@@ -1,0 +1,223 @@
+# VietRide local + production-like dev stack.
+# Run from repo root: `cd infra/docker && docker compose up -d`
+# Env: copy `.env.example` → `.env` at repo root before first run.
+
+x-dotnet-common: &dotnet-common
+  restart: unless-stopped
+  environment:
+    ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+    INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+    ConnectionStrings__Default: "Host=postgres;Port=5432;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev};Database="
+  depends_on:
+    postgres:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+
+x-nest-common: &nest-common
+  restart: unless-stopped
+  environment:
+    NODE_ENV: ${NODE_ENV:-production}
+    INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+    REDIS_HOST: redis
+    REDIS_PORT: 6379
+  depends_on:
+    redis:
+      condition: service_healthy
+
+services:
+  # ── Infrastructure ──────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: vietride_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vietride}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vietride_dev}
+      POSTGRES_DB: postgres
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vietride}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: vietride_pgbouncer
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-vietride}:${POSTGRES_PASSWORD:-vietride_dev}@postgres:5432/postgres
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 200
+      DEFAULT_POOL_SIZE: 25
+    ports:
+      - "${PGBOUNCER_PORT:-6432}:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    container_name: vietride_redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: vietride_rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-vietride}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-vietride_dev}
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MGMT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - ../rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  # ── .NET 8 services ─────────────────────────────────────────────────────────
+  identity:
+    <<: *dotnet-common
+    build:
+      context: ../..
+      dockerfile: apps/identity/Dockerfile
+    container_name: vietride_identity
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      ConnectionStrings__Default: "Host=postgres;Port=5432;Database=vietride_identity;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}"
+    ports:
+      - "${IDENTITY_PORT:-5001}:5001"
+
+  trip:
+    <<: *dotnet-common
+    build:
+      context: ../..
+      dockerfile: apps/trip/Dockerfile
+    container_name: vietride_trip
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      ConnectionStrings__Default: "Host=postgres;Port=5432;Database=vietride_trip;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}"
+    ports:
+      - "${TRIP_PORT:-5002}:5002"
+
+  booking:
+    <<: *dotnet-common
+    build:
+      context: ../..
+      dockerfile: apps/booking/Dockerfile
+    container_name: vietride_booking
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      ConnectionStrings__Default: "Host=postgres;Port=5432;Database=vietride_booking;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}"
+    ports:
+      - "${BOOKING_PORT:-5003}:5003"
+
+  payment:
+    <<: *dotnet-common
+    build:
+      context: ../..
+      dockerfile: apps/payment/Dockerfile
+    container_name: vietride_payment
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      ConnectionStrings__Default: "Host=postgres;Port=5432;Database=vietride_payment;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}"
+    ports:
+      - "${PAYMENT_PORT:-5004}:5004"
+
+  parcel:
+    <<: *dotnet-common
+    build:
+      context: ../..
+      dockerfile: apps/parcel/Dockerfile
+    container_name: vietride_parcel
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      ConnectionStrings__Default: "Host=postgres;Port=5432;Database=vietride_parcel;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}"
+    ports:
+      - "${PARCEL_PORT:-5005}:5005"
+
+  # ── NestJS services ─────────────────────────────────────────────────────────
+  gateway:
+    <<: *nest-common
+    build:
+      context: ../..
+      dockerfile: apps/gateway/Dockerfile
+    container_name: vietride_gateway
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      GATEWAY_PORT: 3000
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      JWT_PUBLIC_KEY_URL: http://identity:5001/v1/.well-known/jwks.json
+      IDENTITY_BASE_URL: http://identity:5001
+      TRIP_BASE_URL: http://trip:5002
+      BOOKING_BASE_URL: http://booking:5003
+      PAYMENT_BASE_URL: http://payment:5004
+      PARCEL_BASE_URL: http://parcel:5005
+      TRACKING_BASE_URL: http://tracking:3001
+      NOTIFICATION_BASE_URL: http://notification:3002
+      RAG_BASE_URL: http://rag:3003
+      REDIS_HOST: redis
+    ports:
+      - "${GATEWAY_PORT:-3000}:3000"
+    depends_on:
+      - identity
+      - trip
+      - booking
+      - payment
+      - parcel
+
+  tracking:
+    <<: *nest-common
+    build:
+      context: ../..
+      dockerfile: apps/tracking/Dockerfile
+    container_name: vietride_tracking
+    ports:
+      - "${TRACKING_PORT:-3001}:3001"
+
+  notification:
+    <<: *nest-common
+    build:
+      context: ../..
+      dockerfile: apps/notification/Dockerfile
+    container_name: vietride_notification
+    ports:
+      - "${NOTIFICATION_PORT:-3002}:3002"
+
+  rag:
+    <<: *nest-common
+    build:
+      context: ../..
+      dockerfile: apps/rag/Dockerfile
+    container_name: vietride_rag
+    ports:
+      - "${RAG_PORT:-3003}:3003"
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:

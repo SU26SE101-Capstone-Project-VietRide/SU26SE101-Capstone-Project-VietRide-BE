@@ -1,0 +1,138 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# VietRide backend monorepo — .gitignore
+# Covers: Nx workspace, NestJS, .NET 8, Docker, IDE, OS noise.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ── Node / TypeScript / Nx ───────────────────────────────────────────────────
+node_modules/
+dist/
+.nx/cache
+.nx/workspace-data
+.angular/
+.eslintcache
+.tsbuildinfo
+*.tsbuildinfo
+.parcel-cache/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Test output
+coverage/
+.nyc_output/
+*.lcov
+**/jest_html_reporters.html
+playwright-report/
+test-results/
+
+# ── .NET 8 ───────────────────────────────────────────────────────────────────
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Bb]uild/
+[Bb]uilds/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio + Rider + JetBrains
+.vs/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/settings.json
+!.vscode/tasks.json
+.idea/
+*.iml
+*.user
+*.suo
+*.userprefs
+*.userosscache
+*.sln.docstates
+*.svclog
+.vshistory/
+
+# .NET build artifacts
+*.dll
+!**/wwwroot/**/*.dll
+*.pdb
+*.cache
+*.nupkg
+*.snupkg
+*.publishsettings
+*.publishproj
+PublishProfiles/
+*.[Pp]ublish.xml
+
+# Test results
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+[Cc]overage*/
+
+# .NET user secrets (development only — never commit)
+**/UserSecretCache/
+**/secrets.json
+
+# EF Core
+*.mdf
+*.ldf
+*.ndf
+
+# ── Environment / secrets ────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Service-local config overrides
+**/appsettings.Local.json
+**/appsettings.*.local.json
+**/appsettings.Production.json
+
+# Credentials
+*.pem
+*.key
+*.pfx
+*.p12
+**/secrets/
+!**/secrets/.gitkeep
+
+# ── Docker ───────────────────────────────────────────────────────────────────
+# Compose state directories (per-volume; don't commit local DB data)
+.docker/
+docker-compose.override.yml
+infra/docker/.data/
+
+# ── OS / Editor ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Backup / temp
+*.bak
+*.orig
+*.tmp
+*.swp
+*.swo
+*~
+.history/
+
+# ── CI / artifacts ───────────────────────────────────────────────────────────
+.artifacts/
+*.sarif
+
+# ── Generated docs (re-runnable) ─────────────────────────────────────────────
+docs/api/openapi/*.json
+docs/api/openapi/*.yaml
+
+# ── Local-only scripts ───────────────────────────────────────────────────────
+scratch/
+playground/

@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\VietRide.Trip.Domain\VietRide.Trip.Domain.csproj" />
+    <ProjectReference Include="..\VietRide.Trip.Application\VietRide.Trip.Application.csproj" />
+    <ProjectReference Include="..\..\..\..\libs\dotnet\VietRide.Shared.Persistence\VietRide.Shared.Persistence.csproj" />
+    <ProjectReference Include="..\..\..\..\libs\dotnet\VietRide.Shared.Http\VietRide.Shared.Http.csproj" />
+    <ProjectReference Include="..\..\..\..\libs\dotnet\VietRide.Shared.Messaging\VietRide.Shared.Messaging.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

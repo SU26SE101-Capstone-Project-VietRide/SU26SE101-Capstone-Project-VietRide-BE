@@ -1,0 +1,6 @@
+-- =============================================================================
+-- VietRide :: Booking Service :: Seed data
+-- =============================================================================
+-- No seed data required for this service.
+-- Vouchers are created by SYSTEM_ADMIN at runtime via Admin Web — no seed catalog.
+-- =============================================================================

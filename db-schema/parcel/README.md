@@ -1,0 +1,78 @@
+# Parcel Service — DB Schema
+
+## Overview
+
+Quản lý **parcel lifecycle full**: tạo request, deposit + re-weigh + additional charge, EXTRA_LARGE operator review, load/transit/unload, email link delivery confirmation (token TTL 48h), Vehicle Substitution transfer flow, return + return-to-sender. Tham chiếu logical FK đến Identity (User/Operator), Trip-Route-Vehicle (Trip/Route/Stop), Payment (Payment cho additional charge).
+
+- **Database:** `vietride_parcel`
+- **Framework:** .NET Core 8 + EF Core 8
+- **Extensions:** `pgcrypto`
+- **Hangfire schema:** `hangfire.*` trong cùng DB. Jobs: undo-reject 15m, EXTRA_LARGE auto-reject 24h, PENDING auto-reject 30m sau IN_PROGRESS, PENDING_ADDITIONAL_PAYMENT timeout (5m), PENDING_TRANSFER_CONFIRM 30m escalation, PENDING_OPERATOR_ACTION 2h re-alert, DELIVERED_PENDING_CONFIRM 7-day re-alert (daily 9am).
+
+## Entity List
+
+| Entity | Purpose | Key business fields |
+|---|---|---|
+| `Parcel` | Hàng ký gửi (40+ field). | `parcelCode` UNIQUE, `senderUserId` NOT NULL, `recipientUserId` nullable, `dropoffStopId` nullable, `sizeCategory` enum, deposit/additional pricing, transfer/return/review/delivery-token fields, full status machine |
+| `ParcelRouteFare` | Operator config giá per route per size. | composite PK `(routeId, sizeCategory)`, future-dated effective window |
+| `ParcelStats` | Counter table per operator per day. | UNIQUE `(operatorId, statDate)` |
+| `OutboxEvent` | Outbox. | |
+
+## Design Decisions
+
+- **`parcels` table có 40+ field** — không tách thành multiple entity (ParcelReview, ParcelTransfer, ParcelDelivery, ParcelReturn) vì:
+  - 1-1 relationship strict (mỗi parcel có ≤ 1 review, ≤ 1 transfer attempt active, ≤ 1 delivery confirmation, ≤ 1 return).
+  - Lifecycle nested trong status machine; tách entity tạo phức tạp app-layer.
+  - v6 entity requirements (Section 8 + 6.6) liệt kê tất cả field trên cùng Parcel entity.
+- **`parcels.parcel_code` UNIQUE** (full unique) — QR scan lookup; format `VRP-yyyyMMdd-XXXXXXXX`.
+- **`parcels.delivery_token` partial unique** trên `IS NOT NULL` — token UUID, revoked khi resend (token cũ giữ trong table với `delivery_token_revoked_at` set, token mới active).
+- **`parcels.sender_user_id NOT NULL`** — spec yêu cầu sender phải có account (no walk-in).
+- **`parcels.recipient_email` nullable** — hỗ trợ hybrid delivery confirmation (email link nếu có email; manual confirm bởi staff nếu không).
+- **`parcels.dropoff_stop_id` nullable** — null = terminal, not null = along-route Stop (validate `allowDropoff=true` app-layer).
+- **`parcels.status` enum** với 18 value đầy đủ theo v6 Section 8 ParcelStatus machine. Mọi transition validate ở handler.
+- **`parcels` 1 mega-table thay vì split** — query "parcel detail page" lấy 1 row đủ; tránh N+1.
+- **2 CHECK constraints** cho weight: `estimated_weight_kg > 0` (bắt buộc), `actual_weight_kg > 0 OR NULL`.
+- **`parcels` indexes nặng vào status + updated_at partial** — Hangfire scan các state cần processing (PENDING_*, DELIVERED_PENDING_CONFIRM, TRANSFER_*, DELIVERY_REJECTED) hiệu quả qua composite index.
+- **`parcels.additional_payment_deadline` index riêng** với partial `status = 'PENDING_ADDITIONAL_PAYMENT'` — Hangfire timeout job 5m interval scan rất hẹp.
+- **`parcel_route_fares.operator_id` denormalized** — operator filter cho dashboard "fares của tôi" không cần cross-service JOIN. Maintain consistency app-layer khi Route đổi operator (rất hiếm).
+- **`parcel_route_fares` composite PK `(route_id, size_category)`** — natural key; 1 route có ≤ 4 fare entry (4 size category).
+- **NO junction table cho parcel review** — `review_decision`/`reviewed_at`/`reviewed_by_user_id` nullable trên Parcel. Chỉ EXTRA_LARGE dùng (3 field còn lại NULL cho SMALL/MEDIUM/LARGE).
+- **NO junction cho parcel transfer history** — `transfer_target_trip_id`/`transfer_requested_at`/`transfer_confirmed_at`/`transfer_confirmed_by_user_id` snapshot 1 lần transfer cuối; nếu cần audit nhiều transfer (parcel chuyển 3 lần) thì query OutboxEvent.
+
+## Index Strategy
+
+| Index | Columns | Type | Purpose |
+|---|---|---|---|
+| `uq_parcels_parcel_code` | `parcel_code` | unique | QR scan |
+| `uq_parcels_delivery_token` | `delivery_token` partial | unique | Email link lookup |
+| `idx_parcels_sender_user_id_created_at` | `(sender_user_id, created_at DESC)` | B-tree | "My sent parcels" |
+| `idx_parcels_recipient_user_id_created_at` | `(recipient_user_id, created_at DESC)` partial | B-tree | "My received parcels" |
+| `idx_parcels_trip_id_status` | `(trip_id, status)` | B-tree | Trip detail page (parcels of trip) |
+| `idx_parcels_operator_id_status` | `(operator_id, status)` | B-tree | Operator dashboard list |
+| `idx_parcels_status_updated_at` | `(status, updated_at)` partial | B-tree | Hangfire scan all transient states |
+| `idx_parcels_additional_payment_deadline` | `additional_payment_deadline` partial | B-tree | 5m timeout job |
+| `idx_parcels_transfer_target_trip_id` | partial | B-tree | "Parcels awaiting confirm on this trip" |
+| `idx_parcel_route_fares_operator_id` | `operator_id` | B-tree | Dashboard fare list |
+| `uq_parcel_stats_operator_date` | `(operator_id, stat_date)` | unique | Counter upsert |
+| `idx_outbox_events_status_created` | partial | B-tree | Outbox poll |
+
+## Cross-service References (Logical FK)
+
+| Column | References | Enforcement |
+|---|---|---|
+| `Parcel.senderUserId/recipientUserId/reviewedByUserId/confirmedByUserId/transferConfirmedByUserId/returnedByUserId` | `identity.User.id` | app-layer |
+| `Parcel.operatorId`, `ParcelRouteFare.operatorId`, `ParcelStats.operatorId` | `identity.Operator.id` | app-layer + tenant filter |
+| `Parcel.tripId`, `Parcel.transferTargetTripId` | `trip.Trip.id` | app-layer |
+| `Parcel.dropoffStopId` | `trip.Stop.id` | app-layer validate `allowDropoff=true` |
+| `ParcelRouteFare.routeId` | `trip.Route.id` | app-layer |
+| `Parcel.additionalPaymentId` | `payment.Payment.id` | app-layer |
+
+## Migration Strategy
+
+- **Tool:** EF Core Migrations.
+- **Bootstrap order:** Sau Identity, Trip-Route-Vehicle, Payment & Wallet (logical FK targets).
+- **Status enum migration:** Add new value via `ALTER TYPE parcel_status ADD VALUE 'X'` (PG ≥ 9.1 supports inline).
+
+## Open Questions
+
+Không có. Section 6.6 + Section 8 đã spec đầy đủ.

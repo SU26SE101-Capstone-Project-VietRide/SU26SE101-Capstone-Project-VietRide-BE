@@ -1,0 +1,6 @@
+-- =============================================================================
+-- VietRide :: Parcel Service :: Seed data
+-- =============================================================================
+-- No seed data required for this service.
+-- ParcelRouteFare entries are created by operators per route at runtime.
+-- =============================================================================

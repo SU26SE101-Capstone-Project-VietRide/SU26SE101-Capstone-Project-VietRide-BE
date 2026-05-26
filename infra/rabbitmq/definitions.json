@@ -1,0 +1,20 @@
+{
+  "_comment": "Placeholder — exchanges + queues + bindings filled when Outbox baseline lands (Day 10, SCV-78).",
+  "rabbit_version": "3.13",
+  "users": [],
+  "vhosts": [{ "name": "/" }],
+  "permissions": [],
+  "exchanges": [
+    {
+      "name": "vietride.events",
+      "vhost": "/",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
+  "queues": [],
+  "bindings": []
+}

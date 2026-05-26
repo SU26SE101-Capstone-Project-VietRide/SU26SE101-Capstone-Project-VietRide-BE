@@ -1,0 +1,52 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VietRide.Shared.Kernel", "VietRide.Shared.Kernel\VietRide.Shared.Kernel.csproj", "{071966DB-BB49-440B-B112-0F44A13CD83D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VietRide.Shared.Application", "VietRide.Shared.Application\VietRide.Shared.Application.csproj", "{DEB1032D-8F28-47EC-9E37-B6CFB99AAE42}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VietRide.Shared.Persistence", "VietRide.Shared.Persistence\VietRide.Shared.Persistence.csproj", "{040CC892-A279-44DB-AD28-816653F3BA75}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VietRide.Shared.Messaging", "VietRide.Shared.Messaging\VietRide.Shared.Messaging.csproj", "{CDAEA01D-76A6-4157-A353-05B1E74E7686}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VietRide.Shared.Http", "VietRide.Shared.Http\VietRide.Shared.Http.csproj", "{064AD16D-2739-422B-86AC-27A26F2CC772}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VietRide.Shared.Web", "VietRide.Shared.Web\VietRide.Shared.Web.csproj", "{C1791B34-7594-4A5D-84E9-E52BC8A55A2C}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{071966DB-BB49-440B-B112-0F44A13CD83D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{071966DB-BB49-440B-B112-0F44A13CD83D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{071966DB-BB49-440B-B112-0F44A13CD83D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{071966DB-BB49-440B-B112-0F44A13CD83D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DEB1032D-8F28-47EC-9E37-B6CFB99AAE42}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DEB1032D-8F28-47EC-9E37-B6CFB99AAE42}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DEB1032D-8F28-47EC-9E37-B6CFB99AAE42}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DEB1032D-8F28-47EC-9E37-B6CFB99AAE42}.Release|Any CPU.Build.0 = Release|Any CPU
+		{040CC892-A279-44DB-AD28-816653F3BA75}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{040CC892-A279-44DB-AD28-816653F3BA75}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{040CC892-A279-44DB-AD28-816653F3BA75}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{040CC892-A279-44DB-AD28-816653F3BA75}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CDAEA01D-76A6-4157-A353-05B1E74E7686}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CDAEA01D-76A6-4157-A353-05B1E74E7686}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CDAEA01D-76A6-4157-A353-05B1E74E7686}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CDAEA01D-76A6-4157-A353-05B1E74E7686}.Release|Any CPU.Build.0 = Release|Any CPU
+		{064AD16D-2739-422B-86AC-27A26F2CC772}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{064AD16D-2739-422B-86AC-27A26F2CC772}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{064AD16D-2739-422B-86AC-27A26F2CC772}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{064AD16D-2739-422B-86AC-27A26F2CC772}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C1791B34-7594-4A5D-84E9-E52BC8A55A2C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C1791B34-7594-4A5D-84E9-E52BC8A55A2C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C1791B34-7594-4A5D-84E9-E52BC8A55A2C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C1791B34-7594-4A5D-84E9-E52BC8A55A2C}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

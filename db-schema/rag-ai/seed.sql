@@ -1,0 +1,6 @@
+-- =============================================================================
+-- VietRide :: RAG AI Service :: Seed data
+-- =============================================================================
+-- No seed data required for this service.
+-- KnowledgeDocument uploads are managed by SYSTEM_ADMIN at runtime via Admin Web.
+-- =============================================================================

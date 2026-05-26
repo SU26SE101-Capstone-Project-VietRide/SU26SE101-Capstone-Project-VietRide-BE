@@ -1,0 +1,68 @@
+# Repo-wide ignore for Docker build context.
+# Build context = repo root, so we exclude everything that doesn't need to ship
+# into the image: dependencies (reinstalled inside), build outputs, IDE state, docs.
+
+# ── Node / TypeScript ───────────────────────────────────────────────────────
+**/node_modules
+**/dist
+**/.nx
+**/.angular
+**/.next
+**/coverage
+**/.eslintcache
+**/.tsbuildinfo
+**/jest.config.*.snap
+
+# ── .NET ────────────────────────────────────────────────────────────────────
+**/bin
+**/obj
+**/*.user
+**/*.suo
+**/*.userprefs
+**/*.nupkg
+**/.vs
+**/TestResults
+**/*.trx
+
+# ── Env / secrets (never bake into image) ────────────────────────────────────
+.env
+.env.local
+.env.*.local
+**/appsettings.Local.json
+**/appsettings.*.local.json
+**/secrets/**
+**/*.pem
+**/*.key
+**/*.pfx
+
+# ── Git ─────────────────────────────────────────────────────────────────────
+.git
+.gitignore
+.gitattributes
+.github
+
+# ── IDE / OS noise ──────────────────────────────────────────────────────────
+**/.vscode
+**/.idea
+**/.history
+**/*.swp
+**/.DS_Store
+**/Thumbs.db
+
+# ── CI / docs / scripts not needed at runtime ────────────────────────────────
+.artifacts
+docs
+db-schema
+tests/e2e
+tests/load
+tests/*-e2e
+*.md
+!apps/*/README.md
+LICENSE
+scripts/reset-local.sh
+
+# ── Docker meta ─────────────────────────────────────────────────────────────
+**/Dockerfile*
+!Dockerfile
+**/docker-compose*.yml
+infra/docker/docker-compose*.yml

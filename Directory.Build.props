@@ -1,0 +1,24 @@
+<Project>
+  <!--
+    Shared MSBuild properties for ALL VietRide .NET projects (apps + libs).
+    Each csproj inherits these by virtue of being under repo root.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsAsErrors>nullable</WarningsAsErrors>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <!--
+      AnalysisLevel default = compiler warnings only. CA-prefix analyzer (Microsoft.CodeAnalysis.NetAnalyzers)
+      stays advisory unless individually opted in. Avoids fighting style rules (CA1000 static-on-generic,
+      CA1716 "reserved keyword" false positives on Shared/Application/etc) that don't represent real bugs.
+    -->
+    <AnalysisLevel>latest-default</AnalysisLevel>
+    <AnalysisMode>None</AnalysisMode>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,91 @@
+# Booking Service — DB Schema
+
+## Overview
+
+Quản lý **booking lifecycle, multi-passenger per booking, seat reference, voucher application, cancellation/refund triggers, round-trip pairing, vehicle substitution transfer tracking**. Tham chiếu logical FK đến Identity (User/Operator) và Trip-Route-Vehicle (Trip/Station/Stop).
+
+- **Database:** `vietride_booking`
+- **Framework:** .NET Core 8 + EF Core 8
+- **Extensions:** `pgcrypto`
+- **Hangfire schema:** `hangfire.*` trong cùng DB. Jobs: seat release khi VNPay timeout 15m, schedule-change auto-accept/escalation, PENDING_SEAT_ASSIGNMENT escalation T+2h + auto-cancel deadline.
+
+## Entity List
+
+| Entity | Purpose | Key business fields |
+|---|---|---|
+| `Booking` | Vé của 1 buyer cho 1 trip. | `bookingCode` UNIQUE, 4 pickup/dropoff FK (exclusive), `totalAmount` immutable snapshot, 4 trip snapshot fields, `bookingGroupId`/`tripDirection` round-trip, `cancellationReason` enum, `refundOverride` |
+| `Passenger` | Sub-entity của Booking (1–5/booking). Operational-only. | `seatNumber`, `boardingStatus`, `boardedAt`, `boardedAtStopId` |
+| `BookingPendingAction` | Pending action passenger cần phản hồi. | `reason` enum, `severity` enum (MEDIUM/MAJOR), `deadline`, `metadata` JSONB; **partial unique 1 active per booking** |
+| `BookingTransfer` | Track Vehicle Substitution per Passenger. | `originalTripId`, `newTripId`, `originalSeatNumber`, `newSeatNumber` nullable, `note` |
+| `BookingStats` | Counter table (event-driven UPSERT). | `(operatorId, statDate, tripId)` unique; tổng booking/cancel/no_show/revenue/refunded |
+| `Voucher` | Platform-wide voucher (chỉ SYSTEM_ADMIN tạo). | `code` UNIQUE, `type`/`value`/`fundingType` enums, `applicableOperatorIds`/`applicableRouteIds` UUID[], validity window |
+| `VoucherUsage` | 1 record per apply. | `funded_by` snapshot, `bookingGroupId` nullable cho round-trip limit |
+| `OperatorVoucherConsent` | Operator opt-in cho OPERATOR_FUNDED voucher. | `status` enum, UNIQUE `(operatorId, voucherId)`, `rejectReason` |
+| `OutboxEvent` | Reliability — Outbox pattern. | `eventType`, `payload`, `status` |
+
+## Design Decisions
+
+- **`Booking.booking_code` UNIQUE** (full unique, not partial — code globally unique). Format `VR-yyyyMMdd-XXXXXXXX`. QR encode directly.
+- **`Booking` 4-column pickup/dropoff** với 2 CHECK constraints:
+  - Pickup: **exactly one** of `pickup_station_id` / `pickup_stop_id` not null.
+  - Dropoff: **at most one** not null (cả 2 NULL = default terminal destination, lưu implicit).
+  - Pattern này thay polymorphic discriminator để giữ strict FK ở DB layer.
+- **`Booking.total_amount` IMMUTABLE** sau INSERT — comment làm rõ. EF Core: configure as snapshot, không update trong handler.
+- **`Booking.total_amount <= base_fare` CHECK** — discount không thể âm.
+- **`Booking.passenger_user_id`, `trip_id`, `operator_id`, `pickup_station_id`, `pickup_stop_id`, etc. là LOGICAL FK** — không có `REFERENCES`. Validate ở Booking Service handler khi tạo Booking (HTTP call sang Identity/Trip).
+- **`Passenger` UNIQUE `(booking_id, seat_number)`** — chống duplicate seat trong cùng booking.
+- **`booking_pending_actions` partial unique `(booking_id) WHERE resolved_at IS NULL`** — enforce v6 rule "chỉ 1 active per booking". Action mới phát sinh → app-layer phải close action cũ với `SUPERSEDED` trước khi INSERT mới.
+- **`booking_pending_actions.severity` nullable** — chỉ set cho SCHEDULE_CHANGE (MEDIUM/MAJOR). MINOR không persist record.
+- **`booking_transfers` 1 record per Passenger** (không phải 1 per Booking) — multi-passenger booking sẽ có N record cùng `booking_id` khác `passenger_id`. UNIQUE constraint NOT enforced ở DB (1 passenger có thể transfer nhiều lần nếu Trip_new lại DISRUPTED).
+- **`booking_stats`** dùng surrogate UUID PK + UNIQUE composite `(operator_id, stat_date, COALESCE(trip_id, ...))` — `trip_id` nullable cho per-operator-per-day aggregate row (trip_id=NULL coalesced to zero-UUID để UNIQUE bao trùm cả 2 case).
+- **`vouchers.applicable_operator_ids`/`applicable_route_ids`** dùng `UUID[]` array thay vì junction table — query với `= ANY(array)` đủ cho scale (mỗi voucher target ≤ 100 operator/route trong realistic case). Junction table phức tạp hơn không justify.
+- **`voucher_usages` CASCADE DELETE từ Booking** — spec yêu cầu DELETE voucher_usage khi booking CANCELLED/REFUNDED (xem v6 Section 8 Voucher convention). Tự động qua CASCADE thay vì manual cleanup.
+- **`operator_voucher_consents` UNIQUE `(operator_id, voucher_id)`** — 1 operator có 1 consent record per voucher (status có thể chuyển PENDING→ACCEPTED→REJECTED, không tạo record mới).
+- **`outbox_events.status` partial index** — chỉ index PENDING/PUBLISHING/FAILED (không index PUBLISHED — > 99% rows sau lifetime).
+
+## Index Strategy
+
+| Index | Columns | Type | Purpose |
+|---|---|---|---|
+| `uq_bookings_booking_code` | `booking_code` | unique | QR scan lookup |
+| `idx_bookings_passenger_user_id_created_at` | `(passenger_user_id, created_at DESC)` | B-tree | History query |
+| `idx_bookings_trip_id_status` | `(trip_id, status)` | B-tree | "bookings on this trip" + filter |
+| `idx_bookings_operator_id_status` | `(operator_id, status)` | B-tree | Operator dashboard |
+| `idx_bookings_booking_group_id` | `booking_group_id` partial | B-tree | Round-trip group lookup |
+| `idx_bookings_status_created_at` | `(status, created_at)` partial | B-tree | Hangfire VNPay timeout scan |
+| `uq_passengers_booking_seat` | `(booking_id, seat_number)` | unique | Avoid duplicate seat |
+| `idx_passengers_boarding_status` | `(booking_id, boarding_status)` | B-tree | NO_SHOW detection job |
+| `uq_booking_pending_actions_active_per_booking` | `(booking_id)` partial | unique | "1 active per booking" rule |
+| `idx_booking_pending_actions_deadline_unresolved` | `deadline` partial | B-tree | Hangfire timeout scan |
+| `idx_booking_transfers_booking_id` | `booking_id` | B-tree | Transfer history per booking |
+| `idx_booking_transfers_original_trip_id` | `original_trip_id` | B-tree | Audit Vehicle Substitution |
+| `uq_booking_stats_operator_date_trip` | `(operator_id, stat_date, COALESCE(trip_id, ...))` | unique | UPSERT upsert lookup |
+| `uq_vouchers_code` | `code` | unique | Code redeem lookup |
+| `idx_voucher_usages_voucher_user` | `(voucher_id, user_id)` | B-tree | Per-user usage limit |
+| `idx_voucher_usages_voucher_group` | `(voucher_id, booking_group_id)` partial | B-tree | Round-trip COUNT DISTINCT |
+| `uq_operator_voucher_consents_operator_voucher` | `(operator_id, voucher_id)` | unique | 1 consent per pair |
+| `idx_operator_voucher_consents_operator_status` | `(operator_id, status)` | B-tree | Operator Web "Voucher đề xuất" tab |
+| `idx_outbox_events_status_created` | `(status, created_at)` partial | B-tree | Outbox worker poll |
+
+## Cross-service References (Logical FK)
+
+| Column | References | Enforcement |
+|---|---|---|
+| `Booking.passengerUserId`, `Voucher.createdByUserId`, `OperatorVoucherConsent.respondedByUserId`, `VoucherUsage.userId`, `BookingTransfer.transferredByUserId` | `identity.User.id` | app-layer validate (Internal JWT carry userId) |
+| `Booking.operatorId`, `OperatorVoucherConsent.operatorId`, `BookingStats.operatorId` | `identity.Operator.id` | app-layer + tenant filter |
+| `Booking.tripId`, `BookingTransfer.originalTripId/newTripId`, `BookingStats.tripId` | `trip.Trip.id` | app-layer validate via HTTP `GET /internal/v1/trips/{id}` |
+| `Booking.pickupStationId/dropoffStationId` | `trip.Station.id` | app-layer |
+| `Booking.pickupStopId/dropoffStopId`, `Passenger.boardedAtStopId` | `trip.Stop.id` | app-layer |
+| `vouchers.applicable_operator_ids[]` | `identity.Operator.id` (array) | app-layer |
+| `vouchers.applicable_route_ids[]` | `trip.Route.id` (array) | app-layer |
+
+## Migration Strategy
+
+- **Tool:** EF Core Migrations.
+- **Bootstrap order:** Sau Identity Service (logical FK validate target).
+- **Snapshot field maintenance:** `trip_snapshot_*` được set tại CREATE Booking, KHÔNG cập nhật khi Trip edit (snapshot rule).
+- **`booking_pending_actions.metadata` JSONB schema** linh hoạt theo reason — không enforce schema ở DB, validate ở handler.
+
+## Open Questions
+
+Không có. Section 6.1, 6.2, 6.4, 6.4.1, 6.12, 6.13 + Section 8 đã spec đầy đủ.
