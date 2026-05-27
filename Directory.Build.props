@@ -19,6 +19,10 @@
     -->
     <AnalysisLevel>latest-default</AnalysisLevel>
     <AnalysisMode>None</AnalysisMode>
-    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+    <!--
+      Central Package Management. Versions live in Directory.Packages.props.
+      Csproj files must use <PackageReference Include="..."/> WITHOUT a Version attribute.
+    -->
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
 </Project>

@@ -1,0 +1,38 @@
+root = true
+
+# Defaults for every file
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# C# source — Microsoft conventions
+[*.{cs,csproj,sln,props,targets}]
+indent_size = 4
+end_of_line = crlf
+# Code-style rules surfaced by `dotnet format` (kept advisory — Directory.Build.props
+# sets AnalysisMode=None so these don't fail builds).
+csharp_new_line_before_open_brace = all
+csharp_new_line_before_else = true
+csharp_new_line_before_catch = true
+csharp_new_line_before_finally = true
+csharp_indent_case_contents = true
+csharp_indent_switch_labels = true
+csharp_space_after_keywords_in_control_flow_statements = true
+dotnet_sort_system_directives_first = true
+
+# Markdown — allow trailing spaces (used for hard line breaks).
+[*.md]
+trim_trailing_whitespace = false
+
+# Makefile requires tabs.
+[Makefile]
+indent_style = tab
+
+# Shell scripts: 2-space indent, LF.
+[*.sh]
+indent_size = 2
+end_of_line = lf

@@ -1,3 +1,4 @@
+/// <reference types="node" />
 module.exports = {
   displayName: 'gateway',
   preset: '../../jest.preset.js',

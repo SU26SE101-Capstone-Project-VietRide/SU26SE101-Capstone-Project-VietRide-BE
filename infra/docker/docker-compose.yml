@@ -60,6 +60,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      # pgbouncer image lacks pg_isready/psql; use a TCP check via /dev/tcp.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/5432 && echo ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
@@ -107,6 +113,12 @@ services:
       ConnectionStrings__Default: "Host=postgres;Port=5432;Database=vietride_identity;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}"
     ports:
       - "${IDENTITY_PORT:-5001}:5001"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:5001/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
   trip:
     <<: *dotnet-common
@@ -120,6 +132,12 @@ services:
       ConnectionStrings__Default: "Host=postgres;Port=5432;Database=vietride_trip;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}"
     ports:
       - "${TRIP_PORT:-5002}:5002"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:5002/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
   booking:
     <<: *dotnet-common
@@ -133,6 +151,12 @@ services:
       ConnectionStrings__Default: "Host=postgres;Port=5432;Database=vietride_booking;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}"
     ports:
       - "${BOOKING_PORT:-5003}:5003"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:5003/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
   payment:
     <<: *dotnet-common
@@ -146,6 +170,12 @@ services:
       ConnectionStrings__Default: "Host=postgres;Port=5432;Database=vietride_payment;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}"
     ports:
       - "${PAYMENT_PORT:-5004}:5004"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:5004/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
   parcel:
     <<: *dotnet-common
@@ -159,6 +189,12 @@ services:
       ConnectionStrings__Default: "Host=postgres;Port=5432;Database=vietride_parcel;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}"
     ports:
       - "${PARCEL_PORT:-5005}:5005"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:5005/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
   # ── NestJS services ─────────────────────────────────────────────────────────
   gateway:
@@ -184,11 +220,24 @@ services:
     ports:
       - "${GATEWAY_PORT:-3000}:3000"
     depends_on:
-      - identity
-      - trip
-      - booking
-      - payment
-      - parcel
+      identity:
+        condition: service_healthy
+      trip:
+        condition: service_healthy
+      booking:
+        condition: service_healthy
+      payment:
+        condition: service_healthy
+      parcel:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
   tracking:
     <<: *nest-common
@@ -198,6 +247,12 @@ services:
     container_name: vietride_tracking
     ports:
       - "${TRACKING_PORT:-3001}:3001"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
   notification:
     <<: *nest-common
@@ -207,6 +262,12 @@ services:
     container_name: vietride_notification
     ports:
       - "${NOTIFICATION_PORT:-3002}:3002"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3002/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
   rag:
     <<: *nest-common
@@ -216,6 +277,16 @@ services:
     container_name: vietride_rag
     ports:
       - "${RAG_PORT:-3003}:3003"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3003/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+networks:
+  default:
+    name: vietride_net
 
 volumes:
   postgres_data:

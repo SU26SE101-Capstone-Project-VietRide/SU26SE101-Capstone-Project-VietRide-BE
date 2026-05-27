@@ -1,3 +1,4 @@
+/// <reference types="node" />
 module.exports = {
   displayName: 'tracking',
   preset: '../../jest.preset.js',

@@ -17,7 +17,10 @@ export class InternalJwtSigner {
   }
 
   async sign(claims: InternalJwtClaims): Promise<string> {
-    return new SignJWT({ ...claims })
+    // Default callerService='gateway' — overridable when an internal .NET service
+    // mints its own token to call a peer (per BACKEND_SOURCE_OF_TRUTH §6.4).
+    const enriched = { callerService: 'gateway', ...claims };
+    return new SignJWT({ ...enriched })
       .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
       .setIssuer('vietride-gateway')
       .setAudience('vietride-internal')
@@ -36,4 +39,10 @@ export interface InternalJwtClaims {
   operatorId?: string;
   /** Original request id (correlation). */
   reqId: string;
+  /**
+   * Caller service identifier. Defaults to 'gateway' when minted at the edge.
+   * Per BACKEND_SOURCE_OF_TRUTH §6.4 — used by downstream services to audit
+   * who initiated the call when service-to-service hops chain.
+   */
+  callerService?: string;
 }

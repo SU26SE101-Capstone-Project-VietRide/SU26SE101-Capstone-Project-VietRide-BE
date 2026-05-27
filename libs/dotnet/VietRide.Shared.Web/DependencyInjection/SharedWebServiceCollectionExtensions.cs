@@ -39,6 +39,9 @@ public static class SharedWebServiceCollectionExtensions
         services.AddVietRideHealthChecks(configuration);
         services.AddVietRideSwagger(serviceName);
 
+        // Observability v1 stack per BACKEND_SOURCE_OF_TRUTH §9.13 = Sentry + UptimeRobot + Serilog only.
+        // Prometheus/Grafana/Jaeger/Tempo/Loki/OpenTelemetry deferred to v2.
+
         return services;
     }
 }

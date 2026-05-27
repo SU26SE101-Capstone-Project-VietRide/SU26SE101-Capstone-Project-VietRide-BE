@@ -71,7 +71,12 @@ export function createProxyHandler(env: Env, signer: InternalJwtSigner): Express
       return;
     }
 
-    const reqId = (req.header('x-request-id') || randomUUID()).toString();
+    // Reuse the requestId stamped by CorrelationIdMiddleware when running
+    // inside the Nest pipeline; otherwise fall back to header/random because
+    // this proxy is mounted as raw Express via `app.use()` before Nest router.
+    const reqId = ((req as Request & { requestId?: string }).requestId
+      ?? req.header('x-request-id')
+      ?? randomUUID()).toString();
     res.setHeader('X-Request-Id', reqId);
 
     const user = (req as RequestWithUser).user;

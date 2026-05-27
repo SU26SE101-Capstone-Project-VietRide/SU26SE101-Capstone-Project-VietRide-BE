@@ -27,6 +27,10 @@ export const envSchema = z.object({
   REDIS_HOST: z.string().default('localhost'),
   REDIS_PORT: z.coerce.number().int().positive().default(6379),
   REDIS_PASSWORD: z.string().optional(),
+
+  // Rate-limit default per BACKEND_SOURCE_OF_TRUTH §11.3 — 120 req/min per IP per route.
+  // Per-route overrides Day 3+.
+  RATE_LIMIT_DEFAULT_PER_MIN: z.coerce.number().int().positive().default(120),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -34,7 +38,6 @@ export type Env = z.infer<typeof envSchema>;
 export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
   const parsed = envSchema.safeParse(raw);
   if (!parsed.success) {
-    // eslint-disable-next-line no-console
     console.error('❌ Invalid env vars:', parsed.error.flatten().fieldErrors);
     process.exit(1);
   }

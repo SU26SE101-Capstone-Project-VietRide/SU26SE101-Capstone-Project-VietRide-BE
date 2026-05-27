@@ -22,26 +22,26 @@
 **Sprint goal**: Identity + Operator + Trip foundation + Outbox baseline ready, so Sprint 3 booking/payment can start.
 
 ### Day 1 — Mon 2026-05-25 — Monorepo + codebase scaffold ([SCV-8](https://hoangvutran088.atlassian.net/browse/SCV-8), [SCV-9](https://hoangvutran088.atlassian.net/browse/SCV-9))
-- Initialize `vietride-backend` monorepo on GitHub (single repo for .NET services + NestJS Gateway + shared docs)
-- Monorepo layout: `services/dotnet/{identity,trip,booking,payment,parcel}/`, `services/gateway/` (NestJS), `services/common-dotnet/`, `docs/`, `infra/` (docker-compose, scripts)
-- `dotnet new sln` at `services/dotnet/VietRide.sln` + 5 service projects + 1 `VietRide.Common` shared library
-- `nest new gateway` at `services/gateway/` with TypeScript strict mode
-- `infra/docker-compose.yaml` with Postgres 16 (single cluster, separate DB per service), Redis 7, RabbitMQ 3-management
+- Initialize `vietride-backend` Nx monorepo on GitHub (single repo for .NET services + NestJS apps + shared libs + docs). See [docs/adr/0001-monorepo-layout.md](docs/adr/0001-monorepo-layout.md).
+- Monorepo layout (per ADR 0001): `apps/{identity,trip,booking,payment,parcel,gateway,tracking,notification,rag}/`, `libs/dotnet/`, `libs/shared/`, `docs/`, `infra/` (docker-compose + nginx + pgbouncer + postgres + rabbitmq config — observability stack deferred to v2 per BACKEND_SOURCE_OF_TRUTH §9.13), `db-schema/`, `tests/`
+- One `.sln` per .NET service at `apps/<svc>/VietRide.<Svc>.sln` (4 layer: Api/Application/Domain/Infrastructure + 2 test projects). Shared .NET libs grouped under `libs/dotnet/VietRide.Libs.sln`
+- `nx generate @nx/nest:app` for `gateway` (+ tracking/notification/rag scaffolds) with TypeScript strict mode
+- `infra/docker/docker-compose.yml` with Postgres 16 (single cluster, separate DB per service), PgBouncer, Redis 7, RabbitMQ 3.13-management
 - Root `README.md` with monorepo run instructions
-- **DoD**: `docker compose up` runs all 3 infra; both `dotnet build` and `pnpm --filter gateway build` succeed on fresh clone
+- **DoD**: `docker compose -f infra/docker/docker-compose.yml up` runs all 4 infra; both `dotnet build` per service .sln and `npx nx run-many -t build` succeed on fresh clone
 - **Review**: Tuyên + 2 FE devs clone repo, run `docker compose up`, no error; folder layout matches `docs/` convention in source-of-truth (no `Docs/` uppercase folder)
 - **Blocker**: none
 
 ### Day 2 — Tue 2026-05-26 — Sprint 2 kickoff: .NET skeleton + NestJS Gateway routing ([SCV-69](https://hoangvutran088.atlassian.net/browse/SCV-69), [SCV-70](https://hoangvutran088.atlassian.net/browse/SCV-70))
-- Per .NET service: `Program.cs` ASP.NET 8 minimal API, `appsettings.json`, EF Core DbContext stub, Dockerfile
-- Add `Serilog` + structured logging + correlationId middleware (.NET) and `nestjs-pino` (Gateway)
-- Add Internal JWT HS256 validation middleware in `VietRide.Common` (.NET side)
-- Gateway: route table config-driven (`routes.config.ts` maps `/api/*` paths → downstream service URL); User JWT (RS256) validation via JWKS from Identity; Internal JWT minting (HS256 TTL 120s) before proxying
-- Gateway: rate limit per IP (express-rate-limit) + health passthrough exemption
+- Per .NET service: `Program.cs` ASP.NET 8 minimal API, `appsettings.json`, EF Core DbContext stub, Dockerfile (multi-stage SDK 8.0-alpine → aspnet 8.0-alpine)
+- Add `Serilog` + structured logging + correlationId middleware in `libs/dotnet/VietRide.Shared.Web` and `nestjs-pino` (Gateway)
+- Add Internal JWT HS256 validation handler in `libs/dotnet/VietRide.Shared.Web/Authentication/` (`InternalJwtAuthenticationHandler.cs`)
+- Gateway: route table config-driven (`apps/gateway/src/config/routes.ts` maps `/v1/*` paths → downstream service URL); User JWT (RS256) validation via JWKS from Identity; Internal JWT minting (HS256 TTL 120s) before proxying
+- Gateway: rate limit per IP (`@nestjs/throttler` 120req/60s default per BACKEND_SOURCE_OF_TRUTH §11.3, env-overridable via `RATE_LIMIT_DEFAULT_PER_MIN`) + health passthrough exemption (`/v1/<svc>/health` rewriteTo `/health`)
 - Define `INTERNAL_JWT_SECRET` + `JWT_PUBLIC_KEY_URL` in `.env.example` (Vũ owns both sides of contract)
-- Add EF Core migration tooling per service (separate DB per service in same Postgres cluster)
+- Add EF Core migration tooling per service: `IDesignTimeDbContextFactory<TDbContext>` under `apps/<svc>/src/VietRide.<Svc>.Infrastructure/Design/` (so `dotnet ef migrations add` works without booting the full host)
 - **DoD**: 5 .NET services boot independently on ports 5001-5005; Gateway on 3000 proxies to each; `/health` returns 200; Internal JWT roundtrip works (Gateway mints → .NET validates)
-- **Review**: hit Gateway `/api/identity/health` from outside docker network → reaches Identity Service; tamper Internal JWT → .NET returns 401
+- **Review**: hit Gateway `/v1/identity/health` from outside docker network → reaches Identity Service; tamper Internal JWT → .NET returns 401
 - **Blocker**: none (Vũ owns both Gateway + .NET sides)
 
 ### Day 3 — Wed 2026-05-27 — Identity Service: User + Auth foundation ([SCV-65](https://hoangvutran088.atlassian.net/browse/SCV-65))

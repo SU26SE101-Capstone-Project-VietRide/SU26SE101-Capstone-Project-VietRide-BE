@@ -1,3 +1,4 @@
+/// <reference types="node" />
 module.exports = {
   displayName: 'notification',
   preset: '../../jest.preset.js',

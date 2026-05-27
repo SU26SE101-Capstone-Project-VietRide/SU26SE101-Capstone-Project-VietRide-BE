@@ -1,2 +1,2 @@
-export * from './lib/nest-persistence.module';
-
+export * from './pg.module';
+export * from './pg.service';

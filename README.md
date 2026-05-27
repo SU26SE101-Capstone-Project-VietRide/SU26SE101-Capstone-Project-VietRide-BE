@@ -54,6 +54,29 @@ npx nx run gateway:serve --watch
 npx nx graph                        # visualize project DAG
 ```
 
+## EF Core migrations
+
+Each .NET service ships an `IDesignTimeDbContextFactory<TDbContext>` under
+`apps/<svc>/src/VietRide.<Svc>.Infrastructure/Design/` so `dotnet ef` works
+WITHOUT booting the full host (which would require `INTERNAL_JWT_SECRET`).
+
+```bash
+# Add a migration for one service (run from repo root):
+dotnet ef migrations add InitialCreate \
+  -p apps/identity/src/VietRide.Identity.Infrastructure \
+  -s apps/identity/src/VietRide.Identity.Api \
+  -o Migrations
+
+# Apply migrations (requires Postgres running):
+dotnet ef database update \
+  -p apps/identity/src/VietRide.Identity.Infrastructure \
+  -s apps/identity/src/VietRide.Identity.Api
+```
+
+Override the design-time connection string per service via env var
+(`IDENTITY_DESIGN_CONNECTION`, `TRIP_DESIGN_CONNECTION`, …). Default targets
+`localhost:5432` with creds from `.env.example`.
+
 ## Layout
 
 ```

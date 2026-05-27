@@ -10,6 +10,14 @@
     <ProjectReference Include="..\VietRide.Payment.Application\VietRide.Payment.Application.csproj" />
     <ProjectReference Include="..\VietRide.Payment.Infrastructure\VietRide.Payment.Infrastructure.csproj" />
     <ProjectReference Include="..\..\..\..\libs\dotnet\VietRide.Shared.Web\VietRide.Shared.Web.csproj" />
+    <ProjectReference Include="..\..\..\..\libs\dotnet\VietRide.Shared.Persistence\VietRide.Shared.Persistence.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
   </ItemGroup>
 
 </Project>

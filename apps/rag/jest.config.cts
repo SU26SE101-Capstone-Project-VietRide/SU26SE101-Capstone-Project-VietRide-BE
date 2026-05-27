@@ -1,3 +1,4 @@
+/// <reference types="node" />
 module.exports = {
   displayName: 'rag',
   preset: '../../jest.preset.js',

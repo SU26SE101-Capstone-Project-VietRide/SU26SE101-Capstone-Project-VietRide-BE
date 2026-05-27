@@ -1,4 +1,4 @@
-import './bootstrap-env'; // MUST be first: populate process.env from .env before AppModule loads.
+import './bootstrap-env'; // Populate process.env from .env before AppModule loads.
 
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';

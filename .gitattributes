@@ -1,0 +1,61 @@
+# Normalize line endings on commit so Windows/macOS/Linux dev see the same bytes.
+# Default: detect text vs binary, store with LF in the repo, check out per platform.
+* text=auto eol=lf
+
+# Force CRLF for files that Visual Studio + MSBuild expect to be CRLF on disk
+# (avoids `dotnet format` noise when a Windows dev re-saves them).
+*.sln         text eol=crlf
+*.csproj      text eol=crlf
+*.props       text eol=crlf
+*.targets     text eol=crlf
+*.cs          text eol=crlf working-tree-encoding=UTF-8
+*.cshtml      text eol=crlf
+*.razor       text eol=crlf
+
+# Cross-platform script files MUST stay LF so they execute in Linux containers.
+*.sh          text eol=lf
+*.bash        text eol=lf
+Dockerfile    text eol=lf
+*.dockerfile  text eol=lf
+
+# Frontend / Node tooling — LF everywhere.
+*.ts          text eol=lf
+*.tsx         text eol=lf
+*.js          text eol=lf
+*.jsx         text eol=lf
+*.mjs         text eol=lf
+*.cjs         text eol=lf
+*.json        text eol=lf
+*.yml         text eol=lf
+*.yaml        text eol=lf
+*.md          text eol=lf
+
+# Binary assets — never normalize, never diff.
+*.png         binary
+*.jpg         binary
+*.jpeg        binary
+*.gif         binary
+*.ico         binary
+*.pdf         binary
+*.zip         binary
+*.gz          binary
+*.tgz         binary
+*.7z          binary
+*.dll         binary
+*.exe         binary
+*.so          binary
+*.dylib       binary
+*.snk         binary
+*.woff        binary
+*.woff2       binary
+*.ttf         binary
+*.otf         binary
+
+# GitHub Linguist hints — exclude generated/vendored from language stats.
+node_modules/ linguist-vendored
+dist/         linguist-generated
+.nx/          linguist-generated
+**/bin/       linguist-generated
+**/obj/       linguist-generated
+db-schema/    linguist-documentation
+docs/         linguist-documentation

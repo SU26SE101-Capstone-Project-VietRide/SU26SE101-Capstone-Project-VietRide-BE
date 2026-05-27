@@ -1,2 +1,4 @@
-export * from './lib/nest-rabbitmq.module';
-
+export * from './rabbitmq.module';
+export * from './rabbitmq.publisher';
+export * from './rabbitmq.consumer';
+export * from './rabbitmq.tokens';
