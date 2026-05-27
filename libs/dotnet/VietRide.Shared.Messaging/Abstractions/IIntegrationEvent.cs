@@ -15,8 +15,8 @@ public interface IIntegrationEvent
 
     /// <summary>
     /// Event type — used as the AMQP routing key on
-    /// <c>vietride.events</c>. Convention: <c>&lt;service&gt;.&lt;aggregate&gt;.&lt;verb&gt;</c>
-    /// e.g. <c>booking.booking.confirmed</c>.
+    /// <c>vietride.events</c>. Convention: <c>&lt;service&gt;.&lt;aggregate&gt;.&lt;verb_past&gt;</c>
+    /// (lowercase, past tense) e.g. <c>booking.booking.confirmed</c>.
     /// </summary>
     string EventType { get; }
 }

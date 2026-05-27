@@ -45,8 +45,12 @@
 - **Blocker**: none (Vũ owns both Gateway + .NET sides)
 
 ### Day 3 — Wed 2026-05-27 — Identity Service: User + Auth foundation ([SCV-65](https://hoangvutran088.atlassian.net/browse/SCV-65))
+- **Pre-reqs — architecture baseline (DO FIRST; blocks every CQRS/auth task below):**
+  - Add to `Directory.Packages.props` as `<PackageVersion>` (CPM; csproj refs stay version-less): `MediatR` **11.x**, `FluentValidation` + `FluentValidation.DependencyInjectionExtensions` **11.x**, `BCrypt.Net-Next` latest. (CPM/banned-dep hooks will reject `Version=` on the ref and MediatR v12+.)
+  - Create MediatR pipeline behaviors (`ValidationBehavior`, `LoggingBehavior`, `TransactionBehavior`) in `libs/dotnet/VietRide.Shared.Application/Behaviors/` (not present yet) and register MediatR + behaviors in the Identity Application/Api DI.
+  - Add `NetArchTest.Rules` to `Directory.Packages.props` + a dependency-direction test in `VietRide.Identity.UnitTests` (Domain→nothing, Application→Domain, Infrastructure→Domain+Application, Api→Application+Infrastructure). This makes the "CI-enforced layering" claimed in BSOT/agents real before feature code lands.
 - EF migration: User, OAuthIdentity, RefreshToken, EmailVerificationToken, UserDevice tables
-- Password hashing (Argon2id) + RS256 JWT signing + JWKS endpoint
+- Password hashing (BCrypt.Net-Next cost 12 per technical_context_v7 §security + BSOT §2.1) + RS256 JWT signing + JWKS endpoint
 - Endpoints: `POST /auth/register` (passenger email/password), `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`
 - Email OTP send + verify flow (provider abstraction, SendGrid stub)
 - **DoD**: passenger can register → receive OTP → verify → login → get access+refresh token; JWKS endpoint serves public key
