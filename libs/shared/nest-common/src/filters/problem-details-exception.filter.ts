@@ -12,9 +12,9 @@ import type { Request, Response } from 'express';
  * Global exception filter that converts every thrown error into an
  * RFC 7807 Problem Details document.
  *
- * Shape: { type, title, status, detail, instance, traceId, errorCode? }
+ * Shape: { type, title, status, detail, instance, traceId, errorCode?, errors? }
  *
- * Per VietRide_API_Contract_v1 §"Error envelope" + BACKEND_SOURCE_OF_TRUTH 3.4.2.
+ * Per VietRide_API_Contract_v1 §"Error envelope" + BACKEND_SOURCE_OF_TRUTH 3.4.2 / §5.5.
  */
 @Catch()
 export class ProblemDetailsExceptionFilter implements ExceptionFilter {
@@ -27,17 +27,20 @@ export class ProblemDetailsExceptionFilter implements ExceptionFilter {
     const res = ctx.getResponse<Response>();
     const req = ctx.getRequest<Request>();
 
-    const status = exception instanceof HttpException
-      ? exception.getStatus()
-      : HttpStatus.INTERNAL_SERVER_ERROR;
+    const status =
+      exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
 
     const raw = exception instanceof HttpException ? exception.getResponse() : undefined;
     const errorCode = extractErrorCode(raw, status);
     const title = extractTitle(raw, status);
     const detail = extractDetail(raw, exception);
 
-    const traceId = (req.headers['x-request-id'] as string | undefined)
-      ?? (req as RequestLike).requestId;
+    const traceId =
+      (req.headers['x-request-id'] as string | undefined) ?? (req as RequestLike).requestId;
+
+    // Field-level validation detail (e.g. from ZodValidationPipe) — forwarded as `errors`
+    // per BACKEND_SOURCE_OF_TRUTH §5.5 ProblemDetails shape.
+    const errors = extractErrors(raw);
 
     const problem = {
       type: `${this.baseTypeUrl}/${errorCode}`,
@@ -47,6 +50,7 @@ export class ProblemDetailsExceptionFilter implements ExceptionFilter {
       instance: req.originalUrl ?? req.url,
       traceId,
       errorCode,
+      ...(errors ? { errors } : {}),
     };
 
     if (status >= 500) {
@@ -66,6 +70,15 @@ export class ProblemDetailsExceptionFilter implements ExceptionFilter {
 
 interface RequestLike extends Request {
   requestId?: string;
+}
+
+/** Pull a field-level `errors` array off the thrown HttpException body, if present. */
+function extractErrors(raw: unknown): unknown[] | undefined {
+  if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>;
+    if (Array.isArray(obj['errors'])) return obj['errors'] as unknown[];
+  }
+  return undefined;
 }
 
 function extractErrorCode(raw: unknown, status: number): string {
@@ -99,30 +112,50 @@ function extractDetail(raw: unknown, exception: unknown): string {
 
 function defaultTitleForStatus(status: number): string {
   switch (status) {
-    case 400: return 'Bad Request';
-    case 401: return 'Unauthorized';
-    case 403: return 'Forbidden';
-    case 404: return 'Not Found';
-    case 409: return 'Conflict';
-    case 422: return 'Unprocessable Entity';
-    case 429: return 'Too Many Requests';
-    case 502: return 'Bad Gateway';
-    case 503: return 'Service Unavailable';
-    default: return status >= 500 ? 'Internal Server Error' : 'Error';
+    case 400:
+      return 'Bad Request';
+    case 401:
+      return 'Unauthorized';
+    case 403:
+      return 'Forbidden';
+    case 404:
+      return 'Not Found';
+    case 409:
+      return 'Conflict';
+    case 422:
+      return 'Unprocessable Entity';
+    case 429:
+      return 'Too Many Requests';
+    case 502:
+      return 'Bad Gateway';
+    case 503:
+      return 'Service Unavailable';
+    default:
+      return status >= 500 ? 'Internal Server Error' : 'Error';
   }
 }
 
 function defaultErrorCodeForStatus(status: number): string {
   switch (status) {
-    case 400: return 'BAD_REQUEST';
-    case 401: return 'UNAUTHORIZED';
-    case 403: return 'FORBIDDEN';
-    case 404: return 'NOT_FOUND';
-    case 409: return 'CONFLICT';
-    case 422: return 'UNPROCESSABLE_ENTITY';
-    case 429: return 'TOO_MANY_REQUESTS';
-    case 502: return 'BAD_GATEWAY';
-    case 503: return 'SERVICE_UNAVAILABLE';
-    default: return status >= 500 ? 'INTERNAL_ERROR' : 'ERROR';
+    case 400:
+      return 'BAD_REQUEST';
+    case 401:
+      return 'UNAUTHORIZED';
+    case 403:
+      return 'FORBIDDEN';
+    case 404:
+      return 'NOT_FOUND';
+    case 409:
+      return 'CONFLICT';
+    case 422:
+      return 'UNPROCESSABLE_ENTITY';
+    case 429:
+      return 'TOO_MANY_REQUESTS';
+    case 502:
+      return 'BAD_GATEWAY';
+    case 503:
+      return 'SERVICE_UNAVAILABLE';
+    default:
+      return status >= 500 ? 'INTERNAL_ERROR' : 'ERROR';
   }
 }

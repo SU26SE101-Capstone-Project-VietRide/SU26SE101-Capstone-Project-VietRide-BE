@@ -20,7 +20,8 @@ export class ZodValidationPipe<T> implements PipeTransform<unknown, T> {
         errorCode: 'VALIDATION_FAILED',
         title: 'Validation failed',
         detail: formatIssues(result.error.issues),
-        issues: result.error.issues.map((i) => ({
+        // Key is `errors` per BACKEND_SOURCE_OF_TRUTH §5.5 ProblemDetails shape.
+        errors: result.error.issues.map((i) => ({
           path: i.path.join('.'),
           code: i.code,
           message: i.message,

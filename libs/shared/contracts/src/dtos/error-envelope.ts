@@ -12,7 +12,9 @@ export const ProblemDetailsSchema = z.object({
   instance: z.string().optional(),
   traceId: z.string().optional(),
   errorCode: z.string().optional(),
-  issues: z
+  // Field-level validation detail — per BACKEND_SOURCE_OF_TRUTH §5.5/§5.9 the
+  // canonical key is `errors` (appears with VALIDATION_ERROR 422).
+  errors: z
     .array(
       z.object({
         path: z.string(),

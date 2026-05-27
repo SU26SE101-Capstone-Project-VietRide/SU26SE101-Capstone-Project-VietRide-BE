@@ -11,4 +11,5 @@ export const TripCompletedEventSchema = z.object({
 
 export type TripCompletedEvent = z.infer<typeof TripCompletedEventSchema>;
 
-export const TRIP_COMPLETED_ROUTING_KEY = 'trip.completed';
+// <service>.<aggregate>.<verb_past> per BACKEND_SOURCE_OF_TRUTH §7.3.
+export const TRIP_COMPLETED_ROUTING_KEY = 'trip.trip.completed';

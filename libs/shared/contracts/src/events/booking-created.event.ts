@@ -18,4 +18,5 @@ export const BookingCreatedEventSchema = z.object({
 
 export type BookingCreatedEvent = z.infer<typeof BookingCreatedEventSchema>;
 
-export const BOOKING_CREATED_ROUTING_KEY = 'booking.created';
+// <service>.<aggregate>.<verb_past> per BACKEND_SOURCE_OF_TRUTH §7.3.
+export const BOOKING_CREATED_ROUTING_KEY = 'booking.booking.created';

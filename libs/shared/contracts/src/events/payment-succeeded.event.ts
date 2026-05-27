@@ -14,4 +14,5 @@ export const PaymentSucceededEventSchema = z.object({
 
 export type PaymentSucceededEvent = z.infer<typeof PaymentSucceededEventSchema>;
 
-export const PAYMENT_SUCCEEDED_ROUTING_KEY = 'payment.succeeded';
+// <service>.<aggregate>.<verb_past> per BACKEND_SOURCE_OF_TRUTH §7.3.
+export const PAYMENT_SUCCEEDED_ROUTING_KEY = 'payment.payment.succeeded';
