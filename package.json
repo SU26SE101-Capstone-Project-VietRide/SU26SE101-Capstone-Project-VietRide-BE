@@ -5,6 +5,7 @@
   "description": "VietRide capstone backend monorepo — 5 .NET services + 4 NestJS services + Gateway",
   "license": "UNLICENSED",
   "scripts": {
+    "prepare": "node .githooks/install.mjs",
     "build": "nx run-many -t build",
     "test": "nx run-many -t test",
     "lint": "nx run-many -t lint",

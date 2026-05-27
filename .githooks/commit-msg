@@ -1,0 +1,3 @@
+#!/bin/sh
+# VietRide commit-msg hook — reject Co-Authored-By trailer (tool-agnostic).
+exec node "$(dirname "$0")/commit-msg-check.mjs" "$1"

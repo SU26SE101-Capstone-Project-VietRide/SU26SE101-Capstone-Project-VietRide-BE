@@ -39,6 +39,15 @@ test-results/
 [Ll]og/
 [Ll]ogs/
 
+# Claude Code — personal/local overrides (never commit). Shared config = .claude/settings.json.
+.claude/settings.local.json
+
+# CodeGraph MCP — local symbol index (rebuilt per clone via `codegraph init -i`)
+.codegraph/
+
+# MCP server config — per-developer (machine-specific paths); each dev configures locally
+.mcp.json
+
 # Visual Studio + Rider + JetBrains
 .vs/
 .vscode/*
