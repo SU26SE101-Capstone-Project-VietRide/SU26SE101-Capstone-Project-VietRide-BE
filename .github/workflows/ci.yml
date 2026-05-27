@@ -45,8 +45,8 @@ jobs:
       - name: Install dependencies
         run: npm ci --prefer-offline --no-audit
 
-      - name: Lint all projects
-        run: npx nx run-many --target=lint --all --parallel=3
+      - name: Lint all projects (TypeScript / NestJS only — .NET format runs in build-dotnet job)
+        run: npx nx run-many --target=lint --all --parallel=3 --exclude="VietRide.*"
 
   test-ts:
     name: Test (TypeScript / NestJS)
@@ -107,8 +107,8 @@ jobs:
       - name: Install dependencies
         run: npm ci --prefer-offline --no-audit
 
-      - name: Build all projects
-        run: npx nx run-many --target=build --all --parallel=3
+      - name: Build all projects (TypeScript / NestJS only — .NET builds in build-dotnet job)
+        run: npx nx run-many --target=build --all --parallel=3 --exclude="VietRide.*"
 
   build-dotnet:
     name: Build & Test (.NET 8)
@@ -144,6 +144,9 @@ jobs:
 
       - name: Build
         run: dotnet build ${{ matrix.solution }} --no-restore --configuration Release
+
+      - name: Format check (.NET lint)
+        run: dotnet format ${{ matrix.solution }} --verify-no-changes --no-restore --verbosity minimal
 
       - name: Test
         run: dotnet test ${{ matrix.solution }} --no-build --configuration Release --logger "trx;LogFileName=test-results.trx" --results-directory ./TestResults
