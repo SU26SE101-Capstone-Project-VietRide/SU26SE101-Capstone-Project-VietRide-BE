@@ -12,7 +12,7 @@ ARG SERVICE
 WORKDIR /src
 
 # Copy global.json + Directory.Build.props so SDK version + MSBuild rules apply.
-COPY global.json Directory.Build.props ./
+COPY global.json Directory.Build.props Directory.Packages.props ./
 
 # Copy libs (referenced by every service).
 COPY libs/dotnet/ libs/dotnet/
