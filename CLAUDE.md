@@ -21,6 +21,7 @@ additionally enforced by git hooks in `.githooks/`, so enforcement does not depe
 **Skills** (`.claude/skills/`) — invoke via `/<name>`
 
 - `plan-day` — start a backend day: `manager` drafts `docs/handoff/day-<N>-plan.md`, then `reviewer` PLAN-REVIEW gate.
+- `implement-task` — execute ONE task from an approved plan: dispatches the task's `implement agent` + `review agent`, loops once on REQUEST CHANGES, stops for human `/verify`. Per-task granularity (no `/implement-day`).
 - `audit-day` — close a backend day: audit code vs SOT + run verification matrix → `docs/handoff/day-<N>-checklist.md`.
 - `scaffold-aggregate` — new .NET aggregate across all 4 Clean Architecture layers (BSOT §3.2/§3.5).
 - `add-endpoint` — .NET controller (→ MediatR) + ProblemDetails + idempotency + Gateway route.
@@ -28,10 +29,12 @@ additionally enforced by git hooks in `.githooks/`, so enforcement does not depe
 - `add-integration-event` — Outbox event + routing key `<svc>.<aggregate>.<verb_past>`.
 - `smoke-test` — bring up the stack + `/health` matrix.
 
-**Daily loop** — `/plan-day N` (plan + PLAN-REVIEW gate) → human approves → dispatch each task to
-a worker, one at a time → review diff + `/verify` → `/audit-day N` (DoD + verification → checklist).
-Plan/checklist are committed handoff artifacts in `docs/handoff/` (see its README) — they survive a
-session ending mid-day, and Day N+1 planning reads Day N's checklist.
+**Daily loop** — `/plan-day N` (plan + PLAN-REVIEW gate) → human approves + resolves open Qs →
+`/implement-task X.Y` per task (worker + review per task, serial; the skill stops after each so
+the human runs `/verify`) → `/audit-day N` (DoD + verification → checklist) → commit.
+Plan/checklist are committed handoff artifacts in `docs/handoff/` (see its README) — they survive
+a session ending mid-day, and Day N+1 planning reads Day N's checklist. There is intentionally
+NO `/implement-day` skill — per-task granularity is the gate.
 
 **Subagents** (`.claude/agents/`) — a backend "department"
 

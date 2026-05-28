@@ -32,21 +32,29 @@ Chạy `manager` (sinh `docs/handoff/day-<N>-plan.md`) rồi `reviewer` ở mode
   (đừng để agent đoán). Xác nhận Task N.0 = "Pre-reqs / architecture baseline" nếu timeline có.
   Duyệt, hoặc trả lại để `manager` patch plan.
 
-### Phase 2 — Implement, mỗi lần một task
-Với từng task theo thứ tự dispatch:
-1. Giao task **nguyên văn** cho worker ghi trong trường `implement agent`:
-   - `dotnet` → `dotnet-worker`  ·  `nest` → `nest-worker`  ·  `cross-cutting` → `worker`.
-   - Worker dùng `skill` của task (`scaffold-aggregate` / `add-endpoint` / `ef-migration` /
-     `add-integration-event`) và **chỉ sửa** `owned files`; `forbidden scope` là vùng cấm.
-   - **Không tự viết lại prompt chi tiết** — giao thẳng task section. Nếu task thiếu chi tiết,
-     bắt `manager` patch plan (qua Cổng 1), đừng viết side-prompt.
-2. **Review diff** trước khi sang task kế (`review agent` của task):
-   - `/code-review` để quét nhanh tính đúng, hoặc reviewer chuyên stack (`dotnet-reviewer` /
-     `nest-reviewer`) để review convention sâu.
-   - Một task được accept rồi mới chạy task kế (serial). Chỉ chạy 2 worker song song khi plan đánh
-     dấu parallel-safe (write set rời nhau).
-- **Một session cho một task (hoặc một layer)** với ngày nặng — đừng chạy cả ngày trong một session.
-  Plan đã commit là điểm resume nếu session bị ngắt giữa chừng.
+### Phase 2 — Implement, mỗi lần một task → `/implement-task X.Y`
+Với từng task theo thứ tự dispatch trong plan, **một dòng**:
+```
+/implement-task 3.0   → worker + reviewer trên task đó → STOP
+/implement-task 3.1   → tương tự
+...
+```
+Skill đọc plan, trích task, dispatch `implement agent` (theo trường task) → dispatch
+`review agent` (theo trường task) → loop **một** vòng nếu REQUEST CHANGES → STOP báo cáo.
+**Không** tự nhảy sang task kế, **không** tự `/verify`, **không** tự `/audit-day`.
+
+Quy tắc khi vận hành:
+- Một task xong rồi mới gọi task kế (serial). Chỉ chạy song song khi plan đánh dấu
+  parallel-safe (write set disjoint).
+- **Không tạo `/implement-day`** để auto-chain cả ngày — chi phí sai ở code lớn hơn ở plan;
+  per-task stop là điểm bạn `/verify` thật trước khi tích luỹ rủi ro.
+- Sau khi skill stop ACCEPTED: bạn `/verify` hành vi (chạy app, hit endpoint — không chỉ unit
+  test) + đi qua bullet "Review" Day-N của timeline cho task đó nếu có; rồi mới `/implement-task`
+  task kế.
+- Nếu task thiếu chi tiết hoặc worker thấy plan sai → STOP, bắt `manager` patch plan qua Cổng 1
+  (không viết side-prompt, không tự sửa code ngoài owned files).
+- **Một session cho một task (hoặc một layer)** với ngày nặng. Plan đã commit là điểm resume
+  nếu session bị ngắt giữa chừng.
 
 ### Phase 3 — Verify ngày
 - `/verify` hành vi mới (chạy app, gọi endpoint — không chỉ unit test).
