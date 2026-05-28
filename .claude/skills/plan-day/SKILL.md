@@ -47,3 +47,15 @@ diff (`/code-review` or the stack reviewer) and `/verify`. Close the day with `/
   no branches/commits, no package installs.
 - The plan is a design, not permission to implement. Quality invariants remain enforced by
   `.githooks/` + CI + NetArchTest regardless — the gate here only catches a *bad plan* early.
+- **Dispatch prompt is the template above, verbatim, with only `N` substituted.** Do NOT enrich
+  the prompt with day-specific scope ("Day N covers X, Y, Z…") — that information already lives
+  in `BE_TIMELINE_VU.md` which `manager.md` is required to read. Enrichment re-introduces the
+  per-day prose drift this pipeline exists to prevent. If `manager` consistently misses scope,
+  fix `manager.md` or the timeline, not the daily prompt.
+- **If `manager` fails mid-draft or mid-patch (session limit, error, timeout):** (1) retry with
+  a fresh `manager` dispatch FIRST. (2) If retry also fails, escalate to the human. (3) Do NOT
+  patch `day-<N>-plan.md` directly from the main thread via `Edit`/`Write`. Direct patches lose
+  `manager.md`'s READ-then-DISCOVER + no-invent + cite-source guardrails — empirical evidence
+  (Day 3, 2026-05-28): main-thread direct patch invented a `LockedUntil` column absent from
+  `schema.sql` and wrote HTTP 423 contradicting BSOT §5.9's 403, both caught by reviewer at the
+  cost of a second patch+review cycle.
