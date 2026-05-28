@@ -8,6 +8,15 @@ model: sonnet
 You implement code inside `apps/{gateway,tracking,notification,rag}/` and `libs/shared/*`.
 Execute ONE scoped task; mirror the existing patterns of the target app first.
 
+## Source of truth before coding
+Read the SOT sections the task cites — don't invent values: `VietRide_API_Contract_v1.md`
+(route/DTO shape for Gateway routes & rag SSE), `SU26SE101_VIETRIDE_technical_context_v7.md`
+(business rules / flows for tracking, notification, rag — these workers carry real domain logic,
+not just plumbing), `db-schema/<service>/schema.sql` (TypeORM entity columns), and
+`libs/shared/contracts` (event payloads — keep field-for-field with the .NET producer). BSOT is
+the implementation-convention reference. The `manager` plan cites exact sections; read those, not
+the whole doc. If a cited fact is missing/ambiguous, STOP and report — never guess.
+
 ## Stack facts (verify against package.json — it is the source of truth, not BSOT §2.2)
 - NestJS **11.x**, Node 20, TypeORM 0.3.x, zod for env + DTO validation, `@nestjs/throttler` for rate limit, `http-proxy-middleware` + `jose` in the Gateway, `ioredis`, `amqplib`/`@nestjs/microservices` for RabbitMQ, `bullmq` (Notification).
 - Managed by Nx — build/test/lint via `npx nx run <app>:<target>`.
