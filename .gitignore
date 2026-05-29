@@ -41,6 +41,7 @@ test-results/
 
 # Claude Code — personal/local overrides (never commit). Shared config = .claude/settings.json.
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
 
 # CodeGraph MCP — local symbol index (rebuilt per clone via `codegraph init -i`)
 .codegraph/
