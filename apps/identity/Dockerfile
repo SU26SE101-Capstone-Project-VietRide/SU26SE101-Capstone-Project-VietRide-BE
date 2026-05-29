@@ -27,6 +27,9 @@ RUN dotnet publish "apps/identity/src/VietRide.Identity.Api/VietRide.Identity.Ap
 
 # ── Runtime stage ───────────────────────────────────────────────────────────────
 FROM mcr.microsoft.com/dotnet/aspnet:8.0-alpine AS runtime
+# The alpine runtime ships without ICU; .NET aborts on startup without it (globalization
+# is not invariant). Install icu-libs so culture-aware formatting (Money, dates) works.
+RUN apk add --no-cache icu-libs
 WORKDIR /app
 COPY --from=build /app/publish .
 

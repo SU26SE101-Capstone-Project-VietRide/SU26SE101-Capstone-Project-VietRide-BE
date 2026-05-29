@@ -1,13 +1,24 @@
 # VietRide local + production-like dev stack.
-# Run from repo root: `cd infra/docker && docker compose up -d`
 # Env: copy `.env.example` → `.env` at repo root before first run.
+#
+# Services are split into two Compose PROFILES so you can bring up tiers independently:
+#   infra → postgres, pgbouncer, redis, rabbitmq   (long-lived backing services)
+#   app   → the 9 .NET + NestJS service containers  (rebuilt often)
+#
+# Run from infra/docker (add --env-file ../../.env since .env lives at repo root):
+#   docker compose --profile infra up -d                   # infra only (daily dev: run services in VS/nx)
+#   docker compose --profile infra --profile app up -d      # full stack (production-like smoke test)
+#   docker compose --profile app down                       # stop just the app tier, leave infra up
+# NOTE: the `app` tier depends_on the `infra` tier, so always enable `infra` alongside `app`.
+# A bare `docker compose up -d` (no --profile) now starts NOTHING — pick a profile explicitly.
 
 x-dotnet-common: &dotnet-common
+  profiles: ['app']
   restart: unless-stopped
   environment:
     ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
     INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
-    ConnectionStrings__Default: "Host=postgres;Port=5432;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev};Database="
+    ConnectionStrings__Default: 'Host=postgres;Port=5432;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev};Database='
   depends_on:
     postgres:
       condition: service_healthy
@@ -15,6 +26,7 @@ x-dotnet-common: &dotnet-common
       condition: service_healthy
 
 x-nest-common: &nest-common
+  profiles: ['app']
   restart: unless-stopped
   environment:
     NODE_ENV: ${NODE_ENV:-production}
@@ -30,18 +42,19 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: vietride_postgres
+    profiles: ['infra']
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-vietride}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vietride_dev}
       POSTGRES_DB: postgres
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - '${POSTGRES_PORT:-5432}:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ../postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vietride}"]
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-vietride}']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -49,6 +62,7 @@ services:
   pgbouncer:
     image: edoburu/pgbouncer:latest
     container_name: vietride_pgbouncer
+    profiles: ['infra']
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-vietride}:${POSTGRES_PASSWORD:-vietride_dev}@postgres:5432/postgres
@@ -56,13 +70,13 @@ services:
       MAX_CLIENT_CONN: 200
       DEFAULT_POOL_SIZE: 25
     ports:
-      - "${PGBOUNCER_PORT:-6432}:5432"
+      - '${PGBOUNCER_PORT:-6432}:5432'
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
       # pgbouncer image lacks pg_isready/psql; use a TCP check via /dev/tcp.
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/5432 && echo ok"]
+      test: ['CMD-SHELL', 'exec 3<>/dev/tcp/localhost/5432 && echo ok']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -70,13 +84,14 @@ services:
   redis:
     image: redis:7-alpine
     container_name: vietride_redis
+    profiles: ['infra']
     restart: unless-stopped
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - '${REDIS_PORT:-6379}:6379'
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
       timeout: 3s
       retries: 10
@@ -84,18 +99,19 @@ services:
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     container_name: vietride_rabbitmq
+    profiles: ['infra']
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-vietride}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-vietride_dev}
     ports:
-      - "${RABBITMQ_PORT:-5672}:5672"
-      - "${RABBITMQ_MGMT_PORT:-15672}:15672"
+      - '${RABBITMQ_PORT:-5672}:5672'
+      - '${RABBITMQ_MGMT_PORT:-15672}:15672'
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
       - ../rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      test: ['CMD', 'rabbitmq-diagnostics', 'ping']
       interval: 10s
       timeout: 10s
       retries: 5
@@ -110,11 +126,12 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
-      ConnectionStrings__Default: "Host=postgres;Port=5432;Database=vietride_identity;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}"
+      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_identity;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}'
     ports:
-      - "${IDENTITY_PORT:-5001}:5001"
+      - '${IDENTITY_PORT:-5001}:5001'
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:5001/health || exit 1"]
+      test:
+        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5001/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5
@@ -129,11 +146,12 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
-      ConnectionStrings__Default: "Host=postgres;Port=5432;Database=vietride_trip;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}"
+      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_trip;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}'
     ports:
-      - "${TRIP_PORT:-5002}:5002"
+      - '${TRIP_PORT:-5002}:5002'
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:5002/health || exit 1"]
+      test:
+        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5002/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5
@@ -148,11 +166,12 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
-      ConnectionStrings__Default: "Host=postgres;Port=5432;Database=vietride_booking;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}"
+      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_booking;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}'
     ports:
-      - "${BOOKING_PORT:-5003}:5003"
+      - '${BOOKING_PORT:-5003}:5003'
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:5003/health || exit 1"]
+      test:
+        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5003/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5
@@ -167,11 +186,12 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
-      ConnectionStrings__Default: "Host=postgres;Port=5432;Database=vietride_payment;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}"
+      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_payment;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}'
     ports:
-      - "${PAYMENT_PORT:-5004}:5004"
+      - '${PAYMENT_PORT:-5004}:5004'
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:5004/health || exit 1"]
+      test:
+        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5004/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5
@@ -186,11 +206,12 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
-      ConnectionStrings__Default: "Host=postgres;Port=5432;Database=vietride_parcel;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}"
+      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_parcel;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}'
     ports:
-      - "${PARCEL_PORT:-5005}:5005"
+      - '${PARCEL_PORT:-5005}:5005'
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:5005/health || exit 1"]
+      test:
+        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5005/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5
@@ -218,7 +239,7 @@ services:
       RAG_BASE_URL: http://rag:3003
       REDIS_HOST: redis
     ports:
-      - "${GATEWAY_PORT:-3000}:3000"
+      - '${GATEWAY_PORT:-3000}:3000'
     depends_on:
       identity:
         condition: service_healthy
@@ -233,7 +254,9 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1"]
+      # Gateway binds IPv4 (0.0.0.0) only; `localhost` resolves to ::1 (IPv6) → refused.
+      test:
+        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5
@@ -246,9 +269,10 @@ services:
       dockerfile: apps/tracking/Dockerfile
     container_name: vietride_tracking
     ports:
-      - "${TRACKING_PORT:-3001}:3001"
+      - '${TRACKING_PORT:-3001}:3001'
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1"]
+      test:
+        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5
@@ -261,9 +285,10 @@ services:
       dockerfile: apps/notification/Dockerfile
     container_name: vietride_notification
     ports:
-      - "${NOTIFICATION_PORT:-3002}:3002"
+      - '${NOTIFICATION_PORT:-3002}:3002'
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3002/health || exit 1"]
+      test:
+        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:3002/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5
@@ -276,9 +301,10 @@ services:
       dockerfile: apps/rag/Dockerfile
     container_name: vietride_rag
     ports:
-      - "${RAG_PORT:-3003}:3003"
+      - '${RAG_PORT:-3003}:3003'
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3003/health || exit 1"]
+      test:
+        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:3003/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5

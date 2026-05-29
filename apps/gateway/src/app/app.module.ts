@@ -59,8 +59,8 @@ const throttlerStorage =
     },
     UserJwtMiddleware,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
-    { provide: APP_FILTER, useClass: ProblemDetailsExceptionFilter },
-    { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
+    { provide: APP_FILTER, useValue: new ProblemDetailsExceptionFilter() },
+    { provide: APP_INTERCEPTOR, useValue: new LoggingInterceptor() },
   ],
   exports: [ENV_TOKEN, InternalJwtSigner],
 })
@@ -84,6 +84,9 @@ export class AppModule implements NestModule {
       { path: 'v1/parcel/health', method: RequestMethod.ALL },
     ];
 
-    consumer.apply(UserJwtMiddleware).exclude(...publicPaths).forRoutes('*');
+    consumer
+      .apply(UserJwtMiddleware)
+      .exclude(...publicPaths)
+      .forRoutes('*');
   }
 }

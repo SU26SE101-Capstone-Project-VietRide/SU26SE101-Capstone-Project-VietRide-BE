@@ -10,24 +10,38 @@ Capstone SU26SE101 — backend monorepo. 5 .NET 8 services + 4 NestJS services +
 - Docker + Docker Compose v2
 - Git
 
+## This repo is an Nx monorepo — read before you start
+
+- **One install, at the root.** Run `npm install` ONCE in the repo root. There is **no
+  `package.json` per app** — all JS deps live at the root and the shared TS libs are wired as
+  workspace symlinks (`@vietride/*`). **Do NOT** `cd apps/<svc> && npm install` — it will fail.
+- **Run everything from the repo root.** Nx commands take a *project name*, not a path:
+  `npx nx run gateway:serve` (✅), not `cd apps/gateway && ...` (❌). `npx nx show projects` lists them.
+- **`.env` is mandatory and gitignored.** It is NOT in the repo — you must create it
+  (`cp .env.example .env`). Without it every service aborts on boot (zod env validation calls
+  `process.exit(1)` with `❌ Invalid env vars`; .NET hosts fail on missing `INTERNAL_JWT_SECRET`).
+- **.NET** services run via Visual Studio (open the `.sln`, F5) or `dotnet run`.
+  **NestJS** services run via `npx nx run <svc>:serve` (gateway/tracking/notification/rag) — not VS.
+
 ## Quick start (Day 2 ready)
 
 ```powershell
-# 1. Install JS deps
+# 1. Install JS deps (ONCE, at repo root — never per app)
 npm install
 
-# 2. Copy env template (one-time)
+# 2. Copy env template — MANDATORY, nothing boots without it (.env is gitignored)
 cp .env.example .env
-# Edit .env if needed — INTERNAL_JWT_SECRET has a working dev default.
+# INTERNAL_JWT_SECRET has a working dev default; edit only if needed.
 
-# 3. Bring up infra (Postgres + Redis + RabbitMQ + PgBouncer)
+# 3. Bring up infra (Postgres + PgBouncer + Redis + RabbitMQ) via the `infra` profile.
+#    Run from infra/docker; .env lives at repo root so pass --env-file.
 cd infra/docker
-docker compose up -d postgres redis rabbitmq pgbouncer
+docker compose --env-file ../../.env --profile infra up -d
 
-# 4a. Run all 9 app containers in Docker (production-like)
-docker compose up -d
+# 4a. Full stack in Docker (production-like) — enable BOTH profiles (app depends on infra):
+docker compose --env-file ../../.env --profile infra --profile app up -d
 
-# 4b. OR run services locally for dev (hot reload):
+# 4b. OR keep only infra in Docker and run services locally for dev (hot reload):
 cd ../..
 # Terminal 1 (Identity, port 5001):
 dotnet run --project apps/identity/src/VietRide.Identity.Api
@@ -39,9 +53,14 @@ npx nx run gateway:serve
 curl http://localhost:3000/health                 # Gateway → {"status":"ok","service":"Gateway"}
 curl http://localhost:3000/v1/identity/health     # Gateway → Identity proxy roundtrip
 curl http://localhost:5001/health                 # Identity direct
+curl http://localhost:5001/swagger                # Swagger UI lives on each .NET service (NOT the gateway)
 curl http://localhost:3000/v1/trip/health         # Gateway → Trip
 # ... booking, payment, parcel
 ```
+
+> **Compose profiles:** services are split into `infra` (postgres/pgbouncer/redis/rabbitmq) and
+> `app` (the 9 service containers). A bare `docker compose up -d` with no `--profile` starts
+> **nothing** — always pass a profile. `docker compose --profile app down` stops just the app tier.
 
 ## Day-to-day commands
 
