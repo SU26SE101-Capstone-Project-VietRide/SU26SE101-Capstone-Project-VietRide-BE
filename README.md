@@ -38,8 +38,8 @@ cp .env.example .env
 cd infra/docker
 docker compose --env-file ../../.env --profile infra up -d
 
-# 4a. Full stack in Docker (production-like) — enable BOTH profiles (app depends on infra):
-docker compose --env-file ../../.env --profile infra --profile app up -d
+# 4a. Full stack in Docker (production-like) — the `app` profile pulls infra in automatically:
+docker compose --env-file ../../.env --profile app up -d
 
 # 4b. OR keep only infra in Docker and run services locally for dev (hot reload):
 cd ../..
@@ -59,8 +59,9 @@ curl http://localhost:3000/v1/trip/health         # Gateway → Trip
 ```
 
 > **Compose profiles:** services are split into `infra` (postgres/pgbouncer/redis/rabbitmq) and
-> `app` (the 9 service containers). A bare `docker compose up -d` with no `--profile` starts
-> **nothing** — always pass a profile. `docker compose --profile app down` stops just the app tier.
+> `app` (the 9 service containers). Infra belongs to both profiles, so `--profile app` brings up
+> the full stack (infra + app) while `--profile infra` brings up infra only. A bare
+> `docker compose up -d` with no `--profile` starts **nothing** — always pass a profile.
 
 ## Day-to-day commands
 

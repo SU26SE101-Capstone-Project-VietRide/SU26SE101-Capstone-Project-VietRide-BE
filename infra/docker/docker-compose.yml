@@ -4,13 +4,16 @@
 # Services are split into two Compose PROFILES so you can bring up tiers independently:
 #   infra → postgres, pgbouncer, redis, rabbitmq   (long-lived backing services)
 #   app   → the 9 .NET + NestJS service containers  (rebuilt often)
+# The infra services belong to BOTH profiles, so the `app` tier (which depends_on them)
+# always has its backing services available — enabling `app` alone pulls infra in too.
 #
 # Run from infra/docker (add --env-file ../../.env since .env lives at repo root):
-#   docker compose --profile infra up -d                   # infra only (daily dev: run services in VS/nx)
-#   docker compose --profile infra --profile app up -d      # full stack (production-like smoke test)
-#   docker compose --profile app down                       # stop just the app tier, leave infra up
-# NOTE: the `app` tier depends_on the `infra` tier, so always enable `infra` alongside `app`.
-# A bare `docker compose up -d` (no --profile) now starts NOTHING — pick a profile explicitly.
+#   docker compose --profile infra up -d    # infra ONLY (daily dev: run services in VS/nx)
+#   docker compose --profile app up -d       # FULL stack (app + infra, production-like smoke test)
+#   docker compose --profile app down        # tear the full stack down
+# To stop just the app containers but leave infra running, stop them by name:
+#   docker compose stop gateway identity trip booking payment parcel tracking notification rag
+# A bare `docker compose up -d` (no --profile) starts NOTHING — pick a profile explicitly.
 
 x-dotnet-common: &dotnet-common
   profiles: ['app']
@@ -42,7 +45,7 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: vietride_postgres
-    profiles: ['infra']
+    profiles: ['infra', 'app']
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-vietride}
@@ -62,7 +65,7 @@ services:
   pgbouncer:
     image: edoburu/pgbouncer:latest
     container_name: vietride_pgbouncer
-    profiles: ['infra']
+    profiles: ['infra', 'app']
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-vietride}:${POSTGRES_PASSWORD:-vietride_dev}@postgres:5432/postgres
@@ -84,7 +87,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: vietride_redis
-    profiles: ['infra']
+    profiles: ['infra', 'app']
     restart: unless-stopped
     ports:
       - '${REDIS_PORT:-6379}:6379'
@@ -99,7 +102,7 @@ services:
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     container_name: vietride_rabbitmq
-    profiles: ['infra']
+    profiles: ['infra', 'app']
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-vietride}
