@@ -15,6 +15,10 @@
 #   docker compose stop gateway identity trip booking payment parcel tracking notification rag
 # A bare `docker compose up -d` (no --profile) starts NOTHING — pick a profile explicitly.
 
+# Project name (Docker Desktop groups containers under this; otherwise it'd be the
+# folder name "docker"). All tiers share ONE project so depends_on health gating works.
+name: vietride
+
 x-dotnet-common: &dotnet-common
   profiles: ['app']
   restart: unless-stopped

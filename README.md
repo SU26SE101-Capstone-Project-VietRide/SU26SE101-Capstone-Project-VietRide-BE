@@ -56,12 +56,23 @@ curl http://localhost:5001/health                 # Identity direct
 curl http://localhost:5001/swagger                # Swagger UI lives on each .NET service (NOT the gateway)
 curl http://localhost:3000/v1/trip/health         # Gateway → Trip
 # ... booking, payment, parcel
+
+# 6. Tear down (run from infra/docker)
+docker compose --profile app down          # stop + remove the full stack (app + infra)
+docker compose --profile infra down        # stop + remove infra only
+# Stop just the app containers but leave infra running (no profile needed — by name):
+docker compose stop gateway identity trip booking payment parcel tracking notification rag
+docker compose --profile app down -v        # also drop volumes (wipes Postgres/Redis/RabbitMQ data)
 ```
 
 > **Compose profiles:** services are split into `infra` (postgres/pgbouncer/redis/rabbitmq) and
 > `app` (the 9 service containers). Infra belongs to both profiles, so `--profile app` brings up
 > the full stack (infra + app) while `--profile infra` brings up infra only. A bare
 > `docker compose up -d` with no `--profile` starts **nothing** — always pass a profile.
+> All containers live under one Compose project named `vietride` (Docker Desktop shows a single
+> `vietride` group, not two) — profiles separate *what each command targets*, not how the UI
+> groups them. Keeping one project is deliberate: it's what makes cross-tier `depends_on`
+> health gating work (app waits for Postgres/Redis/RabbitMQ to be healthy before starting).
 
 ## Day-to-day commands
 
