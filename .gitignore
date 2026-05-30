@@ -147,3 +147,6 @@ docs/api/openapi/*.yaml
 # ── Local-only scripts ───────────────────────────────────────────────────────
 scratch/
 playground/
+
+# ── NestJS workflow (Local) ──────────────────────────────────────────────────
+AGENTS.md

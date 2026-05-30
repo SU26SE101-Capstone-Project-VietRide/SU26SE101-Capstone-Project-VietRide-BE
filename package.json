@@ -11,7 +11,14 @@
     "lint": "nx run-many -t lint",
     "affected:build": "nx affected -t build",
     "affected:test": "nx affected -t test",
-    "graph": "nx graph"
+    "graph": "nx graph",
+    "dev:gateway": "nx serve gateway",
+    "dev:tracking": "nx serve tracking",
+    "dev:notification": "nx serve notification",
+    "dev:rag": "nx serve rag",
+    "lint:ts": "nx run-many -t lint --exclude=\"VietRide.*\"",
+    "test:ts": "nx run-many -t test --exclude=\"VietRide.*\" --ci --passWithNoTests",
+    "build:ts": "nx run-many -t build --exclude=\"VietRide.*\""
   },
   "workspaces": [
     "apps/*",
