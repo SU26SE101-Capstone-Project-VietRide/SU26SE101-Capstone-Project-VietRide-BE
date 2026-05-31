@@ -10,7 +10,7 @@
 |--|--|
 | NestJS | 11.x |
 | Node | 20 |
-| PostgreSQL driver | pg 8.x (raw SQL — NO Prisma) |
+| Database ORM | Prisma ORM |
 | Validation | zod 3.x |
 | JWT | jose 5.x |
 | Redis client | ioredis 5.x |
@@ -46,7 +46,7 @@ apps/<app>/src/
     ├── <aggregate>.module.ts
     ├── <aggregate>.controller.ts
     ├── <aggregate>.service.ts
-    ├── <aggregate>.repository.ts   # raw SQL via PgService
+    ├── <aggregate>.repository.ts   # Database access via Prisma ORM
     └── dto/
         └── <verb>-<aggregate>.dto.ts  # zod schema + inferred type
 ```
@@ -89,10 +89,9 @@ import {
 ```typescript
 import {
   NestPersistenceModule,  // NestPersistenceModule.forRoot({ connectionString })
-  PgService,              // inject for raw SQL queries
+  PrismaService,          // inject for database access
 } from '@vietride/nest-persistence';
 ```
-**No BaseEntity. No Prisma. No ORM of any kind.**
 
 ### `@vietride/nest-rabbitmq`
 ```typescript
@@ -170,35 +169,32 @@ inject via `ENV_TOKEN`. Never call `process.env` directly in services.
 
 ---
 
-## Database pattern — raw SQL only
+## Database pattern — Prisma ORM
 
 ```typescript
 @Injectable()
 export class TripRepository {
-  constructor(private readonly pg: PgService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  async findById(id: string): Promise<TripRow | null> {
-    const { rows } = await this.pg.query<TripRow>(
-      `SELECT * FROM trips WHERE id = $1 AND deleted_at IS NULL`,
-      [id],
-    );
-    return rows[0] ?? null;
+  async findById(id: string) {
+    return this.prisma.trip.findUnique({
+      where: { id },
+    });
   }
 
-  async create(data: CreateTripDto): Promise<TripRow> {
-    const { rows } = await this.pg.query<TripRow>(
-      `INSERT INTO trips (id, origin, destination, created_at)
-       VALUES ($1, $2, $3, NOW()) RETURNING *`,
-      [randomUUID(), data.origin, data.destination],
-    );
-    return rows[0];
+  async create(data: CreateTripDto) {
+    return this.prisma.trip.create({
+      data: {
+        id: randomUUID(),
+        origin: data.origin,
+        destination: data.destination,
+      },
+    });
   }
 }
 ```
 
-- Always parameterize — never string-interpolate SQL values
-- Always filter `deleted_at IS NULL` for soft-deleted tables
-- Repository handles SQL; Service handles business logic
+- Repository handles DB access; Service handles business logic
 
 ---
 

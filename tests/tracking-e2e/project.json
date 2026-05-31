@@ -14,11 +14,7 @@
       "options": {
         "jestConfig": "tests/tracking-e2e/jest.config.cts",
         "passWithNoTests": true
-      },
-      "dependsOn": [
-        "tracking:build",
-        "tracking:serve"
-      ]
+      }
     }
   }
 }

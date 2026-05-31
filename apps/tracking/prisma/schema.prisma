@@ -1,0 +1,47 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/tracking-prisma-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OutboxEventStatus {
+  PENDING
+  PUBLISHING
+  PUBLISHED
+  FAILED
+
+  @@map("outbox_event_status")
+}
+
+model GpsTrail {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tripId     String   @map("trip_id") @db.Uuid
+  latitude   Decimal  @db.Decimal(10, 7)
+  longitude  Decimal  @db.Decimal(10, 7)
+  speedKmh   Decimal? @map("speed_kmh") @db.Decimal(6, 2)
+  headingDeg Decimal? @map("heading_deg") @db.Decimal(5, 2)
+  recordedAt DateTime @map("recorded_at") @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([tripId, recordedAt], map: "idx_gps_trails_trip_id_recorded_at")
+  @@index([recordedAt], map: "idx_gps_trails_recorded_at")
+  @@map("gps_trails")
+}
+
+model OutboxEvent {
+  id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventType   String            @map("event_type") @db.VarChar(100)
+  payload     Json
+  status      OutboxEventStatus @default(PENDING)
+  retryCount  Int               @default(0) @map("retry_count")
+  lastError   String?           @map("last_error")
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  publishedAt DateTime?         @map("published_at") @db.Timestamptz(6)
+
+  @@index([status, createdAt], map: "idx_outbox_events_status_created")
+  @@map("outbox_events")
+}
