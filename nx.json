@@ -1,10 +1,7 @@
 {
   "$schema": "./node_modules/nx/schemas/nx-schema.json",
   "namedInputs": {
-    "default": [
-      "{projectRoot}/**/*",
-      "sharedGlobals"
-    ],
+    "default": ["{projectRoot}/**/*", "sharedGlobals"],
     "production": [
       "default",
       "!{projectRoot}/.eslintrc.json",
@@ -16,41 +13,25 @@
       "!{projectRoot}/test-setup.[jt]s",
       "!{projectRoot}/src/test-setup.[jt]s"
     ],
-    "sharedGlobals": [
-      "{workspaceRoot}/global.json",
-      "{workspaceRoot}/Directory.Build.props"
-    ]
+    "sharedGlobals": ["{workspaceRoot}/global.json", "{workspaceRoot}/Directory.Build.props"]
   },
   "targetDefaults": {
     "build": {
       "cache": true,
-      "dependsOn": [
-        "^build"
-      ],
-      "inputs": [
-        "production",
-        "^production"
-      ]
+      "dependsOn": ["^build"],
+      "inputs": ["production", "^production"]
     },
     "test": {
       "cache": true,
-      "inputs": [
-        "default",
-        "^production"
-      ]
+      "inputs": ["default", "^production"]
     },
     "lint": {
       "cache": true
     },
     "@nx/js:tsc": {
       "cache": true,
-      "dependsOn": [
-        "^build"
-      ],
-      "inputs": [
-        "production",
-        "^production"
-      ]
+      "dependsOn": ["^build"],
+      "inputs": ["production", "^production"]
     }
   },
   "plugins": [
@@ -105,5 +86,6 @@
     }
   },
   "useInferencePlugins": true,
-  "defaultBase": "main"
+  "defaultBase": "main",
+  "analytics": true
 }

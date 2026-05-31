@@ -5,7 +5,7 @@
 Tracking Service là **NestJS service** xử lý real-time GPS broadcast (Socket.IO) + ETA calculation + off-route detection. DB rất nhẹ — hầu hết state ở Redis (5 phút TTL), chỉ persist `GpsTrail` history (batch insert mỗi 5–10 phút từ Redis buffer) và `OutboxEvent` cho các broadcast event (TripDelayed, OffRouteAlert, ApproachingAlert).
 
 - **Database:** `vietride_tracking`
-- **Framework:** NestJS + TypeORM
+- **Framework:** NestJS + Prisma
 - **Extensions:** `pgcrypto`
 - **Background jobs:** **BullMQ scheduled jobs** (NestJS service KHÔNG dùng Hangfire). Jobs:
   - `gps-batch` queue (interval 5 phút): flush Redis GPS buffer → batch INSERT `gps_trails`
@@ -50,7 +50,7 @@ Tracking Service là **NestJS service** xử lý real-time GPS broadcast (Socket
 
 ## Migration Strategy
 
-- **Tool:** TypeORM migrations.
+- **Tool:** Prisma migrations.
 - **Bootstrap order:** Sau Trip-Route-Vehicle (logical FK target).
 - **Data retention:** GPS trail có thể grow rất lớn (3-5s/GPS × N trip). Cleanup job (BullMQ daily): `DELETE FROM gps_trails WHERE recorded_at < now() - INTERVAL '90 days'` (cấu hình env var).
 - **Partitioning consideration (v2):** Khi `gps_trails` > 100M rows, range-partition theo `recorded_at` monthly.

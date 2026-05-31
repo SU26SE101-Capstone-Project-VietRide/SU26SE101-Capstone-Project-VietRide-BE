@@ -11,7 +11,14 @@
     "lint": "nx run-many -t lint",
     "affected:build": "nx affected -t build",
     "affected:test": "nx affected -t test",
-    "graph": "nx graph"
+    "graph": "nx graph",
+    "dev:gateway": "nx serve gateway",
+    "dev:tracking": "nx serve tracking",
+    "dev:notification": "nx serve notification",
+    "dev:rag": "nx serve rag",
+    "lint:ts": "nx run-many -t lint --exclude=\"VietRide.*\"",
+    "test:ts": "nx run-many -t test --exclude=\"VietRide.*\" --ci --passWithNoTests",
+    "build:ts": "nx run-many -t build --exclude=\"VietRide.*\""
   },
   "workspaces": [
     "apps/*",
@@ -46,6 +53,7 @@
     "jsonc-eslint-parser": "^2.1.0",
     "nx": "^22.7.4",
     "prettier": "~3.6.2",
+    "prisma": "^6.0.0",
     "ts-jest": "^29.4.0",
     "ts-node": "10.9.1",
     "tslib": "^2.3.0",
@@ -71,6 +79,7 @@
     "pino": "^9.5.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.0",
-    "zod": "^3.25.76"
+    "zod": "^3.25.76",
+    "@prisma/client": "^6.0.0"
   }
 }

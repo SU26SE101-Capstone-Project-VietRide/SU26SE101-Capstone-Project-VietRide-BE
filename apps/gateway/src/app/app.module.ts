@@ -46,7 +46,7 @@ const throttlerStorage =
       // Default rate limit per IP: 120 req / 60s per BACKEND_SOURCE_OF_TRUTH §11.3.
       // Per-route overrides Day 3+.
       throttlers: [{ ttl: 60_000, limit: env.RATE_LIMIT_DEFAULT_PER_MIN }],
-      storage: throttlerStorage,
+      ...(throttlerStorage ? { storage: throttlerStorage } : {}),
     }),
   ],
   controllers: [HealthController],

@@ -1,6 +1,8 @@
 {
   "compileOnSave": false,
   "compilerOptions": {
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
     "rootDir": ".",
     "sourceMap": true,
     "declaration": false,
@@ -13,9 +15,7 @@
     // Suppress TS5101/TS5107 — moduleResolution="node"/"node10" + baseUrl deprecation noise.
     // Nx 22 generators still emit these; revisit Day-1 of Nx 23+ when upstream migrates.
     "ignoreDeprecations": "6.0",
-    "lib": [
-      "ES2022"
-    ],
+    "lib": ["ES2022"],
     "skipLibCheck": true,
     "skipDefaultLibCheck": true,
     "baseUrl": ".",
@@ -28,30 +28,13 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "paths": {
-      "@vietride/contracts": [
-        "./libs/shared/contracts/src/index.ts"
-      ],
-      "@vietride/nest-common": [
-        "./libs/shared/nest-common/src/index.ts"
-      ],
-      "@vietride/nest-config": [
-        "./libs/shared/nest-config/src/index.ts"
-      ],
-      "@vietride/nest-persistence": [
-        "./libs/shared/nest-persistence/src/index.ts"
-      ],
-      "@vietride/nest-rabbitmq": [
-        "./libs/shared/nest-rabbitmq/src/index.ts"
-      ],
-      "@vietride/nest-redis": [
-        "./libs/shared/nest-redis/src/index.ts"
-      ]
+      "@vietride/contracts": ["./libs/shared/contracts/src/index.ts"],
+      "@vietride/nest-common": ["./libs/shared/nest-common/src/index.ts"],
+      "@vietride/nest-config": ["./libs/shared/nest-config/src/index.ts"],
+      "@vietride/nest-persistence": ["./libs/shared/nest-persistence/src/index.ts"],
+      "@vietride/nest-rabbitmq": ["./libs/shared/nest-rabbitmq/src/index.ts"],
+      "@vietride/nest-redis": ["./libs/shared/nest-redis/src/index.ts"]
     }
   },
-  "exclude": [
-    "node_modules",
-    "tmp",
-    "**/bin/**",
-    "**/obj/**"
-  ]
+  "exclude": ["node_modules", "tmp", "**/bin/**", "**/obj/**"]
 }

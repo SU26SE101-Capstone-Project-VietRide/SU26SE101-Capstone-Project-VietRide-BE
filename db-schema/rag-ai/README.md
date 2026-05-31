@@ -5,7 +5,7 @@
 NestJS service xử lý **knowledge base ingestion + LLM streaming RAG**. Ingest pipeline: upload file → System Admin approve → extract text → chunk + embed (OpenAI text-embedding-3-small 1536d) → store với pgvector. Query: embed user message → cosine similarity top-5 chunks → LLM (claude-sonnet-4-6) stream SSE.
 
 - **Database:** `vietride_rag`
-- **Framework:** NestJS + TypeORM
+- **Framework:** NestJS + Prisma
 - **Extensions:** `pgcrypto`, **`vector` (pgvector)**
 - **Background jobs:** BullMQ (NestJS, KHÔNG dùng Hangfire). Job ingest pipeline triggered by `DocumentApproved` event.
 - **Hangfire schema:** KHÔNG có.
@@ -62,7 +62,7 @@ NestJS service xử lý **knowledge base ingestion + LLM streaming RAG**. Ingest
 
 ## Migration Strategy
 
-- **Tool:** TypeORM migrations.
+- **Tool:** Prisma migrations.
 - **Bootstrap order:** Sau Identity (logical FK).
 - **pgvector setup:** `CREATE EXTENSION IF NOT EXISTS "vector"` must be installed in PostgreSQL container. Docker compose: `docker pull pgvector/pgvector:pg16` (community image bundled with extension).
 - **IVFFlat retraining:** Run `REINDEX INDEX idx_knowledge_chunks_embedding;` after major data growth (10x rows since last reindex).

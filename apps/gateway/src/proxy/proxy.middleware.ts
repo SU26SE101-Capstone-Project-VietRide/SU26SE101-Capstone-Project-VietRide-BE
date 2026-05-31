@@ -52,7 +52,7 @@ export function createProxyHandler(env: Env, signer: InternalJwtSigner): Express
   }
 
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const fullPath = (req.originalUrl || req.url).split('?')[0];
+    const fullPath = (req.originalUrl || req.url).split('?')[0] || '/';
 
     // Let local gateway routes through (health, ready) — Nest controllers handle them.
     if (fullPath === '/health' || fullPath === '/ready') {
@@ -80,11 +80,14 @@ export function createProxyHandler(env: Env, signer: InternalJwtSigner): Express
     res.setHeader('X-Request-Id', reqId);
 
     const user = (req as RequestWithUser).user;
+    const role = user?.['role'] as string | undefined;
+    const operatorId = user?.['operatorId'] as string | undefined;
+
     const internalJwt = await signer.sign({
       sub: (user?.sub as string) ?? 'anonymous',
-      role: user?.['role'] as string | undefined,
-      operatorId: user?.['operatorId'] as string | undefined,
       reqId,
+      ...(role ? { role } : {}),
+      ...(operatorId ? { operatorId } : {}),
     });
 
     req.headers['x-internal-auth'] = `Bearer ${internalJwt}`;

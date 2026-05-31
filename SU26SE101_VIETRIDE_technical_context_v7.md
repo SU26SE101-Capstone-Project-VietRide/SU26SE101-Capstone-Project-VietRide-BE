@@ -7,7 +7,7 @@
 >
 > Đây là **technical context document** (source of truth) cho dự án VietRide. Doc này chứa: business rules, design decisions, architecture, conventions, business flow, status machine, enum values, entity requirements (fields cần có và lý do). API controller/DTO contract chi tiết nằm ở `Docs/API/VietRide_API_Contract_v1.md`.
 >
-> **Doc này KHÔNG PHẢI là DB schema document.** Doc cố tình KHÔNG bao gồm: SQL DDL, column types/constraints chi tiết, index strategy cụ thể, EF Core/TypeORM entity class code, migration scripts.
+> **Doc này KHÔNG PHẢI là DB schema document.** Doc cố tình KHÔNG bao gồm: SQL DDL, column types/constraints chi tiết, index strategy cụ thể, EF Core/Prisma entity class code, migration scripts.
 >
 > **Lý do tách:** DB schema design là deliverable riêng do agent chuyên trách thực hiện sau khi đọc doc này. Nếu gom schema vào đây sẽ (1) làm doc dài quá, (2) khóa hướng agent design DB sai (lock vào schema đã viết sẵn dù chưa optimal), (3) khó maintain khi business rules thay đổi.
 >
@@ -355,7 +355,7 @@ Streaming LLM response qua SSE, gọi vector DB, tích hợp nhiều external AP
 >
 > **Cross-DB query bị cấm.** Nếu service A cần data của service B → HTTP REST (sync) hoặc consume event (async). Snapshot field (như `Booking.tripSnapshot*`) là pattern accept để tránh cross-DB query.
 >
-> **Migration tool:** EF Core Migrations cho .NET services, TypeORM migrations cho NestJS services. Mỗi service tự quản migration của database mình.
+> **Migration tool:** EF Core Migrations cho .NET services, Prisma migrations cho NestJS services. Mỗi service tự quản migration của database mình.
 
 > **Hangfire storage — mỗi .NET service có schema riêng trong PostgreSQL của service đó (chỉ dành cho business scheduled jobs — KHÔNG dùng Hangfire cho Outbox polling):**
 > Hangfire cần persistent storage để track job queue. Dùng `Hangfire.PostgreSql` package — Hangfire tự tạo các bảng (`hangfire.job`, `hangfire.queue`, v.v.) trong **cùng PostgreSQL DB** của service đó (không phải DB share riêng).
@@ -368,8 +368,8 @@ Streaming LLM response qua SSE, gọi vector DB, tích hợp nhiều external AP
 >
 > **Outbox polling KHÔNG dùng Hangfire** — dùng `BackgroundService`/`IHostedService` (xem Decisions section).
 >
-> **TypeORM cho Tracking Service (NestJS):**
-> Tracking Service (NestJS) cần write `GpsTrail` vào PostgreSQL. Dùng **TypeORM** (native với NestJS via `@nestjs/typeorm`). GpsTrail entity requirements: tripId, lat/lng (decimal precision 10 scale 7 — đủ độ chính xác ~1cm), speed nullable (km/h), timestamp. Tracking Service có **PostgreSQL DB riêng** — chỉ chứa GpsTrail (và OutboxEvent nếu publish event). Redis handle realtime state.
+> **Prisma cho Tracking Service (NestJS):**
+> Tracking Service (NestJS) cần write `GpsTrail` vào PostgreSQL. Dùng **Prisma** (native với NestJS via `@nestjs/Prisma`). GpsTrail entity requirements: tripId, lat/lng (decimal precision 10 scale 7 — đủ độ chính xác ~1cm), speed nullable (km/h), timestamp. Tracking Service có **PostgreSQL DB riêng** — chỉ chứa GpsTrail (và OutboxEvent nếu publish event). Redis handle realtime state.
 >
 > **Tracking Service URL exposure:**
 > Tracking Service chạy sau Nginx, **không expose port trực tiếp ra internet**. Nginx route:
@@ -2343,7 +2343,7 @@ Driver app gửi location mỗi 3–5 giây
 
 Background job (BullMQ scheduled job — chạy mỗi 5–10 phút trong Tracking Service NestJS):
   → Đọc buffered GPS trail từ Redis (key prefix `tracking:gps_buffer:{tripId}`)
-  → Batch insert vào PostgreSQL bảng GpsTrail { tripId, lat, lng, speed, timestamp } qua TypeORM
+  → Batch insert vào PostgreSQL bảng GpsTrail { tripId, lat, lng, speed, timestamp } qua Prisma
   → Clear buffer trong Redis
 ```
 
@@ -2351,7 +2351,7 @@ Background job (BullMQ scheduled job — chạy mỗi 5–10 phút trong Trackin
 
 > **Cơ chế batch job — BullMQ:** Tracking Service là NestJS, không dùng Hangfire (.NET only). Pattern dùng **BullMQ scheduled job** (cùng stack với Notification Service đã có sẵn BullMQ + Redis):
 > - Bootstrap: setup repeat job với interval 5 phút trên queue `gps-batch`
-> - Job handler: đọc danh sách active tripIds từ Redis set, với mỗi tripId đọc buffer GPS list, batch insert vào PostgreSQL qua TypeORM, xóa buffer sau khi insert thành công
+> - Job handler: đọc danh sách active tripIds từ Redis set, với mỗi tripId đọc buffer GPS list, batch insert vào PostgreSQL qua Prisma, xóa buffer sau khi insert thành công
 > - Tránh dùng `setInterval` thuần — mất khi service restart, không persistent. BullMQ scheduled job persistent (lưu state trong Redis), tự resume sau restart.
 
 ### 6.4 Thay đổi lộ trình giữa chuyến
@@ -4640,7 +4640,7 @@ Mỗi service chỉ được phép read/write key bắt đầu bằng prefix ser
 - Action endpoints: verb-noun với hyphen (vd `POST /bookings/{id}/cancel`, `POST /trips/{id}/lock-seats`)
 - Query params: camelCase (vd `?passengerUserId=xxx&from=2026-01-01`)
 - JSON body fields: camelCase (vd `{ "tripId": "...", "totalAmount": 350000 }`)
-- DB column names: snake_case (vd `passenger_user_id`, `total_amount`) — EF Core/TypeORM tự map giữa camelCase property và snake_case column qua naming policy.
+- DB column names: snake_case (vd `passenger_user_id`, `total_amount`) — EF Core/Prisma tự map giữa camelCase property và snake_case column qua naming policy.
 
 **Error response — RFC 7807 Problem Details:**
 - Content-Type: `application/problem+json`
@@ -4674,7 +4674,7 @@ Mỗi service chỉ được phép read/write key bắt đầu bằng prefix ser
 
 **Repository / data access pattern:**
 - .NET: EF Core DbContext per service. Repository interface trong Domain layer, implementation trong Infrastructure. CQRS Query handler có thể bypass repository và query DbContext trực tiếp (read-only, performance).
-- NestJS: TypeORM repository pattern. Service class wrap repository, không gọi repository trực tiếp từ controller.
+- NestJS: Prisma repository pattern. Service class wrap repository, không gọi repository trực tiếp từ controller.
 
 ### Authentication & Authorization — Business rules chi tiết
 
