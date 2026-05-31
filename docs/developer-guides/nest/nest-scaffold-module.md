@@ -147,7 +147,7 @@ Both must pass before moving on. Fix any lint errors before continuing.
 ## Checklist
 
 - [ ] Files generated via Nx CLI (not created manually except Repository and DTO)
-- [ ] Repository uses `PgService` — no TypeORM, no ORM
+- [ ] Repository uses `PgService` — no Prisma, no ORM
 - [ ] DTO uses Zod schema + inferred type
 - [ ] Module declares Controller, Service, Repository in `providers`
 - [ ] Module imported into AppModule

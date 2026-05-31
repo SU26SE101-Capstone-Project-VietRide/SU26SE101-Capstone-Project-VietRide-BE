@@ -10,7 +10,7 @@
 |--|--|
 | NestJS | 11.x |
 | Node | 20 |
-| PostgreSQL driver | pg 8.x (raw SQL — NO TypeORM) |
+| PostgreSQL driver | pg 8.x (raw SQL — NO Prisma) |
 | Validation | zod 3.x |
 | JWT | jose 5.x |
 | Redis client | ioredis 5.x |
@@ -92,7 +92,7 @@ import {
   PgService,              // inject for raw SQL queries
 } from '@vietride/nest-persistence';
 ```
-**No BaseEntity. No TypeORM. No ORM of any kind.**
+**No BaseEntity. No Prisma. No ORM of any kind.**
 
 ### `@vietride/nest-rabbitmq`
 ```typescript
