@@ -19,6 +19,14 @@ Polyglot Nx 22 monorepo: 5 .NET 8 services (Clean Architecture) + API Gateway + 
 
 > Rule: if BSOT contradicts `technical_context_v7`, BSOT is wrong — fix BSOT, bump its version (§13 changelog).
 
+> **Working method (all agents/tools, before writing any code):** READ the SOT sections your
+> task cites (above hierarchy) — extract the exact columns/enums/endpoints/status-rules, don't
+> skim. Then DISCOVER the current repo state (existing patterns to mirror, migrations, stubs).
+> **Never invent** a column/enum/endpoint/rule — if a needed fact is missing or ambiguous, STOP
+> and ask, don't guess. Code-quality philosophy is **BSOT §3.2.3 (.NET) / §3.3.1 (NestJS)** —
+> SOLID/clean-code as *balance, not dogma* (judgment over premature fragmentation; size numbers
+> are review guidelines, not CI limits). (Claude Code agents restate this in `.claude/agents/*.md`.)
+
 ## Hard invariants (DO NOT violate — enforced by `.githooks/`)
 
 - **Commits MUST NOT contain a `Co-Authored-By` trailer.** Capstone rule: contribution is attributed to the
@@ -35,7 +43,7 @@ Polyglot Nx 22 monorepo: 5 .NET 8 services (Clean Architecture) + API Gateway + 
 - **User Access Token**: RS256, JWKS from Identity, issuer `vietride-identity`, audience `vietride-api`.
 - **Password hashing**: BCrypt.Net-Next, cost 12 (BSOT §2.1).
 - **Money**: BIGINT (VND), floor to 1000 before persisting (`Money.FromRaw`). No decimals.
-- **Persistence**: EF Core, one DbContext per service, snake_case schema, soft-delete (`is_active` + `deleted_at`), Outbox pattern. EF migrations run WITHOUT booting the host via per-service `IDesignTimeDbContextFactory`.
+- **Persistence**: EF Core, one DbContext per service, snake_case schema, soft-delete (`deleted_at timestamptz` only, partial unique index `WHERE deleted_at IS NULL`, see ADR 0003), `is_active` is a **separate** activation flag (not part of soft-delete — entities that need enable/disable implement `IActivatable`; `User` has no `is_active`, it uses its `status` enum), Outbox pattern. EF migrations run WITHOUT booting the host via per-service `IDesignTimeDbContextFactory`.
 - **Messaging**: RabbitMQ topic exchange `vietride.events`, routing key `<svc>.<aggregate>.<verb_past>` (e.g. `identity.user.created`).
 - **Errors**: RFC 7807 ProblemDetails `{type,title,status,detail,instance,errorCode,errors?}`, `errorCode` is UPPER_SNAKE_CASE.
 - **Cross-DB FK is forbidden at DB layer** — logical FK only, enforced via HTTP/event (see `db-schema/_global/cross-service-references.md`).

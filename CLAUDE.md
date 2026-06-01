@@ -7,6 +7,28 @@ The project rules, invariants, conventions, commands and directory map live in `
 
 ---
 
+## Communication — orchestrator → human (REPORT IN VIETNAMESE)
+
+The skills/subagents in this repo are authored in English, but the human (BE lead, Vũ) works
+in Vietnamese. **The main thread (orchestrator) MUST write its conversational replies and
+hand-back reports to the human in Vietnamese by default** — including the summaries it produces
+after `/plan-day`, `/implement-task`, `/audit-day`, `/verify`, and any general Q&A. Do NOT make
+the human ask for a translation as a second step.
+
+Scope — Vietnamese applies ONLY to the orchestrator's chat/report to the human. It does NOT
+change repo artifacts, which keep their established language:
+- **Subagent dispatch prompts** stay the verbatim English skill templates (translating them
+  would break the "verbatim, only `<N>`/`<X.Y>` substituted" guardrail).
+- **Committed artifacts** (`day-<N>-plan.md` / `day-<N>-checklist.md`, code, comments, commit
+  messages, ADRs, BSOT changelog rows) keep their existing convention — English for code/plan,
+  Vietnamese where the doc is already Vietnamese (e.g. BSOT prose).
+- Technical identifiers (error codes, file paths, type names, commands) stay verbatim.
+
+If a future human prefers another language, override this section (or scope it personally via
+`CLAUDE.local.md`).
+
+---
+
 ## Claude Code-specific tooling in this repo
 
 These are Claude Code features (other tools ignore them). The **hard invariants** are
@@ -15,7 +37,7 @@ additionally enforced by git hooks in `.githooks/`, so enforcement does not depe
 **Hooks & settings**
 
 - `.claude/settings.json` — shared hooks + read-only command allowlist (committed).
-- `.claude/hooks/pre-guard.mjs` (PreToolUse) — blocks: `Co-Authored-By` / `--no-verify` commits; `Version=` on a `.csproj` `<PackageReference>` (CPM); banned deps in `Directory.Packages.props`/`package.json` (AutoMapper, OpenTelemetry/Prometheus/Grafana/Tempo/Loki, MediatR v12+).
+- `.claude/hooks/pre-guard.mjs` (PreToolUse) — blocks: `Co-Authored-By` / `--no-verify` commits; `Version=` on a `.csproj` `<PackageReference>` (CPM); banned deps in `Directory.Packages.props`/`package.json` (AutoMapper, OpenTelemetry/Prometheus/Grafana/Tempo/Loki, MediatR v12+); and the same banned deps installed via the CLI (`dotnet add package` / `npm install`).
 - `.claude/hooks/format-on-edit.mjs` (PostToolUse) — formats only the edited file (`dotnet format --include` for `.cs`, `prettier --write` for TS/JSON/MD/YAML). Best-effort, never blocks.
 
 **Skills** (`.claude/skills/`) — invoke via `/<name>`
