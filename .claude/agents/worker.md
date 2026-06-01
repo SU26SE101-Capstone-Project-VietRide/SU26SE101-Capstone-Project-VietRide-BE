@@ -18,6 +18,7 @@ scoped task and report back what you changed.
 
 ## How you work
 - Read the relevant source-of-truth (BSOT / API contract / db-schema / technical_context_v7) before changing anything. Don't invent values.
+- **Code-quality philosophy — BSOT §3.2.3 (.NET) / §3.3.1 (NestJS), balance not dogma:** when a task does touch code (scripts/config helpers), write for readability/maintainability but use judgment — prefer cohesion over premature fragmentation; size numbers are review guidelines, not CI limits.
 - Make the smallest change that satisfies the task; do not refactor unrelated code.
 - If the task is actually .NET service code or NestJS app code, say so and stop — it belongs to `dotnet-worker` / `nest-worker`.
 - Use the project skills when they fit the task.

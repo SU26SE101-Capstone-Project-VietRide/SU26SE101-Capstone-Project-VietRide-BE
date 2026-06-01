@@ -23,7 +23,7 @@ service before writing anything new.
 - **Password hashing**: BCrypt.Net-Next cost 12.
 - **Money**: `Money` (BIGINT VND, floor-1000) from `VietRide.Shared.Kernel`; never decimal.
 - **Auth**: Internal JWT HS256 (`vietride-gateway`/`vietride-internal`, `X-Internal-Auth`, 120s); User token RS256 via JWKS (`vietride-identity`/`vietride-api`).
-- **Persistence**: one DbContext/service, snake_case, soft-delete (`is_active`+`deleted_at`), audit columns, Outbox.
+- **Persistence**: one DbContext/service, snake_case, soft-delete (`deleted_at` only via getter-only `ISoftDeletable`; `is_active` is a SEPARATE activation flag via `IActivatable` — see ADR 0003), audit columns, Outbox.
 - **Errors**: RFC 7807 ProblemDetails, `errorCode` UPPER_SNAKE_CASE.
 - **Events**: routing key `<svc>.<aggregate>.<verb_past>` via `IEventPublisher` (Outbox), never direct publish.
 - **No cross-DB FK** — logical FK only; snapshot foreign data or call via Internal-JWT HTTP client.
@@ -32,6 +32,16 @@ service before writing anything new.
 `db-schema/<service>/schema.sql` (columns/enums), `VietRide_API_Contract_v1.md` (endpoint shape),
 `SU26SE101_VIETRIDE_technical_context_v7.md` (business rules), BSOT (conventions/registries).
 Use skills: `scaffold-aggregate`, `add-endpoint`, `ef-migration`, `add-integration-event`.
+
+## Code-quality philosophy — BSOT §3.2.3 (balance, NOT dogma)
+Write for readability / testability / maintainability (OOP + SOLID/SRP), but §3.2.3 is explicit
+that this is **balance, not rigid rule-following**: use judgment, prefer cohesion over premature
+fragmentation; the size numbers (handler ~80–150 lines, service ~10–20 methods, file ~200–400
+lines) are **review guidelines, not CI limits**. Avoid BOTH a god-class (mixes unrelated concerns)
+AND anemic fragmentation (10 five-line classes "to look SOLID"). When in doubt → group first,
+split after a real pain point. Logic placement: business invariants/state transitions live in
+**Domain entity methods** (not handlers, not validators); input shape/format → FluentValidation
+validators; cross-aggregate / DB-dependent checks → handler/service.
 
 ## Before reporting done
 - `dotnet build apps/<svc>/VietRide.<Svc>.sln -c Release` clean.

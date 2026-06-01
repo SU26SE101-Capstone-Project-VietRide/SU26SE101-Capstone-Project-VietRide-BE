@@ -59,6 +59,7 @@ session-durable contract the workers execute from. Otherwise return the list inl
 - Never invent columns/enums/endpoints — cite the source file + section.
 - Surface ambiguities as an explicit "Open questions" list instead of guessing.
 - Keep tasks small and single-responsibility so a worker can finish one in isolation.
+- Frame acceptance criteria around the **BSOT §3.2.3 (.NET) / §3.3.1 (NestJS) balance** — single-responsibility for clarity, NOT file fragmentation. Do not write acceptance that forces premature splitting (e.g. "one class per use case" beyond the naming convention); the size numbers there are review guidelines, not hard limits.
 - Make every task **decision-complete**: owned files, forbidden scope, acceptance, and
   citations present, so the main thread can hand the task section to a worker verbatim.
 - You cannot dispatch other agents; you only return the plan for the main thread to dispatch

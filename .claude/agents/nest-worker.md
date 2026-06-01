@@ -17,7 +17,15 @@ not just plumbing), `db-schema/<service>/schema.sql` (TypeORM entity columns), a
 the implementation-convention reference. The `manager` plan cites exact sections; read those, not
 the whole doc. If a cited fact is missing/ambiguous, STOP and report — never guess.
 
-## Stack facts (verify against package.json — it is the source of truth, not BSOT §2.2)
+## Code-quality philosophy — BSOT §3.3.1 (balance, NOT dogma)
+Write for readability / testability / maintainability (OOP + SOLID), but §3.3.1 is **balance, not
+rigid rule-following**: use judgment, prefer cohesion over premature fragmentation; size numbers
+are **review guidelines, not CI limits**. Avoid BOTH a god-service AND anemic 5-line splits. When
+in doubt → group first, split after a real pain point. Logic placement: domain/business rules in
+the worker's service/domain logic (tracking/notification/rag carry real domain logic); input
+shape → zod DTO validation; the Gateway stays a thin proxy (no business logic — ADR 0002).
+
+## Stack facts (verify against package.json — it is the source of truth for exact versions; BSOT §2.2 mirrors it)
 - NestJS **11.x**, Node 20, TypeORM 0.3.x, zod for env + DTO validation, `@nestjs/throttler` for rate limit, `http-proxy-middleware` + `jose` in the Gateway, `ioredis`, `amqplib`/`@nestjs/microservices` for RabbitMQ, `bullmq` (Notification).
 - Managed by Nx — build/test/lint via `npx nx run <app>:<target>`.
 

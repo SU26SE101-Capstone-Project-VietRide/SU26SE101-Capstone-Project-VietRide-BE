@@ -22,13 +22,13 @@ service first** — the file tree below is the convention, not a fixed list (BSO
 - Domain project has **zero external refs** (no EF Core, no MediatR). Invariants live in entity methods (e.g. `token.Revoke()`), not in handlers.
 - Controllers call `MediatR.Send(...)` only — never a service/repo directly.
 - Money is `Money` (BIGINT VND, floor-1000) from `VietRide.Shared.Kernel`. Never decimal.
-- EF: snake_case columns (shared naming convention), soft-delete (`is_active` + `deleted_at` via `ISoftDeletable`), audit columns via `IAuditable`. Base entity from `VietRide.Shared.Kernel/Primitives/BaseEntity.cs`.
+- EF: snake_case columns (shared naming convention), soft-delete (`deleted_at` via getter-only `ISoftDeletable`); entities with an enable/disable toggle ALSO implement `IActivatable` (`is_active`) — separate concern, see ADR 0003. Audit columns via `IAuditable`. Base entity from `VietRide.Shared.Kernel/Primitives/BaseEntity.cs`.
 - Repository extends the generic `IRepository<TEntity,TId>` / `EfRepository<TEntity,TId>` from the shared libs; only add aggregate-specific queries.
 - Result/error: handlers return `Result<T>`; map failures to RFC 7807 ProblemDetails with UPPER_SNAKE_CASE `errorCode`.
 
 ## File set (adapt to the service)
 ```
-Domain/Entities/<Aggregate>.cs                         POCO + invariant methods (: BaseEntity, IAuditable, ISoftDeletable)
+Domain/Entities/<Aggregate>.cs                         POCO + invariant methods (: BaseEntity, IAuditable, ISoftDeletable, IActivatable (if activatable))
 Domain/Enums/<X>Status.cs                              if the aggregate has a status machine
 Domain/Events/<Aggregate><VerbPast>.cs                 domain event(s) if any
 Application/Abstractions/Repositories/I<Aggregate>Repository.cs

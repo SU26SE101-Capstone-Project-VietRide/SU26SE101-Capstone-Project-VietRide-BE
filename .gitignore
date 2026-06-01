@@ -39,9 +39,19 @@ test-results/
 [Ll]og/
 [Ll]ogs/
 
-# Claude Code — personal/local overrides (never commit). Shared config = .claude/settings.json.
-.claude/settings.local.json
-.claude/scheduled_tasks.lock
+# Claude Code / agent setup — per-member (each dev keeps their OWN; not shared, avoids conflicts).
+# Covers .claude/ (agents, skills, hooks, settings*), the CLAUDE.md wrapper, AND AGENTS.md.
+# AGENTS.md is per-member here too: teammates author their agent guides differently (e.g. their
+# own NestJS agent conventions), so it is not shareable as a single file.
+# Canonical SHARED truth stays tracked elsewhere and is unaffected:
+#   BACKEND_SOURCE_OF_TRUTH.md, SU26SE101_VIETRIDE_technical_context_v7.md,
+#   VietRide_API_Contract_v1.md, db-schema/, docs/adr/, docs/handoff/ — and .githooks/, which
+#   enforce the hard invariants (CPM, banned deps, EOL, no Co-Authored-By) regardless of agent setup.
+# NOTE: .gitignore alone does NOT untrack already-committed files — run once:
+#   git rm -r --cached .claude CLAUDE.md AGENTS.md   (then commit). Coordinate / back up first.
+.claude/
+CLAUDE.md
+AGENTS.md
 
 # CodeGraph MCP — local symbol index (rebuilt per clone via `codegraph init -i`)
 .codegraph/

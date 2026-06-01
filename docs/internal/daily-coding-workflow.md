@@ -48,7 +48,7 @@ Quy tắc khi vận hành:
   parallel-safe (write set disjoint).
 - **Không tạo `/implement-day`** để auto-chain cả ngày — chi phí sai ở code lớn hơn ở plan;
   per-task stop là điểm bạn `/verify` thật trước khi tích luỹ rủi ro.
-- Sau khi skill stop ACCEPTED: bạn `/verify` hành vi (chạy app, hit endpoint — không chỉ unit
+- Sau khi skill stop APPROVE: bạn `/verify` hành vi (chạy app, hit endpoint — không chỉ unit
   test) + đi qua bullet "Review" Day-N của timeline cho task đó nếu có; rồi mới `/implement-task`
   task kế.
 - Nếu task thiếu chi tiết hoặc worker thấy plan sai → STOP, bắt `manager` patch plan qua Cổng 1
@@ -80,7 +80,7 @@ Tự audit code đã giao vs SOT + chạy verification matrix, ghi `docs/handoff
 MediatR pipeline behaviors (`ValidationBehavior`/`LoggingBehavior`/`TransactionBehavior`), test
 `NetArchTest` (dependency direction), và CPM `<PackageVersion>`. `/plan-day 3` phải ra các thứ này
 thành **Task 3.0** với mọi feature task phụ thuộc vào nó. Đừng để worker nhảy thẳng vào
-`/auth/register` trước khi Task 3.0 được accept — đó là cổng khiến "CI-enforced layering" thành thật
+`/auth/register` trước khi Task 3.0 được APPROVE — đó là cổng khiến "CI-enforced layering" thành thật
 cho cả phần còn lại của dự án.
 
 **Ngày buffer / integration (Day 20, 29).** Không feature mới — bug sweep + wire E2E. Vẫn dùng

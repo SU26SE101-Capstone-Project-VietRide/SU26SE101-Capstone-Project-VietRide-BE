@@ -12,14 +12,19 @@ day number changes, so end-of-day verification is identical every day (no per-da
 
 ## Method (read-only audit — do NOT fix code here)
 Answer two questions; **both** must pass to call the day done:
-1. **Truth-correct?** Delivered code matches the source-of-truth, in this conflict order:
-   `SU26SE101_VIETRIDE_technical_context_v7.md` (business) > `VietRide_API_Contract_v1.md`
-   (API) > `BACKEND_SOURCE_OF_TRUTH.md` (impl conventions/registries) > ADRs > db-schema.
+1. **Truth-correct?** Delivered code matches the source-of-truth, in this conflict order
+   (same as AGENTS.md): `SU26SE101_VIETRIDE_technical_context_v7.md` (business) >
+   `VietRide_API_Contract_v1.md` (API) > `BACKEND_SOURCE_OF_TRUTH.md` (impl conventions/
+   registries) > ADRs > `BE_TIMELINE_VU.md` > db-schema.
    A file existing but diverging from truth = a bug, not a pass.
 2. **DoD met?** Every Day-N **DoD** + **Review** bullet in `BE_TIMELINE_VU.md` is satisfied.
 
 Read `docs/handoff/day-<N>-plan.md` and the Day-N timeline entry first. Verify by opening
-files and quoting evidence — do not trust filenames or a worker's self-report.
+files and quoting evidence — do not trust filenames, a worker's self-report, **or the plan's
+`## Progress tracker` table**. That tracker is orchestrator bookkeeping, NOT audit evidence: a
+✅ there means "reviewer approved during the day", not "audit-verified". Re-run the verification
+matrix and re-read the code against the SOT regardless of what the tracker says — a task marked
+✅ that fails verification here is a ❌, and the checklist records the real result.
 
 ## Verification matrix (run, record exact result)
 Run only what the day touched; record skips with a reason. Typical:

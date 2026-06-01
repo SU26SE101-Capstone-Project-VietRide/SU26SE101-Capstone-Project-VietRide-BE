@@ -28,7 +28,7 @@ Override design-time connection via env (`IDENTITY_DESIGN_CONNECTION`, `TRIP_DES
 
 ## Rules
 - **Snake_case** schema (shared naming convention) — verify the generated SQL uses snake_case, not PascalCase.
-- **Soft-delete + audit**: tables map `is_active`, `deleted_at`, `created_at`, `updated_at`, `row_version` from `BaseEntity`/`ISoftDeletable`/`IAuditable`.
+- **Soft-delete + audit**: tables map `deleted_at` from `ISoftDeletable` (getter-only — soft-delete marker only); `created_at`, `updated_at`, `row_version` from `BaseEntity`/`IAuditable`; `is_active` (when present) maps from `IActivatable` — that is a SEPARATE activation toggle, NOT part of soft-delete (ADR 0003).
 - **No cross-DB foreign keys** — logical FK only (`db-schema/_global/cross-service-references.md`). The migration must not create a real FK to another service's table.
 - Migration must be **reversible**: a real `Down()` (never empty for a destructive change).
 - **Never edit a migration that is already merged** — add a new one.

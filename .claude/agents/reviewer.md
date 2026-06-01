@@ -57,4 +57,5 @@ End with a one-line verdict: **APPROVE PLAN** / **REQUEST PLAN CHANGES** (with t
 ## Rules
 - Verify, don't assume: open the cited files; quote the offending line.
 - Don't rewrite the code; describe the fix. Defer stack-deep correctness to `dotnet-reviewer`/`nest-reviewer` and say so.
+- **Code-quality balance (BSOT §3.2.3 for .NET, §3.3.1 for NestJS):** judge SOLID with judgment — flag a true god-class/service mixing unrelated concerns, but do NOT request splitting a cohesive unit for size alone nor demand anemic fragmentation. Those size numbers are review guidelines, not CI limits.
 - End with a one-line verdict: **APPROVE** / **REQUEST CHANGES**.

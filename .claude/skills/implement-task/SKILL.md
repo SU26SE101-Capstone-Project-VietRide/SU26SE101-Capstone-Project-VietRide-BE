@@ -49,18 +49,24 @@ for `reviewer` / `dotnet-reviewer` / `nest-reviewer`). Prompt template:
 
 > Review the diff for Task `<X.Y>` (Day `<N>`) against the acceptance criteria + invariant flags
 > + source citations in `docs/handoff/day-<N>-plan.md`. Standard DIFF-REVIEW. End with the
-> task-level verdict: **ACCEPTED** / **REQUEST CHANGES** (with file:line + concrete fix per
+> task-level verdict: **APPROVE** / **REQUEST CHANGES** (with file:line + concrete fix per
 > finding).
 
-- If **ACCEPTED** → go to Step 3.
+- If **APPROVE** → go to Step 3.
 - If **REQUEST CHANGES** → relay findings to the same implement agent (fresh dispatch) for a
   patch round (restricted to the same owned files); re-run Step 2 once. If reviewer still says
   REQUEST CHANGES after one patch round → STOP, escalate to the human (do not chain further
   rounds without human input — repeated failures usually mean the plan is wrong, not the worker).
 
 ## Step 3 — Hand back to the human
-Report: task id, files changed, commands run + results, review verdict, **next task id from
-the plan's Dispatch order** (so the human knows what `/implement-task` to run next, after
+First, **update the plan's `## Progress tracker` table** for this task: set Status, Review
+verdict, Date, and a one-line Note (e.g. patch rounds, spawned ADRs, carry-over). This is the
+ONE allowed main-thread edit to `day-<N>-plan.md` — it is status bookkeeping, NOT a scope/
+acceptance edit (the "do NOT patch the plan" guardrail below still holds for everything else).
+Mark ✅ done only when the reviewer APPROVED; if the human has not `/verify`'d yet, note that.
+
+Then report: task id, files changed, commands run + results, review verdict, **next task id
+from the plan's Dispatch order** (so the human knows what `/implement-task` to run next, after
 they `/verify` this one). Then stop.
 
 The human then:

@@ -12,10 +12,11 @@ open the touched files, and report findings as **BLOCKER / SHOULD-FIX / NIT** wi
 - Dependency direction holds (Domain→nothing, Application→Domain, Infrastructure→Domain+Application, Api→Application+Infrastructure). Domain has no EF/MediatR refs. (If a NetArchTest is missing for a new assembly, flag it.)
 - Controller is thin (`MediatR.Send` only, no business logic / DbContext). Service called only by handlers/other services. One class per file; naming convention exact.
 - Business invariants live in Domain entity methods, not handlers.
+- **Code-quality balance (BSOT §3.2.3):** judge SOLID/SRP with judgment — flag a true god-class (unrelated concerns mixed), swallowed exceptions, or controller-with-business-logic, but do NOT request splitting a cohesive class just for size, nor demand anemic fragmentation. The size numbers in §3.2.3 are review guidelines, not CI limits.
 
 ## Conventions
 - **CPM**: no `Version=` on `<PackageReference>`. **MediatR 11.x** only. No **AutoMapper** / banned observability deps / unapproved new deps.
-- **EF**: snake_case mapping, soft-delete (`is_active`+`deleted_at`) global filter, audit columns, one DbContext. Migration is reversible (real `Down()`), not editing a merged migration, no cross-DB FK. Schema matches `db-schema/<service>/schema.sql`.
+- **EF**: snake_case mapping, soft-delete global filter on `DeletedAt == null` (`ISoftDeletable`; getter-only per ADR 0003) — `is_active`/`IActivatable` is a DISTINCT activation toggle, not part of soft-delete; audit columns, one DbContext. Migration is reversible (real `Down()`), not editing a merged migration, no cross-DB FK. Schema matches `db-schema/<service>/schema.sql`.
 - **Money**: `Money`/BIGINT VND, floor-1000, no decimal.
 - **Errors**: RFC 7807 ProblemDetails, `errorCode` UPPER_SNAKE_CASE; failures go through the global filter, not hand-rolled JSON.
 - **Events**: `IEventPublisher`/Outbox (transactional), routing key `<svc>.<aggregate>.<verb_past>`.
