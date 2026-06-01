@@ -1,5 +1,8 @@
 using Serilog;
+using VietRide.Identity.Application.Features.Auth.Register;
 using VietRide.Identity.Infrastructure;
+using VietRide.Identity.Infrastructure.DependencyInjection;
+using VietRide.Shared.Application.DependencyInjection;
 using VietRide.Shared.Persistence.DependencyInjection;
 using VietRide.Shared.Web.DependencyInjection;
 using VietRide.Shared.Web.Health;
@@ -23,6 +26,14 @@ builder.Services.AddVietRideSharedWeb(builder.Configuration, ServiceName);
 // EF Core (Npgsql) — picks up ConnectionStrings:Default
 // or env IDENTITY__CONNECTIONSTRINGS__DEFAULT.
 builder.Services.AddVietRideDbContext<IdentityDbContext>(builder.Configuration);
+
+// MediatR v11 pipeline behaviors (Logging → Validation → Transaction)
+// + FluentValidation validators discovered from the Application assembly.
+builder.Services.AddVietRideMediatRBehaviors(
+    handlerAssemblies: [typeof(RegisterCommand).Assembly]);
+
+// Infrastructure: repositories, security services, email stub, Redis OTP rate-limiter.
+builder.Services.AddInfrastructure(builder.Configuration);
 
 var app = builder.Build();
 

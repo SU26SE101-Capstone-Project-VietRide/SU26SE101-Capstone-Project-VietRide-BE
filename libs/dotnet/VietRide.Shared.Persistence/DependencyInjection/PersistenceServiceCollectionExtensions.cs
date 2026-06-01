@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Persistence.Outbox;
+using VietRide.Shared.Persistence.UnitOfWork;
 
 namespace VietRide.Shared.Persistence.DependencyInjection;
 
@@ -33,6 +35,12 @@ public static class PersistenceServiceCollectionExtensions
         // Expose the concrete context as VietRideDbContextBase for shared services (e.g. OutboxStore).
         services.AddScoped<VietRideDbContextBase>(sp => sp.GetRequiredService<TContext>());
         services.AddScoped<IOutboxStore, OutboxStore>();
+
+        // Wire the shared IUnitOfWork implementation backed by VietRideDbContextBase.
+        // Resolves EfUnitOfWork via the already-registered VietRideDbContextBase alias,
+        // keeping it service-agnostic (no TContext dependency in EfUnitOfWork).
+        services.AddScoped<IUnitOfWork>(sp =>
+            new EfUnitOfWork(sp.GetRequiredService<VietRideDbContextBase>()));
 
         return services;
     }

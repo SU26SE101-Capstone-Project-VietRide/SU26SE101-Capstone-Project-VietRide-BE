@@ -49,3 +49,31 @@ public sealed class ForbiddenException : Exception
         ErrorCode = errorCode;
     }
 }
+
+/// Mapped to HTTP 401 with a specific error code (e.g. AUTH_INVALID_CREDENTIALS, AUTH_TOKEN_INVALID).
+public sealed class UnauthorizedException : Exception
+{
+    public string ErrorCode { get; }
+
+    public UnauthorizedException(string errorCode, string message) : base(message)
+    {
+        ErrorCode = errorCode;
+    }
+}
+
+/// Mapped to HTTP 400 with a specific error code (e.g. AUTH_OTP_INVALID, AUTH_OTP_EXPIRED).
+public sealed class BadRequestException : Exception
+{
+    public string ErrorCode { get; }
+
+    public BadRequestException(string errorCode, string message) : base(message)
+    {
+        ErrorCode = errorCode;
+    }
+}
+
+/// Mapped to HTTP 429 with a specific error code (e.g. AUTH_OTP_RATE_LIMIT_EXCEEDED).
+public sealed class TooManyRequestsException(string errorCode, string message) : Exception(message)
+{
+    public string ErrorCode { get; } = errorCode;
+}

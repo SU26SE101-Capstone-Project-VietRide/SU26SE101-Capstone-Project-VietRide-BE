@@ -47,10 +47,13 @@ public sealed class ProblemDetailsExceptionFilter : IExceptionFilter
 
     private static (int Status, string ErrorCode, string Detail, object? Errors) Map(Exception ex) => ex switch
     {
+        BadRequestException b => (400, b.ErrorCode, b.Message, null),
         ValidationException v => (422, "VALIDATION_ERROR", v.Message, v.Errors),
         NotFoundException n => (404, "NOT_FOUND", n.Message, null),
         ConflictException c => (409, c.ErrorCode, c.Message, null),
         ForbiddenException f => (403, f.ErrorCode, f.Message, null),
+        UnauthorizedException u => (401, u.ErrorCode, u.Message, null),
+        TooManyRequestsException t => (429, t.ErrorCode, t.Message, null),
         DomainException d => (422, d.ErrorCode, d.Message, null),
         UnauthorizedAccessException => (401, "UNAUTHORIZED", "Authentication required", null),
         _ => (500, "INTERNAL_ERROR", "An unexpected error occurred", null),
