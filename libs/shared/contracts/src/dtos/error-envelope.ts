@@ -1,28 +1,13 @@
-import { z } from 'zod';
-
 /**
- * RFC 7807 Problem Details envelope used by every VietRide API.
- * Per VietRide_API_Contract_v1 §"Error envelope".
+ * @deprecated Use `ApiResponseErrorSchema` / `ApiResponseError` from
+ * `./api-response` instead.  The RFC 7807 ProblemDetails shape is superseded
+ * by the unified `ApiResponse<T>` envelope per ADR 0004.
+ *
+ * This file is kept only as a re-export anchor so existing importers
+ * (`import { ProblemDetailsSchema } from '@vietride/contracts'`) resolve
+ * without a hard break.  Remove once all consumers are migrated.
  */
-export const ProblemDetailsSchema = z.object({
-  type: z.string().url(),
-  title: z.string(),
-  status: z.number().int(),
-  detail: z.string().optional(),
-  instance: z.string().optional(),
-  traceId: z.string().optional(),
-  errorCode: z.string().optional(),
-  // Field-level validation detail — per BACKEND_SOURCE_OF_TRUTH §5.5/§5.9 the
-  // canonical key is `errors` (appears with VALIDATION_ERROR 422).
-  errors: z
-    .array(
-      z.object({
-        path: z.string(),
-        code: z.string(),
-        message: z.string(),
-      }),
-    )
-    .optional(),
-});
-
-export type ProblemDetails = z.infer<typeof ProblemDetailsSchema>;
+export {
+  ApiResponseErrorSchema as ProblemDetailsSchema,
+  type ApiResponseError as ProblemDetails,
+} from './api-response';

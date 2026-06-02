@@ -41,7 +41,9 @@ public class HealthEndpointTests : IClassFixture<VietRideWebApplicationFactory>
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(body);
-        doc.RootElement.GetProperty("service").GetString().Should().Be("Booking");
+        doc.RootElement.GetProperty("success").GetBoolean().Should().BeTrue();
+        doc.RootElement.GetProperty("statusCode").GetInt32().Should().Be((int)HttpStatusCode.OK);
+        doc.RootElement.GetProperty("data").GetProperty("service").GetString().Should().Be("Booking");
     }
 }
 

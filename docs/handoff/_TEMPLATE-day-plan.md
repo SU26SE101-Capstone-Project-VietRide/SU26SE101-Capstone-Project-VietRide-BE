@@ -42,6 +42,19 @@ entries) — feature tasks depend on it.
 ## Dispatch order
 1. Task N.0 → … (note which are parallel-safe = disjoint write sets; default serial in one tree)
 
+## Progress tracker
+> Orchestrator bookkeeping — the main thread updates this table after each `/implement-task`
+> (Step 3) with the task's review verdict. **Informational only — NOT audit evidence.**
+> `/audit-day` MUST re-verify every task independently against the SOT; it must never treat a
+> ✅ here (or a worker self-report) as proof. A row is bookkeeping, not a passed audit.
+
+| Task | Status | Review verdict | Date | Notes |
+|---|---|---|---|---|
+| N.0 | ⬜ todo | — | — | — |
+| N.1 | ⬜ todo | — | — | — |
+
+Legend: ⬜ todo · 🔄 in progress · ✅ done (reviewer APPROVED + human `/verify`) · ⚠️ done-with-carryover · ❌ blocked
+
 ## Open questions
 Ambiguities the `manager` could NOT resolve from the SOT docs — resolve with the human
 before dispatch. Do **not** guess.

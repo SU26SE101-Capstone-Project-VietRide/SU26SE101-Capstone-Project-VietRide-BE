@@ -63,7 +63,8 @@ Tất cả schema tuân thủ v6 Section 8 conventions:
 - `payments.amount >= 0`, `parcels.deposit_amount >= 0`, etc.
 
 ### Soft delete
-- `is_active boolean` + `deleted_at timestamptz` cho: Operator, User, Station, Stop, Route, Vehicle.
+- **Soft-delete marker:** `deleted_at timestamptz` cho: Operator, User, Station, Stop, Route, Vehicle. Row bị loại khỏi normal queries khi `deleted_at IS NOT NULL`. (See ADR 0003: `docs/adr/0003-soft-delete-marker-vs-activation-flag.md`)
+- **Activation flag (separate concern):** `is_active boolean` là enable/disable toggle — Operator, Station, Stop, Route, Vehicle có cột này; **User không có** (dùng `status` enum cho activation axis).
 - Partial unique indexes (`WHERE deleted_at IS NULL`) cho fields đáng được tái sử dụng sau soft delete.
 
 ### Audit columns standard

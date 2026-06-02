@@ -8,7 +8,7 @@
 - Internal service-to-service API prefix: `/internal/v1`, require valid Internal JWT, never exposed publicly through Gateway.
 - Auth header for public protected endpoints: `Authorization: Bearer <userAccessToken>`.
 - Idempotent write endpoints require `Idempotency-Key: <uuid>` where noted.
-- Error response: `application/problem+json` with `{ type, title, status, detail, instance, errorCode, errors? }`.
+- Error response: `ApiResponse` envelope `{ success: false, statusCode, error: { code, message, fields? }, meta: { traceId, timestamp } }` — ADR 0004; `error.code` từ BSOT §5.9 registry (UPPER_SNAKE_CASE). `application/problem+json` (RFC 7807) đã DROP.
 - Money fields are VND `number` in JSON, stored as BIGINT in DB.
 - Datetime fields are ISO 8601 strings with offset.
 - IDs are UUID strings unless explicitly named code fields.
@@ -32,10 +32,25 @@ Request:
 Response `201`:
 ```json
 {
-  "userId": "uuid",
-  "email": "user@example.com",
-  "status": "PENDING_EMAIL_VERIFICATION",
-  "otpTtlMinutes": 5
+  "success": true,
+  "statusCode": 201,
+  "data": {
+    "userId": "uuid",
+    "email": "user@example.com",
+    "status": "PENDING_EMAIL_VERIFICATION",
+    "otpTtlMinutes": 5
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `409` — duplicate email:
+```json
+{
+  "success": false,
+  "statusCode": 409,
+  "error": { "code": "AUTH_EMAIL_ALREADY_REGISTERED", "message": "Email đã được đăng ký." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -55,8 +70,33 @@ Request:
 Response `200`:
 ```json
 {
-  "userId": "uuid",
-  "status": "ACTIVE"
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "userId": "uuid",
+    "status": "ACTIVE"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `400` — wrong OTP code:
+```json
+{
+  "success": false,
+  "statusCode": 400,
+  "error": { "code": "AUTH_OTP_INVALID", "message": "Mã xác thực không đúng." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `400` — expired OTP:
+```json
+{
+  "success": false,
+  "statusCode": 400,
+  "error": { "code": "AUTH_OTP_EXPIRED", "message": "Mã xác thực đã hết hạn." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -75,17 +115,52 @@ Request:
 Response `200`:
 ```json
 {
-  "accessToken": "jwt",
-  "refreshToken": "opaque",
-  "expiresInSeconds": 900,
-  "user": {
-    "id": "uuid",
-    "email": "user@example.com",
-    "displayName": "Nguyen Van A",
-    "role": "PASSENGER",
-    "operatorId": null,
-    "status": "ACTIVE"
-  }
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "accessToken": "jwt",
+    "refreshToken": "opaque",
+    "expiresInSeconds": 900,
+    "user": {
+      "id": "uuid",
+      "email": "user@example.com",
+      "displayName": "Nguyen Van A",
+      "role": "PASSENGER",
+      "operatorId": null,
+      "status": "ACTIVE"
+    }
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `401` — invalid credentials:
+```json
+{
+  "success": false,
+  "statusCode": 401,
+  "error": { "code": "AUTH_INVALID_CREDENTIALS", "message": "Email hoặc mật khẩu không đúng." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `403` — unverified email:
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "error": { "code": "AUTH_EMAIL_NOT_VERIFIED", "message": "Email chưa được xác minh." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `403` — account locked:
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "error": { "code": "AUTH_ACCOUNT_LOCKED", "message": "Tài khoản đã bị khóa." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -100,7 +175,17 @@ Request:
 }
 ```
 
-Response `200`: same token shape as login.
+Response `200`: same envelope shape as login (`data` = same token bundle).
+
+Error `401` — invalid or reused refresh token:
+```json
+{
+  "success": false,
+  "statusCode": 401,
+  "error": { "code": "AUTH_TOKEN_INVALID", "message": "Refresh token không hợp lệ hoặc đã bị thu hồi." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
 
 ### POST `/v1/auth/logout`
 
@@ -165,12 +250,17 @@ Request:
 Response `201`:
 ```json
 {
-  "bookingId": "uuid",
-  "bookingCode": "VR-20260518-ABCD1234",
-  "status": "CONFIRMED",
-  "totalAmount": 350000,
-  "discountAmount": 50000,
-  "paymentRedirectUrl": null
+  "success": true,
+  "statusCode": 201,
+  "data": {
+    "bookingId": "uuid",
+    "bookingCode": "VR-20260518-ABCD1234",
+    "status": "CONFIRMED",
+    "totalAmount": 350000,
+    "discountAmount": 50000,
+    "paymentRedirectUrl": null
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -201,11 +291,16 @@ Request:
 Response `201`:
 ```json
 {
-  "bookingGroupId": "uuid",
-  "outbound": { "bookingId": "uuid", "bookingCode": "VR-20260518-ABCD1234", "totalAmount": 350000, "discountAmount": 50000 },
-  "return": { "bookingId": "uuid", "bookingCode": "VR-20260519-EFGH5678", "totalAmount": 350000, "discountAmount": 50000 },
-  "grandTotal": 700000,
-  "paymentRedirectUrl": "https://vnpay.vn/..."
+  "success": true,
+  "statusCode": 201,
+  "data": {
+    "bookingGroupId": "uuid",
+    "outbound": { "bookingId": "uuid", "bookingCode": "VR-20260518-ABCD1234", "totalAmount": 350000, "discountAmount": 50000 },
+    "return": { "bookingId": "uuid", "bookingCode": "VR-20260519-EFGH5678", "totalAmount": 350000, "discountAmount": 50000 },
+    "grandTotal": 700000,
+    "paymentRedirectUrl": "https://vnpay.vn/..."
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -218,21 +313,29 @@ Query: `status?`, `from?`, `to?`, `page?`, `pageSize?`.
 Response `200`:
 ```json
 {
-  "items": [
-    {
-      "bookingId": "uuid",
-      "bookingCode": "VR-20260518-ABCD1234",
-      "tripId": "uuid",
-      "status": "CONFIRMED",
-      "departureDateTime": "2026-05-18T08:00:00+07:00",
-      "originStationName": "Bến xe Miền Đông",
-      "destinationStationName": "Bến xe Mỹ Đình",
-      "totalAmount": 350000
-    }
-  ],
-  "page": 1,
-  "pageSize": 20,
-  "totalItems": 1
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [
+      {
+        "bookingId": "uuid",
+        "bookingCode": "VR-20260518-ABCD1234",
+        "tripId": "uuid",
+        "status": "CONFIRMED",
+        "departureDateTime": "2026-05-18T08:00:00+07:00",
+        "originStationName": "Bến xe Miền Đông",
+        "destinationStationName": "Bến xe Mỹ Đình",
+        "totalAmount": 350000
+      }
+    ],
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 1,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -256,10 +359,15 @@ Request:
 Response `200`:
 ```json
 {
-  "bookingId": "uuid",
-  "status": "CANCELLED",
-  "refundAmount": 175000,
-  "refundMethod": "WALLET"
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "bookingId": "uuid",
+    "status": "CANCELLED",
+    "refundAmount": 175000,
+    "refundMethod": "WALLET"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -278,11 +386,16 @@ Request:
 Response `200`:
 ```json
 {
-  "bookingId": "uuid",
-  "pickup": { "stationId": "uuid", "stopId": null },
-  "fareDelta": 50000,
-  "refundAmount": 0,
-  "paymentRedirectUrl": null
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "bookingId": "uuid",
+    "pickup": { "stationId": "uuid", "stopId": null },
+    "fareDelta": 50000,
+    "refundAmount": 0,
+    "paymentRedirectUrl": null
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -302,9 +415,14 @@ Request:
 Response `200`:
 ```json
 {
-  "bookingId": "uuid",
-  "dropoff": { "stationId": null, "stopId": "uuid" },
-  "fareDelta": 0
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "bookingId": "uuid",
+    "dropoff": { "stationId": null, "stopId": "uuid" },
+    "fareDelta": 0
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -326,10 +444,15 @@ Request:
 Response `200`:
 ```json
 {
-  "bookingId": "uuid",
-  "actionId": "uuid",
-  "resolvedAction": "ACCEPTED",
-  "resolvedAt": "2026-05-18T09:00:00+07:00"
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "bookingId": "uuid",
+    "actionId": "uuid",
+    "resolvedAction": "ACCEPTED",
+    "resolvedAt": "2026-05-18T09:00:00+07:00"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -342,18 +465,23 @@ Query: `from`, `to`, `groupBy=date`.
 Response `200`:
 ```json
 {
-  "items": [
-    {
-      "operatorId": "uuid",
-      "date": "2026-05-18",
-      "totalBookings": 120,
-      "totalRevenue": 42000000,
-      "totalCancellations": 4,
-      "totalNoShows": 2,
-      "totalPartialNoShows": 1,
-      "totalCompleted": 113
-    }
-  ]
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [
+      {
+        "operatorId": "uuid",
+        "date": "2026-05-18",
+        "totalBookings": 120,
+        "totalRevenue": 42000000,
+        "totalCancellations": 4,
+        "totalNoShows": 2,
+        "totalPartialNoShows": 1,
+        "totalCompleted": 113
+      }
+    ]
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -366,18 +494,23 @@ Query: `from`, `to`, `groupBy=operator|date`.
 Response `200`:
 ```json
 {
-  "items": [
-    {
-      "operatorId": "uuid",
-      "operatorName": "VietRide Express",
-      "totalBookings": 120,
-      "totalRevenue": 42000000,
-      "totalCancellations": 4,
-      "totalNoShows": 2,
-      "totalPartialNoShows": 1,
-      "totalCompleted": 113
-    }
-  ]
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [
+      {
+        "operatorId": "uuid",
+        "operatorName": "VietRide Express",
+        "totalBookings": 120,
+        "totalRevenue": 42000000,
+        "totalCancellations": 4,
+        "totalNoShows": 2,
+        "totalPartialNoShows": 1,
+        "totalCompleted": 113
+      }
+    ]
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -392,22 +525,33 @@ Query: `originStationId`, `destinationStationId`, `departureDate`, `passengerCou
 Response `200`:
 ```json
 {
-  "items": [
-    {
-      "tripId": "uuid",
-      "operatorId": "uuid",
-      "operatorName": "VietRide Express",
-      "routeId": "uuid",
-      "departureDateTime": "2026-05-18T08:00:00+07:00",
-      "estimatedArrivalTime": "2026-05-18T20:00:00+07:00",
-      "originStation": { "id": "uuid", "name": "Bến xe Miền Đông" },
-      "destinationStation": { "id": "uuid", "name": "Bến xe Mỹ Đình" },
-      "availableSeats": 18,
-      "baseFare": 400000,
-      "allowAlongRoutePickup": true,
-      "allowAlongRouteDropoff": true
-    }
-  ]
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [
+      {
+        "tripId": "uuid",
+        "operatorId": "uuid",
+        "operatorName": "VietRide Express",
+        "routeId": "uuid",
+        "departureDateTime": "2026-05-18T08:00:00+07:00",
+        "estimatedArrivalTime": "2026-05-18T20:00:00+07:00",
+        "originStation": { "id": "uuid", "name": "Bến xe Miền Đông" },
+        "destinationStation": { "id": "uuid", "name": "Bến xe Mỹ Đình" },
+        "availableSeats": 18,
+        "baseFare": 400000,
+        "allowAlongRoutePickup": true,
+        "allowAlongRouteDropoff": true
+      }
+    ],
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 1,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -424,11 +568,16 @@ Auth: protected.
 Response `200`:
 ```json
 {
-  "tripId": "uuid",
-  "vehicleType": "SLEEPER_BUS",
-  "seats": [
-    { "seatNumber": "A01", "status": "AVAILABLE", "type": "SLEEPER_LOWER", "row": 1, "col": 1, "deck": 1 }
-  ]
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "tripId": "uuid",
+    "vehicleType": "SLEEPER_BUS",
+    "seats": [
+      { "seatNumber": "A01", "status": "AVAILABLE", "type": "SLEEPER_LOWER", "row": 1, "col": 1, "deck": 1 }
+    ]
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -448,8 +597,13 @@ Request:
 Response `200`:
 ```json
 {
-  "seatLockToken": "uuid",
-  "expiresAt": "2026-05-18T08:10:00+07:00"
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "seatLockToken": "uuid",
+    "expiresAt": "2026-05-18T08:10:00+07:00"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -497,10 +651,15 @@ Request:
 Response `200`:
 ```json
 {
-  "tripId": "uuid",
-  "status": "CANCELLED",
-  "affectedBookings": 42,
-  "affectedParcels": 3
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "tripId": "uuid",
+    "status": "CANCELLED",
+    "affectedBookings": 42,
+    "affectedParcels": 3
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -523,10 +682,15 @@ Request:
 Response `200`:
 ```json
 {
-  "oldTripId": "uuid",
-  "oldTripStatus": "DISRUPTED",
-  "newTripId": "uuid",
-  "transferStatus": "PENDING_PASSENGER_CONFIRMATION"
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "oldTripId": "uuid",
+    "oldTripStatus": "DISRUPTED",
+    "newTripId": "uuid",
+    "transferStatus": "PENDING_PASSENGER_CONFIRMATION"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -541,16 +705,27 @@ Query: `originStationId`, `destinationStationId`, `departureDate`, `estimatedWei
 Response `200`:
 ```json
 {
-  "items": [
-    {
-      "tripId": "uuid",
-      "routeId": "uuid",
-      "operatorName": "VietRide Express",
-      "departureDateTime": "2026-05-18T08:00:00+07:00",
-      "availableCargoWeightKg": 120,
-      "priceVnd": 150000
-    }
-  ]
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [
+      {
+        "tripId": "uuid",
+        "routeId": "uuid",
+        "operatorName": "VietRide Express",
+        "departureDateTime": "2026-05-18T08:00:00+07:00",
+        "availableCargoWeightKg": 120,
+        "priceVnd": 150000
+      }
+    ],
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 1,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -581,11 +756,16 @@ Request:
 Response `201`:
 ```json
 {
-  "parcelId": "uuid",
-  "parcelCode": "VRP-20260518-P7K3D9Q2",
-  "status": "PENDING_PAYMENT",
-  "totalAmount": 150000,
-  "paymentRedirectUrl": "https://vnpay.vn/..."
+  "success": true,
+  "statusCode": 201,
+  "data": {
+    "parcelId": "uuid",
+    "parcelCode": "VRP-20260518-P7K3D9Q2",
+    "status": "PENDING_PAYMENT",
+    "totalAmount": 150000,
+    "paymentRedirectUrl": "https://vnpay.vn/..."
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -596,17 +776,28 @@ Auth: `PASSENGER`.
 Response `200`:
 ```json
 {
-  "items": [
-    {
-      "parcelId": "uuid",
-      "parcelCode": "VRP-20260518-P7K3D9Q2",
-      "tripId": "uuid",
-      "status": "IN_TRANSIT",
-      "originStation": { "id": "uuid", "name": "Bến xe Miền Đông" },
-      "destinationStation": { "id": "uuid", "name": "Bến xe Mỹ Đình" },
-      "eta": "2026-05-18T20:00:00+07:00"
-    }
-  ]
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [
+      {
+        "parcelId": "uuid",
+        "parcelCode": "VRP-20260518-P7K3D9Q2",
+        "tripId": "uuid",
+        "status": "IN_TRANSIT",
+        "originStation": { "id": "uuid", "name": "Bến xe Miền Đông" },
+        "destinationStation": { "id": "uuid", "name": "Bến xe Mỹ Đình" },
+        "eta": "2026-05-18T20:00:00+07:00"
+      }
+    ],
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 1,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -630,9 +821,14 @@ Request:
 Response `200`:
 ```json
 {
-  "parcelId": "uuid",
-  "status": "DELIVERY_CONFIRMED",
-  "confirmedAt": "2026-05-18T20:15:00+07:00"
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "parcelId": "uuid",
+    "status": "DELIVERY_CONFIRMED",
+    "confirmedAt": "2026-05-18T20:15:00+07:00"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -651,9 +847,14 @@ Request:
 Response `200`:
 ```json
 {
-  "parcelId": "uuid",
-  "status": "DELIVERY_REJECTED",
-  "rejectedAt": "2026-05-18T20:15:00+07:00"
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "parcelId": "uuid",
+    "status": "DELIVERY_REJECTED",
+    "rejectedAt": "2026-05-18T20:15:00+07:00"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -673,8 +874,13 @@ Request:
 Response `200`:
 ```json
 {
-  "parcelId": "uuid",
-  "status": "LOADED"
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "parcelId": "uuid",
+    "status": "LOADED"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -694,10 +900,15 @@ Request:
 Response `200`:
 ```json
 {
-  "parcelId": "uuid",
-  "tripId": "uuid",
-  "status": "LOADED",
-  "transferConfirmedAt": "2026-05-18T10:00:00+07:00"
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "parcelId": "uuid",
+    "tripId": "uuid",
+    "status": "LOADED",
+    "transferConfirmedAt": "2026-05-18T10:00:00+07:00"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -716,9 +927,14 @@ Request:
 Response `200`:
 ```json
 {
-  "parcelId": "uuid",
-  "status": "PENDING_TRANSFER_CONFIRM",
-  "transferTargetTripId": "uuid"
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "parcelId": "uuid",
+    "status": "PENDING_TRANSFER_CONFIRM",
+    "transferTargetTripId": "uuid"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -736,10 +952,15 @@ Request:
 Response `200`:
 ```json
 {
-  "parcelId": "uuid",
-  "status": "RETURNED",
-  "returnReason": "Sender requested return after trip disruption",
-  "returnedAt": "2026-05-18T11:00:00+07:00"
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "parcelId": "uuid",
+    "status": "RETURNED",
+    "returnReason": "Sender requested return after trip disruption",
+    "returnedAt": "2026-05-18T11:00:00+07:00"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -760,9 +981,14 @@ Request:
 Response `201`:
 ```json
 {
-  "topUpRequestId": "uuid",
-  "status": "PENDING",
-  "paymentRedirectUrl": "https://vnpay.vn/..."
+  "success": true,
+  "statusCode": 201,
+  "data": {
+    "topUpRequestId": "uuid",
+    "status": "PENDING",
+    "paymentRedirectUrl": "https://vnpay.vn/..."
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -773,9 +999,14 @@ Auth: required.
 Response `200`:
 ```json
 {
-  "userId": "uuid",
-  "balance": 1000000,
-  "currency": "VND"
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "userId": "uuid",
+    "balance": 1000000,
+    "currency": "VND"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -807,9 +1038,14 @@ Request:
 Response `200`:
 ```json
 {
-  "paymentId": "uuid",
-  "status": "SUCCEEDED",
-  "paymentRedirectUrl": null
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "paymentId": "uuid",
+    "status": "SUCCEEDED",
+    "paymentRedirectUrl": null
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -830,8 +1066,13 @@ Request:
 Response `200`:
 ```json
 {
-  "walletTransactionId": "uuid",
-  "balanceAfter": 1175000
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "walletTransactionId": "uuid",
+    "balanceAfter": 1175000
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -902,8 +1143,13 @@ Request: multipart file + `{ title, description?, accessLevel }`.
 Response `201`:
 ```json
 {
-  "documentId": "uuid",
-  "status": "PENDING_REVIEW"
+  "success": true,
+  "statusCode": 201,
+  "data": {
+    "documentId": "uuid",
+    "status": "PENDING_REVIEW"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -914,8 +1160,13 @@ Auth: `SYSTEM_ADMIN`.
 Response `200`:
 ```json
 {
-  "documentId": "uuid",
-  "status": "APPROVED"
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "documentId": "uuid",
+    "status": "APPROVED"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -950,8 +1201,13 @@ Auth: `SYSTEM_ADMIN`.
 Response `200`:
 ```json
 {
-  "operatorId": "uuid",
-  "registrationStatus": "APPROVED"
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "operatorId": "uuid",
+    "registrationStatus": "APPROVED"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -969,8 +1225,13 @@ Request:
 Response `200`:
 ```json
 {
-  "operatorId": "uuid",
-  "registrationStatus": "SUSPENDED"
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "operatorId": "uuid",
+    "registrationStatus": "SUSPENDED"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
@@ -1000,8 +1261,13 @@ Request:
 Response `201`:
 ```json
 {
-  "operatorId": "uuid",
-  "stationId": "uuid",
-  "isActive": true
+  "success": true,
+  "statusCode": 201,
+  "data": {
+    "operatorId": "uuid",
+    "stationId": "uuid",
+    "isActive": true
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```

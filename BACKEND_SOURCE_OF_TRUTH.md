@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.3.3
+> **Phiên bản:** 1.5.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-05-26
+> **Cập nhật lần cuối:** 2026-06-01
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -150,11 +150,11 @@ Khi conflict, ưu tiên theo thứ tự sau:
 | Package | Version | Lý do |
 |---|---|---|
 | Node.js | 20 LTS | |
-| NestJS | 10.x | |
-| Prisma | 0.3.x | Native với `@nestjs/Prisma` |
+| NestJS | 11.x | `package.json` là source-of-truth cho version chính xác |
+| Prisma | 6.x | `package.json` là source-of-truth cho version chính xác |
 | pg | 8.x | |
 | socket.io | 4.x | Tracking |
-| @nestjs/microservices (RabbitMQ) | 10.x | Consumer pattern |
+| @nestjs/microservices (RabbitMQ) | 11.x | Consumer pattern |
 | amqplib | 0.10.x | Underlying AMQP client |
 | bullmq | 5.x | Redis-backed queue |
 | ioredis | 5.x | |
@@ -242,7 +242,7 @@ vietride/                                                                    (wo
 │       ├── VietRide.Shared.Kernel/                 ⭐ Domain primitives — referenced bởi Domain layer
 │       │   ├── ValueObjects/Money.cs               BIGINT VND wrapper, floor-1000 rounding built-in
 │       │   ├── ValueObjects/PhoneNumber.cs         E.164 VN validation
-│       │   ├── Primitives/BaseEntity.cs            Id, CreatedAt, UpdatedAt, RowVersion + IAuditable/ISoftDeletable markers
+│       │   ├── Primitives/BaseEntity.cs            Id, CreatedAt, UpdatedAt, RowVersion + IAuditable/ISoftDeletable/IActivatable markers
 │       │   ├── Primitives/Result.cs                Result<T> + Error type cho functional error handling
 │       │   ├── Abstractions/IClock.cs              `DateTime.UtcNow` wrapper for testability
 │       │   └── Exceptions/DomainException.cs       Base domain exception
@@ -254,14 +254,14 @@ vietride/                                                                    (wo
 │       │   ├── Behaviors/ValidationBehavior.cs     MediatR pipeline — generic
 │       │   ├── Behaviors/LoggingBehavior.cs        MediatR pipeline — generic
 │       │   ├── Behaviors/TransactionBehavior.cs    MediatR pipeline — wrap BeginTransaction/Commit
-│       │   ├── Pagination/PagedResult.cs           `{ items, total, page, pageSize }` generic
+│       │   ├── Pagination/PagedResult.cs           `{ items, page, pageSize, totalItems, totalPages, hasNextPage, hasPreviousPage }` — see §5.7
 │       │   ├── Exceptions/                         ValidationException, NotFoundException, ConflictException, ForbiddenException
 │       │   └── Mapping/MappingExtensions.cs        Manual mapping helpers (KHÔNG bắt buộc Mapster)
 │       ├── VietRide.Shared.Persistence/            ⭐ EF Core helpers — referenced bởi Infrastructure layer
 │       │   ├── EfRepository.cs                     `EfRepository<TEntity, TId>` generic impl của IRepository
 │       │   ├── EfUnitOfWork.cs                     Generic impl của IUnitOfWork
 │       │   ├── Interceptors/AuditingInterceptor.cs       Set CreatedAt/UpdatedAt cho IAuditable
-│       │   ├── Interceptors/SoftDeleteInterceptor.cs     Set DeletedAt + filter cho ISoftDeletable
+│       │   ├── Interceptors/SoftDeleteInterceptor.cs     Set DeletedAt + global query filter (DeletedAt == null) cho ISoftDeletable
 │       │   ├── Interceptors/OutboxInterceptor.cs         INSERT outbox_events cùng SaveChanges transaction
 │       │   ├── Conventions/SnakeCaseNamingConvention.cs  Map PascalCase property → snake_case column
 │       │   └── Outbox/OutboxEvent.cs                     Base OutboxEvent entity (mỗi service có DbSet riêng)
@@ -280,7 +280,8 @@ vietride/                                                                    (wo
 │       └── VietRide.Shared.Web/                    ⭐ ASP.NET Core integration — referenced bởi Api
 │           ├── Authentication/InternalJwtAuthenticationHandler.cs  Verify X-Internal-Auth HS256
 │           ├── Authentication/JwksAuthenticationExtensions.cs      Verify User Access Token RS256 via JWKS
-│           ├── Filters/ProblemDetailsExceptionFilter.cs            Global exception → application/problem+json
+│           ├── Filters/ApiResponseExceptionFilter.cs               Global exception → ApiResponse error envelope
+│           ├── Filters/ApiResponseResultFilter.cs                  Success-wrap → ApiResponse envelope
 │           ├── Middleware/RequestLoggingMiddleware.cs              Structured log per request
 │           ├── Middleware/IdempotencyMiddleware.cs                 Redis-based Idempotency-Key handling
 │           ├── Health/HealthCheckBuilderExtensions.cs              /health + /ready setup
@@ -829,7 +830,7 @@ HTTP request
 
 | Concern | Thư viện | Notes |
 |---|---|---|
-| HTTP framework | NestJS 10.x + Express adapter (default) | Fastify adapter cũng OK nếu cần performance — v1 dùng Express |
+| HTTP framework | NestJS 11.x + Express adapter (default) | Fastify adapter cũng OK nếu cần performance — v1 dùng Express |
 | Reverse proxy | `http-proxy-middleware` v3.x | Forward method/body/query/header nguyên vẹn tới downstream service |
 | User JWT verify (RS256) | `jose` v5.x + JWKS từ Identity Service | Cache JWKS trong Redis key `identity:jwks_cache` TTL 1h |
 | Internal JWT sign (HS256) | `jose` v5.x | TTL 120s, shared secret `INTERNAL_JWT_SECRET` |
@@ -984,12 +985,12 @@ EF Core / Prisma auto-map PascalCase property ↔ snake_case column qua naming s
 
 | Layer | ✅ Thuộc `libs/` (generic) | ❌ Thuộc `apps/<service>/` (service-specific) |
 |---|---|---|
-| **Domain** | Shared kernel primitives: `Money`, `PhoneNumber`, `Result<T>`, `Error`, `BaseEntity`, `IAuditable`, `ISoftDeletable` markers, `IClock`, `DomainException` base | **Mọi domain entity nghiệp vụ:** `Booking`, `Trip`, `Parcel`, `Station`, `Stop`, `Route`, `Voucher`, `User`, `Operator`. Domain-specific VO (`BookingCode`, `ParcelCode`). Domain event (`BookingConfirmed`). Domain-specific enum (`BookingStatus`, `TripStatus`, `ParcelStatus`). Domain method (`booking.Confirm()`, `trip.StartBoarding()`). |
+| **Domain** | Shared kernel primitives: `Money`, `PhoneNumber`, `Result<T>`, `Error`, `BaseEntity`, `IAuditable`, `ISoftDeletable`, `IActivatable` markers, `IClock`, `DomainException` base | **Mọi domain entity nghiệp vụ:** `Booking`, `Trip`, `Parcel`, `Station`, `Stop`, `Route`, `Voucher`, `User`, `Operator`. Domain-specific VO (`BookingCode`, `ParcelCode`). Domain event (`BookingConfirmed`). Domain-specific enum (`BookingStatus`, `TripStatus`, `ParcelStatus`). Domain method (`booking.Confirm()`, `trip.StartBoarding()`). |
 | **Application** | Generic contracts: `IRepository<T,TId>`, `IReadRepository<T>`, `IUnitOfWork`, `IApplicationService` marker. MediatR behaviors generic (`ValidationBehavior`, `LoggingBehavior`, `TransactionBehavior`). Common exception types (`ValidationException`, `NotFoundException`, …). `PagedResult<T>`. `IEventPublisher` interface. | Per-aggregate `IBookingRepository`, `IBookingService` (interface + impl). Specific Command/Query/Handler/Validator. Event consume handler. DTO. Mapping logic. External client interface (`IVnPayClient`, `ITripServiceClient`) — vì impl service-specific. |
 | **Infrastructure** | EF Core generic helpers: `EfRepository<T,TId>`, `EfUnitOfWork`, interceptors (`AuditingInterceptor`, `SoftDeleteInterceptor`, `OutboxInterceptor`), `SnakeCaseNamingConvention`, `OutboxEvent` base entity. RabbitMQ wrapper: `RabbitMqConnectionFactory`, `OutboxEventPublisher`, `OutboxPublisherHostedService` base, `RoutingKeys` constants. HTTP helpers: `PollyPolicyBuilder`, `InternalJwtPropagationHandler` (DelegatingHandler), optional `BaseHttpClient`. | **`ApplicationDbContext` concrete** (DbSet per entity). Per-entity `IEntityTypeConfiguration<T>`. **EF migrations**. Per-aggregate repository impl (`BookingRepository : EfRepository<Booking,Guid>, IBookingRepository`). Concrete external client impl: `VnPayClient`, `SendGridEmailClient`, `FcmPushClient`, `FirebaseStorageClient`, `GoogleDirectionsClient`. Concrete inter-service HTTP client: `TripServiceClient`, `IdentityServiceClient`, `PaymentServiceClient`. Concrete RabbitMQ consumer dispatcher. |
-| **Api / Web** | ASP.NET Core helpers: `InternalJwtAuthenticationHandler`, `JwksAuthenticationExtensions`, `ProblemDetailsExceptionFilter`, `RequestLoggingMiddleware`, `IdempotencyMiddleware`, `HealthCheckBuilderExtensions`, Swagger setup defaults | Controllers, custom service-specific Guard/Filter, `Program.cs` composition root, appsettings, route registration. |
+| **Api / Web** | ASP.NET Core helpers: `InternalJwtAuthenticationHandler`, `JwksAuthenticationExtensions`, `ApiResponseExceptionFilter` (global exception → ApiResponse error envelope), `ApiResponseResultFilter` (success-wrap), `RequestLoggingMiddleware`, `IdempotencyMiddleware`, `HealthCheckBuilderExtensions`, Swagger setup defaults | Controllers, custom service-specific Guard/Filter, `Program.cs` composition root, appsettings, route registration. |
 | **NestJS Common** | `JwtAuthGuard`, `InternalJwtGuard`, `RolesGuard`, `ProblemJsonExceptionFilter`, `RequestContextMiddleware`, `ZodValidationPipe`, `@CurrentUser()`, `@Roles()` decorators | Custom guard service-specific (vd `OperatorTenantGuard`), feature module (`BookingModule`, `TrackingModule`), service class, Prisma entity, controller. |
-| **NestJS Infrastructure** | `nest-rabbitmq` (connection factory + producer/consumer base + Outbox base), `nest-persistence` (naming strategy + base entity + soft-delete subscriber), `nest-redis` (IoRedis module factory), `nest-config` (Zod env schema base + ConfigModule factory) | Prisma `DataSource` config service-specific, migration files, BullMQ queue worker logic, business handler. |
+| **NestJS Infrastructure** | `nest-rabbitmq` (connection factory + producer/consumer base + Outbox base), `nest-persistence` (naming strategy + base entity + soft-delete subscriber), `nest-redis` (IoRedis module factory), `nest-config` (Zod env schema base + ConfigModule factory) | Prisma config service-specific, migration files, BullMQ queue worker logic, business handler. |
 | **Contracts (TS shared)** | Error code enum, event payload types, DTO interface types (FE+BE consume) | Service-specific internal types (Prisma entity, query result shape không expose ra ngoài). |
 
 #### Quy ước nhanh
@@ -1112,7 +1113,7 @@ Tham chiếu `db-schema/_global/cross-service-references.md` cho danh sách đ�
 - **UUID:** `UUID DEFAULT gen_random_uuid()`.
 - **JSON config:** `JSONB`.
 - **pgvector embedding:** `vector(1536)` — chỉ trong `vietride_rag`.
-- **Soft delete:** `is_active boolean` + `deleted_at timestamptz` cho Operator, User, Station, Stop, Route, Vehicle. Partial unique index `WHERE deleted_at IS NULL`.
+- **Soft delete:** `deleted_at timestamptz` (canonical marker) cho Operator, User, Station, Stop, Route, Vehicle. Partial unique index `WHERE deleted_at IS NULL`. `is_active boolean` là **activation flag riêng biệt** (không phải soft-delete) cho Operator, Station, Stop, Route, Vehicle — `User` không có `is_active` (dùng `status` enum). Xem ADR 0003 + markers `ISoftDeletable`/`IActivatable`.
 - **Audit columns:** `created_at TIMESTAMPTZ DEFAULT now()` + `updated_at TIMESTAMPTZ DEFAULT now()` + trigger `trg_set_updated_at` cho UPDATE.
 - **Optimistic concurrency:** `row_version INT DEFAULT 0` cho `wallets`, `platform_wallets`, `operator_wallets`, `operator_trip_settlements`.
 - **Index baseline:** PK auto · mọi FK có index · enum status xuất hiện trong WHERE business flow có index (partial nếu cần) · timestamp có range query có index.
@@ -1166,42 +1167,75 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 | `Accept-Language` | Optional | `vi`, `en` (v1 chỉ phục vụ message kèm tài liệu i18n nội bộ — error code SCREAMING_SNAKE_CASE độc lập ngôn ngữ) |
 | `Content-Type: application/json` | Request body có data | |
 
-### 5.4 Response shape — success
+### 5.4 Response shape — success (ADR 0004 — ApiResponse envelope)
 
-- **Single resource:** trả thẳng object, không bọc envelope. Ví dụ `GET /v1/bookings/{id}` trả `{ id, code, status, totalAmount, … }`.
-- **List:** trả `{ items, total, page, pageSize }` — KHÔNG dùng `data`/`results` wrap.
-- **Created:** HTTP 201 + body resource vừa tạo.
-- **No content:** HTTP 204 không body (e.g. DELETE, action không có data trả).
-- **Money:** number trong JSON (BIGINT VND — JS safe < 2^53). Server-side luôn lưu BIGINT.
-- **Datetime:** ISO 8601 string với offset, ví dụ `"2026-05-25T14:30:00+07:00"`.
-- **UUID:** string lowercase với dấu gạch ngang chuẩn.
+> **Effective 2026-06-01 (ADR 0004, accepted + rolled out Day 3).** Mọi FE-facing HTTP response dùng envelope `ApiResponse<T>` thống nhất — cả .NET (`VietRide.Shared.Web`) lẫn NestJS (`nest-common`). Controller trả `Ok(dto)` / `StatusCode(201, dto)` bình thường; filter/interceptor tự wrap.
 
-### 5.5 Response shape — error (RFC 7807 Problem Details)
+**Envelope success (single resource):**
 
-```
-Content-Type: application/problem+json
-HTTP status: 4xx hoặc 5xx
-```
-
-```json
+```jsonc
 {
-  "type": "https://vietride.app/errors/BOOKING_SEAT_UNAVAILABLE",
-  "title": "Seat is no longer available",
-  "status": 409,
-  "detail": "Seat A5 đã được hành khách khác giữ trong 8 phút trước.",
-  "instance": "/v1/bookings",
-  "errorCode": "BOOKING_SEAT_UNAVAILABLE",
-  "errors": [
-    { "field": "seats[0].seatNumber", "message": "Seat A5 unavailable" }
-  ]
+  "success": true,
+  "statusCode": 200,                          // mirrors HTTP status line — xem §5.5 Rule 2
+  "message": "Đăng ký thành công",            // optional — FE toast/UX; bỏ khi không cần
+  "data": { /* DTO camelCase */ },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
-- `errorCode` là **canonical SCREAMING_SNAKE_CASE** — FE map UI message từ key này.
-- `errors` chỉ xuất hiện với `VALIDATION_ERROR` (422) hoặc khi cần list field-level detail.
-- `detail` có thể là tiếng Việt user-facing; FE thường thay bằng UI string từ `errorCode`.
-- `instance` = request path.
-- `type` URL hiện chưa host docs — agent có thể dùng placeholder `https://vietride.app/errors/<errorCode>`.
+**Envelope success (list — `data` là `PagedResult<T>`, xem §5.7):**
+
+```jsonc
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [ /* ... */ ],
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 57,
+    "totalPages": 3,
+    "hasNextPage": true,
+    "hasPreviousPage": false
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+- **Created:** HTTP 201 + `data` chứa resource vừa tạo, bọc trong envelope.
+- **No content:** HTTP 204 — **empty body** (không envelope, xem ADR 0004 Rule 2).
+- **Money:** number trong JSON (BIGINT VND — JS safe < 2^53). Server-side luôn lưu BIGINT.
+- **Datetime:** ISO 8601 string với offset, ví dụ `"2026-05-25T14:30:00+07:00"`.
+- **UUID:** string lowercase với dấu gạch ngang chuẩn.
+- **`meta.traceId`:** lấy từ header `X-Request-Id` do Gateway stamp (ADR 0002). `meta.timestamp` = UTC ISO-8601 response time.
+
+### 5.5 Response shape — error (ADR 0004 — ApiResponse error envelope)
+
+> **`application/problem+json` (RFC 7807) bị DROP kể từ ADR 0004 (2026-06-01).** Error đi qua cùng một envelope `ApiResponse` với `success: false`. HTTP status line vẫn là source-of-truth (4xx/5xx).
+
+**Envelope error:**
+
+```jsonc
+// HTTP status: 4xx hoặc 5xx (đặt đúng trên status line — ADR 0004 Rule 2)
+{
+  "success": false,
+  "statusCode": 400,                          // mirrors HTTP status line
+  "error": {
+    "code": "AUTH_OTP_INVALID",               // §5.9 registry code (UPPER_SNAKE_CASE)
+    "message": "Mã xác thực không đúng.",     // FE có thể dùng hoặc map từ code
+    "fields": [                               // chỉ với validation errors (422 + 400 model-binding)
+      { "field": "code", "message": "..." }
+    ]
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+- `error.code` là **canonical UPPER_SNAKE_CASE** từ §5.9 registry — FE map UI message từ key này (thay thế `errorCode` của RFC 7807 cũ).
+- `error.fields[]` thay thế RFC 7807 `errors[]` — chỉ xuất hiện với validation errors (422) và model-binding failures (400).
+- `error.message` có thể là tiếng Việt user-facing; FE thường thay bằng UI string từ `error.code`.
+- **KHÔNG dùng** `application/problem+json`, `type` URL, `title`, `instance`, `detail` (RFC 7807 fields) — đã loại bỏ.
+- **KHÔNG return** `200 OK` với `success: false` — HTTP status line luôn phản ánh lỗi thật (ADR 0004 Rule 2).
 
 ### 5.6 Idempotency
 
@@ -1232,17 +1266,46 @@ HTTP status: 4xx hoặc 5xx
   - **Different body hash** → HTTP 422 `IDEMPOTENCY_KEY_MISMATCH`.
 - Key format: UUID v4 do client generate. Reuse key 1 lần là acceptable; nếu retry phải dùng cùng key.
 
-### 5.7 Pagination
+### 5.7 Pagination — `PagedResult<T>` + `QueryOptions` (ADR 0004)
 
-- Default `page=1`, `pageSize=20`. Max `pageSize=100`.
-- Sort: `?sort=field` (asc) hoặc `?sort=-field` (desc). Default sort theo `createdAt desc` cho list endpoint.
-- Response: `{ items, total, page, pageSize }`. KHÔNG dùng cursor-based pagination ở v1.
+> **`?sort=-field` convention cũ bị SUPERSEDE bởi `sortBy`+`sortDir` kể từ ADR 0004 (2026-06-01).** Xem §5.8.
 
-### 5.8 Filter conventions
+**`PagedResult<T>` — response shape cho list (7 fields):**
 
-- Date range: `from=<ISO8601>&to=<ISO8601>` (inclusive).
-- Status filter: `status=<enum>` hoặc `status=A,B,C` (csv multi-value).
-- Search: `q=<text>` (BE quyết định fields fuzzy match).
+| Field | Type | Mô tả |
+|---|---|---|
+| `items` | `T[]` | Danh sách items trang hiện tại |
+| `page` | `int` | Trang hiện tại (1-based) |
+| `pageSize` | `int` | Số items per trang |
+| `totalItems` | `int` | Tổng số items |
+| `totalPages` | `int` | = `ceil(totalItems / pageSize)` |
+| `hasNextPage` | `bool` | `page < totalPages` |
+| `hasPreviousPage` | `bool` | `page > 1` |
+
+**`QueryOptions` — request query string (list/collection endpoints):**
+
+| Parameter | Default | Constraint | Mô tả |
+|---|---|---|---|
+| `page` | `1` | `>= 1` | Trang cần lấy |
+| `pageSize` | `20` | `1..100` (clamped max 100) | Số items per trang |
+| `search` | `null` | optional | Full-text / partial search string |
+| `searchIn` | `null` | whitelist per aggregate | Comma-separated fields to search (`email,phone`) |
+| `sortBy` | aggregate default | whitelist per aggregate | Field to sort — **bắt buộc whitelisted** (xem §5.8) |
+| `sortDir` | `desc` | `asc` hoặc `desc` | Chiều sắp xếp |
+| `includeDeleted` | `false` | admin/privileged only | Bao gồm soft-deleted records (ADR 0003) |
+
+- `pageSize` clamped về max 100 server-side — client không thể vượt.
+- KHÔNG dùng cursor-based pagination ở v1.
+
+### 5.8 Filter conventions + Sort (ADR 0004)
+
+> **`?sort=-field` convention cũ đã bị SUPERSEDE.** Sort dùng `sortBy` + `sortDir` trong `QueryOptions` (§5.7).
+
+- **Date range:** `from=<ISO8601>&to=<ISO8601>` (inclusive).
+- **Status filter:** `status=<enum>` hoặc `status=A,B,C` (csv multi-value).
+- **Search:** `search=<text>` + `searchIn=field1,field2` (thay thế `q=<text>` cũ; BE whitelist các field được phép search per aggregate).
+- **Sort:** `sortBy=<field>&sortDir=asc|desc` — **`sortBy` PHẢI nằm trong whitelist của aggregate** (security requirement — ngăn arbitrary-column sort/search → injection / info-leak). Query handler/repository reject bất kỳ field nào không trong allow-list với `400 INVALID_SORT_FIELD`. Default `sortDir=desc`, default `sortBy` do aggregate quyết định (thường `createdAt`).
+- **Soft-delete:** `includeDeleted=true` — chỉ cho phép admin/privileged endpoint (ADR 0003).
 
 ### 5.9 Canonical Error Code Registry
 
@@ -1257,6 +1320,7 @@ HTTP status: 4xx hoặc 5xx
 | | `AUTH_ACCOUNT_LOCKED` | 403 | User.status = LOCKED |
 | | `AUTH_OTP_INVALID` | 400 | OTP code sai |
 | | `AUTH_OTP_EXPIRED` | 400 | OTP TTL 5 phút hết |
+| | `AUTH_OTP_RATE_LIMIT_EXCEEDED` | 429 | OTP request rate limit (Redis `identity:otp_rate:{email}` max 3/h) exceeded |
 | | `AUTH_EMAIL_ALREADY_REGISTERED` | 409 | Register email trùng |
 | | `AUTH_PHONE_ALREADY_REGISTERED` | 409 | Phone trùng User khác |
 | | `AUTH_PHONE_REQUIRED` | 403 | Gateway block: User.phone NULL + role=PASSENGER |
@@ -1264,6 +1328,7 @@ HTTP status: 4xx hoặc 5xx
 | | `AUTH_INITIAL_PASSWORD_TOKEN_INVALID` | 400 | SET_INITIAL_PASSWORD token sai |
 | | `AUTH_INITIAL_PASSWORD_TOKEN_EXPIRED` | 400 | Token quá 48h |
 | | `AUTH_PENDING_INITIAL_PASSWORD` | 403 | User.status = PENDING_INITIAL_PASSWORD, không login được |
+| **User** | `USER_INVALID_STATUS_TRANSITION` | 422 | Invalid User status transition (domain guard) |
 | **Booking** | `BOOKING_SEAT_UNAVAILABLE` | 409 | Ghế đã BOOKED/HELD/UNAVAILABLE |
 | | `BOOKING_TRIP_NOT_BOOKABLE` | 409 | Trip status ≠ SCHEDULED hoặc đã đóng |
 | | `BOOKING_CUTOFF_EXCEEDED` | 409 | Edit/cancel sau cutoff 2h |
@@ -1331,6 +1396,7 @@ HTTP status: 4xx hoặc 5xx
 | | `RAG_ACCESS_DENIED_FOR_ROLE` | 403 | accessLevel không match role |
 | **Validation** | `VALIDATION_ERROR` | 422 | Field-level — kèm `errors` array |
 | | `IDEMPOTENCY_KEY_MISMATCH` | 422 | Same key, different body |
+| | `INVALID_SORT_FIELD` | 400 | sortBy value not in the per-aggregate whitelist |
 | **Generic** | `RESOURCE_NOT_FOUND` | 404 | Fallback |
 | | `FORBIDDEN` | 403 | RBAC reject |
 | | `RATE_LIMITED` | 429 | Vượt rate limit |
@@ -2000,7 +2066,7 @@ const CreateBookingSchema = z.object({
 
 Áp dụng cho: `Operator`, `User`, `Station`, `Stop`, `Route`, `Vehicle`.
 
-Pattern: `is_active boolean DEFAULT true` + `deleted_at timestamptz NULL`.
+**Pattern:** `deleted_at timestamptz NULL` — đây là canonical soft-delete marker duy nhất (xem ADR 0003). Implement `ISoftDeletable` (getter-only `DeletedAt`). `is_active` **không phải** thành phần của soft-delete.
 
 EF Core global query filter:
 
@@ -2015,6 +2081,8 @@ Partial unique index cho field tái sử dụng được sau delete:
 ```sql
 CREATE UNIQUE INDEX uq_users_email ON users (email) WHERE deleted_at IS NULL;
 ```
+
+**Activation flag (separate concern):** `is_active boolean` là flag enable/disable độc lập với soft-delete. Chỉ Operator, Station, Stop, Route, Vehicle có `is_active`; `User` không có (dùng `status` enum cho activation axis). Entities cần activation flag implement `IActivatable` (getter-only `IsActive`). Xem ADR 0003 (`docs/adr/0003-soft-delete-marker-vs-activation-flag.md`).
 
 ### 9.7 Optimistic concurrency
 
@@ -2597,6 +2665,11 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.5.0** | 2026-06-01 | BE lead (Vũ) | **MINOR** — **ADR 0004: Adopt `ApiResponse<T>` envelope for all FE-facing HTTP responses.** Rewrite §5.4 (success shape) to envelope `{success,statusCode,message?,data,meta{traceId,timestamp}}`; rewrite §5.5 (error shape) — DROP `application/problem+json` (RFC 7807), adopt error envelope `{success:false,statusCode,error{code,message,fields?},meta}` với `error.code` từ §5.9 registry; rewrite §5.7 (Pagination) — introduce `PagedResult<T>` (7 fields: `items,page,pageSize,totalItems,totalPages,hasNextPage,hasPreviousPage`) + `QueryOptions` (`page/pageSize`-clamped-1..100/`search`/`searchIn`/`sortBy`/`sortDir`/`includeDeleted`); rewrite §5.8 (Filter conventions) — `sortBy`+`sortDir` SUPERSEDES `?sort=-field` convention + sortBy whitelist security requirement → reject non-whitelisted field với `400 INVALID_SORT_FIELD` (đăng ký §5.9 Validation group). §3.1 tree + §3.6 Api/Web layer: `ProblemDetailsExceptionFilter` → `ApiResponseExceptionFilter` + `ApiResponseResultFilter` (Task 3.8 target state). §3.1 tree: `PagedResult.cs` comment cập nhật 7-field shape. Bump 1.4.0 → 1.5.0 MINOR. API Contract wrapped accordingly. ADR 0004 follow-ups #1–#2. |
+| **1.4.0** | 2026-06-01 | BE lead (Vũ) | **MINOR** — §5.9 Auth error registry: thêm code mới `AUTH_OTP_RATE_LIMIT_EXCEEDED` (HTTP 429) — OTP request rate limit hit (Redis `identity:otp_rate:{email}` max 3/h TTL 1h, BSOT §6.9 line 1545). Code này backs Day-3 OTP rate-limit path (Task 3.4 handler throws `TooManyRequestsException` → 429). Human decision B2 (plan v7.1 patch). Đồng thời ratify shared-lib edits từ blocked 3.4 attempt: `UnauthorizedException` (401) + `BadRequestException` (400) đã có trong `ApplicationExceptions.cs`; thêm mới `TooManyRequestsException` (429) vào same file + arm tương ứng trong `ProblemDetailsExceptionFilter`. |
+| **1.3.6** | 2026-05-31 | BE lead (Vũ) | **PATCH** — §2.2 + §3.4 stack version: **NestJS 10.x → 11.x** để khớp `package.json` (`@nestjs/core`/`@nestjs/common` = `^11.0.0`) — đây là thực tế đã cài, doc bị stale. `package.json` là source-of-truth cho version chính xác. Đồng bộ ghi chú trong `.claude/agents/nest-worker.md` + `nest-reviewer.md` (bỏ workaround "BSOT §2.2 still says 10.x"). No code/DDL change. |
+| **1.3.5** | 2026-05-31 | BE lead (Vũ) | **PATCH** — **Decouple soft-delete from activation flag** per ADR 0003. Soft-delete = `deleted_at timestamptz` only (marker `ISoftDeletable`, getter-only `DeletedAt`). `is_active boolean` is a SEPARATE activation toggle (marker `IActivatable`, getter-only `IsActive`) — NOT part of soft-delete. `User` has no `is_active` (uses `status` enum). Cập nhật: §4.4 datatype list, §9.6 Soft delete, §3.1 monorepo tree (BaseEntity.cs comment), §3.6 Domain layer table. No DDL change — schema was already correct. |
+| **1.3.4** | 2026-05-31 | BE lead (Vũ) | **PATCH** — §5.9 error registry: thêm **User** group với `USER_INVALID_STATUS_TRANSITION` (HTTP 422, domain/Identity, thrown by `User.VerifyEmail()` guard). Error code đã được dùng trong Task 3.1 nhưng chưa đăng ký registry — patch này sync lại. |
 | **1.3.3** | 2026-05-26 | BE lead (Vũ) | **PATCH** — (1) **Bỏ folder `DOC/` uppercase**, gom toàn bộ generated artifacts (`openapi/`, `deliverables/`) vào `docs/` lowercase để chỉ có 1 folder doc duy nhất, tránh confusion 2 folders `DOC/` vs `docs/`. Cập nhật Section 3.1 monorepo tree + Section 3.1 folder semantics table. (2) **DTO mapping: AutoMapper → Mapster 7.x**. Lý do: Mapster source-gen compile-time (không reflection runtime), license MIT (AutoMapper từ v13+ commercial), perf benchmark ~3x faster, ít allocation. Vẫn **OPTIONAL** — manual mapping static factory / extension method là default. Cập nhật Section 2.1 + Section 3.2.3 anti-pattern row. Anti-pattern `IMapper` AutoMapper toàn project vẫn áp dụng cho Mapster — bắt buộc `TypeAdapterConfig` per Aggregate nếu dùng. (3) **Move 4 `<svc>-e2e/` folders từ `apps/` → `tests/`** để `apps/` chỉ chứa deployable units. Break Nx generator default (sibling layout) nhưng cleaner mental model: per-app HTTP e2e (Jest + axios) ở `tests/<svc>-e2e/`, cross-service e2e ở `tests/e2e/`, load test ở `tests/load/`. Khi `nx g @nx/nest:app foo` tạo `apps/foo-e2e/` thì manual move về `tests/foo-e2e/` + fix `jestConfig` path trong `project.json` + update `nx.json` jest plugin exclude paths. |
 | **1.3.2** | 2026-05-25 | Senior Backend Architect | **PATCH** — Section 3.4 mở rộng: thêm **3.4.1 Tech stack rationale** giải thích **KHÔNG dùng Kong / YARP / Tyk / Express Gateway / AWS APIM / Nginx-only** + lý do reject từng option + ✅ stack chính xác đã chọn (NestJS + `http-proxy-middleware` + `jose` + `ioredis`). Thêm **3.4.2 Routing approach** với route table config-driven (KHÔNG controller per endpoint trừ health + VNPay IPN exception) + middleware chain order (Cors → RequestId → RateLimit → RouteMatcher → UserJwtVerify → RoleCheck → PhoneCompleteGate → InternalJwtSigner → ProxyForwarder). Folder layout đổi tên thành 3.4.3. Quyết định canonical source vẫn là `technical_context_v7.md` Section 3.2 — doc này chỉ tổng hợp lại + giải thích lý do reject các option khác cho agent. |
 | **1.3.1** | 2026-05-25 | Senior Backend Architect | **PATCH** — Thêm callout đầu Section 3 + reminder ở 3.1 / 3.2.1 / 3.3: **file structure trong doc CHỈ là ví dụ minh họa**, KHÔNG phải danh sách bắt buộc. Agent được phép tạo thêm file/folder mới (vd `Sagas/`, `Specifications/`, `BookingRefundService.cs`), bỏ file/folder không cần (Gateway không cần `Domain/`, Notification không cần `Outbox/`), rename `<Aggregate>` placeholder theo domain thật, gom hoặc tách file theo balance philosophy 3.2.3. Liệt kê 5 điều agent KHÔNG được phép thay đổi (naming convention 3.5, dependency direction 3.2.2, anti-pattern 3.2.3, domain leak vào libs, infra cụ thể leak vào libs). Thêm 5-step "nguyên tắc khi quyết định tạo file mới" cho agent. |

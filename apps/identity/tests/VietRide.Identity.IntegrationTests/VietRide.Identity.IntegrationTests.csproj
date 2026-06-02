@@ -25,6 +25,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\VietRide.Identity.Api\VietRide.Identity.Api.csproj" />
     <ProjectReference Include="..\..\src\VietRide.Identity.Infrastructure\VietRide.Identity.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\..\..\libs\dotnet\VietRide.Shared.Persistence\VietRide.Shared.Persistence.csproj" />
   </ItemGroup>
 
 </Project>

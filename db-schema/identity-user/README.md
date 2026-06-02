@@ -33,7 +33,7 @@ Identity & User Service quản lý **authentication, authorization, user profile
 - **`OperatorSubscription.operatorId` UNIQUE** — 1 operator có đúng 1 subscription active tại 1 thời điểm; nâng cấp = update plan trên record này, không tạo record mới (lifecycle qua `status` machine).
 - **Default `SubscriptionPlan` "Starter (Free Trial)"** seed với UUID cố định `00000000-0000-0000-0000-000000000001` để EF Core seed migration deterministic cross-environment. KHÔNG seed Pro/Enterprise plan — System Admin tạo qua Admin Web.
 - **Bootstrap SYSTEM_ADMIN seed** dùng placeholder bcrypt hash, idempotent check `WHERE NOT EXISTS (SELECT 1 FROM users WHERE role='SYSTEM_ADMIN')`. Spec yêu cầu env vars `SYSTEM_ADMIN_BOOTSTRAP_EMAIL/_PASSWORD` ở production deploy.
-- **Soft delete pattern** dùng `deleted_at TIMESTAMPTZ` cho `users` + `operators`; combined `is_active boolean` cho Operator để quick filter (soft delete nói chung dài hạn, is_active = on/off pause).
+- **Soft delete pattern**: `deleted_at TIMESTAMPTZ` is the canonical soft-delete marker for both `users` and `operators` (ADR 0003). `is_active boolean` on `operators` is a SEPARATE activation toggle (temporary pause/resume — not a delete); `users` has no `is_active` and uses the `status` enum (`ACTIVE`/`LOCKED`/`DELETED`) for its activation axis instead.
 
 ## Index Strategy
 

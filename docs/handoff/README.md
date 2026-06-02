@@ -43,3 +43,9 @@ Everything else is mechanical. Quality invariants are still enforced determinist
 - Do not paste DDL or full API contract here — cite the source file + section (same rule as BSOT).
 - These files ARE committed (unlike SignalDesk where handoff was local) — they are the team's
   audit trail for the capstone.
+- **Commit cadence: one commit per day**, not per task. Commit the whole day's work once after
+  `/audit-day N` passes and the human signs the DoD. Per-task progress during the day is tracked
+  in the plan's `## Progress tracker` table (orchestrator bookkeeping), so a mid-day session end
+  does not lose the "which tasks are done" record even before anything is committed.
+- The plan's `## Progress tracker` is **informational only** — `/audit-day` re-verifies every
+  task independently against the SOT and never trusts the tracker (or a worker self-report).

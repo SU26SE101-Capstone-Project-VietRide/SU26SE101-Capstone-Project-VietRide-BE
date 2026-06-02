@@ -180,6 +180,8 @@ Không enum nào missing value.
 
 Pattern nhất quán theo entity. v6 Section 8 Conventions cho phép cả "isActive/deletedAt" — không mandate cụ thể chọn cả 2 hay 1. Acceptable design choice.
 
+> **Note (ADR 0003, 2026-05-31):** The framing "is_active + deleted_at as soft-delete" above is superseded. `deleted_at` alone is the canonical soft-delete marker (`ISoftDeletable`, `WHERE deleted_at IS NULL` global query filter). `is_active` is a SEPARATE activation toggle (`IActivatable`) — present on Operator/Station/Stop/Route/Vehicle but absent from User (which uses the `status` enum). The table column facts remain accurate; only the conceptual grouping has changed. See `docs/adr/0003-soft-delete-marker-vs-activation-flag.md`.
+
 ### 10. Concurrency / Optimistic Lock — ✅ PASS
 
 `row_version INT NOT NULL DEFAULT 0` cho:
