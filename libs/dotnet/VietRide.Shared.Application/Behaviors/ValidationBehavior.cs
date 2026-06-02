@@ -8,7 +8,7 @@ namespace VietRide.Shared.Application.Behaviors;
 /// <summary>
 /// MediatR pipeline behavior that runs FluentValidation validators for the incoming
 /// request before the handler executes. Throws <see cref="ValidationException"/> with
-/// field-level errors so the shared <c>ProblemDetailsExceptionFilter</c> maps it to
+/// field-level errors so the shared <c>ApiResponseExceptionFilter</c> maps it to
 /// HTTP 422 Unprocessable Entity.
 /// </summary>
 public sealed class ValidationBehavior<TRequest, TResponse>

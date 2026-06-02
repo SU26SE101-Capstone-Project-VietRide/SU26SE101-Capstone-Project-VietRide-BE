@@ -15,6 +15,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VietRide.Shared.Http", "Vie
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VietRide.Shared.Web", "VietRide.Shared.Web\VietRide.Shared.Web.csproj", "{C1791B34-7594-4A5D-84E9-E52BC8A55A2C}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VietRide.Shared.Web.UnitTests", "..\..\tests\dotnet\VietRide.Shared.Web.UnitTests\VietRide.Shared.Web.UnitTests.csproj", "{F8A414C1-242B-4D48-98D5-CBAA8436F9EA}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -48,5 +50,9 @@ Global
 		{C1791B34-7594-4A5D-84E9-E52BC8A55A2C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C1791B34-7594-4A5D-84E9-E52BC8A55A2C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C1791B34-7594-4A5D-84E9-E52BC8A55A2C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F8A414C1-242B-4D48-98D5-CBAA8436F9EA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F8A414C1-242B-4D48-98D5-CBAA8436F9EA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F8A414C1-242B-4D48-98D5-CBAA8436F9EA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F8A414C1-242B-4D48-98D5-CBAA8436F9EA}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

@@ -1,6 +1,6 @@
 namespace VietRide.Shared.Application.Exceptions;
 
-/// Mapped to HTTP 422 by ProblemDetailsExceptionFilter. Carries field-level errors.
+/// Mapped to HTTP 422 by ApiResponseExceptionFilter. Carries field-level errors.
 public sealed class ValidationException : Exception
 {
     public IReadOnlyList<ValidationError> Errors { get; }
