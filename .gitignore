@@ -157,3 +157,9 @@ docs/api/openapi/*.yaml
 # ── Local-only scripts ───────────────────────────────────────────────────────
 scratch/
 playground/
+
+# ── OpenCode harness (local-only; team uses Claude Code) ─────────────────────
+# Parallel OpenCode setup mirroring .claude/* — intentionally NOT pushed: most
+# members run a different harness. AGENTS.md (shared rules) IS committed.
+/opencode.json
+/.opencode/

@@ -29,7 +29,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|Edit|Write|MultiEdit",
+        "matcher": "Bash|Edit|Write|MultiEdit|Task|Agent|Workflow|EnterWorktree|ExitWorktree",
         "hooks": [
           {
             "type": "command",
@@ -49,5 +49,9 @@
         ]
       }
     ]
+  },
+  "worktree": {
+    "baseRef": "head",
+    "bgIsolation": "none"
   }
 }
