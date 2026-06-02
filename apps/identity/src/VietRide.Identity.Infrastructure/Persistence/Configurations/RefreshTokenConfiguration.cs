@@ -53,9 +53,6 @@ internal sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refre
         builder.Property(r => r.RevokedReason)
             .HasColumnName("revoked_reason")
             .HasColumnType("refresh_token_revoke_reason")
-            .HasConversion(
-                rr => rr.HasValue ? rr.Value.ToString() : null,
-                s => s != null ? Enum.Parse<RefreshTokenRevokeReason>(s) : (RefreshTokenRevokeReason?)null)
             .IsRequired(false);
 
         builder.Property(r => r.UserAgent)

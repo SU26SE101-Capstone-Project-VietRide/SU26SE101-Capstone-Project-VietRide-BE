@@ -1,5 +1,6 @@
 using FluentAssertions;
 using NSubstitute;
+using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Application.Features.Auth.VerifyEmail;
 using VietRide.Identity.Domain.Entities;
@@ -19,8 +20,9 @@ public sealed class VerifyEmailCommandHandlerTests
     private static VerifyEmailCommandHandler BuildHandler(
         IUserRepository users,
         IEmailVerificationTokenRepository tokens,
+        IOtpFailedAttemptPersister failedAttemptPersister,
         IClock clock)
-        => new(users, tokens, clock);
+        => new(users, tokens, failedAttemptPersister, clock);
 
     private static User MakePendingUser(string email = "user@example.com")
         => User.CreatePassenger(email, TestPhone, "hash", "Test User");
@@ -56,6 +58,7 @@ public sealed class VerifyEmailCommandHandlerTests
 
         var users = Substitute.For<IUserRepository>();
         var tokens = Substitute.For<IEmailVerificationTokenRepository>();
+        var persister = Substitute.For<IOtpFailedAttemptPersister>();
         var clock = Substitute.For<IClock>();
 
         clock.UtcNow.Returns(FrozenNow);
@@ -63,7 +66,7 @@ public sealed class VerifyEmailCommandHandlerTests
         tokens.FindByCodeAsync(user.Id, "123456", EmailVerificationPurpose.REGISTRATION, Arg.Any<CancellationToken>())
             .Returns(token);
 
-        var handler = BuildHandler(users, tokens, clock);
+        var handler = BuildHandler(users, tokens, persister, clock);
 
         var result = await handler.Handle(
             new VerifyEmailCommand("user@example.com", "123456", "REGISTRATION"),
@@ -73,6 +76,9 @@ public sealed class VerifyEmailCommandHandlerTests
         result.UserId.Should().Be(user.Id);
         result.Status.Should().Be(UserStatus.ACTIVE.ToString());
         token.UsedAt.Should().Be(FrozenNow);
+
+        // Persister must NOT be called on the happy path.
+        await persister.DidNotReceive().PersistAsync(Arg.Any<Guid>(), Arg.Any<EmailVerificationPurpose>(), Arg.Any<CancellationToken>());
     }
 
     // -------------------------------------------------------------------------
@@ -80,13 +86,13 @@ public sealed class VerifyEmailCommandHandlerTests
     // -------------------------------------------------------------------------
 
     [Fact]
-    public async Task Handle_WrongCode_Throws400OtpInvalid_AndIncrementsLatestPending()
+    public async Task Handle_WrongCode_Throws400OtpInvalid_AndDelegatesIncrementToPersister()
     {
         var user = MakePendingUser();
-        var latestPending = MakeToken(user.Id, code: "654321"); // different code
 
         var users = Substitute.For<IUserRepository>();
         var tokens = Substitute.For<IEmailVerificationTokenRepository>();
+        var persister = Substitute.For<IOtpFailedAttemptPersister>();
         var clock = Substitute.For<IClock>();
 
         clock.UtcNow.Returns(FrozenNow);
@@ -94,11 +100,8 @@ public sealed class VerifyEmailCommandHandlerTests
         // FindByCodeAsync returns null — no exact match (wrong code).
         tokens.FindByCodeAsync(user.Id, "000000", EmailVerificationPurpose.REGISTRATION, Arg.Any<CancellationToken>())
             .Returns((EmailVerificationToken?)null);
-        // FindLatestPendingAsync returns the outstanding token.
-        tokens.FindLatestPendingAsync(user.Id, EmailVerificationPurpose.REGISTRATION, Arg.Any<CancellationToken>())
-            .Returns(latestPending);
 
-        var handler = BuildHandler(users, tokens, clock);
+        var handler = BuildHandler(users, tokens, persister, clock);
 
         var act = () => handler.Handle(
             new VerifyEmailCommand("user@example.com", "000000", "REGISTRATION"),
@@ -107,13 +110,15 @@ public sealed class VerifyEmailCommandHandlerTests
         await act.Should().ThrowAsync<BadRequestException>()
             .Where(e => e.ErrorCode == "AUTH_OTP_INVALID");
 
-        // failed_attempts must have been incremented on the latest pending token.
-        latestPending.FailedAttempts.Should().Be(1);
-        tokens.Received(1).Update(latestPending);
+        // The persister must be called once so the increment commits independently.
+        await persister.Received(1).PersistAsync(
+            user.Id,
+            EmailVerificationPurpose.REGISTRATION,
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task Handle_ExpiredCode_Throws400OtpExpired_DoesNotIncrement()
+    public async Task Handle_ExpiredCode_Throws400OtpExpired_DoesNotCallPersister()
     {
         var user = MakePendingUser();
         // Token already expired (expiresAt in the past).
@@ -121,6 +126,7 @@ public sealed class VerifyEmailCommandHandlerTests
 
         var users = Substitute.For<IUserRepository>();
         var tokens = Substitute.For<IEmailVerificationTokenRepository>();
+        var persister = Substitute.For<IOtpFailedAttemptPersister>();
         var clock = Substitute.For<IClock>();
 
         clock.UtcNow.Returns(FrozenNow);
@@ -128,7 +134,7 @@ public sealed class VerifyEmailCommandHandlerTests
         tokens.FindByCodeAsync(user.Id, "123456", EmailVerificationPurpose.REGISTRATION, Arg.Any<CancellationToken>())
             .Returns(expiredToken);
 
-        var handler = BuildHandler(users, tokens, clock);
+        var handler = BuildHandler(users, tokens, persister, clock);
 
         var act = () => handler.Handle(
             new VerifyEmailCommand("user@example.com", "123456", "REGISTRATION"),
@@ -137,9 +143,9 @@ public sealed class VerifyEmailCommandHandlerTests
         await act.Should().ThrowAsync<BadRequestException>()
             .Where(e => e.ErrorCode == "AUTH_OTP_EXPIRED");
 
-        // Expiry must NOT increment failed_attempts.
+        // Expiry must NOT trigger the persister (not a wrong-code attempt).
         expiredToken.FailedAttempts.Should().Be(0);
-        tokens.DidNotReceive().Update(expiredToken);
+        await persister.DidNotReceive().PersistAsync(Arg.Any<Guid>(), Arg.Any<EmailVerificationPurpose>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -151,6 +157,7 @@ public sealed class VerifyEmailCommandHandlerTests
 
         var users = Substitute.For<IUserRepository>();
         var tokens = Substitute.For<IEmailVerificationTokenRepository>();
+        var persister = Substitute.For<IOtpFailedAttemptPersister>();
         var clock = Substitute.For<IClock>();
 
         clock.UtcNow.Returns(FrozenNow);
@@ -158,7 +165,7 @@ public sealed class VerifyEmailCommandHandlerTests
         tokens.FindByCodeAsync(user.Id, "123456", EmailVerificationPurpose.REGISTRATION, Arg.Any<CancellationToken>())
             .Returns(burnedToken);
 
-        var handler = BuildHandler(users, tokens, clock);
+        var handler = BuildHandler(users, tokens, persister, clock);
 
         var act = () => handler.Handle(
             new VerifyEmailCommand("user@example.com", "123456", "REGISTRATION"),
@@ -173,12 +180,13 @@ public sealed class VerifyEmailCommandHandlerTests
     {
         var users = Substitute.For<IUserRepository>();
         var tokens = Substitute.For<IEmailVerificationTokenRepository>();
+        var persister = Substitute.For<IOtpFailedAttemptPersister>();
         var clock = Substitute.For<IClock>();
 
         clock.UtcNow.Returns(FrozenNow);
         users.GetByEmailAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns((User?)null);
 
-        var handler = BuildHandler(users, tokens, clock);
+        var handler = BuildHandler(users, tokens, persister, clock);
 
         var act = () => handler.Handle(
             new VerifyEmailCommand("nobody@example.com", "123456", "REGISTRATION"),
@@ -195,12 +203,13 @@ public sealed class VerifyEmailCommandHandlerTests
 
         var users = Substitute.For<IUserRepository>();
         var tokens = Substitute.For<IEmailVerificationTokenRepository>();
+        var persister = Substitute.For<IOtpFailedAttemptPersister>();
         var clock = Substitute.For<IClock>();
 
         clock.UtcNow.Returns(FrozenNow);
         users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>()).Returns(user);
 
-        var handler = BuildHandler(users, tokens, clock);
+        var handler = BuildHandler(users, tokens, persister, clock);
 
         var act = () => handler.Handle(
             new VerifyEmailCommand("user@example.com", "123456", "INVALID_PURPOSE"),

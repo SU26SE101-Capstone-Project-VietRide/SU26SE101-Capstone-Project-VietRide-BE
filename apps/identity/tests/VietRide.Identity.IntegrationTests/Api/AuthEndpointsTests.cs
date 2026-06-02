@@ -239,6 +239,7 @@ public sealed class AuthWebApplicationFactory : WebApplicationFactory<Program>
     private sealed class NoOpUnitOfWork : IUnitOfWork
     {
         public Task<int> SaveChangesAsync(CancellationToken ct) => Task.FromResult(0);
+        public async Task<T> ExecuteInTransactionAsync<T>(Func<Task<T>> operation, CancellationToken ct) => await operation();
         public Task BeginTransactionAsync(CancellationToken ct) => Task.CompletedTask;
         public Task CommitAsync(CancellationToken ct) => Task.CompletedTask;
         public Task RollbackAsync(CancellationToken ct) => Task.CompletedTask;

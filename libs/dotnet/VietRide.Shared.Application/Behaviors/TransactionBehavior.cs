@@ -1,13 +1,14 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
+using VietRide.Shared.Application.Cqrs;
 using VietRide.Shared.Application.UnitOfWork;
 
 namespace VietRide.Shared.Application.Behaviors;
 
 /// <summary>
-/// MediatR pipeline behavior that wraps the handler in a database transaction.
-/// If an <see cref="IUnitOfWork"/> is registered it is used directly; otherwise
-/// the behavior is a no-op and the handler manages its own transaction.
+/// MediatR pipeline behavior that wraps command handlers in a database transaction.
+/// Query requests bypass the transaction; if an <see cref="IUnitOfWork"/> is registered,
+/// it owns the retry-safe transaction boundary, otherwise the behavior is a no-op.
 /// </summary>
 public sealed class TransactionBehavior<TRequest, TResponse>
     : IPipelineBehavior<TRequest, TResponse>
@@ -29,7 +30,7 @@ public sealed class TransactionBehavior<TRequest, TResponse>
         RequestHandlerDelegate<TResponse> next,
         CancellationToken cancellationToken)
     {
-        if (_unitOfWork is null)
+        if (_unitOfWork is null || IsQueryRequest())
         {
             return await next();
         }
@@ -38,19 +39,20 @@ public sealed class TransactionBehavior<TRequest, TResponse>
 
         _logger.LogDebug("Beginning transaction for {RequestName}", requestName);
 
-        await _unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {
-            var response = await next();
-            await _unitOfWork.CommitAsync(cancellationToken);
+            var response = await _unitOfWork.ExecuteInTransactionAsync<TResponse>(() => next(), cancellationToken);
             _logger.LogDebug("Committed transaction for {RequestName}", requestName);
             return response;
         }
         catch (Exception ex)
         {
-            await _unitOfWork.RollbackAsync(cancellationToken);
             _logger.LogWarning(ex, "Rolled back transaction for {RequestName}", requestName);
             throw;
         }
     }
+
+    private static bool IsQueryRequest()
+        => typeof(TRequest).GetInterfaces().Any(i =>
+            i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IQuery<>));
 }

@@ -26,9 +26,6 @@ internal sealed class OAuthIdentityConfiguration : IEntityTypeConfiguration<OAut
         builder.Property(o => o.Provider)
             .HasColumnName("provider")
             .HasColumnType("oauth_provider")
-            .HasConversion(
-                p => p.ToString(),
-                s => Enum.Parse<OAuthProvider>(s))
             .IsRequired();
 
         builder.Property(o => o.ProviderSubject)

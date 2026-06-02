@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using VietRide.Shared.Application.UnitOfWork;
 
@@ -20,6 +21,36 @@ public sealed class EfUnitOfWork : IUnitOfWork
     /// <inheritdoc />
     public Task<int> SaveChangesAsync(CancellationToken ct)
         => _db.SaveChangesAsync(ct);
+
+    /// <inheritdoc />
+    public async Task<T> ExecuteInTransactionAsync<T>(Func<Task<T>> operation, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+
+        if (_transaction is not null)
+        {
+            throw new InvalidOperationException(
+                "ExecuteInTransactionAsync cannot run while an explicit transaction is active.");
+        }
+
+        var strategy = _db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await _db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
+            try
+            {
+                var result = await operation().ConfigureAwait(false);
+                await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+                await transaction.CommitAsync(ct).ConfigureAwait(false);
+                return result;
+            }
+            catch
+            {
+                await transaction.RollbackAsync(ct).ConfigureAwait(false);
+                throw;
+            }
+        }).ConfigureAwait(false);
+    }
 
     /// <inheritdoc />
     public async Task BeginTransactionAsync(CancellationToken ct)

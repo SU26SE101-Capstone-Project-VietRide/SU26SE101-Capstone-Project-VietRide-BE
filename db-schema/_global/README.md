@@ -11,9 +11,9 @@ Master overview cho 8 business services + 0 shared DB. Mỗi service có 1 logic
 | 3 | Booking | `vietride_booking` | .NET Core 8 + EF Core 8 | `pgcrypto` | 3 (parallel with 4, 5) |
 | 4 | Payment & Wallet | `vietride_payment` | .NET Core 8 + EF Core 8 | `pgcrypto` | 3 |
 | 5 | Parcel | `vietride_parcel` | .NET Core 8 + EF Core 8 | `pgcrypto` | 3 |
-| 6 | Tracking | `vietride_tracking` | NestJS + TypeORM | `pgcrypto` | 4 (parallel with 7, 8) |
-| 7 | Notification | `vietride_notification` | NestJS + TypeORM | `pgcrypto` | 4 |
-| 8 | RAG AI | `vietride_rag` | NestJS + TypeORM | `pgcrypto`, **`vector`** | 4 |
+| 6 | Tracking | `vietride_tracking` | NestJS + Prisma | `pgcrypto` | 4 (parallel with 7, 8) |
+| 7 | Notification | `vietride_notification` | NestJS + Prisma | `pgcrypto` | 4 |
+| 8 | RAG AI | `vietride_rag` | NestJS + Prisma | `pgcrypto`, **`vector`** | 4 |
 
 **Bootstrap order rationale:**
 - Step 1 — Identity Service migrate đầu tiên + seed default `SubscriptionPlan` + bootstrap `SYSTEM_ADMIN` (vì 7 service còn lại có logical FK đến User/Operator).
@@ -21,7 +21,7 @@ Master overview cho 8 business services + 0 shared DB. Mỗi service có 1 logic
 - Step 3 — Booking / Payment / Parcel chạy song song (independent của nhau ở schema layer; chỉ logical FK đến Step 1+2).
 - Step 4 — Tracking / Notification / RAG chạy song song (logical FK đến Step 1, 2).
 
-Tất cả service đều **idempotent**: chạy migration 2 lần không lỗi (EF Core / TypeORM migrations history tự handle).
+Tất cả service đều **idempotent**: chạy migration 2 lần không lỗi (EF Core / Prisma migrations history tự handle).
 
 ## Hangfire schema
 

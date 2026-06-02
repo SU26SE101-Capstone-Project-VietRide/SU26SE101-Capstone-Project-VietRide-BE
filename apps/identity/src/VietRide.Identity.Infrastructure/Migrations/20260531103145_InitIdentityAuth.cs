@@ -1,5 +1,6 @@
 using System;
 using Microsoft.EntityFrameworkCore.Migrations;
+using VietRide.Identity.Domain.Enums;
 
 #nullable disable
 
@@ -13,6 +14,19 @@ namespace VietRide.Identity.Infrastructure.Migrations
         {
             migrationBuilder.EnsureSchema(
                 name: "vietride_identity");
+
+            migrationBuilder.Sql(
+                "CREATE TYPE user_role AS ENUM ('PASSENGER', 'DRIVER', 'ASSISTANT', 'OPERATOR_STAFF', 'OPERATOR_ADMIN', 'SYSTEM_ADMIN');");
+            migrationBuilder.Sql(
+                "CREATE TYPE user_status AS ENUM ('PENDING_EMAIL_VERIFICATION', 'PENDING_INITIAL_PASSWORD', 'ACTIVE', 'LOCKED', 'DELETED');");
+            migrationBuilder.Sql(
+                "CREATE TYPE email_verification_purpose AS ENUM ('REGISTRATION', 'PASSWORD_RESET', 'SET_INITIAL_PASSWORD');");
+            migrationBuilder.Sql(
+                "CREATE TYPE oauth_provider AS ENUM ('GOOGLE');");
+            migrationBuilder.Sql(
+                "CREATE TYPE refresh_token_revoke_reason AS ENUM ('NORMAL_ROTATION', 'REUSE_DETECTED', 'USER_LOGOUT', 'ADMIN_REVOKE', 'PASSWORD_RESET');");
+            migrationBuilder.Sql(
+                "CREATE TYPE device_platform AS ENUM ('IOS', 'ANDROID', 'WEB');");
 
             migrationBuilder.CreateTable(
                 name: "operators",
@@ -55,8 +69,8 @@ namespace VietRide.Identity.Infrastructure.Migrations
                     password_hash = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: true),
                     display_name = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
                     avatar_url = table.Column<string>(type: "text", nullable: true),
-                    role = table.Column<string>(type: "user_role", nullable: false),
-                    status = table.Column<string>(type: "user_status", nullable: false),
+                    role = table.Column<UserRole>(type: "user_role", nullable: false),
+                    status = table.Column<UserStatus>(type: "user_status", nullable: false),
                     operator_id = table.Column<Guid>(type: "uuid", nullable: true),
                     failed_login_attempts = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     last_failed_login_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
@@ -86,7 +100,7 @@ namespace VietRide.Identity.Infrastructure.Migrations
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false, defaultValueSql: "gen_random_uuid()"),
                     user_id = table.Column<Guid>(type: "uuid", nullable: false),
-                    purpose = table.Column<string>(type: "email_verification_purpose", nullable: false),
+                    purpose = table.Column<EmailVerificationPurpose>(type: "email_verification_purpose", nullable: false),
                     code = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
                     expires_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
                     failed_attempts = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
@@ -112,7 +126,7 @@ namespace VietRide.Identity.Infrastructure.Migrations
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false, defaultValueSql: "gen_random_uuid()"),
                     user_id = table.Column<Guid>(type: "uuid", nullable: false),
-                    provider = table.Column<string>(type: "oauth_provider", nullable: false),
+                    provider = table.Column<OAuthProvider>(type: "oauth_provider", nullable: false),
                     provider_subject = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
                     provider_email = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: true),
                     linked_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
@@ -144,7 +158,7 @@ namespace VietRide.Identity.Infrastructure.Migrations
                     issued_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
                     expires_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
                     revoked_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    revoked_reason = table.Column<string>(type: "refresh_token_revoke_reason", nullable: true),
+                    revoked_reason = table.Column<RefreshTokenRevokeReason>(type: "refresh_token_revoke_reason", nullable: true),
                     user_agent = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: true),
                     ip_address = table.Column<string>(type: "character varying(45)", maxLength: 45, nullable: true),
                     created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
@@ -177,7 +191,7 @@ namespace VietRide.Identity.Infrastructure.Migrations
                     id = table.Column<Guid>(type: "uuid", nullable: false, defaultValueSql: "gen_random_uuid()"),
                     user_id = table.Column<Guid>(type: "uuid", nullable: false),
                     fcm_token = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: false),
-                    platform = table.Column<string>(type: "device_platform", nullable: false),
+                    platform = table.Column<DevicePlatform>(type: "device_platform", nullable: false),
                     is_active = table.Column<bool>(type: "boolean", nullable: false, defaultValue: true),
                     last_active_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
                     created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
@@ -361,6 +375,13 @@ namespace VietRide.Identity.Infrastructure.Migrations
             migrationBuilder.DropTable(
                 name: "operators",
                 schema: "vietride_identity");
+
+            migrationBuilder.Sql("DROP TYPE IF EXISTS device_platform;");
+            migrationBuilder.Sql("DROP TYPE IF EXISTS refresh_token_revoke_reason;");
+            migrationBuilder.Sql("DROP TYPE IF EXISTS oauth_provider;");
+            migrationBuilder.Sql("DROP TYPE IF EXISTS email_verification_purpose;");
+            migrationBuilder.Sql("DROP TYPE IF EXISTS user_status;");
+            migrationBuilder.Sql("DROP TYPE IF EXISTS user_role;");
         }
     }
 }

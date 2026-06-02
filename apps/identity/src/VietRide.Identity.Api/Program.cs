@@ -25,7 +25,9 @@ builder.Services.AddVietRideSharedWeb(builder.Configuration, ServiceName);
 
 // EF Core (Npgsql) — picks up ConnectionStrings:Default
 // or env IDENTITY__CONNECTIONSTRINGS__DEFAULT.
-builder.Services.AddVietRideDbContext<IdentityDbContext>(builder.Configuration);
+builder.Services.AddVietRideDbContext<IdentityDbContext>(
+    builder.Configuration,
+    configureDataSource: IdentityDbContext.ConfigurePostgresEnums);
 
 // MediatR v11 pipeline behaviors (Logging → Validation → Transaction)
 // + FluentValidation validators discovered from the Application assembly.

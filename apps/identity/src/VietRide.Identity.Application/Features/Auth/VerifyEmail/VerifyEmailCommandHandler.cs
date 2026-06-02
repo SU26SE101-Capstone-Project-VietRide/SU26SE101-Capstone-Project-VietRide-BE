@@ -1,4 +1,5 @@
 using MediatR;
+using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
@@ -12,15 +13,18 @@ public sealed class VerifyEmailCommandHandler : IRequestHandler<VerifyEmailComma
 
     private readonly IUserRepository _users;
     private readonly IEmailVerificationTokenRepository _tokens;
+    private readonly IOtpFailedAttemptPersister _failedAttemptPersister;
     private readonly IClock _clock;
 
     public VerifyEmailCommandHandler(
         IUserRepository users,
         IEmailVerificationTokenRepository tokens,
+        IOtpFailedAttemptPersister failedAttemptPersister,
         IClock clock)
     {
         _users = users;
         _tokens = tokens;
+        _failedAttemptPersister = failedAttemptPersister;
         _clock = clock;
     }
 
@@ -45,14 +49,10 @@ public sealed class VerifyEmailCommandHandler : IRequestHandler<VerifyEmailComma
 
         if (token is null)
         {
-            // Case (1): no matching row — wrong code. Increment failed_attempts on the newest
-            // pending token for this user+purpose (v7.2 option (b): FindLatestPendingAsync).
-            var latestPending = await _tokens.FindLatestPendingAsync(user.Id, purpose, cancellationToken);
-            if (latestPending is not null)
-            {
-                latestPending.IncrementFailedAttempts();
-                _tokens.Update(latestPending);
-            }
+            // Case (1): no matching row — wrong code. Persist the failed_attempts increment via
+            // a fresh DbContext scope so the write commits independently of the ambient
+            // TransactionBehavior transaction (which will be rolled back when we throw below).
+            await _failedAttemptPersister.PersistAsync(user.Id, purpose, cancellationToken);
 
             throw new BadRequestException("AUTH_OTP_INVALID", "Invalid verification code.");
         }

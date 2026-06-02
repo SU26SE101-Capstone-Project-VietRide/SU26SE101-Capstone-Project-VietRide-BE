@@ -5,7 +5,7 @@
 NestJS service xử lý **in-app notification history + FCM push outbound**. **Chỉ consume** RabbitMQ events (BookingConfirmed, TripDelayed, ParcelLoaded, etc.) → INSERT in-app history + enqueue BullMQ `fcm-push` queue. BullMQ retry với exponential backoff: 5s → 30s → 5m → DLQ.
 
 - **Database:** `vietride_notification`
-- **Framework:** NestJS + TypeORM
+- **Framework:** NestJS + Prisma
 - **Extensions:** `pgcrypto`
 - **Background jobs:** **BullMQ** (NestJS service, KHÔNG dùng Hangfire). `fcm-push` queue Redis-backed.
 - **Hangfire schema:** KHÔNG có.
@@ -48,7 +48,7 @@ NestJS service xử lý **in-app notification history + FCM push outbound**. **C
 
 ## Migration Strategy
 
-- **Tool:** TypeORM migrations.
+- **Tool:** Prisma migrations.
 - **Bootstrap order:** Sau Identity (logical FK target). Không depend service khác về schema.
 - **Data retention:** BullMQ daily job `DELETE FROM notifications WHERE created_at < now() - INTERVAL '90 days'` (env var configurable). NotificationDelivery cascade.
 

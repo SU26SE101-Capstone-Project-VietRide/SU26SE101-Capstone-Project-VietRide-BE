@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Shared.Application.Repositories;
+using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Identity.Infrastructure.Persistence.Repositories;
 
@@ -22,8 +23,15 @@ internal sealed class UserRepository : IUserRepository
             .FirstOrDefaultAsync(u => u.Email.ToLower() == emailLower, ct);
 
     public async Task<User?> GetByPhoneAsync(string e164Phone, CancellationToken ct = default)
-        => await _db.Users
-            .FirstOrDefaultAsync(u => u.Phone != null && u.Phone.Value.Value == e164Phone, ct);
+    {
+        // u.Phone is mapped via ValueConverter<PhoneNumber?, string?>; comparing the
+        // CLR PhoneNumber? value against a constant allows EF Core to translate the
+        // predicate into a SQL WHERE phone = @e164Phone via the converter's
+        // ConvertToProviderExpression (constant on the RHS is evaluated at plan time).
+        PhoneNumber? phone = PhoneNumber.Parse(e164Phone);
+        return await _db.Users
+            .FirstOrDefaultAsync(u => u.Phone == phone, ct);
+    }
 
     public async Task<User> AddAsync(User entity, CancellationToken ct)
     {

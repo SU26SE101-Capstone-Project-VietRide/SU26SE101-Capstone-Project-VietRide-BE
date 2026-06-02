@@ -31,9 +31,6 @@ internal sealed class UserDeviceConfiguration : IEntityTypeConfiguration<UserDev
         builder.Property(d => d.Platform)
             .HasColumnName("platform")
             .HasColumnType("device_platform")
-            .HasConversion(
-                p => p.ToString(),
-                s => Enum.Parse<DevicePlatform>(s))
             .IsRequired();
 
         builder.Property(d => d.IsActive)

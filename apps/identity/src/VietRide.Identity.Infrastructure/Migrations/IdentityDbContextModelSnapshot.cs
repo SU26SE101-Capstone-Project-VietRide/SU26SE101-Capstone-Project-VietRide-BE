@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
+using VietRide.Identity.Domain.Enums;
 using VietRide.Identity.Infrastructure;
 
 #nullable disable
@@ -22,6 +23,13 @@ namespace VietRide.Identity.Infrastructure.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
+
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "device_platform", new[] { "IOS", "ANDROID", "WEB" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "email_verification_purpose", new[] { "REGISTRATION", "PASSWORD_RESET", "SET_INITIAL_PASSWORD" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "oauth_provider", new[] { "GOOGLE" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "refresh_token_revoke_reason", new[] { "NORMAL_ROTATION", "REUSE_DETECTED", "USER_LOGOUT", "ADMIN_REVOKE", "PASSWORD_RESET" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "user_role", new[] { "PASSENGER", "DRIVER", "ASSISTANT", "OPERATOR_STAFF", "OPERATOR_ADMIN", "SYSTEM_ADMIN" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "user_status", new[] { "PENDING_EMAIL_VERIFICATION", "PENDING_INITIAL_PASSWORD", "ACTIVE", "LOCKED", "DELETED" });
 
             modelBuilder.Entity("VietRide.Identity.Domain.Entities.EmailVerificationToken", b =>
                 {
@@ -51,8 +59,7 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasDefaultValue(0)
                         .HasColumnName("failed_attempts");
 
-                    b.Property<string>("Purpose")
-                        .IsRequired()
+                    b.Property<EmailVerificationPurpose>("Purpose")
                         .HasColumnType("email_verification_purpose")
                         .HasColumnName("purpose");
 
@@ -98,8 +105,7 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("linked_at");
 
-                    b.Property<string>("Provider")
-                        .IsRequired()
+                    b.Property<OAuthProvider>("Provider")
                         .HasColumnType("oauth_provider")
                         .HasColumnName("provider");
 
@@ -190,7 +196,7 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("revoked_at");
 
-                    b.Property<string>("RevokedReason")
+                    b.Property<RefreshTokenRevokeReason?>("RevokedReason")
                         .HasColumnType("refresh_token_revoke_reason")
                         .HasColumnName("revoked_reason");
 
@@ -297,13 +303,11 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("phone");
 
-                    b.Property<string>("Role")
-                        .IsRequired()
+                    b.Property<UserRole>("Role")
                         .HasColumnType("user_role")
                         .HasColumnName("role");
 
-                    b.Property<string>("Status")
-                        .IsRequired()
+                    b.Property<UserStatus>("Status")
                         .HasColumnType("user_status")
                         .HasColumnName("status");
 
@@ -367,8 +371,7 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_active_at");
 
-                    b.Property<string>("Platform")
-                        .IsRequired()
+                    b.Property<DevicePlatform>("Platform")
                         .HasColumnType("device_platform")
                         .HasColumnName("platform");
 

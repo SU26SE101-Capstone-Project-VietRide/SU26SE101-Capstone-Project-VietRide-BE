@@ -53,17 +53,11 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.Role)
             .HasColumnName("role")
             .HasColumnType("user_role")
-            .HasConversion(
-                r => r.ToString(),
-                s => Enum.Parse<UserRole>(s))
             .IsRequired();
 
         builder.Property(u => u.Status)
             .HasColumnName("status")
             .HasColumnType("user_status")
-            .HasConversion(
-                s => s.ToString(),
-                s => Enum.Parse<UserStatus>(s))
             .IsRequired();
 
         builder.Property(u => u.OperatorId)

@@ -17,8 +17,12 @@ internal sealed class IdentityDbContextDesignFactory : IDesignTimeDbContextFacto
         var connectionString = Environment.GetEnvironmentVariable("IDENTITY_DESIGN_CONNECTION")
             ?? "Host=localhost;Port=5432;Database=vietride_identity;Username=vietride;Password=vietride_dev";
 
+        var dataSourceBuilder = new Npgsql.NpgsqlDataSourceBuilder(connectionString);
+        IdentityDbContext.ConfigurePostgresEnums(dataSourceBuilder);
+        var dataSource = dataSourceBuilder.Build();
+
         var options = new DbContextOptionsBuilder<IdentityDbContext>()
-            .UseNpgsql(connectionString, npgsql =>
+            .UseNpgsql(dataSource, npgsql =>
                 npgsql.MigrationsHistoryTable("__ef_migrations_history", IdentityDbContext.SchemaName))
             .Options;
 

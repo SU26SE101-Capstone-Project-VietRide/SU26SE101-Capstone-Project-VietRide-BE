@@ -81,7 +81,7 @@ Khi conflict, ưu tiên theo thứ tự sau:
 
 ### 1.2 Service ↔ Framework ↔ Database matrix
 
-| # | Service | Framework | Database name | Hangfire | TypeORM | Trách nhiệm chính |
+| # | Service | Framework | Database name | Hangfire | Prisma | Trách nhiệm chính |
 |---|---|---|---|---|---|---|
 | 0 | **API Gateway** | NestJS | — (stateless) | — | — | JWT validate (RS256 JWKS), Internal JWT sign (HS256 120s), reverse proxy, rate limit, phone-completion gate |
 | 1 | **Identity & User** | .NET 8 + EF Core 8 | `vietride_identity` | ✓ | — | Auth (OAuth/email/OTP), RBAC, User/Operator profile, refresh token rotation, SubscriptionPlan + OperatorSubscription, ActivityLog, UserDevice (FCM token) |
@@ -89,9 +89,9 @@ Khi conflict, ưu tiên theo thứ tự sau:
 | 3 | **Booking** | .NET 8 + EF Core 8 | `vietride_booking` | ✓ | — | Booking + Passenger + BookingTransfer, BookingPendingAction, Voucher + VoucherUsage + OperatorVoucherConsent, BookingStats, seat lock TTL (Redis) |
 | 4 | **Payment & Wallet** | .NET 8 + EF Core 8 | `vietride_payment` | ✓ | — | Payment (BOOKING/PARCEL/TOP_UP/SUBSCRIPTION), Wallet + WalletTransaction (passenger), PlatformWallet + OperatorWallet + OperatorLedgerEntry + OperatorTripSettlement, Invoice + PDF, VNPay integration, RefundFailureLog |
 | 5 | **Parcel** | .NET 8 + EF Core 8 | `vietride_parcel` | ✓ | — | Parcel lifecycle, ParcelRouteFare, deliveryToken email-link, transfer/return flows, ParcelStats |
-| 6 | **Tracking** | NestJS + TypeORM | `vietride_tracking` | — | ✓ | Socket.IO GPS streaming (`/tracking`), ETA caching (Redis 60s), off-route detection, batch-write `GpsTrail` từ Redis buffer mỗi 5 phút |
-| 7 | **Notification** | NestJS + TypeORM | `vietride_notification` | — | ✓ | Consume RabbitMQ events → enqueue BullMQ → FCM push + in-app `Notification` history + `NotificationDelivery` retry log + Email via SendGrid (OTP + parcel link) |
-| 8 | **RAG AI** | NestJS + TypeORM | `vietride_rag` | — | ✓ | KnowledgeDocument ingest, KnowledgeChunk + pgvector embed, RagConversation + RagMessage, LLM SSE streaming |
+| 6 | **Tracking** | NestJS + Prisma | `vietride_tracking` | — | ✓ | Socket.IO GPS streaming (`/tracking`), ETA caching (Redis 60s), off-route detection, batch-write `GpsTrail` từ Redis buffer mỗi 5 phút |
+| 7 | **Notification** | NestJS + Prisma | `vietride_notification` | — | ✓ | Consume RabbitMQ events → enqueue BullMQ → FCM push + in-app `Notification` history + `NotificationDelivery` retry log + Email via SendGrid (OTP + parcel link) |
+| 8 | **RAG AI** | NestJS + Prisma | `vietride_rag` | — | ✓ | KnowledgeDocument ingest, KnowledgeChunk + pgvector embed, RagConversation + RagMessage, LLM SSE streaming |
 
 ### 1.3 Container & port map (local dev)
 
@@ -151,7 +151,7 @@ Khi conflict, ưu tiên theo thứ tự sau:
 |---|---|---|
 | Node.js | 20 LTS | |
 | NestJS | 11.x | `package.json` là source-of-truth cho version chính xác |
-| TypeORM | 0.3.x | Native với `@nestjs/typeorm` |
+| Prisma | 6.x | `package.json` là source-of-truth cho version chính xác |
 | pg | 8.x | |
 | socket.io | 4.x | Tracking |
 | @nestjs/microservices (RabbitMQ) | 11.x | Consumer pattern |
@@ -235,7 +235,7 @@ vietride/                                                                    (wo
 │   │   ├── contracts/                   DTO types, error code enum, event payload types (FE + BE share qua TS path alias)
 │   │   ├── nest-common/                 JwtAuthGuard, InternalJwtGuard, RolesGuard, ProblemJsonExceptionFilter, RequestContextMiddleware, ZodValidationPipe, @CurrentUser/@Roles decorators
 │   │   ├── nest-rabbitmq/               RabbitMQ connection factory, producer abstraction, consumer base class, routing-key constants, Outbox publisher base
-│   │   ├── nest-persistence/            TypeORM naming strategy (snake_case), base entity (id/createdAt/updatedAt/rowVersion), soft-delete subscriber
+│   │   ├── nest-persistence/            Prisma naming strategy (snake_case), base entity (id/createdAt/updatedAt/rowVersion), soft-delete subscriber
 │   │   ├── nest-redis/                  IoRedis module factory + idempotency middleware helper
 │   │   └── nest-config/                 Zod env schema base + ConfigModule factory + validated env type
 │   └── dotnet/                          (C# — .NET apps reference qua ProjectReference từ libs)
@@ -733,7 +733,7 @@ apps/<service>/                                    (Nx project root)
 │   │       └── zod-validation.pipe.ts
 │   ├── infrastructure/                            Concrete adapters (1 module per integration)
 │   │   ├── database/
-│   │   │   ├── database.module.ts                 TypeORM forRoot
+│   │   │   ├── database.module.ts                 Prisma forRoot
 │   │   │   ├── data-source.ts                     CLI migration source
 │   │   │   └── migrations/<timestamp>-<name>.ts   1 file = 1 migration
 │   │   ├── redis/redis.module.ts
@@ -756,7 +756,7 @@ apps/<service>/                                    (Nx project root)
 │   │       ├── <feature>.controller.ts            Thin — gọi service, KHÔNG chứa business logic
 │   │       ├── <feature>.service.ts               Domain logic — KHÔNG bọc IXyzService
 │   │       ├── entities/
-│   │       │   └── <entity>.entity.ts             1 file/entity (TypeORM)
+│   │       │   └── <entity>.entity.ts             1 file/entity (Prisma)
 │   │       ├── dto/
 │   │       │   ├── create-<feature>.dto.ts        Zod schema + `type X = z.infer<typeof Schema>`
 │   │       │   └── <feature>-response.dto.ts
@@ -780,7 +780,7 @@ Cùng checklist như 3.2.3, dịch sang NestJS context:
 
 | ❌ Anti-pattern | ✅ Yêu cầu |
 |---|---|
-| `XyzService` 800 dòng làm CRUD + business + integration | Tách: `XyzService` (business), `XyzRepository` (chỉ nếu cần — thường TypeORM repo đã đủ inject direct), `XyzClient` (external HTTP) |
+| `XyzService` 800 dòng làm CRUD + business + integration | Tách: `XyzService` (business), `XyzRepository` (chỉ nếu cần — thường Prisma repo đã đủ inject direct), `XyzClient` (external HTTP) |
 | `IXyzService` interface + class implement (vì "test dễ hơn") | Inject class concrete. Jest mock module được — không cần interface. |
 | Controller chứa logic + repository call trực tiếp | Controller → Service. Tối đa 10 dòng/method handler. |
 | Module import nhau vòng tròn | Dùng `forwardRef()` cẩn thận; chia lại nếu vòng tròn |
@@ -801,7 +801,7 @@ HTTP request
   → Interceptor (Logging + Idempotency)
   → Controller method
   → Service method (1 method/use case — KHÔNG bọc thêm)
-  → TypeORM Repository inject trực tiếp HOẶC raw DataSource cho transaction
+  → Prisma Repository inject trực tiếp HOẶC raw DataSource cho transaction
   → Response
 ```
 
@@ -965,7 +965,7 @@ apps/gateway/src/
 | Unique | `uq_<table>_<columns>` | `uq_users_email` |
 | Check | `chk_<table>_<rule>` | `chk_payments_amount_non_negative` |
 
-EF Core / TypeORM auto-map PascalCase property ↔ snake_case column qua naming strategy (cấu hình ở `ApplicationDbContext.OnModelCreating` / TypeORM `namingStrategy`).
+EF Core / Prisma auto-map PascalCase property ↔ snake_case column qua naming strategy (cấu hình ở `ApplicationDbContext.OnModelCreating` / Prisma `namingStrategy`).
 
 ### 3.6 Shared libs philosophy — `libs/` vs `apps/`
 
@@ -989,9 +989,9 @@ EF Core / TypeORM auto-map PascalCase property ↔ snake_case column qua naming 
 | **Application** | Generic contracts: `IRepository<T,TId>`, `IReadRepository<T>`, `IUnitOfWork`, `IApplicationService` marker. MediatR behaviors generic (`ValidationBehavior`, `LoggingBehavior`, `TransactionBehavior`). Common exception types (`ValidationException`, `NotFoundException`, …). `PagedResult<T>`. `IEventPublisher` interface. | Per-aggregate `IBookingRepository`, `IBookingService` (interface + impl). Specific Command/Query/Handler/Validator. Event consume handler. DTO. Mapping logic. External client interface (`IVnPayClient`, `ITripServiceClient`) — vì impl service-specific. |
 | **Infrastructure** | EF Core generic helpers: `EfRepository<T,TId>`, `EfUnitOfWork`, interceptors (`AuditingInterceptor`, `SoftDeleteInterceptor`, `OutboxInterceptor`), `SnakeCaseNamingConvention`, `OutboxEvent` base entity. RabbitMQ wrapper: `RabbitMqConnectionFactory`, `OutboxEventPublisher`, `OutboxPublisherHostedService` base, `RoutingKeys` constants. HTTP helpers: `PollyPolicyBuilder`, `InternalJwtPropagationHandler` (DelegatingHandler), optional `BaseHttpClient`. | **`ApplicationDbContext` concrete** (DbSet per entity). Per-entity `IEntityTypeConfiguration<T>`. **EF migrations**. Per-aggregate repository impl (`BookingRepository : EfRepository<Booking,Guid>, IBookingRepository`). Concrete external client impl: `VnPayClient`, `SendGridEmailClient`, `FcmPushClient`, `FirebaseStorageClient`, `GoogleDirectionsClient`. Concrete inter-service HTTP client: `TripServiceClient`, `IdentityServiceClient`, `PaymentServiceClient`. Concrete RabbitMQ consumer dispatcher. |
 | **Api / Web** | ASP.NET Core helpers: `InternalJwtAuthenticationHandler`, `JwksAuthenticationExtensions`, `ApiResponseExceptionFilter` (global exception → ApiResponse error envelope), `ApiResponseResultFilter` (success-wrap), `RequestLoggingMiddleware`, `IdempotencyMiddleware`, `HealthCheckBuilderExtensions`, Swagger setup defaults | Controllers, custom service-specific Guard/Filter, `Program.cs` composition root, appsettings, route registration. |
-| **NestJS Common** | `JwtAuthGuard`, `InternalJwtGuard`, `RolesGuard`, `ProblemJsonExceptionFilter`, `RequestContextMiddleware`, `ZodValidationPipe`, `@CurrentUser()`, `@Roles()` decorators | Custom guard service-specific (vd `OperatorTenantGuard`), feature module (`BookingModule`, `TrackingModule`), service class, TypeORM entity, controller. |
-| **NestJS Infrastructure** | `nest-rabbitmq` (connection factory + producer/consumer base + Outbox base), `nest-persistence` (naming strategy + base entity + soft-delete subscriber), `nest-redis` (IoRedis module factory), `nest-config` (Zod env schema base + ConfigModule factory) | TypeORM `DataSource` config service-specific, migration files, BullMQ queue worker logic, business handler. |
-| **Contracts (TS shared)** | Error code enum, event payload types, DTO interface types (FE+BE consume) | Service-specific internal types (TypeORM entity, query result shape không expose ra ngoài). |
+| **NestJS Common** | `JwtAuthGuard`, `InternalJwtGuard`, `RolesGuard`, `ProblemJsonExceptionFilter`, `RequestContextMiddleware`, `ZodValidationPipe`, `@CurrentUser()`, `@Roles()` decorators | Custom guard service-specific (vd `OperatorTenantGuard`), feature module (`BookingModule`, `TrackingModule`), service class, Prisma entity, controller. |
+| **NestJS Infrastructure** | `nest-rabbitmq` (connection factory + producer/consumer base + Outbox base), `nest-persistence` (naming strategy + base entity + soft-delete subscriber), `nest-redis` (IoRedis module factory), `nest-config` (Zod env schema base + ConfigModule factory) | Prisma config service-specific, migration files, BullMQ queue worker logic, business handler. |
+| **Contracts (TS shared)** | Error code enum, event payload types, DTO interface types (FE+BE consume) | Service-specific internal types (Prisma entity, query result shape không expose ra ngoài). |
 
 #### Quy ước nhanh
 
@@ -1054,7 +1054,7 @@ Step 3 (parallel): vietride_booking, vietride_payment, vietride_parcel
 Step 4 (parallel): vietride_tracking, vietride_notification, vietride_rag
 ```
 
-Idempotent: chạy migration 2 lần không lỗi (EF Core / TypeORM migrations history tự handle).
+Idempotent: chạy migration 2 lần không lỗi (EF Core / Prisma migrations history tự handle).
 
 ### 4.2 Entity inventory per service
 
@@ -1154,7 +1154,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 - Action endpoints: verb-noun hyphen — `POST /bookings/{id}/cancel`, `POST /trips/{id}/lock-seats`
 - Query params: camelCase — `?passengerUserId=xxx&from=2026-01-01`
 - JSON body fields: camelCase — `{ "tripId": "...", "totalAmount": 350000 }`
-- DB columns: snake_case (auto-map qua EF Core / TypeORM naming strategy)
+- DB columns: snake_case (auto-map qua EF Core / Prisma naming strategy)
 
 ### 5.3 Request headers
 
@@ -1427,11 +1427,11 @@ Controller
 ```
 Controller
   → <Feature>Service.<method>()        (1 method = 1 use case)
-     → @InjectRepository(Entity) repo  (TypeORM, không bọc IXyzRepository)
+     → @InjectRepository(Entity) repo  (Prisma, không bọc IXyzRepository)
         → DataSource (cho multi-write transaction)
 ```
 
-- TypeORM Repository đã đủ generic — KHÔNG cần wrap `IXyzRepository` interface ở TS layer (Jest mock module được).
+- Prisma Repository đã đủ generic — KHÔNG cần wrap `IXyzRepository` interface ở TS layer (Jest mock module được).
 - Service method = 1 use case. Vượt ~250 dòng → tách `XyzCommandService` / `XyzQueryService`.
 - Multi-write transaction: `dataSource.transaction(async manager => { ... })`. Outbox INSERT trong cùng callback.
 
@@ -2074,7 +2074,7 @@ EF Core global query filter:
 modelBuilder.Entity<User>().HasQueryFilter(u => u.DeletedAt == null);
 ```
 
-TypeORM: tự manual filter trong repository hoặc dùng `@DeleteDateColumn`.
+Prisma: tự manual filter trong repository hoặc dùng `@DeleteDateColumn`.
 
 Partial unique index cho field tái sử dụng được sau delete:
 
@@ -2701,7 +2701,7 @@ PR fail nếu bất kỳ step nào fail.
 1. **Đọc:**
    - `BACKEND_SOURCE_OF_TRUTH.md` Section 1.2 (DB name) + 3 (project layout) + 5 (API) + 6 (auth).
    - `SU26SE101_VIETRIDE_technical_context_v7.md` Section 8 → Entity Requirements per Service → tìm phần dành cho service đó.
-   - `db-schema/<service>/schema.sql` để biết exact DDL → sinh EF Core / TypeORM entity match.
+   - `db-schema/<service>/schema.sql` để biết exact DDL → sinh EF Core / Prisma entity match.
    - `db-schema/_global/cross-service-references.md` để biết logical FK cần HTTP validate.
 
 2. **Tạo solution:**
@@ -2748,7 +2748,7 @@ PR fail nếu bất kỳ step nào fail.
 ### Khi sửa schema DB
 
 1. Sửa `db-schema/<service>/schema.sql` + `seed.sql` + `README.md` + `schema.drawio`.
-2. Tạo EF Core migration (`dotnet ef migrations add`) hoặc TypeORM migration.
+2. Tạo EF Core migration (`dotnet ef migrations add`) hoặc Prisma migration.
 3. Nếu thay đổi cross-service logical FK → update `db-schema/_global/cross-service-references.md`.
 4. Nếu thêm enum value mới → update technical_context Section 8.
 5. Run migration smoke test trên fresh DB.

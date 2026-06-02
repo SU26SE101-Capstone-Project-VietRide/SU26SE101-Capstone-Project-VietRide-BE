@@ -26,9 +26,6 @@ internal sealed class EmailVerificationTokenConfiguration : IEntityTypeConfigura
         builder.Property(e => e.Purpose)
             .HasColumnName("purpose")
             .HasColumnType("email_verification_purpose")
-            .HasConversion(
-                p => p.ToString(),
-                s => Enum.Parse<EmailVerificationPurpose>(s))
             .IsRequired();
 
         builder.Property(e => e.Code)

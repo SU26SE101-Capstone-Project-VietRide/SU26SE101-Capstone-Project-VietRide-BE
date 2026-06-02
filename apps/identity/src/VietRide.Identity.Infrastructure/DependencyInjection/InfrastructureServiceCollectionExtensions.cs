@@ -44,6 +44,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IAccessTokenService, RsaAccessTokenService>();
         services.AddSingleton<IJwksProvider, JwksProvider>();
         services.AddScoped<IRefreshTokenFactory, RefreshTokenFactory>();
+        services.AddSingleton<IOtpFailedAttemptPersister, OtpFailedAttemptPersister>();
 
         // ------------------------------------------------------------------
         // External-client stubs
