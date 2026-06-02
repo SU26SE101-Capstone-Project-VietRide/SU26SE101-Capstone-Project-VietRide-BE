@@ -7,12 +7,15 @@ using VietRide.Identity.Application.Features.Auth.Logout;
 using VietRide.Identity.Application.Features.Auth.Refresh;
 using VietRide.Identity.Application.Features.Auth.Register;
 using VietRide.Identity.Application.Features.Auth.VerifyEmail;
+using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Identity.Api.Controllers;
 
 /// <summary>
 /// Authentication endpoints: register, verify-email, login, refresh, logout.
 /// Paths per VietRide_API_Contract_v1.md Identity section (lines 18–116).
+/// All success responses are wrapped in <see cref="ApiResponse{T}"/> by <c>ApiResponseResultFilter</c> (ADR 0004).
+/// All error responses are wrapped in <see cref="ApiResponse"/> by <c>ApiResponseExceptionFilter</c> (ADR 0004).
 /// </summary>
 [ApiController]
 [Route("v1/auth")]
@@ -35,11 +38,11 @@ public sealed class AuthController : ControllerBase
     /// OTP rate limit exceeded → 429 AUTH_OTP_RATE_LIMIT_EXCEEDED.
     /// </remarks>
     [HttpPost("register")]
-    [ProducesResponseType(typeof(RegisterResponseDto), StatusCodes.Status201Created)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status422UnprocessableEntity)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType(typeof(ApiResponse<RegisterResponseDto>), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status429TooManyRequests)]
     public async Task<IActionResult> Register(
         [FromBody] RegisterRequest request,
         CancellationToken ct)
@@ -58,8 +61,8 @@ public sealed class AuthController : ControllerBase
     /// Expired code → 400 AUTH_OTP_EXPIRED.
     /// </remarks>
     [HttpPost("verify-email")]
-    [ProducesResponseType(typeof(VerifyEmailResponseDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<VerifyEmailResponseDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> VerifyEmail(
         [FromBody] VerifyEmailRequest request,
         CancellationToken ct)
@@ -78,9 +81,9 @@ public sealed class AuthController : ControllerBase
     /// Locked account → 403 AUTH_ACCOUNT_LOCKED.
     /// </remarks>
     [HttpPost("login")]
-    [ProducesResponseType(typeof(TokenBundleDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<TokenBundleDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> Login(
         [FromBody] LoginRequest request,
         CancellationToken ct)
@@ -95,8 +98,8 @@ public sealed class AuthController : ControllerBase
     /// Reuse of a revoked token revokes the whole family → 401 AUTH_TOKEN_INVALID.
     /// </remarks>
     [HttpPost("refresh")]
-    [ProducesResponseType(typeof(TokenBundleDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<TokenBundleDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Refresh(
         [FromBody] RefreshRequest request,
         CancellationToken ct)
@@ -106,10 +109,11 @@ public sealed class AuthController : ControllerBase
     }
 
     /// <summary>Revoke the provided refresh token (logout). Auth required.</summary>
+    /// <remarks>204 No Content — empty body (not wrapped in envelope per ADR 0004 Rule 5).</remarks>
     [HttpPost("logout")]
     [Authorize]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Logout(
         [FromBody] LogoutRequest request,
         CancellationToken ct)

@@ -15,7 +15,7 @@ namespace VietRide.Identity.IntegrationTests.Api;
 /// These tests exercise controller → MediatR pipeline routing.
 /// Full register-verify-login-refresh-logout flow requires a real DB;
 /// these tests validate that the endpoints boot, route correctly, and
-/// return properly shaped RFC 7807 problem responses for bad input.
+/// return properly shaped <c>ApiResponse</c> envelope responses (ADR 0004).
 /// (End-to-end flow tests are run manually against the dev stack.)
 /// </summary>
 public sealed class AuthEndpointsTests : IClassFixture<AuthWebApplicationFactory>
@@ -28,7 +28,7 @@ public sealed class AuthEndpointsTests : IClassFixture<AuthWebApplicationFactory
     }
 
     // -------------------------------------------------------------------------
-    // JWKS endpoint — no DB required, always available
+    // JWKS endpoint — exempt from envelope per Q-v7.5.1 (RFC 7517 standard format)
     // -------------------------------------------------------------------------
 
     [Fact]
@@ -40,12 +40,15 @@ public sealed class AuthEndpointsTests : IClassFixture<AuthWebApplicationFactory
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await response.Content.ReadAsStringAsync();
+        // JWKS is exempt from ApiResponse envelope — must return raw {keys:[...]} shape.
         body.Should().Contain("\"kty\":\"RSA\"");
         body.Should().Contain("\"alg\":\"RS256\"");
         body.Should().Contain("\"use\":\"sig\"");
         body.Should().Contain("\"kid\":");
         body.Should().Contain("\"n\":");
         body.Should().Contain("\"e\":");
+        // Must NOT be wrapped in the ApiResponse envelope.
+        body.Should().NotContain("\"success\":");
     }
 
     // -------------------------------------------------------------------------
@@ -66,11 +69,18 @@ public sealed class AuthEndpointsTests : IClassFixture<AuthWebApplicationFactory
 
         // ASP.NET Core 8 returns 400 for missing non-nullable fields before FluentValidation runs;
         // OR FluentValidation returns 422. Both are valid client-error responses (4xx).
+        // Response uses ApiResponse envelope (ADR 0004).
         ((int)response.StatusCode).Should().BeInRange(400, 422);
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        // Envelope: {success:false, statusCode, error:{code, message}, meta}
+        doc.RootElement.GetProperty("success").GetBoolean().Should().BeFalse();
+        doc.RootElement.GetProperty("error").GetProperty("code").GetString()
+            .Should().Be("VALIDATION_ERROR");
     }
 
     [Fact]
-    public async Task PostRegister_InvalidPhone_Returns422()
+    public async Task PostRegister_InvalidPhone_Returns422_WithEnvelope()
     {
         using var client = _factory.CreateClient();
 
@@ -86,7 +96,11 @@ public sealed class AuthEndpointsTests : IClassFixture<AuthWebApplicationFactory
         response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
         var body = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(body);
-        doc.RootElement.GetProperty("errorCode").GetString().Should().Be("VALIDATION_ERROR");
+        // Envelope shape (ADR 0004): error.code (not root-level errorCode).
+        doc.RootElement.GetProperty("success").GetBoolean().Should().BeFalse();
+        doc.RootElement.GetProperty("statusCode").GetInt32().Should().Be(422);
+        doc.RootElement.GetProperty("error").GetProperty("code").GetString()
+            .Should().Be("VALIDATION_ERROR");
     }
 
     // -------------------------------------------------------------------------
@@ -105,7 +119,13 @@ public sealed class AuthEndpointsTests : IClassFixture<AuthWebApplicationFactory
         });
 
         // Missing required field — 400 (model binding) or 422 (FluentValidation), both are 4xx.
+        // Response uses ApiResponse envelope (ADR 0004).
         ((int)response.StatusCode).Should().BeInRange(400, 422);
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("success").GetBoolean().Should().BeFalse();
+        doc.RootElement.GetProperty("error").GetProperty("code").GetString()
+            .Should().Be("VALIDATION_ERROR");
     }
 
     // -------------------------------------------------------------------------
@@ -123,7 +143,37 @@ public sealed class AuthEndpointsTests : IClassFixture<AuthWebApplicationFactory
         });
 
         // Missing required field — 400 (model binding) or 422 (FluentValidation), both are 4xx.
+        // Response uses ApiResponse envelope (ADR 0004).
         ((int)response.StatusCode).Should().BeInRange(400, 422);
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("success").GetBoolean().Should().BeFalse();
+        doc.RootElement.GetProperty("error").GetProperty("code").GetString()
+            .Should().Be("VALIDATION_ERROR");
+    }
+
+    // -------------------------------------------------------------------------
+    // Logout — validation failure (no DB required)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task PostLogout_MissingRefreshToken_ReturnsClientError()
+    {
+        using var client = _factory.CreateClient();
+
+        // Empty body: missing required refreshToken field → 400/422 validation error.
+        // (Note: AuthController has [AllowAnonymous] class-level, so auth middleware is bypassed;
+        // the request reaches the handler, but validation rejects it before any repo call.)
+        var response = await client.PostAsJsonAsync("/v1/auth/logout", new { });
+
+        // 400 (model binding) or 422 (FluentValidation) — both are 4xx client errors.
+        ((int)response.StatusCode).Should().BeInRange(400, 422);
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        // Response uses ApiResponse envelope (ADR 0004).
+        doc.RootElement.GetProperty("success").GetBoolean().Should().BeFalse();
+        doc.RootElement.GetProperty("error").GetProperty("code").GetString()
+            .Should().Be("VALIDATION_ERROR");
     }
 }
 

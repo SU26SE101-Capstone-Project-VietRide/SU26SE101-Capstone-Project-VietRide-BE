@@ -35,7 +35,7 @@ public class HealthEndpointTests : IClassFixture<VietRideWebApplicationFactory>
     }
 
     [Fact]
-    public async Task GetPing_Returns200_WithServiceName()
+    public async Task GetPing_Returns200_WithEnvelopedServiceName()
     {
         using var client = _factory.CreateClient();
 
@@ -44,7 +44,10 @@ public class HealthEndpointTests : IClassFixture<VietRideWebApplicationFactory>
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(body);
-        doc.RootElement.GetProperty("service").GetString().Should().Be("Identity");
+        // /v1/ping is NOT exempt from the ApiResponse envelope (ADR 0004).
+        // Success body shape: {success:true, statusCode:200, data:{service,status,timestamp}, meta:{traceId,timestamp}}.
+        doc.RootElement.GetProperty("success").GetBoolean().Should().BeTrue();
+        doc.RootElement.GetProperty("data").GetProperty("service").GetString().Should().Be("Identity");
     }
 }
 
