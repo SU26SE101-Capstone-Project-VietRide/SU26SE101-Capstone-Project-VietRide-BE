@@ -24,7 +24,7 @@ service first** — the file tree below is the convention, not a fixed list (BSO
 - Money is `Money` (BIGINT VND, floor-1000) from `VietRide.Shared.Kernel`. Never decimal.
 - EF: snake_case columns (shared naming convention), soft-delete (`deleted_at` via getter-only `ISoftDeletable`); entities with an enable/disable toggle ALSO implement `IActivatable` (`is_active`) — separate concern, see ADR 0003. Audit columns via `IAuditable`. Base entity from `VietRide.Shared.Kernel/Primitives/BaseEntity.cs`.
 - Repository extends the generic `IRepository<TEntity,TId>` / `EfRepository<TEntity,TId>` from the shared libs; only add aggregate-specific queries.
-- Result/error: handlers return `Result<T>`; map failures to RFC 7807 ProblemDetails with UPPER_SNAKE_CASE `errorCode`.
+- Result/error: handlers return `Result<T>`; failures map to the ADR 0004 `ApiResponse` error envelope (`error.code` UPPER_SNAKE_CASE from BSOT §5.9), wrapped by the shared envelope filter — not RFC 7807.
 
 ## File set (adapt to the service)
 ```

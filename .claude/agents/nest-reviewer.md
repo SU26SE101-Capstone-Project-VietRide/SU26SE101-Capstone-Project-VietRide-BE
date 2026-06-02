@@ -23,7 +23,7 @@ open the touched files, report findings as **BLOCKER / SHOULD-FIX / NIT** with f
 ## Conventions
 - **Line endings**: `.ts/.js/.json/.yml/.md` = LF.
 - **No unapproved npm dep**; banned `@opentelemetry/*`, `prom-client`/Prometheus.
-- **Errors**: RFC 7807 via `ProblemJsonExceptionFilter`, `errorCode` UPPER_SNAKE_CASE.
+- **Responses/errors**: ADR 0004 `ApiResponse<T>` envelope via the shared `nest-common` envelope filter; `error.code` UPPER_SNAKE_CASE from BSOT §5.9. RFC 7807/`application/problem+json` dropped.
 - Input validated with zod; TS strict (no `any` escape hatches, no `// @ts-ignore` without reason).
 - Tests: `npx nx run <app>:test` covers new logic; lint clean.
 - **Code-quality balance (BSOT §3.3.1):** judge SOLID with judgment — flag a true god-service or business logic leaking into the thin-proxy Gateway, but do NOT request splitting a cohesive class just for size, nor demand anemic fragmentation. Size numbers are review guidelines, not CI limits.

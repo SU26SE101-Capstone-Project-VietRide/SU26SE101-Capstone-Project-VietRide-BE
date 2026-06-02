@@ -43,7 +43,7 @@ End with a one-line verdict: **APPROVE PLAN** / **REQUEST PLAN CHANGES** (with t
 - **CPM**: no `Version=` on a `.csproj` `<PackageReference>`; versions only in `Directory.Packages.props`.
 - **Banned deps**: AutoMapper, OpenTelemetry/Prometheus/Grafana/Tempo/Loki, MediatR v12+, any commercial/new dep without approval.
 - **Money**: BIGINT VND, floor-1000; no decimals.
-- **Errors**: RFC 7807 ProblemDetails, `errorCode` UPPER_SNAKE_CASE.
+- **Responses/errors**: ADR 0004 `ApiResponse<T>` envelope — success `{success,statusCode,data,meta}`, error `{success:false,statusCode,error:{code,message,fields?},meta}`; `error.code` UPPER_SNAKE_CASE from BSOT §5.9. RFC 7807/`application/problem+json` dropped.
 - **Events**: routing key `<svc>.<aggregate>.<verb_past>`; published via Outbox/`IEventPublisher`, not direct; consumer payload type in `libs/shared/contracts` matches.
 - **No cross-DB FK** at the DB layer (logical FK only).
 - **Auth**: Internal JWT (HS256, `vietride-gateway`/`vietride-internal`, `X-Internal-Auth`, TTL 120s); User token (RS256, JWKS, `vietride-identity`/`vietride-api`). Protected endpoints actually require auth; operator-scoped endpoints enforce tenant isolation.

@@ -1,6 +1,6 @@
 ---
 name: add-endpoint
-description: Add an HTTP endpoint to a VietRide .NET service (thin controller -> MediatR.Send), with RFC 7807 ProblemDetails, Idempotency-Key on mutations, Swashbuckle annotation, and the matching Gateway route entry. Use when exposing a new REST endpoint defined in VietRide_API_Contract_v1.md.
+description: Add an HTTP endpoint to a VietRide .NET service (thin controller -> MediatR.Send), with the ADR 0004 ApiResponse envelope, Idempotency-Key on mutations, Swashbuckle annotation, and the matching Gateway route entry. Use when exposing a new REST endpoint defined in VietRide_API_Contract_v1.md.
 ---
 
 # Add a .NET endpoint + wire the Gateway route
@@ -14,7 +14,7 @@ description: Add an HTTP endpoint to a VietRide .NET service (thin controller ->
 - Controller is **thin**: bind request -> `MediatR.Send(command/query)` -> map `Result<T>` to `ActionResult`. No business logic, no DbContext, no service call.
 - One controller per aggregate: `Controllers/<Aggregate>Controller.cs`.
 - Annotate with Swashbuckle (`[ProducesResponseType]` per documented status) so FE can generate clients.
-- Errors flow through the global ProblemDetails filter — return RFC 7807 `{type,title,status,detail,instance,errorCode,errors?}`, `errorCode` UPPER_SNAKE_CASE. Don't hand-roll error JSON.
+- Errors flow through the global ApiResponse envelope filter (ADR 0004) — error shape `{success:false,statusCode,error:{code,message,fields?},meta}`, `error.code` UPPER_SNAKE_CASE from BSOT §5.9. Don't hand-roll error JSON; RFC 7807/`application/problem+json` is dropped.
 - **Mutations (POST/PATCH/PUT/DELETE)** must honor the `Idempotency-Key` header (Redis SETNX 24h, via the shared `IdempotencyMiddleware`). Reads do not.
 - Money in responses is the raw BIGINT VND.
 

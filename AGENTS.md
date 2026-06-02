@@ -8,6 +8,25 @@
 Polyglot Nx 22 monorepo: 5 .NET 8 services (Clean Architecture) + API Gateway + 3 workers (NestJS),
 6 .NET shared libs + 6 TS shared libs. Infra: Postgres 16 + Redis 7 + RabbitMQ 3.13.
 
+## Communication — report to the human in Vietnamese
+
+The skills/subagents in this repo are authored in English, but the human (BE lead, Vũ) works in
+Vietnamese. **The orchestrator (main thread, whichever harness) MUST write its conversational
+replies and hand-back reports to the human in Vietnamese by default** — including the summaries
+after `/plan-day`, `/implement-task`, `/review-task`, `/audit-day`, `/verify`, and any general
+Q&A. Do NOT make the human ask for a translation as a second step.
+
+Scope — Vietnamese applies ONLY to the orchestrator's chat/report to the human. It does NOT
+change repo artifacts, which keep their established language:
+- **Subagent dispatch prompts** stay the verbatim English skill templates (translating them would
+  break the "verbatim, only `<N>`/`<X.Y>` substituted" guardrail).
+- **Committed artifacts** (`day-<N>-plan.md` / `day-<N>-checklist.md`, code, comments, commit
+  messages, ADRs, BSOT changelog rows) keep their existing convention — English for code/plan,
+  Vietnamese where the doc is already Vietnamese (e.g. BSOT prose).
+- Technical identifiers (error codes, file paths, type names, commands) stay verbatim.
+
+If a future human prefers another language, override this section locally.
+
 ## Source-of-truth hierarchy (when in conflict, higher wins)
 
 1. `SU26SE101_VIETRIDE_technical_context_v7.md` — business rules, flows, enums, status machines (canonical for **business/domain**)
@@ -36,6 +55,17 @@ Polyglot Nx 22 monorepo: 5 .NET 8 services (Clean Architecture) + API Gateway + 
 - **Observability v1 = Sentry + UptimeRobot + Serilog/Winston only** (BSOT §9.13). Do NOT add OpenTelemetry / Prometheus / Grafana / Tempo / Loki — they were removed deliberately. (Enforced by `.githooks/pre-commit`.)
 - **Banned deps:** AutoMapper (use Mapster or manual mapping). **MediatR pinned v11.x** (v12+ commercial — do NOT upgrade). No commercial/paid deps.
 - **Do not add a new .NET or TS dependency without explicit approval.**
+- **Git worktrees are forbidden in this repo.** Do not create or enter a worktree — no
+  `git worktree add`, and no agent/subagent worktree isolation. Dispatch subagents in the current
+  working tree; if parallel work could conflict, STOP and ask the human. Worktree creation is
+  blocked *before the tool runs* by a per-harness pre-tool guard: `.claude/hooks/pre-guard.mjs`
+  (Claude Code — committed, every clone has it) and `.opencode/plugins/pre-guard.js` (OpenCode —
+  local-only / git-ignored, so each OpenCode user must install that mirror; without it the rule is
+  instruction-only for them). Git has no commit-time hook for worktree creation, so `.githooks/*`
+  do NOT block it — those enforce the other invariants (no `Co-Authored-By`, CPM, banned deps) at
+  commit time. A genuinely-needed worktree requires temporarily disabling the active guard.
+  (`git worktree list/remove/prune` stay allowed for cleanup.) Rationale: many agent worktrees
+  obscure which checkout holds the real diff and make later merges/cleanup error-prone.
 
 ## Domain conventions
 
@@ -45,7 +75,7 @@ Polyglot Nx 22 monorepo: 5 .NET 8 services (Clean Architecture) + API Gateway + 
 - **Money**: BIGINT (VND), floor to 1000 before persisting (`Money.FromRaw`). No decimals.
 - **Persistence**: EF Core, one DbContext per service, snake_case schema, soft-delete (`deleted_at timestamptz` only, partial unique index `WHERE deleted_at IS NULL`, see ADR 0003), `is_active` is a **separate** activation flag (not part of soft-delete — entities that need enable/disable implement `IActivatable`; `User` has no `is_active`, it uses its `status` enum), Outbox pattern. EF migrations run WITHOUT booting the host via per-service `IDesignTimeDbContextFactory`.
 - **Messaging**: RabbitMQ topic exchange `vietride.events`, routing key `<svc>.<aggregate>.<verb_past>` (e.g. `identity.user.created`).
-- **Errors**: RFC 7807 ProblemDetails `{type,title,status,detail,instance,errorCode,errors?}`, `errorCode` is UPPER_SNAKE_CASE.
+- **Responses/errors**: ADR 0004 `ApiResponse<T>` envelope — success `{success,statusCode,data,meta}`, error `{success:false,statusCode,error:{code,message,fields?},meta}`; `error.code` is UPPER_SNAKE_CASE from BSOT §5.9. `application/problem+json` (RFC 7807) is dropped as of ADR 0004 (2026-06-01).
 - **Cross-DB FK is forbidden at DB layer** — logical FK only, enforced via HTTP/event (see `db-schema/_global/cross-service-references.md`).
 - **Clean Architecture dependency direction** (CI-enforced via NetArchTest): Domain → (nothing); Application → Domain; Infrastructure → Domain+Application; Api → Application+Infrastructure. Controller calls `MediatR.Send`, never a service directly.
 - **Naming** (BSOT §3.5, fixed): `<Verb><Aggregate>Command/Query/Handler/Validator`, `I<Aggregate>Repository`, `<Aggregate>Service`. One class per file.

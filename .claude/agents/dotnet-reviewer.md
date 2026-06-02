@@ -1,6 +1,6 @@
 ---
 name: dotnet-reviewer
-description: Deep correctness + convention reviewer for VietRide .NET service code. Read-only. Audits Clean Architecture dependency direction, CQRS/naming, EF/migration conventions, CPM, MediatR v11, BCrypt, Money, ProblemDetails and Outbox usage in apps/{identity,trip,booking,payment,parcel} and libs/dotnet. Use after dotnet-worker finishes a change.
+description: Deep correctness + convention reviewer for VietRide .NET service code. Read-only. Audits Clean Architecture dependency direction, CQRS/naming, EF/migration conventions, CPM, MediatR v11, BCrypt, Money, ApiResponse envelope and Outbox usage in apps/{identity,trip,booking,payment,parcel} and libs/dotnet. Use after dotnet-worker finishes a change.
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
@@ -18,7 +18,7 @@ open the touched files, and report findings as **BLOCKER / SHOULD-FIX / NIT** wi
 - **CPM**: no `Version=` on `<PackageReference>`. **MediatR 11.x** only. No **AutoMapper** / banned observability deps / unapproved new deps.
 - **EF**: snake_case mapping, soft-delete global filter on `DeletedAt == null` (`ISoftDeletable`; getter-only per ADR 0003) — `is_active`/`IActivatable` is a DISTINCT activation toggle, not part of soft-delete; audit columns, one DbContext. Migration is reversible (real `Down()`), not editing a merged migration, no cross-DB FK. Schema matches `db-schema/<service>/schema.sql`.
 - **Money**: `Money`/BIGINT VND, floor-1000, no decimal.
-- **Errors**: RFC 7807 ProblemDetails, `errorCode` UPPER_SNAKE_CASE; failures go through the global filter, not hand-rolled JSON.
+- **Responses/errors**: ADR 0004 `ApiResponse<T>` envelope (error `{success:false,statusCode,error:{code,message,fields?},meta}`); `error.code` UPPER_SNAKE_CASE from BSOT §5.9; failures wrapped by the global envelope filter, not hand-rolled JSON. RFC 7807/`application/problem+json` dropped.
 - **Events**: `IEventPublisher`/Outbox (transactional), routing key `<svc>.<aggregate>.<verb_past>`.
 - **Auth**: correct scheme per endpoint (Internal HS256 vs User RS256/JWKS); protected + tenant-scoped endpoints enforced.
 - **Line endings**: `.cs/.csproj` CRLF.

@@ -42,7 +42,7 @@ shape → zod DTO validation; the Gateway stays a thin proxy (no business logic 
 ## Hard invariants
 - **Line endings**: all `.ts/.js/.json/.yml/.md` = LF.
 - **No new npm dependency** without approval. Banned: `@opentelemetry/*`, `prom-client`/Prometheus (observability v1 = Winston + Sentry + UptimeRobot).
-- **Errors**: RFC 7807 ProblemDetails (`ProblemJsonExceptionFilter` in `nest-common`), `errorCode` UPPER_SNAKE_CASE.
+- **Responses/errors**: ADR 0004 `ApiResponse<T>` envelope via the shared `nest-common` envelope filter — error `{success:false,statusCode,error:{code,message,fields?},meta}`, `error.code` UPPER_SNAKE_CASE from BSOT §5.9. RFC 7807/`application/problem+json` dropped.
 - TypeScript strict mode; validate input with zod (`ZodValidationPipe`).
 
 ## Before reporting done

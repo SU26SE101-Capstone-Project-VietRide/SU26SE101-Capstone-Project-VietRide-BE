@@ -24,7 +24,7 @@ service before writing anything new.
 - **Money**: `Money` (BIGINT VND, floor-1000) from `VietRide.Shared.Kernel`; never decimal.
 - **Auth**: Internal JWT HS256 (`vietride-gateway`/`vietride-internal`, `X-Internal-Auth`, 120s); User token RS256 via JWKS (`vietride-identity`/`vietride-api`).
 - **Persistence**: one DbContext/service, snake_case, soft-delete (`deleted_at` only via getter-only `ISoftDeletable`; `is_active` is a SEPARATE activation flag via `IActivatable` — see ADR 0003), audit columns, Outbox.
-- **Errors**: RFC 7807 ProblemDetails, `errorCode` UPPER_SNAKE_CASE.
+- **Responses/errors**: ADR 0004 `ApiResponse<T>` envelope — success `{success,statusCode,data,meta}`, error `{success:false,statusCode,error:{code,message,fields?},meta}`; `error.code` UPPER_SNAKE_CASE from BSOT §5.9. RFC 7807/`application/problem+json` dropped.
 - **Events**: routing key `<svc>.<aggregate>.<verb_past>` via `IEventPublisher` (Outbox), never direct publish.
 - **No cross-DB FK** — logical FK only; snapshot foreign data or call via Internal-JWT HTTP client.
 
