@@ -280,6 +280,7 @@ function createTestEnv(publicKeyPem: string): Env {
     LOG_LEVEL: 'info',
     USER_JWT_PUBLIC_KEY: publicKeyPem,
     TRACKING_GPS_FLUSH_ENABLED: false,
+    TRACKING_GPS_FLUSH_INTERVAL_MS: 300_000,
   };
 }
 

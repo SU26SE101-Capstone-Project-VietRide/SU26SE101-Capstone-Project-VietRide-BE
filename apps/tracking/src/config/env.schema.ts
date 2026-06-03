@@ -17,6 +17,7 @@ export const envSchema = baseEnvSchema.merge(
     JWT_PUBLIC_KEY_URL: z.string().url().default('http://identity:5001/v1/.well-known/jwks.json'),
     USER_JWT_PUBLIC_KEY: z.string().optional(),
     TRACKING_GPS_FLUSH_ENABLED: booleanEnvSchema.default(false),
+    TRACKING_GPS_FLUSH_INTERVAL_MS: z.coerce.number().int().positive().default(300_000),
   }),
 );
 

@@ -29,7 +29,7 @@ Mỗi phase phải test được bằng e2e/unit theo hướng production. Nếu
 ## Phase Progress
 
 - [x] Phase 1 — Identity-backed Realtime Foundation Và FE Socket Contract
-- [ ] Phase 2 — GPS Persistence Batch Job
+- [x] Phase 2 — GPS Persistence Batch Job
 - [ ] Phase 3 — REST Fallback Endpoints Cho Tracking Data
 - [ ] Phase 4 — Dynamic ETA Engine
 - [ ] Phase 5 — Approaching Alert

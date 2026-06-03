@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RedisService } from '@vietride/nest-redis';
+import type { UpdateLocationDto } from '../location/dto/update-location.dto';
 import { TrackingPrismaService } from '../prisma/tracking-prisma.service';
 import {
   TRACKING_ACTIVE_TRIPS_KEY,
@@ -26,13 +27,10 @@ export class GpsBatchFlushService {
       const rows = await client.lrange(bufferKey, 0, -1);
       if (rows.length === 0) continue;
 
-      const parsedRows = rows
-        .map((row) => UpdateLocationSchema.safeParse(JSON.parse(row)))
-        .filter((result) => result.success)
-        .map((result) => result.data);
+      const parsedRows = rows.flatMap((row) => this.parseBufferedRow(row, tripId));
 
       if (parsedRows.length === 0) {
-        await client.del(bufferKey);
+        this.logger.warn(`No valid GPS rows found in buffer for trip ${tripId}`);
         continue;
       }
 
@@ -56,5 +54,23 @@ export class GpsBatchFlushService {
 
     this.logger.log(`Flushed ${inserted} GPS trail rows`);
     return inserted;
+  }
+
+  private parseBufferedRow(row: string, tripId: string): UpdateLocationDto[] {
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(row);
+    } catch {
+      this.logger.warn(`Skipping malformed GPS JSON row for trip ${tripId}`);
+      return [];
+    }
+
+    const parsed = UpdateLocationSchema.safeParse(parsedJson);
+    if (!parsed.success) {
+      this.logger.warn(`Skipping invalid GPS row for trip ${tripId}`);
+      return [];
+    }
+
+    return [parsed.data];
   }
 }
