@@ -4,19 +4,11 @@ namespace VietRide.Identity.Application.Features.Auth.Register;
 
 /// <summary>
 /// Input-shape validation for <see cref="RegisterCommand"/>.
-/// Phone: local (0xxxxxxxxx / 0xxxxxxxxxx) OR E.164 (+84xxxxxxxxx / +84xxxxxxxxxx).
-/// Other formats → FluentValidation error → 422 VALIDATION_ERROR.
-/// Note: AUTH_PHONE_INVALID_FORMAT (400) is a semantic duplicate that the contract
-/// references; FluentValidation 422 covers it at the input-validation boundary.
+/// Phone is required here; semantic phone-format validation belongs in the handler
+/// so the API can return the contract-specific 400 AUTH_PHONE_INVALID_FORMAT.
 /// </summary>
 public sealed class RegisterCommandValidator : AbstractValidator<RegisterCommand>
 {
-    // Matches local VN: 0 followed by 9 or 10 digits.
-    private const string LocalVnPattern = @"^0[0-9]{9,10}$";
-
-    // Matches E.164 VN: +84 followed by 9 or 10 digits.
-    private const string E164VnPattern = @"^\+84[0-9]{9,10}$";
-
     public RegisterCommandValidator()
     {
         RuleFor(x => x.Email)
@@ -34,9 +26,6 @@ public sealed class RegisterCommandValidator : AbstractValidator<RegisterCommand
             .MaximumLength(100);
 
         RuleFor(x => x.Phone)
-            .NotEmpty()
-            .Matches($"({LocalVnPattern})|({E164VnPattern})")
-            .WithErrorCode("AUTH_PHONE_INVALID_FORMAT")
-            .WithMessage("Phone must be a valid Vietnamese number (0xxxxxxxxx or +84xxxxxxxxx).");
+            .NotEmpty();
     }
 }

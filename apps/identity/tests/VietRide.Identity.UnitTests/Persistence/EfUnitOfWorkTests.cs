@@ -1,7 +1,10 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using NSubstitute;
+using VietRide.Identity.Domain.Entities;
+using VietRide.Identity.Infrastructure;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Persistence;
 using VietRide.Shared.Persistence.UnitOfWork;
 
@@ -38,6 +41,31 @@ public sealed class EfUnitOfWorkTests
         }
     }
 
+    private sealed class AuditingDbContext : VietRideDbContextBase
+    {
+        public AuditingDbContext(DbContextOptions options, IClock clock)
+            : base(options, clock)
+        {
+        }
+
+        public DbSet<AuditedEntity> AuditedEntities => Set<AuditedEntity>();
+    }
+
+    private sealed class AuditedEntity : BaseEntity<Guid>
+    {
+        public string Name { get; private set; } = string.Empty;
+
+        public static AuditedEntity Create(string name)
+            => new()
+            {
+                Id = Guid.NewGuid(),
+                Name = name,
+            };
+
+        public void Rename(string name)
+            => Name = name;
+    }
+
     private static (SpyDbContext db, EfUnitOfWork uow) Build()
     {
         var clock = Substitute.For<IClock>();
@@ -52,6 +80,100 @@ public sealed class EfUnitOfWorkTests
         var db = new SpyDbContext(options, clock);
         var uow = new EfUnitOfWork(db);
         return (db, uow);
+    }
+
+    private static AuditingDbContext BuildAuditingContext(DateTimeOffset now)
+    {
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(now);
+
+        var options = new DbContextOptionsBuilder<AuditingDbContext>()
+            .UseNpgsql("Host=127.0.0.1;Port=1;Database=vietride_audit_test;Username=test;Password=test")
+            .Options;
+
+        return new AuditingDbContext(options, clock);
+    }
+
+    private static IdentityDbContext BuildIdentityContext()
+    {
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+
+        var options = new DbContextOptionsBuilder<IdentityDbContext>()
+            .UseNpgsql("Host=127.0.0.1;Port=1;Database=vietride_identity_model_test;Username=test;Password=test")
+            .Options;
+
+        return new IdentityDbContext(options, clock);
+    }
+
+    // -----------------------------------------------------------------------
+    // Happy-path: BaseEntity auditing through VietRideDbContextBase
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void BaseEntity_ImplementsIAuditable()
+    {
+        typeof(IAuditable).IsAssignableFrom(typeof(BaseEntity<Guid>))
+            .Should().BeTrue("VietRideDbContextBase scans ChangeTracker.Entries<IAuditable>() for audit columns.");
+    }
+
+    [Fact]
+    public void IdentityModel_EmailVerificationToken_DoesNotMapUpdatedAtColumn()
+    {
+        // Arrange
+        using var db = BuildIdentityContext();
+
+        // Act
+        var entityType = db.Model.FindEntityType(typeof(EmailVerificationToken));
+
+        // Assert — schema.sql has created_at only for email_verification_tokens.
+        entityType.Should().NotBeNull();
+        entityType!.FindProperty(nameof(EmailVerificationToken.CreatedAt)).Should().NotBeNull();
+        entityType.FindProperty(nameof(EmailVerificationToken.UpdatedAt)).Should().BeNull(
+            "email_verification_tokens intentionally ignores BaseEntity.UpdatedAt to avoid DB column drift.");
+    }
+
+    [Fact]
+    public void SaveChanges_AuditsAddedBaseEntity_BeforeProviderSave()
+    {
+        // Arrange
+        var now = new DateTimeOffset(2026, 6, 3, 12, 0, 0, TimeSpan.Zero);
+        using var db = BuildAuditingContext(now);
+        var entity = AuditedEntity.Create("created");
+
+        db.AuditedEntities.Add(entity);
+
+        // Act — the database points to a closed local port, so EF save fails after auditing runs.
+        var act = () => db.SaveChanges();
+
+        // Assert
+        act.Should().Throw<Exception>();
+        entity.CreatedAt.Should().Be(now);
+        entity.UpdatedAt.Should().Be(now);
+    }
+
+    [Fact]
+    public void SaveChanges_AuditsModifiedBaseEntity_BeforeProviderSave()
+    {
+        // Arrange
+        var now = new DateTimeOffset(2026, 6, 3, 12, 30, 0, TimeSpan.Zero);
+        using var db = BuildAuditingContext(now);
+        var createdAt = new DateTimeOffset(2026, 6, 3, 12, 0, 0, TimeSpan.Zero);
+        var entity = AuditedEntity.Create("original");
+        entity.CreatedAt = createdAt;
+        entity.UpdatedAt = createdAt;
+
+        db.Attach(entity);
+        entity.Rename("updated");
+        db.Entry(entity).State = EntityState.Modified;
+
+        // Act — the database points to a closed local port, so EF save fails after auditing runs.
+        var act = () => db.SaveChanges();
+
+        // Assert
+        act.Should().Throw<Exception>();
+        entity.CreatedAt.Should().Be(createdAt);
+        entity.UpdatedAt.Should().Be(now);
     }
 
     // -----------------------------------------------------------------------

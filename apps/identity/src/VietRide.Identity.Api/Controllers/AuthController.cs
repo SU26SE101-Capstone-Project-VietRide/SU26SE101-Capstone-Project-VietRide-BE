@@ -19,7 +19,6 @@ namespace VietRide.Identity.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("v1/auth")]
-[AllowAnonymous]
 public sealed class AuthController : ControllerBase
 {
     private readonly ISender _sender;
@@ -38,6 +37,7 @@ public sealed class AuthController : ControllerBase
     /// OTP rate limit exceeded → 429 AUTH_OTP_RATE_LIMIT_EXCEEDED.
     /// </remarks>
     [HttpPost("register")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(ApiResponse<RegisterResponseDto>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
@@ -61,6 +61,7 @@ public sealed class AuthController : ControllerBase
     /// Expired code → 400 AUTH_OTP_EXPIRED.
     /// </remarks>
     [HttpPost("verify-email")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(ApiResponse<VerifyEmailResponseDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> VerifyEmail(
@@ -81,6 +82,7 @@ public sealed class AuthController : ControllerBase
     /// Locked account → 403 AUTH_ACCOUNT_LOCKED.
     /// </remarks>
     [HttpPost("login")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(ApiResponse<TokenBundleDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
@@ -98,6 +100,7 @@ public sealed class AuthController : ControllerBase
     /// Reuse of a revoked token revokes the whole family → 401 AUTH_TOKEN_INVALID.
     /// </remarks>
     [HttpPost("refresh")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(ApiResponse<TokenBundleDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Refresh(

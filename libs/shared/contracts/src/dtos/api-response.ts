@@ -12,8 +12,8 @@ import { z } from 'zod';
 // ── Meta ──────────────────────────────────────────────────────────────────────
 
 export const ApiMetaSchema = z.object({
-  /** Correlation id stamped by the gateway (X-Request-Id / ADR 0002). */
-  traceId: z.string().optional(),
+  /** Required correlation id stamped by the gateway (X-Request-Id / ADR 0002). */
+  traceId: z.string(),
   /** Response timestamp — UTC ISO-8601. */
   timestamp: z.string(),
 });

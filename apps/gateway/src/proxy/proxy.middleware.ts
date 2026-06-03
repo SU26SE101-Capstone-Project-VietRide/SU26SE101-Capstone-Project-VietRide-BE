@@ -3,9 +3,56 @@ import type { NextFunction, Request, RequestHandler as ExpressHandler, Response 
 import { createProxyMiddleware, type RequestHandler } from 'http-proxy-middleware';
 import { randomUUID } from 'node:crypto';
 import { InternalJwtSigner } from '../auth/internal-jwt.signer';
+import { createUserJwtVerifier } from '../auth/user-jwt.verifier';
 import type { Env } from '../config/env.schema';
 import { buildRouteTable, matchRoute, type ProxyRoute } from '../config/routes';
 import type { RequestWithUser } from '../auth/user-jwt.middleware';
+
+type ApiErrorEnvelope = {
+  success: false;
+  statusCode: number;
+  error: {
+    code: string;
+    message: string;
+  };
+  meta: {
+    traceId: string;
+    timestamp: string;
+  };
+};
+
+type RequestIdSource = {
+  requestId?: string;
+  header?: (name: string) => string | undefined;
+  headers?: Record<string, string | string[] | undefined>;
+};
+
+function resolveRequestId(req: RequestIdSource): string {
+  const headerValue =
+    typeof req.header === 'function'
+      ? req.header('x-request-id')
+      : firstHeaderValue(req.headers?.['x-request-id']);
+
+  return (req.requestId ?? headerValue ?? randomUUID()).toString();
+}
+
+function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function buildErrorEnvelope(
+  statusCode: number,
+  code: string,
+  message: string,
+  traceId: string,
+): ApiErrorEnvelope {
+  return {
+    success: false,
+    statusCode,
+    error: { code, message },
+    meta: { traceId, timestamp: new Date().toISOString() },
+  };
+}
 
 /**
  * Factory returning an Express middleware (raw, not Nest) that:
@@ -22,6 +69,7 @@ export function createProxyHandler(env: Env, signer: InternalJwtSigner): Express
   const logger = new Logger('Proxy');
   const routes = buildRouteTable(env);
   const proxies = new Map<string, RequestHandler>();
+  const userJwtVerifier = createUserJwtVerifier(env);
 
   function getProxy(route: ProxyRoute): RequestHandler {
     const key = route.target;
@@ -31,17 +79,20 @@ export function createProxyHandler(env: Env, signer: InternalJwtSigner): Express
         target: route.target,
         changeOrigin: true,
         on: {
-          error: (err, _req, res) => {
+          error: (err, proxyReq, res) => {
             logger.error(`Upstream ${route.target} error: ${err.message}`);
             const r = res as Response;
             if (!r.headersSent) {
-              r.status(502).json({
-                type: 'https://vietride.app/errors/UPSTREAM_UNAVAILABLE',
-                title: 'Upstream service unavailable',
-                status: 502,
-                errorCode: 'UPSTREAM_UNAVAILABLE',
-                detail: err.message,
-              });
+              const reqId = resolveRequestId(proxyReq as RequestIdSource);
+              r.setHeader('X-Request-Id', reqId);
+              r.status(502).json(
+                buildErrorEnvelope(
+                  502,
+                  'UPSTREAM_UNAVAILABLE',
+                  'Upstream service unavailable',
+                  reqId,
+                ),
+              );
             }
           },
         },
@@ -49,6 +100,19 @@ export function createProxyHandler(env: Env, signer: InternalJwtSigner): Express
       proxies.set(key, handler);
     }
     return handler;
+  }
+
+  function sendUnauthorized(res: Response, reqId: string): void {
+    res
+      .status(401)
+      .json(
+        buildErrorEnvelope(
+          401,
+          'AUTH_TOKEN_INVALID',
+          'Authorization header is required or access token is invalid.',
+          reqId,
+        ),
+      );
   }
 
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -59,27 +123,39 @@ export function createProxyHandler(env: Env, signer: InternalJwtSigner): Express
       return next();
     }
 
-    const route = matchRoute(routes, fullPath);
-    if (!route) {
-      res.status(404).json({
-        type: 'https://vietride.app/errors/ROUTE_NOT_FOUND',
-        title: 'No upstream for path',
-        status: 404,
-        errorCode: 'ROUTE_NOT_FOUND',
-        detail: `No upstream registered for ${fullPath}`,
-      });
-      return;
-    }
-
     // Reuse the requestId stamped by CorrelationIdMiddleware when running
     // inside the Nest pipeline; otherwise fall back to header/random because
     // this proxy is mounted as raw Express via `app.use()` before Nest router.
-    const reqId = ((req as Request & { requestId?: string }).requestId
-      ?? req.header('x-request-id')
-      ?? randomUUID()).toString();
+    const reqId = resolveRequestId(req);
     res.setHeader('X-Request-Id', reqId);
 
-    const user = (req as RequestWithUser).user;
+    const route = matchRoute(routes, fullPath);
+    if (!route) {
+      res
+        .status(404)
+        .json(
+          buildErrorEnvelope(
+            404,
+            'ROUTE_NOT_FOUND',
+            `No upstream registered for ${fullPath}`,
+            reqId,
+          ),
+        );
+      return;
+    }
+
+    let user = (req as RequestWithUser).user;
+    if (route.authRequired === 'user' && !user) {
+      try {
+        user = await userJwtVerifier.verifyAuthorizationHeader(req.header('authorization'));
+        (req as RequestWithUser).user = user;
+      } catch (err) {
+        logger.warn(`JWT verify failed: ${(err as Error).message}`);
+        sendUnauthorized(res, reqId);
+        return;
+      }
+    }
+
     const role = user?.['role'] as string | undefined;
     const operatorId = user?.['operatorId'] as string | undefined;
 
@@ -95,7 +171,9 @@ export function createProxyHandler(env: Env, signer: InternalJwtSigner): Express
 
     // Compute upstream path; set BOTH req.url AND req.originalUrl since http-proxy-middleware v3
     // may read either when constructing the forwarded URL.
-    const search = req.originalUrl.includes('?') ? req.originalUrl.substring(req.originalUrl.indexOf('?')) : '';
+    const search = req.originalUrl.includes('?')
+      ? req.originalUrl.substring(req.originalUrl.indexOf('?'))
+      : '';
     let upstreamPath: string;
     if (route.rewriteTo) {
       upstreamPath = route.rewriteTo + search;

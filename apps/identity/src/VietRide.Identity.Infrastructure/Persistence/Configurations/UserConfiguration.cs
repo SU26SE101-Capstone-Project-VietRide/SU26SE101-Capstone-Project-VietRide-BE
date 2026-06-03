@@ -58,6 +58,7 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.Status)
             .HasColumnName("status")
             .HasColumnType("user_status")
+            .HasDefaultValue(UserStatus.PENDING_EMAIL_VERIFICATION)
             .IsRequired();
 
         builder.Property(u => u.OperatorId)
@@ -80,10 +81,12 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
 
         builder.Property(u => u.CreatedAt)
             .HasColumnName("created_at")
+            .HasDefaultValueSql("now()")
             .IsRequired();
 
         builder.Property(u => u.UpdatedAt)
             .HasColumnName("updated_at")
+            .HasDefaultValueSql("now()")
             .IsRequired();
 
         builder.Property(u => u.DeletedAt)

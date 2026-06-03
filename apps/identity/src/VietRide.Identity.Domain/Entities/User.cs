@@ -84,18 +84,28 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
     }
 
     /// <summary>
-    /// Increments failed login counter and sets last_failed_login_at.
-    /// When the counter reaches >= 5 the status transitions permanently to LOCKED.
+    /// Records a failed login and sets last_failed_login_at.
+    /// <paramref name="failedAttemptsInWindow"/> is the Redis counter value for the
+    /// 15-minute <c>identity:login_lockout:{userId}</c> window. When that windowed
+    /// counter reaches >= 5 the status transitions permanently to LOCKED.
     /// The lock is permanent — only a System Admin unlocks the account manually.
-    /// Note: the 15-minute window is enforced by the Redis TTL on
-    /// identity:login_lockout:{userId} (Application layer), NOT by a DB column.
     /// </summary>
-    public void RecordFailedLogin(IClock clock)
+    public void RecordFailedLogin(IClock clock, long failedAttemptsInWindow)
     {
-        FailedLoginAttempts++;
+        if (failedAttemptsInWindow < 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(failedAttemptsInWindow),
+                failedAttemptsInWindow,
+                "Failed login attempts in window must be at least 1.");
+        }
+
+        FailedLoginAttempts = failedAttemptsInWindow > int.MaxValue
+            ? int.MaxValue
+            : (int)failedAttemptsInWindow;
         LastFailedLoginAt = clock.UtcNow;
 
-        if (FailedLoginAttempts >= MaxFailedLoginAttempts)
+        if (failedAttemptsInWindow >= MaxFailedLoginAttempts)
         {
             Status = UserStatus.LOCKED;
         }

@@ -123,7 +123,7 @@ function defaultErrorCodeForStatus(status: number): string {
     case 422:
       return 'UNPROCESSABLE_ENTITY';
     case 429:
-      return 'TOO_MANY_REQUESTS';
+      return 'RATE_LIMITED';
     case 502:
       return 'BAD_GATEWAY';
     case 503:

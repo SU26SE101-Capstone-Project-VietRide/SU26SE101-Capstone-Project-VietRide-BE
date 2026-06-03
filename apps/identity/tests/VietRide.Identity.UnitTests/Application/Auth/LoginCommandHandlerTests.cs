@@ -17,18 +17,29 @@ public sealed class LoginCommandHandlerTests
     private static readonly DateTimeOffset FrozenNow = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
     private static readonly PhoneNumber TestPhone = PhoneNumber.Parse("+84901234567");
 
-    private static (LoginCommandHandler handler, IUserRepository users, IRefreshTokenRepository tokens) CreateHandler()
+    private static (
+        LoginCommandHandler handler,
+        IUserRepository users,
+        IRefreshTokenRepository tokens,
+        IFailedLoginPersister failedLoginPersister,
+        ILoginLockoutCounter lockoutCounter) CreateHandler(
+            IPasswordHasher? hasher = null,
+            IFailedLoginPersister? failedLoginPersister = null,
+            ILoginLockoutCounter? lockoutCounter = null)
     {
         var users = Substitute.For<IUserRepository>();
         var tokens = Substitute.For<IRefreshTokenRepository>();
-        var hasher = Substitute.For<IPasswordHasher>();
+        hasher ??= Substitute.For<IPasswordHasher>();
         var accessTokenSvc = Substitute.For<IAccessTokenService>();
         var refreshFactory = Substitute.For<IRefreshTokenFactory>();
+        failedLoginPersister ??= Substitute.For<IFailedLoginPersister>();
+        lockoutCounter ??= Substitute.For<ILoginLockoutCounter>();
         var clock = Substitute.For<IClock>();
 
         clock.UtcNow.Returns(FrozenNow);
         hasher.Verify(Arg.Any<string>(), Arg.Any<string>()).Returns(false);
         accessTokenSvc.IssueToken(Arg.Any<User>()).Returns("jwt.access.token");
+        lockoutCounter.IncrementAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(1L);
 
         var (rawToken, refreshEntity) = (
             "rawtoken123",
@@ -38,8 +49,16 @@ public sealed class LoginCommandHandlerTests
         tokens.AddAsync(Arg.Any<RefreshToken>(), Arg.Any<CancellationToken>())
             .Returns(ci => ci.Arg<RefreshToken>());
 
-        var handler = new LoginCommandHandler(users, tokens, hasher, accessTokenSvc, refreshFactory, clock);
-        return (handler, users, tokens);
+        var handler = new LoginCommandHandler(
+            users,
+            tokens,
+            hasher,
+            accessTokenSvc,
+            refreshFactory,
+            failedLoginPersister,
+            lockoutCounter,
+            clock);
+        return (handler, users, tokens, failedLoginPersister, lockoutCounter);
     }
 
     private static User MakeActiveUser(string email = "user@example.com", string passwordHash = "stored_hash")
@@ -56,32 +75,15 @@ public sealed class LoginCommandHandlerTests
     [Fact]
     public async Task Handle_ValidCredentials_ReturnsTokenBundle()
     {
-        var (handler, users, _) = CreateHandler();
+        var hasher = Substitute.For<IPasswordHasher>();
+        var (handler, users, _, _, lockoutCounter) = CreateHandler(hasher: hasher);
+        hasher.Verify("correct_password", "stored_hash").Returns(true);
         var user = MakeActiveUser();
 
         users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>())
             .Returns(user);
 
-        // Override hasher to return valid for this test.
-        var hasher = Substitute.For<IPasswordHasher>();
-        hasher.Verify("correct_password", "stored_hash").Returns(true);
-
-        var clock = Substitute.For<IClock>();
-        clock.UtcNow.Returns(FrozenNow);
-
-        var tokens = Substitute.For<IRefreshTokenRepository>();
-        var accessTokenSvc = Substitute.For<IAccessTokenService>();
-        var refreshFactory = Substitute.For<IRefreshTokenFactory>();
-
-        accessTokenSvc.IssueToken(Arg.Any<User>()).Returns("jwt.access.token");
-        var refreshEntity = RefreshToken.Create(Guid.NewGuid(), "hash", Guid.NewGuid(), null, FrozenNow, FrozenNow.AddDays(30));
-        refreshFactory.Create(Arg.Any<Guid>(), Arg.Any<Guid?>(), Arg.Any<Guid?>())
-            .Returns(("rawtoken123", refreshEntity));
-        tokens.AddAsync(Arg.Any<RefreshToken>(), Arg.Any<CancellationToken>())
-            .Returns(ci => ci.Arg<RefreshToken>());
-
-        var fullHandler = new LoginCommandHandler(users, tokens, hasher, accessTokenSvc, refreshFactory, clock);
-        var result = await fullHandler.Handle(new LoginCommand("user@example.com", "correct_password"), CancellationToken.None);
+        var result = await handler.Handle(new LoginCommand("user@example.com", "correct_password"), CancellationToken.None);
 
         result.Should().NotBeNull();
         result.AccessToken.Should().Be("jwt.access.token");
@@ -89,6 +91,8 @@ public sealed class LoginCommandHandlerTests
         result.ExpiresInSeconds.Should().Be(900);
         result.User.Email.Should().Be("user@example.com");
         result.User.Role.Should().Be(UserRole.PASSENGER.ToString());
+
+        await lockoutCounter.Received(1).ResetAsync(user.Id, Arg.Any<CancellationToken>());
     }
 
     // -------------------------------------------------------------------------
@@ -98,21 +102,41 @@ public sealed class LoginCommandHandlerTests
     [Fact]
     public async Task Handle_WrongPassword_Throws401()
     {
-        var (handler, users, _) = CreateHandler();
+        var (handler, users, _, failedLoginPersister, lockoutCounter) = CreateHandler();
         var user = MakeActiveUser();
         users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>()).Returns(user);
+        lockoutCounter.IncrementAsync(user.Id, Arg.Any<CancellationToken>()).Returns(1L);
         // hasher.Verify returns false by default in CreateHandler.
 
         var act = () => handler.Handle(new LoginCommand("user@example.com", "wrong_password"), CancellationToken.None);
 
         await act.Should().ThrowAsync<UnauthorizedException>()
             .Where(e => e.ErrorCode == "AUTH_INVALID_CREDENTIALS");
+
+        await lockoutCounter.Received(1).IncrementAsync(user.Id, Arg.Any<CancellationToken>());
+        await failedLoginPersister.Received(1).PersistAsync(user.Id, 1, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_FifthWrongPasswordInRedisWindow_LocksAccount()
+    {
+        var (handler, users, _, failedLoginPersister, lockoutCounter) = CreateHandler();
+        var user = MakeActiveUser();
+        users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>()).Returns(user);
+        lockoutCounter.IncrementAsync(user.Id, Arg.Any<CancellationToken>()).Returns(5L);
+
+        var act = () => handler.Handle(new LoginCommand("user@example.com", "wrong_password"), CancellationToken.None);
+
+        await act.Should().ThrowAsync<UnauthorizedException>()
+            .Where(e => e.ErrorCode == "AUTH_INVALID_CREDENTIALS");
+
+        await failedLoginPersister.Received(1).PersistAsync(user.Id, 5, Arg.Any<CancellationToken>());
     }
 
     [Fact]
     public async Task Handle_UnverifiedEmail_Throws403()
     {
-        var (handler, users, _) = CreateHandler();
+        var (handler, users, _, _, _) = CreateHandler();
         // User in PENDING_EMAIL_VERIFICATION status (not verified yet).
         var user = User.CreatePassenger("user@example.com", TestPhone, "hash", "User");
 
@@ -127,7 +151,7 @@ public sealed class LoginCommandHandlerTests
     [Fact]
     public async Task Handle_LockedAccount_Throws403()
     {
-        var (handler, users, _) = CreateHandler();
+        var (handler, users, _, _, _) = CreateHandler();
         var user = MakeActiveUser();
         user.Lock();
 
@@ -142,12 +166,14 @@ public sealed class LoginCommandHandlerTests
     [Fact]
     public async Task Handle_UserNotFound_Throws401()
     {
-        var (handler, users, _) = CreateHandler();
+        var (handler, users, _, _, lockoutCounter) = CreateHandler();
         users.GetByEmailAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns((User?)null);
 
         var act = () => handler.Handle(new LoginCommand("nobody@example.com", "pass"), CancellationToken.None);
 
         await act.Should().ThrowAsync<UnauthorizedException>()
             .Where(e => e.ErrorCode == "AUTH_INVALID_CREDENTIALS");
+
+        await lockoutCounter.DidNotReceive().IncrementAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
     }
 }

@@ -15,6 +15,8 @@ namespace VietRide.Identity.Infrastructure.Migrations
             migrationBuilder.EnsureSchema(
                 name: "vietride_identity");
 
+            migrationBuilder.Sql("CREATE EXTENSION IF NOT EXISTS \"pgcrypto\";");
+
             migrationBuilder.Sql(
                 "CREATE TYPE user_role AS ENUM ('PASSENGER', 'DRIVER', 'ASSISTANT', 'OPERATOR_STAFF', 'OPERATOR_ADMIN', 'SYSTEM_ADMIN');");
             migrationBuilder.Sql(
@@ -70,14 +72,14 @@ namespace VietRide.Identity.Infrastructure.Migrations
                     display_name = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
                     avatar_url = table.Column<string>(type: "text", nullable: true),
                     role = table.Column<UserRole>(type: "user_role", nullable: false),
-                    status = table.Column<UserStatus>(type: "user_status", nullable: false),
+                    status = table.Column<UserStatus>(type: "user_status", nullable: false, defaultValue: UserStatus.PENDING_EMAIL_VERIFICATION),
                     operator_id = table.Column<Guid>(type: "uuid", nullable: true),
                     failed_login_attempts = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     last_failed_login_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
                     last_login_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
                     deleted_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    updated_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
+                    created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false, defaultValueSql: "now()"),
+                    updated_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false, defaultValueSql: "now()")
                 },
                 constraints: table =>
                 {
@@ -105,7 +107,7 @@ namespace VietRide.Identity.Infrastructure.Migrations
                     expires_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
                     failed_attempts = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     used_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
+                    created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false, defaultValueSql: "now()")
                 },
                 constraints: table =>
                 {
@@ -129,9 +131,9 @@ namespace VietRide.Identity.Infrastructure.Migrations
                     provider = table.Column<OAuthProvider>(type: "oauth_provider", nullable: false),
                     provider_subject = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
                     provider_email = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: true),
-                    linked_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    updated_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
+                    linked_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false, defaultValueSql: "now()"),
+                    created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false, defaultValueSql: "now()"),
+                    updated_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false, defaultValueSql: "now()")
                 },
                 constraints: table =>
                 {
@@ -155,14 +157,14 @@ namespace VietRide.Identity.Infrastructure.Migrations
                     token_hash = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
                     family_id = table.Column<Guid>(type: "uuid", nullable: false),
                     parent_token_id = table.Column<Guid>(type: "uuid", nullable: true),
-                    issued_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
+                    issued_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false, defaultValueSql: "now()"),
                     expires_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
                     revoked_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
                     revoked_reason = table.Column<RefreshTokenRevokeReason>(type: "refresh_token_revoke_reason", nullable: true),
                     user_agent = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: true),
                     ip_address = table.Column<string>(type: "character varying(45)", maxLength: 45, nullable: true),
-                    created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    updated_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
+                    created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false, defaultValueSql: "now()"),
+                    updated_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false, defaultValueSql: "now()")
                 },
                 constraints: table =>
                 {
@@ -193,9 +195,9 @@ namespace VietRide.Identity.Infrastructure.Migrations
                     fcm_token = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: false),
                     platform = table.Column<DevicePlatform>(type: "device_platform", nullable: false),
                     is_active = table.Column<bool>(type: "boolean", nullable: false, defaultValue: true),
-                    last_active_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    updated_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
+                    last_active_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false, defaultValueSql: "now()"),
+                    created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false, defaultValueSql: "now()"),
+                    updated_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false, defaultValueSql: "now()")
                 },
                 constraints: table =>
                 {
@@ -343,6 +345,29 @@ namespace VietRide.Identity.Infrastructure.Migrations
                 column: "phone",
                 unique: true,
                 filter: "deleted_at IS NULL AND phone IS NOT NULL");
+
+            migrationBuilder.Sql(
+                """
+                CREATE OR REPLACE FUNCTION vietride_identity.trg_set_updated_at()
+                RETURNS TRIGGER AS $$
+                BEGIN
+                    NEW.updated_at = now();
+                    RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql;
+                """);
+
+            migrationBuilder.Sql(
+                """
+                CREATE TRIGGER trg_users_updated_at BEFORE UPDATE ON vietride_identity.users
+                    FOR EACH ROW EXECUTE FUNCTION vietride_identity.trg_set_updated_at();
+                CREATE TRIGGER trg_oauth_identities_updated_at BEFORE UPDATE ON vietride_identity.oauth_identities
+                    FOR EACH ROW EXECUTE FUNCTION vietride_identity.trg_set_updated_at();
+                CREATE TRIGGER trg_refresh_tokens_updated_at BEFORE UPDATE ON vietride_identity.refresh_tokens
+                    FOR EACH ROW EXECUTE FUNCTION vietride_identity.trg_set_updated_at();
+                CREATE TRIGGER trg_user_devices_updated_at BEFORE UPDATE ON vietride_identity.user_devices
+                    FOR EACH ROW EXECUTE FUNCTION vietride_identity.trg_set_updated_at();
+                """);
         }
 
         /// <inheritdoc />
@@ -376,12 +401,16 @@ namespace VietRide.Identity.Infrastructure.Migrations
                 name: "operators",
                 schema: "vietride_identity");
 
+            migrationBuilder.Sql("DROP FUNCTION IF EXISTS vietride_identity.trg_set_updated_at();");
+
             migrationBuilder.Sql("DROP TYPE IF EXISTS device_platform;");
             migrationBuilder.Sql("DROP TYPE IF EXISTS refresh_token_revoke_reason;");
             migrationBuilder.Sql("DROP TYPE IF EXISTS oauth_provider;");
             migrationBuilder.Sql("DROP TYPE IF EXISTS email_verification_purpose;");
             migrationBuilder.Sql("DROP TYPE IF EXISTS user_status;");
             migrationBuilder.Sql("DROP TYPE IF EXISTS user_role;");
+
+            migrationBuilder.Sql("DROP EXTENSION IF EXISTS \"pgcrypto\";");
         }
     }
 }

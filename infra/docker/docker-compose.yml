@@ -82,8 +82,8 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      # pgbouncer image lacks pg_isready/psql; use a TCP check via /dev/tcp.
-      test: ['CMD-SHELL', 'exec 3<>/dev/tcp/localhost/5432 && echo ok']
+      # pgbouncer image lacks pg_isready/psql; assert the PgBouncer process is alive.
+      test: ['CMD-SHELL', 'pidof pgbouncer >/dev/null']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -133,6 +133,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      REDIS_URL: 'redis:6379,abortConnect=false'
       ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_identity;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}'
     ports:
       - '${IDENTITY_PORT:-5001}:5001'

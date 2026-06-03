@@ -101,7 +101,7 @@ public sealed class UserTests
         var clock = FrozenClock();
         var user = MakeActivePassenger();
 
-        user.RecordFailedLogin(clock);
+        user.RecordFailedLogin(clock, 1);
 
         user.FailedLoginAttempts.Should().Be(1);
         user.LastFailedLoginAt.Should().Be(FixedNow);
@@ -117,14 +117,15 @@ public sealed class UserTests
         // Four increments — still ACTIVE
         for (var i = 0; i < 4; i++)
         {
-            user.RecordFailedLogin(clock);
+            user.RecordFailedLogin(clock, i + 1);
         }
+
 
         user.Status.Should().Be(UserStatus.ACTIVE);
         user.FailedLoginAttempts.Should().Be(4);
 
         // Fifth increment — transitions to LOCKED
-        user.RecordFailedLogin(clock);
+        user.RecordFailedLogin(clock, 5);
 
         user.Status.Should().Be(UserStatus.LOCKED);
         user.FailedLoginAttempts.Should().Be(5);
@@ -142,8 +143,8 @@ public sealed class UserTests
     {
         var clock = FrozenClock();
         var user = MakeActivePassenger();
-        user.RecordFailedLogin(clock);
-        user.RecordFailedLogin(clock);
+        user.RecordFailedLogin(clock, 1);
+        user.RecordFailedLogin(clock, 2);
 
         user.ResetFailedLogins();
 
@@ -160,7 +161,7 @@ public sealed class UserTests
     {
         var clock = FrozenClock();
         var user = MakeActivePassenger();
-        user.RecordFailedLogin(clock);
+        user.RecordFailedLogin(clock, 1);
 
         user.RecordSuccessfulLogin(clock);
 

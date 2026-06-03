@@ -83,7 +83,7 @@ const ERROR_422_VALIDATION_FIXTURE = {
   success: false,
   statusCode: 422,
   error: {
-    code: 'VALIDATION_FAILED',
+    code: 'VALIDATION_ERROR',
     message: 'Validation failed',
     fields: [
       { field: 'email', message: 'Invalid email format' },
@@ -151,17 +151,16 @@ describe('Cross-stack envelope contract (ADR 0004)', () => {
       expect(result.success).toBe(true);
     });
 
-    it('rejects a success envelope missing required meta fields', () => {
+    it('rejects a success envelope missing required meta.traceId', () => {
       const schema = apiResponseSchema(z.object({ id: z.string() }));
       const bad = {
         success: true,
         statusCode: 200,
         data: { id: '1' },
-        meta: { timestamp: '2026-06-01T10:00:00Z' }, // traceId is optional
+        meta: { timestamp: '2026-06-01T10:00:00Z' },
       };
-      // meta.timestamp is required — this should still pass since traceId is optional
       const result = schema.safeParse(bad);
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
     });
 
     it('rejects success:false in a success schema', () => {
@@ -228,7 +227,7 @@ describe('Cross-stack envelope contract (ADR 0004)', () => {
         success: false,
         statusCode: 400,
         error: { message: 'no code' },
-        meta: { timestamp: '2026-06-01T10:00:00Z' },
+        meta: { traceId: 'req-no-code', timestamp: '2026-06-01T10:00:00Z' },
       };
       const result = ApiResponseErrorSchema.safeParse(bad);
       expect(result.success).toBe(false);
@@ -247,9 +246,18 @@ describe('Cross-stack envelope contract (ADR 0004)', () => {
       }
     });
 
-    it('clamps pageSize to max 100', () => {
-      const result = QueryOptionsSchema.safeParse({ pageSize: 500 });
-      expect(result.success).toBe(false); // zod max(100) rejects 500
+    it('clamps pageSize to 1..100', () => {
+      const tooLarge = QueryOptionsSchema.safeParse({ pageSize: 500 });
+      expect(tooLarge.success).toBe(true);
+      if (tooLarge.success) {
+        expect(tooLarge.data.pageSize).toBe(100);
+      }
+
+      const tooSmall = QueryOptionsSchema.safeParse({ pageSize: 0 });
+      expect(tooSmall.success).toBe(true);
+      if (tooSmall.success) {
+        expect(tooSmall.data.pageSize).toBe(1);
+      }
     });
 
     it('rejects page < 1', () => {

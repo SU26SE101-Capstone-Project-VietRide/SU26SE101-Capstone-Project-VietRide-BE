@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using StackExchange.Redis;
 using VietRide.Identity.Application.Abstractions;
@@ -27,8 +28,21 @@ public static class InfrastructureServiceCollectionExtensions
         // ------------------------------------------------------------------
         // Configuration
         // ------------------------------------------------------------------
-        services.Configure<JwtSigningOptions>(
-            configuration.GetSection(JwtSigningOptions.SectionName));
+        services.Configure<JwtSigningOptions>(options =>
+        {
+            configuration.GetSection(JwtSigningOptions.SectionName).Bind(options);
+
+            // Production SOT names are plain environment variables. Keep the
+            // IdentityJwt section for local/dev config, but let explicit env vars
+            // override it when present in production/container environments.
+            var privateKey = configuration["USER_JWT_PRIVATE_KEY"];
+            if (!string.IsNullOrWhiteSpace(privateKey))
+                options.PrivateKey = privateKey;
+
+            var kid = configuration["USER_JWT_KID"];
+            if (!string.IsNullOrWhiteSpace(kid))
+                options.Kid = kid;
+        });
 
         // ------------------------------------------------------------------
         // Repositories
@@ -45,6 +59,9 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IJwksProvider, JwksProvider>();
         services.AddScoped<IRefreshTokenFactory, RefreshTokenFactory>();
         services.AddSingleton<IOtpFailedAttemptPersister, OtpFailedAttemptPersister>();
+        services.AddSingleton<IFailedLoginPersister, FailedLoginPersister>();
+        services.AddSingleton<IRefreshTokenFamilyRevoker, RefreshTokenFamilyRevoker>();
+        services.AddSingleton<ILoginLockoutCounter, RedisLoginLockoutCounter>();
 
         // ------------------------------------------------------------------
         // External-client stubs

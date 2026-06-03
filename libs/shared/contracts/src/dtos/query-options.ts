@@ -26,7 +26,11 @@ export interface QueryOptions {
 
 export const QueryOptionsSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  pageSize: z.coerce
+    .number()
+    .int()
+    .default(20)
+    .transform((value) => Math.min(100, Math.max(1, value))),
   search: z.string().optional(),
   searchIn: z.string().optional(),
   sortBy: z.string().optional(),

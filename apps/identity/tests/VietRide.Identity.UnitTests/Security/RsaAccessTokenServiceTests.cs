@@ -1,11 +1,14 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Cryptography;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using NSubstitute;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
+using VietRide.Identity.Infrastructure.DependencyInjection;
 using VietRide.Identity.Infrastructure.Security;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
@@ -264,6 +267,34 @@ public sealed class RsaAccessTokenServiceTests
 
         rotated.FamilyId.Should().Be(first.FamilyId);
         rotated.ParentTokenId.Should().Be(first.Id);
+    }
+
+    // -------------------------------------------------------------------------
+    // Options binding
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void AddInfrastructure_UserJwtEnvVars_OverrideIdentityJwtSection()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["IdentityJwt:PrivateKey"] = "section-private-key",
+                ["IdentityJwt:Kid"] = "section-kid",
+                ["USER_JWT_PRIVATE_KEY"] = DevPrivateKeyPem,
+                ["USER_JWT_KID"] = "env-kid",
+                ["REDIS_URL"] = "localhost:6379",
+            })
+            .Build();
+        var services = new ServiceCollection();
+
+        services.AddInfrastructure(configuration);
+        using var provider = services.BuildServiceProvider();
+
+        var options = provider.GetRequiredService<IOptions<JwtSigningOptions>>().Value;
+
+        options.PrivateKey.Should().Be(DevPrivateKeyPem);
+        options.Kid.Should().Be("env-kid");
     }
 
     // -------------------------------------------------------------------------

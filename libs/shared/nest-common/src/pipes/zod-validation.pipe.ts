@@ -1,10 +1,11 @@
-import { BadRequestException, Injectable, PipeTransform } from '@nestjs/common';
-import type { ZodSchema, ZodIssue } from 'zod';
+import { Injectable, PipeTransform, UnprocessableEntityException } from '@nestjs/common';
+import type { ZodSchema } from 'zod';
 
 /**
  * NestJS pipe that validates / parses incoming payloads against a Zod schema.
- * On failure raises a BadRequestException carrying RFC 7807-ish detail with
- * the flattened Zod issues so ProblemDetailsExceptionFilter can render them.
+ * On failure raises an UnprocessableEntityException carrying the BSOT registry
+ * code plus flattened Zod issues; ApiResponseExceptionFilter maps them to
+ * `error.fields[]` in the ADR 0004 error envelope.
  *
  * Usage:
  *   @Body(new ZodValidationPipe(MyDtoSchema)) dto: MyDto
@@ -16,11 +17,9 @@ export class ZodValidationPipe<T> implements PipeTransform<unknown, T> {
   transform(value: unknown): T {
     const result = this.schema.safeParse(value);
     if (!result.success) {
-      throw new BadRequestException({
-        errorCode: 'VALIDATION_FAILED',
-        title: 'Validation failed',
-        detail: formatIssues(result.error.issues),
-        // Key is `errors` per BACKEND_SOURCE_OF_TRUTH §5.5 ProblemDetails shape.
+      throw new UnprocessableEntityException({
+        errorCode: 'VALIDATION_ERROR',
+        message: 'Validation failed',
         errors: result.error.issues.map((i) => ({
           path: i.path.join('.'),
           code: i.code,
@@ -30,10 +29,4 @@ export class ZodValidationPipe<T> implements PipeTransform<unknown, T> {
     }
     return result.data;
   }
-}
-
-function formatIssues(issues: ZodIssue[]): string {
-  return issues
-    .map((i) => `${i.path.length ? i.path.join('.') : '(root)'}: ${i.message}`)
-    .join('; ');
 }

@@ -1,8 +1,10 @@
 namespace VietRide.Shared.Kernel.Primitives;
 
 /// Base entity with audit columns. Concrete entities inherit and set Id type.
-/// Audit columns auto-populated by AuditingInterceptor in VietRide.Shared.Persistence.
-public abstract class BaseEntity<TId> where TId : notnull
+/// Audit columns are auto-populated by VietRideDbContextBase in VietRide.Shared.Persistence.
+/// A few schema tables intentionally map only CreatedAt and ignore UpdatedAt in EF configuration
+/// when their canonical table has no updated_at column (for example, email_verification_tokens).
+public abstract class BaseEntity<TId> : IAuditable where TId : notnull
 {
     public TId Id { get; protected set; } = default!;
     public DateTimeOffset CreatedAt { get; set; }

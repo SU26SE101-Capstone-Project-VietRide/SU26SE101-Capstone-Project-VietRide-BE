@@ -4,9 +4,9 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
 import { Redis } from 'ioredis';
 import {
+  ApiResponseExceptionFilter,
   LoggingInterceptor,
   NestCommonModule,
-  ProblemDetailsExceptionFilter,
 } from '@vietride/nest-common';
 import { InternalJwtSigner } from '../auth/internal-jwt.signer';
 import { UserJwtMiddleware } from '../auth/user-jwt.middleware';
@@ -59,7 +59,7 @@ const throttlerStorage =
     },
     UserJwtMiddleware,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
-    { provide: APP_FILTER, useValue: new ProblemDetailsExceptionFilter() },
+    { provide: APP_FILTER, useValue: new ApiResponseExceptionFilter() },
     { provide: APP_INTERCEPTOR, useValue: new LoggingInterceptor() },
   ],
   exports: [ENV_TOKEN, InternalJwtSigner],
@@ -71,8 +71,10 @@ export class AppModule implements NestModule {
     const publicPaths = [
       { path: 'health', method: RequestMethod.ALL },
       { path: 'ready', method: RequestMethod.ALL },
-      { path: 'v1/auth/*path', method: RequestMethod.ALL },
-      { path: 'v1/auth', method: RequestMethod.ALL },
+      { path: 'v1/auth/register', method: RequestMethod.ALL },
+      { path: 'v1/auth/verify-email', method: RequestMethod.ALL },
+      { path: 'v1/auth/login', method: RequestMethod.ALL },
+      { path: 'v1/auth/refresh', method: RequestMethod.ALL },
       { path: 'v1/.well-known/*path', method: RequestMethod.ALL },
       { path: 'v1/operators/register', method: RequestMethod.ALL },
       { path: 'v1/payments/vnpay-ipn', method: RequestMethod.ALL },

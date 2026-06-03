@@ -40,14 +40,17 @@ internal sealed class UserDeviceConfiguration : IEntityTypeConfiguration<UserDev
 
         builder.Property(d => d.LastActiveAt)
             .HasColumnName("last_active_at")
+            .HasDefaultValueSql("now()")
             .IsRequired();
 
         builder.Property(d => d.CreatedAt)
             .HasColumnName("created_at")
+            .HasDefaultValueSql("now()")
             .IsRequired();
 
         builder.Property(d => d.UpdatedAt)
             .HasColumnName("updated_at")
+            .HasDefaultValueSql("now()")
             .IsRequired();
 
         builder.Ignore(d => d.RowVersion);

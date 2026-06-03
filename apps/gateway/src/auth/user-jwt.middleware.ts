@@ -1,8 +1,9 @@
 import { Inject, Injectable, Logger, NestMiddleware, UnauthorizedException } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
-import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
+import type { JWTPayload } from 'jose';
 import type { Env } from '../config/env.schema';
 import { ENV_TOKEN } from '../app/tokens';
+import { createUserJwtVerifier, type UserJwtVerifier } from './user-jwt.verifier';
 
 /**
  * Verifies User Access Token (RS256) via JWKS from Identity Service.
@@ -15,30 +16,24 @@ import { ENV_TOKEN } from '../app/tokens';
 @Injectable()
 export class UserJwtMiddleware implements NestMiddleware {
   private readonly logger = new Logger('UserJwtMiddleware');
-  private readonly jwks: ReturnType<typeof createRemoteJWKSet>;
+  private readonly verifier: UserJwtVerifier;
 
-  constructor(@Inject(ENV_TOKEN) private readonly env: Env) {
-    this.jwks = createRemoteJWKSet(new URL(env.JWT_PUBLIC_KEY_URL));
+  constructor(@Inject(ENV_TOKEN) env: Env) {
+    this.verifier = createUserJwtVerifier(env);
   }
 
   async use(req: Request, _res: Response, next: NextFunction): Promise<void> {
-    const auth = req.header('authorization');
-    if (!auth?.toLowerCase().startsWith('bearer ')) {
-      throw new UnauthorizedException({ errorCode: 'MISSING_BEARER', message: 'Authorization header required' });
-    }
-
-    const token = auth.slice(7).trim();
     try {
-      const { payload } = await jwtVerify(token, this.jwks, {
-        issuer: this.env.JWT_ISSUER,
-        audience: this.env.JWT_AUDIENCE,
-        clockTolerance: 5,
-      });
-      (req as RequestWithUser).user = payload;
+      (req as RequestWithUser).user = await this.verifier.verifyAuthorizationHeader(
+        req.header('authorization'),
+      );
       next();
     } catch (err) {
       this.logger.warn(`JWT verify failed: ${(err as Error).message}`);
-      throw new UnauthorizedException({ errorCode: 'INVALID_TOKEN', message: 'Access token invalid or expired' });
+      throw new UnauthorizedException({
+        errorCode: 'AUTH_TOKEN_INVALID',
+        message: 'Access token invalid or expired',
+      });
     }
   }
 }

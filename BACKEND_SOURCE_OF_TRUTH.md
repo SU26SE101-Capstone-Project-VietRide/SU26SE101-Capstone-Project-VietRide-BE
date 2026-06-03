@@ -1400,6 +1400,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 | **Generic** | `RESOURCE_NOT_FOUND` | 404 | Fallback |
 | | `FORBIDDEN` | 403 | RBAC reject |
 | | `RATE_LIMITED` | 429 | Vượt rate limit |
+| | `UPSTREAM_UNAVAILABLE` | 502 | Gateway không kết nối được downstream service |
 | | `INTERNAL_ERROR` | 500 | Unhandled exception (Sentry capture) |
 
 ### 5.10 Data access pattern (Repository + optional Service)
@@ -2665,6 +2666,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.5.1** | 2026-06-03 | BE lead (Vũ) | **PATCH** — §5.9 Generic error registry: add `UPSTREAM_UNAVAILABLE` (HTTP 502) for Gateway-generated downstream connection failures. This syncs the Day-3 Gateway ADR 0004 envelope fallback with the registry discipline. |
 | **1.5.0** | 2026-06-01 | BE lead (Vũ) | **MINOR** — **ADR 0004: Adopt `ApiResponse<T>` envelope for all FE-facing HTTP responses.** Rewrite §5.4 (success shape) to envelope `{success,statusCode,message?,data,meta{traceId,timestamp}}`; rewrite §5.5 (error shape) — DROP `application/problem+json` (RFC 7807), adopt error envelope `{success:false,statusCode,error{code,message,fields?},meta}` với `error.code` từ §5.9 registry; rewrite §5.7 (Pagination) — introduce `PagedResult<T>` (7 fields: `items,page,pageSize,totalItems,totalPages,hasNextPage,hasPreviousPage`) + `QueryOptions` (`page/pageSize`-clamped-1..100/`search`/`searchIn`/`sortBy`/`sortDir`/`includeDeleted`); rewrite §5.8 (Filter conventions) — `sortBy`+`sortDir` SUPERSEDES `?sort=-field` convention + sortBy whitelist security requirement → reject non-whitelisted field với `400 INVALID_SORT_FIELD` (đăng ký §5.9 Validation group). §3.1 tree + §3.6 Api/Web layer: `ProblemDetailsExceptionFilter` → `ApiResponseExceptionFilter` + `ApiResponseResultFilter` (Task 3.8 target state). §3.1 tree: `PagedResult.cs` comment cập nhật 7-field shape. Bump 1.4.0 → 1.5.0 MINOR. API Contract wrapped accordingly. ADR 0004 follow-ups #1–#2. |
 | **1.4.0** | 2026-06-01 | BE lead (Vũ) | **MINOR** — §5.9 Auth error registry: thêm code mới `AUTH_OTP_RATE_LIMIT_EXCEEDED` (HTTP 429) — OTP request rate limit hit (Redis `identity:otp_rate:{email}` max 3/h TTL 1h, BSOT §6.9 line 1545). Code này backs Day-3 OTP rate-limit path (Task 3.4 handler throws `TooManyRequestsException` → 429). Human decision B2 (plan v7.1 patch). Đồng thời ratify shared-lib edits từ blocked 3.4 attempt: `UnauthorizedException` (401) + `BadRequestException` (400) đã có trong `ApplicationExceptions.cs`; thêm mới `TooManyRequestsException` (429) vào same file + arm tương ứng trong `ProblemDetailsExceptionFilter`. |
 | **1.3.6** | 2026-05-31 | BE lead (Vũ) | **PATCH** — §2.2 + §3.4 stack version: **NestJS 10.x → 11.x** để khớp `package.json` (`@nestjs/core`/`@nestjs/common` = `^11.0.0`) — đây là thực tế đã cài, doc bị stale. `package.json` là source-of-truth cho version chính xác. Đồng bộ ghi chú trong `.claude/agents/nest-worker.md` + `nest-reviewer.md` (bỏ workaround "BSOT §2.2 still says 10.x"). No code/DDL change. |
