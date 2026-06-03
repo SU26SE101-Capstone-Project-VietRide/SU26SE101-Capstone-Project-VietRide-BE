@@ -16,6 +16,7 @@ import { TrackingConfigModule } from '../config/tracking-config.module';
 import { GpsBatchModule } from '../gps-batch/gps-batch.module';
 import { LocationModule } from '../location/location.module';
 import { TrackingPrismaModule } from '../prisma/prisma.module';
+import { TrackingDataModule } from '../tracking-data/tracking-data.module';
 
 const env = loadEnv();
 
@@ -32,6 +33,7 @@ const env = loadEnv();
     TrackingPrismaModule,
     LocationModule,
     GpsBatchModule,
+    TrackingDataModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

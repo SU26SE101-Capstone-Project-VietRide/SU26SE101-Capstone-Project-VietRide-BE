@@ -10,6 +10,10 @@ export function trackingGpsBufferKey(tripId: string): string {
   return `tracking:gps_buffer:${tripId}`;
 }
 
+export function trackingEtaKey(tripId: string, stopId: string): string {
+  return `tracking:eta:${tripId}:${stopId}`;
+}
+
 export function trackingTripRoom(tripId: string): string {
   return `trip:${tripId}`;
 }
