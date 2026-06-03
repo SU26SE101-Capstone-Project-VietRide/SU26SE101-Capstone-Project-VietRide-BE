@@ -1,7 +1,8 @@
 -- =============================================================================
 -- VietRide :: Notification Service :: PostgreSQL 16 schema
 -- Database: vietride_notification
--- Framework: NestJS + TypeORM
+-- Schema: vietride_notification
+-- Framework: NestJS + Prisma ORM
 -- =============================================================================
 -- Notification Service ONLY CONSUMES events from RabbitMQ — does NOT publish.
 -- => No OutboxEvent table (per v6 Section 8).
@@ -9,6 +10,9 @@
 -- =============================================================================
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+CREATE SCHEMA IF NOT EXISTS vietride_notification;
+SET search_path TO vietride_notification, public;
 
 -- =============================================================================
 -- ENUMS

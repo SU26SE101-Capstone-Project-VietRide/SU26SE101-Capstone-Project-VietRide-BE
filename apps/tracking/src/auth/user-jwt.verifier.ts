@@ -25,10 +25,12 @@ export class JoseUserJwtVerifier implements UserJwtVerifier {
       ? await jwtVerify(token, await this.localPublicKey, {
           issuer: this.env.JWT_ISSUER,
           audience: this.env.JWT_AUDIENCE,
+          clockTolerance: 5,
         })
       : await jwtVerify(token, this.remoteJwks, {
           issuer: this.env.JWT_ISSUER,
           audience: this.env.JWT_AUDIENCE,
+          clockTolerance: 5,
         });
 
     const userId = result.payload.sub;

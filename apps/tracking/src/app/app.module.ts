@@ -1,9 +1,10 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import {
+  ApiResponseExceptionFilter,
+  ApiResponseInterceptor,
   LoggingInterceptor,
   NestCommonModule,
-  ProblemDetailsExceptionFilter,
 } from '@vietride/nest-common';
 import { NestRabbitMqModule } from '@vietride/nest-rabbitmq';
 import { NestRedisModule } from '@vietride/nest-redis';
@@ -35,8 +36,9 @@ const env = loadEnv();
   controllers: [AppController, HealthController],
   providers: [
     AppService,
-    { provide: APP_FILTER, useValue: new ProblemDetailsExceptionFilter() },
+    { provide: APP_FILTER, useValue: new ApiResponseExceptionFilter() },
     { provide: APP_INTERCEPTOR, useValue: new LoggingInterceptor() },
+    { provide: APP_INTERCEPTOR, useValue: new ApiResponseInterceptor() },
   ],
 })
 export class AppModule {}

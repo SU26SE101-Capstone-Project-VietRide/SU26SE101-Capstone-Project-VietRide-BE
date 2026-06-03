@@ -76,7 +76,8 @@ One class per file. No barrel re-exports unless the lib requires it.
 ```typescript
 import {
   NestCommonModule,               // wire in root AppModule.imports
-  ProblemDetailsExceptionFilter,  // wire as APP_FILTER
+  ApiResponseExceptionFilter,     // wire as APP_FILTER
+  ApiResponseInterceptor,         // wire as APP_INTERCEPTOR
   ZodValidationPipe,              // use per-param: @Body(new ZodValidationPipe(Schema))
   LoggingInterceptor,             // wire as APP_INTERCEPTOR
   RequestContextService,          // inject for requestId / userId / role
@@ -89,7 +90,7 @@ import {
 ```typescript
 import {
   NestPersistenceModule,  // NestPersistenceModule.forRoot({ connectionString })
-  PrismaService,          // inject for database access
+  // KHÔNG import PrismaService từ lib này — mỗi service tự tạo local PrismaService
 } from '@vietride/nest-persistence';
 ```
 
@@ -122,8 +123,9 @@ import type { SomeSharedType } from '@vietride/contracts';
 @Module({
   imports: [NestCommonModule],
   providers: [
-    { provide: APP_FILTER,      useValue: new ProblemDetailsExceptionFilter() },
+    { provide: APP_FILTER,      useValue: new ApiResponseExceptionFilter() },
     { provide: APP_INTERCEPTOR, useValue: new LoggingInterceptor() },
+    { provide: APP_INTERCEPTOR, useValue: new ApiResponseInterceptor() },
   ],
 })
 export class AppModule {}
@@ -138,8 +140,9 @@ Workers connect to PostgreSQL via `NestPersistenceModule`.
     NestPersistenceModule.forRoot({ connectionString: env.DATABASE_URL }), // DB access
   ],
   providers: [
-    { provide: APP_FILTER,      useValue: new ProblemDetailsExceptionFilter() },
+    { provide: APP_FILTER,      useValue: new ApiResponseExceptionFilter() },
     { provide: APP_INTERCEPTOR, useValue: new LoggingInterceptor() },
+    { provide: APP_INTERCEPTOR, useValue: new ApiResponseInterceptor() },
   ],
 })
 export class AppModule {}
@@ -169,32 +172,58 @@ inject via `ENV_TOKEN`. Never call `process.env` directly in services.
 
 ---
 
-## Database pattern — Prisma ORM
+## Database pattern — Prisma multi-schema pattern
+
+Mỗi NestJS service có Prisma Client riêng. TUYỆT ĐỐI KHÔNG dùng shared `PrismaService` từ `@vietride/nest-persistence`.
+
+Mỗi NestJS service dùng schema PostgreSQL riêng trùng tên service: `vietride_tracking`, `vietride_notification`, `vietride_rag`.
+Trong Prisma PHẢI khai báo `schemas = ["vietride_<service>"]` và gán `@@schema("vietride_<service>")` cho từng model/enum.
+Trong `db-schema/<service>/schema.sql` PHẢI `CREATE SCHEMA IF NOT EXISTS ...` và `SET search_path TO <schema>, public` trước khi tạo enum/table.
+
+```
+apps/<service>/
+├── prisma/
+│   └── schema.prisma              # generator output: ../src/generated/<service>-prisma-client
+└── src/
+    ├── generated/
+    │   └── <service>-prisma-client/   # auto-generated, do NOT edit
+    └── prisma/
+        └── <service>-prisma.service.ts   # Local PrismaService
+```
 
 ```typescript
-@Injectable()
-export class TripRepository {
-  constructor(private readonly prisma: PrismaService) {}
+// apps/<service>/src/prisma/<service>-prisma.service.ts
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+// eslint-disable-next-line @nx/enforce-module-boundaries
+import { PrismaClient } from '../generated/<service>-prisma-client';
 
-  async findById(id: string) {
-    return this.prisma.trip.findUnique({
-      where: { id },
-    });
+@Injectable()
+export class <Service>PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(<Service>PrismaService.name);
+
+  async onModuleInit(): Promise<void> {
+    await this.$connect();
+    this.logger.log('<Service> Prisma connected');
   }
 
-  async create(data: CreateTripDto) {
-    return this.prisma.trip.create({
-      data: {
-        id: randomUUID(),
-        origin: data.origin,
-        destination: data.destination,
-      },
-    });
+  async onModuleDestroy(): Promise<void> {
+    await this.$disconnect();
+    this.logger.log('<Service> Prisma disconnected');
   }
 }
 ```
 
-- Repository handles DB access; Service handles business logic
+```typescript
+// Repository inject local service
+@Injectable()
+export class TripRepository {
+  constructor(private readonly prisma: TripPrismaService) {}
+
+  async findById(id: string) {
+    return this.prisma.trip.findUnique({ where: { id } });
+  }
+}
+```
 
 ---
 
@@ -228,7 +257,7 @@ async create(
 ## Error throwing pattern
 
 ```typescript
-// Throw standard NestJS exceptions — ProblemDetailsExceptionFilter converts automatically
+// Throw standard NestJS exceptions — ApiResponseExceptionFilter converts automatically
 throw new NotFoundException({
   errorCode: 'TRIP_NOT_FOUND',
   detail: `Trip ${id} not found`,
@@ -245,29 +274,31 @@ throw new BadRequestException({
 });
 ```
 
-`errorCode` must be `UPPER_SNAKE_CASE`. Never build a ProblemDetails object manually.
+`errorCode` must be `UPPER_SNAKE_CASE`. Never build an ApiResponse object manually.
 
 ---
 
 ## Logging pattern
 
-- **HTTP request/response logging**: Handled by `LoggingInterceptor` (pino) via `APP_INTERCEPTOR`.
-- **Service/Repository business logs**: Use NestJS `Logger` (like shared libs do) or `pino` (just be consistent).
-- **NEVER** use `console.log`.
+```
+Layer                 | Tool            | Scope
+---------------------|-----------------|------------------------------------------
+Infrastructure        | NestJS Logger   | Filters, interceptors, PrismaService lifecycle
+Business              | pino            | Services, repositories, event consumers
+```
 
 ```typescript
-import { Logger } from '@nestjs/common';
+// Infrastructure layer — ví dụ: PrismaService lifecycle — dùng NestJS Logger
+private readonly logger = new Logger(TrackingPrismaService.name);
+this.logger.log('Tracking Prisma connected');
 
-@Injectable()
-export class TripService {
-  private readonly logger = new Logger('TripService');
-
-  async create(dto: CreateTripDto) {
-    this.logger.log(`Creating trip...`);
-    // ...
-  }
-}
+// Business layer — ví dụ: Service — dùng pino
+import pino from 'pino';
+const logger = pino({ name: 'TripService' });
+logger.info({ tripId }, 'Creating trip');
 ```
+
+**NEVER** use `console.log` anywhere.
 
 ---
 

@@ -80,6 +80,16 @@
       "options": {
         "passWithNoTests": true
       }
+    },
+    "test:e2e": {
+      "executor": "@nx/jest:jest",
+      "outputs": [
+        "{workspaceRoot}/coverage/apps/tracking-e2e"
+      ],
+      "options": {
+        "jestConfig": "apps/tracking/jest.e2e.config.cts",
+        "passWithNoTests": false
+      }
     }
   }
 }
