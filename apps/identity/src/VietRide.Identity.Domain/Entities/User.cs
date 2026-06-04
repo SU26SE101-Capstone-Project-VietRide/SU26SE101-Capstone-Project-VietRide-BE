@@ -64,6 +64,56 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
         };
     }
 
+    /// <summary>
+    /// Factory for Google OAuth PASSENGER accounts. Google has already verified the email.
+    /// Phone is completed later through the complete-profile flow.
+    /// </summary>
+    public static User CreateGoogleAccount(
+        string email,
+        string displayName,
+        string? avatarUrl)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(email);
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
+
+        return new User
+        {
+            Id = Guid.NewGuid(),
+            Email = email.Trim().ToLowerInvariant(),
+            Phone = null,
+            PasswordHash = null,
+            DisplayName = displayName,
+            AvatarUrl = avatarUrl,
+            Role = UserRole.PASSENGER,
+            Status = UserStatus.ACTIVE,
+            FailedLoginAttempts = 0,
+        };
+    }
+
+    /// <summary>
+    /// Factory for SYSTEM_ADMIN users that must set their initial password later.
+    /// </summary>
+    public static User CreateAdminPendingPassword(
+        string email,
+        string displayName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(email);
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
+
+        return new User
+        {
+            Id = Guid.NewGuid(),
+            Email = email.Trim().ToLowerInvariant(),
+            Phone = null,
+            PasswordHash = null,
+            DisplayName = displayName,
+            Role = UserRole.SYSTEM_ADMIN,
+            Status = UserStatus.PENDING_INITIAL_PASSWORD,
+            OperatorId = null,
+            FailedLoginAttempts = 0,
+        };
+    }
+
     // ---------------------------------------------------------------------------
     // Domain methods — status transitions + lockout tracking
     // ---------------------------------------------------------------------------
@@ -81,6 +131,24 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
         }
 
         Status = UserStatus.ACTIVE;
+    }
+
+    /// <summary>
+    /// Completes a Google-created profile by setting the already-normalized phone once.
+    /// Existing phone changes must use the dedicated profile-update flow.
+    /// </summary>
+    public void CompleteProfile(PhoneNumber phone)
+    {
+        ArgumentNullException.ThrowIfNull(phone);
+
+        if (Phone is not null)
+        {
+            throw new IdentityDomainException(
+                "VALIDATION_ERROR",
+                "Phone is already set and cannot be overwritten through complete profile.");
+        }
+
+        Phone = phone;
     }
 
     /// <summary>
