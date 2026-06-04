@@ -18,6 +18,11 @@ export const envSchema = baseEnvSchema.merge(
     USER_JWT_PUBLIC_KEY: z.string().optional(),
     TRACKING_GPS_FLUSH_ENABLED: booleanEnvSchema.default(false),
     TRACKING_GPS_FLUSH_INTERVAL_MS: z.coerce.number().int().positive().default(300_000),
+    TRACKING_TRIP_DELAY_ENABLED: booleanEnvSchema.default(false),
+    TRACKING_TRIP_DELAY_INTERVAL_MS: z.coerce.number().int().positive().default(300_000),
+    TRACKING_OUTBOX_PUBLISH_ENABLED: booleanEnvSchema.default(false),
+    TRACKING_OUTBOX_PUBLISH_INTERVAL_MS: z.coerce.number().int().positive().default(5_000),
+    TRACKING_OUTBOX_PUBLISH_BATCH_SIZE: z.coerce.number().int().positive().max(100).default(25),
   }),
 );
 

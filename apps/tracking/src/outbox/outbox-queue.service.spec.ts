@@ -1,41 +1,42 @@
 import type IORedis from 'ioredis';
 import type { Env } from '../config/env.schema';
 import {
-  GPS_BATCH_FLUSH_JOB_NAME,
-  GPS_BATCH_QUEUE_NAME,
-  GPS_BATCH_SCHEDULER_ID,
-  GPS_BATCH_WORKER_CONCURRENCY,
-} from './gps-batch.constants';
-import { GpsBatchFlushService } from './gps-batch-flush.service';
-import { GpsBatchQueueService } from './gps-batch-queue.service';
+  OUTBOX_JOB_NAME,
+  OUTBOX_QUEUE_NAME,
+  OUTBOX_SCHEDULER_ID,
+  OUTBOX_WORKER_CONCURRENCY,
+} from './outbox.constants';
+import { OutboxPublisherService } from './outbox-publisher.service';
+import { OutboxQueueService } from './outbox-queue.service';
 
-describe('GpsBatchQueueService', () => {
+describe('OutboxQueueService', () => {
   it('does not create queue infrastructure when disabled', async () => {
-    const service = new TestGpsBatchQueueService(createEnv({ TRACKING_GPS_FLUSH_ENABLED: false }));
+    const service = new TestOutboxQueueService(createEnv({ TRACKING_OUTBOX_PUBLISH_ENABLED: false }));
 
     await service.onModuleInit();
 
     expect(service.createConnectionCalled).toBe(false);
   });
 
-  it('schedules repeat flush job when enabled', async () => {
-    const service = new TestGpsBatchQueueService(
+  it('schedules repeat publish job when enabled', async () => {
+    const service = new TestOutboxQueueService(
       createEnv({
-        TRACKING_GPS_FLUSH_ENABLED: true,
-        TRACKING_GPS_FLUSH_INTERVAL_MS: 123_000,
+        TRACKING_OUTBOX_PUBLISH_ENABLED: true,
+        TRACKING_OUTBOX_PUBLISH_INTERVAL_MS: 7_000,
+        TRACKING_OUTBOX_PUBLISH_BATCH_SIZE: 12,
       }),
     );
 
     await service.onModuleInit();
 
-    expect(service.queueName).toBe(GPS_BATCH_QUEUE_NAME);
-    expect(service.workerName).toBe(GPS_BATCH_QUEUE_NAME);
-    expect(service.workerConcurrency).toBe(GPS_BATCH_WORKER_CONCURRENCY);
+    expect(service.queueName).toBe(OUTBOX_QUEUE_NAME);
+    expect(service.workerName).toBe(OUTBOX_QUEUE_NAME);
+    expect(service.workerConcurrency).toBe(OUTBOX_WORKER_CONCURRENCY);
     expect(service.mockQueue.upsertJobScheduler).toHaveBeenCalledWith(
-      GPS_BATCH_SCHEDULER_ID,
-      { every: 123_000 },
+      OUTBOX_SCHEDULER_ID,
+      { every: 7_000 },
       {
-        name: GPS_BATCH_FLUSH_JOB_NAME,
+        name: OUTBOX_JOB_NAME,
         data: {},
         opts: {
           removeOnComplete: true,
@@ -44,11 +45,12 @@ describe('GpsBatchQueueService', () => {
       },
     );
 
-    await expect(service.processor()).resolves.toBe(7);
+    await expect(service.processor()).resolves.toBe(3);
+    expect(service.mockPublisherService.publishPendingOnce).toHaveBeenCalledWith(12);
   });
 });
 
-class TestGpsBatchQueueService extends GpsBatchQueueService {
+class TestOutboxQueueService extends OutboxQueueService {
   readonly mockQueue = {
     upsertJobScheduler: jest.fn(async () => undefined),
     close: jest.fn(async () => undefined),
@@ -60,8 +62,11 @@ class TestGpsBatchQueueService extends GpsBatchQueueService {
   readonly mockConnection = {
     quit: jest.fn(async () => undefined),
   };
-  readonly mockFlushService = {
-    flushOnce: jest.fn(async () => 7),
+  readonly mockPublisherService = {
+    publishPendingOnce: jest.fn(async (limit: number) => {
+      void limit;
+      return 3;
+    }),
   };
   createConnectionCalled = false;
   queueName?: string;
@@ -70,7 +75,7 @@ class TestGpsBatchQueueService extends GpsBatchQueueService {
   processor: () => Promise<number> = async () => 0;
 
   constructor(env: Env) {
-    super(env, new GpsBatchFlushService({} as never, {} as never));
+    super(env, { publishPendingOnce: jest.fn(async () => 0) } as unknown as OutboxPublisherService);
   }
 
   protected override createConnection(): IORedis {
@@ -80,15 +85,15 @@ class TestGpsBatchQueueService extends GpsBatchQueueService {
 
   protected override createQueue(connection: IORedis): never {
     expect(connection).toBe(this.mockConnection);
-    this.queueName = GPS_BATCH_QUEUE_NAME;
+    this.queueName = OUTBOX_QUEUE_NAME;
     return this.mockQueue as never;
   }
 
   protected override createWorker(connection: IORedis): never {
     expect(connection).toBe(this.mockConnection);
-    this.workerName = GPS_BATCH_QUEUE_NAME;
-    this.workerConcurrency = GPS_BATCH_WORKER_CONCURRENCY;
-    this.processor = () => this.mockFlushService.flushOnce();
+    this.workerName = OUTBOX_QUEUE_NAME;
+    this.workerConcurrency = OUTBOX_WORKER_CONCURRENCY;
+    this.processor = () => this.mockPublisherService.publishPendingOnce(this.env.TRACKING_OUTBOX_PUBLISH_BATCH_SIZE);
     return this.mockWorker as never;
   }
 }

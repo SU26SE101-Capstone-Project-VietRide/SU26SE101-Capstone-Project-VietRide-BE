@@ -8,11 +8,12 @@ import { JoseUserJwtVerifier } from '../auth/user-jwt.verifier';
 import { ApproachingAlertModule } from '../approaching-alert/approaching-alert.module';
 import { EtaModule } from '../eta/eta.module';
 import { OffRouteModule } from '../off-route/off-route.module';
+import { TripDelayModule } from '../trip-delay/trip-delay.module';
 import { LocationGateway } from './location.gateway';
 import { LocationService } from './location.service';
 
 @Module({
-  imports: [EtaModule, ApproachingAlertModule, OffRouteModule],
+  imports: [EtaModule, ApproachingAlertModule, OffRouteModule, TripDelayModule],
   providers: [
     LocationGateway,
     LocationService,

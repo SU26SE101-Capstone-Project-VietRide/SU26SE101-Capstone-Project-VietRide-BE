@@ -14,6 +14,7 @@ import { MvpTrackingAuthorizationAdapter } from '../authorization/tracking-autho
 import type { Env } from '../config/env.schema';
 import { EtaService, type EtaUpdateEvent } from '../eta/eta.service';
 import { OffRouteService } from '../off-route/off-route.service';
+import { TripDelayService, type TripDelayEtaUpdate } from '../trip-delay/trip-delay.service';
 import { LocationGateway } from './location.gateway';
 import { TRACKING_SOCKET_PATH, trackingGpsBufferKey, trackingLatestKey } from './location.constants';
 import { LocationService } from './location.service';
@@ -57,6 +58,7 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
   let etaHandleGpsUpdate: jest.MockedFunction<(event: unknown) => Promise<EtaUpdateEvent | null>>;
   let approachingHandleEtaUpdate: jest.MockedFunction<(event: EtaUpdateEvent) => Promise<number>>;
   let offRouteHandleGpsUpdate: jest.MockedFunction<(event: unknown) => Promise<unknown>>;
+  let tripDelayHandleEtaUpdate: jest.MockedFunction<(event: EtaUpdateEvent) => Promise<TripDelayEtaUpdate>>;
 
   beforeAll(async () => {
     const generated = await generateKeyPair('RS256');
@@ -76,6 +78,10 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       void event;
       return null;
     });
+    tripDelayHandleEtaUpdate = jest.fn(async (event: EtaUpdateEvent) => ({
+      ...event,
+      delayed: false,
+    }));
     const redisService = {
       getClient: jest.fn(() => ({
         multi: jest.fn(() => redisMulti),
@@ -114,6 +120,10 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
           provide: OffRouteService,
           useValue: { handleGpsUpdate: offRouteHandleGpsUpdate },
         },
+        {
+          provide: TripDelayService,
+          useValue: { handleEtaUpdate: tripDelayHandleEtaUpdate },
+        },
       ],
     }).compile();
 
@@ -130,6 +140,11 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     approachingHandleEtaUpdate.mockResolvedValue(0);
     offRouteHandleGpsUpdate.mockClear();
     offRouteHandleGpsUpdate.mockResolvedValue(null);
+    tripDelayHandleEtaUpdate.mockClear();
+    tripDelayHandleEtaUpdate.mockImplementation(async (event: EtaUpdateEvent) => ({
+      ...event,
+      delayed: false,
+    }));
   });
 
   afterAll(async () => {
@@ -222,8 +237,49 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     const receivedEta = await etaPromise;
 
     expect(ack).toEqual({ success: true });
-    expect(receivedEta).toEqual(etaUpdate);
-    expect(approachingHandleEtaUpdate).toHaveBeenCalledWith(etaUpdate);
+    expect(receivedEta).toEqual({ ...etaUpdate, delayed: false });
+    expect(approachingHandleEtaUpdate).toHaveBeenCalledWith({ ...etaUpdate, delayed: false });
+    socket.disconnect();
+  });
+
+  it('broadcasts trip:statusChanged when delayed detection flags ETA update', async () => {
+    const token = await signIdentityToken('DRIVER', TEST_OPERATOR_ID);
+    const socket = await connectSocket(token);
+    const etaUpdate: EtaUpdateEvent = {
+      tripId: TEST_TRIP_ID,
+      stopId: '44444444-4444-4444-8444-444444444444',
+      etaMinutes: 60,
+      estimatedArrivalTime: '2026-06-03T11:00:00.000Z',
+      distanceMeters: 8_000,
+      updatedAt: '2026-06-03T10:00:01.000Z',
+    };
+    const delayedEtaUpdate: TripDelayEtaUpdate = {
+      ...etaUpdate,
+      delayed: true,
+      delayMinutes: 35,
+    };
+    etaHandleGpsUpdate.mockResolvedValue(etaUpdate);
+    tripDelayHandleEtaUpdate.mockResolvedValue(delayedEtaUpdate);
+
+    await emitWithAck<JoinTripTrackingAck>(socket, 'joinTripTracking', {
+      tripId: TEST_TRIP_ID,
+    });
+    const etaPromise = waitForEvent<TripDelayEtaUpdate>(socket, 'eta:update');
+    const statusPromise = waitForEvent<Record<string, unknown>>(socket, 'trip:statusChanged');
+    const ack = await emitWithAck<GpsUpdateAck>(socket, 'gps:update', createGpsPayload());
+    const receivedEta = await etaPromise;
+    const receivedStatus = await statusPromise;
+
+    expect(ack).toEqual({ success: true });
+    expect(receivedEta).toEqual(delayedEtaUpdate);
+    expect(receivedStatus).toEqual({
+      tripId: TEST_TRIP_ID,
+      stopId: etaUpdate.stopId,
+      status: 'DELAYED',
+      delayMinutes: 35,
+      updatedAt: etaUpdate.updatedAt,
+    });
+    expect(approachingHandleEtaUpdate).toHaveBeenCalledWith(delayedEtaUpdate);
     socket.disconnect();
   });
 
@@ -359,6 +415,11 @@ function createTestEnv(publicKeyPem: string): Env {
     USER_JWT_PUBLIC_KEY: publicKeyPem,
     TRACKING_GPS_FLUSH_ENABLED: false,
     TRACKING_GPS_FLUSH_INTERVAL_MS: 300_000,
+    TRACKING_TRIP_DELAY_ENABLED: false,
+    TRACKING_TRIP_DELAY_INTERVAL_MS: 300_000,
+    TRACKING_OUTBOX_PUBLISH_ENABLED: false,
+    TRACKING_OUTBOX_PUBLISH_INTERVAL_MS: 5_000,
+    TRACKING_OUTBOX_PUBLISH_BATCH_SIZE: 25,
   };
 }
 

@@ -18,6 +18,7 @@ import type { UserJwtVerifier } from '../auth/user-jwt.verifier';
 import type { TrackingAuthorizationAdapter } from '../authorization/tracking-authorization.adapter';
 import { EtaService } from '../eta/eta.service';
 import { OffRouteService } from '../off-route/off-route.service';
+import { TripDelayService } from '../trip-delay/trip-delay.service';
 import {
   TRACKING_SOCKET_PATH,
   trackingTripRoom,
@@ -65,6 +66,7 @@ export class LocationGateway implements OnGatewayInit {
     private readonly etaService: EtaService,
     private readonly approachingAlertService: ApproachingAlertService,
     private readonly offRouteService: OffRouteService,
+    private readonly tripDelayService: TripDelayService,
   ) {}
 
   afterInit(server: Server): void {
@@ -138,8 +140,18 @@ export class LocationGateway implements OnGatewayInit {
     this.server.to(trackingTripRoom(parsed.data.tripId)).emit('gps:update', event);
     const etaUpdate = await this.etaService.handleGpsUpdate(event);
     if (etaUpdate) {
-      this.server.to(trackingTripRoom(parsed.data.tripId)).emit('eta:update', etaUpdate);
-      await this.approachingAlertService.handleEtaUpdate(etaUpdate);
+      const tripDelayEtaUpdate = await this.tripDelayService.handleEtaUpdate(etaUpdate);
+      this.server.to(trackingTripRoom(parsed.data.tripId)).emit('eta:update', tripDelayEtaUpdate);
+      if (tripDelayEtaUpdate.delayed) {
+        this.server.to(trackingTripRoom(parsed.data.tripId)).emit('trip:statusChanged', {
+          tripId: tripDelayEtaUpdate.tripId,
+          stopId: tripDelayEtaUpdate.stopId,
+          status: 'DELAYED',
+          delayMinutes: tripDelayEtaUpdate.delayMinutes,
+          updatedAt: tripDelayEtaUpdate.updatedAt,
+        });
+      }
+      await this.approachingAlertService.handleEtaUpdate(tripDelayEtaUpdate);
     }
     this.logger.debug(`Broadcasted gps:update for trip ${parsed.data.tripId}`);
     return { success: true };
