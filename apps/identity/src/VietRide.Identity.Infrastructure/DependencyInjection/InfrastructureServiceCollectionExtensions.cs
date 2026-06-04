@@ -7,6 +7,7 @@ using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Infrastructure.ExternalClients;
 using VietRide.Identity.Infrastructure.Persistence.Repositories;
 using VietRide.Identity.Infrastructure.Security;
+using VietRide.Identity.Infrastructure.Seed;
 
 namespace VietRide.Identity.Infrastructure.DependencyInjection;
 
@@ -50,6 +51,12 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IEmailVerificationTokenRepository, EmailVerificationTokenRepository>();
+        services.AddScoped<IActivityLogRepository, ActivityLogRepository>();
+
+        // ------------------------------------------------------------------
+        // Startup seeders
+        // ------------------------------------------------------------------
+        services.AddScoped<BootstrapAdminSeeder>();
 
         // ------------------------------------------------------------------
         // Security services

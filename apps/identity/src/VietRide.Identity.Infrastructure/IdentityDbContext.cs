@@ -29,6 +29,7 @@ public sealed class IdentityDbContext : VietRideDbContextBase
         builder.MapEnum<OAuthProvider>("oauth_provider", PostgresEnumNameTranslator);
         builder.MapEnum<RefreshTokenRevokeReason>("refresh_token_revoke_reason", PostgresEnumNameTranslator);
         builder.MapEnum<DevicePlatform>("device_platform", PostgresEnumNameTranslator);
+        builder.MapEnum<ActivityLogAction>("activity_log_action", PostgresEnumNameTranslator);
     }
 
     // --- DbSets ---
@@ -41,6 +42,7 @@ public sealed class IdentityDbContext : VietRideDbContextBase
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<EmailVerificationToken> EmailVerificationTokens => Set<EmailVerificationToken>();
     public DbSet<UserDevice> UserDevices => Set<UserDevice>();
+    public DbSet<ActivityLog> ActivityLogs => Set<ActivityLog>();
 
     private static void RegisterPostgresEnums(ModelBuilder modelBuilder)
     {
@@ -50,6 +52,7 @@ public sealed class IdentityDbContext : VietRideDbContextBase
         modelBuilder.HasPostgresEnum("oauth_provider", Enum.GetNames<OAuthProvider>());
         modelBuilder.HasPostgresEnum("refresh_token_revoke_reason", Enum.GetNames<RefreshTokenRevokeReason>());
         modelBuilder.HasPostgresEnum("device_platform", Enum.GetNames<DevicePlatform>());
+        modelBuilder.HasPostgresEnum("activity_log_action", Enum.GetNames<ActivityLogAction>());
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
