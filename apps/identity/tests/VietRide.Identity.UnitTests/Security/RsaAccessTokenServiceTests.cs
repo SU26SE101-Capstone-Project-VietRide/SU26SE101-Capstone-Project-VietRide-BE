@@ -159,6 +159,39 @@ public sealed class RsaAccessTokenServiceTests
     }
 
     [Fact]
+    public void IssueToken_ContainsHasPhoneTrue_WhenUserPhoneIsPresent()
+    {
+        var service = CreateService();
+        var user = MakeActivePassenger();
+
+        var tokenStr = service.IssueToken(user);
+
+        var handler = new JwtSecurityTokenHandler();
+        var jwt = handler.ReadJwtToken(tokenStr);
+
+        jwt.Claims.Should().ContainSingle(c => c.Type == "hasPhone")
+            .Which.Value.Should().BeOneOf("true", "True");
+    }
+
+    [Fact]
+    public void IssueToken_ContainsHasPhoneFalse_WhenUserPhoneIsNull()
+    {
+        var service = CreateService();
+        var user = User.CreateGoogleAccount(
+            "google@example.com",
+            "Google User",
+            "https://example.test/avatar.png");
+
+        var tokenStr = service.IssueToken(user);
+
+        var handler = new JwtSecurityTokenHandler();
+        var jwt = handler.ReadJwtToken(tokenStr);
+
+        jwt.Claims.Should().ContainSingle(c => c.Type == "hasPhone")
+            .Which.Value.Should().BeOneOf("false", "False");
+    }
+
+    [Fact]
     public void IssueToken_ExpiresExactly15MinutesAfterFrozenClock()
     {
         var clock = MakeFrozenClock(FrozenNow);

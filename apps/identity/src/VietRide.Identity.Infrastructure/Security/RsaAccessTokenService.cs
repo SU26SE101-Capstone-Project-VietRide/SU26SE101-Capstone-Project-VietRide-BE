@@ -12,7 +12,7 @@ namespace VietRide.Identity.Infrastructure.Security;
 /// <summary>
 /// Issues RS256 JWT access tokens.
 /// Issuer: <c>vietride-identity</c>, audience: <c>vietride-api</c>, TTL: 15 minutes.
-/// Claims per BSOT §6.2: iss, sub, role, operatorId, email, iat, exp, kid.
+/// Claims per BSOT §6.2: iss, sub, role, operatorId, email, hasPhone, iat, exp, kid.
 /// operatorId claim is OMITTED when the user has no operator (PASSENGER/SYSTEM_ADMIN).
 /// </summary>
 public sealed class RsaAccessTokenService : IAccessTokenService
@@ -54,6 +54,7 @@ public sealed class RsaAccessTokenService : IAccessTokenService
             new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
             new("role", user.Role.ToString()),
             new("email", user.Email),
+            new("hasPhone", user.Phone is not null ? "true" : "false", ClaimValueTypes.Boolean),
         };
 
         // operatorId claim is present only for operator-scoped roles; absent = null operator
