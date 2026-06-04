@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <PackageReference Include="BCrypt.Net-Next" />
+    <PackageReference Include="Google.Apis.Auth" />
     <PackageReference Include="StackExchange.Redis" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
       <PrivateAssets>all</PrivateAssets>

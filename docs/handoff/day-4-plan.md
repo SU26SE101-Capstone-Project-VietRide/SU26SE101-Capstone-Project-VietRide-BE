@@ -234,7 +234,7 @@ Default execution in one tree is serial per /implement-task; parallel-safe flags
 | 4.0 | ✅ done | APPROVE | 2026-06-04 | Approved after human-authorized extra patch; human verify pending. |
 | 4.1 | ✅ done | APPROVE | 2026-06-04 | Approved on first review; human verify pending. |
 | 4.2 | ✅ done | APPROVE | 2026-06-04 | Approved on first review; human verify pending. |
-| 4.3 | todo | -- | -- | -- |
+| 4.3 | ✅ done | APPROVE | 2026-06-04 | Approved on first review; human verify pending. |
 | 4.4 | todo | -- | -- | -- |
 | 4.5 | todo | -- | -- | -- |
 | 4.6 | todo | -- | -- | -- |

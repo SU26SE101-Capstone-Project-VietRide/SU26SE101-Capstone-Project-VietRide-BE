@@ -45,6 +45,19 @@ public static class InfrastructureServiceCollectionExtensions
                 options.Kid = kid;
         });
 
+        services.Configure<GoogleOAuthOptions>(options =>
+        {
+            configuration.GetSection(GoogleOAuthOptions.SectionName).Bind(options);
+
+            var clientId = configuration["GOOGLE_OAUTH_CLIENT_ID"];
+            if (!string.IsNullOrWhiteSpace(clientId))
+                options.ClientId = clientId;
+
+            var clientSecret = configuration["GOOGLE_OAUTH_CLIENT_SECRET"];
+            if (!string.IsNullOrWhiteSpace(clientSecret))
+                options.ClientSecret = clientSecret;
+        });
+
         // ------------------------------------------------------------------
         // Repositories
         // ------------------------------------------------------------------
@@ -65,6 +78,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IPasswordHasher, BCryptPasswordHasher>();
         services.AddSingleton<IAccessTokenService, RsaAccessTokenService>();
         services.AddSingleton<IJwksProvider, JwksProvider>();
+        services.AddSingleton<IGoogleIdTokenVerifier, GoogleIdTokenVerifier>();
         services.AddScoped<IRefreshTokenFactory, RefreshTokenFactory>();
         services.AddSingleton<IOtpFailedAttemptPersister, OtpFailedAttemptPersister>();
         services.AddSingleton<IFailedLoginPersister, FailedLoginPersister>();
