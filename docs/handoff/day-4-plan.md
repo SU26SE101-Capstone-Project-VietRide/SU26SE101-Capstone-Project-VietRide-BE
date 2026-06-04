@@ -239,7 +239,7 @@ Default execution in one tree is serial per /implement-task; parallel-safe flags
 | 4.5 | ✅ done | APPROVE | 2026-06-04 | Approved on first review; human verify pending. |
 | 4.6 | ✅ done | APPROVE | 2026-06-04 | Approved on first review; human verify pending. |
 | 4.7 | ✅ done | APPROVE | 2026-06-04 | Approved after one patch round; human verify pending. |
-| 4.8 | todo | -- | -- | -- |
+| 4.8 | ✅ done | APPROVE | 2026-06-04 | Approved after one patch round; human verify pending. |
 
 Legend: todo / in progress / done (reviewer APPROVED + human /verify) / done-with-carryover / blocked
 
