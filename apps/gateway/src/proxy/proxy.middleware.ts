@@ -27,6 +27,12 @@ type RequestIdSource = {
   headers?: Record<string, string | string[] | undefined>;
 };
 
+type GateRejection = {
+  statusCode: number;
+  code: 'FORBIDDEN' | 'AUTH_PHONE_REQUIRED';
+  message: string;
+};
+
 function resolveRequestId(req: RequestIdSource): string {
   const headerValue =
     typeof req.header === 'function'
@@ -52,6 +58,59 @@ function buildErrorEnvelope(
     error: { code, message },
     meta: { traceId, timestamp: new Date().toISOString() },
   };
+}
+
+function hasRequiredRole(route: ProxyRoute, role: string | undefined): boolean {
+  return !route.requiredRoles?.length || (role !== undefined && route.requiredRoles.includes(role));
+}
+
+function hasCompletedPhoneProfile(hasPhone: unknown): boolean {
+  return hasPhone === true || hasPhone === 'true';
+}
+
+function isPhoneGateWhitelisted(method: string, path: string): boolean {
+  if (path === '/health' || path === '/ready') {
+    return true;
+  }
+
+  const normalizedMethod = method.toUpperCase();
+  return (
+    (normalizedMethod === 'GET' && path === '/v1/users/me') ||
+    (normalizedMethod === 'POST' && path === '/v1/users/me/complete-profile') ||
+    (normalizedMethod === 'POST' && path === '/v1/auth/logout') ||
+    (normalizedMethod === 'POST' && path === '/v1/auth/refresh')
+  );
+}
+
+function validateAccessGates(
+  route: ProxyRoute,
+  req: Request,
+  fullPath: string,
+): GateRejection | undefined {
+  const user = (req as RequestWithUser).user;
+  const role = user?.['role'] as string | undefined;
+
+  if (!hasRequiredRole(route, role)) {
+    return {
+      statusCode: 403,
+      code: 'FORBIDDEN',
+      message: 'Access to this resource is forbidden.',
+    };
+  }
+
+  if (
+    role === 'PASSENGER' &&
+    !hasCompletedPhoneProfile(user?.['hasPhone']) &&
+    !isPhoneGateWhitelisted(req.method, fullPath)
+  ) {
+    return {
+      statusCode: 403,
+      code: 'AUTH_PHONE_REQUIRED',
+      message: 'Vui lòng hoàn tất hồ sơ trước khi tiếp tục.',
+    };
+  }
+
+  return undefined;
 }
 
 /**
@@ -154,6 +213,21 @@ export function createProxyHandler(env: Env, signer: InternalJwtSigner): Express
         sendUnauthorized(res, reqId);
         return;
       }
+    }
+
+    const gateRejection = validateAccessGates(route, req, fullPath);
+    if (gateRejection) {
+      res
+        .status(gateRejection.statusCode)
+        .json(
+          buildErrorEnvelope(
+            gateRejection.statusCode,
+            gateRejection.code,
+            gateRejection.message,
+            reqId,
+          ),
+        );
+      return;
     }
 
     const role = user?.['role'] as string | undefined;
