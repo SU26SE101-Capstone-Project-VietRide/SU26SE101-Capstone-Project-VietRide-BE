@@ -12,9 +12,12 @@ import {
   TRACKING_AUTHORIZATION_ADAPTER,
   TRACKING_JWT_VERIFIER,
 } from '../app/tokens';
+import { ApproachingAlertService } from '../approaching-alert/approaching-alert.service';
 import type { TrackingUser } from '../auth/tracking-user.types';
 import type { UserJwtVerifier } from '../auth/user-jwt.verifier';
 import type { TrackingAuthorizationAdapter } from '../authorization/tracking-authorization.adapter';
+import { EtaService } from '../eta/eta.service';
+import { OffRouteService } from '../off-route/off-route.service';
 import {
   TRACKING_SOCKET_PATH,
   trackingTripRoom,
@@ -59,6 +62,9 @@ export class LocationGateway implements OnGatewayInit {
     @Inject(TRACKING_JWT_VERIFIER) private readonly jwtVerifier: UserJwtVerifier,
     @Inject(TRACKING_AUTHORIZATION_ADAPTER)
     private readonly authorizationAdapter: TrackingAuthorizationAdapter,
+    private readonly etaService: EtaService,
+    private readonly approachingAlertService: ApproachingAlertService,
+    private readonly offRouteService: OffRouteService,
   ) {}
 
   afterInit(server: Server): void {
@@ -128,7 +134,13 @@ export class LocationGateway implements OnGatewayInit {
     }
 
     const event = await this.locationService.recordLocation(parsed.data);
+    await this.offRouteService.handleGpsUpdate(event);
     this.server.to(trackingTripRoom(parsed.data.tripId)).emit('gps:update', event);
+    const etaUpdate = await this.etaService.handleGpsUpdate(event);
+    if (etaUpdate) {
+      this.server.to(trackingTripRoom(parsed.data.tripId)).emit('eta:update', etaUpdate);
+      await this.approachingAlertService.handleEtaUpdate(etaUpdate);
+    }
     this.logger.debug(`Broadcasted gps:update for trip ${parsed.data.tripId}`);
     return { success: true };
   }

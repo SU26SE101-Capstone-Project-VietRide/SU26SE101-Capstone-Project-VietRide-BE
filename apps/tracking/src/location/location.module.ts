@@ -5,10 +5,14 @@ import {
 } from '../app/tokens';
 import { MvpTrackingAuthorizationAdapter } from '../authorization/tracking-authorization.adapter';
 import { JoseUserJwtVerifier } from '../auth/user-jwt.verifier';
+import { ApproachingAlertModule } from '../approaching-alert/approaching-alert.module';
+import { EtaModule } from '../eta/eta.module';
+import { OffRouteModule } from '../off-route/off-route.module';
 import { LocationGateway } from './location.gateway';
 import { LocationService } from './location.service';
 
 @Module({
+  imports: [EtaModule, ApproachingAlertModule, OffRouteModule],
   providers: [
     LocationGateway,
     LocationService,

@@ -8,9 +8,12 @@ import {
   TRACKING_AUTHORIZATION_ADAPTER,
   TRACKING_JWT_VERIFIER,
 } from '../app/tokens';
+import { ApproachingAlertService } from '../approaching-alert/approaching-alert.service';
 import { JoseUserJwtVerifier } from '../auth/user-jwt.verifier';
 import { MvpTrackingAuthorizationAdapter } from '../authorization/tracking-authorization.adapter';
 import type { Env } from '../config/env.schema';
+import { EtaService, type EtaUpdateEvent } from '../eta/eta.service';
+import { OffRouteService } from '../off-route/off-route.service';
 import { LocationGateway } from './location.gateway';
 import { TRACKING_SOCKET_PATH, trackingGpsBufferKey, trackingLatestKey } from './location.constants';
 import { LocationService } from './location.service';
@@ -51,6 +54,9 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
   let privateKey: KeyLike;
   let publicKeyPem: string;
   let redisMulti: RedisMultiMock;
+  let etaHandleGpsUpdate: jest.MockedFunction<(event: unknown) => Promise<EtaUpdateEvent | null>>;
+  let approachingHandleEtaUpdate: jest.MockedFunction<(event: EtaUpdateEvent) => Promise<number>>;
+  let offRouteHandleGpsUpdate: jest.MockedFunction<(event: unknown) => Promise<unknown>>;
 
   beforeAll(async () => {
     const generated = await generateKeyPair('RS256');
@@ -58,6 +64,18 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     publicKeyPem = await exportSPKI(generated.publicKey);
 
     redisMulti = createRedisMultiMock();
+    etaHandleGpsUpdate = jest.fn(async (event: unknown) => {
+      void event;
+      return null;
+    });
+    approachingHandleEtaUpdate = jest.fn(async (event: EtaUpdateEvent) => {
+      void event;
+      return 0;
+    });
+    offRouteHandleGpsUpdate = jest.fn(async (event: unknown) => {
+      void event;
+      return null;
+    });
     const redisService = {
       getClient: jest.fn(() => ({
         multi: jest.fn(() => redisMulti),
@@ -84,6 +102,18 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
           provide: RedisService,
           useValue: redisService,
         },
+        {
+          provide: EtaService,
+          useValue: { handleGpsUpdate: etaHandleGpsUpdate },
+        },
+        {
+          provide: ApproachingAlertService,
+          useValue: { handleEtaUpdate: approachingHandleEtaUpdate },
+        },
+        {
+          provide: OffRouteService,
+          useValue: { handleGpsUpdate: offRouteHandleGpsUpdate },
+        },
       ],
     }).compile();
 
@@ -94,6 +124,12 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
 
   beforeEach(() => {
     resetRedisMultiMock(redisMulti);
+    etaHandleGpsUpdate.mockClear();
+    etaHandleGpsUpdate.mockResolvedValue(null);
+    approachingHandleEtaUpdate.mockClear();
+    approachingHandleEtaUpdate.mockResolvedValue(0);
+    offRouteHandleGpsUpdate.mockClear();
+    offRouteHandleGpsUpdate.mockResolvedValue(null);
   });
 
   afterAll(async () => {
@@ -159,6 +195,35 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     expect(redisMulti.rpush).toHaveBeenCalledWith(trackingGpsBufferKey(TEST_TRIP_ID), expect.any(String));
     expect(redisMulti.sadd).toHaveBeenCalledWith('tracking:active_trips', TEST_TRIP_ID);
     expect(redisMulti.exec).toHaveBeenCalledTimes(1);
+    expect(offRouteHandleGpsUpdate).toHaveBeenCalledWith(expect.objectContaining({ tripId: TEST_TRIP_ID }));
+    expect(etaHandleGpsUpdate).toHaveBeenCalledWith(expect.objectContaining({ tripId: TEST_TRIP_ID }));
+    expect(approachingHandleEtaUpdate).not.toHaveBeenCalled();
+    socket.disconnect();
+  });
+
+  it('broadcasts eta:update when ETA engine recalculates', async () => {
+    const token = await signIdentityToken('DRIVER', TEST_OPERATOR_ID);
+    const socket = await connectSocket(token);
+    const etaUpdate: EtaUpdateEvent = {
+      tripId: TEST_TRIP_ID,
+      stopId: '44444444-4444-4444-8444-444444444444',
+      etaMinutes: 12,
+      estimatedArrivalTime: '2026-06-03T10:12:00.000Z',
+      distanceMeters: 8_000,
+      updatedAt: '2026-06-03T10:00:01.000Z',
+    };
+    etaHandleGpsUpdate.mockResolvedValue(etaUpdate);
+
+    await emitWithAck<JoinTripTrackingAck>(socket, 'joinTripTracking', {
+      tripId: TEST_TRIP_ID,
+    });
+    const etaPromise = waitForEvent<EtaUpdateEvent>(socket, 'eta:update');
+    const ack = await emitWithAck<GpsUpdateAck>(socket, 'gps:update', createGpsPayload());
+    const receivedEta = await etaPromise;
+
+    expect(ack).toEqual({ success: true });
+    expect(receivedEta).toEqual(etaUpdate);
+    expect(approachingHandleEtaUpdate).toHaveBeenCalledWith(etaUpdate);
     socket.disconnect();
   });
 
@@ -217,6 +282,19 @@ function emitWithAck<TAck>(socket: Socket, eventName: string, payload: unknown):
     socket.emit(eventName, payload, (ack: TAck) => {
       clearTimeout(timeout);
       resolve(ack);
+    });
+  });
+}
+
+function waitForEvent<TPayload>(socket: Socket, eventName: string): Promise<TPayload> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(`${eventName.toUpperCase()}_EVENT_TIMEOUT`));
+    }, ACK_TIMEOUT_MS);
+
+    socket.once(eventName, (payload: TPayload) => {
+      clearTimeout(timeout);
+      resolve(payload);
     });
   });
 }
