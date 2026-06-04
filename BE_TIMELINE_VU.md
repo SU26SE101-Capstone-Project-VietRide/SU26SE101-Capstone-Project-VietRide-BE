@@ -59,11 +59,11 @@
 
 ### Day 4 — Thu 2026-05-28 — Identity Service: Google OAuth + Complete Phone + Admin bootstrap
 - `POST /auth/google` flow with Google OAuth token verification
-- "Complete phone" enforcement: middleware on protected routes returns 428 if `Phone IS NULL` and role=PASSENGER
-- `POST /auth/complete-phone` endpoint (re-verify via OTP)
-- Admin bootstrap migration: seeded SYSTEM_ADMIN from `BOOTSTRAP_ADMIN_*` env (idempotent)
+- "Complete phone" Gateway enforcement: protected routes return 403 if `Phone IS NULL` and role=PASSENGER
+- `POST /v1/users/me/complete-profile` endpoint (no OTP (D1))
+- Admin bootstrap startup seeder: seeded SYSTEM_ADMIN from `SYSTEM_ADMIN_BOOTSTRAP_*` env (idempotent)
 - `POST /admin/users` (System Admin creates other admin)
-- **DoD**: Google OAuth user without phone gets 428 on protected route; bootstrap admin exists after first migration run
+- **DoD**: Google OAuth user without phone gets 403 on protected route; bootstrap admin exists after first Identity service startup/seeder run
 - **Review**: Postman collection covering all 3 auth paths (email/Google/admin-created)
 
 ### Day 5 — Fri 2026-05-29 — Identity Service: Staff initial password + FCM tokens
