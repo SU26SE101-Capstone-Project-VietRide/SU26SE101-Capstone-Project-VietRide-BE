@@ -37,6 +37,22 @@ public sealed class UserDevice : BaseEntity<Guid>, IActivatable
         IsActive = false;
     }
 
+    public void Reactivate(DateTimeOffset now)
+    {
+        IsActive = true;
+        LastActiveAt = now;
+    }
+
+    public void ClaimBy(Guid newUserId, DateTimeOffset now)
+    {
+        if (newUserId == Guid.Empty)
+            throw new ArgumentException("User id must not be empty.", nameof(newUserId));
+
+        UserId = newUserId;
+        IsActive = true;
+        LastActiveAt = now;
+    }
+
     public void UpdateLastActive(DateTimeOffset lastActiveAt)
     {
         LastActiveAt = lastActiveAt;

@@ -158,7 +158,7 @@ Gateway routes: /v1/auth prefix already routes to Identity (authRequired user, r
 |---|---|---|---|---|
 | 5.0 | done | APPROVE | 2026-06-06 | APPROVE after patch rounds and DB-backed verification; Postgres started/stopped for tests; human /verify pending |
 | 5.1 | done | APPROVE | 2026-06-06 | APPROVE after one password-policy patch; Postgres started/stopped for DB-backed tests; human /verify pending |
-| 5.2 | todo | — | — | ordered register: user-scoped-incl-inactive reactivate, global-active claim, create (Item 2); DELETE 204 (Item 7) |
+| 5.2 | done | APPROVE | 2026-06-06 | APPROVE after one patch for DB-backed device endpoint coverage, response shape, validation, and claim/reactivation edge case; human /verify pending |
 | 5.3 | done | APPROVE | 2026-06-06 | APPROVE after one patch for handler-level missing-role 403 + DB-backed resend happy path; Postgres started/stopped; human /verify pending |
 | 5.4 | todo | — | — | Consume Task 5.0 ListActiveByUserIdAsync; inactive tokens excluded |
 | 5.5a | todo | — | — | login block (dotnet) |
