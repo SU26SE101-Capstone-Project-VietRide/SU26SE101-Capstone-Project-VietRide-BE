@@ -71,6 +71,18 @@ internal sealed class EmailVerificationTokenRepository : IEmailVerificationToken
             .OrderByDescending(e => e.CreatedAt)
             .FirstOrDefaultAsync(ct);
 
+    /// <inheritdoc />
+    public async Task RevokeActiveByUserAndPurposeAsync(
+        Guid userId,
+        EmailVerificationPurpose purpose,
+        DateTimeOffset revokedAt,
+        CancellationToken ct = default)
+    {
+        await _db.EmailVerificationTokens
+            .Where(e => e.UserId == userId && e.Purpose == purpose && e.UsedAt == null)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(e => e.UsedAt, revokedAt), ct);
+    }
+
     public async Task<EmailVerificationToken> AddAsync(EmailVerificationToken entity, CancellationToken ct)
     {
         await _db.EmailVerificationTokens.AddAsync(entity, ct);

@@ -65,6 +65,16 @@ public interface IEmailVerificationTokenRepository : IRepository<EmailVerificati
         CancellationToken ct = default);
 
     /// <summary>
+    /// Marks every pending token for <paramref name="userId"/> and <paramref name="purpose"/>
+    /// as used. The operation is intentionally user-scoped for resend flows.
+    /// </summary>
+    Task RevokeActiveByUserAndPurposeAsync(
+        Guid userId,
+        EmailVerificationPurpose purpose,
+        DateTimeOffset revokedAt,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Attempts to persist <paramref name="entity"/>.
     /// Returns <c>true</c> when the insert succeeds; <c>false</c> when a
     /// unique-constraint violation occurs (e.g. OTP code collision on the

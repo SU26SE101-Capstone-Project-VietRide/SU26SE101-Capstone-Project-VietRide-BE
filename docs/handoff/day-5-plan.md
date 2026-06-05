@@ -159,7 +159,7 @@ Gateway routes: /v1/auth prefix already routes to Identity (authRequired user, r
 | 5.0 | done | APPROVE | 2026-06-06 | APPROVE after patch rounds and DB-backed verification; Postgres started/stopped for tests; human /verify pending |
 | 5.1 | done | APPROVE | 2026-06-06 | APPROVE after one password-policy patch; Postgres started/stopped for DB-backed tests; human /verify pending |
 | 5.2 | todo | — | — | ordered register: user-scoped-incl-inactive reactivate, global-active claim, create (Item 2); DELETE 204 (Item 7) |
-| 5.3 | todo | — | — | OPERATOR_ADMIN resend on NEW OperatorUsersController; tenant-isolated by callerOperatorId == targetUser.OperatorId; updates shared NotFoundException mapping to RESOURCE_NOT_FOUND; errors 403/404 RESOURCE_NOT_FOUND/422 USER_INVALID_STATUS_TRANSITION; adds ONLY revoke-active-by-(userId,purpose) helper; asserts RESEND_INITIAL_PASSWORD ActivityLog row |
+| 5.3 | done | APPROVE | 2026-06-06 | APPROVE after one patch for handler-level missing-role 403 + DB-backed resend happy path; Postgres started/stopped; human /verify pending |
 | 5.4 | todo | — | — | Consume Task 5.0 ListActiveByUserIdAsync; inactive tokens excluded |
 | 5.5a | todo | — | — | login block (dotnet) |
 | 5.5b | todo | — | — | Gateway: explicit-prefix public /v1/auth/set-initial-password before /v1/auth catch-all + validate/update app.module.ts publicPaths + OPERATOR_ADMIN /v1/operator/users route (nest) |

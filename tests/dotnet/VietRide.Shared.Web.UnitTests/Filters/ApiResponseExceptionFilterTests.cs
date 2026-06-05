@@ -84,7 +84,7 @@ public sealed class ApiResponseExceptionFilterTests
         var result = ctx.Result.Should().BeOfType<ObjectResult>().Subject;
         result.StatusCode.Should().Be(404);
         var envelope = result.Value.Should().BeOfType<ApiResponse>().Subject;
-        envelope.Error.Code.Should().Be("NOT_FOUND");
+        envelope.Error.Code.Should().Be("RESOURCE_NOT_FOUND");
     }
 
     [Fact]
