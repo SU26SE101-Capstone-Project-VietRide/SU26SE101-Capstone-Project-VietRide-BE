@@ -135,6 +135,43 @@ public sealed class UserTests
     }
 
     // -------------------------------------------------------------------------
+    // SetInitialPassword
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void SetInitialPassword_WhenPendingInitialPassword_SetsHashAndTransitionsToActive()
+    {
+        var user = User.CreateAdminPendingPassword("admin@example.com", "System Admin");
+
+        user.SetInitialPassword("$2a$12$hashed-initial-password");
+
+        user.PasswordHash.Should().Be("$2a$12$hashed-initial-password");
+        user.Status.Should().Be(UserStatus.ACTIVE);
+    }
+
+    [Fact]
+    public void SetInitialPassword_WhenNotPendingInitialPassword_ThrowsInvalidUserStatusTransition()
+    {
+        var user = MakeActivePassenger();
+
+        var act = () => user.SetInitialPassword("$2a$12$hashed-initial-password");
+
+        act.Should().Throw<InvalidUserStatusTransitionException>();
+    }
+
+    [Fact]
+    public void SetInitialPassword_WhenHashBlank_ThrowsArgumentException()
+    {
+        var user = User.CreateAdminPendingPassword("admin@example.com", "System Admin");
+
+        var act = () => user.SetInitialPassword(" ");
+
+        act.Should().Throw<ArgumentException>();
+        user.Status.Should().Be(UserStatus.PENDING_INITIAL_PASSWORD);
+        user.PasswordHash.Should().BeNull();
+    }
+
+    // -------------------------------------------------------------------------
     // CompleteProfile
     // -------------------------------------------------------------------------
 

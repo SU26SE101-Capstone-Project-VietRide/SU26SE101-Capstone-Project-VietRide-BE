@@ -7,6 +7,7 @@ using VietRide.Identity.Application.Features.Auth.Login;
 using VietRide.Identity.Application.Features.Auth.Logout;
 using VietRide.Identity.Application.Features.Auth.Refresh;
 using VietRide.Identity.Application.Features.Auth.Register;
+using VietRide.Identity.Application.Features.Auth.SetInitialPassword;
 using VietRide.Identity.Application.Features.Auth.VerifyEmail;
 using VietRide.Shared.Kernel.Primitives;
 
@@ -73,6 +74,25 @@ public sealed class AuthController : ControllerBase
             new VerifyEmailCommand(request.Email, request.Code, request.Purpose),
             ct);
 
+        return Ok(result);
+    }
+
+    /// <summary>Set the initial password using a one-time anonymous token.</summary>
+    /// <remarks>
+    /// Invalid, missing, or already-used token → 400 AUTH_INITIAL_PASSWORD_TOKEN_INVALID.
+    /// Expired token → 400 AUTH_INITIAL_PASSWORD_TOKEN_EXPIRED.
+    /// Blank or weak password → 422 VALIDATION_ERROR.
+    /// </remarks>
+    [HttpPost("set-initial-password")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiResponse<SetInitialPasswordResponseDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> SetInitialPassword(
+        [FromBody] SetInitialPasswordRequest request,
+        CancellationToken ct)
+    {
+        var result = await _sender.Send(new SetInitialPasswordCommand(request.Token, request.Password), ct);
         return Ok(result);
     }
 
