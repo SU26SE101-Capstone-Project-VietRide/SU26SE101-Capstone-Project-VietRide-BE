@@ -16,6 +16,13 @@ export const envSchema = baseEnvSchema.merge(
     RABBITMQ_EXCHANGE: z.string().default('vietride.events'),
     JWT_PUBLIC_KEY_URL: z.string().url().default('http://identity:5001/v1/.well-known/jwks.json'),
     USER_JWT_PUBLIC_KEY: z.string().optional(),
+    TRIP_SERVICE_BASE_URL: z.string().url().default('http://trip:5002'),
+    BOOKING_SERVICE_BASE_URL: z.string().url().default('http://booking:5003'),
+    PARCEL_SERVICE_BASE_URL: z.string().url().default('http://parcel:5005'),
+    TRIP_TRACKING_AUTH_PATH: z.string().default('/internal/trips/:tripId/tracking-authorization'),
+    BOOKING_TRACKING_AUTH_PATH: z.string().default('/internal/trips/:tripId/tracking-authorization/bookings'),
+    PARCEL_TRACKING_AUTH_PATH: z.string().default('/internal/trips/:tripId/tracking-authorization/parcels'),
+    TRACKING_AUTH_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(2_000),
     TRACKING_GPS_FLUSH_ENABLED: booleanEnvSchema.default(false),
     TRACKING_GPS_FLUSH_INTERVAL_MS: z.coerce.number().int().positive().default(300_000),
     TRACKING_TRIP_DELAY_ENABLED: booleanEnvSchema.default(false),
@@ -32,6 +39,7 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
   const normalizedRaw = {
     ...raw,
     SENTRY_DSN: raw.SENTRY_DSN === '' ? undefined : raw.SENTRY_DSN,
+    INTERNAL_JWT_SECRET: raw.INTERNAL_JWT_SECRET === '' ? undefined : raw.INTERNAL_JWT_SECRET,
     USER_JWT_PUBLIC_KEY: raw.USER_JWT_PUBLIC_KEY === '' ? undefined : raw.USER_JWT_PUBLIC_KEY,
   };
   const postgresHost = raw.POSTGRES_HOST;

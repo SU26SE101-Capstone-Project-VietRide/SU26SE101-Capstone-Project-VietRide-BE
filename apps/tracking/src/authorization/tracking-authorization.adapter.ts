@@ -12,7 +12,7 @@ export type TrackingScope =
 export interface TrackingAuthorizationResult {
   allowed: boolean;
   scope?: TrackingScope;
-  error?: 'TRIP_NOT_FOUND' | 'ACCESS_DENIED' | 'TRACKING_TRIP_NOT_ACTIVE';
+  error?: 'TRIP_NOT_FOUND' | 'ACCESS_DENIED' | 'TRACKING_TRIP_NOT_ACTIVE' | 'TRACKING_AUTH_UNAVAILABLE';
 }
 
 export interface TrackingAuthorizationAdapter {

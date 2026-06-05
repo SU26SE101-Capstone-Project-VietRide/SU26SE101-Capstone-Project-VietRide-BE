@@ -35,8 +35,8 @@ Mỗi phase phải test được bằng e2e/unit theo hướng production. Nếu
 - [x] Phase 5 — Approaching Alert
 - [x] Phase 6 — Off-route Detection
 - [x] Phase 7 — Trip Delayed Detection
-- [ ] Phase 8 — Outbox Publisher
-- [ ] Phase 9 — Trip/Booking/Parcel Authorization Providers
+- [x] Phase 8 — Outbox Publisher
+- [x] Phase 9 — Trip/Booking/Parcel Authorization Providers
 - [ ] Phase 10 — Hardening Và Final Acceptance
 
 ---

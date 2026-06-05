@@ -3,6 +3,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import {
@@ -87,6 +88,12 @@ export class TrackingDataService {
         throw new NotFoundException({
           errorCode: 'TRIP_NOT_FOUND',
           detail: `Trip ${tripId} not found`,
+        });
+      }
+      if (authorization.error === 'TRACKING_AUTH_UNAVAILABLE') {
+        throw new ServiceUnavailableException({
+          errorCode: 'TRACKING_AUTH_UNAVAILABLE',
+          detail: 'Tracking authorization provider is unavailable',
         });
       }
 

@@ -135,6 +135,11 @@ export class LocationGateway implements OnGatewayInit {
       return { success: false, error: 'ACCESS_DENIED' };
     }
 
+    const authorization = await this.authorizationAdapter.authorizeTripTracking(user, parsed.data.tripId);
+    if (!authorization.allowed || (authorization.scope !== 'DRIVER' && authorization.scope !== 'ASSISTANT')) {
+      return { success: false, error: authorization.error ?? 'ACCESS_DENIED' };
+    }
+
     const event = await this.locationService.recordLocation(parsed.data);
     await this.offRouteService.handleGpsUpdate(event);
     this.server.to(trackingTripRoom(parsed.data.tripId)).emit('gps:update', event);
