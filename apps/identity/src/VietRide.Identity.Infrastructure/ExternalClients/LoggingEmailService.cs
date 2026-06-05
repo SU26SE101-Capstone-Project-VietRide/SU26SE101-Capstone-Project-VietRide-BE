@@ -39,6 +39,22 @@ public sealed class LoggingEmailService : IEmailService
     }
 
     /// <inheritdoc />
+    public Task SendAccountCreatedLinkAsync(
+        string to,
+        AccountCreatedEmailDto accountInfo,
+        CancellationToken ct = default)
+    {
+        _logger.LogInformation(
+            "[DEV] Account-created email — to: {Email}, userId: {UserId}, link: {Link}, expiresAt: {ExpiresAt}",
+            to,
+            accountInfo.UserId,
+            accountInfo.SetInitialPasswordUrl,
+            accountInfo.ExpiresAt);
+
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
     public Task SendParcelDeliveryLinkAsync(
         string to,
         string deliveryToken,
