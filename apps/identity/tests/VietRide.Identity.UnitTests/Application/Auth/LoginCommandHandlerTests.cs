@@ -68,6 +68,15 @@ public sealed class LoginCommandHandlerTests
         return user;
     }
 
+    private static User MakePendingInitialPasswordUser()
+    {
+        var user = MakeActiveUser();
+        typeof(User)
+            .GetProperty(nameof(User.Status))!
+            .SetValue(user, UserStatus.PENDING_INITIAL_PASSWORD);
+        return user;
+    }
+
     // -------------------------------------------------------------------------
     // Happy path
     // -------------------------------------------------------------------------
@@ -161,6 +170,22 @@ public sealed class LoginCommandHandlerTests
 
         await act.Should().ThrowAsync<ForbiddenException>()
             .Where(e => e.ErrorCode == "AUTH_ACCOUNT_LOCKED");
+    }
+
+    [Fact]
+    public async Task Handle_PendingInitialPassword_Throws403()
+    {
+        var (handler, users, _, _, lockoutCounter) = CreateHandler();
+        var user = MakePendingInitialPasswordUser();
+
+        users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>()).Returns(user);
+
+        var act = () => handler.Handle(new LoginCommand("user@example.com", "any_pass"), CancellationToken.None);
+
+        await act.Should().ThrowAsync<ForbiddenException>()
+            .Where(e => e.ErrorCode == "AUTH_PENDING_INITIAL_PASSWORD");
+
+        await lockoutCounter.DidNotReceive().IncrementAsync(user.Id, Arg.Any<CancellationToken>());
     }
 
     [Fact]
