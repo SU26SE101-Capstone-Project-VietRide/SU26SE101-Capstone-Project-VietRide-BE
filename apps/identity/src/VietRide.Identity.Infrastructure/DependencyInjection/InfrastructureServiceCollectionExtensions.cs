@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using StackExchange.Redis;
 using VietRide.Identity.Application.Abstractions;
@@ -6,6 +7,7 @@ using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Infrastructure.ExternalClients;
 using VietRide.Identity.Infrastructure.Persistence.Repositories;
 using VietRide.Identity.Infrastructure.Security;
+using VietRide.Identity.Infrastructure.Seed;
 
 namespace VietRide.Identity.Infrastructure.DependencyInjection;
 
@@ -27,8 +29,34 @@ public static class InfrastructureServiceCollectionExtensions
         // ------------------------------------------------------------------
         // Configuration
         // ------------------------------------------------------------------
-        services.Configure<JwtSigningOptions>(
-            configuration.GetSection(JwtSigningOptions.SectionName));
+        services.Configure<JwtSigningOptions>(options =>
+        {
+            configuration.GetSection(JwtSigningOptions.SectionName).Bind(options);
+
+            // Production SOT names are plain environment variables. Keep the
+            // IdentityJwt section for local/dev config, but let explicit env vars
+            // override it when present in production/container environments.
+            var privateKey = configuration["USER_JWT_PRIVATE_KEY"];
+            if (!string.IsNullOrWhiteSpace(privateKey))
+                options.PrivateKey = privateKey;
+
+            var kid = configuration["USER_JWT_KID"];
+            if (!string.IsNullOrWhiteSpace(kid))
+                options.Kid = kid;
+        });
+
+        services.Configure<GoogleOAuthOptions>(options =>
+        {
+            configuration.GetSection(GoogleOAuthOptions.SectionName).Bind(options);
+
+            var clientId = configuration["GOOGLE_OAUTH_CLIENT_ID"];
+            if (!string.IsNullOrWhiteSpace(clientId))
+                options.ClientId = clientId;
+
+            var clientSecret = configuration["GOOGLE_OAUTH_CLIENT_SECRET"];
+            if (!string.IsNullOrWhiteSpace(clientSecret))
+                options.ClientSecret = clientSecret;
+        });
 
         // ------------------------------------------------------------------
         // Repositories
@@ -36,6 +64,14 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IEmailVerificationTokenRepository, EmailVerificationTokenRepository>();
+        services.AddScoped<IActivityLogRepository, ActivityLogRepository>();
+        services.AddScoped<IOAuthIdentityRepository, OAuthIdentityRepository>();
+
+        // ------------------------------------------------------------------
+        // Startup seeders
+        // ------------------------------------------------------------------
+        services.AddScoped<ISystemAdminBootstrapStore, EfSystemAdminBootstrapStore>();
+        services.AddScoped<BootstrapAdminSeeder>();
 
         // ------------------------------------------------------------------
         // Security services
@@ -43,8 +79,12 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IPasswordHasher, BCryptPasswordHasher>();
         services.AddSingleton<IAccessTokenService, RsaAccessTokenService>();
         services.AddSingleton<IJwksProvider, JwksProvider>();
+        services.AddSingleton<IGoogleIdTokenVerifier, GoogleIdTokenVerifier>();
         services.AddScoped<IRefreshTokenFactory, RefreshTokenFactory>();
         services.AddSingleton<IOtpFailedAttemptPersister, OtpFailedAttemptPersister>();
+        services.AddSingleton<IFailedLoginPersister, FailedLoginPersister>();
+        services.AddSingleton<IRefreshTokenFamilyRevoker, RefreshTokenFamilyRevoker>();
+        services.AddSingleton<ILoginLockoutCounter, RedisLoginLockoutCounter>();
 
         // ------------------------------------------------------------------
         // External-client stubs

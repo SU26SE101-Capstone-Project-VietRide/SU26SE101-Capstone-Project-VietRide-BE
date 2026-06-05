@@ -1309,7 +1309,7 @@ POST /v1/admin/operators/{operatorId}/wallet/adjust
 | Hành khách | Google OAuth 2.0, Email + Password; Email OTP verify bắt buộc khi đăng ký lần đầu. **Phone REQUIRED + UNIQUE** ở registration — dùng cho contact, NO_SHOW alert, sau này SMS notify v2. Phone format E.164 Việt Nam (vd `+84901234567`). Khi self-register email/password: bắt buộc nhập đủ `{ email, password, displayName, phone }`. Google OAuth callback chưa có phone → first-login redirect màn "Hoàn tất hồ sơ" yêu cầu nhập phone trước khi vào app. |
 | Tài xế / Phụ xe | Email + Password — tài khoản do Operator tạo, set password lần đầu qua **email link** (`SET_INITIAL_PASSWORD` token TTL 48h). Operator nhập phone khi tạo account (bắt buộc — operator gọi liên hệ). Xem 4.3 |
 | Operator Staff / Admin | Email + Password. **OPERATOR_ADMIN:** tạo qua self-registration (`POST /v1/operators/register`) hoặc System Admin tạo thủ công. **OPERATOR_STAFF:** do OPERATOR_ADMIN tạo trong dashboard, set initial password qua email link giống Driver/Assistant. Phone required (bắt buộc cho contact operator). |
-| System Admin | Email + Password — **bootstrap admin đầu tiên qua seed migration** (xem 5.1.1). Phone optional. |
+| System Admin | Email + Password — **bootstrap admin đầu tiên do Identity Service startup seeder tạo từ env vars** (xem 5.1.1). Phone optional. |
 
 > **Phone uniqueness scope:** `User.phone` UNIQUE **across all roles + all operators** (1 SĐT chỉ thuộc 1 User account duy nhất trong hệ thống). Lý do: tránh confusion khi notify (1 SĐT nhận thông báo từ 2 account khác nhau), ngăn user lách rate limit OTP bằng cách tạo nhiều account cùng SĐT. Edge case: nếu user đổi sim hoặc bị mất SĐT → System Admin có endpoint manual update (audit log).
 
@@ -1361,28 +1361,29 @@ POST /v1/admin/operators/{operatorId}/wallet/adjust
 
 ### 5.1.1 System Admin Bootstrap
 
-System Admin đầu tiên được tạo qua **EF Core seed migration** khi deploy lần đầu, không có endpoint registration cho SYSTEM_ADMIN role.
+System Admin đầu tiên được tạo bởi **Identity Service startup seeder** khi app khởi động lần đầu, không có endpoint registration cho SYSTEM_ADMIN role và không seed placeholder password trong EF migration/`seed.sql`.
 
 ```
-Seed migration (Identity Service):
-  - Đọc env vars: SYSTEM_ADMIN_BOOTSTRAP_EMAIL, SYSTEM_ADMIN_BOOTSTRAP_PASSWORD
+Startup seeder (Identity Service):
+  - Đọc env vars: SYSTEM_ADMIN_BOOTSTRAP_EMAIL, SYSTEM_ADMIN_BOOTSTRAP_PASSWORD, SYSTEM_ADMIN_BOOTSTRAP_DISPLAY_NAME (optional)
   - Nếu chưa có User nào với role = SYSTEM_ADMIN trong DB:
       INSERT User {
         email: env.SYSTEM_ADMIN_BOOTSTRAP_EMAIL,
         passwordHash: bcrypt(env.SYSTEM_ADMIN_BOOTSTRAP_PASSWORD, cost=12),
         role: SYSTEM_ADMIN,
         status: ACTIVE,
-        displayName: "System Administrator"
+        displayName: env.SYSTEM_ADMIN_BOOTSTRAP_DISPLAY_NAME ?? "System Administrator"
       }
   - Idempotent: chạy nhiều lần không tạo duplicate (check role=SYSTEM_ADMIN exists).
   - Sau khi deploy thành công, bootstrap admin được khuyến nghị đổi password lần đầu login (UI hint, không enforce hardcode).
 
 Subsequent System Admin (thêm admin thứ 2+):
   - Endpoint: POST /v1/admin/users { email, displayName, role: SYSTEM_ADMIN } (role SYSTEM_ADMIN required)
-  - Identity Service tự gen SET_INITIAL_PASSWORD token + gửi email link (giống Driver/Assistant flow)
+  - Identity Service tạo user passwordless với status=PENDING_INITIAL_PASSWORD
+  - SET_INITIAL_PASSWORD token generation + email send defer sang Day 5
 ```
 
-> **Security note:** `SYSTEM_ADMIN_BOOTSTRAP_PASSWORD` env var chỉ dùng cho deployment đầu tiên — sau khi admin đăng nhập và đổi password, env var này không còn ảnh hưởng (vì seed migration check existence trước). Production cần rotate password mặc định ngay sau deploy.
+> **Security note:** `SYSTEM_ADMIN_BOOTSTRAP_PASSWORD` env var chỉ dùng cho deployment đầu tiên — sau khi admin đăng nhập và đổi password, env var này không còn ảnh hưởng (vì startup seeder check existence trước). Production cần rotate password mặc định ngay sau deploy.
 
 ### 5.2 Token Strategy (user-facing)
 
@@ -4642,12 +4643,12 @@ Mỗi service chỉ được phép read/write key bắt đầu bằng prefix ser
 - JSON body fields: camelCase (vd `{ "tripId": "...", "totalAmount": 350000 }`)
 - DB column names: snake_case (vd `passenger_user_id`, `total_amount`) — EF Core/Prisma tự map giữa camelCase property và snake_case column qua naming policy.
 
-**Error response — RFC 7807 Problem Details:**
-- Content-Type: `application/problem+json`
-- Body shape: `{ type, title, status, detail, instance, errorCode, errors? }`
-- `errorCode` là string canonical viết SCREAMING_SNAKE_CASE — frontend dev dùng để map UI message
+**Error response — ADR 0004 ApiResponse error envelope:**
+- Content-Type: `application/json`
+- Body shape: `{ success: false, statusCode, error: { code, message, fields? }, meta: { traceId, timestamp } }`
+- `error.code` là string canonical viết SCREAMING_SNAKE_CASE — frontend dev dùng để map UI message
 - Error code list khởi đầu (mở rộng khi gặp use case mới):
-  - **Auth:** `AUTH_INVALID_CREDENTIALS`, `AUTH_TOKEN_EXPIRED`, `AUTH_TOKEN_INVALID`, `AUTH_EMAIL_NOT_VERIFIED`, `AUTH_ACCOUNT_LOCKED`, `AUTH_OTP_INVALID`, `AUTH_OTP_EXPIRED`, `AUTH_EMAIL_ALREADY_REGISTERED`, `AUTH_PHONE_ALREADY_REGISTERED`, `AUTH_PHONE_REQUIRED`, `AUTH_PHONE_INVALID_FORMAT`
+  - **Auth:** `AUTH_INVALID_CREDENTIALS`, `AUTH_TOKEN_EXPIRED`, `AUTH_TOKEN_INVALID`, `AUTH_GOOGLE_TOKEN_INVALID`, `AUTH_EMAIL_NOT_VERIFIED`, `AUTH_ACCOUNT_LOCKED`, `AUTH_OTP_INVALID`, `AUTH_OTP_EXPIRED`, `AUTH_EMAIL_ALREADY_REGISTERED`, `AUTH_PHONE_ALREADY_REGISTERED`, `AUTH_PHONE_REQUIRED`, `AUTH_PHONE_INVALID_FORMAT`
   - **Booking:** `BOOKING_SEAT_UNAVAILABLE`, `BOOKING_TRIP_NOT_BOOKABLE`, `BOOKING_CUTOFF_EXCEEDED`, `BOOKING_MAX_SEATS_EXCEEDED`, `BOOKING_NOT_FOUND`, `BOOKING_NOT_CANCELLABLE`, `BOOKING_EDIT_PICKUP_PRICE_INCREASE`, `BOOKING_NOT_FOR_THIS_TRIP` (QR scan booking khác trip), `BOOKING_PASSENGER_ALREADY_BOARDED`, `BOOKING_ROUND_TRIP_INVALID` (return trip không hợp lệ — không return route, departure trùng outbound, etc.)
   - **Voucher:** `VOUCHER_NOT_FOUND`, `VOUCHER_EXPIRED`, `VOUCHER_NOT_APPLICABLE`, `VOUCHER_USAGE_LIMIT_REACHED`, `VOUCHER_USER_LIMIT_REACHED`, `VOUCHER_MIN_ORDER_NOT_MET`
   - **Payment:** `PAYMENT_INSUFFICIENT_WALLET`, `PAYMENT_VNPAY_ERROR`, `PAYMENT_TIMEOUT`, `PAYMENT_ALREADY_PROCESSED`, `PAYMENT_SIGNATURE_INVALID` (VNPay HMAC verify fail)
@@ -4852,7 +4853,7 @@ Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → 
 - **Operator tự tạo Station** với autocomplete dedupe — System Admin chỉ data-quality cleanup. Xem 4.3 + 4.4 + 6.10.
 - **Trip edit snapshot rule** — booking CONFIRMED giữ điều kiện cũ khi operator edit Trip. Xem 6.1.
 - **Stop disable flow** với BookingPendingAction `STOP_DISABLED`. Xem 6.4.1.
-- **System Admin bootstrap** qua seed migration. Xem 5.1.1.
+- **System Admin bootstrap** qua Identity Service startup seeder. Xem 5.1.1.
 - **Driver/Assistant/OperatorStaff first-login password** qua email link (`SET_INITIAL_PASSWORD` token TTL 48h). Xem 4.3 + 5.1.
 - **Parcel delivery tại Stop dọc tuyến** — `Parcel.dropoffStopId` nullable. Sender chọn Stop trong RouteStop của trip; UNLOADED trigger check stop của parcel.
 - **`RouteStop` là single source of truth cho pickup/dropoff control** — bỏ hoàn toàn `Trip.allowAlongRoutePickup`/`Dropoff` và `Route.defaultAllowAlongRoute*`. Operator kiểm soát qua việc thêm/bỏ RouteStop entries.

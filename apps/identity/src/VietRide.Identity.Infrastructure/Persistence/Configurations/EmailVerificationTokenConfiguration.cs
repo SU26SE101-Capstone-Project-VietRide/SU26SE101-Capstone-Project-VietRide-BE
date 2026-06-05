@@ -48,9 +48,12 @@ internal sealed class EmailVerificationTokenConfiguration : IEntityTypeConfigura
 
         builder.Property(e => e.CreatedAt)
             .HasColumnName("created_at")
+            .HasDefaultValueSql("now()")
             .IsRequired();
 
-        // email_verification_tokens has no updated_at column in schema.sql.
+        // BaseEntity implements IAuditable for EF-side timestamp population, but the canonical
+        // email_verification_tokens table has no updated_at column in schema.sql; keep it ignored
+        // here so the EF model does not drift from the Day-3 auth schema.
         builder.Ignore(e => e.UpdatedAt);
         builder.Ignore(e => e.RowVersion);
 

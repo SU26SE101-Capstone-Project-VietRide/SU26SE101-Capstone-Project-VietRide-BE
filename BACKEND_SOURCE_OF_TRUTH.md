@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.5.0
+> **Phiên bản:** 1.6.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-06-01
+> **Cập nhật lần cuối:** 2026-06-04
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -395,7 +395,7 @@ apps/<service>/                                    (Nx project root)
 ├── src/
 │   ├── VietRide.<Service>.Api/                    ASP.NET Core host (entry + HTTP boundary)
 │   │   ├── Controllers/<Aggregate>Controller.cs   Thin — chỉ MediatR.Send + map response
-│   │   ├── Middleware/                            InternalJwtAuthHandler, ProblemDetailsMiddleware, RequestLoggingMiddleware
+│   │   ├── Middleware/                            InternalJwtAuthHandler, RequestLoggingMiddleware
 │   │   ├── HostedServices/OutboxPublisherHostedService.cs   IHostedService — KHÔNG dùng Hangfire
 │   │   ├── HangfireJobs/<Job>.cs                  1 file = 1 job class (business scheduled jobs)
 │   │   ├── DependencyInjection/                   ServiceCollection extensions (AddApi, AddSwagger, AddHangfireSetup)
@@ -549,7 +549,7 @@ Test fail → CI fail.
 | Controller gọi thẳng `IBookingService` (bypass MediatR) | Controller → `MediatR.Send` → Handler → Service. KHÔNG bypass. | Pipeline behaviors (validation, logging, transaction) chỉ chạy qua MediatR. |
 | Service inject Service inject Service chain dài (5+ tầng) | Tối đa 2 tầng service: Handler → Service → Repository. Cross-aggregate orchestration cần phối hợp 3+ service → tách ra Saga / Process Manager. | Tránh "service trong service" indirection nightmare. |
 | `throw new Exception("...")` generic | `throw new BookingNotCancellableException(bookingId)` custom class kèm errorCode | Catch-able theo type, error code map được |
-| `try { … } catch { return null; }` swallow | Để exception propagate, ExceptionMiddleware map sang Problem+JSON | Fail loud, Sentry capture |
+| `try { … } catch { return null; }` swallow | Để exception propagate, exception filter map sang `ApiResponse` error envelope | Fail loud, Sentry capture |
 | `static List<>` hoặc `static Dictionary<>` mutable in-process state | Redis cho shared state hoặc DI singleton có lock proper | Scale ngang vỡ |
 | Nullable reference type tắt (`<Nullable>disable</Nullable>`) | **Bật `<Nullable>enable</Nullable>` ở `Directory.Build.props`** + treat nullable warnings as errors | Bắt nullref compile time |
 | Async method không `CancellationToken` | Mọi async method (Handler, Service, Repository, HTTP call) **phải nhận `CancellationToken ct`** từ caller | Cancel propagation |
@@ -1316,6 +1316,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 | **Auth** | `AUTH_INVALID_CREDENTIALS` | 401 | Email/password sai |
 | | `AUTH_TOKEN_EXPIRED` | 401 | Access token expired |
 | | `AUTH_TOKEN_INVALID` | 401 | Signature/format invalid |
+| | `AUTH_GOOGLE_TOKEN_INVALID` | 401 | Google ID token signature/expiry/audience invalid |
 | | `AUTH_EMAIL_NOT_VERIFIED` | 403 | User.status = PENDING_EMAIL_VERIFICATION |
 | | `AUTH_ACCOUNT_LOCKED` | 403 | User.status = LOCKED |
 | | `AUTH_OTP_INVALID` | 400 | OTP code sai |
@@ -1400,6 +1401,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 | **Generic** | `RESOURCE_NOT_FOUND` | 404 | Fallback |
 | | `FORBIDDEN` | 403 | RBAC reject |
 | | `RATE_LIMITED` | 429 | Vượt rate limit |
+| | `UPSTREAM_UNAVAILABLE` | 502 | Gateway không kết nối được downstream service |
 | | `INTERNAL_ERROR` | 500 | Unhandled exception (Sentry capture) |
 
 ### 5.10 Data access pattern (Repository + optional Service)
@@ -2001,7 +2003,7 @@ HttpRequestException   → 502 PAYMENT_VNPAY_ERROR / external service errors
 Unhandled              → 500 INTERNAL_ERROR + Sentry capture + log full stack
 ```
 
-Mọi response error → `application/problem+json` shape (Section 5.5).
+Mọi response error → ADR 0004 `ApiResponse` error envelope (Section 5.5).
 
 **NestJS:** Global `HttpExceptionFilter` + custom exception classes (`BookingException`, `ValidationException`, etc.) mapping tương tự.
 
@@ -2665,6 +2667,8 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.6.0** | 2026-06-04 | BE lead (Vũ) | **MINOR** — §5.9 Auth error registry: add `AUTH_GOOGLE_TOKEN_INVALID` (HTTP 401) for invalid Google ID token signature/expiry/audience during Google OAuth login. |
+| **1.5.1** | 2026-06-03 | BE lead (Vũ) | **PATCH** — §5.9 Generic error registry: add `UPSTREAM_UNAVAILABLE` (HTTP 502) for Gateway-generated downstream connection failures. This syncs the Day-3 Gateway ADR 0004 envelope fallback with the registry discipline. |
 | **1.5.0** | 2026-06-01 | BE lead (Vũ) | **MINOR** — **ADR 0004: Adopt `ApiResponse<T>` envelope for all FE-facing HTTP responses.** Rewrite §5.4 (success shape) to envelope `{success,statusCode,message?,data,meta{traceId,timestamp}}`; rewrite §5.5 (error shape) — DROP `application/problem+json` (RFC 7807), adopt error envelope `{success:false,statusCode,error{code,message,fields?},meta}` với `error.code` từ §5.9 registry; rewrite §5.7 (Pagination) — introduce `PagedResult<T>` (7 fields: `items,page,pageSize,totalItems,totalPages,hasNextPage,hasPreviousPage`) + `QueryOptions` (`page/pageSize`-clamped-1..100/`search`/`searchIn`/`sortBy`/`sortDir`/`includeDeleted`); rewrite §5.8 (Filter conventions) — `sortBy`+`sortDir` SUPERSEDES `?sort=-field` convention + sortBy whitelist security requirement → reject non-whitelisted field với `400 INVALID_SORT_FIELD` (đăng ký §5.9 Validation group). §3.1 tree + §3.6 Api/Web layer: `ProblemDetailsExceptionFilter` → `ApiResponseExceptionFilter` + `ApiResponseResultFilter` (Task 3.8 target state). §3.1 tree: `PagedResult.cs` comment cập nhật 7-field shape. Bump 1.4.0 → 1.5.0 MINOR. API Contract wrapped accordingly. ADR 0004 follow-ups #1–#2. |
 | **1.4.0** | 2026-06-01 | BE lead (Vũ) | **MINOR** — §5.9 Auth error registry: thêm code mới `AUTH_OTP_RATE_LIMIT_EXCEEDED` (HTTP 429) — OTP request rate limit hit (Redis `identity:otp_rate:{email}` max 3/h TTL 1h, BSOT §6.9 line 1545). Code này backs Day-3 OTP rate-limit path (Task 3.4 handler throws `TooManyRequestsException` → 429). Human decision B2 (plan v7.1 patch). Đồng thời ratify shared-lib edits từ blocked 3.4 attempt: `UnauthorizedException` (401) + `BadRequestException` (400) đã có trong `ApplicationExceptions.cs`; thêm mới `TooManyRequestsException` (429) vào same file + arm tương ứng trong `ProblemDetailsExceptionFilter`. |
 | **1.3.6** | 2026-05-31 | BE lead (Vũ) | **PATCH** — §2.2 + §3.4 stack version: **NestJS 10.x → 11.x** để khớp `package.json` (`@nestjs/core`/`@nestjs/common` = `^11.0.0`) — đây là thực tế đã cài, doc bị stale. `package.json` là source-of-truth cho version chính xác. Đồng bộ ghi chú trong `.claude/agents/nest-worker.md` + `nest-reviewer.md` (bỏ workaround "BSOT §2.2 still says 10.x"). No code/DDL change. |
@@ -2711,7 +2715,7 @@ PR fail nếu bất kỳ step nào fail.
 
 3. **Wire up:**
    - JWT auth middleware (Section 6.4).
-   - Exception filter + Problem+JSON (Section 5.5).
+   - Exception filter + `ApiResponse` error envelope (Section 5.5).
    - Validation pipeline (Section 9.3).
    - Outbox + RabbitMQ producer/consumer (Section 7).
    - Hangfire / BullMQ jobs (Section 10).

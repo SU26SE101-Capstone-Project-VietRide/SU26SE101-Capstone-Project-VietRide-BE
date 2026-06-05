@@ -40,6 +40,7 @@ internal sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refre
 
         builder.Property(r => r.IssuedAt)
             .HasColumnName("issued_at")
+            .HasDefaultValueSql("now()")
             .IsRequired();
 
         builder.Property(r => r.ExpiresAt)
@@ -67,10 +68,12 @@ internal sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refre
 
         builder.Property(r => r.CreatedAt)
             .HasColumnName("created_at")
+            .HasDefaultValueSql("now()")
             .IsRequired();
 
         builder.Property(r => r.UpdatedAt)
             .HasColumnName("updated_at")
+            .HasDefaultValueSql("now()")
             .IsRequired();
 
         builder.Ignore(r => r.RowVersion);

@@ -2,6 +2,7 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Identity.Api.Controllers.Requests;
+using VietRide.Identity.Application.Features.Auth.GoogleLogin;
 using VietRide.Identity.Application.Features.Auth.Login;
 using VietRide.Identity.Application.Features.Auth.Logout;
 using VietRide.Identity.Application.Features.Auth.Refresh;
@@ -12,14 +13,13 @@ using VietRide.Shared.Kernel.Primitives;
 namespace VietRide.Identity.Api.Controllers;
 
 /// <summary>
-/// Authentication endpoints: register, verify-email, login, refresh, logout.
+/// Authentication endpoints: register, verify-email, login, Google login, refresh, logout.
 /// Paths per VietRide_API_Contract_v1.md Identity section (lines 18–116).
 /// All success responses are wrapped in <see cref="ApiResponse{T}"/> by <c>ApiResponseResultFilter</c> (ADR 0004).
 /// All error responses are wrapped in <see cref="ApiResponse"/> by <c>ApiResponseExceptionFilter</c> (ADR 0004).
 /// </summary>
 [ApiController]
 [Route("v1/auth")]
-[AllowAnonymous]
 public sealed class AuthController : ControllerBase
 {
     private readonly ISender _sender;
@@ -38,6 +38,7 @@ public sealed class AuthController : ControllerBase
     /// OTP rate limit exceeded → 429 AUTH_OTP_RATE_LIMIT_EXCEEDED.
     /// </remarks>
     [HttpPost("register")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(ApiResponse<RegisterResponseDto>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
@@ -61,6 +62,7 @@ public sealed class AuthController : ControllerBase
     /// Expired code → 400 AUTH_OTP_EXPIRED.
     /// </remarks>
     [HttpPost("verify-email")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(ApiResponse<VerifyEmailResponseDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> VerifyEmail(
@@ -81,6 +83,7 @@ public sealed class AuthController : ControllerBase
     /// Locked account → 403 AUTH_ACCOUNT_LOCKED.
     /// </remarks>
     [HttpPost("login")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(ApiResponse<TokenBundleDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
@@ -92,12 +95,30 @@ public sealed class AuthController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>Authenticate with a Google ID token. Returns access + refresh tokens.</summary>
+    /// <remarks>
+    /// Invalid, expired, or wrong-audience Google ID token → 401 AUTH_GOOGLE_TOKEN_INVALID.
+    /// </remarks>
+    [HttpPost("google")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiResponse<TokenBundleDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Google(
+        [FromBody] GoogleLoginRequest request,
+        CancellationToken ct)
+    {
+        var result = await _sender.Send(new GoogleLoginCommand(request.IdToken), ct);
+        return Ok(result);
+    }
+
     /// <summary>Rotate a refresh token. Returns a new access + refresh token pair.</summary>
     /// <remarks>
     /// Invalid or expired token → 401 AUTH_TOKEN_INVALID.
     /// Reuse of a revoked token revokes the whole family → 401 AUTH_TOKEN_INVALID.
     /// </remarks>
     [HttpPost("refresh")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(ApiResponse<TokenBundleDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Refresh(

@@ -22,14 +22,64 @@ namespace VietRide.Identity.Infrastructure.Migrations
                 .HasAnnotation("ProductVersion", "8.0.11")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
-            NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
-
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "activity_log_action", new[] { "LOGIN", "LOGOUT", "BOOK_TICKET", "CANCEL_TICKET", "UPDATE_PROFILE", "CHANGE_PASSWORD", "COMPLETE_PROFILE", "CREATE_OPERATOR", "APPROVE_OPERATOR", "REJECT_OPERATOR", "LOCK_USER", "UNLOCK_USER", "VEHICLE_SUBSTITUTION_TRIGGERED", "DRIVER_SCHEDULE_EDIT", "VEHICLE_SWAP", "TRIP_COMPLETED_MANUAL", "PARCEL_UNLOAD_OVERRIDE", "PARCEL_DELIVERY_RESEND", "PARCEL_MANUAL_CONFIRM", "TRIP_SETTLEMENT_MANUAL", "OPERATOR_WALLET_ADJUSTMENT" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "device_platform", new[] { "IOS", "ANDROID", "WEB" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "email_verification_purpose", new[] { "REGISTRATION", "PASSWORD_RESET", "SET_INITIAL_PASSWORD" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "oauth_provider", new[] { "GOOGLE" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "refresh_token_revoke_reason", new[] { "NORMAL_ROTATION", "REUSE_DETECTED", "USER_LOGOUT", "ADMIN_REVOKE", "PASSWORD_RESET" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "user_role", new[] { "PASSENGER", "DRIVER", "ASSISTANT", "OPERATOR_STAFF", "OPERATOR_ADMIN", "SYSTEM_ADMIN" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "user_status", new[] { "PENDING_EMAIL_VERIFICATION", "PENDING_INITIAL_PASSWORD", "ACTIVE", "LOCKED", "DELETED" });
+            NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
+
+            modelBuilder.Entity("VietRide.Identity.Domain.Entities.ActivityLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<ActivityLogAction>("Action")
+                        .HasColumnType("activity_log_action")
+                        .HasColumnName("action");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("IpAddress")
+                        .HasMaxLength(45)
+                        .HasColumnType("character varying(45)")
+                        .HasColumnName("ip_address");
+
+                    b.Property<string>("Metadata")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("metadata");
+
+                    b.Property<string>("UserAgent")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("user_agent");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_activity_logs");
+
+                    b.HasIndex("Action", "CreatedAt")
+                        .IsDescending(false, true)
+                        .HasDatabaseName("idx_activity_logs_action_created_at");
+
+                    b.HasIndex("UserId", "CreatedAt")
+                        .IsDescending(false, true)
+                        .HasDatabaseName("idx_activity_logs_user_id_created_at");
+
+                    b.ToTable("activity_logs", "vietride_identity");
+                });
 
             modelBuilder.Entity("VietRide.Identity.Domain.Entities.EmailVerificationToken", b =>
                 {
@@ -46,8 +96,10 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasColumnName("code");
 
                     b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
 
                     b.Property<DateTimeOffset>("ExpiresAt")
                         .HasColumnType("timestamp with time zone")
@@ -98,12 +150,16 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasDefaultValueSql("gen_random_uuid()");
 
                     b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
 
                     b.Property<DateTimeOffset>("LinkedAt")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("linked_at");
+                        .HasColumnName("linked_at")
+                        .HasDefaultValueSql("now()");
 
                     b.Property<OAuthProvider>("Provider")
                         .HasColumnType("oauth_provider")
@@ -121,8 +177,10 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasColumnName("provider_subject");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid")
@@ -168,8 +226,10 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasDefaultValueSql("gen_random_uuid()");
 
                     b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
 
                     b.Property<DateTimeOffset>("ExpiresAt")
                         .HasColumnType("timestamp with time zone")
@@ -185,8 +245,10 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasColumnName("ip_address");
 
                     b.Property<DateTimeOffset>("IssuedAt")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("issued_at");
+                        .HasColumnName("issued_at")
+                        .HasDefaultValueSql("now()");
 
                     b.Property<Guid?>("ParentTokenId")
                         .HasColumnType("uuid")
@@ -207,8 +269,10 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasColumnName("token_hash");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
 
                     b.Property<string>("UserAgent")
                         .HasMaxLength(500)
@@ -256,8 +320,10 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasColumnName("avatar_url");
 
                     b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
 
                     b.Property<DateTimeOffset?>("DeletedAt")
                         .HasColumnType("timestamp with time zone")
@@ -308,12 +374,16 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasColumnName("role");
 
                     b.Property<UserStatus>("Status")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("user_status")
+                        .HasDefaultValue(UserStatus.PENDING_EMAIL_VERIFICATION)
                         .HasColumnName("status");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
 
                     b.HasKey("Id")
                         .HasName("pk_users");
@@ -352,8 +422,10 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasDefaultValueSql("gen_random_uuid()");
 
                     b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
 
                     b.Property<string>("FcmToken")
                         .IsRequired()
@@ -368,16 +440,20 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasColumnName("is_active");
 
                     b.Property<DateTimeOffset>("LastActiveAt")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("last_active_at");
+                        .HasColumnName("last_active_at")
+                        .HasDefaultValueSql("now()");
 
                     b.Property<DevicePlatform>("Platform")
                         .HasColumnType("device_platform")
                         .HasColumnName("platform");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid")
@@ -447,6 +523,16 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasDatabaseName("ix_outbox_messages_processed_at_occurred_at");
 
                     b.ToTable("outbox_messages", "vietride_identity");
+                });
+
+            modelBuilder.Entity("VietRide.Identity.Domain.Entities.ActivityLog", b =>
+                {
+                    b.HasOne("VietRide.Identity.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_activity_logs_users_user_id");
                 });
 
             modelBuilder.Entity("VietRide.Identity.Domain.Entities.EmailVerificationToken", b =>

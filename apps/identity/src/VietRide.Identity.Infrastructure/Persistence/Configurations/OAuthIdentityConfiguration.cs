@@ -40,14 +40,17 @@ internal sealed class OAuthIdentityConfiguration : IEntityTypeConfiguration<OAut
 
         builder.Property(o => o.LinkedAt)
             .HasColumnName("linked_at")
+            .HasDefaultValueSql("now()")
             .IsRequired();
 
         builder.Property(o => o.CreatedAt)
             .HasColumnName("created_at")
+            .HasDefaultValueSql("now()")
             .IsRequired();
 
         builder.Property(o => o.UpdatedAt)
             .HasColumnName("updated_at")
+            .HasDefaultValueSql("now()")
             .IsRequired();
 
         builder.Ignore(o => o.RowVersion);

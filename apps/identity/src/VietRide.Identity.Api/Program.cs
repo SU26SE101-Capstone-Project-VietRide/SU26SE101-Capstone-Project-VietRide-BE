@@ -2,6 +2,7 @@ using Serilog;
 using VietRide.Identity.Application.Features.Auth.Register;
 using VietRide.Identity.Infrastructure;
 using VietRide.Identity.Infrastructure.DependencyInjection;
+using VietRide.Identity.Infrastructure.Seed;
 using VietRide.Shared.Application.DependencyInjection;
 using VietRide.Shared.Persistence.DependencyInjection;
 using VietRide.Shared.Web.DependencyInjection;
@@ -39,6 +40,13 @@ builder.Services.AddInfrastructure(builder.Configuration);
 
 var app = builder.Build();
 
+if (!IsWebApplicationFactoryHost())
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    var bootstrapAdminSeeder = scope.ServiceProvider.GetRequiredService<BootstrapAdminSeeder>();
+    await bootstrapAdminSeeder.SeedAsync();
+}
+
 app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseVietRideSwagger();
 app.UseAuthentication();
@@ -47,6 +55,10 @@ app.MapVietRideHealth(ServiceName);
 app.MapControllers();
 
 app.Run();
+
+static bool IsWebApplicationFactoryHost()
+    => AppDomain.CurrentDomain.GetAssemblies()
+        .Any(assembly => assembly.GetName().Name == "Microsoft.AspNetCore.Mvc.Testing");
 
 // Expose Program for WebApplicationFactory<Program> in integration tests.
 public partial class Program;

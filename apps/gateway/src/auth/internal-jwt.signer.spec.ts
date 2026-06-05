@@ -36,9 +36,10 @@ describe('InternalJwtSigner', () => {
     const token = await signer.sign({ sub: 'anonymous', reqId: 'req-1' });
     const { payload } = await jwtVerify(token, secretBytes);
 
-    expect(payload.exp).toBeDefined();
-    expect(payload.exp!).toBeGreaterThanOrEqual(before + 119);
-    expect(payload.exp!).toBeLessThanOrEqual(before + 121);
+    const exp = payload.exp;
+    expect(exp).toBeDefined();
+    expect(exp).toBeGreaterThanOrEqual(before + 119);
+    expect(exp).toBeLessThanOrEqual(before + 121);
   });
 
   it('different signer instances with same secret produce verifiable tokens', async () => {

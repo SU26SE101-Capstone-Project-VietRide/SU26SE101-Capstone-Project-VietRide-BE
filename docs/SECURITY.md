@@ -13,7 +13,7 @@ These values are **committed intentionally** so a fresh `git clone` boots withou
 | `apps/*/src/*.Api/appsettings.json` | `Password=vietride_dev` in connection string | PostgreSQL password matching `docker compose` default. |
 | `.env.example` | All `*_API_KEY`, `*_SECRET`, `*_HASH_SECRET` placeholders | Template — copy to `.env` (gitignored) and fill real values. |
 | `infra/docker/docker-compose.yml` | `POSTGRES_PASSWORD: vietride_dev`, `RABBITMQ_DEFAULT_PASS: vietride_dev` | Local stack only. |
-| `db-schema/identity-user/seed.sql` | `password_hash = '$2b$12$PLACEHOLDER_REPLACE_AFTER_DEPLOY_BCRYPT_HASH_HERE_xxxxxxxxxxxxxx'` | Admin bootstrap row. The string is **not a valid bcrypt hash** — login won't work until you rotate it (per seed.sql comment block). |
+| `.env.example` / deployment env | `SYSTEM_ADMIN_BOOTSTRAP_EMAIL`, `SYSTEM_ADMIN_BOOTSTRAP_PASSWORD`, optional `SYSTEM_ADMIN_BOOTSTRAP_DISPLAY_NAME` | Identity startup seeder uses these once to create the first `SYSTEM_ADMIN`. They are placeholders/templates only; no admin password/hash is stored in `seed.sql` or EF seed migrations. |
 
 ## 2. Pre-deploy checklist
 
@@ -27,11 +27,8 @@ Before any environment that's not your laptop:
 - [ ] Rotate Postgres password; update `ConnectionStrings__Default` env var (don't edit `appsettings.json` in the image).
 - [ ] Rotate RabbitMQ password; update `RABBITMQ_PASSWORD`.
 - [ ] Generate Identity's RS256 keypair (Day 3+ when JWKS endpoint exists). Public key auto-published at `/v1/.well-known/jwks.json`; private key as env var on Identity only.
-- [ ] Replace seed admin's bcrypt hash:
-  ```sql
-  UPDATE users SET password_hash = '<bcrypt cost 12 of new password>'
-    WHERE email = 'admin@vietride.local';
-  ```
+- [ ] Set a one-time bootstrap admin secret before first Identity startup: `SYSTEM_ADMIN_BOOTSTRAP_EMAIL`, a strong `SYSTEM_ADMIN_BOOTSTRAP_PASSWORD`, and optional `SYSTEM_ADMIN_BOOTSTRAP_DISPLAY_NAME`.
+- [ ] After first login, change the bootstrap admin password immediately; the startup seeder is idempotent and does not update an existing `SYSTEM_ADMIN`.
 - [ ] Set real `VNPAY_HASH_SECRET`, `SENDGRID_API_KEY`, `FIREBASE_PRIVATE_KEY`, `GOOGLE_MAPS_API_KEY`, `ANTHROPIC_API_KEY` per `.env.example`.
 - [ ] Confirm no `.env` accidentally baked into Docker image (`.dockerignore` should block it; verify with `docker run --rm <image> sh -c 'ls -la /.env* /app/.env*'`).
 - [ ] Confirm `ASPNETCORE_ENVIRONMENT=Production` (disables Swagger UI by default).

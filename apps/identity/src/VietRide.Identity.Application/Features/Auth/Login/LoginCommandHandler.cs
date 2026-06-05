@@ -16,6 +16,8 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
     private readonly IPasswordHasher _hasher;
     private readonly IAccessTokenService _accessTokenService;
     private readonly IRefreshTokenFactory _refreshTokenFactory;
+    private readonly IFailedLoginPersister _failedLoginPersister;
+    private readonly ILoginLockoutCounter _loginLockoutCounter;
     private readonly IClock _clock;
 
     public LoginCommandHandler(
@@ -24,6 +26,8 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
         IPasswordHasher hasher,
         IAccessTokenService accessTokenService,
         IRefreshTokenFactory refreshTokenFactory,
+        IFailedLoginPersister failedLoginPersister,
+        ILoginLockoutCounter loginLockoutCounter,
         IClock clock)
     {
         _users = users;
@@ -31,6 +35,8 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
         _hasher = hasher;
         _accessTokenService = accessTokenService;
         _refreshTokenFactory = refreshTokenFactory;
+        _failedLoginPersister = failedLoginPersister;
+        _loginLockoutCounter = loginLockoutCounter;
         _clock = clock;
     }
 
@@ -56,18 +62,26 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
 
         if (!passwordValid)
         {
-            // Increment failed attempt counter if the user exists.
+            // Increment the 15-minute Redis window for existing users only. Unknown-email
+            // attempts still fail uniformly but must not create a user-scoped Redis key.
             if (user is not null)
             {
-                user.RecordFailedLogin(_clock);
-                // SaveChanges is committed by TransactionBehavior.
+                var failedAttemptsInWindow = await _loginLockoutCounter.IncrementAsync(
+                    user.Id,
+                    cancellationToken);
+
+                await _failedLoginPersister.PersistAsync(
+                    user.Id,
+                    failedAttemptsInWindow,
+                    cancellationToken);
             }
 
             throw new UnauthorizedException("AUTH_INVALID_CREDENTIALS", "Invalid email or password.");
         }
 
-        // 4. Successful login — reset failed counter and record timestamp.
+        // 4. Successful login — reset DB tracking and clear the Redis lockout window.
         user!.RecordSuccessfulLogin(_clock);
+        await _loginLockoutCounter.ResetAsync(user.Id, cancellationToken);
 
         // 5. Issue tokens.
         var accessToken = _accessTokenService.IssueToken(user);

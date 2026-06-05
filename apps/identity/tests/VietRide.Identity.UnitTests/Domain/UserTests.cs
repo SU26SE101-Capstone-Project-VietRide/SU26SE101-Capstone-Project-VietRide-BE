@@ -64,6 +64,49 @@ public sealed class UserTests
     }
 
     // -------------------------------------------------------------------------
+    // CreateGoogleAccount
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void CreateGoogleAccount_Sets_ActivePassenger_WithNoPhoneOrPassword()
+    {
+        var user = User.CreateGoogleAccount(
+            "  Google.User@Example.COM  ",
+            "Google User",
+            "https://example.com/avatar.png");
+
+        user.Email.Should().Be("google.user@example.com");
+        user.DisplayName.Should().Be("Google User");
+        user.AvatarUrl.Should().Be("https://example.com/avatar.png");
+        user.Role.Should().Be(UserRole.PASSENGER);
+        user.Status.Should().Be(UserStatus.ACTIVE);
+        user.Phone.Should().BeNull();
+        user.PasswordHash.Should().BeNull();
+        user.FailedLoginAttempts.Should().Be(0);
+    }
+
+    // -------------------------------------------------------------------------
+    // CreateAdminPendingPassword
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void CreateAdminPendingPassword_Sets_SystemAdminPendingInitialPassword_WithNoPasswordOrOperator()
+    {
+        var user = User.CreateAdminPendingPassword(
+            "  Admin@Example.COM  ",
+            "System Admin");
+
+        user.Email.Should().Be("admin@example.com");
+        user.DisplayName.Should().Be("System Admin");
+        user.Role.Should().Be(UserRole.SYSTEM_ADMIN);
+        user.Status.Should().Be(UserStatus.PENDING_INITIAL_PASSWORD);
+        user.Phone.Should().BeNull();
+        user.PasswordHash.Should().BeNull();
+        user.OperatorId.Should().BeNull();
+        user.FailedLoginAttempts.Should().Be(0);
+    }
+
+    // -------------------------------------------------------------------------
     // VerifyEmail
     // -------------------------------------------------------------------------
 
@@ -92,6 +135,37 @@ public sealed class UserTests
     }
 
     // -------------------------------------------------------------------------
+    // CompleteProfile
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void CompleteProfile_WhenPhoneIsNull_SetsPhone()
+    {
+        var user = User.CreateGoogleAccount(
+            "google.user@example.com",
+            "Google User",
+            null);
+        var phone = PhoneNumber.Parse("+84987654321");
+
+        user.CompleteProfile(phone);
+
+        user.Phone.Should().Be(phone);
+    }
+
+    [Fact]
+    public void CompleteProfile_WhenPhoneAlreadySet_ThrowsValidationDomainException()
+    {
+        var user = MakeActivePassenger();
+        var phone = PhoneNumber.Parse("+84987654321");
+
+        var act = () => user.CompleteProfile(phone);
+
+        act.Should().Throw<IdentityDomainException>()
+            .Which.ErrorCode.Should().Be("VALIDATION_ERROR");
+        user.Phone.Should().Be(TestPhone);
+    }
+
+    // -------------------------------------------------------------------------
     // RecordFailedLogin — increment + boundary
     // -------------------------------------------------------------------------
 
@@ -101,7 +175,7 @@ public sealed class UserTests
         var clock = FrozenClock();
         var user = MakeActivePassenger();
 
-        user.RecordFailedLogin(clock);
+        user.RecordFailedLogin(clock, 1);
 
         user.FailedLoginAttempts.Should().Be(1);
         user.LastFailedLoginAt.Should().Be(FixedNow);
@@ -117,14 +191,15 @@ public sealed class UserTests
         // Four increments — still ACTIVE
         for (var i = 0; i < 4; i++)
         {
-            user.RecordFailedLogin(clock);
+            user.RecordFailedLogin(clock, i + 1);
         }
+
 
         user.Status.Should().Be(UserStatus.ACTIVE);
         user.FailedLoginAttempts.Should().Be(4);
 
         // Fifth increment — transitions to LOCKED
-        user.RecordFailedLogin(clock);
+        user.RecordFailedLogin(clock, 5);
 
         user.Status.Should().Be(UserStatus.LOCKED);
         user.FailedLoginAttempts.Should().Be(5);
@@ -142,8 +217,8 @@ public sealed class UserTests
     {
         var clock = FrozenClock();
         var user = MakeActivePassenger();
-        user.RecordFailedLogin(clock);
-        user.RecordFailedLogin(clock);
+        user.RecordFailedLogin(clock, 1);
+        user.RecordFailedLogin(clock, 2);
 
         user.ResetFailedLogins();
 
@@ -160,7 +235,7 @@ public sealed class UserTests
     {
         var clock = FrozenClock();
         var user = MakeActivePassenger();
-        user.RecordFailedLogin(clock);
+        user.RecordFailedLogin(clock, 1);
 
         user.RecordSuccessfulLogin(clock);
 

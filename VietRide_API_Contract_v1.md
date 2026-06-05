@@ -1,6 +1,6 @@
 # VietRide API Contract v1
 
-> Source of truth cho controller/DTO scaffolding. Business rules, status machines, entity rationale nằm trong `SU26SE101_VIETRIDE_technical_context_v6.md`.
+> Source of truth cho controller/DTO scaffolding. Business rules, status machines, entity rationale nằm trong `SU26SE101_VIETRIDE_technical_context_v7.md`.
 
 ## Global Conventions
 
@@ -217,6 +217,186 @@ Response `200`:
       "e": "AQAB"
     }
   ]
+}
+```
+
+### POST `/v1/auth/google`
+
+Auth: public. Idempotency-Key: not required by BSOT §5.6.
+
+Request:
+```json
+{
+  "idToken": "google-id-token"
+}
+```
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "accessToken": "jwt",
+    "refreshToken": "opaque",
+    "expiresInSeconds": 900,
+    "user": {
+      "id": "uuid",
+      "email": "user@example.com",
+      "displayName": "Nguyen Van A",
+      "role": "PASSENGER",
+      "operatorId": null,
+      "status": "ACTIVE"
+    }
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `401` — invalid Google ID token:
+```json
+{
+  "success": false,
+  "statusCode": 401,
+  "error": { "code": "AUTH_GOOGLE_TOKEN_INVALID", "message": "Google ID token signature/expiry/audience invalid." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+### POST `/v1/users/me/complete-profile`
+
+Auth: User Access Token (RS256). Idempotency-Key: not required by BSOT §5.6.
+
+Request:
+```json
+{
+  "phone": "+84901234567"
+}
+```
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "userId": "uuid",
+    "phone": "+84901234567",
+    "message": "Hồ sơ hoàn tất."
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `400` — invalid phone format:
+```json
+{
+  "success": false,
+  "statusCode": 400,
+  "error": { "code": "AUTH_PHONE_INVALID_FORMAT", "message": "Số điện thoại không đúng định dạng." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `409` — duplicate phone:
+```json
+{
+  "success": false,
+  "statusCode": 409,
+  "error": { "code": "AUTH_PHONE_ALREADY_REGISTERED", "message": "Số điện thoại đã được đăng ký." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `422` — phone already set:
+```json
+{
+  "success": false,
+  "statusCode": 422,
+  "error": { "code": "VALIDATION_ERROR", "message": "Phone already exists and cannot be overwritten from this endpoint." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+### GET `/v1/users/me`
+
+Auth: User Access Token (RS256). Idempotency-Key: not required (read endpoint).
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "id": "uuid",
+    "email": "user@example.com",
+    "displayName": "Nguyen Van A",
+    "phone": "+84901234567",
+    "role": "PASSENGER",
+    "operatorId": null,
+    "status": "ACTIVE",
+    "avatarUrl": "https://example.com/avatar.png"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `401` — missing or invalid token:
+```json
+{
+  "success": false,
+  "statusCode": 401,
+  "error": { "code": "AUTH_TOKEN_INVALID", "message": "Token không hợp lệ." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+### POST `/v1/admin/users`
+
+Auth: `SYSTEM_ADMIN`. Idempotency-Key: not required by BSOT §5.6.
+
+Request:
+```json
+{
+  "email": "admin2@example.com",
+  "displayName": "Admin Two",
+  "role": "SYSTEM_ADMIN"
+}
+```
+
+Response `201`:
+```json
+{
+  "success": true,
+  "statusCode": 201,
+  "data": {
+    "userId": "uuid",
+    "email": "admin2@example.com",
+    "displayName": "Admin Two",
+    "role": "SYSTEM_ADMIN",
+    "status": "PENDING_INITIAL_PASSWORD"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `403` — caller is not a system admin:
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "error": { "code": "FORBIDDEN", "message": "Bạn không có quyền thực hiện thao tác này." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `409` — duplicate email:
+```json
+{
+  "success": false,
+  "statusCode": 409,
+  "error": { "code": "AUTH_EMAIL_ALREADY_REGISTERED", "message": "Email đã được đăng ký." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 

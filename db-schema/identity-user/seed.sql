@@ -28,26 +28,4 @@ INSERT INTO subscription_plans (
 )
 ON CONFLICT (id) DO NOTHING;
 
--- -----------------------------------------------------------------------------
--- 2) Bootstrap SYSTEM_ADMIN user
---    Idempotent: only inserts if no SYSTEM_ADMIN exists yet (5.1.1 spec).
---    SECURITY: replace password_hash AFTER first deploy via:
---      UPDATE users SET password_hash = '<bcrypt cost 12 of new password>'
---      WHERE email = 'admin@vietride.local';
---    Production: load email + password from env vars
---      (SYSTEM_ADMIN_BOOTSTRAP_EMAIL, SYSTEM_ADMIN_BOOTSTRAP_PASSWORD).
--- -----------------------------------------------------------------------------
-INSERT INTO users (
-    id, email, phone, password_hash, display_name, role, status
-)
-SELECT
-    '00000000-0000-0000-0000-000000000010'::UUID,
-    'admin@vietride.local',
-    NULL,
-    '$2b$12$PLACEHOLDER_REPLACE_AFTER_DEPLOY_BCRYPT_HASH_HERE_xxxxxxxxxxxxxx',
-    'System Administrator',
-    'SYSTEM_ADMIN',
-    'ACTIVE'
-WHERE NOT EXISTS (
-    SELECT 1 FROM users WHERE role = 'SYSTEM_ADMIN'
-);
+-- Bootstrap SYSTEM_ADMIN is intentionally handled by the Identity Service startup seeder.

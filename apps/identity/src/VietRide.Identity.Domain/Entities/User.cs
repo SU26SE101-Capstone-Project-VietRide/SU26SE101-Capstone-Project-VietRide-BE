@@ -64,6 +64,56 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
         };
     }
 
+    /// <summary>
+    /// Factory for Google OAuth PASSENGER accounts. Google has already verified the email.
+    /// Phone is completed later through the complete-profile flow.
+    /// </summary>
+    public static User CreateGoogleAccount(
+        string email,
+        string displayName,
+        string? avatarUrl)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(email);
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
+
+        return new User
+        {
+            Id = Guid.NewGuid(),
+            Email = email.Trim().ToLowerInvariant(),
+            Phone = null,
+            PasswordHash = null,
+            DisplayName = displayName,
+            AvatarUrl = avatarUrl,
+            Role = UserRole.PASSENGER,
+            Status = UserStatus.ACTIVE,
+            FailedLoginAttempts = 0,
+        };
+    }
+
+    /// <summary>
+    /// Factory for SYSTEM_ADMIN users that must set their initial password later.
+    /// </summary>
+    public static User CreateAdminPendingPassword(
+        string email,
+        string displayName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(email);
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
+
+        return new User
+        {
+            Id = Guid.NewGuid(),
+            Email = email.Trim().ToLowerInvariant(),
+            Phone = null,
+            PasswordHash = null,
+            DisplayName = displayName,
+            Role = UserRole.SYSTEM_ADMIN,
+            Status = UserStatus.PENDING_INITIAL_PASSWORD,
+            OperatorId = null,
+            FailedLoginAttempts = 0,
+        };
+    }
+
     // ---------------------------------------------------------------------------
     // Domain methods — status transitions + lockout tracking
     // ---------------------------------------------------------------------------
@@ -84,18 +134,46 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
     }
 
     /// <summary>
-    /// Increments failed login counter and sets last_failed_login_at.
-    /// When the counter reaches >= 5 the status transitions permanently to LOCKED.
-    /// The lock is permanent — only a System Admin unlocks the account manually.
-    /// Note: the 15-minute window is enforced by the Redis TTL on
-    /// identity:login_lockout:{userId} (Application layer), NOT by a DB column.
+    /// Completes a Google-created profile by setting the already-normalized phone once.
+    /// Existing phone changes must use the dedicated profile-update flow.
     /// </summary>
-    public void RecordFailedLogin(IClock clock)
+    public void CompleteProfile(PhoneNumber phone)
     {
-        FailedLoginAttempts++;
+        ArgumentNullException.ThrowIfNull(phone);
+
+        if (Phone is not null)
+        {
+            throw new IdentityDomainException(
+                "VALIDATION_ERROR",
+                "Phone is already set and cannot be overwritten through complete profile.");
+        }
+
+        Phone = phone;
+    }
+
+    /// <summary>
+    /// Records a failed login and sets last_failed_login_at.
+    /// <paramref name="failedAttemptsInWindow"/> is the Redis counter value for the
+    /// 15-minute <c>identity:login_lockout:{userId}</c> window. When that windowed
+    /// counter reaches >= 5 the status transitions permanently to LOCKED.
+    /// The lock is permanent — only a System Admin unlocks the account manually.
+    /// </summary>
+    public void RecordFailedLogin(IClock clock, long failedAttemptsInWindow)
+    {
+        if (failedAttemptsInWindow < 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(failedAttemptsInWindow),
+                failedAttemptsInWindow,
+                "Failed login attempts in window must be at least 1.");
+        }
+
+        FailedLoginAttempts = failedAttemptsInWindow > int.MaxValue
+            ? int.MaxValue
+            : (int)failedAttemptsInWindow;
         LastFailedLoginAt = clock.UtcNow;
 
-        if (FailedLoginAttempts >= MaxFailedLoginAttempts)
+        if (failedAttemptsInWindow >= MaxFailedLoginAttempts)
         {
             Status = UserStatus.LOCKED;
         }
