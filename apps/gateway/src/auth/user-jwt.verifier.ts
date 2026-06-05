@@ -27,6 +27,7 @@ export function createUserJwtVerifier(
         const { payload } = await jwtVerify(auth.slice(7).trim(), jwks, {
           issuer: env.JWT_ISSUER,
           audience: env.JWT_AUDIENCE,
+          algorithms: ['RS256'],
           clockTolerance: 5,
         });
 

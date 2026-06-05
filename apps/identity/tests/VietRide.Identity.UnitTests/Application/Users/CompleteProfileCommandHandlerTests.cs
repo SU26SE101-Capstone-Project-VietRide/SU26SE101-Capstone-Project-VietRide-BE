@@ -38,8 +38,12 @@ public sealed class CompleteProfileCommandHandlerTests
             Arg.Any<CancellationToken>());
     }
 
-    [Fact]
-    public async Task Handle_InvalidPhone_Throws400WithAuthPhoneInvalidFormat()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("0901234567")]
+    public async Task Handle_InvalidPhone_Throws400WithAuthPhoneInvalidFormat(string? phone)
     {
         var users = Substitute.For<IUserRepository>();
         var activityLogs = Substitute.For<IActivityLogRepository>();
@@ -49,7 +53,7 @@ public sealed class CompleteProfileCommandHandlerTests
         users.GetByIdAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
 
         var act = () => handler.Handle(
-            new CompleteProfileCommand(user.Id, "0901234567"),
+            new CompleteProfileCommand(user.Id, phone),
             CancellationToken.None);
 
         var assertion = await act.Should().ThrowAsync<BadRequestException>();

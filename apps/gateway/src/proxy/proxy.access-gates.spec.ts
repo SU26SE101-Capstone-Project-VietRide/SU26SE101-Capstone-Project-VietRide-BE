@@ -127,6 +127,40 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['/v1/admin/operators', env.IDENTITY_BASE_URL],
+    ['/v1/admin/operators/11111111-1111-1111-1111-111111111111/approve', env.IDENTITY_BASE_URL],
+    ['/v1/admin/users', env.IDENTITY_BASE_URL],
+    ['/v1/admin/booking-stats/aggregate', env.BOOKING_BASE_URL],
+    ['/v1/admin/platform-wallet', env.PAYMENT_BASE_URL],
+    [
+      '/v1/admin/trip-settlements/11111111-1111-1111-1111-111111111111/settle',
+      env.PAYMENT_BASE_URL,
+    ],
+  ] as const)('routes SYSTEM_ADMIN request %s to %s', async (path, target) => {
+    const upstreamHandler = arrangeProxyPass();
+    const signer = {
+      sign: jest.fn().mockResolvedValue('internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({ sub: 'admin-1', role: 'SYSTEM_ADMIN' });
+    const req = makeRequest(path, { authorization, 'x-request-id': 'req-admin-route' });
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(signer.sign).toHaveBeenCalledWith({
+      sub: 'admin-1',
+      reqId: 'req-admin-route',
+      role: 'SYSTEM_ADMIN',
+    });
+    expect(createProxyMiddlewareMock).toHaveBeenCalledWith(expect.objectContaining({ target }));
+    expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
+    expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
   it('returns 403 AUTH_PHONE_REQUIRED for a jose-verified boolean false hasPhone claim', async () => {
     const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
     const handler = createProxyHandler(env, signer);
@@ -310,19 +344,107 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
-  it('does not force mixed routes such as /v1/operators through user-only auth', async () => {
-    const upstreamHandler = arrangeProxyPass();
-    const signer = {
-      sign: jest.fn().mockResolvedValue('internal-token'),
-    } as unknown as InternalJwtSigner;
+  it('returns 401 for a protected mixed route without Authorization', async () => {
+    const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
     const handler = createProxyHandler(env, signer);
-    const req = makeRequest('/v1/operators/public-registration', { 'x-request-id': 'req-mixed' });
+    const req = makeRequest('/v1/operators/profile', { 'x-request-id': 'req-mixed-auth' });
     const res = makeResponse();
     const next = jest.fn() as NextFunction;
 
     await handler(req, res, next);
 
-    expect(signer.sign).toHaveBeenCalledWith({ sub: 'anonymous', reqId: 'req-mixed' });
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 401,
+      error: { code: 'AUTH_TOKEN_INVALID' },
+      meta: { traceId: 'req-mixed-auth' },
+    });
+    expect(signer.sign).not.toHaveBeenCalled();
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 AUTH_PHONE_REQUIRED for a protected mixed route when passenger hasPhone=false', async () => {
+    const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({
+      sub: 'passenger-1',
+      role: 'PASSENGER',
+      hasPhone: false,
+    });
+    const req = makeRequest('/v1/payments/vnpay-init', {
+      authorization,
+      'x-request-id': 'req-mixed-phone',
+    });
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 403,
+      error: { code: 'AUTH_PHONE_REQUIRED' },
+      meta: { traceId: 'req-mixed-phone' },
+    });
+    expect(signer.sign).not.toHaveBeenCalled();
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['POST', '/v1/operators/register'],
+    ['POST', '/v1/payments/vnpay-ipn'],
+    ['POST', '/v1/payments/vnpay-topup-ipn'],
+  ] as const)('lets public mixed endpoint %s %s pass anonymously', async (method, path) => {
+    const upstreamHandler = arrangeProxyPass();
+    const signer = {
+      sign: jest.fn().mockResolvedValue('internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const req = makeRequest(path, { 'x-request-id': 'req-mixed-public' }, method);
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(signer.sign).toHaveBeenCalledWith({ sub: 'anonymous', reqId: 'req-mixed-public' });
+    expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
+    expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('strips user Authorization before proxying while adding X-Internal-Auth with user context', async () => {
+    const upstreamHandler = arrangeProxyPass();
+    const signer = {
+      sign: jest.fn().mockResolvedValue('internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({
+      sub: 'operator-admin-1',
+      role: 'OPERATOR_ADMIN',
+      operatorId: 'operator-1',
+      hasPhone: true,
+    });
+    const req = makeRequest('/v1/operators/profile', {
+      authorization,
+      'x-request-id': 'req-strip-auth',
+    });
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(signer.sign).toHaveBeenCalledWith({
+      sub: 'operator-admin-1',
+      reqId: 'req-strip-auth',
+      role: 'OPERATOR_ADMIN',
+      operatorId: 'operator-1',
+    });
+    expect(req.headers.authorization).toBeUndefined();
+    expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
     expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
     expect(res.status).not.toHaveBeenCalled();
   });

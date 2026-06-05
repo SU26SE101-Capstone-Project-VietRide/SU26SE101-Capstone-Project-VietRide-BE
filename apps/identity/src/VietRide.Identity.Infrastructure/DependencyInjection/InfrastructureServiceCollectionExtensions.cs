@@ -70,6 +70,7 @@ public static class InfrastructureServiceCollectionExtensions
         // ------------------------------------------------------------------
         // Startup seeders
         // ------------------------------------------------------------------
+        services.AddScoped<ISystemAdminBootstrapStore, EfSystemAdminBootstrapStore>();
         services.AddScoped<BootstrapAdminSeeder>();
 
         // ------------------------------------------------------------------

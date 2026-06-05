@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Google.Apis.Auth;
 using NSubstitute;
 using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.Repositories;
@@ -165,12 +166,27 @@ public sealed class GoogleLoginCommandHandlerTests
     {
         var handler = CreateHandler();
         _googleIdTokenVerifier.VerifyAsync("bad-token", Arg.Any<CancellationToken>())
-            .Returns<Task<GoogleIdTokenVerificationResult>>(_ => throw new InvalidOperationException("invalid token"));
+            .Returns<Task<GoogleIdTokenVerificationResult>>(_ => throw new InvalidJwtException("invalid token"));
 
         var act = () => handler.Handle(new GoogleLoginCommand("bad-token"), CancellationToken.None);
 
         var assertion = await act.Should().ThrowAsync<UnauthorizedException>();
         assertion.Which.ErrorCode.Should().Be("AUTH_GOOGLE_TOKEN_INVALID");
+        await _oauthIdentities.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
+        await _refreshTokens.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task Handle_WhenGoogleVerifierHasOperationalConfigError_PropagatesError()
+    {
+        var handler = CreateHandler();
+        _googleIdTokenVerifier.VerifyAsync("id-token", Arg.Any<CancellationToken>())
+            .Returns<Task<GoogleIdTokenVerificationResult>>(_ => throw new InvalidOperationException("Google OAuth client id is not configured."));
+
+        var act = () => handler.Handle(new GoogleLoginCommand("id-token"), CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Google OAuth client id is not configured.");
         await _oauthIdentities.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
         await _refreshTokens.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
     }

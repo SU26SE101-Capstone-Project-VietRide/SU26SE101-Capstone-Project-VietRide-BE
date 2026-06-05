@@ -30,13 +30,49 @@ describe('buildRouteTable', () => {
     });
   });
 
-  it('admin routes require SYSTEM_ADMIN role', () => {
-    const admin = routes.find((r) => r.prefix === '/v1/admin');
-    if (!admin) {
-      throw new Error('Expected /v1/admin route to be registered');
-    }
+  it('admin routes require SYSTEM_ADMIN role and point at their owning services', () => {
+    const expectedAdminRoutes = [
+      ['/v1/admin/operators', env.IDENTITY_BASE_URL],
+      ['/v1/admin/users', env.IDENTITY_BASE_URL],
+      ['/v1/admin/booking-stats', env.BOOKING_BASE_URL],
+      ['/v1/admin/trip-settlements', env.PAYMENT_BASE_URL],
+      ['/v1/admin/platform-wallet', env.PAYMENT_BASE_URL],
+    ] as const;
 
-    expect(admin.requiredRoles).toContain('SYSTEM_ADMIN');
+    expect(routes.find((r) => r.prefix === '/v1/admin')).toBeUndefined();
+
+    expectedAdminRoutes.forEach(([prefix, target]) => {
+      const adminRoute = routes.find((r) => r.prefix === prefix);
+      if (!adminRoute) {
+        throw new Error(`Expected ${prefix} route to be registered`);
+      }
+
+      expect(adminRoute.target).toBe(target);
+      expect(adminRoute.authRequired).toBe('user');
+      expect(adminRoute.requiredRoles).toEqual(['SYSTEM_ADMIN']);
+    });
+  });
+
+  it('matches cross-service admin routes to the correct upstream services', () => {
+    const cases = [
+      ['/v1/admin/operators', env.IDENTITY_BASE_URL],
+      ['/v1/admin/operators/11111111-1111-1111-1111-111111111111/approve', env.IDENTITY_BASE_URL],
+      ['/v1/admin/users', env.IDENTITY_BASE_URL],
+      ['/v1/admin/booking-stats/aggregate', env.BOOKING_BASE_URL],
+      ['/v1/admin/platform-wallet', env.PAYMENT_BASE_URL],
+      [
+        '/v1/admin/trip-settlements/11111111-1111-1111-1111-111111111111/settle',
+        env.PAYMENT_BASE_URL,
+      ],
+    ] as const;
+
+    cases.forEach(([path, target]) => {
+      const route = matchRoute(routes, path);
+
+      expect(route?.target).toBe(target);
+      expect(route?.authRequired).toBe('user');
+      expect(route?.requiredRoles).toEqual(['SYSTEM_ADMIN']);
+    });
   });
 
   it('public auth routes and well-known have authRequired = none', () => {
@@ -44,6 +80,7 @@ describe('buildRouteTable', () => {
       '/v1/auth/register',
       '/v1/auth/verify-email',
       '/v1/auth/login',
+      '/v1/auth/google',
       '/v1/auth/refresh',
       '/v1/.well-known',
     ];

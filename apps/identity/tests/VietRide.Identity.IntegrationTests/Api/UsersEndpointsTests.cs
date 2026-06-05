@@ -11,8 +11,10 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
+using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Application.Features.Users.CompleteProfile;
 using VietRide.Identity.Application.Features.Users.GetMe;
+using VietRide.Identity.Domain.Entities;
 using VietRide.Shared.Application.Exceptions;
 
 namespace VietRide.Identity.IntegrationTests.Api;
@@ -83,7 +85,7 @@ public sealed class UsersEndpointsTests : IClassFixture<AuthWebApplicationFactor
     [Fact]
     public async Task CompleteProfile_InvalidPhone_Returns400AuthPhoneInvalidFormat()
     {
-        using var client = CreateClientWithSender(new HappyPathUsersSender());
+        using var client = CreateClientWithRepositories();
         using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/users/me/complete-profile")
         {
             Content = JsonContent.Create(new { phone = "not-a-phone" }),
@@ -92,12 +94,37 @@ public sealed class UsersEndpointsTests : IClassFixture<AuthWebApplicationFactor
 
         var response = await client.SendAsync(request);
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        doc.RootElement.GetProperty("success").GetBoolean().Should().BeFalse();
-        doc.RootElement.GetProperty("statusCode").GetInt32().Should().Be(400);
-        doc.RootElement.GetProperty("error").GetProperty("code").GetString()
-            .Should().Be("AUTH_PHONE_INVALID_FORMAT");
+        await AssertErrorCodeAsync(response, HttpStatusCode.BadRequest, "AUTH_PHONE_INVALID_FORMAT");
+    }
+
+    [Fact]
+    public async Task CompleteProfile_EmptyPhone_Returns400AuthPhoneInvalidFormat()
+    {
+        using var client = CreateClientWithRepositories();
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/users/me/complete-profile")
+        {
+            Content = JsonContent.Create(new { phone = string.Empty }),
+        };
+        request.Headers.TryAddWithoutValidation("X-Internal-Auth", $"Bearer {CreateInternalJwt(CallerUserId, "PASSENGER")}");
+
+        var response = await client.SendAsync(request);
+
+        await AssertErrorCodeAsync(response, HttpStatusCode.BadRequest, "AUTH_PHONE_INVALID_FORMAT");
+    }
+
+    [Fact]
+    public async Task CompleteProfile_MissingPhone_Returns400AuthPhoneInvalidFormat()
+    {
+        using var client = CreateClientWithRepositories();
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/users/me/complete-profile")
+        {
+            Content = JsonContent.Create(new { }),
+        };
+        request.Headers.TryAddWithoutValidation("X-Internal-Auth", $"Bearer {CreateInternalJwt(CallerUserId, "PASSENGER")}");
+
+        var response = await client.SendAsync(request);
+
+        await AssertErrorCodeAsync(response, HttpStatusCode.BadRequest, "AUTH_PHONE_INVALID_FORMAT");
     }
 
     private HttpClient CreateClientWithSender(ISender sender)
@@ -111,6 +138,33 @@ public sealed class UsersEndpointsTests : IClassFixture<AuthWebApplicationFactor
                 services.AddSingleton(sender);
             });
         }).CreateClient();
+    }
+
+    private HttpClient CreateClientWithRepositories()
+    {
+        return _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<IUserRepository>();
+                services.RemoveAll<IActivityLogRepository>();
+                services.AddSingleton<IUserRepository>(new TestUsersRepository());
+                services.AddSingleton<IActivityLogRepository>(new TestActivityLogRepository());
+            });
+        }).CreateClient();
+    }
+
+    private static async Task AssertErrorCodeAsync(
+        HttpResponseMessage response,
+        HttpStatusCode expectedStatusCode,
+        string expectedErrorCode)
+    {
+        response.StatusCode.Should().Be(expectedStatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        doc.RootElement.GetProperty("success").GetBoolean().Should().BeFalse();
+        doc.RootElement.GetProperty("statusCode").GetInt32().Should().Be((int)expectedStatusCode);
+        doc.RootElement.GetProperty("error").GetProperty("code").GetString()
+            .Should().Be(expectedErrorCode);
     }
 
     private static void AssertSuccessEnvelope(JsonDocument doc, int expectedStatusCode)
@@ -139,6 +193,60 @@ public sealed class UsersEndpointsTests : IClassFixture<AuthWebApplicationFactor
             signingCredentials: credentials);
 
         return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    private sealed class TestUsersRepository : IUserRepository
+    {
+        private readonly User _user = User.CreateGoogleAccount("user@example.com", "Test User", null);
+
+        public Task<User?> GetByIdAsync(Guid id, CancellationToken ct)
+            => Task.FromResult<User?>(_user);
+
+        public Task<User> AddAsync(User entity, CancellationToken ct)
+            => Task.FromResult(entity);
+
+        public void Update(User entity)
+        {
+        }
+
+        public void Remove(User entity)
+        {
+        }
+
+        public IQueryable<User> Query()
+            => new[] { _user }.AsQueryable();
+
+        public IQueryable<User> QueryNoTracking()
+            => Query();
+
+        public Task<User?> GetByEmailAsync(string emailLower, CancellationToken ct = default)
+            => Task.FromResult<User?>(null);
+
+        public Task<User?> GetByPhoneAsync(string e164Phone, CancellationToken ct = default)
+            => Task.FromResult<User?>(null);
+    }
+
+    private sealed class TestActivityLogRepository : IActivityLogRepository
+    {
+        public Task<ActivityLog?> GetByIdAsync(Guid id, CancellationToken ct)
+            => Task.FromResult<ActivityLog?>(null);
+
+        public Task<ActivityLog> AddAsync(ActivityLog entity, CancellationToken ct)
+            => Task.FromResult(entity);
+
+        public void Update(ActivityLog entity)
+        {
+        }
+
+        public void Remove(ActivityLog entity)
+        {
+        }
+
+        public IQueryable<ActivityLog> Query()
+            => Array.Empty<ActivityLog>().AsQueryable();
+
+        public IQueryable<ActivityLog> QueryNoTracking()
+            => Query();
     }
 
     private sealed class HappyPathUsersSender : ISender
@@ -175,7 +283,7 @@ public sealed class UsersEndpointsTests : IClassFixture<AuthWebApplicationFactor
 
                 CompleteProfileCommand command => new CompleteProfileResponseDto(
                     UserId: command.UserId,
-                    Phone: command.Phone,
+                    Phone: command.Phone!,
                     Message: "Hồ sơ hoàn tất."),
 
                 _ => throw new InvalidOperationException($"Unexpected request type {request.GetType().Name}."),

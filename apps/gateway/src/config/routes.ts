@@ -3,13 +3,24 @@ import type { Env } from './env.schema';
 /** Auth requirement per route. */
 export type AuthMode = 'none' | 'user' | 'mixed';
 
+export type RouteMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'ALL';
+
+export interface PublicSubpath {
+  /** HTTP method allowed to bypass User JWT for an otherwise mixed prefix. */
+  method: RouteMethod;
+  /** Exact public path under the mixed prefix. */
+  path: string;
+}
+
 export interface ProxyRoute {
   /** URL prefix matched against incoming request. */
   prefix: string;
   /** Downstream service base URL. */
   target: string;
-  /** Auth mode. 'mixed' = some sub-paths public, others require user JWT (handled in middleware whitelist). */
+  /** Auth mode. 'mixed' = explicit publicSubpaths are anonymous, all other subpaths require user JWT. */
   authRequired: AuthMode;
+  /** Explicit public endpoints under a mixed prefix. Method + path must match exactly. */
+  publicSubpaths?: PublicSubpath[];
   /** Optional RBAC requirement. */
   requiredRoles?: string[];
   /** Strip prefix before forwarding? Default false. Cannot be combined with rewriteTo. */
@@ -33,10 +44,39 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     { prefix: '/v1/auth/logout', target: env.IDENTITY_BASE_URL, authRequired: 'user' },
     { prefix: '/v1/auth', target: env.IDENTITY_BASE_URL, authRequired: 'user' },
     { prefix: '/v1/users', target: env.IDENTITY_BASE_URL, authRequired: 'user' },
-    { prefix: '/v1/operators', target: env.IDENTITY_BASE_URL, authRequired: 'mixed' },
     {
-      prefix: '/v1/admin',
+      prefix: '/v1/operators',
       target: env.IDENTITY_BASE_URL,
+      authRequired: 'mixed',
+      publicSubpaths: [{ method: 'POST', path: '/v1/operators/register' }],
+    },
+    {
+      prefix: '/v1/admin/operators',
+      target: env.IDENTITY_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
+      prefix: '/v1/admin/users',
+      target: env.IDENTITY_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
+      prefix: '/v1/admin/booking-stats',
+      target: env.BOOKING_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
+      prefix: '/v1/admin/trip-settlements',
+      target: env.PAYMENT_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
+      prefix: '/v1/admin/platform-wallet',
+      target: env.PAYMENT_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['SYSTEM_ADMIN'],
     },
@@ -79,7 +119,11 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     {
       prefix: '/v1/payments',
       target: env.PAYMENT_BASE_URL,
-      authRequired: 'mixed' /* vnpay-ipn public */,
+      authRequired: 'mixed',
+      publicSubpaths: [
+        { method: 'POST', path: '/v1/payments/vnpay-ipn' },
+        { method: 'POST', path: '/v1/payments/vnpay-topup-ipn' },
+      ],
     },
     { prefix: '/v1/wallet', target: env.PAYMENT_BASE_URL, authRequired: 'user' },
     {

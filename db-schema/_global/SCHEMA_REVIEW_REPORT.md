@@ -212,7 +212,7 @@ Wallet/PlatformWallet/OperatorWallet UPDATE pattern dùng `balance_before`/`bala
 
 ### 12. Seed Data Correctness — ✅ PASS
 
-- ✅ `identity-user/seed.sql`: Bootstrap SYSTEM_ADMIN (fixed UUID `00000000-0000-0000-0000-000000000010`, idempotent check `WHERE NOT EXISTS WHERE role='SYSTEM_ADMIN'`) + default SubscriptionPlan "Starter (Free Trial)" (fixed UUID `00000000-0000-0000-0000-000000000001`). Bcrypt password placeholder với comment hướng dẫn rotate sau deploy.
+- ✅ `identity-user/seed.sql`: default SubscriptionPlan "Starter (Free Trial)" only (fixed UUID `00000000-0000-0000-0000-000000000001`). Bootstrap SYSTEM_ADMIN is intentionally handled by the Identity Service startup seeder from `SYSTEM_ADMIN_BOOTSTRAP_*` env vars; no SQL/EF seed placeholder password.
 - ✅ `trip-route-vehicle/seed.sql`: 3 VehicleType với fixed UUIDs (`...101` STANDARD_BUS, `...102` LIMOUSINE, `...103` SLEEPER_BUS), `is_system_defined=TRUE`, `ON CONFLICT (id) DO NOTHING` idempotent.
 - ✅ `booking/seed.sql`: comment only `-- No seed data required for this service.`
 - ✅ `payment-wallet/seed.sql`: comment only
@@ -333,8 +333,9 @@ User-driven design alignment: `wallets` table đổi từ synthetic `id` PK + `U
    - Use EF Core fluent API `[Index]`/`HasIndex()` matching schema indexes
    - Apply `[ConcurrencyCheck]` on `row_version` columns
    - `OnModelCreating` config naming policy: PascalCase entity ↔ snake_case table/column
-   - HasData seeding for SubscriptionPlan (fixed UUID `00000000-0000-0000-0000-000000000001`)
-   - Bootstrap SYSTEM_ADMIN seeding via env vars + `WHERE NOT EXISTS` check (idempotent migration)
+    - HasData/seed SQL for SubscriptionPlan (fixed UUID `00000000-0000-0000-0000-000000000001`)
+    - Bootstrap SYSTEM_ADMIN via Identity Service startup seeder using `SYSTEM_ADMIN_BOOTSTRAP_*` env vars + `WHERE NOT EXISTS` check; do not put placeholder passwords in migrations/seed.sql
+
 2. **Migrate first**: `dotnet ef migrations add InitialIdentity --project src/VietRide.Identity.Infrastructure`, then `dotnet ef database update`.
 3. **Bootstrap event handlers** sẵn sàng cho Wallet/PlatformWallet/OperatorWallet creation (Step 2 onwards services).
 4. **Smoke test** sample queries: User lookup by email, Operator subscription join, OAuth identity link.

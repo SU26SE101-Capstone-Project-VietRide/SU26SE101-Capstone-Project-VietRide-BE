@@ -1,6 +1,6 @@
 # VietRide API Contract v1
 
-> Source of truth cho controller/DTO scaffolding. Business rules, status machines, entity rationale nằm trong `SU26SE101_VIETRIDE_technical_context_v6.md`.
+> Source of truth cho controller/DTO scaffolding. Business rules, status machines, entity rationale nằm trong `SU26SE101_VIETRIDE_technical_context_v7.md`.
 
 ## Global Conventions
 

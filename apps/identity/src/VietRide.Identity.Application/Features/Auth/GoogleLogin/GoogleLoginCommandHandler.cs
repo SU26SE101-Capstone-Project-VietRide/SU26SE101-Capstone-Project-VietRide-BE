@@ -127,11 +127,16 @@ public sealed class GoogleLoginCommandHandler : IRequestHandler<GoogleLoginComma
         {
             return await _googleIdTokenVerifier.VerifyAsync(idToken, cancellationToken);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (IsGoogleJwtInvalid(ex))
         {
             throw new UnauthorizedException(
                 "AUTH_GOOGLE_TOKEN_INVALID",
                 "Google ID token signature, expiry, or audience is invalid.");
         }
+    }
+
+    private static bool IsGoogleJwtInvalid(Exception exception)
+    {
+        return exception.GetType().FullName == "Google.Apis.Auth.InvalidJwtException";
     }
 }

@@ -56,6 +56,9 @@ public sealed class GoogleIdTokenVerifier : IGoogleIdTokenVerifier
         if (string.IsNullOrWhiteSpace(payload.Subject) || string.IsNullOrWhiteSpace(payload.Email))
             throw new InvalidJwtException("Google ID token is missing required claims.");
 
+        if (payload.EmailVerified != true)
+            throw new InvalidJwtException("Google ID token email is not verified.");
+
         return new GoogleIdTokenVerificationResult(
             payload.Subject,
             payload.Email,

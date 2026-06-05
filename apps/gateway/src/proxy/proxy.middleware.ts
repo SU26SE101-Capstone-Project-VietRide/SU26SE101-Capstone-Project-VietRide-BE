@@ -68,6 +68,20 @@ function hasCompletedPhoneProfile(hasPhone: unknown): boolean {
   return hasPhone === true || hasPhone === 'true';
 }
 
+function isPublicMixedSubpath(route: ProxyRoute, method: string, path: string): boolean {
+  if (route.authRequired !== 'mixed') {
+    return false;
+  }
+
+  const normalizedMethod = method.toUpperCase();
+  return (
+    route.publicSubpaths?.some(
+      (subpath) =>
+        subpath.path === path && (subpath.method === 'ALL' || subpath.method === normalizedMethod),
+    ) ?? false
+  );
+}
+
 function isPhoneGateWhitelisted(method: string, path: string): boolean {
   if (path === '/health' || path === '/ready') {
     return true;
@@ -138,6 +152,9 @@ export function createProxyHandler(env: Env, signer: InternalJwtSigner): Express
         target: route.target,
         changeOrigin: true,
         on: {
+          proxyReq: (proxyReq) => {
+            proxyReq.removeHeader('authorization');
+          },
           error: (err, proxyReq, res) => {
             logger.error(`Upstream ${route.target} error: ${err.message}`);
             const r = res as Response;
@@ -203,8 +220,11 @@ export function createProxyHandler(env: Env, signer: InternalJwtSigner): Express
       return;
     }
 
+    const isAnonymousMixedEndpoint = isPublicMixedSubpath(route, req.method, fullPath);
+    const requiresUserJwt = route.authRequired === 'user' || route.authRequired === 'mixed';
+
     let user = (req as RequestWithUser).user;
-    if (route.authRequired === 'user' && !user) {
+    if (requiresUserJwt && !isAnonymousMixedEndpoint && !user) {
       try {
         user = await userJwtVerifier.verifyAuthorizationHeader(req.header('authorization'));
         (req as RequestWithUser).user = user;
@@ -240,6 +260,8 @@ export function createProxyHandler(env: Env, signer: InternalJwtSigner): Express
       ...(operatorId ? { operatorId } : {}),
     });
 
+    delete req.headers['authorization'];
+    delete req.headers['Authorization'];
     req.headers['x-internal-auth'] = `Bearer ${internalJwt}`;
     req.headers['x-request-id'] = reqId;
 

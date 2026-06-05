@@ -21,6 +21,7 @@ public sealed class GoogleIdTokenVerifierTests
                 {
                     Subject = "google-sub-123",
                     Email = "passenger@example.com",
+                    EmailVerified = true,
                     Name = "Passenger One",
                     Picture = "https://example.com/avatar.png"
                 });
@@ -32,6 +33,24 @@ public sealed class GoogleIdTokenVerifierTests
         result.Email.Should().Be("passenger@example.com");
         result.DisplayName.Should().Be("Passenger One");
         result.AvatarUrl.Should().Be("https://example.com/avatar.png");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_WhenEmailIsNotVerified_ThrowsTypedFailure()
+    {
+        var verifier = new GoogleIdTokenVerifier(
+            Options.Create(new GoogleOAuthOptions { ClientId = "vietride-client-id" }),
+            (_, _) => Task.FromResult(new GoogleJsonWebSignature.Payload
+            {
+                Subject = "google-sub-123",
+                Email = "passenger@example.com",
+                EmailVerified = false
+            }));
+
+        var act = () => verifier.VerifyAsync("valid-signature-unverified-email-token", CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidJwtException>()
+            .WithMessage("Google ID token email is not verified.");
     }
 
     [Fact]

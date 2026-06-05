@@ -395,7 +395,7 @@ apps/<service>/                                    (Nx project root)
 ├── src/
 │   ├── VietRide.<Service>.Api/                    ASP.NET Core host (entry + HTTP boundary)
 │   │   ├── Controllers/<Aggregate>Controller.cs   Thin — chỉ MediatR.Send + map response
-│   │   ├── Middleware/                            InternalJwtAuthHandler, ProblemDetailsMiddleware, RequestLoggingMiddleware
+│   │   ├── Middleware/                            InternalJwtAuthHandler, RequestLoggingMiddleware
 │   │   ├── HostedServices/OutboxPublisherHostedService.cs   IHostedService — KHÔNG dùng Hangfire
 │   │   ├── HangfireJobs/<Job>.cs                  1 file = 1 job class (business scheduled jobs)
 │   │   ├── DependencyInjection/                   ServiceCollection extensions (AddApi, AddSwagger, AddHangfireSetup)
@@ -549,7 +549,7 @@ Test fail → CI fail.
 | Controller gọi thẳng `IBookingService` (bypass MediatR) | Controller → `MediatR.Send` → Handler → Service. KHÔNG bypass. | Pipeline behaviors (validation, logging, transaction) chỉ chạy qua MediatR. |
 | Service inject Service inject Service chain dài (5+ tầng) | Tối đa 2 tầng service: Handler → Service → Repository. Cross-aggregate orchestration cần phối hợp 3+ service → tách ra Saga / Process Manager. | Tránh "service trong service" indirection nightmare. |
 | `throw new Exception("...")` generic | `throw new BookingNotCancellableException(bookingId)` custom class kèm errorCode | Catch-able theo type, error code map được |
-| `try { … } catch { return null; }` swallow | Để exception propagate, ExceptionMiddleware map sang Problem+JSON | Fail loud, Sentry capture |
+| `try { … } catch { return null; }` swallow | Để exception propagate, exception filter map sang `ApiResponse` error envelope | Fail loud, Sentry capture |
 | `static List<>` hoặc `static Dictionary<>` mutable in-process state | Redis cho shared state hoặc DI singleton có lock proper | Scale ngang vỡ |
 | Nullable reference type tắt (`<Nullable>disable</Nullable>`) | **Bật `<Nullable>enable</Nullable>` ở `Directory.Build.props`** + treat nullable warnings as errors | Bắt nullref compile time |
 | Async method không `CancellationToken` | Mọi async method (Handler, Service, Repository, HTTP call) **phải nhận `CancellationToken ct`** từ caller | Cancel propagation |
@@ -2003,7 +2003,7 @@ HttpRequestException   → 502 PAYMENT_VNPAY_ERROR / external service errors
 Unhandled              → 500 INTERNAL_ERROR + Sentry capture + log full stack
 ```
 
-Mọi response error → `application/problem+json` shape (Section 5.5).
+Mọi response error → ADR 0004 `ApiResponse` error envelope (Section 5.5).
 
 **NestJS:** Global `HttpExceptionFilter` + custom exception classes (`BookingException`, `ValidationException`, etc.) mapping tương tự.
 
@@ -2715,7 +2715,7 @@ PR fail nếu bất kỳ step nào fail.
 
 3. **Wire up:**
    - JWT auth middleware (Section 6.4).
-   - Exception filter + Problem+JSON (Section 5.5).
+   - Exception filter + `ApiResponse` error envelope (Section 5.5).
    - Validation pipeline (Section 9.3).
    - Outbox + RabbitMQ producer/consumer (Section 7).
    - Hangfire / BullMQ jobs (Section 10).

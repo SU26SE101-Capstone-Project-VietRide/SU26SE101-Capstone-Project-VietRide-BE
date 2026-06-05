@@ -3,7 +3,7 @@
 -- Database: vietride_identity
 -- Framework: .NET Core 8 + EF Core 8
 -- =============================================================================
--- Source of truth: SU26SE101_VIETRIDE_technical_context_v6.md (Section 5, 8)
+-- Source of truth: SU26SE101_VIETRIDE_technical_context_v7.md (Section 5, 8)
 -- Conventions:
 --   - snake_case tables + columns (EF Core naming policy maps to camelCase)
 --   - UUID PK with gen_random_uuid() default

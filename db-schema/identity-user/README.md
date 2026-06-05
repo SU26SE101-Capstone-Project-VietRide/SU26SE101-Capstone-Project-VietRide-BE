@@ -31,8 +31,8 @@ Identity & User Service quản lý **authentication, authorization, user profile
 - **`Operator.businessRegistrationNumber` + `Operator.taxCode` partial unique** trên `deleted_at IS NULL` — chống self-resubmit spam (re-register cùng số đăng ký kinh doanh sau khi REJECTED bị block trừ khi Admin reset).
 - **`RefreshToken.parentTokenId` self-FK** dùng `ON DELETE SET NULL` thay vì CASCADE để tránh phá chain audit (đôi khi cần giữ child record cho forensics).
 - **`OperatorSubscription.operatorId` UNIQUE** — 1 operator có đúng 1 subscription active tại 1 thời điểm; nâng cấp = update plan trên record này, không tạo record mới (lifecycle qua `status` machine).
-- **Default `SubscriptionPlan` "Starter (Free Trial)"** seed với UUID cố định `00000000-0000-0000-0000-000000000001` để EF Core seed migration deterministic cross-environment. KHÔNG seed Pro/Enterprise plan — System Admin tạo qua Admin Web.
-- **Bootstrap SYSTEM_ADMIN seed** dùng placeholder bcrypt hash, idempotent check `WHERE NOT EXISTS (SELECT 1 FROM users WHERE role='SYSTEM_ADMIN')`. Spec yêu cầu env vars `SYSTEM_ADMIN_BOOTSTRAP_EMAIL/_PASSWORD` ở production deploy.
+- **Default `SubscriptionPlan` "Starter (Free Trial)"** seed với UUID cố định `00000000-0000-0000-0000-000000000001` để deterministic cross-environment. KHÔNG seed Pro/Enterprise plan — System Admin tạo qua Admin Web.
+- **Bootstrap SYSTEM_ADMIN** KHÔNG nằm trong `seed.sql`/EF seed migration và KHÔNG dùng placeholder password. Identity Service startup seeder tạo admin đầu tiên từ env vars `SYSTEM_ADMIN_BOOTSTRAP_EMAIL`, `SYSTEM_ADMIN_BOOTSTRAP_PASSWORD`, optional `SYSTEM_ADMIN_BOOTSTRAP_DISPLAY_NAME`, với idempotent check `WHERE NOT EXISTS (SELECT 1 FROM users WHERE role='SYSTEM_ADMIN')`.
 - **Soft delete pattern**: `deleted_at TIMESTAMPTZ` is the canonical soft-delete marker for both `users` and `operators` (ADR 0003). `is_active boolean` on `operators` is a SEPARATE activation toggle (temporary pause/resume — not a delete); `users` has no `is_active` and uses the `status` enum (`ACTIVE`/`LOCKED`/`DELETED`) for its activation axis instead.
 
 ## Index Strategy
@@ -87,7 +87,7 @@ Xem `_global/cross-service-references.md` cho danh sách đầy đủ.
 ## Migration Strategy
 
 - **Tool:** EF Core Migrations (`dotnet ef migrations add <Name>`). Migration history bảng mặc định `__EFMigrationsHistory` của EF Core.
-- **Bootstrap order:** Identity Service migrate **trước** mọi service khác. Default `SubscriptionPlan` + bootstrap `SYSTEM_ADMIN` chạy ngay sau migration (qua `seed.sql` hoặc EF Core HasData).
+- **Bootstrap order:** Identity Service migrate **trước** mọi service khác. Default `SubscriptionPlan` chạy qua `seed.sql`/EF seed data; bootstrap `SYSTEM_ADMIN` chạy ở Identity Service startup seeder sau migrate, từ `SYSTEM_ADMIN_BOOTSTRAP_*` env vars.
 - **Breaking change policy:** ENUM `user_role`, `operator_registration_status`, etc. mở rộng bằng `ALTER TYPE ... ADD VALUE`. KHÔNG rename/remove enum value trong 1 release (cần migration 2-phase nếu cần).
 - **Soft delete data retention:** Anonymize PII (email, phone, name) sau 90 ngày `deleted_at` (cron job — không thuộc DB schema layer).
 

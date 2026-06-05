@@ -3,8 +3,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Identity.Api.Controllers.Requests;
 using VietRide.Identity.Application.Features.Admin.CreateAdminUser;
-using VietRide.Identity.Domain.Enums;
-using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Identity.Api.Controllers;
@@ -43,9 +41,6 @@ public sealed class AdminUsersController : ControllerBase
     {
         var callerUserId = CurrentUserClaims.GetUserId(User);
         var callerRole = CurrentUserClaims.GetRole(User);
-
-        if (!string.Equals(callerRole, UserRole.SYSTEM_ADMIN.ToString(), StringComparison.Ordinal))
-            throw new ForbiddenException("FORBIDDEN", "Only SYSTEM_ADMIN can create admin users.");
 
         var result = await _sender.Send(
             new CreateAdminUserCommand(

@@ -154,7 +154,7 @@ psql -U postgres -h localhost -d vietride_notification -f db-schema/notification
 psql -U postgres -h localhost -d vietride_rag          -f db-schema/rag-ai/schema.sql
 
 # 4. .NET services boot → Hangfire auto-creates `hangfire.*` schema in each service DB.
-# 5. SYSTEM_ADMIN log in with seed credentials → CHANGE PASSWORD immediately.
+# 5. Identity Service startup seeder creates the first SYSTEM_ADMIN from SYSTEM_ADMIN_BOOTSTRAP_* env vars; change the bootstrap password immediately after first login.
 ```
 
 ## Files in this directory

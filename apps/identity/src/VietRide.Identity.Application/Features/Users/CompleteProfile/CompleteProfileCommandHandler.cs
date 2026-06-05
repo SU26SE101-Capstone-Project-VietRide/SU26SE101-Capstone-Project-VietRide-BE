@@ -36,6 +36,11 @@ public sealed class CompleteProfileCommandHandler : IRequestHandler<CompleteProf
                 [new ValidationError("phone", "Phone is already set.")]);
         }
 
+        if (string.IsNullOrWhiteSpace(request.Phone))
+        {
+            throw new BadRequestException("AUTH_PHONE_INVALID_FORMAT", "Invalid phone number format.");
+        }
+
         PhoneNumber phone;
         try
         {

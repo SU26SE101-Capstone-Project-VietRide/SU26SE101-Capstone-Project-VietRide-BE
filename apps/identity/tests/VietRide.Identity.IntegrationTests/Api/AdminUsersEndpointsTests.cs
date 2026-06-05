@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using VietRide.Identity.Application.Features.Admin.CreateAdminUser;
 using VietRide.Identity.Domain.Enums;
+using VietRide.Shared.Application.Exceptions;
 
 namespace VietRide.Identity.IntegrationTests.Api;
 
@@ -30,7 +31,7 @@ public sealed class AdminUsersEndpointsTests : IClassFixture<AuthWebApplicationF
     [Fact]
     public async Task CreateAdminUser_HappyPath_Returns201Envelope()
     {
-        using var client = CreateClientWithSender(new HappyPathAdminUsersSender());
+        using var client = CreateClientWithSender(new AuthorizingAdminUsersSender());
         using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/admin/users")
         {
             Content = JsonContent.Create(new
@@ -57,7 +58,7 @@ public sealed class AdminUsersEndpointsTests : IClassFixture<AuthWebApplicationF
     [Fact]
     public async Task CreateAdminUser_NonSystemAdminCaller_Returns403ForbiddenEnvelope()
     {
-        using var client = CreateClientWithSender(new HappyPathAdminUsersSender());
+        using var client = CreateClientWithSender(new AuthorizingAdminUsersSender());
         using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/admin/users")
         {
             Content = JsonContent.Create(new
@@ -120,7 +121,7 @@ public sealed class AdminUsersEndpointsTests : IClassFixture<AuthWebApplicationF
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    private sealed class HappyPathAdminUsersSender : ISender
+    private sealed class AuthorizingAdminUsersSender : ISender
     {
         public Task<TResponse> Send<TResponse>(IRequest<TResponse> request, CancellationToken cancellationToken = default)
             => Task.FromResult((TResponse)Handle(request));
@@ -139,6 +140,9 @@ public sealed class AdminUsersEndpointsTests : IClassFixture<AuthWebApplicationF
         private static object Handle(object request)
             => request switch
             {
+                CreateAdminUserCommand command when command.CallerRole != UserRole.SYSTEM_ADMIN.ToString()
+                    => throw new ForbiddenException("FORBIDDEN", "Only SYSTEM_ADMIN can create admin users."),
+
                 CreateAdminUserCommand command => new CreateAdminUserResponseDto(
                     UserId: Guid.Parse("55555555-5555-5555-5555-555555555555"),
                     Email: command.Email,
