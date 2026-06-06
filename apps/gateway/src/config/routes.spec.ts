@@ -15,7 +15,10 @@ describe('buildRouteTable', () => {
 
   it('every Identity route points at IDENTITY_BASE_URL', () => {
     const identityRoutes = routes.filter(
-      (r) => r.prefix.startsWith('/v1/auth') || r.prefix.startsWith('/v1/users'),
+      (r) =>
+        r.prefix.startsWith('/v1/auth') ||
+        r.prefix.startsWith('/v1/users') ||
+        r.prefix.startsWith('/v1/operator/users'),
     );
     expect(identityRoutes.length).toBeGreaterThan(0);
     identityRoutes.forEach((r) => expect(r.target).toBe(env.IDENTITY_BASE_URL));
@@ -79,6 +82,7 @@ describe('buildRouteTable', () => {
     const publicPrefixes = [
       '/v1/auth/register',
       '/v1/auth/verify-email',
+      '/v1/auth/set-initial-password',
       '/v1/auth/login',
       '/v1/auth/google',
       '/v1/auth/refresh',
@@ -94,12 +98,32 @@ describe('buildRouteTable', () => {
     });
   });
 
+  it('matches set-initial-password to the dedicated public auth route', () => {
+    const route = matchRoute(routes, '/v1/auth/set-initial-password');
+
+    expect(route?.prefix).toBe('/v1/auth/set-initial-password');
+    expect(route?.authRequired).toBe('none');
+    expect(route?.target).toBe(env.IDENTITY_BASE_URL);
+  });
+
   it('logout and other non-public auth paths require user auth', () => {
     const logout = matchRoute(routes, '/v1/auth/logout');
     const changePassword = matchRoute(routes, '/v1/auth/change-password');
 
     expect(logout?.authRequired).toBe('user');
     expect(changePassword?.authRequired).toBe('user');
+  });
+
+  it('operator user routes require OPERATOR_ADMIN role', () => {
+    const route = matchRoute(
+      routes,
+      '/v1/operator/users/11111111-1111-1111-1111-111111111111/resend-initial-password',
+    );
+
+    expect(route?.prefix).toBe('/v1/operator/users');
+    expect(route?.target).toBe(env.IDENTITY_BASE_URL);
+    expect(route?.authRequired).toBe('user');
+    expect(route?.requiredRoles).toEqual(['OPERATOR_ADMIN']);
   });
 
   it('prefixes are unique', () => {

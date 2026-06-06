@@ -38,6 +38,11 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     // Identity
     { prefix: '/v1/auth/register', target: env.IDENTITY_BASE_URL, authRequired: 'none' },
     { prefix: '/v1/auth/verify-email', target: env.IDENTITY_BASE_URL, authRequired: 'none' },
+    {
+      prefix: '/v1/auth/set-initial-password',
+      target: env.IDENTITY_BASE_URL,
+      authRequired: 'none',
+    },
     { prefix: '/v1/auth/login', target: env.IDENTITY_BASE_URL, authRequired: 'none' },
     { prefix: '/v1/auth/google', target: env.IDENTITY_BASE_URL, authRequired: 'none' },
     { prefix: '/v1/auth/refresh', target: env.IDENTITY_BASE_URL, authRequired: 'none' },
@@ -61,6 +66,12 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       target: env.IDENTITY_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
+      prefix: '/v1/operator/users',
+      target: env.IDENTITY_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
     },
     {
       prefix: '/v1/admin/booking-stats',

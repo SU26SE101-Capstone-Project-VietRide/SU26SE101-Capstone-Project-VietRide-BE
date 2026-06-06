@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.6.0
+> **Phiên bản:** 1.6.2
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-06-04
+> **Cập nhật lần cuối:** 2026-06-06
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1169,7 +1169,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 
 ### 5.4 Response shape — success (ADR 0004 — ApiResponse envelope)
 
-> **Effective 2026-06-01 (ADR 0004, accepted + rolled out Day 3).** Mọi FE-facing HTTP response dùng envelope `ApiResponse<T>` thống nhất — cả .NET (`VietRide.Shared.Web`) lẫn NestJS (`nest-common`). Controller trả `Ok(dto)` / `StatusCode(201, dto)` bình thường; filter/interceptor tự wrap.
+> **Effective 2026-06-01 (ADR 0004, accepted + rolled out Day 3).** Mọi FE-facing HTTP response dùng envelope `ApiResponse<T>` thống nhất — cả .NET (`VietRide.Shared.Web`) lẫn NestJS (`nest-common`). Controller trả `Ok(dto)` / `StatusCode(201, dto)` bình thường; filter/interceptor tự wrap. **Exception:** successful service-to-service `/internal/v1/*` (or `/internal/*`) responses return the raw DTO/list, not `ApiResponse<T>`; internal errors still use the standardized §5.5 error envelope.
 
 **Envelope success (single resource):**
 
@@ -1204,6 +1204,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 
 - **Created:** HTTP 201 + `data` chứa resource vừa tạo, bọc trong envelope.
 - **No content:** HTTP 204 — **empty body** (không envelope, xem ADR 0004 Rule 2).
+- **Internal success:** `/internal/v1/*` / `/internal/*` trả raw DTO/list để giữ contract service-to-service đơn giản; không bọc `ApiResponse<T>` trên success.
 - **Money:** number trong JSON (BIGINT VND — JS safe < 2^53). Server-side luôn lưu BIGINT.
 - **Datetime:** ISO 8601 string với offset, ví dụ `"2026-05-25T14:30:00+07:00"`.
 - **UUID:** string lowercase với dấu gạch ngang chuẩn.
@@ -1236,6 +1237,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 - `error.message` có thể là tiếng Việt user-facing; FE thường thay bằng UI string từ `error.code`.
 - **KHÔNG dùng** `application/problem+json`, `type` URL, `title`, `instance`, `detail` (RFC 7807 fields) — đã loại bỏ.
 - **KHÔNG return** `200 OK` với `success: false` — HTTP status line luôn phản ánh lỗi thật (ADR 0004 Rule 2).
+- **Internal errors:** `/internal/v1/*` / `/internal/*` cũng dùng envelope lỗi chuẩn này; chỉ success payload của internal endpoints là raw.
 
 ### 5.6 Idempotency
 
@@ -2667,6 +2669,8 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.6.2** | 2026-06-06 | BE lead (Vũ) | **PATCH** — Clarify ADR 0004 convention for service-to-service HTTP: FE-facing `/v1/*` successes stay wrapped in `ApiResponse<T>`, but successful `/internal/v1/*` / `/internal/*` responses return raw DTO/list payloads; internal errors still use the standardized `ApiResponse` error envelope. |
+| **1.6.1** | 2026-06-06 | BE lead (Vũ) | **PATCH** — Day-5 Identity contract sync: document FE-facing `SET_INITIAL_PASSWORD` consume/resend endpoints and user device-token POST/DELETE shapes in the API contract/Postman without adding new error codes, Idempotency-Key requirements, or Outbox events; record ActivityLog action additions for initial-password token generation/resend flows. Internal `GET /internal/v1/users/{userId}/device-tokens` registry row already exists in §7.2 and is intentionally not duplicated. |
 | **1.6.0** | 2026-06-04 | BE lead (Vũ) | **MINOR** — §5.9 Auth error registry: add `AUTH_GOOGLE_TOKEN_INVALID` (HTTP 401) for invalid Google ID token signature/expiry/audience during Google OAuth login. |
 | **1.5.1** | 2026-06-03 | BE lead (Vũ) | **PATCH** — §5.9 Generic error registry: add `UPSTREAM_UNAVAILABLE` (HTTP 502) for Gateway-generated downstream connection failures. This syncs the Day-3 Gateway ADR 0004 envelope fallback with the registry discipline. |
 | **1.5.0** | 2026-06-01 | BE lead (Vũ) | **MINOR** — **ADR 0004: Adopt `ApiResponse<T>` envelope for all FE-facing HTTP responses.** Rewrite §5.4 (success shape) to envelope `{success,statusCode,message?,data,meta{traceId,timestamp}}`; rewrite §5.5 (error shape) — DROP `application/problem+json` (RFC 7807), adopt error envelope `{success:false,statusCode,error{code,message,fields?},meta}` với `error.code` từ §5.9 registry; rewrite §5.7 (Pagination) — introduce `PagedResult<T>` (7 fields: `items,page,pageSize,totalItems,totalPages,hasNextPage,hasPreviousPage`) + `QueryOptions` (`page/pageSize`-clamped-1..100/`search`/`searchIn`/`sortBy`/`sortDir`/`includeDeleted`); rewrite §5.8 (Filter conventions) — `sortBy`+`sortDir` SUPERSEDES `?sort=-field` convention + sortBy whitelist security requirement → reject non-whitelisted field với `400 INVALID_SORT_FIELD` (đăng ký §5.9 Validation group). §3.1 tree + §3.6 Api/Web layer: `ProblemDetailsExceptionFilter` → `ApiResponseExceptionFilter` + `ApiResponseResultFilter` (Task 3.8 target state). §3.1 tree: `PagedResult.cs` comment cập nhật 7-field shape. Bump 1.4.0 → 1.5.0 MINOR. API Contract wrapped accordingly. ADR 0004 follow-ups #1–#2. |

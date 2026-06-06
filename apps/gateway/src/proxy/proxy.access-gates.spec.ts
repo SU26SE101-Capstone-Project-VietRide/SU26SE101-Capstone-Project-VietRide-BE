@@ -1,3 +1,4 @@
+import { RequestMethod, type MiddlewareConsumer } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { jwtVerify, SignJWT, type JWTPayload } from 'jose';
@@ -97,6 +98,54 @@ function arrangeProxyPass(): jest.Mock {
   return upstreamHandler;
 }
 
+describe('AppModule UserJwtMiddleware public paths', () => {
+  const originalRedisFlag = process.env.THROTTLER_STORAGE_DISABLE_REDIS;
+  const originalInternalJwtSecret = process.env.INTERNAL_JWT_SECRET;
+
+  beforeAll(() => {
+    process.env.THROTTLER_STORAGE_DISABLE_REDIS = '1';
+    process.env.INTERNAL_JWT_SECRET = 'test-secret-min-32-chars-aaaaaaaaaaaaaaaa';
+  });
+
+  afterAll(() => {
+    if (originalRedisFlag === undefined) {
+      delete process.env.THROTTLER_STORAGE_DISABLE_REDIS;
+    } else {
+      process.env.THROTTLER_STORAGE_DISABLE_REDIS = originalRedisFlag;
+    }
+
+    if (originalInternalJwtSecret === undefined) {
+      delete process.env.INTERNAL_JWT_SECRET;
+    } else {
+      process.env.INTERNAL_JWT_SECRET = originalInternalJwtSecret;
+    }
+  });
+
+  it('excludes set-initial-password from UserJwtMiddleware while keeping resend protected', () => {
+    jest.isolateModules(() => {
+      const { AppModule } = jest.requireActual(
+        '../app/app.module',
+      ) as typeof import('../app/app.module');
+      const exclude = jest.fn().mockReturnThis();
+      const forRoutes = jest.fn();
+      const consumer = {
+        apply: jest.fn().mockReturnValue({ exclude, forRoutes }),
+      } as unknown as MiddlewareConsumer;
+
+      new AppModule().configure(consumer);
+
+      const publicPaths = exclude.mock.calls[0] as Array<{ path: string; method: RequestMethod }>;
+      expect(publicPaths).toContainEqual({
+        path: 'v1/auth/set-initial-password',
+        method: RequestMethod.POST,
+      });
+      expect(publicPaths).not.toContainEqual(
+        expect.objectContaining({ path: 'v1/operator/users' }),
+      );
+    });
+  });
+});
+
 describe('createProxyHandler RBAC and phone-required gates', () => {
   beforeEach(() => {
     createProxyMiddlewareMock.mockReset();
@@ -125,6 +174,89 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
     expect(signer.sign).not.toHaveBeenCalled();
     expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
     expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 for anonymous requests to the operator users route', async () => {
+    const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const req = makeRequest(
+      '/v1/operator/users/11111111-1111-1111-1111-111111111111/resend-initial-password',
+      { 'x-request-id': 'req-operator-anonymous' },
+    );
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 401,
+      error: { code: 'AUTH_TOKEN_INVALID' },
+      meta: { traceId: 'req-operator-anonymous' },
+    });
+    expect(signer.sign).not.toHaveBeenCalled();
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 FORBIDDEN for non-OPERATOR_ADMIN requests to the operator users route', async () => {
+    const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({ sub: 'admin-1', role: 'SYSTEM_ADMIN' });
+    const req = makeRequest(
+      '/v1/operator/users/11111111-1111-1111-1111-111111111111/resend-initial-password',
+      { authorization, 'x-request-id': 'req-operator-role' },
+    );
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 403,
+      error: { code: 'FORBIDDEN' },
+      meta: { traceId: 'req-operator-role' },
+    });
+    expect(signer.sign).not.toHaveBeenCalled();
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('routes OPERATOR_ADMIN requests to the operator users route', async () => {
+    const upstreamHandler = arrangeProxyPass();
+    const signer = {
+      sign: jest.fn().mockResolvedValue('internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({
+      sub: 'operator-admin-1',
+      role: 'OPERATOR_ADMIN',
+      operatorId: 'operator-1',
+    });
+    const req = makeRequest(
+      '/v1/operator/users/11111111-1111-1111-1111-111111111111/resend-initial-password',
+      { authorization, 'x-request-id': 'req-operator-pass' },
+    );
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(signer.sign).toHaveBeenCalledWith({
+      sub: 'operator-admin-1',
+      reqId: 'req-operator-pass',
+      role: 'OPERATOR_ADMIN',
+      operatorId: 'operator-1',
+    });
+    expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+      expect.objectContaining({ target: env.IDENTITY_BASE_URL }),
+    );
+    expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
+    expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+    expect(res.status).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -305,6 +437,32 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
     await handler(req, res, next);
 
     expect(signer.sign).toHaveBeenCalledWith({ sub: 'anonymous', reqId: 'req-refresh' });
+    expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('lets public set-initial-password pass anonymously', async () => {
+    const upstreamHandler = arrangeProxyPass();
+    const signer = {
+      sign: jest.fn().mockResolvedValue('internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const req = makeRequest('/v1/auth/set-initial-password', {
+      'x-request-id': 'req-set-initial-password',
+    });
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(signer.sign).toHaveBeenCalledWith({
+      sub: 'anonymous',
+      reqId: 'req-set-initial-password',
+    });
+    expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+      expect.objectContaining({ target: env.IDENTITY_BASE_URL }),
+    );
+    expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
     expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
     expect(res.status).not.toHaveBeenCalled();
   });

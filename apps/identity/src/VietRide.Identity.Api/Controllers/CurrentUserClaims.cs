@@ -19,4 +19,10 @@ internal static class CurrentUserClaims
         => user.FindFirstValue("role")
             ?? user.FindFirstValue(ClaimTypes.Role)
             ?? string.Empty;
+
+    public static Guid? GetOperatorId(ClaimsPrincipal user)
+    {
+        var operatorId = user.FindFirstValue("operatorId");
+        return Guid.TryParse(operatorId, out var parsed) ? parsed : null;
+    }
 }

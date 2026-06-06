@@ -1,9 +1,13 @@
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Middleware;
 
 namespace VietRide.Shared.Web.Authentication;
 
@@ -56,7 +60,55 @@ public static class InternalJwtAuthenticationExtensions
                     }
                     return Task.CompletedTask;
                 },
+                OnChallenge = ctx =>
+                {
+                    ctx.HandleResponse();
+                    return WriteErrorEnvelopeAsync(
+                        ctx.HttpContext,
+                        StatusCodes.Status401Unauthorized,
+                        "AUTH_TOKEN_INVALID",
+                        "Internal authentication token is missing or invalid.");
+                },
+                OnForbidden = ctx => WriteErrorEnvelopeAsync(
+                    ctx.HttpContext,
+                    StatusCodes.Status403Forbidden,
+                    "FORBIDDEN",
+                    "Access denied."),
             };
         });
+    }
+
+    private static async Task WriteErrorEnvelopeAsync(
+        HttpContext context,
+        int statusCode,
+        string code,
+        string message)
+    {
+        if (context.Response.HasStarted)
+            return;
+
+        context.Response.StatusCode = statusCode;
+        context.Response.ContentType = "application/json";
+
+        var envelope = ApiResponse.Failure(
+            statusCode,
+            new ApiError { Code = code, Message = message },
+            ApiMeta.Create(GetTraceId(context)));
+
+        await context.Response.WriteAsJsonAsync(envelope, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    }
+
+    private static string GetTraceId(HttpContext context)
+    {
+        if (context.Items.TryGetValue(RequestLoggingMiddleware.RequestIdHeader, out var id)
+            && id is string s
+            && !string.IsNullOrWhiteSpace(s))
+        {
+            return s;
+        }
+
+        return context.Request.Headers.TryGetValue(RequestLoggingMiddleware.RequestIdHeader, out var h)
+            ? h.ToString()
+            : string.Empty;
     }
 }

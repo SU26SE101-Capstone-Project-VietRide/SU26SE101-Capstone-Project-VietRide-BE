@@ -55,7 +55,11 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
         if (user?.Status == UserStatus.PENDING_EMAIL_VERIFICATION)
             throw new ForbiddenException("AUTH_EMAIL_NOT_VERIFIED", "Email address has not been verified.");
 
-        // 3. Validate credentials. Constant-time reject when user not found.
+        // 3. Check if the operator has not set an initial password yet (403).
+        if (user?.Status == UserStatus.PENDING_INITIAL_PASSWORD)
+            throw new ForbiddenException("AUTH_PENDING_INITIAL_PASSWORD", "Initial password has not been set.");
+
+        // 4. Validate credentials. Constant-time reject when user not found.
         var passwordValid = user is not null
             && user.PasswordHash is not null
             && _hasher.Verify(request.Password, user.PasswordHash);
@@ -79,11 +83,11 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
             throw new UnauthorizedException("AUTH_INVALID_CREDENTIALS", "Invalid email or password.");
         }
 
-        // 4. Successful login — reset DB tracking and clear the Redis lockout window.
+        // 5. Successful login — reset DB tracking and clear the Redis lockout window.
         user!.RecordSuccessfulLogin(_clock);
         await _loginLockoutCounter.ResetAsync(user.Id, cancellationToken);
 
-        // 5. Issue tokens.
+        // 6. Issue tokens.
         var accessToken = _accessTokenService.IssueToken(user);
         var (rawRefresh, refreshEntity) = _refreshTokenFactory.Create(
             userId: user.Id,

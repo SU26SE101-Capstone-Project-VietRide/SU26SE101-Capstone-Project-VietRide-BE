@@ -16,6 +16,7 @@ using VietRide.Identity.Application.Features.Auth.Login;
 using VietRide.Identity.Application.Features.Auth.Logout;
 using VietRide.Identity.Application.Features.Auth.Refresh;
 using VietRide.Identity.Application.Features.Auth.Register;
+using VietRide.Identity.Application.Features.Auth.SetInitialPassword;
 using VietRide.Identity.Application.Features.Auth.VerifyEmail;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.UnitOfWork;
@@ -109,6 +110,28 @@ public sealed class AuthEndpointsTests : IClassFixture<AuthWebApplicationFactory
         AssertSuccessEnvelope(doc, 200);
         var data = doc.RootElement.GetProperty("data");
         data.GetProperty("status").GetString().Should().Be("ACTIVE");
+    }
+
+    [Fact]
+    public async Task PostSetInitialPassword_HappyPath_Returns200EnvelopeWithoutTokens()
+    {
+        using var client = CreateClientWithSender(new HappyPathAuthSender());
+
+        var response = await client.PostAsJsonAsync("/v1/auth/set-initial-password", new
+        {
+            token = "initial-password-token",
+            password = "StrongPassword123",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        AssertSuccessEnvelope(doc, 200);
+        var data = doc.RootElement.GetProperty("data");
+        data.GetProperty("userId").GetGuid().Should().Be(HappyPathAuthSender.UserId);
+        data.GetProperty("status").GetString().Should().Be("ACTIVE");
+        data.TryGetProperty("accessToken", out _).Should().BeFalse();
+        data.TryGetProperty("refreshToken", out _).Should().BeFalse();
     }
 
     [Fact]
@@ -316,6 +339,96 @@ public sealed class AuthEndpointsTests : IClassFixture<AuthWebApplicationFactory
     }
 
     // -------------------------------------------------------------------------
+    // SetInitialPassword — token errors are 400 per Day-5 Q1
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task PostSetInitialPassword_InvalidToken_Returns400AuthInitialPasswordTokenInvalid()
+    {
+        using var client = CreateClientWithSender(new SetInitialPasswordErrorAuthSender(
+            "invalid-token",
+            "AUTH_INITIAL_PASSWORD_TOKEN_INVALID"));
+
+        var response = await client.PostAsJsonAsync("/v1/auth/set-initial-password", new
+        {
+            token = "invalid-token",
+            password = "StrongPassword123",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("success").GetBoolean().Should().BeFalse();
+        doc.RootElement.GetProperty("statusCode").GetInt32().Should().Be(400);
+        doc.RootElement.GetProperty("error").GetProperty("code").GetString()
+            .Should().Be("AUTH_INITIAL_PASSWORD_TOKEN_INVALID");
+    }
+
+    [Fact]
+    public async Task PostSetInitialPassword_BlankPassword_Returns422ValidationError()
+    {
+        using var client = _factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/v1/auth/set-initial-password", new
+        {
+            token = "initial-password-token",
+            password = " ",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("success").GetBoolean().Should().BeFalse();
+        doc.RootElement.GetProperty("statusCode").GetInt32().Should().Be(422);
+        doc.RootElement.GetProperty("error").GetProperty("code").GetString()
+            .Should().Be("VALIDATION_ERROR");
+    }
+
+    [Theory]
+    [InlineData("OnlyLetters")]
+    [InlineData("12345678")]
+    public async Task PostSetInitialPassword_WeakPassword_Returns422ValidationError(string password)
+    {
+        using var client = _factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/v1/auth/set-initial-password", new
+        {
+            token = "initial-password-token",
+            password,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("success").GetBoolean().Should().BeFalse();
+        doc.RootElement.GetProperty("statusCode").GetInt32().Should().Be(422);
+        doc.RootElement.GetProperty("error").GetProperty("code").GetString()
+            .Should().Be("VALIDATION_ERROR");
+    }
+
+    [Fact]
+    public async Task PostSetInitialPassword_ExpiredToken_Returns400AuthInitialPasswordTokenExpired()
+    {
+        using var client = CreateClientWithSender(new SetInitialPasswordErrorAuthSender(
+            "expired-token",
+            "AUTH_INITIAL_PASSWORD_TOKEN_EXPIRED"));
+
+        var response = await client.PostAsJsonAsync("/v1/auth/set-initial-password", new
+        {
+            token = "expired-token",
+            password = "StrongPassword123",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("success").GetBoolean().Should().BeFalse();
+        doc.RootElement.GetProperty("statusCode").GetInt32().Should().Be(400);
+        doc.RootElement.GetProperty("error").GetProperty("code").GetString()
+            .Should().Be("AUTH_INITIAL_PASSWORD_TOKEN_EXPIRED");
+    }
+
+    // -------------------------------------------------------------------------
     // Logout — auth required before validation/handler
     // -------------------------------------------------------------------------
 
@@ -390,7 +503,7 @@ public sealed class AuthEndpointsTests : IClassFixture<AuthWebApplicationFactory
 
 internal sealed class HappyPathAuthSender : ISender
 {
-    private static readonly Guid UserId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    internal static readonly Guid UserId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
     public Task<TResponse> Send<TResponse>(IRequest<TResponse> request, CancellationToken cancellationToken = default)
         => Task.FromResult((TResponse)Handle(request));
@@ -415,6 +528,7 @@ internal sealed class HappyPathAuthSender : ISender
                 "PENDING_EMAIL_VERIFICATION",
                 5),
             VerifyEmailCommand => new VerifyEmailResponseDto(UserId, "ACTIVE"),
+            SetInitialPasswordCommand => new SetInitialPasswordResponseDto(UserId, "ACTIVE"),
             LoginCommand command => CreateTokenBundle(command.Email, "access-token", "refresh-token"),
             GoogleLoginCommand command when command.IdToken == "google-id-token" => CreateTokenBundle(
                 "google.user@example.com",
@@ -439,6 +553,57 @@ internal sealed class HappyPathAuthSender : ISender
                 "PASSENGER",
                 null,
                 "ACTIVE"));
+}
+
+internal sealed class SetInitialPasswordErrorAuthSender : ISender
+{
+    private readonly string _expectedToken;
+    private readonly string _errorCode;
+
+    public SetInitialPasswordErrorAuthSender(string expectedToken, string errorCode)
+    {
+        _expectedToken = expectedToken;
+        _errorCode = errorCode;
+    }
+
+    public Task<TResponse> Send<TResponse>(IRequest<TResponse> request, CancellationToken cancellationToken = default)
+    {
+        if (request is SetInitialPasswordCommand command)
+        {
+            ThrowTokenError(command);
+        }
+
+        throw new InvalidOperationException($"Unexpected request type {request.GetType().Name}.");
+    }
+
+    public Task<object?> Send(object request, CancellationToken cancellationToken = default)
+    {
+        if (request is SetInitialPasswordCommand command)
+        {
+            ThrowTokenError(command);
+        }
+
+        throw new InvalidOperationException($"Unexpected request type {request.GetType().Name}.");
+    }
+
+    private void ThrowTokenError(SetInitialPasswordCommand command)
+    {
+        if (command.Token != _expectedToken)
+        {
+            throw new InvalidOperationException(
+                $"Unexpected set-initial-password token '{command.Token}' for token-error test sender.");
+        }
+
+        throw new BadRequestException(_errorCode, "Initial password token error.");
+    }
+
+    public IAsyncEnumerable<TResponse> CreateStream<TResponse>(
+        IStreamRequest<TResponse> request,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Auth endpoint tests do not use streaming MediatR requests.");
+
+    public IAsyncEnumerable<object?> CreateStream(object request, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Auth endpoint tests do not use streaming MediatR requests.");
 }
 
 internal sealed class InvalidGoogleTokenAuthSender : ISender

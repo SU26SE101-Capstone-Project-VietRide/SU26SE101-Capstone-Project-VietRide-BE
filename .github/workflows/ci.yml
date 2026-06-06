@@ -11,10 +11,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: "20"
-  DOTNET_VERSION: "8.0.421"
-  DOTNET_NOLOGO: "true"
-  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  NODE_VERSION: '20'
+  DOTNET_VERSION: '8.0.421'
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
 
 jobs:
   lint:
@@ -113,6 +113,33 @@ jobs:
   build-dotnet:
     name: Build & Test (.NET 8)
     runs-on: ubuntu-latest
+    env:
+      # .NET integration tests create throwaway databases on localhost.
+      VIETRIDE_IDENTITY_TEST_CONNECTION_STRING: 'Host=localhost;Port=5432;Database=vietride_identity_tests;Username=postgres;Password=postgres'
+      REDIS_URL: 'localhost:6379,abortConnect=false'
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     strategy:
       fail-fast: false
       matrix:

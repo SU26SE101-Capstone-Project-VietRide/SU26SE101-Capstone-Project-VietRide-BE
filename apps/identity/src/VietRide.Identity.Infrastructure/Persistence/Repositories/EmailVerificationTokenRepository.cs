@@ -48,6 +48,20 @@ internal sealed class EmailVerificationTokenRepository : IEmailVerificationToken
                 ct);
 
     /// <inheritdoc />
+    public async Task<EmailVerificationToken?> FindByCodeAndPurposeAsync(
+        string code,
+        EmailVerificationPurpose purpose,
+        CancellationToken ct = default)
+        => await QueryByCodeAndPurpose(_db.EmailVerificationTokens, code, purpose)
+            .FirstOrDefaultAsync(ct);
+
+    internal static IQueryable<EmailVerificationToken> QueryByCodeAndPurpose(
+        IQueryable<EmailVerificationToken> tokens,
+        string code,
+        EmailVerificationPurpose purpose)
+        => tokens.Where(e => e.Code == code && e.Purpose == purpose && e.UsedAt == null);
+
+    /// <inheritdoc />
     public async Task<EmailVerificationToken?> FindLatestPendingAsync(
         Guid userId,
         EmailVerificationPurpose purpose,
@@ -56,6 +70,18 @@ internal sealed class EmailVerificationTokenRepository : IEmailVerificationToken
             .Where(e => e.UserId == userId && e.Purpose == purpose && e.UsedAt == null)
             .OrderByDescending(e => e.CreatedAt)
             .FirstOrDefaultAsync(ct);
+
+    /// <inheritdoc />
+    public async Task RevokeActiveByUserAndPurposeAsync(
+        Guid userId,
+        EmailVerificationPurpose purpose,
+        DateTimeOffset revokedAt,
+        CancellationToken ct = default)
+    {
+        await _db.EmailVerificationTokens
+            .Where(e => e.UserId == userId && e.Purpose == purpose && e.UsedAt == null)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(e => e.UsedAt, revokedAt), ct);
+    }
 
     public async Task<EmailVerificationToken> AddAsync(EmailVerificationToken entity, CancellationToken ct)
     {

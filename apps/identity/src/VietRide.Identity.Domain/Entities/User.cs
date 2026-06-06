@@ -134,6 +134,24 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
     }
 
     /// <summary>
+    /// Sets the first password for admin/operator accounts created in PENDING_INITIAL_PASSWORD.
+    /// </summary>
+    public void SetInitialPassword(string passwordHash)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(passwordHash);
+
+        if (Status != UserStatus.PENDING_INITIAL_PASSWORD)
+        {
+            throw new InvalidUserStatusTransitionException(
+                Status.ToString(),
+                UserStatus.ACTIVE.ToString());
+        }
+
+        PasswordHash = passwordHash;
+        Status = UserStatus.ACTIVE;
+    }
+
+    /// <summary>
     /// Completes a Google-created profile by setting the already-normalized phone once.
     /// Existing phone changes must use the dedicated profile-update flow.
     /// </summary>

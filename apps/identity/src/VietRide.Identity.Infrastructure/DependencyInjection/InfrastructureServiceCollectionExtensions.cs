@@ -64,6 +64,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IEmailVerificationTokenRepository, EmailVerificationTokenRepository>();
+        services.AddScoped<IUserDeviceRepository, UserDeviceRepository>();
         services.AddScoped<IActivityLogRepository, ActivityLogRepository>();
         services.AddScoped<IOAuthIdentityRepository, OAuthIdentityRepository>();
 
@@ -77,6 +78,7 @@ public static class InfrastructureServiceCollectionExtensions
         // Security services
         // ------------------------------------------------------------------
         services.AddSingleton<IPasswordHasher, BCryptPasswordHasher>();
+        services.AddSingleton<IInitialPasswordTokenService, InitialPasswordTokenService>();
         services.AddSingleton<IAccessTokenService, RsaAccessTokenService>();
         services.AddSingleton<IJwksProvider, JwksProvider>();
         services.AddSingleton<IGoogleIdTokenVerifier, GoogleIdTokenVerifier>();

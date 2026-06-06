@@ -22,7 +22,7 @@ namespace VietRide.Identity.Infrastructure.Migrations
                 .HasAnnotation("ProductVersion", "8.0.11")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
-            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "activity_log_action", new[] { "LOGIN", "LOGOUT", "BOOK_TICKET", "CANCEL_TICKET", "UPDATE_PROFILE", "CHANGE_PASSWORD", "COMPLETE_PROFILE", "CREATE_OPERATOR", "APPROVE_OPERATOR", "REJECT_OPERATOR", "LOCK_USER", "UNLOCK_USER", "VEHICLE_SUBSTITUTION_TRIGGERED", "DRIVER_SCHEDULE_EDIT", "VEHICLE_SWAP", "TRIP_COMPLETED_MANUAL", "PARCEL_UNLOAD_OVERRIDE", "PARCEL_DELIVERY_RESEND", "PARCEL_MANUAL_CONFIRM", "TRIP_SETTLEMENT_MANUAL", "OPERATOR_WALLET_ADJUSTMENT" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "activity_log_action", new[] { "LOGIN", "LOGOUT", "BOOK_TICKET", "CANCEL_TICKET", "UPDATE_PROFILE", "CHANGE_PASSWORD", "COMPLETE_PROFILE", "CREATE_OPERATOR", "APPROVE_OPERATOR", "REJECT_OPERATOR", "LOCK_USER", "UNLOCK_USER", "VEHICLE_SUBSTITUTION_TRIGGERED", "DRIVER_SCHEDULE_EDIT", "VEHICLE_SWAP", "TRIP_COMPLETED_MANUAL", "PARCEL_UNLOAD_OVERRIDE", "PARCEL_DELIVERY_RESEND", "PARCEL_MANUAL_CONFIRM", "TRIP_SETTLEMENT_MANUAL", "OPERATOR_WALLET_ADJUSTMENT", "SET_INITIAL_PASSWORD", "RESEND_INITIAL_PASSWORD" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "device_platform", new[] { "IOS", "ANDROID", "WEB" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "email_verification_purpose", new[] { "REGISTRATION", "PASSWORD_RESET", "SET_INITIAL_PASSWORD" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "oauth_provider", new[] { "GOOGLE" });

@@ -13,6 +13,7 @@ namespace VietRide.Shared.Web.Filters;
 ///   <item>Already-wrapped <see cref="ApiResponse{T}"/> → not double-wrapped.</item>
 ///   <item>Paths matching <c>/.well-known/*</c>, <c>/v1/.well-known/jwks.json</c>,
 ///   or <c>/health*</c> → skipped (exempt per resolved Q-v7.5.1 / Q-v7.5.4).</item>
+///   <item>Successful <c>/internal/*</c> responses → raw payload; errors still use the ADR 0004 error envelope.</item>
 /// </list>
 /// Registered as <see cref="IAlwaysRunResultFilter"/> so it runs even when a short-circuit filter
 /// (e.g. an authorization filter) produces a result directly.
@@ -49,6 +50,11 @@ public sealed class ApiResponseResultFilter : IAlwaysRunResultFilter
             return;
         }
 
+        if (IsInternalPath(path))
+        {
+            return;
+        }
+
         var traceId = GetTraceId(context);
         var meta = ApiMeta.Create(traceId);
         var wrapped = Wrap(value, valueType, statusCode, meta);
@@ -70,6 +76,10 @@ public sealed class ApiResponseResultFilter : IAlwaysRunResultFilter
             [typeof(int), valueType, typeof(ApiMeta), typeof(string)])!;
         return method.Invoke(null, [statusCode, value, meta, null])!;
     }
+
+    private static bool IsInternalPath(string path)
+        => path.Equals("/internal", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/internal/", StringComparison.OrdinalIgnoreCase);
 
     private static string GetTraceId(ResultExecutingContext context)
     {

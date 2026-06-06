@@ -86,7 +86,7 @@ public sealed class ApiResponseExceptionFilter : IExceptionFilter
                 => (422, "VALIDATION_ERROR", v.Message, MapValidationErrors(v.Errors)),
 
             NotFoundException n
-                => (404, "NOT_FOUND", n.Message, null),
+                => (404, "RESOURCE_NOT_FOUND", n.Message, null),
 
             ConflictException c
                 => (409, c.ErrorCode, c.Message, null),

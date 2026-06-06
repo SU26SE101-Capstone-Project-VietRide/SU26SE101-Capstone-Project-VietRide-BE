@@ -41,6 +41,17 @@ public interface IEmailVerificationTokenRepository : IRepository<EmailVerificati
         CancellationToken ct = default);
 
     /// <summary>
+    /// Returns the token matched ONLY by <c>code = @code AND purpose = @purpose
+    /// AND used_at IS NULL</c> — NO user scope, expiry, or failed-attempts filter.
+    /// Used by the anonymous set-initial-password flow, where the token itself
+    /// resolves the target user.
+    /// </summary>
+    Task<EmailVerificationToken?> FindByCodeAndPurposeAsync(
+        string code,
+        EmailVerificationPurpose purpose,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Returns the most-recent token for a specific user and purpose where
     /// <c>user_id = @userId AND purpose = @purpose AND used_at IS NULL</c>,
     /// ordered by <c>created_at DESC</c> (newest first). No code match.
@@ -51,6 +62,16 @@ public interface IEmailVerificationTokenRepository : IRepository<EmailVerificati
     Task<EmailVerificationToken?> FindLatestPendingAsync(
         Guid userId,
         EmailVerificationPurpose purpose,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Marks every pending token for <paramref name="userId"/> and <paramref name="purpose"/>
+    /// as used. The operation is intentionally user-scoped for resend flows.
+    /// </summary>
+    Task RevokeActiveByUserAndPurposeAsync(
+        Guid userId,
+        EmailVerificationPurpose purpose,
+        DateTimeOffset revokedAt,
         CancellationToken ct = default);
 
     /// <summary>

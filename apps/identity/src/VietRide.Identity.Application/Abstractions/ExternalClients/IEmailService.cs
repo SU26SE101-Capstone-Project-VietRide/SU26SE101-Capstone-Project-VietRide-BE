@@ -22,6 +22,14 @@ public interface IEmailService
         CancellationToken ct = default);
 
     /// <summary>
+    /// Sends the account-created email with the initial-password setup link.
+    /// </summary>
+    Task SendAccountCreatedLinkAsync(
+        string to,
+        AccountCreatedEmailDto accountInfo,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Sends a parcel delivery link email.
     /// Day 26+ — not implemented in Day 3 (throws <see cref="NotImplementedException"/>).
     /// </summary>

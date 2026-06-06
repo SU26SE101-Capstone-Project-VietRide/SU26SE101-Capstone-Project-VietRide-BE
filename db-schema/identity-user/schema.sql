@@ -60,7 +60,9 @@ CREATE TYPE activity_log_action AS ENUM (
     'PARCEL_MANUAL_CONFIRM',
     -- Operator Wallet & Trip Settlement (4.6)
     'TRIP_SETTLEMENT_MANUAL',
-    'OPERATOR_WALLET_ADJUSTMENT'
+    'OPERATOR_WALLET_ADJUSTMENT',
+    -- Initial password flow (Day 5)
+    'SET_INITIAL_PASSWORD', 'RESEND_INITIAL_PASSWORD'
     -- v2: 'BANK_ACCOUNT_UPDATED' (removed from v1 — bank withdrawal deferred)
     -- v2: 'OPERATOR_WITHDRAWAL_REQUESTED' / 'OPERATOR_WITHDRAWAL_PROCESSED'
 );
