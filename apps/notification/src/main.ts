@@ -7,12 +7,14 @@ import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app/app.module';
+import { loadEnv } from './config/env.schema';
 
-async function bootstrap() {
+async function bootstrap(): Promise<void> {
+  const env = loadEnv();
   const app = await NestFactory.create(AppModule);
   const globalPrefix = 'api';
   // Exclude the liveness probe so docker-compose/Nginx can reach it at root /health.
-  app.setGlobalPrefix(globalPrefix, { exclude: ['health'] });
+  app.setGlobalPrefix(globalPrefix, { exclude: ['health', 'ready'] });
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('VietRide Notification API')
@@ -21,8 +23,8 @@ async function bootstrap() {
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('api', app, document);
-  const port = process.env.PORT || 3002;
-  await app.listen(port);
+  const port = env.PORT;
+  await app.listen(port, '0.0.0.0');
   Logger.log(`🚀 Application is running on: http://localhost:${port}/${globalPrefix}`);
 }
 
