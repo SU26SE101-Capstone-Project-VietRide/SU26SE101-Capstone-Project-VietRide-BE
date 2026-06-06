@@ -168,6 +168,36 @@ public sealed class ApiResponseResultFilterTests
         ctx.Result.Should().BeSameAs(original);
     }
 
+    [Fact]
+    public void Internal_Path_Success_Is_Returned_Raw()
+    {
+        var filter = CreateFilter();
+        var dto = new[] { new { FcmToken = "token-1", Platform = "ANDROID" } };
+        var original = new ObjectResult(dto) { StatusCode = 200 };
+        var ctx = BuildContext(original, "/internal/v1/users/11111111-1111-1111-1111-111111111111/device-tokens");
+
+        filter.OnResultExecuting(ctx);
+
+        ctx.Result.Should().BeSameAs(original);
+    }
+
+    [Fact]
+    public void Internal_Path_Error_Envelope_Is_Not_Bypassed()
+    {
+        var filter = CreateFilter();
+        var error = ApiResponse.Failure(
+            422,
+            new ApiError { Code = "VALIDATION_ERROR", Message = "Invalid." },
+            ApiMeta.Create("t"));
+        var original = new ObjectResult(error) { StatusCode = 422 };
+        var ctx = BuildContext(original, "/internal/v1/users");
+
+        filter.OnResultExecuting(ctx);
+
+        var result = ctx.Result.Should().BeOfType<ObjectResult>().Subject;
+        result.Value.Should().BeSameAs(error);
+    }
+
     // ------------------------------------------------------------------
     // Meta traceId propagation
     // ------------------------------------------------------------------

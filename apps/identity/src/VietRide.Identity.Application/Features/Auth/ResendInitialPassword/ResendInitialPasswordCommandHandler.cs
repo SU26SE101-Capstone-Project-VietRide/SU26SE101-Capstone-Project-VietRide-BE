@@ -90,7 +90,7 @@ public sealed class ResendInitialPasswordCommandHandler
                 $"{{\"callerUserId\":\"{request.CallerUserId}\"}}"),
             cancellationToken);
 
-        return new ResendInitialPasswordResponseDto(user.Id, user.Email, expiresAt);
+        return new ResendInitialPasswordResponseDto(user.Id, user.Status.ToString(), expiresAt);
     }
 
     private static void EnsureOperatorScopedTarget(User user, Guid callerOperatorId)

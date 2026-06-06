@@ -66,6 +66,16 @@
               "script": {
                 "exec": [
                   "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('ADR 0004 success envelope with token bundle', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.have.property('accessToken').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data).to.have.property('refreshToken').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data.user.status).to.equal('ACTIVE');",
+                  "});",
                   "if (body && body.data) {",
                   "  pm.collectionVariables.set('tokens', JSON.stringify(body.data));",
                   "  pm.collectionVariables.set('accessToken', body.data.accessToken || '');",
@@ -108,6 +118,35 @@
         },
         {
           "name": "Set initial password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "const expectedStatus = Number(pm.variables.get('expectedStatus') || 200);",
+                  "const expectedErrorCode = pm.variables.get('expectedErrorCode') || '';",
+                  "pm.test(`Status code is ${expectedStatus}`, function () {",
+                  "  pm.response.to.have.status(expectedStatus);",
+                  "});",
+                  "pm.test('ADR 0004 envelope matches expected outcome', function () {",
+                  "  pm.expect(body.statusCode).to.equal(expectedStatus);",
+                  "  if (expectedStatus >= 200 && expectedStatus < 300) {",
+                  "    pm.expect(body.success).to.equal(true);",
+                  "    pm.expect(body.data).to.have.property('userId').that.is.a('string').and.is.not.empty;",
+                  "    pm.expect(body.data).to.have.property('status', 'ACTIVE');",
+                  "    pm.expect(body.meta).to.have.property('traceId');",
+                  "  } else {",
+                  "    pm.expect(body.success).to.equal(false);",
+                  "    pm.expect(body.error).to.have.property('code', expectedErrorCode);",
+                  "    pm.expect(body.meta).to.have.property('traceId');",
+                  "  }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
@@ -125,6 +164,29 @@
         },
         {
           "name": "Register device token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('ADR 0004 device-token success envelope', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.have.property('userDeviceId').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data).to.have.property('fcmToken', pm.variables.get('fcmToken'));",
+                  "  pm.expect(body.data).to.have.property('platform', 'ANDROID');",
+                  "  pm.expect(body.data).to.have.property('isActive', true);",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -192,6 +254,16 @@
               "script": {
                 "exec": [
                   "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('ADR 0004 success envelope with token bundle', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.have.property('accessToken').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data).to.have.property('refreshToken').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data.user.status).to.equal('ACTIVE');",
+                  "});",
                   "if (body && body.data) {",
                   "  pm.collectionVariables.set('tokens', JSON.stringify(body.data));",
                   "  pm.collectionVariables.set('accessToken', body.data.accessToken || '');",
@@ -254,6 +326,29 @@
       "item": [
         {
           "name": "Create passwordless System Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 201', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test('Created admin is pending initial password', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(201);",
+                  "  pm.expect(body.data).to.have.property('userId').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data).to.have.property('email', pm.variables.get('createdAdminEmail'));",
+                  "  pm.expect(body.data).to.have.property('role', 'SYSTEM_ADMIN');",
+                  "  pm.expect(body.data).to.have.property('status', 'PENDING_INITIAL_PASSWORD');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -274,6 +369,26 @@
         },
         {
           "name": "Login created admin before initial password (expect blocked)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 403', function () {",
+                  "  pm.response.to.have.status(403);",
+                  "});",
+                  "pm.test('Pending initial password login is blocked', function () {",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.statusCode).to.equal(403);",
+                  "  pm.expect(body.error).to.have.property('code', 'AUTH_PENDING_INITIAL_PASSWORD');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
@@ -291,6 +406,28 @@
         },
         {
           "name": "Resend operator user initial-password link",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Resend response shape matches Day 5 contract', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.have.property('userId', pm.variables.get('operatorUserId'));",
+                  "  pm.expect(body.data).to.have.property('status', 'PENDING_INITIAL_PASSWORD');",
+                  "  pm.expect(body.data).to.have.property('expiresAt').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [

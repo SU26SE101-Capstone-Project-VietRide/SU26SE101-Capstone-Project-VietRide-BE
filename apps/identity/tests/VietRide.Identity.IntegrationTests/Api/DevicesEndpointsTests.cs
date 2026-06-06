@@ -47,8 +47,8 @@ public sealed class DevicesEndpointsTests : IClassFixture<AuthWebApplicationFact
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        AssertRegisterResponse(doc, 200, expectedIsActive: true);
-        var deviceId = doc.RootElement.GetProperty("data").GetProperty("deviceId").GetGuid();
+        AssertRegisterResponse(doc, 200, fcmToken, "ANDROID", expectedIsActive: true);
+        var deviceId = doc.RootElement.GetProperty("data").GetProperty("userDeviceId").GetGuid();
         await using var db = _fixture.CreateDbContext();
         var devices = await db.UserDevices.Where(d => d.FcmToken == fcmToken).ToListAsync();
         devices.Should().ContainSingle();
@@ -70,6 +70,12 @@ public sealed class DevicesEndpointsTests : IClassFixture<AuthWebApplicationFact
         var response = await client.PostAsJsonAsync("/v1/auth/device-token", new { fcmToken, platform = "IOS" });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using (var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync()))
+        {
+            AssertRegisterResponse(doc, 200, fcmToken, "IOS", expectedIsActive: true);
+            doc.RootElement.GetProperty("data").GetProperty("userDeviceId").GetGuid().Should().Be(existing.Id);
+        }
+
         await using var db = _fixture.CreateDbContext();
         var devices = await db.UserDevices.Where(d => d.FcmToken == fcmToken).ToListAsync();
         devices.Should().ContainSingle();
@@ -106,13 +112,43 @@ public sealed class DevicesEndpointsTests : IClassFixture<AuthWebApplicationFact
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public async Task RemoveDeviceToken_NullOrBlankFcmToken_Returns204EmptyBody(string? fcmToken)
+    public async Task RemoveDeviceToken_NullOrBlankFcmToken_Returns422ValidationError(string? fcmToken)
     {
         await SeedUsersAsync(CallerUserId);
         using var client = CreateDbBackedClient(CallerUserId);
         using var request = new HttpRequestMessage(HttpMethod.Delete, "/v1/auth/device-token")
         {
             Content = JsonContent.Create(new { fcmToken }),
+        };
+
+        var response = await client.SendAsync(request);
+
+        await AssertValidationError(response, "fcmToken");
+    }
+
+    [Fact]
+    public async Task RemoveDeviceToken_MissingFcmToken_Returns422ValidationError()
+    {
+        await SeedUsersAsync(CallerUserId);
+        using var client = CreateDbBackedClient(CallerUserId);
+        using var request = new HttpRequestMessage(HttpMethod.Delete, "/v1/auth/device-token")
+        {
+            Content = JsonContent.Create(new { }),
+        };
+
+        var response = await client.SendAsync(request);
+
+        await AssertValidationError(response, "fcmToken");
+    }
+
+    [Fact]
+    public async Task RemoveDeviceToken_AbsentRow_Returns204EmptyBody()
+    {
+        await SeedUsersAsync(CallerUserId);
+        using var client = CreateDbBackedClient(CallerUserId);
+        using var request = new HttpRequestMessage(HttpMethod.Delete, "/v1/auth/device-token")
+        {
+            Content = JsonContent.Create(new { fcmToken = UniqueToken("absent-delete") }),
         };
 
         var response = await client.SendAsync(request);
@@ -246,14 +282,37 @@ public sealed class DevicesEndpointsTests : IClassFixture<AuthWebApplicationFact
     private static string UniqueToken(string prefix)
         => $"fcm-{prefix}-{Guid.NewGuid():N}";
 
-    private static void AssertRegisterResponse(JsonDocument doc, int expectedStatusCode, bool expectedIsActive)
+    private static async Task AssertValidationError(HttpResponseMessage response, string expectedField)
+    {
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        doc.RootElement.GetProperty("success").GetBoolean().Should().BeFalse();
+        doc.RootElement.GetProperty("statusCode").GetInt32().Should().Be(422);
+        var error = doc.RootElement.GetProperty("error");
+        error.GetProperty("code").GetString().Should().Be("VALIDATION_ERROR");
+        error.GetProperty("fields")
+            .EnumerateArray()
+            .Should()
+            .Contain(field => field.GetProperty("field").GetString() == expectedField);
+        doc.RootElement.TryGetProperty("meta", out _).Should().BeTrue();
+    }
+
+    private static void AssertRegisterResponse(
+        JsonDocument doc,
+        int expectedStatusCode,
+        string expectedFcmToken,
+        string expectedPlatform,
+        bool expectedIsActive)
     {
         doc.RootElement.GetProperty("success").GetBoolean().Should().BeTrue();
         doc.RootElement.GetProperty("statusCode").GetInt32().Should().Be(expectedStatusCode);
         doc.RootElement.TryGetProperty("meta", out _).Should().BeTrue();
         var data = doc.RootElement.GetProperty("data");
-        data.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo(["deviceId", "isActive"]);
-        data.GetProperty("deviceId").GetGuid().Should().NotBeEmpty();
+        data.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo(
+            ["userDeviceId", "fcmToken", "platform", "isActive"]);
+        data.GetProperty("userDeviceId").GetGuid().Should().NotBeEmpty();
+        data.GetProperty("fcmToken").GetString().Should().Be(expectedFcmToken);
+        data.GetProperty("platform").GetString().Should().Be(expectedPlatform);
         data.GetProperty("isActive").GetBoolean().Should().Be(expectedIsActive);
     }
 

@@ -41,14 +41,14 @@ public sealed class RemoveDeviceTokenCommandHandlerTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public async Task Handle_NullOrBlankToken_ReturnsWithoutRepositoryLookup(string? fcmToken)
+    public void Validator_RejectsNullOrBlankToken(string? fcmToken)
     {
-        var devices = new TestUserDeviceRepository();
-        var handler = new RemoveDeviceTokenCommandHandler(devices);
+        var validator = new RemoveDeviceTokenCommandValidator();
 
-        await handler.Handle(new RemoveDeviceTokenCommand(CallerUserId, fcmToken), CancellationToken.None);
+        var result = validator.Validate(new RemoveDeviceTokenCommand(CallerUserId, fcmToken));
 
-        devices.FindByUserAndFcmTokenCallCount.Should().Be(0);
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(error => error.PropertyName == "fcmToken");
     }
 
     private sealed class TestUserDeviceRepository : IUserDeviceRepository

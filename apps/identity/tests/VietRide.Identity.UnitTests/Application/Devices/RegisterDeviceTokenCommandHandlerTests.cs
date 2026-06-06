@@ -31,7 +31,9 @@ public sealed class RegisterDeviceTokenCommandHandlerTests
         device.Platform.Should().Be(DevicePlatform.ANDROID);
         device.IsActive.Should().BeTrue();
         device.LastActiveAt.Should().Be(FrozenNow);
-        result.DeviceId.Should().Be(device.Id);
+        result.UserDeviceId.Should().Be(device.Id);
+        result.FcmToken.Should().Be("token-new");
+        result.Platform.Should().Be(DevicePlatform.ANDROID.ToString());
         result.IsActive.Should().BeTrue();
     }
 
@@ -68,7 +70,7 @@ public sealed class RegisterDeviceTokenCommandHandlerTests
         devices.AddCount.Should().Be(0);
         existing.IsActive.Should().BeTrue();
         existing.LastActiveAt.Should().Be(FrozenNow);
-        result.DeviceId.Should().Be(existing.Id);
+        result.UserDeviceId.Should().Be(existing.Id);
     }
 
     [Fact]
@@ -87,7 +89,7 @@ public sealed class RegisterDeviceTokenCommandHandlerTests
         existing.UserId.Should().Be(CallerUserId);
         existing.IsActive.Should().BeTrue();
         existing.LastActiveAt.Should().Be(FrozenNow);
-        result.DeviceId.Should().Be(existing.Id);
+        result.UserDeviceId.Should().Be(existing.Id);
     }
 
     [Fact]
@@ -108,7 +110,7 @@ public sealed class RegisterDeviceTokenCommandHandlerTests
         callerDevice.LastActiveAt.Should().Be(FrozenNow);
         otherDevice.IsActive.Should().BeFalse();
         devices.Items.Count(device => device.FcmToken == "token-edge" && device.IsActive).Should().Be(1);
-        result.DeviceId.Should().Be(callerDevice.Id);
+        result.UserDeviceId.Should().Be(callerDevice.Id);
     }
 
     [Theory]

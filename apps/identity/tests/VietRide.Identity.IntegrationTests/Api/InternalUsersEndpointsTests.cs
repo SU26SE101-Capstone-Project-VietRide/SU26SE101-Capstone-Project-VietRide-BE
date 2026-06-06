@@ -16,6 +16,7 @@ using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Application.Features.Devices.GetActiveDeviceTokens;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Shared.Web.Authentication;
+using VietRide.Shared.Web.Filters;
 
 namespace VietRide.Identity.IntegrationTests.Api;
 
@@ -39,13 +40,16 @@ public sealed class InternalUsersEndpointsTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var json = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal(JsonValueKind.Array, doc.RootElement.ValueKind);
+        Assert.DoesNotContain("\"success\"", json, StringComparison.Ordinal);
         Assert.Contains("active-android-token", json, StringComparison.Ordinal);
         Assert.Contains("active-ios-token", json, StringComparison.Ordinal);
         Assert.DoesNotContain("inactive-ios-token", json, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task GetDeviceTokens_WithoutInternalJwt_ReturnsUnauthorized()
+    public async Task GetDeviceTokens_WithoutInternalJwt_ReturnsUnauthorizedEnvelope()
     {
         await using var app = await CreateAppAsync(Array.Empty<DeviceRow>());
         using var client = app.GetTestClient();
@@ -53,6 +57,11 @@ public sealed class InternalUsersEndpointsTests
         var response = await client.GetAsync($"/internal/v1/users/{Guid.NewGuid()}/device-tokens");
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.False(doc.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal(401, doc.RootElement.GetProperty("statusCode").GetInt32());
+        Assert.Equal("AUTH_TOKEN_INVALID", doc.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.True(doc.RootElement.TryGetProperty("meta", out _));
     }
 
     private static async Task<WebApplication> CreateAppAsync(IReadOnlyList<DeviceRow> devices)
@@ -61,7 +70,7 @@ public sealed class InternalUsersEndpointsTests
         builder.WebHost.UseTestServer();
 
         builder.Services
-            .AddControllers()
+            .AddControllers(options => options.Filters.Add<ApiResponseResultFilter>())
             .AddApplicationPart(typeof(InternalUsersController).Assembly);
         builder.Services.AddAuthentication(InternalJwtAuthenticationExtensions.Scheme)
             .AddInternalJwt(InternalJwtSecret);

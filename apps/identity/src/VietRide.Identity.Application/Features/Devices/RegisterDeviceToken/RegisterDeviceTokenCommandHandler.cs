@@ -65,6 +65,8 @@ public sealed class RegisterDeviceTokenCommandHandler : IRequestHandler<Register
 
     private static RegisterDeviceTokenResponseDto ToResponse(UserDevice device)
         => new(
-            DeviceId: device.Id,
+            UserDeviceId: device.Id,
+            FcmToken: device.FcmToken,
+            Platform: device.Platform.ToString(),
             IsActive: device.IsActive);
 }

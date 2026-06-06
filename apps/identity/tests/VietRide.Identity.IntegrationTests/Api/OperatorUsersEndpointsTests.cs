@@ -73,8 +73,10 @@ public sealed class OperatorUsersEndpointsTests : IClassFixture<AuthWebApplicati
             using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
             AssertSuccessEnvelope(doc, 200);
             var data = doc.RootElement.GetProperty("data");
+            data.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo(
+                ["userId", "status", "expiresAt"]);
             data.GetProperty("userId").GetGuid().Should().Be(TargetUserId);
-            data.GetProperty("email").GetString().Should().Be(targetEmail);
+            data.GetProperty("status").GetString().Should().Be(UserStatus.PENDING_INITIAL_PASSWORD.ToString());
 
             await using var scope = dbFactory.Services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
@@ -309,7 +311,7 @@ public sealed class OperatorUsersEndpointsTests : IClassFixture<AuthWebApplicati
 
                 ResendInitialPasswordCommand command => new ResendInitialPasswordResponseDto(
                     command.UserId,
-                    "driver@example.com",
+                    UserStatus.PENDING_INITIAL_PASSWORD.ToString(),
                     new DateTimeOffset(2026, 6, 8, 10, 0, 0, TimeSpan.Zero)),
 
                 _ => throw new InvalidOperationException($"Unexpected request type {request.GetType().Name}."),

@@ -51,6 +51,7 @@ public sealed class DevicesController : ControllerBase
     [HttpDelete("device-token")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> RemoveDeviceToken(
         [FromBody] RemoveDeviceTokenRequest? request,
         CancellationToken ct)

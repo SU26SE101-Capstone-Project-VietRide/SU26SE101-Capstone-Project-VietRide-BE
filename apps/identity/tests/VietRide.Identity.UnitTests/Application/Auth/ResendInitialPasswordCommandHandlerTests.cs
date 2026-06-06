@@ -43,7 +43,7 @@ public sealed class ResendInitialPasswordCommandHandlerTests
             CancellationToken.None);
 
         result.UserId.Should().Be(user.Id);
-        result.Email.Should().Be(user.Email);
+        result.Status.Should().Be(UserStatus.PENDING_INITIAL_PASSWORD.ToString());
         result.ExpiresAt.Should().Be(Now.AddHours(48));
         oldToken.UsedAt.Should().Be(Now);
         tokens.Entities.Should().HaveCount(2);
