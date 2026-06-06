@@ -197,4 +197,3 @@ Legend: ⏳ todo / 🚧 in progress / ✅ done (reviewer APPROVED; 🧑‍💻 h
 - ~~Task 5.0 DI registration gap~~ → `InfrastructureServiceCollectionExtensions.cs` is explicitly owned by Task 5.0; DI must resolve `IUserDeviceRepository`, `IInitialPasswordTokenService`, and updated `IEmailService`.
 - ~~Task 5.0/5.3 EmailVerificationToken repo partition~~ → Task 5.0 owns the non-user-scoped lookup-by-code+purpose method; Task 5.3 adds only revoke-active-by-(userId, purpose).
 - ~~Gateway public set-initial-password route pattern~~ → Use dedicated explicit prefix `/v1/auth/set-initial-password` with `authRequired none` before the `/v1/auth` catch-all; do not use mixed `publicSubpaths`.
-
