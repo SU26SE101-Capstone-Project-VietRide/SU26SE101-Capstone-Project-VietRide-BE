@@ -302,6 +302,31 @@ logger.info({ tripId }, 'Creating trip');
 
 ---
 
+## Swagger Documentation
+
+Mọi controller và endpoint mới BẮT BUỘC phải được document bằng `@nestjs/swagger`.
+
+```typescript
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags, ApiParam, ApiQuery } from '@nestjs/swagger';
+
+@ApiTags('Trips')
+@ApiBearerAuth()
+@Controller('trips')
+export class TripController {
+  @Get(':id')
+  @ApiOperation({ summary: 'Get trip by ID' })
+  @ApiParam({ name: 'id', format: 'uuid', description: 'Trip ID' })
+  @ApiResponse({ status: 200, description: 'Success' })
+  @ApiResponse({ status: 404, description: 'Trip not found' })
+  async getTrip(@Param('id') id: string) {
+    // ...
+  }
+}
+```
+Lưu ý: Vì project dùng Zod schemas thay cho class-validator, Swagger không thể tự động parse schema từ class. Do đó, cần khai báo rõ `@ApiParam`, `@ApiQuery`, `@ApiBody` thủ công trên các methods.
+
+---
+
 ## Line endings
 
 `.ts` `.json` `.md` files must use **LF**. Enforced by `.gitattributes`.
