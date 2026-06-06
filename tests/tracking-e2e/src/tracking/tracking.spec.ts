@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { RedisService } from '@vietride/nest-redis';
 import { io, type Socket } from 'socket.io-client';
+/* eslint-disable @nx/enforce-module-boundaries */
 import {
   TRACKING_AUTHORIZATION_ADAPTER,
   TRACKING_JWT_VERIFIER,
@@ -15,6 +16,7 @@ import {
 } from '../../../../apps/tracking/src/location/location.constants';
 import { LocationGateway } from '../../../../apps/tracking/src/location/location.gateway';
 import { LocationService } from '../../../../apps/tracking/src/location/location.service';
+/* eslint-enable @nx/enforce-module-boundaries */
 
 const TRIP_ID = '11111111-1111-4111-8111-111111111111';
 
@@ -154,6 +156,7 @@ function createRedisClient() {
       }
 
       const chain: RedisMultiChain = {
+        /* eslint-disable @typescript-eslint/no-unused-vars */
         set: jest.fn((key: string, _value: string, _mode: string, _ttl: number): RedisMultiChain => {
           expect(key).toBe(trackingLatestKey(TRIP_ID));
           return chain;
@@ -163,6 +166,7 @@ function createRedisClient() {
           return chain;
         }),
         sadd: jest.fn((_key: string, _value: string): RedisMultiChain => chain),
+        /* eslint-enable @typescript-eslint/no-unused-vars */
         exec: jest.fn(async () => []),
       };
       return chain;
