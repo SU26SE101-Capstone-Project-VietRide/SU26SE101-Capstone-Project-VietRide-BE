@@ -30,12 +30,16 @@ public sealed class IdentityDbContext : VietRideDbContextBase
         builder.MapEnum<RefreshTokenRevokeReason>("refresh_token_revoke_reason", PostgresEnumNameTranslator);
         builder.MapEnum<DevicePlatform>("device_platform", PostgresEnumNameTranslator);
         builder.MapEnum<ActivityLogAction>("activity_log_action", PostgresEnumNameTranslator);
+        builder.MapEnum<OperatorRegistrationStatus>("operator_registration_status", PostgresEnumNameTranslator);
+        builder.MapEnum<SubscriptionStatus>("subscription_status", PostgresEnumNameTranslator);
+        builder.MapEnum<SubscriptionPaymentMethod>("subscription_payment_method", PostgresEnumNameTranslator);
     }
 
     // --- DbSets ---
 
-    /// <summary>Day-3 stub — PK only; Day 6 adds full columns + behavior.</summary>
     public DbSet<Operator> Operators => Set<Operator>();
+    public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
+    public DbSet<OperatorSubscription> OperatorSubscriptions => Set<OperatorSubscription>();
 
     public DbSet<User> Users => Set<User>();
     public DbSet<OAuthIdentity> OAuthIdentities => Set<OAuthIdentity>();
@@ -53,6 +57,9 @@ public sealed class IdentityDbContext : VietRideDbContextBase
         modelBuilder.HasPostgresEnum("refresh_token_revoke_reason", Enum.GetNames<RefreshTokenRevokeReason>());
         modelBuilder.HasPostgresEnum("device_platform", Enum.GetNames<DevicePlatform>());
         modelBuilder.HasPostgresEnum("activity_log_action", Enum.GetNames<ActivityLogAction>());
+        modelBuilder.HasPostgresEnum("operator_registration_status", Enum.GetNames<OperatorRegistrationStatus>());
+        modelBuilder.HasPostgresEnum("subscription_status", Enum.GetNames<SubscriptionStatus>());
+        modelBuilder.HasPostgresEnum("subscription_payment_method", Enum.GetNames<SubscriptionPaymentMethod>());
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
