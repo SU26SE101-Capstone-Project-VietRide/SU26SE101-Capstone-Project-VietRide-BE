@@ -162,7 +162,7 @@ Gateway routes: /v1/auth prefix already routes to Identity (authRequired user, r
 | 5.3 | done | APPROVE | 2026-06-06 | APPROVE after one patch for handler-level missing-role 403 + DB-backed resend happy path; Postgres started/stopped; human /verify pending |
 | 5.4 | done | APPROVE | 2026-06-06 | APPROVE; InternalJwt endpoint returns active tokens only; Postgres started/stopped; human /verify pending |
 | 5.5a | done | APPROVE | 2026-06-06 | APPROVE; PENDING_INITIAL_PASSWORD login returns AUTH_PENDING_INITIAL_PASSWORD; human /verify pending |
-| 5.5b | todo | — | — | Gateway: explicit-prefix public /v1/auth/set-initial-password before /v1/auth catch-all + validate/update app.module.ts publicPaths + OPERATOR_ADMIN /v1/operator/users route (nest) |
+| 5.5b | done | APPROVE | 2026-06-06 | APPROVE; Gateway public set-initial-password + OPERATOR_ADMIN operator-users route; human /verify pending |
 | 5.6a | todo | — | — | admin-create wiring ONLY; assert token + email + SET_INITIAL_PASSWORD ActivityLog row; operator-create deferred to Day 6 (Item 1) |
 | 5.6b | todo | — | — | docs + Postman; no Idempotency-Key rows (Item 5); DELETE 204 (Item 7) |
 
