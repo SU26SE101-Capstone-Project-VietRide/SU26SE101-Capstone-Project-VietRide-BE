@@ -16,7 +16,11 @@
     { "key": "refreshToken", "value": "" },
     { "key": "googleIdToken", "value": "<google-id-token>" },
     { "key": "systemAdminAccessToken", "value": "<system-admin-access-token>" },
-    { "key": "createdAdminEmail", "value": "admin2@example.com" }
+    { "key": "operatorAdminAccessToken", "value": "<operator-admin-access-token>" },
+    { "key": "createdAdminEmail", "value": "admin2@example.com" },
+    { "key": "initialPasswordToken", "value": "<set-initial-password-token>" },
+    { "key": "operatorUserId", "value": "<operator-user-id>" },
+    { "key": "fcmToken", "value": "<fcm-token>" }
   ],
   "item": [
     {
@@ -100,6 +104,79 @@
               "mode": "raw",
               "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
             }
+          }
+        },
+        {
+          "name": "Set initial password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/set-initial-password",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "auth", "set-initial-password"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{initialPasswordToken}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "description": "Day 5 staff/admin initial-password consume flow. No Idempotency-Key header; success envelope data is { userId, status: \"ACTIVE\" }."
+          }
+        },
+        {
+          "name": "Register device token",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/device-token",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "auth", "device-token"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fcmToken\": \"{{fcmToken}}\",\n  \"platform\": \"ANDROID\"\n}"
+            },
+            "description": "Day 5 FCM device-token upsert. No Idempotency-Key header; expects 200 ApiResponse envelope."
+          }
+        },
+        {
+          "name": "Delete device token (expect 204)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 204', function () {",
+                  "  pm.response.to.have.status(204);",
+                  "});",
+                  "pm.test('Response body is empty', function () {",
+                  "  pm.expect(pm.response.text()).to.equal('');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/device-token",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "auth", "device-token"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fcmToken\": \"{{fcmToken}}\"\n}"
+            },
+            "description": "Day 5 FCM device-token deactivate/logout. No Idempotency-Key header; expects 204 No Content with empty body."
           }
         }
       ]
@@ -192,7 +269,7 @@
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{createdAdminEmail}}\",\n  \"displayName\": \"Admin Two\",\n  \"role\": \"SYSTEM_ADMIN\"\n}"
             },
-            "description": "Day 4 approved behavior: creates a passwordless SYSTEM_ADMIN with status PENDING_INITIAL_PASSWORD. SET_INITIAL_PASSWORD token generation and email send are deferred to Day 5."
+            "description": "Creates a passwordless SYSTEM_ADMIN with status PENDING_INITIAL_PASSWORD; Day 5 flow generates a SET_INITIAL_PASSWORD token and sends the initial-password email link."
           }
         },
         {
@@ -209,7 +286,27 @@
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{createdAdminEmail}}\",\n  \"password\": \"{{password}}\"\n}"
             },
-            "description": "Expected Day 4 review outcome: created admin remains PENDING_INITIAL_PASSWORD and cannot login until Day 5 set-initial-password flow is implemented."
+            "description": "Expected before initial password is set: created admin remains PENDING_INITIAL_PASSWORD and cannot login."
+          }
+        },
+        {
+          "name": "Resend operator user initial-password link",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/users/{{operatorUserId}}/resend-initial-password",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "users", "{{operatorUserId}}", "resend-initial-password"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "description": "Day 5 OPERATOR_ADMIN resend for a same-operator user in PENDING_INITIAL_PASSWORD. No Idempotency-Key header; cross-operator targets expect 403."
           }
         }
       ]

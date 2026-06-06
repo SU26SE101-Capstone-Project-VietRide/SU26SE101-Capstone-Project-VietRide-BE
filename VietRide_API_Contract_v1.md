@@ -351,6 +351,201 @@ Error `401` — missing or invalid token:
 }
 ```
 
+### POST `/v1/auth/set-initial-password`
+
+Auth: public. Idempotency-Key: not required by BSOT §5.6.
+
+Request:
+```json
+{
+  "token": "uuid-v4-token",
+  "password": "ChangeMe123!"
+}
+```
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "userId": "uuid",
+    "status": "ACTIVE"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `400` — invalid initial-password token:
+```json
+{
+  "success": false,
+  "statusCode": 400,
+  "error": { "code": "AUTH_INITIAL_PASSWORD_TOKEN_INVALID", "message": "SET_INITIAL_PASSWORD token không hợp lệ." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `400` — expired initial-password token:
+```json
+{
+  "success": false,
+  "statusCode": 400,
+  "error": { "code": "AUTH_INITIAL_PASSWORD_TOKEN_EXPIRED", "message": "SET_INITIAL_PASSWORD token đã hết hạn." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `422` — user is not pending initial password:
+```json
+{
+  "success": false,
+  "statusCode": 422,
+  "error": { "code": "USER_INVALID_STATUS_TRANSITION", "message": "User status không cho phép đặt mật khẩu lần đầu." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+### POST `/v1/auth/device-token`
+
+Auth: User Access Token (RS256). Idempotency-Key: not required by BSOT §5.6.
+
+Request:
+```json
+{
+  "fcmToken": "fcm-token",
+  "platform": "ANDROID"
+}
+```
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "userDeviceId": "uuid",
+    "fcmToken": "fcm-token",
+    "platform": "ANDROID",
+    "isActive": true
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `401` — missing or invalid token:
+```json
+{
+  "success": false,
+  "statusCode": 401,
+  "error": { "code": "AUTH_TOKEN_INVALID", "message": "Token không hợp lệ." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `422` — invalid device token payload:
+```json
+{
+  "success": false,
+  "statusCode": 422,
+  "error": { "code": "VALIDATION_ERROR", "message": "Dữ liệu device token không hợp lệ.", "fields": [{ "field": "platform", "message": "platform must be IOS, ANDROID, or WEB." }] },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+### DELETE `/v1/auth/device-token`
+
+Auth: User Access Token (RS256). Idempotency-Key: not required by BSOT §5.6.
+
+Request:
+```json
+{
+  "fcmToken": "fcm-token"
+}
+```
+
+Response `204`: No Content, empty body (no `ApiResponse` envelope per ADR 0004 Rule 2).
+
+Error `401` — missing or invalid token:
+```json
+{
+  "success": false,
+  "statusCode": 401,
+  "error": { "code": "AUTH_TOKEN_INVALID", "message": "Token không hợp lệ." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `422` — invalid device token payload:
+```json
+{
+  "success": false,
+  "statusCode": 422,
+  "error": { "code": "VALIDATION_ERROR", "message": "Dữ liệu device token không hợp lệ.", "fields": [{ "field": "fcmToken", "message": "fcmToken is required." }] },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+### POST `/v1/operator/users/{userId}/resend-initial-password`
+
+Auth: `OPERATOR_ADMIN`. Tenant isolation: caller `operatorId` must match the target user's `operatorId`. Idempotency-Key: not required by BSOT §5.6.
+
+Request: empty JSON object `{}`.
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "userId": "uuid",
+    "status": "PENDING_INITIAL_PASSWORD",
+    "expiresAt": "2026-06-08T10:00:00Z"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `401` — missing or invalid token:
+```json
+{
+  "success": false,
+  "statusCode": 401,
+  "error": { "code": "AUTH_TOKEN_INVALID", "message": "Token không hợp lệ." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `403` — caller is not an operator admin or cross-operator target:
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "error": { "code": "FORBIDDEN", "message": "Bạn không có quyền thực hiện thao tác này." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `404` — target user not found:
+```json
+{
+  "success": false,
+  "statusCode": 404,
+  "error": { "code": "RESOURCE_NOT_FOUND", "message": "User không tồn tại." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `422` — target user is not pending initial password:
+```json
+{
+  "success": false,
+  "statusCode": 422,
+  "error": { "code": "USER_INVALID_STATUS_TRANSITION", "message": "Chỉ user ở trạng thái PENDING_INITIAL_PASSWORD mới được gửi lại link đặt mật khẩu." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
 ### POST `/v1/admin/users`
 
 Auth: `SYSTEM_ADMIN`. Idempotency-Key: not required by BSOT §5.6.
