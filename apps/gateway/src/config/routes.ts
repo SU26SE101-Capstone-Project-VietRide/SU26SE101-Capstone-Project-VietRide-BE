@@ -156,6 +156,16 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     // NestJS services
     { prefix: '/v1/notifications', target: env.NOTIFICATION_BASE_URL, authRequired: 'user' },
     { prefix: '/v1/rag', target: env.RAG_BASE_URL, authRequired: 'user' },
+
+    // Swagger Specs Proxy
+    { prefix: '/api-specs/identity', target: env.IDENTITY_BASE_URL, authRequired: 'none', rewriteTo: '/swagger/v1/swagger.json' },
+    { prefix: '/api-specs/trip', target: env.TRIP_BASE_URL, authRequired: 'none', rewriteTo: '/swagger/v1/swagger.json' },
+    { prefix: '/api-specs/booking', target: env.BOOKING_BASE_URL, authRequired: 'none', rewriteTo: '/swagger/v1/swagger.json' },
+    { prefix: '/api-specs/payment', target: env.PAYMENT_BASE_URL, authRequired: 'none', rewriteTo: '/swagger/v1/swagger.json' },
+    { prefix: '/api-specs/parcel', target: env.PARCEL_BASE_URL, authRequired: 'none', rewriteTo: '/swagger/v1/swagger.json' },
+    { prefix: '/api-specs/tracking', target: env.TRACKING_BASE_URL, authRequired: 'none', rewriteTo: '/api-json' },
+    { prefix: '/api-specs/notification', target: env.NOTIFICATION_BASE_URL, authRequired: 'none', rewriteTo: '/api-json' },
+    { prefix: '/api-specs/rag', target: env.RAG_BASE_URL, authRequired: 'none', rewriteTo: '/api-json' },
     // /tracking/socket.io/* is NOT routed via Gateway (Nginx direct upgrade).
   ];
 }
