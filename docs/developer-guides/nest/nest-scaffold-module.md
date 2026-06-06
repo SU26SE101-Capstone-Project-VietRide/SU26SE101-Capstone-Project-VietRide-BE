@@ -40,7 +40,7 @@ Nx does not generate repositories. Create manually:
 ```typescript
 // apps/<app>/src/<aggregate>/<aggregate>.repository.ts
 import { Injectable } from '@nestjs/common';
-import { PgService } from '@vietride/nest-persistence';
+import { PrismaService } from '@vietride/nest-persistence';
 import { randomUUID } from 'node:crypto';
 import type { Create<Aggregate>Dto } from './dto/create-<aggregate>.dto';
 
@@ -54,29 +54,26 @@ export interface <Aggregate>Row {
 
 @Injectable()
 export class <Aggregate>Repository {
-  constructor(private readonly pg: PgService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  async findById(id: string): Promise<<Aggregate>Row | null> {
-    const { rows } = await this.pg.query<<Aggregate>Row>(
-      `SELECT * FROM <table> WHERE id = $1 AND deleted_at IS NULL`,
-      [id],
-    );
-    return rows[0] ?? null;
+  async findById(id: string) {
+    return this.prisma.<aggregate>.findUnique({
+      where: { id },
+    });
   }
 
-  async create(dto: Create<Aggregate>Dto): Promise<<Aggregate>Row> {
-    const { rows } = await this.pg.query<<Aggregate>Row>(
-      `INSERT INTO <table> (id, /* columns */, created_at, updated_at)
-       VALUES ($1, /* $2... */, NOW(), NOW())
-       RETURNING *`,
-      [randomUUID(), /* values */],
-    );
-    return rows[0];
+  async create(dto: Create<Aggregate>Dto) {
+    return this.prisma.<aggregate>.create({
+      data: {
+        id: randomUUID(),
+        // map dto fields here
+      },
+    });
   }
 }
 ```
 
-Replace `<table>` with the actual table name from `db-schema/<service>/schema.sql`.
+Make sure to map the fields properly. The Prisma model is generated from `schema.prisma`.
 Always check the schema file — never invent column names.
 
 ---
@@ -147,7 +144,7 @@ Both must pass before moving on. Fix any lint errors before continuing.
 ## Checklist
 
 - [ ] Files generated via Nx CLI (not created manually except Repository and DTO)
-- [ ] Repository uses `PgService` — no Prisma, no ORM
+- [ ] Repository uses Prisma ORM via PrismaService
 - [ ] DTO uses Zod schema + inferred type
 - [ ] Module declares Controller, Service, Repository in `providers`
 - [ ] Module imported into AppModule

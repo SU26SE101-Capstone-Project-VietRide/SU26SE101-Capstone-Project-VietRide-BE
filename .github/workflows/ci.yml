@@ -45,6 +45,14 @@ jobs:
       - name: Install dependencies
         run: npm ci --prefer-offline --no-audit
 
+      - name: Generate Prisma Clients
+        run: |
+          for schema in apps/*/prisma/schema.prisma; do
+            if [ -f "$schema" ]; then
+              npx prisma generate --schema="$schema"
+            fi
+          done
+
       - name: Lint all projects (TypeScript / NestJS only — .NET format runs in build-dotnet job)
         run: npx nx run-many --target=lint --all --parallel=3 --exclude="VietRide.*"
 
@@ -76,6 +84,14 @@ jobs:
       - name: Install dependencies
         run: npm ci --prefer-offline --no-audit
 
+      - name: Generate Prisma Clients
+        run: |
+          for schema in apps/*/prisma/schema.prisma; do
+            if [ -f "$schema" ]; then
+              npx prisma generate --schema="$schema"
+            fi
+          done
+
       - name: Run tests (TypeScript / NestJS only — .NET tests run in build-dotnet job)
         run: npx nx run-many --target=test --all --parallel=3 --exclude="VietRide.*" --ci --passWithNoTests
 
@@ -106,6 +122,14 @@ jobs:
 
       - name: Install dependencies
         run: npm ci --prefer-offline --no-audit
+
+      - name: Generate Prisma Clients
+        run: |
+          for schema in apps/*/prisma/schema.prisma; do
+            if [ -f "$schema" ]; then
+              npx prisma generate --schema="$schema"
+            fi
+          done
 
       - name: Build all projects (TypeScript / NestJS only — .NET builds in build-dotnet job)
         run: npx nx run-many --target=build --all --parallel=3 --exclude="VietRide.*"

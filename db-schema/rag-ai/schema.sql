@@ -1,7 +1,8 @@
 -- =============================================================================
 -- VietRide :: RAG AI Service :: PostgreSQL 16 schema
 -- Database: vietride_rag
--- Framework: NestJS + TypeORM
+-- Schema: vietride_rag
+-- Framework: NestJS + Prisma ORM
 -- =============================================================================
 -- pgvector extension required for embedding similarity search.
 -- Embedding model: OpenAI text-embedding-3-small (1536 dimensions).
@@ -9,6 +10,9 @@
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE EXTENSION IF NOT EXISTS "vector";
+
+CREATE SCHEMA IF NOT EXISTS vietride_rag;
+SET search_path TO vietride_rag, public;
 
 -- =============================================================================
 -- ENUMS
