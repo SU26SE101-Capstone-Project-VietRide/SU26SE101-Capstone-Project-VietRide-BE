@@ -11,10 +11,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: "20"
-  DOTNET_VERSION: "8.0.421"
-  DOTNET_NOLOGO: "true"
-  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  NODE_VERSION: '20'
+  DOTNET_VERSION: '8.0.421'
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
 
 jobs:
   lint:
@@ -118,7 +118,6 @@ jobs:
       matrix:
         solution:
           - libs/dotnet/VietRide.Libs.sln
-          - apps/identity/VietRide.Identity.sln
           - apps/trip/VietRide.Trip.sln
           - apps/booking/VietRide.Booking.sln
           - apps/payment/VietRide.Payment.sln
@@ -156,5 +155,71 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dotnet-test-results-${{ strategy.job-index }}
+          path: ./TestResults
+          if-no-files-found: ignore
+
+  test-identity-dotnet:
+    name: Build & Test Identity (.NET 8 + Postgres)
+    runs-on: ubuntu-latest
+    env:
+      # Identity integration tests create throwaway databases on localhost.
+      VIETRIDE_IDENTITY_TEST_CONNECTION_STRING: 'Host=localhost;Port=5432;Database=vietride_identity_tests;Username=postgres;Password=postgres'
+      REDIS_URL: 'localhost:6379,abortConnect=false'
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', 'global.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore apps/identity/VietRide.Identity.sln
+
+      - name: Build
+        run: dotnet build apps/identity/VietRide.Identity.sln --no-restore --configuration Release
+
+      - name: Format check (.NET lint)
+        run: dotnet format apps/identity/VietRide.Identity.sln --verify-no-changes --no-restore --verbosity minimal
+
+      - name: Test
+        run: dotnet test apps/identity/VietRide.Identity.sln --no-build --configuration Release --logger "trx;LogFileName=test-results.trx" --results-directory ./TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-test-results-identity
           path: ./TestResults
           if-no-files-found: ignore
