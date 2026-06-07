@@ -213,7 +213,7 @@ Day 6 turns the stub Operator aggregate into the full Operator + Subscription do
 | 6.3 | ✅ done | dotnet-reviewer-approved | 2026-06-07 | expanded resend scope; patch rounds for transaction/resend/tests; human verify pending |
 | 6.4 | ✅ done | dotnet-reviewer-approved | 2026-06-07 | patch round for full profile contract/update; human verify pending |
 | 6.5 | ✅ done | dotnet-reviewer-approved | 2026-06-07 | scope override + contract sync for 402 SUBSCRIPTION_EXPIRED; human verify pending |
-| 6.6 | ⬜ todo | — | — | Gateway profile route |
+| 6.6 | ✅ done | nest-reviewer-approved | 2026-06-07 | route-only Gateway profile prefix; human verify pending |
 | 6.7 | ⬜ todo | — | — | Postman/final docs |
 
 Legend: ⬜ todo · 🔄 in progress · ✅ done (reviewer APPROVED + human `/verify`) · ⚠️ done-with-carryover · ❌ blocked

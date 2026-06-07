@@ -18,6 +18,7 @@ describe('buildRouteTable', () => {
       (r) =>
         r.prefix.startsWith('/v1/auth') ||
         r.prefix.startsWith('/v1/users') ||
+        r.prefix.startsWith('/v1/operator/profile') ||
         r.prefix.startsWith('/v1/operator/users'),
     );
     expect(identityRoutes.length).toBeGreaterThan(0);
@@ -112,6 +113,28 @@ describe('buildRouteTable', () => {
 
     expect(logout?.authRequired).toBe('user');
     expect(changePassword?.authRequired).toBe('user');
+  });
+
+  it('operator profile routes allow OPERATOR_ADMIN and OPERATOR_STAFF roles', () => {
+    const route = matchRoute(routes, '/v1/operator/profile');
+
+    expect(route?.prefix).toBe('/v1/operator/profile');
+    expect(route?.target).toBe(env.IDENTITY_BASE_URL);
+    expect(route?.authRequired).toBe('user');
+    expect(route?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
+  });
+
+  it('operator profile and operator users routes match distinctly with no generic operator prefix', () => {
+    const profileRoute = matchRoute(routes, '/v1/operator/profile');
+    const usersRoute = matchRoute(
+      routes,
+      '/v1/operator/users/11111111-1111-1111-1111-111111111111/resend-initial-password',
+    );
+
+    expect(profileRoute?.prefix).toBe('/v1/operator/profile');
+    expect(usersRoute?.prefix).toBe('/v1/operator/users');
+    expect(profileRoute).not.toBe(usersRoute);
+    expect(routes.find((r) => r.prefix === '/v1/operator')).toBeUndefined();
   });
 
   it('operator user routes require OPERATOR_ADMIN role', () => {

@@ -68,6 +68,12 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['SYSTEM_ADMIN'],
     },
     {
+      prefix: '/v1/operator/profile',
+      target: env.IDENTITY_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
+    {
       prefix: '/v1/operator/users',
       target: env.IDENTITY_BASE_URL,
       authRequired: 'user',
