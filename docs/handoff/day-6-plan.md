@@ -208,7 +208,7 @@ Day 6 turns the stub Operator aggregate into the full Operator + Subscription do
 | 6.0a | ✅ done | reviewer-approved | 2026-06-07 | contract baseline synced in API Contract + BSOT; no new error code/Idempotency-Key/Outbox emission |
 | 6.0 | ✅ done | dotnet-reviewer-approved | 2026-06-07 | 2 patch rounds; human verify pending; DB/integration rerun needs local Postgres |
 | 6.1 | ✅ done | dotnet-reviewer-approved | 2026-06-07 | patch rounds for DI/contract/tests; human verify pending |
-| 6.2 | ⬜ todo | — | — | lifecycle |
+| 6.2 | ✅ done | dotnet-reviewer-approved | 2026-06-07 | patch round for integration test isolation; human verify pending |
 | 6.2b | ⬜ todo | — | — | login-block |
 | 6.3 | ⬜ todo | — | — | Day-5 operator-user carry-over |
 | 6.4 | ⬜ todo | — | — | profile app RBAC |
