@@ -154,9 +154,35 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
         string displayName,
         Guid operatorId)
     {
+        return CreateOperatorScopedPendingPassword(
+            email,
+            phone,
+            displayName,
+            UserRole.OPERATOR_ADMIN,
+            operatorId);
+    }
+
+    /// <summary>
+    /// Factory for operator-scoped users created by an approved OPERATOR_ADMIN.
+    /// The account must set its first password through the emailed initial-password link.
+    /// </summary>
+    public static User CreateOperatorScopedPendingPassword(
+        string email,
+        PhoneNumber phone,
+        string displayName,
+        UserRole role,
+        Guid operatorId)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(email);
         ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
         ArgumentOutOfRangeException.ThrowIfEqual(operatorId, Guid.Empty);
+
+        if (role is not (UserRole.DRIVER or UserRole.ASSISTANT or UserRole.OPERATOR_STAFF or UserRole.OPERATOR_ADMIN))
+        {
+            throw new IdentityDomainException(
+                "VALIDATION_ERROR",
+                "Only operator-scoped roles can be created with a pending initial password.");
+        }
 
         return new User
         {
@@ -165,7 +191,7 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
             Phone = phone,
             PasswordHash = null,
             DisplayName = displayName,
-            Role = UserRole.OPERATOR_ADMIN,
+            Role = role,
             Status = UserStatus.PENDING_INITIAL_PASSWORD,
             OperatorId = operatorId,
             FailedLoginAttempts = 0,

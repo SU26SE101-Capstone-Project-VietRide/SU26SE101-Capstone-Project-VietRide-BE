@@ -210,7 +210,7 @@ Day 6 turns the stub Operator aggregate into the full Operator + Subscription do
 | 6.1 | ✅ done | dotnet-reviewer-approved | 2026-06-07 | patch rounds for DI/contract/tests; human verify pending |
 | 6.2 | ✅ done | dotnet-reviewer-approved | 2026-06-07 | patch round for integration test isolation; human verify pending |
 | 6.2b | ✅ done | dotnet-reviewer-approved | 2026-06-07 | patch round for real DB-backed login flows; human verify pending |
-| 6.3 | ⬜ todo | — | — | Day-5 operator-user carry-over |
+| 6.3 | ✅ done | dotnet-reviewer-approved | 2026-06-07 | expanded resend scope; patch rounds for transaction/resend/tests; human verify pending |
 | 6.4 | ⬜ todo | — | — | profile app RBAC |
 | 6.5 | ⬜ todo | — | — | internal endpoints |
 | 6.6 | ⬜ todo | — | — | Gateway profile route |

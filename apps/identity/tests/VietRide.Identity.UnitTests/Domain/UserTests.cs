@@ -149,6 +149,46 @@ public sealed class UserTests
         user.OperatorId.Should().Be(operatorId);
     }
 
+    [Theory]
+    [InlineData(UserRole.DRIVER)]
+    [InlineData(UserRole.ASSISTANT)]
+    [InlineData(UserRole.OPERATOR_STAFF)]
+    public void CreateOperatorScopedPendingPassword_SetsOperatorUserPendingInitialPassword_WithNoPassword(UserRole role)
+    {
+        var operatorId = Guid.NewGuid();
+
+        var user = User.CreateOperatorScopedPendingPassword(
+            "  Operator.User@Example.COM  ",
+            TestPhone,
+            "Operator User",
+            role,
+            operatorId);
+
+        user.Email.Should().Be("operator.user@example.com");
+        user.DisplayName.Should().Be("Operator User");
+        user.Role.Should().Be(role);
+        user.Status.Should().Be(UserStatus.PENDING_INITIAL_PASSWORD);
+        user.Phone.Should().Be(TestPhone);
+        user.PasswordHash.Should().BeNull();
+        user.OperatorId.Should().Be(operatorId);
+    }
+
+    [Theory]
+    [InlineData(UserRole.PASSENGER)]
+    [InlineData(UserRole.SYSTEM_ADMIN)]
+    public void CreateOperatorScopedPendingPassword_WhenRoleIsNotOperatorScoped_ThrowsValidationError(UserRole role)
+    {
+        var act = () => User.CreateOperatorScopedPendingPassword(
+            "operator.user@example.com",
+            TestPhone,
+            "Operator User",
+            role,
+            Guid.NewGuid());
+
+        act.Should().Throw<IdentityDomainException>()
+            .Which.ErrorCode.Should().Be("VALIDATION_ERROR");
+    }
+
     // -------------------------------------------------------------------------
     // VerifyEmail
     // -------------------------------------------------------------------------
