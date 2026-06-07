@@ -212,7 +212,7 @@ Day 6 turns the stub Operator aggregate into the full Operator + Subscription do
 | 6.2b | ✅ done | dotnet-reviewer-approved | 2026-06-07 | patch round for real DB-backed login flows; human verify pending |
 | 6.3 | ✅ done | dotnet-reviewer-approved | 2026-06-07 | expanded resend scope; patch rounds for transaction/resend/tests; human verify pending |
 | 6.4 | ✅ done | dotnet-reviewer-approved | 2026-06-07 | patch round for full profile contract/update; human verify pending |
-| 6.5 | ⬜ todo | — | — | internal endpoints |
+| 6.5 | ✅ done | dotnet-reviewer-approved | 2026-06-07 | scope override + contract sync for 402 SUBSCRIPTION_EXPIRED; human verify pending |
 | 6.6 | ⬜ todo | — | — | Gateway profile route |
 | 6.7 | ⬜ todo | — | — | Postman/final docs |
 

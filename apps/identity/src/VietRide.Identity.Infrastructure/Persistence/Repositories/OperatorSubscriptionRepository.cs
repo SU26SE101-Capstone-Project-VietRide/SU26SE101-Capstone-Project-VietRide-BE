@@ -48,6 +48,58 @@ public sealed class OperatorSubscriptionRepository : IOperatorSubscriptionReposi
             .FirstOrDefaultAsync(cancellationToken);
     }
 
+    public async Task<(OperatorSubscription Subscription, SubscriptionPlan Plan)?> GetCurrentWithPlanByOperatorIdAsync(
+        Guid operatorId,
+        CancellationToken cancellationToken = default)
+    {
+        var row = await _dbContext.OperatorSubscriptions
+            .AsNoTracking()
+            .Where(subscription => subscription.OperatorId == operatorId)
+            .Join(
+                _dbContext.SubscriptionPlans.AsNoTracking(),
+                subscription => subscription.PlanId,
+                plan => plan.Id,
+                (subscription, plan) => new { Subscription = subscription, Plan = plan })
+            .OrderByDescending(x => x.Subscription.StartedAt ?? x.Subscription.LastResetAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return row is null ? null : (row.Subscription, row.Plan);
+    }
+
+    public async Task<(OperatorSubscription Subscription, SubscriptionPlan Plan)?> TryIncrementUsageWithinLimitAsync(
+        Guid operatorId,
+        SubscriptionUsageResource resource,
+        int delta,
+        CancellationToken cancellationToken = default)
+    {
+        var subscriptionId = await _dbContext.OperatorSubscriptions
+            .Where(x => x.OperatorId == operatorId)
+            .Where(x => x.Status == SubscriptionStatus.ACTIVE)
+            .OrderByDescending(x => x.StartedAt ?? x.LastResetAt)
+            .Select(x => x.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (subscriptionId == Guid.Empty)
+        {
+            return null;
+        }
+
+        var updatedRows = resource switch
+        {
+            SubscriptionUsageResource.VEHICLES => await IncrementVehicleCountAsync(subscriptionId, delta, cancellationToken),
+            SubscriptionUsageResource.DRIVERS => await IncrementDriverCountAsync(subscriptionId, delta, cancellationToken),
+            SubscriptionUsageResource.ASSISTANTS => await IncrementAssistantCountAsync(subscriptionId, delta, cancellationToken),
+            SubscriptionUsageResource.OPERATOR_USERS => await IncrementOperatorUserCountAsync(subscriptionId, delta, cancellationToken),
+            SubscriptionUsageResource.ROUTES => await IncrementRouteCountAsync(subscriptionId, delta, cancellationToken),
+            SubscriptionUsageResource.TRIPS_THIS_MONTH => await IncrementTripCountAsync(subscriptionId, delta, cancellationToken),
+            _ => 0,
+        };
+
+        return updatedRows == 1
+            ? await GetCurrentWithPlanByOperatorIdAsync(operatorId, cancellationToken)
+            : null;
+    }
+
     public async Task<bool> TryCreateOperatorUserWithinLimitAsync(
         Guid operatorId,
         User user,
@@ -70,9 +122,9 @@ public sealed class OperatorSubscriptionRepository : IOperatorSubscriptionReposi
 
         var updatedRows = role switch
         {
-            UserRole.DRIVER => await IncrementDriverCountAsync(subscriptionId, cancellationToken),
-            UserRole.ASSISTANT => await IncrementAssistantCountAsync(subscriptionId, cancellationToken),
-            UserRole.OPERATOR_STAFF => await IncrementOperatorUserCountAsync(subscriptionId, cancellationToken),
+            UserRole.DRIVER => await IncrementDriverCountAsync(subscriptionId, 1, cancellationToken),
+            UserRole.ASSISTANT => await IncrementAssistantCountAsync(subscriptionId, 1, cancellationToken),
+            UserRole.OPERATOR_STAFF => await IncrementOperatorUserCountAsync(subscriptionId, 1, cancellationToken),
             _ => 0,
         };
 
@@ -88,36 +140,69 @@ public sealed class OperatorSubscriptionRepository : IOperatorSubscriptionReposi
         return true;
     }
 
-    private Task<int> IncrementDriverCountAsync(Guid subscriptionId, CancellationToken cancellationToken)
+    private Task<int> IncrementVehicleCountAsync(Guid subscriptionId, int delta, CancellationToken cancellationToken)
         => _dbContext.OperatorSubscriptions
             .Where(subscription => subscription.Id == subscriptionId)
             .Where(subscription => _dbContext.SubscriptionPlans.Any(plan =>
-                plan.Id == subscription.PlanId && subscription.CurrentDrivers < plan.MaxDrivers))
+                plan.Id == subscription.PlanId && subscription.CurrentVehicles + delta <= plan.MaxVehicles))
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(
+                    subscription => subscription.CurrentVehicles,
+                    subscription => subscription.CurrentVehicles + delta),
+                cancellationToken);
+
+    private Task<int> IncrementDriverCountAsync(Guid subscriptionId, int delta, CancellationToken cancellationToken)
+        => _dbContext.OperatorSubscriptions
+            .Where(subscription => subscription.Id == subscriptionId)
+            .Where(subscription => _dbContext.SubscriptionPlans.Any(plan =>
+                plan.Id == subscription.PlanId && subscription.CurrentDrivers + delta <= plan.MaxDrivers))
             .ExecuteUpdateAsync(
                 setters => setters.SetProperty(
                     subscription => subscription.CurrentDrivers,
-                    subscription => subscription.CurrentDrivers + 1),
+                    subscription => subscription.CurrentDrivers + delta),
                 cancellationToken);
 
-    private Task<int> IncrementAssistantCountAsync(Guid subscriptionId, CancellationToken cancellationToken)
+    private Task<int> IncrementAssistantCountAsync(Guid subscriptionId, int delta, CancellationToken cancellationToken)
         => _dbContext.OperatorSubscriptions
             .Where(subscription => subscription.Id == subscriptionId)
             .Where(subscription => _dbContext.SubscriptionPlans.Any(plan =>
-                plan.Id == subscription.PlanId && subscription.CurrentAssistants < plan.MaxAssistants))
+                plan.Id == subscription.PlanId && subscription.CurrentAssistants + delta <= plan.MaxAssistants))
             .ExecuteUpdateAsync(
                 setters => setters.SetProperty(
                     subscription => subscription.CurrentAssistants,
-                    subscription => subscription.CurrentAssistants + 1),
+                    subscription => subscription.CurrentAssistants + delta),
                 cancellationToken);
 
-    private Task<int> IncrementOperatorUserCountAsync(Guid subscriptionId, CancellationToken cancellationToken)
+    private Task<int> IncrementOperatorUserCountAsync(Guid subscriptionId, int delta, CancellationToken cancellationToken)
         => _dbContext.OperatorSubscriptions
             .Where(subscription => subscription.Id == subscriptionId)
             .Where(subscription => _dbContext.SubscriptionPlans.Any(plan =>
-                plan.Id == subscription.PlanId && subscription.CurrentOperatorUsers < plan.MaxOperatorUsers))
+                plan.Id == subscription.PlanId && subscription.CurrentOperatorUsers + delta <= plan.MaxOperatorUsers))
             .ExecuteUpdateAsync(
                 setters => setters.SetProperty(
                     subscription => subscription.CurrentOperatorUsers,
-                    subscription => subscription.CurrentOperatorUsers + 1),
+                    subscription => subscription.CurrentOperatorUsers + delta),
+                cancellationToken);
+
+    private Task<int> IncrementRouteCountAsync(Guid subscriptionId, int delta, CancellationToken cancellationToken)
+        => _dbContext.OperatorSubscriptions
+            .Where(subscription => subscription.Id == subscriptionId)
+            .Where(subscription => _dbContext.SubscriptionPlans.Any(plan =>
+                plan.Id == subscription.PlanId && subscription.CurrentRoutes + delta <= plan.MaxRoutes))
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(
+                    subscription => subscription.CurrentRoutes,
+                    subscription => subscription.CurrentRoutes + delta),
+                cancellationToken);
+
+    private Task<int> IncrementTripCountAsync(Guid subscriptionId, int delta, CancellationToken cancellationToken)
+        => _dbContext.OperatorSubscriptions
+            .Where(subscription => subscription.Id == subscriptionId)
+            .Where(subscription => _dbContext.SubscriptionPlans.Any(plan =>
+                plan.Id == subscription.PlanId && subscription.CurrentTripsThisMonth + delta <= plan.MaxTripsPerMonth))
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(
+                    subscription => subscription.CurrentTripsThisMonth,
+                    subscription => subscription.CurrentTripsThisMonth + delta),
                 cancellationToken);
 }

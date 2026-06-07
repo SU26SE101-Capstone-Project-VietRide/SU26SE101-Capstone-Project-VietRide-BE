@@ -10,6 +10,18 @@ public interface IOperatorSubscriptionRepository : IRepository<OperatorSubscript
         Guid operatorId,
         CancellationToken cancellationToken = default);
 
+    Task<(OperatorSubscription Subscription, SubscriptionPlan Plan)?> GetCurrentWithPlanByOperatorIdAsync(
+        Guid operatorId,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult<(OperatorSubscription Subscription, SubscriptionPlan Plan)?>(null);
+
+    Task<(OperatorSubscription Subscription, SubscriptionPlan Plan)?> TryIncrementUsageWithinLimitAsync(
+        Guid operatorId,
+        SubscriptionUsageResource resource,
+        int delta,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult<(OperatorSubscription Subscription, SubscriptionPlan Plan)?>(null);
+
     Task<bool> TryCreateOperatorUserWithinLimitAsync(
         Guid operatorId,
         User user,

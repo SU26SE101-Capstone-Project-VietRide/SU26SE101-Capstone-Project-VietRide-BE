@@ -100,6 +100,9 @@ public sealed class ApiResponseExceptionFilter : IExceptionFilter
             TooManyRequestsException t
                 => (429, t.ErrorCode, t.Message, null),
 
+            DomainException { ErrorCode: "SUBSCRIPTION_EXPIRED" } d
+                => (402, d.ErrorCode, d.Message, null),
+
             DomainException d
                 => (422, d.ErrorCode, d.Message, null),
 

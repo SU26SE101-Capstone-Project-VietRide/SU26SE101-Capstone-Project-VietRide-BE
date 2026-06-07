@@ -16,6 +16,12 @@ public sealed class OperatorRepository : IOperatorRepository
     public Task<Operator?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
         => _dbContext.Operators.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
+    public Task<Operator?> GetByIdNoTrackingAsync(Guid id, CancellationToken cancellationToken = default)
+        => _dbContext.Operators.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+    public Task<bool> ExistsAsync(Guid id, CancellationToken cancellationToken = default)
+        => _dbContext.Operators.AsNoTracking().AnyAsync(x => x.Id == id, cancellationToken);
+
     public Task<Operator> AddAsync(Operator entity, CancellationToken cancellationToken = default)
     {
         _dbContext.Operators.Add(entity);
