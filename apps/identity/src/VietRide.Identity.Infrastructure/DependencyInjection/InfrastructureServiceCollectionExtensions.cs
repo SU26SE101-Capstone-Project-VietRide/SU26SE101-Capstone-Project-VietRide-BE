@@ -67,6 +67,9 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IUserDeviceRepository, UserDeviceRepository>();
         services.AddScoped<IActivityLogRepository, ActivityLogRepository>();
         services.AddScoped<IOAuthIdentityRepository, OAuthIdentityRepository>();
+        services.AddScoped<IOperatorRepository, OperatorRepository>();
+        services.AddScoped<IOperatorSubscriptionRepository, OperatorSubscriptionRepository>();
+        services.AddScoped<ISubscriptionPlanRepository, SubscriptionPlanRepository>();
 
         // ------------------------------------------------------------------
         // Startup seeders
