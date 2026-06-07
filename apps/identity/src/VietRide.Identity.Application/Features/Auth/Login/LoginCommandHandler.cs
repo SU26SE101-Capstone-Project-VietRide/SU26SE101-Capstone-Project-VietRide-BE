@@ -1,6 +1,7 @@
 using MediatR;
 using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.Repositories;
+using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Abstractions;
@@ -12,6 +13,7 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
     private const int AccessTokenTtlSeconds = 900; // 15 minutes
 
     private readonly IUserRepository _users;
+    private readonly IOperatorRepository _operators;
     private readonly IRefreshTokenRepository _refreshTokens;
     private readonly IPasswordHasher _hasher;
     private readonly IAccessTokenService _accessTokenService;
@@ -22,6 +24,7 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
 
     public LoginCommandHandler(
         IUserRepository users,
+        IOperatorRepository operators,
         IRefreshTokenRepository refreshTokens,
         IPasswordHasher hasher,
         IAccessTokenService accessTokenService,
@@ -31,6 +34,7 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
         IClock clock)
     {
         _users = users;
+        _operators = operators;
         _refreshTokens = refreshTokens;
         _hasher = hasher;
         _accessTokenService = accessTokenService;
@@ -83,14 +87,24 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
             throw new UnauthorizedException("AUTH_INVALID_CREDENTIALS", "Invalid email or password.");
         }
 
-        // 5. Successful login — reset DB tracking and clear the Redis lockout window.
-        user!.RecordSuccessfulLogin(_clock);
-        await _loginLockoutCounter.ResetAsync(user.Id, cancellationToken);
+        var authenticatedUser = user!;
 
-        // 6. Issue tokens.
-        var accessToken = _accessTokenService.IssueToken(user);
+        // 5. Operator dashboard login is allowed only after the operator is approved.
+        if (RequiresApprovedOperator(authenticatedUser))
+        {
+            var operatorEntity = await _operators.GetByIdAsync(authenticatedUser.OperatorId!.Value, cancellationToken);
+            if (operatorEntity?.RegistrationStatus != OperatorRegistrationStatus.APPROVED)
+                throw new ForbiddenException("FORBIDDEN", "Operator registration is not approved.");
+        }
+
+        // 6. Successful login — reset DB tracking and clear the Redis lockout window.
+        authenticatedUser.RecordSuccessfulLogin(_clock);
+        await _loginLockoutCounter.ResetAsync(authenticatedUser.Id, cancellationToken);
+
+        // 7. Issue tokens.
+        var accessToken = _accessTokenService.IssueToken(authenticatedUser);
         var (rawRefresh, refreshEntity) = _refreshTokenFactory.Create(
-            userId: user.Id,
+            userId: authenticatedUser.Id,
             parentTokenId: null,
             familyId: null);
 
@@ -101,11 +115,15 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
             RefreshToken: rawRefresh,
             ExpiresInSeconds: AccessTokenTtlSeconds,
             User: new UserSummaryDto(
-                Id: user.Id,
-                Email: user.Email,
-                DisplayName: user.DisplayName,
-                Role: user.Role.ToString(),
-                OperatorId: user.OperatorId,
-                Status: user.Status.ToString()));
+                Id: authenticatedUser.Id,
+                Email: authenticatedUser.Email,
+                DisplayName: authenticatedUser.DisplayName,
+                Role: authenticatedUser.Role.ToString(),
+                OperatorId: authenticatedUser.OperatorId,
+                Status: authenticatedUser.Status.ToString()));
     }
+
+    private static bool RequiresApprovedOperator(User user)
+        => user.OperatorId.HasValue
+            && (user.Role == UserRole.OPERATOR_ADMIN || user.Role == UserRole.OPERATOR_STAFF);
 }

@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Json;
+using System.Reflection;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -8,9 +9,14 @@ using FluentAssertions;
 using MediatR;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
+using Npgsql;
+using VietRide.Identity.Application.Abstractions;
+using VietRide.Identity.Application.Abstractions.ExternalClients;
 using VietRide.Identity.Application.Features.Auth.GoogleLogin;
 using VietRide.Identity.Application.Features.Auth.Login;
 using VietRide.Identity.Application.Features.Auth.Logout;
@@ -18,8 +24,12 @@ using VietRide.Identity.Application.Features.Auth.Refresh;
 using VietRide.Identity.Application.Features.Auth.Register;
 using VietRide.Identity.Application.Features.Auth.SetInitialPassword;
 using VietRide.Identity.Application.Features.Auth.VerifyEmail;
+using VietRide.Identity.Domain.Entities;
+using VietRide.Identity.Domain.Enums;
+using VietRide.Identity.Infrastructure;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Shared.Persistence;
 using Xunit;
 
 namespace VietRide.Identity.IntegrationTests.Api;
@@ -32,13 +42,19 @@ namespace VietRide.Identity.IntegrationTests.Api;
 /// return properly shaped <c>ApiResponse</c> envelope responses (ADR 0004).
 /// (End-to-end flow tests are run manually against the dev stack.)
 /// </summary>
-public sealed class AuthEndpointsTests : IClassFixture<AuthWebApplicationFactory>
+public sealed class AuthEndpointsTests :
+    IClassFixture<AuthWebApplicationFactory>,
+    IClassFixture<AuthEndpointsTests.DbBackedAuthFactory>
 {
-    private readonly AuthWebApplicationFactory _factory;
+    private static readonly Guid SystemAdminId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
-    public AuthEndpointsTests(AuthWebApplicationFactory factory)
+    private readonly AuthWebApplicationFactory _factory;
+    private readonly DbBackedAuthFactory _dbFactory;
+
+    public AuthEndpointsTests(AuthWebApplicationFactory factory, DbBackedAuthFactory dbFactory)
     {
         _factory = factory;
+        _dbFactory = dbFactory;
     }
 
     // -------------------------------------------------------------------------
@@ -156,6 +172,112 @@ public sealed class AuthEndpointsTests : IClassFixture<AuthWebApplicationFactory
     }
 
     [Fact]
+    public async Task PostLogin_NonApprovedOperator_Returns403ForbiddenEnvelopeWithoutTokens()
+    {
+        using var client = CreateClientWithSender(new NonApprovedOperatorLoginAuthSender());
+
+        var response = await client.PostAsJsonAsync("/v1/auth/login", new
+        {
+            email = "operator@example.com",
+            password = "password123",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("success").GetBoolean().Should().BeFalse();
+        doc.RootElement.GetProperty("statusCode").GetInt32().Should().Be(403);
+        doc.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("FORBIDDEN");
+        doc.RootElement.TryGetProperty("data", out _).Should().BeFalse();
+        body.Should().NotContain("accessToken");
+        body.Should().NotContain("refreshToken");
+    }
+
+    [Fact]
+    public async Task OperatorSelfRegisterVerifyApproveThenLogin_UsesRealHandlersDbAndReturnsOperatorAdminTokens()
+    {
+        await _dbFactory.ResetAsync();
+        await _dbFactory.SeedSystemAdminAsync(SystemAdminId);
+        var email = UniqueEmail("operator-self-register-login");
+        const string Password = "Password123!";
+        using var client = _dbFactory.CreateClient();
+
+        var registerResponse = await client.PostAsJsonAsync("/v1/operators/register", ValidOperatorRegisterPayload(email, Password));
+
+        registerResponse.StatusCode.Should().Be(HttpStatusCode.Created);
+        using var registerDoc = JsonDocument.Parse(await registerResponse.Content.ReadAsStringAsync());
+        AssertSuccessEnvelope(registerDoc, 201);
+        var operatorId = registerDoc.RootElement.GetProperty("data").GetProperty("operatorId").GetGuid();
+
+        var verificationCode = await _dbFactory.GetRegistrationCodeAsync(operatorId);
+        _dbFactory.EmailService.SentOtps.Should().ContainSingle(message => message.To == email && message.Code == verificationCode);
+        var verifyResponse = await client.PostAsJsonAsync("/v1/auth/verify-email", new
+        {
+            email,
+            code = verificationCode,
+            purpose = EmailVerificationPurpose.REGISTRATION.ToString(),
+        });
+        verifyResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using var approveRequest = AuthorizedPost($"/v1/admin/operators/{operatorId}/approve", new { });
+        var approveResponse = await client.SendAsync(approveRequest);
+        approveResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var loginResponse = await client.PostAsJsonAsync("/v1/auth/login", new
+        {
+            email,
+            password = Password,
+        });
+
+        loginResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var loginDoc = JsonDocument.Parse(await loginResponse.Content.ReadAsStringAsync());
+        AssertSuccessEnvelope(loginDoc, 200);
+        AssertOperatorAdminLogin(loginDoc, email, operatorId);
+    }
+
+    [Fact]
+    public async Task AdminCreateSetInitialPasswordThenLogin_UsesRealHandlersDbAndReturnsOperatorAdminTokens()
+    {
+        await _dbFactory.ResetAsync();
+        await _dbFactory.SeedSystemAdminAsync(SystemAdminId);
+        var email = UniqueEmail("operator-admin-create-login");
+        const string Password = "Password123!";
+        using var client = _dbFactory.CreateClient();
+        using var createRequest = AuthorizedPost("/v1/admin/operators", ValidAdminCreatePayload(email));
+
+        var createResponse = await client.SendAsync(createRequest);
+
+        createResponse.StatusCode.Should().Be(HttpStatusCode.Created);
+        using var createDoc = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        AssertSuccessEnvelope(createDoc, 201);
+        var operatorId = createDoc.RootElement.GetProperty("data").GetProperty("operator").GetProperty("operatorId").GetGuid();
+        var adminUserId = createDoc.RootElement.GetProperty("data").GetProperty("adminUser").GetProperty("userId").GetGuid();
+
+        var initialPasswordToken = await _dbFactory.GetSetInitialPasswordTokenAsync(adminUserId);
+        _dbFactory.EmailService.SentAccountCreatedLinks.Should().ContainSingle(message =>
+            message.To == email
+            && message.Info.UserId == adminUserId
+            && message.Info.SetInitialPasswordUrl.EndsWith(initialPasswordToken, StringComparison.Ordinal));
+        var setPasswordResponse = await client.PostAsJsonAsync("/v1/auth/set-initial-password", new
+        {
+            token = initialPasswordToken,
+            password = Password,
+        });
+        setPasswordResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var loginResponse = await client.PostAsJsonAsync("/v1/auth/login", new
+        {
+            email,
+            password = Password,
+        });
+
+        loginResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var loginDoc = JsonDocument.Parse(await loginResponse.Content.ReadAsStringAsync());
+        AssertSuccessEnvelope(loginDoc, 200);
+        AssertOperatorAdminLogin(loginDoc, email, operatorId);
+    }
+
+    [Fact]
     public async Task PostGoogle_HappyPath_Returns200EnvelopeWithTokens()
     {
         using var client = CreateClientWithSender(new HappyPathAuthSender());
@@ -245,7 +367,7 @@ public sealed class AuthEndpointsTests : IClassFixture<AuthWebApplicationFactory
     [Fact]
     public async Task PostRegister_InvalidPhone_Returns400_WithAuthPhoneInvalidFormat()
     {
-        using var client = _factory.CreateClient();
+        using var client = CreateClientWithSender(new InvalidPhoneRegisterAuthSender());
 
         var response = await client.PostAsJsonAsync("/v1/auth/register", new
         {
@@ -463,6 +585,66 @@ public sealed class AuthEndpointsTests : IClassFixture<AuthWebApplicationFactory
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
+    private static object ValidOperatorRegisterPayload(string email, string password)
+        => new
+        {
+            name = "Operator Co",
+            contactEmail = email,
+            contactPhone = "+84901234567",
+            businessRegistrationNumber = $"BRN-{Guid.NewGuid():N}",
+            taxCode = $"TAX-{Guid.NewGuid():N}",
+            addressStreet = "1 Street",
+            addressWard = "Ward",
+            addressDistrict = "District",
+            addressProvince = "Province",
+            representativeName = "Operator Admin",
+            representativePhone = "+84901234568",
+            password,
+        };
+
+    private static object ValidAdminCreatePayload(string email)
+        => new
+        {
+            name = "Operator Co",
+            contactEmail = email,
+            contactPhone = "+84901234567",
+            businessRegistrationNumber = $"BRN-{Guid.NewGuid():N}",
+            taxCode = $"TAX-{Guid.NewGuid():N}",
+            addressStreet = "1 Street",
+            addressWard = "Ward",
+            addressDistrict = "District",
+            addressProvince = "Province",
+            representativeName = "Operator Admin",
+            representativePhone = "+84901234568",
+        };
+
+    private static HttpRequestMessage AuthorizedPost(string path, object body)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, path)
+        {
+            Content = JsonContent.Create(body),
+        };
+        request.Headers.TryAddWithoutValidation(
+            "X-Internal-Auth",
+            $"Bearer {CreateInternalJwt(SystemAdminId, UserRole.SYSTEM_ADMIN.ToString())}");
+
+        return request;
+    }
+
+    private static string UniqueEmail(string prefix)
+        => $"{prefix}-{Guid.NewGuid():N}@example.com";
+
+    private static void AssertOperatorAdminLogin(JsonDocument doc, string email, Guid operatorId)
+    {
+        var data = doc.RootElement.GetProperty("data");
+        data.GetProperty("accessToken").GetString().Should().NotBeNullOrWhiteSpace();
+        data.GetProperty("refreshToken").GetString().Should().NotBeNullOrWhiteSpace();
+        var user = data.GetProperty("user");
+        user.GetProperty("email").GetString().Should().Be(email);
+        user.GetProperty("role").GetString().Should().Be(UserRole.OPERATOR_ADMIN.ToString());
+        user.GetProperty("operatorId").GetGuid().Should().Be(operatorId);
+    }
+
     private HttpClient CreateClientWithSender(ISender sender)
     {
         return _factory.WithWebHostBuilder(builder =>
@@ -485,19 +667,277 @@ public sealed class AuthEndpointsTests : IClassFixture<AuthWebApplicationFactory
     }
 
     private static string CreateInternalJwt()
+        => CreateInternalJwt("integration-test", role: null);
+
+    private static string CreateInternalJwt(Guid userId, string role)
+        => CreateInternalJwt(userId.ToString(), role);
+
+    private static string CreateInternalJwt(string subject, string? role)
     {
         var now = DateTime.UtcNow;
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(AuthWebApplicationFactory.InternalJwtSecret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+        var claims = new List<Claim>
+        {
+            new(JwtRegisteredClaimNames.Sub, subject),
+        };
+        if (role is not null)
+        {
+            claims.Add(new Claim("role", role));
+            claims.Add(new Claim(ClaimTypes.Role, role));
+        }
+
         var token = new JwtSecurityToken(
             issuer: "vietride-gateway",
             audience: "vietride-internal",
-            claims: [new Claim(JwtRegisteredClaimNames.Sub, "integration-test")],
+            claims: claims,
             notBefore: now.AddSeconds(-5),
             expires: now.AddSeconds(120),
             signingCredentials: credentials);
 
         return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    public sealed class DbBackedAuthFactory : WebApplicationFactory<Program>
+    {
+        private readonly string _connectionString = BuildTestDatabaseConnectionString();
+        private readonly string _databaseName;
+        private bool _databaseCreated;
+        private bool _initialized;
+
+        public DbBackedAuthFactory()
+        {
+            _databaseName = new NpgsqlConnectionStringBuilder(_connectionString).Database!;
+        }
+
+        public CapturingEmailService EmailService { get; } = new();
+
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            Environment.SetEnvironmentVariable("INTERNAL_JWT_SECRET", AuthWebApplicationFactory.InternalJwtSecret);
+            builder.UseEnvironment("Testing");
+            builder.UseSetting("INTERNAL_JWT_SECRET", AuthWebApplicationFactory.InternalJwtSecret);
+            builder.UseSetting("ConnectionStrings:Default", _connectionString);
+            builder.UseSetting("REDIS_URL", "localhost:6379,abortConnect=false");
+            builder.UseSetting("IdentityJwt:Kid", "test-kid");
+            builder.UseSetting("IdentityJwt:PrivateKey", AuthWebApplicationFactory.DevPrivateKeyPem);
+
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<NpgsqlDataSource>();
+                services.RemoveAll<DbContextOptions<IdentityDbContext>>();
+                services.RemoveAll<IdentityDbContext>();
+                services.RemoveAll<VietRideDbContextBase>();
+                services.RemoveAll<IEmailService>();
+                services.RemoveAll<ILoginLockoutCounter>();
+
+                services.AddSingleton(_ =>
+                {
+                    var dataSourceBuilder = new NpgsqlDataSourceBuilder(_connectionString);
+                    IdentityDbContext.ConfigurePostgresEnums(dataSourceBuilder);
+                    return dataSourceBuilder.Build();
+                });
+
+                services.AddDbContext<IdentityDbContext>((sp, options) =>
+                {
+                    options
+                        .UseNpgsql(sp.GetRequiredService<NpgsqlDataSource>())
+                        .ConfigureWarnings(warnings => warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning));
+                });
+                services.AddScoped<VietRideDbContextBase>(sp => sp.GetRequiredService<IdentityDbContext>());
+                services.AddSingleton<IEmailService>(EmailService);
+                services.AddSingleton<ILoginLockoutCounter, NoOpLoginLockoutCounter>();
+            });
+        }
+
+        public async Task ResetAsync()
+        {
+            await InitializeAsync();
+            EmailService.SentOtps.Clear();
+            EmailService.SentAccountCreatedLinks.Clear();
+
+            await using var scope = Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            await db.Database.ExecuteSqlRawAsync(
+                "TRUNCATE TABLE vietride_identity.activity_logs, vietride_identity.email_verification_tokens, vietride_identity.refresh_tokens, vietride_identity.operator_subscriptions, vietride_identity.users, vietride_identity.operators, vietride_identity.outbox_messages RESTART IDENTITY CASCADE;");
+        }
+
+        public async Task SeedSystemAdminAsync(Guid userId)
+        {
+            await using var scope = Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var systemAdmin = User.CreateAdminPendingPassword("system-admin@example.com", "System Admin");
+            SetPrivateProperty(systemAdmin, nameof(User.Id), userId);
+            await db.Users.AddAsync(systemAdmin);
+            await db.SaveChangesAsync();
+        }
+
+        public async Task<string> GetRegistrationCodeAsync(Guid operatorId)
+        {
+            await using var scope = Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            return await (
+                from token in db.EmailVerificationTokens
+                join user in db.Users on token.UserId equals user.Id
+                where token.Purpose == EmailVerificationPurpose.REGISTRATION && user.OperatorId == operatorId
+                select token.Code)
+                .SingleAsync();
+        }
+
+        public async Task<string> GetSetInitialPasswordTokenAsync(Guid userId)
+        {
+            await using var scope = Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            return await db.EmailVerificationTokens
+                .Where(token => token.UserId == userId && token.Purpose == EmailVerificationPurpose.SET_INITIAL_PASSWORD)
+                .Select(token => token.Code)
+                .SingleAsync();
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            await base.DisposeAsync();
+            await DropDatabaseAsync();
+        }
+
+        private async Task InitializeAsync()
+        {
+            if (_initialized)
+            {
+                return;
+            }
+
+            await CreateDatabaseAsync();
+
+            await using var scope = Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            await db.Database.MigrateAsync();
+            await ReloadPostgresTypesAsync();
+            _initialized = true;
+        }
+
+        private async Task DropDatabaseAsync()
+        {
+            if (!_databaseCreated)
+            {
+                return;
+            }
+
+            await using var connection = new NpgsqlConnection(BuildMaintenanceConnectionString());
+            await connection.OpenAsync();
+            await using var terminateCommand = connection.CreateCommand();
+            terminateCommand.CommandText =
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = @databaseName AND pid <> pg_backend_pid();";
+            terminateCommand.Parameters.AddWithValue("databaseName", _databaseName);
+            await terminateCommand.ExecuteNonQueryAsync();
+
+            await using var dropCommand = connection.CreateCommand();
+            dropCommand.CommandText = $"DROP DATABASE IF EXISTS \"{_databaseName}\"";
+            await dropCommand.ExecuteNonQueryAsync();
+            _databaseCreated = false;
+        }
+
+        private async Task CreateDatabaseAsync()
+        {
+            if (_databaseCreated)
+            {
+                return;
+            }
+
+            await using var connection = new NpgsqlConnection(BuildMaintenanceConnectionString());
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"CREATE DATABASE \"{_databaseName}\"";
+            await command.ExecuteNonQueryAsync();
+            _databaseCreated = true;
+        }
+
+        private async Task ReloadPostgresTypesAsync()
+        {
+            var dataSource = Services.GetRequiredService<NpgsqlDataSource>();
+            await using var connection = await dataSource.OpenConnectionAsync();
+            await connection.ReloadTypesAsync();
+        }
+
+        private string BuildMaintenanceConnectionString()
+        {
+            var builder = new NpgsqlConnectionStringBuilder(_connectionString)
+            {
+                Database = "postgres",
+            };
+
+            return builder.ConnectionString;
+        }
+
+        private static string BuildTestDatabaseConnectionString()
+        {
+            var configured = Environment.GetEnvironmentVariable("VIETRIDE_IDENTITY_TEST_CONNECTION_STRING")
+                ?? Environment.GetEnvironmentVariable("ConnectionStrings__Default")
+                ?? "Host=localhost;Port=5432;Database=vietride_identity_tests;Username=vietride;Password=vietride_dev";
+            var builder = new NpgsqlConnectionStringBuilder(configured)
+            {
+                Database = $"vietride_identity_task6_2b_{Guid.NewGuid():N}",
+            };
+
+            return builder.ConnectionString;
+        }
+
+        private static void SetPrivateProperty<T>(object entity, string propertyName, T value)
+        {
+            var type = entity.GetType();
+            while (type is not null)
+            {
+                var property = type.GetProperty(
+                    propertyName,
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (property is not null)
+                {
+                    property.SetValue(entity, value);
+                    return;
+                }
+
+                type = type.BaseType;
+            }
+
+            throw new InvalidOperationException($"Property {propertyName} was not found on {entity.GetType().Name}.");
+        }
+    }
+
+    private sealed class NoOpLoginLockoutCounter : ILoginLockoutCounter
+    {
+        public Task<long> IncrementAsync(Guid userId, CancellationToken ct = default)
+            => Task.FromResult(1L);
+
+        public Task ResetAsync(Guid userId, CancellationToken ct = default)
+            => Task.CompletedTask;
+    }
+
+    public sealed class CapturingEmailService : IEmailService
+    {
+        public List<(string To, string Code, EmailOtpPurpose Purpose, int TtlMinutes)> SentOtps { get; } = [];
+        public List<(string To, AccountCreatedEmailDto Info)> SentAccountCreatedLinks { get; } = [];
+
+        public Task SendOtpAsync(string to, string code, EmailOtpPurpose purpose, int ttlMinutes, CancellationToken ct = default)
+        {
+            SentOtps.Add((to, code, purpose, ttlMinutes));
+            return Task.CompletedTask;
+        }
+
+        public Task SendAccountCreatedLinkAsync(
+            string to,
+            AccountCreatedEmailDto accountInfo,
+            CancellationToken ct = default)
+        {
+            SentAccountCreatedLinks.Add((to, accountInfo));
+            return Task.CompletedTask;
+        }
+
+        public Task SendParcelDeliveryLinkAsync(
+            string to,
+            string deliveryToken,
+            ParcelDeliveryEmailDto parcelInfo,
+            CancellationToken ct = default)
+            => throw new NotSupportedException();
     }
 }
 
@@ -553,6 +993,90 @@ internal sealed class HappyPathAuthSender : ISender
                 "PASSENGER",
                 null,
                 "ACTIVE"));
+}
+
+internal sealed class InvalidPhoneRegisterAuthSender : ISender
+{
+    public Task<TResponse> Send<TResponse>(IRequest<TResponse> request, CancellationToken cancellationToken = default)
+    {
+        if (request is RegisterCommand command)
+        {
+            ThrowInvalidPhone(command);
+        }
+
+        throw new InvalidOperationException($"Unexpected request type {request.GetType().Name}.");
+    }
+
+    public Task<object?> Send(object request, CancellationToken cancellationToken = default)
+    {
+        if (request is RegisterCommand command)
+        {
+            ThrowInvalidPhone(command);
+        }
+
+        throw new InvalidOperationException($"Unexpected request type {request.GetType().Name}.");
+    }
+
+    private static void ThrowInvalidPhone(RegisterCommand command)
+    {
+        if (command.Phone != "not-a-phone")
+        {
+            throw new InvalidOperationException(
+                $"Unexpected register phone '{command.Phone}' for invalid-phone test sender.");
+        }
+
+        throw new BadRequestException("AUTH_PHONE_INVALID_FORMAT", "Invalid phone number format.");
+    }
+
+    public IAsyncEnumerable<TResponse> CreateStream<TResponse>(
+        IStreamRequest<TResponse> request,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Auth endpoint tests do not use streaming MediatR requests.");
+
+    public IAsyncEnumerable<object?> CreateStream(object request, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Auth endpoint tests do not use streaming MediatR requests.");
+}
+
+internal sealed class NonApprovedOperatorLoginAuthSender : ISender
+{
+    public Task<TResponse> Send<TResponse>(IRequest<TResponse> request, CancellationToken cancellationToken = default)
+    {
+        if (request is LoginCommand command)
+        {
+            ThrowForbidden(command);
+        }
+
+        throw new InvalidOperationException($"Unexpected request type {request.GetType().Name}.");
+    }
+
+    public Task<object?> Send(object request, CancellationToken cancellationToken = default)
+    {
+        if (request is LoginCommand command)
+        {
+            ThrowForbidden(command);
+        }
+
+        throw new InvalidOperationException($"Unexpected request type {request.GetType().Name}.");
+    }
+
+    private static void ThrowForbidden(LoginCommand command)
+    {
+        if (command.Email != "operator@example.com")
+        {
+            throw new InvalidOperationException(
+                $"Unexpected login email '{command.Email}' for non-approved operator test sender.");
+        }
+
+        throw new ForbiddenException("FORBIDDEN", "Operator registration is not approved.");
+    }
+
+    public IAsyncEnumerable<TResponse> CreateStream<TResponse>(
+        IStreamRequest<TResponse> request,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Auth endpoint tests do not use streaming MediatR requests.");
+
+    public IAsyncEnumerable<object?> CreateStream(object request, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Auth endpoint tests do not use streaming MediatR requests.");
 }
 
 internal sealed class SetInitialPasswordErrorAuthSender : ISender
@@ -655,7 +1179,7 @@ public sealed class AuthWebApplicationFactory : WebApplicationFactory<Program>
     internal const string InternalJwtSecret = "test-secret-at-least-32-chars-long-xxxxx";
 
     // Dev-only RSA 2048 private key (PKCS#8 PEM) — same as appsettings.Development.json placeholder.
-    private const string DevPrivateKeyPem =
+    internal const string DevPrivateKeyPem =
         "-----BEGIN PRIVATE KEY-----\n" +
         "MIIEuwIBADANBgkqhkiG9w0BAQEFAASCBKUwggShAgEAAoIBAQC+6Nk4TLBS4Hm3\n" +
         "p3/urqAAa+/eC1o+W4sbvmKEv2mZb9kxnTWwGudixb3bIxTD/5b468eI3cBftXZB\n" +
