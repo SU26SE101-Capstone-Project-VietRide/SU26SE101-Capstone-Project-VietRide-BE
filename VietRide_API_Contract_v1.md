@@ -164,6 +164,16 @@ Error `403` — account locked:
 }
 ```
 
+Error `403` — OPERATOR_ADMIN/OPERATOR_STAFF belongs to an operator that is not currently `APPROVED`:
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "error": { "code": "FORBIDDEN", "message": "Nhà xe chưa được phép truy cập hệ thống." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
 ### POST `/v1/auth/refresh`
 
 Auth: public.
@@ -488,7 +498,7 @@ Error `422` — invalid device token payload:
 
 ### POST `/v1/operator/users/{userId}/resend-initial-password`
 
-Auth: `OPERATOR_ADMIN`. Tenant isolation: caller `operatorId` must match the target user's `operatorId`. Idempotency-Key: not required by BSOT §5.6.
+Auth: `OPERATOR_ADMIN`. Tenant isolation: caller `operatorId` must match the target user's `operatorId`. Caller Operator must currently be `APPROVED`; tokens issued before a later suspend/reject return `403 FORBIDDEN` without token/email/ActivityLog side effects. Idempotency-Key: not required by BSOT §5.6.
 
 Request: empty JSON object `{}`.
 
@@ -516,7 +526,7 @@ Error `401` — missing or invalid token:
 }
 ```
 
-Error `403` — caller is not an operator admin or cross-operator target:
+Error `403` — caller is not an operator admin, cross-operator target, or caller Operator is not currently `APPROVED`:
 ```json
 {
   "success": false,
@@ -1563,15 +1573,160 @@ Response: Server-Sent Events stream with assistant tokens and final cited chunk 
 
 ## Operator/Admin Management
 
+### POST `/v1/operators/register`
+
+Auth: public. Idempotency-Key: not required by BSOT §5.6.
+
+Request:
+```json
+{
+  "name": "VietRide Limousine",
+  "contactEmail": "ops@example.com",
+  "contactPhone": "+84901234567",
+  "businessRegistrationNumber": "0312345678",
+  "taxCode": "0312345678",
+  "addressStreet": "123 Le Loi",
+  "addressWard": "Ben Nghe",
+  "addressDistrict": "District 1",
+  "addressProvince": "Ho Chi Minh City",
+  "representativeName": "Nguyen Van Operator",
+  "representativePhone": "+84907654321",
+  "password": "pass1234"
+}
+```
+
+Response `201`:
+```json
+{
+  "success": true,
+  "statusCode": 201,
+  "data": {
+    "operatorId": "uuid",
+    "message": "Đơn đăng ký đã nhận, vui lòng xác thực email"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Errors:
+- `409 OPERATOR_DUPLICATE_REGISTRATION` — `businessRegistrationNumber` already exists among non-deleted operators.
+- `409 OPERATOR_DUPLICATE_TAX_CODE` — `taxCode` already exists among non-deleted operators.
+- `409 AUTH_EMAIL_ALREADY_REGISTERED` — OPERATOR_ADMIN email already exists.
+- `409 AUTH_PHONE_ALREADY_REGISTERED` — OPERATOR_ADMIN phone already exists.
+- `422 VALIDATION_ERROR` — invalid payload/password/phone format.
+
+Notes: creates `Operator.registrationStatus=PENDING`, OPERATOR_ADMIN user `PENDING_EMAIL_VERIFICATION`, and Starter Free-Trial `OperatorSubscription.status=PENDING_APPROVAL` in one transaction. The OPERATOR_ADMIN cannot login until email is verified and the operator is approved.
+
 ### GET `/v1/admin/operators`
 
 Auth: `SYSTEM_ADMIN`.
 
-Response `200`: paged operators.
+Query: `page?`, `pageSize?`, `search?`, `sortBy?`, `sortDir?`, `status?` (`PENDING|APPROVED|REJECTED|SUSPENDED`).
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [
+      {
+        "operatorId": "uuid",
+        "name": "VietRide Limousine",
+        "contactEmail": "ops@example.com",
+        "contactPhone": "+84901234567",
+        "businessRegistrationNumber": "0312345678",
+        "taxCode": "0312345678",
+        "registrationStatus": "PENDING",
+        "isActive": true,
+        "createdAt": "2026-06-01T10:00:00Z",
+        "approvedAt": null,
+        "suspendedAt": null
+      }
+    ],
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 1,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+### POST `/v1/admin/operators`
+
+Auth: `SYSTEM_ADMIN`. Idempotency-Key: not required by BSOT §5.6.
+
+Request:
+```json
+{
+  "name": "VietRide Limousine",
+  "contactEmail": "ops@example.com",
+  "contactPhone": "+84901234567",
+  "businessRegistrationNumber": "0312345678",
+  "taxCode": "0312345678",
+  "addressStreet": "123 Le Loi",
+  "addressWard": "Ben Nghe",
+  "addressDistrict": "District 1",
+  "addressProvince": "Ho Chi Minh City",
+  "representativeName": "Nguyen Van Operator",
+  "representativePhone": "+84907654321"
+}
+```
+
+Response `201`:
+```json
+{
+  "success": true,
+  "statusCode": 201,
+  "data": {
+    "operator": {
+      "operatorId": "uuid",
+      "name": "VietRide Limousine",
+      "registrationStatus": "APPROVED",
+      "contactEmail": "ops@example.com",
+      "contactPhone": "+84901234567",
+      "businessRegistrationNumber": "0312345678",
+      "taxCode": "0312345678"
+    },
+    "adminUser": {
+      "userId": "uuid",
+      "email": "ops@example.com",
+      "phone": "+84907654321",
+      "displayName": "Nguyen Van Operator",
+      "role": "OPERATOR_ADMIN",
+      "status": "PENDING_INITIAL_PASSWORD"
+    },
+    "subscription": {
+      "subscriptionId": "uuid",
+      "planId": "00000000-0000-0000-0000-000000000001",
+      "planName": "Starter (Free Trial)",
+      "status": "ACTIVE",
+      "startedAt": "2026-06-01T10:00:00Z",
+      "expiresAt": "2026-07-01T10:00:00Z",
+      "currentOperatorUsers": 1
+    }
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Errors:
+- `409 OPERATOR_DUPLICATE_REGISTRATION` — `businessRegistrationNumber` already exists among non-deleted operators.
+- `409 OPERATOR_DUPLICATE_TAX_CODE` — `taxCode` already exists among non-deleted operators.
+- `409 AUTH_EMAIL_ALREADY_REGISTERED` — OPERATOR_ADMIN email already exists.
+- `409 AUTH_PHONE_ALREADY_REGISTERED` — OPERATOR_ADMIN phone already exists.
+- `422 VALIDATION_ERROR` — invalid payload, including any paid-plan/`planId` field. Day 6 supports only the default Starter Free-Trial path and never creates `PENDING_PAYMENT` here.
+
+Notes: creates an approved Operator, a passwordless OPERATOR_ADMIN `PENDING_INITIAL_PASSWORD`, a 48h `SET_INITIAL_PASSWORD` email link, and an ACTIVE Starter Free-Trial subscription in one transaction.
 
 ### POST `/v1/admin/operators/{operatorId}/approve`
 
-Auth: `SYSTEM_ADMIN`.
+Auth: `SYSTEM_ADMIN`. Idempotency-Key: not required by BSOT §5.6.
+
+Request: empty JSON object `{}`.
 
 Response `200`:
 ```json
@@ -1586,9 +1741,45 @@ Response `200`:
 }
 ```
 
+Errors:
+- `404 RESOURCE_NOT_FOUND` — operator does not exist.
+- `422 VALIDATION_ERROR` — invalid lifecycle transition, for example approving a non-`PENDING` operator. Day 6 does not implement SUSPENDED -> APPROVED reactivation.
+
+Notes: atomically sets `Operator.registrationStatus=APPROVED` and activates the PENDING_APPROVAL Starter Free-Trial subscription for 30 days. Outbox emission is deferred to Day 10.
+
+### POST `/v1/admin/operators/{operatorId}/reject`
+
+Auth: `SYSTEM_ADMIN`. Idempotency-Key: not required by BSOT §5.6.
+
+Request:
+```json
+{
+  "reason": "Business registration documents are invalid."
+}
+```
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "operatorId": "uuid",
+    "registrationStatus": "REJECTED"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Errors:
+- `404 RESOURCE_NOT_FOUND` — operator does not exist.
+- `422 VALIDATION_ERROR` — missing reason or invalid lifecycle transition.
+
+Notes: atomically sets `Operator.registrationStatus=REJECTED`, stores reject metadata, and sets the PENDING_APPROVAL subscription to `CANCELLED`. `operator_subscriptions` is not soft-deletable in the canonical DDL, so no `deletedAt` is set.
+
 ### POST `/v1/admin/operators/{operatorId}/suspend`
 
-Auth: `SYSTEM_ADMIN`.
+Auth: `SYSTEM_ADMIN`. Idempotency-Key: not required by BSOT §5.6.
 
 Request:
 ```json
@@ -1609,6 +1800,212 @@ Response `200`:
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
+
+Errors:
+- `404 RESOURCE_NOT_FOUND` — operator does not exist.
+- `422 VALIDATION_ERROR` — missing reason or invalid lifecycle transition.
+
+Notes: suspend writes no ActivityLog in Day 6 because canonical `activity_log_action` has no `SUSPEND_OPERATOR`. Outbox emission is deferred to Day 10.
+
+### POST `/v1/operator/users`
+
+Auth: `OPERATOR_ADMIN`. Tenant isolation: caller `operatorId` is the created user's `operatorId`. Caller Operator must currently be `APPROVED`; tokens issued before a later suspend/reject return `403 FORBIDDEN` without side effects. Idempotency-Key: not required by BSOT §5.6.
+
+Request:
+```json
+{
+  "email": "driver@example.com",
+  "phone": "+84901112222",
+  "displayName": "Driver One",
+  "role": "DRIVER"
+}
+```
+
+Allowed `role`: `DRIVER`, `ASSISTANT`, `OPERATOR_STAFF`.
+
+Response `201`:
+```json
+{
+  "success": true,
+  "statusCode": 201,
+  "data": {
+    "userId": "uuid",
+    "email": "driver@example.com",
+    "phone": "+84901112222",
+    "displayName": "Driver One",
+    "role": "DRIVER",
+    "status": "PENDING_INITIAL_PASSWORD",
+    "operatorId": "uuid",
+    "initialPasswordExpiresAt": "2026-06-03T10:00:00Z"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Errors:
+- `403 FORBIDDEN` — caller is not `OPERATOR_ADMIN`, has no `operatorId`, or caller Operator is not currently `APPROVED`.
+- `409 AUTH_EMAIL_ALREADY_REGISTERED` — target email already exists.
+- `409 AUTH_PHONE_ALREADY_REGISTERED` — target phone already exists.
+- `422 SUBSCRIPTION_LIMIT_EXCEEDED` — creating the target role would exceed the current subscription limit.
+- `422 VALIDATION_ERROR` — invalid payload or role outside the allowed set.
+
+### GET `/v1/operator/profile`
+
+Auth: `OPERATOR_ADMIN` or `OPERATOR_STAFF`. Tenant isolation: operator is resolved from caller `operatorId`. Read is allowed even when the current Operator is non-`APPROVED` so the UI can display current status/policies.
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "operatorId": "uuid",
+    "name": "VietRide Limousine",
+    "businessRegistrationNumber": "0312345678",
+    "taxCode": "0312345678",
+    "contactEmail": "ops@example.com",
+    "contactPhone": "+84901234567",
+    "logoUrl": null,
+    "address": {
+      "street": "123 Le Loi",
+      "ward": "Ben Nghe",
+      "district": "District 1",
+      "province": "Ho Chi Minh City"
+    },
+    "representativeName": "Nguyen Van Operator",
+    "representativePhone": "+84907654321",
+    "registrationStatus": "APPROVED",
+    "isActive": true,
+    "cancellationPolicy": [
+      { "hoursBeforeDeparture": 24, "feePercent": 10 }
+    ],
+    "parcelNoShowPolicy": { "noShowFeePercent": 0, "additionalPaymentTimeoutMinutes": 30 },
+    "luggagePolicy": { "defaultLuggageKgPerSeat": 10 }
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Errors:
+- `403 FORBIDDEN` — caller is not an operator role or has no `operatorId`.
+- `404 RESOURCE_NOT_FOUND` — operator does not exist.
+
+### PATCH `/v1/operator/profile`
+
+Auth: `OPERATOR_ADMIN`. Tenant isolation: operator is resolved from caller `operatorId`. Caller Operator must currently be `APPROVED`; tokens issued before a later suspend/reject return `403 FORBIDDEN` without side effects. Idempotency-Key: not required by BSOT §5.6.
+
+Request:
+```json
+{
+  "name": "VietRide Limousine",
+  "contactPhone": "+84901234567",
+  "logoUrl": "https://cdn.vietride.app/operators/logo.png",
+  "addressStreet": "123 Le Loi",
+  "addressWard": "Ben Nghe",
+  "addressDistrict": "District 1",
+  "addressProvince": "Ho Chi Minh City",
+  "representativeName": "Nguyen Van Operator",
+  "representativePhone": "+84907654321",
+  "cancellationPolicy": [
+    { "hoursBeforeDeparture": 24, "feePercent": 10 },
+    { "hoursBeforeDeparture": 2, "feePercent": 50 }
+  ],
+  "parcelNoShowPolicy": { "noShowFeePercent": 0, "additionalPaymentTimeoutMinutes": 30 },
+  "luggagePolicy": { "defaultLuggageKgPerSeat": 10 }
+}
+```
+
+Response `200`: same `data` shape as `GET /v1/operator/profile`.
+
+Errors:
+- `403 FORBIDDEN` — caller is not `OPERATOR_ADMIN`, has no `operatorId`, or caller Operator is not currently `APPROVED`.
+- `404 RESOURCE_NOT_FOUND` — operator does not exist.
+- `422 VALIDATION_ERROR` — invalid policy JSON shape or invalid profile payload.
+
+### GET `/internal/v1/operators/{operatorId}`
+
+Auth: Internal JWT via `X-Internal-Auth`. Not exposed through Gateway. Success response is raw DTO (no `ApiResponse` wrapper); errors use the standard ADR 0004 error envelope.
+
+Response `200`:
+```json
+{
+  "operatorId": "uuid",
+  "name": "VietRide Limousine",
+  "registrationStatus": "APPROVED",
+  "isActive": true,
+  "contactEmail": "ops@example.com",
+  "contactPhone": "+84901234567",
+  "businessRegistrationNumber": "0312345678",
+  "taxCode": "0312345678"
+}
+```
+
+Error `404` — `RESOURCE_NOT_FOUND`.
+
+### GET `/internal/v1/operators/{operatorId}/subscription`
+
+Auth: Internal JWT via `X-Internal-Auth`. Not exposed through Gateway. Success response is raw DTO; errors use the standard ADR 0004 error envelope.
+
+Response `200`:
+```json
+{
+  "operatorId": "uuid",
+  "subscriptionId": "uuid",
+  "status": "ACTIVE",
+  "startedAt": "2026-06-01T10:00:00Z",
+  "expiresAt": "2026-07-01T10:00:00Z",
+  "plan": {
+    "planId": "00000000-0000-0000-0000-000000000001",
+    "name": "Starter (Free Trial)",
+    "limits": {
+      "maxVehicles": 3,
+      "maxDrivers": 5,
+      "maxAssistants": 5,
+      "maxOperatorUsers": 3,
+      "maxRoutes": 5,
+      "maxTripsPerMonth": 100
+    },
+    "modules": {
+      "enableParcel": false,
+      "enableShuttle": false,
+      "enableRag": true
+    }
+  },
+  "usage": {
+    "currentVehicles": 0,
+    "currentDrivers": 0,
+    "currentAssistants": 0,
+    "currentOperatorUsers": 1,
+    "currentRoutes": 0,
+    "currentTripsThisMonth": 0
+  },
+  "lastResetAt": "2026-06-01T10:00:00Z"
+}
+```
+
+Error `404` — `RESOURCE_NOT_FOUND`.
+
+### POST `/internal/v1/operators/{operatorId}/usage/increment`
+
+Auth: Internal JWT via `X-Internal-Auth`. Not exposed through Gateway. Success response is raw DTO; errors use the standard ADR 0004 error envelope.
+
+Request:
+```json
+{
+  "resource": "DRIVERS",
+  "delta": 1
+}
+```
+
+Allowed `resource`: `VEHICLES`, `DRIVERS`, `ASSISTANTS`, `OPERATOR_USERS`, `ROUTES`, `TRIPS_THIS_MONTH`. `delta` must be a positive integer.
+
+Response `200`: same raw DTO shape as `GET /internal/v1/operators/{operatorId}/subscription`, with the updated `usage` counters.
+
+Errors:
+- `404 RESOURCE_NOT_FOUND` — operator or subscription does not exist.
+- `402 SUBSCRIPTION_EXPIRED` — operator subscription has expired.
+- `422 SUBSCRIPTION_LIMIT_EXCEEDED` — `current + delta` would exceed the matching plan limit.
+- `422 VALIDATION_ERROR` — invalid resource or delta.
 
 ### GET `/v1/stations`
 
