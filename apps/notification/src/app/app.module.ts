@@ -10,6 +10,7 @@ import { NestRabbitMqModule } from '@vietride/nest-rabbitmq';
 import { NestRedisModule } from '@vietride/nest-redis';
 import { loadEnv } from '../config/env.schema';
 import { NotificationConfigModule } from '../config/notification-config.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { NotificationPrismaModule } from '../prisma/prisma.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -29,6 +30,7 @@ const env = loadEnv();
       exchangeType: 'topic',
     }),
     NotificationPrismaModule,
+    NotificationsModule,
   ],
   controllers: [AppController, HealthController, ReadyController],
   providers: [

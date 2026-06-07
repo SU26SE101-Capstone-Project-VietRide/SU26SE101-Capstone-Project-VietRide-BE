@@ -1,1 +1,2 @@
 export const ENV_TOKEN = Symbol('ENV_TOKEN');
+export const NOTIFICATION_JWT_VERIFIER = Symbol('NOTIFICATION_JWT_VERIFIER');
