@@ -1,5 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { Notification } from '../generated/notification-prisma-client';
+import {
+  CreateNotificationSchema,
+  type CreateNotificationDto,
+} from './dto/create-notification.dto';
 import type { ListNotificationsQueryDto } from './dto/list-notifications-query.dto';
 import { NotificationsRepository } from './notifications.repository';
 
@@ -27,6 +31,12 @@ export interface PagedNotificationsDto {
 @Injectable()
 export class NotificationsService {
   constructor(private readonly notificationsRepository: NotificationsRepository) {}
+
+  async createNotification(dto: CreateNotificationDto): Promise<NotificationItemDto> {
+    const notification = await this.notificationsRepository.create(CreateNotificationSchema.parse(dto));
+
+    return this.toDto(notification);
+  }
 
   async listForUser(userId: string, query: ListNotificationsQueryDto): Promise<PagedNotificationsDto> {
     const result = await this.notificationsRepository.listForUser(userId, query);

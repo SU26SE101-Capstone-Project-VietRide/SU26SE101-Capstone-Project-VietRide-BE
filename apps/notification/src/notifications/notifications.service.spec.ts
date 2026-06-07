@@ -1,5 +1,5 @@
 import { NotFoundException } from '@nestjs/common';
-import type { Notification } from '../generated/notification-prisma-client';
+import { NotificationType, type Notification } from '../generated/notification-prisma-client';
 import type { ListNotificationsQueryDto } from './dto/list-notifications-query.dto';
 import { NotificationsRepository } from './notifications.repository';
 import { NotificationsService } from './notifications.service';
@@ -13,11 +13,49 @@ describe('NotificationsService', () => {
 
   beforeEach(() => {
     repository = {
+      create: jest.fn(),
       listForUser: jest.fn(),
       findOwnedById: jest.fn(),
       markRead: jest.fn(),
     } as unknown as jest.Mocked<NotificationsRepository>;
     service = new NotificationsService(repository);
+  });
+
+  it('creates a normalized notification DTO', async () => {
+    repository.create.mockResolvedValue(
+      createNotification({
+        type: NotificationType.BOOKING_CONFIRMED,
+        title: 'Dat ve thanh cong',
+        body: 'Ve cua ban da duoc xac nhan.',
+        data: { bookingId: '33333333-3333-4333-8333-333333333333' },
+      }),
+    );
+
+    await expect(
+      service.createNotification({
+        userId: OWNER_USER_ID,
+        type: NotificationType.BOOKING_CONFIRMED,
+        title: '  Dat ve thanh cong  ',
+        body: '  Ve cua ban da duoc xac nhan.  ',
+        data: { bookingId: '33333333-3333-4333-8333-333333333333' },
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        id: NOTIFICATION_ID,
+        userId: OWNER_USER_ID,
+        type: NotificationType.BOOKING_CONFIRMED,
+        title: 'Dat ve thanh cong',
+        body: 'Ve cua ban da duoc xac nhan.',
+        data: { bookingId: '33333333-3333-4333-8333-333333333333' },
+      }),
+    );
+    expect(repository.create).toHaveBeenCalledWith({
+      userId: OWNER_USER_ID,
+      type: NotificationType.BOOKING_CONFIRMED,
+      title: 'Dat ve thanh cong',
+      body: 'Ve cua ban da duoc xac nhan.',
+      data: { bookingId: '33333333-3333-4333-8333-333333333333' },
+    });
   });
 
   it('returns a paged notification history DTO', async () => {
@@ -79,7 +117,7 @@ function createNotification(overrides: Partial<Notification>): Notification {
   return {
     id: NOTIFICATION_ID,
     userId: OWNER_USER_ID,
-    type: 'BOOKING_CONFIRMED',
+    type: NotificationType.BOOKING_CONFIRMED,
     title: 'Dat ve thanh cong',
     body: 'Ve cua ban da duoc xac nhan.',
     data: { bookingId: '33333333-3333-4333-8333-333333333333' },
