@@ -8,10 +8,12 @@ using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Application.Behaviors;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Shared.Kernel.Primitives;
 using VietRide.Trip.Api.Controllers;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Features.Internal.Stops;
 using VietRide.Trip.Application.Features.Stops;
 using VietRide.Trip.Domain.Entities;
 
@@ -148,6 +150,62 @@ public sealed class StopHandlersTests
 
         var exception = await act.Should().ThrowAsync<CodedNotFoundException>();
         exception.Which.ErrorCode.Should().Be("STOP_NOT_FOUND");
+    }
+
+    [Fact]
+    public async Task GetStopById_ReturnsCanonicalRawDto_WhenStopExists()
+    {
+        var stop = Stop.Create(OperatorId, "Bến xe Trung Tâm", 16.0678m, 108.2208m, "Điểm đón trung tâm", "Đường Trung Tâm", "google-place-id");
+        var handler = new GetStopByIdHandler(new FakeStopRepository([stop]));
+
+        var result = await handler.Handle(new GetStopByIdQuery(stop.Id), CancellationToken.None);
+
+        result.Id.Should().Be(stop.Id);
+        result.OperatorId.Should().Be(stop.OperatorId);
+        result.Name.Should().Be(stop.Name);
+        result.Description.Should().Be(stop.Description);
+        result.Latitude.Should().Be(stop.Latitude);
+        result.Longitude.Should().Be(stop.Longitude);
+        result.Address.Should().Be(stop.Address);
+        result.GooglePlaceId.Should().Be(stop.GooglePlaceId);
+    }
+
+    [Fact]
+    public async Task GetStopById_ThrowsCodedStopNotFound_WhenStopIsMissing()
+    {
+        var handler = new GetStopByIdHandler(new FakeStopRepository([]));
+
+        var act = () => handler.Handle(new GetStopByIdQuery(Guid.NewGuid()), CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<CodedNotFoundException>();
+        exception.Which.ErrorCode.Should().Be("STOP_NOT_FOUND");
+    }
+
+    [Fact]
+    public async Task InternalStopsController_ReturnsRawDto_WithoutApiResponseEnvelope()
+    {
+        var stop = new InternalStopDto(
+            Guid.NewGuid(),
+            OperatorId,
+            "Bến xe Trung Tâm",
+            "Điểm đón trung tâm",
+            16.0678m,
+            108.2208m,
+            "Đường Trung Tâm",
+            "google-place-id",
+            true,
+            default,
+            default);
+        var mediator = new CapturingMediator(stop);
+        var controller = new InternalStopsController(mediator);
+
+        var response = await controller.GetByIdAsync(stop.Id, CancellationToken.None);
+
+        var ok = response.Result.Should().BeOfType<OkObjectResult>().Subject;
+        ok.Value.Should().BeSameAs(stop);
+        ok.Value.Should().NotBeOfType<ApiResponse>();
+        var query = mediator.LastRequest.Should().BeOfType<GetStopByIdQuery>().Subject;
+        query.Id.Should().Be(stop.Id);
     }
 
     [Fact]

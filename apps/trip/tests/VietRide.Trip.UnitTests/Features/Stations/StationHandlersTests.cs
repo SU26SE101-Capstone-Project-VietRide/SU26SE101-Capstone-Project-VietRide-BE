@@ -8,10 +8,12 @@ using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Application.Behaviors;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Shared.Kernel.Primitives;
 using VietRide.Trip.Api.Controllers;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Features.Internal.Stations;
 using VietRide.Trip.Application.Features.Stations;
 using VietRide.Trip.Domain.Entities;
 
@@ -37,6 +39,60 @@ public sealed class StationHandlersTests
         repository.LastQuery.Should().Be("Mien Tay");
         repository.LastCity.Should().Be("Ho Chi Minh City");
         repository.LastProvince.Should().Be("Ho Chi Minh");
+    }
+
+    [Fact]
+    public async Task GetStationById_ReturnsCanonicalRawDto_WhenStationExists()
+    {
+        var station = Station.Create("Bến xe Miền Tây", "ben-xe-mien-tay", "Ho Chi Minh City", "Ho Chi Minh", latitude: 10.7212345m, longitude: 106.6267890m);
+        var handler = new GetStationByIdHandler(new FakeStationRepository([station]));
+
+        var result = await handler.Handle(new GetStationByIdQuery(station.Id), CancellationToken.None);
+
+        result.Id.Should().Be(station.Id);
+        result.Name.Should().Be(station.Name);
+        result.Slug.Should().Be(station.Slug);
+        result.City.Should().Be(station.City);
+        result.Province.Should().Be(station.Province);
+        result.Latitude.Should().Be(station.Latitude);
+        result.Longitude.Should().Be(station.Longitude);
+    }
+
+    [Fact]
+    public async Task GetStationById_ThrowsCodedStationNotFound_WhenStationIsMissing()
+    {
+        var handler = new GetStationByIdHandler(new FakeStationRepository([]));
+
+        var act = () => handler.Handle(new GetStationByIdQuery(Guid.NewGuid()), CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<CodedNotFoundException>();
+        exception.Which.ErrorCode.Should().Be("STATION_NOT_FOUND");
+    }
+
+    [Fact]
+    public async Task InternalStationsController_ReturnsRawDto_WithoutApiResponseEnvelope()
+    {
+        var station = new InternalStationDto(
+            Guid.NewGuid(),
+            "Bến xe Miền Tây",
+            "ben-xe-mien-tay",
+            "Ho Chi Minh City",
+            "Ho Chi Minh",
+            10.7212345m,
+            106.6267890m,
+            true,
+            default,
+            default);
+        var mediator = new CapturingMediator(station);
+        var controller = new InternalStationsController(mediator);
+
+        var response = await controller.GetByIdAsync(station.Id, CancellationToken.None);
+
+        var ok = response.Result.Should().BeOfType<OkObjectResult>().Subject;
+        ok.Value.Should().BeSameAs(station);
+        ok.Value.Should().NotBeOfType<ApiResponse>();
+        var query = mediator.LastRequest.Should().BeOfType<GetStationByIdQuery>().Subject;
+        query.Id.Should().Be(station.Id);
     }
 
     [Theory]
@@ -382,9 +438,9 @@ public sealed class StationHandlersTests
 
     private sealed class CapturingMediator : IMediator
     {
-        private readonly CreateOrLinkOperatorStationResponse response;
+        private readonly object response;
 
-        public CapturingMediator(CreateOrLinkOperatorStationResponse response)
+        public CapturingMediator(object response)
         {
             this.response = response;
         }
