@@ -259,6 +259,72 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
+  it.each(['OPERATOR_ADMIN', 'OPERATOR_STAFF'] as const)(
+    'routes %s requests to the operator profile route',
+    async (role) => {
+      const upstreamHandler = arrangeProxyPass();
+      const signer = {
+        sign: jest.fn().mockResolvedValue('internal-token'),
+      } as unknown as InternalJwtSigner;
+      const handler = createProxyHandler(env, signer);
+      const authorization = await makeAuthorizationHeader({
+        sub: 'operator-user-1',
+        role,
+        operatorId: 'operator-1',
+      });
+      const req = makeRequest(
+        '/v1/operator/profile',
+        {
+          authorization,
+          'x-request-id': `req-profile-${role.toLowerCase()}`,
+        },
+        'GET',
+      );
+      const res = makeResponse();
+      const next = jest.fn() as NextFunction;
+
+      await handler(req, res, next);
+
+      expect(signer.sign).toHaveBeenCalledWith({
+        sub: 'operator-user-1',
+        reqId: `req-profile-${role.toLowerCase()}`,
+        role,
+        operatorId: 'operator-1',
+      });
+      expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+        expect.objectContaining({ target: env.IDENTITY_BASE_URL }),
+      );
+      expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
+      expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+      expect(res.status).not.toHaveBeenCalled();
+    },
+  );
+
+  it('returns 403 FORBIDDEN for other roles on the operator profile route', async () => {
+    const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({ sub: 'passenger-1', role: 'PASSENGER' });
+    const req = makeRequest('/v1/operator/profile', {
+      authorization,
+      'x-request-id': 'req-profile-role',
+    });
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 403,
+      error: { code: 'FORBIDDEN' },
+      meta: { traceId: 'req-profile-role' },
+    });
+    expect(signer.sign).not.toHaveBeenCalled();
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['/v1/admin/operators', env.IDENTITY_BASE_URL],
     ['/v1/admin/operators/11111111-1111-1111-1111-111111111111/approve', env.IDENTITY_BASE_URL],

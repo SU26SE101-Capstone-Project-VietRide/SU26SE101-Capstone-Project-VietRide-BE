@@ -20,7 +20,35 @@
     { "key": "createdAdminEmail", "value": "admin2@example.com" },
     { "key": "initialPasswordToken", "value": "<set-initial-password-token>" },
     { "key": "operatorUserId", "value": "<operator-user-id>" },
-    { "key": "fcmToken", "value": "<fcm-token>" }
+    { "key": "fcmToken", "value": "<fcm-token>" },
+    { "key": "operatorSelfRegisterEmail", "value": "operator-self@example.com" },
+    { "key": "operatorSelfRegisterPhone", "value": "+84901230001" },
+    { "key": "operatorSelfRegisterPassword", "value": "Operator123!" },
+    { "key": "operatorSelfRegisterName", "value": "VietRide Self Register Operator" },
+    { "key": "operatorBusinessRegistrationNumber", "value": "0312345601" },
+    { "key": "operatorTaxCode", "value": "0312345601" },
+    { "key": "operatorRepresentativePhone", "value": "+84901230002" },
+    { "key": "operatorOtpCode", "value": "123456" },
+    { "key": "operatorId", "value": "<operator-id>" },
+    { "key": "adminCreatedOperatorEmail", "value": "operator-admin-created@example.com" },
+    { "key": "adminCreatedOperatorPhone", "value": "+84901230003" },
+    { "key": "adminCreatedOperatorId", "value": "<admin-created-operator-id>" },
+    { "key": "adminCreatedOperatorAdminUserId", "value": "<admin-created-operator-admin-user-id>" },
+    { "key": "adminCreatedOperatorAccessToken", "value": "<admin-created-operator-access-token>" },
+    {
+      "key": "adminOperatorInitialPasswordToken",
+      "value": "<admin-operator-set-initial-password-token>"
+    },
+    { "key": "adminOperatorPassword", "value": "OperatorAdmin123!" },
+    { "key": "operatorUserEmail", "value": "operator-staff@example.com" },
+    { "key": "operatorUserPhone", "value": "+84901230004" },
+    { "key": "operatorUserRole", "value": "OPERATOR_STAFF" },
+    {
+      "key": "operatorUserInitialPasswordToken",
+      "value": "<operator-user-set-initial-password-token>"
+    },
+    { "key": "operatorUserPassword", "value": "OperatorUser123!" },
+    { "key": "operatorUserAccessToken", "value": "<operator-user-access-token>" }
   ],
   "item": [
     {
@@ -444,6 +472,837 @@
               "raw": "{}"
             },
             "description": "Day 5 OPERATOR_ADMIN resend for a same-operator user in PENDING_INITIAL_PASSWORD. No Idempotency-Key header; cross-operator targets expect 403."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Identity — Operator + Subscription (Day 6)",
+      "description": "Day 6 operator E2E paths. For local Newman runs, start the local harness with scripts/run-day6-newman-local.js so OTP, SET_INITIAL_PASSWORD tokens, and a SYSTEM_ADMIN access token are supplied without committing secrets. No Day-6 FE-facing endpoint uses Idempotency-Key.",
+      "item": [
+        {
+          "name": "0. Prepare Day-6 local run",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "if (pm.variables.get('localHarnessEnabled') !== 'true') {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Local harness prepare returns 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Local harness response shape', function () {",
+                  "  pm.expect(body).to.have.property('systemAdminAccessToken').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body).to.have.property('run');",
+                  "});",
+                  "function setVar(key, value) {",
+                  "  if (value !== undefined && value !== null) {",
+                  "    pm.collectionVariables.set(key, String(value));",
+                  "    pm.environment.set(key, String(value));",
+                  "  }",
+                  "}",
+                  "setVar('systemAdminAccessToken', body.systemAdminAccessToken);",
+                  "for (const [key, value] of Object.entries(body.run || {})) {",
+                  "  setVar(key, value);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{localHarnessUrl}}/day6/bootstrap",
+              "host": ["{{localHarnessUrl}}"],
+              "path": ["day6", "bootstrap"]
+            },
+            "description": "Local-only harness step for Newman. It mints a SYSTEM_ADMIN access token from the local dev Identity key and returns unique Day-6 test data. Not a VietRide API endpoint."
+          }
+        },
+        {
+          "name": "1. Self-register operator",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 201', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test('Operator registration response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(201);",
+                  "  pm.expect(body.data).to.have.property('operatorId').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data).to.have.property('message').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});",
+                  "if (body && body.data && body.data.operatorId) {",
+                  "  pm.collectionVariables.set('operatorId', body.data.operatorId);",
+                  "  pm.environment.set('operatorId', body.data.operatorId);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operators/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operators", "register"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{operatorSelfRegisterName}}\",\n  \"contactEmail\": \"{{operatorSelfRegisterEmail}}\",\n  \"contactPhone\": \"{{operatorSelfRegisterPhone}}\",\n  \"businessRegistrationNumber\": \"{{operatorBusinessRegistrationNumber}}\",\n  \"taxCode\": \"{{operatorTaxCode}}\",\n  \"addressStreet\": \"123 Le Loi\",\n  \"addressWard\": \"Ben Nghe\",\n  \"addressDistrict\": \"District 1\",\n  \"addressProvince\": \"Ho Chi Minh City\",\n  \"representativeName\": \"Nguyen Van Operator\",\n  \"representativePhone\": \"{{operatorRepresentativePhone}}\",\n  \"password\": \"{{operatorSelfRegisterPassword}}\"\n}"
+            },
+            "description": "Path 1: public self-register creates a PENDING operator and OPERATOR_ADMIN pending email verification. Expected data: { operatorId, message }."
+          }
+        },
+        {
+          "name": "1a. Fetch self-register email OTP from local harness",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "if (pm.variables.get('localHarnessEnabled') !== 'true') {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Local harness returns registration OTP', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(body).to.have.property('code').that.is.a('string').and.is.not.empty;",
+                  "});",
+                  "pm.collectionVariables.set('operatorOtpCode', body.code);",
+                  "pm.environment.set('operatorOtpCode', body.code);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{localHarnessUrl}}/identity/email-token?email={{operatorSelfRegisterEmail}}&purpose=REGISTRATION",
+              "host": ["{{localHarnessUrl}}"],
+              "path": ["identity", "email-token"],
+              "query": [
+                { "key": "email", "value": "{{operatorSelfRegisterEmail}}" },
+                { "key": "purpose", "value": "REGISTRATION" }
+              ]
+            },
+            "description": "Local-only helper reads the latest unused REGISTRATION OTP for the self-registered operator admin from the local dev DB."
+          }
+        },
+        {
+          "name": "2. Verify operator admin email",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Verify-email response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.have.property('userId').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data).to.have.property('status', 'ACTIVE');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/verify-email",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "auth", "verify-email"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{operatorSelfRegisterEmail}}\",\n  \"code\": \"{{operatorOtpCode}}\",\n  \"purpose\": \"REGISTRATION\"\n}"
+            },
+            "description": "Path 1: verify the OPERATOR_ADMIN email before System Admin approval. The operator admin still cannot login until approval."
+          }
+        },
+        {
+          "name": "3. Approve self-registered operator",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Approve response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.have.property('operatorId', pm.variables.get('operatorId'));",
+                  "  pm.expect(body.data).to.have.property('registrationStatus', 'APPROVED');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/operators/{{operatorId}}/approve",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "operators", "{{operatorId}}", "approve"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "description": "Path 1: System Admin approval activates the Starter Free-Trial subscription and allows the verified OPERATOR_ADMIN to login."
+          }
+        },
+        {
+          "name": "4. Login self-registered operator admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Operator admin login token bundle shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.have.property('accessToken').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data).to.have.property('refreshToken').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data).to.have.property('expiresInSeconds').that.is.a('number');",
+                  "  pm.expect(body.data.user).to.have.property('role', 'OPERATOR_ADMIN');",
+                  "  pm.expect(body.data.user).to.have.property('operatorId', pm.variables.get('operatorId'));",
+                  "  pm.expect(body.data.user).to.have.property('status', 'ACTIVE');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});",
+                  "if (body && body.data) {",
+                  "  pm.collectionVariables.set('operatorAdminAccessToken', body.data.accessToken || '');",
+                  "  pm.environment.set('operatorAdminAccessToken', body.data.accessToken || '');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{operatorSelfRegisterEmail}}\",\n  \"password\": \"{{operatorSelfRegisterPassword}}\"\n}"
+            },
+            "description": "Path 1: after verify-email + approve, the self-registered OPERATOR_ADMIN can login."
+          }
+        },
+        {
+          "name": "5. Update own operator profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Operator profile response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.have.property('operatorId', pm.variables.get('operatorId'));",
+                  "  pm.expect(body.data).to.have.property('name').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data).to.have.property('registrationStatus', 'APPROVED');",
+                  "  pm.expect(body.data).to.have.property('isActive').that.is.a('boolean');",
+                  "  pm.expect(body.data).to.have.property('address');",
+                  "  pm.expect(body.data.address).to.include.keys(['street', 'ward', 'district', 'province']);",
+                  "  pm.expect(body.data).to.have.property('parcelNoShowPolicy');",
+                  "  pm.expect(body.data).to.have.property('luggagePolicy');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/profile",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "profile"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{operatorSelfRegisterName}} Updated\",\n  \"contactPhone\": \"{{operatorSelfRegisterPhone}}\",\n  \"logoUrl\": \"https://cdn.vietride.app/operators/logo.png\",\n  \"addressStreet\": \"456 Nguyen Hue\",\n  \"addressWard\": \"Ben Nghe\",\n  \"addressDistrict\": \"District 1\",\n  \"addressProvince\": \"Ho Chi Minh City\",\n  \"representativeName\": \"Nguyen Van Operator\",\n  \"representativePhone\": \"{{operatorRepresentativePhone}}\",\n  \"cancellationPolicy\": [\n    { \"hoursBeforeDeparture\": 24, \"feePercent\": 10 },\n    { \"hoursBeforeDeparture\": 2, \"feePercent\": 50 }\n  ],\n  \"parcelNoShowPolicy\": {\n    \"noShowFeePercent\": 0,\n    \"additionalPaymentTimeoutMinutes\": 30\n  },\n  \"luggagePolicy\": {\n    \"defaultLuggageKgPerSeat\": 10\n  }\n}"
+            },
+            "description": "Path 1: OPERATOR_ADMIN of an APPROVED operator updates own profile and policy JSONB."
+          }
+        },
+        {
+          "name": "5a. Read own operator profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Operator profile read response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.have.property('operatorId', pm.variables.get('operatorId'));",
+                  "  pm.expect(body.data).to.have.property('registrationStatus', 'APPROVED');",
+                  "  pm.expect(body.data).to.have.property('parcelNoShowPolicy');",
+                  "  pm.expect(body.data).to.have.property('luggagePolicy');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/profile",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "profile"]
+            },
+            "description": "Day-6 profile read success coverage: OPERATOR_ADMIN can read own approved operator profile and policy JSONB."
+          }
+        },
+        {
+          "name": "6. Admin-create operator",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 201', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test('Admin-created operator response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(201);",
+                  "  pm.expect(body.data.operator).to.have.property('operatorId').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data.operator).to.have.property('registrationStatus', 'APPROVED');",
+                  "  pm.expect(body.data.adminUser).to.have.property('userId').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data.adminUser).to.have.property('email', pm.variables.get('adminCreatedOperatorEmail'));",
+                  "  pm.expect(body.data.adminUser).to.have.property('role', 'OPERATOR_ADMIN');",
+                  "  pm.expect(body.data.adminUser).to.have.property('status', 'PENDING_INITIAL_PASSWORD');",
+                  "  pm.expect(body.data.subscription).to.have.property('subscriptionId').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data.subscription).to.have.property('planId').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data.subscription).to.have.property('planName').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data.subscription).to.have.property('status', 'ACTIVE');",
+                  "  pm.expect(body.data.subscription).to.have.property('currentOperatorUsers', 1);",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});",
+                  "if (body && body.data) {",
+                  "  pm.collectionVariables.set('adminCreatedOperatorId', body.data.operator.operatorId);",
+                  "  pm.collectionVariables.set('adminCreatedOperatorAdminUserId', body.data.adminUser.userId);",
+                  "  pm.environment.set('adminCreatedOperatorId', body.data.operator.operatorId);",
+                  "  pm.environment.set('adminCreatedOperatorAdminUserId', body.data.adminUser.userId);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/operators",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "operators"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"VietRide Admin Created Operator {{day6RunId}}\",\n  \"contactEmail\": \"{{adminCreatedOperatorEmail}}\",\n  \"contactPhone\": \"{{adminCreatedOperatorPhone}}\",\n  \"businessRegistrationNumber\": \"{{adminCreatedOperatorBusinessRegistrationNumber}}\",\n  \"taxCode\": \"{{adminCreatedOperatorTaxCode}}\",\n  \"addressStreet\": \"789 Hai Ba Trung\",\n  \"addressWard\": \"Vo Thi Sau\",\n  \"addressDistrict\": \"District 3\",\n  \"addressProvince\": \"Ho Chi Minh City\",\n  \"representativeName\": \"Tran Admin Operator\",\n  \"representativePhone\": \"{{adminCreatedOperatorRepresentativePhone}}\"\n}"
+            },
+            "description": "Path 2: SYSTEM_ADMIN creates an APPROVED operator and passwordless OPERATOR_ADMIN. Paid-plan/planId fields are intentionally omitted; Day 6 supports Starter Free-Trial only."
+          }
+        },
+        {
+          "name": "6a. Fetch admin-created operator admin initial-password token",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "if (pm.variables.get('localHarnessEnabled') !== 'true') {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Local harness returns admin initial-password token', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(body).to.have.property('code').that.is.a('string').and.is.not.empty;",
+                  "});",
+                  "pm.collectionVariables.set('adminOperatorInitialPasswordToken', body.code);",
+                  "pm.environment.set('adminOperatorInitialPasswordToken', body.code);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{localHarnessUrl}}/identity/email-token?email={{adminCreatedOperatorEmail}}&purpose=SET_INITIAL_PASSWORD",
+              "host": ["{{localHarnessUrl}}"],
+              "path": ["identity", "email-token"],
+              "query": [
+                { "key": "email", "value": "{{adminCreatedOperatorEmail}}" },
+                { "key": "purpose", "value": "SET_INITIAL_PASSWORD" }
+              ]
+            },
+            "description": "Local-only helper reads the latest unused SET_INITIAL_PASSWORD token for the admin-created operator admin."
+          }
+        },
+        {
+          "name": "7. Set initial password for admin-created operator admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Initial-password consume response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.have.property('userId', pm.variables.get('adminCreatedOperatorAdminUserId'));",
+                  "  pm.expect(body.data).to.have.property('status', 'ACTIVE');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/set-initial-password",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "auth", "set-initial-password"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{adminOperatorInitialPasswordToken}}\",\n  \"password\": \"{{adminOperatorPassword}}\"\n}"
+            },
+            "description": "Path 2: the preceding local-harness step populates the SET_INITIAL_PASSWORD token for local Newman runs; paste the token manually only when running without the harness."
+          }
+        },
+        {
+          "name": "8. Login admin-created operator admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Admin-created operator admin login shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.have.property('accessToken').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data).to.have.property('refreshToken').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data.user).to.have.property('role', 'OPERATOR_ADMIN');",
+                  "  pm.expect(body.data.user).to.have.property('operatorId', pm.variables.get('adminCreatedOperatorId'));",
+                  "  pm.expect(body.data.user).to.have.property('status', 'ACTIVE');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});",
+                  "if (body && body.data) {",
+                  "  pm.collectionVariables.set('adminCreatedOperatorAccessToken', body.data.accessToken || '');",
+                  "  pm.environment.set('adminCreatedOperatorAccessToken', body.data.accessToken || '');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminCreatedOperatorEmail}}\",\n  \"password\": \"{{adminOperatorPassword}}\"\n}"
+            },
+            "description": "Path 2: after set-initial-password, the admin-created OPERATOR_ADMIN can login."
+          }
+        },
+        {
+          "name": "9. Create operator user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 201', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test('Operator-user create response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(201);",
+                  "  pm.expect(body.data).to.have.property('userId').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data).to.have.property('email', pm.variables.get('operatorUserEmail'));",
+                  "  pm.expect(body.data).to.have.property('phone', pm.variables.get('operatorUserPhone'));",
+                  "  pm.expect(body.data).to.have.property('displayName').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data).to.have.property('role', pm.variables.get('operatorUserRole'));",
+                  "  pm.expect(body.data).to.have.property('status', 'PENDING_INITIAL_PASSWORD');",
+                  "  pm.expect(body.data).to.have.property('operatorId', pm.variables.get('adminCreatedOperatorId'));",
+                  "  pm.expect(body.data).to.have.property('initialPasswordExpiresAt').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});",
+                  "if (body && body.data && body.data.userId) {",
+                  "  pm.collectionVariables.set('operatorUserId', body.data.userId);",
+                  "  pm.environment.set('operatorUserId', body.data.userId);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminCreatedOperatorAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/users",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "users"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{operatorUserEmail}}\",\n  \"phone\": \"{{operatorUserPhone}}\",\n  \"displayName\": \"Operator Staff Example\",\n  \"role\": \"{{operatorUserRole}}\"\n}"
+            },
+            "description": "Path 3: APPROVED OPERATOR_ADMIN creates DRIVER, ASSISTANT, or OPERATOR_STAFF under own operator. The new user starts PENDING_INITIAL_PASSWORD."
+          }
+        },
+        {
+          "name": "9a. Fetch operator-user initial-password token",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "if (pm.variables.get('localHarnessEnabled') !== 'true') {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Local harness returns operator-user initial-password token', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(body).to.have.property('code').that.is.a('string').and.is.not.empty;",
+                  "});",
+                  "pm.collectionVariables.set('operatorUserInitialPasswordToken', body.code);",
+                  "pm.environment.set('operatorUserInitialPasswordToken', body.code);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{localHarnessUrl}}/identity/email-token?email={{operatorUserEmail}}&purpose=SET_INITIAL_PASSWORD",
+              "host": ["{{localHarnessUrl}}"],
+              "path": ["identity", "email-token"],
+              "query": [
+                { "key": "email", "value": "{{operatorUserEmail}}" },
+                { "key": "purpose", "value": "SET_INITIAL_PASSWORD" }
+              ]
+            },
+            "description": "Local-only helper reads the latest unused SET_INITIAL_PASSWORD token for the operator-created user."
+          }
+        },
+        {
+          "name": "10. Set initial password for operator user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Operator-user initial-password response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.have.property('userId', pm.variables.get('operatorUserId'));",
+                  "  pm.expect(body.data).to.have.property('status', 'ACTIVE');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/set-initial-password",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "auth", "set-initial-password"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{operatorUserInitialPasswordToken}}\",\n  \"password\": \"{{operatorUserPassword}}\"\n}"
+            },
+            "description": "Path 3: the preceding local-harness step populates the SET_INITIAL_PASSWORD token for local Newman runs; paste the token manually only when running without the harness."
+          }
+        },
+        {
+          "name": "11. Login operator user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Operator-user login token bundle shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.have.property('accessToken').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data).to.have.property('refreshToken').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data.user).to.have.property('role', pm.variables.get('operatorUserRole'));",
+                  "  pm.expect(body.data.user).to.have.property('operatorId', pm.variables.get('adminCreatedOperatorId'));",
+                  "  pm.expect(body.data.user).to.have.property('status', 'ACTIVE');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});",
+                  "if (body && body.data) {",
+                  "  pm.collectionVariables.set('operatorUserAccessToken', body.data.accessToken || '');",
+                  "  pm.environment.set('operatorUserAccessToken', body.data.accessToken || '');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{operatorUserEmail}}\",\n  \"password\": \"{{operatorUserPassword}}\"\n}"
+            },
+            "description": "Path 3: after set-initial-password, the operator-created DRIVER/ASSISTANT/OPERATOR_STAFF can login when the parent operator is APPROVED."
+          }
+        },
+        {
+          "name": "11a. Operator staff can read operator profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Operator staff profile read response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.have.property('operatorId', pm.variables.get('adminCreatedOperatorId'));",
+                  "  pm.expect(body.data).to.have.property('registrationStatus', 'APPROVED');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/profile",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "profile"]
+            },
+            "description": "Day-6 success coverage: OPERATOR_STAFF can read own operator profile; only PATCH is forbidden."
+          }
+        },
+        {
+          "name": "12. List operators as system admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Paged operators response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.have.property('items').that.is.an('array');",
+                  "  pm.expect(body.data).to.have.property('page', 1);",
+                  "  pm.expect(body.data).to.have.property('pageSize', 20);",
+                  "  pm.expect(body.data).to.have.property('totalItems').that.is.a('number');",
+                  "  pm.expect(body.data).to.have.property('totalPages').that.is.a('number');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/operators?page=1&pageSize=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "operators"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "pageSize", "value": "20" }
+              ]
+            },
+            "description": "System Admin list endpoint required by Day 6 contract. Expected data is a paged operator list."
+          }
+        },
+        {
+          "name": "13. Operator staff cannot update operator profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 403', function () {",
+                  "  pm.response.to.have.status(403);",
+                  "});",
+                  "pm.test('Forbidden envelope shape', function () {",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.statusCode).to.equal(403);",
+                  "  pm.expect(body.error).to.have.property('code', 'FORBIDDEN');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/profile",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "profile"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"addressStreet\": \"Staff Forbidden Street\"\n}"
+            },
+            "description": "Day-6 adversarial check: OPERATOR_STAFF may read profile but cannot modify operator policy/profile fields."
           }
         }
       ]

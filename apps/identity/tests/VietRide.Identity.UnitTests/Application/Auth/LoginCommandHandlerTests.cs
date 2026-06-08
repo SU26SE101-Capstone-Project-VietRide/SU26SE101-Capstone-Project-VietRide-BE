@@ -20,14 +20,18 @@ public sealed class LoginCommandHandlerTests
     private static (
         LoginCommandHandler handler,
         IUserRepository users,
+        IOperatorRepository operators,
         IRefreshTokenRepository tokens,
+        IAccessTokenService accessTokenService,
         IFailedLoginPersister failedLoginPersister,
         ILoginLockoutCounter lockoutCounter) CreateHandler(
             IPasswordHasher? hasher = null,
+            IOperatorRepository? operators = null,
             IFailedLoginPersister? failedLoginPersister = null,
             ILoginLockoutCounter? lockoutCounter = null)
     {
         var users = Substitute.For<IUserRepository>();
+        operators ??= Substitute.For<IOperatorRepository>();
         var tokens = Substitute.For<IRefreshTokenRepository>();
         hasher ??= Substitute.For<IPasswordHasher>();
         var accessTokenSvc = Substitute.For<IAccessTokenService>();
@@ -51,6 +55,7 @@ public sealed class LoginCommandHandlerTests
 
         var handler = new LoginCommandHandler(
             users,
+            operators,
             tokens,
             hasher,
             accessTokenSvc,
@@ -58,7 +63,7 @@ public sealed class LoginCommandHandlerTests
             failedLoginPersister,
             lockoutCounter,
             clock);
-        return (handler, users, tokens, failedLoginPersister, lockoutCounter);
+        return (handler, users, operators, tokens, accessTokenSvc, failedLoginPersister, lockoutCounter);
     }
 
     private static User MakeActiveUser(string email = "user@example.com", string passwordHash = "stored_hash")
@@ -77,6 +82,27 @@ public sealed class LoginCommandHandlerTests
         return user;
     }
 
+    private static User MakeOperatorUser(UserRole role, Guid operatorId)
+    {
+        var user = MakeActiveUser();
+        typeof(User)
+            .GetProperty(nameof(User.Role))!
+            .SetValue(user, role);
+        typeof(User)
+            .GetProperty(nameof(User.OperatorId))!
+            .SetValue(user, operatorId);
+        return user;
+    }
+
+    private static Operator MakeOperator(OperatorRegistrationStatus status)
+    {
+        var operatorEntity = (Operator)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(Operator));
+        typeof(Operator)
+            .GetProperty(nameof(Operator.RegistrationStatus))!
+            .SetValue(operatorEntity, status);
+        return operatorEntity;
+    }
+
     // -------------------------------------------------------------------------
     // Happy path
     // -------------------------------------------------------------------------
@@ -85,7 +111,7 @@ public sealed class LoginCommandHandlerTests
     public async Task Handle_ValidCredentials_ReturnsTokenBundle()
     {
         var hasher = Substitute.For<IPasswordHasher>();
-        var (handler, users, _, _, lockoutCounter) = CreateHandler(hasher: hasher);
+        var (handler, users, _, _, _, _, lockoutCounter) = CreateHandler(hasher: hasher);
         hasher.Verify("correct_password", "stored_hash").Returns(true);
         var user = MakeActiveUser();
 
@@ -104,14 +130,91 @@ public sealed class LoginCommandHandlerTests
         await lockoutCounter.Received(1).ResetAsync(user.Id, Arg.Any<CancellationToken>());
     }
 
+    [Theory]
+    [InlineData(UserRole.OPERATOR_ADMIN)]
+    [InlineData(UserRole.OPERATOR_STAFF)]
+    public async Task Handle_ApprovedOperatorAdminOrStaff_ReturnsTokenBundle(UserRole role)
+    {
+        var hasher = Substitute.For<IPasswordHasher>();
+        var (handler, users, operators, _, _, _, lockoutCounter) = CreateHandler(hasher: hasher);
+        hasher.Verify("correct_password", "stored_hash").Returns(true);
+        var operatorId = Guid.NewGuid();
+        var user = MakeOperatorUser(role, operatorId);
+        users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>()).Returns(user);
+        operators.GetByIdAsync(operatorId, Arg.Any<CancellationToken>())
+            .Returns(MakeOperator(OperatorRegistrationStatus.APPROVED));
+
+        var result = await handler.Handle(new LoginCommand("user@example.com", "correct_password"), CancellationToken.None);
+
+        result.AccessToken.Should().Be("jwt.access.token");
+        result.User.Role.Should().Be(role.ToString());
+        result.User.OperatorId.Should().Be(operatorId);
+        await lockoutCounter.Received(1).ResetAsync(user.Id, Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData(UserRole.SYSTEM_ADMIN)]
+    [InlineData(UserRole.PASSENGER)]
+    [InlineData(UserRole.DRIVER)]
+    public async Task Handle_NonOperatorAdminOrStaffRoles_DoNotCheckOperatorApproval(UserRole role)
+    {
+        var hasher = Substitute.For<IPasswordHasher>();
+        var (handler, users, operators, _, _, _, _) = CreateHandler(hasher: hasher);
+        hasher.Verify("correct_password", "stored_hash").Returns(true);
+        var operatorId = Guid.NewGuid();
+        var user = MakeOperatorUser(role, operatorId);
+        users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>()).Returns(user);
+
+        var result = await handler.Handle(new LoginCommand("user@example.com", "correct_password"), CancellationToken.None);
+
+        result.AccessToken.Should().Be("jwt.access.token");
+        result.User.Role.Should().Be(role.ToString());
+        await operators.DidNotReceive().GetByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+    }
+
     // -------------------------------------------------------------------------
     // Error cases
     // -------------------------------------------------------------------------
 
+    [Theory]
+    [InlineData(UserRole.OPERATOR_ADMIN, OperatorRegistrationStatus.PENDING)]
+    [InlineData(UserRole.OPERATOR_ADMIN, OperatorRegistrationStatus.SUSPENDED)]
+    [InlineData(UserRole.OPERATOR_ADMIN, OperatorRegistrationStatus.REJECTED)]
+    [InlineData(UserRole.OPERATOR_STAFF, OperatorRegistrationStatus.PENDING)]
+    [InlineData(UserRole.OPERATOR_STAFF, OperatorRegistrationStatus.SUSPENDED)]
+    [InlineData(UserRole.OPERATOR_STAFF, OperatorRegistrationStatus.REJECTED)]
+    public async Task Handle_NonApprovedOperatorAfterValidCredentials_Throws403WithoutLoginSideEffects(
+        UserRole role,
+        OperatorRegistrationStatus registrationStatus)
+    {
+        var hasher = Substitute.For<IPasswordHasher>();
+        var (handler, users, operators, tokens, accessTokenService, failedLoginPersister, lockoutCounter) =
+            CreateHandler(hasher: hasher);
+        hasher.Verify("correct_password", "stored_hash").Returns(true);
+        var operatorId = Guid.NewGuid();
+        var user = MakeOperatorUser(role, operatorId);
+        var originalLastLoginAt = user.LastLoginAt;
+        users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>()).Returns(user);
+        operators.GetByIdAsync(operatorId, Arg.Any<CancellationToken>()).Returns(MakeOperator(registrationStatus));
+
+        var act = () => handler.Handle(new LoginCommand("user@example.com", "correct_password"), CancellationToken.None);
+
+        await act.Should().ThrowAsync<ForbiddenException>()
+            .Where(e => e.ErrorCode == "FORBIDDEN");
+
+        hasher.Received(1).Verify("correct_password", "stored_hash");
+        user.LastLoginAt.Should().Be(originalLastLoginAt);
+        accessTokenService.DidNotReceive().IssueToken(Arg.Any<User>());
+        await tokens.DidNotReceive().AddAsync(Arg.Any<RefreshToken>(), Arg.Any<CancellationToken>());
+        await lockoutCounter.DidNotReceive().ResetAsync(user.Id, Arg.Any<CancellationToken>());
+        await lockoutCounter.DidNotReceive().IncrementAsync(user.Id, Arg.Any<CancellationToken>());
+        await failedLoginPersister.DidNotReceive().PersistAsync(user.Id, Arg.Any<long>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task Handle_WrongPassword_Throws401()
     {
-        var (handler, users, _, failedLoginPersister, lockoutCounter) = CreateHandler();
+        var (handler, users, _, _, _, failedLoginPersister, lockoutCounter) = CreateHandler();
         var user = MakeActiveUser();
         users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>()).Returns(user);
         lockoutCounter.IncrementAsync(user.Id, Arg.Any<CancellationToken>()).Returns(1L);
@@ -129,7 +232,7 @@ public sealed class LoginCommandHandlerTests
     [Fact]
     public async Task Handle_FifthWrongPasswordInRedisWindow_LocksAccount()
     {
-        var (handler, users, _, failedLoginPersister, lockoutCounter) = CreateHandler();
+        var (handler, users, _, _, _, failedLoginPersister, lockoutCounter) = CreateHandler();
         var user = MakeActiveUser();
         users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>()).Returns(user);
         lockoutCounter.IncrementAsync(user.Id, Arg.Any<CancellationToken>()).Returns(5L);
@@ -145,7 +248,7 @@ public sealed class LoginCommandHandlerTests
     [Fact]
     public async Task Handle_UnverifiedEmail_Throws403()
     {
-        var (handler, users, _, _, _) = CreateHandler();
+        var (handler, users, _, _, _, _, _) = CreateHandler();
         // User in PENDING_EMAIL_VERIFICATION status (not verified yet).
         var user = User.CreatePassenger("user@example.com", TestPhone, "hash", "User");
 
@@ -160,7 +263,7 @@ public sealed class LoginCommandHandlerTests
     [Fact]
     public async Task Handle_LockedAccount_Throws403()
     {
-        var (handler, users, _, _, _) = CreateHandler();
+        var (handler, users, _, _, _, _, _) = CreateHandler();
         var user = MakeActiveUser();
         user.Lock();
 
@@ -175,7 +278,7 @@ public sealed class LoginCommandHandlerTests
     [Fact]
     public async Task Handle_PendingInitialPassword_Throws403()
     {
-        var (handler, users, _, _, lockoutCounter) = CreateHandler();
+        var (handler, users, _, _, _, _, lockoutCounter) = CreateHandler();
         var user = MakePendingInitialPasswordUser();
 
         users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>()).Returns(user);
@@ -191,7 +294,7 @@ public sealed class LoginCommandHandlerTests
     [Fact]
     public async Task Handle_UserNotFound_Throws401()
     {
-        var (handler, users, _, _, lockoutCounter) = CreateHandler();
+        var (handler, users, _, _, _, _, lockoutCounter) = CreateHandler();
         users.GetByEmailAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns((User?)null);
 
         var act = () => handler.Handle(new LoginCommand("nobody@example.com", "pass"), CancellationToken.None);

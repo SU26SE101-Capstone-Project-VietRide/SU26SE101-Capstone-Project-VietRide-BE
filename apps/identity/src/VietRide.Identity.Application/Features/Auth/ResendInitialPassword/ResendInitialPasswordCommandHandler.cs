@@ -1,3 +1,4 @@
+using System.Text.Json;
 using MediatR;
 using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
@@ -16,6 +17,7 @@ public sealed class ResendInitialPasswordCommandHandler
     private const string SetInitialPasswordUrlBase = "https://app.vietride.app/auth/set-password?token=";
 
     private readonly IUserRepository _users;
+    private readonly IOperatorRepository _operators;
     private readonly IEmailVerificationTokenRepository _tokens;
     private readonly IActivityLogRepository _activityLogs;
     private readonly IInitialPasswordTokenService _initialPasswordTokens;
@@ -28,9 +30,11 @@ public sealed class ResendInitialPasswordCommandHandler
         IActivityLogRepository activityLogs,
         IInitialPasswordTokenService initialPasswordTokens,
         IEmailService emailService,
-        IClock clock)
+        IClock clock,
+        IOperatorRepository operators)
     {
         _users = users;
+        _operators = operators;
         _tokens = tokens;
         _activityLogs = activityLogs;
         _initialPasswordTokens = initialPasswordTokens;
@@ -47,6 +51,10 @@ public sealed class ResendInitialPasswordCommandHandler
 
         if (!request.CallerOperatorId.HasValue)
             throw new ForbiddenException("FORBIDDEN", "Operator scope is required to resend initial-password links.");
+
+        var operatorEntity = await _operators.GetByIdAsync(request.CallerOperatorId.Value, cancellationToken);
+        if (operatorEntity?.RegistrationStatus != OperatorRegistrationStatus.APPROVED)
+            throw new ForbiddenException("FORBIDDEN", "Operator must be approved to resend initial-password links.");
 
         var user = await _users.GetByIdAsync(request.UserId, cancellationToken)
             ?? throw new NotFoundException("User", request.UserId);
@@ -83,11 +91,20 @@ public sealed class ResendInitialPasswordCommandHandler
             new AccountCreatedEmailDto(user.Id, user.DisplayName, setInitialPasswordUrl, expiresAt),
             cancellationToken);
 
+        var metadata = JsonSerializer.Serialize(new
+        {
+            operatorId = request.CallerOperatorId.Value,
+            actorUserId = request.CallerUserId,
+            callerUserId = request.CallerUserId,
+            targetUserId = user.Id,
+            source = "RESEND_INITIAL_PASSWORD",
+        });
+
         await _activityLogs.AddAsync(
             ActivityLog.Create(
-                user.Id,
+                request.CallerUserId,
                 ActivityLogAction.RESEND_INITIAL_PASSWORD,
-                $"{{\"callerUserId\":\"{request.CallerUserId}\"}}"),
+                metadata),
             cancellationToken);
 
         return new ResendInitialPasswordResponseDto(user.Id, user.Status.ToString(), expiresAt);
