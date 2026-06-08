@@ -196,7 +196,7 @@ New REST endpoints (Trip service, behind Gateway). All paths/roles below are FIN
 ## Progress tracker
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
-| 7.0 | todo | — | — | Trip baseline corrected to Identity composition-root pattern |
+| 7.0 | done | APPROVE | 2026-06-08 | APPROVED; human /verify pending; 0 patch rounds |
 | 7.0a | todo | — | — | Q1-Q9 RESOLVED; includes canonical schema extension sync |
 | 7.0b | todo | — | — | Shared coded 404 path for STATION/STOP not-found |
 | 7.1 | todo | — | — | Enables pgcrypto + unaccent + pg_trgm; trgm search still deferred |
