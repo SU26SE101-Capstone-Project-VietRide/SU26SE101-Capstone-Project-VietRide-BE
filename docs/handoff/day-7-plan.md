@@ -205,7 +205,7 @@ New REST endpoints (Trip service, behind Gateway). All paths/roles below are FIN
 | 7.3 | done | APPROVE | 2026-06-08 | APPROVED; human /verify pending; 3 patch rounds; pageSize clamp fixed |
 | 7.4 | done | APPROVE | 2026-06-08 | APPROVED; human /verify pending; 0 patch rounds |
 | 7.5 | done | APPROVE | 2026-06-08 | APPROVED; human /verify pending; 0 patch rounds |
-| 7.6 | todo | — | — | Postman includes duplicate warning + coded 404 cases |
+| 7.6 | done | APPROVE | 2026-06-08 | APPROVED; human /verify pending; 3 patch rounds; guarded runtime-only adversarial inputs |
 
 Legend: todo / in progress / done (reviewer APPROVED + human /verify) / done-with-carryover / blocked
 

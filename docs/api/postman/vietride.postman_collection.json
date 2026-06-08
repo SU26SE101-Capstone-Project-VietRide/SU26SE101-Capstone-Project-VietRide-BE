@@ -48,7 +48,19 @@
       "value": "<operator-user-set-initial-password-token>"
     },
     { "key": "operatorUserPassword", "value": "OperatorUser123!" },
-    { "key": "operatorUserAccessToken", "value": "<operator-user-access-token>" }
+    { "key": "operatorUserAccessToken", "value": "<operator-user-access-token>" },
+    { "key": "stationSearchResultId", "value": "<station-search-result-id>" },
+    { "key": "createdStationId", "value": "<created-station-id>" },
+    { "key": "operatorStationId", "value": "<operator-station-id>" },
+    {
+      "key": "duplicateNearbyCandidateStationId",
+      "value": "<duplicate-nearby-candidate-station-id>"
+    },
+    { "key": "stopId", "value": "<stop-id>" },
+    { "key": "crossOperatorStopId", "value": "<cross-operator-stop-id>" },
+    { "key": "missingStationId", "value": "00000000-0000-0000-0000-000000000001" },
+    { "key": "missingStopId", "value": "00000000-0000-0000-0000-000000000002" },
+    { "key": "nonApprovedOperatorAccessToken", "value": "<non-approved-operator-access-token>" }
   ],
   "item": [
     {
@@ -1303,6 +1315,612 @@
               "raw": "{\n  \"addressStreet\": \"Staff Forbidden Street\"\n}"
             },
             "description": "Day-6 adversarial check: OPERATOR_STAFF may read profile but cannot modify operator policy/profile fields."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Trip — Day 7 station/stop flow",
+      "item": [
+        {
+          "name": "1. Search stations by accent-insensitive contains",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;",
+                  "let mienTayStation = null;",
+                  "pm.test('Station search response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.be.an('array').that.is.not.empty;",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});",
+                  "pm.test('Search is accent-insensitive and returns Bến xe Miền Tây', function () {",
+                  "  mienTayStation = body.data.find(function (station) {",
+                  "    const name = station.name || station.stationName || '';",
+                  "    return name.includes('Miền Tây') || /Bến xe Miền Tây/i.test(name);",
+                  "  });",
+                  "  pm.expect(mienTayStation, 'Bến xe Miền Tây search result').to.exist;",
+                  "  const stationId = mienTayStation.stationId || mienTayStation.id || '';",
+                  "  pm.expect(stationId, 'stationSearchResultId').to.match(uuidLike);",
+                  "  pm.collectionVariables.set('stationSearchResultId', stationId);",
+                  "  pm.environment.set('stationSearchResultId', stationId);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/stations/search?q=Mien Tay",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "stations", "search"],
+              "query": [{ "key": "q", "value": "Mien Tay" }]
+            },
+            "description": "Day 7 search happy path: accent-insensitive contains should match Bến xe Miền Tây for q=Mien Tay."
+          }
+        },
+        {
+          "name": "1a. Search stations rejects empty q",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 422', function () {",
+                  "  pm.response.to.have.status(422);",
+                  "});",
+                  "pm.test('Validation error envelope', function () {",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.statusCode).to.equal(422);",
+                  "  pm.expect(body.error).to.have.property('code', 'VALIDATION_ERROR');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/stations/search?q=",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "stations", "search"],
+              "query": [{ "key": "q", "value": "" }]
+            },
+            "description": "Adversarial Day 7 validation case: empty q is rejected."
+          }
+        },
+        {
+          "name": "2. Link existing station to operator",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.expect(pm.response.code).to.equal(200);",
+                  "});",
+                  "pm.test('Operator station link response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.be.an('object');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});",
+                  "if (body && body.data) {",
+                  "  const operatorStationId = body.data.operatorStationId || body.data.id || body.data.mappingId || '';",
+                  "  if (operatorStationId) {",
+                  "    pm.collectionVariables.set('operatorStationId', operatorStationId);",
+                  "    pm.environment.set('operatorStationId', operatorStationId);",
+                  "  }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminCreatedOperatorAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/stations",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "stations"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stationId\": \"{{stationSearchResultId}}\"\n}"
+            },
+            "description": "Link branch: stationId present means create OperatorStation only. Idempotency-Key is not required by current BSOT §5.6."
+          }
+        },
+        {
+          "name": "3. Create station and auto-link",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 201', function () {",
+                  "  pm.expect(pm.response.code).to.equal(201);",
+                  "});",
+                  "pm.test('Create-and-link response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(201);",
+                  "  pm.expect(body.data).to.be.an('object');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});",
+                  "if (body && body.data) {",
+                  "  const stationId = body.data.stationId || (body.data.station && body.data.station.id) || body.data.id || '';",
+                  "  if (stationId) {",
+                  "    pm.collectionVariables.set('createdStationId', stationId);",
+                  "    pm.environment.set('createdStationId', stationId);",
+                  "  }",
+                  "  const operatorStationId = body.data.operatorStationId || (body.data.operatorStation && body.data.operatorStation.id) || '';",
+                  "  if (operatorStationId) {",
+                  "    pm.collectionVariables.set('operatorStationId', operatorStationId);",
+                  "    pm.environment.set('operatorStationId', operatorStationId);",
+                  "  }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminCreatedOperatorAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/stations",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "stations"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"B\u1ebfn xe Mi\u1ec1n Tây Day 7\",\n  \"city\": \"H\u1ed3 Ch\u00ed Minh\",\n  \"province\": \"H\u1ed3 Ch\u00ed Minh\",\n  \"latitude\": 10.7461,\n  \"longitude\": 106.6173,\n  \"addressStreet\": \"395 Kinh D\u01b0\u01a1ng V\u01b0\u01a1ng\",\n  \"contactPhone\": \"02838545529\",\n  \"contactEmail\": \"station-day7@example.com\",\n  \"operatingHours\": \"24/7\",\n  \"facilities\": [\"waiting-room\", \"restroom\"],\n  \"supportsShuttle\": true\n}"
+            },
+            "description": "Create branch: station fields present means create Station + auto-link in one transaction. Latitude and longitude are required by Day 7 even though the DB columns are nullable."
+          }
+        },
+        {
+          "name": "4. Duplicate-nearby station returns warning",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Duplicate-nearby warning response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.have.property('warning');",
+                  "  pm.expect(body.data.warning).to.have.property('code', 'STATION_DUPLICATE_NEARBY');",
+                  "  pm.expect(body.data).to.have.property('nearbyStations').that.is.an('array');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminCreatedOperatorAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/stations",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "stations"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"B\u1ebfn xe Mi\u1ec1n Tây Day 7 Duplicate\",\n  \"city\": \"H\u1ed3 Ch\u00ed Minh\",\n  \"province\": \"H\u1ed3 Ch\u00ed Minh\",\n  \"latitude\": 10.7461,\n  \"longitude\": 106.6173,\n  \"addressStreet\": \"395 Kinh D\u01b0\u01a1ng V\u01b0\u01a1ng\",\n  \"contactPhone\": \"02838545529\",\n  \"contactEmail\": \"station-day7-duplicate@example.com\",\n  \"operatingHours\": \"24/7\",\n  \"facilities\": [\"waiting-room\", \"restroom\"],\n  \"supportsShuttle\": true\n}"
+            },
+            "description": "Duplicate-nearby case: same area within <100m must not create a new station and must return STATION_DUPLICATE_NEARBY."
+          }
+        },
+        {
+          "name": "5. Create stop",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 201', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test('Stop create response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(201);",
+                  "  pm.expect(body.data).to.be.an('object');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});",
+                  "if (body && body.data) {",
+                  "  const stopId = body.data.stopId || body.data.id || '';",
+                  "  if (stopId) {",
+                  "    pm.collectionVariables.set('stopId', stopId);",
+                  "    pm.environment.set('stopId', stopId);",
+                  "  }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminCreatedOperatorAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/stops",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "stops"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Day 7 Stop\",\n  \"latitude\": 10.758,\n  \"longitude\": 106.67,\n  \"address\": \"1 L\u00ea L\u01a1i\",\n  \"googlePlaceId\": \"day7-google-place-id-1\"\n}"
+            },
+            "description": "Day 7 create stop; googlePlaceId is persisted as an opaque string only."
+          }
+        },
+        {
+          "name": "6. Get stop",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Stop get response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.be.an('object');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminCreatedOperatorAccessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/stops/{{stopId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "stops", "{{stopId}}"]
+            },
+            "description": "Read own stop by id."
+          }
+        },
+        {
+          "name": "7. List stops as operator staff",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('PagedResult shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.have.property('items').that.is.an('array');",
+                  "  pm.expect(body.data).to.have.property('page', 1);",
+                  "  pm.expect(body.data).to.have.property('pageSize', 20);",
+                  "  pm.expect(body.data).to.have.property('totalItems').that.is.a('number');",
+                  "  pm.expect(body.data).to.have.property('totalPages').that.is.a('number');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/stops?page=1&pageSize=20&search=Day",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "stops"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "pageSize", "value": "20" },
+                { "key": "search", "value": "Day" }
+              ]
+            },
+            "description": "List stops with BSOT page/pageSize defaults and optional allow-listed search."
+          }
+        },
+        {
+          "name": "8. Update stop",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Stop update response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.be.an('object');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminCreatedOperatorAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/stops/{{stopId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "stops", "{{stopId}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Day 7 Stop Updated\",\n  \"latitude\": 10.759,\n  \"longitude\": 106.671,\n  \"address\": \"2 L\u00ea L\u01a1i\",\n  \"googlePlaceId\": \"day7-google-place-id-1-updated\"\n}"
+            },
+            "description": "Update own stop; OPERATOR_STAFF is forbidden to PATCH, OPERATOR_ADMIN may PATCH."
+          }
+        },
+        {
+          "name": "9. Missing station returns STATION_NOT_FOUND",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 404', function () {",
+                  "  pm.response.to.have.status(404);",
+                  "});",
+                  "pm.test('Station not found envelope', function () {",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.statusCode).to.equal(404);",
+                  "  pm.expect(body.error).to.have.property('code', 'STATION_NOT_FOUND');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminCreatedOperatorAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/stations",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "stations"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stationId\": \"{{missingStationId}}\"\n}"
+            },
+            "description": "Missing stationId should return STATION_NOT_FOUND."
+          }
+        },
+        {
+          "name": "10. Missing stop returns STOP_NOT_FOUND",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 404', function () {",
+                  "  pm.response.to.have.status(404);",
+                  "});",
+                  "pm.test('Stop not found envelope', function () {",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.statusCode).to.equal(404);",
+                  "  pm.expect(body.error).to.have.property('code', 'STOP_NOT_FOUND');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminCreatedOperatorAccessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/stops/{{missingStopId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "stops", "{{missingStopId}}"]
+            },
+            "description": "Missing stopId should return STOP_NOT_FOUND."
+          }
+        },
+        {
+          "name": "11. Cross-operator stop access returns STOP_NOT_FOUND",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;",
+                  "const crossOperatorStopId = pm.variables.get('crossOperatorStopId') || '';",
+                  "if (!uuidLike.test(crossOperatorStopId)) {",
+                  "  console.log('Skipping cross-operator stop 404 check: set crossOperatorStopId to a UUID stop owned by another operator.');",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 404', function () {",
+                  "  pm.response.to.have.status(404);",
+                  "});",
+                  "pm.test('Cross-operator stop access is hidden', function () {",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.statusCode).to.equal(404);",
+                  "  pm.expect(body.error).to.have.property('code', 'STOP_NOT_FOUND');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/stops/{{crossOperatorStopId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "stops", "{{crossOperatorStopId}}"]
+            },
+            "description": "Set crossOperatorStopId to a stop owned by another operator to verify tenant isolation without existence leaks."
+          }
+        },
+        {
+          "name": "12. OPERATOR_STAFF cannot patch stop",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 403', function () {",
+                  "  pm.response.to.have.status(403);",
+                  "});",
+                  "pm.test('Forbidden envelope', function () {",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.statusCode).to.equal(403);",
+                  "  pm.expect(body.error).to.have.property('code', 'FORBIDDEN');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/stops/{{stopId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "stops", "{{stopId}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Day 7 Staff Forbidden Update\"\n}"
+            },
+            "description": "OPERATOR_STAFF can read but cannot modify stops."
+          }
+        },
+        {
+          "name": "13. Non-approved operator cannot write",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const token = pm.variables.get('nonApprovedOperatorAccessToken') || '';",
+                  "if (!token || token === '<non-approved-operator-access-token>') {",
+                  "  console.log('Skipping non-approved operator write 403 check: set nonApprovedOperatorAccessToken to a valid JWT for a non-APPROVED or inactive operator.');",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 403', function () {",
+                  "  pm.response.to.have.status(403);",
+                  "});",
+                  "pm.test('Non-approved operator write denied', function () {",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.statusCode).to.equal(403);",
+                  "  pm.expect(body.error).to.have.property('code', 'FORBIDDEN');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{nonApprovedOperatorAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/stops",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "stops"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Blocked Stop\",\n  \"latitude\": 10.75,\n  \"longitude\": 106.67\n}"
+            },
+            "description": "Writes require an approved, active operator."
           }
         }
       ]

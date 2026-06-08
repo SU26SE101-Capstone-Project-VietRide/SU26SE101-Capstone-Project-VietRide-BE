@@ -31,6 +31,16 @@ JWT from the dev Identity key, and passes `localHarnessEnabled=true` to Newman. 
 inside the cumulative collection are skipped unless that variable is enabled, so the normal full
 collection remains runnable with externally supplied secrets/placeholders.
 
+Day-7 station/stop adversarial cases include two reviewer-supplied values that are intentionally
+not committed:
+
+- `crossOperatorStopId` must be a Stop id owned by another operator. If it is unset, a placeholder,
+  or not UUID-like, the collection skips the tenant-isolation request; when set, the request must
+  return exact `404 STOP_NOT_FOUND`.
+- `nonApprovedOperatorAccessToken` must be a valid user JWT for a non-`APPROVED` or inactive
+  operator. If it is unset or still the placeholder, the collection skips the write request; when
+  set, the request must return exact `403 FORBIDDEN`. Never commit token values.
+
 Or import both files into the Postman app (Collection + Environment) and run the folders.
 
 ## Notes
