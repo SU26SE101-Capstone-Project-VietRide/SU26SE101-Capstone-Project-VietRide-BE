@@ -9,12 +9,15 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Identity.Infrastructure;
+using VietRide.Shared.Persistence;
 using VietRide.Shared.Web.Authentication;
 
 namespace VietRide.Identity.IntegrationTests.Api;
@@ -317,6 +320,29 @@ public sealed class InternalOperatorsEndpointsTests
             builder.UseSetting("REDIS_URL", "localhost:6379,abortConnect=false");
             builder.UseSetting("IdentityJwt:Kid", "test-kid");
             builder.UseSetting("IdentityJwt:PrivateKey", AuthWebApplicationFactory.DevPrivateKeyPem);
+
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<NpgsqlDataSource>();
+                services.RemoveAll<DbContextOptions<IdentityDbContext>>();
+                services.RemoveAll<IdentityDbContext>();
+                services.RemoveAll<VietRideDbContextBase>();
+
+                services.AddSingleton(_ =>
+                {
+                    var dataSourceBuilder = new NpgsqlDataSourceBuilder(_connectionString);
+                    IdentityDbContext.ConfigurePostgresEnums(dataSourceBuilder);
+                    return dataSourceBuilder.Build();
+                });
+
+                services.AddDbContext<IdentityDbContext>((sp, options) =>
+                {
+                    options
+                        .UseNpgsql(sp.GetRequiredService<NpgsqlDataSource>())
+                        .ConfigureWarnings(warnings => warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning));
+                });
+                services.AddScoped<VietRideDbContextBase>(sp => sp.GetRequiredService<IdentityDbContext>());
+            });
         }
 
         public async Task InitializeAsync()

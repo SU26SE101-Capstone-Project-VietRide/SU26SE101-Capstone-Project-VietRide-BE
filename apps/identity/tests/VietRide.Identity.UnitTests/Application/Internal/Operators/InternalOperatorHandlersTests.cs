@@ -7,6 +7,7 @@ using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Identity.Domain.Exceptions;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Identity.UnitTests.Application.Internal.Operators;
 
@@ -178,6 +179,12 @@ public sealed class InternalOperatorHandlersTests
 
         public Task<Operator?> GetByTaxCodeAsync(string taxCode, CancellationToken cancellationToken = default)
             => Task.FromResult<Operator?>(null);
+
+        public Task<PagedResult<Operator>> ListAsync(
+            QueryOptions options,
+            OperatorRegistrationStatus? status,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
 
         public Task<Operator> AddAsync(Operator entity, CancellationToken cancellationToken = default)
             => Task.FromResult(entity);

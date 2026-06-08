@@ -2,7 +2,9 @@ using System.Text.Json;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Application.Features.Operators;
 using VietRide.Identity.Domain.Entities;
+using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Primitives;
 using Xunit;
 
 namespace VietRide.Identity.UnitTests.Application.Operators;
@@ -213,6 +215,14 @@ public sealed class ProfileOperatorProfileHandlerTests
         public Task<Operator?> GetByTaxCodeAsync(string taxCode, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(operatorProfile?.TaxCode == taxCode ? operatorProfile : null);
+        }
+
+        public Task<PagedResult<Operator>> ListAsync(
+            QueryOptions options,
+            OperatorRegistrationStatus? status,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
         }
 
         public Task<Operator?> GetByIdAsync(Guid id, CancellationToken ct)

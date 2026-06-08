@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Domain.Entities;
+using VietRide.Identity.Domain.Enums;
+using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Identity.Infrastructure.Persistence.Repositories;
 
@@ -58,5 +60,56 @@ public sealed class OperatorRepository : IOperatorRepository
         return _dbContext.Operators.FirstOrDefaultAsync(
             x => x.TaxCode == normalized,
             cancellationToken);
+    }
+
+    public async Task<PagedResult<Operator>> ListAsync(
+        QueryOptions options,
+        OperatorRegistrationStatus? status,
+        CancellationToken cancellationToken = default)
+    {
+        var query = _dbContext.Operators.AsNoTracking();
+
+        if (status.HasValue)
+            query = query.Where(x => x.RegistrationStatus == status.Value);
+
+        if (!string.IsNullOrWhiteSpace(options.Search))
+        {
+            var searchPattern = $"%{options.Search.Trim()}%";
+            query = query.Where(x =>
+                EF.Functions.ILike(x.Name, searchPattern)
+                || EF.Functions.ILike(x.ContactEmail, searchPattern)
+                || EF.Functions.ILike(x.ContactPhone, searchPattern)
+                || EF.Functions.ILike(x.BusinessRegistrationNumber, searchPattern)
+                || EF.Functions.ILike(x.TaxCode, searchPattern));
+        }
+
+        var totalItems = await query.LongCountAsync(cancellationToken);
+        var items = await ApplySort(query, options.SortBy, options.SortDir)
+            .Skip((options.Page - 1) * options.PageSize)
+            .Take(options.PageSize)
+            .ToListAsync(cancellationToken);
+
+        return PagedResult<Operator>.Create(items, options.Page, options.PageSize, totalItems);
+    }
+
+    private static IOrderedQueryable<Operator> ApplySort(
+        IQueryable<Operator> query,
+        string? sortBy,
+        string sortDir)
+    {
+        var descending = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
+        return sortBy?.Trim().ToLowerInvariant() switch
+        {
+            "name" => descending ? query.OrderByDescending(x => x.Name) : query.OrderBy(x => x.Name),
+            "contactemail" => descending ? query.OrderByDescending(x => x.ContactEmail) : query.OrderBy(x => x.ContactEmail),
+            "contactphone" => descending ? query.OrderByDescending(x => x.ContactPhone) : query.OrderBy(x => x.ContactPhone),
+            "businessregistrationnumber" => descending ? query.OrderByDescending(x => x.BusinessRegistrationNumber) : query.OrderBy(x => x.BusinessRegistrationNumber),
+            "taxcode" => descending ? query.OrderByDescending(x => x.TaxCode) : query.OrderBy(x => x.TaxCode),
+            "registrationstatus" => descending ? query.OrderByDescending(x => x.RegistrationStatus) : query.OrderBy(x => x.RegistrationStatus),
+            "isactive" => descending ? query.OrderByDescending(x => x.IsActive) : query.OrderBy(x => x.IsActive),
+            "approvedat" => descending ? query.OrderByDescending(x => x.ApprovedAt) : query.OrderBy(x => x.ApprovedAt),
+            "suspendedat" => descending ? query.OrderByDescending(x => x.SuspendedAt) : query.OrderBy(x => x.SuspendedAt),
+            _ => descending ? query.OrderByDescending(x => x.CreatedAt) : query.OrderBy(x => x.CreatedAt),
+        };
     }
 }

@@ -10,6 +10,7 @@ using MediatR;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
@@ -24,6 +25,7 @@ using VietRide.Identity.Domain.Exceptions;
 using VietRide.Identity.Infrastructure;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.ValueObjects;
+using VietRide.Shared.Persistence;
 
 namespace VietRide.Identity.IntegrationTests.Api;
 
@@ -664,8 +666,27 @@ public sealed class OperatorUsersEndpointsTests : IClassFixture<AuthWebApplicati
 
             builder.ConfigureServices(services =>
             {
+                services.RemoveAll<NpgsqlDataSource>();
+                services.RemoveAll<DbContextOptions<IdentityDbContext>>();
+                services.RemoveAll<IdentityDbContext>();
+                services.RemoveAll<VietRideDbContextBase>();
                 services.RemoveAll<IEmailService>();
                 services.RemoveAll<ILoginLockoutCounter>();
+
+                services.AddSingleton(_ =>
+                {
+                    var dataSourceBuilder = new NpgsqlDataSourceBuilder(_connectionString);
+                    IdentityDbContext.ConfigurePostgresEnums(dataSourceBuilder);
+                    return dataSourceBuilder.Build();
+                });
+
+                services.AddDbContext<IdentityDbContext>((sp, options) =>
+                {
+                    options
+                        .UseNpgsql(sp.GetRequiredService<NpgsqlDataSource>())
+                        .ConfigureWarnings(warnings => warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning));
+                });
+                services.AddScoped<VietRideDbContextBase>(sp => sp.GetRequiredService<IdentityDbContext>());
                 services.AddSingleton<IEmailService>(EmailService);
                 services.AddSingleton<ILoginLockoutCounter, NoOpLoginLockoutCounter>();
             });

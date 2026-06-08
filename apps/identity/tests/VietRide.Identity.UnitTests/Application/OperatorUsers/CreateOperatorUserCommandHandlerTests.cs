@@ -8,6 +8,7 @@ using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Identity.UnitTests.Application.OperatorUsers;
@@ -296,6 +297,7 @@ public sealed class CreateOperatorUserCommandHandlerTests
         public Task<Operator?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(_operator);
         public Task<Operator?> GetByBusinessRegistrationNumberAsync(string businessRegistrationNumber, CancellationToken cancellationToken = default) => Task.FromResult<Operator?>(null);
         public Task<Operator?> GetByTaxCodeAsync(string taxCode, CancellationToken cancellationToken = default) => Task.FromResult<Operator?>(null);
+        public Task<PagedResult<Operator>> ListAsync(QueryOptions options, OperatorRegistrationStatus? status, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Operator> AddAsync(Operator entity, CancellationToken cancellationToken = default) => Task.FromResult(entity);
         public void Update(Operator entity) { }
         public void Remove(Operator entity) { }

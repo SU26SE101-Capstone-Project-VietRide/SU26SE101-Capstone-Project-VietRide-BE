@@ -35,6 +35,74 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
     }
 
     [Fact]
+    public async Task List_SystemAdmin_ReturnsPagedOperatorsWithFilterSearchSortAndPage()
+    {
+        await _factory.ResetAsync();
+        await _factory.SeedSystemAdminAsync(SystemAdminId);
+        await _factory.SeedOperatorAsync("Alpha Transit", "BRN-ALPHA", "TAX-ALPHA", OperatorRegistrationStatus.APPROVED);
+        await _factory.SeedOperatorAsync("Zebra Transit", "BRN-ZEBRA", "TAX-ZEBRA", OperatorRegistrationStatus.APPROVED);
+        await _factory.SeedOperatorAsync("Beta Pending", "BRN-BETA", "TAX-BETA", OperatorRegistrationStatus.PENDING);
+        using var client = _factory.CreateClient();
+        using var request = AuthorizedGet("/v1/admin/operators?status=APPROVED&search=BRN-&sortBy=name&sortDir=asc&page=1&pageSize=1");
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        AssertSuccessEnvelope(doc, 200);
+        var data = doc.RootElement.GetProperty("data");
+        data.GetProperty("page").GetInt32().Should().Be(1);
+        data.GetProperty("pageSize").GetInt32().Should().Be(1);
+        data.GetProperty("totalItems").GetInt64().Should().Be(2);
+        data.GetProperty("totalPages").GetInt32().Should().Be(2);
+        data.GetProperty("hasNextPage").GetBoolean().Should().BeTrue();
+        data.GetProperty("hasPreviousPage").GetBoolean().Should().BeFalse();
+        var item = data.GetProperty("items").EnumerateArray().Should().ContainSingle().Subject;
+        item.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo(
+            ["operatorId", "name", "contactEmail", "contactPhone", "businessRegistrationNumber", "taxCode", "registrationStatus", "isActive", "createdAt", "approvedAt", "suspendedAt"]);
+        item.GetProperty("name").GetString().Should().Be("Alpha Transit");
+        item.GetProperty("registrationStatus").GetString().Should().Be(OperatorRegistrationStatus.APPROVED.ToString());
+    }
+
+    [Fact]
+    public async Task List_Anonymous_Returns401()
+    {
+        await _factory.ResetAsync();
+        using var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/v1/admin/operators?page=1&pageSize=20");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task List_NonSystemAdmin_Returns403()
+    {
+        await _factory.ResetAsync();
+        using var client = _factory.CreateClient();
+        using var request = AuthorizedGet("/v1/admin/operators", UserRole.OPERATOR_ADMIN.ToString());
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task List_NumericStatus_Returns422ValidationError()
+    {
+        await _factory.ResetAsync();
+        await _factory.SeedSystemAdminAsync(SystemAdminId);
+        using var client = _factory.CreateClient();
+        using var request = AuthorizedGet("/v1/admin/operators?status=1");
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        AssertErrorEnvelope(doc, 422, "VALIDATION_ERROR");
+    }
+
+    [Fact]
     public async Task Approve_PendingOperator_Returns200PersistsActiveTrialActivityLogAndNoOutbox()
     {
         await _factory.ResetAsync();
@@ -182,6 +250,13 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
             Content = JsonContent.Create(payload),
         };
         request.Headers.TryAddWithoutValidation("X-Internal-Auth", $"Bearer {CreateInternalJwt(SystemAdminId, UserRole.SYSTEM_ADMIN.ToString())}");
+        return request;
+    }
+
+    private static HttpRequestMessage AuthorizedGet(string url, string role = "SYSTEM_ADMIN")
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.TryAddWithoutValidation("X-Internal-Auth", $"Bearer {CreateInternalJwt(SystemAdminId, role)}");
         return request;
     }
 
@@ -336,6 +411,45 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
             var subscription = OperatorSubscription.CreateActiveTrial(operatorEntity.Id, SubscriptionPlan.StarterPlanId, now, now.AddDays(30));
             await db.Operators.AddAsync(operatorEntity);
             await db.OperatorSubscriptions.AddAsync(subscription);
+            await db.SaveChangesAsync();
+            return operatorEntity.Id;
+        }
+
+        public async Task<Guid> SeedOperatorAsync(
+            string name,
+            string businessRegistrationNumber,
+            string taxCode,
+            OperatorRegistrationStatus status)
+        {
+            await using var scope = Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var phoneDigits = new string(businessRegistrationNumber.Where(char.IsDigit).ToArray());
+            var phoneSuffix = phoneDigits.PadLeft(7, '0')[^7..];
+            var operatorEntity = Operator.CreatePending(
+                name,
+                businessRegistrationNumber,
+                taxCode,
+                $"{businessRegistrationNumber.ToLowerInvariant()}@example.com",
+                $"+8490{phoneSuffix}",
+                "1 Street",
+                "Ward",
+                "District",
+                "Province",
+                "Operator Admin",
+                "+84901234568");
+
+            if (status == OperatorRegistrationStatus.APPROVED)
+                operatorEntity.Approve(SystemAdminId, now);
+            else if (status == OperatorRegistrationStatus.REJECTED)
+                operatorEntity.Reject(SystemAdminId, "Rejected in test", now);
+            else if (status == OperatorRegistrationStatus.SUSPENDED)
+            {
+                operatorEntity.Approve(SystemAdminId, now.AddMinutes(-5));
+                operatorEntity.Suspend("Suspended in test", now);
+            }
+
+            await db.Operators.AddAsync(operatorEntity);
             await db.SaveChangesAsync();
             return operatorEntity.Id;
         }

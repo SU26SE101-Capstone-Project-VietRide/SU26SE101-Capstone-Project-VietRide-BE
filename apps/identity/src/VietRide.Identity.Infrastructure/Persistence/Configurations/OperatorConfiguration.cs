@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using VietRide.Identity.Domain.Entities;
@@ -116,18 +117,27 @@ internal sealed class OperatorConfiguration : IEntityTypeConfiguration<Operator>
         builder.Property(o => o.CancellationPolicy)
             .HasColumnName("cancellation_policy")
             .HasColumnType("jsonb")
+            .HasConversion(
+                value => ToJsonElement(value),
+                value => ToJsonString(value))
             .IsRequired(false)
             .HasComment("JSONB array of {hoursBeforeDeparture, feePercent}; sorted ascending. NULL = no policy configured.");
 
         builder.Property(o => o.ParcelNoShowPolicy)
             .HasColumnName("parcel_no_show_policy")
             .HasColumnType("jsonb")
+            .HasConversion(
+                value => ToJsonElement(value),
+                value => ToJsonString(value))
             .IsRequired(false)
             .HasComment("JSONB {noShowFeePercent, additionalPaymentTimeoutMinutes}. NULL defaults to {0, 30}.");
 
         builder.Property(o => o.LuggagePolicy)
             .HasColumnName("luggage_policy")
             .HasColumnType("jsonb")
+            .HasConversion(
+                value => ToJsonElement(value),
+                value => ToJsonString(value))
             .IsRequired(false)
             .HasComment("JSONB {defaultLuggageKgPerSeat}. NULL defaults to {10}.");
 
@@ -187,4 +197,16 @@ internal sealed class OperatorConfiguration : IEntityTypeConfiguration<Operator>
 
         builder.HasQueryFilter(o => o.DeletedAt == null);
     }
+
+    private static JsonElement? ToJsonElement(string? value)
+    {
+        if (value is null)
+            return null;
+
+        using var document = JsonDocument.Parse(value);
+        return document.RootElement.Clone();
+    }
+
+    private static string? ToJsonString(JsonElement? value)
+        => value?.GetRawText();
 }

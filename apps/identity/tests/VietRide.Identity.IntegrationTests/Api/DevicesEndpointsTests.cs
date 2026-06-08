@@ -9,6 +9,7 @@ using MediatR;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
@@ -240,7 +241,26 @@ public sealed class DevicesEndpointsTests : IClassFixture<AuthWebApplicationFact
             builder.UseSetting("ConnectionStrings:Default", _fixture.ConnectionString);
             builder.ConfigureServices(services =>
             {
+                services.RemoveAll<NpgsqlDataSource>();
+                services.RemoveAll<DbContextOptions<IdentityDbContext>>();
+                services.RemoveAll<IdentityDbContext>();
+                services.RemoveAll<VietRideDbContextBase>();
                 services.RemoveAll<IUnitOfWork>();
+
+                services.AddSingleton(_ =>
+                {
+                    var dataSourceBuilder = new NpgsqlDataSourceBuilder(_fixture.ConnectionString);
+                    IdentityDbContext.ConfigurePostgresEnums(dataSourceBuilder);
+                    return dataSourceBuilder.Build();
+                });
+
+                services.AddDbContext<IdentityDbContext>((sp, options) =>
+                {
+                    options
+                        .UseNpgsql(sp.GetRequiredService<NpgsqlDataSource>())
+                        .ConfigureWarnings(warnings => warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning));
+                });
+                services.AddScoped<VietRideDbContextBase>(sp => sp.GetRequiredService<IdentityDbContext>());
                 services.AddScoped<IUnitOfWork>(sp => new EfUnitOfWork(sp.GetRequiredService<VietRideDbContextBase>()));
             });
         }).CreateClient();

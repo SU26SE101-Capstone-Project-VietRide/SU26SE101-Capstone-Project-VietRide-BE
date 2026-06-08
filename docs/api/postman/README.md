@@ -18,6 +18,19 @@ npx newman run docs/api/postman/vietride.postman_collection.json \
   -e docs/api/postman/vietride.local.postman_environment.json
 ```
 
+Day-6 operator onboarding needs local-only OTP / SET_INITIAL_PASSWORD token lookup because those
+secrets are intentionally not returned by production API responses. For a self-contained local
+Day-6 audit run, use the helper wrapper instead of pasting tokens manually:
+
+```bash
+node scripts/run-day6-newman-local.js
+```
+
+The helper binds only `127.0.0.1`, reads the local dev database, mints a short-lived SYSTEM_ADMIN
+JWT from the dev Identity key, and passes `localHarnessEnabled=true` to Newman. The helper requests
+inside the cumulative collection are skipped unless that variable is enabled, so the normal full
+collection remains runnable with externally supplied secrets/placeholders.
+
 Or import both files into the Postman app (Collection + Environment) and run the folders.
 
 ## Notes

@@ -1,5 +1,7 @@
 using VietRide.Identity.Domain.Entities;
+using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Repositories;
+using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Identity.Application.Abstractions.Repositories;
 
@@ -17,5 +19,10 @@ public interface IOperatorRepository : IRepository<Operator, Guid>
 
     Task<Operator?> GetByTaxCodeAsync(
         string taxCode,
+        CancellationToken cancellationToken = default);
+
+    Task<PagedResult<Operator>> ListAsync(
+        QueryOptions options,
+        OperatorRegistrationStatus? status,
         CancellationToken cancellationToken = default);
 }

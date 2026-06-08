@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using VietRide.Identity.Api.Controllers.Requests;
 using VietRide.Identity.Application.Features.Admin.ApproveOperator;
 using VietRide.Identity.Application.Features.Admin.CreateOperator;
+using VietRide.Identity.Application.Features.Admin.ListOperators;
 using VietRide.Identity.Application.Features.Admin.RejectOperator;
 using VietRide.Identity.Application.Features.Admin.SuspendOperator;
 using VietRide.Shared.Kernel.Primitives;
@@ -20,6 +21,35 @@ public sealed class AdminOperatorsController : ControllerBase
     public AdminOperatorsController(ISender sender)
     {
         _sender = sender;
+    }
+
+    /// <summary>Lists operators for System Admin review and operations.</summary>
+    [HttpGet]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<OperatorListItemDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<PagedResult<OperatorListItemDto>>> List(
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize,
+        [FromQuery] string? search,
+        [FromQuery] string? sortBy,
+        [FromQuery] string? sortDir,
+        [FromQuery] string? status,
+        CancellationToken cancellationToken)
+    {
+        var response = await _sender.Send(
+            new ListOperatorsQuery(
+                CurrentUserClaims.GetRole(User),
+                page,
+                pageSize,
+                search,
+                sortBy,
+                sortDir,
+                status),
+            cancellationToken);
+
+        return Ok(response);
     }
 
     /// <summary>Creates an approved operator and initial OPERATOR_ADMIN account.</summary>
