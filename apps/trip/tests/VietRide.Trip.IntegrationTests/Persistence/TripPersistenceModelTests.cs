@@ -65,6 +65,7 @@ public sealed class TripPersistenceModelTests
 
         stop.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "idx_stops_operator_id");
         stop.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "idx_stops_replaced_by");
+        stop.GetForeignKeys().Should().OnlyContain(x => x.PrincipalEntityType.ClrType == typeof(Stop));
         stop.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "idx_stops_shared_suggestion");
         stop.GetCheckConstraints().Should().Contain(x => x.Name == "chk_stops_no_self_replacement");
     }
