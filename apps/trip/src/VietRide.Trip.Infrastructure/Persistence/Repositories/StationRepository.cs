@@ -33,4 +33,38 @@ internal sealed class StationRepository : IStationRepository
 
     public IQueryable<Station> QueryNoTracking()
         => _dbContext.Stations.AsNoTracking();
+
+    public async Task<IReadOnlyList<Station>> SearchActiveByNameAsync(
+        string q,
+        string? city,
+        string? province,
+        CancellationToken cancellationToken)
+        => await BuildSearchActiveByNameQuery(q, city, province).ToListAsync(cancellationToken);
+
+    private IQueryable<Station> BuildSearchActiveByNameQuery(string q, string? city, string? province)
+    {
+        var search = _dbContext.Stations
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_trip.stations
+                WHERE deleted_at IS NULL
+                  AND is_active = TRUE
+                  AND unaccent(name) ILIKE unaccent('%' || {q.Trim()} || '%')
+                """)
+            .AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(city))
+        {
+            var cityFilter = city.Trim();
+            search = search.Where(station => station.City == cityFilter);
+        }
+
+        if (!string.IsNullOrWhiteSpace(province))
+        {
+            var provinceFilter = province.Trim();
+            search = search.Where(station => station.Province == provinceFilter);
+        }
+
+        return search;
+    }
 }
