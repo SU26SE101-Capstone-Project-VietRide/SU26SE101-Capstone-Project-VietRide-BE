@@ -1,3 +1,4 @@
+using DotNetEnv;
 using Serilog;
 using VietRide.Identity.Application.Features.Auth.Register;
 using VietRide.Identity.Infrastructure;
@@ -11,6 +12,8 @@ using VietRide.Shared.Web.Middleware;
 using VietRide.Shared.Web.Swagger;
 
 const string ServiceName = "Identity";
+
+Env.NoClobber().TraversePath().Load();
 
 var builder = WebApplication.CreateBuilder(args);
 

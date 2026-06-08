@@ -1,0 +1,257 @@
+# Day 7 — Plan
+
+- **Timeline ref**: BE_TIMELINE_VU.md -> Day 7 (Tue 2026-06-02) — Trip-Route-Vehicle: Station + OperatorStation + Stop (Jira: SCV-74)
+- **Prior checklist**: docs/handoff/day-6-checklist.md (found — Day 6 Operator onboarding READY; carry-over: SUSPENDED->APPROVED reactivation deferred, paid-plan onboarding deferred to Day 37, Day 10 owns Outbox wiring for identity.operator.* events. Day 7 note: Trip may rely on Identity internal operator/subscription lookup + usage increment; Identity integration tests green.)
+- **Plan status**: APPROVED (ready to implement)
+
+## Objective
+Day 7 stands up the Trip-Route-Vehicle service first three aggregates — canonical Station, the OperatorStation mapping, and operator-owned Stop — with the EF migration, autocomplete search, station link/create, and Stop CRU. This is the first feature work in the Trip service (currently a bare skeleton: only PingController, empty TripDbContext, design factory, no migrations), so it also lands the Trip MediatR/Infrastructure DI + NetArchTest baseline by mirroring the Identity composition-root pattern. It unblocks Day 8 (Route/RouteStop reference Station + Stop) and Day 11 (Trip search joins Route->RouteStop->Stop->Station).
+
+## Success criteria (DoD — binary, verifiable)
+- [ ] Canonical schema docs are synced for Day 7 search extensions: db-schema/trip-route-vehicle/schema.sql and README list `pgcrypto`, `unaccent`, and `pg_trgm`. `unaccent` is used for accent-insensitive search; `pg_trgm` is enabled only because the canonical schema contains the deferred `idx_stations_name_trgm` placeholder using `gin_trgm_ops`.
+- [ ] EF migration creates stations, operator_stations, stops tables matching db-schema/trip-route-vehicle/schema.sql (cols/indexes/checks, including the existing `idx_stations_name_trgm ... WHERE FALSE` placeholder) and runs `CREATE EXTENSION IF NOT EXISTS` for `pgcrypto`, `unaccent`, and `pg_trgm`; dotnet ef database update applies, rolls back (Down), and re-applies clean.
+- [ ] Operator can search stations via GET /v1/stations/search (accent-insensitive contains: `unaccent(name) ILIKE unaccent('%'||q||'%')` — "Mien Tay" matches "Bến xe Miền Tây"), then via the SINGLE POST /v1/operator/stations either LINK an existing Station (stationId present -> OperatorStation mapping only, no duplicate Station) OR CREATE a new Station + auto-link in one transaction (station fields present), immediately available to other operators.
+- [ ] Duplicate-nearby Station create (<100m from an existing active Station) DOES NOT create a new Station. It returns HTTP 200 success envelope with `data.warning.code = "STATION_DUPLICATE_NEARBY"` and `data.nearbyStations[]` candidates so FE can link an existing Station.
+- [ ] OperatorStation create and Stop create/update validate the caller `operatorId` logical FK via Identity internal HTTP (`GET /internal/v1/operators/{operatorId}`) using outbound Internal JWT; no cross-DB FK is added. All Day-7 Trip WRITE actions also require current Identity `registrationStatus == "APPROVED"` and `isActive == true` to block stale tokens after suspend/reject.
+- [ ] Stop CREATE/READ/UPDATE (no DELETE — deferred Day 24): under /v1/operator/stops, operator creates a Stop with lat in [-90,90], lng in [-180,180], name; reads/updates own Stops only (tenant isolation by operatorId from JWT). WRITE = OPERATOR_ADMIN only; READ = OPERATOR_STAFF + OPERATOR_ADMIN. `GET /v1/operator/stops` returns `PagedResult<StopDto>` using BSOT §5.7 `page`/`pageSize` defaults; `search` is optional over name/address only if implemented with an allow-list. google_place_id persisted as opaque string (no live Maps call).
+- [ ] Internal lookups GET /internal/v1/stations/{id} and GET /internal/v1/stops/{id} return canonical entities (raw DTO, internal-auth).
+- [ ] Gateway routes for the station/stop endpoint families exist and proxy to Trip with correct auth/roles; Gateway forwards user context into Internal JWT claims exactly as Trip controllers expect (`sub`, `role`, `operatorId`).
+- [ ] `STATION_NOT_FOUND` and `STOP_NOT_FOUND` return HTTP 404 with those exact BSOT error codes by adding a 404-capable coded exception path (`CodedNotFoundException`) in shared Application/Web and tests; existing generic `NotFoundException -> RESOURCE_NOT_FOUND` behavior remains intact.
+- [ ] dotnet build + dotnet format --verify-no-changes clean; unit + integration tests green incl. NetArchTest layering for Trip; required endpoint/error matrix below is covered.
+- [ ] API contract + BSOT registry (error codes, internal-endpoint registry) updated to match shipped endpoints; Postman collection extended.
+
+## Required test matrix (minimum)
+- Station search: accent-insensitive happy path (`q=Mien Tay` returns `Bến xe Miền Tây`) + empty/invalid q validation.
+- Station link: missing station -> 404 `STATION_NOT_FOUND`; duplicate link for same operator is behavior-idempotent 200 with existing OperatorStation mapping (no `Idempotency-Key` required by current BSOT §5.6).
+- Station create: valid create+auto-link requires latitude+longitude and uses collision-safe slug; duplicate-nearby within <100m returns 200 with `data.warning.code = "STATION_DUPLICATE_NEARBY"` and no new Station row.
+- Operator logical FK/status validation: OperatorStation create and Stop create/update call Identity internal operator validation. Identity 404, Identity 5xx, and transport/circuit-breaker failures all map to `422 VALIDATION_ERROR` per current BSOT logical-FK rule (`HTTP validate at WRITE ... Hỏng -> VALIDATION_ERROR 422`); do NOT use `UPSTREAM_UNAVAILABLE` for Trip->Identity validation failures unless BSOT is changed first. Identity 2xx is write-eligible only when payload has `registrationStatus == "APPROVED"` and `isActive == true`; PENDING/REJECTED/SUSPENDED/inactive -> 403 `FORBIDDEN`, no side effects.
+- Stop write/list: OPERATOR_STAFF POST/PATCH -> 403; invalid lat/lng -> 422 `VALIDATION_ERROR`; list returns `PagedResult<StopDto>` with page/pageSize defaults and tenant-scoped total count.
+- Stop read/update: tenant isolation for cross-operator access -> 404 `STOP_NOT_FOUND` consistently (avoid existence leak).
+- Internal endpoints: raw DTO success; missing station/stop -> 404 `STATION_NOT_FOUND` / `STOP_NOT_FOUND` via `CodedNotFoundException`.
+- Gateway: `/v1/stations/search` proxies via existing `/v1/stations` with OPERATOR_ADMIN/OPERATOR_STAFF role restriction; `/v1/operator/stations` and `/v1/operator/stops` proxy to Trip and preserve user context claims (`sub`, `role`, `operatorId`).
+
+## Contract changes
+New REST endpoints (Trip service, behind Gateway). All paths/roles below are FINAL — Open questions Q1-Q9 resolved (see Open questions section):
+- GET /v1/stations/search?q=&city?=&province?= — autocomplete, Auth = OPERATOR_STAFF + OPERATOR_ADMIN (Q1 RESOLVED; human-confirmed for Day 7 OperatorStation Management flow). Canonical path is /v1/stations/search (technical_context_v7:523 + timeline). The API contract's GET /v1/stations (VietRide_API_Contract_v1.md:2010) is reconciled to /v1/stations/search in Task 7.0a. Query param stays `q` intentionally because technical_context_v7:523 outranks the generic BSOT §5.8 `search=` convention for this endpoint. Matching = accent-insensitive contains: `unaccent(name) ILIKE unaccent('%'||q||'%')`. `pg_trgm` is enabled only for schema compatibility with the existing deferred `idx_stations_name_trgm ... WHERE FALSE` placeholder; Day 7 does NOT implement trigram similarity search, does NOT remove `WHERE FALSE`, does NOT add an immutable-unaccent-wrapper expression index, and does NOT rely on the placeholder for performance. Distance-from-operator-coords ranking (technical_context_v7:523) DEFERRED — out of Day-7 scope.
+- POST /v1/operator/stations — SINGLE endpoint that branches on body (Q2 RESOLVED, option a): stationId present -> LINK existing (create OperatorStation only); station fields present (name/city/province/coords…) -> CREATE Station + auto-link in one transaction. Role = OPERATOR_STAFF + OPERATOR_ADMIN (technical_context_v7:525 outranks contract OPERATOR_ADMIN-only at :2020). Task 7.0a extends the contract request body (:2024) to document the create-Station branch fields + corrects the role. Station create requires latitude + longitude when using the create branch so duplicate-nearby can be evaluated deterministically; if the body omits coords, reject with 422 `VALIDATION_ERROR` rather than guessing. Duplicate-nearby create (<100m) is Q4 RESOLVED: return 200 success envelope with `data.warning` + `data.nearbyStations`, and do not create a Station.
+- (REMOVED) POST /v1/operators/{id}/stations and POST /v1/stations — folded into the single POST /v1/operator/stations above (Q2 RESOLVED). Do NOT implement separate create/link endpoints.
+- Stop CRU (Q3 RESOLVED): path family /v1/operator/stops. Day-7 scope = CREATE + READ + UPDATE only: POST /v1/operator/stops (create), GET /v1/operator/stops (list), GET /v1/operator/stops/{id} (get), PATCH /v1/operator/stops/{id} (update). Roles: WRITE (create+update) = OPERATOR_ADMIN ONLY; READ (list+get) = OPERATOR_STAFF + OPERATOR_ADMIN. `GET /v1/operator/stops` uses BSOT §5.7 pagination (`page`, `pageSize`, default page=1/pageSize=20, max 100) and returns `PagedResult<StopDto>`; optional `search` may match name/address only with an explicit allow-list, no arbitrary sort/search columns. DELETE / disable-with-replacement (replaced_by_stop_id write path, shared_suggestion, BookingPendingAction) DEFERRED to Day 24 (timeline:254) — do NOT implement a DELETE/replacement endpoint this day. Google Places = STUB only (persist optional google_place_id string, schema.sql:127 — NO live Maps/Places call). Not in API contract; timeline line 94 + technical_context_v7:551 (Stop Management module) authorize them.
+- Internal: GET /internal/v1/stations/{id}, GET /internal/v1/stops/{id} (BACKEND_SOURCE_OF_TRUTH.md:1680).
+- Error codes (already registered, BSOT 5.9 BACKEND_SOURCE_OF_TRUTH.md:1373-1382): STATION_NOT_FOUND (404), STATION_DUPLICATE_NEARBY (200 warning, <100m), STOP_NOT_FOUND (404), STOP_REPLACEMENT_CYCLE (422), STOP_REPLACEMENT_DIFFERENT_OPERATOR (403). The two STOP_REPLACEMENT_* codes are NOT exercised in Day 7 (replacement deferred to Day 24) but stay registered. Current BSOT logical-FK rule maps Identity validation-call failures to 422 `VALIDATION_ERROR`; do NOT use `UPSTREAM_UNAVAILABLE` for Trip->Identity operator validation unless Task 7.0a first changes BSOT. No new error code invented. Q5 RESOLVED: add `CodedNotFoundException` in shared Application/Web so Station/Stop handlers can return coded 404 without changing generic `NotFoundException` behavior.
+- DB migration: first Trip migration (3 tables) — must also CREATE EXTENSION IF NOT EXISTS `pgcrypto`, `unaccent`, and `pg_trgm`. Gateway routes: /v1/stations, /v1/stops, /v1/trips already exist (apps/gateway/src/config/routes.ts:111-115, Day 2 placeholder, authRequired user); ADD /v1/operator/stations (target TRIP, OPERATOR_STAFF/ADMIN) and /v1/operator/stops (target TRIP, roles split per Q3); /v1/stations already covers the /search subpath (longest-prefix match).
+
+## Tasks
+
+### Task 7.0 — Trip service architecture baseline (MediatR + Infrastructure DI + NetArchTest)
+| Field | Value |
+|---|---|
+| stack/owner | dotnet |
+| implement agent | dotnet-worker |
+| review agent | dotnet-reviewer |
+| skill | (none) |
+| owned files (write set) | apps/trip/src/VietRide.Trip.Api/Program.cs (wire shared MediatR behaviors + Infrastructure DI) ; apps/trip/src/VietRide.Trip.Application/ApplicationAssemblyMarker.cs (new minimal marker type for MediatR assembly scanning because Trip.Application currently has no .cs files) ; apps/trip/src/VietRide.Trip.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs (new) ; apps/trip/tests/VietRide.Trip.UnitTests/Architecture/LayeringTests.cs (new) ; apps/trip/tests/VietRide.Trip.UnitTests/VietRide.Trip.UnitTests.csproj (add version-less NetArchTest package + ProjectReferences to Trip.Infrastructure and Trip.Api) |
+| forbidden scope | Directory.Packages.props (MediatR/FluentValidation/NetArchTest versions ALREADY exist from Day 3 — do NOT re-add or bump) ; libs/dotnet/** except Task 7.0b ; any other service ; .env/secrets ; git ops |
+| depends on | — |
+| invariant flags | CRLF on .cs/.csproj ; CPM csproj refs version-less (no Version=) ; MediatR v11 (do not upgrade) ; Clean Arch dependency direction (NetArchTest) ; do NOT create `Trip.Application/DependencyInjection/ApplicationServiceCollectionExtensions.cs` unless deliberately choosing a wrapper — Identity does not have this wrapper |
+| acceptance | dotnet build apps/trip/VietRide.Trip.sln -c Release clean ; dotnet format apps/trip/VietRide.Trip.sln --verify-no-changes clean ; NetArchTest layering test (Domain->nothing, Application->Domain, Infrastructure->Domain+Application, Api->Application+Infrastructure) compiles and passes ; Trip.Api uses `AddVietRideMediatRBehaviors(handlerAssemblies: [typeof(ApplicationAssemblyMarker).Assembly])` from `VietRide.Shared.Application.DependencyInjection` (mirror Identity Program.cs composition-root pattern), not a fake Identity-mirror wrapper ; Trip.Infrastructure exposes `AddInfrastructure(builder.Configuration)` like Identity, registering Trip repositories/external clients as they land ; service boots, /health 200 |
+| source citations | apps/identity/src/VietRide.Identity.Api/Program.cs:36-42 (direct AddVietRideMediatRBehaviors + AddInfrastructure pattern); apps/identity/src/VietRide.Identity.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs; BE_TIMELINE_VU.md Day 3 pre-reqs; AGENTS.md Clean Architecture dependency direction; apps/trip/src/VietRide.Trip.Api/Program.cs |
+
+### Task 7.0a — Contract + BSOT + canonical schema sync for Day 7 endpoints
+| Field | Value |
+|---|---|
+| stack/owner | cross-cutting |
+| implement agent | worker |
+| review agent | reviewer |
+| skill | (none) |
+| owned files (write set) | VietRide_API_Contract_v1.md (Station/Stop endpoint sections) ; BACKEND_SOURCE_OF_TRUTH.md (5.9 error registry confirm, internal-endpoint registry confirm, 13 changelog row) ; db-schema/trip-route-vehicle/schema.sql (extensions only, plus keep existing placeholder index) ; db-schema/trip-route-vehicle/README.md (extension list) |
+| forbidden scope | any apps/** or libs/** code ; .env/secrets ; git ops |
+| depends on | — (Q1-Q9 RESOLVED — see Open questions; paths/roles/bodies/warning/exception/idempotency/status/slug/list-shape decisions finalized) |
+| invariant flags | LF on .md/.sql ; do NOT invent error codes (reuse BSOT 5.9) ; no new event keys (no Outbox this day) ; Day-7 mutation endpoints are NOT added to the BSOT §5.6 13-endpoint Idempotency-Key list; explicitly document `Idempotency-Key: not required by BSOT §5.6` for POST/PATCH Day-7 endpoints, and do NOT implement/wire shared IdempotencyMiddleware in Day 7 unless BSOT §5.6 is first changed ; do NOT invent Station-create field names — derive ONLY from stations columns schema.sql:62-81 (name, city, province, latitude, longitude, address_street, contact_phone, contact_email, operating_hours, facilities, supports_shuttle); create branch MUST require both latitude and longitude despite nullable DB columns, because duplicate-nearby must be evaluated deterministically ; flag any naming choice not directly in contract/technical_context_v7 as needing confirmation ; query param stays `q` for this endpoint because technical_context_v7:523 outranks BSOT §5.8 generic `search=` convention, and record this as a Day-7 endpoint-specific exception in the contract/BSOT changelog |
+| acceptance | (Q1) Reconcile contract GET /v1/stations (:2010) -> GET /v1/stations/search?q=&city?=&province?= with Auth = OPERATOR_STAFF/OPERATOR_ADMIN for Day-7 OperatorStation Management flow ; document this as a targeted exception to BSOT §5.8 `search=` because technical_context_v7:523 is higher priority for this endpoint ; document accent-insensitive contains matching (unaccent + ILIKE) ; document `pg_trgm` enabled only for canonical schema placeholder compatibility, with trigram similarity + distance-ranking DEFERRED. Update canonical schema/README to list `pgcrypto`, `unaccent`, `pg_trgm`. (Q2) Extend POST /v1/operator/stations request body (:2024 currently stationId-only = link) to ALSO document the create-Station branch fields (from schema.sql:62-81 stations columns only) + change Auth from OPERATOR_ADMIN (:2020) to OPERATOR_STAFF/OPERATOR_ADMIN (technical_context_v7:525) ; document the stationId-present=link / station-fields-present=create+link branching ; require latitude+longitude for create branch even though DB allows null. (Q3) Add Stop CREATE/READ/UPDATE endpoints under /v1/operator/stops with role split (WRITE=OPERATOR_ADMIN, READ=OPERATOR_STAFF/ADMIN), `GET /v1/operator/stops` returning `PagedResult<StopDto>` with BSOT §5.7 pagination, google_place_id stub note, and explicit DELETE-deferred-to-Day-24 note. (Q4) Define duplicate-nearby behavior exactly: create-branch Station within <100m of existing active Station returns HTTP 200 success envelope, DOES NOT create Station, and response `data` contains `warning: { code: "STATION_DUPLICATE_NEARBY", message: string }` plus `nearbyStations: StationSearchResult[]`; no `ApiMeta` shape change. Document Identity operator logical-FK/status validation: missing/unreachable upstream maps to 422 `VALIDATION_ERROR` per current BSOT, and non-APPROVED/inactive operators get 403 `FORBIDDEN` on writes. Document `Idempotency-Key: not required by BSOT §5.6` on all Day-7 POST/PATCH endpoints (unless BSOT is changed first). Document the 2 internal endpoints. BSOT STATION/STOP error rows confirmed present ; internal-endpoint registry stations/stops line confirmed ; BSOT 13 changelog row added |
+| source citations | VietRide_API_Contract_v1.md:2010-2046 (GET /v1/stations :2010-2016; POST /v1/operator/stations :2018-2045, body :2024); technical_context_v7:523 (search path + fuzzy), :525 (POST /v1/operator/stations role + create branch), :551 (Stop Management); db-schema/trip-route-vehicle/schema.sql:7,62-88 (extensions + Station create fields + trgm placeholder), :127 (google_place_id); db-schema/trip-route-vehicle/README.md:9 (extension list); BACKEND_SOURCE_OF_TRUTH.md:1373-1382, :1406, :1680 |
+
+### Task 7.0b — Shared coded 404 exception path
+| Field | Value |
+|---|---|
+| stack/owner | dotnet/shared |
+| implement agent | dotnet-worker |
+| review agent | dotnet-reviewer |
+| skill | (none) |
+| owned files (write set) | libs/dotnet/VietRide.Shared.Application/Exceptions/ApplicationExceptions.cs (add `CodedNotFoundException` or equivalent sealed 404-coded exception) ; libs/dotnet/VietRide.Shared.Web/Filters/ApiResponseExceptionFilter.cs (map `CodedNotFoundException` to HTTP 404 + exact ErrorCode) ; tests/dotnet/VietRide.Shared.Web.UnitTests/Filters/ApiResponseExceptionFilterTests.cs |
+| forbidden scope | Do NOT change existing `NotFoundException` semantics or its `RESOURCE_NOT_FOUND` mapping ; no new package refs/deps ; no app-service behavior except handlers may use the new exception later ; git ops |
+| depends on | 7.0a (error codes confirmed) |
+| invariant flags | CRLF on .cs ; coded exception must require non-empty UPPER_SNAKE_CASE error code ; keep generic `NotFoundException` backwards-compatible for existing Identity tests that expect `RESOURCE_NOT_FOUND` |
+| acceptance | New `CodedNotFoundException` maps to HTTP 404 with caller-supplied code/message in ADR 0004 envelope ; existing `NotFoundException` test still returns `RESOURCE_NOT_FOUND` ; `STATION_NOT_FOUND` and `STOP_NOT_FOUND` are valid use cases documented for Trip handlers ; dotnet build/test shared libs green |
+| source citations | libs/dotnet/VietRide.Shared.Web/Filters/ApiResponseExceptionFilter.cs:88-89 (current generic mapping); libs/dotnet/VietRide.Shared.Application/Exceptions/ApplicationExceptions.cs:18-28 (current NotFoundException); BACKEND_SOURCE_OF_TRUTH.md:1373,1381 |
+
+### Task 7.1 — Station/OperatorStation/Stop domain + EF config + first Trip migration
+| Field | Value |
+|---|---|
+| stack/owner | dotnet |
+| implement agent | dotnet-worker |
+| review agent | dotnet-reviewer |
+| skill | scaffold-aggregate + ef-migration |
+| owned files (write set) | apps/trip/src/VietRide.Trip.Domain/Entities/{Station,OperatorStation,Stop}.cs ; apps/trip/src/VietRide.Trip.Domain/Exceptions/TripDomainException.cs (if needed) ; apps/trip/src/VietRide.Trip.Application/Abstractions/Repositories/{IStationRepository,IOperatorStationRepository,IStopRepository}.cs ; apps/trip/src/VietRide.Trip.Infrastructure/Persistence/Configurations/{Station,OperatorStation,Stop}Configuration.cs ; apps/trip/src/VietRide.Trip.Infrastructure/Persistence/Repositories/{Station,OperatorStation,Stop}Repository.cs ; apps/trip/src/VietRide.Trip.Infrastructure/TripDbContext.cs (DbSets) ; apps/trip/src/VietRide.Trip.Infrastructure/Migrations/* (generated; first Trip migration Up() must run `CREATE EXTENSION IF NOT EXISTS "pgcrypto"`, `"unaccent"`, and `"pg_trgm"` before tables/indexes; Down() drops after dependent objects) ; register repos in InfrastructureServiceCollectionExtensions.cs ; apps/trip/tests/VietRide.Trip.IntegrationTests/Persistence/* |
+| forbidden scope | db-schema/** beyond Task 7.0a extension sync ; other services ; Directory.Packages.props ; .env/secrets ; git ops |
+| depends on | 7.0, 7.0a |
+| invariant flags | CRLF on .cs ; snake_case columns ; soft-delete = deleted_at only + partial unique WHERE deleted_at IS NULL (ADR 0003) ; is_active SEPARATE activation flag (IActivatable) ; operator_id LOGICAL FK (no cross-DB FK) ; Stop.replaced_by_stop_id self-FK CHECK <> id ; Station.OperatingHours and Station.Facilities are domain `string?` JSON payloads, EF converts to JSONB using the Identity OperatorConfiguration string-to-JsonElement pattern ; latitude/longitude DECIMAL(10,7) ; migration reversible (Down) ; OperatorStation has NO `deleted_at` column — no soft-delete (verify schema.sql:98-109); activation via `is_active` only; worker must NOT add `deleted_at` to the OperatorStation entity or its EF config (Station + Stop DO have deleted_at) |
+| acceptance | Migration creates stations/operator_stations/stops with EXACT columns, real indexes and CHECK constraints from schema.sql, including: `uq_stations_slug`, `idx_stations_city_province`, `idx_stations_supports_shuttle`, deferred placeholder `idx_stations_name_trgm ... WHERE FALSE`, `uq_operator_stations_operator_station`, `idx_operator_stations_operator_id`, `idx_operator_stations_station_id`, `idx_stops_operator_id`, `idx_stops_replaced_by`, `idx_stops_shared_suggestion`, and `chk_stops_no_self_replacement`. Migration enables `pgcrypto`, `unaccent`, and `pg_trgm`; `pg_trgm` is for placeholder index compatibility only — Day 7 does NOT implement trigram similarity search or remove `WHERE FALSE`. If EF fluent config cannot emit exact `USING gin (name gin_trgm_ops) WHERE FALSE`, patch the migration with explicit `migrationBuilder.Sql("CREATE INDEX ...")` and matching `DROP INDEX`. Apply then rollback(Down) then reapply clean — Down() drops tables/indexes before `DROP EXTENSION IF EXISTS "pg_trgm"`, `"unaccent"`, `"pgcrypto"` if this initial migration introduced them. Entities encapsulate state (private setters + factory like Operator). Stop entity maps replaced_by_stop_id (self-FK) + chk_stops_no_self_replacement column from schema (column exists; NO write path for it in Day 7). build/format/test green |
+| source citations | db-schema/trip-route-vehicle/schema.sql:7,62-142 (stations 62-88, operator_stations 98-114, stops 119-142; extensions; trgm placeholder :87-88; chk_stops_no_self_replacement :134); README.md:9,16-18,39-41; mirror apps/identity/.../Operator.cs + OperatorConfiguration.cs (JSONB converter pattern); ADR 0003; AGENTS.md Persistence |
+
+### Task 7.1b — Trip Identity internal client + operator logical-FK validation
+| Field | Value |
+|---|---|
+| stack/owner | dotnet |
+| implement agent | dotnet-worker |
+| review agent | dotnet-reviewer |
+| skill | (none) |
+| owned files (write set) | apps/trip/src/VietRide.Trip.Application/Abstractions/ExternalClients/IIdentityInternalClient.cs ; apps/trip/src/VietRide.Trip.Infrastructure/ExternalClients/IdentityInternalClient.cs ; apps/trip/src/VietRide.Trip.Infrastructure/ExternalClients/InternalJwtTokenFactory.cs (BCL-only HS256 JWT signing; no PackageReference/dependency additions) ; apps/trip/src/VietRide.Trip.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs (HttpClient + options registration) ; apps/trip/tests/** external-client tests |
+| forbidden scope | Identity service code ; Gateway code ; cross-DB FK ; new NuGet deps ; .env/secrets ; git ops |
+| depends on | 7.0, 7.0a, 7.1 |
+| invariant flags | CRLF on .cs ; logical FK enforcement is app-layer HTTP validate at WRITE; outbound service-to-service call uses Internal JWT header `X-Internal-Auth: Bearer <jwt>` with issuer `vietride-gateway`, audience `vietride-internal`, secret env `INTERNAL_JWT_SECRET`, TTL <=120s; FIRST discover/reuse the shared `VietRide.Shared.Http` pipeline (`AddVietRideServiceClient`, `InternalJwtDelegatingHandler`, `IInternalJwtTokenProvider`) if sufficient; if the shared concrete token provider is still absent, implement the smallest Trip-local BCL-only HS256 signer or shared provider needed without adding NuGet packages, and keep claims compatible with BSOT §6.4 (`sub`, `role`, `operatorId` when available, `callerService`) ; Identity base URL comes from configuration/env, no hardcoded production URL |
+| acceptance | Expose an application abstraction that can validate Day-7 write eligibility, e.g. `ValidateOperatorCanWriteAsync(Guid operatorId, CancellationToken)`, by calling `GET /internal/v1/operators/{operatorId}`. 2xx is valid only when the raw Identity payload has `registrationStatus == "APPROVED"` and `isActive == true`; PENDING/REJECTED/SUSPENDED/inactive is a 403 `FORBIDDEN` write-denial for the eventual handler. Identity 404, Identity 5xx, transport failures, and circuit-breaker failures all become logical-FK validation failures (`422 VALIDATION_ERROR`) per current BSOT §4.3/db-schema cross-service rule; do NOT map Trip->Identity validation failures to `UPSTREAM_UNAVAILABLE` unless Task 7.0a changes BSOT first. Task 7.1b only registers/exposes the client and tests client success/status-denied/404/5xx/transport + outbound `X-Internal-Auth` shape; the actual OperatorStation/Stop handlers call this write-eligibility method in Tasks 7.2/7.3 where those handlers are created. Tests verify no cross-DB FK is added |
+| source citations | db-schema/_global/cross-service-references.md:20-21 (OperatorStation/Stop operator logical FK); BACKEND_SOURCE_OF_TRUTH.md:1103,1666-1668 (logical FK/internal endpoints); Identity internal endpoints from Day 6 checklist |
+
+### Task 7.2 — Station search + link/create endpoints (CQRS + controllers)
+| Field | Value |
+|---|---|
+| stack/owner | dotnet |
+| implement agent | dotnet-worker |
+| review agent | dotnet-reviewer |
+| skill | add-endpoint |
+| owned files (write set) | apps/trip/src/VietRide.Trip.Application/Features/Stations/** (SearchStations query+handler+validator+DTO; CreateOrLinkOperatorStation command+handler+validator+DTO) ; apps/trip/src/VietRide.Trip.Api/Controllers/StationsController.cs ; apps/trip/src/VietRide.Trip.Api/Controllers/OperatorStationsController.cs ; apps/trip/src/VietRide.Trip.Api/Controllers/CurrentUserClaims.cs (new — mirror Identity claim names) ; apps/trip/src/VietRide.Trip.Api/Controllers/Requests/* ; tests under apps/trip/tests/** |
+| forbidden scope | Domain/Infrastructure config beyond 7.1/7.1b (no migration edits; repo interfaces + Identity client pre-registered) ; other services ; db-schema beyond 7.0a ; .env/secrets ; git ops |
+| depends on | 7.0, 7.0a, 7.0b, 7.1, 7.1b (Q1+Q2+Q4+Q5+Q6+Q7+Q8 RESOLVED) |
+| invariant flags | CRLF on .cs ; ApiResponse-T envelope (ADR 0004) ; controller calls MediatR.Send only ; tenant: operatorId from JWT via CurrentUserClaims.GetOperatorId (mirror Identity exact claim name `operatorId`) ; Gateway/user-context Internal JWT must provide `sub`, `role`, `operatorId` claims; integration tests must create internal JWT with those claims. Day-7 mutations do NOT require `Idempotency-Key` by current BSOT §5.6 and must not wire IdempotencyMiddleware. ONE endpoint POST /v1/operator/stations branching on body (stationId present -> link; station fields present -> create+link) — do NOT add separate POST /v1/stations or POST /v1/operators/{id}/stations (Q2). Authorize(Roles = OPERATOR_STAFF, OPERATOR_ADMIN) on both search and POST /v1/operator/stations (technical_context_v7:525, Q2). Search uses accent-insensitive contains `unaccent(name) ILIKE unaccent('%'||q||'%')` — NOT plain ILIKE; DO NOT use trigram `similarity`, `%` operator, or distance ranking in Day 7 (Q1). create-branch requires latitude+longitude. Station slug must be deterministic AND collision-safe: prefer slug base from `name + city + province`; on unique collision, append a short deterministic suffix from station id or normalized address, and test two stations with same name in different provinces do not violate `uq_stations_slug`. Missing station uses `CodedNotFoundException("STATION_NOT_FOUND", ...)`. Duplicate-nearby (<100m) DOES NOT create Station; returns 200 success envelope with `data.warning.code = "STATION_DUPLICATE_NEARBY"` and `data.nearbyStations[]`, no `ApiMeta` shape change (Q4) |
+| acceptance | GET /v1/stations/search returns canonical Stations matched accent-insensitively: `unaccent(name) ILIKE unaccent('%'||q||'%')` so q="Mien Tay" matches "Bến xe Miền Tây" (Day-7 review test) — optional city/province exact filters ; POST /v1/operator/stations validates caller operator write eligibility via Identity internal client (APPROVED + active required), then with stationId -> creates OperatorStation, no duplicate Station; linking a Station already linked to the operator returns 200 OK with the existing OperatorStation mapping (behavior-idempotent on uq_operator_stations_operator_station), NOT 409 ; link-to-missing -> 404 `STATION_NOT_FOUND`; POST /v1/operator/stations with station fields (name/city/province/latitude/longitude required, other fields from schema.sql:62-81) -> if no duplicate-nearby, creates Station with collision-safe slug + auto-links OperatorStation in one transaction, visible to other operators immediately ; missing coords -> 422 `VALIDATION_ERROR`; if duplicate-nearby <100m exists, returns 200 warning payload and leaves Station count unchanged ; both branches authorized for OPERATOR_STAFF + OPERATOR_ADMIN ; 403 when caller lacks operator scope/role or current Identity operator status is not APPROVED/active ; required test matrix green ; build/format/test green |
+| source citations | technical_context_v7:523 (search path /v1/stations/search + fuzzy match), :524 (link branch), :525 (create branch + OPERATOR_STAFF/ADMIN role); VietRide_API_Contract_v1.md:2010-2045 (as reconciled by 7.0a); db-schema/trip-route-vehicle/schema.sql:62-81 (Station create fields), :111-112 (uq_operator_stations_operator_station idempotency); db-schema/_global/cross-service-references.md:20; mirror apps/identity/.../Controllers/OperatorProfileController.cs + CurrentUserClaims.cs; BSOT:1381-1382 (STATION_NOT_FOUND, STATION_DUPLICATE_NEARBY) |
+
+### Task 7.3 — Stop CRU endpoints (operator-scoped; delete/soft-delete deferred)
+| Field | Value |
+|---|---|
+| stack/owner | dotnet |
+| implement agent | dotnet-worker |
+| review agent | dotnet-reviewer |
+| skill | add-endpoint |
+| owned files (write set) | apps/trip/src/VietRide.Trip.Application/Features/Stops/** (Create/Get/List/Update ONLY — NO Disable/Delete, deferred Day 24; command/query+handler+validator+DTO) ; apps/trip/src/VietRide.Trip.Api/Controllers/OperatorStopsController.cs (route prefix /v1/operator/stops) ; apps/trip/src/VietRide.Trip.Api/Controllers/Requests/* (Stop requests) ; tests under apps/trip/tests/** |
+| forbidden scope | StationsController/OperatorStationsController (7.2) ; migrations/domain config (7.1) ; other services ; db-schema ; .env/secrets ; git ops |
+| depends on | 7.0, 7.0a, 7.0b, 7.1, 7.1b (Q3+Q5+Q6+Q7+Q9 RESOLVED) |
+| invariant flags | CRLF on .cs ; ApiResponse-T envelope ; MediatR.Send only ; Day-7 mutations do NOT require `Idempotency-Key` by current BSOT §5.6 and must not wire IdempotencyMiddleware ; path family /v1/operator/stops (Q3) ; SCOPE = CREATE + READ + UPDATE only — do NOT implement DELETE, disable, replaced_by_stop_id write path, shared_suggestion write path, or BookingPendingAction (all DEFERRED to Day 24, timeline:254; STOP_REPLACEMENT_* codes NOT exercised this day) ; roles: WRITE (create POST + update PATCH) = Authorize(Roles=OPERATOR_ADMIN) ONLY ; READ (list GET + get GET) = Authorize(Roles = OPERATOR_STAFF, OPERATOR_ADMIN) (Q3 human override: staff view-only) ; tenant isolation: every Stop query/command scoped to operatorId from JWT claim `operatorId`; Gateway/user-context Internal JWT must provide `sub`, `role`, `operatorId`; cross-operator -> 404 `STOP_NOT_FOUND` consistently to avoid leaking existence ; create/update validate caller operator write eligibility via Identity internal client before write (APPROVED + active required; non-approved/inactive -> 403) ; missing own Stop uses `CodedNotFoundException("STOP_NOT_FOUND", ...)`; `GET /v1/operator/stops` returns `PagedResult<StopDto>` with BSOT §5.7 page/pageSize defaults and allow-listed optional search (name/address only) ; google_place_id = STUB — persist optional opaque string only, NO live Google Maps/Places call (Q3) ; lat in [-90,90], lng in [-180,180] validated (timeline review note) |
+| acceptance | POST /v1/operator/stops (OPERATOR_ADMIN) validates caller operator write eligibility via Identity internal client, then creates Stop with valid coords + operatorId from JWT, optional google_place_id persisted verbatim, plus optional `description` (text, nullable) and `address` (varchar 500, nullable) create fields (schema.sql:123,126) ; GET /v1/operator/stops (OPERATOR_STAFF or ADMIN) returns only caller Stops as `PagedResult<StopDto>` with tenant-scoped total count, page/pageSize validation/clamping, and optional allow-listed search; GET /v1/operator/stops/{id} returns only caller Stop ; PATCH /v1/operator/stops/{id} (OPERATOR_ADMIN) validates operator write eligibility then updates own ; missing/cross-operator stop -> 404 `STOP_NOT_FOUND`; NO DELETE endpoint exists (deferred Day 24) ; OPERATOR_STAFF calling POST/PATCH -> 403 ; non-APPROVED/inactive Identity operator -> 403 no side effects ; invalid lat (91) or lng (181) -> 422 VALIDATION_ERROR ; required test matrix green ; build/format/test green |
+| source citations | db-schema/trip-route-vehicle/schema.sql:119-135 (stops cols, google_place_id :127, replaced_by_stop_id :129, chk_stops_no_self_replacement :134); db-schema/_global/cross-service-references.md:21; README.md:41; technical_context_v7:551 (Stop Management module — create/edit, disable+replacement noted as separate concern); BE_TIMELINE_VU.md Day 24 (timeline:254 owns DELETE/replacement); BSOT:1373-1375 (STOP error codes); Q3 RESOLVED (path /v1/operator/stops, WRITE=OPERATOR_ADMIN / READ=OPERATOR_STAFF+ADMIN, google_place_id stub, CRU only) |
+
+### Task 7.4 — Internal station/stop lookup endpoints
+| Field | Value |
+|---|---|
+| stack/owner | dotnet |
+| implement agent | dotnet-worker |
+| review agent | dotnet-reviewer |
+| skill | add-endpoint |
+| owned files (write set) | apps/trip/src/VietRide.Trip.Application/Features/Internal/** (GetStationById, GetStopById query+handler+DTO) ; apps/trip/src/VietRide.Trip.Api/Controllers/InternalStationsController.cs ; apps/trip/src/VietRide.Trip.Api/Controllers/InternalStopsController.cs ; tests under apps/trip/tests/** |
+| forbidden scope | FE-facing controllers (7.2/7.3) ; migrations/domain (7.1) ; other services ; db-schema ; .env/secrets ; git ops |
+| depends on | 7.0, 7.0a, 7.0b, 7.1 |
+| invariant flags | CRLF on .cs ; internal endpoints return RAW success DTO (NOT ApiResponse-T envelope — BSOT internal raw-success rule, mirror Identity InternalOperatorsController) ; errors still use ADR 0004 envelope through exception filter ; route prefix internal/v1/... ; InternalJwt required ; missing station/stop uses `CodedNotFoundException` so error code is `STATION_NOT_FOUND` / `STOP_NOT_FOUND`, not generic `RESOURCE_NOT_FOUND` |
+| acceptance | GET /internal/v1/stations/{id} and GET /internal/v1/stops/{id} return canonical entity DTOs ; 404 when missing with exact coded errors ; raw-DTO shape verified ; >=1 happy + 1 not-found test each ; build/format/test green |
+| source citations | BACKEND_SOURCE_OF_TRUTH.md:1680; mirror apps/identity/src/VietRide.Identity.Api/Controllers/InternalOperatorsController.cs (raw-success, BSOT:1235-1240); BACKEND_SOURCE_OF_TRUTH.md:1373,1381 |
+
+### Task 7.5 — Gateway routes for station/stop families
+| Field | Value |
+|---|---|
+| stack/owner | nest |
+| implement agent | nest-worker |
+| review agent | nest-reviewer |
+| skill | (none) |
+| owned files (write set) | apps/gateway/src/config/routes.ts ; gateway route tests under apps/gateway/** |
+| forbidden scope | any .NET/apps/trip code ; .env/secrets ; git ops ; other route families semantics |
+| depends on | 7.2, 7.3 (final paths/roles known; Q1-Q9 RESOLVED) |
+| invariant flags | LF on .ts ; longest-prefix-wins (existing matchRoute, routes.ts:170-175) ; /v1/stations (routes.ts:113) already covers /v1/stations/search subpath via prefix match — do NOT add a separate /search route, but update the existing /v1/stations entry with `requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF']` for Day-7 station search auth ; /v1/stops (routes.ts:114) stays but Day-7 Stop endpoints live under /v1/operator/stops (add new entry) ; ADD `/v1/operator/stations` -> TRIP_BASE_URL, authRequired user ; ADD `/v1/operator/stops` -> TRIP_BASE_URL, authRequired user ; for `/v1/stations` and both new entries set `requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF']` at the gateway (the union of roles that can reach these endpoints — consistent with the established /v1/operator/* pattern at routes.ts:71-81); the per-method role split (Stop WRITE = OPERATOR_ADMIN only) is enforced inside the Trip controller, not at the gateway, because a single `requiredRoles` array cannot express a method-level restriction ; both new entries target TRIP while existing /v1/operator/profile (routes.ts:71) + /v1/operator/users (routes.ts:77) target IDENTITY — none is a string-prefix of another so longest-prefix resolution is unambiguous, but co-locate the two new TRIP /v1/operator/* entries (in the Trip/Vehicle block) and do NOT touch the IDENTITY /v1/operator/* entries ; Gateway must forward user context into downstream Internal JWT claims exactly as Trip controllers read them: `sub`, `role`, `operatorId` |
+| acceptance | Gateway proxies GET /v1/stations/search (via existing /v1/stations prefix, now role-restricted to OPERATOR_ADMIN/OPERATOR_STAFF), POST /v1/operator/stations, and /v1/operator/stops CREATE/READ/UPDATE to TRIP_BASE_URL as authenticated-user routes ; downstream request includes Internal JWT user-context claims `sub`, `role`, `operatorId` when present on the user session ; existing IDENTITY /v1/operator/profile + /v1/operator/users routes unaffected (still target IDENTITY) ; no /v1/operator/stops DELETE route added (deferred Day 24) ; gateway checks green using repo-standard commands: `npx nx run-many -t test --all --exclude="VietRide.*" --ci --passWithNoTests` and `npx nx run-many -t lint --all --exclude="VietRide.*"` |
+| source citations | apps/gateway/src/config/routes.ts:111-115 (Trip block, /v1/stations :113, /v1/stops :114), :71 (/v1/operator/profile IDENTITY), :77 (/v1/operator/users IDENTITY), :170-175 (matchRoute longest-prefix-wins); Q1-Q9 RESOLVED (paths /v1/stations/search, /v1/operator/stations, /v1/operator/stops, warning shape, coded 404, no Day-7 Idempotency-Key, operator write eligibility, station slug/coords, Stop list shape); AGENTS.md Per new .NET endpoint add Gateway route |
+
+### Task 7.6 — Postman collection: Day-7 station/stop flow
+| Field | Value |
+|---|---|
+| stack/owner | cross-cutting |
+| implement agent | worker |
+| review agent | reviewer |
+| skill | (none) |
+| owned files (write set) | docs/api/postman/vietride.postman_collection.json ; docs/api/postman/README.md (if Day-7 note needed) |
+| forbidden scope | code/migrations ; db-schema ; .env/secrets ; vietride.local.postman_environment.json secret values ; git ops |
+| depends on | 7.2, 7.3, 7.4, 7.5 |
+| invariant flags | LF on .json/.md ; collection must still JSON.parse ; no committed secret/token values ; follow Day-6 local-harness-guard convention for local-only helpers |
+| acceptance | Collection adds operator station search (GET /v1/stations/search?q=, incl. an accent-insensitive case e.g. q=Mien Tay) -> create/link (POST /v1/operator/stations both branches; no Idempotency-Key header required by current BSOT §5.6) -> duplicate-nearby warning case (200 `data.warning.code = STATION_DUPLICATE_NEARBY`) -> stop create/get/list/update under /v1/operator/stops (NO disable/delete — deferred Day 24; list asserts `PagedResult` shape) happy path + adversarial cases (cross-operator 404 `STOP_NOT_FOUND`, missing-station 404 `STATION_NOT_FOUND`, missing-stop 404 `STOP_NOT_FOUND`, OPERATOR_STAFF PATCH stop 403, non-APPROVED operator write 403) ; collection JSON parses ; existing Day1-6 requests unchanged |
+| source citations | docs/handoff/day-6-checklist.md:64-68; AGENTS.md Per PR update Postman |
+
+## Dispatch order
+1. Task 7.0 (Trip DI/arch baseline) — serial, first. parallel-safe: no.
+2. Task 7.0a (contract/BSOT/schema sync) — parallel-safe with 7.0 (docs/schema only; no app code). Q1-Q9 RESOLVED.
+3. Task 7.0b (shared coded 404 exception path) — after 7.0a; parallel-safe with 7.1 if no shared app code conflict, but review before endpoint handlers depend on it.
+4. Task 7.1 (domain + migration) — after 7.0 and 7.0a. parallel-safe: no.
+5. Task 7.1b (Identity internal client + operator logical-FK validation) — after 7.1; can be implemented before endpoint handlers. parallel-safe: limited (edits Infrastructure DI, so avoid parallel edits to same file).
+6. Task 7.2 (station endpoints) and Task 7.3 (stop endpoints) — after 7.0b, 7.1, 7.1b; disjoint Features and controllers. 7.1/7.1b pre-register repos/client in DI so 7.2/7.3 do not edit InfrastructureServiceCollectionExtensions.cs. Run serial-in-one-tree to be safe (parallel-safe only if DI untouched).
+7. Task 7.4 (internal lookups) — after 7.0b and 7.1; parallel-safe with 7.2/7.3 (own controllers + Features/Internal).
+8. Task 7.5 (gateway routes) — after 7.2/7.3 (nest, disjoint from .NET). parallel-safe: yes vs .NET tasks.
+9. Task 7.6 (Postman) — last.
+
+## Progress tracker
+| Task | Status | Review verdict | Date | Notes |
+|---|---|---|---|---|
+| 7.0 | todo | — | — | Trip baseline corrected to Identity composition-root pattern |
+| 7.0a | todo | — | — | Q1-Q9 RESOLVED; includes canonical schema extension sync |
+| 7.0b | todo | — | — | Shared coded 404 path for STATION/STOP not-found |
+| 7.1 | todo | — | — | Enables pgcrypto + unaccent + pg_trgm; trgm search still deferred |
+| 7.1b | todo | — | — | Identity internal client validates operator logical FK |
+| 7.2 | todo | — | — | Q1,Q2,Q4,Q5 RESOLVED |
+| 7.3 | todo | — | — | Q3,Q5 RESOLVED |
+| 7.4 | todo | — | — | Internal raw DTO + coded 404 |
+| 7.5 | todo | — | — | Gateway claim forwarding asserted |
+| 7.6 | todo | — | — | Postman includes duplicate warning + coded 404 cases |
+
+Legend: todo / in progress / done (reviewer APPROVED + human /verify) / done-with-carryover / blocked
+
+## Open questions
+All resolved by the human (BE lead, Vũ) before dispatch. Decisions are baked into the tasks above; recorded here for traceability.
+
+**Q1 — RESOLVED (Option B+) — Station search path + matching strategy + extensions.**
+- Canonical path: `GET /v1/stations/search?q=` (technical_context_v7:523 + timeline). The API contract's `GET /v1/stations` (VietRide_API_Contract_v1.md:2010) is reconciled to `/v1/stations/search` in Task 7.0a. Auth is OPERATOR_STAFF + OPERATOR_ADMIN for Day-7 OperatorStation Management flow. Query param remains `q` because technical_context_v7:523 outranks the generic BSOT §5.8 `search=` convention for this endpoint.
+- Matching = ACCENT-INSENSITIVE contains: enable the Postgres `unaccent` extension and search `WHERE unaccent(name) ILIKE unaccent('%' || q || '%')` (so "Mien Tay" matches "Bến xe Miền Tây" — required by the Day-7 review test). Task 7.1 migration runs `CREATE EXTENSION IF NOT EXISTS "unaccent"`.
+- Also enable `pg_trgm` because canonical schema already contains the deferred `idx_stations_name_trgm ... gin_trgm_ops WHERE FALSE` placeholder. Day 7 does NOT implement trigram similarity search, does NOT remove `WHERE FALSE`, and does NOT add an immutable-unaccent-wrapper expression index.
+- DEFERRED: distance-from-operator-coords ranking (technical_context_v7:523) — out of Day-7 scope; search returns matches without distance sort.
+
+**Q2 — RESOLVED (option a) — Station create vs link = single endpoint.**
+- ONE endpoint `POST /v1/operator/stations` that branches on the body: `stationId` present -> LINK existing (create OperatorStation only, no duplicate Station); station fields present (name/city/province/coords…) -> CREATE Station + auto-link in one transaction. Do NOT implement separate `POST /v1/stations` or `POST /v1/operators/{id}/stations`.
+- Role = `OPERATOR_STAFF` + `OPERATOR_ADMIN` (technical_context_v7:525 outranks the contract's OPERATOR_ADMIN-only at :2020).
+- Task 7.0a extends the contract `POST /v1/operator/stations` request body (currently :2024 stationId-only = link-only) to document the create-Station branch fields and updates the role. Create-branch field names derive ONLY from stations columns schema.sql:62-81 (name, city, province, latitude, longitude, address_street, contact_phone, contact_email, operating_hours, facilities, supports_shuttle) — any naming choice not directly in contract/technical_context_v7 is flagged for confirmation. Even though DB latitude/longitude are nullable for future backfill/import flexibility, the Day-7 create API requires both latitude and longitude; missing either returns 422 `VALIDATION_ERROR`. Slug generation must be deterministic and collision-safe (base from name+city+province, with deterministic suffix on collision) so `uq_stations_slug` is never leaked as a DB error.
+
+**Q3 — RESOLVED — Stop CRU scope.**
+- Path family = `/v1/operator/stops` (operator-owned resource; consistent with the /v1/operator/* family).
+- Roles: WRITE (create + update) = `OPERATOR_ADMIN` ONLY. READ (list + get) = `OPERATOR_STAFF` + `OPERATOR_ADMIN` (human override: staff may view but not modify stops).
+- `GET /v1/operator/stops` returns `PagedResult<StopDto>` using BSOT §5.7 (`page`, `pageSize`, max 100) and optional allow-listed `search` over name/address only.
+- Google Places = STUB only: persist the optional `google_place_id` string (schema.sql:127) — NO live Google Maps/Places API call this day.
+- Scope = CREATE / READ / UPDATE only. DEFERRED to Day 24 (timeline:254): disable/DELETE-with-replacement (replaced_by_stop_id write path, shared_suggestion, BookingPendingAction). Task 7.3 must NOT implement DELETE or replacement-cycle endpoints — though the entity/EF mapping of `replaced_by_stop_id` + the `chk_stops_no_self_replacement` column still come from schema.sql:129,134 (column exists; just no write path for it in Day 7).
+- Coords validated lat ∈ [-90,90], lng ∈ [-180,180] (timeline review note).
+
+**Q4 — RESOLVED — Duplicate-nearby Station behavior.**
+- If create-Station branch is within <100m of an existing active Station, DO NOT create a new Station and DO NOT create OperatorStation automatically.
+- Return HTTP 200 success envelope with `data.warning = { code: "STATION_DUPLICATE_NEARBY", message: string }` and `data.nearbyStations[]` using the same Station search/result DTO shape. FE then chooses an existing Station and calls the link branch.
+- No `ApiMeta` shape change.
+
+**Q5 — RESOLVED — Coded 404 error path.**
+- Add a shared `CodedNotFoundException` (or equivalent sealed 404-coded exception) and map it in `ApiResponseExceptionFilter` to HTTP 404 + caller-supplied error code.
+- Do NOT change existing `NotFoundException` semantics; it must continue mapping to `RESOURCE_NOT_FOUND` for existing Identity behavior/tests.
+- Trip Station/Stop handlers use `CodedNotFoundException("STATION_NOT_FOUND", ...)` and `CodedNotFoundException("STOP_NOT_FOUND", ...)`.
+
+**Q6 — RESOLVED — Day-7 idempotency/header scope.**
+- Day-7 POST/PATCH endpoints are not part of the current BSOT §5.6 13-endpoint `Idempotency-Key` list, and Day 10 owns the Redis Idempotency baseline. Therefore Day 7 explicitly documents `Idempotency-Key: not required by BSOT §5.6` and must NOT implement/wire IdempotencyMiddleware unless BSOT §5.6 is changed first.
+- Some Day-7 operations are behavior-idempotent by domain/data rules (e.g. duplicate station link returns existing mapping via `uq_operator_stations_operator_station`), but this is not header idempotency.
+
+**Q7 — RESOLVED — Identity operator write eligibility + logical-FK failure mapping.**
+- Day-7 Trip writes validate the caller operator through Identity internal `GET /internal/v1/operators/{operatorId}`. Write is allowed only when Identity returns `registrationStatus == "APPROVED"` and `isActive == true`; PENDING/REJECTED/SUSPENDED/inactive returns 403 `FORBIDDEN` with no side effects.
+- Current BSOT cross-service logical-FK rule maps validation-call failures to 422 `VALIDATION_ERROR`. Therefore Identity 404, 5xx, transport failure, and circuit-breaker failure all surface as 422 `VALIDATION_ERROR` for Day-7 logical-FK validation. `UPSTREAM_UNAVAILABLE` is not used for Trip->Identity validation unless BSOT is changed first.
+
+**Q8 — RESOLVED — Station create coords + slug.**
+- Station DB coords remain nullable per canonical schema for future import/backfill flexibility, but Day-7 create API requires both latitude and longitude so duplicate-nearby can be evaluated. Missing either returns 422 `VALIDATION_ERROR`.
+- Slug generation is deterministic and collision-safe: base from normalized name+city+province; if uniqueness still collides, append a deterministic short suffix from id or normalized address before save. Do not leak `uq_stations_slug` DB constraint errors to clients.
+
+**Q9 — RESOLVED — Stop list shape.**
+- `GET /v1/operator/stops` returns `PagedResult<StopDto>` using BSOT §5.7, not a bare array. The list is tenant-scoped before count/projection, supports `page`/`pageSize`, and optional `search` only over allow-listed fields (name/address).
