@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Infrastructure.Persistence.Repositories;
 
 namespace VietRide.Trip.Infrastructure.DependencyInjection;
 
@@ -16,6 +18,10 @@ public static class InfrastructureServiceCollectionExtensions
         IConfiguration configuration)
     {
         _ = configuration;
+
+        services.AddScoped<IStationRepository, StationRepository>();
+        services.AddScoped<IOperatorStationRepository, OperatorStationRepository>();
+        services.AddScoped<IStopRepository, StopRepository>();
 
         return services;
     }

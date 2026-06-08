@@ -199,7 +199,7 @@ New REST endpoints (Trip service, behind Gateway). All paths/roles below are FIN
 | 7.0 | done | APPROVE | 2026-06-08 | APPROVED; human /verify pending; 0 patch rounds |
 | 7.0a | done | APPROVE | 2026-06-08 | APPROVED; human /verify pending; 3 patch rounds |
 | 7.0b | done | APPROVE | 2026-06-08 | APPROVED; human /verify pending; 0 patch rounds |
-| 7.1 | todo | — | — | Enables pgcrypto + unaccent + pg_trgm; trgm search still deferred |
+| 7.1 | done | APPROVE | 2026-06-08 | APPROVED; human /verify pending; 1 patch round; EF apply/rollback/reapply passed |
 | 7.1b | todo | — | — | Identity internal client validates operator logical FK |
 | 7.2 | todo | — | — | Q1,Q2,Q4,Q5 RESOLVED |
 | 7.3 | todo | — | — | Q3,Q5 RESOLVED |
