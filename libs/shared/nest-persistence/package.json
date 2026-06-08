@@ -10,6 +10,6 @@
   },
   "peerDependencies": {
     "@nestjs/common": "^11.0.0",
-    "pg": "^8.0.0"
+    "@prisma/client": "^6.0.0"
   }
 }

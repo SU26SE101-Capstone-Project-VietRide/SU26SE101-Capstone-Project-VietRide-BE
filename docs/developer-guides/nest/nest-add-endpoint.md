@@ -50,7 +50,7 @@ async list(
 ```
 
 On validation failure, `ZodValidationPipe` throws a `BadRequestException`.
-`ProblemDetailsExceptionFilter` (wired globally) converts it to RFC 7807 automatically.
+`ApiResponseExceptionFilter` (wired globally) converts it to the `ApiResponse` error envelope automatically.
 
 ---
 
@@ -117,7 +117,7 @@ throw new UnprocessableEntityException({
 ```
 
 `errorCode` must be `UPPER_SNAKE_CASE`.
-`ProblemDetailsExceptionFilter` handles the RFC 7807 shape — never build it manually.
+`ApiResponseExceptionFilter` handles the standard `ApiResponse` shape — never build it manually.
 
 ---
 
@@ -138,6 +138,6 @@ async login() {}
 
 - [ ] Input validated with `ZodValidationPipe` — no class-validator, no manual checks
 - [ ] Errors thrown as NestJS HTTP exceptions with `errorCode` UPPER_SNAKE_CASE
-- [ ] No manual ProblemDetails object construction
+- [ ] No manual ApiResponse object construction
 - [ ] No `console.log` — use pino or Logger in service layer
 - [ ] Lint and tests pass

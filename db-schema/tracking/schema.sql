@@ -1,13 +1,17 @@
 -- =============================================================================
 -- VietRide :: Tracking Service :: PostgreSQL 16 schema
 -- Database: vietride_tracking
--- Framework: NestJS + TypeORM
+-- Schema: vietride_tracking
+-- Framework: NestJS + Prisma ORM
 -- =============================================================================
 -- Minimal DB — most state lives in Redis (last position, GPS buffer, ETA cache).
 -- This DB only persists batched GpsTrail history and OutboxEvent.
 -- =============================================================================
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+CREATE SCHEMA IF NOT EXISTS vietride_tracking;
+SET search_path TO vietride_tracking, public;
 
 -- =============================================================================
 -- ENUMS

@@ -35,7 +35,7 @@ import { RabbitMqPublisher } from '@vietride/nest-rabbitmq';
 @Injectable()
 export class LocationService {
   constructor(
-    private readonly pg: PgService,
+    private readonly locationRepository: LocationRepository,
     private readonly publisher: RabbitMqPublisher,
   ) {}
 

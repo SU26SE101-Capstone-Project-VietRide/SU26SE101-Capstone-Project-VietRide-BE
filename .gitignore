@@ -168,3 +168,6 @@ TASK.md
 CHANGELOG_AI.md
 /opencode.json
 /.opencode/
+
+# ── Prisma / Generated code ──────────────────────────────────────────────────
+**/src/generated/
