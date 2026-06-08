@@ -100,16 +100,16 @@ describe('OutboxPublisherService', () => {
     expect(repository.markFailed).toHaveBeenCalledWith(EVENT_ID, expect.any(Error));
   });
 
-  it('routes approaching alerts to the vehicle approaching key', async () => {
+  it('routes approaching alerts to the gps approaching stop key', async () => {
     repository.findPublishable.mockResolvedValueOnce([
       createEvent({
         eventType: APPROACHING_ALERT_EVENT_TYPE,
         payload: {
           tripId: EVENT_ID,
-          bookingId: '33333333-3333-4333-8333-333333333333',
+          bookingIds: ['33333333-3333-4333-8333-333333333333'],
           stopId: '22222222-2222-4222-8222-222222222222',
           etaMinutes: 10,
-          wave: 'w2',
+          wave: 2,
         },
       }),
     ]);
@@ -118,7 +118,7 @@ describe('OutboxPublisherService', () => {
 
     expect(publisher.publish).toHaveBeenCalledWith(
       TRACKING_APPROACHING_ROUTING_KEY,
-      expect.objectContaining({ wave: 'w2' }),
+      expect.objectContaining({ wave: 2 }),
       expect.objectContaining({ eventType: APPROACHING_ALERT_EVENT_TYPE }),
     );
   });

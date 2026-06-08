@@ -6,6 +6,7 @@ import { CoreEventsConsumer } from './core-events.consumer';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsRepository } from './notifications.repository';
 import { NotificationsService } from './notifications.service';
+import { TripTrackingAlertEventsConsumer } from './trip-tracking-alert-events.consumer';
 
 @Module({
   controllers: [NotificationsController],
@@ -13,6 +14,7 @@ import { NotificationsService } from './notifications.service';
     NotificationsService,
     NotificationsRepository,
     CoreEventsConsumer,
+    TripTrackingAlertEventsConsumer,
     UserJwtAuthGuard,
     { provide: NOTIFICATION_JWT_VERIFIER, useClass: JoseNotificationUserJwtVerifier },
   ],

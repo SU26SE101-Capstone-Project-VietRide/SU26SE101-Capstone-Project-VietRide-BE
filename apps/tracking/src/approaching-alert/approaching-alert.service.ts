@@ -24,6 +24,7 @@ export interface ApproachingAlertEtaUpdate {
 export interface ApproachingAlertPayload {
   tripId: string;
   bookingId: string;
+  passengerUserId?: string;
   stopId: string;
   etaMinutes: number;
   wave: ApproachingAlertWave;
@@ -65,6 +66,7 @@ export class ApproachingAlertService {
         await this.createOutboxEvent({
           tripId: eta.tripId,
           bookingId: booking.bookingId,
+          ...(booking.passengerUserId ? { passengerUserId: booking.passengerUserId } : {}),
           stopId: eta.stopId,
           etaMinutes: eta.etaMinutes,
           wave,
@@ -116,7 +118,8 @@ export class ApproachingAlertService {
         eventType: APPROACHING_ALERT_EVENT_TYPE,
         payload: {
           tripId: payload.tripId,
-          bookingId: payload.bookingId,
+          bookingIds: [payload.bookingId],
+          ...(payload.passengerUserId ? { userId: payload.passengerUserId } : {}),
           stopId: payload.stopId,
           etaMinutes: payload.etaMinutes,
           wave: payload.wave,

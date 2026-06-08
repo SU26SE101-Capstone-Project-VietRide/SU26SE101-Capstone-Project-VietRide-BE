@@ -1,6 +1,6 @@
 export const APPROACHING_ALERT_EVENT_TYPE = 'ApproachingAlert';
-export const APPROACHING_ALERT_WAVE_1 = 'w1';
-export const APPROACHING_ALERT_WAVE_2 = 'w2';
+export const APPROACHING_ALERT_WAVE_1 = 1;
+export const APPROACHING_ALERT_WAVE_2 = 2;
 export const APPROACHING_ALERT_WAVE_1_THRESHOLD_MINUTES = 30;
 export const APPROACHING_ALERT_WAVE_2_THRESHOLD_MINUTES = 10;
 export const APPROACHING_ALERT_DEDUPE_TTL_SECONDS = 604_800;
@@ -14,5 +14,5 @@ export function trackingApproachingNotifiedKey(
   bookingId: string,
   wave: ApproachingAlertWave,
 ): string {
-  return `tracking:approaching_notified:${tripId}:${bookingId}:${wave}`;
+  return `tracking:approaching_notified:${tripId}:${bookingId}:w${wave}`;
 }

@@ -6,6 +6,7 @@ export interface RouteGeometryPoint {
 export interface RouteGeometrySnapshot {
   tripId: string;
   points: RouteGeometryPoint[];
+  alertRecipientUserIds?: string[];
 }
 
 export interface RouteGeometryProvider {

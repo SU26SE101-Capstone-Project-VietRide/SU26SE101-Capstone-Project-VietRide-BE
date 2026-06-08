@@ -27,9 +27,9 @@ giu provider interface va fake adapter trong test, nhung khong goi do la product
 
 - [x] Phase 1 - Production Foundation Va Prisma
 - [x] Phase 2 - Identity-backed REST Auth Va In-app API
-- [ ] Phase 3 - Notification Write Core
-- [ ] Phase 4 - Core Booking/Payment Consumers
-- [ ] Phase 5 - Trip/Tracking Alert Consumers
+- [x] Phase 3 - Notification Write Core
+- [x] Phase 4 - Core Booking/Payment Consumers
+- [x] Phase 5 - Trip/Tracking Alert Consumers
 - [ ] Phase 6 - Parcel/Subscription/Operator Consumers
 - [ ] Phase 7 - Push Delivery Pipeline
 - [ ] Phase 8 - Email Delivery Pipeline

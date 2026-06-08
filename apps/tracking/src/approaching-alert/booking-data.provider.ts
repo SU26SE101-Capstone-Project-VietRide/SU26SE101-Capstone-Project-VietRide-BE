@@ -3,6 +3,7 @@ export type BookingStatus = 'CONFIRMED' | 'CHECKED_IN' | 'CANCELLED' | 'NO_SHOW'
 
 export interface PickupBookingSnapshot {
   bookingId: string;
+  passengerUserId?: string;
   stopId: string;
   status: BookingStatus;
   pickupStatus?: BookingPickupStatus;

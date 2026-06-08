@@ -226,7 +226,7 @@ npx nx run tracking:build
 - Dữ liệu booking lấy qua `BookingDataProvider` interface.
 - Event tạo qua Outbox:
   - `ApproachingAlert`.
-  - payload gồm `tripId`, `bookingId`, `stopId`, `etaMinutes`, `wave`.
+  - payload gồm `tripId`, `bookingIds`, `stopId`, `etaMinutes`, `wave`, `userId?` nếu provider biết passenger.
 - E2E/unit:
   - wave 1 publish đúng 1 lần.
   - wave 2 publish đúng 1 lần.
@@ -264,7 +264,7 @@ npx nx run tracking:build
   - không publish alert.
 - Event qua Outbox:
   - `OffRouteAlert`.
-  - payload gồm `tripId`, `latitude`, `longitude`, `distanceMeters`, `detectedAt`.
+  - payload gồm `tripId`, `latitude`, `longitude`, `distanceMeters`, `durationSeconds`, `detectedAt`, `userIds?`.
 - E2E/unit:
   - GPS drift ngắn không alert.
   - lệch tuyến liên tục đủ 2 phút -> publish 1 alert.
@@ -292,7 +292,7 @@ npx nx run tracking:build
   - chạy repeat mỗi 5 phút.
   - đọc dynamic ETA Redis.
   - so với static ETA từ `TripDataProvider`.
-  - nếu dynamic ETA - static ETA > 30 phút -> Outbox `TripDelayed`.
+  - nếu dynamic ETA - static ETA > 30 phút -> Outbox `TripDelayed` voi `etaNew`, `delayMinutes`, `userIds?` neu provider biet recipients.
 - Dedupe delayed event theo trip/stop/window để tránh spam.
 - Broadcast Socket.IO:
   - `trip:statusChanged` hoặc `eta:update` kèm delayed flag, theo contract hiện tại.
@@ -326,9 +326,9 @@ npx nx run tracking:build
   - mark `PUBLISHED`.
   - fail thì tăng `retryCount`, lưu `lastError`.
 - Routing keys:
-  - `tracking.trip.delayed`.
-  - `tracking.route.off_route`.
-  - `tracking.vehicle.approaching`.
+  - `trip.trip.delayed`.
+  - `tracking.gps.off_route`.
+  - `tracking.gps.approaching_stop`.
 - E2E/unit:
   - pending event publish success -> `PUBLISHED`.
   - publish fail -> `FAILED`, retry count tăng.
@@ -447,9 +447,9 @@ npx nx run tracking:build
   - `tracking:active_trips`
   - `tracking:approaching_notified:{tripId}:{bookingId}:w{1|2}`
 - RabbitMQ / Outbox:
-  - `tracking.trip.delayed`
-  - `tracking.route.off_route`
-  - `tracking.vehicle.approaching`
+  - `trip.trip.delayed`
+  - `tracking.gps.off_route`
+  - `tracking.gps.approaching_stop`
 
 ## Assumptions
 

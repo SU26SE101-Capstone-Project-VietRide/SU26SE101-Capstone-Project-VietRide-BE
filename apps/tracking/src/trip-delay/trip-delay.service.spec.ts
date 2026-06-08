@@ -14,6 +14,7 @@ import { TripDelayService } from './trip-delay.service';
 
 const TEST_TRIP_ID = '11111111-1111-4111-8111-111111111111';
 const TEST_STOP_ID = '22222222-2222-4222-8222-222222222222';
+const ALERT_RECIPIENT_USER_ID = '66666666-6666-4666-8666-666666666666';
 const STATIC_ETA = '2026-06-04T10:00:00.000Z';
 const ON_TIME_DYNAMIC_ETA = '2026-06-04T10:30:00.000Z';
 const DELAYED_DYNAMIC_ETA = '2026-06-04T10:31:00.000Z';
@@ -117,8 +118,10 @@ describe('TripDelayService', () => {
         payload: {
           tripId: TEST_TRIP_ID,
           stopId: TEST_STOP_ID,
+          userIds: [ALERT_RECIPIENT_USER_ID],
           staticEstimatedArrivalTime: STATIC_ETA,
           dynamicEstimatedArrivalTime: DELAYED_DYNAMIC_ETA,
+          etaNew: DELAYED_DYNAMIC_ETA,
           delayMinutes: 31,
           detectedAt: expect.any(String),
         },
@@ -158,6 +161,7 @@ describe('TripDelayService', () => {
       latitude: 10.762622,
       longitude: 106.660172,
       sequence: 1,
+      alertRecipientUserIds: [ALERT_RECIPIENT_USER_ID],
       estimatedArrivalTime: STATIC_ETA,
     };
   }
