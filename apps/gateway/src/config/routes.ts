@@ -110,8 +110,25 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     // Trip / Vehicle
     { prefix: '/v1/trips', target: env.TRIP_BASE_URL, authRequired: 'user' },
     { prefix: '/v1/routes', target: env.TRIP_BASE_URL, authRequired: 'user' },
-    { prefix: '/v1/stations', target: env.TRIP_BASE_URL, authRequired: 'user' },
+    {
+      prefix: '/v1/stations',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
     { prefix: '/v1/stops', target: env.TRIP_BASE_URL, authRequired: 'user' },
+    {
+      prefix: '/v1/operator/stations',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
+    {
+      prefix: '/v1/operator/stops',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
     { prefix: '/v1/vehicles', target: env.TRIP_BASE_URL, authRequired: 'user' },
     { prefix: '/v1/driver', target: env.TRIP_BASE_URL, authRequired: 'user' },
     { prefix: '/v1/assistant', target: env.TRIP_BASE_URL, authRequired: 'user' },

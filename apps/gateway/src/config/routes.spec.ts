@@ -149,6 +149,43 @@ describe('buildRouteTable', () => {
     expect(route?.requiredRoles).toEqual(['OPERATOR_ADMIN']);
   });
 
+  it('routes Day 7 station and operator stop families to Trip with operator role union', () => {
+    const cases = [
+      ['/v1/stations/search?q=Mien%20Tay', '/v1/stations'],
+      ['/v1/operator/stations', '/v1/operator/stations'],
+      ['/v1/operator/stops', '/v1/operator/stops'],
+      ['/v1/operator/stops/11111111-1111-1111-1111-111111111111', '/v1/operator/stops'],
+    ] as const;
+
+    cases.forEach(([path, prefix]) => {
+      const [pathname] = path.split('?');
+      const route = matchRoute(routes, pathname ?? path);
+
+      expect(route?.prefix).toBe(prefix);
+      expect(route?.target).toBe(env.TRIP_BASE_URL);
+      expect(route?.authRequired).toBe('user');
+      expect(route?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
+    });
+  });
+
+  it('keeps existing Identity operator routes distinct from Trip operator routes', () => {
+    const profileRoute = matchRoute(routes, '/v1/operator/profile');
+    const usersRoute = matchRoute(routes, '/v1/operator/users');
+    const operatorStationsRoute = matchRoute(routes, '/v1/operator/stations');
+    const operatorStopsRoute = matchRoute(routes, '/v1/operator/stops');
+
+    expect(profileRoute?.target).toBe(env.IDENTITY_BASE_URL);
+    expect(usersRoute?.target).toBe(env.IDENTITY_BASE_URL);
+    expect(operatorStationsRoute?.target).toBe(env.TRIP_BASE_URL);
+    expect(operatorStopsRoute?.target).toBe(env.TRIP_BASE_URL);
+    expect(routes.find((r) => r.prefix === '/v1/operator')).toBeUndefined();
+  });
+
+  it('does not register a separate station search route or stop delete route', () => {
+    expect(routes.find((r) => r.prefix === '/v1/stations/search')).toBeUndefined();
+    expect(routes.find((r) => r.prefix === '/v1/operator/stops/delete')).toBeUndefined();
+  });
+
   it('prefixes are unique', () => {
     const prefixes = routes.map((r) => r.prefix);
     const set = new Set(prefixes);
