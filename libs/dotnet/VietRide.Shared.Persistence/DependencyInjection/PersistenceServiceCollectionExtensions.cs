@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
+using Npgsql.NameTranslation;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Persistence.Outbox;
 using VietRide.Shared.Persistence.UnitOfWork;
@@ -23,27 +24,18 @@ public static class PersistenceServiceCollectionExtensions
             ?? throw new InvalidOperationException(
                 $"ConnectionStrings:{connectionStringName} is not configured.");
 
-        if (configureDataSource is null)
+        services.AddSingleton(_ =>
         {
-            services.AddDbContext<TContext>(options =>
-            {
-                options.UseNpgsql(connectionString, ConfigureNpgsqlRetry);
-            });
-        }
-        else
-        {
-            services.AddSingleton(_ =>
-            {
-                var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
-                configureDataSource(dataSourceBuilder);
-                return dataSourceBuilder.Build();
-            });
+            var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
+            ConfigureSharedPostgresTypes(dataSourceBuilder);
+            configureDataSource?.Invoke(dataSourceBuilder);
+            return dataSourceBuilder.Build();
+        });
 
-            services.AddDbContext<TContext>((sp, options) =>
-            {
-                options.UseNpgsql(sp.GetRequiredService<NpgsqlDataSource>(), ConfigureNpgsqlRetry);
-            });
-        }
+        services.AddDbContext<TContext>((sp, options) =>
+        {
+            options.UseNpgsql(sp.GetRequiredService<NpgsqlDataSource>(), ConfigureNpgsqlRetry);
+        });
 
         // Expose the concrete context as VietRideDbContextBase for shared services (e.g. OutboxStore).
         services.AddScoped<VietRideDbContextBase>(sp => sp.GetRequiredService<TContext>());
@@ -56,6 +48,13 @@ public static class PersistenceServiceCollectionExtensions
             new EfUnitOfWork(sp.GetRequiredService<VietRideDbContextBase>()));
 
         return services;
+    }
+
+    private static void ConfigureSharedPostgresTypes(NpgsqlDataSourceBuilder dataSourceBuilder)
+    {
+        dataSourceBuilder.MapEnum<OutboxEventStatus>(
+            "outbox_event_status",
+            new NpgsqlNullNameTranslator());
     }
 
     private static void ConfigureNpgsqlRetry(

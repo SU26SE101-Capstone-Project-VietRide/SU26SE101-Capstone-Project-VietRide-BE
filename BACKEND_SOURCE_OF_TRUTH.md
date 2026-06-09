@@ -1370,7 +1370,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 | | `PARCEL_NOT_TRANSFERABLE` | 409 | Status sai khi confirm transfer |
 | | `PARCEL_ADDITIONAL_PAYMENT_REQUIRED` | 402 | Cân lại > ước lượng |
 | | `PARCEL_REVIEW_TIMEOUT` | 409 | EXTRA_LARGE auto-reject 24h |
-| **Stop / Route** | `STOP_NOT_FOUND` | 404 | |
+| **Stop / Route** | `STOP_NOT_FOUND` | 404 | Day-7 Trip Stop handlers use coded 404 path |
 | | `STOP_REPLACEMENT_CYCLE` | 422 | replacedByStopId tạo cycle |
 | | `STOP_REPLACEMENT_DIFFERENT_OPERATOR` | 403 | Stop thay thế khác operator |
 | | `STOP_DISABLED_BOOKING_AFFECTED` | 200 (warning) | Alert khi disable Stop có booking active |
@@ -1378,7 +1378,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 | | `STOP_NOT_DROPOFF_ALLOWED` | 422 | RouteStop.allowDropoff = false |
 | | `ROUTE_NOT_FOUND` | 404 | |
 | | `ROUTE_RETURN_NOT_CONFIGURED` | 422 | returnRouteId NULL khi đặt round-trip |
-| **Station** | `STATION_NOT_FOUND` | 404 | |
+| **Station** | `STATION_NOT_FOUND` | 404 | Day-7 Trip Station handlers use coded 404 path |
 | | `STATION_DUPLICATE_NEARBY` | 200 (warning) | Operator tạo Station < 100m gần Station hiện có |
 | **Invoice** | `INVOICE_NOT_FOUND` | 404 | |
 | | `INVOICE_PDF_GENERATION_FAILED` | 500 | Hangfire retry job |
@@ -1677,7 +1677,7 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `POST /internal/v1/trips/{tripId}/release-seats` | Booking | Release seat khi payment fail/timeout |
 | `POST /internal/v1/trips/{tripId}/confirm-seats` | Booking | Convert HELD → BOOKED khi payment success |
 | `GET /internal/v1/trips/{tripId}/passengers-pending` | Booking | Cho operator dashboard |
-| `GET /internal/v1/stations/{id}` · `GET /internal/v1/stops/{id}` · `GET /internal/v1/routes/{id}` | All services | Lookup canonical entity |
+| `GET /internal/v1/stations/{id}` · `GET /internal/v1/stops/{id}` · `GET /internal/v1/routes/{id}` | All services | Trip internal-auth required; raw DTO lookup for canonical entity; station/stop not found returns ADR 0004 error envelope with `STATION_NOT_FOUND` / `STOP_NOT_FOUND` |
 | `GET /internal/v1/trips/{tripId}/capacity` | Parcel | Lấy available cargo capacity |
 | `POST /internal/v1/trips/{tripId}/cargo-counter/reserve` · `release` · `load` · `unload` | Parcel | Update reservedParcelWeightKg + totalLoadedWeightKg atomic |
 
@@ -2675,6 +2675,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.6.4** | 2026-06-08 | BE lead (Vũ) | **PATCH** — Day-7 Trip Station/Stop contract sync: reconcile station autocomplete to `GET /v1/stations/search?q=` as a targeted endpoint-specific exception to §5.8 `search=` because `technical_context_v7` line 523 has higher priority; `q` is required and blank/empty `q` maps to `422 VALIDATION_ERROR`; document accent-insensitive `unaccent` contains matching, `pg_trgm` placeholder-only compatibility, duplicate-nearby Station warning shape (`STATION_DUPLICATE_NEARBY` 200 without ApiMeta changes), single `POST /v1/operator/stations` link/create branch, Stop CRU under `/v1/operator/stops` (without Day-7 `sharedSuggestion`/`shared_suggestion` mutation), no Day-7 `Idempotency-Key` requirement, Trip->Identity logical-FK failures mapping to `422 VALIDATION_ERROR`, non-APPROVED/inactive operator writes mapping to `403 FORBIDDEN`, internal station/stop raw DTO lookup with coded 404 error envelopes, and existing coded 404 use cases for `STATION_NOT_FOUND`/`STOP_NOT_FOUND`. No new error codes, no event keys. |
 | **1.6.3** | 2026-06-07 | BE lead (Vũ) | **PATCH** — Day-6 Operator contract baseline: sync API contract/BSOT for operator self-register, System Admin manual-create, approve/reject/suspend POST action endpoints, operator-created user create/resend initial-password, operator profile GET/PATCH, and internal operator/subscription/usage endpoints. Ratify Day-6 decisions without adding new error codes, Idempotency-Key requirements, or Outbox emission: non-APPROVED operator login/write-action guards use `FORBIDDEN`; invalid lifecycle transitions use `VALIDATION_ERROR`; reject cancels `OperatorSubscription` without `deletedAt`; ActivityLog `user_id` stores actor user id with JSONB serializer metadata; Day 10 remains responsible for emitting `identity.operator.approved`/`identity.operator.suspended`. |
 | **1.6.2** | 2026-06-06 | BE lead (Vũ) | **PATCH** — Clarify ADR 0004 convention for service-to-service HTTP: FE-facing `/v1/*` successes stay wrapped in `ApiResponse<T>`, but successful `/internal/v1/*` / `/internal/*` responses return raw DTO/list payloads; internal errors still use the standardized `ApiResponse` error envelope. |
 | **1.6.1** | 2026-06-06 | BE lead (Vũ) | **PATCH** — Day-5 Identity contract sync: document FE-facing `SET_INITIAL_PASSWORD` consume/resend endpoints and user device-token POST/DELETE shapes in the API contract/Postman without adding new error codes, Idempotency-Key requirements, or Outbox events; record ActivityLog action additions for initial-password token generation/resend flows. Internal `GET /internal/v1/users/{userId}/device-tokens` registry row already exists in §7.2 and is intentionally not duplicated. |

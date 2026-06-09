@@ -5,10 +5,19 @@ namespace VietRide.Shared.Persistence.Outbox;
 public sealed class OutboxMessage
 {
     public Guid Id { get; set; } = Guid.NewGuid();
-    public DateTimeOffset OccurredAt { get; set; }
-    public string Type { get; set; } = string.Empty;
+    public string EventType { get; set; } = string.Empty;
     public string Payload { get; set; } = string.Empty;
-    public DateTimeOffset? ProcessedAt { get; set; }
+    public OutboxEventStatus Status { get; set; } = OutboxEventStatus.PENDING;
     public int RetryCount { get; set; }
     public string? LastError { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? PublishedAt { get; set; }
+}
+
+public enum OutboxEventStatus
+{
+    PENDING,
+    PUBLISHING,
+    PUBLISHED,
+    FAILED
 }

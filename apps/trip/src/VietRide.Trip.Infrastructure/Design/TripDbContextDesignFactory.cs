@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using Npgsql.NameTranslation;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Persistence.Outbox;
 
 namespace VietRide.Trip.Infrastructure.Design;
 
@@ -13,8 +15,12 @@ internal sealed class TripDbContextDesignFactory : IDesignTimeDbContextFactory<T
         var connectionString = Environment.GetEnvironmentVariable("TRIP_DESIGN_CONNECTION")
             ?? "Host=localhost;Port=5432;Database=vietride_trip;Username=vietride;Password=vietride_dev";
 
+        var dataSourceBuilder = new Npgsql.NpgsqlDataSourceBuilder(connectionString);
+        dataSourceBuilder.MapEnum<OutboxEventStatus>("outbox_event_status", new NpgsqlNullNameTranslator());
+        var dataSource = dataSourceBuilder.Build();
+
         var options = new DbContextOptionsBuilder<TripDbContext>()
-            .UseNpgsql(connectionString, npgsql =>
+            .UseNpgsql(dataSource, npgsql =>
                 npgsql.MigrationsHistoryTable("__ef_migrations_history", TripDbContext.SchemaName))
             .Options;
 

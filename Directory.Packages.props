@@ -27,6 +27,7 @@
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="9.0.0" />
     <PackageVersion Include="System.Text.Json" Version="8.0.5" />
+    <PackageVersion Include="DotNetEnv" Version="3.2.0" />
 
     <!-- JWT / Identity -->
     <PackageVersion Include="Google.Apis.Auth" Version="1.74.0" />

@@ -31,6 +31,27 @@ JWT from the dev Identity key, and passes `localHarnessEnabled=true` to Newman. 
 inside the cumulative collection are skipped unless that variable is enabled, so the normal full
 collection remains runnable with externally supplied secrets/placeholders.
 
+Day-7 station/stop adversarial cases are covered by the deterministic local harness below, so the
+collection no longer depends on pre-supplied reviewer values for the required cross-operator and
+non-approved checks:
+
+```bash
+node scripts/run-day7-newman-local.js
+# or
+npm run postman:day7:local
+```
+
+The helper seeds local-only Identity/Trip data, mints short-lived JWTs from the dev Identity key,
+and provides the required variables at runtime. Never commit real token values.
+
+If you run the collection manually without the helper, the following variables are still the ones the
+folder expects:
+
+- `crossOperatorStopId` — a Stop id owned by another operator; the request must return exact
+  `404 STOP_NOT_FOUND`.
+- `nonApprovedOperatorAccessToken` — a valid user JWT for a non-`APPROVED` or inactive operator;
+  the request must return exact `403 FORBIDDEN`.
+
 Or import both files into the Postman app (Collection + Environment) and run the folders.
 
 ## Notes

@@ -14,7 +14,7 @@ public sealed class ValidationException : Exception
 
 public sealed record ValidationError(string Field, string Message);
 
-/// Mapped to HTTP 404.
+/// Mapped to HTTP 404 with the backwards-compatible RESOURCE_NOT_FOUND error code.
 public sealed class NotFoundException : Exception
 {
     public string EntityName { get; }
@@ -25,6 +25,54 @@ public sealed class NotFoundException : Exception
     {
         EntityName = entityName;
         Id = id;
+    }
+}
+
+/// Mapped to HTTP 404 with a caller-supplied UPPER_SNAKE_CASE error code.
+public sealed class CodedNotFoundException : Exception
+{
+    public string ErrorCode { get; }
+
+    public CodedNotFoundException(string errorCode, string message) : base(message)
+    {
+        if (!IsUpperSnakeCase(errorCode))
+        {
+            throw new ArgumentException("Error code must be non-empty UPPER_SNAKE_CASE.", nameof(errorCode));
+        }
+
+        ErrorCode = errorCode;
+    }
+
+    private static bool IsUpperSnakeCase(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var previousWasUnderscore = true;
+        foreach (var c in value)
+        {
+            if (c == '_')
+            {
+                if (previousWasUnderscore)
+                {
+                    return false;
+                }
+
+                previousWasUnderscore = true;
+                continue;
+            }
+
+            if (c is not (>= 'A' and <= 'Z') and not (>= '0' and <= '9'))
+            {
+                return false;
+            }
+
+            previousWasUnderscore = false;
+        }
+
+        return !previousWasUnderscore;
     }
 }
 

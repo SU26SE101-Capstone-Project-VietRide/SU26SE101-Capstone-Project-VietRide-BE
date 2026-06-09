@@ -87,6 +87,38 @@ public sealed class ApiResponseExceptionFilterTests
         envelope.Error.Code.Should().Be("RESOURCE_NOT_FOUND");
     }
 
+    [Theory]
+    [InlineData("STATION_NOT_FOUND")]
+    [InlineData("STOP_NOT_FOUND")]
+    public void CodedNotFoundException_Maps_To_404_With_Caller_ErrorCode(string errorCode)
+    {
+        var filter = CreateFilter();
+        var ctx = BuildContext(new CodedNotFoundException(errorCode, "Resource was not found"));
+
+        filter.OnException(ctx);
+
+        var result = ctx.Result.Should().BeOfType<ObjectResult>().Subject;
+        result.StatusCode.Should().Be(404);
+        var envelope = result.Value.Should().BeOfType<ApiResponse>().Subject;
+        envelope.StatusCode.Should().Be(404);
+        envelope.Error.Code.Should().Be(errorCode);
+        envelope.Error.Message.Should().Be("Resource was not found");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("station_not_found")]
+    [InlineData("STATION-NOT-FOUND")]
+    [InlineData("STATION__NOT_FOUND")]
+    [InlineData("STATION_NOT_FOUND_")]
+    public void CodedNotFoundException_Rejects_Invalid_ErrorCode(string errorCode)
+    {
+        var act = () => new CodedNotFoundException(errorCode, "Resource was not found");
+
+        act.Should().Throw<ArgumentException>().WithParameterName("errorCode");
+    }
+
     [Fact]
     public void ConflictException_Maps_To_409()
     {

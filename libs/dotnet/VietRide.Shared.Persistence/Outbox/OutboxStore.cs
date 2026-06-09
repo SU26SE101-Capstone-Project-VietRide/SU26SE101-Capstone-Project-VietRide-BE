@@ -17,9 +17,9 @@ public sealed class OutboxStore : IOutboxStore
 
     public async Task AddAsync(OutboxMessage message, CancellationToken cancellationToken = default)
     {
-        if (message.OccurredAt == default)
+        if (message.CreatedAt == default)
         {
-            message.OccurredAt = _clock.UtcNow;
+            message.CreatedAt = _clock.UtcNow;
         }
 
         await _db.OutboxMessages.AddAsync(message, cancellationToken).ConfigureAwait(false);
@@ -28,8 +28,8 @@ public sealed class OutboxStore : IOutboxStore
     public async Task<IReadOnlyList<OutboxMessage>> GetUnprocessedAsync(int batchSize, CancellationToken cancellationToken = default)
     {
         return await _db.OutboxMessages
-            .Where(x => x.ProcessedAt == null)
-            .OrderBy(x => x.OccurredAt)
+            .Where(x => x.Status == OutboxEventStatus.PENDING || x.Status == OutboxEventStatus.FAILED)
+            .OrderBy(x => x.CreatedAt)
             .Take(batchSize)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);

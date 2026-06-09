@@ -2007,17 +2007,44 @@ Errors:
 - `422 SUBSCRIPTION_LIMIT_EXCEEDED` — `current + delta` would exceed the matching plan limit.
 - `422 VALIDATION_ERROR` — invalid resource or delta.
 
-### GET `/v1/stations`
+### GET `/v1/stations/search`
 
-Auth: protected.
+Auth: `OPERATOR_STAFF`, `OPERATOR_ADMIN`.
 
-Query: `q?`, `city?`, `province?`.
+Query: `q`, `city?`, `province?`.
 
-Response `200`: list canonical Stations.
+`q` is required. Blank or empty `q` is invalid and returns `422 VALIDATION_ERROR`.
+
+Matching: accent-insensitive contains via `unaccent(name) ILIKE unaccent('%' || q || '%')`.
+
+Day-7 exception: this endpoint intentionally uses `q` (not BSOT §5.8 `search`) because `technical_context_v7` line 523 is higher-priority for the OperatorStation Management flow.
+
+`pg_trgm` is enabled only for canonical schema compatibility with the deferred `idx_stations_name_trgm ... gin_trgm_ops WHERE FALSE` placeholder. Trigram similarity search and distance-from-operator-coordinates ranking are deferred.
+
+Response `200`: `StationSearchResult[]` in the ADR 0004 success envelope.
+
+`StationSearchResult` shape:
+```json
+{
+  "id": "uuid",
+  "name": "Bến xe Miền Tây",
+  "city": "Ho Chi Minh City",
+  "province": "Ho Chi Minh",
+  "latitude": 10.7212345,
+  "longitude": 106.6267890,
+  "addressStreet": "Kinh Dương Vương",
+  "supportsShuttle": true
+}
+```
 
 ### POST `/v1/operator/stations`
 
-Auth: `OPERATOR_ADMIN`.
+Auth: `OPERATOR_STAFF`, `OPERATOR_ADMIN`.
+
+Idempotency-Key: not required by BSOT §5.6.
+
+Write requires caller operator to be `APPROVED` and active.
+Identity validation failures (404, 5xx, transport, circuit-breaker) map to `422 VALIDATION_ERROR` per current BSOT logical-FK rule; non-APPROVED or inactive operators get `403 FORBIDDEN`.
 
 Request:
 ```json
@@ -2029,6 +2056,62 @@ Request:
   "instructions": "Có mặt trước giờ chạy 30 phút"
 }
 ```
+
+Create-Station branch request (field names derive from `stations` columns; JSON uses the contract's existing camelCase style for multi-word names):
+```json
+{
+  "name": "Bến xe Miền Tây",
+  "city": "Ho Chi Minh City",
+  "province": "Ho Chi Minh",
+  "latitude": 10.7212345,
+  "longitude": 106.6267890,
+  "addressStreet": "Kinh Dương Vương",
+  "contactPhone": "02837650601",
+  "contactEmail": "info@bexe.com",
+  "operatingHours": {
+    "mon": "05:00-22:00"
+  },
+  "facilities": ["waiting_room", "parking"],
+  "supportsShuttle": true
+}
+```
+
+Branching:
+- `stationId` present -> link existing Station only.
+- station fields present -> create Station + auto-link in one transaction.
+- create branch requires both `latitude` and `longitude` even though DB columns are nullable; missing either returns `422 VALIDATION_ERROR`.
+- link branch validates the target Station is present and active; missing or inactive `stationId` returns `404 STATION_NOT_FOUND` in the ADR 0004 error envelope.
+- link branch duplicate `(operatorId, stationId)` returns HTTP `200` success envelope with the existing `OperatorStation` mapping; no new mapping is created.
+- If create branch finds an existing active Station within <100m, return `200` with `data.warning.code = "STATION_DUPLICATE_NEARBY"` and `data.nearbyStations: StationSearchResult[]`; do not create a Station.
+
+Duplicate-nearby response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "warning": {
+      "code": "STATION_DUPLICATE_NEARBY",
+      "message": "A nearby active station already exists. Link an existing station instead."
+    },
+    "nearbyStations": [
+      {
+        "id": "uuid",
+        "name": "Bến xe Miền Tây",
+        "city": "Ho Chi Minh City",
+        "province": "Ho Chi Minh",
+        "latitude": 10.7212345,
+        "longitude": 106.6267890,
+        "addressStreet": "Kinh Dương Vương",
+        "supportsShuttle": true
+      }
+    ]
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+`data.nearbyStations` uses the same `StationSearchResult[]` item shape as `GET /v1/stations/search`; this is a data payload detail and does not change `meta` / `ApiMeta`.
 
 Response `201`:
 ```json
@@ -2043,3 +2126,88 @@ Response `201`:
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
+
+### POST `/v1/operator/stops`
+
+Auth: `OPERATOR_ADMIN`.
+
+Idempotency-Key: not required by BSOT §5.6.
+
+Write requires caller operator to be `APPROVED` and active.
+Identity validation failures (404, 5xx, transport, circuit-breaker) map to `422 VALIDATION_ERROR` per current BSOT logical-FK rule; non-APPROVED or inactive operators get `403 FORBIDDEN`.
+
+`google_place_id` is an opaque persisted string only; no live Google Maps/Places call in Day 7.
+
+Day 7 does not accept or mutate `shared_suggestion` / `sharedSuggestion`; that write path is deferred.
+
+DELETE / disable-with-replacement is deferred to Day 24.
+
+Coordinates validate latitude in [-90, 90] and longitude in [-180, 180].
+
+Request:
+```json
+{
+  "name": "Trạm dừng Phú Lâm",
+  "description": "Điểm đón phía trước cổng chính",
+  "latitude": 10.7321000,
+  "longitude": 106.6142000,
+  "address": "123 Hồng Bàng, Quận 6",
+  "googlePlaceId": "ChIJ1234567890"
+}
+```
+
+Response `201`: created Stop DTO in ADR 0004 envelope.
+
+### GET `/v1/operator/stops`
+
+Auth: `OPERATOR_STAFF`, `OPERATOR_ADMIN`.
+
+Query: `page?`, `pageSize?`, `search?`.
+
+Pagination follows BSOT §5.7 defaults (`page=1`, `pageSize=20`, max `100`). Optional `search` is allow-listed to Stop `name` and `address` only.
+
+Response `200`: `PagedResult<StopDto>`.
+
+### GET `/v1/operator/stops/{id}`
+
+Auth: `OPERATOR_STAFF`, `OPERATOR_ADMIN`.
+
+Tenant isolation: missing Stop or Stop owned by another operator returns `404 STOP_NOT_FOUND` in the ADR 0004 error envelope.
+
+Response `200`: canonical Stop DTO.
+
+### PATCH `/v1/operator/stops/{id}`
+
+Auth: `OPERATOR_ADMIN`.
+
+Idempotency-Key: not required by BSOT §5.6.
+
+Write requires caller operator to be `APPROVED` and active.
+
+Identity logical-FK/status validation for this write: Identity 404, Identity 5xx, transport failures, and circuit-breaker failures map to `422 VALIDATION_ERROR`; non-APPROVED or inactive operators get `403 FORBIDDEN`.
+
+Tenant isolation: missing Stop or Stop owned by another operator returns `404 STOP_NOT_FOUND` in the ADR 0004 error envelope.
+
+Coordinates validate latitude in [-90, 90] and longitude in [-180, 180]; invalid `latitude` or `longitude` returns `422 VALIDATION_ERROR`.
+
+Request: partial Stop update.
+
+Response `200`: updated Stop DTO.
+
+### GET `/internal/v1/stations/{id}`
+
+Auth: internal service authentication required (`X-Internal-Auth: Bearer <jwt>`).
+
+Response `200`: raw Station DTO (successful internal response is not wrapped).
+
+Errors:
+- `404 STATION_NOT_FOUND` — Station does not exist; returned in ADR 0004 error envelope.
+
+### GET `/internal/v1/stops/{id}`
+
+Auth: internal service authentication required (`X-Internal-Auth: Bearer <jwt>`).
+
+Response `200`: raw Stop DTO (successful internal response is not wrapped).
+
+Errors:
+- `404 STOP_NOT_FOUND` — Stop does not exist; returned in ADR 0004 error envelope.
