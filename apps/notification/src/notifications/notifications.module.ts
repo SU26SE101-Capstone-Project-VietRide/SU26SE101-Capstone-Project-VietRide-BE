@@ -1,8 +1,12 @@
 import { Module } from '@nestjs/common';
-import { NOTIFICATION_JWT_VERIFIER } from '../app/tokens';
+import { DEVICE_TOKEN_PROVIDER, FCM_PUSH_PROVIDER, NOTIFICATION_JWT_VERIFIER } from '../app/tokens';
 import { JoseNotificationUserJwtVerifier } from '../auth/user-jwt.verifier';
 import { UserJwtAuthGuard } from '../auth/user-jwt-auth.guard';
 import { CoreEventsConsumer } from './core-events.consumer';
+import { FcmPushQueue } from './fcm-push.queue';
+import { FcmPushWorker } from './fcm-push.worker';
+import { FirebaseFcmPushProvider } from './firebase-fcm-push.provider';
+import { IdentityDeviceTokenProvider } from './identity-device-token.provider';
 import { NoopOperatorRecipientProvider } from './noop-operator-recipient.provider';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsRepository } from './notifications.repository';
@@ -16,12 +20,16 @@ import { TripTrackingAlertEventsConsumer } from './trip-tracking-alert-events.co
   providers: [
     NotificationsService,
     NotificationsRepository,
+    FcmPushQueue,
+    FcmPushWorker,
     CoreEventsConsumer,
     TripTrackingAlertEventsConsumer,
     ParcelSubscriptionOperatorEventsConsumer,
     UserJwtAuthGuard,
     { provide: NOTIFICATION_JWT_VERIFIER, useClass: JoseNotificationUserJwtVerifier },
     { provide: OPERATOR_RECIPIENT_PROVIDER, useClass: NoopOperatorRecipientProvider },
+    { provide: DEVICE_TOKEN_PROVIDER, useClass: IdentityDeviceTokenProvider },
+    { provide: FCM_PUSH_PROVIDER, useClass: FirebaseFcmPushProvider },
   ],
 })
 export class NotificationsModule {}

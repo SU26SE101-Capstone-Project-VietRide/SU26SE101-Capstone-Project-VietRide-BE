@@ -5,6 +5,7 @@ import {
   type CreateNotificationDto,
 } from './dto/create-notification.dto';
 import type { ListNotificationsQueryDto } from './dto/list-notifications-query.dto';
+import { FcmPushQueue } from './fcm-push.queue';
 import { NotificationsRepository } from './notifications.repository';
 
 export interface NotificationItemDto {
@@ -30,10 +31,17 @@ export interface PagedNotificationsDto {
 
 @Injectable()
 export class NotificationsService {
-  constructor(private readonly notificationsRepository: NotificationsRepository) {}
+  constructor(
+    private readonly notificationsRepository: NotificationsRepository,
+    private readonly fcmPushQueue: FcmPushQueue,
+  ) {}
 
   async createNotification(dto: CreateNotificationDto): Promise<NotificationItemDto> {
     const notification = await this.notificationsRepository.create(CreateNotificationSchema.parse(dto));
+    await this.fcmPushQueue.enqueue({
+      notificationId: notification.id,
+      userId: notification.userId,
+    });
 
     return this.toDto(notification);
   }

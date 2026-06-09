@@ -10,6 +10,7 @@ import { ENV_TOKEN, NOTIFICATION_JWT_VERIFIER } from '../app/tokens';
 import { JoseNotificationUserJwtVerifier } from '../auth/user-jwt.verifier';
 import type { Env } from '../config/env.schema';
 import { NotificationPrismaService } from '../prisma/notification-prisma.service';
+import { FcmPushQueue } from './fcm-push.queue';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsRepository } from './notifications.repository';
 import { NotificationsService } from './notifications.service';
@@ -60,6 +61,7 @@ describe('NotificationsController (e2e)', () => {
       providers: [
         NotificationsService,
         NotificationsRepository,
+        { provide: FcmPushQueue, useValue: { enqueue: jest.fn() } },
         { provide: ENV_TOKEN, useValue: createTestEnv(publicKeyPem) },
         { provide: NOTIFICATION_JWT_VERIFIER, useClass: JoseNotificationUserJwtVerifier },
         {
@@ -238,6 +240,10 @@ function createTestEnv(publicKeyPem: string): Env {
     DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/vietride_notification',
     LOG_LEVEL: 'info',
     USER_JWT_PUBLIC_KEY: publicKeyPem,
+    IDENTITY_INTERNAL_BASE_URL: 'http://identity.test',
+    FCM_PROJECT_ID: undefined,
+    FCM_CLIENT_EMAIL: undefined,
+    FCM_PRIVATE_KEY: undefined,
   };
 }
 

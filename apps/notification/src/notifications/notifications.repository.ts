@@ -1,9 +1,13 @@
 import { Injectable } from '@nestjs/common';
-import type { Notification, Prisma } from '../generated/notification-prisma-client';
-import { Prisma as NotificationPrisma } from '../generated/notification-prisma-client';
+import type { Notification, NotificationDelivery, Prisma } from '../generated/notification-prisma-client';
+import {
+  NotificationDeliveryStatus,
+  Prisma as NotificationPrisma,
+} from '../generated/notification-prisma-client';
 import { NotificationPrismaService } from '../prisma/notification-prisma.service';
 import type { NormalizedCreateNotificationDto } from './dto/create-notification.dto';
 import type { ListNotificationsQueryDto } from './dto/list-notifications-query.dto';
+import type { DeviceTokenSnapshot } from './fcm-push.types';
 
 export interface PagedNotificationsRow {
   items: Notification[];
@@ -55,10 +59,77 @@ export class NotificationsRepository {
     });
   }
 
+  async findById(notificationId: string): Promise<Notification | null> {
+    return this.prisma.notification.findUnique({
+      where: { id: notificationId },
+    });
+  }
+
   async markRead(notificationId: string): Promise<Notification> {
     return this.prisma.notification.update({
       where: { id: notificationId },
       data: { readAt: new Date() },
+    });
+  }
+
+  async listDeliveriesByNotificationId(notificationId: string): Promise<NotificationDelivery[]> {
+    return this.prisma.notificationDelivery.findMany({
+      where: { notificationId },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async createDelivery(
+    notificationId: string,
+    deviceToken: DeviceTokenSnapshot,
+  ): Promise<NotificationDelivery> {
+    return this.prisma.notificationDelivery.create({
+      data: {
+        notificationId,
+        fcmToken: deviceToken.fcmToken,
+        platform: deviceToken.platform,
+      },
+    });
+  }
+
+  async markDeliverySent(deliveryId: string): Promise<NotificationDelivery> {
+    return this.prisma.notificationDelivery.update({
+      where: { id: deliveryId },
+      data: {
+        status: NotificationDeliveryStatus.SENT,
+        sentAt: new Date(),
+        lastError: null,
+      },
+    });
+  }
+
+  async markDeliveryRetrying(
+    deliveryId: string,
+    retryCount: number,
+    lastError: string,
+  ): Promise<NotificationDelivery> {
+    return this.prisma.notificationDelivery.update({
+      where: { id: deliveryId },
+      data: {
+        status: NotificationDeliveryStatus.RETRYING,
+        retryCount,
+        lastError,
+      },
+    });
+  }
+
+  async markDeliveryFailed(
+    deliveryId: string,
+    retryCount: number,
+    lastError: string,
+  ): Promise<NotificationDelivery> {
+    return this.prisma.notificationDelivery.update({
+      where: { id: deliveryId },
+      data: {
+        status: NotificationDeliveryStatus.FAILED,
+        retryCount,
+        lastError,
+      },
     });
   }
 }

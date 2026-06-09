@@ -1,6 +1,7 @@
 import { NotFoundException } from '@nestjs/common';
 import { NotificationType, type Notification } from '../generated/notification-prisma-client';
 import type { ListNotificationsQueryDto } from './dto/list-notifications-query.dto';
+import { FcmPushQueue } from './fcm-push.queue';
 import { NotificationsRepository } from './notifications.repository';
 import { NotificationsService } from './notifications.service';
 
@@ -9,6 +10,7 @@ const NOTIFICATION_ID = '22222222-2222-4222-8222-222222222222';
 
 describe('NotificationsService', () => {
   let repository: jest.Mocked<NotificationsRepository>;
+  let fcmPushQueue: jest.Mocked<FcmPushQueue>;
   let service: NotificationsService;
 
   beforeEach(() => {
@@ -18,7 +20,10 @@ describe('NotificationsService', () => {
       findOwnedById: jest.fn(),
       markRead: jest.fn(),
     } as unknown as jest.Mocked<NotificationsRepository>;
-    service = new NotificationsService(repository);
+    fcmPushQueue = {
+      enqueue: jest.fn(),
+    } as unknown as jest.Mocked<FcmPushQueue>;
+    service = new NotificationsService(repository, fcmPushQueue);
   });
 
   it('creates a normalized notification DTO', async () => {
@@ -55,6 +60,10 @@ describe('NotificationsService', () => {
       title: 'Dat ve thanh cong',
       body: 'Ve cua ban da duoc xac nhan.',
       data: { bookingId: '33333333-3333-4333-8333-333333333333' },
+    });
+    expect(fcmPushQueue.enqueue).toHaveBeenCalledWith({
+      notificationId: NOTIFICATION_ID,
+      userId: OWNER_USER_ID,
     });
   });
 
