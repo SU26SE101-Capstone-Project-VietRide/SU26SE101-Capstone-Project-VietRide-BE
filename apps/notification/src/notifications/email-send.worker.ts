@@ -16,6 +16,7 @@ import { BULLMQ_QUEUE_PREFIX } from './fcm-push.constants';
 import type { EmailProvider, EmailSendJobData } from './email-send.types';
 import { EmailTemplateRenderer } from './email-template.renderer';
 import { NotificationsRepository } from './notifications.repository';
+import { normalizeSafeError } from './safe-error';
 
 @Injectable()
 export class EmailSendWorker implements OnModuleInit, OnModuleDestroy {
@@ -94,8 +95,6 @@ export class EmailSendWorker implements OnModuleInit, OnModuleDestroy {
   }
 
   private normalizeError(error: unknown): string {
-    const message = error instanceof Error ? error.message : String(error);
-
-    return message.slice(0, EMAIL_LAST_ERROR_MAX_LENGTH);
+    return normalizeSafeError(error, EMAIL_LAST_ERROR_MAX_LENGTH);
   }
 }

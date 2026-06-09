@@ -17,6 +17,8 @@ export const envSchema = baseEnvSchema.merge(
     SENDGRID_API_KEY: z.string().optional(),
     SENDGRID_FROM_EMAIL: z.string().email().optional(),
     SENDGRID_FROM_NAME: z.string().default('VietRide'),
+    NOTIFICATION_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
+    NOTIFICATION_RETENTION_JOB_INTERVAL_MS: z.coerce.number().int().positive().default(86_400_000),
   }),
 );
 

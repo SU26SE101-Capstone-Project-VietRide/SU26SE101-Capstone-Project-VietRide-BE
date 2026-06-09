@@ -10,7 +10,9 @@ import {
   BULLMQ_QUEUE_PREFIX,
   FCM_PUSH_ATTEMPTS,
   FCM_PUSH_BACKOFF_DELAYS_MS,
+  FCM_LAST_ERROR_MAX_LENGTH,
   FCM_PUSH_QUEUE_NAME,
+  LAST_FCM_PUSH_BACKOFF_DELAY_MS,
   FCM_TOKEN_BLACKLIST_PREFIX,
   FCM_TOKEN_BLACKLIST_TTL_SECONDS,
 } from './fcm-push.constants';
@@ -21,9 +23,7 @@ import type {
   FcmPushProvider,
 } from './fcm-push.types';
 import { NotificationsRepository } from './notifications.repository';
-
-const LAST_ERROR_MAX_LENGTH = 1_000;
-const LAST_FCM_PUSH_BACKOFF_DELAY_MS = 300_000;
+import { normalizeSafeError } from './safe-error';
 
 @Injectable()
 export class FcmPushWorker implements OnModuleInit, OnModuleDestroy {
@@ -177,8 +177,6 @@ export class FcmPushWorker implements OnModuleInit, OnModuleDestroy {
   }
 
   private normalizeError(error: unknown): string {
-    const message = error instanceof Error ? error.message : String(error);
-
-    return message.slice(0, LAST_ERROR_MAX_LENGTH);
+    return normalizeSafeError(error, FCM_LAST_ERROR_MAX_LENGTH);
   }
 }

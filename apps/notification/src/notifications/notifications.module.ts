@@ -17,6 +17,7 @@ import { FirebaseFcmPushProvider } from './firebase-fcm-push.provider';
 import { IdentityDeviceTokenProvider } from './identity-device-token.provider';
 import { NoopOperatorRecipientProvider } from './noop-operator-recipient.provider';
 import { NotificationsController } from './notifications.controller';
+import { NotificationRetentionService } from './notification-retention.service';
 import { NotificationsRepository } from './notifications.repository';
 import { NotificationsService } from './notifications.service';
 import { OPERATOR_RECIPIENT_PROVIDER } from './parcel-subscription-operator-events.constants';
@@ -29,6 +30,7 @@ import { TripTrackingAlertEventsConsumer } from './trip-tracking-alert-events.co
   providers: [
     NotificationsService,
     NotificationsRepository,
+    NotificationRetentionService,
     FcmPushQueue,
     FcmPushWorker,
     EmailSendQueue,

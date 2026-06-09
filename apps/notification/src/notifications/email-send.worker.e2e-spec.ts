@@ -115,5 +115,7 @@ function createEnv(): Env {
     SENDGRID_API_KEY: undefined,
     SENDGRID_FROM_EMAIL: undefined,
     SENDGRID_FROM_NAME: 'VietRide',
+    NOTIFICATION_RETENTION_DAYS: 90,
+    NOTIFICATION_RETENTION_JOB_INTERVAL_MS: 86_400_000,
   };
 }

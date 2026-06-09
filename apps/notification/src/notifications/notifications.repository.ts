@@ -87,6 +87,18 @@ export class NotificationsRepository {
     });
   }
 
+  async deleteNotificationsCreatedBefore(cutoff: Date): Promise<number> {
+    const result = await this.prisma.notification.deleteMany({
+      where: {
+        createdAt: {
+          lt: cutoff,
+        },
+      },
+    });
+
+    return result.count;
+  }
+
   async listDeliveriesByNotificationId(notificationId: string): Promise<NotificationDelivery[]> {
     return this.prisma.notificationDelivery.findMany({
       where: { notificationId },

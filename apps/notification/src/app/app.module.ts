@@ -16,6 +16,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { HealthController } from './health.controller';
 import { ReadyController } from './ready.controller';
+import { ReadinessService } from './readiness.service';
 
 const env = loadEnv();
 
@@ -35,6 +36,7 @@ const env = loadEnv();
   controllers: [AppController, HealthController, ReadyController],
   providers: [
     AppService,
+    ReadinessService,
     { provide: APP_FILTER, useValue: new ApiResponseExceptionFilter() },
     { provide: APP_INTERCEPTOR, useValue: new LoggingInterceptor() },
     { provide: APP_INTERCEPTOR, useValue: new ApiResponseInterceptor() },
