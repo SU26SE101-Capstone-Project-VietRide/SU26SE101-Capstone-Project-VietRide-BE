@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
+using VietRide.Shared.Persistence.Outbox;
 using VietRide.Trip.Infrastructure;
 
 #nullable disable
@@ -22,30 +23,41 @@ namespace VietRide.Trip.Infrastructure.Migrations
                 .HasAnnotation("ProductVersion", "8.0.11")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "outbox_event_status", new[] { "PENDING", "PUBLISHING", "PUBLISHED", "FAILED" });
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("VietRide.Shared.Persistence.Outbox.OutboxMessage", b =>
                 {
                     b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
-                        .HasColumnName("id");
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("event_type");
 
                     b.Property<string>("LastError")
                         .HasColumnType("text")
                         .HasColumnName("last_error");
-
-                    b.Property<DateTimeOffset>("OccurredAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("occurred_at");
 
                     b.Property<string>("Payload")
                         .IsRequired()
                         .HasColumnType("jsonb")
                         .HasColumnName("payload");
 
-                    b.Property<DateTimeOffset?>("ProcessedAt")
+                    b.Property<DateTimeOffset?>("PublishedAt")
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("processed_at");
+                        .HasColumnName("published_at");
 
                     b.Property<int>("RetryCount")
                         .ValueGeneratedOnAdd()
@@ -53,19 +65,20 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .HasDefaultValue(0)
                         .HasColumnName("retry_count");
 
-                    b.Property<string>("Type")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
-                        .HasColumnName("type");
+                    b.Property<OutboxEventStatus>("Status")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("outbox_event_status")
+                        .HasDefaultValue(OutboxEventStatus.PENDING)
+                        .HasColumnName("status");
 
                     b.HasKey("Id")
-                        .HasName("pk_outbox_messages");
+                        .HasName("pk_outbox_events");
 
-                    b.HasIndex("ProcessedAt", "OccurredAt")
-                        .HasDatabaseName("ix_outbox_messages_processed_at_occurred_at");
+                    b.HasIndex("Status", "CreatedAt")
+                        .HasDatabaseName("idx_outbox_events_status_created")
+                        .HasFilter("status IN ('PENDING', 'PUBLISHING', 'FAILED')");
 
-                    b.ToTable("outbox_messages", "vietride_trip");
+                    b.ToTable("outbox_events", "vietride_trip");
                 });
 
             modelBuilder.Entity("VietRide.Trip.Domain.Entities.OperatorStation", b =>

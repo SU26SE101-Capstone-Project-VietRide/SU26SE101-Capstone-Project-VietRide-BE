@@ -18,23 +18,25 @@ namespace VietRide.Trip.Infrastructure.Migrations
             migrationBuilder.Sql("CREATE EXTENSION IF NOT EXISTS \"pgcrypto\";");
             migrationBuilder.Sql("CREATE EXTENSION IF NOT EXISTS \"unaccent\";");
             migrationBuilder.Sql("CREATE EXTENSION IF NOT EXISTS \"pg_trgm\";");
+            migrationBuilder.Sql("CREATE TYPE outbox_event_status AS ENUM ('PENDING', 'PUBLISHING', 'PUBLISHED', 'FAILED');");
 
             migrationBuilder.CreateTable(
-                name: "outbox_messages",
+                name: "outbox_events",
                 schema: "vietride_trip",
                 columns: table => new
                 {
-                    id = table.Column<Guid>(type: "uuid", nullable: false),
-                    occurred_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    type = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
+                    id = table.Column<Guid>(type: "uuid", nullable: false, defaultValueSql: "gen_random_uuid()"),
+                    event_type = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
                     payload = table.Column<string>(type: "jsonb", nullable: false),
-                    processed_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
+                    status = table.Column<string>(type: "outbox_event_status", nullable: false, defaultValue: "PENDING"),
                     retry_count = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
-                    last_error = table.Column<string>(type: "text", nullable: true)
+                    last_error = table.Column<string>(type: "text", nullable: true),
+                    created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false, defaultValueSql: "now()"),
+                    published_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("pk_outbox_messages", x => x.id);
+                    table.PrimaryKey("pk_outbox_events", x => x.id);
                 });
 
             migrationBuilder.CreateTable(
@@ -148,10 +150,11 @@ namespace VietRide.Trip.Infrastructure.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "ix_outbox_messages_processed_at_occurred_at",
+                name: "idx_outbox_events_status_created",
                 schema: "vietride_trip",
-                table: "outbox_messages",
-                columns: new[] { "processed_at", "occurred_at" });
+                table: "outbox_events",
+                columns: new[] { "status", "created_at" },
+                filter: "status IN ('PENDING', 'PUBLISHING', 'FAILED')");
 
             migrationBuilder.CreateIndex(
                 name: "idx_stations_city_province",
@@ -209,7 +212,7 @@ namespace VietRide.Trip.Infrastructure.Migrations
                 schema: "vietride_trip");
 
             migrationBuilder.DropTable(
-                name: "outbox_messages",
+                name: "outbox_events",
                 schema: "vietride_trip");
 
             migrationBuilder.DropTable(
@@ -221,6 +224,7 @@ namespace VietRide.Trip.Infrastructure.Migrations
                 schema: "vietride_trip");
 
             migrationBuilder.Sql("DROP EXTENSION IF EXISTS \"pg_trgm\";");
+            migrationBuilder.Sql("DROP TYPE IF EXISTS outbox_event_status;");
             migrationBuilder.Sql("DROP EXTENSION IF EXISTS \"unaccent\";");
             migrationBuilder.Sql("DROP EXTENSION IF EXISTS \"pgcrypto\";");
         }

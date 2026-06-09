@@ -375,7 +375,7 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
             await using var scope = Services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
             await db.Database.ExecuteSqlRawAsync(
-                "TRUNCATE TABLE vietride_identity.activity_logs, vietride_identity.email_verification_tokens, vietride_identity.operator_subscriptions, vietride_identity.users, vietride_identity.operators, vietride_identity.outbox_messages RESTART IDENTITY CASCADE;");
+                "TRUNCATE TABLE vietride_identity.activity_logs, vietride_identity.email_verification_tokens, vietride_identity.operator_subscriptions, vietride_identity.users, vietride_identity.operators, vietride_identity.outbox_events RESTART IDENTITY CASCADE;");
         }
 
         public async Task SeedSystemAdminAsync(Guid userId)

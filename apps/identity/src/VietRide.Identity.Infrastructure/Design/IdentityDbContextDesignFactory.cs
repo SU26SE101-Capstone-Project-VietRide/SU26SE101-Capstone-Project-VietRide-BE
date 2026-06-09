@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using Npgsql.NameTranslation;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Persistence.Outbox;
 
 namespace VietRide.Identity.Infrastructure.Design;
 
@@ -18,6 +20,7 @@ internal sealed class IdentityDbContextDesignFactory : IDesignTimeDbContextFacto
             ?? "Host=localhost;Port=5432;Database=vietride_identity;Username=vietride;Password=vietride_dev";
 
         var dataSourceBuilder = new Npgsql.NpgsqlDataSourceBuilder(connectionString);
+        dataSourceBuilder.MapEnum<OutboxEventStatus>("outbox_event_status", new NpgsqlNullNameTranslator());
         IdentityDbContext.ConfigurePostgresEnums(dataSourceBuilder);
         var dataSource = dataSourceBuilder.Build();
 

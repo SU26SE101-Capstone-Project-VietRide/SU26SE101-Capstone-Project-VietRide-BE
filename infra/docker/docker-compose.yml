@@ -160,6 +160,7 @@ services:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_trip;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}'
+      IDENTITY_SERVICE_BASE_URL: http://identity:5001
     ports:
       - '${TRIP_PORT:-5002}:5002'
     healthcheck:
@@ -281,11 +282,27 @@ services:
       context: ../..
       dockerfile: apps/tracking/Dockerfile
     container_name: vietride_tracking
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3001
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      DATABASE_URL: 'postgresql://${POSTGRES_USER:-vietride}:${POSTGRES_PASSWORD:-vietride_dev}@postgres:5432/${TRACKING_DB:-vietride_tracking}'
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      RABBITMQ_URL: 'amqp://${RABBITMQ_USER:-vietride}:${RABBITMQ_PASSWORD:-vietride_dev}@rabbitmq:5672'
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-vietride.events}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     ports:
       - '${TRACKING_PORT:-3001}:3001'
     healthcheck:
       test:
-        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1']
+        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://127.0.0.1:3001/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5
@@ -297,11 +314,17 @@ services:
       context: ../..
       dockerfile: apps/notification/Dockerfile
     container_name: vietride_notification
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3002
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
     ports:
       - '${NOTIFICATION_PORT:-3002}:3002'
     healthcheck:
       test:
-        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:3002/health || exit 1']
+        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://127.0.0.1:3002/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5
@@ -313,11 +336,17 @@ services:
       context: ../..
       dockerfile: apps/rag/Dockerfile
     container_name: vietride_rag
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3003
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
     ports:
       - '${RAG_PORT:-3003}:3003'
     healthcheck:
       test:
-        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:3003/health || exit 1']
+        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://127.0.0.1:3003/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5

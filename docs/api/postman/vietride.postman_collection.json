@@ -1497,7 +1497,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"B\u1ebfn xe Mi\u1ec1n Tây Day 7\",\n  \"city\": \"H\u1ed3 Ch\u00ed Minh\",\n  \"province\": \"H\u1ed3 Ch\u00ed Minh\",\n  \"latitude\": 10.7461,\n  \"longitude\": 106.6173,\n  \"addressStreet\": \"395 Kinh D\u01b0\u01a1ng V\u01b0\u01a1ng\",\n  \"contactPhone\": \"02838545529\",\n  \"contactEmail\": \"station-day7@example.com\",\n  \"operatingHours\": \"24/7\",\n  \"facilities\": [\"waiting-room\", \"restroom\"],\n  \"supportsShuttle\": true\n}"
+              "raw": "{\n  \"name\": \"B\u1ebfn xe Mi\u1ec1n Tây Day 7\",\n  \"city\": \"H\u1ed3 Ch\u00ed Minh\",\n  \"province\": \"H\u1ed3 Ch\u00ed Minh\",\n  \"latitude\": 10.7461,\n  \"longitude\": 106.6173,\n  \"addressStreet\": \"395 Kinh D\u01b0\u01a1ng V\u01b0\u01a1ng\",\n  \"contactPhone\": \"02838545529\",\n  \"contactEmail\": \"station-day7@example.com\",\n  \"operatingHours\": {\n    \"mon\": \"00:00-24:00\"\n  },\n  \"facilities\": [\"waiting-room\", \"restroom\"],\n  \"supportsShuttle\": true\n}"
             },
             "description": "Create branch: station fields present means create Station + auto-link in one transaction. Latitude and longitude are required by Day 7 even though the DB columns are nullable."
           }
@@ -1539,7 +1539,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"B\u1ebfn xe Mi\u1ec1n Tây Day 7 Duplicate\",\n  \"city\": \"H\u1ed3 Ch\u00ed Minh\",\n  \"province\": \"H\u1ed3 Ch\u00ed Minh\",\n  \"latitude\": 10.7461,\n  \"longitude\": 106.6173,\n  \"addressStreet\": \"395 Kinh D\u01b0\u01a1ng V\u01b0\u01a1ng\",\n  \"contactPhone\": \"02838545529\",\n  \"contactEmail\": \"station-day7-duplicate@example.com\",\n  \"operatingHours\": \"24/7\",\n  \"facilities\": [\"waiting-room\", \"restroom\"],\n  \"supportsShuttle\": true\n}"
+              "raw": "{\n  \"name\": \"B\u1ebfn xe Mi\u1ec1n Tây Day 7 Duplicate\",\n  \"city\": \"H\u1ed3 Ch\u00ed Minh\",\n  \"province\": \"H\u1ed3 Ch\u00ed Minh\",\n  \"latitude\": 10.7461,\n  \"longitude\": 106.6173,\n  \"addressStreet\": \"395 Kinh D\u01b0\u01a1ng V\u01b0\u01a1ng\",\n  \"contactPhone\": \"02838545529\",\n  \"contactEmail\": \"station-day7-duplicate@example.com\",\n  \"operatingHours\": {\n    \"mon\": \"00:00-24:00\"\n  },\n  \"facilities\": [\"waiting-room\", \"restroom\"],\n  \"supportsShuttle\": true\n}"
             },
             "description": "Duplicate-nearby case: same area within <100m must not create a new station and must return STATION_DUPLICATE_NEARBY."
           }
@@ -1589,6 +1589,46 @@
               "raw": "{\n  \"name\": \"Day 7 Stop\",\n  \"latitude\": 10.758,\n  \"longitude\": 106.67,\n  \"address\": \"1 L\u00ea L\u01a1i\",\n  \"googlePlaceId\": \"day7-google-place-id-1\"\n}"
             },
             "description": "Day 7 create stop; googlePlaceId is persisted as an opaque string only."
+          }
+        },
+        {
+          "name": "5a. Invalid stop coordinates return VALIDATION_ERROR",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 422', function () {",
+                  "  pm.response.to.have.status(422);",
+                  "});",
+                  "pm.test('Invalid coordinates validation envelope', function () {",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.statusCode).to.equal(422);",
+                  "  pm.expect(body.error).to.have.property('code', 'VALIDATION_ERROR');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminCreatedOperatorAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/stops",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "stops"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Day 7 Invalid Coordinate Stop\",\n  \"latitude\": 91,\n  \"longitude\": 181,\n  \"address\": \"Invalid coordinate address\"\n}"
+            },
+            "description": "Adversarial Day 7 validation case: latitude must be in [-90,90] and longitude in [-180,180]."
           }
         },
         {
@@ -1787,20 +1827,6 @@
           "name": "11. Cross-operator stop access returns STOP_NOT_FOUND",
           "event": [
             {
-              "listen": "prerequest",
-              "script": {
-                "exec": [
-                  "const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;",
-                  "const crossOperatorStopId = pm.variables.get('crossOperatorStopId') || '';",
-                  "if (!uuidLike.test(crossOperatorStopId)) {",
-                  "  console.log('Skipping cross-operator stop 404 check: set crossOperatorStopId to a UUID stop owned by another operator.');",
-                  "  pm.execution.skipRequest();",
-                  "}"
-                ],
-                "type": "text/javascript"
-              }
-            },
-            {
               "listen": "test",
               "script": {
                 "exec": [
@@ -1873,19 +1899,6 @@
         {
           "name": "13. Non-approved operator cannot write",
           "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "exec": [
-                  "const token = pm.variables.get('nonApprovedOperatorAccessToken') || '';",
-                  "if (!token || token === '<non-approved-operator-access-token>') {",
-                  "  console.log('Skipping non-approved operator write 403 check: set nonApprovedOperatorAccessToken to a valid JWT for a non-APPROVED or inactive operator.');",
-                  "  pm.execution.skipRequest();",
-                  "}"
-                ],
-                "type": "text/javascript"
-              }
-            },
             {
               "listen": "test",
               "script": {
