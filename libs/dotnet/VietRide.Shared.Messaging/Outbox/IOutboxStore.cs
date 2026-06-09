@@ -13,16 +13,15 @@ namespace VietRide.Shared.Messaging.Outbox;
 public interface IOutboxStore
 {
     /// <summary>
-    /// Fetch up to <paramref name="batchSize"/> rows where
-    /// <c>ProcessedAt IS NULL</c> AND
-    /// (<c>NextAttemptAt IS NULL OR NextAttemptAt &lt;= NOW</c>),
-    /// ordered by <c>OccurredAt ASC</c>. Should use
+    /// Fetch up to <paramref name="batchSize"/> rows where the event is publishable
+    /// (for example <c>Status IN ('PENDING','FAILED')</c> and any retry delay has elapsed),
+    /// ordered by <c>CreatedAt ASC</c>. Should use
     /// <c>FOR UPDATE SKIP LOCKED</c> on Postgres to allow multiple workers.
     /// </summary>
-    Task<IReadOnlyList<OutboxMessage>> FetchPendingAsync(int batchSize, CancellationToken ct);
+    Task<IReadOnlyList<OutboxEventEnvelope>> FetchPendingAsync(int batchSize, CancellationToken ct);
 
-    /// <summary>Mark a row as successfully published.</summary>
-    Task MarkProcessedAsync(Guid id, DateTime processedAt, CancellationToken ct);
+    /// <summary>Mark an outbox event as successfully published.</summary>
+    Task MarkPublishedAsync(Guid id, DateTime publishedAt, CancellationToken ct);
 
     /// <summary>
     /// Record a failed publish — increment RetryCount, push NextAttemptAt

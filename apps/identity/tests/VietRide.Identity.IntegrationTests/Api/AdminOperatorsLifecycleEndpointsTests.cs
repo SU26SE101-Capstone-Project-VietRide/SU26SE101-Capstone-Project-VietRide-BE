@@ -131,7 +131,7 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
         subscription.ExpiresAt.Should().Be(operatorEntity.ApprovedAt!.Value.AddDays(30));
         var activityLog = await db.ActivityLogs.SingleAsync(x => x.UserId == SystemAdminId && x.Action == ActivityLogAction.APPROVE_OPERATOR);
         AssertActivityMetadata(activityLog.Metadata, operatorId, "SYSTEM_ADMIN_APPROVE_OPERATOR");
-        (await db.Set<OutboxMessage>().CountAsync()).Should().Be(0);
+        (await db.Set<OutboxEvent>().CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -179,7 +179,7 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
         subscription.Status.Should().Be(SubscriptionStatus.CANCELLED);
         var activityLog = await db.ActivityLogs.SingleAsync(x => x.UserId == SystemAdminId && x.Action == ActivityLogAction.REJECT_OPERATOR);
         AssertActivityMetadata(activityLog.Metadata, operatorId, "SYSTEM_ADMIN_REJECT_OPERATOR");
-        (await db.Set<OutboxMessage>().CountAsync()).Should().Be(0);
+        (await db.Set<OutboxEvent>().CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -223,7 +223,7 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
         operatorEntity.SuspendedAt.Should().NotBeNull();
         operatorEntity.SuspendReason.Should().Be("Policy violation");
         (await db.ActivityLogs.CountAsync()).Should().Be(0);
-        (await db.Set<OutboxMessage>().CountAsync()).Should().Be(0);
+        (await db.Set<OutboxEvent>().CountAsync()).Should().Be(0);
     }
 
     [Fact]

@@ -70,7 +70,7 @@ public sealed class IdentityDbContext : VietRideDbContextBase
         // Apply all IEntityTypeConfiguration<T> defined in this assembly.
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(IdentityDbContext).Assembly);
 
-        // Base applies snake_case naming + OutboxMessages mapping.
+        // Base applies snake_case naming + OutboxEvents mapping.
         base.OnModelCreating(modelBuilder);
     }
 }

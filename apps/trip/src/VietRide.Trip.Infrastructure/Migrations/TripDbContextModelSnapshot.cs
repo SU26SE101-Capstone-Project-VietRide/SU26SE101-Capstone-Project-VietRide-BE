@@ -26,7 +26,7 @@ namespace VietRide.Trip.Infrastructure.Migrations
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "outbox_event_status", new[] { "PENDING", "PUBLISHING", "PUBLISHED", "FAILED" });
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("VietRide.Shared.Persistence.Outbox.OutboxMessage", b =>
+            modelBuilder.Entity("VietRide.Shared.Persistence.Outbox.OutboxEvent", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
