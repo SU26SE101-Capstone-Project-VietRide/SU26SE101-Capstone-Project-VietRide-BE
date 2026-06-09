@@ -2,3 +2,4 @@ export const ENV_TOKEN = Symbol('ENV_TOKEN');
 export const NOTIFICATION_JWT_VERIFIER = Symbol('NOTIFICATION_JWT_VERIFIER');
 export const FCM_PUSH_PROVIDER = Symbol('FCM_PUSH_PROVIDER');
 export const DEVICE_TOKEN_PROVIDER = Symbol('DEVICE_TOKEN_PROVIDER');
+export const EMAIL_PROVIDER = Symbol('EMAIL_PROVIDER');

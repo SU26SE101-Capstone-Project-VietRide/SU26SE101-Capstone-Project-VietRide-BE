@@ -1,6 +1,14 @@
 import { NotFoundException } from '@nestjs/common';
-import { NotificationType, type Notification } from '../generated/notification-prisma-client';
+import {
+  EmailDeliveryStatus,
+  EmailTemplateKey,
+  NotificationType,
+  type EmailDelivery,
+  type Notification,
+} from '../generated/notification-prisma-client';
 import type { ListNotificationsQueryDto } from './dto/list-notifications-query.dto';
+import { EmailSendQueue } from './email-send.queue';
+import { EmailTemplateRenderer } from './email-template.renderer';
 import { FcmPushQueue } from './fcm-push.queue';
 import { NotificationsRepository } from './notifications.repository';
 import { NotificationsService } from './notifications.service';
@@ -11,6 +19,7 @@ const NOTIFICATION_ID = '22222222-2222-4222-8222-222222222222';
 describe('NotificationsService', () => {
   let repository: jest.Mocked<NotificationsRepository>;
   let fcmPushQueue: jest.Mocked<FcmPushQueue>;
+  let emailSendQueue: jest.Mocked<EmailSendQueue>;
   let service: NotificationsService;
 
   beforeEach(() => {
@@ -19,11 +28,15 @@ describe('NotificationsService', () => {
       listForUser: jest.fn(),
       findOwnedById: jest.fn(),
       markRead: jest.fn(),
+      createEmailDelivery: jest.fn(),
     } as unknown as jest.Mocked<NotificationsRepository>;
     fcmPushQueue = {
       enqueue: jest.fn(),
     } as unknown as jest.Mocked<FcmPushQueue>;
-    service = new NotificationsService(repository, fcmPushQueue);
+    emailSendQueue = {
+      enqueue: jest.fn(),
+    } as unknown as jest.Mocked<EmailSendQueue>;
+    service = new NotificationsService(repository, fcmPushQueue, emailSendQueue, new EmailTemplateRenderer());
   });
 
   it('creates a normalized notification DTO', async () => {
@@ -120,6 +133,50 @@ describe('NotificationsService', () => {
 
     await expect(service.markRead(NOTIFICATION_ID, OWNER_USER_ID)).rejects.toThrow(NotFoundException);
   });
+
+  it('creates sanitized email delivery audit and enqueues sensitive template data for SendGrid', async () => {
+    repository.createEmailDelivery.mockResolvedValue(createEmailDelivery());
+
+    await expect(
+      service.enqueueEmail({
+        toEmail: 'passenger@vietride.local',
+        templateKey: EmailTemplateKey.AUTH_OTP,
+        templateData: {
+          otpCode: '123456',
+          purpose: 'dang ky',
+          ttlMinutes: 10,
+        },
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        id: '44444444-4444-4444-8444-444444444444',
+        toEmail: 'passenger@vietride.local',
+        templateKey: EmailTemplateKey.AUTH_OTP,
+        status: EmailDeliveryStatus.PENDING,
+      }),
+    );
+
+    expect(repository.createEmailDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toEmail: 'passenger@vietride.local',
+        templateKey: EmailTemplateKey.AUTH_OTP,
+        subject: 'Ma xac thuc VietRide',
+        sanitizedData: expect.objectContaining({
+          otpCode: '[REDACTED]',
+          purpose: 'dang ky',
+          ttlMinutes: 10,
+        }),
+      }),
+    );
+    expect(emailSendQueue.enqueue).toHaveBeenCalledWith({
+      emailDeliveryId: '44444444-4444-4444-8444-444444444444',
+      toEmail: 'passenger@vietride.local',
+      templateKey: EmailTemplateKey.AUTH_OTP,
+      templateData: expect.objectContaining({
+        otpCode: '123456',
+      }),
+    });
+  });
 });
 
 function createNotification(overrides: Partial<Notification>): Notification {
@@ -133,5 +190,23 @@ function createNotification(overrides: Partial<Notification>): Notification {
     readAt: null,
     createdAt: new Date('2026-06-01T10:00:00.000Z'),
     ...overrides,
+  };
+}
+
+function createEmailDelivery(): EmailDelivery {
+  return {
+    id: '44444444-4444-4444-8444-444444444444',
+    notificationId: null,
+    toEmail: 'passenger@vietride.local',
+    templateKey: EmailTemplateKey.AUTH_OTP,
+    subject: 'Ma xac thuc VietRide',
+    sanitizedData: { otpCode: '[REDACTED]' },
+    status: EmailDeliveryStatus.PENDING,
+    retryCount: 0,
+    lastError: null,
+    providerMessageId: null,
+    sentAt: null,
+    createdAt: new Date('2026-06-01T10:00:00.000Z'),
+    updatedAt: new Date('2026-06-01T10:00:00.000Z'),
   };
 }

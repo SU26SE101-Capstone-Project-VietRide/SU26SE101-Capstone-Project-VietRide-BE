@@ -10,6 +10,8 @@ import { ENV_TOKEN, NOTIFICATION_JWT_VERIFIER } from '../app/tokens';
 import { JoseNotificationUserJwtVerifier } from '../auth/user-jwt.verifier';
 import type { Env } from '../config/env.schema';
 import { NotificationPrismaService } from '../prisma/notification-prisma.service';
+import { EmailSendQueue } from './email-send.queue';
+import { EmailTemplateRenderer } from './email-template.renderer';
 import { FcmPushQueue } from './fcm-push.queue';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsRepository } from './notifications.repository';
@@ -62,6 +64,8 @@ describe('NotificationsController (e2e)', () => {
         NotificationsService,
         NotificationsRepository,
         { provide: FcmPushQueue, useValue: { enqueue: jest.fn() } },
+        { provide: EmailSendQueue, useValue: { enqueue: jest.fn() } },
+        EmailTemplateRenderer,
         { provide: ENV_TOKEN, useValue: createTestEnv(publicKeyPem) },
         { provide: NOTIFICATION_JWT_VERIFIER, useClass: JoseNotificationUserJwtVerifier },
         {
@@ -244,6 +248,9 @@ function createTestEnv(publicKeyPem: string): Env {
     FCM_PROJECT_ID: undefined,
     FCM_CLIENT_EMAIL: undefined,
     FCM_PRIVATE_KEY: undefined,
+    SENDGRID_API_KEY: undefined,
+    SENDGRID_FROM_EMAIL: undefined,
+    SENDGRID_FROM_NAME: 'VietRide',
   };
 }
 

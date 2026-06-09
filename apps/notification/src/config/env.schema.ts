@@ -14,6 +14,9 @@ export const envSchema = baseEnvSchema.merge(
     FCM_PROJECT_ID: z.string().optional(),
     FCM_CLIENT_EMAIL: z.string().email().optional(),
     FCM_PRIVATE_KEY: z.string().optional(),
+    SENDGRID_API_KEY: z.string().optional(),
+    SENDGRID_FROM_EMAIL: z.string().email().optional(),
+    SENDGRID_FROM_NAME: z.string().default('VietRide'),
   }),
 );
 
@@ -28,6 +31,8 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
     FCM_PROJECT_ID: raw.FCM_PROJECT_ID === '' ? undefined : raw.FCM_PROJECT_ID,
     FCM_CLIENT_EMAIL: raw.FCM_CLIENT_EMAIL === '' ? undefined : raw.FCM_CLIENT_EMAIL,
     FCM_PRIVATE_KEY: raw.FCM_PRIVATE_KEY === '' ? undefined : raw.FCM_PRIVATE_KEY,
+    SENDGRID_API_KEY: raw.SENDGRID_API_KEY === '' ? undefined : raw.SENDGRID_API_KEY,
+    SENDGRID_FROM_EMAIL: raw.SENDGRID_FROM_EMAIL === '' ? undefined : raw.SENDGRID_FROM_EMAIL,
   };
   const postgresHost = raw.POSTGRES_HOST;
   const postgresPort = raw.POSTGRES_PORT;

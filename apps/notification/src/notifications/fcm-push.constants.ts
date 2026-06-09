@@ -1,4 +1,5 @@
-export const FCM_PUSH_QUEUE_NAME = 'notification:fcm-push';
+export const BULLMQ_QUEUE_PREFIX = 'notification';
+export const FCM_PUSH_QUEUE_NAME = 'fcm-push';
 export const FCM_PUSH_JOB_NAME = 'send-fcm-push';
 export const FCM_PUSH_ATTEMPTS = 4;
 export const FCM_PUSH_BACKOFF_DELAYS_MS = [5_000, 30_000, 300_000] as const;

@@ -1,6 +1,13 @@
 import { Injectable } from '@nestjs/common';
-import type { Notification, NotificationDelivery, Prisma } from '../generated/notification-prisma-client';
+import type {
+  EmailDelivery,
+  EmailTemplateKey,
+  Notification,
+  NotificationDelivery,
+  Prisma,
+} from '../generated/notification-prisma-client';
 import {
+  EmailDeliveryStatus,
   NotificationDeliveryStatus,
   Prisma as NotificationPrisma,
 } from '../generated/notification-prisma-client';
@@ -12,6 +19,14 @@ import type { DeviceTokenSnapshot } from './fcm-push.types';
 export interface PagedNotificationsRow {
   items: Notification[];
   totalItems: number;
+}
+
+export interface CreateEmailDeliveryRow {
+  notificationId?: string | null;
+  toEmail: string;
+  templateKey: EmailTemplateKey;
+  subject: string;
+  sanitizedData: unknown;
 }
 
 @Injectable()
@@ -127,6 +142,69 @@ export class NotificationsRepository {
       where: { id: deliveryId },
       data: {
         status: NotificationDeliveryStatus.FAILED,
+        retryCount,
+        lastError,
+      },
+    });
+  }
+
+  async createEmailDelivery(dto: CreateEmailDeliveryRow): Promise<EmailDelivery> {
+    return this.prisma.emailDelivery.create({
+      data: {
+        notificationId: dto.notificationId ?? null,
+        toEmail: dto.toEmail,
+        templateKey: dto.templateKey,
+        subject: dto.subject,
+        sanitizedData: dto.sanitizedData as Prisma.InputJsonValue,
+      },
+    });
+  }
+
+  async findEmailDeliveryById(emailDeliveryId: string): Promise<EmailDelivery | null> {
+    return this.prisma.emailDelivery.findUnique({
+      where: { id: emailDeliveryId },
+    });
+  }
+
+  async markEmailDeliverySent(
+    emailDeliveryId: string,
+    providerMessageId: string | null,
+  ): Promise<EmailDelivery> {
+    return this.prisma.emailDelivery.update({
+      where: { id: emailDeliveryId },
+      data: {
+        status: EmailDeliveryStatus.SENT,
+        providerMessageId,
+        sentAt: new Date(),
+        lastError: null,
+      },
+    });
+  }
+
+  async markEmailDeliveryRetrying(
+    emailDeliveryId: string,
+    retryCount: number,
+    lastError: string,
+  ): Promise<EmailDelivery> {
+    return this.prisma.emailDelivery.update({
+      where: { id: emailDeliveryId },
+      data: {
+        status: EmailDeliveryStatus.RETRYING,
+        retryCount,
+        lastError,
+      },
+    });
+  }
+
+  async markEmailDeliveryFailed(
+    emailDeliveryId: string,
+    retryCount: number,
+    lastError: string,
+  ): Promise<EmailDelivery> {
+    return this.prisma.emailDelivery.update({
+      where: { id: emailDeliveryId },
+      data: {
+        status: EmailDeliveryStatus.FAILED,
         retryCount,
         lastError,
       },

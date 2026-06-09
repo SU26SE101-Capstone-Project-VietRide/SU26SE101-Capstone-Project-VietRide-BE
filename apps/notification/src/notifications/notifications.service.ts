@@ -4,7 +4,14 @@ import {
   CreateNotificationSchema,
   type CreateNotificationDto,
 } from './dto/create-notification.dto';
+import {
+  CreateEmailSendSchema,
+  type CreateEmailSendDto,
+} from './dto/create-email-send.dto';
 import type { ListNotificationsQueryDto } from './dto/list-notifications-query.dto';
+import { EmailSendQueue } from './email-send.queue';
+import { sanitizeEmailTemplateData } from './email-sensitive-data';
+import { EmailTemplateRenderer } from './email-template.renderer';
 import { FcmPushQueue } from './fcm-push.queue';
 import { NotificationsRepository } from './notifications.repository';
 
@@ -29,11 +36,21 @@ export interface PagedNotificationsDto {
   hasPreviousPage: boolean;
 }
 
+export interface EmailDeliveryDto {
+  id: string;
+  toEmail: string;
+  templateKey: string;
+  status: string;
+  createdAt: string;
+}
+
 @Injectable()
 export class NotificationsService {
   constructor(
     private readonly notificationsRepository: NotificationsRepository,
     private readonly fcmPushQueue: FcmPushQueue,
+    private readonly emailSendQueue: EmailSendQueue,
+    private readonly emailTemplateRenderer: EmailTemplateRenderer,
   ) {}
 
   async createNotification(dto: CreateNotificationDto): Promise<NotificationItemDto> {
@@ -73,6 +90,36 @@ export class NotificationsService {
     if (!notification.readAt) {
       await this.notificationsRepository.markRead(notificationId);
     }
+  }
+
+  async enqueueEmail(dto: CreateEmailSendDto): Promise<EmailDeliveryDto> {
+    const normalizedDto = CreateEmailSendSchema.parse(dto);
+    const renderedEmail = this.emailTemplateRenderer.render(
+      normalizedDto.templateKey,
+      normalizedDto.templateData,
+    );
+    const emailDelivery = await this.notificationsRepository.createEmailDelivery({
+      notificationId: normalizedDto.notificationId ?? null,
+      toEmail: normalizedDto.toEmail,
+      templateKey: normalizedDto.templateKey,
+      subject: renderedEmail.subject,
+      sanitizedData: sanitizeEmailTemplateData(normalizedDto.templateData),
+    });
+
+    await this.emailSendQueue.enqueue({
+      emailDeliveryId: emailDelivery.id,
+      toEmail: normalizedDto.toEmail,
+      templateKey: normalizedDto.templateKey,
+      templateData: normalizedDto.templateData,
+    });
+
+    return {
+      id: emailDelivery.id,
+      toEmail: emailDelivery.toEmail,
+      templateKey: emailDelivery.templateKey,
+      status: emailDelivery.status,
+      createdAt: emailDelivery.createdAt.toISOString(),
+    };
   }
 
   private toDto(notification: Notification): NotificationItemDto {

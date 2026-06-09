@@ -122,5 +122,8 @@ function createEnv(): Env {
     DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/vietride_notification',
     LOG_LEVEL: 'info',
     IDENTITY_INTERNAL_BASE_URL: 'http://identity.test',
+    SENDGRID_API_KEY: undefined,
+    SENDGRID_FROM_EMAIL: undefined,
+    SENDGRID_FROM_NAME: 'VietRide',
   };
 }

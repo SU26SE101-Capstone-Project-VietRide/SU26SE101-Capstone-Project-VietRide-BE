@@ -7,6 +7,7 @@ import { DEVICE_TOKEN_PROVIDER, ENV_TOKEN, FCM_PUSH_PROVIDER } from '../app/toke
 import type { Env } from '../config/env.schema';
 import { NotificationDeliveryStatus, type Notification } from '../generated/notification-prisma-client';
 import {
+  BULLMQ_QUEUE_PREFIX,
   FCM_PUSH_ATTEMPTS,
   FCM_PUSH_BACKOFF_DELAYS_MS,
   FCM_PUSH_QUEUE_NAME,
@@ -45,6 +46,7 @@ export class FcmPushWorker implements OnModuleInit, OnModuleDestroy {
       (job) => this.process(job),
       {
         connection: this.connection,
+        prefix: BULLMQ_QUEUE_PREFIX,
         settings: {
           backoffStrategy: (attemptsMade) =>
             FCM_PUSH_BACKOFF_DELAYS_MS[attemptsMade - 1] ??
