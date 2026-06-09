@@ -15,19 +15,19 @@ public sealed class OutboxStore : IOutboxStore
         _clock = clock;
     }
 
-    public async Task AddAsync(OutboxMessage message, CancellationToken cancellationToken = default)
+    public async Task AddAsync(OutboxEvent outboxEvent, CancellationToken cancellationToken = default)
     {
-        if (message.CreatedAt == default)
+        if (outboxEvent.CreatedAt == default)
         {
-            message.CreatedAt = _clock.UtcNow;
+            outboxEvent.CreatedAt = _clock.UtcNow;
         }
 
-        await _db.OutboxMessages.AddAsync(message, cancellationToken).ConfigureAwait(false);
+        await _db.OutboxEvents.AddAsync(outboxEvent, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<IReadOnlyList<OutboxMessage>> GetUnprocessedAsync(int batchSize, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<OutboxEvent>> GetUnprocessedAsync(int batchSize, CancellationToken cancellationToken = default)
     {
-        return await _db.OutboxMessages
+        return await _db.OutboxEvents
             .Where(x => x.Status == OutboxEventStatus.PENDING || x.Status == OutboxEventStatus.FAILED)
             .OrderBy(x => x.CreatedAt)
             .Take(batchSize)

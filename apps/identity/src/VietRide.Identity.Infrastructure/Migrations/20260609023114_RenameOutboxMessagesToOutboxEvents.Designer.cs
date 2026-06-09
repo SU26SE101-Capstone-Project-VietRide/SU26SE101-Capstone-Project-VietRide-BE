@@ -898,7 +898,7 @@ namespace VietRide.Identity.Infrastructure.Migrations
                     b.ToTable("user_devices", "vietride_identity");
                 });
 
-            modelBuilder.Entity("VietRide.Shared.Persistence.Outbox.OutboxMessage", b =>
+            modelBuilder.Entity("VietRide.Shared.Persistence.Outbox.OutboxEvent", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()

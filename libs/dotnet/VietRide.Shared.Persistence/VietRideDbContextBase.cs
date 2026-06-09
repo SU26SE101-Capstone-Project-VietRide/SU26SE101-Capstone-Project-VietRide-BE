@@ -10,7 +10,7 @@ namespace VietRide.Shared.Persistence;
 /// Base DbContext for every VietRide service.
 /// - Applies snake_case naming convention to all tables/columns.
 /// - Auto-populates CreatedAt/UpdatedAt for IAuditable entities on SaveChanges.
-/// - Registers OutboxMessage DbSet so every service inherits the outbox table.
+/// - Registers OutboxEvent DbSet so every service inherits the outbox table.
 public abstract class VietRideDbContextBase : DbContext
 {
     private readonly IClock _clock;
@@ -22,7 +22,7 @@ public abstract class VietRideDbContextBase : DbContext
     }
 
     /// Outbox table — every service that publishes events writes here in same transaction.
-    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+    public DbSet<OutboxEvent> OutboxEvents => Set<OutboxEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -30,7 +30,7 @@ public abstract class VietRideDbContextBase : DbContext
 
         modelBuilder.HasPostgresEnum("outbox_event_status", Enum.GetNames<OutboxEventStatus>());
 
-        modelBuilder.Entity<OutboxMessage>(b =>
+        modelBuilder.Entity<OutboxEvent>(b =>
         {
             b.ToTable("outbox_events");
             b.HasKey(x => x.Id);

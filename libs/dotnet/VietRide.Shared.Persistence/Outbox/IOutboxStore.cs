@@ -5,7 +5,7 @@ namespace VietRide.Shared.Persistence.Outbox;
 /// so SaveChanges atomically commits both.
 public interface IOutboxStore
 {
-    Task AddAsync(OutboxMessage message, CancellationToken cancellationToken = default);
+    Task AddAsync(OutboxEvent outboxEvent, CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<OutboxMessage>> GetUnprocessedAsync(int batchSize, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<OutboxEvent>> GetUnprocessedAsync(int batchSize, CancellationToken cancellationToken = default);
 }

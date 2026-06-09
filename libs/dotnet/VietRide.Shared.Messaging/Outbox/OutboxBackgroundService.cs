@@ -81,18 +81,18 @@ public sealed class OutboxBackgroundService : BackgroundService, IOutboxPublishe
         if (batch.Count == 0) return 0;
 
         var ok = 0;
-        foreach (var msg in batch)
+        foreach (var outboxEvent in batch)
         {
             ct.ThrowIfCancellationRequested();
             try
             {
-                await publisher.PublishRawAsync(msg.EventType, msg.Id, msg.Payload, ct).ConfigureAwait(false);
-                await store.MarkProcessedAsync(msg.Id, DateTime.UtcNow, ct).ConfigureAwait(false);
+                await publisher.PublishRawAsync(outboxEvent.EventType, outboxEvent.Id, outboxEvent.Payload, ct).ConfigureAwait(false);
+                await store.MarkPublishedAsync(outboxEvent.Id, DateTime.UtcNow, ct).ConfigureAwait(false);
                 ok++;
             }
             catch (Exception ex)
             {
-                var nextRetry = msg.RetryCount + 1;
+                var nextRetry = outboxEvent.RetryCount + 1;
                 var giveUp = nextRetry > _options.MaxRetryCount;
                 var backoff = ComputeBackoff(nextRetry);
                 var nextAt = giveUp
@@ -103,9 +103,9 @@ public sealed class OutboxBackgroundService : BackgroundService, IOutboxPublishe
                     giveUp ? LogLevel.Error : LogLevel.Warning,
                     ex,
                     "Outbox publish failed for {EventType} id={Id} attempt={Attempt}/{Max}. NextAttempt={NextAt}.",
-                    msg.EventType, msg.Id, nextRetry, _options.MaxRetryCount, nextAt);
+                    outboxEvent.EventType, outboxEvent.Id, nextRetry, _options.MaxRetryCount, nextAt);
 
-                await store.MarkFailedAsync(msg.Id, ex.Message, nextAt, ct).ConfigureAwait(false);
+                await store.MarkFailedAsync(outboxEvent.Id, ex.Message, nextAt, ct).ConfigureAwait(false);
             }
         }
 
