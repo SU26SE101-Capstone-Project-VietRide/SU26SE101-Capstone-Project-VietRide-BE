@@ -161,7 +161,7 @@ New REST endpoints under Trip. The Day-8 endpoints are NOT yet in `VietRide_API_
 |---|---|---|---|---|
 | 8.0a | done | APPROVE | 2026-06-10 | Reviewer approved; human verify pending; 1 patch round. |
 | 8.G | done | APPROVE | 2026-06-10 | Reviewer approved; human verify pending. |
-| 8.0 | todo | — | — | — |
+| 8.0 | done | APPROVE | 2026-06-10 | Reviewer approved; human verify pending; 1 patch round. |
 | 8.1 | todo | — | — | — |
 | 8.2 | todo | — | — | — |
 | 8.3 | todo | — | — | — |
