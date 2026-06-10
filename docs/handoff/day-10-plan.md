@@ -121,7 +121,7 @@ Parallel-safe: 10.3 is disjoint from the 10.0->10.1->10.2 chain. 10.4 is disjoin
 
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
-| 10.0 | todo | -- | -- | reconcile split IOutboxStore -- blocking; Q4 decided option (a), no migration |
+| 10.0 | done | APPROVE | 2026-06-10 | reconcile split IOutboxStore -- blocking; Q4 decided option (a), no migration; new test project VietRide.Shared.Persistence.UnitTests (human-approved) |
 | 10.1 | todo | -- | -- | wire AddVietRideMessaging into Identity |
 | 10.2 | todo | -- | -- | emit user.created/operator.approved/operator.suspended |
 | 10.3 | todo | -- | -- | Idempotency middleware placeholder (not wired); Q3 resolved |

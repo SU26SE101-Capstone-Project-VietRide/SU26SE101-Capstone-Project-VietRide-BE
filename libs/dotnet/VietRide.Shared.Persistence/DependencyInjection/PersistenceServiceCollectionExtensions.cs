@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Npgsql.NameTranslation;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Persistence.Outbox;
 using VietRide.Shared.Persistence.UnitOfWork;
@@ -40,6 +41,7 @@ public static class PersistenceServiceCollectionExtensions
         // Expose the concrete context as VietRideDbContextBase for shared services (e.g. OutboxStore).
         services.AddScoped<VietRideDbContextBase>(sp => sp.GetRequiredService<TContext>());
         services.AddScoped<IOutboxStore, OutboxStore>();
+        services.AddScoped<IIntegrationEventOutbox, IntegrationEventOutbox>();
 
         // Wire the shared IUnitOfWork implementation backed by VietRideDbContextBase.
         // Resolves EfUnitOfWork via the already-registered VietRideDbContextBase alias,

@@ -15,8 +15,8 @@ public static class MessagingServiceCollectionExtensions
     /// Registers RabbitMQ connection factory (singleton), <see cref="IEventPublisher"/>
     /// (singleton — channels are cheap, connection is shared) and the
     /// outbox background worker. Services MUST additionally register their
-    /// own <see cref="IOutboxStore"/> implementation in their Infrastructure
-    /// layer; without it the worker idles.
+    /// own <see cref="VietRide.Shared.Persistence.Outbox.IOutboxStore"/>
+    /// implementation in their Infrastructure layer; without it the worker idles.
     /// </summary>
     public static IServiceCollection AddVietRideMessaging(
         this IServiceCollection services,
