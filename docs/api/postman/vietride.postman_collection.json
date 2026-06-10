@@ -60,7 +60,20 @@
     { "key": "crossOperatorStopId", "value": "<cross-operator-stop-id>" },
     { "key": "missingStationId", "value": "00000000-0000-0000-0000-000000000001" },
     { "key": "missingStopId", "value": "00000000-0000-0000-0000-000000000002" },
-    { "key": "nonApprovedOperatorAccessToken", "value": "<non-approved-operator-access-token>" }
+    { "key": "nonApprovedOperatorAccessToken", "value": "<non-approved-operator-access-token>" },
+    { "key": "day8RouteId", "value": "<day8-route-id>" },
+    { "key": "day8AlternativeRouteId1", "value": "<day8-alternative-route-id-1>" },
+    { "key": "day8AlternativeRouteId2", "value": "<day8-alternative-route-id-2>" },
+    { "key": "day8OriginStationId", "value": "<day8-origin-station-id>" },
+    { "key": "day8DestinationStationId", "value": "<day8-destination-station-id>" },
+    {
+      "key": "day8AlternativeDestinationStationId",
+      "value": "<day8-alternative-destination-station-id>"
+    },
+    { "key": "day8MissingStationId", "value": "00000000-0000-0000-0000-000000000008" },
+    { "key": "day8StopId", "value": "<day8-stop-id>" },
+    { "key": "day8SecondStopId", "value": "<day8-second-stop-id>" },
+    { "key": "day8CrossOperatorRouteId", "value": "<day8-cross-operator-route-id>" }
   ],
   "item": [
     {
@@ -1932,6 +1945,721 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Blocked Stop\",\n  \"latitude\": 10.75,\n  \"longitude\": 106.67\n}"
+            },
+            "description": "Writes require an approved, active operator."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Trip — Day 8 route flow",
+      "item": [
+        {
+          "name": "1. Create route rejects same origin/destination",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 422', function () { pm.response.to.have.status(422); });",
+                  "pm.test('Validation error envelope', function () {",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.statusCode).to.equal(422);",
+                  "  pm.expect(body.error).to.have.property('code', 'VALIDATION_ERROR');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/routes",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "routes"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Day 8 Invalid Same Station\",\n  \"originStationId\": \"{{day8OriginStationId}}\",\n  \"destinationStationId\": \"{{day8OriginStationId}}\",\n  \"baseFare\": 125000,\n  \"totalDistanceKm\": 300.5,\n  \"estimatedDurationMinutes\": 420,\n  \"isActive\": true\n}"
+            },
+            "description": "originStationId == destinationStationId must be rejected."
+          }
+        },
+        {
+          "name": "2. Create route rejects missing station",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 404', function () { pm.response.to.have.status(404); });",
+                  "pm.test('Station not found envelope', function () {",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.statusCode).to.equal(404);",
+                  "  pm.expect(body.error).to.have.property('code', 'STATION_NOT_FOUND');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/routes",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "routes"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Day 8 Missing Station\",\n  \"originStationId\": \"{{day8MissingStationId}}\",\n  \"destinationStationId\": \"{{day8DestinationStationId}}\",\n  \"baseFare\": 125000,\n  \"totalDistanceKm\": 300.5,\n  \"estimatedDurationMinutes\": 420,\n  \"isActive\": true\n}"
+            },
+            "description": "Non-existent originStationId/destinationStationId returns STATION_NOT_FOUND."
+          }
+        },
+        {
+          "name": "3. Create route",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 201', function () { pm.response.to.have.status(201); });",
+                  "pm.test('Route create response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(201);",
+                  "  pm.expect(body.data).to.be.an('object');",
+                  "  const routeId = body.data.id || body.data.routeId;",
+                  "  pm.expect(routeId).to.be.a('string').and.is.not.empty;",
+                  "  pm.collectionVariables.set('day8RouteId', routeId);",
+                  "  pm.environment.set('day8RouteId', routeId);",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/routes",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "routes"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Day 8 HCMC to Da Lat\",\n  \"originStationId\": \"{{day8OriginStationId}}\",\n  \"destinationStationId\": \"{{day8DestinationStationId}}\",\n  \"baseFare\": 125000,\n  \"totalDistanceKm\": 300.5,\n  \"estimatedDurationMinutes\": 420,\n  \"isActive\": true\n}"
+            },
+            "description": "Happy-path Route create through Gateway /v1/operator/routes."
+          }
+        },
+        {
+          "name": "4. List routes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Route list response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.be.an('object');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/routes?page=1&pageSize=20&search=Day%208",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "routes"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "pageSize", "value": "20" },
+                { "key": "search", "value": "Day 8" }
+              ]
+            },
+            "description": "OPERATOR_STAFF can read tenant-scoped routes."
+          }
+        },
+        {
+          "name": "5. Get route by id",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Route get response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  const routeId = body.data.id || body.data.routeId;",
+                  "  pm.expect(routeId).to.equal(pm.variables.get('day8RouteId'));",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "routes", "{{day8RouteId}}"]
+            },
+            "description": "Get route by id through Gateway."
+          }
+        },
+        {
+          "name": "6. Add RouteStop",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 201', function () { pm.response.to.have.status(201); });",
+                  "pm.test('RouteStop create response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(201);",
+                  "  pm.expect(body.data).to.have.property('stopId', pm.variables.get('day8StopId'));",
+                  "  pm.expect(body.data).to.have.property('orderIndex', 1);",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/stops",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "routes", "{{day8RouteId}}", "stops"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stopId\": \"{{day8StopId}}\",\n  \"orderIndex\": 1,\n  \"estimatedDurationFromOriginMinutes\": 90,\n  \"distanceFromOriginKm\": 75.25,\n  \"allowPickup\": true,\n  \"allowDropoff\": false\n}"
+            },
+            "description": "Adds an intermediate RouteStop."
+          }
+        },
+        {
+          "name": "7. Add RouteStop rejects order conflict",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 422', function () { pm.response.to.have.status(422); });",
+                  "pm.test('Order conflict envelope', function () {",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.statusCode).to.equal(422);",
+                  "  pm.expect(body.error).to.have.property('code', 'ROUTE_STOP_ORDER_CONFLICT');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/stops",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "routes", "{{day8RouteId}}", "stops"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stopId\": \"{{day8SecondStopId}}\",\n  \"orderIndex\": 1,\n  \"estimatedDurationFromOriginMinutes\": 100,\n  \"distanceFromOriginKm\": 95.25,\n  \"allowPickup\": true,\n  \"allowDropoff\": true\n}"
+            },
+            "description": "BE_TIMELINE_VU.md:105 review case."
+          }
+        },
+        {
+          "name": "8. Add RouteStop rejects both flags false",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 422', function () { pm.response.to.have.status(422); });",
+                  "pm.test('Flags invalid envelope', function () {",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.statusCode).to.equal(422);",
+                  "  pm.expect(body.error).to.have.property('code', 'ROUTE_STOP_FLAGS_INVALID');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/stops",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "routes", "{{day8RouteId}}", "stops"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stopId\": \"{{day8SecondStopId}}\",\n  \"orderIndex\": 2,\n  \"estimatedDurationFromOriginMinutes\": 100,\n  \"distanceFromOriginKm\": 95.25,\n  \"allowPickup\": false,\n  \"allowDropoff\": false\n}"
+            },
+            "description": "At least one RouteStop pickup/dropoff flag must be true."
+          }
+        },
+        {
+          "name": "9. Create fare template",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 201', function () { pm.response.to.have.status(201); });",
+                  "pm.test('Fare-template create response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(201);",
+                  "  pm.expect(body.data).to.have.property('stopId', pm.variables.get('day8StopId'));",
+                  "  pm.expect(body.data).to.have.property('fareFromThisStop');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/fare-templates",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "routes", "{{day8RouteId}}", "fare-templates"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stopId\": \"{{day8StopId}}\",\n  \"fareFromThisStop\": 200500,\n  \"effectiveFrom\": \"2027-07-01T00:00:00+07:00\",\n  \"effectiveUntil\": \"2027-08-01T00:00:00+07:00\"\n}"
+            },
+            "description": "Creates a future-dated fare override; service floors VND to 1000 before persisting."
+          }
+        },
+        {
+          "name": "10. Fare template rejects bad effective window",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 422', function () { pm.response.to.have.status(422); });",
+                  "pm.test('Bad window validation envelope', function () {",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.statusCode).to.equal(422);",
+                  "  pm.expect(body.error).to.have.property('code', 'VALIDATION_ERROR');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/fare-templates",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "routes", "{{day8RouteId}}", "fare-templates"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stopId\": \"{{day8StopId}}\",\n  \"fareFromThisStop\": 210000,\n  \"effectiveFrom\": \"2027-09-01T00:00:00+07:00\",\n  \"effectiveUntil\": \"2027-09-01T00:00:00+07:00\"\n}"
+            },
+            "description": "effectiveUntil must be greater than effectiveFrom."
+          }
+        },
+        {
+          "name": "11. Fare template rejects overlapping window",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 422', function () { pm.response.to.have.status(422); });",
+                  "pm.test('Overlap validation envelope', function () {",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.statusCode).to.equal(422);",
+                  "  pm.expect(body.error).to.have.property('code', 'VALIDATION_ERROR');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/fare-templates",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "routes", "{{day8RouteId}}", "fare-templates"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stopId\": \"{{day8StopId}}\",\n  \"fareFromThisStop\": 220000,\n  \"effectiveFrom\": \"2027-07-15T00:00:00+07:00\",\n  \"effectiveUntil\": \"2027-08-15T00:00:00+07:00\"\n}"
+            },
+            "description": "Overlapping fare-template windows for the same route/stop are rejected."
+          }
+        },
+        {
+          "name": "12. Fare template rejects stop not on route",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 422', function () { pm.response.to.have.status(422); });",
+                  "pm.test('stopId-not-on-route validation envelope', function () {",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.statusCode).to.equal(422);",
+                  "  pm.expect(body.error).to.have.property('code', 'VALIDATION_ERROR');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/fare-templates",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "routes", "{{day8RouteId}}", "fare-templates"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stopId\": \"{{day8SecondStopId}}\",\n  \"fareFromThisStop\": 230000,\n  \"effectiveFrom\": \"2027-10-01T00:00:00+07:00\",\n  \"effectiveUntil\": \"2027-11-01T00:00:00+07:00\"\n}"
+            },
+            "description": "Fare templates require stopId to already be a RouteStop on the same Route."
+          }
+        },
+        {
+          "name": "13. Create first AlternativeRoute",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 201', function () { pm.response.to.have.status(201); });",
+                  "pm.test('AlternativeRoute create response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  const altId = body.data.id || body.data.alternativeRouteId;",
+                  "  pm.expect(altId).to.be.a('string').and.is.not.empty;",
+                  "  pm.collectionVariables.set('day8AlternativeRouteId1', altId);",
+                  "  pm.environment.set('day8AlternativeRouteId1', altId);",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/alternative-routes",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "routes", "{{day8RouteId}}", "alternative-routes"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Day 8 Alternative Route 1\",\n  \"description\": \"First active alternative.\",\n  \"destinationStationId\": \"{{day8AlternativeDestinationStationId}}\",\n  \"totalDistanceKm\": 321.0,\n  \"estimatedDurationMinutes\": 455,\n  \"stops\": [{\n    \"stopId\": \"{{day8StopId}}\",\n    \"orderIndex\": 1,\n    \"estimatedDurationFromOriginMinutes\": 80,\n    \"distanceFromOriginKm\": 70.25\n  }]\n}"
+            },
+            "description": "Creates the first active AlternativeRoute."
+          }
+        },
+        {
+          "name": "14. Create second AlternativeRoute",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 201', function () { pm.response.to.have.status(201); });",
+                  "pm.test('Second AlternativeRoute create response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  const altId = body.data.id || body.data.alternativeRouteId;",
+                  "  pm.expect(altId).to.be.a('string').and.is.not.empty;",
+                  "  pm.collectionVariables.set('day8AlternativeRouteId2', altId);",
+                  "  pm.environment.set('day8AlternativeRouteId2', altId);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/alternative-routes",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "routes", "{{day8RouteId}}", "alternative-routes"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Day 8 Alternative Route 2\",\n  \"description\": \"Second active alternative.\",\n  \"destinationStationId\": \"{{day8AlternativeDestinationStationId}}\",\n  \"totalDistanceKm\": 322.0,\n  \"estimatedDurationMinutes\": 456,\n  \"stops\": [{\n    \"stopId\": \"{{day8SecondStopId}}\",\n    \"orderIndex\": 1,\n    \"estimatedDurationFromOriginMinutes\": 82,\n    \"distanceFromOriginKm\": 72.25\n  }]\n}"
+            },
+            "description": "Creates the second active AlternativeRoute."
+          }
+        },
+        {
+          "name": "15. Third active AlternativeRoute is rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 422', function () { pm.response.to.have.status(422); });",
+                  "pm.test('AlternativeRoute limit envelope', function () {",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.statusCode).to.equal(422);",
+                  "  pm.expect(body.error).to.have.property('code', 'ALTERNATIVE_ROUTE_LIMIT_EXCEEDED');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/alternative-routes",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "routes", "{{day8RouteId}}", "alternative-routes"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Day 8 Alternative Route 3 Blocked\",\n  \"description\": \"Third active alternative should fail.\",\n  \"destinationStationId\": \"{{day8AlternativeDestinationStationId}}\",\n  \"totalDistanceKm\": 323.0,\n  \"estimatedDurationMinutes\": 457,\n  \"stops\": []\n}"
+            },
+            "description": "Each main Route can have at most two active AlternativeRoutes."
+          }
+        },
+        {
+          "name": "16. Delete deactivates AlternativeRoute",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('AlternativeRoute deactivate response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.be.an('object');",
+                  "  pm.expect(body.data).to.have.property('isActive', false);",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/alternative-routes/{{day8AlternativeRouteId1}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "alternative-routes", "{{day8AlternativeRouteId1}}"]
+            },
+            "description": "DELETE sets isActive=false and frees one active AlternativeRoute slot."
+          }
+        },
+        {
+          "name": "17. Create AlternativeRoute after deactivation succeeds",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 201', function () { pm.response.to.have.status(201); });",
+                  "pm.test('AlternativeRoute slot freed', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(201);",
+                  "  pm.expect(body.data.id || body.data.alternativeRouteId).to.be.a('string').and.is.not.empty;",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/alternative-routes",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "routes", "{{day8RouteId}}", "alternative-routes"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Day 8 Alternative Route 3 After Delete\",\n  \"description\": \"Third alternative succeeds after one deactivate.\",\n  \"destinationStationId\": \"{{day8AlternativeDestinationStationId}}\",\n  \"totalDistanceKm\": 323.0,\n  \"estimatedDurationMinutes\": 457,\n  \"stops\": []\n}"
+            },
+            "description": "A subsequent create succeeds after DELETE deactivates an existing AlternativeRoute."
+          }
+        },
+        {
+          "name": "18. Cross-operator route returns 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 404', function () { pm.response.to.have.status(404); });",
+                  "pm.test('Tenant isolation route not found envelope', function () {",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.statusCode).to.equal(404);",
+                  "  pm.expect(body.error).to.have.property('code', 'ROUTE_NOT_FOUND');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/routes/{{day8CrossOperatorRouteId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "routes", "{{day8CrossOperatorRouteId}}"]
+            },
+            "description": "Routes owned by another operator are hidden as ROUTE_NOT_FOUND."
+          }
+        },
+        {
+          "name": "19. Non-approved operator cannot write route",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 403', function () { pm.response.to.have.status(403); });",
+                  "pm.test('Non-approved operator write denied', function () {",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.statusCode).to.equal(403);",
+                  "  pm.expect(body.error).to.have.property('code', 'FORBIDDEN');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{nonApprovedOperatorAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/routes",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "routes"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Day 8 Pending Operator Blocked Route\",\n  \"originStationId\": \"{{day8OriginStationId}}\",\n  \"destinationStationId\": \"{{day8DestinationStationId}}\",\n  \"baseFare\": 125000,\n  \"totalDistanceKm\": 300.5,\n  \"estimatedDurationMinutes\": 420,\n  \"isActive\": true\n}"
             },
             "description": "Writes require an approved, active operator."
           }

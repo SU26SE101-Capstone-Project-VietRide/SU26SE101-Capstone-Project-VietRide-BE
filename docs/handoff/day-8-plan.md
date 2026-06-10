@@ -166,7 +166,7 @@ New REST endpoints under Trip. The Day-8 endpoints are NOT yet in `VietRide_API_
 | 8.2 | done | APPROVE | 2026-06-10 | Reviewer approved; human verify pending; shared CodedValidationException override; 1 patch round; integration DB env still needs local Postgres. |
 | 8.3 | done | APPROVE | 2026-06-10 | Reviewer approved; human verify pending; integration DB env still needs local Postgres. |
 | 8.4 | done | APPROVE | 2026-06-10 | Reviewer approved; human verify pending; reviewer noted non-blocking DELETE response/PATCH partial nits; integration DB env still needs local Postgres. |
-| 8.5 | todo | — | — | — |
+| 8.5 | done | APPROVE | 2026-06-10 | Reviewer approved; human verify pending; 1 patch round; Newman local blocked by running stack returning 404 for Day-8 routes. |
 
 Legend: todo / in progress / done (reviewer APPROVED + human /verify) / done-with-carryover / blocked
 
