@@ -5,6 +5,7 @@ using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Application.Features.Routes;
+using VietRide.Trip.Application.Features.RouteStops;
 
 namespace VietRide.Trip.Api.Controllers;
 
@@ -97,6 +98,47 @@ public sealed class OperatorRoutesController : ControllerBase
                 request.EstimatedDurationMinutes,
                 request.IsActive),
             cancellationToken));
+    }
+
+    [HttpPost("{id:guid}/stops")]
+    [Authorize(Roles = OperatorWriteRoles)]
+    [ProducesResponseType(typeof(ApiResponse<RouteStopDto>), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<RouteStopDto>> AddStopAsync(
+        Guid id,
+        [FromBody] AddRouteStopRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await mediator.Send(
+            new AddRouteStopCommand(
+                GetRequiredOperatorId(),
+                id,
+                request.StopId,
+                request.OrderIndex,
+                request.EstimatedDurationFromOriginMinutes,
+                request.DistanceFromOriginKm,
+                request.AllowPickup ?? true,
+                request.AllowDropoff ?? true),
+            cancellationToken);
+
+        return StatusCode(StatusCodes.Status201Created, response);
+    }
+
+    [HttpDelete("{id:guid}/stops/{stopId:guid}")]
+    [Authorize(Roles = OperatorWriteRoles)]
+    [ProducesResponseType(typeof(ApiResponse<IReadOnlyDictionary<string, bool>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<IReadOnlyDictionary<string, bool>>> RemoveStopAsync(
+        Guid id,
+        Guid stopId,
+        CancellationToken cancellationToken)
+    {
+        await mediator.Send(new RemoveRouteStopCommand(GetRequiredOperatorId(), id, stopId), cancellationToken);
+        return Ok(new Dictionary<string, bool> { ["deleted"] = true });
     }
 
     private Guid GetRequiredOperatorId()

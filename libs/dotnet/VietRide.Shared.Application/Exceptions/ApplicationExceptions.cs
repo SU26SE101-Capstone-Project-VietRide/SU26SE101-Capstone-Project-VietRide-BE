@@ -14,6 +14,57 @@ public sealed class ValidationException : Exception
 
 public sealed record ValidationError(string Field, string Message);
 
+/// Mapped to HTTP 422 by ApiResponseExceptionFilter. Carries a caller-supplied UPPER_SNAKE_CASE error code and field-level errors.
+public sealed class CodedValidationException : Exception
+{
+    public string ErrorCode { get; }
+    public IReadOnlyList<ValidationError> Errors { get; }
+
+    public CodedValidationException(string errorCode, string message, IReadOnlyList<ValidationError>? errors = null)
+        : base(message)
+    {
+        if (!IsUpperSnakeCase(errorCode))
+        {
+            throw new ArgumentException("Error code must be non-empty UPPER_SNAKE_CASE.", nameof(errorCode));
+        }
+
+        ErrorCode = errorCode;
+        Errors = errors ?? Array.Empty<ValidationError>();
+    }
+
+    private static bool IsUpperSnakeCase(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var previousWasUnderscore = true;
+        foreach (var c in value)
+        {
+            if (c == '_')
+            {
+                if (previousWasUnderscore)
+                {
+                    return false;
+                }
+
+                previousWasUnderscore = true;
+                continue;
+            }
+
+            if (c is not (>= 'A' and <= 'Z') and not (>= '0' and <= '9'))
+            {
+                return false;
+            }
+
+            previousWasUnderscore = false;
+        }
+
+        return !previousWasUnderscore;
+    }
+}
+
 /// Mapped to HTTP 404 with the backwards-compatible RESOURCE_NOT_FOUND error code.
 public sealed class NotFoundException : Exception
 {
