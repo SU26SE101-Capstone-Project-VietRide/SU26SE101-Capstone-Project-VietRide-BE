@@ -1,8 +1,11 @@
+using System.Text.Json;
 using MediatR;
 using VietRide.Identity.Application.Abstractions.Repositories;
+using VietRide.Identity.Application.Events;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Identity.Application.Features.Admin.SuspendOperator;
@@ -11,11 +14,13 @@ public sealed class SuspendOperatorCommandHandler : IRequestHandler<SuspendOpera
 {
     private readonly IOperatorRepository _operators;
     private readonly IClock _clock;
+    private readonly IIntegrationEventOutbox _outbox;
 
-    public SuspendOperatorCommandHandler(IOperatorRepository operators, IClock clock)
+    public SuspendOperatorCommandHandler(IOperatorRepository operators, IClock clock, IIntegrationEventOutbox outbox)
     {
         _operators = operators;
         _clock = clock;
+        _outbox = outbox;
     }
 
     public async Task<SuspendOperatorResponseDto> Handle(
@@ -28,7 +33,16 @@ public sealed class SuspendOperatorCommandHandler : IRequestHandler<SuspendOpera
         var operatorEntity = await _operators.GetByIdAsync(request.OperatorId, cancellationToken)
             ?? throw new NotFoundException(nameof(Operator), request.OperatorId);
 
-        TryApplyLifecycleTransition(() => operatorEntity.Suspend(request.Reason, _clock.UtcNow));
+        var suspendedAt = _clock.UtcNow;
+        TryApplyLifecycleTransition(() => operatorEntity.Suspend(request.Reason, suspendedAt));
+
+        // Enqueue the integration event inside the same transaction the
+        // TransactionBehavior commits (BSOT §7.3).
+        var integrationEvent = new OperatorSuspendedIntegrationEvent(operatorEntity.Id, suspendedAt);
+        await _outbox.EnqueueAsync(
+            OperatorSuspendedIntegrationEvent.EventType,
+            JsonSerializer.Serialize(integrationEvent),
+            cancellationToken);
 
         return new SuspendOperatorResponseDto(operatorEntity.Id, operatorEntity.RegistrationStatus.ToString());
     }

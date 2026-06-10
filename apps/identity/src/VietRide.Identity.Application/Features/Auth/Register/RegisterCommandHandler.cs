@@ -1,11 +1,14 @@
+using System.Text.Json;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
 using VietRide.Identity.Application.Abstractions.Repositories;
+using VietRide.Identity.Application.Events;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 
@@ -22,6 +25,7 @@ public sealed class RegisterCommandHandler : IRequestHandler<RegisterCommand, Re
     private readonly IEmailService _email;
     private readonly IOtpRateLimiter _rateLimiter;
     private readonly IClock _clock;
+    private readonly IIntegrationEventOutbox _outbox;
     private readonly ILogger<RegisterCommandHandler> _logger;
 
     public RegisterCommandHandler(
@@ -31,6 +35,7 @@ public sealed class RegisterCommandHandler : IRequestHandler<RegisterCommand, Re
         IEmailService email,
         IOtpRateLimiter rateLimiter,
         IClock clock,
+        IIntegrationEventOutbox outbox,
         ILogger<RegisterCommandHandler> logger)
     {
         _users = users;
@@ -39,6 +44,7 @@ public sealed class RegisterCommandHandler : IRequestHandler<RegisterCommand, Re
         _email = email;
         _rateLimiter = rateLimiter;
         _clock = clock;
+        _outbox = outbox;
         _logger = logger;
     }
 
@@ -85,6 +91,19 @@ public sealed class RegisterCommandHandler : IRequestHandler<RegisterCommand, Re
             displayName: request.DisplayName.Trim());
 
         await _users.AddAsync(user, cancellationToken);
+
+        // 6b. Enqueue the integration event inside the same transaction the
+        // TransactionBehavior commits (BSOT §7.3). Use _clock.UtcNow because the
+        // entity's CreatedAt is not stamped until SaveChanges.
+        var integrationEvent = new UserCreatedIntegrationEvent(
+            user.Id,
+            user.Role.ToString(),
+            user.Email,
+            _clock.UtcNow);
+        await _outbox.EnqueueAsync(
+            UserCreatedIntegrationEvent.EventType,
+            JsonSerializer.Serialize(integrationEvent),
+            cancellationToken);
 
         // 7. Generate OTP with retry on collision.
         var otpToken = await CreateOtpWithRetryAsync(user.Id, cancellationToken);

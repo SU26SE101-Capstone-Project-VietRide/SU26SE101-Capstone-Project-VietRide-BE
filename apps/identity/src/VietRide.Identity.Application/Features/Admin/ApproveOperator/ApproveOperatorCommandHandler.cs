@@ -1,9 +1,11 @@
 using System.Text.Json;
 using MediatR;
 using VietRide.Identity.Application.Abstractions.Repositories;
+using VietRide.Identity.Application.Events;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Identity.Application.Features.Admin.ApproveOperator;
@@ -14,17 +16,20 @@ public sealed class ApproveOperatorCommandHandler : IRequestHandler<ApproveOpera
     private readonly IOperatorSubscriptionRepository _operatorSubscriptions;
     private readonly IActivityLogRepository _activityLogs;
     private readonly IClock _clock;
+    private readonly IIntegrationEventOutbox _outbox;
 
     public ApproveOperatorCommandHandler(
         IOperatorRepository operators,
         IOperatorSubscriptionRepository operatorSubscriptions,
         IActivityLogRepository activityLogs,
-        IClock clock)
+        IClock clock,
+        IIntegrationEventOutbox outbox)
     {
         _operators = operators;
         _operatorSubscriptions = operatorSubscriptions;
         _activityLogs = activityLogs;
         _clock = clock;
+        _outbox = outbox;
     }
 
     public async Task<ApproveOperatorResponseDto> Handle(
@@ -54,6 +59,14 @@ public sealed class ApproveOperatorCommandHandler : IRequestHandler<ApproveOpera
 
         await _activityLogs.AddAsync(
             ActivityLog.Create(request.CallerUserId, ActivityLogAction.APPROVE_OPERATOR, metadata),
+            cancellationToken);
+
+        // Enqueue the integration event inside the same transaction the
+        // TransactionBehavior commits (BSOT §7.3).
+        var integrationEvent = new OperatorApprovedIntegrationEvent(operatorEntity.Id, approvedAt);
+        await _outbox.EnqueueAsync(
+            OperatorApprovedIntegrationEvent.EventType,
+            JsonSerializer.Serialize(integrationEvent),
             cancellationToken);
 
         return new ApproveOperatorResponseDto(operatorEntity.Id, operatorEntity.RegistrationStatus.ToString());
