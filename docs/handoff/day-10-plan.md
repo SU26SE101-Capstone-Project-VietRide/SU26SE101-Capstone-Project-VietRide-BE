@@ -125,7 +125,7 @@ Parallel-safe: 10.3 is disjoint from the 10.0->10.1->10.2 chain. 10.4 is disjoin
 | 10.1 | done | APPROVE | 2026-06-10 | wire AddVietRideMessaging into Identity; boot verified, OutboxBackgroundService starts |
 | 10.2 | done | APPROVE | 2026-06-10 | emit user.created/operator.approved/operator.suspended; transactional + rollback test green; prod outbox_event_status enum mapping verified |
 | 10.3 | done | APPROVE | 2026-06-10 | Idempotency middleware placeholder (not wired); Q3 resolved; 3+1 unit-test branches green |
-| 10.4 | todo | -- | -- | passenger stub endpoints + gateway route -- Q1 RESOLVED (shapes ratified); /me reuses GetMeResponseDto, /bookings empty paginated envelope |
+| 10.4 | done | APPROVE | 2026-06-10 | passenger stub endpoints + gateway route -- Q1 RESOLVED; /me reuses GetMeResponseDto, /bookings empty paginated envelope; 127 integration + 65 gateway tests green |
 
 Legend: todo - in progress - done (reviewer APPROVED + human /verify) - done-with-carryover - blocked
 

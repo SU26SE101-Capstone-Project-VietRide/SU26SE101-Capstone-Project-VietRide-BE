@@ -361,6 +361,77 @@ Error `401` — missing or invalid token:
 }
 ```
 
+### GET `/v1/passenger/me`
+
+Auth: User Access Token (RS256). Idempotency-Key: not required (read endpoint).
+
+> Note: stub -- item schema finalized in Sprint 3 (SCV-76 / Booking).
+> Passenger profile reuses the `/v1/users/me` projection verbatim; no passenger-specific fields are defined this day.
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "id": "uuid",
+    "email": "user@example.com",
+    "displayName": "Nguyen Van A",
+    "phone": "+84901234567",
+    "role": "PASSENGER",
+    "operatorId": null,
+    "status": "ACTIVE",
+    "avatarUrl": "https://example.com/avatar.png"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `401` — missing or invalid token:
+```json
+{
+  "success": false,
+  "statusCode": 401,
+  "error": { "code": "AUTH_TOKEN_INVALID", "message": "Token không hợp lệ." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+### GET `/v1/passenger/bookings`
+
+Auth: User Access Token (RS256). Idempotency-Key: not required (read endpoint).
+
+> Note: stub -- item schema finalized in Sprint 3 (SCV-76 / Booking).
+> Returns the canonical empty paginated envelope; the booking item schema is NOT defined this day.
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [],
+    "total": 0,
+    "page": 1,
+    "pageSize": 20,
+    "totalPages": 0,
+    "hasNext": false,
+    "hasPrev": false
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `401` — missing or invalid token:
+```json
+{
+  "success": false,
+  "statusCode": 401,
+  "error": { "code": "AUTH_TOKEN_INVALID", "message": "Token không hợp lệ." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
 ### POST `/v1/auth/set-initial-password`
 
 Auth: public. Idempotency-Key: not required by BSOT §5.6.
