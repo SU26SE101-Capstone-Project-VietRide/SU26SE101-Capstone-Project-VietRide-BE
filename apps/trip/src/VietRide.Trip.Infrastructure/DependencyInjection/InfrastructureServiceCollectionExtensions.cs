@@ -27,6 +27,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IStopRepository, StopRepository>();
         services.AddScoped<IRouteRepository, RouteRepository>();
         services.AddScoped<IRouteStopRepository, RouteStopRepository>();
+        services.AddScoped<IRouteStopFareTemplateRepository, RouteStopFareTemplateRepository>();
 
         services.AddSingleton<IInternalJwtTokenProvider, InternalJwtTokenFactory>();
         services.AddHttpContextAccessor();

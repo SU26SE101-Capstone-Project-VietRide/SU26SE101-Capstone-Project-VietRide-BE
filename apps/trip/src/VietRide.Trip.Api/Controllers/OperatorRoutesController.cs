@@ -5,6 +5,7 @@ using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Application.Features.Routes;
+using VietRide.Trip.Application.Features.RouteStopFareTemplates;
 using VietRide.Trip.Application.Features.RouteStops;
 
 namespace VietRide.Trip.Api.Controllers;
@@ -139,6 +140,47 @@ public sealed class OperatorRoutesController : ControllerBase
     {
         await mediator.Send(new RemoveRouteStopCommand(GetRequiredOperatorId(), id, stopId), cancellationToken);
         return Ok(new Dictionary<string, bool> { ["deleted"] = true });
+    }
+
+    [HttpPost("{id:guid}/fare-templates")]
+    [Authorize(Roles = OperatorWriteRoles)]
+    [ProducesResponseType(typeof(ApiResponse<RouteStopFareTemplateDto>), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<RouteStopFareTemplateDto>> AddFareTemplateAsync(
+        Guid id,
+        [FromBody] CreateRouteStopFareTemplateRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await mediator.Send(
+            new CreateRouteStopFareTemplateCommand(
+                GetRequiredOperatorId(),
+                id,
+                request.StopId,
+                request.FareFromThisStop,
+                request.EffectiveFrom,
+                request.EffectiveUntil),
+            cancellationToken);
+
+        return StatusCode(StatusCodes.Status201Created, response);
+    }
+
+    [HttpGet("{id:guid}/fare-templates")]
+    [Authorize(Roles = OperatorReadRoles)]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<RouteStopFareTemplateDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<PagedResult<RouteStopFareTemplateDto>>> GetFareTemplatesAsync(
+        Guid id,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await mediator.Send(
+            new ListRouteStopFareTemplatesQuery(GetRequiredOperatorId(), id, page, pageSize),
+            cancellationToken));
     }
 
     private Guid GetRequiredOperatorId()
