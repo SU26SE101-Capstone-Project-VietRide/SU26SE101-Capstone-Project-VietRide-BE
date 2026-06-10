@@ -81,6 +81,115 @@ namespace VietRide.Trip.Infrastructure.Migrations
                     b.ToTable("outbox_events", "vietride_trip");
                 });
 
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.AlternativeRoute", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text")
+                        .HasColumnName("description");
+
+                    b.Property<Guid>("DestinationStationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("destination_station_id");
+
+                    b.Property<int?>("EstimatedDurationMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("estimated_duration_minutes");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("RouteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("route_id");
+
+                    b.Property<decimal?>("TotalDistanceKm")
+                        .HasColumnType("decimal(8,2)")
+                        .HasColumnName("total_distance_km");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("Id")
+                        .HasName("pk_alternative_routes");
+
+                    b.HasIndex("RouteId")
+                        .HasDatabaseName("idx_alternative_routes_route_id")
+                        .HasFilter("is_active = TRUE");
+
+                    b.ToTable("alternative_routes", "vietride_trip");
+                });
+
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.AlternativeRouteStop", b =>
+                {
+                    b.Property<Guid>("AlternativeRouteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("alternative_route_id");
+
+                    b.Property<Guid>("StopId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("stop_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<decimal?>("DistanceFromOriginKm")
+                        .HasColumnType("decimal(8,2)")
+                        .HasColumnName("distance_from_origin_km");
+
+                    b.Property<int>("EstimatedDurationFromOriginMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("estimated_duration_from_origin_minutes");
+
+                    b.Property<int>("OrderIndex")
+                        .HasColumnType("integer")
+                        .HasColumnName("order_index");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("AlternativeRouteId", "StopId")
+                        .HasName("pk_alternative_route_stops");
+
+                    b.HasIndex("AlternativeRouteId", "OrderIndex")
+                        .IsUnique()
+                        .HasDatabaseName("uq_alternative_route_stops_route_order");
+
+                    b.ToTable("alternative_route_stops", "vietride_trip", t =>
+                        {
+                            t.HasCheckConstraint("chk_alternative_route_stops_order_positive", "order_index > 0");
+                        });
+                });
+
             modelBuilder.Entity("VietRide.Trip.Domain.Entities.OperatorStation", b =>
                 {
                     b.Property<Guid>("Id")
@@ -150,6 +259,211 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .HasDatabaseName("uq_operator_stations_operator_station");
 
                     b.ToTable("operator_stations", "vietride_trip");
+                });
+
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.Route", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<long>("BaseFare")
+                        .HasColumnType("bigint")
+                        .HasColumnName("base_fare");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<Guid>("DestinationStationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("destination_station_id");
+
+                    b.Property<int?>("EstimatedDurationMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("estimated_duration_minutes");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("OperatorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("operator_id");
+
+                    b.Property<Guid>("OriginStationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("origin_station_id");
+
+                    b.Property<Guid?>("ReturnRouteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("return_route_id");
+
+                    b.Property<decimal?>("TotalDistanceKm")
+                        .HasColumnType("decimal(8,2)")
+                        .HasColumnName("total_distance_km");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("Id")
+                        .HasName("pk_routes");
+
+                    b.HasIndex("OperatorId")
+                        .HasDatabaseName("idx_routes_operator_id")
+                        .HasFilter("is_active = TRUE");
+
+                    b.HasIndex("ReturnRouteId")
+                        .HasDatabaseName("idx_routes_return_route_id")
+                        .HasFilter("return_route_id IS NOT NULL");
+
+                    b.HasIndex("OriginStationId", "DestinationStationId")
+                        .HasDatabaseName("idx_routes_origin_destination")
+                        .HasFilter("is_active = TRUE");
+
+                    b.ToTable("routes", "vietride_trip", t =>
+                        {
+                            t.HasCheckConstraint("chk_routes_base_fare_non_negative", "base_fare >= 0");
+
+                            t.HasCheckConstraint("chk_routes_origin_dest_different", "origin_station_id <> destination_station_id");
+                        });
+                });
+
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.RouteStop", b =>
+                {
+                    b.Property<Guid>("RouteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("route_id");
+
+                    b.Property<Guid>("StopId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("stop_id");
+
+                    b.Property<bool>("AllowDropoff")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("allow_dropoff");
+
+                    b.Property<bool>("AllowPickup")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("allow_pickup");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<decimal?>("DistanceFromOriginKm")
+                        .HasColumnType("decimal(8,2)")
+                        .HasColumnName("distance_from_origin_km");
+
+                    b.Property<int>("EstimatedDurationFromOriginMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("estimated_duration_from_origin_minutes");
+
+                    b.Property<int>("OrderIndex")
+                        .HasColumnType("integer")
+                        .HasColumnName("order_index");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("RouteId", "StopId")
+                        .HasName("pk_route_stops");
+
+                    b.HasIndex("StopId")
+                        .HasDatabaseName("idx_route_stops_stop_id");
+
+                    b.HasIndex("RouteId", "OrderIndex")
+                        .IsUnique()
+                        .HasDatabaseName("uq_route_stops_route_order");
+
+                    b.ToTable("route_stops", "vietride_trip", t =>
+                        {
+                            t.HasCheckConstraint("chk_route_stops_allow_at_least_one", "allow_pickup = TRUE OR allow_dropoff = TRUE");
+
+                            t.HasCheckConstraint("chk_route_stops_order_positive", "order_index > 0");
+                        });
+                });
+
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.RouteStopFareTemplate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<DateTimeOffset>("EffectiveFrom")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("effective_from");
+
+                    b.Property<DateTimeOffset?>("EffectiveUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("effective_until");
+
+                    b.Property<long>("FareFromThisStop")
+                        .HasColumnType("bigint")
+                        .HasColumnName("fare_from_this_stop");
+
+                    b.Property<Guid>("RouteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("route_id");
+
+                    b.Property<Guid>("StopId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("stop_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("Id")
+                        .HasName("pk_route_stop_fare_templates");
+
+                    b.HasIndex("RouteId", "StopId", "EffectiveFrom")
+                        .HasDatabaseName("idx_route_stop_fare_templates_route_stop_effective");
+
+                    b.ToTable("route_stop_fare_templates", "vietride_trip", t =>
+                        {
+                            t.HasCheckConstraint("chk_route_stop_fare_templates_effective_order", "effective_until IS NULL OR effective_until > effective_from");
+
+                            t.HasCheckConstraint("chk_route_stop_fare_templates_fare_non_negative", "fare_from_this_stop >= 0");
+                        });
                 });
 
             modelBuilder.Entity("VietRide.Trip.Domain.Entities.Station", b =>
@@ -361,11 +675,91 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.AlternativeRoute", b =>
+                {
+                    b.HasOne("VietRide.Trip.Domain.Entities.Station", null)
+                        .WithMany()
+                        .HasForeignKey("DestinationStationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("VietRide.Trip.Domain.Entities.Route", null)
+                        .WithMany()
+                        .HasForeignKey("RouteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.AlternativeRouteStop", b =>
+                {
+                    b.HasOne("VietRide.Trip.Domain.Entities.AlternativeRoute", null)
+                        .WithMany()
+                        .HasForeignKey("AlternativeRouteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("VietRide.Trip.Domain.Entities.Stop", null)
+                        .WithMany()
+                        .HasForeignKey("StopId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("VietRide.Trip.Domain.Entities.OperatorStation", b =>
                 {
                     b.HasOne("VietRide.Trip.Domain.Entities.Station", null)
                         .WithMany()
                         .HasForeignKey("StationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.Route", b =>
+                {
+                    b.HasOne("VietRide.Trip.Domain.Entities.Station", null)
+                        .WithMany()
+                        .HasForeignKey("DestinationStationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("VietRide.Trip.Domain.Entities.Station", null)
+                        .WithMany()
+                        .HasForeignKey("OriginStationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("VietRide.Trip.Domain.Entities.Route", null)
+                        .WithMany()
+                        .HasForeignKey("ReturnRouteId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.RouteStop", b =>
+                {
+                    b.HasOne("VietRide.Trip.Domain.Entities.Route", null)
+                        .WithMany()
+                        .HasForeignKey("RouteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("VietRide.Trip.Domain.Entities.Stop", null)
+                        .WithMany()
+                        .HasForeignKey("StopId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.RouteStopFareTemplate", b =>
+                {
+                    b.HasOne("VietRide.Trip.Domain.Entities.Route", null)
+                        .WithMany()
+                        .HasForeignKey("RouteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("VietRide.Trip.Domain.Entities.Stop", null)
+                        .WithMany()
+                        .HasForeignKey("StopId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

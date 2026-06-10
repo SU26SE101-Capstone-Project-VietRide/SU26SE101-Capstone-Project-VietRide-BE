@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.6.3
+> **Phiên bản:** 1.7.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-06-07
+> **Cập nhật lần cuối:** 2026-06-10
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1377,7 +1377,10 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 | | `STOP_NOT_PICKUP_ALLOWED` | 422 | RouteStop.allowPickup = false |
 | | `STOP_NOT_DROPOFF_ALLOWED` | 422 | RouteStop.allowDropoff = false |
 | | `ROUTE_NOT_FOUND` | 404 | |
+| | `ROUTE_STOP_ORDER_CONFLICT` | 422 | Day-8 config-time RouteStop `orderIndex` conflict within the same Route |
+| | `ROUTE_STOP_FLAGS_INVALID` | 422 | Day-8 config-time RouteStop `allowPickup=false` and `allowDropoff=false` |
 | | `ROUTE_RETURN_NOT_CONFIGURED` | 422 | returnRouteId NULL khi đặt round-trip |
+| | `ALTERNATIVE_ROUTE_LIMIT_EXCEEDED` | 422 | Day-8 config-time third active AlternativeRoute for the same Route |
 | **Station** | `STATION_NOT_FOUND` | 404 | Day-7 Trip Station handlers use coded 404 path |
 | | `STATION_DUPLICATE_NEARBY` | 200 (warning) | Operator tạo Station < 100m gần Station hiện có |
 | **Invoice** | `INVOICE_NOT_FOUND` | 404 | |
@@ -2675,6 +2678,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.7.0** | 2026-06-10 | BE lead (Vũ) | **MINOR** — Day-8 Trip route contract + registry sync: add the Route/RouteStop/FareTemplate/AlternativeRoute section to the API contract with ADR 0004 envelopes, method-level role matrix (WRITE = `OPERATOR_ADMIN` only; READ = `OPERATOR_ADMIN` + `OPERATOR_STAFF`), tenant-isolation `404 ROUTE_NOT_FOUND`, RouteStop hard-delete, AlternativeRoute soft-deactivate, fare-template `fareFromThisStop` and effective-window rules, and the app-layer preconditions for Route create. Add three new §5.9 validation codes for Day-8 config-time failures: `ROUTE_STOP_ORDER_CONFLICT`, `ROUTE_STOP_FLAGS_INVALID`, and `ALTERNATIVE_ROUTE_LIMIT_EXCEEDED`, each with `error.fields` discriminators. No code/DDL change. |
 | **1.6.5** | 2026-06-10 | BE lead (Vũ) | **PATCH** — Day-10 Outbox + passenger-stub contract sync. Add two stub endpoints to the API contract + Postman: `GET /v1/passenger/me` (reuses the `/v1/users/me` `GetMeResponseDto` projection verbatim — `id,email,displayName,phone,role,operatorId,status,avatarUrl`; no passenger-specific fields) and `GET /v1/passenger/bookings` (empty `PagedResult` envelope `{items:[],page:1,pageSize:20,total:0}` — booking ITEM schema deferred to Sprint 3 / [SCV-76](https://hoangvutran088.atlassian.net/browse/SCV-76)), both marked `stub -- item schema finalized in Sprint 3 (SCV-76 / Booking)`; both require a user JWT (401 without). Add Gateway route `/v1/passenger/*` → identity (authRequired `user`). Implement the three already-registered §7.3 events transactionally from Identity handlers (`identity.user.created {userId,role,email,createdAt}`, `identity.operator.approved {operatorId,approvedAt}`, `identity.operator.suspended {operatorId,suspendedAt}`) via the string-based `IIntegrationEventOutbox` seam; wire `AddVietRideMessaging` into Identity + set the identity container's `RabbitMq__HostName=rabbitmq` so the Outbox publishes to `vietride.events`. Add the placeholder Redis `IdempotencyMiddleware` to Shared.Web (not wired). **No new event keys, no new error codes** (`IDEMPOTENCY_KEY_MISMATCH` already §5.9; events already §7.3). `staff.password_set` intentionally NOT emitted (Q2: no registry row, no consumer — registry §7.3 > timeline). No schema/migration change (reuse existing `outbox_events`). |
 | **1.6.4** | 2026-06-08 | BE lead (Vũ) | **PATCH** — Day-7 Trip Station/Stop contract sync: reconcile station autocomplete to `GET /v1/stations/search?q=` as a targeted endpoint-specific exception to §5.8 `search=` because `technical_context_v7` line 523 has higher priority; `q` is required and blank/empty `q` maps to `422 VALIDATION_ERROR`; document accent-insensitive `unaccent` contains matching, `pg_trgm` placeholder-only compatibility, duplicate-nearby Station warning shape (`STATION_DUPLICATE_NEARBY` 200 without ApiMeta changes), single `POST /v1/operator/stations` link/create branch, Stop CRU under `/v1/operator/stops` (without Day-7 `sharedSuggestion`/`shared_suggestion` mutation), no Day-7 `Idempotency-Key` requirement, Trip->Identity logical-FK failures mapping to `422 VALIDATION_ERROR`, non-APPROVED/inactive operator writes mapping to `403 FORBIDDEN`, internal station/stop raw DTO lookup with coded 404 error envelopes, and existing coded 404 use cases for `STATION_NOT_FOUND`/`STOP_NOT_FOUND`. No new error codes, no event keys. |
 | **1.6.3** | 2026-06-07 | BE lead (Vũ) | **PATCH** — Day-6 Operator contract baseline: sync API contract/BSOT for operator self-register, System Admin manual-create, approve/reject/suspend POST action endpoints, operator-created user create/resend initial-password, operator profile GET/PATCH, and internal operator/subscription/usage endpoints. Ratify Day-6 decisions without adding new error codes, Idempotency-Key requirements, or Outbox emission: non-APPROVED operator login/write-action guards use `FORBIDDEN`; invalid lifecycle transitions use `VALIDATION_ERROR`; reject cancels `OperatorSubscription` without `deletedAt`; ActivityLog `user_id` stores actor user id with JSONB serializer metadata; Day 10 remains responsible for emitting `identity.operator.approved`/`identity.operator.suspended`. |

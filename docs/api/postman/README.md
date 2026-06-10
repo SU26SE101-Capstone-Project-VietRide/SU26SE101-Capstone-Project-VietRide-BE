@@ -44,13 +44,38 @@ npm run postman:day7:local
 The helper seeds local-only Identity/Trip data, mints short-lived JWTs from the dev Identity key,
 and provides the required variables at runtime. Never commit real token values.
 
-If you run the collection manually without the helper, the following variables are still the ones the
-folder expects:
+Day-8 route/route-stop/fare-template/alternative-route adversarial cases are covered by a matching
+local harness. It seeds deterministic local Identity/Trip records, mints short-lived JWTs in-process,
+and runs only the cumulative collection's Day-8 folder through the Gateway (`http://localhost:3000`):
 
-- `crossOperatorStopId` — a Stop id owned by another operator; the request must return exact
-  `404 STOP_NOT_FOUND`.
-- `nonApprovedOperatorAccessToken` — a valid user JWT for a non-`APPROVED` or inactive operator;
+```bash
+node scripts/run-day8-newman-local.js
+# or
+npm run postman:day8:local
+```
+
+The Day-8 helper seeds/mints the folder's required runtime values automatically, including
+`operatorAdminAccessToken`, `operatorUserAccessToken`, `nonApprovedOperatorAccessToken`,
+`operatorId`, `day8OriginStationId`, `day8DestinationStationId`,
+`day8AlternativeDestinationStationId`, `day8MissingStationId`, `day8StopId`,
+`day8SecondStopId`, and `day8CrossOperatorRouteId`. Never commit real token values.
+
+If you run the Day-8 folder manually without the helper, provide equivalent local values:
+
+- `operatorAdminAccessToken` — a valid `OPERATOR_ADMIN` JWT for an `APPROVED`, active operator.
+- `operatorUserAccessToken` — a valid operator user JWT for the same approved operator.
+- `nonApprovedOperatorAccessToken` — a valid operator JWT for a non-`APPROVED` or inactive operator;
   the request must return exact `403 FORBIDDEN`.
+- `operatorId` — the approved operator id that owns the Day-8 test data.
+- `day8OriginStationId` and `day8DestinationStationId` — two active Station ids available to the
+  approved operator; the origin/destination equality case must return `422`.
+- `day8AlternativeDestinationStationId` — an active Station id used by AlternativeRoute create cases.
+- `day8MissingStationId` — a syntactically valid Station id that does not exist; the request must
+  return exact `404 STATION_NOT_FOUND`.
+- `day8StopId` and `day8SecondStopId` — active Stop ids owned by the approved operator and valid for
+  the Day-8 route-stop / alternative-route flow.
+- `day8CrossOperatorRouteId` — a Route id owned by another operator; the request must return exact
+  `404 ROUTE_NOT_FOUND`.
 
 Or import both files into the Postman app (Collection + Environment) and run the folders.
 

@@ -74,6 +74,24 @@ public sealed class ApiResponseExceptionFilterTests
     }
 
     [Fact]
+    public void CodedValidationException_Maps_To_422_With_ErrorCode_And_Fields()
+    {
+        var filter = CreateFilter();
+        var errors = new[] { new ValidationError("orderIndex", "Order index is already used.") };
+        var ctx = BuildContext(new CodedValidationException("ROUTE_STOP_ORDER_CONFLICT", "Route stop order index is already used.", errors));
+
+        filter.OnException(ctx);
+
+        var result = ctx.Result.Should().BeOfType<ObjectResult>().Subject;
+        result.StatusCode.Should().Be(422);
+
+        var envelope = result.Value.Should().BeOfType<ApiResponse>().Subject;
+        envelope.Error.Code.Should().Be("ROUTE_STOP_ORDER_CONFLICT");
+        envelope.Error.Fields.Should().HaveCount(1);
+        envelope.Error.Fields![0].Field.Should().Be("orderIndex");
+    }
+
+    [Fact]
     public void NotFoundException_Maps_To_404()
     {
         var filter = CreateFilter();

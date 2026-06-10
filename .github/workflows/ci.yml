@@ -140,6 +140,7 @@ jobs:
     env:
       # .NET integration tests create throwaway databases on localhost.
       VIETRIDE_IDENTITY_TEST_CONNECTION_STRING: 'Host=localhost;Port=5432;Database=vietride_identity_tests;Username=postgres;Password=postgres'
+      VIETRIDE_PERSISTENCE_TEST_CONNECTION_STRING: 'Host=localhost;Port=5432;Database=postgres;Username=postgres;Password=postgres'
       REDIS_URL: 'localhost:6379,abortConnect=false'
     services:
       postgres:
