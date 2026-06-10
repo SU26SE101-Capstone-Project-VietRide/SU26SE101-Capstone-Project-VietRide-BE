@@ -326,6 +326,16 @@ services:
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: '5672'
+      RABBITMQ_USER: ${RABBITMQ_USER:-vietride}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-vietride_dev}
+      RABBITMQ_EXCHANGE: vietride.events
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     ports:
       - '${NOTIFICATION_PORT:-3002}:3002'
     healthcheck:
