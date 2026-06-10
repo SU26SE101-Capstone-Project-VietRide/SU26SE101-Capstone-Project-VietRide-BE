@@ -3,14 +3,18 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using VietRide.Shared.Messaging.Abstractions;
+using VietRide.Shared.Persistence.Outbox;
 
 namespace VietRide.Shared.Messaging.Outbox;
 
 /// <summary>
 /// Polls the per-service outbox table on a fixed interval, publishes each
 /// pending row to RabbitMQ via <see cref="IEventPublisher"/>, and marks
-/// the row processed. Transient failures use exponential backoff capped
-/// at <see cref="OutboxOptions.MaxRetryCount"/>.
+/// the row processed. Retry is bounded by poll cadence: a failed row is
+/// re-fetched on the next tick and retried until its RetryCount exceeds
+/// <see cref="OutboxOptions.MaxRetryCount"/>, after which it is parked. There
+/// is no per-row delay — <c>ComputeBackoff</c> is computed and logged for
+/// visibility but is NOT persisted and does NOT gate fetching.
 /// </summary>
 /// <remarks>
 /// Per BACKEND_SOURCE_OF_TRUTH section 4.3 + 11.x: each service owns its
@@ -77,7 +81,7 @@ public sealed class OutboxBackgroundService : BackgroundService, IOutboxPublishe
         }
 
         var publisher = scope.ServiceProvider.GetRequiredService<IEventPublisher>();
-        var batch = await store.FetchPendingAsync(_options.BatchSize, ct).ConfigureAwait(false);
+        var batch = await store.FetchPendingAsync(_options.BatchSize, _options.MaxRetryCount, ct).ConfigureAwait(false);
         if (batch.Count == 0) return 0;
 
         var ok = 0;

@@ -1,4 +1,4 @@
-export * from './events/user-registered.event';
+export * from './events/identity-events';
 export * from './events/booking-created.event';
 export * from './events/trip-completed.event';
 export * from './events/payment-succeeded.event';
