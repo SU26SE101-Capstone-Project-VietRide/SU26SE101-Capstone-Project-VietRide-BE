@@ -168,6 +168,38 @@ describe('buildRouteTable', () => {
     });
   });
 
+  it('routes Day 8 operator route families to Trip with operator role union', () => {
+    const cases = [
+      ['/v1/operator/routes', '/v1/operator/routes'],
+      ['/v1/operator/routes/11111111-1111-1111-1111-111111111111/stops', '/v1/operator/routes'],
+      ['/v1/operator/alternative-routes', '/v1/operator/alternative-routes'],
+      [
+        '/v1/operator/alternative-routes/11111111-1111-1111-1111-111111111111',
+        '/v1/operator/alternative-routes',
+      ],
+    ] as const;
+
+    cases.forEach(([path, prefix]) => {
+      const route = matchRoute(routes, path);
+
+      expect(route?.prefix).toBe(prefix);
+      expect(route?.target).toBe(env.TRIP_BASE_URL);
+      expect(route?.authRequired).toBe('user');
+      expect(route?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
+    });
+  });
+
+  it('matches operator routes using the dedicated prefix instead of generic routes', () => {
+    const operatorRoute = matchRoute(
+      routes,
+      '/v1/operator/routes/11111111-1111-1111-1111-111111111111',
+    );
+    const publicRoute = matchRoute(routes, '/v1/routes/11111111-1111-1111-1111-111111111111');
+
+    expect(operatorRoute?.prefix).toBe('/v1/operator/routes');
+    expect(publicRoute?.prefix).toBe('/v1/routes');
+  });
+
   it('keeps existing Identity operator routes distinct from Trip operator routes', () => {
     const profileRoute = matchRoute(routes, '/v1/operator/profile');
     const usersRoute = matchRoute(routes, '/v1/operator/users');

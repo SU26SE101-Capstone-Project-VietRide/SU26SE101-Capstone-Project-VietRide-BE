@@ -129,6 +129,18 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       authRequired: 'user',
       requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
     },
+    {
+      prefix: '/v1/operator/routes',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
+    {
+      prefix: '/v1/operator/alternative-routes',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
     { prefix: '/v1/vehicles', target: env.TRIP_BASE_URL, authRequired: 'user' },
     { prefix: '/v1/driver', target: env.TRIP_BASE_URL, authRequired: 'user' },
     { prefix: '/v1/assistant', target: env.TRIP_BASE_URL, authRequired: 'user' },
