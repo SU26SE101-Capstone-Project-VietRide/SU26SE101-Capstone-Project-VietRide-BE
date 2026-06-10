@@ -140,6 +140,12 @@ services:
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID}
       GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET}
       ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_identity;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}'
+      # Outbox publisher must reach the broker by its compose hostname, not localhost
+      # (appsettings RabbitMq:HostName defaults to localhost for host-run dev).
+      RabbitMq__HostName: rabbitmq
+      RabbitMq__Port: '5672'
+      RabbitMq__UserName: ${RABBITMQ_USER:-vietride}
+      RabbitMq__Password: ${RABBITMQ_PASSWORD:-vietride_dev}
     ports:
       - '${IDENTITY_PORT:-5001}:5001'
     healthcheck:
@@ -320,6 +326,16 @@ services:
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: '5672'
+      RABBITMQ_USER: ${RABBITMQ_USER:-vietride}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-vietride_dev}
+      RABBITMQ_EXCHANGE: vietride.events
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     ports:
       - '${NOTIFICATION_PORT:-3002}:3002'
     healthcheck:

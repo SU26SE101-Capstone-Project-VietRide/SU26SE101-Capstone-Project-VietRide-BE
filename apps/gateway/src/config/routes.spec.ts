@@ -115,6 +115,18 @@ describe('buildRouteTable', () => {
     expect(changePassword?.authRequired).toBe('user');
   });
 
+  it('routes the passenger stub family to Identity requiring user auth', () => {
+    const meRoute = matchRoute(routes, '/v1/passenger/me');
+    const bookingsRoute = matchRoute(routes, '/v1/passenger/bookings');
+
+    [meRoute, bookingsRoute].forEach((route) => {
+      expect(route?.prefix).toBe('/v1/passenger');
+      expect(route?.target).toBe(env.IDENTITY_BASE_URL);
+      expect(route?.authRequired).toBe('user');
+      expect(route?.requiredRoles).toBeUndefined();
+    });
+  });
+
   it('operator profile routes allow OPERATOR_ADMIN and OPERATOR_STAFF roles', () => {
     const route = matchRoute(routes, '/v1/operator/profile');
 

@@ -371,6 +371,32 @@
               "raw": "{\n  \"phone\": \"{{phone}}\"\n}"
             }
           }
+        },
+        {
+          "name": "Get passenger profile (stub)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/passenger/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "passenger", "me"]
+            },
+            "description": "stub -- item schema finalized in Sprint 3 (SCV-76 / Booking). Passenger profile reuses the /v1/users/me projection verbatim; requires a valid user JWT (401 without auth)."
+          }
+        },
+        {
+          "name": "Get passenger booking history (stub)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/passenger/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "passenger", "bookings"]
+            },
+            "description": "stub -- item schema finalized in Sprint 3 (SCV-76 / Booking). Returns the canonical empty paginated envelope (items [], page 1, pageSize 20, total 0); requires a valid user JWT (401 without auth)."
+          }
         }
       ]
     },

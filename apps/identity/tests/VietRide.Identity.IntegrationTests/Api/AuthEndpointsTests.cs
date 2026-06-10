@@ -30,6 +30,7 @@ using VietRide.Identity.Infrastructure;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Persistence;
+using VietRide.Shared.Persistence.Outbox;
 using Xunit;
 
 namespace VietRide.Identity.IntegrationTests.Api;
@@ -275,6 +276,79 @@ public sealed class AuthEndpointsTests :
         using var loginDoc = JsonDocument.Parse(await loginResponse.Content.ReadAsStringAsync());
         AssertSuccessEnvelope(loginDoc, 200);
         AssertOperatorAdminLogin(loginDoc, email, operatorId);
+    }
+
+    [Fact]
+    public async Task PostRegister_Passenger_PersistsExactlyOneUserCreatedOutboxEventInSameTransaction()
+    {
+        await _dbFactory.ResetAsync();
+        var email = UniqueEmail("passenger-outbox");
+        using var client = _dbFactory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/v1/auth/register", new
+        {
+            email,
+            password = "Password123!",
+            displayName = "Passenger User",
+            phone = $"09{Random.Shared.Next(10000000, 99999999)}",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var userId = doc.RootElement.GetProperty("data").GetProperty("userId").GetGuid();
+
+        await using var scope = _dbFactory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+
+        var outboxEvent = await db.Set<OutboxEvent>().SingleAsync(x => x.EventType == "identity.user.created");
+        outboxEvent.Status.Should().Be(OutboxEventStatus.PENDING);
+        (await db.Set<OutboxEvent>().CountAsync()).Should().Be(1);
+
+        using var payload = JsonDocument.Parse(outboxEvent.Payload);
+        payload.RootElement.GetProperty("userId").GetGuid().Should().Be(userId);
+        payload.RootElement.GetProperty("role").GetString().Should().Be(UserRole.PASSENGER.ToString());
+        payload.RootElement.GetProperty("email").GetString().Should().Be(email);
+        payload.RootElement.TryGetProperty("createdAt", out _).Should().BeTrue();
+        payload.RootElement.EnumerateObject().Select(p => p.Name)
+            .Should().BeEquivalentTo(["userId", "role", "email", "createdAt"]);
+
+        // The user was committed in the same transaction as the outbox row.
+        (await db.Users.CountAsync(u => u.Id == userId)).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task PostRegister_WhenHandlerFailsAfterEnqueue_RollsBackBothUserAndOutboxEvent()
+    {
+        await _dbFactory.ResetAsync();
+        var email = UniqueEmail("passenger-rollback");
+        _dbFactory.EmailService.ThrowOnSendOtp = true;
+        try
+        {
+            using var client = _dbFactory.CreateClient();
+
+            // OTP email send (step 8) runs AFTER the outbox enqueue (step 6b) but inside the
+            // handler, so its failure propagates out before TransactionBehavior commits.
+            var response = await client.PostAsJsonAsync("/v1/auth/register", new
+            {
+                email,
+                password = "Password123!",
+                displayName = "Rollback User",
+                phone = $"09{Random.Shared.Next(10000000, 99999999)}",
+            });
+
+            ((int)response.StatusCode).Should().BeGreaterThanOrEqualTo(500);
+
+            await using var scope = _dbFactory.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+
+            // The transaction rolled back: neither the business write nor the outbox row persists.
+            (await db.Set<OutboxEvent>().CountAsync()).Should().Be(0);
+            (await db.Users.CountAsync(u => u.Email == email)).Should().Be(0);
+        }
+        finally
+        {
+            _dbFactory.EmailService.ThrowOnSendOtp = false;
+        }
     }
 
     [Fact]
@@ -735,6 +809,11 @@ public sealed class AuthEndpointsTests :
                 {
                     var dataSourceBuilder = new NpgsqlDataSourceBuilder(_connectionString);
                     IdentityDbContext.ConfigurePostgresEnums(dataSourceBuilder);
+                    // Map the shared outbox enum (normally wired by AddVietRideDbContext) so
+                    // outbox_events INSERTs from the Register handler can serialize the status.
+                    dataSourceBuilder.MapEnum<OutboxEventStatus>(
+                        "outbox_event_status",
+                        new Npgsql.NameTranslation.NpgsqlNullNameTranslator());
                     return dataSourceBuilder.Build();
                 });
 
@@ -917,8 +996,20 @@ public sealed class AuthEndpointsTests :
         public List<(string To, string Code, EmailOtpPurpose Purpose, int TtlMinutes)> SentOtps { get; } = [];
         public List<(string To, AccountCreatedEmailDto Info)> SentAccountCreatedLinks { get; } = [];
 
+        /// <summary>
+        /// When true, <see cref="SendOtpAsync"/> throws. Used to force a handler failure
+        /// AFTER the outbox enqueue but before TransactionBehavior commits, proving the
+        /// outbox row and the business write roll back together (Task 10.2 atomicity).
+        /// </summary>
+        public bool ThrowOnSendOtp { get; set; }
+
         public Task SendOtpAsync(string to, string code, EmailOtpPurpose purpose, int ttlMinutes, CancellationToken ct = default)
         {
+            if (ThrowOnSendOtp)
+            {
+                throw new InvalidOperationException("Forced OTP send failure for rollback test.");
+            }
+
             SentOtps.Add((to, code, purpose, ttlMinutes));
             return Task.CompletedTask;
         }

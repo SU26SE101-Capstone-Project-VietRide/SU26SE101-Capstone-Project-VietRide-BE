@@ -103,7 +103,7 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
     }
 
     [Fact]
-    public async Task Approve_PendingOperator_Returns200PersistsActiveTrialActivityLogAndNoOutbox()
+    public async Task Approve_PendingOperator_Returns200PersistsActiveTrialActivityLogAndOutboxEvent()
     {
         await _factory.ResetAsync();
         await _factory.SeedSystemAdminAsync(SystemAdminId);
@@ -131,7 +131,17 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
         subscription.ExpiresAt.Should().Be(operatorEntity.ApprovedAt!.Value.AddDays(30));
         var activityLog = await db.ActivityLogs.SingleAsync(x => x.UserId == SystemAdminId && x.Action == ActivityLogAction.APPROVE_OPERATOR);
         AssertActivityMetadata(activityLog.Metadata, operatorId, "SYSTEM_ADMIN_APPROVE_OPERATOR");
-        (await db.Set<OutboxEvent>().CountAsync()).Should().Be(0);
+
+        // Task 10.2 — transactional outbox emits identity.operator.approved (BSOT §7.3).
+        var outboxEvent = await db.Set<OutboxEvent>().SingleAsync();
+        outboxEvent.EventType.Should().Be("identity.operator.approved");
+        outboxEvent.Status.Should().Be(OutboxEventStatus.PENDING);
+        using var approvedPayload = JsonDocument.Parse(outboxEvent.Payload);
+        approvedPayload.RootElement.GetProperty("operatorId").GetGuid().Should().Be(operatorId);
+        // Postgres timestamptz truncates to microseconds; the payload carries full .NET ticks.
+        approvedPayload.RootElement.GetProperty("approvedAt").GetDateTimeOffset()
+            .Should().BeCloseTo(operatorEntity.ApprovedAt!.Value, TimeSpan.FromMilliseconds(1));
+        approvedPayload.RootElement.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(["operatorId", "approvedAt"]);
     }
 
     [Fact]
@@ -200,7 +210,7 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
     }
 
     [Fact]
-    public async Task Suspend_ApprovedOperator_Returns200PersistsSuspendedWithoutActivityLogOrOutbox()
+    public async Task Suspend_ApprovedOperator_Returns200PersistsSuspendedWithoutActivityLogAndWithOutboxEvent()
     {
         await _factory.ResetAsync();
         await _factory.SeedSystemAdminAsync(SystemAdminId);
@@ -223,7 +233,17 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
         operatorEntity.SuspendedAt.Should().NotBeNull();
         operatorEntity.SuspendReason.Should().Be("Policy violation");
         (await db.ActivityLogs.CountAsync()).Should().Be(0);
-        (await db.Set<OutboxEvent>().CountAsync()).Should().Be(0);
+
+        // Task 10.2 — transactional outbox emits identity.operator.suspended (BSOT §7.3).
+        var outboxEvent = await db.Set<OutboxEvent>().SingleAsync();
+        outboxEvent.EventType.Should().Be("identity.operator.suspended");
+        outboxEvent.Status.Should().Be(OutboxEventStatus.PENDING);
+        using var suspendedPayload = JsonDocument.Parse(outboxEvent.Payload);
+        suspendedPayload.RootElement.GetProperty("operatorId").GetGuid().Should().Be(operatorId);
+        // Postgres timestamptz truncates to microseconds; the payload carries full .NET ticks.
+        suspendedPayload.RootElement.GetProperty("suspendedAt").GetDateTimeOffset()
+            .Should().BeCloseTo(operatorEntity.SuspendedAt!.Value, TimeSpan.FromMilliseconds(1));
+        suspendedPayload.RootElement.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(["operatorId", "suspendedAt"]);
     }
 
     [Fact]
@@ -333,6 +353,11 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
                 {
                     var dataSourceBuilder = new NpgsqlDataSourceBuilder(_connectionString);
                     IdentityDbContext.ConfigurePostgresEnums(dataSourceBuilder);
+                    // Map the shared outbox enum (normally wired by AddVietRideDbContext) so
+                    // outbox_events INSERTs from the lifecycle handlers can serialize the status.
+                    dataSourceBuilder.MapEnum<OutboxEventStatus>(
+                        "outbox_event_status",
+                        new Npgsql.NameTranslation.NpgsqlNullNameTranslator());
                     return dataSourceBuilder.Build();
                 });
 

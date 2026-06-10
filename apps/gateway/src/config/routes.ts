@@ -49,6 +49,7 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     { prefix: '/v1/auth/logout', target: env.IDENTITY_BASE_URL, authRequired: 'user' },
     { prefix: '/v1/auth', target: env.IDENTITY_BASE_URL, authRequired: 'user' },
     { prefix: '/v1/users', target: env.IDENTITY_BASE_URL, authRequired: 'user' },
+    { prefix: '/v1/passenger', target: env.IDENTITY_BASE_URL, authRequired: 'user' },
     {
       prefix: '/v1/operators',
       target: env.IDENTITY_BASE_URL,

@@ -2,12 +2,14 @@ using System.Text.Json;
 using FluentAssertions;
 using NSubstitute;
 using VietRide.Identity.Application.Abstractions.Repositories;
+using VietRide.Identity.Application.Events;
 using VietRide.Identity.Application.Features.Admin.ApproveOperator;
 using VietRide.Identity.Application.Features.Admin.RejectOperator;
 using VietRide.Identity.Application.Features.Admin.SuspendOperator;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Identity.UnitTests.Application.Operators;
@@ -40,6 +42,28 @@ public sealed class LifecycleOperatorCommandHandlerTests
         await fixture.ActivityLogs.Received(1).AddAsync(
             Arg.Is<ActivityLog>(x => x.Action == ActivityLogAction.APPROVE_OPERATOR && HasLifecycleMetadata(x.Metadata, operatorEntity.Id, "SYSTEM_ADMIN_APPROVE_OPERATOR")),
             Arg.Any<CancellationToken>());
+        await fixture.Outbox.Received(1).EnqueueAsync(
+            "identity.operator.approved",
+            Arg.Is<string>(p => HasOperatorTimestampPayload(p, "operatorId", operatorEntity.Id, "approvedAt", FixedNow)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Approve_InvalidState_DoesNotEnqueueOutboxEvent()
+    {
+        var fixture = new Fixture();
+        var operatorEntity = PendingOperator();
+        operatorEntity.Approve(CallerUserId, FixedNow.AddDays(-1));
+        var subscription = OperatorSubscription.CreateActiveTrial(operatorEntity.Id, SubscriptionPlan.StarterPlanId, FixedNow.AddDays(-1), FixedNow.AddDays(29));
+        fixture.Operators.GetByIdAsync(operatorEntity.Id, Arg.Any<CancellationToken>()).Returns(operatorEntity);
+        fixture.OperatorSubscriptions.GetCurrentByOperatorIdAsync(operatorEntity.Id, Arg.Any<CancellationToken>()).Returns(subscription);
+
+        var act = () => fixture.ApproveHandler.Handle(
+            new ApproveOperatorCommand(UserRole.SYSTEM_ADMIN.ToString(), CallerUserId, operatorEntity.Id),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<ValidationException>();
+        await fixture.Outbox.DidNotReceive().EnqueueAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -120,6 +144,10 @@ public sealed class LifecycleOperatorCommandHandlerTests
         operatorEntity.SuspendedAt.Should().Be(FixedNow);
         operatorEntity.SuspendReason.Should().Be("Policy violation");
         await fixture.ActivityLogs.DidNotReceive().AddAsync(Arg.Any<ActivityLog>(), Arg.Any<CancellationToken>());
+        await fixture.Outbox.Received(1).EnqueueAsync(
+            "identity.operator.suspended",
+            Arg.Is<string>(p => HasOperatorTimestampPayload(p, "operatorId", operatorEntity.Id, "suspendedAt", FixedNow)),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -136,6 +164,7 @@ public sealed class LifecycleOperatorCommandHandlerTests
         await act.Should().ThrowAsync<ValidationException>();
         operatorEntity.RegistrationStatus.Should().Be(OperatorRegistrationStatus.PENDING);
         await fixture.ActivityLogs.DidNotReceive().AddAsync(Arg.Any<ActivityLog>(), Arg.Any<CancellationToken>());
+        await fixture.Outbox.DidNotReceive().EnqueueAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     private static Operator PendingOperator()
@@ -151,6 +180,22 @@ public sealed class LifecycleOperatorCommandHandlerTests
             "Province",
             "Operator Admin",
             "+84901234568");
+
+    private static bool HasOperatorTimestampPayload(
+        string payload,
+        string idKey,
+        Guid operatorId,
+        string timestampKey,
+        DateTimeOffset timestamp)
+    {
+        using var document = JsonDocument.Parse(payload);
+        var root = document.RootElement;
+
+        return root.TryGetProperty(idKey, out var idElement)
+            && idElement.GetGuid() == operatorId
+            && root.TryGetProperty(timestampKey, out var timestampElement)
+            && timestampElement.GetDateTimeOffset() == timestamp;
+    }
 
     private static bool HasLifecycleMetadata(string? metadata, Guid operatorId, string source)
     {
@@ -173,15 +218,16 @@ public sealed class LifecycleOperatorCommandHandlerTests
             ActivityLogs.AddAsync(Arg.Any<ActivityLog>(), Arg.Any<CancellationToken>())
                 .Returns(call => Task.FromResult(call.Arg<ActivityLog>()));
 
-            ApproveHandler = new ApproveOperatorCommandHandler(Operators, OperatorSubscriptions, ActivityLogs, Clock);
+            ApproveHandler = new ApproveOperatorCommandHandler(Operators, OperatorSubscriptions, ActivityLogs, Clock, Outbox);
             RejectHandler = new RejectOperatorCommandHandler(Operators, OperatorSubscriptions, ActivityLogs, Clock);
-            SuspendHandler = new SuspendOperatorCommandHandler(Operators, Clock);
+            SuspendHandler = new SuspendOperatorCommandHandler(Operators, Clock, Outbox);
         }
 
         public IOperatorRepository Operators { get; } = Substitute.For<IOperatorRepository>();
         public IOperatorSubscriptionRepository OperatorSubscriptions { get; } = Substitute.For<IOperatorSubscriptionRepository>();
         public IActivityLogRepository ActivityLogs { get; } = Substitute.For<IActivityLogRepository>();
         public IClock Clock { get; } = Substitute.For<IClock>();
+        public IIntegrationEventOutbox Outbox { get; } = Substitute.For<IIntegrationEventOutbox>();
         public ApproveOperatorCommandHandler ApproveHandler { get; }
         public RejectOperatorCommandHandler RejectHandler { get; }
         public SuspendOperatorCommandHandler SuspendHandler { get; }
