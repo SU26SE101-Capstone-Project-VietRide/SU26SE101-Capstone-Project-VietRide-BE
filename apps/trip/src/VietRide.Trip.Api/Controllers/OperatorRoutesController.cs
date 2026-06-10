@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Trip.Api.Controllers.Requests;
+using VietRide.Trip.Application.Features.AlternativeRoutes;
 using VietRide.Trip.Application.Features.Routes;
 using VietRide.Trip.Application.Features.RouteStopFareTemplates;
 using VietRide.Trip.Application.Features.RouteStops;
@@ -182,6 +183,56 @@ public sealed class OperatorRoutesController : ControllerBase
             new ListRouteStopFareTemplatesQuery(GetRequiredOperatorId(), id, page, pageSize),
             cancellationToken));
     }
+
+    [HttpPost("{id:guid}/alternative-routes")]
+    [Authorize(Roles = OperatorWriteRoles)]
+    [ProducesResponseType(typeof(ApiResponse<AlternativeRouteDto>), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<AlternativeRouteDto>> AddAlternativeRouteAsync(
+        Guid id,
+        [FromBody] CreateAlternativeRouteRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await mediator.Send(
+            new CreateAlternativeRouteCommand(
+                GetRequiredOperatorId(),
+                id,
+                request.Name,
+                request.Description,
+                request.DestinationStationId,
+                request.TotalDistanceKm,
+                request.EstimatedDurationMinutes,
+                (request.Stops ?? []).Select(ToAlternativeRouteStopInput).ToList()),
+            cancellationToken);
+
+        return StatusCode(StatusCodes.Status201Created, response);
+    }
+
+    [HttpGet("{id:guid}/alternative-routes")]
+    [Authorize(Roles = OperatorReadRoles)]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<AlternativeRouteDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<PagedResult<AlternativeRouteDto>>> GetAlternativeRoutesAsync(
+        Guid id,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await mediator.Send(
+            new ListAlternativeRoutesQuery(GetRequiredOperatorId(), id, page, pageSize),
+            cancellationToken));
+    }
+
+    private static AlternativeRouteStopInput ToAlternativeRouteStopInput(AlternativeRouteStopRequest request)
+        => new(
+            request.StopId,
+            request.OrderIndex,
+            request.EstimatedDurationFromOriginMinutes,
+            request.DistanceFromOriginKm);
 
     private Guid GetRequiredOperatorId()
         => CurrentUserClaims.GetOperatorId(User)

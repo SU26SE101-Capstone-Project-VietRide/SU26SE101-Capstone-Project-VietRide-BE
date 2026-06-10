@@ -165,7 +165,7 @@ New REST endpoints under Trip. The Day-8 endpoints are NOT yet in `VietRide_API_
 | 8.1 | done | APPROVE | 2026-06-10 | Reviewer approved; human verify pending; 1 patch round; Trip unit/build/format green, full solution integration needs local Postgres. |
 | 8.2 | done | APPROVE | 2026-06-10 | Reviewer approved; human verify pending; shared CodedValidationException override; 1 patch round; integration DB env still needs local Postgres. |
 | 8.3 | done | APPROVE | 2026-06-10 | Reviewer approved; human verify pending; integration DB env still needs local Postgres. |
-| 8.4 | todo | — | — | — |
+| 8.4 | done | APPROVE | 2026-06-10 | Reviewer approved; human verify pending; reviewer noted non-blocking DELETE response/PATCH partial nits; integration DB env still needs local Postgres. |
 | 8.5 | todo | — | — | — |
 
 Legend: todo / in progress / done (reviewer APPROVED + human /verify) / done-with-carryover / blocked
