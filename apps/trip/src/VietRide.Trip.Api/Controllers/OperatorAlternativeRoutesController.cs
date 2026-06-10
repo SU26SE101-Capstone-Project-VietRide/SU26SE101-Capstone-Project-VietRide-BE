@@ -37,12 +37,18 @@ public sealed class OperatorAlternativeRoutesController : ControllerBase
                 GetRequiredOperatorId(),
                 id,
                 request.Name,
+                request.HasName,
                 request.Description,
+                request.HasDescription,
                 request.DestinationStationId,
+                request.HasDestinationStationId,
                 request.TotalDistanceKm,
+                request.HasTotalDistanceKm,
                 request.EstimatedDurationMinutes,
+                request.HasEstimatedDurationMinutes,
                 request.IsActive,
-                (request.Stops ?? []).Select(ToInput).ToList()),
+                request.HasStops,
+                request.Stops?.Select(ToInput).ToList()),
             cancellationToken));
     }
 
@@ -56,7 +62,7 @@ public sealed class OperatorAlternativeRoutesController : ControllerBase
         CancellationToken cancellationToken)
     {
         await mediator.Send(new DeactivateAlternativeRouteCommand(GetRequiredOperatorId(), id), cancellationToken);
-        return Ok(new Dictionary<string, bool> { ["deactivated"] = true });
+        return Ok(new Dictionary<string, bool> { ["isActive"] = false });
     }
 
     private static AlternativeRouteStopInput ToInput(AlternativeRouteStopRequest request)

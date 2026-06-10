@@ -39,6 +39,8 @@ public sealed class UpdateRouteHandler : IRequestHandler<UpdateRouteCommand, Rou
 
         await ValidateReturnRouteAsync(request.OperatorId, request.ReturnRouteId, cancellationToken);
 
+        var returnRouteId = request.HasReturnRouteId ? request.ReturnRouteId : route.ReturnRouteId;
+
         route.UpdateDetails(
             request.Name ?? route.Name,
             route.OriginStationId,
@@ -46,7 +48,7 @@ public sealed class UpdateRouteHandler : IRequestHandler<UpdateRouteCommand, Rou
             Money.FromRaw(request.BaseFare ?? route.BaseFare.Amount),
             request.TotalDistanceKm ?? route.TotalDistanceKm,
             request.EstimatedDurationMinutes ?? route.EstimatedDurationMinutes,
-            request.ReturnRouteId ?? route.ReturnRouteId);
+            returnRouteId);
 
         if (request.IsActive.HasValue)
         {

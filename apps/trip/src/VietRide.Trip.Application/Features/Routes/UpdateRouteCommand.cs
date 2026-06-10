@@ -7,6 +7,7 @@ public sealed record UpdateRouteCommand(
     Guid RouteId,
     string? Name,
     Guid? ReturnRouteId,
+    bool HasReturnRouteId,
     long? BaseFare,
     decimal? TotalDistanceKm,
     int? EstimatedDurationMinutes,

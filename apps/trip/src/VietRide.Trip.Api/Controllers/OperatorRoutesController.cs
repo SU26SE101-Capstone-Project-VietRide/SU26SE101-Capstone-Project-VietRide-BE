@@ -95,6 +95,7 @@ public sealed class OperatorRoutesController : ControllerBase
                 id,
                 request.Name,
                 request.ReturnRouteId,
+                request.HasReturnRouteId,
                 request.BaseFare,
                 request.TotalDistanceKm,
                 request.EstimatedDurationMinutes,

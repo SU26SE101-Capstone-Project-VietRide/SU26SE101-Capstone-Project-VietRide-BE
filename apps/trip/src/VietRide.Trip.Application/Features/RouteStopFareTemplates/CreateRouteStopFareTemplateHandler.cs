@@ -43,7 +43,10 @@ public sealed class CreateRouteStopFareTemplateHandler : IRequestHandler<CreateR
             request.OperatorId,
             cancellationToken);
 
-        ValidateEffectiveWindow(request.EffectiveFrom, request.EffectiveUntil);
+        var effectiveFrom = request.EffectiveFrom.ToUniversalTime();
+        var effectiveUntil = request.EffectiveUntil?.ToUniversalTime();
+
+        ValidateEffectiveWindow(effectiveFrom, effectiveUntil);
 
         var route = await routeRepository.GetOwnedByIdAsync(request.OperatorId, request.RouteId, cancellationToken);
         if (route is null)
@@ -56,16 +59,16 @@ public sealed class CreateRouteStopFareTemplateHandler : IRequestHandler<CreateR
         await ValidateEffectiveWindowDoesNotOverlapAsync(
             request.RouteId,
             request.StopId,
-            request.EffectiveFrom,
-            request.EffectiveUntil,
+            effectiveFrom,
+            effectiveUntil,
             cancellationToken);
 
         var template = RouteStopFareTemplate.Create(
             request.RouteId,
             request.StopId,
             Money.FromRaw(request.FareFromThisStop),
-            request.EffectiveFrom,
-            request.EffectiveUntil);
+            effectiveFrom,
+            effectiveUntil);
 
         await fareTemplateRepository.AddAsync(template, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);

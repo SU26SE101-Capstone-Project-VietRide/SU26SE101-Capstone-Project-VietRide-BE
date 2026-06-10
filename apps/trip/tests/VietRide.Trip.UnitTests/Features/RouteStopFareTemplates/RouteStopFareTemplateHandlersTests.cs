@@ -47,6 +47,32 @@ public sealed class RouteStopFareTemplateHandlersTests
     }
 
     [Fact]
+    public async Task CreateRouteStopFareTemplate_NormalizesOffsetWindowToUtc_BeforePersisting()
+    {
+        var route = CreateRoute(OperatorId);
+        var stop = CreateStop(OperatorId);
+        var routeStop = RouteStop.Create(route.Id, stop.Id, 1, 20, 5m, true, true);
+        var fareTemplateRepository = new FakeRouteStopFareTemplateRepository([]);
+        var handler = CreateCreateHandler(
+            new FakeRouteRepository([route]),
+            fareTemplateRepository,
+            new FakeRouteStopRepository([routeStop]),
+            new FakeStopRepository([stop]));
+        var effectiveFrom = new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.FromHours(7));
+        var effectiveUntil = new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.FromHours(7));
+
+        var result = await handler.Handle(
+            CreateCommand(route.Id, stop.Id, effectiveFrom: effectiveFrom, effectiveUntil: effectiveUntil),
+            CancellationToken.None);
+
+        result.EffectiveFrom.Should().Be(effectiveFrom.ToUniversalTime());
+        result.EffectiveUntil.Should().Be(effectiveUntil.ToUniversalTime());
+        fareTemplateRepository.Entities.Should().ContainSingle(template =>
+            template.EffectiveFrom == effectiveFrom.ToUniversalTime()
+            && template.EffectiveUntil == effectiveUntil.ToUniversalTime());
+    }
+
+    [Fact]
     public async Task CreateRouteStopFareTemplate_AcceptsNonOverlappingWindowsForSameRouteStop()
     {
         var route = CreateRoute(OperatorId);

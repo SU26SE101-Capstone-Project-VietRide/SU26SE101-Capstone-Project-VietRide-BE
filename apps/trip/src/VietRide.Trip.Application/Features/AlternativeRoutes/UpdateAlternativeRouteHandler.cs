@@ -50,15 +50,22 @@ public sealed class UpdateAlternativeRouteHandler : IRequestHandler<UpdateAltern
             await ValidateActiveLimitAsync(alternativeRoute.RouteId, cancellationToken);
         }
 
-        await ValidateStationExistsAsync(request.DestinationStationId, cancellationToken);
-        await ValidateStopsAsync(request.OperatorId, request.Stops, cancellationToken);
+        if (request.HasDestinationStationId && request.DestinationStationId.HasValue)
+        {
+            await ValidateStationExistsAsync(request.DestinationStationId.Value, cancellationToken);
+        }
+
+        if (request.HasStops)
+        {
+            await ValidateStopsAsync(request.OperatorId, request.Stops!, cancellationToken);
+        }
 
         alternativeRoute.UpdateDetails(
-            request.Name!,
-            request.DestinationStationId,
-            request.TotalDistanceKm,
-            request.EstimatedDurationMinutes,
-            request.Description);
+            request.HasName ? request.Name! : alternativeRoute.Name,
+            request.HasDestinationStationId ? request.DestinationStationId!.Value : alternativeRoute.DestinationStationId,
+            request.HasTotalDistanceKm ? request.TotalDistanceKm : alternativeRoute.TotalDistanceKm,
+            request.HasEstimatedDurationMinutes ? request.EstimatedDurationMinutes : alternativeRoute.EstimatedDurationMinutes,
+            request.HasDescription ? request.Description : alternativeRoute.Description);
 
         if (request.IsActive == true)
         {
@@ -69,17 +76,25 @@ public sealed class UpdateAlternativeRouteHandler : IRequestHandler<UpdateAltern
             alternativeRoute.Deactivate();
         }
 
-        var stops = request.Stops
-            .Select(stop => AlternativeRouteStop.Create(
-                alternativeRoute.Id,
-                stop.StopId,
-                stop.OrderIndex,
-                stop.EstimatedDurationFromOriginMinutes,
-                stop.DistanceFromOriginKm))
-            .ToList();
+        IReadOnlyList<AlternativeRouteStop> stops;
+        if (request.HasStops)
+        {
+            stops = request.Stops!
+                .Select(stop => AlternativeRouteStop.Create(
+                    alternativeRoute.Id,
+                    stop.StopId,
+                    stop.OrderIndex,
+                    stop.EstimatedDurationFromOriginMinutes,
+                    stop.DistanceFromOriginKm))
+                .ToList();
+            await alternativeRouteRepository.ReplaceStopsAsync(alternativeRoute.Id, stops, cancellationToken);
+        }
+        else
+        {
+            stops = await alternativeRouteRepository.ListStopsAsync(alternativeRoute.Id, cancellationToken);
+        }
 
         alternativeRouteRepository.Update(alternativeRoute);
-        await alternativeRouteRepository.ReplaceStopsAsync(alternativeRoute.Id, stops, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return AlternativeRouteMapper.ToDto(alternativeRoute, stops);

@@ -221,6 +221,7 @@ public sealed class RouteHandlersTests
             route.Id,
             "Da Nang to Hue Express",
             returnRoute.Id,
+            true,
             260500,
             105.5m,
             180,
@@ -236,12 +237,70 @@ public sealed class RouteHandlersTests
     }
 
     [Fact]
+    public async Task UpdateRoute_PreservesReturnRouteId_WhenFieldIsOmitted()
+    {
+        var route = CreateRoute(OperatorId, "Da Nang to Hue");
+        var returnRoute = CreateRoute(OperatorId, "Hue to Da Nang");
+        route.UpdateDetails(
+            route.Name,
+            route.OriginStationId,
+            route.DestinationStationId,
+            route.BaseFare,
+            route.TotalDistanceKm,
+            route.EstimatedDurationMinutes,
+            returnRoute.Id);
+        var handler = CreateUpdateHandler(new FakeRouteRepository([route, returnRoute]));
+
+        var result = await handler.Handle(new UpdateRouteCommand(
+            OperatorId,
+            route.Id,
+            "Da Nang to Hue Express",
+            null,
+            false,
+            null,
+            null,
+            null,
+            null), CancellationToken.None);
+
+        result.ReturnRouteId.Should().Be(returnRoute.Id);
+    }
+
+    [Fact]
+    public async Task UpdateRoute_ClearsReturnRouteId_WhenFieldIsExplicitNull()
+    {
+        var route = CreateRoute(OperatorId, "Da Nang to Hue");
+        var returnRoute = CreateRoute(OperatorId, "Hue to Da Nang");
+        route.UpdateDetails(
+            route.Name,
+            route.OriginStationId,
+            route.DestinationStationId,
+            route.BaseFare,
+            route.TotalDistanceKm,
+            route.EstimatedDurationMinutes,
+            returnRoute.Id);
+        var handler = CreateUpdateHandler(new FakeRouteRepository([route, returnRoute]));
+
+        var result = await handler.Handle(new UpdateRouteCommand(
+            OperatorId,
+            route.Id,
+            null,
+            null,
+            true,
+            null,
+            null,
+            null,
+            null), CancellationToken.None);
+
+        result.ReturnRouteId.Should().BeNull();
+    }
+
+    [Fact]
     public async Task UpdateRoute_ThrowsRouteNotFound_ForCrossOperatorRoute()
     {
         var route = CreateRoute(OtherOperatorId, "Da Nang to Hue");
         var handler = CreateUpdateHandler(new FakeRouteRepository([route]));
 
-        var act = () => handler.Handle(new UpdateRouteCommand(OperatorId, route.Id, "New", null, null, null, null, null), CancellationToken.None);
+        var act = () => handler.Handle(new UpdateRouteCommand(OperatorId, route.Id, "New", null, false, null, null, null, null), CancellationToken.None);
 
         var exception = await act.Should().ThrowAsync<CodedNotFoundException>();
         exception.Which.ErrorCode.Should().Be("ROUTE_NOT_FOUND");
@@ -253,7 +312,7 @@ public sealed class RouteHandlersTests
         var route = CreateRoute(OperatorId, "Da Nang to Hue");
         var handler = CreateUpdateHandler(new FakeRouteRepository([route]));
 
-        var act = () => handler.Handle(new UpdateRouteCommand(OperatorId, route.Id, null, Guid.NewGuid(), null, null, null, null), CancellationToken.None);
+        var act = () => handler.Handle(new UpdateRouteCommand(OperatorId, route.Id, null, Guid.NewGuid(), true, null, null, null, null), CancellationToken.None);
 
         var exception = await act.Should().ThrowAsync<CodedNotFoundException>();
         exception.Which.ErrorCode.Should().Be("ROUTE_NOT_FOUND");
@@ -270,6 +329,7 @@ public sealed class RouteHandlersTests
             route.Id,
             "Da Nang to Hue Express",
             null,
+            false,
             null,
             null,
             null,

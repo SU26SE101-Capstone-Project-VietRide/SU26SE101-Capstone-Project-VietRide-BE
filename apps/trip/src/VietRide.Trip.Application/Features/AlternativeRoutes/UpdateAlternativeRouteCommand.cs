@@ -6,9 +6,15 @@ public sealed record UpdateAlternativeRouteCommand(
     Guid OperatorId,
     Guid AlternativeRouteId,
     string? Name,
+    bool HasName,
     string? Description,
-    Guid DestinationStationId,
+    bool HasDescription,
+    Guid? DestinationStationId,
+    bool HasDestinationStationId,
     decimal? TotalDistanceKm,
+    bool HasTotalDistanceKm,
     int? EstimatedDurationMinutes,
+    bool HasEstimatedDurationMinutes,
     bool? IsActive,
-    IReadOnlyList<AlternativeRouteStopInput> Stops) : IRequest<AlternativeRouteDto>;
+    bool HasStops,
+    IReadOnlyList<AlternativeRouteStopInput>? Stops) : IRequest<AlternativeRouteDto>;

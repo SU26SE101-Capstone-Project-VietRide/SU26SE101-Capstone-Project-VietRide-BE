@@ -140,6 +140,181 @@ public sealed class AlternativeRouteHandlersTests
     }
 
     [Fact]
+    public async Task UpdateAlternativeRoute_PreservesExistingValuesAndStops_WhenFieldsAreOmitted()
+    {
+        var route = CreateRoute(OperatorId);
+        var destination = CreateStation();
+        var existingStop = CreateStop(OperatorId);
+        var alternativeRoute = AlternativeRoute.Create(route.Id, "Alt", destination.Id, 10m, 30, "Old description");
+        var alternativeRouteRepository = new FakeAlternativeRouteRepository([alternativeRoute], [route]);
+        alternativeRouteRepository.Stops.Add(AlternativeRouteStop.Create(alternativeRoute.Id, existingStop.Id, 1, 10, 3m));
+        var handler = CreateUpdateHandler(
+            alternativeRouteRepository,
+            new FakeStationRepository([destination]),
+            new FakeStopRepository([existingStop]));
+
+        var result = await handler.Handle(new UpdateAlternativeRouteCommand(
+            OperatorId,
+            alternativeRoute.Id,
+            null,
+            false,
+            "Updated description",
+            true,
+            null,
+            false,
+            null,
+            false,
+            null,
+            false,
+            false,
+            false,
+            null), CancellationToken.None);
+
+        result.Name.Should().Be("Alt");
+        result.Description.Should().Be("Updated description");
+        result.DestinationStationId.Should().Be(destination.Id);
+        result.TotalDistanceKm.Should().Be(10m);
+        result.EstimatedDurationMinutes.Should().Be(30);
+        result.IsActive.Should().BeFalse();
+        result.Stops.Should().ContainSingle().Which.StopId.Should().Be(existingStop.Id);
+    }
+
+    [Fact]
+    public void UpdateAlternativeRouteValidator_Fails_WhenStopsIsExplicitNull()
+    {
+        var validator = new UpdateAlternativeRouteValidator();
+        var command = new UpdateAlternativeRouteCommand(
+            OperatorId,
+            Guid.NewGuid(),
+            null,
+            false,
+            null,
+            false,
+            null,
+            false,
+            null,
+            false,
+            null,
+            false,
+            null,
+            true,
+            null);
+
+        var result = validator.Validate(command);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(error => error.PropertyName == nameof(UpdateAlternativeRouteCommand.Stops));
+    }
+
+    [Fact]
+    public async Task UpdateAlternativeRoute_ReplacesStopsOnlyWhenStopsAreSupplied()
+    {
+        var route = CreateRoute(OperatorId);
+        var destination = CreateStation();
+        var oldStop = CreateStop(OperatorId);
+        var newStop = CreateStop(OperatorId);
+        var alternativeRoute = AlternativeRoute.Create(route.Id, "Alt", destination.Id, null, null);
+        var alternativeRouteRepository = new FakeAlternativeRouteRepository([alternativeRoute], [route]);
+        alternativeRouteRepository.Stops.Add(AlternativeRouteStop.Create(alternativeRoute.Id, oldStop.Id, 1, 10, 3m));
+        var handler = CreateUpdateHandler(
+            alternativeRouteRepository,
+            new FakeStationRepository([destination]),
+            new FakeStopRepository([oldStop, newStop]));
+
+        var result = await handler.Handle(new UpdateAlternativeRouteCommand(
+            OperatorId,
+            alternativeRoute.Id,
+            null,
+            false,
+            null,
+            false,
+            null,
+            false,
+            null,
+            false,
+            null,
+            false,
+            null,
+            true,
+            [new AlternativeRouteStopInput(newStop.Id, 2, 20, 6m)]), CancellationToken.None);
+
+        result.Stops.Should().ContainSingle().Which.StopId.Should().Be(newStop.Id);
+        alternativeRouteRepository.Stops.Should().ContainSingle().Which.StopId.Should().Be(newStop.Id);
+    }
+
+    [Fact]
+    public async Task UpdateAlternativeRoute_ThrowsValidation_WhenSuppliedStopsHaveDuplicateOrderIndex()
+    {
+        var route = CreateRoute(OperatorId);
+        var destination = CreateStation();
+        var firstStop = CreateStop(OperatorId);
+        var secondStop = CreateStop(OperatorId);
+        var alternativeRoute = AlternativeRoute.Create(route.Id, "Alt", destination.Id, null, null);
+        var handler = CreateUpdateHandler(
+            new FakeAlternativeRouteRepository([alternativeRoute], [route]),
+            new FakeStationRepository([destination]),
+            new FakeStopRepository([firstStop, secondStop]));
+
+        var act = () => handler.Handle(new UpdateAlternativeRouteCommand(
+            OperatorId,
+            alternativeRoute.Id,
+            null,
+            false,
+            null,
+            false,
+            null,
+            false,
+            null,
+            false,
+            null,
+            false,
+            null,
+            true,
+            [
+                new AlternativeRouteStopInput(firstStop.Id, 1, 10, 3m),
+                new AlternativeRouteStopInput(secondStop.Id, 1, 20, 6m),
+            ]), CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<ValidationException>();
+        exception.Which.Errors.Should().Contain(error => error.Field == "orderIndex");
+    }
+
+    [Fact]
+    public async Task UpdateAlternativeRoute_ThrowsLimitExceeded_WhenReactivatingWouldExceedMaxActiveRoutes()
+    {
+        var route = CreateRoute(OperatorId);
+        var destination = CreateStation();
+        var inactiveAlternativeRoute = AlternativeRoute.Create(route.Id, "Inactive", destination.Id, null, null);
+        inactiveAlternativeRoute.Deactivate();
+        var activeOne = AlternativeRoute.Create(route.Id, "Alt 1", destination.Id, null, null);
+        var activeTwo = AlternativeRoute.Create(route.Id, "Alt 2", destination.Id, null, null);
+        var handler = CreateUpdateHandler(
+            new FakeAlternativeRouteRepository([inactiveAlternativeRoute, activeOne, activeTwo], [route]),
+            new FakeStationRepository([destination]),
+            new FakeStopRepository([]));
+
+        var act = () => handler.Handle(new UpdateAlternativeRouteCommand(
+            OperatorId,
+            inactiveAlternativeRoute.Id,
+            null,
+            false,
+            null,
+            false,
+            null,
+            false,
+            null,
+            false,
+            null,
+            false,
+            true,
+            false,
+            null), CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<CodedValidationException>();
+        exception.Which.ErrorCode.Should().Be("ALTERNATIVE_ROUTE_LIMIT_EXCEEDED");
+    }
+
+    [Fact]
     public async Task DeactivateAlternativeRoute_DeactivatesButDoesNotRemoveEntity()
     {
         var route = CreateRoute(OperatorId);
@@ -155,6 +330,20 @@ public sealed class AlternativeRouteHandlersTests
 
         alternativeRoute.IsActive.Should().BeFalse();
         alternativeRouteRepository.Entities.Should().Contain(alternativeRoute);
+    }
+
+    [Fact]
+    public async Task OperatorAlternativeRoutesController_Delete_ReturnsIsActiveFalseShape()
+    {
+        var mediator = new CapturingMediator(Unit.Value);
+        var controller = CreateAlternativeRoutesController(mediator);
+
+        var response = await controller.DeleteAsync(Guid.NewGuid(), CancellationToken.None);
+
+        var ok = response.Result.Should().BeOfType<OkObjectResult>().Subject;
+        ok.Value.Should().BeEquivalentTo(new Dictionary<string, bool> { ["isActive"] = false });
+        mediator.LastRequest.Should().BeOfType<DeactivateAlternativeRouteCommand>()
+            .Which.OperatorId.Should().Be(OperatorId);
     }
 
     [Fact]
@@ -223,10 +412,16 @@ public sealed class AlternativeRouteHandlersTests
             OperatorId,
             alternativeRouteId,
             "Updated bypass",
+            true,
             null,
+            true,
             destinationStationId,
+            true,
             12m,
+            true,
             22,
+            true,
+            true,
             true,
             [new AlternativeRouteStopInput(stopId, 1, 10, 3m)]);
 
@@ -242,7 +437,19 @@ public sealed class AlternativeRouteHandlersTests
     private static OperatorRoutesController CreateRoutesController(IMediator mediator)
     {
         var controller = new OperatorRoutesController(mediator);
-        controller.ControllerContext = new ControllerContext
+        controller.ControllerContext = CreateControllerContext();
+        return controller;
+    }
+
+    private static OperatorAlternativeRoutesController CreateAlternativeRoutesController(IMediator mediator)
+    {
+        var controller = new OperatorAlternativeRoutesController(mediator);
+        controller.ControllerContext = CreateControllerContext();
+        return controller;
+    }
+
+    private static ControllerContext CreateControllerContext()
+        => new()
         {
             HttpContext = new DefaultHttpContext
             {
@@ -251,8 +458,6 @@ public sealed class AlternativeRouteHandlersTests
                     "TestAuth")),
             },
         };
-        return controller;
-    }
 
     private sealed class FakeAlternativeRouteRepository : IAlternativeRouteRepository
     {
