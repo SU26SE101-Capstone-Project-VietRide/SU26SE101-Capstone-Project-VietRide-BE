@@ -2211,3 +2211,402 @@ Response `200`: raw Stop DTO (successful internal response is not wrapped).
 
 Errors:
 - `404 STOP_NOT_FOUND` — Stop does not exist; returned in ADR 0004 error envelope.
+
+## Trip Route Management (Day 8)
+
+### Role matrix and shared rules
+
+Gateway route entries allow both `OPERATOR_ADMIN` and `OPERATOR_STAFF`, but Trip controllers enforce method-level roles:
+
+| Method | Role(s) |
+|---|---|
+| `POST`, `PATCH`, `DELETE` | `OPERATOR_ADMIN` only |
+| `GET` list/by-id | `OPERATOR_ADMIN`, `OPERATOR_STAFF` |
+
+All public responses use the ADR 0004 `ApiResponse<T>` envelope. Success responses include `{ success, statusCode, data, meta }`; errors include `{ success: false, statusCode, error: { code, message, fields? }, meta }`.
+
+Write endpoints in this Day-8 section do not require `Idempotency-Key` per BSOT §5.6.
+
+Tenant isolation: a missing Route or a Route not owned by the caller's operator returns `404 ROUTE_NOT_FOUND` in the ADR 0004 error envelope. Child resources under a Route apply the same parent Route tenant check first unless noted otherwise.
+
+Route create/update money fields are VND BIGINT-compatible JSON numbers. Persisted values follow the shared Money rule and are floored to 1000 before storage.
+
+### Route DTOs
+
+`RouteDto` shape:
+```json
+{
+  "id": "uuid",
+  "operatorId": "uuid",
+  "name": "Ho Chi Minh City to Da Lat",
+  "originStationId": "uuid",
+  "destinationStationId": "uuid",
+  "returnRouteId": "uuid",
+  "baseFare": 250000,
+  "totalDistanceKm": 308.50,
+  "estimatedDurationMinutes": 420,
+  "isActive": true,
+  "createdAt": "2026-06-10T10:00:00Z",
+  "updatedAt": "2026-06-10T10:00:00Z"
+}
+```
+
+`returnRouteId` is nullable and one-way: setting Route A `returnRouteId = B` does not mutate Route B.
+
+### POST `/v1/operator/routes`
+
+Auth: `OPERATOR_ADMIN`.
+
+Idempotency-Key: not required by BSOT §5.6.
+
+Write requires caller operator to be `APPROVED` and active; non-APPROVED or inactive operators get `403 FORBIDDEN`.
+
+Request:
+```json
+{
+  "name": "Ho Chi Minh City to Da Lat",
+  "originStationId": "uuid",
+  "destinationStationId": "uuid",
+  "returnRouteId": "uuid",
+  "baseFare": 250000,
+  "totalDistanceKm": 308.50,
+  "estimatedDurationMinutes": 420,
+  "isActive": true
+}
+```
+
+Validation:
+- `originStationId` and `destinationStationId` must reference existing active Stations; missing Station returns `404 STATION_NOT_FOUND`.
+- Before creating a Route, the caller operator must have an active `OperatorStation` link for both origin and destination Station. Missing or inactive link returns `422 VALIDATION_ERROR` with `error.fields` on `originStationId` and/or `destinationStationId`.
+- `originStationId == destinationStationId` returns `422 VALIDATION_ERROR`.
+- `returnRouteId`, when present, must reference an existing, active, non-soft-deleted Route owned by the same caller operator; missing or cross-operator target returns `404 ROUTE_NOT_FOUND`.
+
+Response `201`: `RouteDto` in the ADR 0004 success envelope.
+
+### GET `/v1/operator/routes`
+
+Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`.
+
+Query: `page?`, `pageSize?`, `search?`.
+
+Pagination follows BSOT §5.7 defaults (`page=1`, `pageSize=20`, max `100`). Optional `search` follows BSOT §5.8 and is allow-listed to Route `name`.
+
+Response `200`: `PagedResult<RouteDto>` in the ADR 0004 success envelope.
+
+### GET `/v1/operator/routes/{id}`
+
+Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`.
+
+Tenant isolation: missing Route, soft-deleted Route, or Route owned by another operator returns `404 ROUTE_NOT_FOUND`.
+
+Response `200`: `RouteDto` in the ADR 0004 success envelope.
+
+### PATCH `/v1/operator/routes/{id}`
+
+Auth: `OPERATOR_ADMIN`.
+
+Idempotency-Key: not required by BSOT §5.6.
+
+Request: partial Route update.
+```json
+{
+  "name": "Ho Chi Minh City to Da Lat Express",
+  "returnRouteId": "uuid",
+  "baseFare": 260000,
+  "totalDistanceKm": 308.50,
+  "estimatedDurationMinutes": 400,
+  "isActive": true
+}
+```
+
+Validation mirrors Route create for mutable fields. `returnRouteId`, when present, must reference an existing, active, non-soft-deleted Route owned by the same caller operator; missing or cross-operator target returns `404 ROUTE_NOT_FOUND`.
+
+Response `200`: updated `RouteDto` in the ADR 0004 success envelope.
+
+### RouteStop DTOs
+
+`RouteStopDto` shape:
+```json
+{
+  "routeId": "uuid",
+  "stopId": "uuid",
+  "orderIndex": 1,
+  "estimatedDurationFromOriginMinutes": 90,
+  "distanceFromOriginKm": 75.25,
+  "allowPickup": true,
+  "allowDropoff": false,
+  "createdAt": "2026-06-10T10:00:00Z",
+  "updatedAt": "2026-06-10T10:00:00Z"
+}
+```
+
+RouteStop entries are intermediate waypoints only; Route origin/destination Stations live on the Route entity.
+
+### POST `/v1/operator/routes/{id}/stops`
+
+Auth: `OPERATOR_ADMIN`.
+
+Idempotency-Key: not required by BSOT §5.6.
+
+Request:
+```json
+{
+  "stopId": "uuid",
+  "orderIndex": 1,
+  "estimatedDurationFromOriginMinutes": 90,
+  "distanceFromOriginKm": 75.25,
+  "allowPickup": true,
+  "allowDropoff": false
+}
+```
+
+Validation:
+- Parent Route must belong to caller operator; otherwise `404 ROUTE_NOT_FOUND`.
+- `stopId` must belong to caller operator; otherwise `404 STOP_NOT_FOUND`.
+- `allowPickup=false` and `allowDropoff=false` is rejected with `422 ROUTE_STOP_FLAGS_INVALID`; `error.fields.allowPickup` identifies the discriminator.
+- Duplicate `orderIndex` within the same Route is rejected with `422 ROUTE_STOP_ORDER_CONFLICT`; `error.fields.orderIndex` identifies the discriminator.
+
+Response `201`: `RouteStopDto` in the ADR 0004 success envelope.
+
+### DELETE `/v1/operator/routes/{id}/stops/{stopId}`
+
+Auth: `OPERATOR_ADMIN`.
+
+RouteStop delete is a hard-delete of the junction row. `route_stops` has no `deleted_at`; Day 8 has no booking-impact check because Trips/Bookings do not exist yet.
+
+Validation:
+- Parent Route must belong to caller operator; otherwise `404 ROUTE_NOT_FOUND`.
+- Missing RouteStop returns `404 STOP_NOT_FOUND`.
+
+Response `200`: success envelope with `{ "deleted": true }`.
+
+### RouteStopFareTemplate DTOs
+
+`RouteStopFareTemplateDto` shape:
+```json
+{
+  "id": "uuid",
+  "routeId": "uuid",
+  "stopId": "uuid",
+  "fareFromThisStop": 200000,
+  "effectiveFrom": "2026-07-01T00:00:00+07:00",
+  "effectiveUntil": "2026-08-01T00:00:00+07:00",
+  "createdAt": "2026-06-10T10:00:00Z",
+  "updatedAt": "2026-06-10T10:00:00Z"
+}
+```
+
+`fareFromThisStop` is an exception override for Route base fare. It is VND BIGINT-compatible and is floored to 1000 before persisting. Stops without a fare-template entry use `Route.baseFare`.
+
+### POST `/v1/operator/routes/{id}/fare-templates`
+
+Auth: `OPERATOR_ADMIN`.
+
+Idempotency-Key: not required by BSOT §5.6.
+
+Request:
+```json
+{
+  "stopId": "uuid",
+  "fareFromThisStop": 200000,
+  "effectiveFrom": "2026-07-01T00:00:00+07:00",
+  "effectiveUntil": "2026-08-01T00:00:00+07:00"
+}
+```
+
+Validation:
+- Parent Route must belong to caller operator; otherwise `404 ROUTE_NOT_FOUND`.
+- `stopId` must belong to caller operator; otherwise `404 STOP_NOT_FOUND`.
+- `stopId` must already be a RouteStop on the same Route; otherwise `422 VALIDATION_ERROR` with `error.fields.stopId`.
+- `effectiveUntil`, when present, must be greater than `effectiveFrom`; otherwise `422 VALIDATION_ERROR` with `error.fields.effectiveUntil`.
+- A new `[effectiveFrom, effectiveUntil)` window must not overlap an existing template window for the same `(routeId, stopId)`. Overlap is rejected with `422 VALIDATION_ERROR` and `error.fields.effectiveFrom`/`error.fields.effectiveUntil`. `effectiveUntil = null` is treated as open-ended.
+
+Response `201`: `RouteStopFareTemplateDto` in the ADR 0004 success envelope.
+
+### GET `/v1/operator/routes/{id}/fare-templates`
+
+Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`.
+
+Query: `page?`, `pageSize?`.
+
+Pagination follows BSOT §5.7 defaults (`page=1`, `pageSize=20`, max `100`).
+
+Response `200`: `PagedResult<RouteStopFareTemplateDto>` in the ADR 0004 success envelope.
+
+### AlternativeRoute DTOs
+
+`AlternativeRouteStopDto` shape:
+```json
+{
+  "alternativeRouteId": "uuid",
+  "stopId": "uuid",
+  "orderIndex": 1,
+  "estimatedDurationFromOriginMinutes": 80,
+  "distanceFromOriginKm": 70.25,
+  "createdAt": "2026-06-10T10:00:00Z",
+  "updatedAt": "2026-06-10T10:00:00Z"
+}
+```
+
+`AlternativeRouteDto` shape:
+```json
+{
+  "id": "uuid",
+  "routeId": "uuid",
+  "name": "Da Lat bypass via Bao Loc",
+  "description": "Use when the main pass is disrupted.",
+  "destinationStationId": "uuid",
+  "totalDistanceKm": 320.00,
+  "estimatedDurationMinutes": 450,
+  "isActive": true,
+  "stops": [
+    {
+      "alternativeRouteId": "uuid",
+      "stopId": "uuid",
+      "orderIndex": 1,
+      "estimatedDurationFromOriginMinutes": 80,
+      "distanceFromOriginKm": 70.25,
+      "createdAt": "2026-06-10T10:00:00Z",
+      "updatedAt": "2026-06-10T10:00:00Z"
+    }
+  ],
+  "createdAt": "2026-06-10T10:00:00Z",
+  "updatedAt": "2026-06-10T10:00:00Z"
+}
+```
+
+Each main Route can have at most two active AlternativeRoutes. AlternativeRoute stops are an independent stop sequence and do not reuse RouteStop rows.
+
+### POST `/v1/operator/routes/{id}/alternative-routes`
+
+Auth: `OPERATOR_ADMIN`.
+
+Idempotency-Key: not required by BSOT §5.6.
+
+Request:
+```json
+{
+  "name": "Da Lat bypass via Bao Loc",
+  "description": "Use when the main pass is disrupted.",
+  "destinationStationId": "uuid",
+  "totalDistanceKm": 320.00,
+  "estimatedDurationMinutes": 450,
+  "stops": [
+    {
+      "stopId": "uuid",
+      "orderIndex": 1,
+      "estimatedDurationFromOriginMinutes": 80,
+      "distanceFromOriginKm": 70.25
+    }
+  ]
+}
+```
+
+Validation:
+- Parent Route must belong to caller operator; otherwise `404 ROUTE_NOT_FOUND`.
+- `destinationStationId` must reference an existing active Station; missing Station returns `404 STATION_NOT_FOUND`.
+- A third active AlternativeRoute for the same parent Route is rejected with `422 ALTERNATIVE_ROUTE_LIMIT_EXCEEDED`; `error.fields.alternativeRoutes` identifies the discriminator. Only active rows count toward the cap.
+- Duplicate `orderIndex` within the same AlternativeRoute stop sequence is rejected with `422 VALIDATION_ERROR` and `error.fields.orderIndex`.
+- `stopId` values in the alternative stop sequence must belong to caller operator; otherwise `404 STOP_NOT_FOUND`.
+
+Response `201`: `AlternativeRouteDto` in the ADR 0004 success envelope.
+
+### GET `/v1/operator/routes/{id}/alternative-routes`
+
+Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`.
+
+Query: `page?`, `pageSize?`.
+
+Pagination follows BSOT §5.7 defaults (`page=1`, `pageSize=20`, max `100`).
+
+Response `200`: `PagedResult<AlternativeRouteDto>` in the ADR 0004 success envelope.
+
+### PATCH `/v1/operator/alternative-routes/{altId}`
+
+Auth: `OPERATOR_ADMIN`.
+
+Idempotency-Key: not required by BSOT §5.6.
+
+Request: partial AlternativeRoute update.
+```json
+{
+  "name": "Da Lat bypass via Bao Loc updated",
+  "description": "Use when main route is blocked.",
+  "destinationStationId": "uuid",
+  "totalDistanceKm": 321.00,
+  "estimatedDurationMinutes": 455,
+  "isActive": true,
+  "stops": [
+    {
+      "stopId": "uuid",
+      "orderIndex": 1,
+      "estimatedDurationFromOriginMinutes": 80,
+      "distanceFromOriginKm": 70.25
+    }
+  ]
+}
+```
+
+Validation mirrors AlternativeRoute create for mutable fields. Missing AlternativeRoute or AlternativeRoute whose parent Route belongs to another operator returns `404 ROUTE_NOT_FOUND`.
+
+Response `200`: updated `AlternativeRouteDto` in the ADR 0004 success envelope.
+
+### DELETE `/v1/operator/alternative-routes/{altId}`
+
+Auth: `OPERATOR_ADMIN`.
+
+AlternativeRoute delete deactivates the row by setting `isActive=false`; it is not a hard-delete and `alternative_routes` has no `deleted_at`. Deactivating one AlternativeRoute frees one slot toward the max-two-active cap.
+
+Validation: missing AlternativeRoute or AlternativeRoute whose parent Route belongs to another operator returns `404 ROUTE_NOT_FOUND`.
+
+Response `200`: success envelope with `{ "isActive": false }`.
+
+### Day-8 dedicated validation error examples
+
+RouteStop order conflict:
+```json
+{
+  "success": false,
+  "statusCode": 422,
+  "error": {
+    "code": "ROUTE_STOP_ORDER_CONFLICT",
+    "message": "A route stop with the same order index already exists.",
+    "fields": [
+      { "field": "orderIndex", "message": "Order index must be unique within a route." }
+    ]
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-10T10:00:00Z" }
+}
+```
+
+RouteStop flags invalid:
+```json
+{
+  "success": false,
+  "statusCode": 422,
+  "error": {
+    "code": "ROUTE_STOP_FLAGS_INVALID",
+    "message": "At least one of allowPickup or allowDropoff must be true.",
+    "fields": [
+      { "field": "allowPickup", "message": "allowPickup and allowDropoff cannot both be false." }
+    ]
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-10T10:00:00Z" }
+}
+```
+
+AlternativeRoute active limit exceeded:
+```json
+{
+  "success": false,
+  "statusCode": 422,
+  "error": {
+    "code": "ALTERNATIVE_ROUTE_LIMIT_EXCEEDED",
+    "message": "A route can have at most two active alternative routes.",
+    "fields": [
+      { "field": "alternativeRoutes", "message": "Deactivate an existing alternative route before creating another one." }
+    ]
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-10T10:00:00Z" }
+}
+```
