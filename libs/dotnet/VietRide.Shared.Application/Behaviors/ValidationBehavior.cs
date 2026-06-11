@@ -46,9 +46,54 @@ public sealed class ValidationBehavior<TRequest, TResponse>
                 .Select(f => new ValidationError(f.PropertyName, f.ErrorMessage))
                 .ToList();
 
+            var errorCodes = failures
+                .Select(f => f.ErrorCode)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+            if (errorCodes.Count == 1 && IsUpperSnakeCase(errorCodes[0]))
+            {
+                throw new CodedValidationException(
+                    errorCodes[0],
+                    "One or more validation errors occurred.",
+                    errors);
+            }
+
             throw new ValidationException("One or more validation errors occurred.", errors);
         }
 
         return await next();
+    }
+
+    private static bool IsUpperSnakeCase(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var previousWasUnderscore = true;
+        foreach (var c in value)
+        {
+            if (c == '_')
+            {
+                if (previousWasUnderscore)
+                {
+                    return false;
+                }
+
+                previousWasUnderscore = true;
+                continue;
+            }
+
+            if (c is not (>= 'A' and <= 'Z') and not (>= '0' and <= '9'))
+            {
+                return false;
+            }
+
+            previousWasUnderscore = false;
+        }
+
+        return !previousWasUnderscore;
     }
 }

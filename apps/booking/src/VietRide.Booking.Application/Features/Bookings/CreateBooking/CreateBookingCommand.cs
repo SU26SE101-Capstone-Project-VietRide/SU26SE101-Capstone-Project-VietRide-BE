@@ -1,0 +1,34 @@
+using MediatR;
+
+namespace VietRide.Booking.Application.Features.Bookings.CreateBooking;
+
+/// <summary>
+/// Command for POST /v1/bookings — creates a new booking for 1-5 seats.
+/// Issued by a PASSENGER; idempotency guaranteed by Idempotency-Key header.
+/// Auth claims (passengerId) are resolved in the controller and injected here.
+/// </summary>
+public sealed record CreateBookingCommand(
+    Guid PassengerUserId,
+    Guid TripId,
+
+    // Pickup — exactly one of StationId/StopId
+    Guid? PickupStationId,
+    Guid? PickupStopId,
+
+    // Dropoff — at most one of StationId/StopId
+    Guid? DropoffStationId,
+    Guid? DropoffStopId,
+
+    IReadOnlyList<SeatRequest> Seats,
+    string? VoucherCode,
+    string PaymentMethod) : IRequest<CreateBookingResult>;
+
+/// <summary>
+/// Per-seat booking request. PII (fullName, phoneNumber, idNumber) is validated
+/// but NOT persisted (schema.sql line 149 — passengers is operational-only).
+/// </summary>
+public sealed record SeatRequest(
+    string SeatNumber,
+    string FullName,
+    string PhoneNumber,
+    string IdNumber);

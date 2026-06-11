@@ -57,6 +57,18 @@ describe('buildRouteTable', () => {
     });
   });
 
+  it('routes booking family to Booking and requires PASSENGER role', () => {
+    const bookingRoute = matchRoute(routes, '/v1/bookings');
+    const bookingHistoryRoute = matchRoute(routes, '/v1/bookings/history');
+
+    [bookingRoute, bookingHistoryRoute].forEach((route) => {
+      expect(route?.prefix).toBe('/v1/bookings');
+      expect(route?.target).toBe(env.BOOKING_BASE_URL);
+      expect(route?.authRequired).toBe('user');
+      expect(route?.requiredRoles).toEqual(['PASSENGER']);
+    });
+  });
+
   it('matches cross-service admin routes to the correct upstream services', () => {
     const cases = [
       ['/v1/admin/operators', env.IDENTITY_BASE_URL],

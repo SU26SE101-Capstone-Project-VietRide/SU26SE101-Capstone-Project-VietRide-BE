@@ -91,10 +91,10 @@ Stand up the Booking-side of the seat-lock saga: bootstrap the Booking service a
 
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
-| 12.0 | todo | — | — | — |
-| 12.1 | todo | — | — | — |
-| 12.2 | todo | — | — | — |
-| 12.3 | todo | — | — | — |
+| 12.0 | done | APPROVED | 2026-06-11 | 0 patch rounds; idempotency wiring + NetArchTest baseline; human /verify batched at end of day |
+| 12.1 | done | APPROVED | 2026-06-11 | 1 patch round (BookingCode.Parse guards + crypto RNG); migration apply+rollback verified on empty Postgres 16; human /verify batched at end of day |
+| 12.2 | done | APPROVED | 2026-06-11 | 1 patch round (ILogger in release compensation + 409 release test + XML doc); 11 client tests (200/404/409 mapping); InternalJwtTokenFactory duplication = carryover; human /verify batched at end of day |
+| 12.3 | done | APPROVED | 2026-06-11 | 2 patch rounds (PAYMENT_INSUFFICIENT_WALLET code, integration tests + ConfigureTestServices, explicit tripId compensation, BOOKING_MAX_SEATS_EXCEEDED coded 422, Postman); 42 unit + 5 integration tests green; human /verify batched at end of day |
 
 Legend: todo / in progress / done (reviewer APPROVED + human /verify) / done-with-carryover / blocked
 

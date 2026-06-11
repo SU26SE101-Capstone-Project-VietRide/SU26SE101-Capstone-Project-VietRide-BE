@@ -5,84 +5,286 @@
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    { "key": "baseUrl", "value": "http://localhost:3000" },
-    { "key": "email", "value": "passenger@example.com" },
-    { "key": "password", "value": "ChangeMe123!" },
-    { "key": "displayName", "value": "Passenger Example" },
-    { "key": "phone", "value": "+84901234567" },
-    { "key": "otpCode", "value": "123456" },
-    { "key": "tokens", "value": "" },
-    { "key": "accessToken", "value": "" },
-    { "key": "refreshToken", "value": "" },
-    { "key": "googleIdToken", "value": "<google-id-token>" },
-    { "key": "systemAdminAccessToken", "value": "<system-admin-access-token>" },
-    { "key": "operatorAdminAccessToken", "value": "<operator-admin-access-token>" },
-    { "key": "createdAdminEmail", "value": "admin2@example.com" },
-    { "key": "initialPasswordToken", "value": "<set-initial-password-token>" },
-    { "key": "operatorUserId", "value": "<operator-user-id>" },
-    { "key": "fcmToken", "value": "<fcm-token>" },
-    { "key": "operatorSelfRegisterEmail", "value": "operator-self@example.com" },
-    { "key": "operatorSelfRegisterPhone", "value": "+84901230001" },
-    { "key": "operatorSelfRegisterPassword", "value": "Operator123!" },
-    { "key": "operatorSelfRegisterName", "value": "VietRide Self Register Operator" },
-    { "key": "operatorBusinessRegistrationNumber", "value": "0312345601" },
-    { "key": "operatorTaxCode", "value": "0312345601" },
-    { "key": "operatorRepresentativePhone", "value": "+84901230002" },
-    { "key": "operatorOtpCode", "value": "123456" },
-    { "key": "operatorId", "value": "<operator-id>" },
-    { "key": "adminCreatedOperatorEmail", "value": "operator-admin-created@example.com" },
-    { "key": "adminCreatedOperatorPhone", "value": "+84901230003" },
-    { "key": "adminCreatedOperatorId", "value": "<admin-created-operator-id>" },
-    { "key": "adminCreatedOperatorAdminUserId", "value": "<admin-created-operator-admin-user-id>" },
-    { "key": "adminCreatedOperatorAccessToken", "value": "<admin-created-operator-access-token>" },
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "email",
+      "value": "passenger@example.com"
+    },
+    {
+      "key": "password",
+      "value": "ChangeMe123!"
+    },
+    {
+      "key": "displayName",
+      "value": "Passenger Example"
+    },
+    {
+      "key": "phone",
+      "value": "+84901234567"
+    },
+    {
+      "key": "otpCode",
+      "value": "123456"
+    },
+    {
+      "key": "tokens",
+      "value": ""
+    },
+    {
+      "key": "accessToken",
+      "value": ""
+    },
+    {
+      "key": "refreshToken",
+      "value": ""
+    },
+    {
+      "key": "googleIdToken",
+      "value": "<google-id-token>"
+    },
+    {
+      "key": "systemAdminAccessToken",
+      "value": "<system-admin-access-token>"
+    },
+    {
+      "key": "operatorAdminAccessToken",
+      "value": "<operator-admin-access-token>"
+    },
+    {
+      "key": "createdAdminEmail",
+      "value": "admin2@example.com"
+    },
+    {
+      "key": "initialPasswordToken",
+      "value": "<set-initial-password-token>"
+    },
+    {
+      "key": "operatorUserId",
+      "value": "<operator-user-id>"
+    },
+    {
+      "key": "fcmToken",
+      "value": "<fcm-token>"
+    },
+    {
+      "key": "operatorSelfRegisterEmail",
+      "value": "operator-self@example.com"
+    },
+    {
+      "key": "operatorSelfRegisterPhone",
+      "value": "+84901230001"
+    },
+    {
+      "key": "operatorSelfRegisterPassword",
+      "value": "Operator123!"
+    },
+    {
+      "key": "operatorSelfRegisterName",
+      "value": "VietRide Self Register Operator"
+    },
+    {
+      "key": "operatorBusinessRegistrationNumber",
+      "value": "0312345601"
+    },
+    {
+      "key": "operatorTaxCode",
+      "value": "0312345601"
+    },
+    {
+      "key": "operatorRepresentativePhone",
+      "value": "+84901230002"
+    },
+    {
+      "key": "operatorOtpCode",
+      "value": "123456"
+    },
+    {
+      "key": "operatorId",
+      "value": "<operator-id>"
+    },
+    {
+      "key": "adminCreatedOperatorEmail",
+      "value": "operator-admin-created@example.com"
+    },
+    {
+      "key": "adminCreatedOperatorPhone",
+      "value": "+84901230003"
+    },
+    {
+      "key": "adminCreatedOperatorId",
+      "value": "<admin-created-operator-id>"
+    },
+    {
+      "key": "adminCreatedOperatorAdminUserId",
+      "value": "<admin-created-operator-admin-user-id>"
+    },
+    {
+      "key": "adminCreatedOperatorAccessToken",
+      "value": "<admin-created-operator-access-token>"
+    },
     {
       "key": "adminOperatorInitialPasswordToken",
       "value": "<admin-operator-set-initial-password-token>"
     },
-    { "key": "adminOperatorPassword", "value": "OperatorAdmin123!" },
-    { "key": "operatorUserEmail", "value": "operator-staff@example.com" },
-    { "key": "operatorUserPhone", "value": "+84901230004" },
-    { "key": "operatorUserRole", "value": "OPERATOR_STAFF" },
+    {
+      "key": "adminOperatorPassword",
+      "value": "OperatorAdmin123!"
+    },
+    {
+      "key": "operatorUserEmail",
+      "value": "operator-staff@example.com"
+    },
+    {
+      "key": "operatorUserPhone",
+      "value": "+84901230004"
+    },
+    {
+      "key": "operatorUserRole",
+      "value": "OPERATOR_STAFF"
+    },
     {
       "key": "operatorUserInitialPasswordToken",
       "value": "<operator-user-set-initial-password-token>"
     },
-    { "key": "operatorUserPassword", "value": "OperatorUser123!" },
-    { "key": "operatorUserAccessToken", "value": "<operator-user-access-token>" },
-    { "key": "stationSearchResultId", "value": "<station-search-result-id>" },
-    { "key": "createdStationId", "value": "<created-station-id>" },
-    { "key": "operatorStationId", "value": "<operator-station-id>" },
+    {
+      "key": "operatorUserPassword",
+      "value": "OperatorUser123!"
+    },
+    {
+      "key": "operatorUserAccessToken",
+      "value": "<operator-user-access-token>"
+    },
+    {
+      "key": "stationSearchResultId",
+      "value": "<station-search-result-id>"
+    },
+    {
+      "key": "createdStationId",
+      "value": "<created-station-id>"
+    },
+    {
+      "key": "operatorStationId",
+      "value": "<operator-station-id>"
+    },
     {
       "key": "duplicateNearbyCandidateStationId",
       "value": "<duplicate-nearby-candidate-station-id>"
     },
-    { "key": "stopId", "value": "<stop-id>" },
-    { "key": "crossOperatorStopId", "value": "<cross-operator-stop-id>" },
-    { "key": "missingStationId", "value": "00000000-0000-0000-0000-000000000001" },
-    { "key": "missingStopId", "value": "00000000-0000-0000-0000-000000000002" },
-    { "key": "nonApprovedOperatorAccessToken", "value": "<non-approved-operator-access-token>" },
-    { "key": "day8RouteId", "value": "<day8-route-id>" },
-    { "key": "day8AlternativeRouteId1", "value": "<day8-alternative-route-id-1>" },
-    { "key": "day8AlternativeRouteId2", "value": "<day8-alternative-route-id-2>" },
-    { "key": "day8OriginStationId", "value": "<day8-origin-station-id>" },
-    { "key": "day8DestinationStationId", "value": "<day8-destination-station-id>" },
+    {
+      "key": "stopId",
+      "value": "<stop-id>"
+    },
+    {
+      "key": "crossOperatorStopId",
+      "value": "<cross-operator-stop-id>"
+    },
+    {
+      "key": "missingStationId",
+      "value": "00000000-0000-0000-0000-000000000001"
+    },
+    {
+      "key": "missingStopId",
+      "value": "00000000-0000-0000-0000-000000000002"
+    },
+    {
+      "key": "nonApprovedOperatorAccessToken",
+      "value": "<non-approved-operator-access-token>"
+    },
+    {
+      "key": "day8RouteId",
+      "value": "<day8-route-id>"
+    },
+    {
+      "key": "day8AlternativeRouteId1",
+      "value": "<day8-alternative-route-id-1>"
+    },
+    {
+      "key": "day8AlternativeRouteId2",
+      "value": "<day8-alternative-route-id-2>"
+    },
+    {
+      "key": "day8OriginStationId",
+      "value": "<day8-origin-station-id>"
+    },
+    {
+      "key": "day8DestinationStationId",
+      "value": "<day8-destination-station-id>"
+    },
     {
       "key": "day8AlternativeDestinationStationId",
       "value": "<day8-alternative-destination-station-id>"
     },
-    { "key": "day8MissingStationId", "value": "00000000-0000-0000-0000-000000000008" },
-    { "key": "day8StopId", "value": "<day8-stop-id>" },
-    { "key": "day8SecondStopId", "value": "<day8-second-stop-id>" },
-    { "key": "day8CrossOperatorRouteId", "value": "<day8-cross-operator-route-id>" },
-    { "key": "day9RouteId", "value": "<day9-route-id>" },
-    { "key": "day9VehicleId", "value": "<day9-vehicle-id>" },
-    { "key": "day9CrossOperatorVehicleId", "value": "<day9-cross-operator-vehicle-id>" },
-    { "key": "day9DriverScheduleId", "value": "<day9-driver-schedule-id>" },
-    { "key": "day9StandardVehicleTypeId", "value": "00000000-0000-0000-0000-000000000101" },
-    { "key": "day9UnknownVehicleTypeId", "value": "00000000-0000-0000-0000-000000009999" },
-    { "key": "day9DriverUserId", "value": "<day9-driver-user-id>" },
-    { "key": "day9AssistantUserId", "value": "<day9-assistant-user-id>" },
-    { "key": "day9OtherOperatorAccessToken", "value": "<day9-other-operator-access-token>" }
+    {
+      "key": "day8MissingStationId",
+      "value": "00000000-0000-0000-0000-000000000008"
+    },
+    {
+      "key": "day8StopId",
+      "value": "<day8-stop-id>"
+    },
+    {
+      "key": "day8SecondStopId",
+      "value": "<day8-second-stop-id>"
+    },
+    {
+      "key": "day8CrossOperatorRouteId",
+      "value": "<day8-cross-operator-route-id>"
+    },
+    {
+      "key": "day9RouteId",
+      "value": "<day9-route-id>"
+    },
+    {
+      "key": "day9VehicleId",
+      "value": "<day9-vehicle-id>"
+    },
+    {
+      "key": "day9CrossOperatorVehicleId",
+      "value": "<day9-cross-operator-vehicle-id>"
+    },
+    {
+      "key": "day9DriverScheduleId",
+      "value": "<day9-driver-schedule-id>"
+    },
+    {
+      "key": "day9StandardVehicleTypeId",
+      "value": "00000000-0000-0000-0000-000000000101"
+    },
+    {
+      "key": "day9UnknownVehicleTypeId",
+      "value": "00000000-0000-0000-0000-000000009999"
+    },
+    {
+      "key": "day9DriverUserId",
+      "value": "<day9-driver-user-id>"
+    },
+    {
+      "key": "day9AssistantUserId",
+      "value": "<day9-assistant-user-id>"
+    },
+    {
+      "key": "day9OtherOperatorAccessToken",
+      "value": "<day9-other-operator-access-token>"
+    },
+    {
+      "key": "day12TripId",
+      "value": "<day12-trip-id>"
+    },
+    {
+      "key": "day12PickupStationId",
+      "value": "<day12-pickup-station-id>"
+    },
+    {
+      "key": "createdBookingId",
+      "value": ""
+    },
+    {
+      "key": "createdBookingCode",
+      "value": ""
+    }
   ],
   "item": [
     {
@@ -92,7 +294,12 @@
           "name": "Register passenger",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/auth/register",
               "host": ["{{baseUrl}}"],
@@ -108,7 +315,12 @@
           "name": "Verify registration email",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/auth/verify-email",
               "host": ["{{baseUrl}}"],
@@ -150,7 +362,12 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/auth/login",
               "host": ["{{baseUrl}}"],
@@ -166,7 +383,12 @@
           "name": "Refresh passenger token",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/auth/refresh",
               "host": ["{{baseUrl}}"],
@@ -211,7 +433,12 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/auth/set-initial-password",
               "host": ["{{baseUrl}}"],
@@ -252,8 +479,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/auth/device-token",
@@ -288,8 +521,14 @@
           "request": {
             "method": "DELETE",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/auth/device-token",
@@ -338,7 +577,12 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/auth/google",
               "host": ["{{baseUrl}}"],
@@ -354,7 +598,12 @@
           "name": "Get current Google-created profile",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/users/me",
               "host": ["{{baseUrl}}"],
@@ -367,8 +616,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/users/me/complete-profile",
@@ -385,7 +640,12 @@
           "name": "Get passenger profile (stub)",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/passenger/me",
               "host": ["{{baseUrl}}"],
@@ -398,7 +658,12 @@
           "name": "Get passenger booking history (stub)",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/passenger/bookings",
               "host": ["{{baseUrl}}"],
@@ -440,8 +705,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{systemAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/users",
@@ -479,7 +750,12 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/auth/login",
               "host": ["{{baseUrl}}"],
@@ -519,8 +795,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/users/{{operatorUserId}}/resend-initial-password",
@@ -621,7 +903,12 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/operators/register",
               "host": ["{{baseUrl}}"],
@@ -672,8 +959,14 @@
               "host": ["{{localHarnessUrl}}"],
               "path": ["identity", "email-token"],
               "query": [
-                { "key": "email", "value": "{{operatorSelfRegisterEmail}}" },
-                { "key": "purpose", "value": "REGISTRATION" }
+                {
+                  "key": "email",
+                  "value": "{{operatorSelfRegisterEmail}}"
+                },
+                {
+                  "key": "purpose",
+                  "value": "REGISTRATION"
+                }
               ]
             },
             "description": "Local-only helper reads the latest unused REGISTRATION OTP for the self-registered operator admin from the local dev DB."
@@ -704,7 +997,12 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/auth/verify-email",
               "host": ["{{baseUrl}}"],
@@ -743,8 +1041,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{systemAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/operators/{{operatorId}}/approve",
@@ -791,7 +1095,12 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/auth/login",
               "host": ["{{baseUrl}}"],
@@ -836,8 +1145,14 @@
           "request": {
             "method": "PATCH",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/profile",
@@ -878,7 +1193,12 @@
           ],
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/profile",
               "host": ["{{baseUrl}}"],
@@ -928,8 +1248,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{systemAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/operators",
@@ -981,8 +1307,14 @@
               "host": ["{{localHarnessUrl}}"],
               "path": ["identity", "email-token"],
               "query": [
-                { "key": "email", "value": "{{adminCreatedOperatorEmail}}" },
-                { "key": "purpose", "value": "SET_INITIAL_PASSWORD" }
+                {
+                  "key": "email",
+                  "value": "{{adminCreatedOperatorEmail}}"
+                },
+                {
+                  "key": "purpose",
+                  "value": "SET_INITIAL_PASSWORD"
+                }
               ]
             },
             "description": "Local-only helper reads the latest unused SET_INITIAL_PASSWORD token for the admin-created operator admin."
@@ -1013,7 +1345,12 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/auth/set-initial-password",
               "host": ["{{baseUrl}}"],
@@ -1058,7 +1395,12 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/auth/login",
               "host": ["{{baseUrl}}"],
@@ -1107,8 +1449,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{adminCreatedOperatorAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminCreatedOperatorAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/users",
@@ -1160,8 +1508,14 @@
               "host": ["{{localHarnessUrl}}"],
               "path": ["identity", "email-token"],
               "query": [
-                { "key": "email", "value": "{{operatorUserEmail}}" },
-                { "key": "purpose", "value": "SET_INITIAL_PASSWORD" }
+                {
+                  "key": "email",
+                  "value": "{{operatorUserEmail}}"
+                },
+                {
+                  "key": "purpose",
+                  "value": "SET_INITIAL_PASSWORD"
+                }
               ]
             },
             "description": "Local-only helper reads the latest unused SET_INITIAL_PASSWORD token for the operator-created user."
@@ -1192,7 +1546,12 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/auth/set-initial-password",
               "host": ["{{baseUrl}}"],
@@ -1237,7 +1596,12 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/auth/login",
               "host": ["{{baseUrl}}"],
@@ -1275,7 +1639,12 @@
           ],
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorUserAccessToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/profile",
               "host": ["{{baseUrl}}"],
@@ -1312,14 +1681,25 @@
           ],
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{systemAdminAccessToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/operators?page=1&pageSize=20",
               "host": ["{{baseUrl}}"],
               "path": ["v1", "admin", "operators"],
               "query": [
-                { "key": "page", "value": "1" },
-                { "key": "pageSize", "value": "20" }
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                }
               ]
             },
             "description": "System Admin list endpoint required by Day 6 contract. Expected data is a paged operator list."
@@ -1350,8 +1730,14 @@
           "request": {
             "method": "PATCH",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorUserAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/profile",
@@ -1407,12 +1793,22 @@
           ],
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorUserAccessToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/stations/search?q=Mien Tay",
               "host": ["{{baseUrl}}"],
               "path": ["v1", "stations", "search"],
-              "query": [{ "key": "q", "value": "Mien Tay" }]
+              "query": [
+                {
+                  "key": "q",
+                  "value": "Mien Tay"
+                }
+              ]
             },
             "description": "Day 7 search happy path: accent-insensitive contains should match Bến xe Miền Tây for q=Mien Tay."
           }
@@ -1441,12 +1837,22 @@
           ],
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorUserAccessToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/stations/search?q=",
               "host": ["{{baseUrl}}"],
               "path": ["v1", "stations", "search"],
-              "query": [{ "key": "q", "value": "" }]
+              "query": [
+                {
+                  "key": "q",
+                  "value": ""
+                }
+              ]
             },
             "description": "Adversarial Day 7 validation case: empty q is rejected."
           }
@@ -1483,8 +1889,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{adminCreatedOperatorAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminCreatedOperatorAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/stations",
@@ -1535,8 +1947,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{adminCreatedOperatorAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminCreatedOperatorAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/stations",
@@ -1545,7 +1963,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"B\u1ebfn xe Mi\u1ec1n Tây Day 7\",\n  \"city\": \"H\u1ed3 Ch\u00ed Minh\",\n  \"province\": \"H\u1ed3 Ch\u00ed Minh\",\n  \"latitude\": 10.7461,\n  \"longitude\": 106.6173,\n  \"addressStreet\": \"395 Kinh D\u01b0\u01a1ng V\u01b0\u01a1ng\",\n  \"contactPhone\": \"02838545529\",\n  \"contactEmail\": \"station-day7@example.com\",\n  \"operatingHours\": {\n    \"mon\": \"00:00-24:00\"\n  },\n  \"facilities\": [\"waiting-room\", \"restroom\"],\n  \"supportsShuttle\": true\n}"
+              "raw": "{\n  \"name\": \"Bến xe Miền Tây Day 7\",\n  \"city\": \"Hồ Chí Minh\",\n  \"province\": \"Hồ Chí Minh\",\n  \"latitude\": 10.7461,\n  \"longitude\": 106.6173,\n  \"addressStreet\": \"395 Kinh Dương Vương\",\n  \"contactPhone\": \"02838545529\",\n  \"contactEmail\": \"station-day7@example.com\",\n  \"operatingHours\": {\n    \"mon\": \"00:00-24:00\"\n  },\n  \"facilities\": [\"waiting-room\", \"restroom\"],\n  \"supportsShuttle\": true\n}"
             },
             "description": "Create branch: station fields present means create Station + auto-link in one transaction. Latitude and longitude are required by Day 7 even though the DB columns are nullable."
           }
@@ -1577,8 +1995,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{adminCreatedOperatorAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminCreatedOperatorAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/stations",
@@ -1587,7 +2011,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"B\u1ebfn xe Mi\u1ec1n Tây Day 7 Duplicate\",\n  \"city\": \"H\u1ed3 Ch\u00ed Minh\",\n  \"province\": \"H\u1ed3 Ch\u00ed Minh\",\n  \"latitude\": 10.7461,\n  \"longitude\": 106.6173,\n  \"addressStreet\": \"395 Kinh D\u01b0\u01a1ng V\u01b0\u01a1ng\",\n  \"contactPhone\": \"02838545529\",\n  \"contactEmail\": \"station-day7-duplicate@example.com\",\n  \"operatingHours\": {\n    \"mon\": \"00:00-24:00\"\n  },\n  \"facilities\": [\"waiting-room\", \"restroom\"],\n  \"supportsShuttle\": true\n}"
+              "raw": "{\n  \"name\": \"Bến xe Miền Tây Day 7 Duplicate\",\n  \"city\": \"Hồ Chí Minh\",\n  \"province\": \"Hồ Chí Minh\",\n  \"latitude\": 10.7461,\n  \"longitude\": 106.6173,\n  \"addressStreet\": \"395 Kinh Dương Vương\",\n  \"contactPhone\": \"02838545529\",\n  \"contactEmail\": \"station-day7-duplicate@example.com\",\n  \"operatingHours\": {\n    \"mon\": \"00:00-24:00\"\n  },\n  \"facilities\": [\"waiting-room\", \"restroom\"],\n  \"supportsShuttle\": true\n}"
             },
             "description": "Duplicate-nearby case: same area within <100m must not create a new station and must return STATION_DUPLICATE_NEARBY."
           }
@@ -1624,8 +2048,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{adminCreatedOperatorAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminCreatedOperatorAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/stops",
@@ -1634,7 +2064,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Day 7 Stop\",\n  \"latitude\": 10.758,\n  \"longitude\": 106.67,\n  \"address\": \"1 L\u00ea L\u01a1i\",\n  \"googlePlaceId\": \"day7-google-place-id-1\"\n}"
+              "raw": "{\n  \"name\": \"Day 7 Stop\",\n  \"latitude\": 10.758,\n  \"longitude\": 106.67,\n  \"address\": \"1 Lê Lơi\",\n  \"googlePlaceId\": \"day7-google-place-id-1\"\n}"
             },
             "description": "Day 7 create stop; googlePlaceId is persisted as an opaque string only."
           }
@@ -1664,8 +2094,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{adminCreatedOperatorAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminCreatedOperatorAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/stops",
@@ -1704,7 +2140,10 @@
           "request": {
             "method": "GET",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{adminCreatedOperatorAccessToken}}" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminCreatedOperatorAccessToken}}"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/stops/{{stopId}}",
@@ -1742,15 +2181,29 @@
           ],
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorUserAccessToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/stops?page=1&pageSize=20&search=Day",
               "host": ["{{baseUrl}}"],
               "path": ["v1", "operator", "stops"],
               "query": [
-                { "key": "page", "value": "1" },
-                { "key": "pageSize", "value": "20" },
-                { "key": "search", "value": "Day" }
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "search",
+                  "value": "Day"
+                }
               ]
             },
             "description": "List stops with BSOT page/pageSize defaults and optional allow-listed search."
@@ -1781,8 +2234,14 @@
           "request": {
             "method": "PATCH",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{adminCreatedOperatorAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminCreatedOperatorAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/stops/{{stopId}}",
@@ -1791,7 +2250,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Day 7 Stop Updated\",\n  \"latitude\": 10.759,\n  \"longitude\": 106.671,\n  \"address\": \"2 L\u00ea L\u01a1i\",\n  \"googlePlaceId\": \"day7-google-place-id-1-updated\"\n}"
+              "raw": "{\n  \"name\": \"Day 7 Stop Updated\",\n  \"latitude\": 10.759,\n  \"longitude\": 106.671,\n  \"address\": \"2 Lê Lơi\",\n  \"googlePlaceId\": \"day7-google-place-id-1-updated\"\n}"
             },
             "description": "Update own stop; OPERATOR_STAFF is forbidden to PATCH, OPERATOR_ADMIN may PATCH."
           }
@@ -1821,8 +2280,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{adminCreatedOperatorAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminCreatedOperatorAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/stations",
@@ -1861,7 +2326,10 @@
           "request": {
             "method": "GET",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{adminCreatedOperatorAccessToken}}" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminCreatedOperatorAccessToken}}"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/stops/{{missingStopId}}",
@@ -1895,7 +2363,12 @@
           ],
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorUserAccessToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/stops/{{crossOperatorStopId}}",
               "host": ["{{baseUrl}}"],
@@ -1929,8 +2402,14 @@
           "request": {
             "method": "PATCH",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorUserAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/stops/{{stopId}}",
@@ -1969,8 +2448,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{nonApprovedOperatorAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{nonApprovedOperatorAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/stops",
@@ -2012,8 +2497,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/routes",
@@ -2050,8 +2541,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/routes",
@@ -2092,8 +2589,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/routes",
@@ -2129,15 +2632,29 @@
           ],
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorUserAccessToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/routes?page=1&pageSize=20&search=Day%208",
               "host": ["{{baseUrl}}"],
               "path": ["v1", "operator", "routes"],
               "query": [
-                { "key": "page", "value": "1" },
-                { "key": "pageSize", "value": "20" },
-                { "key": "search", "value": "Day 8" }
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "search",
+                  "value": "Day 8"
+                }
               ]
             },
             "description": "OPERATOR_STAFF can read tenant-scoped routes."
@@ -2166,7 +2683,12 @@
           ],
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorUserAccessToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}",
               "host": ["{{baseUrl}}"],
@@ -2199,8 +2721,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/stops",
@@ -2237,8 +2765,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/stops",
@@ -2275,8 +2809,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/stops",
@@ -2314,8 +2854,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/fare-templates",
@@ -2352,8 +2898,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/fare-templates",
@@ -2390,8 +2942,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/fare-templates",
@@ -2428,8 +2986,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/fare-templates",
@@ -2468,8 +3032,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/alternative-routes",
@@ -2507,8 +3077,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/alternative-routes",
@@ -2545,8 +3121,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/alternative-routes",
@@ -2583,7 +3165,12 @@
           ],
           "request": {
             "method": "DELETE",
-            "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/alternative-routes/{{day8AlternativeRouteId1}}",
               "host": ["{{baseUrl}}"],
@@ -2615,8 +3202,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/alternative-routes",
@@ -2652,7 +3245,12 @@
           ],
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorUserAccessToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/routes/{{day8CrossOperatorRouteId}}",
               "host": ["{{baseUrl}}"],
@@ -2684,8 +3282,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{nonApprovedOperatorAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{nonApprovedOperatorAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/routes",
@@ -2733,7 +3337,12 @@
           ],
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorUserAccessToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/vehicle-types",
               "host": ["{{baseUrl}}"],
@@ -2770,8 +3379,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/vehicles",
@@ -2809,8 +3424,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/vehicles",
@@ -2848,8 +3469,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/vehicles",
@@ -2886,8 +3513,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/vehicles",
@@ -2923,7 +3556,12 @@
           ],
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorUserAccessToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/vehicles/{{day9CrossOperatorVehicleId}}",
               "host": ["{{baseUrl}}"],
@@ -2960,8 +3598,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/driver-schedules",
@@ -2998,8 +3642,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/driver-schedules",
@@ -3011,6 +3661,118 @@
               "raw": "{\n  \"routeId\": \"{{day9RouteId}}\",\n  \"vehicleId\": \"{{day9VehicleId}}\",\n  \"driverUserId\": \"{{day9DriverUserId}}\",\n  \"assistantUserId\": \"{{day9AssistantUserId}}\",\n  \"dayOfWeek\": [3],\n  \"departureTime\": \"08:30:00\",\n  \"validFrom\": \"2026-07-01\",\n  \"validUntil\": \"2026-08-31\",\n  \"isActive\": true\n}"
             },
             "description": "Same driver + overlapping dayOfWeek + same departureTime + overlapping valid window returns TRIP_DRIVER_CONFLICT."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Booking — Bookings",
+      "item": [
+        {
+          "name": "1. Create booking (WALLET, happy path)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 201', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test('ADR 0004 success envelope — booking confirmed', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(201);",
+                  "  pm.expect(body.data).to.have.property('bookingId').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data).to.have.property('bookingCode').that.matches(/^VR-\\d{8}-[0-9A-Z]{8}$/);",
+                  "  pm.expect(body.data).to.have.property('status', 'CONFIRMED');",
+                  "  pm.expect(body.data).to.have.property('totalAmount').that.is.a('number');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});",
+                  "if (body && body.data) {",
+                  "  pm.collectionVariables.set('createdBookingId', body.data.bookingId || '');",
+                  "  pm.collectionVariables.set('createdBookingCode', body.data.bookingCode || '');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "bookings"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tripId\": \"{{day12TripId}}\",\n  \"pickup\": {\n    \"stationId\": \"{{day12PickupStationId}}\"\n  },\n  \"seats\": [\n    {\n      \"seatNumber\": \"A01\",\n      \"passenger\": {\n        \"fullName\": \"Nguyen Van A\",\n        \"phoneNumber\": \"0900000001\",\n        \"idNumber\": \"012345678901\"\n      }\n    }\n  ],\n  \"paymentMethod\": \"WALLET\"\n}"
+            },
+            "description": "Day 12 — POST /v1/bookings (WALLET path). Auth: PASSENGER bearer token. Idempotency-Key required. Max 5 seats. Returns 201 CONFIRMED on WALLET success; 409 BOOKING_SEAT_UNAVAILABLE if seat is held; 422 BOOKING_MAX_SEATS_EXCEEDED if >5 seats. Passenger PII (fullName/phoneNumber/idNumber) is validated but not persisted per schema.sql line 149."
+          }
+        },
+        {
+          "name": "2. Create booking — max seats exceeded (expect 422)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 422', function () {",
+                  "  pm.response.to.have.status(422);",
+                  "});",
+                  "pm.test('BOOKING_MAX_SEATS_EXCEEDED error envelope', function () {",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.statusCode).to.equal(422);",
+                  "  pm.expect(body.error).to.have.property('code', 'BOOKING_MAX_SEATS_EXCEEDED');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "bookings"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tripId\": \"{{day12TripId}}\",\n  \"pickup\": {\n    \"stationId\": \"{{day12PickupStationId}}\"\n  },\n  \"seats\": [\n    { \"seatNumber\": \"A01\", \"passenger\": { \"fullName\": \"A\", \"phoneNumber\": \"0900000001\", \"idNumber\": \"012345678901\" } },\n    { \"seatNumber\": \"A02\", \"passenger\": { \"fullName\": \"B\", \"phoneNumber\": \"0900000002\", \"idNumber\": \"012345678902\" } },\n    { \"seatNumber\": \"A03\", \"passenger\": { \"fullName\": \"C\", \"phoneNumber\": \"0900000003\", \"idNumber\": \"012345678903\" } },\n    { \"seatNumber\": \"A04\", \"passenger\": { \"fullName\": \"D\", \"phoneNumber\": \"0900000004\", \"idNumber\": \"012345678904\" } },\n    { \"seatNumber\": \"A05\", \"passenger\": { \"fullName\": \"E\", \"phoneNumber\": \"0900000005\", \"idNumber\": \"012345678905\" } },\n    { \"seatNumber\": \"A06\", \"passenger\": { \"fullName\": \"F\", \"phoneNumber\": \"0900000006\", \"idNumber\": \"012345678906\" } }\n  ],\n  \"paymentMethod\": \"WALLET\"\n}"
+            },
+            "description": "6 seats → 422 BOOKING_MAX_SEATS_EXCEEDED."
           }
         }
       ]

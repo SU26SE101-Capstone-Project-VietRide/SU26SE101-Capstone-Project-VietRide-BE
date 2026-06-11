@@ -16,6 +16,9 @@ COPY libs/shared libs/shared
 RUN npm ci --no-audit --no-fund --ignore-scripts
 RUN npx nx run-many -t build -p nest-common nest-config nest-rabbitmq nest-redis --skip-nx-cache
 
+# Build shared workspace libraries that webpack externalizes at runtime.
+RUN npx nx run-many -t build --projects=contracts,nest-common,nest-config,nest-rabbitmq,nest-redis --skip-nx-cache
+
 # Copy sources needed to build tracking (Nx will only build referenced projects).
 COPY apps/tracking apps/tracking
 
@@ -30,14 +33,14 @@ ENV NODE_ENV=production
 # Copy built artifacts.
 COPY --from=build /workspace/dist/apps/tracking ./
 COPY --from=build /workspace/node_modules ./node_modules
-# Prisma's generated client is bundled into main.js, but its native query engine must
-# still exist at the generated-client path Prisma searches at runtime.
-COPY --from=build /workspace/apps/tracking/src/generated/tracking-prisma-client ./src/generated/tracking-prisma-client
 # webpack externalizes the @vietride/* shared libs but they live as workspace symlinks
 # (→ /workspace/libs/shared) that don't exist in this stage. Replace those dangling
 # symlinks with the compiled lib packages so require('@vietride/*') resolves at runtime.
 RUN rm -rf node_modules/@vietride
 COPY --from=build /workspace/dist/libs/shared ./node_modules/@vietride
+# Prisma generates native query-engine binaries outside the webpack bundle.
+# Keep the generated client beside the bundle at the path Prisma searches at runtime.
+COPY --from=build /workspace/apps/tracking/src/generated ./src/generated
 COPY .env.example ./.env.example
 
 EXPOSE 3001

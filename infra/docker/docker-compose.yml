@@ -187,6 +187,11 @@ services:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_booking;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}'
+      REDIS_URL: redis:6379
+      TRIP_SERVICE_BASE_URL: http://trip:5002
+      PAYMENT_SERVICE_BASE_URL: http://payment:5004
+      BOOKING_TRIP_USE_DEV_STUB: 'true'
+      BOOKING_PAYMENT_USE_DEV_STUB: 'true'
     ports:
       - '${BOOKING_PORT:-5003}:5003'
     healthcheck:

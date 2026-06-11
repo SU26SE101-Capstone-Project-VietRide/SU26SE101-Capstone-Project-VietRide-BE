@@ -1,5 +1,8 @@
 using Serilog;
+using VietRide.Booking.Application;
 using VietRide.Booking.Infrastructure;
+using VietRide.Booking.Infrastructure.DependencyInjection;
+using VietRide.Shared.Application.DependencyInjection;
 using VietRide.Shared.Persistence.DependencyInjection;
 using VietRide.Shared.Web.DependencyInjection;
 using VietRide.Shared.Web.Health;
@@ -17,7 +20,13 @@ builder.Host.UseSerilog((ctx, _, lc) => lc
     .WriteTo.Console());
 
 builder.Services.AddVietRideSharedWeb(builder.Configuration, ServiceName);
-builder.Services.AddVietRideDbContext<BookingDbContext>(builder.Configuration);
+builder.Services.AddVietRideDbContext<BookingDbContext>(
+    builder.Configuration,
+    configureDataSource: BookingDbContext.ConfigurePostgresTypes);
+builder.Services.AddVietRideMediatRBehaviors(
+    handlerAssemblies: [typeof(ApplicationAssemblyMarker).Assembly]);
+builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddVietRideIdempotency("booking");
 
 var app = builder.Build();
 
@@ -25,6 +34,7 @@ app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseVietRideSwagger();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseVietRideIdempotency();
 app.MapVietRideHealth(ServiceName);
 app.MapControllers();
 
