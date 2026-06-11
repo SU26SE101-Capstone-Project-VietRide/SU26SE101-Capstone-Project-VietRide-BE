@@ -14,6 +14,7 @@ RUN node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('nx.json'
 # in node_modules — webpack resolves the shared libs through those symlinks.
 COPY libs/shared libs/shared
 RUN npm ci --no-audit --no-fund --ignore-scripts
+RUN npx nx run-many -t build -p nest-common nest-config nest-rabbitmq nest-redis --skip-nx-cache
 
 # Build shared workspace libraries that webpack externalizes at runtime.
 RUN npx nx run-many -t build --projects=contracts,nest-common,nest-config,nest-rabbitmq,nest-redis --skip-nx-cache

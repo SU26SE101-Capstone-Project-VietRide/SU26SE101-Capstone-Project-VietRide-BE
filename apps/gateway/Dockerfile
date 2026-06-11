@@ -14,6 +14,7 @@ RUN node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('nx.json'
 # in node_modules — webpack resolves the shared libs through those symlinks.
 COPY libs/shared libs/shared
 RUN npm ci --no-audit --no-fund --ignore-scripts
+RUN npx nx run nest-common:build --skip-nx-cache
 
 # Copy sources needed to build gateway (Nx will only build referenced projects).
 COPY apps/gateway apps/gateway

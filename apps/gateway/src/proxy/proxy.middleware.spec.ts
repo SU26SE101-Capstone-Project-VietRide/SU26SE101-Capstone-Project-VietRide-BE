@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { InternalJwtSigner } from '../auth/internal-jwt.signer';
+import type { RequestWithUser } from '../auth/user-jwt.middleware';
 import { envSchema } from '../config/env.schema';
 import { createProxyHandler } from './proxy.middleware';
 
@@ -14,12 +15,12 @@ const env = envSchema.parse({
 
 const createProxyMiddlewareMock = jest.mocked(createProxyMiddleware);
 
-function makeRequest(path: string, headers: Record<string, string> = {}): Request {
+function makeRequest(path: string, headers: Record<string, string> = {}, method = 'POST'): Request {
   const lowerHeaders = Object.fromEntries(
     Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value]),
   );
   return {
-    method: 'POST',
+    method,
     url: path,
     originalUrl: path,
     headers: lowerHeaders,
@@ -115,6 +116,44 @@ describe('createProxyHandler auth enforcement', () => {
     );
     expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
     expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('proxies Day 9 Trip route families instead of returning ROUTE_NOT_FOUND', async () => {
+    const upstreamHandler = jest.fn();
+    createProxyMiddlewareMock.mockReturnValue(
+      upstreamHandler as unknown as ReturnType<typeof createProxyMiddleware>,
+    );
+    const signer = {
+      sign: jest.fn().mockResolvedValue('internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const cases = [
+      ['GET', '/v1/vehicle-types'],
+      ['POST', '/v1/operator/vehicles'],
+      ['POST', '/v1/operator/driver-schedules'],
+    ] as const;
+
+    for (const [method, path] of cases) {
+      const req = makeRequest(path, { 'x-request-id': `req-${path.split('/').pop()}` }, method);
+      (req as RequestWithUser).user = {
+        sub: 'operator-user-id',
+        role: 'OPERATOR_ADMIN',
+        operatorId: 'operator-id',
+      };
+      const res = makeResponse();
+      const next = jest.fn() as NextFunction;
+
+      await handler(req, res, next);
+
+      expect(res.status).not.toHaveBeenCalledWith(404);
+      expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
+      expect(req.url).toBe(path);
+      expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+    }
+
+    expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+      expect.objectContaining({ target: env.TRIP_BASE_URL }),
+    );
   });
 
   it('returns an ADR 0004 envelope when the upstream proxy fails', async () => {
