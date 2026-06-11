@@ -212,6 +212,47 @@ describe('buildRouteTable', () => {
     expect(publicRoute?.prefix).toBe('/v1/routes');
   });
 
+  it('routes Day 9 vehicle and driver schedule families to Trip with operator role union', () => {
+    const cases = [
+      ['/v1/operator/vehicles', '/v1/operator/vehicles'],
+      [
+        '/v1/operator/vehicles/11111111-1111-1111-1111-111111111111',
+        '/v1/operator/vehicles',
+      ],
+      ['/v1/operator/driver-schedules', '/v1/operator/driver-schedules'],
+      [
+        '/v1/operator/driver-schedules/11111111-1111-1111-1111-111111111111',
+        '/v1/operator/driver-schedules',
+      ],
+      ['/v1/vehicle-types', '/v1/vehicle-types'],
+    ] as const;
+
+    cases.forEach(([path, prefix]) => {
+      const route = matchRoute(routes, path);
+
+      expect(route?.prefix).toBe(prefix);
+      expect(route?.target).toBe(env.TRIP_BASE_URL);
+      expect(route?.authRequired).toBe('user');
+      expect(route?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
+    });
+  });
+
+  it('matches operator vehicles using the dedicated prefix without changing generic vehicles', () => {
+    const operatorRoute = matchRoute(
+      routes,
+      '/v1/operator/vehicles/11111111-1111-1111-1111-111111111111',
+    );
+    const genericRoute = matchRoute(
+      routes,
+      '/v1/vehicles/11111111-1111-1111-1111-111111111111',
+    );
+
+    expect(operatorRoute?.prefix).toBe('/v1/operator/vehicles');
+    expect(operatorRoute?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
+    expect(genericRoute?.prefix).toBe('/v1/vehicles');
+    expect(genericRoute?.requiredRoles).toBeUndefined();
+  });
+
   it('keeps existing Identity operator routes distinct from Trip operator routes', () => {
     const profileRoute = matchRoute(routes, '/v1/operator/profile');
     const usersRoute = matchRoute(routes, '/v1/operator/users');

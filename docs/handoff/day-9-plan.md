@@ -141,7 +141,7 @@ Recommended serial order: 9.0a -> 9.G -> 9.0 -> 9.1 -> 9.2 -> 9.3.
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
 | 9.0a | done | APPROVE | 2026-06-11 | Approved after 2 patch rounds; human /verify pending. |
-| 9.G | todo | - | - | - |
+| 9.G | done | APPROVE | 2026-06-11 | Strong-Codex diff review approved; gateway test/lint/build green; human /verify pending. |
 | 9.0 | todo | - | - | - |
 | 9.1 | todo | - | - | - |
 | 9.2 | todo | - | - | - |
