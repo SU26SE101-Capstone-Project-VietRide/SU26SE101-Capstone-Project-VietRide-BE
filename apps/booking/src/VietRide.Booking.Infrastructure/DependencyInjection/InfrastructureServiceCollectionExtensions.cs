@@ -1,8 +1,10 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using StackExchange.Redis;
+using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Infrastructure.Http;
 using VietRide.Shared.Http.Handlers;
+using VietRide.Shared.Http.Resilience;
 using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Booking.Infrastructure.DependencyInjection;
@@ -14,7 +16,6 @@ namespace VietRide.Booking.Infrastructure.DependencyInjection;
 /// <remarks>
 /// DB-CONTEXT GUARD: this method MUST NOT call AddVietRideDbContext / AddDbContext.
 /// The BookingDbContext is already registered at Program.cs via AddVietRideDbContext.
-/// Repositories and the Trip HTTP client are added in subsequent tasks (12.1 / 12.2 / 12.3).
 /// </remarks>
 public static class InfrastructureServiceCollectionExtensions
 {
@@ -33,16 +34,47 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IConnectionMultiplexer>(_ =>
             ConnectionMultiplexer.Connect(redisOptions));
 
-        // Internal JWT provider — used by outbound delegating handlers registered in 12.2.
+        // Internal JWT provider — used by outbound delegating handlers.
         services.AddSingleton<IInternalJwtTokenProvider, InternalJwtTokenFactory>();
         services.AddHttpContextAccessor();
         services.AddTransient<InternalJwtDelegatingHandler>();
         services.AddTransient<CorrelationIdDelegatingHandler>();
 
-        // Repositories, IBookingService, ITripServiceClient, IPaymentServiceClient
-        // are registered in Tasks 12.1 / 12.2 / 12.3 (they depend on domain entities
-        // and the Trip seam that land in those tasks).
+        // Trip inter-service HTTP client (Task 12.2).
+        // BSOT §3.5 line 935: ITripServiceClient at Abstractions/ServiceClients/,
+        // impl TripServiceClient at Infrastructure/Http/.
+        services
+            .AddHttpClient<ITripServiceClient, TripServiceClient>(client =>
+            {
+                var baseUrl = ResolveTripBaseUrl(configuration);
+                client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
+                client.Timeout = TimeSpan.FromSeconds(30);
+                client.DefaultRequestHeaders.Accept.Clear();
+                client.DefaultRequestHeaders.Accept.Add(
+                    new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+            })
+            .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
+            .AddHttpMessageHandler<InternalJwtDelegatingHandler>()
+            .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
+            .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
+
+        // Repositories, IBookingService, IPaymentServiceClient
+        // are registered in Task 12.3 (depend on domain entities that land in 12.1).
 
         return services;
+    }
+
+    private static string ResolveTripBaseUrl(IConfiguration configuration)
+    {
+        var baseUrl = configuration["Trip:BaseUrl"]
+            ?? Environment.GetEnvironmentVariable("TRIP_SERVICE_BASE_URL");
+
+        if (string.IsNullOrWhiteSpace(baseUrl))
+        {
+            throw new InvalidOperationException(
+                "Trip base URL must be configured via Trip:BaseUrl or TRIP_SERVICE_BASE_URL.");
+        }
+
+        return baseUrl;
     }
 }
