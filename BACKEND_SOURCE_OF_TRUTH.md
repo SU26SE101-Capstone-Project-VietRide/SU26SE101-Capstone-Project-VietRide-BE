@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.6.2
+> **Phiên bản:** 1.9.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-06-06
+> **Cập nhật lần cuối:** 2026-06-11
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1357,6 +1357,8 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 | | `WALLET_TOP_UP_FAILED` | 502 | TopUp VNPay failed |
 | | `WALLET_TOP_UP_AMOUNT_TOO_LOW` | 422 | < 10,000 VND |
 | **Trip** | `TRIP_NOT_FOUND` | 404 | |
+| | `VEHICLE_NOT_FOUND` | 404 | Vehicle không tồn tại, đã soft-delete, hoặc không thuộc operator caller |
+| | `VEHICLE_TYPE_NOT_FOUND` | 404 | VehicleType không tồn tại hoặc không active |
 | | `TRIP_NOT_EDITABLE` | 409 | Status ≠ SCHEDULED |
 | | `TRIP_VEHICLE_CONFLICT` | 409 | Vehicle trùng giờ trên Trip khác |
 | | `TRIP_DRIVER_CONFLICT` | 409 | Driver trùng giờ |
@@ -1370,15 +1372,18 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 | | `PARCEL_NOT_TRANSFERABLE` | 409 | Status sai khi confirm transfer |
 | | `PARCEL_ADDITIONAL_PAYMENT_REQUIRED` | 402 | Cân lại > ước lượng |
 | | `PARCEL_REVIEW_TIMEOUT` | 409 | EXTRA_LARGE auto-reject 24h |
-| **Stop / Route** | `STOP_NOT_FOUND` | 404 | |
+| **Stop / Route** | `STOP_NOT_FOUND` | 404 | Day-7 Trip Stop handlers use coded 404 path |
 | | `STOP_REPLACEMENT_CYCLE` | 422 | replacedByStopId tạo cycle |
 | | `STOP_REPLACEMENT_DIFFERENT_OPERATOR` | 403 | Stop thay thế khác operator |
 | | `STOP_DISABLED_BOOKING_AFFECTED` | 200 (warning) | Alert khi disable Stop có booking active |
 | | `STOP_NOT_PICKUP_ALLOWED` | 422 | RouteStop.allowPickup = false |
 | | `STOP_NOT_DROPOFF_ALLOWED` | 422 | RouteStop.allowDropoff = false |
 | | `ROUTE_NOT_FOUND` | 404 | |
+| | `ROUTE_STOP_ORDER_CONFLICT` | 422 | Day-8 config-time RouteStop `orderIndex` conflict within the same Route |
+| | `ROUTE_STOP_FLAGS_INVALID` | 422 | Day-8 config-time RouteStop `allowPickup=false` and `allowDropoff=false` |
 | | `ROUTE_RETURN_NOT_CONFIGURED` | 422 | returnRouteId NULL khi đặt round-trip |
-| **Station** | `STATION_NOT_FOUND` | 404 | |
+| | `ALTERNATIVE_ROUTE_LIMIT_EXCEEDED` | 422 | Day-8 config-time third active AlternativeRoute for the same Route |
+| **Station** | `STATION_NOT_FOUND` | 404 | Day-7 Trip Station handlers use coded 404 path |
 | | `STATION_DUPLICATE_NEARBY` | 200 (warning) | Operator tạo Station < 100m gần Station hiện có |
 | **Invoice** | `INVOICE_NOT_FOUND` | 404 | |
 | | `INVOICE_PDF_GENERATION_FAILED` | 500 | Hangfire retry job |
@@ -1587,6 +1592,12 @@ role=OPERATOR_*:       socket.join(`operator:${operatorId}`)
 
 **Tenant isolation:** mọi query trong service có entity gắn `operatorId` BẮT BUỘC filter `WHERE operator_id = :claim` từ Internal JWT (trừ SYSTEM_ADMIN — không filter).
 
+**Day-6 Operator status guard (Identity):** OPERATOR_ADMIN/OPERATOR_STAFF login is rejected with HTTP 403 `FORBIDDEN` when the caller's `Operator.registrationStatus != APPROVED`. Because access tokens can outlive a later suspend/reject, Identity application handlers MUST also re-check current Operator status for operator write/action endpoints. In Day 6 this applies to `POST /v1/operator/users`, `POST /v1/operator/users/{userId}/resend-initial-password`, and `PATCH /v1/operator/profile`: require current `Operator.registrationStatus=APPROVED`, otherwise return 403 `FORBIDDEN` with no side effects. `GET /v1/operator/profile` remains readable for OPERATOR_ADMIN/OPERATOR_STAFF even when non-APPROVED so the UI can display current status/policies. No Gateway -> Identity synchronous status hop is added.
+
+**Day-6 ActivityLog actor convention (Identity):** for operator onboarding/lifecycle actions, `activity_logs.user_id` stores the actor user id. Authenticated actions use the caller's user id; public operator self-registration uses the newly created OPERATOR_ADMIN user id as the self actor. Metadata is JSONB built via serializer (not string interpolation) and includes `operatorId`, `actorUserId`, `targetUserId` when different from actor, and `source` (for example `SELF_REGISTER`, `SYSTEM_ADMIN_CREATE_OPERATOR`, `OPERATOR_USER_CREATE`). Suspend writes no ActivityLog in Day 6 because `activity_log_action` has no `SUSPEND_OPERATOR` value.
+
+**Day-6 reject subscription rule (Identity):** when System Admin rejects a PENDING operator, Identity sets `Operator.registrationStatus=REJECTED` and sets the matching PENDING_APPROVAL `OperatorSubscription.status=CANCELLED`. `operator_subscriptions` has no `deleted_at` column and is not soft-deletable, so implementations MUST NOT set a subscription `deletedAt` value for reject.
+
 ### 6.7 Account status enums
 
 **`User.status`:**
@@ -1657,9 +1668,9 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `GET /internal/v1/users/{userId}` | All services | Lookup user info (cho HTTP validate logical FK) |
 | `GET /internal/v1/users/by-email?email=` | Parcel | Lookup recipient user khi tạo parcel |
 | `GET /internal/v1/users/{userId}/device-tokens` | Notification | Lấy FCM tokens active để push |
-| `GET /internal/v1/operators/{operatorId}` | All services | Lookup operator info |
-| `GET /internal/v1/operators/{operatorId}/subscription` | Booking, Trip, Parcel | Check subscription limits + module flags |
-| `POST /internal/v1/operators/{operatorId}/usage/increment` | Trip, Booking, Parcel | Increment usage counter (vehicles/routes/etc.) |
+| `GET /internal/v1/operators/{operatorId}` | All services | Lookup operator info for logical FK validation (raw success DTO) |
+| `GET /internal/v1/operators/{operatorId}/subscription` | Booking, Trip, Parcel | Raw current subscription + plan limits/module flags + usage counters |
+| `POST /internal/v1/operators/{operatorId}/usage/increment` | Trip, Booking, Parcel | Body `{resource, delta}` where resource is `VEHICLES|DRIVERS|ASSISTANTS|OPERATOR_USERS|ROUTES|TRIPS_THIS_MONTH`; atomically increment usage counter without concurrent overshoot |
 | `GET /internal/v1/subscription-plans` | Admin Web (qua Gateway) | List gói SaaS |
 
 #### Trip-Route-Vehicle Service
@@ -1669,9 +1680,9 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `GET /internal/v1/trips/{tripId}` | Booking, Parcel, Tracking, Payment | Lookup trip snapshot |
 | `POST /internal/v1/trips/{tripId}/lock-seats` | Booking | Lock seats trong checkout (TTL 10 phút Redis) |
 | `POST /internal/v1/trips/{tripId}/release-seats` | Booking | Release seat khi payment fail/timeout |
-| `POST /internal/v1/trips/{tripId}/confirm-seats` | Booking | Convert HELD → BOOKED khi payment success |
+| `POST /internal/v1/trips/{tripId}/book-seats` | Booking | Convert HELD → BOOKED khi payment success (API contract canonical name; was `confirm-seats`) |
 | `GET /internal/v1/trips/{tripId}/passengers-pending` | Booking | Cho operator dashboard |
-| `GET /internal/v1/stations/{id}` · `GET /internal/v1/stops/{id}` · `GET /internal/v1/routes/{id}` | All services | Lookup canonical entity |
+| `GET /internal/v1/stations/{id}` · `GET /internal/v1/stops/{id}` · `GET /internal/v1/routes/{id}` | All services | Trip internal-auth required; raw DTO lookup for canonical entity; station/stop not found returns ADR 0004 error envelope with `STATION_NOT_FOUND` / `STOP_NOT_FOUND` |
 | `GET /internal/v1/trips/{tripId}/capacity` | Parcel | Lấy available cargo capacity |
 | `POST /internal/v1/trips/{tripId}/cargo-counter/reserve` · `release` · `load` · `unload` | Parcel | Update reservedParcelWeightKg + totalLoadedWeightKg atomic |
 
@@ -2669,6 +2680,12 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.9.0** | 2026-06-11 | BE lead (Vũ) | **MINOR** — Day-9 Trip vehicle/schedule contract + registry sync: add the VehicleType catalog read, operator-scoped Vehicle CRUD, exact `seatLayoutJson` BE/FE shape and v1 validation scope, and DriverSchedule create contract with local-ICT weekly recurrence, validity window, conflict handling via existing `TRIP_DRIVER_CONFLICT`, no Trip generation, and Day-11 deferred driver/assistant role validation. Add exactly two new §5.9 tenant/reference codes: `VEHICLE_NOT_FOUND` and `VEHICLE_TYPE_NOT_FOUND`. No code/DDL change. |
+| **1.8.0** | 2026-06-11 | BE lead (Vũ) | **MINOR** — Trip↔Booking seam freeze (unblocks parallel Day-12 Booking work). Document the seat lifecycle as **synchronous internal HTTP** owned by Trip-Route-Vehicle: `TripSeat` lives in the `trip-route-vehicle` schema (NOT Booking — corrects the BE_TIMELINE Day-12 "TripSeat tables" note, which loses to technical_context §6.1/§6.10 + db-schema), generated by the Trip Hangfire job from `Vehicle.seatLayoutJson`; Booking drives `lock-seats` (AVAILABLE→HELD, Redis `seat_lock:{tripId}:{seatNumber}` TTL 10 min, all-or-nothing) → `book-seats` (HELD→BOOKED) → `release-seats` (HELD→AVAILABLE, idempotent compensation); no event on the seat path. Reconcile §7.2 endpoint name `confirm-seats` → **`book-seats`** to match API Contract (#2 > #3). Flesh out the API contract: add the missing `GET /internal/v1/trips/{tripId}` raw-DTO shape (operatorId/routeId/baseFare/stops[allowPickup,allowDropoff,orderIndex,fareFromThisStop]/seatSummary) already registered in §7.2, and add error responses to the three seat endpoints. **No new error codes** (`BOOKING_SEAT_UNAVAILABLE` 409, `BOOKING_TRIP_NOT_BOOKABLE` 409, `TRIP_NOT_FOUND` 404 already §5.9). No code/DDL change. |
+| **1.7.0** | 2026-06-10 | BE lead (Vũ) | **MINOR** — Day-8 Trip route contract + registry sync: add the Route/RouteStop/FareTemplate/AlternativeRoute section to the API contract with ADR 0004 envelopes, method-level role matrix (WRITE = `OPERATOR_ADMIN` only; READ = `OPERATOR_ADMIN` + `OPERATOR_STAFF`), tenant-isolation `404 ROUTE_NOT_FOUND`, RouteStop hard-delete, AlternativeRoute soft-deactivate, fare-template `fareFromThisStop` and effective-window rules, and the app-layer preconditions for Route create. Add three new §5.9 validation codes for Day-8 config-time failures: `ROUTE_STOP_ORDER_CONFLICT`, `ROUTE_STOP_FLAGS_INVALID`, and `ALTERNATIVE_ROUTE_LIMIT_EXCEEDED`, each with `error.fields` discriminators. No code/DDL change. |
+| **1.6.5** | 2026-06-10 | BE lead (Vũ) | **PATCH** — Day-10 Outbox + passenger-stub contract sync. Add two stub endpoints to the API contract + Postman: `GET /v1/passenger/me` (reuses the `/v1/users/me` `GetMeResponseDto` projection verbatim — `id,email,displayName,phone,role,operatorId,status,avatarUrl`; no passenger-specific fields) and `GET /v1/passenger/bookings` (empty `PagedResult` envelope `{items:[],page:1,pageSize:20,total:0}` — booking ITEM schema deferred to Sprint 3 / [SCV-76](https://hoangvutran088.atlassian.net/browse/SCV-76)), both marked `stub -- item schema finalized in Sprint 3 (SCV-76 / Booking)`; both require a user JWT (401 without). Add Gateway route `/v1/passenger/*` → identity (authRequired `user`). Implement the three already-registered §7.3 events transactionally from Identity handlers (`identity.user.created {userId,role,email,createdAt}`, `identity.operator.approved {operatorId,approvedAt}`, `identity.operator.suspended {operatorId,suspendedAt}`) via the string-based `IIntegrationEventOutbox` seam; wire `AddVietRideMessaging` into Identity + set the identity container's `RabbitMq__HostName=rabbitmq` so the Outbox publishes to `vietride.events`. Add the placeholder Redis `IdempotencyMiddleware` to Shared.Web (not wired). **No new event keys, no new error codes** (`IDEMPOTENCY_KEY_MISMATCH` already §5.9; events already §7.3). `staff.password_set` intentionally NOT emitted (Q2: no registry row, no consumer — registry §7.3 > timeline). No schema/migration change (reuse existing `outbox_events`). |
+| **1.6.4** | 2026-06-08 | BE lead (Vũ) | **PATCH** — Day-7 Trip Station/Stop contract sync: reconcile station autocomplete to `GET /v1/stations/search?q=` as a targeted endpoint-specific exception to §5.8 `search=` because `technical_context_v7` line 523 has higher priority; `q` is required and blank/empty `q` maps to `422 VALIDATION_ERROR`; document accent-insensitive `unaccent` contains matching, `pg_trgm` placeholder-only compatibility, duplicate-nearby Station warning shape (`STATION_DUPLICATE_NEARBY` 200 without ApiMeta changes), single `POST /v1/operator/stations` link/create branch, Stop CRU under `/v1/operator/stops` (without Day-7 `sharedSuggestion`/`shared_suggestion` mutation), no Day-7 `Idempotency-Key` requirement, Trip->Identity logical-FK failures mapping to `422 VALIDATION_ERROR`, non-APPROVED/inactive operator writes mapping to `403 FORBIDDEN`, internal station/stop raw DTO lookup with coded 404 error envelopes, and existing coded 404 use cases for `STATION_NOT_FOUND`/`STOP_NOT_FOUND`. No new error codes, no event keys. |
+| **1.6.3** | 2026-06-07 | BE lead (Vũ) | **PATCH** — Day-6 Operator contract baseline: sync API contract/BSOT for operator self-register, System Admin manual-create, approve/reject/suspend POST action endpoints, operator-created user create/resend initial-password, operator profile GET/PATCH, and internal operator/subscription/usage endpoints. Ratify Day-6 decisions without adding new error codes, Idempotency-Key requirements, or Outbox emission: non-APPROVED operator login/write-action guards use `FORBIDDEN`; invalid lifecycle transitions use `VALIDATION_ERROR`; reject cancels `OperatorSubscription` without `deletedAt`; ActivityLog `user_id` stores actor user id with JSONB serializer metadata; Day 10 remains responsible for emitting `identity.operator.approved`/`identity.operator.suspended`. |
 | **1.6.2** | 2026-06-06 | BE lead (Vũ) | **PATCH** — Clarify ADR 0004 convention for service-to-service HTTP: FE-facing `/v1/*` successes stay wrapped in `ApiResponse<T>`, but successful `/internal/v1/*` / `/internal/*` responses return raw DTO/list payloads; internal errors still use the standardized `ApiResponse` error envelope. |
 | **1.6.1** | 2026-06-06 | BE lead (Vũ) | **PATCH** — Day-5 Identity contract sync: document FE-facing `SET_INITIAL_PASSWORD` consume/resend endpoints and user device-token POST/DELETE shapes in the API contract/Postman without adding new error codes, Idempotency-Key requirements, or Outbox events; record ActivityLog action additions for initial-password token generation/resend flows. Internal `GET /internal/v1/users/{userId}/device-tokens` registry row already exists in §7.2 and is intentionally not duplicated. |
 | **1.6.0** | 2026-06-04 | BE lead (Vũ) | **MINOR** — §5.9 Auth error registry: add `AUTH_GOOGLE_TOKEN_INVALID` (HTTP 401) for invalid Google ID token signature/expiry/audience during Google OAuth login. |

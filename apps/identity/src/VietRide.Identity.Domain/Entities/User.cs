@@ -114,6 +114,90 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
         };
     }
 
+    /// <summary>
+    /// Factory for the initial OPERATOR_ADMIN created by public operator self-registration.
+    /// The account owns a password immediately but must verify email before approval/login.
+    /// </summary>
+    public static User CreateOperatorAdminPendingEmailVerification(
+        string email,
+        PhoneNumber phone,
+        string passwordHash,
+        string displayName,
+        Guid operatorId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(email);
+        ArgumentException.ThrowIfNullOrWhiteSpace(passwordHash);
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
+        ArgumentOutOfRangeException.ThrowIfEqual(operatorId, Guid.Empty);
+
+        return new User
+        {
+            Id = Guid.NewGuid(),
+            Email = email.Trim().ToLowerInvariant(),
+            Phone = phone,
+            PasswordHash = passwordHash,
+            DisplayName = displayName,
+            Role = UserRole.OPERATOR_ADMIN,
+            Status = UserStatus.PENDING_EMAIL_VERIFICATION,
+            OperatorId = operatorId,
+            FailedLoginAttempts = 0,
+        };
+    }
+
+    /// <summary>
+    /// Factory for an OPERATOR_ADMIN manually created by SYSTEM_ADMIN.
+    /// The account must set its first password through the emailed initial-password link.
+    /// </summary>
+    public static User CreateOperatorAdminPendingPassword(
+        string email,
+        PhoneNumber phone,
+        string displayName,
+        Guid operatorId)
+    {
+        return CreateOperatorScopedPendingPassword(
+            email,
+            phone,
+            displayName,
+            UserRole.OPERATOR_ADMIN,
+            operatorId);
+    }
+
+    /// <summary>
+    /// Factory for operator-scoped users created by an approved OPERATOR_ADMIN.
+    /// The account must set its first password through the emailed initial-password link.
+    /// </summary>
+    public static User CreateOperatorScopedPendingPassword(
+        string email,
+        PhoneNumber phone,
+        string displayName,
+        UserRole role,
+        Guid operatorId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(email);
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
+        ArgumentOutOfRangeException.ThrowIfEqual(operatorId, Guid.Empty);
+
+        if (role is not (UserRole.DRIVER or UserRole.ASSISTANT or UserRole.OPERATOR_STAFF or UserRole.OPERATOR_ADMIN))
+        {
+            throw new IdentityDomainException(
+                "VALIDATION_ERROR",
+                "Only operator-scoped roles can be created with a pending initial password.");
+        }
+
+        return new User
+        {
+            Id = Guid.NewGuid(),
+            Email = email.Trim().ToLowerInvariant(),
+            Phone = phone,
+            PasswordHash = null,
+            DisplayName = displayName,
+            Role = role,
+            Status = UserStatus.PENDING_INITIAL_PASSWORD,
+            OperatorId = operatorId,
+            FailedLoginAttempts = 0,
+        };
+    }
+
     // ---------------------------------------------------------------------------
     // Domain methods — status transitions + lockout tracking
     // ---------------------------------------------------------------------------

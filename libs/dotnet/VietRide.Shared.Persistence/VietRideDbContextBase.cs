@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Persistence.Naming;
@@ -9,7 +10,7 @@ namespace VietRide.Shared.Persistence;
 /// Base DbContext for every VietRide service.
 /// - Applies snake_case naming convention to all tables/columns.
 /// - Auto-populates CreatedAt/UpdatedAt for IAuditable entities on SaveChanges.
-/// - Registers OutboxMessage DbSet so every service inherits the outbox table.
+/// - Registers OutboxEvent DbSet so every service inherits the outbox table.
 public abstract class VietRideDbContextBase : DbContext
 {
     private readonly IClock _clock;
@@ -21,25 +22,32 @@ public abstract class VietRideDbContextBase : DbContext
     }
 
     /// Outbox table — every service that publishes events writes here in same transaction.
-    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+    public DbSet<OutboxEvent> OutboxEvents => Set<OutboxEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
-        modelBuilder.Entity<OutboxMessage>(b =>
+        modelBuilder.HasPostgresEnum("outbox_event_status", Enum.GetNames<OutboxEventStatus>());
+
+        modelBuilder.Entity<OutboxEvent>(b =>
         {
-            b.ToTable("outbox_messages");
+            b.ToTable("outbox_events");
             b.HasKey(x => x.Id);
-            b.Property(x => x.Id).ValueGeneratedNever();
-            b.Property(x => x.OccurredAt).IsRequired();
-            b.Property(x => x.Type).IsRequired().HasMaxLength(200);
+            b.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
+            b.Property(x => x.EventType).IsRequired().HasMaxLength(100);
             b.Property(x => x.Payload).HasColumnType("jsonb").IsRequired();
-            b.Property(x => x.ProcessedAt);
+            b.Property(x => x.Status)
+                .HasColumnType("outbox_event_status")
+                .HasDefaultValue(OutboxEventStatus.PENDING)
+                .IsRequired();
             b.Property(x => x.RetryCount).HasDefaultValue(0);
             b.Property(x => x.LastError);
-            b.HasIndex(x => new { x.ProcessedAt, x.OccurredAt })
-                .HasDatabaseName("ix_outbox_messages_processed_at_occurred_at");
+            b.Property(x => x.CreatedAt).HasDefaultValueSql("now()").IsRequired();
+            b.Property(x => x.PublishedAt);
+            b.HasIndex(x => new { x.Status, x.CreatedAt })
+                .HasDatabaseName("idx_outbox_events_status_created")
+                .HasFilter("status IN ('PENDING', 'PUBLISHING', 'FAILED')");
         });
 
         modelBuilder.ApplySnakeCaseNaming();

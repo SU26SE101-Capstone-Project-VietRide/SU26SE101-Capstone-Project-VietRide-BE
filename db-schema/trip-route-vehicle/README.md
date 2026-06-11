@@ -6,7 +6,9 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 
 - **Database:** `vietride_trip`
 - **Framework:** .NET Core 8 + EF Core 8
-- **Extensions:** `pgcrypto`
+- **Extensions:** `pgcrypto`, `unaccent`, `pg_trgm`
+  - `unaccent` backs Day-7 accent-insensitive station search (`unaccent(name) ILIKE unaccent('%' || q || '%')`).
+  - `pg_trgm` is enabled only because the canonical schema keeps the deferred `idx_stations_name_trgm ... gin_trgm_ops WHERE FALSE` placeholder; Day 7 does not enable trigram similarity search.
 - **Hangfire schema:** `hangfire.*` trong cùng DB này. Jobs: auto-generate Trip (CN 23:00 + on-create), auto-BOARDING 30 phút trước departure, auto-COMPLETED fallback +30 phút sau ETA, delayed detection.
 
 ## Entity List

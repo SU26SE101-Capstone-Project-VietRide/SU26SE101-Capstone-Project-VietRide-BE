@@ -1,0 +1,297 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Microsoft.Extensions.Logging;
+using VietRide.Booking.Application.Abstractions.ServiceClients;
+
+namespace VietRide.Booking.Infrastructure.Http;
+
+/// <summary>
+/// HTTP client implementation for the Trip inter-service seam.
+/// Implements <see cref="ITripServiceClient"/> per BSOT §3.5 line 935
+/// (impl at Infrastructure/Http/, interface at Application/Abstractions/ServiceClients/).
+/// Seam shapes are FROZEN (BSOT §13 row 1.8.0, API Contract lines 1065-1179).
+/// </summary>
+public sealed class TripServiceClient : ITripServiceClient
+{
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    private readonly HttpClient _httpClient;
+    private readonly ILogger<TripServiceClient> _logger;
+
+    public TripServiceClient(HttpClient httpClient, ILogger<TripServiceClient> logger)
+    {
+        _httpClient = httpClient;
+        _logger = logger;
+    }
+
+    /// <inheritdoc/>
+    public async Task<TripSnapshot?> GetTripSnapshotAsync(
+        Guid tripId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var response = await _httpClient
+                .GetAsync($"/internal/v1/trips/{tripId:D}", cancellationToken)
+                .ConfigureAwait(false);
+
+            if (response.StatusCode == HttpStatusCode.NotFound)
+                return null;
+
+            response.EnsureSuccessStatusCode();
+
+            return await response.Content
+                .ReadFromJsonAsync<TripSnapshot>(JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<LockSeatsOutcome> LockSeatsAsync(
+        Guid tripId,
+        IReadOnlyList<string> seatNumbers,
+        Guid holdOwnerId,
+        string idempotencyKey,
+        int? ttlSeconds = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var body = new LockSeatsRequest(seatNumbers, holdOwnerId, ttlSeconds);
+            using var request = BuildJsonRequest(
+                HttpMethod.Post,
+                $"/internal/v1/trips/{tripId:D}/lock-seats",
+                body,
+                idempotencyKey);
+
+            using var response = await _httpClient.SendAsync(request, cancellationToken)
+                .ConfigureAwait(false);
+
+            return response.StatusCode switch
+            {
+                HttpStatusCode.OK => await ReadLockSuccessAsync(response, cancellationToken)
+                    .ConfigureAwait(false),
+
+                HttpStatusCode.NotFound => new LockSeatsOutcome.TripNotFound(),
+
+                HttpStatusCode.Conflict => await ReadLockConflictAsync(response, cancellationToken)
+                    .ConfigureAwait(false),
+
+                _ => new LockSeatsOutcome.TransportError(
+                    $"Trip service returned unexpected status {(int)response.StatusCode}."),
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return new LockSeatsOutcome.TransportError(
+                $"Trip service transport failure: {ex.Message}");
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> BookSeatsAsync(
+        Guid tripId,
+        Guid seatLockToken,
+        Guid bookingId,
+        IReadOnlyList<PassengerSeatAssignment> passengerSeatAssignments,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var body = new BookSeatsRequest(
+                seatLockToken,
+                bookingId,
+                passengerSeatAssignments
+                    .Select(a => new BookSeatAssignmentDto(a.PassengerId, a.SeatNumber))
+                    .ToList());
+
+            using var request = BuildJsonRequest(
+                HttpMethod.Post,
+                $"/internal/v1/trips/{tripId:D}/book-seats",
+                body,
+                idempotencyKey: null);
+
+            using var response = await _httpClient.SendAsync(request, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (response.StatusCode == HttpStatusCode.NoContent)
+                return true;
+
+            if (response.StatusCode == HttpStatusCode.Conflict)
+                return false; // lock expired (BOOKING_SEAT_UNAVAILABLE)
+
+            response.EnsureSuccessStatusCode();
+            return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task ReleaseSeatsAsync(
+        Guid tripId,
+        Guid seatLockToken,
+        IReadOnlyList<string> seatNumbers,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var body = new ReleaseSeatsRequest(seatLockToken, seatNumbers);
+            using var request = BuildJsonRequest(
+                HttpMethod.Post,
+                $"/internal/v1/trips/{tripId:D}/release-seats",
+                body,
+                idempotencyKey: null);
+
+            using var response = await _httpClient.SendAsync(request, cancellationToken)
+                .ConfigureAwait(false);
+
+            // 204 = success; idempotent — ignore 404/409 (lock already released/expired)
+            if (response.StatusCode is HttpStatusCode.NoContent
+                or HttpStatusCode.NotFound
+                or HttpStatusCode.Conflict)
+            {
+                return;
+            }
+
+            response.EnsureSuccessStatusCode();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        // Swallow transport errors — release is best-effort compensation (saga rollback path)
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ReleaseSeatsAsync transport failure for trip {TripId}", tripId);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Private helpers
+    // -----------------------------------------------------------------------
+
+    private static HttpRequestMessage BuildJsonRequest<T>(
+        HttpMethod method,
+        string uri,
+        T body,
+        string? idempotencyKey)
+    {
+        var request = new HttpRequestMessage(method, uri)
+        {
+            Content = new StringContent(
+                JsonSerializer.Serialize(body, JsonOptions),
+                Encoding.UTF8,
+                "application/json"),
+        };
+
+        if (!string.IsNullOrWhiteSpace(idempotencyKey))
+            request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey);
+
+        return request;
+    }
+
+    private static async Task<LockSeatsOutcome> ReadLockSuccessAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        var envelope = await response.Content
+            .ReadFromJsonAsync<ApiEnvelope<LockSeatsData>>(JsonOptions, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (envelope?.Data is null)
+            return new LockSeatsOutcome.TransportError("Trip lock-seats returned null data.");
+
+        var result = new SeatLockResult(
+            envelope.Data.SeatLockToken,
+            envelope.Data.LockedSeats,
+            envelope.Data.ExpiresAt);
+
+        return new LockSeatsOutcome.Success(result);
+    }
+
+    private static async Task<LockSeatsOutcome> ReadLockConflictAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var envelope = await response.Content
+                .ReadFromJsonAsync<ApiErrorEnvelope>(JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+
+            var code = envelope?.Error?.Code ?? string.Empty;
+
+            if (string.Equals(code, "BOOKING_SEAT_UNAVAILABLE", StringComparison.OrdinalIgnoreCase))
+            {
+                var fields = envelope?.Error?.Fields?
+                    .Where(f => f.Field == "seatNumbers")
+                    .SelectMany(f => f.Value is System.Text.Json.JsonElement el
+                        ? el.EnumerateArray().Select(e => e.GetString() ?? string.Empty)
+                        : [])
+                    .ToList() ?? [];
+
+                return new LockSeatsOutcome.SeatUnavailable(fields);
+            }
+
+            return new LockSeatsOutcome.TripNotBookable(
+                envelope?.Error?.Message ?? "Trip is not bookable.");
+        }
+        catch
+        {
+            return new LockSeatsOutcome.TripNotBookable("Trip is not bookable.");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Internal request / response DTOs (not exposed past this file)
+    // -----------------------------------------------------------------------
+
+    private sealed record LockSeatsRequest(
+        IReadOnlyList<string> SeatNumbers,
+        Guid HoldOwnerId,
+        int? TtlSeconds);
+
+    private sealed record BookSeatsRequest(
+        Guid SeatLockToken,
+        Guid BookingId,
+        IReadOnlyList<BookSeatAssignmentDto> PassengerSeatAssignments);
+
+    private sealed record BookSeatAssignmentDto(Guid PassengerId, string SeatNumber);
+
+    private sealed record ReleaseSeatsRequest(
+        Guid SeatLockToken,
+        IReadOnlyList<string> SeatNumbers);
+
+    // ApiResponse<T> envelope shape (success path — BSOT §5.4)
+    private sealed record ApiEnvelope<T>(T? Data);
+
+    // ApiResponse error envelope shape (BSOT §5.5)
+    private sealed record ApiErrorEnvelope(ApiErrorBody? Error);
+
+    private sealed record ApiErrorBody(string Code, string Message, IReadOnlyList<ApiErrorField>? Fields);
+
+    private sealed record ApiErrorField(string Field, object? Value);
+
+    // Lock-seats data payload
+    private sealed record LockSeatsData(
+        Guid SeatLockToken,
+        IReadOnlyList<string> LockedSeats,
+        DateTimeOffset ExpiresAt);
+}

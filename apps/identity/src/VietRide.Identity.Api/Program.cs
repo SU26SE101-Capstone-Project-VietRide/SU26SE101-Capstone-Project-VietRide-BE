@@ -1,9 +1,11 @@
+using DotNetEnv;
 using Serilog;
 using VietRide.Identity.Application.Features.Auth.Register;
 using VietRide.Identity.Infrastructure;
 using VietRide.Identity.Infrastructure.DependencyInjection;
 using VietRide.Identity.Infrastructure.Seed;
 using VietRide.Shared.Application.DependencyInjection;
+using VietRide.Shared.Messaging.DependencyInjection;
 using VietRide.Shared.Persistence.DependencyInjection;
 using VietRide.Shared.Web.DependencyInjection;
 using VietRide.Shared.Web.Health;
@@ -11,6 +13,8 @@ using VietRide.Shared.Web.Middleware;
 using VietRide.Shared.Web.Swagger;
 
 const string ServiceName = "Identity";
+
+Env.NoClobber().TraversePath().Load();
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -37,6 +41,9 @@ builder.Services.AddVietRideMediatRBehaviors(
 
 // Infrastructure: repositories, security services, email stub, Redis OTP rate-limiter.
 builder.Services.AddInfrastructure(builder.Configuration);
+
+// RabbitMQ publisher + Outbox background drainer (publishes integration events).
+builder.Services.AddVietRideMessaging(builder.Configuration);
 
 var app = builder.Build();
 

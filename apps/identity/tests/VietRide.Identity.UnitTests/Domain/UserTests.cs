@@ -107,6 +107,89 @@ public sealed class UserTests
     }
 
     // -------------------------------------------------------------------------
+    // Operator admin factories
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void CreateOperatorAdminPendingEmailVerification_SetsOperatorAdminPendingEmail_WithPasswordAndOperator()
+    {
+        var operatorId = Guid.NewGuid();
+        var user = User.CreateOperatorAdminPendingEmailVerification(
+            "  Operator.Admin@Example.COM  ",
+            TestPhone,
+            "$2a$12$hashedpassword",
+            "Operator Admin",
+            operatorId);
+
+        user.Email.Should().Be("operator.admin@example.com");
+        user.DisplayName.Should().Be("Operator Admin");
+        user.Role.Should().Be(UserRole.OPERATOR_ADMIN);
+        user.Status.Should().Be(UserStatus.PENDING_EMAIL_VERIFICATION);
+        user.Phone.Should().Be(TestPhone);
+        user.PasswordHash.Should().Be("$2a$12$hashedpassword");
+        user.OperatorId.Should().Be(operatorId);
+    }
+
+    [Fact]
+    public void CreateOperatorAdminPendingPassword_SetsOperatorAdminPendingInitialPassword_WithNoPassword()
+    {
+        var operatorId = Guid.NewGuid();
+        var user = User.CreateOperatorAdminPendingPassword(
+            "  Operator.Admin@Example.COM  ",
+            TestPhone,
+            "Operator Admin",
+            operatorId);
+
+        user.Email.Should().Be("operator.admin@example.com");
+        user.DisplayName.Should().Be("Operator Admin");
+        user.Role.Should().Be(UserRole.OPERATOR_ADMIN);
+        user.Status.Should().Be(UserStatus.PENDING_INITIAL_PASSWORD);
+        user.Phone.Should().Be(TestPhone);
+        user.PasswordHash.Should().BeNull();
+        user.OperatorId.Should().Be(operatorId);
+    }
+
+    [Theory]
+    [InlineData(UserRole.DRIVER)]
+    [InlineData(UserRole.ASSISTANT)]
+    [InlineData(UserRole.OPERATOR_STAFF)]
+    public void CreateOperatorScopedPendingPassword_SetsOperatorUserPendingInitialPassword_WithNoPassword(UserRole role)
+    {
+        var operatorId = Guid.NewGuid();
+
+        var user = User.CreateOperatorScopedPendingPassword(
+            "  Operator.User@Example.COM  ",
+            TestPhone,
+            "Operator User",
+            role,
+            operatorId);
+
+        user.Email.Should().Be("operator.user@example.com");
+        user.DisplayName.Should().Be("Operator User");
+        user.Role.Should().Be(role);
+        user.Status.Should().Be(UserStatus.PENDING_INITIAL_PASSWORD);
+        user.Phone.Should().Be(TestPhone);
+        user.PasswordHash.Should().BeNull();
+        user.OperatorId.Should().Be(operatorId);
+    }
+
+    [Theory]
+    [InlineData(UserRole.PASSENGER)]
+    [InlineData(UserRole.SYSTEM_ADMIN)]
+    public void CreateOperatorScopedPendingPassword_WhenRoleIsNotOperatorScoped_ThrowsValidationError(UserRole role)
+    {
+        var act = () => User.CreateOperatorScopedPendingPassword(
+            "operator.user@example.com",
+            TestPhone,
+            "Operator User",
+            role,
+            Guid.NewGuid());
+
+        act.Should().Throw<IdentityDomainException>()
+            .Which.ErrorCode.Should().Be("VALIDATION_ERROR");
+    }
+
+    // -------------------------------------------------------------------------
     // VerifyEmail
     // -------------------------------------------------------------------------
 

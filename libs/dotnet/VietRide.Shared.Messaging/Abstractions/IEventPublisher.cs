@@ -8,7 +8,8 @@ namespace VietRide.Shared.Messaging.Abstractions;
 /// </summary>
 /// <remarks>
 /// Application/domain code SHOULD NOT call this directly — write the event
-/// to <c>OutboxMessage</c> inside the same DbContext transaction and let
+/// to <c>OutboxEvent</c> inside the same DbContext transaction and let
+
 /// <c>OutboxBackgroundService</c> drain it. This interface is exposed so
 /// the outbox worker (and integration tests) can publish.
 /// </remarks>
@@ -24,7 +25,7 @@ public interface IEventPublisher
     /// <summary>
     /// Publish a pre-serialized envelope. Used by the outbox worker which
     /// has the JSON payload + routing key already on the
-    /// <c>OutboxMessage</c> row and avoids re-serializing.
+    /// <c>OutboxEvent</c> row and avoids re-serializing.
     /// </summary>
     Task PublishRawAsync(
         string routingKey,

@@ -18,6 +18,82 @@ npx newman run docs/api/postman/vietride.postman_collection.json \
   -e docs/api/postman/vietride.local.postman_environment.json
 ```
 
+Day-6 operator onboarding needs local-only OTP / SET_INITIAL_PASSWORD token lookup because those
+secrets are intentionally not returned by production API responses. For a self-contained local
+Day-6 audit run, use the helper wrapper instead of pasting tokens manually:
+
+```bash
+node scripts/run-day6-newman-local.js
+```
+
+The helper binds only `127.0.0.1`, reads the local dev database, mints a short-lived SYSTEM_ADMIN
+JWT from the dev Identity key, and passes `localHarnessEnabled=true` to Newman. The helper requests
+inside the cumulative collection are skipped unless that variable is enabled, so the normal full
+collection remains runnable with externally supplied secrets/placeholders.
+
+Day-7 station/stop adversarial cases are covered by the deterministic local harness below, so the
+collection no longer depends on pre-supplied reviewer values for the required cross-operator and
+non-approved checks:
+
+```bash
+node scripts/run-day7-newman-local.js
+# or
+npm run postman:day7:local
+```
+
+The helper seeds local-only Identity/Trip data, mints short-lived JWTs from the dev Identity key,
+and provides the required variables at runtime. Never commit real token values.
+
+Day-8 route/route-stop/fare-template/alternative-route adversarial cases are covered by a matching
+local harness. It seeds deterministic local Identity/Trip records, mints short-lived JWTs in-process,
+and runs only the cumulative collection's Day-8 folder through the Gateway (`http://localhost:3000`):
+
+```bash
+node scripts/run-day8-newman-local.js
+# or
+npm run postman:day8:local
+```
+
+The Day-8 helper seeds/mints the folder's required runtime values automatically, including
+`operatorAdminAccessToken`, `operatorUserAccessToken`, `nonApprovedOperatorAccessToken`,
+`operatorId`, `day8OriginStationId`, `day8DestinationStationId`,
+`day8AlternativeDestinationStationId`, `day8MissingStationId`, `day8StopId`,
+`day8SecondStopId`, and `day8CrossOperatorRouteId`. Never commit real token values.
+
+Day-9 vehicle/driver-schedule adversarial cases use the same local-harness pattern. It seeds
+approved + second-operator Identity/Trip data, mints short-lived JWTs in-process, and runs only the
+cumulative collection's Day-9 folder through the Gateway (`http://localhost:3000`):
+
+```bash
+node scripts/run-day9-newman-local.js
+# or
+npm run postman:day9:local
+```
+
+The Day-9 helper supplies `operatorAdminAccessToken`, `operatorUserAccessToken`,
+`day9OtherOperatorAccessToken`, `operatorId`, `day9RouteId`, `day9CrossOperatorVehicleId`,
+`day9StandardVehicleTypeId`, `day9UnknownVehicleTypeId`, `day9DriverUserId`, and
+`day9AssistantUserId`. The folder verifies the 3 system VehicleType seed rows (45/9/40), Vehicle
+happy path and validation errors, tenant-hidden Vehicle reads, and DriverSchedule conflict handling.
+Never commit real token values.
+
+If you run the Day-8 folder manually without the helper, provide equivalent local values:
+
+- `operatorAdminAccessToken` — a valid `OPERATOR_ADMIN` JWT for an `APPROVED`, active operator.
+- `operatorUserAccessToken` — a valid operator user JWT for the same approved operator.
+- `nonApprovedOperatorAccessToken` — a valid operator JWT for a non-`APPROVED` or inactive operator;
+  the request must return exact `403 FORBIDDEN`.
+- `operatorId` — the approved operator id that owns the Day-8 test data.
+- `day8OriginStationId` and `day8DestinationStationId` — two active Station ids available to the
+  approved operator; the origin/destination equality case must return `422`.
+- `day8AlternativeDestinationStationId` — an active Station id used by AlternativeRoute create cases.
+- `day8MissingStationId` — a syntactically valid Station id that does not exist; the request must
+  return exact `404 STATION_NOT_FOUND`.
+- `day8StopId` and `day8SecondStopId` — active Stop ids owned by the approved operator and valid for
+  the Day-8 route-stop / alternative-route flow.
+- `day8CrossOperatorRouteId` — a Route id owned by another operator; the request must return exact
+  `404 ROUTE_NOT_FOUND`.
+
 Or import both files into the Postman app (Collection + Environment) and run the folders.
 
 ## Notes

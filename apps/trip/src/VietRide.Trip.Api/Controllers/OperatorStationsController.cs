@@ -1,0 +1,72 @@
+using System.Text.Json;
+using MediatR;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Primitives;
+using VietRide.Trip.Api.Controllers.Requests;
+using VietRide.Trip.Application.Features.Stations;
+
+namespace VietRide.Trip.Api.Controllers;
+
+[ApiController]
+[Route("v1/operator/stations")]
+public sealed class OperatorStationsController : ControllerBase
+{
+    private const string OperatorRoles = "OPERATOR_STAFF,OPERATOR_ADMIN";
+
+    private readonly IMediator mediator;
+
+    public OperatorStationsController(IMediator mediator)
+    {
+        this.mediator = mediator;
+    }
+
+    [HttpPost]
+    [Authorize(Roles = OperatorRoles)]
+    [ProducesResponseType(typeof(ApiResponse<CreateOrLinkOperatorStationResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<CreateOrLinkOperatorStationResponse>), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<CreateOrLinkOperatorStationResponse>> PostAsync(
+        [FromBody] CreateOrLinkOperatorStationRequest request,
+        CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required to manage operator stations.");
+
+        var isLinkBranch = request.StationId.HasValue;
+        var command = new CreateOrLinkOperatorStationCommand(
+            operatorId,
+            request.StationId,
+            request.Name,
+            request.City,
+            request.Province,
+            request.Latitude,
+            request.Longitude,
+            request.AddressStreet,
+            isLinkBranch ? null : request.ContactPhone,
+            request.ContactEmail,
+            Serialize(request.OperatingHours),
+            Serialize(request.Facilities),
+            request.SupportsShuttle,
+            request.DisplayNameOverride,
+            request.CounterLocation,
+            isLinkBranch ? request.ContactPhone : null,
+            request.Instructions);
+
+        var response = await mediator.Send(command, cancellationToken);
+        if (response.Warning is not null)
+        {
+            return Ok(response);
+        }
+
+        return request.StationId.HasValue ? Ok(response) : StatusCode(StatusCodes.Status201Created, response);
+    }
+
+    private static string? Serialize(JsonElement? value)
+        => value is null || value.Value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null
+            ? null
+            : value.Value.GetRawText();
+}

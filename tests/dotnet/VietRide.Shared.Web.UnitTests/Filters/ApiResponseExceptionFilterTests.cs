@@ -74,6 +74,24 @@ public sealed class ApiResponseExceptionFilterTests
     }
 
     [Fact]
+    public void CodedValidationException_Maps_To_422_With_ErrorCode_And_Fields()
+    {
+        var filter = CreateFilter();
+        var errors = new[] { new ValidationError("orderIndex", "Order index is already used.") };
+        var ctx = BuildContext(new CodedValidationException("ROUTE_STOP_ORDER_CONFLICT", "Route stop order index is already used.", errors));
+
+        filter.OnException(ctx);
+
+        var result = ctx.Result.Should().BeOfType<ObjectResult>().Subject;
+        result.StatusCode.Should().Be(422);
+
+        var envelope = result.Value.Should().BeOfType<ApiResponse>().Subject;
+        envelope.Error.Code.Should().Be("ROUTE_STOP_ORDER_CONFLICT");
+        envelope.Error.Fields.Should().HaveCount(1);
+        envelope.Error.Fields![0].Field.Should().Be("orderIndex");
+    }
+
+    [Fact]
     public void NotFoundException_Maps_To_404()
     {
         var filter = CreateFilter();
@@ -85,6 +103,38 @@ public sealed class ApiResponseExceptionFilterTests
         result.StatusCode.Should().Be(404);
         var envelope = result.Value.Should().BeOfType<ApiResponse>().Subject;
         envelope.Error.Code.Should().Be("RESOURCE_NOT_FOUND");
+    }
+
+    [Theory]
+    [InlineData("STATION_NOT_FOUND")]
+    [InlineData("STOP_NOT_FOUND")]
+    public void CodedNotFoundException_Maps_To_404_With_Caller_ErrorCode(string errorCode)
+    {
+        var filter = CreateFilter();
+        var ctx = BuildContext(new CodedNotFoundException(errorCode, "Resource was not found"));
+
+        filter.OnException(ctx);
+
+        var result = ctx.Result.Should().BeOfType<ObjectResult>().Subject;
+        result.StatusCode.Should().Be(404);
+        var envelope = result.Value.Should().BeOfType<ApiResponse>().Subject;
+        envelope.StatusCode.Should().Be(404);
+        envelope.Error.Code.Should().Be(errorCode);
+        envelope.Error.Message.Should().Be("Resource was not found");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("station_not_found")]
+    [InlineData("STATION-NOT-FOUND")]
+    [InlineData("STATION__NOT_FOUND")]
+    [InlineData("STATION_NOT_FOUND_")]
+    public void CodedNotFoundException_Rejects_Invalid_ErrorCode(string errorCode)
+    {
+        var act = () => new CodedNotFoundException(errorCode, "Resource was not found");
+
+        act.Should().Throw<ArgumentException>().WithParameterName("errorCode");
     }
 
     [Fact]

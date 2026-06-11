@@ -1,10 +1,13 @@
 using Serilog;
+using VietRide.Shared.Application.DependencyInjection;
 using VietRide.Shared.Persistence.DependencyInjection;
 using VietRide.Shared.Web.DependencyInjection;
 using VietRide.Shared.Web.Health;
 using VietRide.Shared.Web.Middleware;
 using VietRide.Shared.Web.Swagger;
+using VietRide.Trip.Application;
 using VietRide.Trip.Infrastructure;
+using VietRide.Trip.Infrastructure.DependencyInjection;
 
 const string ServiceName = "Trip";
 
@@ -18,6 +21,9 @@ builder.Host.UseSerilog((ctx, _, lc) => lc
 
 builder.Services.AddVietRideSharedWeb(builder.Configuration, ServiceName);
 builder.Services.AddVietRideDbContext<TripDbContext>(builder.Configuration);
+builder.Services.AddVietRideMediatRBehaviors(
+    handlerAssemblies: [typeof(ApplicationAssemblyMarker).Assembly]);
+builder.Services.AddInfrastructure(builder.Configuration);
 
 var app = builder.Build();
 

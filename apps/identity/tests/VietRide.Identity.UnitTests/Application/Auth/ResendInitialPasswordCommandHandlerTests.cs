@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
@@ -8,6 +9,7 @@ using VietRide.Identity.Domain.Enums;
 using VietRide.Identity.Domain.Exceptions;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Identity.UnitTests.Application.Auth;
 
@@ -51,7 +53,16 @@ public sealed class ResendInitialPasswordCommandHandlerTests
         emailService.Sent.Should().ContainSingle();
         emailService.Sent[0].To.Should().Be(user.Email);
         emailService.Sent[0].Info.SetInitialPasswordUrl.Should().EndWith("new-token");
-        activityLogs.Entities.Should().ContainSingle(l => l.Action == ActivityLogAction.RESEND_INITIAL_PASSWORD);
+        var activityLog = activityLogs.Entities.Should()
+            .ContainSingle(l => l.Action == ActivityLogAction.RESEND_INITIAL_PASSWORD)
+            .Subject;
+        activityLog.UserId.Should().Be(callerId);
+        using var metadata = JsonDocument.Parse(activityLog.Metadata!);
+        metadata.RootElement.GetProperty("operatorId").GetGuid().Should().Be(operatorId);
+        metadata.RootElement.GetProperty("actorUserId").GetGuid().Should().Be(callerId);
+        metadata.RootElement.GetProperty("callerUserId").GetGuid().Should().Be(callerId);
+        metadata.RootElement.GetProperty("targetUserId").GetGuid().Should().Be(user.Id);
+        metadata.RootElement.GetProperty("source").GetString().Should().Be("RESEND_INITIAL_PASSWORD");
     }
 
     [Fact]
@@ -162,14 +173,53 @@ public sealed class ResendInitialPasswordCommandHandlerTests
         ex.Which.ErrorCode.Should().Be("FORBIDDEN");
     }
 
+    [Theory]
+    [InlineData(OperatorRegistrationStatus.SUSPENDED)]
+    [InlineData(OperatorRegistrationStatus.REJECTED)]
+    public async Task Handle_NonApprovedOperator_ThrowsForbiddenBeforeTokenEmailOrActivityLogSideEffects(
+        OperatorRegistrationStatus status)
+    {
+        var operatorId = Guid.NewGuid();
+        var user = CreateOperatorPendingUser(operatorId);
+        var oldToken = EmailVerificationToken.Create(
+            user.Id,
+            EmailVerificationPurpose.SET_INITIAL_PASSWORD,
+            "old-token",
+            Now.AddHours(1));
+        var sut = CreateHandler(
+            [user],
+            [oldToken],
+            out var tokens,
+            out var activityLogs,
+            out var emailService,
+            status);
+
+        var act = () => sut.Handle(
+            new ResendInitialPasswordCommand(
+                user.Id,
+                Guid.NewGuid(),
+                UserRole.OPERATOR_ADMIN.ToString(),
+                operatorId),
+            CancellationToken.None);
+
+        var ex = await act.Should().ThrowAsync<ForbiddenException>();
+        ex.Which.ErrorCode.Should().Be("FORBIDDEN");
+        oldToken.UsedAt.Should().BeNull();
+        tokens.Entities.Should().ContainSingle();
+        emailService.Sent.Should().BeEmpty();
+        activityLogs.Entities.Should().BeEmpty();
+    }
+
     private static ResendInitialPasswordCommandHandler CreateHandler(
         IReadOnlyCollection<User> users,
         IReadOnlyCollection<EmailVerificationToken> initialTokens,
         out FakeEmailVerificationTokenRepository tokens,
         out FakeActivityLogRepository activityLogs,
-        out CapturingEmailService emailService)
+        out CapturingEmailService emailService,
+        OperatorRegistrationStatus operatorStatus = OperatorRegistrationStatus.APPROVED)
     {
         var userRepository = new FakeUserRepository(users);
+        var operatorRepository = new FakeOperatorRepository(operatorStatus);
         tokens = new FakeEmailVerificationTokenRepository(initialTokens);
         activityLogs = new FakeActivityLogRepository();
         emailService = new CapturingEmailService();
@@ -180,7 +230,8 @@ public sealed class ResendInitialPasswordCommandHandlerTests
             activityLogs,
             new FixedInitialPasswordTokenService(),
             emailService,
-            new FixedClock());
+            new FixedClock(),
+            operatorRepository);
     }
 
     private static User CreateOperatorPendingUser(Guid operatorId)
@@ -261,6 +312,40 @@ public sealed class ResendInitialPasswordCommandHandlerTests
         public IQueryable<User> Query() => _users.AsQueryable();
 
         public IQueryable<User> QueryNoTracking() => _users.AsQueryable();
+    }
+
+    private sealed class FakeOperatorRepository : IOperatorRepository
+    {
+        private readonly Operator _operator;
+
+        public FakeOperatorRepository(OperatorRegistrationStatus status)
+        {
+            _operator = (Operator)Activator.CreateInstance(typeof(Operator), nonPublic: true)!;
+            typeof(Operator).GetProperty(nameof(Operator.RegistrationStatus))!.SetValue(_operator, status);
+        }
+
+        public Task<Operator?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<Operator?>(_operator);
+
+        public Task<Operator?> GetByBusinessRegistrationNumberAsync(
+            string businessRegistrationNumber,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<Operator?>(null);
+
+        public Task<Operator?> GetByTaxCodeAsync(string taxCode, CancellationToken cancellationToken = default)
+            => Task.FromResult<Operator?>(null);
+
+        public Task<PagedResult<Operator>> ListAsync(QueryOptions options, OperatorRegistrationStatus? status, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<Operator> AddAsync(Operator entity, CancellationToken cancellationToken = default) => Task.FromResult(entity);
+
+        public void Update(Operator entity) { }
+
+        public void Remove(Operator entity) { }
+
+        public IQueryable<Operator> Query() => Array.Empty<Operator>().AsQueryable();
+
+        public IQueryable<Operator> QueryNoTracking() => Array.Empty<Operator>().AsQueryable();
     }
 
     private sealed class FakeEmailVerificationTokenRepository : IEmailVerificationTokenRepository

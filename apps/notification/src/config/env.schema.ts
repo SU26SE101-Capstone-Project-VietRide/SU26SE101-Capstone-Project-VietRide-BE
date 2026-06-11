@@ -52,12 +52,12 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
     (postgresHost && postgresPort && postgresUser && postgresPassword && notificationDb
       ? `postgresql://${postgresUser}:${postgresPassword}@${postgresHost}:${postgresPort}/${notificationDb}`
       : undefined);
+  const redisUrl = raw.REDIS_URL ?? `redis://${redisHost}:${redisPort}`;
   const rabbitMqUrl =
     raw.RABBITMQ_URL ??
     (rabbitHost && rabbitPort && rabbitUser && rabbitPassword
       ? `amqp://${rabbitUser}:${rabbitPassword}@${rabbitHost}:${rabbitPort}`
       : undefined);
-  const redisUrl = raw.REDIS_URL ?? `redis://${redisHost}:${redisPort}`;
 
   if (databaseUrl) process.env.DATABASE_URL = databaseUrl;
   process.env.REDIS_URL = redisUrl;

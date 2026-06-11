@@ -259,6 +259,168 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
+  it.each(['OPERATOR_ADMIN', 'OPERATOR_STAFF'] as const)(
+    'routes %s requests to the operator profile route',
+    async (role) => {
+      const upstreamHandler = arrangeProxyPass();
+      const signer = {
+        sign: jest.fn().mockResolvedValue('internal-token'),
+      } as unknown as InternalJwtSigner;
+      const handler = createProxyHandler(env, signer);
+      const authorization = await makeAuthorizationHeader({
+        sub: 'operator-user-1',
+        role,
+        operatorId: 'operator-1',
+      });
+      const req = makeRequest(
+        '/v1/operator/profile',
+        {
+          authorization,
+          'x-request-id': `req-profile-${role.toLowerCase()}`,
+        },
+        'GET',
+      );
+      const res = makeResponse();
+      const next = jest.fn() as NextFunction;
+
+      await handler(req, res, next);
+
+      expect(signer.sign).toHaveBeenCalledWith({
+        sub: 'operator-user-1',
+        reqId: `req-profile-${role.toLowerCase()}`,
+        role,
+        operatorId: 'operator-1',
+      });
+      expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+        expect.objectContaining({ target: env.IDENTITY_BASE_URL }),
+      );
+      expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
+      expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+      expect(res.status).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['GET', '/v1/stations/search?q=Mien%20Tay'],
+    ['POST', '/v1/operator/stations'],
+    ['GET', '/v1/operator/stops'],
+    ['POST', '/v1/operator/stops'],
+    ['PATCH', '/v1/operator/stops/11111111-1111-1111-1111-111111111111'],
+  ] as const)('routes %s %s to Trip with operator user context claims', async (method, path) => {
+    const upstreamHandler = arrangeProxyPass();
+    const signer = {
+      sign: jest.fn().mockResolvedValue('internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({
+      sub: 'operator-admin-1',
+      role: 'OPERATOR_ADMIN',
+      operatorId: 'operator-1',
+    });
+    const req = makeRequest(path, { authorization, 'x-request-id': 'req-trip-operator' }, method);
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(signer.sign).toHaveBeenCalledWith({
+      sub: 'operator-admin-1',
+      reqId: 'req-trip-operator',
+      role: 'OPERATOR_ADMIN',
+      operatorId: 'operator-1',
+    });
+    expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+      expect.objectContaining({ target: env.TRIP_BASE_URL }),
+    );
+    expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
+    expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('allows OPERATOR_STAFF through the Gateway for stop reads and writes to Trip', async () => {
+    const upstreamHandler = arrangeProxyPass();
+    const signer = {
+      sign: jest.fn().mockResolvedValue('internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({
+      sub: 'operator-staff-1',
+      role: 'OPERATOR_STAFF',
+      operatorId: 'operator-1',
+    });
+    const req = makeRequest(
+      '/v1/operator/stops/11111111-1111-1111-1111-111111111111',
+      { authorization, 'x-request-id': 'req-trip-staff' },
+      'PATCH',
+    );
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(signer.sign).toHaveBeenCalledWith({
+      sub: 'operator-staff-1',
+      reqId: 'req-trip-staff',
+      role: 'OPERATOR_STAFF',
+      operatorId: 'operator-1',
+    });
+    expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+      expect.objectContaining({ target: env.TRIP_BASE_URL }),
+    );
+    expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 FORBIDDEN for non-operator roles on Day 7 Trip operator routes', async () => {
+    const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({ sub: 'passenger-1', role: 'PASSENGER' });
+    const req = makeRequest('/v1/operator/stops', {
+      authorization,
+      'x-request-id': 'req-trip-role',
+    });
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 403,
+      error: { code: 'FORBIDDEN' },
+      meta: { traceId: 'req-trip-role' },
+    });
+    expect(signer.sign).not.toHaveBeenCalled();
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 FORBIDDEN for other roles on the operator profile route', async () => {
+    const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({ sub: 'passenger-1', role: 'PASSENGER' });
+    const req = makeRequest('/v1/operator/profile', {
+      authorization,
+      'x-request-id': 'req-profile-role',
+    });
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 403,
+      error: { code: 'FORBIDDEN' },
+      meta: { traceId: 'req-profile-role' },
+    });
+    expect(signer.sign).not.toHaveBeenCalled();
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['/v1/admin/operators', env.IDENTITY_BASE_URL],
     ['/v1/admin/operators/11111111-1111-1111-1111-111111111111/approve', env.IDENTITY_BASE_URL],
@@ -291,6 +453,31 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
     expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
     expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
     expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 FORBIDDEN for non-PASSENGER roles on booking routes', async () => {
+    const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({ sub: 'admin-1', role: 'SYSTEM_ADMIN' });
+    const req = makeRequest('/v1/bookings', {
+      authorization,
+      'x-request-id': 'req-booking-role',
+    });
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 403,
+      error: { code: 'FORBIDDEN' },
+      meta: { traceId: 'req-booking-role' },
+    });
+    expect(signer.sign).not.toHaveBeenCalled();
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
   });
 
   it('returns 403 AUTH_PHONE_REQUIRED for a jose-verified boolean false hasPhone claim', async () => {

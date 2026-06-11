@@ -4,10 +4,12 @@ using NSubstitute;
 using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
 using VietRide.Identity.Application.Abstractions.Repositories;
+using VietRide.Identity.Application.Events;
 using VietRide.Identity.Application.Features.Auth.Register;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 using Xunit;
@@ -28,9 +30,10 @@ public sealed class RegisterCommandHandlerTests
         IPasswordHasher hasher,
         IEmailService email,
         IOtpRateLimiter rateLimiter,
-        IClock clock)
+        IClock clock,
+        IIntegrationEventOutbox outbox)
     {
-        return new RegisterCommandHandler(users, tokens, hasher, email, rateLimiter, clock,
+        return new RegisterCommandHandler(users, tokens, hasher, email, rateLimiter, clock, outbox,
             Substitute.For<ILogger<RegisterCommandHandler>>());
     }
 
@@ -40,7 +43,8 @@ public sealed class RegisterCommandHandlerTests
         IPasswordHasher hasher,
         IEmailService email,
         IOtpRateLimiter rateLimiter,
-        IClock clock) MakeDefaults()
+        IClock clock,
+        IIntegrationEventOutbox outbox) MakeDefaults()
     {
         var users = Substitute.For<IUserRepository>();
         var tokens = Substitute.For<IEmailVerificationTokenRepository>();
@@ -48,6 +52,7 @@ public sealed class RegisterCommandHandlerTests
         var email = Substitute.For<IEmailService>();
         var rateLimiter = Substitute.For<IOtpRateLimiter>();
         var clock = Substitute.For<IClock>();
+        var outbox = Substitute.For<IIntegrationEventOutbox>();
 
         clock.UtcNow.Returns(FrozenNow);
         hasher.Hash(Arg.Any<string>()).Returns("$2a$12$fakehash");
@@ -58,7 +63,7 @@ public sealed class RegisterCommandHandlerTests
         tokens.TryAddAsync(Arg.Any<EmailVerificationToken>(), Arg.Any<CancellationToken>())
             .Returns(true);
 
-        return (users, tokens, hasher, email, rateLimiter, clock);
+        return (users, tokens, hasher, email, rateLimiter, clock, outbox);
     }
 
     // -------------------------------------------------------------------------
@@ -68,8 +73,8 @@ public sealed class RegisterCommandHandlerTests
     [Fact]
     public async Task Handle_HappyPath_Returns201Response()
     {
-        var (users, tokens, hasher, email, rateLimiter, clock) = MakeDefaults();
-        var handler = BuildHandler(users, tokens, hasher, email, rateLimiter, clock);
+        var (users, tokens, hasher, email, rateLimiter, clock, outbox) = MakeDefaults();
+        var handler = BuildHandler(users, tokens, hasher, email, rateLimiter, clock, outbox);
 
         var result = await handler.Handle(
             new RegisterCommand("test@example.com", "password123", "Test User", "0901234567"),
@@ -82,15 +87,53 @@ public sealed class RegisterCommandHandlerTests
     }
 
     [Fact]
-    public async Task Handle_NormalizesLocalPhone_To_E164()
+    public async Task Handle_HappyPath_EnqueuesUserCreatedIntegrationEventWithCamelCasePayload()
     {
-        var (users, tokens, hasher, email, rateLimiter, clock) = MakeDefaults();
+        var (users, tokens, hasher, email, rateLimiter, clock, outbox) = MakeDefaults();
 
         User? capturedUser = null;
         users.AddAsync(Arg.Do<User>(u => capturedUser = u), Arg.Any<CancellationToken>())
             .Returns(ci => ci.Arg<User>());
 
-        var handler = BuildHandler(users, tokens, hasher, email, rateLimiter, clock);
+        string? capturedEventType = null;
+        string? capturedPayload = null;
+        await outbox.EnqueueAsync(
+            Arg.Do<string>(t => capturedEventType = t),
+            Arg.Do<string>(p => capturedPayload = p),
+            Arg.Any<CancellationToken>());
+
+        var handler = BuildHandler(users, tokens, hasher, email, rateLimiter, clock, outbox);
+
+        await handler.Handle(
+            new RegisterCommand("test@example.com", "password123", "Test User", "0901234567"),
+            CancellationToken.None);
+
+        capturedEventType.Should().Be("identity.user.created");
+        capturedPayload.Should().NotBeNull();
+
+        using var doc = System.Text.Json.JsonDocument.Parse(capturedPayload!);
+        var root = doc.RootElement;
+        root.GetProperty("userId").GetGuid().Should().Be(capturedUser!.Id);
+        root.GetProperty("role").GetString().Should().Be(UserRole.PASSENGER.ToString());
+        root.GetProperty("email").GetString().Should().Be("test@example.com");
+        root.GetProperty("createdAt").GetDateTimeOffset().Should().Be(FrozenNow);
+
+        // Deserializes back to the strongly-typed record.
+        var deserialized = System.Text.Json.JsonSerializer.Deserialize<UserCreatedIntegrationEvent>(capturedPayload!);
+        deserialized.Should().NotBeNull();
+        deserialized!.Role.Should().Be("PASSENGER");
+    }
+
+    [Fact]
+    public async Task Handle_NormalizesLocalPhone_To_E164()
+    {
+        var (users, tokens, hasher, email, rateLimiter, clock, outbox) = MakeDefaults();
+
+        User? capturedUser = null;
+        users.AddAsync(Arg.Do<User>(u => capturedUser = u), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.Arg<User>());
+
+        var handler = BuildHandler(users, tokens, hasher, email, rateLimiter, clock, outbox);
 
         await handler.Handle(
             new RegisterCommand("t@e.com", "pass1234", "Name", "0901234567"),
@@ -107,7 +150,7 @@ public sealed class RegisterCommandHandlerTests
     [Fact]
     public async Task Handle_DuplicateEmail_Throws409()
     {
-        var (users, tokens, hasher, email, rateLimiter, clock) = MakeDefaults();
+        var (users, tokens, hasher, email, rateLimiter, clock, outbox) = MakeDefaults();
 
         var existingUser = User.CreatePassenger(
             "dup@example.com",
@@ -116,7 +159,7 @@ public sealed class RegisterCommandHandlerTests
             "Dup");
         users.GetByEmailAsync("dup@example.com", Arg.Any<CancellationToken>()).Returns(existingUser);
 
-        var handler = BuildHandler(users, tokens, hasher, email, rateLimiter, clock);
+        var handler = BuildHandler(users, tokens, hasher, email, rateLimiter, clock, outbox);
 
         var act = () => handler.Handle(
             new RegisterCommand("dup@example.com", "pass1234", "Name", "0901234567"),
@@ -129,7 +172,7 @@ public sealed class RegisterCommandHandlerTests
     [Fact]
     public async Task Handle_DuplicatePhone_Throws409()
     {
-        var (users, tokens, hasher, email, rateLimiter, clock) = MakeDefaults();
+        var (users, tokens, hasher, email, rateLimiter, clock, outbox) = MakeDefaults();
 
         var existingUser = User.CreatePassenger(
             "other@example.com",
@@ -138,7 +181,7 @@ public sealed class RegisterCommandHandlerTests
             "Other");
         users.GetByPhoneAsync("+84901234567", Arg.Any<CancellationToken>()).Returns(existingUser);
 
-        var handler = BuildHandler(users, tokens, hasher, email, rateLimiter, clock);
+        var handler = BuildHandler(users, tokens, hasher, email, rateLimiter, clock, outbox);
 
         var act = () => handler.Handle(
             new RegisterCommand("new@example.com", "pass1234", "Name", "0901234567"),
@@ -154,8 +197,8 @@ public sealed class RegisterCommandHandlerTests
         // Invoke the handler directly with a phone that PhoneNumber.Normalize() cannot parse.
         // FluentValidation is bypassed here (direct handler call), exercising the handler-level
         // BadRequestException("AUTH_PHONE_INVALID_FORMAT", ...) guard in step 1.
-        var (users, tokens, hasher, email, rateLimiter, clock) = MakeDefaults();
-        var handler = BuildHandler(users, tokens, hasher, email, rateLimiter, clock);
+        var (users, tokens, hasher, email, rateLimiter, clock, outbox) = MakeDefaults();
+        var handler = BuildHandler(users, tokens, hasher, email, rateLimiter, clock, outbox);
 
         var act = () => handler.Handle(
             new RegisterCommand("x@x.com", "pass1234", "Name", "not-a-phone"),
@@ -168,12 +211,12 @@ public sealed class RegisterCommandHandlerTests
     [Fact]
     public async Task Handle_RateLimitExceeded_Throws429()
     {
-        var (users, tokens, hasher, email, rateLimiter, clock) = MakeDefaults();
+        var (users, tokens, hasher, email, rateLimiter, clock, outbox) = MakeDefaults();
 
         // Override: rate limit exceeded.
         rateLimiter.TryIncrementAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(false);
 
-        var handler = BuildHandler(users, tokens, hasher, email, rateLimiter, clock);
+        var handler = BuildHandler(users, tokens, hasher, email, rateLimiter, clock, outbox);
 
         var act = () => handler.Handle(
             new RegisterCommand("r@r.com", "pass1234", "Name", "0901234567"),

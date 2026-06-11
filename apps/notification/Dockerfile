@@ -15,6 +15,9 @@ RUN node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('nx.json'
 COPY libs/shared libs/shared
 RUN npm ci --no-audit --no-fund --ignore-scripts
 
+# Build shared workspace libraries that webpack externalizes at runtime.
+RUN npx nx run-many -t build --projects=contracts,nest-common,nest-config,nest-rabbitmq,nest-redis --skip-nx-cache
+
 # Copy sources needed to build notification (Nx will only build referenced projects).
 COPY apps/notification apps/notification
 
@@ -29,6 +32,11 @@ ENV NODE_ENV=production
 # Copy built artifacts.
 COPY --from=build /workspace/dist/apps/notification ./
 COPY --from=build /workspace/node_modules ./node_modules
+# webpack externalizes the @vietride/* shared libs but they live as workspace symlinks
+# (→ /workspace/libs/shared) that don't exist in this stage. Replace those dangling
+# symlinks with the compiled lib packages so require('@vietride/*') resolves at runtime.
+RUN rm -rf node_modules/@vietride
+COPY --from=build /workspace/dist/libs/shared ./node_modules/@vietride
 COPY .env.example ./.env.example
 
 EXPOSE 3002

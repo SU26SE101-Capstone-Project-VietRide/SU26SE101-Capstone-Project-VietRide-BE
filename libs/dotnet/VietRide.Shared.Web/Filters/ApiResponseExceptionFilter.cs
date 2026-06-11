@@ -85,6 +85,12 @@ public sealed class ApiResponseExceptionFilter : IExceptionFilter
             ValidationException v
                 => (422, "VALIDATION_ERROR", v.Message, MapValidationErrors(v.Errors)),
 
+            CodedValidationException v
+                => (422, v.ErrorCode, v.Message, MapValidationErrors(v.Errors)),
+
+            CodedNotFoundException n
+                => (404, n.ErrorCode, n.Message, null),
+
             NotFoundException n
                 => (404, "RESOURCE_NOT_FOUND", n.Message, null),
 
@@ -99,6 +105,9 @@ public sealed class ApiResponseExceptionFilter : IExceptionFilter
 
             TooManyRequestsException t
                 => (429, t.ErrorCode, t.Message, null),
+
+            DomainException { ErrorCode: "SUBSCRIPTION_EXPIRED" } d
+                => (402, d.ErrorCode, d.Message, null),
 
             DomainException d
                 => (422, d.ErrorCode, d.Message, null),
