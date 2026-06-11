@@ -145,7 +145,7 @@ Recommended serial order: 9.0a -> 9.G -> 9.0 -> 9.1 -> 9.2 -> 9.3.
 | 9.0 | done | APPROVE | 2026-06-11 | Strong-Codex re-review approved; build/unit/NetArch/format green; migration apply/down/re-apply verified on PostgreSQL 16; human /verify pending. |
 | 9.1 | done | APPROVE | 2026-06-11 | Approved after 2 patch rounds; owned scope expanded to Vehicle.cs by human; 143 unit/NetArch + 19 integration tests green; human /verify pending. |
 | 9.2 | done | APPROVE | 2026-06-11 | Approved after 2 patch rounds; Trip unit tests/format/build green; full sln integration tests blocked by local PostgreSQL auth; human /verify pending. |
-| 9.3 | todo | - | - | - |
+| 9.3 | done | APPROVE | 2026-06-11 | Reviewer approved; JSON/syntax/diff checks green; Newman local blocked by DB missing Day-9 migration; human /verify pending. |
 
 Legend: todo / in progress / done (reviewer APPROVED + human /verify) / done-with-carryover / blocked
 

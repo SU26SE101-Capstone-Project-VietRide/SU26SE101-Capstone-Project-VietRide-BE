@@ -60,6 +60,23 @@ The Day-8 helper seeds/mints the folder's required runtime values automatically,
 `day8AlternativeDestinationStationId`, `day8MissingStationId`, `day8StopId`,
 `day8SecondStopId`, and `day8CrossOperatorRouteId`. Never commit real token values.
 
+Day-9 vehicle/driver-schedule adversarial cases use the same local-harness pattern. It seeds
+approved + second-operator Identity/Trip data, mints short-lived JWTs in-process, and runs only the
+cumulative collection's Day-9 folder through the Gateway (`http://localhost:3000`):
+
+```bash
+node scripts/run-day9-newman-local.js
+# or
+npm run postman:day9:local
+```
+
+The Day-9 helper supplies `operatorAdminAccessToken`, `operatorUserAccessToken`,
+`day9OtherOperatorAccessToken`, `operatorId`, `day9RouteId`, `day9CrossOperatorVehicleId`,
+`day9StandardVehicleTypeId`, `day9UnknownVehicleTypeId`, `day9DriverUserId`, and
+`day9AssistantUserId`. The folder verifies the 3 system VehicleType seed rows (45/9/40), Vehicle
+happy path and validation errors, tenant-hidden Vehicle reads, and DriverSchedule conflict handling.
+Never commit real token values.
+
 If you run the Day-8 folder manually without the helper, provide equivalent local values:
 
 - `operatorAdminAccessToken` — a valid `OPERATOR_ADMIN` JWT for an `APPROVED`, active operator.
