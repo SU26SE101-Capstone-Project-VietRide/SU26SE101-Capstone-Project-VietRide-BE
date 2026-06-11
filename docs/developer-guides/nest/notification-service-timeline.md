@@ -33,7 +33,7 @@ giu provider interface va fake adapter trong test, nhung khong goi do la product
 - [x] Phase 6 - Parcel/Subscription/Operator Consumers
 - [x] Phase 7 - Push Delivery Pipeline
 - [x] Phase 8 - Email Delivery Pipeline
-- [ ] Phase 9 - Reliability, Retention, Observability
+- [x] Phase 9 - Reliability, Retention, Observability
 - [ ] Phase 10 - Hardening Va Final Acceptance
 
 ---
