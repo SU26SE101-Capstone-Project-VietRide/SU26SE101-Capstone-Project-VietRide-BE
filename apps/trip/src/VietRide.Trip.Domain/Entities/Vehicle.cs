@@ -71,6 +71,18 @@ public sealed class Vehicle : BaseEntity<Guid>, ISoftDeletable, IActivatable
         TotalSeats = totalSeats;
     }
 
+    public void ChangeVehicleType(Guid vehicleTypeId)
+    {
+        ValidateGuid(vehicleTypeId, nameof(vehicleTypeId));
+        VehicleTypeId = vehicleTypeId;
+    }
+
+    public void ChangeLicensePlate(string licensePlate)
+    {
+        ValidateRequired(licensePlate, nameof(licensePlate));
+        LicensePlate = licensePlate.Trim();
+    }
+
     public void UpdateCargoCapacity(decimal? maxCargoWeightKg, decimal? maxCargoVolumeM3)
     {
         ValidateOptionalNonNegative(maxCargoWeightKg, nameof(maxCargoWeightKg));
