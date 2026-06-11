@@ -92,7 +92,7 @@ Stand up the Booking-side of the seat-lock saga: bootstrap the Booking service a
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
 | 12.0 | done | APPROVED | 2026-06-11 | 0 patch rounds; idempotency wiring + NetArchTest baseline; human /verify batched at end of day |
-| 12.1 | todo | — | — | — |
+| 12.1 | done | APPROVED | 2026-06-11 | 1 patch round (BookingCode.Parse guards + crypto RNG); migration apply+rollback verified on empty Postgres 16; human /verify batched at end of day |
 | 12.2 | todo | — | — | — |
 | 12.3 | todo | — | — | — |
 
