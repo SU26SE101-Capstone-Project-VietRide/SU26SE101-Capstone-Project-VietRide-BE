@@ -122,6 +122,7 @@ describe('TrackingDataController REST fallback (e2e)', () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api');
     await app.listen(0);
     port = readListeningPort(app);
   });

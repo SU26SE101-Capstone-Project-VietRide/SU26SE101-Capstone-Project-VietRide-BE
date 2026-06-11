@@ -10,7 +10,9 @@ const PARCEL_RECIPIENT_USER_ID = '33333333-3333-4333-8333-333333333333';
 const UNRELATED_USER_ID = '44444444-4444-4444-8444-444444444444';
 const DRIVER_USER_ID = '55555555-5555-4555-8555-555555555555';
 const INTERNAL_JWT_SECRET = 'test-secret-min-32-chars-aaaaaaaaaaaaaaaa';
-const TIMEOUT_MS = 50;
+const TIMEOUT_MS = 5_000;
+const SLOW_RESPONSE_DELAY_MS = TIMEOUT_MS + 500;
+const TIMEOUT_TEST_TIMEOUT_MS = SLOW_RESPONSE_DELAY_MS + 2_000;
 
 describe('HttpTrackingAuthorizationAdapter (e2e)', () => {
   let server: Server;
@@ -65,14 +67,14 @@ describe('HttpTrackingAuthorizationAdapter (e2e)', () => {
     const result = await adapter.authorizeTripTracking({ userId: DRIVER_USER_ID, role: 'DRIVER' }, timeoutTripId());
 
     expect(result).toEqual({ allowed: false, error: 'TRACKING_AUTH_UNAVAILABLE' });
-  });
+  }, TIMEOUT_TEST_TIMEOUT_MS);
 
   async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url ?? '/', baseUrl);
     await expectInternalJwt(request);
 
     if (url.pathname.includes(timeoutTripId())) {
-      setTimeout(() => response.end(), TIMEOUT_MS * 4);
+      setTimeout(() => response.end(), SLOW_RESPONSE_DELAY_MS);
       return;
     }
 

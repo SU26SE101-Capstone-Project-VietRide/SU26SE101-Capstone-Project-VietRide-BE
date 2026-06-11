@@ -59,6 +59,18 @@ CREATE TYPE notification_delivery_status AS ENUM (
     'PENDING', 'SENT', 'FAILED', 'RETRYING'
 );
 
+CREATE TYPE email_template_key AS ENUM (
+    'AUTH_OTP',
+    'SET_INITIAL_PASSWORD',
+    'PARCEL_DELIVERY_LINK',
+    'OPERATOR_SUBSCRIPTION_NOTICE',
+    'INVOICE_NOTICE'
+);
+
+CREATE TYPE email_delivery_status AS ENUM (
+    'PENDING', 'SENT', 'FAILED', 'RETRYING'
+);
+
 CREATE TYPE device_platform AS ENUM ('IOS', 'ANDROID', 'WEB');
 
 -- =============================================================================
@@ -105,8 +117,33 @@ CREATE TABLE notification_deliveries (
 CREATE INDEX idx_notification_deliveries_notification_id
     ON notification_deliveries (notification_id);
 CREATE INDEX idx_notification_deliveries_status_created_at
-    ON notification_deliveries (status, created_at)
-    WHERE status IN ('PENDING', 'RETRYING', 'FAILED');
+    ON notification_deliveries (status, created_at);
+
+-- -----------------------------------------------------------------------------
+-- email_deliveries (transactional email attempt audit)
+-- -----------------------------------------------------------------------------
+CREATE TABLE email_deliveries (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    notification_id UUID NULL REFERENCES notifications (id) ON DELETE SET NULL,
+    to_email VARCHAR(320) NOT NULL,
+    template_key email_template_key NOT NULL,
+    subject VARCHAR(255) NOT NULL,
+    sanitized_data JSONB NULL,
+    status email_delivery_status NOT NULL DEFAULT 'PENDING',
+    retry_count INT NOT NULL DEFAULT 0,
+    last_error TEXT NULL,
+    provider_message_id VARCHAR(255) NULL,
+    sent_at TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_email_deliveries_notification_id
+    ON email_deliveries (notification_id);
+CREATE INDEX idx_email_deliveries_status_created_at
+    ON email_deliveries (status, created_at);
+CREATE INDEX idx_email_deliveries_to_email_created_at
+    ON email_deliveries (to_email, created_at DESC);
 
 -- =============================================================================
 -- TRIGGERS
@@ -119,6 +156,10 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trg_notification_deliveries_updated_at
     BEFORE UPDATE ON notification_deliveries
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+
+CREATE TRIGGER trg_email_deliveries_updated_at
+    BEFORE UPDATE ON email_deliveries
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 
 -- =============================================================================

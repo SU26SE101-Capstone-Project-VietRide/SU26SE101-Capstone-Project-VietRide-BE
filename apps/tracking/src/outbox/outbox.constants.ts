@@ -8,9 +8,9 @@ export const TRIP_DELAYED_EVENT_TYPE = 'TripDelayed';
 export const OFF_ROUTE_ALERT_EVENT_TYPE = 'OffRouteAlert';
 export const APPROACHING_ALERT_EVENT_TYPE = 'ApproachingAlert';
 
-export const TRACKING_TRIP_DELAYED_ROUTING_KEY = 'tracking.trip.delayed';
-export const TRACKING_OFF_ROUTE_ROUTING_KEY = 'tracking.route.off_route';
-export const TRACKING_APPROACHING_ROUTING_KEY = 'tracking.vehicle.approaching';
+export const TRACKING_TRIP_DELAYED_ROUTING_KEY = 'trip.trip.delayed';
+export const TRACKING_OFF_ROUTE_ROUTING_KEY = 'tracking.gps.off_route';
+export const TRACKING_APPROACHING_ROUTING_KEY = 'tracking.gps.approaching_stop';
 
 export const OUTBOX_EVENT_ROUTING_KEYS: Record<string, string> = {
   [TRIP_DELAYED_EVENT_TYPE]: TRACKING_TRIP_DELAYED_ROUTING_KEY,

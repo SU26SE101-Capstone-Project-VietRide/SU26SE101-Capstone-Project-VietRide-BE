@@ -11,6 +11,7 @@ import { OffRouteService } from './off-route.service';
 import type { RouteGeometryProvider } from './route-geometry.provider';
 
 const TEST_TRIP_ID = '11111111-1111-4111-8111-111111111111';
+const ALERT_RECIPIENT_USER_ID = '66666666-6666-4666-8666-666666666666';
 const FIRST_RECORDED_AT = '2026-06-04T10:00:00.000Z';
 const SHORT_DRIFT_RECORDED_AT = '2026-06-04T10:01:00.000Z';
 const ALERT_RECORDED_AT = '2026-06-04T10:02:01.000Z';
@@ -43,6 +44,7 @@ describe('OffRouteService', () => {
     routeGeometryProvider = {
       getRouteGeometry: jest.fn(async (tripId: string) => ({
         tripId,
+        alertRecipientUserIds: [ALERT_RECIPIENT_USER_ID],
         points: [
           { latitude: 10.7, longitude: 106.6 },
           { latitude: 10.8, longitude: 106.6 },
@@ -117,9 +119,11 @@ describe('OffRouteService', () => {
         eventType: OFF_ROUTE_EVENT_TYPE,
         payload: {
           tripId: TEST_TRIP_ID,
+          userIds: [ALERT_RECIPIENT_USER_ID],
           latitude: 10.75,
           longitude: 106.61,
           distanceMeters: expect.any(Number),
+          durationSeconds: 121,
           detectedAt: ALERT_RECORDED_AT,
         },
       },

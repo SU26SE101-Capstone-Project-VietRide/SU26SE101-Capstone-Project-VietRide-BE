@@ -18,6 +18,7 @@ import {
 export interface TripDelayedPayload {
   tripId: string;
   stopId: string;
+  alertRecipientUserIds?: string[];
   staticEstimatedArrivalTime: string;
   dynamicEstimatedArrivalTime: string;
   delayMinutes: number;
@@ -139,6 +140,7 @@ export class TripDelayService {
     const payload: TripDelayedPayload = {
       tripId: eta.tripId,
       stopId: eta.stopId,
+      ...(stop.alertRecipientUserIds?.length ? { alertRecipientUserIds: stop.alertRecipientUserIds } : {}),
       staticEstimatedArrivalTime: stop.estimatedArrivalTime,
       dynamicEstimatedArrivalTime: eta.estimatedArrivalTime,
       delayMinutes,
@@ -172,8 +174,10 @@ export class TripDelayService {
         payload: {
           tripId: payload.tripId,
           stopId: payload.stopId,
+          ...(payload.alertRecipientUserIds?.length ? { userIds: payload.alertRecipientUserIds } : {}),
           staticEstimatedArrivalTime: payload.staticEstimatedArrivalTime,
           dynamicEstimatedArrivalTime: payload.dynamicEstimatedArrivalTime,
+          etaNew: payload.dynamicEstimatedArrivalTime,
           delayMinutes: payload.delayMinutes,
           detectedAt: payload.detectedAt,
         },

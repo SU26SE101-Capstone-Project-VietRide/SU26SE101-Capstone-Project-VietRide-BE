@@ -15,6 +15,7 @@ import type { BookingDataProvider, PickupBookingSnapshot } from './booking-data.
 const TEST_TRIP_ID = '11111111-1111-4111-8111-111111111111';
 const TEST_STOP_ID = '22222222-2222-4222-8222-222222222222';
 const TEST_BOOKING_ID = '33333333-3333-4333-8333-333333333333';
+const TEST_PASSENGER_USER_ID = '66666666-6666-4666-8666-666666666666';
 
 describe('ApproachingAlertService', () => {
   let service: ApproachingAlertService;
@@ -100,7 +101,8 @@ describe('ApproachingAlertService', () => {
         eventType: APPROACHING_ALERT_EVENT_TYPE,
         payload: {
           tripId: TEST_TRIP_ID,
-          bookingId: TEST_BOOKING_ID,
+          bookingIds: [TEST_BOOKING_ID],
+          userId: TEST_PASSENGER_USER_ID,
           stopId: TEST_STOP_ID,
           etaMinutes: 25,
           wave: APPROACHING_ALERT_WAVE_1,
@@ -125,7 +127,8 @@ describe('ApproachingAlertService', () => {
         eventType: APPROACHING_ALERT_EVENT_TYPE,
         payload: {
           tripId: TEST_TRIP_ID,
-          bookingId: TEST_BOOKING_ID,
+          bookingIds: [TEST_BOOKING_ID],
+          userId: TEST_PASSENGER_USER_ID,
           stopId: TEST_STOP_ID,
           etaMinutes: 8,
           wave: APPROACHING_ALERT_WAVE_2,
@@ -169,6 +172,7 @@ describe('ApproachingAlertService', () => {
   function createBooking(overrides: Partial<PickupBookingSnapshot> = {}): PickupBookingSnapshot {
     return {
       bookingId: TEST_BOOKING_ID,
+      passengerUserId: TEST_PASSENGER_USER_ID,
       stopId: TEST_STOP_ID,
       status: 'CONFIRMED',
       pickupStatus: 'PENDING',

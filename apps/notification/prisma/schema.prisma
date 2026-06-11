@@ -1,0 +1,150 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/notification-prisma-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["vietride_notification"]
+}
+
+enum NotificationType {
+  BOOKING_CONFIRMED
+  BOOKING_CANCELLED
+  BOOKING_DISRUPTED
+  BOOKING_REFUNDED
+  PASSENGER_NO_SHOW
+  TRIP_BOARDING_REMINDER
+  TRIP_VEHICLE_APPROACHING
+  TRIP_ROUTE_CHANGED
+  TRIP_SCHEDULE_CHANGED
+  TRIP_CANCELLED
+  TRIP_DELAYED
+  TRIP_DISRUPTED
+  VEHICLE_SUBSTITUTED
+  VEHICLE_SWAPPED
+  PARCEL_LOADED
+  PARCEL_IN_TRANSIT
+  PARCEL_DELIVERED_PENDING_CONFIRM
+  PARCEL_REJECTED
+  PARCEL_RETURNED
+  WALLET_CREDITED
+  WALLET_DEBITED
+  INCIDENT_REPORTED
+  OFF_ROUTE_ALERT
+  TRIP_DELAYED_ALERT
+  CARGO_NEAR_FULL_ALERT
+  PARCEL_REVIEW_REQUESTED
+  VOUCHER_CONSENT_REQUESTED
+  SUBSCRIPTION_LIMIT_EXCEEDED
+  SUBSCRIPTION_TRIAL_EXPIRING
+  SUBSCRIPTION_EXPIRED
+  SUBSCRIPTION_APPROVED
+  DRIVER_SCHEDULE_EDITED
+  PAYOUT_PROCESSED
+  PAYOUT_FAILED
+
+  @@map("notification_type")
+  @@schema("vietride_notification")
+}
+
+enum NotificationDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  RETRYING
+
+  @@map("notification_delivery_status")
+  @@schema("vietride_notification")
+}
+
+enum EmailTemplateKey {
+  AUTH_OTP
+  SET_INITIAL_PASSWORD
+  PARCEL_DELIVERY_LINK
+  OPERATOR_SUBSCRIPTION_NOTICE
+  INVOICE_NOTICE
+
+  @@map("email_template_key")
+  @@schema("vietride_notification")
+}
+
+enum EmailDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  RETRYING
+
+  @@map("email_delivery_status")
+  @@schema("vietride_notification")
+}
+
+enum DevicePlatform {
+  IOS
+  ANDROID
+  WEB
+
+  @@map("device_platform")
+  @@schema("vietride_notification")
+}
+
+model Notification {
+  id         String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String                 @map("user_id") @db.Uuid
+  type       NotificationType
+  title      String                 @db.VarChar(255)
+  body       String
+  data       Json?
+  readAt     DateTime?              @map("read_at") @db.Timestamptz(6)
+  createdAt  DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  deliveries NotificationDelivery[]
+  emailDeliveries EmailDelivery[]
+
+  @@index([userId, createdAt(sort: Desc)], map: "idx_notifications_user_id_created_at")
+  @@index([type, createdAt(sort: Desc)], map: "idx_notifications_type_created_at")
+  @@map("notifications")
+  @@schema("vietride_notification")
+}
+
+model NotificationDelivery {
+  id             String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  notificationId String                     @map("notification_id") @db.Uuid
+  fcmToken       String                     @map("fcm_token") @db.VarChar(500)
+  platform       DevicePlatform
+  status         NotificationDeliveryStatus @default(PENDING)
+  retryCount     Int                        @default(0) @map("retry_count")
+  lastError      String?                    @map("last_error")
+  sentAt         DateTime?                  @map("sent_at") @db.Timestamptz(6)
+  createdAt      DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime                   @default(now()) @map("updated_at") @db.Timestamptz(6)
+  notification   Notification               @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@index([notificationId], map: "idx_notification_deliveries_notification_id")
+  @@index([status, createdAt], map: "idx_notification_deliveries_status_created_at")
+  @@map("notification_deliveries")
+  @@schema("vietride_notification")
+}
+
+model EmailDelivery {
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  notificationId    String?             @map("notification_id") @db.Uuid
+  toEmail           String              @map("to_email") @db.VarChar(320)
+  templateKey       EmailTemplateKey    @map("template_key")
+  subject           String              @db.VarChar(255)
+  sanitizedData     Json?               @map("sanitized_data")
+  status            EmailDeliveryStatus @default(PENDING)
+  retryCount        Int                 @default(0) @map("retry_count")
+  lastError         String?             @map("last_error")
+  providerMessageId String?             @map("provider_message_id") @db.VarChar(255)
+  sentAt            DateTime?           @map("sent_at") @db.Timestamptz(6)
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime            @default(now()) @map("updated_at") @db.Timestamptz(6)
+  notification      Notification?       @relation(fields: [notificationId], references: [id], onDelete: SetNull)
+
+  @@index([notificationId], map: "idx_email_deliveries_notification_id")
+  @@index([status, createdAt], map: "idx_email_deliveries_status_created_at")
+  @@index([toEmail, createdAt(sort: Desc)], map: "idx_email_deliveries_to_email_created_at")
+  @@map("email_deliveries")
+  @@schema("vietride_notification")
+}

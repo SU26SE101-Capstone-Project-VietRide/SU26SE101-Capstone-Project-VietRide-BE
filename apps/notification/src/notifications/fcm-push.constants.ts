@@ -1,0 +1,12 @@
+export const BULLMQ_QUEUE_PREFIX = 'notification';
+export const FCM_PUSH_QUEUE_NAME = 'fcm-push';
+export const FCM_PUSH_JOB_NAME = 'send-fcm-push';
+export const FCM_PUSH_ATTEMPTS = 4;
+export const FCM_PUSH_BACKOFF_DELAYS_MS = [5_000, 30_000, 300_000] as const;
+export const LAST_FCM_PUSH_BACKOFF_DELAY_MS = 300_000;
+export const FCM_LAST_ERROR_MAX_LENGTH = 1_000;
+export const FCM_TOKEN_BLACKLIST_PREFIX = 'notification:fcm_token_blacklist:';
+export const FCM_TOKEN_BLACKLIST_TTL_SECONDS = 86_400;
+export const INTERNAL_JWT_ISSUER = 'vietride-gateway';
+export const INTERNAL_JWT_AUDIENCE = 'vietride-internal';
+export const INTERNAL_AUTH_HEADER = 'X-Internal-Auth';

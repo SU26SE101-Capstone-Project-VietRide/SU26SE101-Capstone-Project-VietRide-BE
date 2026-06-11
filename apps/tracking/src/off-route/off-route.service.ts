@@ -20,11 +20,15 @@ interface OffRouteState {
   alertedAt?: string;
 }
 
+const MILLISECONDS_PER_SECOND = 1_000;
+
 export interface OffRouteAlertPayload {
   tripId: string;
+  alertRecipientUserIds?: string[];
   latitude: number;
   longitude: number;
   distanceMeters: number;
+  durationSeconds: number;
   detectedAt: string;
 }
 
@@ -72,9 +76,11 @@ export class OffRouteService {
 
     const payload: OffRouteAlertPayload = {
       tripId: gps.tripId,
+      ...(route.alertRecipientUserIds?.length ? { alertRecipientUserIds: route.alertRecipientUserIds } : {}),
       latitude: gps.latitude,
       longitude: gps.longitude,
       distanceMeters,
+      durationSeconds: Math.floor((detectedAtMs - firstDetectedAtMs) / MILLISECONDS_PER_SECOND),
       detectedAt: gps.recordedAt,
     };
     await this.createOutboxEvent(payload);
@@ -106,9 +112,11 @@ export class OffRouteService {
         eventType: OFF_ROUTE_EVENT_TYPE,
         payload: {
           tripId: payload.tripId,
+          ...(payload.alertRecipientUserIds?.length ? { userIds: payload.alertRecipientUserIds } : {}),
           latitude: payload.latitude,
           longitude: payload.longitude,
           distanceMeters: payload.distanceMeters,
+          durationSeconds: payload.durationSeconds,
           detectedAt: payload.detectedAt,
         },
       },
