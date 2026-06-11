@@ -18,6 +18,8 @@ namespace VietRide.Booking.Api.Controllers;
 [Authorize]
 public sealed class BookingsController : ControllerBase
 {
+    private const string PassengerRole = "PASSENGER";
+
     private readonly ISender _sender;
 
     public BookingsController(ISender sender)
@@ -36,6 +38,7 @@ public sealed class BookingsController : ControllerBase
     /// Trip not found → 404 TRIP_NOT_FOUND.
     /// </remarks>
     [HttpPost]
+    [Authorize(Roles = PassengerRole)]
     [ProducesResponseType(typeof(ApiResponse<CreateBookingResult>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]

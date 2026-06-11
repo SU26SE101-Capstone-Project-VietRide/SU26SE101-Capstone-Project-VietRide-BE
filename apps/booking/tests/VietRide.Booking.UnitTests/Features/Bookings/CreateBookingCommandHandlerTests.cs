@@ -141,7 +141,8 @@ public class CreateBookingCommandHandlerTests
 
         result.IsValid.Should().BeFalse();
         result.Errors.Should().ContainSingle(e =>
-            e.ErrorMessage.Contains("5 seats") || e.ErrorMessage.Contains("cannot exceed"));
+            e.ErrorCode == "BOOKING_MAX_SEATS_EXCEEDED"
+            && (e.ErrorMessage.Contains("5 seats") || e.ErrorMessage.Contains("cannot exceed")));
     }
 
     [Fact]
@@ -183,6 +184,57 @@ public class CreateBookingCommandHandlerTests
     // -----------------------------------------------------------------------
     // Seat unavailable → 409 BOOKING_SEAT_UNAVAILABLE; no booking created
     // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task Handle_ConcurrentSameSeat_OneWins_OneSeatUnavailable_AndCreatesOneBooking()
+    {
+        // Arrange: fake Trip lock contract allows only the first same-seat attempt to lock.
+        var tripClient = new OneWinsTripServiceClient(ValidTrip, LockData);
+        var bookings = Substitute.For<IBookingRepository>();
+        var paymentClient = Substitute.For<IPaymentServiceClient>();
+        var bookingService = Substitute.For<IBookingService>();
+        var outbox = Substitute.For<IIntegrationEventOutbox>();
+        var clock = Substitute.For<IClock>();
+        var addCount = 0;
+
+        clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                Interlocked.Increment(ref addCount);
+                return ci.Arg<BookingEntity>();
+            });
+        paymentClient.ChargeAsync(default!, default, default, default, default!, default!, default)
+            .ReturnsForAnyArgs(new ChargeOutcome.Success(new ChargeResult(PaymentId, "SUCCEEDED", null)));
+
+        var handler = new CreateBookingCommandHandler(
+            bookings,
+            tripClient,
+            paymentClient,
+            bookingService,
+            outbox,
+            clock,
+            NullLogger<CreateBookingCommandHandler>.Instance);
+        var command = BuildCommand(seatCount: 1, paymentMethod: "WALLET");
+
+        // Act: two passenger attempts race for the same trip/seat.
+        var attempts = await Task.WhenAll(
+            CaptureAsync(() => handler.Handle(command, CancellationToken.None)),
+            CaptureAsync(() => handler.Handle(command, CancellationToken.None)));
+
+        // Assert: exactly one booking path succeeds; the loser gets the canonical code.
+        attempts.Count(x => x.Result?.Status == "CONFIRMED").Should().Be(1);
+        attempts.Count(x => x.Exception is ConflictException ce
+            && ce.ErrorCode == "BOOKING_SEAT_UNAVAILABLE").Should().Be(1);
+        addCount.Should().Be(1);
+        tripClient.BookSeatsCallCount.Should().Be(1);
+
+        await outbox.Received(1)
+            .EnqueueAsync(
+                Arg.Is("booking.booking.confirmed"),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>());
+    }
 
     [Fact]
     public async Task Handle_SeatUnavailable_ThrowsConflictException_AndNoBookingCreated()
@@ -313,5 +365,72 @@ public class CreateBookingCommandHandlerTests
         // No outbox event for VNPAY — not yet confirmed
         await _outbox.DidNotReceiveWithAnyArgs()
             .EnqueueAsync(default!, default!, default);
+    }
+
+    private static async Task<AttemptResult> CaptureAsync(Func<Task<CreateBookingResult>> action)
+    {
+        try
+        {
+            return new AttemptResult(await action(), null);
+        }
+        catch (Exception ex)
+        {
+            return new AttemptResult(null, ex);
+        }
+    }
+
+    private sealed record AttemptResult(CreateBookingResult? Result, Exception? Exception);
+
+    private sealed class OneWinsTripServiceClient : ITripServiceClient
+    {
+        private readonly TripSnapshot _trip;
+        private readonly SeatLockResult _lockData;
+        private int _lockWinnerChosen;
+        private int _bookSeatsCallCount;
+
+        public OneWinsTripServiceClient(TripSnapshot trip, SeatLockResult lockData)
+        {
+            _trip = trip;
+            _lockData = lockData;
+        }
+
+        public int BookSeatsCallCount => _bookSeatsCallCount;
+
+        public Task<TripSnapshot?> GetTripSnapshotAsync(
+            Guid tripId,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<TripSnapshot?>(_trip);
+
+        public Task<LockSeatsOutcome> LockSeatsAsync(
+            Guid tripId,
+            IReadOnlyList<string> seatNumbers,
+            Guid holdOwnerId,
+            string idempotencyKey,
+            int? ttlSeconds = null,
+            CancellationToken cancellationToken = default)
+        {
+            var isWinner = Interlocked.CompareExchange(ref _lockWinnerChosen, 1, 0) == 0;
+            return Task.FromResult<LockSeatsOutcome>(isWinner
+                ? new LockSeatsOutcome.Success(_lockData)
+                : new LockSeatsOutcome.SeatUnavailable(seatNumbers));
+        }
+
+        public Task<bool> BookSeatsAsync(
+            Guid tripId,
+            Guid seatLockToken,
+            Guid bookingId,
+            IReadOnlyList<PassengerSeatAssignment> passengerSeatAssignments,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _bookSeatsCallCount);
+            return Task.FromResult(true);
+        }
+
+        public Task ReleaseSeatsAsync(
+            Guid tripId,
+            Guid seatLockToken,
+            IReadOnlyList<string> seatNumbers,
+            CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 }

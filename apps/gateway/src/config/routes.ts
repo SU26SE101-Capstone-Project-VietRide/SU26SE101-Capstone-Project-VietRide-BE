@@ -153,7 +153,12 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     },
 
     // Booking
-    { prefix: '/v1/bookings', target: env.BOOKING_BASE_URL, authRequired: 'user' },
+    {
+      prefix: '/v1/bookings',
+      target: env.BOOKING_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['PASSENGER'],
+    },
     { prefix: '/v1/vouchers', target: env.BOOKING_BASE_URL, authRequired: 'user' },
     {
       prefix: '/v1/booking/health',

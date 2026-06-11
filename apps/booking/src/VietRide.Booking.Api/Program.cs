@@ -20,7 +20,9 @@ builder.Host.UseSerilog((ctx, _, lc) => lc
     .WriteTo.Console());
 
 builder.Services.AddVietRideSharedWeb(builder.Configuration, ServiceName);
-builder.Services.AddVietRideDbContext<BookingDbContext>(builder.Configuration);
+builder.Services.AddVietRideDbContext<BookingDbContext>(
+    builder.Configuration,
+    configureDataSource: BookingDbContext.ConfigurePostgresTypes);
 builder.Services.AddVietRideMediatRBehaviors(
     handlerAssemblies: [typeof(ApplicationAssemblyMarker).Assembly]);
 builder.Services.AddInfrastructure(builder.Configuration);

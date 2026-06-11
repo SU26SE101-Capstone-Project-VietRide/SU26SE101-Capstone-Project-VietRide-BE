@@ -52,6 +52,7 @@ public sealed class CreateBookingCommandValidator : AbstractValidator<CreateBook
         RuleFor(x => x.Seats)
             .Must(s => s.Count <= 5)
             .When(x => x.Seats is { Count: > 0 })
+            .WithErrorCode("BOOKING_MAX_SEATS_EXCEEDED")
             .WithMessage("A booking cannot exceed 5 seats.");
 
         // Per-seat PII validation

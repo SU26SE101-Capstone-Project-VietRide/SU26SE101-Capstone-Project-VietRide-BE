@@ -32,8 +32,7 @@ internal sealed class PassengerConfiguration : IEntityTypeConfiguration<Passenge
         builder.Property(x => x.BoardingStatus)
             .HasColumnName("boarding_status")
             .HasColumnType("passenger_boarding_status")
-            .HasConversion(s => s.ToString(), s => Enum.Parse<PassengerBoardingStatus>(s))
-            .HasDefaultValueSql("'PENDING'")
+            .HasDefaultValue(PassengerBoardingStatus.PENDING)
             .IsRequired();
 
         builder.Property(x => x.BoardedAt)

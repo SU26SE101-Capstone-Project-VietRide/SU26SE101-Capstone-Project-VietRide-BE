@@ -344,6 +344,96 @@ public class CreateBookingIntegrationTests
                 Arg.Any<IReadOnlyList<string>>(),
                 Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task PostBookings_MoreThanFiveSeats_Returns422BookingMaxSeatsExceeded()
+    {
+        _factory.TripClient.ClearReceivedCalls();
+        _factory.PaymentClient.ClearReceivedCalls();
+        _factory.BookingRepository.ClearReceivedCalls();
+
+        var client = _factory.CreateAuthenticatedClient(Guid.NewGuid());
+        var body = JsonSerializer.Serialize(new
+        {
+            tripId = Guid.NewGuid(),
+            pickup = new { stationId = Guid.NewGuid() },
+            seats = Enumerable.Range(1, 6).Select(i => new
+            {
+                seatNumber = $"A{i:D2}",
+                passenger = new
+                {
+                    fullName = $"Passenger {i}",
+                    phoneNumber = $"090000000{i}",
+                    idNumber = $"01234567890{i}",
+                },
+            }),
+            paymentMethod = "WALLET",
+        });
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/bookings")
+        {
+            Content = new StringContent(body, Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+
+        var json = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        root.GetProperty("success").GetBoolean().Should().BeFalse();
+        root.GetProperty("statusCode").GetInt32().Should().Be(422);
+        root.GetProperty("error").GetProperty("code").GetString()
+            .Should().Be("BOOKING_MAX_SEATS_EXCEEDED");
+        root.GetProperty("meta").GetProperty("traceId").GetString()
+            .Should().NotBeNullOrEmpty();
+
+        await _factory.TripClient.DidNotReceiveWithAnyArgs()
+            .GetTripSnapshotAsync(default, default);
+        await _factory.BookingRepository.DidNotReceiveWithAnyArgs()
+            .AddAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task PostBookings_NonPassengerRole_Returns403_BeforeHandler()
+    {
+        _factory.TripClient.ClearReceivedCalls();
+        _factory.PaymentClient.ClearReceivedCalls();
+        _factory.BookingRepository.ClearReceivedCalls();
+
+        var client = _factory.CreateAuthenticatedClient(Guid.NewGuid(), role: "OPERATOR_STAFF");
+        var body = JsonSerializer.Serialize(new
+        {
+            tripId = Guid.NewGuid(),
+            pickup = new { stationId = Guid.NewGuid() },
+            seats = new[]
+            {
+                new
+                {
+                    seatNumber = "A01",
+                    passenger = new { fullName = "Nguyen Van A", phoneNumber = "0900000001", idNumber = "012345678901" },
+                },
+            },
+            paymentMethod = "WALLET",
+        });
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/bookings")
+        {
+            Content = new StringContent(body, Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await _factory.TripClient.DidNotReceiveWithAnyArgs()
+            .GetTripSnapshotAsync(default, default);
+        await _factory.BookingRepository.DidNotReceiveWithAnyArgs()
+            .AddAsync(default!, default);
+    }
 }
 
 /// <summary>
@@ -425,15 +515,15 @@ public class CreateBookingWebApplicationFactory : WebApplicationFactory<Program>
     /// Creates an <see cref="HttpClient"/> with a valid Internal JWT in
     /// <c>X-Internal-Auth</c> carrying the given <paramref name="userId"/> as sub.
     /// </summary>
-    public HttpClient CreateAuthenticatedClient(Guid userId)
+    public HttpClient CreateAuthenticatedClient(Guid userId, string role = "PASSENGER")
     {
         var client = CreateClient();
-        var token = MintInternalJwt(userId.ToString());
+        var token = MintInternalJwt(userId.ToString(), role);
         client.DefaultRequestHeaders.Add("X-Internal-Auth", $"Bearer {token}");
         return client;
     }
 
-    private static string MintInternalJwt(string subject)
+    private static string MintInternalJwt(string subject, string role)
     {
         var secretBytes = Encoding.UTF8.GetBytes(TestSecret);
         var now = DateTimeOffset.UtcNow;
@@ -451,6 +541,7 @@ public class CreateBookingWebApplicationFactory : WebApplicationFactory<Program>
                 ["iss"] = "vietride-gateway",
                 ["aud"] = "vietride-internal",
                 ["sub"] = subject,
+                ["role"] = role,
                 ["jti"] = Guid.NewGuid().ToString("N"),
                 ["iat"] = now.ToUnixTimeSeconds(),
                 ["nbf"] = now.ToUnixTimeSeconds(),

@@ -104,16 +104,12 @@ internal sealed class BookingConfiguration : IEntityTypeConfiguration<BookingEnt
         builder.Property(x => x.Status)
             .HasColumnName("status")
             .HasColumnType("booking_status")
-            .HasConversion(s => s.ToString(), s => Enum.Parse<BookingStatus>(s))
-            .HasDefaultValueSql("'PENDING_PAYMENT'")
+            .HasDefaultValue(BookingStatus.PENDING_PAYMENT)
             .IsRequired();
 
         builder.Property(x => x.CancellationReason)
             .HasColumnName("cancellation_reason")
             .HasColumnType("booking_cancellation_reason")
-            .HasConversion(
-                r => r.HasValue ? r.Value.ToString() : null,
-                s => s != null ? Enum.Parse<BookingCancellationReason>(s) : (BookingCancellationReason?)null)
             .IsRequired(false);
 
         builder.Property(x => x.RefundOverride)
@@ -129,9 +125,6 @@ internal sealed class BookingConfiguration : IEntityTypeConfiguration<BookingEnt
         builder.Property(x => x.TripDirection)
             .HasColumnName("trip_direction")
             .HasColumnType("trip_direction")
-            .HasConversion(
-                d => d.HasValue ? d.Value.ToString() : null,
-                s => s != null ? Enum.Parse<TripDirection>(s) : (TripDirection?)null)
             .IsRequired(false);
 
         builder.Property(x => x.TripSnapshotOriginName)

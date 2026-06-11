@@ -32,7 +32,9 @@ public static class InfrastructureServiceCollectionExtensions
     {
         // Redis — required by IdempotencyMiddleware (wired in Program.cs via AddVietRideIdempotency).
         // Falls back gracefully if REDIS_URL is absent (AbortOnConnectFail = false).
-        var redisUrl = configuration["REDIS_URL"] ?? "localhost:6379";
+        var redisUrl = configuration["REDIS_URL"]
+            ?? Environment.GetEnvironmentVariable("REDIS_URL")
+            ?? "localhost:6379";
         var redisOptions = ConfigurationOptions.Parse(redisUrl);
         redisOptions.AbortOnConnectFail = false;
         services.AddSingleton<IConnectionMultiplexer>(_ =>
@@ -47,20 +49,27 @@ public static class InfrastructureServiceCollectionExtensions
         // Trip inter-service HTTP client (Task 12.2).
         // BSOT §3.5 line 935: ITripServiceClient at Abstractions/ServiceClients/,
         // impl TripServiceClient at Infrastructure/Http/.
-        services
-            .AddHttpClient<ITripServiceClient, TripServiceClient>(client =>
-            {
-                var baseUrl = ResolveTripBaseUrl(configuration);
-                client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
-                client.Timeout = TimeSpan.FromSeconds(30);
-                client.DefaultRequestHeaders.Accept.Clear();
-                client.DefaultRequestHeaders.Accept.Add(
-                    new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
-            })
-            .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
-            .AddHttpMessageHandler<InternalJwtDelegatingHandler>()
-            .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
-            .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
+        if (UseTripDevStub(configuration))
+        {
+            services.AddScoped<ITripServiceClient, DevTripServiceClient>();
+        }
+        else
+        {
+            services
+                .AddHttpClient<ITripServiceClient, TripServiceClient>(client =>
+                {
+                    var baseUrl = ResolveTripBaseUrl(configuration);
+                    client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
+                    client.Timeout = TimeSpan.FromSeconds(30);
+                    client.DefaultRequestHeaders.Accept.Clear();
+                    client.DefaultRequestHeaders.Accept.Add(
+                        new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+                })
+                .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
+                .AddHttpMessageHandler<InternalJwtDelegatingHandler>()
+                .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
+                .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
+        }
 
         // Repositories (Task 12.3)
         services.AddScoped<IBookingRepository, BookingRepository>();
@@ -70,22 +79,31 @@ public static class InfrastructureServiceCollectionExtensions
         // depends on ITripServiceClient which is Infrastructure.
         services.AddScoped<IBookingService, BookingService>();
 
-        // Payment inter-service HTTP client (Task 12.3 stub — real debit Day 15/16)
-        // BSOT §3.5 line 427/479: interface at Abstractions/ServiceClients/, impl at Infrastructure/Http/
-        services
-            .AddHttpClient<IPaymentServiceClient, PaymentServiceClient>(client =>
-            {
-                var baseUrl = ResolvePaymentBaseUrl(configuration);
-                client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
-                client.Timeout = TimeSpan.FromSeconds(30);
-                client.DefaultRequestHeaders.Accept.Clear();
-                client.DefaultRequestHeaders.Accept.Add(
-                    new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
-            })
-            .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
-            .AddHttpMessageHandler<InternalJwtDelegatingHandler>()
-            .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
-            .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
+        // Payment inter-service client (real debit lands Day 15/16).
+        // Day-12 local/runtime seam can be enabled explicitly so WALLET reaches CONFIRMED
+        // without requiring the future Payment charge endpoint.
+        // BSOT §3.5 line 427/479: interface at Abstractions/ServiceClients/, impl at Infrastructure/Http/.
+        if (UsePaymentDevStub(configuration))
+        {
+            services.AddScoped<IPaymentServiceClient, DevPaymentServiceClient>();
+        }
+        else
+        {
+            services
+                .AddHttpClient<IPaymentServiceClient, PaymentServiceClient>(client =>
+                {
+                    var baseUrl = ResolvePaymentBaseUrl(configuration);
+                    client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
+                    client.Timeout = TimeSpan.FromSeconds(30);
+                    client.DefaultRequestHeaders.Accept.Clear();
+                    client.DefaultRequestHeaders.Accept.Add(
+                        new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+                })
+                .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
+                .AddHttpMessageHandler<InternalJwtDelegatingHandler>()
+                .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
+                .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
+        }
 
         return services;
     }
@@ -103,6 +121,20 @@ public static class InfrastructureServiceCollectionExtensions
 
         return baseUrl;
     }
+
+    private static bool UseTripDevStub(IConfiguration configuration)
+        => configuration.GetValue("Trip:UseDevStub", false)
+            || string.Equals(
+                Environment.GetEnvironmentVariable("BOOKING_TRIP_USE_DEV_STUB"),
+                "true",
+                StringComparison.OrdinalIgnoreCase);
+
+    private static bool UsePaymentDevStub(IConfiguration configuration)
+        => configuration.GetValue("Payment:UseDevStub", false)
+            || string.Equals(
+                Environment.GetEnvironmentVariable("BOOKING_PAYMENT_USE_DEV_STUB"),
+                "true",
+                StringComparison.OrdinalIgnoreCase);
 
     private static string ResolvePaymentBaseUrl(IConfiguration configuration)
     {
