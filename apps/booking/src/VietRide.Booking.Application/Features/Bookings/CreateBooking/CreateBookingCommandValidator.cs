@@ -1,0 +1,82 @@
+using FluentValidation;
+
+namespace VietRide.Booking.Application.Features.Bookings.CreateBooking;
+
+/// <summary>
+/// Input-shape and field validation for <see cref="CreateBookingCommand"/>.
+/// <para>
+/// PII fields (FullName, PhoneNumber, IdNumber) are validated non-empty here
+/// but are NOT persisted — dropped after this check per schema.sql line 149.
+/// </para>
+/// </summary>
+public sealed class CreateBookingCommandValidator : AbstractValidator<CreateBookingCommand>
+{
+    private static readonly string[] ValidPaymentMethods = ["WALLET", "VNPAY"];
+
+    public CreateBookingCommandValidator()
+    {
+        RuleFor(x => x.TripId)
+            .NotEmpty();
+
+        RuleFor(x => x.PassengerUserId)
+            .NotEmpty();
+
+        // Pickup: exactly one of StationId/StopId (application-level guard; domain also checks)
+        RuleFor(x => x)
+            .Must(x =>
+            {
+                var count = (x.PickupStationId.HasValue ? 1 : 0)
+                    + (x.PickupStopId.HasValue ? 1 : 0);
+                return count == 1;
+            })
+            .WithName("pickup")
+            .WithMessage("Exactly one of pickupStationId or pickupStopId must be provided.");
+
+        // Dropoff: at most one of StationId/StopId
+        RuleFor(x => x)
+            .Must(x =>
+            {
+                var count = (x.DropoffStationId.HasValue ? 1 : 0)
+                    + (x.DropoffStopId.HasValue ? 1 : 0);
+                return count <= 1;
+            })
+            .WithName("dropoff")
+            .WithMessage("At most one of dropoffStationId or dropoffStopId may be provided.");
+
+        // Seats — must have 1..5 entries
+        RuleFor(x => x.Seats)
+            .NotNull()
+            .NotEmpty()
+            .WithMessage("At least one seat is required.");
+
+        RuleFor(x => x.Seats)
+            .Must(s => s.Count <= 5)
+            .When(x => x.Seats is { Count: > 0 })
+            .WithMessage("A booking cannot exceed 5 seats.");
+
+        // Per-seat PII validation
+        RuleForEach(x => x.Seats).ChildRules(seat =>
+        {
+            seat.RuleFor(s => s.SeatNumber)
+                .NotEmpty()
+                .MaximumLength(10);
+
+            seat.RuleFor(s => s.FullName)
+                .NotEmpty()
+                .MaximumLength(100);
+
+            seat.RuleFor(s => s.PhoneNumber)
+                .NotEmpty()
+                .MaximumLength(20);
+
+            seat.RuleFor(s => s.IdNumber)
+                .NotEmpty()
+                .MaximumLength(20);
+        });
+
+        RuleFor(x => x.PaymentMethod)
+            .NotEmpty()
+            .Must(m => ValidPaymentMethods.Contains(m, StringComparer.OrdinalIgnoreCase))
+            .WithMessage($"paymentMethod must be one of: {string.Join(", ", ValidPaymentMethods)}.");
+    }
+}

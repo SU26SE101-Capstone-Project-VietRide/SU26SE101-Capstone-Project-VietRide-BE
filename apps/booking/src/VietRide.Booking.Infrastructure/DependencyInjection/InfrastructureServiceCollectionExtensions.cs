@@ -1,8 +1,12 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using StackExchange.Redis;
+using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
+using VietRide.Booking.Application.Abstractions.Services;
+using VietRide.Booking.Application.Services;
 using VietRide.Booking.Infrastructure.Http;
+using VietRide.Booking.Infrastructure.Persistence.Repositories;
 using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Http.Resilience;
 using VietRide.Shared.Kernel.Abstractions;
@@ -58,8 +62,30 @@ public static class InfrastructureServiceCollectionExtensions
             .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
             .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
 
-        // Repositories, IBookingService, IPaymentServiceClient
-        // are registered in Task 12.3 (depend on domain entities that land in 12.1).
+        // Repositories (Task 12.3)
+        services.AddScoped<IBookingRepository, BookingRepository>();
+
+        // Application service (Task 12.3)
+        // BookingService lives in Application layer; registered here because its ctor
+        // depends on ITripServiceClient which is Infrastructure.
+        services.AddScoped<IBookingService, BookingService>();
+
+        // Payment inter-service HTTP client (Task 12.3 stub — real debit Day 15/16)
+        // BSOT §3.5 line 427/479: interface at Abstractions/ServiceClients/, impl at Infrastructure/Http/
+        services
+            .AddHttpClient<IPaymentServiceClient, PaymentServiceClient>(client =>
+            {
+                var baseUrl = ResolvePaymentBaseUrl(configuration);
+                client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
+                client.Timeout = TimeSpan.FromSeconds(30);
+                client.DefaultRequestHeaders.Accept.Clear();
+                client.DefaultRequestHeaders.Accept.Add(
+                    new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+            })
+            .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
+            .AddHttpMessageHandler<InternalJwtDelegatingHandler>()
+            .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
+            .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
 
         return services;
     }
@@ -73,6 +99,20 @@ public static class InfrastructureServiceCollectionExtensions
         {
             throw new InvalidOperationException(
                 "Trip base URL must be configured via Trip:BaseUrl or TRIP_SERVICE_BASE_URL.");
+        }
+
+        return baseUrl;
+    }
+
+    private static string ResolvePaymentBaseUrl(IConfiguration configuration)
+    {
+        var baseUrl = configuration["Payment:BaseUrl"]
+            ?? Environment.GetEnvironmentVariable("PAYMENT_SERVICE_BASE_URL");
+
+        if (string.IsNullOrWhiteSpace(baseUrl))
+        {
+            throw new InvalidOperationException(
+                "Payment base URL must be configured via Payment:BaseUrl or PAYMENT_SERVICE_BASE_URL.");
         }
 
         return baseUrl;

@@ -73,7 +73,11 @@
     { "key": "day8MissingStationId", "value": "00000000-0000-0000-0000-000000000008" },
     { "key": "day8StopId", "value": "<day8-stop-id>" },
     { "key": "day8SecondStopId", "value": "<day8-second-stop-id>" },
-    { "key": "day8CrossOperatorRouteId", "value": "<day8-cross-operator-route-id>" }
+    { "key": "day8CrossOperatorRouteId", "value": "<day8-cross-operator-route-id>" },
+    { "key": "day12TripId", "value": "<day12-trip-id>" },
+    { "key": "day12PickupStationId", "value": "<day12-pickup-station-id>" },
+    { "key": "createdBookingId", "value": "" },
+    { "key": "createdBookingCode", "value": "" }
   ],
   "item": [
     {
@@ -2688,6 +2692,100 @@
               "raw": "{\n  \"name\": \"Day 8 Pending Operator Blocked Route\",\n  \"originStationId\": \"{{day8OriginStationId}}\",\n  \"destinationStationId\": \"{{day8DestinationStationId}}\",\n  \"baseFare\": 125000,\n  \"totalDistanceKm\": 300.5,\n  \"estimatedDurationMinutes\": 420,\n  \"isActive\": true\n}"
             },
             "description": "Writes require an approved, active operator."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Booking — Bookings",
+      "item": [
+        {
+          "name": "1. Create booking (WALLET, happy path)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 201', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test('ADR 0004 success envelope — booking confirmed', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(201);",
+                  "  pm.expect(body.data).to.have.property('bookingId').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data).to.have.property('bookingCode').that.matches(/^VR-\\d{8}-[0-9A-Z]{8}$/);",
+                  "  pm.expect(body.data).to.have.property('status', 'CONFIRMED');",
+                  "  pm.expect(body.data).to.have.property('totalAmount').that.is.a('number');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});",
+                  "if (body && body.data) {",
+                  "  pm.collectionVariables.set('createdBookingId', body.data.bookingId || '');",
+                  "  pm.collectionVariables.set('createdBookingCode', body.data.bookingCode || '');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "bookings"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tripId\": \"{{day12TripId}}\",\n  \"pickup\": {\n    \"stationId\": \"{{day12PickupStationId}}\"\n  },\n  \"seats\": [\n    {\n      \"seatNumber\": \"A01\",\n      \"passenger\": {\n        \"fullName\": \"Nguyen Van A\",\n        \"phoneNumber\": \"0900000001\",\n        \"idNumber\": \"012345678901\"\n      }\n    }\n  ],\n  \"paymentMethod\": \"WALLET\"\n}"
+            },
+            "description": "Day 12 — POST /v1/bookings (WALLET path). Auth: PASSENGER bearer token. Idempotency-Key required. Max 5 seats. Returns 201 CONFIRMED on WALLET success; 409 BOOKING_SEAT_UNAVAILABLE if seat is held; 422 BOOKING_MAX_SEATS_EXCEEDED if >5 seats. Passenger PII (fullName/phoneNumber/idNumber) is validated but not persisted per schema.sql line 149."
+          }
+        },
+        {
+          "name": "2. Create booking — max seats exceeded (expect 422)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 422', function () {",
+                  "  pm.response.to.have.status(422);",
+                  "});",
+                  "pm.test('BOOKING_MAX_SEATS_EXCEEDED error envelope', function () {",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.statusCode).to.equal(422);",
+                  "  pm.expect(body.error).to.have.property('code', 'BOOKING_MAX_SEATS_EXCEEDED');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "bookings"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tripId\": \"{{day12TripId}}\",\n  \"pickup\": {\n    \"stationId\": \"{{day12PickupStationId}}\"\n  },\n  \"seats\": [\n    { \"seatNumber\": \"A01\", \"passenger\": { \"fullName\": \"A\", \"phoneNumber\": \"0900000001\", \"idNumber\": \"012345678901\" } },\n    { \"seatNumber\": \"A02\", \"passenger\": { \"fullName\": \"B\", \"phoneNumber\": \"0900000002\", \"idNumber\": \"012345678902\" } },\n    { \"seatNumber\": \"A03\", \"passenger\": { \"fullName\": \"C\", \"phoneNumber\": \"0900000003\", \"idNumber\": \"012345678903\" } },\n    { \"seatNumber\": \"A04\", \"passenger\": { \"fullName\": \"D\", \"phoneNumber\": \"0900000004\", \"idNumber\": \"012345678904\" } },\n    { \"seatNumber\": \"A05\", \"passenger\": { \"fullName\": \"E\", \"phoneNumber\": \"0900000005\", \"idNumber\": \"012345678905\" } },\n    { \"seatNumber\": \"A06\", \"passenger\": { \"fullName\": \"F\", \"phoneNumber\": \"0900000006\", \"idNumber\": \"012345678906\" } }\n  ],\n  \"paymentMethod\": \"WALLET\"\n}"
+            },
+            "description": "6 seats → 422 BOOKING_MAX_SEATS_EXCEEDED."
           }
         }
       ]
