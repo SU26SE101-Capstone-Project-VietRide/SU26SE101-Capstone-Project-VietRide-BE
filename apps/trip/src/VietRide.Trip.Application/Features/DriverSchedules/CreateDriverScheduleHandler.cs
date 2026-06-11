@@ -58,7 +58,8 @@ public sealed class CreateDriverScheduleHandler : IRequestHandler<CreateDriverSc
             throw new CodedNotFoundException("VEHICLE_NOT_FOUND", "Vehicle was not found.");
         }
 
-        if (await driverScheduleRepository.HasDriverConflictAsync(
+        if (request.IsActive
+            && await driverScheduleRepository.HasDriverConflictAsync(
                 request.DriverUserId,
                 request.DayOfWeek,
                 request.DepartureTime,
@@ -79,7 +80,8 @@ public sealed class CreateDriverScheduleHandler : IRequestHandler<CreateDriverSc
             dayOfWeek,
             request.DepartureTime,
             request.ValidFrom,
-            request.ValidUntil);
+            request.ValidUntil,
+            request.IsActive);
 
         await driverScheduleRepository.AddAsync(schedule, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);

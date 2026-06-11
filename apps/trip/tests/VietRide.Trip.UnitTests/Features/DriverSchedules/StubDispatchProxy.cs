@@ -7,6 +7,7 @@ internal class StubDispatchProxy<T> : DispatchProxy
 {
     private readonly Dictionary<string, int> callCounts = [];
     private readonly Dictionary<string, object?> results = [];
+    private readonly Dictionary<string, object?[]?> lastArguments = [];
 
     public T Object => (T)(object)this;
 
@@ -25,10 +26,16 @@ internal class StubDispatchProxy<T> : DispatchProxy
         return callCounts.GetValueOrDefault(methodName);
     }
 
+    public object?[]? LastArguments(string methodName)
+    {
+        return lastArguments.GetValueOrDefault(methodName);
+    }
+
     protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
     {
         ArgumentNullException.ThrowIfNull(targetMethod);
         callCounts[targetMethod.Name] = CallCount(targetMethod.Name) + 1;
+        lastArguments[targetMethod.Name] = args;
         results.TryGetValue(targetMethod.Name, out var configuredResult);
 
         if (targetMethod.ReturnType == typeof(Task))

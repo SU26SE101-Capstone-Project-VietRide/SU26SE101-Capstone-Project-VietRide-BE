@@ -17,7 +17,8 @@ public sealed class CreateDriverScheduleValidatorTests
             [0, 8],
             new TimeOnly(8, 0),
             new DateOnly(2026, 6, 15),
-            new DateOnly(2026, 6, 14));
+            new DateOnly(2026, 6, 14),
+            true);
 
         var result = await new CreateDriverScheduleValidator().ValidateAsync(command);
 
@@ -38,7 +39,8 @@ public sealed class CreateDriverScheduleValidatorTests
             [],
             new TimeOnly(8, 0),
             new DateOnly(2026, 6, 15),
-            null);
+            null,
+            true);
 
         var result = await new CreateDriverScheduleValidator().ValidateAsync(command);
 

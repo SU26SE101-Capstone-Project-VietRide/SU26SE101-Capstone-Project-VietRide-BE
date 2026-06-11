@@ -43,7 +43,8 @@ public sealed class OperatorDriverSchedulesController : ControllerBase
                 request.DayOfWeek,
                 request.DepartureTime,
                 request.ValidFrom,
-                request.ValidUntil),
+                request.ValidUntil,
+                request.IsActive),
             cancellationToken);
 
         return StatusCode(StatusCodes.Status201Created, result);

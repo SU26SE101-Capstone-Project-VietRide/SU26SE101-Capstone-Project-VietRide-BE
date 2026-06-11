@@ -11,4 +11,5 @@ public sealed record CreateDriverScheduleCommand(
     IReadOnlyCollection<int> DayOfWeek,
     TimeOnly DepartureTime,
     DateOnly ValidFrom,
-    DateOnly? ValidUntil) : IRequest<DriverScheduleDto>;
+    DateOnly? ValidUntil,
+    bool IsActive) : IRequest<DriverScheduleDto>;

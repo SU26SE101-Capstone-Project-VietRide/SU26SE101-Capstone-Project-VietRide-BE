@@ -31,7 +31,8 @@ public sealed class DriverSchedule : BaseEntity<Guid>, IActivatable
         JsonElement dayOfWeek,
         TimeOnly departureTime,
         DateOnly validFrom,
-        DateOnly? validUntil)
+        DateOnly? validUntil,
+        bool isActive)
     {
         ValidateGuid(operatorId, nameof(operatorId));
         ValidateGuid(routeId, nameof(routeId));
@@ -53,7 +54,7 @@ public sealed class DriverSchedule : BaseEntity<Guid>, IActivatable
             DepartureTime = departureTime,
             ValidFrom = validFrom,
             ValidUntil = validUntil,
-            IsActive = true,
+            IsActive = isActive,
         };
     }
 

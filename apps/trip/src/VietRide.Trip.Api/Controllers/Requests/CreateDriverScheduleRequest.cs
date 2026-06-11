@@ -8,4 +8,5 @@ public sealed record CreateDriverScheduleRequest(
     IReadOnlyCollection<int> DayOfWeek,
     TimeOnly DepartureTime,
     DateOnly ValidFrom,
-    DateOnly? ValidUntil);
+    DateOnly? ValidUntil,
+    bool IsActive);

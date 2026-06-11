@@ -65,6 +65,27 @@ public sealed class VehicleEntityAndModelTests
     }
 
     [Fact]
+    public void DriverSchedule_Create_PreservesRequestedActivationState()
+    {
+        using var document = JsonDocument.Parse("[1,3,5]");
+
+        var schedule = DriverSchedule.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            vehicleId: null,
+            Guid.NewGuid(),
+            assistantUserId: null,
+            document.RootElement,
+            new TimeOnly(8, 30),
+            new DateOnly(2026, 7, 1),
+            validUntil: null,
+            isActive: false);
+
+        schedule.IsActive.Should().BeFalse();
+        schedule.DayOfWeek.Deserialize<int[]>().Should().BeEquivalentTo([1, 3, 5]);
+    }
+
+    [Fact]
     public void DriverSchedule_Create_RejectsInvalidDateRange()
     {
         using var document = JsonDocument.Parse("[1,3,5]");
@@ -78,7 +99,8 @@ public sealed class VehicleEntityAndModelTests
             document.RootElement,
             new TimeOnly(8, 30),
             new DateOnly(2026, 7, 2),
-            new DateOnly(2026, 7, 1));
+            new DateOnly(2026, 7, 1),
+            true);
 
         act.Should().Throw<ArgumentOutOfRangeException>()
             .WithParameterName("validUntil");
@@ -103,7 +125,8 @@ public sealed class VehicleEntityAndModelTests
             document.RootElement,
             new TimeOnly(8, 30),
             new DateOnly(2026, 7, 1),
-            validUntil: null);
+            validUntil: null,
+            isActive: true);
 
         act.Should().Throw<ArgumentException>();
     }
