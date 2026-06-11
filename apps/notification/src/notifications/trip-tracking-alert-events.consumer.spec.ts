@@ -1,10 +1,7 @@
 import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
-import { RedisService } from '@vietride/nest-redis';
 import type { ConsumeMessage } from 'amqplib';
 import { NotificationType } from '../generated/notification-prisma-client';
-import {
-  RABBITMQ_IDEMPOTENCY_TTL_SECONDS,
-} from './core-events.constants';
+import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
 import {
   TRACKING_GPS_OFF_ROUTE_ROUTING_KEY,
@@ -19,8 +16,7 @@ const MESSAGE_ID = 'trip-alert-message-1';
 
 describe('TripTrackingAlertEventsConsumer', () => {
   let rabbitConsumer: jest.Mocked<RabbitMqConsumer>;
-  let redisSet: jest.Mock;
-  let redis: jest.Mocked<RedisService>;
+  let idempotency: jest.Mocked<MessageIdempotencyService>;
   let notificationsService: jest.Mocked<NotificationsService>;
   let consumer: TripTrackingAlertEventsConsumer;
 
@@ -28,14 +24,15 @@ describe('TripTrackingAlertEventsConsumer', () => {
     rabbitConsumer = {
       subscribe: jest.fn(),
     } as unknown as jest.Mocked<RabbitMqConsumer>;
-    redisSet = jest.fn();
-    redis = {
-      getClient: jest.fn(() => ({ set: redisSet })),
-    } as unknown as jest.Mocked<RedisService>;
+    idempotency = {
+      begin: jest.fn(),
+      markProcessed: jest.fn(),
+      release: jest.fn(),
+    } as unknown as jest.Mocked<MessageIdempotencyService>;
     notificationsService = {
       createNotification: jest.fn(),
     } as unknown as jest.Mocked<NotificationsService>;
-    consumer = new TripTrackingAlertEventsConsumer(rabbitConsumer, redis, notificationsService);
+    consumer = new TripTrackingAlertEventsConsumer(rabbitConsumer, idempotency, notificationsService);
   });
 
   it('subscribes all phase 5 routing keys', async () => {
@@ -47,13 +44,13 @@ describe('TripTrackingAlertEventsConsumer', () => {
         binding.queue,
         binding.routingKey,
         expect.any(Function),
-        { prefetch: 1 },
+        { prefetch: 1, requeueOnError: true },
       );
     }
   });
 
   it('creates delayed notification for a new valid message', async () => {
-    redisSet.mockResolvedValue('OK');
+    idempotency.begin.mockResolvedValue('acquired');
     notificationsService.createNotification.mockResolvedValue({
       id: '66666666-6666-4666-8666-666666666666',
       userId: USER_ID,
@@ -75,23 +72,17 @@ describe('TripTrackingAlertEventsConsumer', () => {
       createMessage(MESSAGE_ID),
     );
 
-    expect(redisSet).toHaveBeenCalledWith(
-      `notification:idem:${TRIP_DELAYED_ROUTING_KEY}:${MESSAGE_ID}`,
-      '1',
-      'EX',
-      RABBITMQ_IDEMPOTENCY_TTL_SECONDS,
-      'NX',
-    );
     expect(notificationsService.createNotification).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.TRIP_DELAYED,
       }),
     );
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(TRIP_DELAYED_ROUTING_KEY, MESSAGE_ID);
   });
 
   it('skips duplicate delayed message id', async () => {
-    redisSet.mockResolvedValue(null);
+    idempotency.begin.mockResolvedValue('duplicate');
 
     await consumer.handle(
       TRIP_DELAYED_ROUTING_KEY,
@@ -106,7 +97,7 @@ describe('TripTrackingAlertEventsConsumer', () => {
   });
 
   it('skips duplicate off-route message id', async () => {
-    redisSet.mockResolvedValue(null);
+    idempotency.begin.mockResolvedValue('duplicate');
 
     await consumer.handle(
       TRACKING_GPS_OFF_ROUTE_ROUTING_KEY,
@@ -122,7 +113,7 @@ describe('TripTrackingAlertEventsConsumer', () => {
   });
 
   it('drops malformed payload without rethrowing', async () => {
-    redisSet.mockResolvedValue('OK');
+    idempotency.begin.mockResolvedValue('acquired');
 
     await expect(
       consumer.handle(
@@ -135,6 +126,7 @@ describe('TripTrackingAlertEventsConsumer', () => {
       ),
     ).resolves.toBeUndefined();
     expect(notificationsService.createNotification).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(TRIP_DELAYED_ROUTING_KEY, MESSAGE_ID);
   });
 });
 

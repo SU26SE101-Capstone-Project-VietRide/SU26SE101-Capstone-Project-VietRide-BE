@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
-import { RedisService } from '@vietride/nest-redis';
+import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
 import type { OperatorRecipientProvider } from './operator-recipient.provider';
 import {
@@ -19,7 +19,7 @@ describe('ParcelSubscriptionOperatorEventsConsumer registration (e2e)', () => {
       providers: [
         ParcelSubscriptionOperatorEventsConsumer,
         { provide: RabbitMqConsumer, useValue: { subscribe } },
-        { provide: RedisService, useValue: { getClient: jest.fn() } },
+        { provide: MessageIdempotencyService, useValue: { begin: jest.fn(), markProcessed: jest.fn(), release: jest.fn() } },
         { provide: NotificationsService, useValue: { createNotification: jest.fn() } },
         { provide: OPERATOR_RECIPIENT_PROVIDER, useValue: operatorRecipientProvider },
       ],
@@ -32,4 +32,3 @@ describe('ParcelSubscriptionOperatorEventsConsumer registration (e2e)', () => {
     await moduleRef.close();
   });
 });
-

@@ -18,7 +18,7 @@ import {
 
 @ApiTags('Tracking')
 @ApiBearerAuth()
-@Controller('/api/v1/tracking/trips')
+@Controller('/v1/tracking/trips')
 export class TrackingDataController {
   constructor(private readonly trackingDataService: TrackingDataService) {}
 

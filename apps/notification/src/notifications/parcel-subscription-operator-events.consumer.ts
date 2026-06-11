@@ -1,13 +1,12 @@
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
-import { RedisService } from '@vietride/nest-redis';
 import type { ConsumeMessage } from 'amqplib';
 import pino from 'pino';
 import { ZodError } from 'zod';
 import {
-  RABBITMQ_IDEMPOTENCY_TTL_SECONDS,
   RABBITMQ_PREFETCH_ONE,
 } from './core-events.constants';
+import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
 import type { OperatorRecipientProvider } from './operator-recipient.provider';
 import {
@@ -25,7 +24,7 @@ export class ParcelSubscriptionOperatorEventsConsumer implements OnModuleInit {
 
   constructor(
     private readonly consumer: RabbitMqConsumer,
-    private readonly redis: RedisService,
+    private readonly idempotency: MessageIdempotencyService,
     private readonly notificationsService: NotificationsService,
     @Inject(OPERATOR_RECIPIENT_PROVIDER) private readonly operatorRecipientProvider: OperatorRecipientProvider,
   ) {}
@@ -37,7 +36,7 @@ export class ParcelSubscriptionOperatorEventsConsumer implements OnModuleInit {
           binding.queue,
           binding.routingKey,
           (payload, raw) => this.handle(binding.routingKey, payload, raw),
-          { prefetch: RABBITMQ_PREFETCH_ONE },
+          { prefetch: RABBITMQ_PREFETCH_ONE, requeueOnError: true },
         ),
       ),
     );
@@ -54,9 +53,12 @@ export class ParcelSubscriptionOperatorEventsConsumer implements OnModuleInit {
       return;
     }
 
-    const isNewMessage = await this.markMessageAsProcessing(routingKey, messageId);
-    if (!isNewMessage) {
-      this.logger.info({ routingKey, messageId }, 'Skipping duplicate parcel/subscription/operator message');
+    const processingState = await this.idempotency.begin(routingKey, messageId);
+    if (processingState !== 'acquired') {
+      this.logger.info(
+        { routingKey, messageId, processingState },
+        'Skipping already handled parcel/subscription/operator message',
+      );
       return;
     }
 
@@ -69,6 +71,7 @@ export class ParcelSubscriptionOperatorEventsConsumer implements OnModuleInit {
       await Promise.all(
         notifications.map((notification) => this.notificationsService.createNotification(notification)),
       );
+      await this.idempotency.markProcessed(routingKey, messageId);
       this.logger.info(
         { routingKey, messageId, notificationCount: notifications.length },
         'Processed parcel/subscription/operator notification event',
@@ -79,20 +82,12 @@ export class ParcelSubscriptionOperatorEventsConsumer implements OnModuleInit {
           { routingKey, messageId, issues: error.issues },
           'Dropping malformed parcel/subscription/operator notification event',
         );
+        await this.idempotency.markProcessed(routingKey, messageId);
         return;
       }
 
+      await this.idempotency.release(routingKey, messageId);
       throw error;
     }
   }
-
-  private async markMessageAsProcessing(routingKey: string, messageId: string): Promise<boolean> {
-    const key = `notification:idem:${routingKey}:${messageId}`;
-    const result = await this.redis
-      .getClient()
-      .set(key, '1', 'EX', RABBITMQ_IDEMPOTENCY_TTL_SECONDS, 'NX');
-
-    return result === 'OK';
-  }
 }
-

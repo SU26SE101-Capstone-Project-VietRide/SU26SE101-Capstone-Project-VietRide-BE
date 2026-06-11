@@ -1,7 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
-import { RedisService } from '@vietride/nest-redis';
 import { CoreEventsConsumer } from './core-events.consumer';
+import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
 
 describe('CoreEventsConsumer registration (e2e)', () => {
@@ -11,7 +11,7 @@ describe('CoreEventsConsumer registration (e2e)', () => {
       providers: [
         CoreEventsConsumer,
         { provide: RabbitMqConsumer, useValue: { subscribe } },
-        { provide: RedisService, useValue: { getClient: jest.fn() } },
+        { provide: MessageIdempotencyService, useValue: { begin: jest.fn(), markProcessed: jest.fn(), release: jest.fn() } },
         { provide: NotificationsService, useValue: { createNotification: jest.fn() } },
       ],
     })

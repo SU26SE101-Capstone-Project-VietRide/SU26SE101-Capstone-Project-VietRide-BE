@@ -1,15 +1,14 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
-import { RedisService } from '@vietride/nest-redis';
 import type { ConsumeMessage } from 'amqplib';
 import pino from 'pino';
 import { ZodError } from 'zod';
 import { mapCoreEventToNotification, type CoreEventRoutingKey } from './core-event-notification.mapper';
 import {
   CORE_EVENT_QUEUE_BINDINGS,
-  RABBITMQ_IDEMPOTENCY_TTL_SECONDS,
   RABBITMQ_PREFETCH_ONE,
 } from './core-events.constants';
+import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
 
 @Injectable()
@@ -18,7 +17,7 @@ export class CoreEventsConsumer implements OnModuleInit {
 
   constructor(
     private readonly consumer: RabbitMqConsumer,
-    private readonly redis: RedisService,
+    private readonly idempotency: MessageIdempotencyService,
     private readonly notificationsService: NotificationsService,
   ) {}
 
@@ -29,7 +28,7 @@ export class CoreEventsConsumer implements OnModuleInit {
           binding.queue,
           binding.routingKey,
           (payload, raw) => this.handle(binding.routingKey, payload, raw),
-          { prefetch: RABBITMQ_PREFETCH_ONE },
+          { prefetch: RABBITMQ_PREFETCH_ONE, requeueOnError: true },
         ),
       ),
     );
@@ -42,32 +41,26 @@ export class CoreEventsConsumer implements OnModuleInit {
       return;
     }
 
-    const isNewMessage = await this.markMessageAsProcessing(routingKey, messageId);
-    if (!isNewMessage) {
-      this.logger.info({ routingKey, messageId }, 'Skipping duplicate message');
+    const processingState = await this.idempotency.begin(routingKey, messageId);
+    if (processingState !== 'acquired') {
+      this.logger.info({ routingKey, messageId, processingState }, 'Skipping already handled message');
       return;
     }
 
     try {
       const notification = mapCoreEventToNotification(routingKey, payload);
       await this.notificationsService.createNotification(notification);
+      await this.idempotency.markProcessed(routingKey, messageId);
       this.logger.info({ routingKey, messageId, userId: notification.userId }, 'Processed core notification event');
     } catch (error) {
       if (error instanceof ZodError) {
         this.logger.warn({ routingKey, messageId, issues: error.issues }, 'Dropping malformed notification event');
+        await this.idempotency.markProcessed(routingKey, messageId);
         return;
       }
 
+      await this.idempotency.release(routingKey, messageId);
       throw error;
     }
-  }
-
-  private async markMessageAsProcessing(routingKey: string, messageId: string): Promise<boolean> {
-    const key = `notification:idem:${routingKey}:${messageId}`;
-    const result = await this.redis
-      .getClient()
-      .set(key, '1', 'EX', RABBITMQ_IDEMPOTENCY_TTL_SECONDS, 'NX');
-
-    return result === 'OK';
   }
 }

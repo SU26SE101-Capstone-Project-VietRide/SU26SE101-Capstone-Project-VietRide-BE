@@ -23,7 +23,7 @@ export class RabbitMqConsumer implements OnModuleDestroy {
     queue: string,
     routingKey: string,
     handler: RabbitMqHandler<T>,
-    options: { prefetch?: number } = {},
+    options: { prefetch?: number; requeueOnError?: boolean } = {},
   ): Promise<void> {
     const ch = await this.conn.createChannel();
     await ch.assertExchange(this.opts.exchange, this.opts.exchangeType ?? 'topic', { durable: true });
@@ -39,7 +39,7 @@ export class RabbitMqConsumer implements OnModuleDestroy {
         ch.ack(msg);
       } catch (err) {
         this.logger.error(`Handler failed on queue=${queue} rk=${routingKey}: ${(err as Error).message}`);
-        ch.nack(msg, false, false);
+        ch.nack(msg, false, options.requeueOnError ?? false);
       }
     });
 

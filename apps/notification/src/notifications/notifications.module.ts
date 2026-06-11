@@ -16,6 +16,7 @@ import { FcmPushWorker } from './fcm-push.worker';
 import { FirebaseFcmPushProvider } from './firebase-fcm-push.provider';
 import { IdentityDeviceTokenProvider } from './identity-device-token.provider';
 import { NoopOperatorRecipientProvider } from './noop-operator-recipient.provider';
+import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsController } from './notifications.controller';
 import { NotificationRetentionService } from './notification-retention.service';
 import { NotificationsRepository } from './notifications.repository';
@@ -36,6 +37,7 @@ import { TripTrackingAlertEventsConsumer } from './trip-tracking-alert-events.co
     EmailSendQueue,
     EmailSendWorker,
     EmailTemplateRenderer,
+    MessageIdempotencyService,
     CoreEventsConsumer,
     TripTrackingAlertEventsConsumer,
     ParcelSubscriptionOperatorEventsConsumer,

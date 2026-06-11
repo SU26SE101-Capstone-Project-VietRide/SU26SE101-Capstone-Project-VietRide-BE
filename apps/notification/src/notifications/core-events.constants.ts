@@ -1,4 +1,5 @@
 export const RABBITMQ_IDEMPOTENCY_TTL_SECONDS = 86_400;
+export const RABBITMQ_PROCESSING_LOCK_TTL_SECONDS = 300;
 export const RABBITMQ_PREFETCH_ONE = 1;
 
 export const BOOKING_CONFIRMED_ROUTING_KEY = 'booking.booking.confirmed';

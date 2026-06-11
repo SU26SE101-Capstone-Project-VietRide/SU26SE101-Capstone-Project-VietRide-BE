@@ -1,10 +1,7 @@
 import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
-import { RedisService } from '@vietride/nest-redis';
 import type { ConsumeMessage } from 'amqplib';
 import { NotificationType } from '../generated/notification-prisma-client';
-import {
-  RABBITMQ_IDEMPOTENCY_TTL_SECONDS,
-} from './core-events.constants';
+import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
 import type { OperatorRecipientProvider } from './operator-recipient.provider';
 import {
@@ -22,8 +19,7 @@ const MESSAGE_ID = 'phase-6-message-1';
 
 describe('ParcelSubscriptionOperatorEventsConsumer', () => {
   let rabbitConsumer: jest.Mocked<RabbitMqConsumer>;
-  let redisSet: jest.Mock;
-  let redis: jest.Mocked<RedisService>;
+  let idempotency: jest.Mocked<MessageIdempotencyService>;
   let notificationsService: jest.Mocked<NotificationsService>;
   let operatorRecipientProvider: jest.Mocked<OperatorRecipientProvider>;
   let consumer: ParcelSubscriptionOperatorEventsConsumer;
@@ -32,10 +28,11 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
     rabbitConsumer = {
       subscribe: jest.fn(),
     } as unknown as jest.Mocked<RabbitMqConsumer>;
-    redisSet = jest.fn();
-    redis = {
-      getClient: jest.fn(() => ({ set: redisSet })),
-    } as unknown as jest.Mocked<RedisService>;
+    idempotency = {
+      begin: jest.fn(),
+      markProcessed: jest.fn(),
+      release: jest.fn(),
+    } as unknown as jest.Mocked<MessageIdempotencyService>;
     notificationsService = {
       createNotification: jest.fn(),
     } as unknown as jest.Mocked<NotificationsService>;
@@ -44,7 +41,7 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
     };
     consumer = new ParcelSubscriptionOperatorEventsConsumer(
       rabbitConsumer,
-      redis,
+      idempotency,
       notificationsService,
       operatorRecipientProvider,
     );
@@ -59,13 +56,13 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
         binding.queue,
         binding.routingKey,
         expect.any(Function),
-        { prefetch: 1 },
+        { prefetch: 1, requeueOnError: true },
       );
     }
   });
 
   it('creates parcel notification for a new valid message', async () => {
-    redisSet.mockResolvedValue('OK');
+    idempotency.begin.mockResolvedValue('acquired');
     notificationsService.createNotification.mockResolvedValue(createNotification(NotificationType.PARCEL_LOADED));
 
     await consumer.handle(
@@ -78,23 +75,17 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
       createMessage(MESSAGE_ID),
     );
 
-    expect(redisSet).toHaveBeenCalledWith(
-      `notification:idem:${PARCEL_LOADED_ROUTING_KEY}:${MESSAGE_ID}`,
-      '1',
-      'EX',
-      RABBITMQ_IDEMPOTENCY_TTL_SECONDS,
-      'NX',
-    );
     expect(notificationsService.createNotification).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.PARCEL_LOADED,
       }),
     );
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(PARCEL_LOADED_ROUTING_KEY, MESSAGE_ID);
   });
 
   it('uses operator recipient provider when payload only has operatorId', async () => {
-    redisSet.mockResolvedValue('OK');
+    idempotency.begin.mockResolvedValue('acquired');
     operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([USER_ID]);
     notificationsService.createNotification.mockResolvedValue(
       createNotification(NotificationType.SUBSCRIPTION_LIMIT_EXCEEDED),
@@ -119,7 +110,7 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
   });
 
   it('skips duplicate message id', async () => {
-    redisSet.mockResolvedValue(null);
+    idempotency.begin.mockResolvedValue('duplicate');
 
     await consumer.handle(
       PARCEL_LOADED_ROUTING_KEY,
@@ -134,7 +125,7 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
   });
 
   it('drops malformed payload without rethrowing', async () => {
-    redisSet.mockResolvedValue('OK');
+    idempotency.begin.mockResolvedValue('acquired');
 
     await expect(
       consumer.handle(
@@ -147,6 +138,7 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
       ),
     ).resolves.toBeUndefined();
     expect(notificationsService.createNotification).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(PARCEL_LOADED_ROUTING_KEY, MESSAGE_ID);
   });
 
   it('drops messages without id before idempotency check', async () => {
@@ -159,7 +151,7 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
       createMessage(undefined),
     );
 
-    expect(redisSet).not.toHaveBeenCalled();
+    expect(idempotency.begin).not.toHaveBeenCalled();
     expect(notificationsService.createNotification).not.toHaveBeenCalled();
   });
 });
@@ -187,4 +179,3 @@ function createNotification(type: NotificationType) {
 }
 
 void OPERATOR_RECIPIENT_PROVIDER;
-

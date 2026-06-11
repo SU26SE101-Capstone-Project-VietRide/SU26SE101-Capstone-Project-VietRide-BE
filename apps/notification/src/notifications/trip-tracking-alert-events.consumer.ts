@@ -1,13 +1,12 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
-import { RedisService } from '@vietride/nest-redis';
 import type { ConsumeMessage } from 'amqplib';
 import pino from 'pino';
 import { ZodError } from 'zod';
 import {
-  RABBITMQ_IDEMPOTENCY_TTL_SECONDS,
   RABBITMQ_PREFETCH_ONE,
 } from './core-events.constants';
+import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
 import {
   TRIP_TRACKING_ALERT_QUEUE_BINDINGS,
@@ -23,7 +22,7 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
 
   constructor(
     private readonly consumer: RabbitMqConsumer,
-    private readonly redis: RedisService,
+    private readonly idempotency: MessageIdempotencyService,
     private readonly notificationsService: NotificationsService,
   ) {}
 
@@ -34,7 +33,7 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
           binding.queue,
           binding.routingKey,
           (payload, raw) => this.handle(binding.routingKey, payload, raw),
-          { prefetch: RABBITMQ_PREFETCH_ONE },
+          { prefetch: RABBITMQ_PREFETCH_ONE, requeueOnError: true },
         ),
       ),
     );
@@ -47,9 +46,9 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
       return;
     }
 
-    const isNewMessage = await this.markMessageAsProcessing(routingKey, messageId);
-    if (!isNewMessage) {
-      this.logger.info({ routingKey, messageId }, 'Skipping duplicate alert message');
+    const processingState = await this.idempotency.begin(routingKey, messageId);
+    if (processingState !== 'acquired') {
+      this.logger.info({ routingKey, messageId, processingState }, 'Skipping already handled alert message');
       return;
     }
 
@@ -58,6 +57,7 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
       await Promise.all(
         notifications.map((notification) => this.notificationsService.createNotification(notification)),
       );
+      await this.idempotency.markProcessed(routingKey, messageId);
       this.logger.info(
         { routingKey, messageId, notificationCount: notifications.length },
         'Processed trip/tracking alert notification event',
@@ -65,19 +65,12 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
     } catch (error) {
       if (error instanceof ZodError) {
         this.logger.warn({ routingKey, messageId, issues: error.issues }, 'Dropping malformed alert notification event');
+        await this.idempotency.markProcessed(routingKey, messageId);
         return;
       }
 
+      await this.idempotency.release(routingKey, messageId);
       throw error;
     }
-  }
-
-  private async markMessageAsProcessing(routingKey: string, messageId: string): Promise<boolean> {
-    const key = `notification:idem:${routingKey}:${messageId}`;
-    const result = await this.redis
-      .getClient()
-      .set(key, '1', 'EX', RABBITMQ_IDEMPOTENCY_TTL_SECONDS, 'NX');
-
-    return result === 'OK';
   }
 }

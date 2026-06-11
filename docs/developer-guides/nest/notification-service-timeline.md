@@ -408,6 +408,15 @@ npm run build:ts
 - Internal HTTP:
   - `GET /internal/v1/users/{userId}/device-tokens`
 
+## Ghi chú đồng bộ production sau Phase 10
+
+- `IdentityDeviceTokenProvider` không còn là placeholder: Identity Service đã có endpoint thật `GET /internal/v1/users/{userId}/device-tokens`. Notification phải tiếp tục dùng endpoint này với `X-Internal-Auth: Bearer <internal-jwt>`, `IDENTITY_INTERNAL_BASE_URL` thật và `INTERNAL_JWT_SECRET` dùng chung.
+- `NoopOperatorRecipientProvider` vẫn là placeholder. Khi event chỉ có `operatorId`, Notification không thể gửi trực tiếp vì bảng `notifications.user_id` cần `userId`; phải resolve `operatorId -> userId[]` qua Identity/Operator API nội bộ thật rồi mới tạo notification cho `OPERATOR_ADMIN`/`OPERATOR_STAFF` phù hợp.
+- Nếu payload event đã có `userId`, `userIds`, `passengerUserId`, `senderUserId` hoặc `recipientUserId`, Notification được tạo trực tiếp cho các user đó, không cần operator recipient provider.
+- FCM chỉ production-ready khi Firebase credential thật được cấu hình đầy đủ: `FCM_PROJECT_ID`, `FCM_CLIENT_EMAIL`, `FCM_PRIVATE_KEY` hoặc application default credentials hợp lệ.
+- SendGrid chỉ production-ready khi `SENDGRID_API_KEY`, `SENDGRID_FROM_EMAIL` và sender domain thật đã cấu hình đúng. Nếu thiếu credential, email job sẽ retry/fail theo audit, không được gọi là production delivery verify.
+- Redis của Notification là state vận hành cho BullMQ, RabbitMQ idempotency và FCM token blacklist. Deploy production phải cấu hình Redis ổn định; không coi Redis chỉ là cache có thể mất tùy ý.
+
 ## Assumptions
 
 - Identity Service la source of truth cho User Access Token.

@@ -11,6 +11,8 @@ import { NestRedisModule } from '@vietride/nest-redis';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { HealthController } from './health.controller';
+import { ReadyController } from './ready.controller';
+import { ReadinessService } from './readiness.service';
 import { loadEnv } from '../config/env.schema';
 import { TrackingConfigModule } from '../config/tracking-config.module';
 import { GpsBatchModule } from '../gps-batch/gps-batch.module';
@@ -37,9 +39,10 @@ const env = loadEnv();
     OutboxModule,
     TrackingDataModule,
   ],
-  controllers: [AppController, HealthController],
+  controllers: [AppController, HealthController, ReadyController],
   providers: [
     AppService,
+    ReadinessService,
     { provide: APP_FILTER, useValue: new ApiResponseExceptionFilter() },
     { provide: APP_INTERCEPTOR, useValue: new LoggingInterceptor() },
     { provide: APP_INTERCEPTOR, useValue: new ApiResponseInterceptor() },

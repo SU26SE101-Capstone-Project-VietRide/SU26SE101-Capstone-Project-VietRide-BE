@@ -451,6 +451,17 @@ npx nx run tracking:build
   - `tracking.gps.off_route`
   - `tracking.gps.approaching_stop`
 
+## Ghi chú đồng bộ production sau Phase 10
+
+- `NoopTripDataProvider`, `NoopBookingDataProvider`, và `NoopRouteGeometryProvider` chỉ là placeholder khi Trip/Booking/Route chưa có API nội bộ thật cho route stops, pickup bookings, static ETA, route geometry và recipient users.
+- Khi các API nội bộ thật đã sẵn sàng, phải thay các `Noop*Provider` bằng HTTP provider production dùng `X-Internal-Auth: Bearer <internal-jwt>` theo chuẩn HS256, issuer `vietride-gateway`, audience `vietride-internal`, TTL 120 giây.
+- Tracking authorization cho `joinTripTracking`, REST fallback và `gps:update` đã đi qua HTTP adapter production-shaped. Không được quay lại role-gate hoặc mock token làm đường chính.
+- Local/dev có thể để các worker flag ở `false` để tránh job chạy khi dependency chưa đủ. Khi Tracking, Notification, Redis, RabbitMQ và downstream service đã sẵn sàng production, phải bật:
+  - `TRACKING_GPS_FLUSH_ENABLED=true`
+  - `TRACKING_TRIP_DELAY_ENABLED=true`
+  - `TRACKING_OUTBOX_PUBLISH_ENABLED=true`
+- Redis của Tracking là state vận hành, không chỉ là cache: latest GPS, GPS buffer, ETA cache, off-route timer, approaching/delayed dedupe đều phụ thuộc Redis. Deploy production phải có Redis ổn định và không coi mất Redis data là vô hại.
+
 ## Assumptions
 
 - Identity Service đã có và là source of truth cho User Access Token.

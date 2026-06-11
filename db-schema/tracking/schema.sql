@@ -64,7 +64,7 @@ CREATE TABLE outbox_events (
 );
 
 CREATE INDEX idx_outbox_events_status_created
-    ON outbox_events (status, created_at) WHERE status IN ('PENDING', 'PUBLISHING', 'FAILED');
+    ON outbox_events (status, created_at);
 
 -- =============================================================================
 -- NOTE: NestJS Tracking Service does NOT use Hangfire.
