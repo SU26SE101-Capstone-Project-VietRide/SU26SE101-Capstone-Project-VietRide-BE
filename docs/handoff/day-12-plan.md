@@ -91,7 +91,7 @@ Stand up the Booking-side of the seat-lock saga: bootstrap the Booking service a
 
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
-| 12.0 | todo | — | — | — |
+| 12.0 | done | APPROVED | 2026-06-11 | 0 patch rounds; idempotency wiring + NetArchTest baseline; human /verify batched at end of day |
 | 12.1 | todo | — | — | — |
 | 12.2 | todo | — | — | — |
 | 12.3 | todo | — | — | — |

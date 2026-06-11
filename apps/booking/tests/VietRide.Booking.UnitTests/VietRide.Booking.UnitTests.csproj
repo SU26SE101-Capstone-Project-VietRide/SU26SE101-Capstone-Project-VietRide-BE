@@ -13,6 +13,7 @@
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="NetArchTest.Rules" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
   </ItemGroup>
@@ -25,6 +26,8 @@
     <ProjectReference Include="..\..\..\..\libs\dotnet\VietRide.Shared.Kernel\VietRide.Shared.Kernel.csproj" />
     <ProjectReference Include="..\..\src\VietRide.Booking.Domain\VietRide.Booking.Domain.csproj" />
     <ProjectReference Include="..\..\src\VietRide.Booking.Application\VietRide.Booking.Application.csproj" />
+    <ProjectReference Include="..\..\src\VietRide.Booking.Infrastructure\VietRide.Booking.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\VietRide.Booking.Api\VietRide.Booking.Api.csproj" />
   </ItemGroup>
 
 </Project>
