@@ -32,6 +32,12 @@ public sealed class TripDbContext : VietRideDbContextBase
 
     public DbSet<AlternativeRouteStop> AlternativeRouteStops => Set<AlternativeRouteStop>();
 
+    public DbSet<VehicleType> VehicleTypes => Set<VehicleType>();
+
+    public DbSet<Vehicle> Vehicles => Set<Vehicle>();
+
+    public DbSet<DriverSchedule> DriverSchedules => Set<DriverSchedule>();
+
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
         configurationBuilder.Conventions.Remove(typeof(ForeignKeyIndexConvention));

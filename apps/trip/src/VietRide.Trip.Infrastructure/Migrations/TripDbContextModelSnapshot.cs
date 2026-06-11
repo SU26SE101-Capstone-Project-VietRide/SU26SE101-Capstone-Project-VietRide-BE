@@ -190,6 +190,90 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.DriverSchedule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid?>("AssistantUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("assistant_user_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<JsonElement>("DayOfWeek")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("day_of_week");
+
+                    b.Property<TimeOnly>("DepartureTime")
+                        .HasColumnType("time without time zone")
+                        .HasColumnName("departure_time");
+
+                    b.Property<Guid>("DriverUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("driver_user_id");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<Guid>("OperatorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("operator_id");
+
+                    b.Property<Guid>("RouteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("route_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<DateOnly>("ValidFrom")
+                        .HasColumnType("date")
+                        .HasColumnName("valid_from");
+
+                    b.Property<DateOnly?>("ValidUntil")
+                        .HasColumnType("date")
+                        .HasColumnName("valid_until");
+
+                    b.Property<Guid?>("VehicleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("vehicle_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_driver_schedules");
+
+                    b.HasIndex("DriverUserId", "IsActive")
+                        .HasDatabaseName("idx_driver_schedules_driver_active");
+
+                    b.HasIndex("OperatorId", "IsActive")
+                        .HasDatabaseName("idx_driver_schedules_operator_active");
+
+                    b.HasIndex("RouteId", "IsActive")
+                        .HasDatabaseName("idx_driver_schedules_route_active");
+
+                    b.HasIndex("VehicleId", "IsActive")
+                        .HasDatabaseName("idx_driver_schedules_vehicle_active")
+                        .HasFilter("vehicle_id IS NOT NULL");
+
+                    b.ToTable("driver_schedules", "vietride_trip", t =>
+                        {
+                            t.HasCheckConstraint("chk_driver_schedules_valid_until_after_from", "valid_until IS NULL OR valid_until >= valid_from");
+                        });
+                });
+
             modelBuilder.Entity("VietRide.Trip.Domain.Entities.OperatorStation", b =>
                 {
                     b.Property<Guid>("Id")
@@ -675,6 +759,161 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.Vehicle", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("LicensePlate")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("license_plate");
+
+                    b.Property<decimal?>("MaxCargoVolumeM3")
+                        .HasColumnType("decimal(8,2)")
+                        .HasColumnName("max_cargo_volume_m3");
+
+                    b.Property<decimal?>("MaxCargoWeightKg")
+                        .HasColumnType("decimal(8,2)")
+                        .HasColumnName("max_cargo_weight_kg");
+
+                    b.Property<Guid>("OperatorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("operator_id");
+
+                    b.Property<JsonElement>("SeatLayoutJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("seat_layout_json");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("vehicle_status")
+                        .HasColumnName("status")
+                        .HasDefaultValueSql("'ACTIVE'::vehicle_status");
+
+                    b.Property<int>("TotalSeats")
+                        .HasColumnType("integer")
+                        .HasColumnName("total_seats");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid>("VehicleTypeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("vehicle_type_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_vehicles");
+
+                    b.HasIndex("LicensePlate")
+                        .IsUnique()
+                        .HasDatabaseName("uq_vehicles_license_plate")
+                        .HasFilter("deleted_at IS NULL");
+
+                    b.HasIndex("VehicleTypeId")
+                        .HasDatabaseName("idx_vehicles_vehicle_type_id");
+
+                    b.HasIndex("OperatorId", "Status")
+                        .HasDatabaseName("idx_vehicles_operator_status")
+                        .HasFilter("is_active = TRUE");
+
+                    b.ToTable("vehicles", "vietride_trip", t =>
+                        {
+                            t.HasCheckConstraint("chk_vehicles_cargo_weight_non_negative", "max_cargo_weight_kg IS NULL OR max_cargo_weight_kg >= 0");
+
+                            t.HasCheckConstraint("chk_vehicles_total_seats_positive", "total_seats > 0");
+                        });
+                });
+
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.VehicleType", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<int?>("DefaultSeatCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("default_seat_count");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("display_name");
+
+                    b.Property<int?>("EstimatedPassengerLuggageKgPerSeat")
+                        .HasColumnType("integer")
+                        .HasColumnName("estimated_passenger_luggage_kg_per_seat");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<bool>("IsSystemDefined")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_system_defined");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("Id")
+                        .HasName("pk_vehicle_types");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("uq_vehicle_types_code");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("idx_vehicle_types_is_active");
+
+                    b.ToTable("vehicle_types", "vietride_trip");
+                });
+
             modelBuilder.Entity("VietRide.Trip.Domain.Entities.AlternativeRoute", b =>
                 {
                     b.HasOne("VietRide.Trip.Domain.Entities.Station", null)
@@ -703,6 +942,20 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .HasForeignKey("StopId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.DriverSchedule", b =>
+                {
+                    b.HasOne("VietRide.Trip.Domain.Entities.Route", null)
+                        .WithMany()
+                        .HasForeignKey("RouteId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("VietRide.Trip.Domain.Entities.Vehicle", null)
+                        .WithMany()
+                        .HasForeignKey("VehicleId")
+                        .OnDelete(DeleteBehavior.SetNull);
                 });
 
             modelBuilder.Entity("VietRide.Trip.Domain.Entities.OperatorStation", b =>
@@ -770,6 +1023,15 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .WithMany()
                         .HasForeignKey("ReplacedByStopId")
                         .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.Vehicle", b =>
+                {
+                    b.HasOne("VietRide.Trip.Domain.Entities.VehicleType", null)
+                        .WithMany()
+                        .HasForeignKey("VehicleTypeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

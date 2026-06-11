@@ -6,7 +6,7 @@ FROM node:20-alpine AS build
 WORKDIR /workspace
 
 # Install deps using workspace package.json (root only — no per-app package.json).
-COPY package.json package-lock.json nx.json tsconfig.base.json ./
+COPY package.json package-lock.json nx.json tsconfig.base.json eslint.config.mjs ./
 # Drop the @nx-dotnet/core plugin from this image's nx.json — the Node image has no
 # dotnet SDK, and loading it would abort `nx build`. Repo nx.json is untouched.
 RUN node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('nx.json'));j.plugins=j.plugins.filter(p=>(p.plugin||p)!=='@nx-dotnet/core');fs.writeFileSync('nx.json',JSON.stringify(j,null,2))"
@@ -14,6 +14,7 @@ RUN node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('nx.json'
 # in node_modules — webpack resolves the shared libs through those symlinks.
 COPY libs/shared libs/shared
 RUN npm ci --no-audit --no-fund --ignore-scripts
+RUN npx nx run nest-common:build --skip-nx-cache
 
 # Copy sources needed to build gateway (Nx will only build referenced projects).
 COPY apps/gateway apps/gateway

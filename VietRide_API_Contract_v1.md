@@ -2767,3 +2767,378 @@ AlternativeRoute active limit exceeded:
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-10T10:00:00Z" }
 }
 ```
+
+## Trip Vehicle and Driver Schedule Management (Day 9)
+
+### Role matrix and shared rules
+
+| Method | Role(s) |
+|---|---|
+| `POST`, `PATCH` | `OPERATOR_ADMIN` only |
+| `GET` list/by-id | `OPERATOR_ADMIN`, `OPERATOR_STAFF` |
+
+All public responses use the ADR 0004 `ApiResponse<T>` envelope. Success responses include `{ success, statusCode, data, meta }`; errors include `{ success: false, statusCode, error: { code, message, fields? }, meta }`.
+
+Write endpoints in this Day-9 section do not require `Idempotency-Key` per BSOT §5.6.
+
+Vehicle and DriverSchedule writes require the caller operator to be `APPROVED` and active. A non-APPROVED or inactive operator receives `403 FORBIDDEN`.
+
+Vehicle tenant isolation: a missing Vehicle, a soft-deleted Vehicle, or a Vehicle not owned by the caller's operator returns `404 VEHICLE_NOT_FOUND`.
+
+### VehicleType DTO
+
+`VehicleTypeDto` shape:
+```json
+{
+  "id": "uuid",
+  "code": "LIMOUSINE",
+  "displayName": "Limousine",
+  "estimatedPassengerLuggageKgPerSeat": 15,
+  "defaultSeatCount": 9,
+  "isSystemDefined": true,
+  "isActive": true,
+  "createdAt": "2026-06-11T10:00:00Z",
+  "updatedAt": "2026-06-11T10:00:00Z"
+}
+```
+
+The catalog contains the three platform-seeded system types:
+
+| `code` | `defaultSeatCount` |
+|---|---:|
+| `STANDARD_BUS` | 45 |
+| `LIMOUSINE` | 9 |
+| `SLEEPER_BUS` | 40 |
+
+`isSystemDefined=true` blocks deletion in the application layer. Day 9 exposes the catalog as read-only; it does not expose a VehicleType delete endpoint.
+
+### GET `/v1/vehicle-types`
+
+Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`.
+
+Query: `page?`, `pageSize?`, `search?`, `searchIn?`, `sortBy?`, `sortDir?`.
+
+Pagination follows BSOT §5.7 defaults (`page=1`, `pageSize=20`, max `100`). Search and sort follow BSOT §5.8; allowed search fields are `code` and `displayName`.
+
+Response `200`: `PagedResult<VehicleTypeDto>` in the ADR 0004 success envelope.
+
+### SeatLayoutJson contract
+
+`Vehicle.seatLayoutJson` has this exact shared BE/FE structure:
+```json
+{
+  "version": 1,
+  "vehicleTypeCode": "LIMOUSINE",
+  "totalSeats": 2,
+  "rows": 1,
+  "cols": 2,
+  "decks": 1,
+  "aisles": [
+    { "afterCol": 1 }
+  ],
+  "seats": [
+    {
+      "seatNumber": "A01",
+      "row": 1,
+      "col": 1,
+      "deck": 1,
+      "type": "VIP",
+      "isWindow": true,
+      "isAisle": false,
+      "disabled": false
+    },
+    {
+      "seatNumber": "A02",
+      "row": 1,
+      "col": 2,
+      "deck": 1,
+      "type": "DRIVER_AREA",
+      "isWindow": false,
+      "isAisle": true,
+      "disabled": true
+    }
+  ]
+}
+```
+
+Field rules:
+- `version` is an integer.
+- `vehicleTypeCode` is a string.
+- `totalSeats`, `rows`, `cols`, and `decks` are integers. `decks=1` is a normal vehicle and `decks=2` is a sleeper vehicle.
+- `aisles` is an array whose entries contain integer `afterCol`.
+- `seats` is an array whose entries contain string `seatNumber`, 1-indexed integer `row` and `col`, integer `deck`, enum `type`, booleans `isWindow`, `isAisle`, and `disabled`.
+- `type` is exactly one of `STANDARD`, `SLEEPER_LOWER`, `SLEEPER_UPPER`, `VIP`, `DRIVER_AREA`.
+- `seatNumber` is a string and identifies the seat used by TripSeat.
+
+The complete v1 semantic seat-layout validation scope is limited to:
+1. `Vehicle.totalSeats == seatLayoutJson.totalSeats == seatLayoutJson.seats.length`.
+2. Every `seatLayoutJson.seats[].seatNumber` is unique within the Vehicle.
+
+Either failure returns `422 VALIDATION_ERROR` with `error.fields` identifying `totalSeats` or `seatLayoutJson.seats[].seatNumber`. No additional row, column, deck, aisle, or seat-geometry rule is enforced in v1.
+
+### Vehicle DTO
+
+`VehicleDto` shape:
+```json
+{
+  "id": "uuid",
+  "operatorId": "uuid",
+  "vehicleTypeId": "uuid",
+  "licensePlate": "51B-12345",
+  "seatLayoutJson": {
+    "version": 1,
+    "vehicleTypeCode": "LIMOUSINE",
+    "totalSeats": 2,
+    "rows": 1,
+    "cols": 2,
+    "decks": 1,
+    "aisles": [{ "afterCol": 1 }],
+    "seats": [
+      {
+        "seatNumber": "A01",
+        "row": 1,
+        "col": 1,
+        "deck": 1,
+        "type": "VIP",
+        "isWindow": true,
+        "isAisle": false,
+        "disabled": false
+      },
+      {
+        "seatNumber": "A02",
+        "row": 1,
+        "col": 2,
+        "deck": 1,
+        "type": "DRIVER_AREA",
+        "isWindow": false,
+        "isAisle": true,
+        "disabled": true
+      }
+    ]
+  },
+  "totalSeats": 2,
+  "maxCargoWeightKg": 500.00,
+  "maxCargoVolumeM3": 8.50,
+  "status": "ACTIVE",
+  "isActive": true,
+  "createdAt": "2026-06-11T10:00:00Z",
+  "updatedAt": "2026-06-11T10:00:00Z"
+}
+```
+
+### POST `/v1/operator/vehicles`
+
+Auth: `OPERATOR_ADMIN`.
+
+Idempotency-Key: not required by BSOT §5.6.
+
+Request:
+```json
+{
+  "vehicleTypeId": "uuid",
+  "licensePlate": "51B-12345",
+  "seatLayoutJson": {
+    "version": 1,
+    "vehicleTypeCode": "LIMOUSINE",
+    "totalSeats": 2,
+    "rows": 1,
+    "cols": 2,
+    "decks": 1,
+    "aisles": [{ "afterCol": 1 }],
+    "seats": [
+      {
+        "seatNumber": "A01",
+        "row": 1,
+        "col": 1,
+        "deck": 1,
+        "type": "VIP",
+        "isWindow": true,
+        "isAisle": false,
+        "disabled": false
+      },
+      {
+        "seatNumber": "A02",
+        "row": 1,
+        "col": 2,
+        "deck": 1,
+        "type": "DRIVER_AREA",
+        "isWindow": false,
+        "isAisle": true,
+        "disabled": true
+      }
+    ]
+  },
+  "totalSeats": 2,
+  "maxCargoWeightKg": 500.00,
+  "maxCargoVolumeM3": 8.50
+}
+```
+
+Validation:
+- Missing or inactive `vehicleTypeId` returns `404 VEHICLE_TYPE_NOT_FOUND`.
+- Seat-layout validation is exactly the two rules in the SeatLayoutJson contract above. A failure returns `422 VALIDATION_ERROR` with `error.fields`.
+- `licensePlate` must be unique across Vehicles whose `deletedAt` is null. A conflict returns `422 VALIDATION_ERROR` with `error.fields.licensePlate`; a plate from a soft-deleted Vehicle does not conflict.
+- Negative `maxCargoWeightKg` returns `422 VALIDATION_ERROR` with `error.fields.maxCargoWeightKg`.
+
+Response `201`: `VehicleDto` in the ADR 0004 success envelope.
+
+### GET `/v1/operator/vehicles`
+
+Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`.
+
+Query: `page?`, `pageSize?`, `search?`, `searchIn?`, `sortBy?`, `sortDir?`.
+
+Pagination follows BSOT §5.7 defaults (`page=1`, `pageSize=20`, max `100`). Search and sort follow BSOT §5.8; the allowed search field is `licensePlate`. Only non-soft-deleted Vehicles owned by the caller's operator are returned.
+
+Response `200`: `PagedResult<VehicleDto>` in the ADR 0004 success envelope.
+
+### GET `/v1/operator/vehicles/{id}`
+
+Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`.
+
+Tenant isolation: missing, soft-deleted, or cross-operator Vehicle returns `404 VEHICLE_NOT_FOUND`.
+
+Response `200`: `VehicleDto` in the ADR 0004 success envelope.
+
+### PATCH `/v1/operator/vehicles/{id}`
+
+Auth: `OPERATOR_ADMIN`.
+
+Idempotency-Key: not required by BSOT §5.6.
+
+Request: partial Vehicle update using the mutable fields from the create request, plus `status` and `isActive`.
+```json
+{
+  "vehicleTypeId": "uuid",
+  "licensePlate": "51B-54321",
+  "totalSeats": 2,
+  "seatLayoutJson": {
+    "version": 1,
+    "vehicleTypeCode": "LIMOUSINE",
+    "totalSeats": 2,
+    "rows": 1,
+    "cols": 2,
+    "decks": 1,
+    "aisles": [{ "afterCol": 1 }],
+    "seats": [
+      {
+        "seatNumber": "A01",
+        "row": 1,
+        "col": 1,
+        "deck": 1,
+        "type": "VIP",
+        "isWindow": true,
+        "isAisle": false,
+        "disabled": false
+      },
+      {
+        "seatNumber": "A02",
+        "row": 1,
+        "col": 2,
+        "deck": 1,
+        "type": "DRIVER_AREA",
+        "isWindow": false,
+        "isAisle": true,
+        "disabled": true
+      }
+    ]
+  },
+  "maxCargoWeightKg": 500.00,
+  "maxCargoVolumeM3": 8.50,
+  "status": "ACTIVE",
+  "isActive": true
+}
+```
+
+Validation mirrors Vehicle create for supplied fields. Missing or inactive `vehicleTypeId` returns `404 VEHICLE_TYPE_NOT_FOUND`; missing, soft-deleted, or cross-operator Vehicle returns `404 VEHICLE_NOT_FOUND`.
+
+For every partial update, validation runs against the effective merged state: the persisted Vehicle values combined with all supplied PATCH fields. The merged state must still satisfy `Vehicle.totalSeats == seatLayoutJson.totalSeats == seatLayoutJson.seats.length` and unique `seatLayoutJson.seats[].seatNumber`, so changing only `totalSeats` or only `seatLayoutJson` cannot leave an invalid Vehicle.
+
+Response `200`: updated `VehicleDto` in the ADR 0004 success envelope.
+
+### DriverSchedule DTO
+
+`DriverScheduleDto` shape:
+```json
+{
+  "id": "uuid",
+  "operatorId": "uuid",
+  "routeId": "uuid",
+  "vehicleId": "uuid",
+  "driverUserId": "uuid",
+  "assistantUserId": "uuid",
+  "dayOfWeek": [1, 3, 5],
+  "departureTime": "08:00:00",
+  "validFrom": "2026-07-01",
+  "validUntil": "2026-12-31",
+  "isActive": true,
+  "createdAt": "2026-06-11T10:00:00Z",
+  "updatedAt": "2026-06-11T10:00:00Z"
+}
+```
+
+`vehicleId`, `assistantUserId`, and `validUntil` are nullable. `dayOfWeek` is a JSON array using `1=Monday`, `2=Tuesday`, ..., `7=Sunday`. `departureTime` is a timezone-free `TIME` value with local ICT semantics.
+
+### POST `/v1/operator/driver-schedules`
+
+Auth: `OPERATOR_ADMIN`.
+
+Idempotency-Key: not required by BSOT §5.6.
+
+Request:
+```json
+{
+  "routeId": "uuid",
+  "vehicleId": "uuid",
+  "driverUserId": "uuid",
+  "assistantUserId": "uuid",
+  "dayOfWeek": [1, 3, 5],
+  "departureTime": "08:00:00",
+  "validFrom": "2026-07-01",
+  "validUntil": "2026-12-31",
+  "isActive": true
+}
+```
+
+Validation:
+- `dayOfWeek` must be a non-empty JSON array containing only integers from `1` through `7`. An empty array, a non-integer entry, or an entry outside `1..7` returns `422 VALIDATION_ERROR` with `error.fields.dayOfWeek`.
+- `validUntil`, when present, must be on or after `validFrom`; otherwise return `422 VALIDATION_ERROR` with `error.fields.validUntil`.
+- `routeId` must resolve to an active Route owned by the caller's operator. A missing, inactive, or cross-operator Route returns `404 ROUTE_NOT_FOUND`.
+- `vehicleId`, when present, must resolve to a non-soft-deleted Vehicle owned by the caller's operator; otherwise return `404 VEHICLE_NOT_FOUND`.
+- An active schedule conflicts when the same `driverUserId` has any intersecting `dayOfWeek`, the same local-ICT `departureTime`, and an overlapping `[validFrom, validUntil]` window. Return `409 TRIP_DRIVER_CONFLICT`.
+- Driver `role=DRIVER` and assistant `role=ASSISTANT` validation is deferred to Day 11. Day 9 does not reject this request based on those Identity roles.
+
+Response `201`: `DriverScheduleDto` in the ADR 0004 success envelope.
+
+Creating a DriverSchedule only persists the recurring assignment. Day 9 does not generate Trips or enqueue Trip generation.
+
+### Day-9 error examples
+
+Seat-layout count failure:
+```json
+{
+  "success": false,
+  "statusCode": 422,
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Seat layout validation failed.",
+    "fields": [
+      { "field": "totalSeats", "message": "totalSeats must equal seatLayoutJson.totalSeats and seats.length." }
+    ]
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-11T10:00:00Z" }
+}
+```
+
+Driver schedule conflict:
+```json
+{
+  "success": false,
+  "statusCode": 409,
+  "error": {
+    "code": "TRIP_DRIVER_CONFLICT",
+    "message": "The driver already has an active schedule at this weekly time slot."
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-11T10:00:00Z" }
+}
+```
