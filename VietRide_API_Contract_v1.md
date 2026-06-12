@@ -847,7 +847,7 @@ Response `200`:
   "data": {
     "bookingId": "uuid",
     "pickup": { "stationId": "uuid", "stopId": null },
-    "fareDelta": 50000,
+    "fareDelta": 0,
     "refundAmount": 0,
     "paymentRedirectUrl": null
   },
@@ -855,7 +855,7 @@ Response `200`:
 }
 ```
 
-Rules: reprice using `Trip.baseFare` for terminal pickup or `TripStopFare` for along-route pickup. If fare increases, apply the change only after the delta charge succeeds. If fare decreases, refund the delta to Wallet.
+Rules (price-neutral-only, BSOT v1.11.0 — human decision 2026-06-12, supersedes technical_context_v7 lines 1639-1656 downgrade-and-refund): compute the new fare from `Trip.baseFare` for terminal pickup or `TripStopFare` for along-route pickup; the edit is allowed ONLY when the new fare equals the current fare. Any fare difference — increase OR decrease — is **rejected** with `409 BOOKING_EDIT_PICKUP_PRICE_CHANGED`; to change to a different-priced pickup the passenger must cancel the booking and rebook. `fareDelta` and `refundAmount` are therefore always `0` on success; no wallet refund/charge path exists on this endpoint.
 
 ### POST `/v1/bookings/{bookingId}/edit-dropoff`
 
@@ -1093,7 +1093,8 @@ Response `200` (raw):
       "fareFromThisStop": 350000
     }
   ],
-  "seatSummary": { "totalSeats": 40, "availableSeats": 18 }
+  "seatSummary": { "totalSeats": 40, "availableSeats": 18 },
+  "returnRouteId": "uuid | null"
 }
 ```
 
@@ -1102,6 +1103,10 @@ Notes:
   the caller falls back to `baseFare` (technical_context §6.10 step 2c). `null` ⇒ use `baseFare`.
 - `stops` are the along-route intermediate stops (snapshot of RouteStop into `trip_stops`),
   ordered by `orderIndex`; `allowPickup` / `allowDropoff` drive Day-13 pickup/dropoff validation.
+- `returnRouteId`: nullable UUID — the return-direction route linked via `Route.returnRouteId`
+  self-FK. Booking uses this to validate `ROUTE_RETURN_NOT_CONFIGURED` (422) when the passenger
+  requests a round-trip but the outbound route has no return route configured
+  (technical_context_v7 line 1750). Trip will expose this field in Task 11.4.
 - Errors: `404 TRIP_NOT_FOUND`.
 
 ### POST `/internal/v1/trips/{tripId}/lock-seats`

@@ -8,7 +8,7 @@ namespace VietRide.Booking.UnitTests;
 /// tests (seat lock TTL, BookingPendingAction, voucher application) land Day 12+
 /// alongside SCV-82.
 ///
-/// Value-object correctness (Money floor 1000 VND, PhoneNumber E.164 regex) is
+/// Value-object correctness (Money to-the-đồng VND, PhoneNumber E.164 regex) is
 /// covered ONCE in tests/dotnet/VietRide.Shared.Kernel.UnitTests — do NOT
 /// duplicate those tests here.
 public class SanityTests

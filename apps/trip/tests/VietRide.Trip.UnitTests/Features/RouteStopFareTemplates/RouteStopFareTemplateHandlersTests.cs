@@ -41,7 +41,7 @@ public sealed class RouteStopFareTemplateHandlersTests
 
         result.RouteId.Should().Be(route.Id);
         result.StopId.Should().Be(stop.Id);
-        result.FareFromThisStop.Should().Be(123000);
+        result.FareFromThisStop.Should().Be(123456);
         result.EffectiveFrom.Should().Be(EffectiveFrom);
         fareTemplateRepository.Entities.Should().ContainSingle();
     }

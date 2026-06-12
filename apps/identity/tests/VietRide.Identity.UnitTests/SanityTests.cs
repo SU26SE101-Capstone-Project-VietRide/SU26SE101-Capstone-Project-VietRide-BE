@@ -8,7 +8,7 @@ namespace VietRide.Identity.UnitTests;
 /// tests (User registration, OAuth token rotation, Operator approval flow) land
 /// Day 3+ alongside SCV-65.
 ///
-/// Value-object correctness (Money floor 1000 VND, PhoneNumber E.164 regex) is
+/// Value-object correctness (Money to-the-đồng VND, PhoneNumber E.164 regex) is
 /// covered ONCE in tests/dotnet/VietRide.Shared.Kernel.UnitTests — do NOT
 /// duplicate those tests here.
 public class SanityTests

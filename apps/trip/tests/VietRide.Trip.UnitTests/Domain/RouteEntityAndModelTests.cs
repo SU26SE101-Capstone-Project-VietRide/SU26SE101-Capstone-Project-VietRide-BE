@@ -13,7 +13,7 @@ namespace VietRide.Trip.UnitTests.Domain;
 public sealed class RouteEntityAndModelTests
 {
     [Fact]
-    public void Route_Create_FloorsMoneyAndAllowsNullableDistanceAndDuration()
+    public void Route_Create_KeepsMoneyToTheDongAndAllowsNullableDistanceAndDuration()
     {
         var route = Route.Create(
             Guid.NewGuid(),
@@ -25,7 +25,7 @@ public sealed class RouteEntityAndModelTests
             estimatedDurationMinutes: null);
 
         route.Name.Should().Be("Main corridor");
-        route.BaseFare.Amount.Should().Be(123_000);
+        route.BaseFare.Amount.Should().Be(123_456);
         route.TotalDistanceKm.Should().BeNull();
         route.EstimatedDurationMinutes.Should().BeNull();
         route.IsActive.Should().BeTrue();

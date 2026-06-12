@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.9.0
+> **Phiên bản:** 1.11.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-06-11
+> **Cập nhật lần cuối:** 2026-06-12
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -240,7 +240,7 @@ vietride/                                                                    (wo
 │   │   └── nest-config/                 Zod env schema base + ConfigModule factory + validated env type
 │   └── dotnet/                          (C# — .NET apps reference qua ProjectReference từ libs)
 │       ├── VietRide.Shared.Kernel/                 ⭐ Domain primitives — referenced bởi Domain layer
-│       │   ├── ValueObjects/Money.cs               BIGINT VND wrapper, floor-1000 rounding built-in
+│       │   ├── ValueObjects/Money.cs               BIGINT VND wrapper, to-the-đồng (FromDecimal rounds nearest đồng)
 │       │   ├── ValueObjects/PhoneNumber.cs         E.164 VN validation
 │       │   ├── Primitives/BaseEntity.cs            Id, CreatedAt, UpdatedAt, RowVersion + IAuditable/ISoftDeletable/IActivatable markers
 │       │   ├── Primitives/Result.cs                Result<T> + Error type cho functional error handling
@@ -1107,7 +1107,7 @@ Tham chiếu `db-schema/_global/cross-service-references.md` cho danh sách đ�
 
 ### 4.4 DB conventions canonical (extract — full ở `db-schema/_global/README.md`)
 
-- **Money:** `BIGINT` (VND, đơn vị đồng). Floor 1,000 VND trước khi INSERT. KHÔNG dùng DECIMAL/FLOAT.
+- **Money:** `BIGINT` (VND, đơn vị đồng). Giữ đến đơn vị đồng — KHÔNG floor về 1,000 (v1.11.0); kết quả tính lẻ làm tròn đến đồng gần nhất. KHÔNG dùng DECIMAL/FLOAT.
 - **Timestamps:** `TIMESTAMPTZ` (UTC). KHÔNG `TIMESTAMP` naive.
 - **`departureTime`:** `TIME` (no TZ), semantic local ICT.
 - **UUID:** `UUID DEFAULT gen_random_uuid()`.
@@ -1248,7 +1248,8 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 | 1 | `POST /v1/bookings` | Booking |
 | 2 | `POST /v1/bookings/round-trip` | Booking |
 | 3 | `POST /v1/bookings/{id}/cancel` | Booking |
-| 4 | `POST /v1/bookings/{id}/edit-pickup-dropoff` | Booking |
+| 4 | `POST /v1/bookings/{id}/edit-pickup` | Booking |
+| 4b | `POST /v1/bookings/{id}/edit-dropoff` | Booking |
 | 5 | `POST /v1/parcels` | Parcel |
 | 6 | `POST /v1/parcels/{id}/confirm-delivery` (passenger confirm) | Parcel |
 | 7 | `POST /v1/payments/wallet-charge` | Payment |
@@ -1338,7 +1339,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 | | `BOOKING_MAX_SEATS_EXCEEDED` | 422 | Booking > 5 seats |
 | | `BOOKING_NOT_FOUND` | 404 | |
 | | `BOOKING_NOT_CANCELLABLE` | 409 | Status không trong CONFIRMED/PENDING_PAYMENT |
-| | `BOOKING_EDIT_PICKUP_PRICE_INCREASE` | 409 | Edit pickup làm tăng giá vé — không cho v1 |
+| | `BOOKING_EDIT_PICKUP_PRICE_CHANGED` | 409 | Edit pickup làm THAY ĐỔI giá vé (tăng hoặc giảm) — v1 chỉ cho đổi cùng giá (fareDelta=0); muốn đổi giá: hủy vé + đặt lại (v1.11.0, thay BOOKING_EDIT_PICKUP_PRICE_INCREASE) |
 | | `BOOKING_NOT_FOR_THIS_TRIP` | 422 | QR scan booking khác trip |
 | | `BOOKING_PASSENGER_ALREADY_BOARDED` | 409 | Tick lại passenger đã BOARDED |
 | | `BOOKING_ROUND_TRIP_INVALID` | 422 | Return trip không hợp lệ |
@@ -1698,7 +1699,7 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 
 | Method + Path | Caller | Mục đích |
 |---|---|---|
-| `POST /internal/v1/payments/wallet-charge` | Booking, Parcel | Wallet payment (instant SUCCEEDED) trong cùng DB transaction |
+| `POST /internal/v1/payments/charge` | Booking, Parcel | Wallet payment (instant SUCCEEDED) trong cùng DB transaction |
 | `POST /internal/v1/payments/vnpay-init` | Booking, Parcel | Tạo VNPay redirect URL |
 | `GET /internal/v1/wallets/{userId}/balance` | Booking (preview) | Check balance UI trước checkout |
 | `POST /internal/v1/refunds` | Booking, Parcel | Trigger refund (event-driven preferred — HTTP fallback) |
@@ -1984,7 +1985,7 @@ ACCEPTED ─→ REJECTED  (revoke after accept — voucher inactive cho operator
   "@t": "2026-05-25T14:30:00.123Z",
   "@l": "Information",
   "@m": "Booking confirmed: {BookingCode}",
-  "BookingCode": "VR-A8K2",
+  "BookingCode": "VR-20260518-ABCD1234",
   "BookingId": "uuid",
   "UserId": "uuid",
   "RequestId": "uuid",
@@ -2071,9 +2072,9 @@ const CreateBookingSchema = z.object({
 - **DB:** `BIGINT` (đơn vị đồng VND).
 - **.NET in-process:** custom `Money` struct (wrap `long`) — KHÔNG dùng `decimal`/`float`/`double` cho VND.
 - **TypeScript in-process:** `number` (safe < 2^53; VietRide max booking ~5,000,000 VND, < 2^53 ổn).
-- **Rounding:** floor xuống 1,000 VND trước khi write DB.
+- **Rounding (v1.11.0):** giữ đến đơn vị ĐỒNG — KHÔNG floor về 1,000; `Money.FromRaw` pass-through, kết quả phép tính lẻ (giảm giá %, hoa hồng) làm tròn đến đồng gần nhất:
   ```csharp
-  static long FloorToThousand(long v) => v / 1000 * 1000;
+  Money.FromDecimal(v) // Math.Round(v, 0, MidpointRounding.AwayFromZero)
   ```
 - **API JSON:** `number` (BIGINT VND), KHÔNG dùng string.
 
@@ -2147,7 +2148,7 @@ Mọi key dùng pattern `<service>:<purpose>:<id>` để namespace per service. 
 | `identity:login_lockout:{userId}` | Identity | Failed login counter (window 15p) | 15p |
 | `gateway:rate_limit:{ip}:{route}` | Gateway | API rate limit | 1p |
 | `gateway:internal_jwt:{kid}` | Gateway | Internal JWT signing key cache (nếu rotate) | 1h |
-| `booking:seat_lock:{tripId}:{seatNumber}` | Booking | Seat hold trong checkout | 10p |
+| `seat_lock:{tripId}:{seatNumber}` | Trip | Seat hold trong checkout | 10p |
 | `booking:idem:{key}` | Booking | Idempotency-Key cache | 24h |
 | `payment:idem:{key}` | Payment | Idempotency-Key cache | 24h |
 | `payment:vnpay_ipn:{vnpTxnRef}` | Payment | Dedupe IPN callback | 24h |
@@ -2164,7 +2165,7 @@ Mọi key dùng pattern `<service>:<purpose>:<id>` để namespace per service. 
 ### 9.10 ID format
 
 - **PK:** UUID v4 (`gen_random_uuid()` server-side default).
-- **Booking code:** `VR-<4 char base32>` user-facing, lưu kèm trong `bookings.code UNIQUE`. Generated server-side at create.
+- **Booking code:** `VR-yyyyMMdd-XXXXXXXX` (date prefix + 8-char base32 uppercase, e.g. `VR-20260518-ABCD1234`) user-facing, lưu kèm trong `bookings.code UNIQUE`. Generated server-side at create.
 - **Parcel code:** `VRP-<6 char base32>` similar.
 - **Voucher code:** uppercase base32, 6–12 ký tự, admin nhập thủ công hoặc auto-gen 8 char.
 - **Invoice number:** `VR-INV-yyyyMM-XXXXXX` (6-digit sequential per month).
@@ -2680,6 +2681,8 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.11.0** | 2026-06-12 | BE lead (Vũ) | **MINOR** — (1) **Money rounding rule change (human decision 2026-06-12):** bỏ floor về 1,000 VND — số tiền giữ đến đơn vị ĐỒNG; kết quả phép tính lẻ (giảm giá %, hoa hồng) làm tròn đến đồng gần nhất (`Money.FromDecimal`, MidpointRounding.AwayFromZero); `Money.FromRaw` pass-through. Sửa §9.5, §4.4 Money row, §3.1 tree comment, `libs/dotnet/VietRide.Shared.Kernel/ValueObjects/Money.cs` + tests. SUPERSEDES technical_context_v7 "floor 1,000" wording (erratum — business owner override). Không cần DB migration (BIGINT giữ nguyên). (2) **Edit-pickup policy change (Day-13 OQ2, human decision 2026-06-12):** v1 KHÔNG cho đổi điểm đón làm thay đổi giá — edit-pickup chỉ hợp lệ khi giá mới = giá cũ (fareDelta=0); mọi chênh lệch (tăng HOẶC giảm) → 409; muốn đổi giá thì hủy vé + đặt lại (loại bỏ hoàn toàn nhánh refund-on-downgrade của technical_context_v7 lines 1639-1656 — erratum, business owner override). §5.9: rename `BOOKING_EDIT_PICKUP_PRICE_INCREASE` → `BOOKING_EDIT_PICKUP_PRICE_CHANGED` (chưa có code/FE nào dùng code cũ). |
+| **1.10.0** | 2026-06-11 | BE lead (Vũ) | **MINOR** — SOT reconciliation patches (Day-11 Q2 / Day-12 C1,C2,CO2 / Day-13 C5): (1) §9.9 Redis key `booking:seat_lock:{tripId}:{seatNumber}` owner Booking → key `seat_lock:{tripId}:{seatNumber}` owner Trip (source: BSOT 1.8.0 + API Contract §`lock-seats`). (2) §5.6 idempotency table: split combined row `POST /v1/bookings/{id}/edit-pickup-dropoff` into two separate rows `POST /v1/bookings/{id}/edit-pickup` and `POST /v1/bookings/{id}/edit-dropoff` (source: API Contract lines ~830-885 defines two separate endpoints, higher precedence). (3) §7.2 Payment seam: `POST /internal/v1/payments/wallet-charge` → `POST /internal/v1/payments/charge` (source: API Contract line ~1565). (4) §9.10 + §9.1 logging example: BookingCode short-form `VR-<4 char base32>` → `VR-yyyyMMdd-XXXXXXXX` (date + 8-char base32 uppercase) (source: db-schema/booking/schema.sql COMMENT + API Contract line ~713). No code/DDL change. |
 | **1.9.0** | 2026-06-11 | BE lead (Vũ) | **MINOR** — Day-9 Trip vehicle/schedule contract + registry sync: add the VehicleType catalog read, operator-scoped Vehicle CRUD, exact `seatLayoutJson` BE/FE shape and v1 validation scope, and DriverSchedule create contract with local-ICT weekly recurrence, validity window, conflict handling via existing `TRIP_DRIVER_CONFLICT`, no Trip generation, and Day-11 deferred driver/assistant role validation. Add exactly two new §5.9 tenant/reference codes: `VEHICLE_NOT_FOUND` and `VEHICLE_TYPE_NOT_FOUND`. No code/DDL change. |
 | **1.8.0** | 2026-06-11 | BE lead (Vũ) | **MINOR** — Trip↔Booking seam freeze (unblocks parallel Day-12 Booking work). Document the seat lifecycle as **synchronous internal HTTP** owned by Trip-Route-Vehicle: `TripSeat` lives in the `trip-route-vehicle` schema (NOT Booking — corrects the BE_TIMELINE Day-12 "TripSeat tables" note, which loses to technical_context §6.1/§6.10 + db-schema), generated by the Trip Hangfire job from `Vehicle.seatLayoutJson`; Booking drives `lock-seats` (AVAILABLE→HELD, Redis `seat_lock:{tripId}:{seatNumber}` TTL 10 min, all-or-nothing) → `book-seats` (HELD→BOOKED) → `release-seats` (HELD→AVAILABLE, idempotent compensation); no event on the seat path. Reconcile §7.2 endpoint name `confirm-seats` → **`book-seats`** to match API Contract (#2 > #3). Flesh out the API contract: add the missing `GET /internal/v1/trips/{tripId}` raw-DTO shape (operatorId/routeId/baseFare/stops[allowPickup,allowDropoff,orderIndex,fareFromThisStop]/seatSummary) already registered in §7.2, and add error responses to the three seat endpoints. **No new error codes** (`BOOKING_SEAT_UNAVAILABLE` 409, `BOOKING_TRIP_NOT_BOOKABLE` 409, `TRIP_NOT_FOUND` 404 already §5.9). No code/DDL change. |
 | **1.7.0** | 2026-06-10 | BE lead (Vũ) | **MINOR** — Day-8 Trip route contract + registry sync: add the Route/RouteStop/FareTemplate/AlternativeRoute section to the API contract with ADR 0004 envelopes, method-level role matrix (WRITE = `OPERATOR_ADMIN` only; READ = `OPERATOR_ADMIN` + `OPERATOR_STAFF`), tenant-isolation `404 ROUTE_NOT_FOUND`, RouteStop hard-delete, AlternativeRoute soft-deactivate, fare-template `fareFromThisStop` and effective-window rules, and the app-layer preconditions for Route create. Add three new §5.9 validation codes for Day-8 config-time failures: `ROUTE_STOP_ORDER_CONFLICT`, `ROUTE_STOP_FLAGS_INVALID`, and `ALTERNATIVE_ROUTE_LIMIT_EXCEEDED`, each with `error.fields` discriminators. No code/DDL change. |
