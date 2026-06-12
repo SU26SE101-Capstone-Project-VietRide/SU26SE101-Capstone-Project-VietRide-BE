@@ -1941,7 +1941,7 @@ Trong DB transaction của Booking Service handler:
      → Trip Service lấy giá HIỆN TẠI từ Trip.baseFare + TripStopFare (nếu có exception)
      → Trả về fare snapshot
   2. Apply voucher (nếu có) tại Booking Service local
-  3. Tính totalAmount = (baseFare or exceptionFare) - discountAmount, floor 1000 VND
+  3. Tính totalAmount = (baseFare or exceptionFare) - discountAmount, làm tròn đến đồng gần nhất nếu phép tính ra số lẻ (BSOT v1.11.0 — KHÔNG floor 1000)
   4. INSERT Booking { status=PENDING_PAYMENT, totalAmount, discountAmount } — IMMUTABLE từ đây
   5. HTTP call Trip Service: POST /internal/v1/trips/{tripId}/lock-seats (seat hold)
   6. HTTP call Payment Service: POST /charge { amount=totalAmount, ... }
@@ -2012,7 +2012,7 @@ cancellationPolicy: [
 1. Tra `Operator.cancellationPolicy` của operator thuộc Trip đó.
 2. Tính `hoursToDeparture = (Trip.departureDateTime - now) / 3600`.
 3. Tìm entry đầu tiên trong policy có `hoursBeforeDeparture >= hoursToDeparture` → `feePercent` áp dụng. Nếu không match (hủy quá sớm) → fee = 0%.
-4. `refundAmount = floor((paidAmount × (100 - feePercent) / 100), 1000 VND)`.
+4. `refundAmount = round((paidAmount × (100 - feePercent) / 100), đồng gần nhất)` (BSOT v1.11.0 — không floor 1000).
 5. Hoàn về **Ví VietRide** ngay lập tức.
 
 **Platform cung cấp UI cho operator config policy** trên Operator Web (section 4.3) khi setup nhà xe và mỗi khi cần điều chỉnh.
@@ -2988,7 +2988,7 @@ Hangfire job (chạy mỗi 5 phút):
     AND trip.actualDepartureTime < now - interval '30 minutes'
   → UPDATE Parcel status = REJECTED, rejectionReason = 'Xe đã xuất phát, hàng không được load kịp'
   → Refund **theo Operator.parcelNoShowPolicy** (xem 6.6 phần (b)):
-      refundAmount = paidAmount × (100 - noShowFeePercent) / 100, floor 1000 VND
+      refundAmount = paidAmount × (100 - noShowFeePercent) / 100, làm tròn đến đồng gần nhất (BSOT v1.11.0 — không floor 1000)
       Default policy nếu operator chưa config: noShowFeePercent = 0 (hoàn 100%)
   → Publish event ParcelAutoRejected → Notification Service alert người gửi (kèm số tiền hoàn + lý do giữ phần phí nếu có)
 
@@ -3415,7 +3415,7 @@ Booking flow chạm nhiều service (Booking, Trip-Route-Vehicle, Payment, Walle
            - status = ACCEPTED → continue apply
            - Voucher.fundingType = VIETRIDE_FUNDED: SKIP consent check (áp global)
         7. Tính discountAmount theo voucher type (PERCENT_OFF / FIXED_AMOUNT) + cap maxDiscountAmount
-      Sau đó trừ voucherDiscount và floor 1000 VND
+      Sau đó trừ voucherDiscount, làm tròn đến đồng gần nhất nếu ra số lẻ (BSOT v1.11.0 — không floor 1000)
    d. Tạo Booking record status = PENDING_PAYMENT, tạo 3 Passenger record (chỉ operational: seatNumber + boardingStatus default PENDING)
    e. HTTP POST Payment Service /charge { bookingId, amount, method }
       → Payment:
@@ -4077,7 +4077,7 @@ FALLBACK path (TripStop.distanceFromOriginKm NULL — Operator chưa nhập):
 **Step 2 — Tính `refundAmount`:**
 
 ```
-refundAmount = floor(Booking.totalAmount × (1 - traveledRatio), 1000 VND)
+refundAmount = round(Booking.totalAmount × (1 - traveledRatio), đồng gần nhất)  -- BSOT v1.11.0: không floor 1000
               kẹp về [0, Booking.totalAmount]
 ```
 
@@ -4123,7 +4123,7 @@ Example 1 — Terminal pickup, xe đi 60% chặng rồi DISRUPTED:
   bookingTravelDistance = 970 - 0 = 970
   bookingTotalDistance = 1700 - 0 = 1700
   traveledRatio = 970/1700 ≈ 0.5706
-  refundAmount = floor(400,000 × (1 - 0.5706), 1000) = floor(171,765, 1000) = 171,000 VND
+  refundAmount = round(400,000 × (1 - 0.5706), đồng) = round(171,764.7) = 171,765 VND  -- BSOT v1.11.0
 
 Example 2 — Along-route pickup (NT), xe DISRUPTED trước khi đến ĐN:
   Same route, Booking: pickup tại NT (450km), totalAmount = 300,000 VND (giá NT→HN qua TripStopFare)
@@ -4134,7 +4134,7 @@ Example 2 — Along-route pickup (NT), xe DISRUPTED trước khi đến ĐN:
   bookingTravelDistance = max(450 - 450, 0) = 0
   bookingTotalDistance = 1700 - 450 = 1250
   traveledRatio = 0 / 1250 = 0
-  refundAmount = floor(300,000 × 1.0, 1000) = 300,000 VND (hoàn 100%)
+  refundAmount = round(300,000 × 1.0, đồng) = 300,000 VND (hoàn 100%)
 
   → Booking pickup tại NT, xe rời NT chưa qua stop nào sau đó → coi như chưa đi được gì cho booking này → hoàn 100%
 
@@ -4150,7 +4150,7 @@ Example 3 — FALLBACK (operator chưa nhập distance), xe đi qua 2/4 stop sau
   bookingTravelOrder = 2 - 0 = 2
   bookingTotalOrder = 5 - 0 = 5
   traveledRatio = 2/5 = 0.4
-  refundAmount = floor(500,000 × 0.6, 1000) = 300,000 VND
+  refundAmount = round(500,000 × 0.6, đồng) = 300,000 VND
 ```
 
 **Edge cases:**
@@ -4364,7 +4364,7 @@ ShuttlePassenger (manifest entry — link passenger booking with shuttle) {
 | Wallet data type | BIGINT, đơn vị VND — không dùng float/decimal |
 | Wallet top-up min | **10,000 VND** |
 | Wallet top-up max | **Không giới hạn** — VNPay tự enforce theo policy của họ |
-| Money rounding | Floor đến 1,000 VND trước khi write DB |
+| Money rounding | Giữ đến đơn vị ĐỒNG — không floor 1,000; phép tính ra số lẻ làm tròn đến đồng gần nhất trước khi write DB (BSOT v1.11.0, quyết định 2026-06-12) |
 | Data durability | Không mất dữ liệu booking/trip khi network lỗi (Outbox pattern cho critical events) |
 | Multi-tenancy | Operator chỉ thấy dữ liệu `operatorId` của mình, enforce ở service layer (Internal JWT carry `operatorId`) |
 | Soft delete | Dùng `isActive`/`deletedAt` thay hard delete cho: Operator, User, Station, Stop, Route, Vehicle |
@@ -4536,7 +4536,7 @@ Role:              PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_AD
 ### Conventions quan trọng
 
 **Data types:**
-- **Tiền (VND):** lưu `BIGINT`, đơn vị đồng. Floor xuống 1,000 VND trước khi write DB (287,341 → 287,000). Áp dụng cho fare, discount, refund. Không dùng DECIMAL/FLOAT.
+- **Tiền (VND):** lưu `BIGINT`, đơn vị đồng. Giữ nguyên đến đồng — KHÔNG floor 1,000 (BSOT v1.11.0); phép tính ra số lẻ làm tròn đến đồng gần nhất (287,341.6 → 287,342). Áp dụng cho fare, discount, refund. Không dùng DECIMAL/FLOAT.
 - **Timestamps:** lưu UTC, trả về ISO 8601 với offset. `departureTime TIME` lưu local ICT.
 - **Soft delete:** dùng `isActive`/`deletedAt` thay hard delete cho Operator, User, Station, Stop, Route, Vehicle.
 

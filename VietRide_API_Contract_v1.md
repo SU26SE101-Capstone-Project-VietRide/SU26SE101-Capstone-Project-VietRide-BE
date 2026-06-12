@@ -2391,7 +2391,7 @@ Write endpoints in this Day-8 section do not require `Idempotency-Key` per BSOT 
 
 Tenant isolation: a missing Route or a Route not owned by the caller's operator returns `404 ROUTE_NOT_FOUND` in the ADR 0004 error envelope. Child resources under a Route apply the same parent Route tenant check first unless noted otherwise.
 
-Route create/update money fields are VND BIGINT-compatible JSON numbers. Persisted values follow the shared Money rule and are floored to 1000 before storage.
+Route create/update money fields are VND BIGINT-compatible JSON numbers. Persisted values follow the shared Money rule (BSOT v1.11.0): kept to the đồng — no rounding to thousands; fractional computation results round to the nearest đồng.
 
 ### Route DTOs
 
@@ -2558,7 +2558,7 @@ Response `200`: success envelope with `{ "deleted": true }`.
 }
 ```
 
-`fareFromThisStop` is an exception override for Route base fare. It is VND BIGINT-compatible and is floored to 1000 before persisting. Stops without a fare-template entry use `Route.baseFare`.
+`fareFromThisStop` is an exception override for Route base fare. It is VND BIGINT-compatible and is persisted to the đồng (no flooring to 1000 — BSOT v1.11.0). Stops without a fare-template entry use `Route.baseFare`.
 
 ### POST `/v1/operator/routes/{id}/fare-templates`
 
