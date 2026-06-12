@@ -19,11 +19,13 @@ using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
 using VietRide.Identity.Application.Features.Auth.ResendInitialPassword;
 using VietRide.Identity.Application.Features.OperatorUsers.CreateOperatorUser;
+using VietRide.Identity.Application.Features.OperatorUsers.ListOperatorUsers;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Identity.Domain.Exceptions;
 using VietRide.Identity.Infrastructure;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Shared.Persistence;
 
@@ -75,6 +77,68 @@ public sealed class OperatorUsersEndpointsTests : IClassFixture<AuthWebApplicati
         data.GetProperty("role").GetString().Should().Be(UserRole.DRIVER.ToString());
         data.GetProperty("status").GetString().Should().Be(UserStatus.PENDING_INITIAL_PASSWORD.ToString());
         data.GetProperty("operatorId").GetGuid().Should().Be(OperatorId);
+    }
+
+    [Fact]
+    public async Task ListOperatorUsers_OperatorAdmin_Returns200EnvelopeWithPagedUsers()
+    {
+        using var client = CreateClientWithSender(new OperatorUsersSender());
+        using var request = CreateListRequest(UserRole.OPERATOR_ADMIN.ToString(), OperatorId);
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        AssertSuccessEnvelope(doc, 200);
+        var data = doc.RootElement.GetProperty("data");
+        data.GetProperty("page").GetInt32().Should().Be(1);
+        data.GetProperty("pageSize").GetInt32().Should().Be(20);
+        data.GetProperty("totalItems").GetInt64().Should().Be(1);
+        var item = data.GetProperty("items").EnumerateArray().Should().ContainSingle().Subject;
+        item.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo(
+            ["userId", "email", "phone", "displayName", "role", "status", "operatorId", "createdAt", "avatarUrl"]);
+        item.GetProperty("role").GetString().Should().Be(UserRole.DRIVER.ToString());
+        item.GetProperty("operatorId").GetGuid().Should().Be(OperatorId);
+    }
+
+    [Fact]
+    public async Task ListOperatorUsers_SystemAdmin_ReturnsAllOperatorEmployeesOnly()
+    {
+        using var client = CreateClientWithSender(new OperatorUsersSender());
+        using var request = CreateAdminListRequest(UserRole.SYSTEM_ADMIN.ToString(), operatorId: null);
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        AssertSuccessEnvelope(doc, 200);
+        var items = doc.RootElement.GetProperty("data").GetProperty("items").EnumerateArray().ToArray();
+        items.Should().HaveCount(3);
+        items.Select(item => item.GetProperty("role").GetString()).Should().BeEquivalentTo(
+            [UserRole.DRIVER.ToString(), UserRole.ASSISTANT.ToString(), UserRole.OPERATOR_STAFF.ToString()]);
+        items.Should().OnlyContain(item => item.GetProperty("operatorId").GetGuid() != Guid.Empty);
+    }
+
+    [Fact]
+    public async Task ListOperatorUsers_SystemAdminOnOperatorRoute_Returns403ForbiddenEnvelope()
+    {
+        using var client = CreateClientWithSender(new OperatorUsersSender());
+        using var request = CreateListRequest(UserRole.SYSTEM_ADMIN.ToString(), operatorId: null);
+
+        var response = await client.SendAsync(request);
+
+        await AssertErrorCode(response, HttpStatusCode.Forbidden, "FORBIDDEN");
+    }
+
+    [Fact]
+    public async Task ListOperatorUsers_OperatorAdminOnAdminRoute_Returns403ForbiddenEnvelope()
+    {
+        using var client = CreateClientWithSender(new OperatorUsersSender());
+        using var request = CreateAdminListRequest(UserRole.OPERATOR_ADMIN.ToString(), OperatorId);
+
+        var response = await client.SendAsync(request);
+
+        await AssertErrorCode(response, HttpStatusCode.Forbidden, "FORBIDDEN");
     }
 
     [Fact]
@@ -483,6 +547,24 @@ public sealed class OperatorUsersEndpointsTests : IClassFixture<AuthWebApplicati
         return request;
     }
 
+    private static HttpRequestMessage CreateListRequest(string? callerRole, Guid? operatorId)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "/v1/operator/users?page=1&pageSize=20&sortBy=createdAt&sortDir=desc");
+        request.Headers.TryAddWithoutValidation(
+            "X-Internal-Auth",
+            $"Bearer {CreateInternalJwt(OperatorAdminId, callerRole, operatorId)}");
+        return request;
+    }
+
+    private static HttpRequestMessage CreateAdminListRequest(string? callerRole, Guid? operatorId)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "/v1/admin/operator-users?page=1&pageSize=20&sortBy=createdAt&sortDir=desc");
+        request.Headers.TryAddWithoutValidation(
+            "X-Internal-Auth",
+            $"Bearer {CreateInternalJwt(OperatorAdminId, callerRole, operatorId)}");
+        return request;
+    }
+
     private static HttpRequestMessage CreateCreateRequest(
         string? callerRole,
         Guid? operatorId,
@@ -616,6 +698,17 @@ public sealed class OperatorUsersEndpointsTests : IClassFixture<AuthWebApplicati
                         "USER_INVALID_STATUS_TRANSITION",
                         "Initial-password link can only be resent for users pending initial password setup."),
 
+                ListOperatorUsersQuery command when command.Scope == ListOperatorUsersScope.Operator && command.CallerRole != UserRole.OPERATOR_ADMIN.ToString()
+                    => throw new ForbiddenException("FORBIDDEN", "Only OPERATOR_ADMIN can list operator users."),
+
+                ListOperatorUsersQuery command when command.Scope == ListOperatorUsersScope.Operator && !command.CallerOperatorId.HasValue
+                    => throw new ForbiddenException("FORBIDDEN", "Operator scope is required."),
+
+                ListOperatorUsersQuery command when command.Scope == ListOperatorUsersScope.Admin && command.CallerRole != UserRole.SYSTEM_ADMIN.ToString()
+                    => throw new ForbiddenException("FORBIDDEN", "Only SYSTEM_ADMIN can list operator users."),
+
+                ListOperatorUsersQuery command => CreateListOperatorUsersResponse(command),
+
                 CreateOperatorUserCommand command when !command.CallerOperatorId.HasValue
                     => throw new ForbiddenException("FORBIDDEN", "Operator scope is required."),
 
@@ -639,6 +732,38 @@ public sealed class OperatorUsersEndpointsTests : IClassFixture<AuthWebApplicati
 
                 _ => throw new InvalidOperationException($"Unexpected request type {request.GetType().Name}."),
             };
+
+        private static PagedResult<OperatorUserListItemDto> CreateListOperatorUsersResponse(ListOperatorUsersQuery command)
+        {
+            var operatorId = command.Scope == ListOperatorUsersScope.Operator
+                ? command.CallerOperatorId!.Value
+                : command.OperatorId ?? OperatorId;
+            var items = command.Scope == ListOperatorUsersScope.Admin
+                ? new[]
+                {
+                    CreateOperatorUserListItem(UserRole.DRIVER, operatorId, "driver@example.com"),
+                    CreateOperatorUserListItem(UserRole.ASSISTANT, operatorId, "assistant@example.com"),
+                    CreateOperatorUserListItem(UserRole.OPERATOR_STAFF, operatorId, "staff@example.com"),
+                }
+                : new[] { CreateOperatorUserListItem(UserRole.DRIVER, operatorId, "driver@example.com") };
+
+            return PagedResult<OperatorUserListItemDto>.Create(items, 1, 20, items.Length);
+        }
+
+        private static OperatorUserListItemDto CreateOperatorUserListItem(
+            UserRole role,
+            Guid operatorId,
+            string email)
+            => new(
+                Guid.Parse("99999999-9999-9999-9999-999999999999"),
+                email,
+                "+84901112222",
+                role == UserRole.OPERATOR_STAFF ? "Operator Staff" : role.ToString(),
+                role.ToString(),
+                UserStatus.PENDING_INITIAL_PASSWORD.ToString(),
+                operatorId,
+                new DateTimeOffset(2026, 6, 8, 10, 0, 0, TimeSpan.Zero),
+                null);
     }
 
     private sealed class DbBackedOperatorUsersFactory : WebApplicationFactory<Program>

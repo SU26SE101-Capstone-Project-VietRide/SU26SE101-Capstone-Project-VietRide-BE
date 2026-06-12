@@ -1,5 +1,7 @@
 using VietRide.Identity.Domain.Entities;
+using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Repositories;
+using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Identity.Application.Abstractions.Repositories;
 
@@ -19,4 +21,11 @@ public interface IUserRepository : IRepository<User, Guid>
     /// <paramref name="e164Phone"/>.
     /// </summary>
     Task<User?> GetByPhoneAsync(string e164Phone, CancellationToken ct = default);
+
+    Task<PagedResult<User>> ListOperatorUsersAsync(
+        QueryOptions options,
+        Guid? operatorId,
+        UserRole? role,
+        UserStatus? status,
+        CancellationToken ct = default);
 }
