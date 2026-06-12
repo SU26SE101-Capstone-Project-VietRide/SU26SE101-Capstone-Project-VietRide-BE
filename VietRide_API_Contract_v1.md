@@ -1602,6 +1602,39 @@ Response `200`:
 }
 ```
 
+### POST `/internal/v1/payments/batch-charge`
+
+Auth: Internal JWT. Idempotency: required. Caller: Booking round-trip WALLET checkout.
+
+Request:
+```json
+{
+  "userId": "uuid",
+  "method": "WALLET",
+  "items": [
+    { "referenceType": "BOOKING", "referenceId": "uuid", "amount": 350000 },
+    { "referenceType": "BOOKING", "referenceId": "uuid", "amount": 350000 }
+  ]
+}
+```
+
+Response `200` (raw internal DTO):
+```json
+{
+  "payments": [
+    { "paymentId": "uuid", "referenceType": "BOOKING", "referenceId": "uuid", "status": "SUCCEEDED", "paymentRedirectUrl": null },
+    { "paymentId": "uuid", "referenceType": "BOOKING", "referenceId": "uuid", "status": "SUCCEEDED", "paymentRedirectUrl": null }
+  ]
+}
+```
+
+Rules:
+- Day-13 batch charge supports `method=WALLET` only and every item must use `referenceType=BOOKING`.
+- The operation is atomic in Payment service: if balance is insufficient, an item is invalid, or any payment insert/debit fails, no partial Payment rows and no retained wallet debit are committed.
+- On success, Payment service creates one `SUCCEEDED` Payment row per item (`payments.reference_type=BOOKING`, `payments.reference_id=<bookingId>`) and one WALLET debit ledger entry per item (`wallet_transactions.reference_type=BOOKING_PAYMENT`, `wallet_transactions.reference_id=<bookingId>`), all committed in one Payment DB transaction; total wallet balance decrease equals the sum of item amounts.
+- Batch idempotency is endpoint-level via `payment:idem:{key}` replay plus duplicate `(referenceType, referenceId)` guard; do not write the same header idempotency key into every `payments.idempotency_key` row because the unique index is per row.
+- `BOOKING_GROUP` is not accepted on this WALLET batch endpoint; it remains VNPay-only for round-trip combined redirects.
+
 ### POST `/internal/v1/wallet/refund`
 
 Auth: Internal JWT. Idempotency: required.

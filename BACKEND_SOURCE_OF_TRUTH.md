@@ -1162,7 +1162,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 |---|---|---|
 | `Authorization: Bearer <token>` | Mọi public protected endpoint | User Access Token (JWT RS256) |
 | `X-Internal-Auth: Bearer <token>` | Mọi internal endpoint | Internal JWT (HS256, 120s TTL) |
-| `Idempotency-Key: <uuid>` | 13 endpoints mutation quan trọng (xem 5.6) | UUID v4 |
+| `Idempotency-Key: <uuid>` | Các mutation endpoints quan trọng (xem 5.6) | UUID v4 |
 | `X-Request-Id: <uuid>` | Optional client-supplied, fallback Gateway generate | UUID v4 — propagated qua tất cả services + log |
 | `Accept-Language` | Optional | `vi`, `en` (v1 chỉ phục vụ message kèm tài liệu i18n nội bộ — error code SCREAMING_SNAKE_CASE độc lập ngôn ngữ) |
 | `Content-Type: application/json` | Request body có data | |
@@ -1241,7 +1241,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 
 ### 5.6 Idempotency
 
-13 endpoints yêu cầu `Idempotency-Key: <uuid>` header:
+Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 
 | # | Endpoint | Service |
 |---|---|---|
@@ -1253,6 +1253,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 | 5 | `POST /v1/parcels` | Parcel |
 | 6 | `POST /v1/parcels/{id}/confirm-delivery` (passenger confirm) | Parcel |
 | 7 | `POST /v1/payments/wallet-charge` | Payment |
+| 7b | `POST /internal/v1/payments/batch-charge` | Payment |
 | 8 | `POST /v1/payments/vnpay-init` | Payment |
 | 9 | `POST /v1/wallet/top-up/init` | Payment |
 | 10 | `POST /v1/admin/trip-settlements/{id}/settle` | Payment |
@@ -1700,6 +1701,7 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | Method + Path | Caller | Mục đích |
 |---|---|---|
 | `POST /internal/v1/payments/charge` | Booking, Parcel | Wallet payment (instant SUCCEEDED) trong cùng DB transaction |
+| `POST /internal/v1/payments/batch-charge` | Booking | WALLET batch charge for round-trip: per-item Payment `referenceType=BOOKING`, per-item wallet ledger `referenceType=BOOKING_PAYMENT`, all-or-nothing in one Payment DB transaction |
 | `POST /internal/v1/payments/vnpay-init` | Booking, Parcel | Tạo VNPay redirect URL |
 | `GET /internal/v1/wallets/{userId}/balance` | Booking (preview) | Check balance UI trước checkout |
 | `POST /internal/v1/refunds` | Booking, Parcel | Trigger refund (event-driven preferred — HTTP fallback) |
@@ -2681,6 +2683,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.11.1** | 2026-06-12 | BE lead (Vũ) | **PATCH** — Day-13 Direction A: add Payment-owned internal WALLET batch charge seam `POST /internal/v1/payments/batch-charge` for round-trip checkout. WALLET round-trip remains two per-booking Payment records (`payments.reference_type=BOOKING`) and two per-booking wallet debit ledger entries (`wallet_transactions.reference_type=BOOKING_PAYMENT`) committed all-or-nothing in one transaction; `BOOKING_GROUP` stays VNPay-only. Sync §5.6 idempotency registry, §7.2 internal endpoint registry, API Contract internal payment section, and Day-13 plan Task 13.05. No DB schema change. |
 | **1.11.0** | 2026-06-12 | BE lead (Vũ) | **MINOR** — (1) **Money rounding rule change (human decision 2026-06-12):** bỏ floor về 1,000 VND — số tiền giữ đến đơn vị ĐỒNG; kết quả phép tính lẻ (giảm giá %, hoa hồng) làm tròn đến đồng gần nhất (`Money.FromDecimal`, MidpointRounding.AwayFromZero); `Money.FromRaw` pass-through. Sửa §9.5, §4.4 Money row, §3.1 tree comment, `libs/dotnet/VietRide.Shared.Kernel/ValueObjects/Money.cs` + tests. technical_context_v7 đã được patch in-place cùng đợt (10 chỗ floor-1000: dòng ~1944/2015/2991/3418/4080/4126-4153/4367/4539) + API Contract 2 chỗ (~2394/2561) — SOT hết mâu thuẫn. Không cần DB migration (BIGINT giữ nguyên). (2) **Edit-pickup policy change (Day-13 OQ2, human decision 2026-06-12):** v1 KHÔNG cho đổi điểm đón làm thay đổi giá — edit-pickup chỉ hợp lệ khi giá mới = giá cũ (fareDelta=0); mọi chênh lệch (tăng HOẶC giảm) → 409; muốn đổi giá thì hủy vé + đặt lại (loại bỏ hoàn toàn nhánh refund-on-downgrade của technical_context_v7 lines 1639-1656 — erratum, business owner override). §5.9: rename `BOOKING_EDIT_PICKUP_PRICE_INCREASE` → `BOOKING_EDIT_PICKUP_PRICE_CHANGED` (chưa có code/FE nào dùng code cũ). |
 | **1.10.0** | 2026-06-11 | BE lead (Vũ) | **MINOR** — SOT reconciliation patches (Day-11 Q2 / Day-12 C1,C2,CO2 / Day-13 C5): (1) §9.9 Redis key `booking:seat_lock:{tripId}:{seatNumber}` owner Booking → key `seat_lock:{tripId}:{seatNumber}` owner Trip (source: BSOT 1.8.0 + API Contract §`lock-seats`). (2) §5.6 idempotency table: split combined row `POST /v1/bookings/{id}/edit-pickup-dropoff` into two separate rows `POST /v1/bookings/{id}/edit-pickup` and `POST /v1/bookings/{id}/edit-dropoff` (source: API Contract lines ~830-885 defines two separate endpoints, higher precedence). (3) §7.2 Payment seam: `POST /internal/v1/payments/wallet-charge` → `POST /internal/v1/payments/charge` (source: API Contract line ~1565). (4) §9.10 + §9.1 logging example: BookingCode short-form `VR-<4 char base32>` → `VR-yyyyMMdd-XXXXXXXX` (date + 8-char base32 uppercase) (source: db-schema/booking/schema.sql COMMENT + API Contract line ~713). No code/DDL change. |
 | **1.9.0** | 2026-06-11 | BE lead (Vũ) | **MINOR** — Day-9 Trip vehicle/schedule contract + registry sync: add the VehicleType catalog read, operator-scoped Vehicle CRUD, exact `seatLayoutJson` BE/FE shape and v1 validation scope, and DriverSchedule create contract with local-ICT weekly recurrence, validity window, conflict handling via existing `TRIP_DRIVER_CONFLICT`, no Trip generation, and Day-11 deferred driver/assistant role validation. Add exactly two new §5.9 tenant/reference codes: `VEHICLE_NOT_FOUND` and `VEHICLE_TYPE_NOT_FOUND`. No code/DDL change. |
@@ -2761,7 +2764,7 @@ PR fail nếu bất kỳ step nào fail.
 2. Check `Docs/API/VietRide_API_Contract_v1.md` — nếu chưa có, thêm vào đó trước.
 3. Implement Controller (thin) + Command/Query + Handler + Validator + DTO.
 4. Map errors qua canonical error code (Section 5.9).
-5. Idempotency-Key nếu là 1 trong 13 endpoint mutation (Section 5.6).
+5. Idempotency-Key nếu endpoint nằm trong danh sách mutation ở Section 5.6.
 6. Unit + integration test.
 7. Update changelog API contract.
 
