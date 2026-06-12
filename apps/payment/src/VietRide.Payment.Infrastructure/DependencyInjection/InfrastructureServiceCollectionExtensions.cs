@@ -1,11 +1,13 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using StackExchange.Redis;
+using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Application.Events;
 using VietRide.Payment.Application.Features.Wallets.BootstrapWallet;
 using VietRide.Payment.Infrastructure.Http;
 using VietRide.Payment.Infrastructure.Persistence.Repositories;
+using VietRide.Payment.Infrastructure.VnPay;
 using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Messaging.DependencyInjection;
@@ -31,6 +33,22 @@ public static class InfrastructureServiceCollectionExtensions
         bool registerConsumers = true)
     {
         services.AddScoped<IWalletRepository, WalletRepository>();
+        services.AddScoped<ITopUpRequestRepository, TopUpRequestRepository>();
+        services.Configure<VnPayOptions>(options =>
+        {
+            configuration.GetSection(VnPayOptions.SectionName).Bind(options);
+            options.TmnCode = configuration["VNPAY_TMN_CODE"] ?? options.TmnCode;
+            options.HashSecret = configuration["VNPAY_HASH_SECRET"] ?? options.HashSecret;
+            options.BaseUrl = configuration["VNPAY_BASE_URL"] ?? options.BaseUrl;
+            options.ReturnUrl = configuration["VNPAY_RETURN_URL"] ?? options.ReturnUrl;
+            options.IpnUrl = configuration["VNPAY_IPN_URL"] ?? options.IpnUrl;
+
+            if (long.TryParse(configuration["WALLET_TOP_UP_MIN_VND"], out var minimumTopUpAmount))
+            {
+                options.MinimumTopUpAmount = minimumTopUpAmount;
+            }
+        });
+        services.AddScoped<IVnPayClient, VnPayClient>();
 
         if (registerConsumers)
         {
