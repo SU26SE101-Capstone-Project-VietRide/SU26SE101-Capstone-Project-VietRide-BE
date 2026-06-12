@@ -174,7 +174,7 @@ consumes. This unblocks the real (un-stubbed) booking flow and Sprint-3 search-b
 
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
-| 11.0 | todo | — | — | Hangfire CPM add APPROVED (Q1) — shared `<PackageVersion>` with Day-15 Task 15.5; first to land adds, other no-op (avoid duplicate-entry conflict) |
+| 11.0 | done | APPROVE | 2026-06-12 | Patch round: Redis key uses canonical `seat_lock:{tripId}:{seatNumber}`; pending human verify. |
 | 11.1 | todo | — | — | — |
 | 11.2 | todo | — | — | — |
 | 11.3 | todo | — | — | Gateway route = separate nest-worker dispatch |

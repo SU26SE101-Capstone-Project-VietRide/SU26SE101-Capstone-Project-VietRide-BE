@@ -1,12 +1,16 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using StackExchange.Redis;
 using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Http.Resilience;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.SeatLock;
 using VietRide.Trip.Infrastructure.ExternalClients;
+using VietRide.Trip.Infrastructure.Jobs;
 using VietRide.Trip.Infrastructure.Persistence.Repositories;
+using VietRide.Trip.Infrastructure.SeatLock;
 
 namespace VietRide.Trip.Infrastructure.DependencyInjection;
 
@@ -32,6 +36,17 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IVehicleTypeRepository, VehicleTypeRepository>();
         services.AddScoped<IVehicleRepository, VehicleRepository>();
         services.AddScoped<IDriverScheduleRepository, DriverScheduleRepository>();
+
+        var redisUrl = configuration["REDIS_URL"]
+            ?? Environment.GetEnvironmentVariable("REDIS_URL")
+            ?? "localhost:6379";
+        var redisOptions = ConfigurationOptions.Parse(redisUrl);
+        redisOptions.AbortOnConnectFail = false;
+        services.AddSingleton<IConnectionMultiplexer>(_ =>
+            ConnectionMultiplexer.Connect(redisOptions));
+        services.AddSingleton<ISeatLockStore, RedisSeatLockStore>();
+
+        services.AddTripHangfire(configuration);
 
         services.AddSingleton<IInternalJwtTokenProvider, InternalJwtTokenFactory>();
         services.AddHttpContextAccessor();
