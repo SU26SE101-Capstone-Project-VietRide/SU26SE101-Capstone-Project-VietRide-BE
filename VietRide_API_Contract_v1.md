@@ -760,6 +760,12 @@ Response `201`:
 }
 ```
 
+Rules:
+- `paymentMethod=WALLET` is an all-or-nothing checkout across both legs. On success, each leg still has its own Payment record with `referenceType=BOOKING`; the client must never observe a retained first-leg debit if the second leg fails.
+- `paymentMethod=VNPAY` may use a combined checkout with `referenceType=BOOKING_GROUP` and one redirect for `grandTotal`.
+- `BOOKING_GROUP` is VNPay-only for this endpoint; WALLET success remains two per-booking payments.
+- `paymentRedirectUrl` is `null` for WALLET and populated only when VNPay returns a redirect.
+
 ### GET `/v1/bookings/history`
 
 Auth: `PASSENGER`.
