@@ -4,7 +4,7 @@
 
 - **Timeline ref**: BE_TIMELINE_VU.md -> Day 11 (SCV-80) — Trip Search API + Trip auto-generation
 - **Prior checklist**: docs/handoff/day-10-checklist.md (Day-11 was never planned — work jumped to Day 12). See Sequencing note.
-- **Plan status**: APPROVED — PLAN-REVIEW ran 2026-06-12 (REVISION-REQUIRED), all findings patched same day (SOT-commit precondition added; Gateway /v1/trips auth-mode change specified; seat-map geometry source specified; Postman ownership resolved as post-merge step; BSOT 5.9 citations corrected; Money rule updated to BSOT v1.11.0)
+- **Plan status**: APPROVED -- latest PLAN-REVIEW approved the patched plan on 2026-06-12; ready for not-yet-started worker dispatch.
 - **Branch**: feat/day-11-trip-search — NEW branch off main AFTER the SOT v1.11.0 commit lands
   (BSOT 1.11.0 + API Contract + Money change MUST be committed on main first; the plan's v1.10.0
   citations exist only in that commit). Runs branch-parallel with Day 13 and Day 15.
@@ -23,7 +23,7 @@ follow-up, NOT in Day-11 write scope — see Open Q3.
 ## Objective
 Deliver Trip search + discovery on the Trip-Route-Vehicle service: the Trip aggregate with
 per-trip seat/stop/fare snapshot tables, a Hangfire job that auto-generates Trips 14 days ahead
-from active DriverSchedules (idempotent, on-create + weekly CN 23:00), the FE-facing
+from active DriverSchedules (idempotent, on-create + activation + weekly CN 23:00), the FE-facing
 GET /v1/trips/search, /v1/trips/{id}, /v1/trips/{id}/seat-map, and the frozen internal seat-lock
 seam (lock/book/release-seats + GET /internal/v1/trips/{id}) that Booking (Day 12) already
 consumes. This unblocks the real (un-stubbed) booking flow and Sprint-3 search-book-pay E2E.
@@ -35,15 +35,20 @@ consumes. This unblocks the real (un-stubbed) booking flow and Sprint-3 search-b
       trip_generation_skip_logs per db-schema/trip-route-vehicle/schema.sql (lines 349-474), with
       the two partial unique indexes (uq_trips_driver_departure, uq_trips_vehicle_departure with
       WHERE status NOT IN CANCELLED); migration up + down clean.
-- [ ] Trip auto-generation Hangfire job: on DriverSchedule create/activate (immediate one-off) AND
-      weekly (CN 23:00) generates Trips for the next 14 days matching dayOfWeek; idempotent on
-      (driverUserId, departureDateTime) + (vehicleId, departureDateTime); generates trip_seats from
+- [ ] Trip auto-generation Hangfire job: on DriverSchedule create (immediate one-off), on
+      DriverSchedule activation/update where `isActive false -> true` (Day-11 minimal activation
+      path under existing `/v1/operator/driver-schedules` prefix), AND weekly (CN 23:00) generates
+      Trips for the next 14 days matching dayOfWeek; idempotent on (driverUserId,
+      departureDateTime) + (vehicleId, departureDateTime); generates trip_seats from
       Vehicle.seatLayoutJson (skip disabled true) and trip_stops from RouteStop (snapshot
       orderIndex/allowPickup/allowDropoff/distanceFromOriginKm + computed estimatedArrivalTime).
-      Re-run same day = no duplicate.
+      Re-run same day = no duplicate. The activation path is intentionally activation-only and
+      MUST NOT implement the broader DriverSchedule edit cascade (technical_context_v7 §6.11.1 / Day-18+ scope).
 - [ ] GET /v1/trips/search (originStationId, destinationStationId, departureDate, passengerCount,
       allowAlongRoutePickup?) returns the paged envelope in API contract lines 1000-1037, joins
-      Trip-Route-Stations with availableSeats count; no result = empty 200 (NOT 404).
+      Trip-Route-Stations with availableSeats count; no result = empty 200 (NOT 404). Implement
+      ONLY these API-contract query params; the timeline's operator/time/price wording is not a
+      Day-11 query-param contract unless a future API-contract change adds it.
 - [ ] GET /v1/trips/{tripId} returns trip detail (route, stations, stops, seat summary, fare
       summary); GET /v1/trips/{tripId}/seat-map returns the seat array (API contract lines
       1039-1062). 404 TRIP_NOT_FOUND on unknown id.
@@ -53,8 +58,11 @@ consumes. This unblocks the real (un-stubbed) booking flow and Sprint-3 search-b
       /release-seats (idempotent 204), /book-seats (204) implement the seam in API contract lines
       1107-1179 with Redis seat-lock keys (TTL 10 min, SEAT_LOCK_TTL_MINUTES), trip_seats status
       machine AVAILABLE-HELD-BOOKED + HELD-AVAILABLE.
-- [ ] Redis 10-min TTL expiry releases a HELD seat back to AVAILABLE (CO1) and concurrent same-seat
-      lock attempts resolve to exactly one winner.
+- [ ] TTL release mechanism is concrete and Trip-owned without schema changes: Redis key TTL
+      remains the expiry clock; Task 11.4 adds a Hangfire recurring cleanup (every 1 minute) plus
+      lock-path reconciliation that checks HELD trip_seats whose
+      `seat_lock:{tripId}:{seatNumber}` key no longer exists and flips them HELD -> AVAILABLE.
+      Concurrent same-seat lock attempts after expiry resolve to exactly one winner.
 - [ ] Errors match the registry: 404 TRIP_NOT_FOUND (BSOT line 1360), 409 BOOKING_TRIP_NOT_BOOKABLE
       (line 1337) / 409 BOOKING_SEAT_UNAVAILABLE (line 1336).
 - [ ] Trip build + dotnet format --verify-no-changes clean; NetArchTest layering green; new
@@ -68,6 +76,13 @@ consumes. This unblocks the real (un-stubbed) booking flow and Sprint-3 search-b
 - New REST endpoints (FE-facing): GET /v1/trips/search, GET /v1/trips/{tripId},
   GET /v1/trips/{tripId}/seat-map — VietRide_API_Contract_v1.md lines 1000-1062 (already
   documented; no contract edit needed, verify shapes match).
+- Search-filter precedence: BE_TIMELINE_VU.md line 132 says `GET /trips/search?origin=&destination=&date=`
+  with filter by operator/time/price, but VietRide_API_Contract_v1.md line 1004 is the higher-precedence
+  endpoint contract for the current API. Day 11 implements only `originStationId`,
+  `destinationStationId`, `departureDate`, `passengerCount`, and `allowAlongRoutePickup?`. Extra
+  operator/time/price query filters are out of Day-11 scope/carryover and require a future API
+  contract change before implementation. Existing response fields `operatorId`, `operatorName`,
+  `departureDateTime`, and `baseFare` remain returned, but they are not additional filters.
 - New internal seam endpoints: GET /internal/v1/trips/{tripId},
   POST /internal/v1/trips/{tripId}/lock-seats, /release-seats, /book-seats —
   VietRide_API_Contract_v1.md lines 1065-1179 (frozen seam, BSOT 13 row 1.8.0). Trip is the server
@@ -114,60 +129,83 @@ consumes. This unblocks the real (un-stubbed) booking flow and Sprint-3 search-b
 | acceptance | migration dotnet ef database update clean from current Trip schema; down reverts cleanly; the 5 tables + enums + uq_trips_driver_departure/uq_trips_vehicle_departure/uq_trip_seats_trip_seat/uq_trip_stops_trip_order present; trips.base_fare BIGINT; CHECK constraints (chk_trips_base_fare_non_negative, chk_trips_cargo_counters_non_negative, chk_trip_stop_fares_fare_non_negative) created; build + format clean; NetArchTest layering green |
 | source citations | db-schema/trip-route-vehicle/schema.sql lines 15-37 (enums), 349-474 (5 tables + indexes + CHECKs + COMMENTs); db-schema/trip-route-vehicle/README.md lines 29-53; AGENTS.md Domain conventions (Money BIGINT, soft-delete, logical FK); existing apps/trip/.../Entities/Vehicle.cs + Route.cs (mirror BaseEntity/validation) |
 
-### Task 11.2 — Trip auto-generation Hangfire job (on-create + weekly CN 23:00, idempotent)
+### Task 11.2 — Trip auto-generation Hangfire job (on-create + activation + weekly CN 23:00, idempotent)
 | Field | Value |
 |---|---|
 | stack/owner | dotnet |
 | implement agent | dotnet-worker |
 | review agent | dotnet-reviewer |
 | skill | (none) |
-| owned files (write set) | new apps/trip/src/VietRide.Trip.Application/Features/TripGeneration/GenerateTripsForScheduleCommand.cs + Handler + Validator; new TripGenerationService.cs under the same folder (seats from Vehicle.seatLayoutJson, stops from RouteStop, estimatedArrivalTime via the Q5-resolved deterministic fallback chain — see acceptance/invariants); new apps/trip/src/VietRide.Trip.Infrastructure/Jobs/TripGenerationJob.cs (Hangfire BackgroundJob.Enqueue on-create + RecurringJob CN 23:00); edit ONLY the DriverSchedule create/activate handler(s) under apps/trip/src/VietRide.Trip.Application/Features/DriverSchedules/ to enqueue (no validation change); register recurring job in apps/trip/src/VietRide.Trip.Api/Program.cs (job registration block only); new tests under apps/trip/tests/VietRide.Trip.UnitTests/Features/TripGeneration/ |
-| forbidden scope | .env, secrets; db-schema (read-only); other services; libs; apps/gateway; git ops; do NOT touch DriverSchedule conflict-validation logic (Day-9, frozen); do NOT add auto-BOARDING / auto-COMPLETED jobs (Day-21 scope); do NOT emit any event (no trip.trip.generated key exists) |
+| owned files (write set) | new apps/trip/src/VietRide.Trip.Application/Abstractions/Jobs/ITripGenerationJobScheduler.cs (Application scheduler abstraction; DriverSchedule handlers depend on this, never on Hangfire/Infrastructure); new apps/trip/src/VietRide.Trip.Application/Abstractions/Repositories/ITripGenerationSkipLogRepository.cs; new apps/trip/src/VietRide.Trip.Application/Features/TripGeneration/GenerateTripsForScheduleCommand.cs + Handler + Validator; new TripGenerationService.cs under the same folder (seats from Vehicle.seatLayoutJson, stops from RouteStop, estimatedArrivalTime via the Q5-resolved deterministic fallback chain - see acceptance/invariants); new apps/trip/src/VietRide.Trip.Infrastructure/Jobs/TripGenerationJob.cs (Hangfire job executor that sends GenerateTripsForScheduleCommand via MediatR; no generation/domain logic); new apps/trip/src/VietRide.Trip.Infrastructure/Jobs/HangfireTripGenerationJobScheduler.cs (implements ITripGenerationJobScheduler using Hangfire BackgroundJob/RecurringJob APIs); new apps/trip/src/VietRide.Trip.Infrastructure/Persistence/Repositories/TripGenerationSkipLogRepository.cs; edit apps/trip/src/VietRide.Trip.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs (register ITripGenerationJobScheduler + ITripGenerationSkipLogRepository only); edit ONLY the existing apps/trip/src/VietRide.Trip.Application/Features/DriverSchedules/CreateDriverScheduleHandler.cs to enqueue via ITripGenerationJobScheduler after a successful schedule commit (no validation change); add minimal activation-only path in existing DriverSchedules feature/controller: new apps/trip/src/VietRide.Trip.Application/Features/DriverSchedules/ActivateDriverScheduleCommand.cs + ActivateDriverScheduleHandler.cs + ActivateDriverScheduleValidator.cs (or a single validator-free command if no request body); edit apps/trip/src/VietRide.Trip.Api/Controllers/OperatorDriverSchedulesController.cs to add activation-only action `PATCH /v1/operator/driver-schedules/{id}/activate` under the existing `v1/operator/driver-schedules` route prefix (no broader edit body); if the Api project uses request records for no-body actions, add only the minimal request file under apps/trip/src/VietRide.Trip.Api/Controllers/Requests/; register recurring job in apps/trip/src/VietRide.Trip.Api/Program.cs (job registration block only); new tests under apps/trip/tests/VietRide.Trip.UnitTests/Features/TripGeneration/ and DriverSchedules activation tests |
+| forbidden scope | .env, secrets; db-schema (read-only); other services; libs; apps/gateway (existing Gateway prefix already routes `/v1/operator/driver-schedules/**` to Trip); git ops; do NOT reference Hangfire.* or Infrastructure from VietRide.Trip.Application (use ITripGenerationJobScheduler); do NOT implement full DriverSchedule edit/cascade (departureTime/dayOfWeek/driver/assistant/vehicle/validUntil updates with FUTURE_ONLY/ALL_PENDING are technical_context_v7 §6.11.1 / Day-18+ scope); activation path may only transition `isActive false -> true` and enqueue generation after successful commit; do NOT touch DriverSchedule conflict-validation logic beyond reusing the existing active-schedule conflict check for activation; do NOT add auto-BOARDING / auto-COMPLETED jobs (Day-21 scope); do NOT emit any event (no trip.trip.generated key exists) |
 | depends on | 11.0, 11.1 |
 | invariant flags | CRLF; idempotency = check (driverUserId, departureDateTime) AND (vehicleId, departureDateTime) before INSERT (re-run no dup); Trip.source = AUTO_FROM_SCHEDULE; skip seats where disabled true in seatLayoutJson; TripStop.estimatedArrivalTime static, never recomputed after generate; trips.estimated_arrival_time (Q5 RESOLVED) = deterministic fallback chain: (1) departureDateTime + Route.estimatedDurationMinutes; (2) if NULL, departureDateTime + max(RouteStop.estimatedDurationFromOriginMinutes); (3) if neither available, REFUSE generation/DriverSchedule activation with a validation error — NO invented default; Money to-the-đồng on base_fare snapshot (copy verbatim, no rounding — BSOT v1.11.0); MediatR v11 |
-| acceptance | unit test: schedule with dayOfWeek 2 and 4 generates Trips only for matching dates in next 14 days; idempotent test re-run same day = 0 new rows (DoD trip generation idempotent); seats generated = totalSeats minus disabled count; trip_stops snapshot orderIndex/allow flags/distance; estimated_arrival_time uses the Q5 fallback chain — test: Route.estimatedDurationMinutes set → arrival = departure+duration; Route.estimatedDurationMinutes NULL but RouteStops present → arrival = departure+max(estimatedDurationFromOriginMinutes); neither available → generation refuses with a validation error (no default value persisted); build + format clean; at least 1 happy + 1 skip-path test (e.g. missing vehicle creates a TripGenerationSkipLog row with reason); NetArchTest green |
-| source citations | technical_context_v7 lines 3666-3707 (2-trigger generation algorithm + idempotent check + vehicle conflict), line 1989 (TripSeat from seatLayoutJson skip disabled), line 3600 (TripStop.estimatedArrivalTime formula); Q5-resolved trip-level arrival fallback chain (Route.estimatedDurationMinutes nullable per Route.cs:20 → max RouteStop.estimatedDurationFromOriginMinutes → refuse, no default); line 3113 (Day-9 explicitly does NOT generate); schema.sql lines 462-470 (trip_generation_skip_logs); existing Entities/DriverSchedule.cs + RouteStop.cs |
+| acceptance | Application layer has no Hangfire.* or Infrastructure references; DriverSchedule create enqueues via ITripGenerationJobScheduler only after SaveChanges succeeds; activation-only command/action exists and changes only `isActive false -> true`, returns DriverScheduleDto in ApiResponse envelope, and enqueues via ITripGenerationJobScheduler only after the activation commit succeeds; activating an already-active schedule is idempotent/no duplicate generation enqueue (or returns the unchanged DTO without a new enqueue); activation reuses active-schedule conflict checks so enabling a conflicting row fails with 409 TRIP_DRIVER_CONFLICT and does not enqueue; recurring CN 23:00 job is registered through Infrastructure/Hangfire and executes GenerateTripsForScheduleCommand via MediatR; unit test: schedule with dayOfWeek 2 and 4 generates Trips only for matching dates in next 14 days; idempotent test re-run same day = 0 new rows (DoD trip generation idempotent); seats generated = totalSeats minus disabled count; trip_stops snapshot orderIndex/allow flags/distance; estimated_arrival_time uses the Q5 fallback chain - test: Route.estimatedDurationMinutes set -> arrival = departure+duration; Route.estimatedDurationMinutes NULL but RouteStops present -> arrival = departure+max(estimatedDurationFromOriginMinutes); neither available -> generation refuses with a validation error (no default value persisted); build + format clean; at least 1 happy + 1 skip-path test (e.g. missing vehicle creates a TripGenerationSkipLog row via ITripGenerationSkipLogRepository with reason) + 1 activation trigger test; NetArchTest green |
+| source citations | technical_context_v7 lines 3666-3707 (on-create/update activation + weekly generation algorithm, idempotent check + vehicle conflict), lines 3709-3800 (full edit cascade exists but is NOT Day-11 activation-only scope), line 1989 (TripSeat from seatLayoutJson skip disabled), line 3600 (TripStop.estimatedArrivalTime formula); BE_TIMELINE_VU.md lines 134 and 136 (Day-11 generation on DriverSchedule activation + Sunday 23:00, DoD); VietRide_API_Contract_v1.md lines 3064-3085 (DriverScheduleDto includes `isActive`), 3087-3118 (existing create contract; Day-9 no generation), 3113 (TRIP_DRIVER_CONFLICT); existing apps/trip/src/VietRide.Trip.Api/Controllers/OperatorDriverSchedulesController.cs line 12 (`v1/operator/driver-schedules` route prefix) and apps/gateway/src/config/routes.ts line 152 (existing Gateway prefix); schema.sql lines 462-470 (trip_generation_skip_logs); existing Entities/DriverSchedule.cs + RouteStop.cs; repo discovery 2026-06-12: CreateDriverScheduleHandler.cs exists, no activation handler exists under Features/DriverSchedules/ before this task |
 
 ### Task 11.3 — FE-facing endpoints: trip search + detail + seat-map + Gateway routes
-| Field | Value |
-|---|---|
-| stack/owner | dotnet (+ Gateway route split to TS sub-step — see Dispatch order) |
-| implement agent | dotnet-worker (controllers/handlers); Gateway route edit dispatched to nest-worker |
-| review agent | dotnet-reviewer (.NET); nest-reviewer (Gateway route) |
-| skill | add-endpoint |
-| owned files (write set) | new apps/trip/src/VietRide.Trip.Api/Controllers/TripsController.cs (route /v1/trips); new apps/trip/src/VietRide.Trip.Application/Features/Trips/SearchTrips/ (Query, Handler, Validator, SearchTripsResult, SearchTripItem); .../Features/Trips/GetTripDetail/ (Query, Handler, TripDetailDto — Q4-resolved field set: ApiResponse-wrapped projection of the internal snapshot fields (API Contract ~1072-1109) + stops + seat summary + fare breakdown); .../Features/Trips/GetTripSeatMap/ (Query, Handler, TripSeatMapDto); mappers under .../Features/Trips/; new integration tests under apps/trip/tests/VietRide.Trip.IntegrationTests/Trips/. Gateway sub-step (nest-worker, separate dispatch): apps/gateway/src/config/routes.ts (+ routes.spec.ts) — CHANGE the existing `/v1/trips` entry (~line 112) from `authRequired: 'user'` to `authRequired: 'mixed'` + `publicSubpaths: [{ method: 'GET', path: '/v1/trips/search' }]`; do NOT add a duplicate prefix entry |
-| forbidden scope | .env, secrets; db-schema; other services; libs; git ops; the internal seam endpoints (Task 11.4 owns internal/v1/trips); the dotnet-worker MUST NOT edit apps/gateway (Gateway route = separate nest-worker dispatch) |
-| depends on | 11.1 (entities), 11.2 (generated trips to search). Parallel-safe with 11.4 = no (shared InfrastructureServiceCollectionExtensions.cs DI + Features namespace neighborhood) |
-| invariant flags | CRLF for .cs / LF for .ts (Gateway); ApiResponse envelope (ADR 0004) with meta.traceId; search no-result = empty 200 not 404; availableSeats = count of trip_seats with status AVAILABLE; auth: search optional, detail/seat-map protected (User JWT); MediatR v11 |
-| acceptance | GET /v1/trips/search returns the paged shape (API contract 1006-1037) with correct availableSeats; no-match query returns 200 empty items (DoD); GET /v1/trips/{id} returns the Q4-resolved TripDetailDto = ApiResponse-wrapped projection of the internal snapshot fields (API Contract ~1072-1109) + stops + seat summary + fare breakdown; /seat-map matches contract 1039-1062 — NOTE: trip_seats has NO row/col/deck columns (schema.sql 407-419); the seat-map handler MUST load row/col/deck geometry by joining Trip -> Vehicle and parsing Vehicle.seatLayoutJson (match on seatNumber), merged with trip_seats status — do NOT invent a migration; unknown id returns 404 TRIP_NOT_FOUND; Gateway proxies /v1/trips with search public (mixed + publicSubpaths) and detail/seat-map protected; Swagger renders all three; build + format clean; at least 1 happy + 1 error integration test each |
-| source citations | VietRide_API_Contract_v1.md lines 1000-1062 (search/detail/seat-map shapes); BSOT 5.4/5.5 (ApiResponse envelope), ADR 0004; technical_context_v7 lines 1981-1983 (seat-map fields row/col/deck/type); existing apps/gateway/src/config/routes.ts (mirror /v1/passenger Day-10 entry); timeline Day-11 Review (search no result returns empty 200 not 404) |
+> **Dispatch model:** execute as two separate dispatches/reviews (11.3a dotnet, then 11.3b nest) but keep the human's intended **single Task-11.3 commit** after both sub-steps are approved. Do not mix .NET and Gateway edits in one worker dispatch.
 
-### Task 11.4 — Internal seat-lock seam: GET internal trip + lock/book/release-seats (Trip side of Day-12 seam)
+#### Task 11.3a — Implement Trip FE-facing endpoints
 | Field | Value |
 |---|---|
 | stack/owner | dotnet |
 | implement agent | dotnet-worker |
 | review agent | dotnet-reviewer |
 | skill | add-endpoint |
-| owned files (write set) | new apps/trip/src/VietRide.Trip.Api/Controllers/InternalTripsController.cs (route internal/v1/trips, Authorize with InternalJwtAuthenticationExtensions.Scheme); new apps/trip/src/VietRide.Trip.Application/Features/Internal/Trips/GetTripSnapshot/ (Query, Handler, InternalTripSnapshotDto); .../Internal/Trips/LockSeats/ (Command, Handler, Validator, LockSeatsResult); .../Internal/Trips/BookSeats/ (Command, Handler); .../Internal/Trips/ReleaseSeats/ (Command, Handler); request DTOs under .../Internal/Trips/Requests/; seat-lock orchestration via ISeatLockStore (from 11.0) + trip_seats transitions; new tests under apps/trip/tests/VietRide.Trip.UnitTests/Features/Internal/Trips/ + apps/trip/tests/VietRide.Trip.IntegrationTests/Internal/Trips/. (Q2 RESOLVED — the BSOT §9.9 row was already patched to `seat_lock:{tripId}:{seatNumber}` owner Trip in BSOT changelog v1.10.0; NO BSOT edit in this task. The worker MUST NOT touch BACKEND_SOURCE_OF_TRUTH.md.) |
-| forbidden scope | .env, secrets; db-schema; BACKEND_SOURCE_OF_TRUTH.md + VietRide_API_Contract_v1.md (SOT already reconciled in v1.10.0 — read-only); apps/booking (do NOT edit the Booking client or stub — flipping Booking off the stub is a Day-12-carryover follow-up, see Open Q3); other services; libs; apps/gateway (internal endpoints are NOT gatewayed); git ops; do NOT emit events on the seat path (technical_context_v7 6.10 — sync HTTP only, no event on seat path) |
+| owned files (write set) | new apps/trip/src/VietRide.Trip.Api/Controllers/TripsController.cs (route /v1/trips); new apps/trip/src/VietRide.Trip.Application/Features/Trips/SearchTrips/ (Query, Handler, Validator, SearchTripsResult, SearchTripItem); .../Features/Trips/GetTripDetail/ (Query, Handler, TripDetailDto — Q4-resolved field set: ApiResponse-wrapped projection of the internal snapshot fields (API Contract ~1072-1109) + stops + seat summary + fare breakdown); .../Features/Trips/GetTripSeatMap/ (Query, Handler, TripSeatMapDto); mappers under .../Features/Trips/; new integration tests under apps/trip/tests/VietRide.Trip.IntegrationTests/Trips/ |
+| forbidden scope | .env, secrets; db-schema; other services; libs; apps/gateway (11.3b owns Gateway); git ops; the internal seam endpoints (Task 11.4 owns internal/v1/trips) |
+| depends on | 11.1 (entities), 11.2 (generated trips to search). Parallel-safe with 11.4 = no (shared InfrastructureServiceCollectionExtensions.cs DI + Features namespace neighborhood) |
+| invariant flags | CRLF for .cs; ApiResponse envelope (ADR 0004) with meta.traceId; search no-result = empty 200 not 404; availableSeats = count of trip_seats with status AVAILABLE; search filters = API-contract query params only (`originStationId`, `destinationStationId`, `departureDate`, `passengerCount`, `allowAlongRoutePickup?`) -- do NOT add operatorId/time/price query params in Day 11; auth intent: search public at Gateway, detail/seat-map protected (User JWT); MediatR v11 |
+| acceptance | GET /v1/trips/search returns the paged shape (API contract 1006-1037) with correct availableSeats; no-match query returns 200 empty items (DoD); Swagger/validation expose only the API-contract query params (`originStationId`, `destinationStationId`, `departureDate`, `passengerCount`, `allowAlongRoutePickup?`) -- timeline operator/time/price filters are not implemented until a future API-contract patch adds them; GET /v1/trips/{id} returns the Q4-resolved TripDetailDto = ApiResponse-wrapped projection of the internal snapshot fields (API Contract ~1072-1109) + stops + seat summary + fare breakdown; /seat-map matches contract 1039-1062 -- NOTE: trip_seats has NO row/col/deck columns (schema.sql 407-419); the seat-map handler MUST load row/col/deck geometry by joining Trip -> Vehicle and parsing Vehicle.seatLayoutJson (match on seatNumber), merged with trip_seats status -- do NOT invent a migration; unknown id returns 404 TRIP_NOT_FOUND; Swagger renders all three; Trip build + format clean; at least 1 happy + 1 error integration test each |
+| source citations | VietRide_API_Contract_v1.md lines 1000-1062 (search/detail/seat-map shapes), especially line 1004 (current search query params); BE_TIMELINE_VU.md line 132 (lower-precedence operator/time/price wording -- carryover unless contract changes); AGENTS.md Source-of-truth hierarchy (API contract wins over timeline for endpoint shape); BSOT 5.4/5.5 (ApiResponse envelope), ADR 0004; technical_context_v7 lines 1981-1983 (seat-map fields row/col/deck/type); timeline Day-11 Review (search no result returns empty 200 not 404) |
+
+#### Task 11.3b — Update Gateway route for public trip search
+| Field | Value |
+|---|---|
+| stack/owner | nest |
+| implement agent | nest-worker |
+| review agent | nest-reviewer |
+| skill | (none) |
+| owned files (write set) | apps/gateway/src/config/routes.ts; apps/gateway/src/config/routes.spec.ts |
+| forbidden scope | .env, secrets; all .NET files; apps/trip; other services; libs; git ops; do NOT add a duplicate `/v1/trips` prefix entry |
+| depends on | 11.3a (can be reviewed separately but commit together with 11.3a). Parallel-safe = yes versus .NET tasks after 11.3a is approved because write set is Gateway-only |
+| invariant flags | LF for .ts; Gateway remains a thin proxy; existing `/v1/trips` route changes from `authRequired: 'user'` to `authRequired: 'mixed'` with `publicSubpaths: [{ method: 'GET', path: '/v1/trips/search' }]`; detail and seat-map remain protected User JWT; internal endpoints are NOT exposed via Gateway |
+| acceptance | Gateway proxies `/v1/trips/search` without User JWT; `/v1/trips/{id}` and `/v1/trips/{id}/seat-map` still require User JWT; route tests cover longest-prefix/mixed-auth behavior; TS lint/tests for Gateway route config pass; final handoff note says 11.3a+11.3b are one intended Task-11.3 commit |
+| source citations | apps/gateway/src/config/routes.ts line 112 (existing `/v1/trips` entry), line 152 (existing `/v1/operator/driver-schedules` prefix proving no Gateway edit needed for Task 11.2 activation); routes.spec.ts existing route-config tests; VietRide_API_Contract_v1.md lines 1000-1062; ADR 0002 (Gateway thin proxy) |
+
+### Task 11.4 — Internal seat-lock seam: GET internal trip + lock/book/release-seats (Trip side of Day-12 seam)
+> **Rationale (not scope drift):** although Day-11's title emphasizes Trip search/generation, the current plan already records that Day 12 shipped Booking against a Trip stub and deferred the real Trip seat-lock implementation as CO1/CO2. Task 11.4 is the Trip-owned prerequisite seam that replaces that stub later; it implements only the frozen Trip server endpoints and explicitly does **not** flip Booking off the stub in Day 11.
+
+| Field | Value |
+|---|---|
+| stack/owner | dotnet |
+| implement agent | dotnet-worker |
+| review agent | dotnet-reviewer |
+| skill | add-endpoint |
+| owned files (write set) | new apps/trip/src/VietRide.Trip.Api/Controllers/InternalTripsController.cs (route internal/v1/trips, Authorize with InternalJwtAuthenticationExtensions.Scheme); new apps/trip/src/VietRide.Trip.Application/Features/Internal/Trips/GetTripSnapshot/ (Query, Handler, InternalTripSnapshotDto); .../Internal/Trips/LockSeats/ (Command, Handler, Validator, LockSeatsResult); .../Internal/Trips/BookSeats/ (Command, Handler); .../Internal/Trips/ReleaseSeats/ (Command, Handler); request DTOs under .../Internal/Trips/Requests/; new apps/trip/src/VietRide.Trip.Application/Abstractions/SeatLock/IExpiredSeatLockReleaser.cs; new apps/trip/src/VietRide.Trip.Application/Features/Internal/Trips/ReleaseExpiredSeatLocks/ (Command + Handler or equivalent single-responsibility Application service); new apps/trip/src/VietRide.Trip.Infrastructure/SeatLock/ExpiredSeatLockReleaser.cs; new apps/trip/src/VietRide.Trip.Infrastructure/Jobs/ExpiredSeatLockReleaseJob.cs; apps/trip/src/VietRide.Trip.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs (only if DI registration is needed); apps/trip/src/VietRide.Trip.Infrastructure/Jobs/HangfireServiceCollectionExtensions.cs and/or apps/trip/src/VietRide.Trip.Api/Program.cs (only to register the recurring expired-lock cleanup); seat-lock orchestration via ISeatLockStore (from 11.0) + trip_seats transitions; new tests under apps/trip/tests/VietRide.Trip.UnitTests/Features/Internal/Trips/ + apps/trip/tests/VietRide.Trip.IntegrationTests/Internal/Trips/. (Q2 RESOLVED -- the BSOT §9.9 row was already patched to `seat_lock:{tripId}:{seatNumber}` owner Trip in BSOT changelog v1.10.0; NO BSOT edit in this task. The worker MUST NOT touch BACKEND_SOURCE_OF_TRUTH.md.) |
+| forbidden scope | .env, secrets; db-schema; BACKEND_SOURCE_OF_TRUTH.md + VietRide_API_Contract_v1.md (SOT already reconciled in v1.10.0 -- read-only); apps/booking (do NOT edit the Booking client or stub -- flipping Booking off the stub is a Day-12-carryover follow-up, see Open Q3); other services; libs; apps/gateway (internal endpoints are NOT gatewayed); git ops; do NOT emit events on the seat path (technical_context_v7 6.10 -- sync HTTP only, no event on seat path); do NOT add `lock_expires_at`, `seat_lock_token`, `hold_owner_id`, or any other schema column/table for TTL release unless SOT/schema are changed first |
 | depends on | 11.0 (Redis seat-lock store), 11.1 (trip_seats). Request/response shapes FROZEN to apps/booking/src/VietRide.Booking.Application/Abstractions/ServiceClients/ITripServiceClient.cs + DevTripServiceClient.cs (read-only reference) |
-| invariant flags | CRLF; Internal JWT scheme only (HS256, audience vietride-internal); raw DTO (no ApiResponse envelope) on GET internal trip 200 — envelope only on errors (API contract 1.6.2); idempotency required on lock-seats (replay same Idempotency-Key returns same seatLockToken); all-or-nothing lock; release/book idempotent; Redis key TTL 10 min; seat status machine AVAILABLE-HELD-BOOKED |
-| acceptance | GET internal trip returns the raw snapshot (API contract 1072-1110) matching Booking TripSnapshot, INCLUDING the `returnRouteId` field (uuid | null) per the v1.10.0-patched snapshot (line 1097; cites technical_context_v7 line 1750) so Booking's Day-13 ROUTE_RETURN_NOT_CONFIGURED 422 guard can validate real data; lock-seats all-or-nothing (one seat unavailable means none locked, 409 BOOKING_SEAT_UNAVAILABLE with error.fields); trip not SCHEDULED returns 409 BOOKING_TRIP_NOT_BOOKABLE; release-seats idempotent 204; book-seats flips HELD to BOOKED 204; concurrency test: 2+ concurrent locks on same seat yields exactly one winner (DoD CO1); TTL test: HELD seat returns to AVAILABLE after expiry (CO1); Internal JWT required (tampered returns 401); build + format clean; at least 1 happy + 1 error each |
-| source citations | VietRide_API_Contract_v1.md lines 975-998 (seam ownership), 1065-1179 (4 endpoints + request/response + error codes), 1097/1106-1109 (returnRouteId field + notes, v1.10.0-patched, cites technical_context_v7 line 1750); technical_context_v7 lines 3386-3399 (sync seat-lock saga, Redis key, TTL); BSOT line 2363 (SEAT_LOCK_TTL_MINUTES=10), lines 1336-1337/1360 (error codes); BSOT §9.9 line 2151 (Redis-namespace row ALREADY patched to `seat_lock:{tripId}:{seatNumber}` owner Trip, changelog v1.10.0 — implement this prefix, no BSOT edit); apps/booking ITripServiceClient.cs + DevTripServiceClient.cs (frozen contract); existing InternalStationsController.cs (Internal JWT auth pattern) |
+| invariant flags | CRLF; Internal JWT scheme only (HS256, audience vietride-internal); raw DTO (no ApiResponse envelope) on GET internal trip 200 -- envelope only on errors (API contract 1.6.2); idempotency required on lock-seats (replay same Idempotency-Key returns same seatLockToken); all-or-nothing lock; release/book idempotent; Redis key TTL 10 min is the only expiry clock (no DB expiry column); TTL auto-release = Trip-side recurring Hangfire cleanup every 1 minute scans HELD trip_seats in batches and flips rows to AVAILABLE when Redis `seat_lock:{tripId}:{seatNumber}` no longer exists; lock-seats also runs the same reconciliation for requested seats before checking availability so an expired HELD row is lockable immediately after TTL; book-seats treats missing/expired Redis key as 409 BOOKING_SEAT_UNAVAILABLE and must not book; seat status machine AVAILABLE-HELD-BOOKED |
+| acceptance | GET internal trip returns the raw snapshot (API contract 1072-1110) matching Booking TripSnapshot, INCLUDING the `returnRouteId` field (uuid | null) per the v1.10.0-patched snapshot (line 1097; cites technical_context_v7 line 1750) so Booking's Day-13 ROUTE_RETURN_NOT_CONFIGURED 422 guard can validate real data; lock-seats all-or-nothing (one seat unavailable means none locked, 409 BOOKING_SEAT_UNAVAILABLE with error.fields); trip not SCHEDULED returns 409 BOOKING_TRIP_NOT_BOOKABLE; release-seats idempotent 204; book-seats flips HELD to BOOKED 204 only while every requested seat's Redis key still exists and is owned by the seatLockToken; concurrency test: 2+ concurrent locks on same seat yields exactly one winner (DoD CO1); TTL tests: after Redis TTL elapses, (a) lock-seats on the same seat first reconciles the missing `seat_lock:` key and can acquire a new lock, and (b) the recurring cleanup command/job flips a stale HELD row to AVAILABLE without adding schema columns; Internal JWT required (tampered returns 401); build + format clean; at least 1 happy + 1 error each |
+| source citations | VietRide_API_Contract_v1.md lines 975-998 (seam ownership), 984-990 (lock/book/release lifecycle + Redis TTL), 1065-1179 (4 endpoints + request/response + error codes), 1126-1127 (default TTL = 600s), 1151-1153 (release HELD -> AVAILABLE), 1167-1168 and 1181-1184 (book requires unexpired token; expired token returns 409), 1097/1106-1109 (returnRouteId field + notes, v1.10.0-patched, cites technical_context_v7 line 1750); technical_context_v7 lines 3386-3399 (sync seat-lock saga, Redis key, TTL); BE_TIMELINE_VU.md lines 141-146 (Redis lock, status machine, timeout release review); db-schema/trip-route-vehicle/schema.sql lines 407-419 (trip_seats has status only for lock state; no expiry/token columns); BSOT line 2363 (SEAT_LOCK_TTL_MINUTES=10), lines 1336-1337/1360 (error codes); BSOT §9.9 line 2151 (Redis-namespace row ALREADY patched to `seat_lock:{tripId}:{seatNumber}` owner Trip, changelog v1.10.0 -- implement this prefix, no BSOT edit); apps/booking ITripServiceClient.cs + DevTripServiceClient.cs (frozen contract); existing InternalStationsController.cs (Internal JWT auth pattern) |
 
 ## Dispatch order
 1. Task 11.0 (baseline — Hangfire + Redis seat-lock seam) — blocks all below. Q1 RESOLVED (Hangfire.AspNetCore APPROVED, free MIT 1.8.x); shared CPM `<PackageVersion>` with Day-15 Task 15.5 — check Directory.Packages.props before adding to avoid duplicate-entry merge conflict.
 2. Task 11.1 (Trip aggregate + migration) — depends 11.0.
 3. Task 11.2 (Hangfire generation) and Task 11.4 (internal seam) both depend on 11.1.
-   - Parallel-safe = yes for feature folders (Features/TripGeneration + Jobs vs
-     Features/Internal/Trips), BUT both may register services in
-     InfrastructureServiceCollectionExtensions.cs — run SERIAL in the current tree to avoid a
-     DI-registration merge conflict; STOP and ask if a truly shared file needs both. (Q2 RESOLVED
-     — 11.4 implements the `seat_lock:{tripId}:{seatNumber}` prefix; no BSOT edit needed.)
+   - Parallel-safe = yes for feature folders (Features/TripGeneration + Jobs + skip-log repo vs
+      Features/Internal/Trips), BUT Task 11.2 now owns
+      InfrastructureServiceCollectionExtensions.cs for ITripGenerationJobScheduler +
+      ITripGenerationSkipLogRepository registration and 11.4 may also need DI/Hangfire cleanup
+      registration - run SERIAL in the current tree to avoid a DI-registration merge conflict; STOP
+      and ask if a truly shared file needs both. (Q2 RESOLVED - 11.4 implements the
+      `seat_lock:{tripId}:{seatNumber}` prefix; TTL auto-release is Trip-side recurring cleanup +
+      lock-path reconciliation using Redis key expiry; no BSOT/schema edit needed.)
 4. Task 11.3 (FE endpoints + Gateway) — depends 11.1, 11.2 (needs generated trips to search).
-   Serial after 11.4 (shared DI registration file). The Gateway route addition is a SEPARATE
-   nest-worker dispatch (LF, TS) — the dotnet-worker MUST NOT edit apps/gateway.
+   Serial after 11.4 (shared DI registration file). Execute as 11.3a dotnet-worker then 11.3b
+   nest-worker, with separate reviewers, but keep one intended Task-11.3 commit after both approve;
+   dotnet-worker MUST NOT edit apps/gateway and nest-worker MUST NOT edit apps/trip.
 
 ## Progress tracker
 > Orchestrator bookkeeping — informational only, NOT audit evidence. /audit-day re-verifies.
@@ -177,7 +215,7 @@ consumes. This unblocks the real (un-stubbed) booking flow and Sprint-3 search-b
 | 11.0 | done | APPROVE | 2026-06-12 | Patch round: Redis key uses canonical `seat_lock:{tripId}:{seatNumber}`; pending human verify. |
 | 11.1 | done | APPROVE | 2026-06-12 | Patch rounds fixed row_version drift, skip-log schedule index, and TripSeat state machine; pending human verify. |
 | 11.2 | todo | — | — | — |
-| 11.3 | todo | — | — | Gateway route = separate nest-worker dispatch |
+| 11.3 | todo | — | — | Execute as 11.3a dotnet + 11.3b Gateway (separate dispatch/review, one intended 11.3 commit). |
 | 11.4 | todo | — | — | Trip side of Day-12 seam (CO1/CO2). Q2 RESOLVED (`seat_lock:` prefix, owner Trip; no BSOT edit). Snapshot now exposes returnRouteId (Day-13 CO3) |
 
 Legend: todo / in progress / done (reviewer APPROVED + human /verify) / done-with-carryover / blocked
@@ -206,6 +244,15 @@ Legend: todo / in progress / done (reviewer APPROVED + human /verify) / done-wit
    `departureDateTime + max(RouteStop.estimatedDurationFromOriginMinutes)`; (3) if neither
    available, REFUSE DriverSchedule activation / trip generation with a validation error (NO
    invented default). Committed in Task 11.2 acceptance.
+6. **Q6 -- RESOLVED.** Task 11.4 TTL auto-release uses existing SOT/schema only: Redis key TTL is
+   the canonical expiry clock; Trip adds a recurring Hangfire cleanup every 1 minute plus
+   lock-path reconciliation to release HELD trip_seats whose `seat_lock:{tripId}:{seatNumber}` key
+   no longer exists. No schema columns/tables are added.
+7. **Q7 -- RESOLVED.** Day-11 trip search implements the API Contract query params only
+   (`originStationId`, `destinationStationId`, `departureDate`, `passengerCount`,
+   `allowAlongRoutePickup?`). Timeline operator/time/price filters are carryover/out of scope until
+   a future API-contract change adds explicit query params.
+
 
 ### Scope addition (from Day-13 CO3)
 - The internal trip snapshot DTO (Task 11.4, GET /internal/v1/trips/{tripId}) must now expose
