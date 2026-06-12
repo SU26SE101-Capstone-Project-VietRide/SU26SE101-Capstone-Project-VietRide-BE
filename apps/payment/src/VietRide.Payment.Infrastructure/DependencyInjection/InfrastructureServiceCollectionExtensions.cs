@@ -1,9 +1,14 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using StackExchange.Redis;
+using VietRide.Payment.Application.Abstractions.Repositories;
+using VietRide.Payment.Application.Events;
+using VietRide.Payment.Application.Features.Wallets.BootstrapWallet;
 using VietRide.Payment.Infrastructure.Http;
+using VietRide.Payment.Infrastructure.Persistence.Repositories;
 using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Messaging.DependencyInjection;
 
 namespace VietRide.Payment.Infrastructure.DependencyInjection;
 
@@ -22,8 +27,20 @@ public static class InfrastructureServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        bool registerConsumers = true)
     {
+        services.AddScoped<IWalletRepository, WalletRepository>();
+
+        if (registerConsumers)
+        {
+            services.AddVietRideEventConsumer<UserCreatedIntegrationEvent, BootstrapWalletCommandHandler>(options =>
+            {
+                options.QueueName = "payment.wallet-bootstrap";
+                options.BindingKeys = [UserCreatedIntegrationEvent.EventType];
+            });
+        }
+
         // Redis — required by IdempotencyMiddleware (wired in Program.cs via AddVietRideIdempotency).
         // Falls back gracefully if REDIS_URL is absent (AbortOnConnectFail = false).
         var redisUrl = configuration["REDIS_URL"]

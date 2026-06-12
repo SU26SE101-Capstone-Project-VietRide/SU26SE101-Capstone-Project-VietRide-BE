@@ -166,7 +166,7 @@ Stand up the Payment & Wallet service (currently a bare scaffold - only PingCont
 | 15.0 | done | APPROVE | 2026-06-12 | 1 patch round; InternalJwtTokenFactory split; human verify pending |
 | 15.2a | done | APPROVE | 2026-06-12 | shared-lib inbound consumer; infra started for full libs tests; human verify pending |
 | 15.1 | done | APPROVE | 2026-06-12 | native enum mapping patch; EF update/down validated on clean DB; human verify pending |
-| 15.2 | todo | - | - | - |
+| 15.2 | done | APPROVE | 2026-06-12 | wallet bootstrap UPSERT + idempotency tests; human verify pending |
 | 15.3 | todo | - | - | - |
 | 15.4 | todo | - | - | - |
 | 15.5 | todo | - | - | - |
