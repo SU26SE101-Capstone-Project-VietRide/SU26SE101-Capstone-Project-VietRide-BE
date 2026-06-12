@@ -1,5 +1,8 @@
 using Serilog;
+using VietRide.Payment.Application;
 using VietRide.Payment.Infrastructure;
+using VietRide.Payment.Infrastructure.DependencyInjection;
+using VietRide.Shared.Application.DependencyInjection;
 using VietRide.Shared.Persistence.DependencyInjection;
 using VietRide.Shared.Web.DependencyInjection;
 using VietRide.Shared.Web.Health;
@@ -18,6 +21,10 @@ builder.Host.UseSerilog((ctx, _, lc) => lc
 
 builder.Services.AddVietRideSharedWeb(builder.Configuration, ServiceName);
 builder.Services.AddVietRideDbContext<PaymentDbContext>(builder.Configuration);
+builder.Services.AddVietRideMediatRBehaviors(
+    handlerAssemblies: [typeof(ApplicationAssemblyMarker).Assembly]);
+builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddVietRideIdempotency("payment");
 
 var app = builder.Build();
 
@@ -25,6 +32,7 @@ app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseVietRideSwagger();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseVietRideIdempotency();
 app.MapVietRideHealth(ServiceName);
 app.MapControllers();
 
