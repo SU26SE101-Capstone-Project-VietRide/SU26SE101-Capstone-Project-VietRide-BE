@@ -21,7 +21,8 @@ public sealed record TripSnapshot(
     TripStationSnapshot OriginStation,
     TripStationSnapshot DestinationStation,
     IReadOnlyList<TripStopSnapshot> Stops,
-    TripSeatSummary SeatSummary);
+    TripSeatSummary SeatSummary,
+    Guid? ReturnRouteId = null);
 
 /// <summary>Station snapshot embedded in <see cref="TripSnapshot"/>.</summary>
 public sealed record TripStationSnapshot(Guid Id, string Name);

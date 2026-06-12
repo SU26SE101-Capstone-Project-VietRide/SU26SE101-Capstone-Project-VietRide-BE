@@ -9,6 +9,8 @@ namespace VietRide.Booking.Infrastructure.Http;
 /// </summary>
 public sealed class DevTripServiceClient : ITripServiceClient
 {
+    public static readonly Guid TripWithoutReturnRouteId = Guid.Parse("00000000-0000-4000-8000-000000000013");
+
     private readonly ILogger<DevTripServiceClient> _logger;
 
     public DevTripServiceClient(ILogger<DevTripServiceClient> logger)
@@ -22,10 +24,15 @@ public sealed class DevTripServiceClient : ITripServiceClient
     {
         var now = DateTimeOffset.UtcNow;
 
+        var routeId = Guid.Parse("22222222-2222-4222-8222-222222222222");
+        var returnRouteId = tripId == TripWithoutReturnRouteId
+            ? (Guid?)null
+            : CreateDeterministicGuid($"return-route:{routeId}");
+
         var snapshot = new TripSnapshot(
             TripId: tripId,
             OperatorId: Guid.Parse("11111111-1111-4111-8111-111111111111"),
-            RouteId: Guid.Parse("22222222-2222-4222-8222-222222222222"),
+            RouteId: routeId,
             VehicleId: Guid.Parse("33333333-3333-4333-8333-333333333333"),
             Status: "SCHEDULED",
             DepartureDateTime: now.AddHours(2),
@@ -38,7 +45,8 @@ public sealed class DevTripServiceClient : ITripServiceClient
                 Guid.Parse("55555555-5555-4555-8555-555555555555"),
                 "Day-12 Dev Destination"),
             Stops: [],
-            SeatSummary: new TripSeatSummary(40, 40));
+            SeatSummary: new TripSeatSummary(40, 40),
+            ReturnRouteId: returnRouteId);
 
         return Task.FromResult<TripSnapshot?>(snapshot);
     }

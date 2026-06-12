@@ -128,7 +128,7 @@ Parallel-safe matrix: 13.0 no; 13.1/13.2/13.3 no (shared controller); 13.4 yes (
 
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
-| 13.0 | todo | — | — | — |
+| 13.0 | done | APPROVE | 2026-06-12 | 1 patch round; human verify pending |
 | 13.1 | todo | — | — | — |
 | 13.2 | todo | — | — | — |
 | 13.3 | todo | — | — | — |
