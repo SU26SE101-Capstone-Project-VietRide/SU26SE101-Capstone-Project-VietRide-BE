@@ -13,6 +13,18 @@ public sealed record ChargeResult(
     string Status,
     string? PaymentRedirectUrl);
 
+public sealed record BatchChargeItem(
+    string ReferenceType,
+    Guid ReferenceId,
+    long Amount);
+
+public sealed record BatchChargePaymentResult(
+    Guid PaymentId,
+    string ReferenceType,
+    Guid ReferenceId,
+    string Status,
+    string? PaymentRedirectUrl);
+
 /// <summary>
 /// Discriminated-union result of <see cref="IPaymentServiceClient.ChargeAsync"/>.
 /// </summary>
@@ -32,6 +44,17 @@ public abstract record ChargeOutcome
 
     /// <summary>Unexpected HTTP / transport error.</summary>
     public sealed record TransportError(string Message) : ChargeOutcome;
+}
+
+public abstract record BatchChargeOutcome
+{
+    private BatchChargeOutcome() { }
+
+    public sealed record Success(IReadOnlyList<BatchChargePaymentResult> Payments) : BatchChargeOutcome;
+
+    public sealed record InsufficientFunds(string Message) : BatchChargeOutcome;
+
+    public sealed record TransportError(string Message) : BatchChargeOutcome;
 }
 
 // ---------------------------------------------------------------------------
@@ -58,6 +81,13 @@ public interface IPaymentServiceClient
         Guid userId,
         long amount,
         string method,
+        string idempotencyKey,
+        CancellationToken cancellationToken = default);
+
+    Task<BatchChargeOutcome> BatchChargeAsync(
+        Guid userId,
+        string method,
+        IReadOnlyList<BatchChargeItem> items,
         string idempotencyKey,
         CancellationToken cancellationToken = default);
 }

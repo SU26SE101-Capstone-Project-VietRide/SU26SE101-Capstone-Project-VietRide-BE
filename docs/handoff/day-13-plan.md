@@ -143,7 +143,7 @@ Parallel-safe matrix: 13.0 no; 13.05 no (blocks 13.1 and touches Booking payment
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
 | 13.0 | done | APPROVE | 2026-06-12 | 1 patch round; human verify pending |
-| 13.05 | todo | — | — | Direction A: Payment wallet batch/atomic charge seam required before 13.1 WALLET round-trip |
+| 13.05 | done | APPROVE | 2026-06-13 | 1 patch round; Payment WALLET batch-charge seam approved; Payment+Booking/shared web verification green |
 | 13.1 | todo | — | — | Depends on 13.05 for WALLET atomic batch charge |
 | 13.2 | todo | — | — | — |
 | 13.3 | todo | — | — | — |

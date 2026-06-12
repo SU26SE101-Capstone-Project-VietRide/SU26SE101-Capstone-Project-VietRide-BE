@@ -17,6 +17,41 @@ public sealed class DevPaymentServiceClient : IPaymentServiceClient
         _logger = logger;
     }
 
+    public Task<BatchChargeOutcome> BatchChargeAsync(
+        Guid userId,
+        string method,
+        IReadOnlyList<BatchChargeItem> items,
+        string idempotencyKey,
+        CancellationToken cancellationToken = default)
+    {
+        if (!string.Equals(method, "WALLET", StringComparison.OrdinalIgnoreCase))
+        {
+            return Task.FromResult<BatchChargeOutcome>(new BatchChargeOutcome.TransportError(
+                $"Unsupported payment method '{method}' for Day-13 batch development stub."));
+        }
+
+        if (items.Any(x => !string.Equals(x.ReferenceType, "BOOKING", StringComparison.Ordinal)))
+        {
+            return Task.FromResult<BatchChargeOutcome>(new BatchChargeOutcome.TransportError(
+                "Day-13 batch development stub supports BOOKING references only."));
+        }
+
+        _logger.LogInformation(
+            "Using Day-13 dev Payment stub for WALLET batch charge with {ItemCount} item(s).",
+            items.Count);
+
+        var payments = items
+            .Select(x => new BatchChargePaymentResult(
+                Guid.NewGuid(),
+                x.ReferenceType,
+                x.ReferenceId,
+                "SUCCEEDED",
+                null))
+            .ToList();
+
+        return Task.FromResult<BatchChargeOutcome>(new BatchChargeOutcome.Success(payments));
+    }
+
     public Task<ChargeOutcome> ChargeAsync(
         string referenceType,
         Guid referenceId,
