@@ -164,7 +164,7 @@ Stand up the Payment & Wallet service (currently a bare scaffold - only PingCont
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
 | 15.0 | done | APPROVE | 2026-06-12 | 1 patch round; InternalJwtTokenFactory split; human verify pending |
-| 15.2a | todo | - | - | shared-lib inbound consumer; blocks 15.2 |
+| 15.2a | done | APPROVE | 2026-06-12 | shared-lib inbound consumer; infra started for full libs tests; human verify pending |
 | 15.1 | todo | - | - | - |
 | 15.2 | todo | - | - | - |
 | 15.3 | todo | - | - | - |
