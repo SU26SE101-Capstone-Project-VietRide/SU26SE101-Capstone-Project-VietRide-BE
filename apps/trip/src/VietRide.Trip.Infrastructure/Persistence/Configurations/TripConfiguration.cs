@@ -1,0 +1,115 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using VietRide.Shared.Kernel.ValueObjects;
+using VietRide.Trip.Domain.Entities;
+
+namespace VietRide.Trip.Infrastructure.Persistence.Configurations;
+
+internal sealed class TripConfiguration : IEntityTypeConfiguration<Domain.Entities.Trip>
+{
+    public void Configure(EntityTypeBuilder<Domain.Entities.Trip> builder)
+    {
+        builder.ToTable("trips", table =>
+        {
+            table.HasCheckConstraint("chk_trips_base_fare_non_negative", "base_fare >= 0");
+            table.HasCheckConstraint(
+                "chk_trips_cargo_counters_non_negative",
+                "reserved_parcel_weight_kg >= 0 AND total_loaded_weight_kg >= 0");
+        });
+
+        builder.HasKey(trip => trip.Id).HasName("pk_trips");
+        builder.Ignore(trip => trip.RowVersion);
+
+        builder.Property(trip => trip.Id)
+            .HasColumnName("id")
+            .HasDefaultValueSql("gen_random_uuid()");
+
+        builder.Property(trip => trip.OperatorId).HasColumnName("operator_id");
+        builder.Property(trip => trip.RouteId).HasColumnName("route_id");
+        builder.Property(trip => trip.VehicleId).HasColumnName("vehicle_id");
+        builder.Property(trip => trip.DriverUserId).HasColumnName("driver_user_id");
+        builder.Property(trip => trip.AssistantUserId).HasColumnName("assistant_user_id");
+        builder.Property(trip => trip.DriverScheduleId).HasColumnName("driver_schedule_id");
+        builder.Property(trip => trip.DepartureDateTime).HasColumnName("departure_date_time");
+        builder.Property(trip => trip.EstimatedArrivalTime).HasColumnName("estimated_arrival_time");
+        builder.Property(trip => trip.ActualDepartureTime).HasColumnName("actual_departure_time");
+        builder.Property(trip => trip.CompletedAt).HasColumnName("completed_at");
+        builder.Property(trip => trip.DisruptedAt).HasColumnName("disrupted_at");
+        builder.Property(trip => trip.DisruptionReason).HasColumnName("disruption_reason");
+        builder.Property(trip => trip.CancelledAt).HasColumnName("cancelled_at");
+        builder.Property(trip => trip.CancelledByUserId).HasColumnName("cancelled_by_user_id");
+        builder.Property(trip => trip.CancelReason).HasColumnName("cancel_reason");
+        builder.Property(trip => trip.CompletedByUserId).HasColumnName("completed_by_user_id");
+        builder.Property(trip => trip.Status)
+            .HasColumnName("status")
+            .HasConversion<string>()
+            .HasColumnType("vietride_trip.trip_status")
+            .HasDefaultValue(Domain.Entities.TripStatus.SCHEDULED);
+        builder.Property(trip => trip.Source)
+            .HasColumnName("source")
+            .HasConversion<string>()
+            .HasColumnType("vietride_trip.trip_source")
+            .HasComment("VEHICLE_SUBSTITUTION: created by 6.12 flow, exempt from maxTripsPerMonth counter check.");
+        builder.Property(trip => trip.HasSubstitution)
+            .HasColumnName("has_substitution")
+            .HasDefaultValue(false)
+            .HasComment("Set true when Trip_old triggers Vehicle Substitution (6.12). Reporting field.");
+        builder.Property(trip => trip.BaseFare)
+            .HasColumnName("base_fare")
+            .HasColumnType("bigint")
+            .HasConversion(m => m.Amount, amount => Money.FromRaw(amount));
+        builder.Property(trip => trip.MaxCargoWeightKg)
+            .HasColumnName("max_cargo_weight_kg")
+            .HasColumnType("decimal(8,2)");
+        builder.Property(trip => trip.EstimatedPassengerLuggageKg)
+            .HasColumnName("estimated_passenger_luggage_kg")
+            .HasColumnType("decimal(8,2)")
+            .HasDefaultValue(0m)
+            .HasComment("Snapshot at Trip create from VehicleType.estimatedPassengerLuggageKgPerSeat ?? Operator.luggagePolicy ?? 10 kg/seat × totalSeats.");
+        builder.Property(trip => trip.ReservedParcelWeightKg)
+            .HasColumnName("reserved_parcel_weight_kg")
+            .HasColumnType("decimal(8,2)")
+            .HasDefaultValue(0m);
+        builder.Property(trip => trip.TotalLoadedWeightKg)
+            .HasColumnName("total_loaded_weight_kg")
+            .HasColumnType("decimal(8,2)")
+            .HasDefaultValue(0m);
+        builder.Property(trip => trip.CreatedAt)
+            .HasColumnName("created_at")
+            .HasDefaultValueSql("now()");
+        builder.Property(trip => trip.UpdatedAt)
+            .HasColumnName("updated_at")
+            .HasDefaultValueSql("now()");
+
+        builder.HasIndex(trip => new { trip.DriverUserId, trip.DepartureDateTime })
+            .IsUnique()
+            .HasDatabaseName("uq_trips_driver_departure")
+            .HasFilter("status NOT IN ('CANCELLED')");
+        builder.HasIndex(trip => new { trip.VehicleId, trip.DepartureDateTime })
+            .IsUnique()
+            .HasDatabaseName("uq_trips_vehicle_departure")
+            .HasFilter("status NOT IN ('CANCELLED')");
+        builder.HasIndex(trip => new { trip.OperatorId, trip.Status }).HasDatabaseName("idx_trips_operator_status");
+        builder.HasIndex(trip => new { trip.RouteId, trip.DepartureDateTime }).HasDatabaseName("idx_trips_route_departure");
+        builder.HasIndex(trip => new { trip.Status, trip.DepartureDateTime }).HasDatabaseName("idx_trips_status_departure");
+        builder.HasIndex(trip => trip.AssistantUserId)
+            .HasDatabaseName("idx_trips_assistant_user_id")
+            .HasFilter("assistant_user_id IS NOT NULL");
+        builder.HasIndex(trip => trip.DriverScheduleId)
+            .HasDatabaseName("idx_trips_driver_schedule_id")
+            .HasFilter("driver_schedule_id IS NOT NULL");
+
+        builder.HasOne<Route>()
+            .WithMany()
+            .HasForeignKey(trip => trip.RouteId)
+            .OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<Vehicle>()
+            .WithMany()
+            .HasForeignKey(trip => trip.VehicleId)
+            .OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<DriverSchedule>()
+            .WithMany()
+            .HasForeignKey(trip => trip.DriverScheduleId)
+            .OnDelete(DeleteBehavior.SetNull);
+    }
+}

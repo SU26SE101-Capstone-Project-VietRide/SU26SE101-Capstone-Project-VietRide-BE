@@ -36,6 +36,9 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IVehicleTypeRepository, VehicleTypeRepository>();
         services.AddScoped<IVehicleRepository, VehicleRepository>();
         services.AddScoped<IDriverScheduleRepository, DriverScheduleRepository>();
+        services.AddScoped<ITripRepository, TripRepository>();
+        services.AddScoped<ITripSeatRepository, TripSeatRepository>();
+        services.AddScoped<ITripStopRepository, TripStopRepository>();
 
         var redisUrl = configuration["REDIS_URL"]
             ?? Environment.GetEnvironmentVariable("REDIS_URL")
