@@ -5,6 +5,7 @@ using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Http.Resilience;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
+using VietRide.Trip.Application.Abstractions.Jobs;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Abstractions.SeatLock;
 using VietRide.Trip.Infrastructure.ExternalClients;
@@ -39,6 +40,10 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ITripRepository, TripRepository>();
         services.AddScoped<ITripSeatRepository, TripSeatRepository>();
         services.AddScoped<ITripStopRepository, TripStopRepository>();
+        services.AddScoped<ITripStopFareRepository, TripStopFareRepository>();
+        services.AddScoped<ITripGenerationSkipLogRepository, TripGenerationSkipLogRepository>();
+        services.AddScoped<ITripGenerationJobScheduler, HangfireTripGenerationJobScheduler>();
+        services.AddHostedService<TripGenerationRecurringJobRegistrationHostedService>();
 
         var redisUrl = configuration["REDIS_URL"]
             ?? Environment.GetEnvironmentVariable("REDIS_URL")

@@ -11,6 +11,10 @@ public interface IIdentityInternalClient
     Task<OperatorWriteEligibilityValidation> ValidateOperatorCanWriteAsync(
         Guid operatorId,
         CancellationToken cancellationToken = default);
+
+    Task<IdentityUserLookupResult> GetUserAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -35,4 +39,40 @@ public sealed record OperatorWriteEligibilityValidation(
         422,
         "VALIDATION_ERROR",
         message);
+}
+
+public sealed record IdentityUserLookupResult(
+    bool Found,
+    int? FailureStatusCode,
+    string? ErrorCode,
+    string? Message,
+    Guid? Id,
+    string? Role,
+    Guid? OperatorId,
+    string? Status)
+{
+    public static IdentityUserLookupResult Success(Guid id, string role, Guid? operatorId, string status)
+    {
+        return new IdentityUserLookupResult(true, null, null, null, id, role, operatorId, status);
+    }
+
+    public static IdentityUserLookupResult ValidationFailure(string message) => new(
+        false,
+        422,
+        "VALIDATION_ERROR",
+        message,
+        null,
+        null,
+        null,
+        null);
+
+    public static IdentityUserLookupResult Forbidden(string message) => new(
+        false,
+        403,
+        "FORBIDDEN",
+        message,
+        null,
+        null,
+        null,
+        null);
 }

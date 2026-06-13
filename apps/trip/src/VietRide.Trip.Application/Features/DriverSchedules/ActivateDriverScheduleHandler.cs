@@ -5,14 +5,13 @@ using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Jobs;
 using VietRide.Trip.Application.Abstractions.Repositories;
-using VietRide.Trip.Application.Features.Routes;
 using VietRide.Trip.Application.Features.Stops;
 using VietRide.Trip.Application.Features.TripGeneration;
 using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Application.Features.DriverSchedules;
 
-public sealed class CreateDriverScheduleHandler : IRequestHandler<CreateDriverScheduleCommand, DriverScheduleDto>
+public sealed class ActivateDriverScheduleHandler : IRequestHandler<ActivateDriverScheduleCommand, DriverScheduleDto>
 {
     private readonly IDriverScheduleRepository driverScheduleRepository;
     private readonly IIdentityInternalClient identityInternalClient;
@@ -20,14 +19,12 @@ public sealed class CreateDriverScheduleHandler : IRequestHandler<CreateDriverSc
     private readonly IRouteStopRepository routeStopRepository;
     private readonly ITripGenerationJobScheduler tripGenerationJobScheduler;
     private readonly IUnitOfWork unitOfWork;
-    private readonly IVehicleRepository vehicleRepository;
 
-    public CreateDriverScheduleHandler(
+    public ActivateDriverScheduleHandler(
         IDriverScheduleRepository driverScheduleRepository,
         IIdentityInternalClient identityInternalClient,
         IRouteRepository routeRepository,
         IRouteStopRepository routeStopRepository,
-        IVehicleRepository vehicleRepository,
         ITripGenerationJobScheduler tripGenerationJobScheduler,
         IUnitOfWork unitOfWork)
     {
@@ -35,79 +32,53 @@ public sealed class CreateDriverScheduleHandler : IRequestHandler<CreateDriverSc
         this.identityInternalClient = identityInternalClient;
         this.routeRepository = routeRepository;
         this.routeStopRepository = routeStopRepository;
-        this.vehicleRepository = vehicleRepository;
         this.tripGenerationJobScheduler = tripGenerationJobScheduler;
         this.unitOfWork = unitOfWork;
     }
 
-    public async Task<DriverScheduleDto> Handle(
-        CreateDriverScheduleCommand request,
-        CancellationToken cancellationToken)
+    public async Task<DriverScheduleDto> Handle(ActivateDriverScheduleCommand request, CancellationToken cancellationToken)
     {
         await StopWriteEligibilityGuard.ValidateOperatorCanWriteAsync(
             identityInternalClient,
             request.OperatorId,
             cancellationToken);
 
-        if (!await routeRepository.ExistsActiveOwnedByOperatorAsync(
-                request.OperatorId,
-                request.RouteId,
-                cancellationToken))
+        var schedule = await driverScheduleRepository.GetByIdAsync(request.DriverScheduleId, cancellationToken)
+            ?? throw new CodedNotFoundException("RESOURCE_NOT_FOUND", "Driver schedule was not found.");
+
+        if (schedule.OperatorId != request.OperatorId)
         {
-            throw new CodedNotFoundException("ROUTE_NOT_FOUND", "Route was not found.");
+            throw new CodedNotFoundException("RESOURCE_NOT_FOUND", "Driver schedule was not found.");
         }
-
-        if (request.VehicleId.HasValue
-            && await vehicleRepository.GetOwnedByIdAsync(
-                request.OperatorId,
-                request.VehicleId.Value,
-                cancellationToken) is null)
-        {
-            throw new CodedNotFoundException("VEHICLE_NOT_FOUND", "Vehicle was not found.");
-        }
-
-        await ValidateAssignedUsersAsync(
-            request.OperatorId,
-            request.DriverUserId,
-            request.AssistantUserId,
-            cancellationToken);
-
-        if (request.IsActive)
-        {
-            if (await driverScheduleRepository.HasDriverConflictAsync(
-                    request.DriverUserId,
-                    request.DayOfWeek,
-                    request.DepartureTime,
-                    request.ValidFrom,
-                    request.ValidUntil,
-                    cancellationToken: cancellationToken))
-            {
-                throw new ConflictException("TRIP_DRIVER_CONFLICT", "Driver has a conflicting active schedule.");
-            }
-
-            EnsureRouteCanGenerateTrips(request.RouteId);
-        }
-
-        var dayOfWeek = JsonSerializer.SerializeToElement(request.DayOfWeek);
-        var schedule = DriverSchedule.Create(
-            request.OperatorId,
-            request.RouteId,
-            request.VehicleId,
-            request.DriverUserId,
-            request.AssistantUserId,
-            dayOfWeek,
-            request.DepartureTime,
-            request.ValidFrom,
-            request.ValidUntil,
-            request.IsActive);
-
-        await driverScheduleRepository.AddAsync(schedule, cancellationToken);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
 
         if (schedule.IsActive)
         {
-            tripGenerationJobScheduler.EnqueueScheduleGeneration(schedule.Id);
+            return DriverScheduleMapper.ToDto(schedule);
         }
+
+        await ValidateAssignedUsersAsync(
+            schedule.OperatorId,
+            schedule.DriverUserId,
+            schedule.AssistantUserId,
+            cancellationToken);
+
+        if (await driverScheduleRepository.HasDriverConflictAsync(
+                schedule.DriverUserId,
+                JsonSerializer.Deserialize<int[]>(schedule.DayOfWeek.GetRawText()) ?? [],
+                schedule.DepartureTime,
+                schedule.ValidFrom,
+                schedule.ValidUntil,
+                excludeScheduleId: schedule.Id,
+                cancellationToken: cancellationToken))
+        {
+            throw new ConflictException("TRIP_DRIVER_CONFLICT", "Driver has a conflicting active schedule.");
+        }
+
+        EnsureRouteCanGenerateTrips(schedule);
+
+        schedule.Activate();
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        tripGenerationJobScheduler.EnqueueScheduleGeneration(schedule.Id);
 
         return DriverScheduleMapper.ToDto(schedule);
     }
@@ -155,9 +126,9 @@ public sealed class CreateDriverScheduleHandler : IRequestHandler<CreateDriverSc
         return new ValidationException(message, [new ValidationError(fieldName, message)]);
     }
 
-    private void EnsureRouteCanGenerateTrips(Guid routeId)
+    private void EnsureRouteCanGenerateTrips(DriverSchedule schedule)
     {
-        var route = routeRepository.QueryNoTracking().FirstOrDefault(route => route.Id == routeId)
+        var route = routeRepository.QueryNoTracking().FirstOrDefault(route => route.Id == schedule.RouteId)
             ?? throw new CodedNotFoundException("ROUTE_NOT_FOUND", "Route was not found.");
         if (!route.IsActive || route.DeletedAt is not null)
         {
@@ -165,7 +136,7 @@ public sealed class CreateDriverScheduleHandler : IRequestHandler<CreateDriverSc
         }
 
         var routeStops = routeStopRepository.QueryNoTracking()
-            .Where(routeStop => routeStop.RouteId == routeId)
+            .Where(routeStop => routeStop.RouteId == schedule.RouteId)
             .ToList();
         var resolvedDuration = route.EstimatedDurationMinutes is > 0
             ? route.EstimatedDurationMinutes.Value

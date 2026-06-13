@@ -15,6 +15,9 @@ using VietRide.Identity.Api.Controllers;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Application.Features.Devices.GetActiveDeviceTokens;
 using VietRide.Identity.Domain.Entities;
+using VietRide.Identity.Domain.Enums;
+using VietRide.Shared.Application.Repositories;
+using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Shared.Web.Authentication;
 using VietRide.Shared.Web.Filters;
 
@@ -49,6 +52,32 @@ public sealed class InternalUsersEndpointsTests
     }
 
     [Fact]
+    public async Task GetUser_WithInternalJwt_ReturnsRawUserLookupDto()
+    {
+        var operatorId = Guid.NewGuid();
+        var user = User.CreateOperatorScopedPendingPassword(
+            "driver@example.com",
+            PhoneNumber.Parse("+84901234567"),
+            "Driver One",
+            UserRole.DRIVER,
+            operatorId);
+        await using var app = await CreateAppAsync([], [user]);
+        using var client = app.GetTestClient();
+        client.DefaultRequestHeaders.Add(InternalJwtAuthenticationExtensions.HeaderName, $"Bearer {CreateInternalJwt()}");
+
+        var response = await client.GetAsync($"/internal/v1/users/{user.Id}");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var json = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(json);
+        Assert.False(doc.RootElement.TryGetProperty("success", out _));
+        Assert.Equal(user.Id, doc.RootElement.GetProperty("id").GetGuid());
+        Assert.Equal("DRIVER", doc.RootElement.GetProperty("role").GetString());
+        Assert.Equal(operatorId, doc.RootElement.GetProperty("operatorId").GetGuid());
+        Assert.Equal("PENDING_INITIAL_PASSWORD", doc.RootElement.GetProperty("status").GetString());
+    }
+
+    [Fact]
     public async Task GetDeviceTokens_WithoutInternalJwt_ReturnsUnauthorizedEnvelope()
     {
         await using var app = await CreateAppAsync(Array.Empty<DeviceRow>());
@@ -64,7 +93,9 @@ public sealed class InternalUsersEndpointsTests
         Assert.True(doc.RootElement.TryGetProperty("meta", out _));
     }
 
-    private static async Task<WebApplication> CreateAppAsync(IReadOnlyList<DeviceRow> devices)
+    private static async Task<WebApplication> CreateAppAsync(
+        IReadOnlyList<DeviceRow> devices,
+        IReadOnlyList<User>? users = null)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
@@ -77,6 +108,7 @@ public sealed class InternalUsersEndpointsTests
         builder.Services.AddAuthorization();
         builder.Services.AddMediatR(typeof(GetActiveDeviceTokensQueryHandler).Assembly);
         builder.Services.AddSingleton<IUserDeviceRepository>(UserDeviceRepositoryProxy.Create(devices));
+        builder.Services.AddSingleton<IUserRepository>(UserRepositoryProxy.Create(users ?? []));
 
         var app = builder.Build();
         app.UseAuthentication();
@@ -107,6 +139,34 @@ public sealed class InternalUsersEndpointsTests
         public static DeviceRow Active(string fcmToken, string platform) => new(fcmToken, platform, true);
 
         public static DeviceRow Inactive(string fcmToken, string platform) => new(fcmToken, platform, false);
+    }
+
+    private class UserRepositoryProxy : DispatchProxy
+    {
+        private IReadOnlyList<User> _users = Array.Empty<User>();
+
+        public static IUserRepository Create(IReadOnlyList<User> users)
+        {
+            var proxy = Create<IUserRepository, UserRepositoryProxy>();
+            ((UserRepositoryProxy)(object)proxy)._users = users;
+            return proxy;
+        }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod?.Name == "GetByIdAsync")
+            {
+                var userId = (Guid)args![0]!;
+                return Task.FromResult(_users.FirstOrDefault(user => user.Id == userId));
+            }
+
+            if (targetMethod?.ReturnType == typeof(IQueryable<User>))
+            {
+                return _users.AsQueryable();
+            }
+
+            throw new NotSupportedException($"Unexpected repository call: {targetMethod?.Name}");
+        }
     }
 
     private class UserDeviceRepositoryProxy : DispatchProxy

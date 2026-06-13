@@ -262,7 +262,7 @@ consumes. This unblocks the real (un-stubbed) booking flow and Sprint-3 search-b
 | 11.0 | done | APPROVE | 2026-06-12 | Patch round: Redis key uses canonical `seat_lock:{tripId}:{seatNumber}`; pending human verify. |
 | 11.1 | done | APPROVE | 2026-06-12 | Patch rounds fixed row_version drift, skip-log schedule index, and TripSeat state machine; pending human verify. |
 | 11.2-pre | done | APPROVE | 2026-06-13 | Docs-only SOT/contract patch for activation endpoint + Day-9 carryover role/operator validation; added after PLAN-REVIEW blockers. |
-| 11.2 | todo | - | - | Now depends on 11.2-pre; includes DriverSchedule create+activation role/operator validation and minimal Identity internal user lookup if absent. |
+| 11.2 | done | APPROVE | 2026-06-13 | Multiple patch rounds: activation contract, Identity role/operator validation, recurring job, TripStopFare snapshots, and in-run idempotency fixed; pending human verify. |
 | 11.3 | todo | — | — | Execute as 11.3a dotnet + 11.3b Gateway (separate dispatch/review, one intended 11.3 commit). |
 | 11.4 | todo | — | — | Trip side of Day-12 seam (CO1/CO2). Q2 RESOLVED (`seat_lock:` prefix, owner Trip; no BSOT edit). Snapshot now exposes returnRouteId (Day-13 CO3) |
 

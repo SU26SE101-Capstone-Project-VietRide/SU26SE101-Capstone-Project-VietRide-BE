@@ -53,6 +53,39 @@ public sealed class IdentityInternalClient : IIdentityInternalClient
         }
     }
 
+    public async Task<IdentityUserLookupResult> GetUserAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var response = await _httpClient.GetAsync(
+                $"/internal/v1/users/{userId:D}",
+                cancellationToken).ConfigureAwait(false);
+
+            return response.StatusCode switch
+            {
+                HttpStatusCode.OK => await ReadUserAsync(response, cancellationToken).ConfigureAwait(false),
+                HttpStatusCode.Forbidden => IdentityUserLookupResult.Forbidden("Identity rejected the internal user lookup."),
+                HttpStatusCode.NotFound => IdentityUserLookupResult.ValidationFailure(
+                    $"Identity user '{userId}' was not found."),
+                >= HttpStatusCode.InternalServerError => IdentityUserLookupResult.ValidationFailure(
+                    "Identity user lookup failed due to an upstream server error."),
+                _ => IdentityUserLookupResult.ValidationFailure(
+                    $"Identity returned unexpected status code {(int)response.StatusCode}.")
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return IdentityUserLookupResult.ValidationFailure(
+                "Identity user lookup failed due to transport or circuit-breaker failure.");
+        }
+    }
+
     private static async Task<OperatorWriteEligibilityValidation> ReadEligibilityAsync(
         HttpResponseMessage response,
         CancellationToken cancellationToken)
@@ -87,10 +120,43 @@ public sealed class IdentityInternalClient : IIdentityInternalClient
         return OperatorWriteEligibilityValidation.Forbidden(reason);
     }
 
+    private static async Task<IdentityUserLookupResult> ReadUserAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (payload.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+        {
+            return IdentityUserLookupResult.ValidationFailure("Identity returned an empty user payload.");
+        }
+
+        var id = GetGuidProperty(payload, "id");
+        var role = GetStringProperty(payload, "role");
+        var operatorId = GetGuidProperty(payload, "operatorId");
+        var status = GetStringProperty(payload, "status");
+        if (id is null || role is null || status is null)
+        {
+            return IdentityUserLookupResult.ValidationFailure("Identity user payload is missing id, role, or status.");
+        }
+
+        return IdentityUserLookupResult.Success(id.Value, role, operatorId, status);
+    }
+
     private static string? GetStringProperty(JsonElement payload, string propertyName)
     {
         return payload.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
             ? property.GetString()
+            : null;
+    }
+
+    private static Guid? GetGuidProperty(JsonElement payload, string propertyName)
+    {
+        return payload.TryGetProperty(propertyName, out var property)
+            && property.ValueKind == JsonValueKind.String
+            && Guid.TryParse(property.GetString(), out var value)
+            ? value
             : null;
     }
 
