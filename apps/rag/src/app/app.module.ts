@@ -13,6 +13,7 @@ import { loadEnv } from '../config/env.schema';
 import { RagConfigModule } from '../config/rag-config.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { EmbeddingModule } from '../embedding/embedding.module';
+import { IngestModule } from '../ingest/ingest.module';
 import { RagPrismaModule } from '../prisma/prisma.module';
 import { ProvidersModule } from '../providers/providers.module';
 import { AppController } from './app.controller';
@@ -37,6 +38,7 @@ const env = loadEnv();
     ProvidersModule,
     EmbeddingModule,
     DocumentsModule,
+    IngestModule,
   ],
   controllers: [AppController, HealthController, ReadyController],
   providers: [

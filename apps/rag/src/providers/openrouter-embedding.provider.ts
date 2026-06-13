@@ -24,6 +24,12 @@ export class OpenRouterEmbeddingProvider implements EmbeddingProvider {
     const response = await fetch(`${this.env.OPENROUTER_BASE_URL}/embeddings`, init);
 
     if (!response.ok) {
+      if (response.status === 429) {
+        throw new ServiceUnavailableException({
+          errorCode: 'RAG_PROVIDER_RATE_LIMITED',
+          detail: 'OpenRouter embedding provider rate limit reached',
+        });
+      }
       throw new ServiceUnavailableException({
         errorCode: 'RAG_PROVIDER_UNAVAILABLE',
         detail: 'OpenRouter embedding provider is unavailable',
