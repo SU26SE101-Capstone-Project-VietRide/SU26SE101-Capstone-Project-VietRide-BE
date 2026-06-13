@@ -15,6 +15,11 @@ public interface IIdentityInternalClient
     Task<IdentityUserLookupResult> GetUserAsync(
         Guid userId,
         CancellationToken cancellationToken = default);
+
+    Task<IdentityOperatorLookupResult> GetOperatorAsync(
+        Guid operatorId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(IdentityOperatorLookupResult.ValidationFailure("Identity operator lookup is not implemented."));
 }
 
 /// <summary>
@@ -73,6 +78,36 @@ public sealed record IdentityUserLookupResult(
         message,
         null,
         null,
+        null,
+        null);
+}
+
+public sealed record IdentityOperatorLookupResult(
+    bool Found,
+    int? FailureStatusCode,
+    string? ErrorCode,
+    string? Message,
+    Guid? Id,
+    string? Name)
+{
+    public static IdentityOperatorLookupResult Success(Guid id, string name)
+    {
+        return new IdentityOperatorLookupResult(true, null, null, null, id, name);
+    }
+
+    public static IdentityOperatorLookupResult ValidationFailure(string message) => new(
+        false,
+        422,
+        "VALIDATION_ERROR",
+        message,
+        null,
+        null);
+
+    public static IdentityOperatorLookupResult Forbidden(string message) => new(
+        false,
+        403,
+        "FORBIDDEN",
+        message,
         null,
         null);
 }

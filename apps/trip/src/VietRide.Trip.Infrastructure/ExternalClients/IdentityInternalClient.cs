@@ -86,6 +86,39 @@ public sealed class IdentityInternalClient : IIdentityInternalClient
         }
     }
 
+    public async Task<IdentityOperatorLookupResult> GetOperatorAsync(
+        Guid operatorId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var response = await _httpClient.GetAsync(
+                $"/internal/v1/operators/{operatorId:D}",
+                cancellationToken).ConfigureAwait(false);
+
+            return response.StatusCode switch
+            {
+                HttpStatusCode.OK => await ReadOperatorAsync(response, cancellationToken).ConfigureAwait(false),
+                HttpStatusCode.Forbidden => IdentityOperatorLookupResult.Forbidden("Identity rejected the internal operator lookup."),
+                HttpStatusCode.NotFound => IdentityOperatorLookupResult.ValidationFailure(
+                    $"Identity operator '{operatorId}' was not found."),
+                >= HttpStatusCode.InternalServerError => IdentityOperatorLookupResult.ValidationFailure(
+                    "Identity operator lookup failed due to an upstream server error."),
+                _ => IdentityOperatorLookupResult.ValidationFailure(
+                    $"Identity returned unexpected status code {(int)response.StatusCode}.")
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return IdentityOperatorLookupResult.ValidationFailure(
+                "Identity operator lookup failed due to transport or circuit-breaker failure.");
+        }
+    }
+
     private static async Task<OperatorWriteEligibilityValidation> ReadEligibilityAsync(
         HttpResponseMessage response,
         CancellationToken cancellationToken)
@@ -142,6 +175,28 @@ public sealed class IdentityInternalClient : IIdentityInternalClient
         }
 
         return IdentityUserLookupResult.Success(id.Value, role, operatorId, status);
+    }
+
+    private static async Task<IdentityOperatorLookupResult> ReadOperatorAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (payload.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+        {
+            return IdentityOperatorLookupResult.ValidationFailure("Identity returned an empty operator payload.");
+        }
+
+        var id = GetGuidProperty(payload, "operatorId") ?? GetGuidProperty(payload, "id");
+        var name = GetStringProperty(payload, "name");
+        if (id is null || string.IsNullOrWhiteSpace(name))
+        {
+            return IdentityOperatorLookupResult.ValidationFailure("Identity operator payload is missing operatorId/id or name.");
+        }
+
+        return IdentityOperatorLookupResult.Success(id.Value, name);
     }
 
     private static string? GetStringProperty(JsonElement payload, string propertyName)
