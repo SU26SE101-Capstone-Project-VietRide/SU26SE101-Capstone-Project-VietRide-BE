@@ -32,7 +32,8 @@ Requirements:
 - [mô tả ngắn]
 Constraints:
 - Redis idempotency check bắt buộc
-- Verify: nx run <app>:lint + test + build before done
+- Tự động viết E2E test cho consumer tại `test/[consumer].e2e-spec.ts`. Cover tối thiểu: happy path (event xử lý đúng), duplicate event (idempotency bỏ qua), malformed payload (drop/không crash).
+- Verify: nx run <app>:lint + test + e2e + build before done
 
 ## Build new service (auto-planning)
 Read AGENTS.md §Service Planning Workflow first.

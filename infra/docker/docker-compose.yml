@@ -47,7 +47,7 @@ x-nest-common: &nest-common
 services:
   # ── Infrastructure ──────────────────────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: vietride_postgres
     profiles: ['infra', 'app']
     restart: unless-stopped
@@ -361,8 +361,30 @@ services:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 3003
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      DATABASE_URL: 'postgresql://${POSTGRES_USER:-vietride}:${POSTGRES_PASSWORD:-vietride_dev}@postgres:5432/${RAG_DB:-vietride_rag}'
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      RABBITMQ_URL: 'amqp://${RABBITMQ_USER:-vietride}:${RABBITMQ_PASSWORD:-vietride_dev}@rabbitmq:5672'
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-vietride.events}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      OPENROUTER_CHAT_MODEL: ${OPENROUTER_CHAT_MODEL:-nex-agi/nex-n2-pro:free}
+      OPENROUTER_EMBEDDING_MODEL: ${OPENROUTER_EMBEDDING_MODEL:-nvidia/llama-nemotron-embed-vl-1b-v2:free}
+      OPENROUTER_HTTP_REFERER: ${OPENROUTER_HTTP_REFERER:-http://localhost:3000}
+      OPENROUTER_APP_TITLE: ${OPENROUTER_APP_TITLE:-VietRide RAG}
+      OPENROUTER_ALLOW_PAID_FALLBACK: ${OPENROUTER_ALLOW_PAID_FALLBACK:-false}
+      RAG_EMBEDDING_DIMENSIONS: ${RAG_EMBEDDING_DIMENSIONS:-auto}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
+      CLOUDINARY_RAG_FOLDER: ${CLOUDINARY_RAG_FOLDER:-rag/documents}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     ports:
       - '${RAG_PORT:-3003}:3003'
     healthcheck:
