@@ -3,6 +3,8 @@ import type { Env } from '../config/env.schema';
 import type { RagConversation, RagMessage } from '../generated/rag-prisma-client';
 import type { ChatCompletionProvider } from '../providers/chat-completion.provider';
 import type { EmbeddingProvider } from '../providers/embedding.provider';
+import { ChatEmbeddingCacheService } from './chat-embedding-cache.service';
+import { ChatRateLimitService } from './chat-rate-limit.service';
 import { ChatRepository } from './chat.repository';
 import { ChatService } from './chat.service';
 
@@ -16,6 +18,8 @@ const CHUNK_ID = '66666666-6666-6666-6666-666666666666';
 describe('ChatService', () => {
   let service: ChatService;
   let repository: jest.Mocked<ChatRepository>;
+  let embeddingCache: jest.Mocked<ChatEmbeddingCacheService>;
+  let rateLimit: jest.Mocked<ChatRateLimitService>;
   let chatProvider: jest.Mocked<ChatCompletionProvider>;
   let embeddingProvider: jest.Mocked<EmbeddingProvider>;
 
@@ -28,6 +32,13 @@ describe('ChatService', () => {
       findRecentMessages: jest.fn(),
       searchChunks: jest.fn(),
     } as unknown as jest.Mocked<ChatRepository>;
+    embeddingCache = {
+      get: jest.fn(),
+      set: jest.fn(),
+    } as unknown as jest.Mocked<ChatEmbeddingCacheService>;
+    rateLimit = {
+      assertAllowed: jest.fn(),
+    } as unknown as jest.Mocked<ChatRateLimitService>;
     chatProvider = {
       complete: jest.fn(),
       stream: jest.fn(),
@@ -35,13 +46,14 @@ describe('ChatService', () => {
     embeddingProvider = {
       embed: jest.fn(),
     };
-    service = new ChatService(repository, chatProvider, embeddingProvider, makeEnv());
+    service = new ChatService(repository, embeddingCache, rateLimit, chatProvider, embeddingProvider, makeEnv());
 
     repository.createConversation.mockResolvedValue(makeConversation());
     repository.createUserMessage.mockResolvedValue(makeMessage('USER', 'Tôi cần hỗ trợ'));
     repository.createAssistantMessage.mockResolvedValue(makeMessage('ASSISTANT', 'Câu trả lời'));
     repository.findRecentMessages.mockResolvedValue([]);
     repository.searchChunks.mockResolvedValue([makeChunk()]);
+    embeddingCache.get.mockResolvedValue(undefined);
     embeddingProvider.embed.mockResolvedValue([0.1, 0.2]);
     chatProvider.stream.mockReturnValue(makeTokenStream(['Xin ', 'chào']));
   });
@@ -55,6 +67,32 @@ describe('ChatService', () => {
         limit: 5,
       }),
     );
+  });
+
+  it('checks rate limit before retrieval', async () => {
+    await service.prepareChat({ message: 'Tôi cần hỗ trợ' }, { sub: USER_ID, role: 'PASSENGER' });
+
+    expect(rateLimit.assertAllowed).toHaveBeenCalledWith(
+      expect.objectContaining({ sub: USER_ID, role: 'PASSENGER' }),
+    );
+  });
+
+  it('uses cached query embedding when available', async () => {
+    embeddingCache.get.mockResolvedValue([0.9, 0.8]);
+
+    await service.prepareChat({ message: 'Tôi cần hỗ trợ' }, { sub: USER_ID, role: 'PASSENGER' });
+
+    expect(embeddingProvider.embed).not.toHaveBeenCalled();
+    expect(embeddingCache.set).not.toHaveBeenCalled();
+    expect(repository.searchChunks).toHaveBeenCalledWith(
+      expect.objectContaining({ queryEmbedding: [0.9, 0.8] }),
+    );
+  });
+
+  it('stores query embedding when cache misses', async () => {
+    await service.prepareChat({ message: 'Tôi cần hỗ trợ' }, { sub: USER_ID, role: 'PASSENGER' });
+
+    expect(embeddingCache.set).toHaveBeenCalledWith('Tôi cần hỗ trợ', [0.1, 0.2]);
   });
 
   it('uses PUBLIC and OPERATOR retrieval with tenant filter for operator-scoped callers', async () => {

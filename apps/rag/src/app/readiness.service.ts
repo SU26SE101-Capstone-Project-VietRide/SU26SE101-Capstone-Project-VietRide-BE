@@ -2,6 +2,8 @@ import { Inject, Injectable, ServiceUnavailableException } from '@nestjs/common'
 import { RABBITMQ_CONNECTION } from '@vietride/nest-rabbitmq';
 import { RedisService } from '@vietride/nest-redis';
 import type { ChannelModel } from 'amqplib';
+import { ENV_TOKEN } from './tokens';
+import type { Env } from '../config/env.schema';
 import { EmbeddingDimensionProbeService } from '../embedding/embedding-dimension-probe.service';
 import { RagPrismaService } from '../prisma/rag-prisma.service';
 
@@ -9,7 +11,8 @@ export interface ReadinessDependencyDto {
   prisma: 'ok';
   redis: 'ok';
   rabbitmq: 'ok';
-  embedding: 'ok';
+  cloudinary: 'ok';
+  openrouter: 'ok';
 }
 
 export interface ReadinessDto {
@@ -24,6 +27,7 @@ export class ReadinessService {
     private readonly prisma: RagPrismaService,
     private readonly redis: RedisService,
     private readonly embeddingProbe: EmbeddingDimensionProbeService,
+    @Inject(ENV_TOKEN) private readonly env: Env,
     @Inject(RABBITMQ_CONNECTION) private readonly rabbitMqConnection: ChannelModel,
   ) {}
 
@@ -33,6 +37,7 @@ export class ReadinessService {
         this.checkPrisma(),
         this.checkRedis(),
         this.checkRabbitMq(),
+        this.checkCloudinaryConfig(),
         this.embeddingProbe.probe(),
       ]);
     } catch {
@@ -49,7 +54,8 @@ export class ReadinessService {
         prisma: 'ok',
         redis: 'ok',
         rabbitmq: 'ok',
-        embedding: 'ok',
+        cloudinary: 'ok',
+        openrouter: 'ok',
       },
     };
   }
@@ -65,5 +71,19 @@ export class ReadinessService {
   private async checkRabbitMq(): Promise<void> {
     const channel = await this.rabbitMqConnection.createChannel();
     await channel.close();
+  }
+
+  private checkCloudinaryConfig(): void {
+    if (
+      !this.env.CLOUDINARY_CLOUD_NAME ||
+      !this.env.CLOUDINARY_API_KEY ||
+      !this.env.CLOUDINARY_API_SECRET ||
+      !this.env.CLOUDINARY_RAG_FOLDER
+    ) {
+      throw new ServiceUnavailableException({
+        errorCode: 'RAG_STORAGE_CONFIG_UNAVAILABLE',
+        detail: 'RAG Cloudinary configuration is incomplete',
+      });
+    }
   }
 }

@@ -1,4 +1,4 @@
-import { INestApplication } from '@nestjs/common';
+import { HttpException, HttpStatus, INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { SignJWT } from 'jose';
 import type { AddressInfo } from 'node:net';
@@ -7,6 +7,8 @@ import { InternalJwtAuthGuard } from '../auth/internal-jwt-auth.guard';
 import type { RagConversation, RagMessage } from '../generated/rag-prisma-client';
 import type { ChatCompletionProvider } from '../providers/chat-completion.provider';
 import type { EmbeddingProvider } from '../providers/embedding.provider';
+import { ChatEmbeddingCacheService } from './chat-embedding-cache.service';
+import { ChatRateLimitService } from './chat-rate-limit.service';
 import { ChatController } from './chat.controller';
 import { ChatRepository } from './chat.repository';
 import { ChatService } from './chat.service';
@@ -24,6 +26,8 @@ describe('ChatController (e2e)', () => {
   let app: INestApplication;
   let baseUrl: string;
   let repository: jest.Mocked<ChatRepository>;
+  let embeddingCache: jest.Mocked<ChatEmbeddingCacheService>;
+  let rateLimit: jest.Mocked<ChatRateLimitService>;
   let chatProvider: jest.Mocked<ChatCompletionProvider>;
   let embeddingProvider: jest.Mocked<EmbeddingProvider>;
 
@@ -36,6 +40,13 @@ describe('ChatController (e2e)', () => {
       findRecentMessages: jest.fn(),
       searchChunks: jest.fn(),
     } as unknown as jest.Mocked<ChatRepository>;
+    embeddingCache = {
+      get: jest.fn(),
+      set: jest.fn(),
+    } as unknown as jest.Mocked<ChatEmbeddingCacheService>;
+    rateLimit = {
+      assertAllowed: jest.fn(),
+    } as unknown as jest.Mocked<ChatRateLimitService>;
     chatProvider = {
       complete: jest.fn(),
       stream: jest.fn(),
@@ -50,6 +61,8 @@ describe('ChatController (e2e)', () => {
         ChatService,
         InternalJwtAuthGuard,
         { provide: ChatRepository, useValue: repository },
+        { provide: ChatEmbeddingCacheService, useValue: embeddingCache },
+        { provide: ChatRateLimitService, useValue: rateLimit },
         { provide: CHAT_COMPLETION_PROVIDER, useValue: chatProvider },
         { provide: EMBEDDING_PROVIDER, useValue: embeddingProvider },
         { provide: ENV_TOKEN, useValue: makeEnv() },
@@ -74,6 +87,7 @@ describe('ChatController (e2e)', () => {
     repository.createAssistantMessage.mockResolvedValue(makeMessage('ASSISTANT', 'Xin chào'));
     repository.findRecentMessages.mockResolvedValue([]);
     repository.searchChunks.mockResolvedValue([makeChunk()]);
+    embeddingCache.get.mockResolvedValue(undefined);
     embeddingProvider.embed.mockResolvedValue([0.1, 0.2]);
     chatProvider.stream.mockReturnValue(makeTokenStream(['Xin ', 'chào']));
   });
@@ -120,6 +134,29 @@ describe('ChatController (e2e)', () => {
     });
 
     expect(response.status).toBe(400);
+  });
+
+  it('POST /api/v1/rag/chat returns 429 when rate limit is exceeded', async () => {
+    rateLimit.assertAllowed.mockRejectedValue(
+      new HttpException(
+        {
+          errorCode: 'RAG_RATE_LIMIT_EXCEEDED',
+          detail: 'RAG chat rate limit exceeded',
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      ),
+    );
+
+    const response = await fetch(`${baseUrl}/api/v1/rag/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Auth': await signInternalJwt(USER_ID, 'PASSENGER'),
+      },
+      body: JSON.stringify({ message: 'Tôi cần hỗ trợ' }),
+    });
+
+    expect(response.status).toBe(429);
   });
 });
 

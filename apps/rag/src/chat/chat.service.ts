@@ -18,11 +18,9 @@ import type {
 import type { ChatCompletionProvider, ChatMessage } from '../providers/chat-completion.provider';
 import type { EmbeddingProvider } from '../providers/embedding.provider';
 import type { CreateChatDto } from './dto/create-chat.dto';
-import {
-  RAG_CHAT_HISTORY_MESSAGE_LIMIT,
-  RAG_CHAT_MAX_CONTEXT_CHARS,
-  RAG_CHAT_TOP_K,
-} from './chat.constants';
+import { RAG_CHAT_HISTORY_MESSAGE_LIMIT } from './chat.constants';
+import { ChatEmbeddingCacheService } from './chat-embedding-cache.service';
+import { ChatRateLimitService } from './chat-rate-limit.service';
 import { ChatRepository } from './chat.repository';
 import type { RagChatPreparedStream, RagChatSseEvent, RagRetrievedChunk } from './chat.types';
 
@@ -40,6 +38,8 @@ const logger = pino({ name: 'RagChatService' });
 export class ChatService {
   constructor(
     private readonly chatRepository: ChatRepository,
+    private readonly embeddingCache: ChatEmbeddingCacheService,
+    private readonly rateLimit: ChatRateLimitService,
     @Inject(CHAT_COMPLETION_PROVIDER) private readonly chatProvider: ChatCompletionProvider,
     @Inject(EMBEDDING_PROVIDER) private readonly embeddingProvider: EmbeddingProvider,
     @Inject(ENV_TOKEN) private readonly env: Env,
@@ -48,15 +48,16 @@ export class ChatService {
   async prepareChat(dto: CreateChatDto, user: RagInternalUser | undefined): Promise<RagChatPreparedStream> {
     const caller = this.assertCaller(user);
     this.assertMessageLength(dto.message);
+    await this.rateLimit.assertAllowed(caller);
     const conversation = await this.resolveConversation(dto.conversationId, caller);
     const userMessage = await this.chatRepository.createUserMessage(conversation.id, dto.message);
-    const queryEmbedding = await this.embeddingProvider.embed({ input: dto.message });
+    const queryEmbedding = await this.resolveQueryEmbedding(dto.message);
     const accessLevels = this.resolveAccessLevels(caller.role);
     const chunks = await this.chatRepository.searchChunks({
       queryEmbedding,
       accessLevels,
       ...(caller.operatorId ? { operatorId: caller.operatorId } : {}),
-      limit: RAG_CHAT_TOP_K,
+      limit: this.env.RAG_MAX_RETRIEVED_CHUNKS,
     });
     const history = await this.chatRepository.findRecentMessages(
       conversation.id,
@@ -92,7 +93,10 @@ export class ChatService {
         },
       };
     } catch (error) {
-      logger.warn({ err: error, conversationId: prepared.conversation.id }, 'RAG chat stream failed');
+      logger.warn(
+        { error: this.toSafeErrorLog(error), conversationId: prepared.conversation.id },
+        'RAG chat stream failed',
+      );
       yield {
         event: 'error',
         data: {
@@ -172,6 +176,15 @@ export class ChatService {
     return ['PUBLIC', 'OPERATOR'];
   }
 
+  private async resolveQueryEmbedding(message: string): Promise<number[]> {
+    const cached = await this.embeddingCache.get(message);
+    if (cached) return cached;
+
+    const embedding = await this.embeddingProvider.embed({ input: message });
+    await this.embeddingCache.set(message, embedding);
+    return embedding;
+  }
+
   private buildProviderMessages(
     currentMessage: string,
     history: RagMessage[],
@@ -211,9 +224,10 @@ export class ChatService {
       return 'No retrieved context.';
     }
 
-    let totalChars = 0;
+    let totalTokens = 0;
     const blocks: string[] = [];
     for (const chunk of chunks) {
+      if (totalTokens + chunk.tokenCount > this.env.RAG_MAX_CONTEXT_TOKENS) break;
       const block = [
         `[chunk:${chunk.id}]`,
         `documentTitle: ${chunk.documentTitle}`,
@@ -221,11 +235,18 @@ export class ChatService {
         `documentType: ${chunk.documentType}`,
         chunk.content,
       ].join('\n');
-      if (totalChars + block.length > RAG_CHAT_MAX_CONTEXT_CHARS) break;
-      totalChars += block.length;
+      totalTokens += chunk.tokenCount;
       blocks.push(block);
     }
     return blocks.join('\n\n');
+  }
+
+  private toSafeErrorLog(error: unknown): { name: string; status?: number } {
+    if (error instanceof Error) {
+      const status = 'getStatus' in error ? (error.getStatus as () => number)() : undefined;
+      return { name: error.name, ...(status ? { status } : {}) };
+    }
+    return { name: 'UnknownError' };
   }
 
   private isSupportedRole(role: string): role is RagConversationRole {

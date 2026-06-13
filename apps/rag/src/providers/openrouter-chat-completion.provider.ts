@@ -12,8 +12,14 @@ interface OpenRouterChatResponse {
   choices?: OpenRouterChatChoice[];
 }
 
+const CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
+const CIRCUIT_BREAKER_OPEN_MS = 60_000;
+
 @Injectable()
 export class OpenRouterChatCompletionProvider implements ChatCompletionProvider {
+  private consecutiveFailures = 0;
+  private circuitOpenUntil = 0;
+
   constructor(@Inject(ENV_TOKEN) private readonly env: Env) {}
 
   async complete(request: ChatCompletionRequest): Promise<string> {
@@ -47,6 +53,9 @@ export class OpenRouterChatCompletionProvider implements ChatCompletionProvider 
   }
 
   private async requestChatCompletion(request: ChatCompletionRequest): Promise<Response> {
+    this.assertCircuitClosed();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.env.RAG_PROVIDER_TIMEOUT_MS);
     const init: RequestInit = {
       method: 'POST',
       headers: this.buildHeaders(),
@@ -55,18 +64,37 @@ export class OpenRouterChatCompletionProvider implements ChatCompletionProvider 
         messages: request.messages,
         stream: request.stream,
       }),
-      ...(request.signal ? { signal: request.signal } : {}),
+      signal: request.signal ?? controller.signal,
     };
-    const response = await fetch(`${this.env.OPENROUTER_BASE_URL}/chat/completions`, init);
+    try {
+      const response = await fetch(`${this.env.OPENROUTER_BASE_URL}/chat/completions`, init);
 
-    if (!response.ok) {
+      if (!response.ok) {
+        this.recordFailure(response.status);
+        if (response.status === 429) {
+          throw new ServiceUnavailableException({
+            errorCode: 'RAG_PROVIDER_RATE_LIMITED',
+            detail: 'OpenRouter chat provider rate limit reached',
+          });
+        }
+        throw new ServiceUnavailableException({
+          errorCode: 'RAG_PROVIDER_UNAVAILABLE',
+          detail: 'OpenRouter chat provider is unavailable',
+        });
+      }
+
+      this.recordSuccess();
+      return response;
+    } catch (error) {
+      if (error instanceof ServiceUnavailableException) throw error;
+      this.recordFailure(503);
       throw new ServiceUnavailableException({
         errorCode: 'RAG_PROVIDER_UNAVAILABLE',
         detail: 'OpenRouter chat provider is unavailable',
       });
+    } finally {
+      clearTimeout(timeout);
     }
-
-    return response;
   }
 
   private buildHeaders(): Record<string, string> {
@@ -87,6 +115,28 @@ export class OpenRouterChatCompletionProvider implements ChatCompletionProvider 
       return parsed.choices?.[0]?.delta?.content;
     } catch {
       return undefined;
+    }
+  }
+
+  private assertCircuitClosed(): void {
+    if (Date.now() < this.circuitOpenUntil) {
+      throw new ServiceUnavailableException({
+        errorCode: 'RAG_PROVIDER_CIRCUIT_OPEN',
+        detail: 'OpenRouter chat provider circuit is open',
+      });
+    }
+  }
+
+  private recordSuccess(): void {
+    this.consecutiveFailures = 0;
+    this.circuitOpenUntil = 0;
+  }
+
+  private recordFailure(status: number): void {
+    if (status !== 429 && status < 500) return;
+    this.consecutiveFailures += 1;
+    if (this.consecutiveFailures >= CIRCUIT_BREAKER_FAILURE_THRESHOLD) {
+      this.circuitOpenUntil = Date.now() + CIRCUIT_BREAKER_OPEN_MS;
     }
   }
 }
