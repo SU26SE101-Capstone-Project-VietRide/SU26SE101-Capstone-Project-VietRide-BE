@@ -9,6 +9,7 @@ import {
 import { NestRabbitMqModule } from '@vietride/nest-rabbitmq';
 import { NestRedisModule } from '@vietride/nest-redis';
 import { InternalJwtAuthGuard } from '../auth/internal-jwt-auth.guard';
+import { ChatModule } from '../chat/chat.module';
 import { loadEnv } from '../config/env.schema';
 import { RagConfigModule } from '../config/rag-config.module';
 import { DocumentsModule } from '../documents/documents.module';
@@ -39,6 +40,7 @@ const env = loadEnv();
     EmbeddingModule,
     DocumentsModule,
     IngestModule,
+    ChatModule,
   ],
   controllers: [AppController, HealthController, ReadyController],
   providers: [

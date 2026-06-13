@@ -1,0 +1,6 @@
+export const RAG_CHAT_TOP_K = 5;
+export const RAG_CHAT_SSE_EVENT_TOKEN = 'token';
+export const RAG_CHAT_SSE_EVENT_DONE = 'done';
+export const RAG_CHAT_SSE_EVENT_ERROR = 'error';
+export const RAG_CHAT_MAX_CONTEXT_CHARS = 12_000;
+export const RAG_CHAT_HISTORY_MESSAGE_LIMIT = 8;
