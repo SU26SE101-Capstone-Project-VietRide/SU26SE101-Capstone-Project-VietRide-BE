@@ -3,6 +3,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Options;
+using StackExchange.Redis;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Shared.Kernel.ValueObjects;
 
@@ -17,11 +18,15 @@ public sealed class VnPayClient : IVnPayClient
     private const string DefaultOrderType = "other";
     private static readonly TimeSpan TopUpWindow = TimeSpan.FromMinutes(15);
 
-    private readonly VnPayOptions _options;
+    private static readonly TimeSpan IpnDedupeTtl = TimeSpan.FromHours(24);
 
-    public VnPayClient(IOptions<VnPayOptions> options)
+    private readonly VnPayOptions _options;
+    private readonly IConnectionMultiplexer? _redis;
+
+    public VnPayClient(IOptions<VnPayOptions> options, IConnectionMultiplexer? redis = null)
     {
         _options = options.Value;
+        _redis = redis;
     }
 
     public string CreateTopUpRedirectUrl(
@@ -34,11 +39,7 @@ public sealed class VnPayClient : IVnPayClient
         if (amount.Amount < _options.MinimumTopUpAmount)
             throw new ArgumentOutOfRangeException(nameof(amount), "Top-up amount is below the configured minimum.");
 
-        if (string.IsNullOrWhiteSpace(_options.TmnCode))
-            throw new InvalidOperationException("VNPay TMN code is not configured.");
-
-        if (string.IsNullOrWhiteSpace(_options.HashSecret))
-            throw new InvalidOperationException("VNPay hash secret is not configured.");
+        EnsureSignatureOptions();
 
         var parameters = new SortedDictionary<string, string>(StringComparer.Ordinal)
         {
@@ -64,10 +65,72 @@ public sealed class VnPayClient : IVnPayClient
         return BuildPaymentUrl(parameters);
     }
 
+    public bool VerifySignature(IReadOnlyDictionary<string, string> parameters)
+    {
+        EnsureSignatureOptions();
+
+        if (!parameters.TryGetValue("vnp_SecureHash", out var secureHash) || string.IsNullOrWhiteSpace(secureHash))
+            return false;
+
+        var filtered = parameters
+            .Where(pair => !string.Equals(pair.Key, "vnp_SecureHash", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(pair.Key, "vnp_SecureHashType", StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+
+        var query = BuildQuery(new SortedDictionary<string, string>(filtered, StringComparer.Ordinal));
+        var expected = Sign(query, _options.HashSecret);
+        return string.Equals(expected, secureHash, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public async Task<bool> TryReserveIpnAsync(string vnPayTxnRef, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(vnPayTxnRef))
+            throw new ArgumentException("VNPay transaction reference is required.", nameof(vnPayTxnRef));
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (_redis is null)
+            return true;
+
+        var db = _redis.GetDatabase();
+        return await db.StringSetAsync(
+            BuildIpnDedupeKey(vnPayTxnRef),
+            "1",
+            IpnDedupeTtl,
+            When.NotExists,
+            CommandFlags.None);
+    }
+
+    public async Task ReleaseIpnReservationAsync(string vnPayTxnRef, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(vnPayTxnRef))
+            throw new ArgumentException("VNPay transaction reference is required.", nameof(vnPayTxnRef));
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (_redis is null)
+            return;
+
+        var db = _redis.GetDatabase();
+        await db.KeyDeleteAsync(BuildIpnDedupeKey(vnPayTxnRef), CommandFlags.None);
+    }
+
+    private static string BuildIpnDedupeKey(string vnPayTxnRef)
+        => $"payment:vnpay_ipn:{vnPayTxnRef}";
+
     private string BuildPaymentUrl(SortedDictionary<string, string> parameters)
     {
         var baseUri = ResolvePaymentBaseUri(_options.BaseUrl);
         return $"{baseUri}?{BuildQuery(parameters)}";
+    }
+
+    private void EnsureSignatureOptions()
+    {
+        if (string.IsNullOrWhiteSpace(_options.TmnCode))
+            throw new InvalidOperationException("VNPay TMN code is not configured.");
+
+        if (string.IsNullOrWhiteSpace(_options.HashSecret))
+            throw new InvalidOperationException("VNPay hash secret is not configured.");
     }
 
     private static Uri ResolvePaymentBaseUri(string configuredBaseUrl)

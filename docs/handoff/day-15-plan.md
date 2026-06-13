@@ -168,7 +168,7 @@ Stand up the Payment & Wallet service (currently a bare scaffold - only PingCont
 | 15.1 | done | APPROVE | 2026-06-12 | native enum mapping patch; EF update/down validated on clean DB; human verify pending |
 | 15.2 | done | APPROVE | 2026-06-12 | wallet bootstrap UPSERT + idempotency tests; human verify pending |
 | 15.3 | done | APPROVE | 2026-06-12 | top-up endpoint + VNPay redirect; 2 patch rounds; human verify pending |
-| 15.4 | todo | - | - | - |
+| 15.4 | done | APPROVE | 2026-06-13 | 3 patch rounds; Redis dedupe failure/amount validation fixed; human verify pending |
 | 15.5 | todo | - | - | - |
 | 15.6 | todo | - | - | - |
 

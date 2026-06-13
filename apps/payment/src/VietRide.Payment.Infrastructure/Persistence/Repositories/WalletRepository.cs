@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Domain.Entities;
+using VietRide.Payment.Domain.Enums;
+using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Payment.Infrastructure.Persistence.Repositories;
 
@@ -46,5 +48,32 @@ internal sealed class WalletRepository : IWalletRepository
             """, cancellationToken);
 
         return rows == 1;
+    }
+
+    public async Task<WalletTransaction> CreditTopUpAsync(
+        Guid userId,
+        Money amount,
+        Guid topUpRequestId,
+        CancellationToken cancellationToken)
+    {
+        var wallet = await _db.Wallets.FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken)
+            ?? throw new InvalidOperationException($"Wallet for user {userId} was not found.");
+
+        var balanceBefore = wallet.Balance;
+        wallet.Credit(amount);
+        var balanceAfter = wallet.Balance;
+
+        var transaction = WalletTransaction.Create(
+            userId,
+            WalletTransactionType.CREDIT,
+            amount,
+            balanceBefore,
+            balanceAfter,
+            WalletTransactionRef.TOP_UP,
+            topUpRequestId,
+            "VNPay wallet top-up");
+
+        await _db.WalletTransactions.AddAsync(transaction, cancellationToken);
+        return transaction;
     }
 }
