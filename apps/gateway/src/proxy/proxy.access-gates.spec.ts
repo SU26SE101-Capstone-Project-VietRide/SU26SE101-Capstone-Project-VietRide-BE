@@ -455,11 +455,16 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
-  it('returns 403 FORBIDDEN for non-PASSENGER roles on booking routes', async () => {
+  it.each([
+    '/v1/bookings',
+    '/v1/bookings/round-trip',
+    '/v1/bookings/11111111-1111-1111-1111-111111111111/edit-pickup',
+    '/v1/bookings/11111111-1111-1111-1111-111111111111/edit-dropoff',
+  ] as const)('returns 403 FORBIDDEN for non-PASSENGER roles on booking route %s', async (path) => {
     const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
     const handler = createProxyHandler(env, signer);
     const authorization = await makeAuthorizationHeader({ sub: 'admin-1', role: 'SYSTEM_ADMIN' });
-    const req = makeRequest('/v1/bookings', {
+    const req = makeRequest(path, {
       authorization,
       'x-request-id': 'req-booking-role',
     });
@@ -554,9 +559,15 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it.each([true, 'true'] as const)(
-    'allows PASSENGER requests when hasPhone=%p',
-    async (hasPhone) => {
+  it.each([
+    ['/v1/bookings', true],
+    ['/v1/bookings', 'true'],
+    ['/v1/bookings/round-trip', true],
+    ['/v1/bookings/11111111-1111-1111-1111-111111111111/edit-pickup', true],
+    ['/v1/bookings/11111111-1111-1111-1111-111111111111/edit-dropoff', true],
+  ] as const)(
+    'allows PASSENGER requests to booking route %s when hasPhone=%p',
+    async (path, hasPhone) => {
       const upstreamHandler = arrangeProxyPass();
       const signer = {
         sign: jest.fn().mockResolvedValue('internal-token'),
@@ -567,7 +578,7 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
         role: 'PASSENGER',
         hasPhone,
       });
-      const req = makeRequest('/v1/bookings', { authorization, 'x-request-id': 'req-phone-pass' });
+      const req = makeRequest(path, { authorization, 'x-request-id': 'req-phone-pass' });
       const res = makeResponse();
       const next = jest.fn() as NextFunction;
 
@@ -578,6 +589,9 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
         reqId: 'req-phone-pass',
         role: 'PASSENGER',
       });
+      expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+        expect.objectContaining({ target: env.BOOKING_BASE_URL }),
+      );
       expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
       expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
       expect(res.status).not.toHaveBeenCalled();

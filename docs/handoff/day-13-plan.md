@@ -147,7 +147,7 @@ Parallel-safe matrix: 13.0 no; 13.05 no (blocks 13.1 and touches Booking payment
 | 13.1 | done-with-carryover | APPROVE | 2026-06-13 | round-trip = Day-12 saga per-leg, all-or-nothing@lock; Payment↔Trip residual = Day-16 carry-over (CO per Day-12) |
 | 13.2 | done | APPROVE | 2026-06-13 | 1 patch round; edit-pickup price-neutral-only approved; Booking build/test/format green |
 | 13.3 | done | APPROVE | 2026-06-13 | 1 patch round; edit-dropoff no-reprice approved; Booking build/test/format green |
-| 13.4 | todo | — | — | — |
+| 13.4 | done | APPROVE | 2026-06-13 | 2 patch rounds; Gateway sub-path RBAC + Postman Day 13 requests approved; TS test/lint green |
 
 Legend: todo / in progress / done (reviewer APPROVED + human /verify) / done-with-carryover / blocked
 

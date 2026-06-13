@@ -3726,6 +3726,158 @@
           }
         },
         {
+          "name": "2. Create round-trip booking (WALLET)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 201', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test('Round-trip booking uses ADR 0004 success envelope', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(201);",
+                  "  pm.expect(body.data).to.have.property('bookingGroupId').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data).to.have.property('outbound').that.is.an('object');",
+                  "  pm.expect(body.data).to.have.property('return').that.is.an('object');",
+                  "  pm.expect(body.data).to.have.property('grandTotal').that.is.a('number');",
+                  "  pm.expect(body.data).to.have.property('paymentRedirectUrl');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/bookings/round-trip",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "bookings", "round-trip"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"outbound\": {\n    \"tripId\": \"{{day12TripId}}\",\n    \"pickup\": {\n      \"stationId\": \"{{day12PickupStationId}}\"\n    },\n    \"dropoff\": {\n      \"stationId\": \"{{day12DropoffStationId}}\"\n    },\n    \"seats\": [\n      {\n        \"seatNumber\": \"A01\",\n        \"passenger\": {\n          \"fullName\": \"Nguyen Van A\",\n          \"phoneNumber\": \"0900000001\",\n          \"idNumber\": \"012345678901\"\n        }\n      }\n    ]\n  },\n  \"return\": {\n    \"tripId\": \"{{day12ReturnTripId}}\",\n    \"pickup\": {\n      \"stationId\": \"{{day12ReturnPickupStationId}}\"\n    },\n    \"dropoff\": {\n      \"stationId\": \"{{day12ReturnDropoffStationId}}\"\n    },\n    \"seats\": [\n      {\n        \"seatNumber\": \"A02\",\n        \"passenger\": {\n          \"fullName\": \"Nguyen Van A\",\n          \"phoneNumber\": \"0900000001\",\n          \"idNumber\": \"012345678901\"\n        }\n      }\n    ]\n  },\n  \"paymentMethod\": \"WALLET\"\n}"
+            },
+            "description": "PASSENGER-only round-trip booking request. Idempotency-Key required. Uses the booking sub-path under the existing /v1/bookings prefix."
+          }
+        },
+        {
+          "name": "3. Edit booking pickup (PASSENGER sub-path)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Edit pickup response uses ADR 0004 envelope', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/bookings/{{createdBookingId}}/edit-pickup",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "bookings", "{{createdBookingId}}", "edit-pickup"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickup\": {\n    \"stationId\": \"{{day12AlternatePickupStationId}}\",\n    \"stopId\": null\n  },\n  \"paymentMethod\": \"WALLET\"\n}"
+            },
+            "description": "PASSENGER-only booking edit request. Idempotency-Key required. Uses the booking sub-path under the existing /v1/bookings prefix."
+          }
+        },
+        {
+          "name": "4. Edit booking dropoff (PASSENGER sub-path)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Edit dropoff response uses ADR 0004 envelope', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/bookings/{{createdBookingId}}/edit-dropoff",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "bookings", "{{createdBookingId}}", "edit-dropoff"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dropoff\": {\n    \"stationId\": \"{{day12AlternateDropoffStationId}}\",\n    \"stopId\": null\n  }\n}"
+            },
+            "description": "PASSENGER-only booking edit request. Idempotency-Key required. Uses the booking sub-path under the existing /v1/bookings prefix."
+          }
+        },
+        {
           "name": "2. Create booking — max seats exceeded (expect 422)",
           "event": [
             {
