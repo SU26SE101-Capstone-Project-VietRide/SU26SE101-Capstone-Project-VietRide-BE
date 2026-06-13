@@ -155,7 +155,7 @@ model KnowledgeChunk {
   chunkIndex     Int                 @map("chunk_index")
   content        String
   tokenCount     Int                 @map("token_count")
-  embedding      Unsupported("vector(2048)")
+  embedding      Unsupported("halfvec(2048)")
   searchVector   Unsupported("tsvector") @map("search_vector")
   createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   document       KnowledgeDocument   @relation(fields: [documentId], references: [id], onDelete: Cascade)

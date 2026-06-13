@@ -11,7 +11,7 @@ Tài liệu này là timeline triển khai chính thức cho `apps/rag`. Mục t
 - [x] Phase 0 — Timeline, Threat Model, Eval Design
 - [x] Phase 1 — Foundation, Prisma, Internal Auth
 - [x] Phase 2 — Database Shape Production-Ready
-- [ ] Phase 3 — Documents API Và Cloudinary Storage
+- [x] Phase 3 — Documents API Và Cloudinary Storage
 - [ ] Phase 4 — Ingest TXT/MARKDOWN
 - [ ] Phase 5 — Chat Core Và SSE
 - [ ] Phase 6 — Production Guardrails

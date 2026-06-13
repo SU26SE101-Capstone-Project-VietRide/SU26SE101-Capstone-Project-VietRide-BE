@@ -152,7 +152,7 @@ CREATE TABLE knowledge_chunks (
     chunk_index INT NOT NULL,
     content TEXT NOT NULL,
     token_count INT NOT NULL,
-    embedding vector(2048) NOT NULL,
+    embedding halfvec(2048) NOT NULL,
     search_vector TSVECTOR NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_knowledge_chunks_chunk_index_non_negative CHECK (chunk_index >= 0),
@@ -165,10 +165,9 @@ CREATE INDEX idx_knowledge_chunks_document_id
     ON knowledge_chunks (document_id);
 CREATE INDEX idx_knowledge_chunks_operator_id
     ON knowledge_chunks (operator_id);
-CREATE INDEX idx_knowledge_chunks_embedding
+CREATE INDEX idx_knowledge_chunks_embedding_hnsw
     ON knowledge_chunks
-    USING ivfflat (embedding vector_cosine_ops)
-    WITH (lists = 100);
+    USING hnsw (embedding halfvec_cosine_ops);
 CREATE INDEX idx_knowledge_chunks_search_vector
     ON knowledge_chunks
     USING GIN (search_vector);
@@ -264,10 +263,8 @@ CREATE TRIGGER trg_message_feedback_updated_at
 COMMENT ON COLUMN knowledge_documents.storage_path IS
     'Cloudinary public_id/path for raw document asset. Do not persist long-lived signed URLs.';
 COMMENT ON COLUMN knowledge_chunks.embedding IS
-    'vector(2048) for OpenRouter nvidia/llama-nemotron-embed-vl-1b-v2:free.';
+    'halfvec(2048) for OpenRouter nvidia/llama-nemotron-embed-vl-1b-v2:free; HNSW cosine index enabled.';
 COMMENT ON COLUMN knowledge_chunks.search_vector IS
     'PostgreSQL full-text search vector for optional hybrid search.';
-COMMENT ON INDEX idx_knowledge_chunks_embedding IS
-    'IVFFlat cosine. Adjust lists parameter as table grows and reindex after major corpus growth.';
 COMMENT ON COLUMN rag_messages.cited_chunk_ids IS
     'UUID[] of knowledge_chunks used to generate ASSISTANT response. Empty array for USER messages.';

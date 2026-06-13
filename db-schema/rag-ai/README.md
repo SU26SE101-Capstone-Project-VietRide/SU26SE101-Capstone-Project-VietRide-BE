@@ -18,7 +18,7 @@ NestJS service xử lý knowledge base ingestion và LLM streaming RAG. Ingest p
 | Entity | Purpose | Key business fields |
 |---|---|---|
 | `KnowledgeDocument` | Metadata tài liệu upload. | `storageProvider`, `storagePath`, `fileType`, `accessLevel`, `category`, `documentType`, `audienceRoles`, `operatorId`, `status`, `ingestStatus` |
-| `KnowledgeChunk` | Đoạn text đã chunk + embedding. | `embedding vector(2048)`, `searchVector`, `operatorId`, `documentType`, unique `(documentId, chunkIndex)` |
+| `KnowledgeChunk` | Đoạn text đã chunk + embedding. | `embedding halfvec(2048)`, `searchVector`, `operatorId`, `documentType`, unique `(documentId, chunkIndex)` |
 | `RagConversation` | 1 session chat. | `userId`, `operatorId`, `role`, `summary`, `lastMessageAt` |
 | `RagMessage` | 1 turn USER/ASSISTANT. | `citedChunkIds`, `tokensUsed` |
 | `MessageFeedback` | Feedback cho ASSISTANT message. | `rating`, `chunkIds`, `queryRewritten`, `responseLength` |
@@ -38,8 +38,9 @@ Rule retrieval production:
 
 ## Design Decisions
 
-- `KnowledgeChunk.embedding vector(2048)` khớp kết quả probe thực tế của OpenRouter embedding model `nvidia/llama-nemotron-embed-vl-1b-v2:free`. Nếu đổi sang model dimension khác phải migration và re-embed corpus.
+- `KnowledgeChunk.embedding halfvec(2048)` khớp kết quả probe thực tế của OpenRouter embedding model `nvidia/llama-nemotron-embed-vl-1b-v2:free`. Nếu đổi sang model dimension khác phải migration và re-embed corpus.
 - `KnowledgeChunk.search_vector` là `tsvector` để chuẩn bị hybrid search phía sau feature flag, không thay thế vector search ở Phase 2.
+- Tạo HNSW index `idx_knowledge_chunks_embedding_hnsw` với `halfvec_cosine_ops` để hỗ trợ vector search cho embedding 2048 chiều.
 - `KnowledgeDocument.storage_path` lưu Cloudinary public_id/path. API mới tạo signed/controlled URL ngắn hạn khi cần preview.
 - `KnowledgeDocument.access_level + category` có CHECK constraint để tránh nhầm CSKH hành khách với policy nhà xe.
 - `KnowledgeDocument.operator_id` bắt buộc NULL với `PUBLIC`, tránh leak tài liệu passenger theo tenant sai.
@@ -59,7 +60,7 @@ Rule retrieval production:
 | `uq_knowledge_chunks_doc_index` | `(document_id, chunk_index)` | Unique | Tránh duplicate chunk |
 | `idx_knowledge_chunks_document_id` | `document_id` | B-tree | List chunks của document |
 | `idx_knowledge_chunks_operator_id` | `operator_id` | B-tree | Tenant filter |
-| `idx_knowledge_chunks_embedding` | `embedding` | IVFFlat cosine | Vector similarity search |
+| `idx_knowledge_chunks_embedding_hnsw` | `embedding` | HNSW cosine | Vector similarity search |
 | `idx_knowledge_chunks_search_vector` | `search_vector` | GIN | Hybrid search/FTS |
 | `idx_rag_conversations_user_id_started_at` | `(user_id, started_at DESC)` | B-tree | Conversation history |
 | `idx_rag_conversations_operator_id_started_at` | `(operator_id, started_at DESC)` | B-tree | Operator audit/history |

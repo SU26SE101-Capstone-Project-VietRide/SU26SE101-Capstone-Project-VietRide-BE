@@ -1,0 +1,191 @@
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { extname } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import pino from 'pino';
+import { STORAGE_PROVIDER } from '../app/tokens';
+import type { RagInternalUser } from '../auth/rag-internal-user.types';
+import type {
+  KnowledgeDocumentAccess,
+  KnowledgeDocumentCategory,
+  KnowledgeDocumentFileType,
+  KnowledgeDocumentType,
+} from '../generated/rag-prisma-client';
+import type { StorageProvider } from '../providers/storage.provider';
+import type { CreateDocumentDto } from './dto/create-document.dto';
+import {
+  RAG_DOCUMENT_ALLOWED_MIME_TYPES,
+  RAG_DOCUMENT_MARKDOWN_EXTENSIONS,
+  RAG_DOCUMENT_MAX_FILE_BYTES,
+  RAG_DOCUMENT_PREVIEW_URL_TTL_SECONDS,
+  RAG_DOCUMENT_STORAGE_PREFIX,
+  RAG_DOCUMENT_TEXT_EXTENSIONS,
+} from './documents.constants';
+import { DocumentsRepository } from './documents.repository';
+import {
+  KnowledgeDocumentResponse,
+  toKnowledgeDocumentResponse,
+  UploadedDocumentFile,
+} from './documents.types';
+
+const SYSTEM_ADMIN_ROLE = 'SYSTEM_ADMIN';
+const logger = pino({ name: 'RagDocumentsService' });
+
+@Injectable()
+export class DocumentsService {
+  constructor(
+    private readonly documentsRepository: DocumentsRepository,
+    @Inject(STORAGE_PROVIDER) private readonly storageProvider: StorageProvider,
+  ) {}
+
+  async create(
+    dto: CreateDocumentDto,
+    file: UploadedDocumentFile | undefined,
+    user: RagInternalUser | undefined,
+  ): Promise<KnowledgeDocumentResponse> {
+    this.assertSystemAdmin(user);
+    const validFile = this.validateFile(file);
+    this.validateTaxonomy(dto.accessLevel, dto.category, dto.operatorId);
+
+    const storagePath = this.buildStoragePath(validFile.originalname);
+    await this.storageProvider.uploadObject({
+      storagePath,
+      contentType: validFile.mimetype,
+      body: validFile.buffer,
+    });
+
+    const document = await this.documentsRepository.create({
+      title: dto.title,
+      storagePath,
+      fileName: this.sanitizeFileName(validFile.originalname),
+      mimeType: validFile.mimetype,
+      fileSize: BigInt(validFile.size),
+      fileType: this.detectFileType(validFile),
+      accessLevel: dto.accessLevel as KnowledgeDocumentAccess,
+      category: dto.category as KnowledgeDocumentCategory,
+      documentType: dto.documentType as KnowledgeDocumentType,
+      audienceRoles: dto.audienceRoles,
+      language: dto.language,
+      uploadedByUserId: user.sub,
+      ...(dto.description ? { description: dto.description } : {}),
+      ...(dto.operatorId ? { operatorId: dto.operatorId } : {}),
+    });
+    const previewUrl = await this.storageProvider.createSignedReadUrl({
+      storagePath: document.storagePath,
+      expiresInSeconds: RAG_DOCUMENT_PREVIEW_URL_TTL_SECONDS,
+    });
+
+    logger.info({ documentId: document.id }, 'RAG document uploaded');
+    return toKnowledgeDocumentResponse(document, previewUrl);
+  }
+
+  async approve(
+    documentId: string,
+    user: RagInternalUser | undefined,
+  ): Promise<KnowledgeDocumentResponse> {
+    this.assertSystemAdmin(user);
+    const document = await this.documentsRepository.findById(documentId);
+    if (!document) {
+      throw new NotFoundException({
+        errorCode: 'RAG_DOCUMENT_NOT_FOUND',
+        detail: `Document ${documentId} not found`,
+      });
+    }
+    if (document.status !== 'PENDING_REVIEW') {
+      throw new ConflictException({
+        errorCode: 'RAG_DOCUMENT_STATUS_CONFLICT',
+        detail: `Document ${documentId} is not pending review`,
+      });
+    }
+
+    const approved = await this.documentsRepository.approve({
+      documentId,
+      approvedByUserId: user.sub,
+    });
+    logger.info({ documentId }, 'RAG document approved');
+    return toKnowledgeDocumentResponse(approved);
+  }
+
+  private assertSystemAdmin(user: RagInternalUser | undefined): asserts user is RagInternalUser {
+    if (user?.role !== SYSTEM_ADMIN_ROLE) {
+      throw new ForbiddenException({
+        errorCode: 'INSUFFICIENT_ROLE',
+        detail: 'SYSTEM_ADMIN role is required',
+      });
+    }
+  }
+
+  private validateFile(file: UploadedDocumentFile | undefined): UploadedDocumentFile {
+    if (!file) {
+      throw new BadRequestException({
+        errorCode: 'RAG_DOCUMENT_FILE_REQUIRED',
+        detail: 'Document file is required',
+      });
+    }
+    if (file.size <= 0 || file.size > RAG_DOCUMENT_MAX_FILE_BYTES) {
+      throw new BadRequestException({
+        errorCode: 'RAG_DOCUMENT_FILE_INVALID_SIZE',
+        detail: 'Document file size is invalid',
+      });
+    }
+    if (!RAG_DOCUMENT_ALLOWED_MIME_TYPES.has(file.mimetype)) {
+      throw new BadRequestException({
+        errorCode: 'RAG_DOCUMENT_FILE_INVALID_TYPE',
+        detail: 'Only TXT and MARKDOWN files are supported',
+      });
+    }
+    this.detectFileType(file);
+    return file;
+  }
+
+  private validateTaxonomy(
+    accessLevel: CreateDocumentDto['accessLevel'],
+    category: CreateDocumentDto['category'],
+    operatorId: string | undefined,
+  ): void {
+    if (accessLevel === 'PUBLIC' && (category !== 'CUSTOMER_SUPPORT' || operatorId)) {
+      throw new BadRequestException({
+        errorCode: 'RAG_DOCUMENT_TAXONOMY_INVALID',
+        detail: 'PUBLIC documents must be global customer support documents',
+      });
+    }
+    if (accessLevel === 'OPERATOR' && category !== 'OPERATOR_POLICY') {
+      throw new BadRequestException({
+        errorCode: 'RAG_DOCUMENT_TAXONOMY_INVALID',
+        detail: 'OPERATOR documents must use OPERATOR_POLICY category',
+      });
+    }
+    if (accessLevel === 'ADMIN' && category !== 'PLATFORM_ADMIN') {
+      throw new BadRequestException({
+        errorCode: 'RAG_DOCUMENT_TAXONOMY_INVALID',
+        detail: 'ADMIN documents must use PLATFORM_ADMIN category',
+      });
+    }
+  }
+
+  private detectFileType(file: UploadedDocumentFile): KnowledgeDocumentFileType {
+    const extension = extname(file.originalname).toLowerCase();
+    if (RAG_DOCUMENT_TEXT_EXTENSIONS.has(extension)) return 'TXT';
+    if (RAG_DOCUMENT_MARKDOWN_EXTENSIONS.has(extension)) return 'MARKDOWN';
+    throw new BadRequestException({
+      errorCode: 'RAG_DOCUMENT_FILE_INVALID_TYPE',
+      detail: 'Only TXT and MARKDOWN files are supported',
+    });
+  }
+
+  private buildStoragePath(originalFileName: string): string {
+    const extension = extname(originalFileName).toLowerCase();
+    return `${RAG_DOCUMENT_STORAGE_PREFIX}/${randomUUID()}${extension}`;
+  }
+
+  private sanitizeFileName(originalFileName: string): string {
+    const sanitized = originalFileName.replace(/[/\\]/g, '_').trim();
+    return sanitized.length > 0 ? sanitized : 'document.txt';
+  }
+}

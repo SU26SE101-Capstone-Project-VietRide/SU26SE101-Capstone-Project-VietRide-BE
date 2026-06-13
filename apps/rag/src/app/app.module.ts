@@ -11,6 +11,7 @@ import { NestRedisModule } from '@vietride/nest-redis';
 import { InternalJwtAuthGuard } from '../auth/internal-jwt-auth.guard';
 import { loadEnv } from '../config/env.schema';
 import { RagConfigModule } from '../config/rag-config.module';
+import { DocumentsModule } from '../documents/documents.module';
 import { EmbeddingModule } from '../embedding/embedding.module';
 import { RagPrismaModule } from '../prisma/prisma.module';
 import { ProvidersModule } from '../providers/providers.module';
@@ -35,6 +36,7 @@ const env = loadEnv();
     RagPrismaModule,
     ProvidersModule,
     EmbeddingModule,
+    DocumentsModule,
   ],
   controllers: [AppController, HealthController, ReadyController],
   providers: [
