@@ -10,7 +10,7 @@ Tài liệu này là timeline triển khai chính thức cho `apps/rag`. Mục t
 
 - [x] Phase 0 — Timeline, Threat Model, Eval Design
 - [x] Phase 1 — Foundation, Prisma, Internal Auth
-- [ ] Phase 2 — Database Shape Production-Ready
+- [x] Phase 2 — Database Shape Production-Ready
 - [ ] Phase 3 — Documents API Và Cloudinary Storage
 - [ ] Phase 4 — Ingest TXT/MARKDOWN
 - [ ] Phase 5 — Chat Core Và SSE
@@ -30,6 +30,49 @@ Tài liệu này là timeline triển khai chính thức cho `apps/rag`. Mục t
 - Không tự fallback sang model trả phí nếu `OPENROUTER_ALLOW_PAID_FALLBACK=false`.
 - Không hardcode dimension embedding. Service phải probe dimension từ provider trước khi ingest và fail fast nếu DB dimension không khớp.
 - Tài liệu v1 chỉ ingest TXT/MARKDOWN. PDF/DOCX làm sau khi USER duyệt parser dependency.
+
+## Taxonomy dữ liệu
+
+Knowledge base phải phân loại rõ theo access level, audience và tenant:
+
+- `PUBLIC`: CSKH cho hành khách. Bao gồm FAQ đặt/hủy vé, hoàn tiền, hành lý, hàng ký gửi, voucher, thanh toán, theo dõi chuyến và hướng dẫn tài khoản.
+- `OPERATOR`: policy/SOP/quy trình vận hành cho nhà xe. Bao gồm quy trình đón/trả khách, xử lý trễ chuyến, đổi xe/tài xế, nhận/trả hàng, xử lý sự cố và hướng dẫn dashboard.
+- `ADMIN`: tài liệu quản trị platform cho `SYSTEM_ADMIN`. Bao gồm duyệt nhà xe, audit, RAG operations, cấu hình hệ thống, subscription và runbook nội bộ.
+
+Metadata bắt buộc từ Phase 2:
+
+```text
+accessLevel: PUBLIC | OPERATOR | ADMIN
+operatorId: uuid | null
+category:
+  CUSTOMER_SUPPORT
+  OPERATOR_POLICY
+  PLATFORM_ADMIN
+documentType:
+  FAQ
+  POLICY
+  SOP
+  GUIDE
+  TERMS
+audienceRoles: string[]
+language: vi
+```
+
+Rule retrieval:
+
+```text
+PASSENGER:
+  accessLevel IN (PUBLIC)
+  category = CUSTOMER_SUPPORT
+  operatorId IS NULL
+
+DRIVER / ASSISTANT / OPERATOR_STAFF / OPERATOR_ADMIN:
+  accessLevel IN (PUBLIC, OPERATOR)
+  AND (operatorId IS NULL OR operatorId = caller.operatorId)
+
+SYSTEM_ADMIN:
+  accessLevel IN (PUBLIC, OPERATOR, ADMIN)
+```
 
 ## Biến môi trường bắt buộc
 
@@ -153,6 +196,11 @@ Scope:
 - Mở rộng `knowledge_chunks` với tenant, metadata, `embedding vector(<dimension>)`, `search_vector tsvector`.
 - Mở rộng `rag_conversations` với tenant và summary fields.
 - Thêm `message_feedback`.
+- Thêm taxonomy metadata:
+  - `category`
+  - `document_type`
+  - `audience_roles`
+  - `language`
 - Cập nhật `db-schema/rag-ai/schema.sql`.
 
 DoD:

@@ -8,3 +8,233 @@ datasource db {
   url      = env("DATABASE_URL")
   schemas  = ["vietride_rag"]
 }
+
+enum KnowledgeDocumentStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  ARCHIVED
+
+  @@map("knowledge_document_status")
+  @@schema("vietride_rag")
+}
+
+enum KnowledgeDocumentAccess {
+  PUBLIC
+  OPERATOR
+  ADMIN
+
+  @@map("knowledge_document_access")
+  @@schema("vietride_rag")
+}
+
+enum KnowledgeDocumentFileType {
+  PDF
+  DOCX
+  TXT
+  MARKDOWN
+
+  @@map("knowledge_document_file_type")
+  @@schema("vietride_rag")
+}
+
+enum KnowledgeDocumentCategory {
+  CUSTOMER_SUPPORT
+  OPERATOR_POLICY
+  PLATFORM_ADMIN
+
+  @@map("knowledge_document_category")
+  @@schema("vietride_rag")
+}
+
+enum KnowledgeDocumentType {
+  FAQ
+  POLICY
+  SOP
+  GUIDE
+  TERMS
+
+  @@map("knowledge_document_type")
+  @@schema("vietride_rag")
+}
+
+enum KnowledgeDocumentIngestStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+
+  @@map("knowledge_document_ingest_status")
+  @@schema("vietride_rag")
+}
+
+enum RagStorageProvider {
+  CLOUDINARY
+
+  @@map("rag_storage_provider")
+  @@schema("vietride_rag")
+}
+
+enum RagConversationRole {
+  PASSENGER
+  DRIVER
+  ASSISTANT
+  OPERATOR_STAFF
+  OPERATOR_ADMIN
+  SYSTEM_ADMIN
+
+  @@map("rag_conversation_role")
+  @@schema("vietride_rag")
+}
+
+enum RagMessageRole {
+  USER
+  ASSISTANT
+
+  @@map("rag_message_role")
+  @@schema("vietride_rag")
+}
+
+enum OutboxEventStatus {
+  PENDING
+  PUBLISHING
+  PUBLISHED
+  FAILED
+
+  @@map("outbox_event_status")
+  @@schema("vietride_rag")
+}
+
+model KnowledgeDocument {
+  id                  String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title               String                        @db.VarChar(500)
+  description         String?
+  storageProvider     RagStorageProvider            @default(CLOUDINARY) @map("storage_provider")
+  storagePath         String                        @map("storage_path")
+  fileName            String                        @map("file_name") @db.VarChar(255)
+  mimeType            String                        @map("mime_type") @db.VarChar(100)
+  fileSize            BigInt                        @map("file_size")
+  fileType            KnowledgeDocumentFileType     @map("file_type")
+  accessLevel         KnowledgeDocumentAccess       @map("access_level")
+  category            KnowledgeDocumentCategory
+  documentType        KnowledgeDocumentType         @map("document_type")
+  audienceRoles       String[]                      @default([]) @map("audience_roles")
+  language            String                        @default("vi") @db.VarChar(10)
+  operatorId          String?                       @map("operator_id") @db.Uuid
+  status              KnowledgeDocumentStatus       @default(PENDING_REVIEW)
+  ingestStatus        KnowledgeDocumentIngestStatus @default(PENDING) @map("ingest_status")
+  ingestError         String?                       @map("ingest_error")
+  ingestedAt          DateTime?                     @map("ingested_at") @db.Timestamptz(6)
+  chunkCount          Int?                          @map("chunk_count")
+  embeddingModel      String?                       @map("embedding_model") @db.VarChar(255)
+  embeddingDimensions Int?                          @map("embedding_dimensions")
+  uploadedByUserId    String                        @map("uploaded_by_user_id") @db.Uuid
+  approvedByUserId    String?                       @map("approved_by_user_id") @db.Uuid
+  approvedAt          DateTime?                     @map("approved_at") @db.Timestamptz(6)
+  archivedAt          DateTime?                     @map("archived_at") @db.Timestamptz(6)
+  createdAt           DateTime                      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime                      @default(now()) @map("updated_at") @db.Timestamptz(6)
+  chunks              KnowledgeChunk[]
+
+  @@index([status], map: "idx_knowledge_documents_status")
+  @@index([accessLevel, status], map: "idx_knowledge_documents_access_status")
+  @@index([operatorId, accessLevel, status], map: "idx_knowledge_documents_operator_access_status")
+  @@index([category, status], map: "idx_knowledge_documents_category_status")
+  @@index([uploadedByUserId, createdAt(sort: Desc)], map: "idx_knowledge_documents_uploaded_by")
+  @@map("knowledge_documents")
+  @@schema("vietride_rag")
+}
+
+model KnowledgeChunk {
+  id             String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  documentId     String              @map("document_id") @db.Uuid
+  operatorId     String?             @map("operator_id") @db.Uuid
+  documentTitle  String              @map("document_title") @db.VarChar(500)
+  sectionHeader  String?             @map("section_header") @db.VarChar(500)
+  documentType   KnowledgeDocumentType @map("document_type")
+  chunkIndex     Int                 @map("chunk_index")
+  content        String
+  tokenCount     Int                 @map("token_count")
+  embedding      Unsupported("vector(2048)")
+  searchVector   Unsupported("tsvector") @map("search_vector")
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  document       KnowledgeDocument   @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, chunkIndex], map: "uq_knowledge_chunks_doc_index")
+  @@index([documentId], map: "idx_knowledge_chunks_document_id")
+  @@index([operatorId], map: "idx_knowledge_chunks_operator_id")
+  @@map("knowledge_chunks")
+  @@schema("vietride_rag")
+}
+
+model RagConversation {
+  id                   String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId               String              @map("user_id") @db.Uuid
+  operatorId           String?             @map("operator_id") @db.Uuid
+  role                 RagConversationRole
+  summary              String?
+  summaryUpdatedAt     DateTime?           @map("summary_updated_at") @db.Timestamptz(6)
+  summaryFromMessageId String?             @map("summary_from_message_id") @db.Uuid
+  startedAt            DateTime            @default(now()) @map("started_at") @db.Timestamptz(6)
+  lastMessageAt        DateTime?           @map("last_message_at") @db.Timestamptz(6)
+  createdAt            DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  messages             RagMessage[]
+  feedback             MessageFeedback[]
+
+  @@index([userId, startedAt(sort: Desc)], map: "idx_rag_conversations_user_id_started_at")
+  @@index([operatorId, startedAt(sort: Desc)], map: "idx_rag_conversations_operator_id_started_at")
+  @@index([role], map: "idx_rag_conversations_role")
+  @@map("rag_conversations")
+  @@schema("vietride_rag")
+}
+
+model RagMessage {
+  id             String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId String             @map("conversation_id") @db.Uuid
+  role           RagMessageRole
+  content        String
+  citedChunkIds  String[]           @default([]) @map("cited_chunk_ids") @db.Uuid
+  tokensUsed     Int?               @map("tokens_used")
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  conversation   RagConversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  feedback       MessageFeedback?
+
+  @@index([conversationId, createdAt], map: "idx_rag_messages_conversation_id_created_at")
+  @@map("rag_messages")
+  @@schema("vietride_rag")
+}
+
+model MessageFeedback {
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  messageId      String          @unique(map: "uq_message_feedback_message_id") @map("message_id") @db.Uuid
+  conversationId String          @map("conversation_id") @db.Uuid
+  userId         String          @map("user_id") @db.Uuid
+  rating         Int
+  queryRewritten String?         @map("query_rewritten")
+  chunkIds       String[]        @default([]) @map("chunk_ids") @db.Uuid
+  responseLength Int             @map("response_length")
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime        @default(now()) @map("updated_at") @db.Timestamptz(6)
+  message        RagMessage      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  conversation   RagConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt], map: "idx_message_feedback_conversation_created_at")
+  @@index([userId, createdAt(sort: Desc)], map: "idx_message_feedback_user_created_at")
+  @@map("message_feedback")
+  @@schema("vietride_rag")
+}
+
+model OutboxEvent {
+  id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventType   String            @map("event_type") @db.VarChar(100)
+  payload     Json
+  status      OutboxEventStatus @default(PENDING)
+  retryCount  Int               @default(0) @map("retry_count")
+  lastError   String?           @map("last_error")
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  publishedAt DateTime?         @map("published_at") @db.Timestamptz(6)
+
+  @@index([status, createdAt], map: "idx_outbox_events_status_created")
+  @@map("outbox_events")
+  @@schema("vietride_rag")
+}

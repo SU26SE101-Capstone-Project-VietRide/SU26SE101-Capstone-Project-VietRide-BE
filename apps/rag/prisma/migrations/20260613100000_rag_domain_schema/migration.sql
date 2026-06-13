@@ -1,25 +1,4 @@
--- =============================================================================
--- VietRide :: RAG AI Service :: PostgreSQL 16 schema
--- Database: vietride_rag
--- Schema: vietride_rag
--- Framework: NestJS + Prisma ORM
--- =============================================================================
--- pgvector extension required for embedding similarity search.
--- Storage provider: Cloudinary raw assets.
--- Chat provider: OpenRouter nex-agi/nex-n2-pro:free.
--- Embedding model: OpenRouter nvidia/llama-nemotron-embed-vl-1b-v2:free.
--- Embedding dimension: 2048.
--- =============================================================================
-
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-CREATE EXTENSION IF NOT EXISTS "vector";
-
-CREATE SCHEMA IF NOT EXISTS vietride_rag;
 SET search_path TO vietride_rag, public;
-
--- =============================================================================
--- ENUMS
--- =============================================================================
 
 CREATE TYPE knowledge_document_status AS ENUM (
     'PENDING_REVIEW',
@@ -86,10 +65,6 @@ CREATE TYPE outbox_event_status AS ENUM (
     'PUBLISHED',
     'FAILED'
 );
-
--- =============================================================================
--- TABLES
--- =============================================================================
 
 CREATE TABLE knowledge_documents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -241,10 +216,6 @@ CREATE TABLE outbox_events (
 CREATE INDEX idx_outbox_events_status_created
     ON outbox_events (status, created_at);
 
--- =============================================================================
--- TRIGGERS
--- =============================================================================
-
 CREATE OR REPLACE FUNCTION trg_set_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -267,7 +238,5 @@ COMMENT ON COLUMN knowledge_chunks.embedding IS
     'vector(2048) for OpenRouter nvidia/llama-nemotron-embed-vl-1b-v2:free.';
 COMMENT ON COLUMN knowledge_chunks.search_vector IS
     'PostgreSQL full-text search vector for optional hybrid search.';
-COMMENT ON INDEX idx_knowledge_chunks_embedding IS
-    'IVFFlat cosine. Adjust lists parameter as table grows and reindex after major corpus growth.';
 COMMENT ON COLUMN rag_messages.cited_chunk_ids IS
     'UUID[] of knowledge_chunks used to generate ASSISTANT response. Empty array for USER messages.';
