@@ -8,6 +8,9 @@ import type {
 import { RagPrismaService } from '../prisma/rag-prisma.service';
 import type { RagRetrievedChunk } from './chat.types';
 
+const HYBRID_SEARCH_CANDIDATE_LIMIT = 10;
+const RRF_RANK_OFFSET = 60;
+
 @Injectable()
 export class ChatRepository {
   constructor(private readonly prisma: RagPrismaService) {}
@@ -54,6 +57,20 @@ export class ChatRepository {
   }
 
   async searchChunks(input: {
+    queryText: string;
+    queryEmbedding: number[];
+    accessLevels: KnowledgeDocumentAccess[];
+    operatorId?: string;
+    limit: number;
+    hybridSearchEnabled: boolean;
+  }): Promise<RagRetrievedChunk[]> {
+    if (input.hybridSearchEnabled) {
+      return this.searchChunksHybrid(input);
+    }
+    return this.searchChunksVector(input);
+  }
+
+  private async searchChunksVector(input: {
     queryEmbedding: number[];
     accessLevels: KnowledgeDocumentAccess[];
     operatorId?: string;
@@ -81,6 +98,84 @@ export class ChatRepository {
           OR (${input.operatorId ?? null}::uuid IS NOT NULL AND c.operator_id = ${input.operatorId ?? null}::uuid)
         )
       ORDER BY c.embedding <=> ${this.toVectorLiteral(input.queryEmbedding)}::halfvec
+      LIMIT ${input.limit}
+    `;
+  }
+
+  private async searchChunksHybrid(input: {
+    queryText: string;
+    queryEmbedding: number[];
+    accessLevels: KnowledgeDocumentAccess[];
+    operatorId?: string;
+    limit: number;
+  }): Promise<RagRetrievedChunk[]> {
+    return this.prisma.$queryRaw<RagRetrievedChunk[]>`
+      WITH scoped_chunks AS (
+        SELECT
+          c.id,
+          c.document_id,
+          c.document_title,
+          c.section_header,
+          c.document_type,
+          c.content,
+          c.token_count,
+          c.operator_id,
+          c.embedding,
+          c.search_vector,
+          d.access_level
+        FROM vietride_rag.knowledge_chunks c
+        INNER JOIN vietride_rag.knowledge_documents d ON d.id = c.document_id
+        WHERE d.status = 'APPROVED'::vietride_rag.knowledge_document_status
+          AND d.ingest_status = 'COMPLETED'::vietride_rag.knowledge_document_ingest_status
+          AND d.access_level = ANY(${input.accessLevels}::vietride_rag.knowledge_document_access[])
+          AND (
+            c.operator_id IS NULL
+            OR (${input.operatorId ?? null}::uuid IS NOT NULL AND c.operator_id = ${input.operatorId ?? null}::uuid)
+          )
+      ),
+      fts_candidates AS (
+        SELECT
+          scoped_chunks.id,
+          row_number() OVER (
+            ORDER BY ts_rank_cd(scoped_chunks.search_vector, plainto_tsquery('simple', ${input.queryText})) DESC
+          ) AS rank_fts
+        FROM scoped_chunks
+        WHERE scoped_chunks.search_vector @@ plainto_tsquery('simple', ${input.queryText})
+        ORDER BY ts_rank_cd(scoped_chunks.search_vector, plainto_tsquery('simple', ${input.queryText})) DESC
+        LIMIT ${HYBRID_SEARCH_CANDIDATE_LIMIT}
+      ),
+      vector_candidates AS (
+        SELECT
+          scoped_chunks.id,
+          row_number() OVER (
+            ORDER BY scoped_chunks.embedding <=> ${this.toVectorLiteral(input.queryEmbedding)}::halfvec
+          ) AS rank_vector
+        FROM scoped_chunks
+        ORDER BY scoped_chunks.embedding <=> ${this.toVectorLiteral(input.queryEmbedding)}::halfvec
+        LIMIT ${HYBRID_SEARCH_CANDIDATE_LIMIT}
+      ),
+      fused AS (
+        SELECT
+          COALESCE(fts_candidates.id, vector_candidates.id) AS id,
+          COALESCE(1.0 / (${RRF_RANK_OFFSET} + fts_candidates.rank_fts), 0.0)
+            + COALESCE(1.0 / (${RRF_RANK_OFFSET} + vector_candidates.rank_vector), 0.0) AS rrf_score
+        FROM fts_candidates
+        FULL OUTER JOIN vector_candidates ON vector_candidates.id = fts_candidates.id
+      )
+      SELECT
+        scoped_chunks.id::text AS "id",
+        scoped_chunks.document_id::text AS "documentId",
+        scoped_chunks.document_title AS "documentTitle",
+        scoped_chunks.section_header AS "sectionHeader",
+        scoped_chunks.document_type AS "documentType",
+        scoped_chunks.content,
+        scoped_chunks.token_count AS "tokenCount",
+        scoped_chunks.access_level AS "accessLevel",
+        scoped_chunks.operator_id::text AS "operatorId",
+        (scoped_chunks.embedding <=> ${this.toVectorLiteral(input.queryEmbedding)}::halfvec) AS "distance"
+      FROM fused
+      INNER JOIN scoped_chunks ON scoped_chunks.id = fused.id
+      ORDER BY fused.rrf_score DESC, scoped_chunks.embedding <=> ${this.toVectorLiteral(input.queryEmbedding)}::halfvec
       LIMIT ${input.limit}
     `;
   }

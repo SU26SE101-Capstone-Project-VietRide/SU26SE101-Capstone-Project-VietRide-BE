@@ -63,8 +63,30 @@ describe('ChatService', () => {
 
     expect(repository.searchChunks).toHaveBeenCalledWith(
       expect.objectContaining({
+        queryText: 'Tôi cần hỗ trợ',
         accessLevels: ['PUBLIC'],
         limit: 5,
+        hybridSearchEnabled: false,
+      }),
+    );
+  });
+
+  it('passes hybrid search flag to repository when enabled', async () => {
+    service = new ChatService(
+      repository,
+      embeddingCache,
+      rateLimit,
+      chatProvider,
+      embeddingProvider,
+      makeEnv({ HYBRID_SEARCH_ENABLED: true }),
+    );
+
+    await service.prepareChat({ message: 'Tôi cần hỗ trợ' }, { sub: USER_ID, role: 'PASSENGER' });
+
+    expect(repository.searchChunks).toHaveBeenCalledWith(
+      expect.objectContaining({
+        queryText: 'Tôi cần hỗ trợ',
+        hybridSearchEnabled: true,
       }),
     );
   });
@@ -160,7 +182,7 @@ describe('ChatService', () => {
   });
 });
 
-function makeEnv(): Env {
+function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
     NODE_ENV: 'test',
     PORT: 3003,
@@ -201,6 +223,7 @@ function makeEnv(): Env {
     CLOUDINARY_API_KEY: 'cloud-key',
     CLOUDINARY_API_SECRET: 'cloud-secret',
     CLOUDINARY_RAG_FOLDER: 'rag/documents',
+    ...overrides,
   };
 }
 

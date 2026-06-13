@@ -54,10 +54,12 @@ export class ChatService {
     const queryEmbedding = await this.resolveQueryEmbedding(dto.message);
     const accessLevels = this.resolveAccessLevels(caller.role);
     const chunks = await this.chatRepository.searchChunks({
+      queryText: dto.message,
       queryEmbedding,
       accessLevels,
       ...(caller.operatorId ? { operatorId: caller.operatorId } : {}),
       limit: this.env.RAG_MAX_RETRIEVED_CHUNKS,
+      hybridSearchEnabled: this.env.HYBRID_SEARCH_ENABLED,
     });
     const history = await this.chatRepository.findRecentMessages(
       conversation.id,
