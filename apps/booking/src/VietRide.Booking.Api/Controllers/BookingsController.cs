@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using VietRide.Booking.Api.Controllers.Requests;
 using VietRide.Booking.Application.Features.Bookings.CreateBooking;
 using VietRide.Booking.Application.Features.Bookings.CreateRoundTripBooking;
+using VietRide.Booking.Application.Features.Bookings.EditPickup;
 using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Booking.Api.Controllers;
@@ -106,6 +107,41 @@ public sealed class BookingsController : ControllerBase
         var result = await _sender.Send(command, ct);
 
         return StatusCode(StatusCodes.Status201Created, result);
+    }
+
+    /// <summary>Edit pickup before cutoff with price-neutral-only policy.</summary>
+    /// <remarks>
+    /// Auth: PASSENGER (booking owner only).
+    /// Idempotency-Key header required.
+    /// Any fare difference is rejected with BOOKING_EDIT_PICKUP_PRICE_CHANGED.
+    /// </remarks>
+    [HttpPost("{bookingId:guid}/edit-pickup")]
+    [Authorize(Roles = PassengerRole)]
+    [ProducesResponseType(typeof(ApiResponse<EditPickupResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> EditPickup(
+        [FromRoute] Guid bookingId,
+        [FromBody] EditPickupRequest request,
+        CancellationToken ct)
+    {
+        var passengerUserId = GetPassengerUserId();
+        var idempotencyKey = GetRequiredIdempotencyKey();
+
+        var command = new EditPickupCommand(
+            BookingId: bookingId,
+            PassengerUserId: passengerUserId,
+            IdempotencyKey: idempotencyKey,
+            PickupStationId: request.Pickup?.StationId,
+            PickupStopId: request.Pickup?.StopId,
+            PaymentMethod: request.PaymentMethod);
+
+        var result = await _sender.Send(command, ct);
+
+        return StatusCode(StatusCodes.Status200OK, result);
     }
 
     // -----------------------------------------------------------------------
