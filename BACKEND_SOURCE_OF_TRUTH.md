@@ -1,6 +1,6 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.11.1
+> **Phiên bản:** 1.11.2
 > **Trạng thái:** ACTIVE — sealed for capstone v1
 > **Cập nhật lần cuối:** 2026-06-13
 > **Capstone:** SU26SE101 — SU26
@@ -2360,7 +2360,7 @@ PUBLIC_APP_URL=https://app.vietride.app
 ```
 BOOKING_PORT=5003
 DB_CONNECTION=...vietride_booking...
-SEAT_LOCK_TTL_MINUTES=10
+SEAT_LOCK_TTL_MINUTES=10        # Booking-side/client default only; Trip-owned TTL registry is under Trip-Route-Vehicle.
 VNPAY_PAYMENT_TIMEOUT_MINUTES=15
 EDIT_CUTOFF_HOURS=2
 MAX_SEATS_PER_BOOKING=5
@@ -2374,6 +2374,7 @@ IDENTITY_BASE_URL=http://identity:5001
 ```
 TRIP_PORT=5002
 DB_CONNECTION=...vietride_trip...
+SEAT_LOCK_TTL_MINUTES=10        # Trip-owned source for SeatLock:TtlMinutes / lock-seats ttlSeconds default 600s.
 GOOGLE_MAPS_API_KEY=...
 GOOGLE_DIRECTIONS_API_KEY=...
 HANGFIRE_DASHBOARD_USER=admin
@@ -2681,6 +2682,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.11.2** | 2026-06-13 | BE lead (Vũ) | **PATCH** — Day-11 Task 11.4 PLAN-REVIEW TTL config drift fix: add `SEAT_LOCK_TTL_MINUTES=10` to the Trip-Route-Vehicle env registry as the Trip-owned source for `SeatLock:TtlMinutes` / lock-seats `ttlSeconds` default 600s, while keeping the Booking-side line explicitly marked as client/default-only and not the Trip-owned registry. Docs-only; no code/DDL change. |
 | **1.11.1** | 2026-06-13 | BE lead (Vũ) | **PATCH** — Day-11 Task 11.2-pre SOT/contract patch: document `PATCH /v1/operator/driver-schedules/{id}/activate` as an OPERATOR_ADMIN, no-body, no-Idempotency-Key, behavior-idempotent activation endpoint covered by the existing Gateway `/v1/operator/driver-schedules` prefix; activation-only scope excludes full DriverSchedule edit/cascade. Close the Day-9 carryover by changing DriverSchedule create/activation validation from deferred to Identity logical-FK role/operator validation: `driverUserId` must be `DRIVER` under caller operator and nullable `assistantUserId` must be `ASSISTANT` under caller operator, with mismatches mapped to `422 VALIDATION_ERROR`. Clarify internal `GET /internal/v1/users/{userId}` raw success DTO `{ id, role, operatorId, status }`, Internal-JWT-only, no Gateway exposure. No new error codes, no event keys, no DDL/code change. |
 | **1.11.0** | 2026-06-12 | BE lead (Vũ) | **MINOR** — (1) **Money rounding rule change (human decision 2026-06-12):** bỏ floor về 1,000 VND — số tiền giữ đến đơn vị ĐỒNG; kết quả phép tính lẻ (giảm giá %, hoa hồng) làm tròn đến đồng gần nhất (`Money.FromDecimal`, MidpointRounding.AwayFromZero); `Money.FromRaw` pass-through. Sửa §9.5, §4.4 Money row, §3.1 tree comment, `libs/dotnet/VietRide.Shared.Kernel/ValueObjects/Money.cs` + tests. technical_context_v7 đã được patch in-place cùng đợt (10 chỗ floor-1000: dòng ~1944/2015/2991/3418/4080/4126-4153/4367/4539) + API Contract 2 chỗ (~2394/2561) — SOT hết mâu thuẫn. Không cần DB migration (BIGINT giữ nguyên). (2) **Edit-pickup policy change (Day-13 OQ2, human decision 2026-06-12):** v1 KHÔNG cho đổi điểm đón làm thay đổi giá — edit-pickup chỉ hợp lệ khi giá mới = giá cũ (fareDelta=0); mọi chênh lệch (tăng HOẶC giảm) → 409; muốn đổi giá thì hủy vé + đặt lại (loại bỏ hoàn toàn nhánh refund-on-downgrade của technical_context_v7 lines 1639-1656 — erratum, business owner override). §5.9: rename `BOOKING_EDIT_PICKUP_PRICE_INCREASE` → `BOOKING_EDIT_PICKUP_PRICE_CHANGED` (chưa có code/FE nào dùng code cũ). |
 | **1.10.0** | 2026-06-11 | BE lead (Vũ) | **MINOR** — SOT reconciliation patches (Day-11 Q2 / Day-12 C1,C2,CO2 / Day-13 C5): (1) §9.9 Redis key `booking:seat_lock:{tripId}:{seatNumber}` owner Booking → key `seat_lock:{tripId}:{seatNumber}` owner Trip (source: BSOT 1.8.0 + API Contract §`lock-seats`). (2) §5.6 idempotency table: split combined row `POST /v1/bookings/{id}/edit-pickup-dropoff` into two separate rows `POST /v1/bookings/{id}/edit-pickup` and `POST /v1/bookings/{id}/edit-dropoff` (source: API Contract lines ~830-885 defines two separate endpoints, higher precedence). (3) §7.2 Payment seam: `POST /internal/v1/payments/wallet-charge` → `POST /internal/v1/payments/charge` (source: API Contract line ~1565). (4) §9.10 + §9.1 logging example: BookingCode short-form `VR-<4 char base32>` → `VR-yyyyMMdd-XXXXXXXX` (date + 8-char base32 uppercase) (source: db-schema/booking/schema.sql COMMENT + API Contract line ~713). No code/DDL change. |
