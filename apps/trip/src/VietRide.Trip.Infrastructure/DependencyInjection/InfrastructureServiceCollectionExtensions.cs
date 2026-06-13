@@ -43,7 +43,13 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ITripStopFareRepository, TripStopFareRepository>();
         services.AddScoped<ITripGenerationSkipLogRepository, TripGenerationSkipLogRepository>();
         services.AddScoped<ITripGenerationJobScheduler, HangfireTripGenerationJobScheduler>();
-        services.AddHostedService<TripGenerationRecurringJobRegistrationHostedService>();
+
+        var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
+            ?? Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+        if (!string.Equals(environment, "Testing", StringComparison.OrdinalIgnoreCase))
+        {
+            services.AddHostedService<TripGenerationRecurringJobRegistrationHostedService>();
+        }
 
         var redisUrl = configuration["REDIS_URL"]
             ?? Environment.GetEnvironmentVariable("REDIS_URL")
@@ -52,7 +58,9 @@ public static class InfrastructureServiceCollectionExtensions
         redisOptions.AbortOnConnectFail = false;
         services.AddSingleton<IConnectionMultiplexer>(_ =>
             ConnectionMultiplexer.Connect(redisOptions));
+        services.AddSingleton<ISeatLockTtlProvider, SeatLockTtlProvider>();
         services.AddSingleton<ISeatLockStore, RedisSeatLockStore>();
+        services.AddScoped<IExpiredSeatLockReleaser, ExpiredSeatLockReleaser>();
 
         services.AddTripHangfire(configuration);
 

@@ -12,6 +12,7 @@ public interface ISeatLockStore
         Guid tripId,
         IReadOnlyCollection<string> seatNumbers,
         string lockOwner,
+        TimeSpan? ttl = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -29,5 +30,14 @@ public interface ISeatLockStore
     Task<bool> IsLockedAsync(
         Guid tripId,
         string seatNumber,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns whether the live Redis lock exists and is owned by <paramref name="lockOwner" />.
+    /// </summary>
+    Task<bool> IsOwnedByAsync(
+        Guid tripId,
+        string seatNumber,
+        string lockOwner,
         CancellationToken cancellationToken = default);
 }

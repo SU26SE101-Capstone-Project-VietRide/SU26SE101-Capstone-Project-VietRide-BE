@@ -24,6 +24,7 @@ builder.Services.AddVietRideDbContext<TripDbContext>(builder.Configuration);
 builder.Services.AddVietRideMediatRBehaviors(
     handlerAssemblies: [typeof(ApplicationAssemblyMarker).Assembly]);
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddVietRideIdempotency("trip");
 
 var app = builder.Build();
 
@@ -31,6 +32,11 @@ app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseVietRideSwagger();
 app.UseAuthentication();
 app.UseAuthorization();
+if (!app.Environment.IsEnvironment("Testing"))
+{
+    app.UseVietRideIdempotency();
+}
+
 app.MapVietRideHealth(ServiceName);
 app.MapControllers();
 

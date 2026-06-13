@@ -20,6 +20,13 @@ public static class HangfireServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
+        var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
+            ?? Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+        if (string.Equals(environment, "Testing", StringComparison.OrdinalIgnoreCase))
+        {
+            return services;
+        }
+
         var connectionString = configuration.GetConnectionString("Default");
         if (string.IsNullOrWhiteSpace(connectionString))
         {
@@ -46,6 +53,7 @@ public static class HangfireServiceCollectionExtensions
             options.ServerName = "vietride-trip";
             options.Queues = [queueName];
         });
+        services.AddHostedService<ExpiredSeatLockReleaseJobRegistrationHostedService>();
 
         return services;
     }

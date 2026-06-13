@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Configuration;
 using StackExchange.Redis;
 using VietRide.Trip.Application.Abstractions.SeatLock;
 
@@ -9,7 +8,6 @@ namespace VietRide.Trip.Infrastructure.SeatLock;
 /// </summary>
 public sealed class RedisSeatLockStore : ISeatLockStore
 {
-    private const int DefaultTtlMinutes = 10;
     private const string KeyPrefix = "seat_lock";
 
     private const string ReleaseIfOwnerScript =
@@ -20,17 +18,10 @@ public sealed class RedisSeatLockStore : ISeatLockStore
 
     public RedisSeatLockStore(
         IConnectionMultiplexer redis,
-        IConfiguration configuration)
+        ISeatLockTtlProvider ttlProvider)
     {
         _redis = redis;
-
-        var ttlMinutes = configuration.GetValue("SeatLock:TtlMinutes", DefaultTtlMinutes);
-        if (ttlMinutes <= 0)
-        {
-            ttlMinutes = DefaultTtlMinutes;
-        }
-
-        _ttl = TimeSpan.FromMinutes(ttlMinutes);
+        _ttl = ttlProvider.DefaultTtl;
     }
 
     /// <inheritdoc />
@@ -38,6 +29,7 @@ public sealed class RedisSeatLockStore : ISeatLockStore
         Guid tripId,
         IReadOnlyCollection<string> seatNumbers,
         string lockOwner,
+        TimeSpan? ttl = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(lockOwner);
@@ -52,13 +44,14 @@ public sealed class RedisSeatLockStore : ISeatLockStore
 
         var db = _redis.GetDatabase();
         var acquiredKeys = new List<RedisKey>(normalizedSeatNumbers.Count);
+        var expiry = ttl is { } customTtl && customTtl > TimeSpan.Zero ? customTtl : _ttl;
 
         foreach (var seatNumber in normalizedSeatNumbers)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             var key = BuildKey(tripId, seatNumber);
-            var acquired = await db.StringSetAsync(key, lockOwner, _ttl, When.NotExists);
+            var acquired = await db.StringSetAsync(key, lockOwner, expiry, When.NotExists);
             if (!acquired)
             {
                 await ReleaseAcquiredAsync(db, acquiredKeys, lockOwner);
@@ -108,6 +101,23 @@ public sealed class RedisSeatLockStore : ISeatLockStore
 
         var db = _redis.GetDatabase();
         return await db.KeyExistsAsync(BuildKey(tripId, seatNumber.Trim()));
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> IsOwnedByAsync(
+        Guid tripId,
+        string seatNumber,
+        string lockOwner,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(seatNumber);
+        ArgumentException.ThrowIfNullOrWhiteSpace(lockOwner);
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var db = _redis.GetDatabase();
+        var value = await db.StringGetAsync(BuildKey(tripId, seatNumber.Trim()));
+        return value.HasValue && string.Equals(value.ToString(), lockOwner, StringComparison.Ordinal);
     }
 
     private static async Task ReleaseAcquiredAsync(
