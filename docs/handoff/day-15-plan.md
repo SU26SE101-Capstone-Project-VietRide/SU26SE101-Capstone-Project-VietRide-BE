@@ -170,7 +170,7 @@ Stand up the Payment & Wallet service (currently a bare scaffold - only PingCont
 | 15.3 | done | APPROVE | 2026-06-12 | top-up endpoint + VNPay redirect; 2 patch rounds; human verify pending |
 | 15.4 | done | APPROVE | 2026-06-13 | 3 patch rounds; Redis dedupe failure/amount validation fixed; human verify pending |
 | 15.5 | done | APPROVE | 2026-06-13 | expanded scope approved for atomic expiry + tests; human verify pending |
-| 15.6 | todo | - | - | - |
+| 15.6 | done | APPROVE | 2026-06-13 | handler tests + 401 integration tests added; human verify pending |
 
 Legend: todo / in progress / done (reviewer APPROVED + human /verify) / done-with-carryover / blocked
 

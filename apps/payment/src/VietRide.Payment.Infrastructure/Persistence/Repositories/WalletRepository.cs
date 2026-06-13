@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using VietRide.Payment.Application.Abstractions.Repositories;
+using VietRide.Payment.Application.Features.Wallets.GetWalletTransactions;
 using VietRide.Payment.Domain.Entities;
 using VietRide.Payment.Domain.Enums;
+using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Payment.Infrastructure.Persistence.Repositories;
@@ -48,6 +50,60 @@ internal sealed class WalletRepository : IWalletRepository
             """, cancellationToken);
 
         return rows == 1;
+    }
+
+    public async Task<Wallet?> GetUserWalletAsync(Guid userId, CancellationToken cancellationToken)
+        => await _db.Wallets
+            .AsNoTracking()
+            .FirstOrDefaultAsync(wallet => wallet.UserId == userId, cancellationToken);
+
+    public async Task<PagedResult<GetWalletTransactionResult>> GetUserWalletTransactionsAsync(
+        Guid userId,
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        WalletTransactionType? type,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken)
+    {
+        page = Math.Max(page, 1);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+
+        var query = _db.WalletTransactions
+            .AsNoTracking()
+            .Where(transaction => transaction.UserId == userId);
+
+        if (from.HasValue)
+            query = query.Where(transaction => transaction.CreatedAt >= from.Value);
+
+        if (to.HasValue)
+            query = query.Where(transaction => transaction.CreatedAt <= to.Value);
+
+        if (type.HasValue)
+            query = query.Where(transaction => transaction.Type == type.Value);
+
+        var totalItems = await query.LongCountAsync(cancellationToken);
+
+        var transactions = await query
+            .OrderByDescending(transaction => transaction.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        var items = transactions
+            .Select(transaction => new GetWalletTransactionResult(
+                transaction.Id,
+                transaction.Type.ToString(),
+                transaction.Amount.Amount,
+                transaction.BalanceBefore.Amount,
+                transaction.BalanceAfter.Amount,
+                transaction.ReferenceType.ToString(),
+                transaction.ReferenceId,
+                transaction.Note,
+                transaction.CreatedAt))
+            .ToList();
+
+        return PagedResult<GetWalletTransactionResult>.Create(items, page, pageSize, totalItems);
     }
 
     public async Task<WalletTransaction> CreditTopUpAsync(

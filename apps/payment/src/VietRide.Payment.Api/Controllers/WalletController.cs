@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Payment.Api.Controllers.Requests;
 using VietRide.Payment.Application.Features.TopUps.CreateTopUp;
+using VietRide.Payment.Application.Features.Wallets.GetWallet;
+using VietRide.Payment.Application.Features.Wallets.GetWalletTransactions;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 
@@ -25,6 +27,40 @@ public sealed class WalletController : ControllerBase
     public WalletController(ISender sender)
     {
         _sender = sender;
+    }
+
+    /// <summary>Get the authenticated user's passenger wallet.</summary>
+    [HttpGet]
+    [ProducesResponseType(typeof(ApiResponse<GetWalletResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<GetWalletResult>> GetWallet(CancellationToken ct)
+    {
+        var result = await _sender.Send(new GetWalletQuery(GetUserId()), ct);
+        return Ok(result);
+    }
+
+    /// <summary>Get the authenticated user's passenger wallet ledger newest first.</summary>
+    [HttpGet("transactions")]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<GetWalletTransactionResult>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<PagedResult<GetWalletTransactionResult>>> GetWalletTransactions(
+        [FromQuery] DateTimeOffset? from,
+        [FromQuery] DateTimeOffset? to,
+        [FromQuery] string? type,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken ct = default)
+    {
+        var query = new GetWalletTransactionsQuery(
+            GetUserId(),
+            from,
+            to,
+            type,
+            page,
+            pageSize);
+
+        var result = await _sender.Send(query, ct);
+        return Ok(result);
     }
 
     /// <summary>Create a VNPay redirect URL for a passenger wallet top-up.</summary>
