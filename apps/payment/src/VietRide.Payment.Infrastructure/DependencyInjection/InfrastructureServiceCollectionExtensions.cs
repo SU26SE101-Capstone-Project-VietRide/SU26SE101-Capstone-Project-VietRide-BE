@@ -1,3 +1,5 @@
+using Hangfire;
+using Hangfire.PostgreSql;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using StackExchange.Redis;
@@ -24,6 +26,33 @@ namespace VietRide.Payment.Infrastructure.DependencyInjection;
 /// </remarks>
 public static class InfrastructureServiceCollectionExtensions
 {
+    public const string HangfireSchemaName = "vietride_payment.hangfire";
+
+    /// <summary>
+    /// Adds Hangfire storage for Payment background jobs.
+    /// </summary>
+    public static IServiceCollection AddPaymentHangfire(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        var connectionString = configuration.GetConnectionString("Default")
+            ?? throw new InvalidOperationException("ConnectionStrings:Default is not configured.");
+
+        services.AddHangfire(config => config
+            .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+            .UseSimpleAssemblyNameTypeSerializer()
+            .UseRecommendedSerializerSettings()
+            .UsePostgreSqlStorage(
+                connectionString,
+                new PostgreSqlStorageOptions
+                {
+                    SchemaName = HangfireSchemaName,
+                    PrepareSchemaIfNecessary = true,
+                }));
+
+        return services;
+    }
+
     /// <summary>
     /// Adds Payment Infrastructure services to the DI container.
     /// </summary>

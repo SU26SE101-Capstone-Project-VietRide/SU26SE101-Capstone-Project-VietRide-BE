@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Domain.Entities;
+using VietRide.Payment.Domain.Enums;
 
 namespace VietRide.Payment.Infrastructure.Persistence.Repositories;
 
@@ -38,4 +39,17 @@ internal sealed class TopUpRequestRepository : ITopUpRequestRepository
         => await _db.TopUpRequests.FirstOrDefaultAsync(
             topUp => topUp.VnPayTxnRef == vnPayTxnRef,
             cancellationToken);
+
+    public async Task<int> ExpirePendingOlderThanAsync(
+        DateTimeOffset expiresBefore,
+        DateTimeOffset expiredAt,
+        CancellationToken cancellationToken)
+        => await _db.TopUpRequests
+            .Where(topUp => topUp.Status == TopUpRequestStatus.PENDING && topUp.CreatedAt < expiresBefore)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(topUp => topUp.Status, TopUpRequestStatus.EXPIRED)
+                    .SetProperty(topUp => topUp.ExpiredAt, expiredAt)
+                    .SetProperty(topUp => topUp.UpdatedAt, expiredAt),
+                cancellationToken);
 }

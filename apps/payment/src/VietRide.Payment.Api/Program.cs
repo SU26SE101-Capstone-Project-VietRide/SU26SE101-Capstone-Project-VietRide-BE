@@ -1,7 +1,9 @@
+using Hangfire;
 using Serilog;
 using VietRide.Payment.Application;
 using VietRide.Payment.Infrastructure;
 using VietRide.Payment.Infrastructure.DependencyInjection;
+using VietRide.Payment.Infrastructure.Jobs;
 using VietRide.Shared.Application.DependencyInjection;
 using VietRide.Shared.Messaging.DependencyInjection;
 using VietRide.Shared.Persistence.DependencyInjection;
@@ -30,6 +32,8 @@ var registerMessaging = !builder.Environment.IsEnvironment("Testing");
 if (registerMessaging)
 {
     builder.Services.AddVietRideMessaging(builder.Configuration);
+    builder.Services.AddPaymentHangfire(builder.Configuration);
+    builder.Services.AddHangfireServer();
 }
 
 builder.Services.AddInfrastructure(builder.Configuration, registerConsumers: registerMessaging);
@@ -44,6 +48,16 @@ app.UseAuthorization();
 app.UseVietRideIdempotency();
 app.MapVietRideHealth(ServiceName);
 app.MapControllers();
+
+if (registerMessaging)
+{
+    using var scope = app.Services.CreateScope();
+    var recurringJobs = scope.ServiceProvider.GetRequiredService<IRecurringJobManager>();
+    recurringJobs.AddOrUpdate<TopUpExpiredJob>(
+        TopUpExpiredJob.RecurringJobId,
+        job => job.RunAsync(CancellationToken.None),
+        Cron.Minutely());
+}
 
 app.Run();
 
