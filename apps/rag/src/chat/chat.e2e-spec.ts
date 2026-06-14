@@ -8,10 +8,13 @@ import type { RagConversation, RagMessage } from '../generated/rag-prisma-client
 import type { ChatCompletionProvider } from '../providers/chat-completion.provider';
 import type { EmbeddingProvider } from '../providers/embedding.provider';
 import { ChatEmbeddingCacheService } from './chat-embedding-cache.service';
+import { ChatIntentService } from './chat-intent.service';
+import { ChatQueryRewriteService } from './chat-query-rewrite.service';
 import { ChatRateLimitService } from './chat-rate-limit.service';
 import { ChatController } from './chat.controller';
 import { ChatRepository } from './chat.repository';
 import { ChatService } from './chat.service';
+import { ChatSummaryService } from './chat-summary.service';
 
 const INTERNAL_JWT_SECRET = 'test-secret-min-32-chars-aaaaaaaaaaaaaaaa';
 const INTERNAL_JWT_ISSUER = 'vietride-gateway';
@@ -38,6 +41,8 @@ describe('ChatController (e2e)', () => {
       createUserMessage: jest.fn(),
       createAssistantMessage: jest.fn(),
       findRecentMessages: jest.fn(),
+      countMessages: jest.fn(),
+      updateConversationSummary: jest.fn(),
       searchChunks: jest.fn(),
     } as unknown as jest.Mocked<ChatRepository>;
     embeddingCache = {
@@ -59,6 +64,9 @@ describe('ChatController (e2e)', () => {
       controllers: [ChatController],
       providers: [
         ChatService,
+        ChatIntentService,
+        ChatQueryRewriteService,
+        ChatSummaryService,
         InternalJwtAuthGuard,
         { provide: ChatRepository, useValue: repository },
         { provide: ChatEmbeddingCacheService, useValue: embeddingCache },
@@ -87,6 +95,7 @@ describe('ChatController (e2e)', () => {
     repository.createAssistantMessage.mockResolvedValue(makeMessage('ASSISTANT', 'Xin chào'));
     repository.findRecentMessages.mockResolvedValue([]);
     repository.searchChunks.mockResolvedValue([makeChunk()]);
+    rateLimit.assertAllowed.mockResolvedValue(undefined);
     embeddingCache.get.mockResolvedValue(undefined);
     embeddingProvider.embed.mockResolvedValue([0.1, 0.2]);
     chatProvider.stream.mockReturnValue(makeTokenStream(['Xin ', 'chào']));
@@ -158,6 +167,23 @@ describe('ChatController (e2e)', () => {
 
     expect(response.status).toBe(429);
   });
+
+  it('POST /api/v1/rag/chat refuses off-topic messages when intent filter is enabled', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/rag/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Auth': await signInternalJwt(USER_ID, 'PASSENGER'),
+      },
+      body: JSON.stringify({ message: 'Viết thơ về chứng khoán' }),
+    });
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).toContain('event: token');
+    expect(body).toContain('event: done');
+    expect(repository.searchChunks).not.toHaveBeenCalled();
+  });
 });
 
 function makeEnv() {
@@ -192,7 +218,7 @@ function makeEnv() {
     RAG_OPERATOR_RATE_LIMIT_PER_HOUR: 200,
     RAG_INGEST_WORKER_ENABLED: false,
     RAG_OUTBOX_PUBLISH_ENABLED: false,
-    INTENT_FILTER_ENABLED: false,
+    INTENT_FILTER_ENABLED: true,
     QUERY_REWRITE_ENABLED: false,
     HYBRID_SEARCH_ENABLED: false,
     RERANK_ENABLED: false,

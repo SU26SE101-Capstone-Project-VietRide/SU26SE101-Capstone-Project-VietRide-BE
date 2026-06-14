@@ -4,3 +4,6 @@ export const RAG_CHAT_SSE_EVENT_DONE = 'done';
 export const RAG_CHAT_SSE_EVENT_ERROR = 'error';
 export const RAG_CHAT_MAX_CONTEXT_CHARS = 12_000;
 export const RAG_CHAT_HISTORY_MESSAGE_LIMIT = 8;
+export const RAG_SUMMARY_MIN_MESSAGE_COUNT = 12;
+export const RAG_SUMMARY_HISTORY_MESSAGE_LIMIT = 12;
+export const RAG_MAX_SUMMARY_CHARS = 1_500;

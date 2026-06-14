@@ -23,6 +23,7 @@ export interface RagChatPreparedStream {
   userMessage: RagMessage;
   chunks: RagRetrievedChunk[];
   stream: AsyncIterable<string>;
+  shouldSummarize: boolean;
 }
 
 export type RagChatSseEvent =

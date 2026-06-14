@@ -56,6 +56,27 @@ export class ChatRepository {
     return messages.reverse();
   }
 
+  async countMessages(conversationId: string): Promise<number> {
+    return this.prisma.ragMessage.count({
+      where: { conversationId },
+    });
+  }
+
+  async updateConversationSummary(input: {
+    conversationId: string;
+    summary: string;
+    summaryFromMessageId: string;
+  }): Promise<RagConversation> {
+    return this.prisma.ragConversation.update({
+      where: { id: input.conversationId },
+      data: {
+        summary: input.summary,
+        summaryUpdatedAt: new Date(),
+        summaryFromMessageId: input.summaryFromMessageId,
+      },
+    });
+  }
+
   async searchChunks(input: {
     queryText: string;
     queryEmbedding: number[];

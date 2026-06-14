@@ -4,9 +4,12 @@ import type { RagConversation, RagMessage } from '../generated/rag-prisma-client
 import type { ChatCompletionProvider } from '../providers/chat-completion.provider';
 import type { EmbeddingProvider } from '../providers/embedding.provider';
 import { ChatEmbeddingCacheService } from './chat-embedding-cache.service';
+import { ChatIntentService } from './chat-intent.service';
+import { ChatQueryRewriteService } from './chat-query-rewrite.service';
 import { ChatRateLimitService } from './chat-rate-limit.service';
 import { ChatRepository } from './chat.repository';
 import { ChatService } from './chat.service';
+import { ChatSummaryService } from './chat-summary.service';
 
 const USER_ID = '11111111-1111-1111-1111-111111111111';
 const OPERATOR_ID = '22222222-2222-2222-2222-222222222222';
@@ -20,6 +23,9 @@ describe('ChatService', () => {
   let repository: jest.Mocked<ChatRepository>;
   let embeddingCache: jest.Mocked<ChatEmbeddingCacheService>;
   let rateLimit: jest.Mocked<ChatRateLimitService>;
+  let intentService: jest.Mocked<ChatIntentService>;
+  let queryRewriteService: jest.Mocked<ChatQueryRewriteService>;
+  let summaryService: jest.Mocked<ChatSummaryService>;
   let chatProvider: jest.Mocked<ChatCompletionProvider>;
   let embeddingProvider: jest.Mocked<EmbeddingProvider>;
 
@@ -30,6 +36,8 @@ describe('ChatService', () => {
       createUserMessage: jest.fn(),
       createAssistantMessage: jest.fn(),
       findRecentMessages: jest.fn(),
+      countMessages: jest.fn(),
+      updateConversationSummary: jest.fn(),
       searchChunks: jest.fn(),
     } as unknown as jest.Mocked<ChatRepository>;
     embeddingCache = {
@@ -39,6 +47,15 @@ describe('ChatService', () => {
     rateLimit = {
       assertAllowed: jest.fn(),
     } as unknown as jest.Mocked<ChatRateLimitService>;
+    intentService = {
+      classify: jest.fn(),
+    } as unknown as jest.Mocked<ChatIntentService>;
+    queryRewriteService = {
+      rewriteIfNeeded: jest.fn(),
+    } as unknown as jest.Mocked<ChatQueryRewriteService>;
+    summaryService = {
+      summarizeIfNeeded: jest.fn(),
+    } as unknown as jest.Mocked<ChatSummaryService>;
     chatProvider = {
       complete: jest.fn(),
       stream: jest.fn(),
@@ -46,13 +63,25 @@ describe('ChatService', () => {
     embeddingProvider = {
       embed: jest.fn(),
     };
-    service = new ChatService(repository, embeddingCache, rateLimit, chatProvider, embeddingProvider, makeEnv());
+    service = new ChatService(
+      repository,
+      embeddingCache,
+      rateLimit,
+      intentService,
+      queryRewriteService,
+      summaryService,
+      chatProvider,
+      embeddingProvider,
+      makeEnv(),
+    );
 
     repository.createConversation.mockResolvedValue(makeConversation());
     repository.createUserMessage.mockResolvedValue(makeMessage('USER', 'Tôi cần hỗ trợ'));
     repository.createAssistantMessage.mockResolvedValue(makeMessage('ASSISTANT', 'Câu trả lời'));
     repository.findRecentMessages.mockResolvedValue([]);
     repository.searchChunks.mockResolvedValue([makeChunk()]);
+    intentService.classify.mockResolvedValue({ allowed: true });
+    queryRewriteService.rewriteIfNeeded.mockImplementation(async (message) => message);
     embeddingCache.get.mockResolvedValue(undefined);
     embeddingProvider.embed.mockResolvedValue([0.1, 0.2]);
     chatProvider.stream.mockReturnValue(makeTokenStream(['Xin ', 'chào']));
@@ -76,6 +105,9 @@ describe('ChatService', () => {
       repository,
       embeddingCache,
       rateLimit,
+      intentService,
+      queryRewriteService,
+      summaryService,
       chatProvider,
       embeddingProvider,
       makeEnv({ HYBRID_SEARCH_ENABLED: true }),
@@ -88,6 +120,96 @@ describe('ChatService', () => {
         queryText: 'Tôi cần hỗ trợ',
         hybridSearchEnabled: true,
       }),
+    );
+  });
+
+  it('refuses off-topic messages without retrieval when intent filter is enabled', async () => {
+    service = new ChatService(
+      repository,
+      embeddingCache,
+      rateLimit,
+      intentService,
+      queryRewriteService,
+      summaryService,
+      chatProvider,
+      embeddingProvider,
+      makeEnv({ INTENT_FILTER_ENABLED: true }),
+    );
+    intentService.classify.mockResolvedValue({
+      allowed: false,
+      refusalMessage: 'Tôi chỉ hỗ trợ VietRide.',
+    });
+
+    const prepared = await service.prepareChat({ message: 'Viết thơ về biển' }, { sub: USER_ID, role: 'PASSENGER' });
+    const events = [];
+    for await (const event of service.streamPrepared(prepared)) {
+      events.push(event);
+    }
+
+    expect(embeddingProvider.embed).not.toHaveBeenCalled();
+    expect(repository.searchChunks).not.toHaveBeenCalled();
+    expect(repository.createAssistantMessage).toHaveBeenCalledWith(
+      CONVERSATION_ID,
+      'Tôi chỉ hỗ trợ VietRide.',
+      [],
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        event: 'done',
+        data: expect.objectContaining({ citedChunkIds: [] }),
+      }),
+    );
+  });
+
+  it('uses rewritten query for retrieval when query rewrite is enabled', async () => {
+    service = new ChatService(
+      repository,
+      embeddingCache,
+      rateLimit,
+      intentService,
+      queryRewriteService,
+      summaryService,
+      chatProvider,
+      embeddingProvider,
+      makeEnv({ QUERY_REWRITE_ENABLED: true }),
+    );
+    repository.findRecentMessages.mockResolvedValue([makeMessage('ASSISTANT', 'Hoàn tiền mất 3 ngày.')]);
+    queryRewriteService.rewriteIfNeeded.mockResolvedValue('Thời gian hoàn tiền VietRide là bao lâu?');
+
+    await service.prepareChat({ message: 'Vậy mất bao lâu?' }, { sub: USER_ID, role: 'PASSENGER' });
+
+    expect(embeddingCache.get).toHaveBeenCalledWith('Thời gian hoàn tiền VietRide là bao lâu?');
+    expect(repository.searchChunks).toHaveBeenCalledWith(
+      expect.objectContaining({
+        queryText: 'Thời gian hoàn tiền VietRide là bao lâu?',
+      }),
+    );
+  });
+
+  it('summarizes after the assistant message when summarization is enabled', async () => {
+    service = new ChatService(
+      repository,
+      embeddingCache,
+      rateLimit,
+      intentService,
+      queryRewriteService,
+      summaryService,
+      chatProvider,
+      embeddingProvider,
+      makeEnv({ SUMMARIZE_ENABLED: true }),
+    );
+
+    const prepared = await service.prepareChat(
+      { message: 'Tôi cần hỗ trợ' },
+      { sub: USER_ID, role: 'PASSENGER' },
+    );
+    for await (const unused of service.streamPrepared(prepared)) {
+      void unused;
+    }
+
+    expect(summaryService.summarizeIfNeeded).toHaveBeenCalledWith(
+      expect.objectContaining({ id: CONVERSATION_ID }),
+      ASSISTANT_MESSAGE_ID,
     );
   });
 
