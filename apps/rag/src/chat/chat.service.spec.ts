@@ -1,4 +1,4 @@
-import { ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
+﻿import { ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
 import type { Env } from '../config/env.schema';
 import type { RagConversation, RagMessage } from '../generated/rag-prisma-client';
 import type { ChatCompletionProvider } from '../providers/chat-completion.provider';
@@ -8,6 +8,7 @@ import { ChatIntentService } from './chat-intent.service';
 import { ChatQueryRewriteService } from './chat-query-rewrite.service';
 import { ChatRateLimitService } from './chat-rate-limit.service';
 import { ChatRepository } from './chat.repository';
+import { ChatRerankService } from './chat-rerank.service';
 import { ChatService } from './chat.service';
 import { ChatSummaryService } from './chat-summary.service';
 
@@ -26,6 +27,7 @@ describe('ChatService', () => {
   let intentService: jest.Mocked<ChatIntentService>;
   let queryRewriteService: jest.Mocked<ChatQueryRewriteService>;
   let summaryService: jest.Mocked<ChatSummaryService>;
+  let rerankService: jest.Mocked<ChatRerankService>;
   let chatProvider: jest.Mocked<ChatCompletionProvider>;
   let embeddingProvider: jest.Mocked<EmbeddingProvider>;
 
@@ -56,6 +58,9 @@ describe('ChatService', () => {
     summaryService = {
       summarizeIfNeeded: jest.fn(),
     } as unknown as jest.Mocked<ChatSummaryService>;
+    rerankService = {
+      rerank: jest.fn(),
+    } as unknown as jest.Mocked<ChatRerankService>;
     chatProvider = {
       complete: jest.fn(),
       stream: jest.fn(),
@@ -70,6 +75,7 @@ describe('ChatService', () => {
       intentService,
       queryRewriteService,
       summaryService,
+      rerankService,
       chatProvider,
       embeddingProvider,
       makeEnv(),
@@ -82,6 +88,7 @@ describe('ChatService', () => {
     repository.searchChunks.mockResolvedValue([makeChunk()]);
     intentService.classify.mockResolvedValue({ allowed: true });
     queryRewriteService.rewriteIfNeeded.mockImplementation(async (message) => message);
+    rerankService.rerank.mockImplementation(async (_query, chunks) => chunks.slice(0, 5));
     embeddingCache.get.mockResolvedValue(undefined);
     embeddingProvider.embed.mockResolvedValue([0.1, 0.2]);
     chatProvider.stream.mockReturnValue(makeTokenStream(['Xin ', 'chào']));
@@ -108,6 +115,7 @@ describe('ChatService', () => {
       intentService,
       queryRewriteService,
       summaryService,
+      rerankService,
       chatProvider,
       embeddingProvider,
       makeEnv({ HYBRID_SEARCH_ENABLED: true }),
@@ -131,6 +139,7 @@ describe('ChatService', () => {
       intentService,
       queryRewriteService,
       summaryService,
+      rerankService,
       chatProvider,
       embeddingProvider,
       makeEnv({ INTENT_FILTER_ENABLED: true }),
@@ -169,6 +178,7 @@ describe('ChatService', () => {
       intentService,
       queryRewriteService,
       summaryService,
+      rerankService,
       chatProvider,
       embeddingProvider,
       makeEnv({ QUERY_REWRITE_ENABLED: true }),
@@ -194,6 +204,7 @@ describe('ChatService', () => {
       intentService,
       queryRewriteService,
       summaryService,
+      rerankService,
       chatProvider,
       embeddingProvider,
       makeEnv({ SUMMARIZE_ENABLED: true }),
@@ -211,6 +222,30 @@ describe('ChatService', () => {
       expect.objectContaining({ id: CONVERSATION_ID }),
       ASSISTANT_MESSAGE_ID,
     );
+  });
+
+  it('retrieves 10 candidates and reranks when rerank is enabled', async () => {
+    service = new ChatService(
+      repository,
+      embeddingCache,
+      rateLimit,
+      intentService,
+      queryRewriteService,
+      summaryService,
+      rerankService,
+      chatProvider,
+      embeddingProvider,
+      makeEnv({ RERANK_ENABLED: true }),
+    );
+
+    await service.prepareChat({ message: 'Tôi cần hỗ trợ' }, { sub: USER_ID, role: 'PASSENGER' });
+
+    expect(repository.searchChunks).toHaveBeenCalledWith(
+      expect.objectContaining({
+        limit: 10,
+      }),
+    );
+    expect(rerankService.rerank).toHaveBeenCalledWith('Tôi cần hỗ trợ', [makeChunk()]);
   });
 
   it('checks rate limit before retrieval', async () => {
@@ -411,3 +446,4 @@ function makeFailingStream(): AsyncIterable<string> {
     },
   };
 }
+

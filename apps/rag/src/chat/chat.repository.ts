@@ -6,7 +6,7 @@ import type {
   RagMessage,
 } from '../generated/rag-prisma-client';
 import { RagPrismaService } from '../prisma/rag-prisma.service';
-import type { RagRetrievedChunk } from './chat.types';
+import type { RagFeedbackListItem, RagFeedbackPage, RagMessageWithConversation, RagRetrievedChunk } from './chat.types';
 
 const HYBRID_SEARCH_CANDIDATE_LIMIT = 10;
 const RRF_RANK_OFFSET = 60;
@@ -75,6 +75,83 @@ export class ChatRepository {
         summaryFromMessageId: input.summaryFromMessageId,
       },
     });
+  }
+
+  async findMessageWithConversation(messageId: string): Promise<RagMessageWithConversation | null> {
+    return this.prisma.ragMessage.findUnique({
+      where: { id: messageId },
+      include: { conversation: true },
+    });
+  }
+
+  async upsertMessageFeedback(input: {
+    message: RagMessageWithConversation;
+    userId: string;
+    rating: number;
+  }) {
+    return this.prisma.messageFeedback.upsert({
+      where: { messageId: input.message.id },
+      create: {
+        messageId: input.message.id,
+        conversationId: input.message.conversationId,
+        userId: input.userId,
+        rating: input.rating,
+        chunkIds: input.message.citedChunkIds,
+        responseLength: input.message.content.length,
+      },
+      update: {
+        rating: input.rating,
+        chunkIds: input.message.citedChunkIds,
+        responseLength: input.message.content.length,
+        updatedAt: new Date(),
+      },
+    });
+  }
+
+  async listFeedback(input: {
+    page: number;
+    pageSize: number;
+    sortBy: 'createdAt' | 'rating';
+    sortDir: 'asc' | 'desc';
+  }): Promise<RagFeedbackPage> {
+    const skip = (input.page - 1) * input.pageSize;
+    const [items, totalItems] = await this.prisma.$transaction([
+      this.prisma.messageFeedback.findMany({
+        orderBy: { [input.sortBy]: input.sortDir },
+        skip,
+        take: input.pageSize,
+        include: {
+          message: {
+            select: {
+              id: true,
+              role: true,
+              content: true,
+              citedChunkIds: true,
+              createdAt: true,
+            },
+          },
+          conversation: {
+            select: {
+              id: true,
+              userId: true,
+              operatorId: true,
+              role: true,
+            },
+          },
+        },
+      }),
+      this.prisma.messageFeedback.count(),
+    ]);
+    const totalPages = Math.ceil(totalItems / input.pageSize);
+    return {
+      items: items as RagFeedbackListItem[],
+      page: input.page,
+      pageSize: input.pageSize,
+      totalItems,
+      totalPages,
+      hasNextPage: input.page < totalPages,
+      hasPreviousPage: input.page > 1,
+    };
   }
 
   async searchChunks(input: {

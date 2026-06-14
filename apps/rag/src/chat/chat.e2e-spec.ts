@@ -4,17 +4,20 @@ import { SignJWT } from 'jose';
 import type { AddressInfo } from 'node:net';
 import { CHAT_COMPLETION_PROVIDER, EMBEDDING_PROVIDER, ENV_TOKEN } from '../app/tokens';
 import { InternalJwtAuthGuard } from '../auth/internal-jwt-auth.guard';
-import type { RagConversation, RagMessage } from '../generated/rag-prisma-client';
+import type { MessageFeedback, RagConversation, RagMessage } from '../generated/rag-prisma-client';
 import type { ChatCompletionProvider } from '../providers/chat-completion.provider';
 import type { EmbeddingProvider } from '../providers/embedding.provider';
 import { ChatEmbeddingCacheService } from './chat-embedding-cache.service';
 import { ChatIntentService } from './chat-intent.service';
 import { ChatQueryRewriteService } from './chat-query-rewrite.service';
 import { ChatRateLimitService } from './chat-rate-limit.service';
+import { ChatRerankService } from './chat-rerank.service';
 import { ChatController } from './chat.controller';
 import { ChatRepository } from './chat.repository';
 import { ChatService } from './chat.service';
 import { ChatSummaryService } from './chat-summary.service';
+import { FeedbackController } from './feedback.controller';
+import { FeedbackService } from './feedback.service';
 
 const INTERNAL_JWT_SECRET = 'test-secret-min-32-chars-aaaaaaaaaaaaaaaa';
 const INTERNAL_JWT_ISSUER = 'vietride-gateway';
@@ -31,6 +34,7 @@ describe('ChatController (e2e)', () => {
   let repository: jest.Mocked<ChatRepository>;
   let embeddingCache: jest.Mocked<ChatEmbeddingCacheService>;
   let rateLimit: jest.Mocked<ChatRateLimitService>;
+  let rerankService: jest.Mocked<ChatRerankService>;
   let chatProvider: jest.Mocked<ChatCompletionProvider>;
   let embeddingProvider: jest.Mocked<EmbeddingProvider>;
 
@@ -43,6 +47,9 @@ describe('ChatController (e2e)', () => {
       findRecentMessages: jest.fn(),
       countMessages: jest.fn(),
       updateConversationSummary: jest.fn(),
+      findMessageWithConversation: jest.fn(),
+      upsertMessageFeedback: jest.fn(),
+      listFeedback: jest.fn(),
       searchChunks: jest.fn(),
     } as unknown as jest.Mocked<ChatRepository>;
     embeddingCache = {
@@ -52,6 +59,9 @@ describe('ChatController (e2e)', () => {
     rateLimit = {
       assertAllowed: jest.fn(),
     } as unknown as jest.Mocked<ChatRateLimitService>;
+    rerankService = {
+      rerank: jest.fn(),
+    } as unknown as jest.Mocked<ChatRerankService>;
     chatProvider = {
       complete: jest.fn(),
       stream: jest.fn(),
@@ -61,9 +71,10 @@ describe('ChatController (e2e)', () => {
     };
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
-      controllers: [ChatController],
+      controllers: [ChatController, FeedbackController],
       providers: [
         ChatService,
+        FeedbackService,
         ChatIntentService,
         ChatQueryRewriteService,
         ChatSummaryService,
@@ -71,6 +82,7 @@ describe('ChatController (e2e)', () => {
         { provide: ChatRepository, useValue: repository },
         { provide: ChatEmbeddingCacheService, useValue: embeddingCache },
         { provide: ChatRateLimitService, useValue: rateLimit },
+        { provide: ChatRerankService, useValue: rerankService },
         { provide: CHAT_COMPLETION_PROVIDER, useValue: chatProvider },
         { provide: EMBEDDING_PROVIDER, useValue: embeddingProvider },
         { provide: ENV_TOKEN, useValue: makeEnv() },
@@ -95,7 +107,19 @@ describe('ChatController (e2e)', () => {
     repository.createAssistantMessage.mockResolvedValue(makeMessage('ASSISTANT', 'Xin chào'));
     repository.findRecentMessages.mockResolvedValue([]);
     repository.searchChunks.mockResolvedValue([makeChunk()]);
+    repository.findMessageWithConversation.mockResolvedValue(makeMessageWithConversation('ASSISTANT'));
+    repository.upsertMessageFeedback.mockResolvedValue(makeFeedback());
+    repository.listFeedback.mockResolvedValue({
+      items: [],
+      page: 1,
+      pageSize: 20,
+      totalItems: 0,
+      totalPages: 0,
+      hasNextPage: false,
+      hasPreviousPage: false,
+    });
     rateLimit.assertAllowed.mockResolvedValue(undefined);
+    rerankService.rerank.mockImplementation(async (_query, chunks) => chunks.slice(0, 5));
     embeddingCache.get.mockResolvedValue(undefined);
     embeddingProvider.embed.mockResolvedValue([0.1, 0.2]);
     chatProvider.stream.mockReturnValue(makeTokenStream(['Xin ', 'chào']));
@@ -184,6 +208,58 @@ describe('ChatController (e2e)', () => {
     expect(body).toContain('event: done');
     expect(repository.searchChunks).not.toHaveBeenCalled();
   });
+
+  it('POST /api/v1/rag/messages/:id/feedback records assistant feedback', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/rag/messages/${ASSISTANT_MESSAGE_ID}/feedback`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Auth': await signInternalJwt(USER_ID, 'PASSENGER'),
+      },
+      body: JSON.stringify({ rating: 1 }),
+    });
+    const body = (await response.json()) as { rating: number };
+
+    expect(response.status).toBe(201);
+    expect(body.rating).toBe(1);
+    expect(repository.upsertMessageFeedback).toHaveBeenCalled();
+  });
+
+  it('POST /api/v1/rag/messages/:id/feedback returns 401 without internal JWT', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/rag/messages/${ASSISTANT_MESSAGE_ID}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rating: 1 }),
+    });
+
+    expect(response.status).toBe(401);
+  });
+
+  it('POST /api/v1/rag/messages/:id/feedback returns 400 for invalid payload', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/rag/messages/${ASSISTANT_MESSAGE_ID}/feedback`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Auth': await signInternalJwt(USER_ID, 'PASSENGER'),
+      },
+      body: JSON.stringify({ rating: 0 }),
+    });
+
+    expect(response.status).toBe(400);
+  });
+
+  it('POST /api/v1/rag/messages/:id/feedback returns 403 for non-owner feedback', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/rag/messages/${ASSISTANT_MESSAGE_ID}/feedback`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Auth': await signInternalJwt('99999999-9999-9999-9999-999999999999', 'PASSENGER'),
+      },
+      body: JSON.stringify({ rating: -1 }),
+    });
+
+    expect(response.status).toBe(403);
+  });
 });
 
 function makeEnv() {
@@ -266,6 +342,28 @@ function makeMessage(role: 'USER' | 'ASSISTANT', content: string): RagMessage {
     citedChunkIds: [],
     tokensUsed: null,
     createdAt: new Date('2026-06-13T00:00:00.000Z'),
+  };
+}
+
+function makeMessageWithConversation(role: 'USER' | 'ASSISTANT') {
+  return {
+    ...makeMessage(role, role === 'USER' ? 'Tôi cần hỗ trợ' : 'Xin chào'),
+    conversation: makeConversation(),
+  };
+}
+
+function makeFeedback(): MessageFeedback {
+  return {
+    id: '88888888-8888-8888-8888-888888888888',
+    messageId: ASSISTANT_MESSAGE_ID,
+    conversationId: CONVERSATION_ID,
+    userId: USER_ID,
+    rating: 1,
+    queryRewritten: null,
+    chunkIds: [CHUNK_ID],
+    responseLength: 8,
+    createdAt: new Date('2026-06-13T00:00:00.000Z'),
+    updatedAt: new Date('2026-06-13T00:00:00.000Z'),
   };
 }
 

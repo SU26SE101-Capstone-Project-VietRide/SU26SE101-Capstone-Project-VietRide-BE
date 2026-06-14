@@ -17,7 +17,7 @@ Tài liệu này là timeline triển khai chính thức cho `apps/rag`. Mục t
 - [x] Phase 6 — Production Guardrails
 - [x] Phase 7 — Hybrid Search Behind Flag
 - [x] Phase 8 — Intent Filter, Query Rewrite, Summarization
-- [ ] Phase 9 — Rerank Và Feedback Loop
+- [x] Phase 9 — Rerank Và Feedback Loop
 - [ ] Phase 10 — Production Verification
 
 ## Quyết định đã chốt

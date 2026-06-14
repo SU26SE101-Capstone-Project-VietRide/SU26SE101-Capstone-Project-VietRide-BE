@@ -18,12 +18,13 @@ import type {
 import type { ChatCompletionProvider, ChatMessage } from '../providers/chat-completion.provider';
 import type { EmbeddingProvider } from '../providers/embedding.provider';
 import type { CreateChatDto } from './dto/create-chat.dto';
-import { RAG_CHAT_HISTORY_MESSAGE_LIMIT } from './chat.constants';
+import { RAG_CHAT_HISTORY_MESSAGE_LIMIT, RAG_RERANK_CANDIDATE_LIMIT } from './chat.constants';
 import { ChatEmbeddingCacheService } from './chat-embedding-cache.service';
 import { ChatIntentService } from './chat-intent.service';
 import { ChatQueryRewriteService } from './chat-query-rewrite.service';
 import { ChatRateLimitService } from './chat-rate-limit.service';
 import { ChatRepository } from './chat.repository';
+import { ChatRerankService } from './chat-rerank.service';
 import { ChatSummaryService } from './chat-summary.service';
 import type { RagChatPreparedStream, RagChatSseEvent, RagRetrievedChunk } from './chat.types';
 
@@ -46,6 +47,7 @@ export class ChatService {
     private readonly intentService: ChatIntentService,
     private readonly queryRewriteService: ChatQueryRewriteService,
     private readonly summaryService: ChatSummaryService,
+    private readonly rerankService: ChatRerankService,
     @Inject(CHAT_COMPLETION_PROVIDER) private readonly chatProvider: ChatCompletionProvider,
     @Inject(EMBEDDING_PROVIDER) private readonly embeddingProvider: EmbeddingProvider,
     @Inject(ENV_TOKEN) private readonly env: Env,
@@ -80,14 +82,17 @@ export class ChatService {
       : dto.message;
     const queryEmbedding = await this.resolveQueryEmbedding(retrievalQuery);
     const accessLevels = this.resolveAccessLevels(caller.role);
-    const chunks = await this.chatRepository.searchChunks({
+    const retrievedChunks = await this.chatRepository.searchChunks({
       queryText: retrievalQuery,
       queryEmbedding,
       accessLevels,
       ...(caller.operatorId ? { operatorId: caller.operatorId } : {}),
-      limit: this.env.RAG_MAX_RETRIEVED_CHUNKS,
+      limit: this.env.RERANK_ENABLED ? RAG_RERANK_CANDIDATE_LIMIT : this.env.RAG_MAX_RETRIEVED_CHUNKS,
       hybridSearchEnabled: this.env.HYBRID_SEARCH_ENABLED,
     });
+    const chunks = this.env.RERANK_ENABLED
+      ? await this.rerankService.rerank(retrievalQuery, retrievedChunks)
+      : retrievedChunks;
     const messages = this.buildProviderMessages(dto.message, history, chunks, conversation.summary);
     const stream = this.chatProvider.stream({ messages, stream: true });
     return {

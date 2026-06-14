@@ -1,6 +1,7 @@
 import type {
   KnowledgeDocumentAccess,
   KnowledgeDocumentType,
+  MessageFeedback,
   RagConversation,
   RagMessage,
 } from '../generated/rag-prisma-client';
@@ -24,6 +25,25 @@ export interface RagChatPreparedStream {
   chunks: RagRetrievedChunk[];
   stream: AsyncIterable<string>;
   shouldSummarize: boolean;
+}
+
+export interface RagMessageWithConversation extends RagMessage {
+  conversation: RagConversation;
+}
+
+export interface RagFeedbackListItem extends MessageFeedback {
+  message: Pick<RagMessage, 'id' | 'role' | 'content' | 'citedChunkIds' | 'createdAt'>;
+  conversation: Pick<RagConversation, 'id' | 'userId' | 'operatorId' | 'role'>;
+}
+
+export interface RagFeedbackPage {
+  items: RagFeedbackListItem[];
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
 }
 
 export type RagChatSseEvent =
