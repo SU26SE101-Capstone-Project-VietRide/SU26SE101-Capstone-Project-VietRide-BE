@@ -5,6 +5,7 @@ import type {
   RagConversation,
   RagMessage,
 } from '../generated/rag-prisma-client';
+import type { RuntimeConfigSnapshot } from '../config/runtime-config.service';
 
 export interface RagRetrievedChunk {
   id: string;
@@ -25,6 +26,7 @@ export interface RagChatPreparedStream {
   chunks: RagRetrievedChunk[];
   stream: AsyncIterable<string>;
   shouldSummarize: boolean;
+  runtimeConfig: RuntimeConfigSnapshot;
 }
 
 export interface RagMessageWithConversation extends RagMessage {

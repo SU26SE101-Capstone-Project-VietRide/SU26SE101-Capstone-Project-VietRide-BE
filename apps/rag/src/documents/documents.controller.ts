@@ -26,7 +26,7 @@ import type { RequestWithRagInternalUser } from '../auth/rag-internal-user.types
 import { CreateDocumentDto, CreateDocumentSchema } from './dto/create-document.dto';
 import {
   RAG_DOCUMENT_FILE_FIELD,
-  RAG_DOCUMENT_MAX_FILE_BYTES,
+  RAG_DOCUMENT_UPLOAD_HARD_CAP_BYTES,
 } from './documents.constants';
 import { DocumentsService } from './documents.service';
 import type { KnowledgeDocumentResponse, UploadedDocumentFile } from './documents.types';
@@ -41,7 +41,7 @@ export class DocumentsController {
   @Post()
   @UseInterceptors(
     FileInterceptor(RAG_DOCUMENT_FILE_FIELD, {
-      limits: { fileSize: RAG_DOCUMENT_MAX_FILE_BYTES },
+      limits: { fileSize: RAG_DOCUMENT_UPLOAD_HARD_CAP_BYTES },
     }),
   )
   @ApiOperation({ summary: 'Upload a RAG knowledge document' })

@@ -1,6 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import pino from 'pino';
 import { CHAT_COMPLETION_PROVIDER } from '../app/tokens';
+import { RAG_RUNTIME_CONFIG_KEYS } from '../config/runtime-config.registry';
+import type { RuntimeConfigSnapshot } from '../config/runtime-config.service';
 import type { RagMessage } from '../generated/rag-prisma-client';
 import type { ChatCompletionProvider, ChatMessage } from '../providers/chat-completion.provider';
 
@@ -16,13 +18,18 @@ const CONTEXTUAL_PATTERNS = [
 export class ChatQueryRewriteService {
   constructor(@Inject(CHAT_COMPLETION_PROVIDER) private readonly chatProvider: ChatCompletionProvider) {}
 
-  async rewriteIfNeeded(message: string, history: RagMessage[], summary: string | null): Promise<string> {
+  async rewriteIfNeeded(
+    message: string,
+    history: RagMessage[],
+    summary: string | null,
+    runtimeConfig: RuntimeConfigSnapshot,
+  ): Promise<string> {
     if (!this.needsRewrite(message, history)) return message;
 
     try {
       const rewritten = await this.chatProvider.complete({
         stream: false,
-        messages: this.buildRewriteMessages(message, history, summary),
+        messages: this.buildRewriteMessages(message, history, summary, runtimeConfig),
       });
       const cleaned = this.cleanRewrite(rewritten);
       return cleaned || message;
@@ -37,7 +44,12 @@ export class ChatQueryRewriteService {
     return CONTEXTUAL_PATTERNS.some((pattern) => pattern.test(message));
   }
 
-  private buildRewriteMessages(message: string, history: RagMessage[], summary: string | null): ChatMessage[] {
+  private buildRewriteMessages(
+    message: string,
+    history: RagMessage[],
+    summary: string | null,
+    runtimeConfig: RuntimeConfigSnapshot,
+  ): ChatMessage[] {
     const recentHistory = history
       .slice(-REWRITE_HISTORY_LIMIT)
       .map((item) => `${item.role}: ${item.content}`)
@@ -45,12 +57,7 @@ export class ChatQueryRewriteService {
     return [
       {
         role: 'system',
-        content: [
-          'Rewrite the latest Vietnamese user question into one standalone search query for VietRide knowledge retrieval.',
-          'Only resolve pronouns or implicit context from the provided summary/history.',
-          'Do not answer the question. Do not add facts not present in the summary/history.',
-          'Return only the rewritten query. If the original is already standalone, return it unchanged.',
-        ].join('\n'),
+        content: runtimeConfig.getString(RAG_RUNTIME_CONFIG_KEYS.queryRewritePrompt),
       },
       {
         role: 'user',

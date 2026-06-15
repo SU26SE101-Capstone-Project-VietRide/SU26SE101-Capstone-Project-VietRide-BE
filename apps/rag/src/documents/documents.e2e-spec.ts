@@ -4,6 +4,8 @@ import { SignJWT } from 'jose';
 import type { AddressInfo } from 'node:net';
 import { ENV_TOKEN, STORAGE_PROVIDER } from '../app/tokens';
 import { InternalJwtAuthGuard } from '../auth/internal-jwt-auth.guard';
+import { RAG_RUNTIME_CONFIG_DEFINITIONS } from '../config/runtime-config.registry';
+import { RuntimeConfigService, RuntimeConfigSnapshot } from '../config/runtime-config.service';
 import type { KnowledgeDocument } from '../generated/rag-prisma-client';
 import type { StorageProvider } from '../providers/storage.provider';
 import { DocumentsController } from './documents.controller';
@@ -22,6 +24,7 @@ describe('DocumentsController (e2e)', () => {
   let baseUrl: string;
   let repository: jest.Mocked<DocumentsRepository>;
   let storageProvider: jest.Mocked<StorageProvider>;
+  let runtimeConfig: jest.Mocked<RuntimeConfigService>;
 
   beforeAll(async () => {
     repository = {
@@ -34,6 +37,9 @@ describe('DocumentsController (e2e)', () => {
       downloadObject: jest.fn(),
       createSignedReadUrl: jest.fn(),
     };
+    runtimeConfig = {
+      getSnapshot: jest.fn().mockResolvedValue(makeRuntimeConfigSnapshot()),
+    } as unknown as jest.Mocked<RuntimeConfigService>;
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       controllers: [DocumentsController],
@@ -43,6 +49,7 @@ describe('DocumentsController (e2e)', () => {
         { provide: DocumentsRepository, useValue: repository },
         { provide: STORAGE_PROVIDER, useValue: storageProvider },
         { provide: ENV_TOKEN, useValue: { INTERNAL_JWT_SECRET } },
+        { provide: RuntimeConfigService, useValue: runtimeConfig },
       ],
     }).compile();
 
@@ -154,6 +161,12 @@ function makeValidForm(): FormData {
   form.set('audienceRoles', 'PASSENGER');
   form.set('language', 'vi');
   return form;
+}
+
+function makeRuntimeConfigSnapshot(): RuntimeConfigSnapshot {
+  return new RuntimeConfigSnapshot(
+    new Map(RAG_RUNTIME_CONFIG_DEFINITIONS.map((definition) => [definition.key, definition.defaultValue])),
+  );
 }
 
 async function signInternalJwt(sub: string, role: string): Promise<string> {

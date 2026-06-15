@@ -4,6 +4,8 @@ import { SignJWT } from 'jose';
 import type { AddressInfo } from 'node:net';
 import { CHAT_COMPLETION_PROVIDER, EMBEDDING_PROVIDER, ENV_TOKEN } from '../app/tokens';
 import { InternalJwtAuthGuard } from '../auth/internal-jwt-auth.guard';
+import { RAG_RUNTIME_CONFIG_DEFINITIONS } from '../config/runtime-config.registry';
+import { RuntimeConfigService, RuntimeConfigSnapshot } from '../config/runtime-config.service';
 import type { MessageFeedback, RagConversation, RagMessage } from '../generated/rag-prisma-client';
 import type { ChatCompletionProvider } from '../providers/chat-completion.provider';
 import type { EmbeddingProvider } from '../providers/embedding.provider';
@@ -37,6 +39,7 @@ describe('ChatController (e2e)', () => {
   let rerankService: jest.Mocked<ChatRerankService>;
   let chatProvider: jest.Mocked<ChatCompletionProvider>;
   let embeddingProvider: jest.Mocked<EmbeddingProvider>;
+  let runtimeConfig: jest.Mocked<RuntimeConfigService>;
 
   beforeAll(async () => {
     repository = {
@@ -69,6 +72,9 @@ describe('ChatController (e2e)', () => {
     embeddingProvider = {
       embed: jest.fn(),
     };
+    runtimeConfig = {
+      getSnapshot: jest.fn().mockResolvedValue(makeRuntimeConfigSnapshot()),
+    } as unknown as jest.Mocked<RuntimeConfigService>;
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       controllers: [ChatController, FeedbackController],
@@ -86,6 +92,7 @@ describe('ChatController (e2e)', () => {
         { provide: CHAT_COMPLETION_PROVIDER, useValue: chatProvider },
         { provide: EMBEDDING_PROVIDER, useValue: embeddingProvider },
         { provide: ENV_TOKEN, useValue: makeEnv() },
+        { provide: RuntimeConfigService, useValue: runtimeConfig },
       ],
     }).compile();
 
@@ -304,6 +311,12 @@ function makeEnv() {
     CLOUDINARY_API_SECRET: 'cloud-secret',
     CLOUDINARY_RAG_FOLDER: 'rag/documents',
   };
+}
+
+function makeRuntimeConfigSnapshot(): RuntimeConfigSnapshot {
+  return new RuntimeConfigSnapshot(
+    new Map(RAG_RUNTIME_CONFIG_DEFINITIONS.map((definition) => [definition.key, definition.defaultValue])),
+  );
 }
 
 async function signInternalJwt(sub: string, role: string): Promise<string> {

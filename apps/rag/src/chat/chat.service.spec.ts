@@ -1,5 +1,7 @@
-﻿import { ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
+import { ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
 import type { Env } from '../config/env.schema';
+import { RAG_RUNTIME_CONFIG_DEFINITIONS } from '../config/runtime-config.registry';
+import { RuntimeConfigService, RuntimeConfigSnapshot } from '../config/runtime-config.service';
 import type { RagConversation, RagMessage } from '../generated/rag-prisma-client';
 import type { ChatCompletionProvider } from '../providers/chat-completion.provider';
 import type { EmbeddingProvider } from '../providers/embedding.provider';
@@ -30,6 +32,8 @@ describe('ChatService', () => {
   let rerankService: jest.Mocked<ChatRerankService>;
   let chatProvider: jest.Mocked<ChatCompletionProvider>;
   let embeddingProvider: jest.Mocked<EmbeddingProvider>;
+  let runtimeConfig: jest.Mocked<RuntimeConfigService>;
+  let runtimeConfigSnapshot: RuntimeConfigSnapshot;
 
   beforeEach(() => {
     repository = {
@@ -68,6 +72,10 @@ describe('ChatService', () => {
     embeddingProvider = {
       embed: jest.fn(),
     };
+    runtimeConfigSnapshot = makeRuntimeConfigSnapshot();
+    runtimeConfig = {
+      getSnapshot: jest.fn().mockResolvedValue(runtimeConfigSnapshot),
+    } as unknown as jest.Mocked<RuntimeConfigService>;
     service = new ChatService(
       repository,
       embeddingCache,
@@ -79,6 +87,7 @@ describe('ChatService', () => {
       chatProvider,
       embeddingProvider,
       makeEnv(),
+      runtimeConfig,
     );
 
     repository.createConversation.mockResolvedValue(makeConversation());
@@ -119,6 +128,7 @@ describe('ChatService', () => {
       chatProvider,
       embeddingProvider,
       makeEnv({ HYBRID_SEARCH_ENABLED: true }),
+      runtimeConfig,
     );
 
     await service.prepareChat({ message: 'Tôi cần hỗ trợ' }, { sub: USER_ID, role: 'PASSENGER' });
@@ -143,6 +153,7 @@ describe('ChatService', () => {
       chatProvider,
       embeddingProvider,
       makeEnv({ INTENT_FILTER_ENABLED: true }),
+      runtimeConfig,
     );
     intentService.classify.mockResolvedValue({
       allowed: false,
@@ -182,6 +193,7 @@ describe('ChatService', () => {
       chatProvider,
       embeddingProvider,
       makeEnv({ QUERY_REWRITE_ENABLED: true }),
+      runtimeConfig,
     );
     repository.findRecentMessages.mockResolvedValue([makeMessage('ASSISTANT', 'Hoàn tiền mất 3 ngày.')]);
     queryRewriteService.rewriteIfNeeded.mockResolvedValue('Thời gian hoàn tiền VietRide là bao lâu?');
@@ -208,6 +220,7 @@ describe('ChatService', () => {
       chatProvider,
       embeddingProvider,
       makeEnv({ SUMMARIZE_ENABLED: true }),
+      runtimeConfig,
     );
 
     const prepared = await service.prepareChat(
@@ -221,6 +234,7 @@ describe('ChatService', () => {
     expect(summaryService.summarizeIfNeeded).toHaveBeenCalledWith(
       expect.objectContaining({ id: CONVERSATION_ID }),
       ASSISTANT_MESSAGE_ID,
+      runtimeConfigSnapshot,
     );
   });
 
@@ -236,6 +250,7 @@ describe('ChatService', () => {
       chatProvider,
       embeddingProvider,
       makeEnv({ RERANK_ENABLED: true }),
+      runtimeConfig,
     );
 
     await service.prepareChat({ message: 'Tôi cần hỗ trợ' }, { sub: USER_ID, role: 'PASSENGER' });
@@ -245,7 +260,7 @@ describe('ChatService', () => {
         limit: 10,
       }),
     );
-    expect(rerankService.rerank).toHaveBeenCalledWith('Tôi cần hỗ trợ', [makeChunk()]);
+    expect(rerankService.rerank).toHaveBeenCalledWith('Tôi cần hỗ trợ', [makeChunk()], runtimeConfigSnapshot);
   });
 
   it('checks rate limit before retrieval', async () => {
@@ -382,6 +397,12 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     CLOUDINARY_RAG_FOLDER: 'rag/documents',
     ...overrides,
   };
+}
+
+function makeRuntimeConfigSnapshot(): RuntimeConfigSnapshot {
+  return new RuntimeConfigSnapshot(
+    new Map(RAG_RUNTIME_CONFIG_DEFINITIONS.map((definition) => [definition.key, definition.defaultValue])),
+  );
 }
 
 function makeConversation(): RagConversation {

@@ -8,6 +8,7 @@ import {
 } from '@vietride/nest-common';
 import { NestRabbitMqModule } from '@vietride/nest-rabbitmq';
 import { NestRedisModule } from '@vietride/nest-redis';
+import { RuntimeConfigAdminModule } from '../admin-config/runtime-config-admin.module';
 import { InternalJwtAuthGuard } from '../auth/internal-jwt-auth.guard';
 import { ChatModule } from '../chat/chat.module';
 import { loadEnv } from '../config/env.schema';
@@ -41,6 +42,7 @@ const env = loadEnv();
     DocumentsModule,
     IngestModule,
     ChatModule,
+    RuntimeConfigAdminModule,
   ],
   controllers: [AppController, HealthController, ReadyController],
   providers: [

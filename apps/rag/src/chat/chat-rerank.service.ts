@@ -3,6 +3,8 @@ import { RedisService } from '@vietride/nest-redis';
 import { createHash } from 'node:crypto';
 import pino from 'pino';
 import { CHAT_COMPLETION_PROVIDER } from '../app/tokens';
+import { RAG_RUNTIME_CONFIG_KEYS } from '../config/runtime-config.registry';
+import type { RuntimeConfigSnapshot } from '../config/runtime-config.service';
 import type { ChatCompletionProvider, ChatMessage } from '../providers/chat-completion.provider';
 import {
   RAG_RERANK_CACHE_TTL_SECONDS,
@@ -20,7 +22,11 @@ export class ChatRerankService {
     @Inject(CHAT_COMPLETION_PROVIDER) private readonly chatProvider: ChatCompletionProvider,
   ) {}
 
-  async rerank(query: string, chunks: RagRetrievedChunk[]): Promise<RagRetrievedChunk[]> {
+  async rerank(
+    query: string,
+    chunks: RagRetrievedChunk[],
+    runtimeConfig: RuntimeConfigSnapshot,
+  ): Promise<RagRetrievedChunk[]> {
     const fallback = chunks.slice(0, RAG_RERANK_FINAL_LIMIT);
     if (chunks.length <= RAG_RERANK_FINAL_LIMIT) return fallback;
 
@@ -32,7 +38,7 @@ export class ChatRerankService {
       const result = await this.withTimeout(
         this.chatProvider.complete({
           stream: false,
-          messages: this.buildRerankMessages(query, chunks),
+          messages: this.buildRerankMessages(query, chunks, runtimeConfig),
         }),
       );
       const orderedIds = this.parseOrderedIds(result, chunks);
@@ -46,16 +52,17 @@ export class ChatRerankService {
     }
   }
 
-  private buildRerankMessages(query: string, chunks: RagRetrievedChunk[]): ChatMessage[] {
+  private buildRerankMessages(
+    query: string,
+    chunks: RagRetrievedChunk[],
+    runtimeConfig: RuntimeConfigSnapshot,
+  ): ChatMessage[] {
     return [
       {
         role: 'system',
-        content: [
-          'You rerank VietRide RAG retrieval candidates.',
-          'Return only a JSON array of chunk IDs, ordered from most relevant to least relevant.',
-          `Return at most ${RAG_RERANK_FINAL_LIMIT} IDs.`,
-          'Do not explain.',
-        ].join('\n'),
+        content: runtimeConfig
+          .getString(RAG_RUNTIME_CONFIG_KEYS.rerankPrompt)
+          .replaceAll('{rerank_final_limit}', RAG_RERANK_FINAL_LIMIT.toString()),
       },
       {
         role: 'user',

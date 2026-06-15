@@ -238,3 +238,34 @@ model OutboxEvent {
   @@map("outbox_events")
   @@schema("vietride_rag")
 }
+
+model RuntimeConfig {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key             String   @unique @db.VarChar(120)
+  value           Json
+  valueType       String   @map("value_type") @db.VarChar(30)
+  editableGroup   String   @map("editable_group") @db.VarChar(30)
+  riskLevel       String   @map("risk_level") @db.VarChar(20)
+  requiresRestart Boolean  @default(false) @map("requires_restart")
+  description     String?
+  updatedByUserId String?  @map("updated_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("runtime_configs")
+  @@schema("vietride_rag")
+}
+
+model RuntimeConfigHistory {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key             String   @db.VarChar(120)
+  oldValue        Json?    @map("old_value")
+  newValue        Json     @map("new_value")
+  changedByUserId String?  @map("changed_by_user_id") @db.Uuid
+  reason          String?
+  changedAt       DateTime @default(now()) @map("changed_at") @db.Timestamptz(6)
+
+  @@index([key, changedAt], map: "idx_runtime_config_history_key_changed_at")
+  @@map("runtime_config_history")
+  @@schema("vietride_rag")
+}

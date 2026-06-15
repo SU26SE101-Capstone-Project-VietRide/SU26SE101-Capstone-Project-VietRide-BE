@@ -1,4 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { RAG_RUNTIME_CONFIG_DEFINITIONS } from '../config/runtime-config.registry';
+import { RuntimeConfigService, RuntimeConfigSnapshot } from '../config/runtime-config.service';
 import type { KnowledgeDocument } from '../generated/rag-prisma-client';
 import type { StorageProvider } from '../providers/storage.provider';
 import { DocumentsRepository } from './documents.repository';
@@ -19,6 +21,7 @@ describe('DocumentsService', () => {
   let service: DocumentsService;
   let repository: jest.Mocked<DocumentsRepository>;
   let storageProvider: jest.Mocked<StorageProvider>;
+  let runtimeConfig: jest.Mocked<RuntimeConfigService>;
 
   beforeEach(() => {
     repository = {
@@ -31,7 +34,10 @@ describe('DocumentsService', () => {
       downloadObject: jest.fn(),
       createSignedReadUrl: jest.fn(),
     };
-    service = new DocumentsService(repository, storageProvider);
+    runtimeConfig = {
+      getSnapshot: jest.fn().mockResolvedValue(makeRuntimeConfigSnapshot()),
+    } as unknown as jest.Mocked<RuntimeConfigService>;
+    service = new DocumentsService(repository, storageProvider, runtimeConfig);
   });
 
   it('uploads TXT document metadata and returns preview URL', async () => {
@@ -136,6 +142,12 @@ function makeFile(originalname: string, mimetype: string): UploadedDocumentFile 
     size: Buffer.byteLength('hello'),
     buffer: Buffer.from('hello'),
   };
+}
+
+function makeRuntimeConfigSnapshot(): RuntimeConfigSnapshot {
+  return new RuntimeConfigSnapshot(
+    new Map(RAG_RUNTIME_CONFIG_DEFINITIONS.map((definition) => [definition.key, definition.defaultValue])),
+  );
 }
 
 function makeDocument(overrides: Partial<KnowledgeDocument> = {}): KnowledgeDocument {

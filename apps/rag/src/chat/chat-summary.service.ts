@@ -1,6 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import pino from 'pino';
 import { CHAT_COMPLETION_PROVIDER } from '../app/tokens';
+import { RAG_RUNTIME_CONFIG_KEYS } from '../config/runtime-config.registry';
+import type { RuntimeConfigSnapshot } from '../config/runtime-config.service';
 import type { RagConversation, RagMessage } from '../generated/rag-prisma-client';
 import type { ChatCompletionProvider, ChatMessage } from '../providers/chat-completion.provider';
 import {
@@ -19,7 +21,11 @@ export class ChatSummaryService {
     @Inject(CHAT_COMPLETION_PROVIDER) private readonly chatProvider: ChatCompletionProvider,
   ) {}
 
-  async summarizeIfNeeded(conversation: RagConversation, assistantMessageId: string): Promise<void> {
+  async summarizeIfNeeded(
+    conversation: RagConversation,
+    assistantMessageId: string,
+    runtimeConfig: RuntimeConfigSnapshot,
+  ): Promise<void> {
     const messageCount = await this.chatRepository.countMessages(conversation.id);
     if (messageCount < RAG_SUMMARY_MIN_MESSAGE_COUNT) return;
 
@@ -27,7 +33,7 @@ export class ChatSummaryService {
       conversation.id,
       RAG_SUMMARY_HISTORY_MESSAGE_LIMIT,
     );
-    const summary = await this.createSummary(conversation.summary, history);
+    const summary = await this.createSummary(conversation.summary, history, runtimeConfig);
     if (!summary) return;
 
     await this.chatRepository.updateConversationSummary({
@@ -37,11 +43,15 @@ export class ChatSummaryService {
     });
   }
 
-  private async createSummary(existingSummary: string | null, history: RagMessage[]): Promise<string> {
+  private async createSummary(
+    existingSummary: string | null,
+    history: RagMessage[],
+    runtimeConfig: RuntimeConfigSnapshot,
+  ): Promise<string> {
     try {
       const raw = await this.chatProvider.complete({
         stream: false,
-        messages: this.buildSummaryMessages(existingSummary, history),
+        messages: this.buildSummaryMessages(existingSummary, history, runtimeConfig),
       });
       return raw.trim().slice(0, RAG_MAX_SUMMARY_CHARS);
     } catch (error) {
@@ -50,16 +60,17 @@ export class ChatSummaryService {
     }
   }
 
-  private buildSummaryMessages(existingSummary: string | null, history: RagMessage[]): ChatMessage[] {
+  private buildSummaryMessages(
+    existingSummary: string | null,
+    history: RagMessage[],
+    runtimeConfig: RuntimeConfigSnapshot,
+  ): ChatMessage[] {
     return [
       {
         role: 'system',
-        content: [
-          'Summarize the VietRide RAG conversation in Vietnamese for future context.',
-          'Keep only user goals, important constraints, and resolved topics.',
-          'Do not include secrets, tokens, raw provider data, or unsupported facts.',
-          `Return at most ${RAG_MAX_SUMMARY_CHARS} characters.`,
-        ].join('\n'),
+        content: runtimeConfig
+          .getString(RAG_RUNTIME_CONFIG_KEYS.summaryPrompt)
+          .replaceAll('{max_summary_chars}', RAG_MAX_SUMMARY_CHARS.toString()),
       },
       {
         role: 'user',

@@ -240,6 +240,36 @@ CREATE TABLE outbox_events (
 CREATE INDEX idx_outbox_events_status_created
     ON outbox_events (status, created_at);
 
+CREATE TABLE runtime_configs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    key VARCHAR(120) NOT NULL UNIQUE,
+    value JSONB NOT NULL,
+    value_type VARCHAR(30) NOT NULL,
+    editable_group VARCHAR(30) NOT NULL,
+    risk_level VARCHAR(20) NOT NULL,
+    requires_restart BOOLEAN NOT NULL DEFAULT FALSE,
+    description TEXT NULL,
+    updated_by_user_id UUID NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_runtime_configs_value_type CHECK (value_type IN ('string', 'number', 'bool', 'template', 'string_list')),
+    CONSTRAINT chk_runtime_configs_editable_group CHECK (editable_group IN ('admin', 'ai_ops', 'readonly')),
+    CONSTRAINT chk_runtime_configs_risk_level CHECK (risk_level IN ('low', 'medium', 'high'))
+);
+
+CREATE TABLE runtime_config_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    key VARCHAR(120) NOT NULL,
+    old_value JSONB NULL,
+    new_value JSONB NOT NULL,
+    changed_by_user_id UUID NULL,
+    reason TEXT NULL,
+    changed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_runtime_config_history_key_changed_at
+    ON runtime_config_history (key, changed_at DESC);
+
 -- =============================================================================
 -- TRIGGERS
 -- =============================================================================
@@ -258,6 +288,10 @@ CREATE TRIGGER trg_knowledge_documents_updated_at
 
 CREATE TRIGGER trg_message_feedback_updated_at
     BEFORE UPDATE ON message_feedback
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+
+CREATE TRIGGER trg_runtime_configs_updated_at
+    BEFORE UPDATE ON runtime_configs
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 
 COMMENT ON COLUMN knowledge_documents.storage_path IS

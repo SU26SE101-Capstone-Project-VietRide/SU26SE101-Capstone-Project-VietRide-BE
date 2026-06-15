@@ -11,6 +11,8 @@ import { randomUUID } from 'node:crypto';
 import pino from 'pino';
 import { STORAGE_PROVIDER } from '../app/tokens';
 import type { RagInternalUser } from '../auth/rag-internal-user.types';
+import { RAG_RUNTIME_CONFIG_KEYS } from '../config/runtime-config.registry';
+import { RuntimeConfigService, type RuntimeConfigSnapshot } from '../config/runtime-config.service';
 import type {
   KnowledgeDocumentAccess,
   KnowledgeDocumentCategory,
@@ -20,12 +22,8 @@ import type {
 import type { StorageProvider } from '../providers/storage.provider';
 import type { CreateDocumentDto } from './dto/create-document.dto';
 import {
-  RAG_DOCUMENT_ALLOWED_MIME_TYPES,
-  RAG_DOCUMENT_MARKDOWN_EXTENSIONS,
-  RAG_DOCUMENT_MAX_FILE_BYTES,
   RAG_DOCUMENT_PREVIEW_URL_TTL_SECONDS,
   RAG_DOCUMENT_STORAGE_PREFIX,
-  RAG_DOCUMENT_TEXT_EXTENSIONS,
 } from './documents.constants';
 import { DocumentsRepository } from './documents.repository';
 import {
@@ -42,6 +40,7 @@ export class DocumentsService {
   constructor(
     private readonly documentsRepository: DocumentsRepository,
     @Inject(STORAGE_PROVIDER) private readonly storageProvider: StorageProvider,
+    private readonly runtimeConfig: RuntimeConfigService,
   ) {}
 
   async create(
@@ -50,7 +49,8 @@ export class DocumentsService {
     user: RagInternalUser | undefined,
   ): Promise<KnowledgeDocumentResponse> {
     this.assertSystemAdmin(user);
-    const validFile = this.validateFile(file);
+    const runtimeConfig = await this.runtimeConfig.getSnapshot();
+    const validFile = this.validateFile(file, runtimeConfig);
     this.validateTaxonomy(dto.accessLevel, dto.category, dto.operatorId);
 
     const storagePath = this.buildStoragePath(validFile.originalname);
@@ -66,7 +66,7 @@ export class DocumentsService {
       fileName: this.sanitizeFileName(validFile.originalname),
       mimeType: validFile.mimetype,
       fileSize: BigInt(validFile.size),
-      fileType: this.detectFileType(validFile),
+      fileType: this.detectFileType(validFile, runtimeConfig),
       accessLevel: dto.accessLevel as KnowledgeDocumentAccess,
       category: dto.category as KnowledgeDocumentCategory,
       documentType: dto.documentType as KnowledgeDocumentType,
@@ -121,26 +121,29 @@ export class DocumentsService {
     }
   }
 
-  private validateFile(file: UploadedDocumentFile | undefined): UploadedDocumentFile {
+  private validateFile(
+    file: UploadedDocumentFile | undefined,
+    runtimeConfig: RuntimeConfigSnapshot,
+  ): UploadedDocumentFile {
     if (!file) {
       throw new BadRequestException({
         errorCode: 'RAG_DOCUMENT_FILE_REQUIRED',
         detail: 'Document file is required',
       });
     }
-    if (file.size <= 0 || file.size > RAG_DOCUMENT_MAX_FILE_BYTES) {
+    if (file.size <= 0 || file.size > runtimeConfig.getNumber(RAG_RUNTIME_CONFIG_KEYS.documentMaxFileBytes)) {
       throw new BadRequestException({
         errorCode: 'RAG_DOCUMENT_FILE_INVALID_SIZE',
         detail: 'Document file size is invalid',
       });
     }
-    if (!RAG_DOCUMENT_ALLOWED_MIME_TYPES.has(file.mimetype)) {
+    if (!runtimeConfig.getStringList(RAG_RUNTIME_CONFIG_KEYS.documentAllowedMimeTypes).includes(file.mimetype)) {
       throw new BadRequestException({
         errorCode: 'RAG_DOCUMENT_FILE_INVALID_TYPE',
         detail: 'Only TXT and MARKDOWN files are supported',
       });
     }
-    this.detectFileType(file);
+    this.detectFileType(file, runtimeConfig);
     return file;
   }
 
@@ -169,10 +172,20 @@ export class DocumentsService {
     }
   }
 
-  private detectFileType(file: UploadedDocumentFile): KnowledgeDocumentFileType {
+  private detectFileType(
+    file: UploadedDocumentFile,
+    runtimeConfig: RuntimeConfigSnapshot,
+  ): KnowledgeDocumentFileType {
     const extension = extname(file.originalname).toLowerCase();
-    if (RAG_DOCUMENT_TEXT_EXTENSIONS.has(extension)) return 'TXT';
-    if (RAG_DOCUMENT_MARKDOWN_EXTENSIONS.has(extension)) return 'MARKDOWN';
+    const allowedExtensions = runtimeConfig.getStringList(RAG_RUNTIME_CONFIG_KEYS.documentAllowedExtensions);
+    if (!allowedExtensions.includes(extension)) {
+      throw new BadRequestException({
+        errorCode: 'RAG_DOCUMENT_FILE_INVALID_TYPE',
+        detail: 'Only configured knowledge document file types are supported',
+      });
+    }
+    if (extension === '.txt') return 'TXT';
+    if (extension === '.md' || extension === '.markdown') return 'MARKDOWN';
     throw new BadRequestException({
       errorCode: 'RAG_DOCUMENT_FILE_INVALID_TYPE',
       detail: 'Only TXT and MARKDOWN files are supported',
