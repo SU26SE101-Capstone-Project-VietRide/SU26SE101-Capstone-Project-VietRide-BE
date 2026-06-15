@@ -11,10 +11,8 @@ namespace VietRide.Trip.Infrastructure.Jobs;
 public sealed class TripGenerationRecurringJobRegistrationHostedService : IHostedService
 {
     private const string DefaultQueueName = "trip";
-    private const string DefaultTimeZoneId = "Asia/Ho_Chi_Minh";
-    private const string WindowsVietnamTimeZoneId = "SE Asia Standard Time";
     private const string GenerateActiveSchedulesJobId = "trip.generate-active-schedules";
-    private const string WeeklySundayAt23Cron = "0 23 * * 0";
+    private const string WeeklySundayAt16UtcCron = "0 16 * * 0";
 
     private readonly IConfiguration configuration;
     private readonly IRecurringJobManager recurringJobManager;
@@ -30,17 +28,16 @@ public sealed class TripGenerationRecurringJobRegistrationHostedService : IHoste
     public Task StartAsync(CancellationToken cancellationToken)
     {
         var queueName = configuration["Hangfire:QueueName"] ?? DefaultQueueName;
-        var timeZone = ResolveTimeZone(configuration["Hangfire:TripGenerationTimeZoneId"] ?? DefaultTimeZoneId);
 
 #pragma warning disable CS0618 // Hangfire 1.8 IRecurringJobManager lacks the explicit queue overload available on RecurringJob.
         recurringJobManager.AddOrUpdate(
             GenerateActiveSchedulesJobId,
             Job.FromExpression<TripGenerationJob>(job => job.GenerateForActiveSchedulesAsync(CancellationToken.None)),
-            WeeklySundayAt23Cron,
+            WeeklySundayAt16UtcCron,
             new RecurringJobOptions
             {
                 QueueName = queueName,
-                TimeZone = timeZone
+                TimeZone = TimeZoneInfo.Utc
             });
 #pragma warning restore CS0618
 
@@ -49,37 +46,4 @@ public sealed class TripGenerationRecurringJobRegistrationHostedService : IHoste
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-    private static TimeZoneInfo ResolveTimeZone(string timeZoneId)
-    {
-        if (TryFindTimeZone(timeZoneId, out var configuredTimeZone))
-        {
-            return configuredTimeZone;
-        }
-
-        if (TryFindTimeZone(WindowsVietnamTimeZoneId, out var windowsVietnamTimeZone))
-        {
-            return windowsVietnamTimeZone;
-        }
-
-        return TimeZoneInfo.Utc;
-    }
-
-    private static bool TryFindTimeZone(string timeZoneId, out TimeZoneInfo timeZoneInfo)
-    {
-        try
-        {
-            timeZoneInfo = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
-            return true;
-        }
-        catch (TimeZoneNotFoundException)
-        {
-            timeZoneInfo = TimeZoneInfo.Utc;
-            return false;
-        }
-        catch (InvalidTimeZoneException)
-        {
-            timeZoneInfo = TimeZoneInfo.Utc;
-            return false;
-        }
-    }
 }

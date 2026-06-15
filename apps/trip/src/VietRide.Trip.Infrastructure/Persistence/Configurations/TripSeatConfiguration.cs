@@ -22,12 +22,10 @@ internal sealed class TripSeatConfiguration : IEntityTypeConfiguration<TripSeat>
             .HasMaxLength(20);
         builder.Property(seat => seat.SeatType)
             .HasColumnName("seat_type")
-            .HasConversion<string>()
             .HasColumnType("vietride_trip.trip_seat_type")
             .HasDefaultValue(TripSeatType.STANDARD);
         builder.Property(seat => seat.Status)
             .HasColumnName("status")
-            .HasConversion<string>()
             .HasColumnType("vietride_trip.trip_seat_status")
             .HasDefaultValue(TripSeatStatus.AVAILABLE);
         builder.Property(seat => seat.DisabledReason).HasColumnName("disabled_reason");

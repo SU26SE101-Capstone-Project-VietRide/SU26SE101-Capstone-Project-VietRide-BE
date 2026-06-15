@@ -42,12 +42,10 @@ internal sealed class TripConfiguration : IEntityTypeConfiguration<Domain.Entiti
         builder.Property(trip => trip.CompletedByUserId).HasColumnName("completed_by_user_id");
         builder.Property(trip => trip.Status)
             .HasColumnName("status")
-            .HasConversion<string>()
             .HasColumnType("vietride_trip.trip_status")
             .HasDefaultValue(Domain.Entities.TripStatus.SCHEDULED);
         builder.Property(trip => trip.Source)
             .HasColumnName("source")
-            .HasConversion<string>()
             .HasColumnType("vietride_trip.trip_source")
             .HasComment("VEHICLE_SUBSTITUTION: created by 6.12 flow, exempt from maxTripsPerMonth counter check.");
         builder.Property(trip => trip.HasSubstitution)

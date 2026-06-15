@@ -48,6 +48,21 @@ public sealed class TripHandlerProjectionTests
     }
 
     [Fact]
+    public async Task Search_MissingStationForMatchedRoute_ReturnsEmptyResult()
+    {
+        var fixture = SearchFixture.Create();
+        fixture.Stations.Remove(fixture.DestinationStation);
+        var trip = CreateTrip(fixture.OperatorId, fixture.Route.Id, DateTimeOffset.Parse("2026-05-18T08:00:00+07:00"));
+        fixture.Trips.Add(trip);
+        fixture.Seats.Add(TripSeat.Create(trip.Id, "A01"));
+
+        var result = await fixture.Handler.Handle(fixture.Query, CancellationToken.None);
+
+        result.Items.Should().BeEmpty();
+        result.TotalItems.Should().Be(0);
+    }
+
+    [Fact]
     public async Task GetSeatMap_UsesGeometryFromVehicleSeatLayoutJson()
     {
         var operatorId = Guid.NewGuid();
@@ -121,11 +136,12 @@ public sealed class TripHandlerProjectionTests
             OriginStation = Station.Create("Bến xe Miền Đông", "ben-xe-mien-dong", "Hồ Chí Minh", "Hồ Chí Minh");
             DestinationStation = Station.Create("Bến xe Mỹ Đình", "ben-xe-my-dinh", "Hà Nội", "Hà Nội");
             Route = Route.Create(OperatorId, "HCM - HN", OriginStation.Id, DestinationStation.Id, Money.FromRaw(400000), 1000m, 720);
+            Stations.AddRange([OriginStation, DestinationStation]);
             Identity = new FakeIdentityInternalClient(new Dictionary<Guid, string> { [OperatorId] = operatorName });
             Handler = new SearchTripsHandler(
                 new InMemoryTripRepository(Trips),
                 new InMemoryRouteRepository([Route]),
-                new InMemoryStationRepository([OriginStation, DestinationStation]),
+                new InMemoryStationRepository(Stations),
                 new InMemoryTripSeatRepository(Seats),
                 new InMemoryTripStopRepository(Stops),
                 Identity);
@@ -136,6 +152,7 @@ public sealed class TripHandlerProjectionTests
         public Station OriginStation { get; }
         public Station DestinationStation { get; }
         public Route Route { get; }
+        public List<Station> Stations { get; } = [];
         public List<DomainTrip> Trips { get; } = [];
         public List<TripSeat> Seats { get; } = [];
         public List<TripStop> Stops { get; } = [];

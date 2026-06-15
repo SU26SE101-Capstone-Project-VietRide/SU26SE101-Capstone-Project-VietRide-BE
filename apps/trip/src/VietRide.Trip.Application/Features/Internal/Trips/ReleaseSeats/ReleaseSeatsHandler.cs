@@ -34,11 +34,12 @@ public sealed class ReleaseSeatsHandler : IRequestHandler<ReleaseSeatsCommand>
             .Where(seat => seat.TripId == request.TripId && seatNumbers.Contains(seat.SeatNumber))
             .ToArray();
 
+        var ownedSeats = new List<TripSeat>();
         foreach (var seat in seats.Where(seat => seat.Status == TripSeatStatus.HELD))
         {
-            if (await seatLockStore.IsOwnedByAsync(request.TripId, seat.SeatNumber, lockOwner, cancellationToken)
-                || !await seatLockStore.IsLockedAsync(request.TripId, seat.SeatNumber, cancellationToken))
+            if (await seatLockStore.IsOwnedByAsync(request.TripId, seat.SeatNumber, lockOwner, cancellationToken))
             {
+                ownedSeats.Add(seat);
                 seat.Release();
             }
         }
@@ -46,7 +47,7 @@ public sealed class ReleaseSeatsHandler : IRequestHandler<ReleaseSeatsCommand>
         await unitOfWork.SaveChangesAsync(cancellationToken);
         try
         {
-            await seatLockStore.ReleaseAsync(request.TripId, seatNumbers, lockOwner, cancellationToken);
+            await seatLockStore.ReleaseAsync(request.TripId, ownedSeats.Select(seat => seat.SeatNumber).ToArray(), lockOwner, cancellationToken);
         }
         catch (Exception exception)
         {

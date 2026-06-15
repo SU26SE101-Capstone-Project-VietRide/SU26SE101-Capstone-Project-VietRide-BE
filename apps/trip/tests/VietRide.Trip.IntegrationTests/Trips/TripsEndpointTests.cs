@@ -247,7 +247,7 @@ public sealed class TripsEndpointTests
             Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", "Testing");
             Environment.SetEnvironmentVariable("INTERNAL_JWT_SECRET", TestSecret);
             builder.UseSetting("INTERNAL_JWT_SECRET", TestSecret);
-            builder.UseSetting("ConnectionStrings:Default", "Host=localhost;Port=5432;Database=test;Username=postgres;Password=postgres");
+            builder.UseSetting("ConnectionStrings:Default", "Host=localhost;Port=5432;Database=test;Username=vietride;Password=vietride_dev");
             builder.UseEnvironment("Testing");
             builder.ConfigureTestServices(services =>
             {

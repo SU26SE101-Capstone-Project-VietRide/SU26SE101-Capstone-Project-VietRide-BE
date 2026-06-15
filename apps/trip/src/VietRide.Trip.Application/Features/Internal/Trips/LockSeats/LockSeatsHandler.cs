@@ -9,6 +9,10 @@ namespace VietRide.Trip.Application.Features.Internal.Trips.LockSeats;
 
 public sealed class LockSeatsHandler : IRequestHandler<LockSeatsCommand, LockSeatsResult>
 {
+    private static readonly TimeSpan PendingRetryDelay = TimeSpan.FromMilliseconds(25);
+    private static readonly TimeSpan PendingReplayTimeout = TimeSpan.FromSeconds(5);
+
+    private readonly ISeatLockIdempotencyStore idempotencyStore;
     private readonly ISeatLockStore seatLockStore;
     private readonly ISeatLockTtlProvider seatLockTtlProvider;
     private readonly ITripRepository tripRepository;
@@ -19,12 +23,14 @@ public sealed class LockSeatsHandler : IRequestHandler<LockSeatsCommand, LockSea
         ITripRepository tripRepository,
         ITripSeatRepository tripSeatRepository,
         ISeatLockStore seatLockStore,
+        ISeatLockIdempotencyStore idempotencyStore,
         ISeatLockTtlProvider seatLockTtlProvider,
         IUnitOfWork unitOfWork)
     {
         this.tripRepository = tripRepository;
         this.tripSeatRepository = tripSeatRepository;
         this.seatLockStore = seatLockStore;
+        this.idempotencyStore = idempotencyStore;
         this.seatLockTtlProvider = seatLockTtlProvider;
         this.unitOfWork = unitOfWork;
     }
@@ -39,6 +45,19 @@ public sealed class LockSeatsHandler : IRequestHandler<LockSeatsCommand, LockSea
         }
 
         var requestedSeats = Normalize(request.SeatNumbers);
+        var ttl = request.TtlSeconds is { } ttlSeconds && ttlSeconds > 0
+            ? TimeSpan.FromSeconds(ttlSeconds)
+            : seatLockTtlProvider.DefaultTtl;
+        var requestFingerprint = BuildRequestFingerprint(requestedSeats, request.HoldOwnerId, ttl);
+        var idempotencyTtl = GetIdempotencyTtl(ttl);
+        var reservation = await ReserveIdempotencyAsync(request, requestedSeats, requestFingerprint, idempotencyTtl, cancellationToken);
+        if (reservation.Result is not null)
+        {
+            return reservation.Result;
+        }
+
+        var reservationToken = reservation.ReservationToken!;
+
         var seats = tripSeatRepository.Query()
             .Where(seat => seat.TripId == request.TripId && requestedSeats.Contains(seat.SeatNumber))
             .ToArray();
@@ -49,21 +68,24 @@ public sealed class LockSeatsHandler : IRequestHandler<LockSeatsCommand, LockSea
             .ToArray();
         if (unavailableSeats.Length > 0)
         {
+            await RemoveReservationAsync(request.TripId, request.IdempotencyKey, reservationToken, cancellationToken);
             ThrowSeatUnavailable(unavailableSeats);
         }
 
         var seatLockToken = Guid.NewGuid();
         var lockOwner = seatLockToken.ToString("D");
-        var ttl = request.TtlSeconds is { } ttlSeconds && ttlSeconds > 0
-            ? TimeSpan.FromSeconds(ttlSeconds)
-            : seatLockTtlProvider.DefaultTtl;
         var acquiredAt = DateTimeOffset.UtcNow;
         var acquired = await seatLockStore.TryAcquireAsync(request.TripId, requestedSeats, lockOwner, ttl, cancellationToken);
         if (!acquired)
         {
+            await RemoveReservationAsync(request.TripId, request.IdempotencyKey, reservationToken, cancellationToken);
             ThrowSeatUnavailable(requestedSeats);
         }
 
+        var result = new LockSeatsResult(seatLockToken, requestedSeats, acquiredAt.Add(ttl));
+
+        var releaseSeatLockOnFailure = true;
+        var cleanupReservationOnFailure = true;
         try
         {
             foreach (var seat in seats)
@@ -72,15 +94,105 @@ public sealed class LockSeatsHandler : IRequestHandler<LockSeatsCommand, LockSea
             }
 
             await unitOfWork.SaveChangesAsync(cancellationToken);
+            var completed = await idempotencyStore.StoreCompletedAsync(
+                request.TripId,
+                request.IdempotencyKey,
+                requestFingerprint,
+                reservationToken,
+                requestedSeats,
+                result,
+                idempotencyTtl,
+                cancellationToken);
+            if (!completed)
+            {
+                cleanupReservationOnFailure = false;
+                foreach (var seat in seats.Where(seat => seat.Status == TripSeatStatus.HELD))
+                {
+                    seat.Release();
+                }
+
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+                await seatLockStore.ReleaseAsync(request.TripId, requestedSeats, lockOwner, cancellationToken);
+                releaseSeatLockOnFailure = false;
+                throw new ConflictException("IDEMPOTENCY_REQUEST_PENDING", "A request with the same idempotency key is still being processed.");
+            }
         }
         catch
         {
-            await seatLockStore.ReleaseAsync(request.TripId, requestedSeats, lockOwner, cancellationToken);
+            if (cleanupReservationOnFailure)
+            {
+                await RemoveReservationAsync(request.TripId, request.IdempotencyKey, reservationToken, cancellationToken);
+            }
+
+            if (releaseSeatLockOnFailure)
+            {
+                await seatLockStore.ReleaseAsync(request.TripId, requestedSeats, lockOwner, cancellationToken);
+            }
+
             throw;
         }
 
-        return new LockSeatsResult(seatLockToken, requestedSeats, acquiredAt.Add(ttl));
+        return result;
     }
+
+    private async Task<ReservationState> ReserveIdempotencyAsync(
+        LockSeatsCommand request,
+        IReadOnlyList<string> requestedSeats,
+        string requestFingerprint,
+        TimeSpan idempotencyTtl,
+        CancellationToken cancellationToken)
+    {
+        var reservation = await idempotencyStore.TryReserveAsync(
+            request.TripId,
+            request.IdempotencyKey,
+            requestFingerprint,
+            requestedSeats,
+            idempotencyTtl,
+            cancellationToken);
+        if (reservation.Reserved)
+        {
+            return new ReservationState(null, reservation.ReservationToken);
+        }
+
+        var timeoutAt = DateTimeOffset.UtcNow.Add(PendingReplayTimeout);
+        var cached = reservation.ExistingEntry;
+        while (true)
+        {
+            cached ??= await idempotencyStore.GetAsync(request.TripId, request.IdempotencyKey, cancellationToken);
+            if (cached is null)
+            {
+                reservation = await idempotencyStore.TryReserveAsync(
+                    request.TripId,
+                    request.IdempotencyKey,
+                    requestFingerprint,
+                    requestedSeats,
+                    idempotencyTtl,
+                    cancellationToken);
+                if (reservation.Reserved)
+                {
+                    return new ReservationState(null, reservation.ReservationToken);
+                }
+            }
+            else if (cached.IsCompleted)
+            {
+                return new ReservationState(ReplayCachedResultOrThrow(cached, requestFingerprint), null);
+            }
+            else
+            {
+                ThrowIfFingerprintMismatch(cached, requestFingerprint);
+            }
+
+            if (DateTimeOffset.UtcNow >= timeoutAt)
+            {
+                throw new ConflictException("IDEMPOTENCY_REQUEST_PENDING", "A request with the same idempotency key is still being processed.");
+            }
+
+            await Task.Delay(PendingRetryDelay, cancellationToken);
+        }
+    }
+
+    private async Task RemoveReservationAsync(Guid tripId, string idempotencyKey, string reservationToken, CancellationToken cancellationToken) =>
+        await idempotencyStore.RemoveReservationAsync(tripId, idempotencyKey, reservationToken, cancellationToken);
 
     private async Task ReconcileExpiredHeldSeatsAsync(Guid tripId, IReadOnlyCollection<TripSeat> seats, CancellationToken cancellationToken)
     {
@@ -100,6 +212,35 @@ public sealed class LockSeatsHandler : IRequestHandler<LockSeatsCommand, LockSea
         }
     }
 
+    private static LockSeatsResult ReplayCachedResultOrThrow(SeatLockIdempotencyEntry cached, string requestFingerprint)
+    {
+        ThrowIfFingerprintMismatch(cached, requestFingerprint);
+
+        return cached.Result!;
+    }
+
+    private static void ThrowIfFingerprintMismatch(SeatLockIdempotencyEntry cached, string requestFingerprint)
+    {
+        if (!string.Equals(cached.RequestFingerprint, requestFingerprint, StringComparison.Ordinal))
+        {
+            throw new CodedValidationException(
+                "IDEMPOTENCY_KEY_MISMATCH",
+                "The idempotency key was reused with a different lock-seats request.",
+                [new ValidationError("Idempotency-Key", "The idempotency key was reused with a different lock-seats request.")]);
+        }
+    }
+
+    private static TimeSpan GetIdempotencyTtl(TimeSpan seatTtl)
+    {
+        var minimumTtl = TimeSpan.FromMinutes(15);
+        var pendingSafetyMargin = PendingReplayTimeout + TimeSpan.FromSeconds(1);
+        var calculatedTtl = seatTtl + pendingSafetyMargin;
+        return calculatedTtl > minimumTtl ? calculatedTtl : minimumTtl;
+    }
+
+    private static string BuildRequestFingerprint(IReadOnlyList<string> normalizedSeatNumbers, Guid holdOwnerId, TimeSpan ttl) =>
+        $"seatNumbers={string.Join(',', normalizedSeatNumbers)};holdOwnerId={holdOwnerId:D};ttlSeconds={(long)ttl.TotalSeconds}";
+
     private static string[] Normalize(IReadOnlyList<string> seatNumbers) => seatNumbers
         .Select(seatNumber => seatNumber.Trim())
         .Where(seatNumber => seatNumber.Length > 0)
@@ -115,4 +256,6 @@ public sealed class LockSeatsHandler : IRequestHandler<LockSeatsCommand, LockSea
             "BOOKING_SEAT_UNAVAILABLE",
             "One or more requested seats are unavailable.",
             seatNumbers.Select(seatNumber => new ValidationError("seatNumbers", seatNumber)).ToArray());
+
+    private sealed record ReservationState(LockSeatsResult? Result, string? ReservationToken);
 }

@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Conventions;
+using Npgsql;
+using Npgsql.NameTranslation;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Persistence;
 using VietRide.Trip.Domain.Entities;
@@ -11,9 +13,22 @@ public sealed class TripDbContext : VietRideDbContextBase
 {
     public const string SchemaName = "vietride_trip";
 
+    private static readonly INpgsqlNameTranslator PostgresEnumNameTranslator = new NpgsqlNullNameTranslator();
+
     public TripDbContext(DbContextOptions<TripDbContext> options, IClock clock)
         : base(options, clock)
     {
+    }
+
+    public static void ConfigurePostgresEnums(NpgsqlDataSourceBuilder builder)
+    {
+        builder.MapEnum<TripStatus>("trip_status", PostgresEnumNameTranslator);
+        builder.MapEnum<TripSource>("trip_source", PostgresEnumNameTranslator);
+        builder.MapEnum<TripSeatStatus>("trip_seat_status", PostgresEnumNameTranslator);
+        builder.MapEnum<TripSeatType>("trip_seat_type", PostgresEnumNameTranslator);
+        builder.MapEnum<TripStopStatus>("trip_stop_status", PostgresEnumNameTranslator);
+        builder.MapEnum<TripGenerationSkipReason>("trip_generation_skip_reason", PostgresEnumNameTranslator);
+        builder.MapEnum<VehicleStatus>("vehicle_status", PostgresEnumNameTranslator);
     }
 
     public DbSet<Station> Stations => Set<Station>();
@@ -63,6 +78,7 @@ public sealed class TripDbContext : VietRideDbContextBase
         modelBuilder.HasPostgresEnum("trip_seat_type", new[] { "STANDARD", "SLEEPER_LOWER", "SLEEPER_UPPER", "VIP", "DRIVER_AREA" });
         modelBuilder.HasPostgresEnum("trip_stop_status", new[] { "PENDING", "ARRIVED", "SKIPPED" });
         modelBuilder.HasPostgresEnum("trip_generation_skip_reason", new[] { "SUBSCRIPTION_LIMIT_EXCEEDED", "VEHICLE_CONFLICT", "DRIVER_CONFLICT", "OTHER" });
+        modelBuilder.HasPostgresEnum("vehicle_status", new[] { "ACTIVE", "MAINTENANCE", "OFF_DUTY", "RETIRED" });
         base.OnModelCreating(modelBuilder);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(TripDbContext).Assembly);
         RemoveConventionIndex<Route>(modelBuilder, nameof(Route.DestinationStationId));

@@ -1145,6 +1145,7 @@ Errors:
 - `409 BOOKING_TRIP_NOT_BOOKABLE` — trip status ≠ `SCHEDULED` (closed / departed / cancelled).
 - `409 BOOKING_SEAT_UNAVAILABLE` — ≥1 seat is `HELD` / `BOOKED` / `UNAVAILABLE`;
   `error.fields` lists the offending `seatNumbers`. No seat is held (all-or-nothing).
+- `409 IDEMPOTENCY_REQUEST_PENDING` — same `Idempotency-Key` is still being processed.
 
 ### POST `/internal/v1/trips/{tripId}/release-seats`
 

@@ -6,5 +6,6 @@ public sealed record LockSeatsCommand(
     Guid TripId,
     IReadOnlyList<string> SeatNumbers,
     Guid HoldOwnerId,
-    int? TtlSeconds)
+    int? TtlSeconds,
+    string IdempotencyKey)
     : IRequest<LockSeatsResult>;

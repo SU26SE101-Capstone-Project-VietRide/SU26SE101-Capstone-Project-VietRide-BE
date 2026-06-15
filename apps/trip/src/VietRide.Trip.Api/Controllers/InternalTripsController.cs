@@ -46,8 +46,9 @@ public sealed class InternalTripsController : ControllerBase
         [FromBody] LockSeatsRequest request,
         CancellationToken cancellationToken)
     {
+        var idempotencyKey = Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString();
         var result = await mediator.Send(
-            new LockSeatsCommand(tripId, request.SeatNumbers, request.HoldOwnerId, request.TtlSeconds),
+            new LockSeatsCommand(tripId, request.SeatNumbers, request.HoldOwnerId, request.TtlSeconds, idempotencyKey),
             cancellationToken);
 
         return Ok(ApiResponse<LockSeatsResult>.Ok(result, ApiMeta.Create(HttpContext.TraceIdentifier)));

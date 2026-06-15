@@ -37,6 +37,8 @@ public sealed class TripGenerationServiceTests
 
         var firstTrip = fixture.Trips.Items.OrderBy(trip => trip.DepartureDateTime).First();
         firstTrip.Source.Should().Be(TripSource.AUTO_FROM_SCHEDULE);
+        firstTrip.DepartureDateTime.Offset.Should().Be(TimeSpan.Zero);
+        firstTrip.DepartureDateTime.Should().Be(BuildUtcDepartureDateTime(new DateOnly(2026, 6, 16), fixture.Schedule.DepartureTime));
         firstTrip.EstimatedArrivalTime.Should().Be(firstTrip.DepartureDateTime.AddMinutes(180));
 
         var firstTripStops = fixture.TripStops.Items
@@ -82,8 +84,9 @@ public sealed class TripGenerationServiceTests
         var result = await fixture.Service.GenerateAsync(fixture.Schedule.Id, CancellationToken.None);
 
         result.GeneratedCount.Should().BeGreaterThan(0);
-        fixture.Trips.Items.Should().NotContain(trip => trip.DepartureDateTime == new DateTimeOffset(2026, 6, 14, 8, 0, 0, TimeSpan.FromHours(7)));
-        fixture.Trips.Items.Should().Contain(trip => trip.DepartureDateTime == new DateTimeOffset(2026, 6, 16, 8, 0, 0, TimeSpan.FromHours(7)));
+        fixture.Trips.Items.Should().NotContain(trip => trip.DepartureDateTime == BuildUtcDepartureDateTime(new DateOnly(2026, 6, 14), new TimeOnly(8, 0)));
+        fixture.Trips.Items.Should().Contain(trip => trip.DepartureDateTime == BuildUtcDepartureDateTime(new DateOnly(2026, 6, 16), new TimeOnly(8, 0)));
+        fixture.Trips.Items.Should().OnlyContain(trip => trip.DepartureDateTime.Offset == TimeSpan.Zero);
         fixture.Trips.Items.Should().OnlyContain(trip => trip.DepartureDateTime > new DateTimeOffset(2026, 6, 14, 16, 0, 0, TimeSpan.Zero));
         fixture.Trips.Items.Should().OnlyContain(trip => trip.DepartureDateTime <= new DateTimeOffset(2026, 6, 28, 16, 0, 0, TimeSpan.Zero));
     }
@@ -172,9 +175,7 @@ public sealed class TripGenerationServiceTests
     public async Task GenerateAsync_VehicleConflict_LogsVehicleConflictSkipAndContinuesOtherDates()
     {
         var fixture = TripGenerationFixture.Create(routeDurationMinutes: 180);
-        var departureDateTime = new DateTimeOffset(
-            new DateOnly(2026, 6, 16).ToDateTime(fixture.Schedule.DepartureTime),
-            TimeSpan.FromHours(7));
+        var departureDateTime = BuildUtcDepartureDateTime(new DateOnly(2026, 6, 16), fixture.Schedule.DepartureTime);
         fixture.Trips.Items.Add(
             TripEntity.Create(
                 fixture.Schedule.OperatorId,
@@ -216,6 +217,12 @@ public sealed class TripGenerationServiceTests
     {
         var day = (int)date.DayOfWeek;
         return day == 0 ? 7 : day;
+    }
+
+    private static DateTimeOffset BuildUtcDepartureDateTime(DateOnly date, TimeOnly time)
+    {
+        var localDateTime = date.ToDateTime(time);
+        return new DateTimeOffset(localDateTime, TimeSpan.FromHours(7)).ToUniversalTime();
     }
 
     private sealed class TripGenerationFixture

@@ -9,13 +9,14 @@ namespace VietRide.Trip.UnitTests.Features.TripGeneration;
 public sealed class TripGenerationRecurringJobRegistrationHostedServiceTests
 {
     [Fact]
-    public async Task StartAsync_RegistersWeeklySunday2300TripGenerationJob()
+    public async Task StartAsync_RegistersWeeklySunday2300IctAsUtcTripGenerationJob()
     {
         var recurringJobs = new CapturingRecurringJobManager();
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Hangfire:QueueName"] = "trip"
+                ["Hangfire:QueueName"] = "trip",
+                ["Hangfire:TripGenerationTimeZoneId"] = "SE Asia Standard Time"
             })
             .Build();
         var service = new TripGenerationRecurringJobRegistrationHostedService(configuration, recurringJobs);
@@ -23,12 +24,12 @@ public sealed class TripGenerationRecurringJobRegistrationHostedServiceTests
         await service.StartAsync(CancellationToken.None);
 
         recurringJobs.RecurringJobId.Should().Be("trip.generate-active-schedules");
-        recurringJobs.CronExpression.Should().Be("0 23 * * 0");
+        recurringJobs.CronExpression.Should().Be("0 16 * * 0");
         recurringJobs.Options.Should().NotBeNull();
 #pragma warning disable CS0618 // Hangfire 1.8 IRecurringJobManager stores queue through RecurringJobOptions.
         recurringJobs.Options!.QueueName.Should().Be("trip");
 #pragma warning restore CS0618
-        recurringJobs.Options.TimeZone.Id.Should().BeOneOf("Asia/Ho_Chi_Minh", "SE Asia Standard Time", "UTC");
+        recurringJobs.Options.TimeZone.Should().Be(TimeZoneInfo.Utc);
         recurringJobs.Job.Should().NotBeNull();
         recurringJobs.Job!.Type.Should().Be(typeof(TripGenerationJob));
         recurringJobs.Job.Method.Name.Should().Be(nameof(TripGenerationJob.GenerateForActiveSchedulesAsync));

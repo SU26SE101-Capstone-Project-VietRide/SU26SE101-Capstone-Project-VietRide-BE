@@ -34,7 +34,7 @@ public sealed class InternalTripSeatLockHandlerTests
         var fixture = Fixture.Create();
 
         var result = await fixture.LockHandler.Handle(
-            new LockSeatsCommand(fixture.Trip.Id, ["A01"], Guid.NewGuid(), 60),
+            new LockSeatsCommand(fixture.Trip.Id, ["A01"], Guid.NewGuid(), 60, Guid.NewGuid().ToString("D")),
             CancellationToken.None);
 
         result.LockedSeats.Should().ContainSingle("A01");
@@ -49,7 +49,7 @@ public sealed class InternalTripSeatLockHandlerTests
         fixture.UnitOfWork.FailOnSave = true;
 
         var action = () => fixture.LockHandler.Handle(
-            new LockSeatsCommand(fixture.Trip.Id, ["A01"], Guid.NewGuid(), 60),
+            new LockSeatsCommand(fixture.Trip.Id, ["A01"], Guid.NewGuid(), 60, Guid.NewGuid().ToString("D")),
             CancellationToken.None);
 
         await action.Should().ThrowAsync<InvalidOperationException>();
@@ -243,7 +243,7 @@ public sealed class InternalTripSeatLockHandlerTests
         var fixture = Fixture.Create(held: true);
 
         var result = await fixture.LockHandler.Handle(
-            new LockSeatsCommand(fixture.Trip.Id, ["A01"], Guid.NewGuid(), 60),
+            new LockSeatsCommand(fixture.Trip.Id, ["A01"], Guid.NewGuid(), 60, Guid.NewGuid().ToString("D")),
             CancellationToken.None);
 
         result.LockedSeats.Should().ContainSingle("A01");
@@ -254,10 +254,12 @@ public sealed class InternalTripSeatLockHandlerTests
     public async Task ReleaseSeats_SaveSucceeds_LogsRedisFailureAndStillReleasesDb()
     {
         var fixture = Fixture.Create(held: true);
+        var token = Guid.NewGuid();
+        fixture.SeatLocks.Lock(fixture.Trip.Id, "A01", token.ToString("D"));
         fixture.SeatLocks.ThrowOnRelease = true;
 
         await fixture.ReleaseHandler.Handle(
-            new ReleaseSeatsCommand(fixture.Trip.Id, Guid.NewGuid(), ["A01"]),
+            new ReleaseSeatsCommand(fixture.Trip.Id, token, ["A01"]),
             CancellationToken.None);
 
         fixture.Seats.Single().Status.Should().Be(TripSeatStatus.AVAILABLE);
@@ -282,13 +284,73 @@ public sealed class InternalTripSeatLockHandlerTests
         var fixture = Fixture.Create();
         var commands = Enumerable.Range(0, 2)
             .Select(_ => fixture.LockHandler.Handle(
-                new LockSeatsCommand(fixture.Trip.Id, ["A01"], Guid.NewGuid(), 60),
+                new LockSeatsCommand(fixture.Trip.Id, ["A01"], Guid.NewGuid(), 60, Guid.NewGuid().ToString("D")),
                 CancellationToken.None))
             .ToArray();
 
         await Task.WhenAll(commands.Select(task => task.ContinueWith(_ => { })));
 
         commands.Count(task => task.Status == TaskStatus.RanToCompletion).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task InMemoryIdempotency_StaleActorCannotCompleteNewerSameFingerprintReservation()
+    {
+        var store = new InMemorySeatLockIdempotencyStore();
+        var tripId = Guid.NewGuid();
+        var idempotencyKey = Guid.NewGuid().ToString("D");
+        var fingerprint = "seatNumbers=A01;holdOwnerId=" + Guid.NewGuid().ToString("D") + ";ttlSeconds=60";
+        var staleReservation = await store.TryReserveAsync(tripId, idempotencyKey, fingerprint, ["A01"], TimeSpan.FromMinutes(15));
+        await store.RemoveReservationAsync(tripId, idempotencyKey, staleReservation.ReservationToken!, CancellationToken.None);
+        var newerReservation = await store.TryReserveAsync(tripId, idempotencyKey, fingerprint, ["A01"], TimeSpan.FromMinutes(15));
+        var staleResult = new LockSeatsResult(Guid.NewGuid(), ["A01"], DateTimeOffset.UtcNow.AddMinutes(1));
+
+        var completed = await store.StoreCompletedAsync(
+            tripId,
+            idempotencyKey,
+            fingerprint,
+            staleReservation.ReservationToken!,
+            ["A01"],
+            staleResult,
+            TimeSpan.FromMinutes(15),
+            CancellationToken.None);
+
+        completed.Should().BeFalse();
+        (await store.GetAsync(tripId, idempotencyKey)).Should().BeEquivalentTo(new SeatLockIdempotencyEntry(
+            fingerprint,
+            ["A01"],
+            null,
+            newerReservation.ReservationToken));
+    }
+
+    [Fact]
+    public async Task InMemoryIdempotency_StaleCleanupCannotDeleteNewerCompletedReservation()
+    {
+        var store = new InMemorySeatLockIdempotencyStore();
+        var tripId = Guid.NewGuid();
+        var idempotencyKey = Guid.NewGuid().ToString("D");
+        var fingerprint = "seatNumbers=A01;holdOwnerId=" + Guid.NewGuid().ToString("D") + ";ttlSeconds=60";
+        var staleReservation = await store.TryReserveAsync(tripId, idempotencyKey, fingerprint, ["A01"], TimeSpan.FromMinutes(15));
+        await store.RemoveReservationAsync(tripId, idempotencyKey, staleReservation.ReservationToken!, CancellationToken.None);
+        var newerReservation = await store.TryReserveAsync(tripId, idempotencyKey, fingerprint, ["A01"], TimeSpan.FromMinutes(15));
+        var completedResult = new LockSeatsResult(Guid.NewGuid(), ["A01"], DateTimeOffset.UtcNow.AddMinutes(1));
+        await store.StoreCompletedAsync(
+            tripId,
+            idempotencyKey,
+            fingerprint,
+            newerReservation.ReservationToken!,
+            ["A01"],
+            completedResult,
+            TimeSpan.FromMinutes(15),
+            CancellationToken.None);
+
+        await store.RemoveReservationAsync(tripId, idempotencyKey, staleReservation.ReservationToken!, CancellationToken.None);
+
+        (await store.GetAsync(tripId, idempotencyKey)).Should().BeEquivalentTo(new SeatLockIdempotencyEntry(
+            fingerprint,
+            ["A01"],
+            completedResult,
+            newerReservation.ReservationToken));
     }
 
     private static InternalTripsController CreateController(IMediator mediator)
@@ -324,9 +386,10 @@ public sealed class InternalTripSeatLockHandlerTests
             Seats = seats;
             UnitOfWork = new StubUnitOfWork();
             SeatLocks = new InMemorySeatLockStore();
+            Idempotency = new InMemorySeatLockIdempotencyStore();
             var trips = new StubTripRepository([trip]);
             var tripSeats = new StubTripSeatRepository(seats);
-            LockHandler = new LockSeatsHandler(trips, tripSeats, SeatLocks, new StubSeatLockTtlProvider(), UnitOfWork);
+            LockHandler = new LockSeatsHandler(trips, tripSeats, SeatLocks, Idempotency, new StubSeatLockTtlProvider(), UnitOfWork);
             BookHandler = new BookSeatsHandler(trips, tripSeats, SeatLocks, UnitOfWork);
             ReleaseExpiredHandler = new ReleaseExpiredSeatLocksHandler(new StubExpiredSeatLockReleaser(tripSeats, SeatLocks, UnitOfWork));
             ReleaseHandler = new ReleaseSeatsHandler(tripSeats, SeatLocks, UnitOfWork, NullLogger<ReleaseSeatsHandler>.Instance);
@@ -336,6 +399,7 @@ public sealed class InternalTripSeatLockHandlerTests
         public List<TripSeat> Seats { get; }
         public StubUnitOfWork UnitOfWork { get; }
         public InMemorySeatLockStore SeatLocks { get; }
+        public InMemorySeatLockIdempotencyStore Idempotency { get; }
         public LockSeatsHandler LockHandler { get; }
         public BookSeatsHandler BookHandler { get; }
         public ReleaseSeatsHandler ReleaseHandler { get; }
@@ -374,6 +438,93 @@ public sealed class InternalTripSeatLockHandlerTests
     private sealed class StubSeatLockTtlProvider : ISeatLockTtlProvider
     {
         public TimeSpan DefaultTtl => TimeSpan.FromMinutes(10);
+    }
+
+    private sealed class InMemorySeatLockIdempotencyStore : ISeatLockIdempotencyStore
+    {
+        private readonly Dictionary<(Guid TripId, string Key), SeatLockIdempotencyEntry> entries = new();
+
+        public SeatLockIdempotencyEntry? CollisionEntry { get; set; }
+        public TimeSpan? LastTryReserveTtl { get; private set; }
+        public TimeSpan? LastStoreCompletedTtl { get; private set; }
+        public bool FailStoreCompleted { get; set; }
+
+        public Task<SeatLockIdempotencyEntry?> GetAsync(Guid tripId, string idempotencyKey, CancellationToken cancellationToken = default)
+        {
+            entries.TryGetValue((tripId, idempotencyKey), out var entry);
+            return Task.FromResult(entry);
+        }
+
+        public Task<SeatLockIdempotencyReservation> TryReserveAsync(
+            Guid tripId,
+            string idempotencyKey,
+            string requestFingerprint,
+            IReadOnlyCollection<string> normalizedSeatNumbers,
+            TimeSpan ttl,
+            CancellationToken cancellationToken = default)
+        {
+            LastTryReserveTtl = ttl;
+            if (CollisionEntry is { } collisionEntry)
+            {
+                entries[(tripId, idempotencyKey)] = collisionEntry;
+                CollisionEntry = null;
+                return Task.FromResult(new SeatLockIdempotencyReservation(false, null, collisionEntry));
+            }
+
+            if (entries.TryGetValue((tripId, idempotencyKey), out var current))
+            {
+                return Task.FromResult(new SeatLockIdempotencyReservation(false, null, current));
+            }
+
+            var reservationToken = Guid.NewGuid().ToString("D");
+            var entry = new SeatLockIdempotencyEntry(requestFingerprint, normalizedSeatNumbers.ToArray(), null, reservationToken);
+            entries[(tripId, idempotencyKey)] = entry;
+            return Task.FromResult(new SeatLockIdempotencyReservation(true, reservationToken, null));
+        }
+
+        public Task<bool> StoreCompletedAsync(
+            Guid tripId,
+            string idempotencyKey,
+            string requestFingerprint,
+            string expectedReservationToken,
+            IReadOnlyCollection<string> normalizedSeatNumbers,
+            LockSeatsResult result,
+            TimeSpan ttl,
+            CancellationToken cancellationToken = default)
+        {
+            LastStoreCompletedTtl = ttl;
+            if (FailStoreCompleted)
+            {
+                return Task.FromResult(false);
+            }
+
+            if (entries.TryGetValue((tripId, idempotencyKey), out var current) &&
+                string.Equals(current.RequestFingerprint, requestFingerprint, StringComparison.Ordinal) &&
+                string.Equals(current.ReservationToken, expectedReservationToken, StringComparison.Ordinal) &&
+                !current.IsCompleted)
+            {
+                entries[(tripId, idempotencyKey)] = new SeatLockIdempotencyEntry(
+                    requestFingerprint,
+                    normalizedSeatNumbers.ToArray(),
+                    result,
+                    expectedReservationToken);
+                return Task.FromResult(true);
+            }
+
+            return Task.FromResult(false);
+        }
+
+        public Task RemoveReservationAsync(Guid tripId, string idempotencyKey, string expectedReservationToken, CancellationToken cancellationToken = default)
+        {
+            if (entries.TryGetValue((tripId, idempotencyKey), out var current) &&
+                string.Equals(current.ReservationToken, expectedReservationToken, StringComparison.Ordinal) &&
+                !current.IsCompleted)
+            {
+                entries.Remove((tripId, idempotencyKey));
+            }
+
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class StubExpiredSeatLockReleaser : IExpiredSeatLockReleaser

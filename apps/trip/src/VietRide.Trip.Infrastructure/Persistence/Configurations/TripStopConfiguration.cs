@@ -24,7 +24,6 @@ internal sealed class TripStopConfiguration : IEntityTypeConfiguration<TripStop>
         builder.Property(stop => stop.ActualArrivalTime).HasColumnName("actual_arrival_time");
         builder.Property(stop => stop.Status)
             .HasColumnName("status")
-            .HasConversion<string>()
             .HasColumnType("vietride_trip.trip_stop_status")
             .HasDefaultValue(TripStopStatus.PENDING);
         builder.Property(stop => stop.AllowPickup).HasColumnName("allow_pickup");

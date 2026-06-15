@@ -20,23 +20,18 @@ builder.Host.UseSerilog((ctx, _, lc) => lc
     .WriteTo.Console());
 
 builder.Services.AddVietRideSharedWeb(builder.Configuration, ServiceName);
-builder.Services.AddVietRideDbContext<TripDbContext>(builder.Configuration);
+builder.Services.AddVietRideDbContext<TripDbContext>(
+    builder.Configuration,
+    configureDataSource: TripDbContext.ConfigurePostgresEnums);
 builder.Services.AddVietRideMediatRBehaviors(
     handlerAssemblies: [typeof(ApplicationAssemblyMarker).Assembly]);
 builder.Services.AddInfrastructure(builder.Configuration);
-builder.Services.AddVietRideIdempotency("trip");
-
 var app = builder.Build();
 
 app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseVietRideSwagger();
 app.UseAuthentication();
 app.UseAuthorization();
-if (!app.Environment.IsEnvironment("Testing"))
-{
-    app.UseVietRideIdempotency();
-}
-
 app.MapVietRideHealth(ServiceName);
 app.MapControllers();
 

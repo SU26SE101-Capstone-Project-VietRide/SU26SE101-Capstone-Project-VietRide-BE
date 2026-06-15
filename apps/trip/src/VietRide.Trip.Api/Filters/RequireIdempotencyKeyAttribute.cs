@@ -6,7 +6,7 @@ namespace VietRide.Trip.Api.Filters;
 [AttributeUsage(AttributeTargets.Method)]
 public sealed class RequireIdempotencyKeyAttribute : Attribute, IActionFilter
 {
-    private const string HeaderName = "Idempotency-Key";
+    public const string HeaderName = "Idempotency-Key";
 
     public void OnActionExecuting(ActionExecutingContext context)
     {

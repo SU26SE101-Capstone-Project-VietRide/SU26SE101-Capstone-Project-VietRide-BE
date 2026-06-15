@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.11.2
+> **Phiên bản:** 1.11.3
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-06-13
+> **Cập nhật lần cuối:** 2026-06-15
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1405,6 +1405,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 | | `RAG_ACCESS_DENIED_FOR_ROLE` | 403 | accessLevel không match role |
 | **Validation** | `VALIDATION_ERROR` | 422 | Field-level — kèm `errors` array |
 | | `IDEMPOTENCY_KEY_MISMATCH` | 422 | Same key, different body |
+| | `IDEMPOTENCY_REQUEST_PENDING` | 409 | Same key is still being processed |
 | | `INVALID_SORT_FIELD` | 400 | sortBy value not in the per-aggregate whitelist |
 | **Generic** | `RESOURCE_NOT_FOUND` | 404 | Fallback |
 | | `FORBIDDEN` | 403 | RBAC reject |
@@ -2682,6 +2683,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.11.3** | 2026-06-15 | BE lead (Vũ) | **PATCH** — Day-11 audit closeout: register `IDEMPOTENCY_REQUEST_PENDING` (HTTP 409) in §5.9 for replay-safe seat-lock idempotency when the same key is still being processed. Also backfill the cumulative Postman/local harness Day-11 real-app E2E coverage separately (`postman:day11:local`); no new event keys and no DDL change. |
 | **1.11.2** | 2026-06-13 | BE lead (Vũ) | **PATCH** — Day-11 Task 11.4 PLAN-REVIEW TTL config drift fix: add `SEAT_LOCK_TTL_MINUTES=10` to the Trip-Route-Vehicle env registry as the Trip-owned source for `SeatLock:TtlMinutes` / lock-seats `ttlSeconds` default 600s, while keeping the Booking-side line explicitly marked as client/default-only and not the Trip-owned registry. Docs-only; no code/DDL change. |
 | **1.11.1** | 2026-06-13 | BE lead (Vũ) | **PATCH** — Day-11 Task 11.2-pre SOT/contract patch: document `PATCH /v1/operator/driver-schedules/{id}/activate` as an OPERATOR_ADMIN, no-body, no-Idempotency-Key, behavior-idempotent activation endpoint covered by the existing Gateway `/v1/operator/driver-schedules` prefix; activation-only scope excludes full DriverSchedule edit/cascade. Close the Day-9 carryover by changing DriverSchedule create/activation validation from deferred to Identity logical-FK role/operator validation: `driverUserId` must be `DRIVER` under caller operator and nullable `assistantUserId` must be `ASSISTANT` under caller operator, with mismatches mapped to `422 VALIDATION_ERROR`. Clarify internal `GET /internal/v1/users/{userId}` raw success DTO `{ id, role, operatorId, status }`, Internal-JWT-only, no Gateway exposure. No new error codes, no event keys, no DDL/code change. |
 | **1.11.0** | 2026-06-12 | BE lead (Vũ) | **MINOR** — (1) **Money rounding rule change (human decision 2026-06-12):** bỏ floor về 1,000 VND — số tiền giữ đến đơn vị ĐỒNG; kết quả phép tính lẻ (giảm giá %, hoa hồng) làm tròn đến đồng gần nhất (`Money.FromDecimal`, MidpointRounding.AwayFromZero); `Money.FromRaw` pass-through. Sửa §9.5, §4.4 Money row, §3.1 tree comment, `libs/dotnet/VietRide.Shared.Kernel/ValueObjects/Money.cs` + tests. technical_context_v7 đã được patch in-place cùng đợt (10 chỗ floor-1000: dòng ~1944/2015/2991/3418/4080/4126-4153/4367/4539) + API Contract 2 chỗ (~2394/2561) — SOT hết mâu thuẫn. Không cần DB migration (BIGINT giữ nguyên). (2) **Edit-pickup policy change (Day-13 OQ2, human decision 2026-06-12):** v1 KHÔNG cho đổi điểm đón làm thay đổi giá — edit-pickup chỉ hợp lệ khi giá mới = giá cũ (fareDelta=0); mọi chênh lệch (tăng HOẶC giảm) → 409; muốn đổi giá thì hủy vé + đặt lại (loại bỏ hoàn toàn nhánh refund-on-downgrade của technical_context_v7 lines 1639-1656 — erratum, business owner override). §5.9: rename `BOOKING_EDIT_PICKUP_PRICE_INCREASE` → `BOOKING_EDIT_PICKUP_PRICE_CHANGED` (chưa có code/FE nào dùng code cũ). |

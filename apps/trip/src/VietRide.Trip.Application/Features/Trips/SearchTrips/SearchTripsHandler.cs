@@ -38,8 +38,9 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
 
     public async Task<SearchTripsResult> Handle(SearchTripsQuery request, CancellationToken cancellationToken)
     {
-        var start = new DateTimeOffset(request.DepartureDate.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(7));
-        var end = start.AddDays(1);
+        var localStart = new DateTimeOffset(request.DepartureDate.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(7));
+        var start = localStart.ToUniversalTime();
+        var end = localStart.AddDays(1).ToUniversalTime();
         var routes = routeRepository.QueryNoTracking()
             .Where(route => route.OriginStationId == request.OriginStationId
                 && route.DestinationStationId == request.DestinationStationId
@@ -54,6 +55,10 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
 
         var originStation = GetStation(request.OriginStationId);
         var destinationStation = GetStation(request.DestinationStationId);
+        if (originStation is null || destinationStation is null)
+        {
+            return SearchTripsResult.Create([], Page, PageSize, 0);
+        }
         var routeIds = routes.Keys.ToHashSet();
         var candidates = tripRepository.QueryNoTracking()
             .Where(trip => routeIds.Contains(trip.RouteId)
@@ -130,6 +135,6 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
         return names;
     }
 
-    private Station GetStation(Guid stationId) =>
-        stationRepository.QueryNoTracking().First(station => station.Id == stationId);
+    private Station? GetStation(Guid stationId) =>
+        stationRepository.QueryNoTracking().FirstOrDefault(station => station.Id == stationId);
 }

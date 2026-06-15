@@ -369,7 +369,7 @@ public sealed class TripGenerationService
     private static DateTimeOffset BuildDepartureDateTime(DateOnly date, TimeOnly time)
     {
         var localDateTime = date.ToDateTime(time);
-        return new DateTimeOffset(localDateTime, TimeSpan.FromHours(7));
+        return new DateTimeOffset(localDateTime, TimeSpan.FromHours(7)).ToUniversalTime();
     }
 
     private static HashSet<int> ParseScheduleDays(JsonElement dayOfWeek)

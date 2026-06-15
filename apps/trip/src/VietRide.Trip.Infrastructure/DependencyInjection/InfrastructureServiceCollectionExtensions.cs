@@ -60,6 +60,7 @@ public static class InfrastructureServiceCollectionExtensions
             ConnectionMultiplexer.Connect(redisOptions));
         services.AddSingleton<ISeatLockTtlProvider, SeatLockTtlProvider>();
         services.AddSingleton<ISeatLockStore, RedisSeatLockStore>();
+        services.AddSingleton<ISeatLockIdempotencyStore, RedisSeatLockIdempotencyStore>();
         services.AddScoped<IExpiredSeatLockReleaser, ExpiredSeatLockReleaser>();
 
         services.AddTripHangfire(configuration);

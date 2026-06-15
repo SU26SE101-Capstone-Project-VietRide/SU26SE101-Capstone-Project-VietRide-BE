@@ -18,10 +18,12 @@ using StackExchange.Redis;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Web.DependencyInjection;
 using VietRide.Shared.Web.Middleware;
+using VietRide.Trip.Application.Abstractions.SeatLock;
 using VietRide.Trip.Application.Features.Internal.Trips.BookSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.GetTripSnapshot;
 using VietRide.Trip.Application.Features.Internal.Trips.LockSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.ReleaseSeats;
+using VietRide.Trip.Infrastructure.SeatLock;
 
 namespace VietRide.Trip.IntegrationTests.Internal.Trips;
 
@@ -188,6 +190,166 @@ public sealed class InternalTripsEndpointTests
     }
 
     [Fact]
+    public async Task RedisSeatLockIdempotencyStore_PendingReservationBlocksConcurrentSameKeyUntilCompleted()
+    {
+        var redis = InMemoryRedisConnectionMultiplexer.Create();
+        var store = new RedisSeatLockIdempotencyStore(redis);
+        var tripId = Guid.NewGuid();
+        var idempotencyKey = Guid.NewGuid().ToString("N");
+        var fingerprint = "seatNumbers=A01;holdOwnerId=" + Guid.NewGuid().ToString("D") + ";ttlSeconds=60";
+
+        var reserved = await store.TryReserveAsync(
+            tripId,
+            idempotencyKey,
+            fingerprint,
+            ["A01"],
+            TimeSpan.FromSeconds(60));
+        var secondReserved = await store.TryReserveAsync(
+            tripId,
+            idempotencyKey,
+            fingerprint,
+            ["A01"],
+            TimeSpan.FromSeconds(60));
+        var pending = await store.GetAsync(tripId, idempotencyKey);
+        var completedResult = new LockSeatsResult(Guid.NewGuid(), ["A01"], DateTimeOffset.UtcNow.AddMinutes(1));
+
+        var completedStored = await store.StoreCompletedAsync(
+            tripId,
+            idempotencyKey,
+            fingerprint,
+            reserved.ReservationToken!,
+            ["A01"],
+            completedResult,
+            TimeSpan.FromSeconds(60));
+        var completed = await store.GetAsync(tripId, idempotencyKey);
+
+        reserved.Reserved.Should().BeTrue();
+        reserved.ReservationToken.Should().NotBeNull();
+        completedStored.Should().BeTrue();
+        secondReserved.Reserved.Should().BeFalse();
+        pending.Should().NotBeNull();
+        pending!.IsCompleted.Should().BeFalse();
+        pending.RequestFingerprint.Should().Be(fingerprint);
+        pending.ReservationToken.Should().NotBeNull();
+        completed.Should().NotBeNull();
+        completed!.IsCompleted.Should().BeTrue();
+        completed.Result.Should().BeEquivalentTo(completedResult);
+        completed.ReservationToken.Should().Be(reserved.ReservationToken);
+    }
+
+    [Fact]
+    public async Task RedisSeatLockIdempotencyStore_StoreCompletedRejectsFingerprintMismatchWithoutOverwrite()
+    {
+        var redis = InMemoryRedisConnectionMultiplexer.Create();
+        var store = new RedisSeatLockIdempotencyStore(redis);
+        var tripId = Guid.NewGuid();
+        var idempotencyKey = Guid.NewGuid().ToString("N");
+        var originalFingerprint = "seatNumbers=A01;holdOwnerId=" + Guid.NewGuid().ToString("D") + ";ttlSeconds=60";
+        var newerFingerprint = "seatNumbers=A02;holdOwnerId=" + Guid.NewGuid().ToString("D") + ";ttlSeconds=60";
+        var reservation = await store.TryReserveAsync(tripId, idempotencyKey, originalFingerprint, ["A01"], TimeSpan.FromMinutes(15));
+        var original = await store.GetAsync(tripId, idempotencyKey);
+        var completedResult = new LockSeatsResult(Guid.NewGuid(), ["A02"], DateTimeOffset.UtcNow.AddMinutes(1));
+
+        var completedStored = await store.StoreCompletedAsync(
+            tripId,
+            idempotencyKey,
+            newerFingerprint,
+            reservation.ReservationToken!,
+            ["A02"],
+            completedResult,
+            TimeSpan.FromMinutes(15));
+        var current = await store.GetAsync(tripId, idempotencyKey);
+
+        completedStored.Should().BeFalse();
+        current.Should().BeEquivalentTo(original);
+        current.Should().NotBeNull();
+        current!.IsCompleted.Should().BeFalse();
+        current.RequestFingerprint.Should().Be(originalFingerprint);
+        current.ReservationToken.Should().Be(reservation.ReservationToken);
+    }
+
+    [Fact]
+    public async Task RedisSeatLockIdempotencyStore_StaleTokenCannotCompleteNewerSameFingerprintReservation()
+    {
+        var redis = InMemoryRedisConnectionMultiplexer.Create();
+        var store = new RedisSeatLockIdempotencyStore(redis);
+        var tripId = Guid.NewGuid();
+        var idempotencyKey = Guid.NewGuid().ToString("N");
+        var fingerprint = "seatNumbers=A01;holdOwnerId=" + Guid.NewGuid().ToString("D") + ";ttlSeconds=60";
+        var staleReservation = await store.TryReserveAsync(tripId, idempotencyKey, fingerprint, ["A01"], TimeSpan.FromMinutes(15));
+        await store.RemoveReservationAsync(tripId, idempotencyKey, staleReservation.ReservationToken!, CancellationToken.None);
+        var newerReservation = await store.TryReserveAsync(tripId, idempotencyKey, fingerprint, ["A01"], TimeSpan.FromMinutes(15));
+        var staleResult = new LockSeatsResult(Guid.NewGuid(), ["A01"], DateTimeOffset.UtcNow.AddMinutes(1));
+
+        var completed = await store.StoreCompletedAsync(
+            tripId,
+            idempotencyKey,
+            fingerprint,
+            staleReservation.ReservationToken!,
+            ["A01"],
+            staleResult,
+            TimeSpan.FromMinutes(15));
+        var current = await store.GetAsync(tripId, idempotencyKey);
+
+        completed.Should().BeFalse();
+        current.Should().NotBeNull();
+        current!.IsCompleted.Should().BeFalse();
+        current.RequestFingerprint.Should().Be(fingerprint);
+        current.ReservationToken.Should().Be(newerReservation.ReservationToken);
+    }
+
+    [Fact]
+    public async Task RedisSeatLockIdempotencyStore_StaleCleanupDoesNotDeleteNewerReservedEntry()
+    {
+        var redis = InMemoryRedisConnectionMultiplexer.Create();
+        var store = new RedisSeatLockIdempotencyStore(redis);
+        var tripId = Guid.NewGuid();
+        var idempotencyKey = Guid.NewGuid().ToString("N");
+        var fingerprint = "seatNumbers=A01;holdOwnerId=" + Guid.NewGuid().ToString("D") + ";ttlSeconds=60";
+        var staleReservation = await store.TryReserveAsync(tripId, idempotencyKey, fingerprint, ["A01"], TimeSpan.FromMinutes(15));
+        await store.RemoveReservationAsync(tripId, idempotencyKey, staleReservation.ReservationToken!, CancellationToken.None);
+        var newerReservation = await store.TryReserveAsync(tripId, idempotencyKey, fingerprint, ["A01"], TimeSpan.FromMinutes(15));
+
+        await store.RemoveReservationAsync(tripId, idempotencyKey, staleReservation.ReservationToken!, CancellationToken.None);
+        var current = await store.GetAsync(tripId, idempotencyKey);
+
+        current.Should().NotBeNull();
+        current!.IsCompleted.Should().BeFalse();
+        current.RequestFingerprint.Should().Be(fingerprint);
+        current.ReservationToken.Should().Be(newerReservation.ReservationToken);
+    }
+
+    [Fact]
+    public async Task RedisSeatLockIdempotencyStore_StaleCleanupDoesNotDeleteNewerCompletedEntry()
+    {
+        var redis = InMemoryRedisConnectionMultiplexer.Create();
+        var store = new RedisSeatLockIdempotencyStore(redis);
+        var tripId = Guid.NewGuid();
+        var idempotencyKey = Guid.NewGuid().ToString("N");
+        var fingerprint = "seatNumbers=A01;holdOwnerId=" + Guid.NewGuid().ToString("D") + ";ttlSeconds=60";
+        var staleReservation = await store.TryReserveAsync(tripId, idempotencyKey, fingerprint, ["A01"], TimeSpan.FromMinutes(15));
+        await store.RemoveReservationAsync(tripId, idempotencyKey, staleReservation.ReservationToken!, CancellationToken.None);
+        var newerReservation = await store.TryReserveAsync(tripId, idempotencyKey, fingerprint, ["A01"], TimeSpan.FromMinutes(15));
+        var completedResult = new LockSeatsResult(Guid.NewGuid(), ["A01"], DateTimeOffset.UtcNow.AddMinutes(1));
+        await store.StoreCompletedAsync(
+            tripId,
+            idempotencyKey,
+            fingerprint,
+            newerReservation.ReservationToken!,
+            ["A01"],
+            completedResult,
+            TimeSpan.FromMinutes(15));
+
+        await store.RemoveReservationAsync(tripId, idempotencyKey, staleReservation.ReservationToken!, CancellationToken.None);
+
+        var current = await store.GetAsync(tripId, idempotencyKey);
+        current.Should().NotBeNull();
+        current!.IsCompleted.Should().BeTrue();
+        current.Result.Should().BeEquivalentTo(completedResult);
+        current.ReservationToken.Should().Be(newerReservation.ReservationToken);
+    }
+
+    [Fact]
     public async Task ReleaseSeats_Happy_Returns204()
     {
         var tripId = Guid.NewGuid();
@@ -345,7 +507,7 @@ public sealed class InternalTripsEndpointTests
             Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", "Testing");
             Environment.SetEnvironmentVariable("INTERNAL_JWT_SECRET", InternalTripsWebApplicationFactory.TestSecret);
             builder.UseSetting("INTERNAL_JWT_SECRET", InternalTripsWebApplicationFactory.TestSecret);
-            builder.UseSetting("ConnectionStrings:Default", "Host=localhost;Port=5432;Database=test;Username=postgres;Password=postgres");
+            builder.UseSetting("ConnectionStrings:Default", "Host=localhost;Port=5432;Database=test;Username=vietride;Password=vietride_dev");
             builder.UseEnvironment("Testing");
             builder.ConfigureTestServices(services =>
             {
@@ -398,12 +560,13 @@ public sealed class InternalTripsEndpointTests
             {
                 nameof(IDatabase.StringGetAsync) => Task.FromResult(InMemoryRedisConnectionMultiplexer.Store.TryGetValue(Key(args![0]!), out var value) ? value : RedisValue.Null),
                 nameof(IDatabase.StringGet) => InMemoryRedisConnectionMultiplexer.Store.TryGetValue(Key(args![0]!), out var syncValue) ? syncValue : RedisValue.Null,
-                nameof(IDatabase.StringSetAsync) => Task.FromResult(Set(Key(args![0]!), (RedisValue)args![1]!, (When)args![3]!)),
-                nameof(IDatabase.StringSet) => Set(Key(args![0]!), (RedisValue)args![1]!, (When)args![3]!),
+                nameof(IDatabase.StringSetAsync) => Task.FromResult(Set(Key(args![0]!), (RedisValue)args![1]!, (TimeSpan?)args![2], (When)args![3]!)),
+                nameof(IDatabase.StringSet) => Set(Key(args![0]!), (RedisValue)args![1]!, (TimeSpan?)args![2], (When)args![3]!),
                 nameof(IDatabase.KeyExistsAsync) => Task.FromResult(InMemoryRedisConnectionMultiplexer.Store.ContainsKey(Key(args![0]!))),
                 nameof(IDatabase.KeyExists) => InMemoryRedisConnectionMultiplexer.Store.ContainsKey(Key(args![0]!)),
                 nameof(IDatabase.KeyDeleteAsync) => Task.FromResult(Delete(Key(args![0]!))),
                 nameof(IDatabase.KeyDelete) => Delete(Key(args![0]!)),
+                nameof(IDatabase.ScriptEvaluateAsync) => Task.FromResult(Complete((RedisKey[])args![1]!, (RedisValue[])args![2]!)),
                 _ => targetMethod.ReturnType == typeof(void)
                     ? null
                     : targetMethod.ReturnType.IsValueType
@@ -414,7 +577,7 @@ public sealed class InternalTripsEndpointTests
 
         private static string Key(object key) => key.ToString() ?? string.Empty;
 
-        private static bool Set(string key, RedisValue value, When when)
+        private static bool Set(string key, RedisValue value, TimeSpan? expiry, When when)
         {
             if (when == When.NotExists && InMemoryRedisConnectionMultiplexer.Store.ContainsKey(key))
             {
@@ -423,6 +586,42 @@ public sealed class InternalTripsEndpointTests
 
             InMemoryRedisConnectionMultiplexer.Store[key] = value;
             return true;
+        }
+
+        private static RedisResult Complete(RedisKey[] keys, RedisValue[] values)
+        {
+            var key = Key(keys[0]);
+            if (!InMemoryRedisConnectionMultiplexer.Store.TryGetValue(key, out var current))
+            {
+                return RedisResult.Create((RedisValue)0);
+            }
+
+            var currentEntry = JsonSerializer.Deserialize<SeatLockIdempotencyEntry>(
+                current!,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+            if (values.Length == 1)
+            {
+                var expectedReservationToken = values[0].ToString();
+                if (currentEntry.IsCompleted || !string.Equals(currentEntry.ReservationToken, expectedReservationToken, StringComparison.Ordinal))
+                {
+                    return RedisResult.Create((RedisValue)0);
+                }
+
+                InMemoryRedisConnectionMultiplexer.Store.Remove(key);
+                return RedisResult.Create((RedisValue)1);
+            }
+
+            var requestFingerprint = values[0].ToString();
+            var reservationToken = values[1].ToString();
+            if (!string.Equals(currentEntry.RequestFingerprint, requestFingerprint, StringComparison.Ordinal) ||
+                !string.Equals(currentEntry.ReservationToken, reservationToken, StringComparison.Ordinal) ||
+                currentEntry.IsCompleted)
+            {
+                return RedisResult.Create((RedisValue)0);
+            }
+
+            InMemoryRedisConnectionMultiplexer.Store[key] = values[2];
+            return RedisResult.Create((RedisValue)1);
         }
 
         private static long Delete(string key) => InMemoryRedisConnectionMultiplexer.Store.Remove(key) ? 1L : 0L;

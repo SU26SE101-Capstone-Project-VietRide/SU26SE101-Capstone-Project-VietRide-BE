@@ -21,7 +21,6 @@ internal sealed class TripGenerationSkipLogConfiguration : IEntityTypeConfigurat
         builder.Property(log => log.SkippedDate).HasColumnName("skipped_date");
         builder.Property(log => log.Reason)
             .HasColumnName("reason")
-            .HasConversion<string>()
             .HasColumnType("vietride_trip.trip_generation_skip_reason");
         builder.Property(log => log.Message).HasColumnName("message");
         builder.Property(log => log.CreatedAt)
