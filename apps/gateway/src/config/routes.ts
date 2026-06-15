@@ -27,6 +27,8 @@ export interface ProxyRoute {
   stripPrefix?: boolean;
   /** Rewrite the matched prefix to a different path before forwarding (e.g., /v1/identity/health → /health). */
   rewriteTo?: string;
+  /** Prepend a string to the final upstream path (e.g., '/api'). */
+  prependPrefix?: string;
 }
 
 /**
@@ -219,8 +221,8 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     },
 
     // NestJS services
-    { prefix: '/v1/notifications', target: env.NOTIFICATION_BASE_URL, authRequired: 'user' },
-    { prefix: '/v1/rag', target: env.RAG_BASE_URL, authRequired: 'user' },
+    { prefix: '/v1/notifications', target: env.NOTIFICATION_BASE_URL, authRequired: 'user', prependPrefix: '/api' },
+    { prefix: '/v1/rag', target: env.RAG_BASE_URL, authRequired: 'user', prependPrefix: '/api' },
 
     // Swagger Specs Proxy
     {
