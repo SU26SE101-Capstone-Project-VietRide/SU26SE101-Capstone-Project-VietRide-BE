@@ -6,6 +6,7 @@ import type { StorageProvider } from '../providers/storage.provider';
 import { IngestIdempotencyService } from './ingest-idempotency.service';
 import { IngestRepository } from './ingest.repository';
 import { IngestService } from './ingest.service';
+import type { RagIngestOutboxEvent } from './ingest.types';
 
 const DOCUMENT_ID = '33333333-3333-3333-3333-333333333333';
 const EVENT_ID = '44444444-4444-4444-4444-444444444444';
@@ -24,6 +25,7 @@ describe('IngestService', () => {
       markEventPublishing: jest.fn(),
       markEventPublished: jest.fn(),
       markEventFailed: jest.fn(),
+      markEventDiscarded: jest.fn(),
       findDocumentForIngest: jest.fn(),
       markDocumentProcessing: jest.fn(),
       replaceChunksAndComplete: jest.fn(),
@@ -111,6 +113,37 @@ describe('IngestService', () => {
 
     expect(repository.markEventPublished).toHaveBeenCalledWith(EVENT_ID);
   });
+
+  it('discards malformed outbox event payload without retrying', async () => {
+    repository.markEventPublishing.mockResolvedValue(true);
+
+    await expect(service.processEvent(makeOutboxEvent({ payload: { bad: true } }))).resolves.toBe(false);
+
+    expect(repository.markEventDiscarded).toHaveBeenCalledWith(EVENT_ID, expect.any(Error));
+    expect(repository.markEventFailed).not.toHaveBeenCalled();
+  });
+
+  it('discards outbox event when document ingest reaches max retry', async () => {
+    const ingestError = new Error('provider unavailable');
+    repository.markEventPublishing.mockResolvedValue(true);
+    jest.spyOn(service, 'processDocument').mockRejectedValueOnce(ingestError);
+
+    await expect(service.processEvent(makeOutboxEvent({ retryCount: 4 }))).resolves.toBe(false);
+
+    expect(repository.markEventDiscarded).toHaveBeenCalledWith(EVENT_ID, ingestError);
+    expect(repository.markEventFailed).not.toHaveBeenCalled();
+  });
+
+  it('marks outbox event failed when document ingest can still retry', async () => {
+    const ingestError = new Error('provider unavailable');
+    repository.markEventPublishing.mockResolvedValue(true);
+    jest.spyOn(service, 'processDocument').mockRejectedValueOnce(ingestError);
+
+    await expect(service.processEvent(makeOutboxEvent({ retryCount: 3 }))).resolves.toBe(false);
+
+    expect(repository.markEventFailed).toHaveBeenCalledWith(EVENT_ID, ingestError);
+    expect(repository.markEventDiscarded).not.toHaveBeenCalled();
+  });
 });
 
 function makeEnv(): Env {
@@ -195,7 +228,11 @@ export function makeDocument(overrides: Partial<KnowledgeDocument> = {}): Knowle
   };
 }
 
-export function makeOutboxEvent() {
+export function makeOutboxEvent(overrides: Partial<RagIngestOutboxEvent> = {}): RagIngestOutboxEvent {
+  return { ...makeOutboxEventBase(), ...overrides };
+}
+
+function makeOutboxEventBase(): RagIngestOutboxEvent {
   return {
     id: EVENT_ID,
     eventType: 'rag.document.ingest_requested',
@@ -211,5 +248,5 @@ export function makeOutboxEvent() {
     lastError: null,
     createdAt: new Date('2026-06-13T00:00:00.000Z'),
     publishedAt: null,
-  } as const;
+  };
 }

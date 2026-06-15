@@ -13,6 +13,7 @@ import { ChatRepository } from './chat.repository';
 import { ChatRerankService } from './chat-rerank.service';
 import { ChatService } from './chat.service';
 import { ChatSummaryService } from './chat-summary.service';
+import type { RagRetrievedChunk } from './chat.types';
 
 const USER_ID = '11111111-1111-1111-1111-111111111111';
 const OPERATOR_ID = '22222222-2222-2222-2222-222222222222';
@@ -20,6 +21,7 @@ const CONVERSATION_ID = '33333333-3333-3333-3333-333333333333';
 const USER_MESSAGE_ID = '44444444-4444-4444-4444-444444444444';
 const ASSISTANT_MESSAGE_ID = '55555555-5555-5555-5555-555555555555';
 const CHUNK_ID = '66666666-6666-6666-6666-666666666666';
+const SECOND_CHUNK_ID = '99999999-9999-9999-9999-999999999999';
 
 describe('ChatService', () => {
   let service: ChatService;
@@ -333,6 +335,41 @@ describe('ChatService', () => {
     );
   });
 
+  it('cites only chunks included in the provider context budget', async () => {
+    service = new ChatService(
+      repository,
+      embeddingCache,
+      rateLimit,
+      intentService,
+      queryRewriteService,
+      summaryService,
+      rerankService,
+      chatProvider,
+      embeddingProvider,
+      makeEnv({ RAG_MAX_CONTEXT_TOKENS: 15 }),
+      runtimeConfig,
+    );
+    repository.searchChunks.mockResolvedValue([
+      makeChunk({ id: CHUNK_ID, tokenCount: 10 }),
+      makeChunk({ id: SECOND_CHUNK_ID, tokenCount: 10 }),
+    ]);
+
+    const prepared = await service.prepareChat(
+      { message: 'Tôi cần hỗ trợ' },
+      { sub: USER_ID, role: 'PASSENGER' },
+    );
+    for await (const unused of service.streamPrepared(prepared)) {
+      void unused;
+    }
+
+    expect(prepared.chunks.map((chunk) => chunk.id)).toEqual([CHUNK_ID]);
+    expect(repository.createAssistantMessage).toHaveBeenCalledWith(
+      CONVERSATION_ID,
+      'Xin chào',
+      [CHUNK_ID],
+    );
+  });
+
   it('emits an SSE error event when provider stream fails', async () => {
     chatProvider.stream.mockReturnValue(makeFailingStream());
     const prepared = await service.prepareChat(
@@ -432,7 +469,11 @@ function makeMessage(role: 'USER' | 'ASSISTANT', content: string): RagMessage {
   };
 }
 
-function makeChunk() {
+function makeChunk(overrides: Partial<RagRetrievedChunk> = {}): RagRetrievedChunk {
+  return { ...makeChunkBase(), ...overrides };
+}
+
+function makeChunkBase(): RagRetrievedChunk {
   return {
     id: CHUNK_ID,
     documentId: '77777777-7777-7777-7777-777777777777',
@@ -444,7 +485,7 @@ function makeChunk() {
     accessLevel: 'PUBLIC',
     operatorId: null,
     distance: 0.1,
-  } as const;
+  };
 }
 
 async function* makeTokenStream(tokens: string[]): AsyncIterable<string> {
@@ -467,4 +508,3 @@ function makeFailingStream(): AsyncIterable<string> {
     },
   };
 }
-

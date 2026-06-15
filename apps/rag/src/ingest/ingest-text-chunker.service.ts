@@ -81,6 +81,7 @@ function pushSection(
 }
 
 function tokenize(content: string): string[] {
+  // MVP trade-off: this is whitespace word count, not the provider's real tokenizer.
   return content.split(/\s+/).filter((token) => token.length > 0);
 }
 

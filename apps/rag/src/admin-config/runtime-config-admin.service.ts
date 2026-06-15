@@ -1,6 +1,5 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import type { RagInternalUser } from '../auth/rag-internal-user.types';
-import { RAG_RUNTIME_CONFIG_DEFINITION_BY_KEY, type RuntimeConfigKey } from '../config/runtime-config.registry';
 import { RuntimeConfigService } from '../config/runtime-config.service';
 import type { RollbackRuntimeConfigDto, UpdateRuntimeConfigDto } from './dto/runtime-config.dto';
 
@@ -20,9 +19,14 @@ export class RuntimeConfigAdminService {
     return this.runtimeConfig.getDetail(key);
   }
 
+  async reload(user: RagInternalUser | undefined) {
+    this.assertSystemAdmin(user);
+    await this.runtimeConfig.reload();
+    return { reloaded: true };
+  }
+
   async update(key: string, dto: UpdateRuntimeConfigDto, user: RagInternalUser | undefined) {
     this.assertSystemAdmin(user);
-    this.assertAdminEditable(key);
     return this.runtimeConfig.update({
       key,
       value: dto.value,
@@ -38,7 +42,6 @@ export class RuntimeConfigAdminService {
 
   async rollback(key: string, dto: RollbackRuntimeConfigDto, user: RagInternalUser | undefined) {
     this.assertSystemAdmin(user);
-    this.assertAdminEditable(key);
     return this.runtimeConfig.rollback({
       key,
       historyId: dto.historyId,
@@ -51,16 +54,6 @@ export class RuntimeConfigAdminService {
       throw new ForbiddenException({
         errorCode: 'INSUFFICIENT_ROLE',
         detail: 'SYSTEM_ADMIN role is required',
-      });
-    }
-  }
-
-  private assertAdminEditable(key: string): void {
-    const definition = RAG_RUNTIME_CONFIG_DEFINITION_BY_KEY.get(key as RuntimeConfigKey);
-    if (definition && definition.editableGroup !== 'admin') {
-      throw new ForbiddenException({
-        errorCode: 'RUNTIME_CONFIG_ADMIN_EDIT_FORBIDDEN',
-        detail: `Runtime config ${key} is not editable from the admin UX surface`,
       });
     }
   }

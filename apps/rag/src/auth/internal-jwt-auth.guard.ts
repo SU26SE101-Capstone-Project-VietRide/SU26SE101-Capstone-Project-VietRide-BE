@@ -27,6 +27,7 @@ export class InternalJwtAuthGuard implements CanActivate {
       const result = await jwtVerify(token, new TextEncoder().encode(this.env.INTERNAL_JWT_SECRET), {
         issuer: INTERNAL_JWT_ISSUER,
         audience: INTERNAL_JWT_AUDIENCE,
+        algorithms: ['HS256'],
       });
       const sub = this.readStringClaim(result.payload.sub);
       if (!sub) {

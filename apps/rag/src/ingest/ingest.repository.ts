@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { RagPrismaService } from '../prisma/rag-prisma.service';
 import { RAG_DOCUMENT_INGEST_REQUESTED_EVENT } from '../documents/documents.constants';
-import { RAG_INGEST_MAX_ERROR_LENGTH } from './ingest.constants';
+import { RAG_INGEST_MAX_ERROR_LENGTH, RAG_INGEST_MAX_RETRY } from './ingest.constants';
 import type { RagIngestChunk, RagIngestDocument, RagIngestOutboxEvent } from './ingest.types';
 
 @Injectable()
@@ -14,6 +14,9 @@ export class IngestRepository {
         eventType: RAG_DOCUMENT_INGEST_REQUESTED_EVENT,
         status: {
           in: ['PENDING', 'FAILED'],
+        },
+        retryCount: {
+          lt: RAG_INGEST_MAX_RETRY,
         },
       },
       orderBy: {
@@ -30,6 +33,9 @@ export class IngestRepository {
         eventType: RAG_DOCUMENT_INGEST_REQUESTED_EVENT,
         status: {
           in: ['PENDING', 'FAILED'],
+        },
+        retryCount: {
+          lt: RAG_INGEST_MAX_RETRY,
         },
       },
       data: {
@@ -57,6 +63,19 @@ export class IngestRepository {
       where: { id: eventId },
       data: {
         status: 'FAILED',
+        retryCount: {
+          increment: 1,
+        },
+        lastError: this.formatError(error),
+      },
+    });
+  }
+
+  async markEventDiscarded(eventId: string, error: unknown): Promise<void> {
+    await this.prisma.outboxEvent.update({
+      where: { id: eventId },
+      data: {
+        status: 'DISCARDED',
         retryCount: {
           increment: 1,
         },

@@ -25,6 +25,7 @@ describe('RuntimeConfigAdminController (e2e)', () => {
       update: jest.fn(),
       getDetail: jest.fn(),
       rollback: jest.fn(),
+      reload: jest.fn(),
     } as unknown as jest.Mocked<RuntimeConfigService>;
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -51,7 +52,14 @@ describe('RuntimeConfigAdminController (e2e)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     runtimeConfig.list.mockResolvedValue([makeConfigItem()]);
-    runtimeConfig.update.mockResolvedValue(makeConfigItem({ value: 'Updated refusal' }));
+    runtimeConfig.update.mockImplementation(async (input) =>
+      makeConfigItem({
+        key: input.key,
+        value: input.value as RuntimeConfigItem['value'],
+        updatedByUserId: input.updatedByUserId,
+      }),
+    );
+    runtimeConfig.reload.mockResolvedValue(undefined);
   });
 
   it('GET /api/v1/admin/rag-config returns config list for SYSTEM_ADMIN', async () => {
@@ -110,20 +118,48 @@ describe('RuntimeConfigAdminController (e2e)', () => {
     );
   });
 
-  it('PATCH /api/v1/admin/rag-config/:key returns 403 for AI ops config keys', async () => {
+  it('PATCH /api/v1/admin/rag-config/:key updates prompt config for SYSTEM_ADMIN', async () => {
     const response = await fetch(`${baseUrl}/api/v1/admin/rag-config/chat.system_prompt`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
         'X-Internal-Auth': await signInternalJwt(ADMIN_USER_ID, 'SYSTEM_ADMIN'),
       },
-      body: JSON.stringify({ value: 'System prompt update is not for admin UX.' }),
+      body: JSON.stringify({ value: 'Updated system prompt with {conversation_summary} and {retrieved_context}.' }),
+    });
+    const body = (await response.json()) as RuntimeConfigItem;
+
+    expect(response.status).toBe(200);
+    expect(body.key).toBe('chat.system_prompt');
+    expect(runtimeConfig.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: 'chat.system_prompt',
+        value: 'Updated system prompt with {conversation_summary} and {retrieved_context}.',
+        updatedByUserId: ADMIN_USER_ID,
+      }),
+    );
+  });
+
+  it('POST /api/v1/admin/rag-config/reload reloads config cache for SYSTEM_ADMIN', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/admin/rag-config/reload`, {
+      method: 'POST',
+      headers: { 'X-Internal-Auth': await signInternalJwt(ADMIN_USER_ID, 'SYSTEM_ADMIN') },
+    });
+    const body = (await response.json()) as { reloaded?: boolean };
+
+    expect(response.status).toBe(201);
+    expect(body.reloaded).toBe(true);
+    expect(runtimeConfig.reload).toHaveBeenCalled();
+  });
+
+  it('POST /api/v1/admin/rag-config/reload returns 403 for non-admin caller', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/admin/rag-config/reload`, {
+      method: 'POST',
+      headers: { 'X-Internal-Auth': await signInternalJwt(PASSENGER_USER_ID, 'PASSENGER') },
     });
 
     expect(response.status).toBe(403);
-    expect(runtimeConfig.update).not.toHaveBeenCalledWith(
-      expect.objectContaining({ key: 'chat.system_prompt' }),
-    );
+    expect(runtimeConfig.reload).not.toHaveBeenCalled();
   });
 });
 

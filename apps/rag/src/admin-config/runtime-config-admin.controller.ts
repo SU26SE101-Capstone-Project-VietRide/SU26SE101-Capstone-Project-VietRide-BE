@@ -29,6 +29,15 @@ export class RuntimeConfigAdminController {
     return this.adminService.list(req.user);
   }
 
+  @Post('reload')
+  @ApiOperation({ summary: 'Reload RAG runtime config cache manually' })
+  @ApiResponse({ status: 201, description: 'Runtime config cache reloaded' })
+  @ApiResponse({ status: 401, description: 'Missing or invalid internal JWT' })
+  @ApiResponse({ status: 403, description: 'SYSTEM_ADMIN role is required' })
+  async reload(@Req() req: RequestWithRagInternalUser) {
+    return this.adminService.reload(req.user);
+  }
+
   @Get(':key')
   @ApiOperation({ summary: 'Get one RAG runtime config key with history' })
   @ApiParam({ name: 'key', description: 'Runtime config key' })

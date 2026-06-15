@@ -33,6 +33,8 @@ const logger = pino({ name: 'RuntimeConfigService' });
 
 @Injectable()
 export class RuntimeConfigService implements OnModuleInit {
+  // Capstone deployment is single-replica, so update() refreshes this in-process cache immediately.
+  // In multi-replica production, publish a Redis pub/sub event here and call reload() on subscribers.
   private cache = new Map<RuntimeConfigKey, RuntimeConfigValue>();
   private loaded = false;
 

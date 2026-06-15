@@ -5,6 +5,11 @@ import type { RagInternalUser } from '../auth/rag-internal-user.types';
 import type { Env } from '../config/env.schema';
 
 const RATE_LIMIT_WINDOW_SECONDS = 60 * 60;
+const RATE_LIMIT_INCREMENT_SCRIPT = [
+  "local count = redis.call('INCR', KEYS[1])",
+  "if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end",
+  'return count',
+].join('\n');
 const OPERATOR_SCOPED_ROLES = new Set([
   'DRIVER',
   'ASSISTANT',
@@ -37,10 +42,8 @@ export class ChatRateLimitService {
 
   private async incrementWindow(key: string): Promise<number> {
     const client = this.redis.getClient();
-    const count = await client.incr(key);
-    if (count === 1) {
-      await client.expire(key, RATE_LIMIT_WINDOW_SECONDS);
-    }
+    const rawCount = await client.eval(RATE_LIMIT_INCREMENT_SCRIPT, 1, key, RATE_LIMIT_WINDOW_SECONDS);
+    const count = Number(rawCount);
     return count;
   }
 

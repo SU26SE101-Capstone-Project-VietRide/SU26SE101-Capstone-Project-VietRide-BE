@@ -1,5 +1,5 @@
 import { Body, Controller, Post, Req, Res, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiHeader, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ZodValidationPipe } from '@vietride/nest-common';
 import type { Response } from 'express';
 import { InternalJwtAuthGuard } from '../auth/internal-jwt-auth.guard';
@@ -13,8 +13,15 @@ import { ChatService } from './chat.service';
 import type { RagChatSseEvent } from './chat.types';
 import { CreateChatDto, CreateChatSchema } from './dto/create-chat.dto';
 
+const RAG_CHAT_SWAGGER_MAX_MESSAGE_CHARS = 500;
+
 @ApiTags('RAG Chat')
 @ApiBearerAuth()
+@ApiHeader({
+  name: 'X-Internal-Auth',
+  description: 'Internal Gateway JWT header. Format: Bearer <token>.',
+  required: true,
+})
 @UseGuards(InternalJwtAuthGuard)
 @Controller('v1/rag/chat')
 export class ChatController {
@@ -28,7 +35,7 @@ export class ChatController {
       required: ['message'],
       properties: {
         conversationId: { type: 'string', format: 'uuid' },
-        message: { type: 'string', minLength: 1, maxLength: 4000 },
+        message: { type: 'string', minLength: 1, maxLength: RAG_CHAT_SWAGGER_MAX_MESSAGE_CHARS },
       },
     },
   })

@@ -84,7 +84,8 @@ CREATE TYPE outbox_event_status AS ENUM (
     'PENDING',
     'PUBLISHING',
     'PUBLISHED',
-    'FAILED'
+    'FAILED',
+    'DISCARDED'
 );
 
 -- =============================================================================

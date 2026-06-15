@@ -100,6 +100,7 @@ enum OutboxEventStatus {
   PUBLISHING
   PUBLISHED
   FAILED
+  DISCARDED
 
   @@map("outbox_event_status")
   @@schema("vietride_rag")

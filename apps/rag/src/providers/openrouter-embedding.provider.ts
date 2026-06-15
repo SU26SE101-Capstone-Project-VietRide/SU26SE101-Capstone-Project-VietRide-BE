@@ -51,7 +51,7 @@ export class OpenRouterEmbeddingProvider implements EmbeddingProvider {
       this.recordSuccess();
       const body = (await response.json()) as OpenRouterEmbeddingResponse;
       const embedding = body.data?.[0]?.embedding;
-      if (!embedding?.length || embedding.some((value) => typeof value !== 'number')) {
+      if (!embedding?.length || embedding.some((value) => !Number.isFinite(value))) {
         this.recordFailure(502);
         throw new ServiceUnavailableException({
           errorCode: 'RAG_PROVIDER_INVALID_RESPONSE',

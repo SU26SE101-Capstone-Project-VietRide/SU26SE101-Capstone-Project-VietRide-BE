@@ -98,12 +98,13 @@ export class ChatService {
     const chunks = this.env.RERANK_ENABLED
       ? await this.rerankService.rerank(retrievalQuery, retrievedChunks, runtimeConfig)
       : retrievedChunks;
-    const messages = this.buildProviderMessages(dto.message, history, chunks, conversation.summary, runtimeConfig);
+    const contextChunks = this.selectContextChunks(chunks);
+    const messages = this.buildProviderMessages(dto.message, history, contextChunks, conversation.summary, runtimeConfig);
     const stream = this.chatProvider.stream({ messages, stream: true });
     return {
       conversation,
       userMessage,
-      chunks,
+      chunks: contextChunks,
       stream,
       shouldSummarize: this.env.SUMMARIZE_ENABLED,
       runtimeConfig,
@@ -269,6 +270,7 @@ export class ChatService {
     summary: string | null,
     runtimeConfig: RuntimeConfigSnapshot,
   ): string {
+    // Retrieved context stays in the prompt for MVP; system prompt instructs the model to treat it as untrusted.
     return runtimeConfig
       .getString(RAG_RUNTIME_CONFIG_KEYS.chatSystemPrompt)
       .replaceAll(
@@ -287,21 +289,29 @@ export class ChatService {
       return runtimeConfig.getString(RAG_RUNTIME_CONFIG_KEYS.chatNoContextText);
     }
 
+    return chunks
+      .map((chunk) =>
+        [
+          `[chunk:${chunk.id}]`,
+          `documentTitle: ${chunk.documentTitle}`,
+          `sectionHeader: ${chunk.sectionHeader ?? ''}`,
+          `documentType: ${chunk.documentType}`,
+          chunk.content,
+        ].join('\n'),
+      )
+      .join('\n\n');
+  }
+
+  private selectContextChunks(chunks: RagRetrievedChunk[]): RagRetrievedChunk[] {
+    // tokenCount is currently an ingest-time whitespace word count; keep this budget conservative.
     let totalTokens = 0;
-    const blocks: string[] = [];
+    const selected: RagRetrievedChunk[] = [];
     for (const chunk of chunks) {
       if (totalTokens + chunk.tokenCount > this.env.RAG_MAX_CONTEXT_TOKENS) break;
-      const block = [
-        `[chunk:${chunk.id}]`,
-        `documentTitle: ${chunk.documentTitle}`,
-        `sectionHeader: ${chunk.sectionHeader ?? ''}`,
-        `documentType: ${chunk.documentType}`,
-        chunk.content,
-      ].join('\n');
       totalTokens += chunk.tokenCount;
-      blocks.push(block);
+      selected.push(chunk);
     }
-    return blocks.join('\n\n');
+    return selected;
   }
 
   private toSafeErrorLog(error: unknown): { name: string; status?: number } {

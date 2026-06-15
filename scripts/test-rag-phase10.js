@@ -25,6 +25,7 @@ async function main() {
   });
 
   await testListHappyPath(adminAuth);
+  await testReloadHappyPath(adminAuth);
   await testAuthFail();
   await testRoleFail(passengerAuth);
   await testValidationFail(adminAuth);
@@ -43,6 +44,18 @@ async function testListHappyPath(adminAuth) {
   assert(data.some((item) => item.key === 'chat.system_prompt'), 'config list missing chat.system_prompt');
   assert(data.some((item) => item.key === 'intent.off_topic_refusal'), 'config list missing intent.off_topic_refusal');
   pass('config list returned runtime config keys.');
+}
+
+async function testReloadHappyPath(adminAuth) {
+  const response = await fetch(`${CONFIG_URL}/reload`, {
+    method: 'POST',
+    headers: { 'X-Internal-Auth': adminAuth },
+  });
+  const body = await response.json();
+  const data = body.data ?? body;
+  assert(response.status === 201 || response.status === 200, `config reload expected 200/201, got ${response.status}`);
+  assert(data.reloaded === true, 'config reload response must include reloaded=true');
+  pass('config reload refreshed runtime config cache.');
 }
 
 async function testAuthFail() {

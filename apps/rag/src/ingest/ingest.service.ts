@@ -10,7 +10,7 @@ import { EMBEDDING_PROVIDER, ENV_TOKEN, STORAGE_PROVIDER } from '../app/tokens';
 import type { Env } from '../config/env.schema';
 import type { EmbeddingProvider } from '../providers/embedding.provider';
 import type { StorageProvider } from '../providers/storage.provider';
-import { RAG_INGEST_EXPECTED_EMBEDDING_DIMENSIONS } from './ingest.constants';
+import { RAG_INGEST_EXPECTED_EMBEDDING_DIMENSIONS, RAG_INGEST_MAX_RETRY } from './ingest.constants';
 import { IngestIdempotencyService } from './ingest-idempotency.service';
 import { IngestRepository } from './ingest.repository';
 import { chunkRagText } from './ingest-text-chunker.service';
@@ -62,7 +62,7 @@ export class IngestService {
     try {
       payload = ingestPayloadSchema.parse(event.payload);
     } catch (error) {
-      await this.repository.markEventFailed(event.id, error);
+      await this.repository.markEventDiscarded(event.id, error);
       this.logger.warn({ eventId: event.id, err: error }, 'Dropping malformed RAG ingest event');
       return false;
     }
@@ -72,7 +72,11 @@ export class IngestService {
       await this.repository.markEventPublished(event.id);
       return true;
     } catch (error) {
-      await this.repository.markEventFailed(event.id, error);
+      if (event.retryCount + 1 >= RAG_INGEST_MAX_RETRY) {
+        await this.repository.markEventDiscarded(event.id, error);
+      } else {
+        await this.repository.markEventFailed(event.id, error);
+      }
       this.logger.warn(
         { eventId: event.id, documentId: payload.documentId, err: error },
         'RAG document ingest failed',
@@ -157,6 +161,7 @@ export class IngestService {
   }
 
   private async embedChunks(chunks: RagTextChunk[]): Promise<RagIngestChunk[]> {
+    // MVP trade-off: sequential embedding keeps ingest simple for small admin-approved documents.
     const embedded: RagIngestChunk[] = [];
 
     for (const chunk of chunks) {
