@@ -32,7 +32,7 @@ entries) — feature tasks depend on it.
 | owned files (write set) | concrete paths the worker MAY edit |
 | forbidden scope | paths/areas the worker MUST NOT touch (always incl. `.env`, secrets, other services, git ops) |
 | depends on | task ids that must land first |
-| invariant flags | CRLF/.cs · LF/.ts · CPM no `Version=` · MediatR v11 · BCrypt 12 · Money floor-1000 · Outbox routing-key · no cross-DB FK · tenant isolation |
+| invariant flags | CRLF/.cs · LF/.ts · CPM no `Version=` · MediatR v11 · BCrypt 12 · Money to-the-đồng (no floor-1000, BSOT v1.11.0) · Outbox routing-key · no cross-DB FK · tenant isolation |
 | acceptance | tied to DoD: build · `dotnet format` · tests (incl. NetArchTest) · migration up · contract · events · auth/tenant · idempotency |
 | source citations | technical_context_v7 § / API contract § / db-schema / BSOT § |
 

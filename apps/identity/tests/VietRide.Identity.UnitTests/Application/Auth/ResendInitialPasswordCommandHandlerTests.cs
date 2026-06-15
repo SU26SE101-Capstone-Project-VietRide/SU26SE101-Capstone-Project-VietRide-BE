@@ -312,6 +312,8 @@ public sealed class ResendInitialPasswordCommandHandlerTests
         public IQueryable<User> Query() => _users.AsQueryable();
 
         public IQueryable<User> QueryNoTracking() => _users.AsQueryable();
+
+        public Task<PagedResult<User>> ListOperatorUsersAsync(QueryOptions options, Guid? operatorId, UserRole? role, UserStatus? status, CancellationToken ct = default) => Task.FromResult(PagedResult<User>.Create([], 1, 20, 0));
     }
 
     private sealed class FakeOperatorRepository : IOperatorRepository

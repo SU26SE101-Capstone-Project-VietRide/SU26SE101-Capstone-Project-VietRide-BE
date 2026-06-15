@@ -43,7 +43,7 @@ public sealed class RouteHandlersTests
         result.OriginStationId.Should().Be(origin.Id);
         result.DestinationStationId.Should().Be(destination.Id);
         result.ReturnRouteId.Should().Be(returnRoute.Id);
-        result.BaseFare.Should().Be(250000);
+        result.BaseFare.Should().Be(250500);
         routeRepository.Entities.Should().Contain(route => route.Id == result.Id);
         returnRoute.ReturnRouteId.Should().BeNull("returnRouteId is one-way and must not mutate the target route");
     }
@@ -229,7 +229,7 @@ public sealed class RouteHandlersTests
 
         result.Name.Should().Be("Da Nang to Hue Express");
         result.ReturnRouteId.Should().Be(returnRoute.Id);
-        result.BaseFare.Should().Be(260000);
+        result.BaseFare.Should().Be(260500);
         result.TotalDistanceKm.Should().Be(105.5m);
         result.EstimatedDurationMinutes.Should().Be(180);
         result.IsActive.Should().BeFalse();

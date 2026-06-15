@@ -627,6 +627,27 @@ Error `422` — target user is not pending initial password:
 }
 ```
 
+### GET `/v1/admin/operator-users`
+
+Auth: `SYSTEM_ADMIN`. Lists Driver, Assistant, and Operator Staff users across all operators. Optional `operatorId` filters to a specific operator. Idempotency-Key: not required (read endpoint).
+
+Query parameters:
+- `page` — optional, default `1`, minimum `1`.
+- `pageSize` — optional, default `20`, range `1..100`.
+- `search` — optional, searches `email`, `displayName`, and normalized exact `phone` when the value is a valid phone number.
+- `sortBy` — optional, default `createdAt`; allowed: `createdAt`, `email`, `displayName`, `role`, `status`.
+- `sortDir` — optional, default `desc`; allowed: `asc`, `desc`.
+- `role` — optional; allowed: `DRIVER`, `ASSISTANT`, `OPERATOR_STAFF`.
+- `status` — optional; any valid `UserStatus` value.
+- `operatorId` — optional; filters by operator.
+
+Response `200`: same shape as `GET /v1/operator/users`.
+
+Errors:
+- `403 FORBIDDEN` — caller is not `SYSTEM_ADMIN`.
+- `400 INVALID_SORT_FIELD` — `sortBy` is not in the allow-list.
+- `422 VALIDATION_ERROR` — invalid paging/filter value.
+
 ### POST `/v1/admin/users`
 
 Auth: `SYSTEM_ADMIN`. Idempotency-Key: not required by BSOT §5.6.
@@ -847,7 +868,7 @@ Response `200`:
   "data": {
     "bookingId": "uuid",
     "pickup": { "stationId": "uuid", "stopId": null },
-    "fareDelta": 50000,
+    "fareDelta": 0,
     "refundAmount": 0,
     "paymentRedirectUrl": null
   },
@@ -855,7 +876,7 @@ Response `200`:
 }
 ```
 
-Rules: reprice using `Trip.baseFare` for terminal pickup or `TripStopFare` for along-route pickup. If fare increases, apply the change only after the delta charge succeeds. If fare decreases, refund the delta to Wallet.
+Rules (price-neutral-only, BSOT v1.11.0 — human decision 2026-06-12, supersedes technical_context_v7 lines 1639-1656 downgrade-and-refund): compute the new fare from `Trip.baseFare` for terminal pickup or `TripStopFare` for along-route pickup; the edit is allowed ONLY when the new fare equals the current fare. Any fare difference — increase OR decrease — is **rejected** with `409 BOOKING_EDIT_PICKUP_PRICE_CHANGED`; to change to a different-priced pickup the passenger must cancel the booking and rebook. `fareDelta` and `refundAmount` are therefore always `0` on success; no wallet refund/charge path exists on this endpoint.
 
 ### POST `/v1/bookings/{bookingId}/edit-dropoff`
 
@@ -1093,7 +1114,8 @@ Response `200` (raw):
       "fareFromThisStop": 350000
     }
   ],
-  "seatSummary": { "totalSeats": 40, "availableSeats": 18 }
+  "seatSummary": { "totalSeats": 40, "availableSeats": 18 },
+  "returnRouteId": "uuid | null"
 }
 ```
 
@@ -1102,6 +1124,10 @@ Notes:
   the caller falls back to `baseFare` (technical_context §6.10 step 2c). `null` ⇒ use `baseFare`.
 - `stops` are the along-route intermediate stops (snapshot of RouteStop into `trip_stops`),
   ordered by `orderIndex`; `allowPickup` / `allowDropoff` drive Day-13 pickup/dropoff validation.
+- `returnRouteId`: nullable UUID — the return-direction route linked via `Route.returnRouteId`
+  self-FK. Booking uses this to validate `ROUTE_RETURN_NOT_CONFIGURED` (422) when the passenger
+  requests a round-trip but the outbound route has no return route configured
+  (technical_context_v7 line 1750). Trip will expose this field in Task 11.4.
 - Errors: `404 TRIP_NOT_FOUND`.
 
 ### POST `/internal/v1/trips/{tripId}/lock-seats`
@@ -1964,6 +1990,54 @@ Errors:
 
 Notes: suspend writes no ActivityLog in Day 6 because canonical `activity_log_action` has no `SUSPEND_OPERATOR`. Outbox emission is deferred to Day 10.
 
+### GET `/v1/operator/users`
+
+Auth: `OPERATOR_ADMIN`. Tenant isolation: caller `operatorId` is used as the only operator scope. `OPERATOR_STAFF` is not allowed to list employees. Idempotency-Key: not required (read endpoint).
+
+Query parameters:
+- `page` — optional, default `1`, minimum `1`.
+- `pageSize` — optional, default `20`, range `1..100`.
+- `search` — optional, searches `email`, `displayName`, and normalized exact `phone` when the value is a valid phone number.
+- `sortBy` — optional, default `createdAt`; allowed: `createdAt`, `email`, `displayName`, `role`, `status`.
+- `sortDir` — optional, default `desc`; allowed: `asc`, `desc`.
+- `role` — optional; allowed: `DRIVER`, `ASSISTANT`, `OPERATOR_STAFF`.
+- `status` — optional; any valid `UserStatus` value.
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [
+      {
+        "userId": "uuid",
+        "email": "driver@example.com",
+        "phone": "+84901112222",
+        "displayName": "Driver One",
+        "role": "DRIVER",
+        "status": "PENDING_INITIAL_PASSWORD",
+        "operatorId": "uuid",
+        "createdAt": "2026-06-01T10:00:00Z",
+        "avatarUrl": null
+      }
+    ],
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 1,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Errors:
+- `403 FORBIDDEN` — caller is not `OPERATOR_ADMIN` or has no `operatorId`.
+- `400 INVALID_SORT_FIELD` — `sortBy` is not in the allow-list.
+- `422 VALIDATION_ERROR` — invalid paging/filter value.
+
 ### POST `/v1/operator/users`
 
 Auth: `OPERATOR_ADMIN`. Tenant isolation: caller `operatorId` is the created user's `operatorId`. Caller Operator must currently be `APPROVED`; tokens issued before a later suspend/reject return `403 FORBIDDEN` without side effects. Idempotency-Key: not required by BSOT §5.6.
@@ -2386,7 +2460,7 @@ Write endpoints in this Day-8 section do not require `Idempotency-Key` per BSOT 
 
 Tenant isolation: a missing Route or a Route not owned by the caller's operator returns `404 ROUTE_NOT_FOUND` in the ADR 0004 error envelope. Child resources under a Route apply the same parent Route tenant check first unless noted otherwise.
 
-Route create/update money fields are VND BIGINT-compatible JSON numbers. Persisted values follow the shared Money rule and are floored to 1000 before storage.
+Route create/update money fields are VND BIGINT-compatible JSON numbers. Persisted values follow the shared Money rule (BSOT v1.11.0): kept to the đồng — no rounding to thousands; fractional computation results round to the nearest đồng.
 
 ### Route DTOs
 
@@ -2553,7 +2627,7 @@ Response `200`: success envelope with `{ "deleted": true }`.
 }
 ```
 
-`fareFromThisStop` is an exception override for Route base fare. It is VND BIGINT-compatible and is floored to 1000 before persisting. Stops without a fare-template entry use `Route.baseFare`.
+`fareFromThisStop` is an exception override for Route base fare. It is VND BIGINT-compatible and is persisted to the đồng (no flooring to 1000 — BSOT v1.11.0). Stops without a fare-template entry use `Route.baseFare`.
 
 ### POST `/v1/operator/routes/{id}/fare-templates`
 

@@ -7,15 +7,31 @@ namespace VietRide.Shared.Kernel.UnitTests;
 public class MoneyTests
 {
     [Theory]
-    [InlineData(1234, 1000)]
-    [InlineData(999, 0)]
-    [InlineData(2999, 2000)]
+    [InlineData(1234, 1234)]
+    [InlineData(999, 999)]
     [InlineData(0, 0)]
     [InlineData(50_000, 50_000)]
-    [InlineData(123_456_789, 123_456_000)]
-    public void FromRaw_Floors_To_Nearest_1000_VND(long input, long expected)
+    [InlineData(123_456_789, 123_456_789)]
+    public void FromRaw_Keeps_Amount_To_The_Dong(long input, long expected)
     {
         Money.FromRaw(input).Amount.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(1234.4, 1234)]
+    [InlineData(1234.5, 1235)]
+    [InlineData(1234.6, 1235)]
+    [InlineData(0.0, 0)]
+    public void FromDecimal_Rounds_To_Nearest_Dong(decimal input, long expected)
+    {
+        Money.FromDecimal(input).Amount.Should().Be(expected);
+    }
+
+    [Fact]
+    public void FromDecimal_Negative_Throws()
+    {
+        var act = () => Money.FromDecimal(-0.5m);
+        act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
     [Fact]

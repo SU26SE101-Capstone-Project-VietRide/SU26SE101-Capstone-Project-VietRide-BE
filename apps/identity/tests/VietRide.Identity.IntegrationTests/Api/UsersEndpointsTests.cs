@@ -15,7 +15,9 @@ using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Application.Features.Users.CompleteProfile;
 using VietRide.Identity.Application.Features.Users.GetMe;
 using VietRide.Identity.Domain.Entities;
+using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Identity.IntegrationTests.Api;
 
@@ -224,6 +226,14 @@ public sealed class UsersEndpointsTests : IClassFixture<AuthWebApplicationFactor
 
         public Task<User?> GetByPhoneAsync(string e164Phone, CancellationToken ct = default)
             => Task.FromResult<User?>(null);
+
+        public Task<PagedResult<User>> ListOperatorUsersAsync(
+            QueryOptions options,
+            Guid? operatorId,
+            UserRole? role,
+            UserStatus? status,
+            CancellationToken ct = default)
+            => Task.FromResult(PagedResult<User>.Create([], 1, 20, 0));
     }
 
     private sealed class TestActivityLogRepository : IActivityLogRepository

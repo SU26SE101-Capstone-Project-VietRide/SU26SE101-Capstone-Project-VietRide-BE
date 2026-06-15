@@ -1,0 +1,154 @@
+# Day 13 — Plan
+
+- **Timeline ref**: BE_TIMELINE_VU.md to Day 13 (Jira: SCV-84) — Booking Service: Pickup/Dropoff edit + Round-trip
+- **Branch**: feat/day-13-booking-edits — NEW branch off main AFTER the SOT v1.11.0 commit lands
+  (BSOT 1.11.0 + API Contract price-neutral edit-pickup + Money to-the-đồng MUST be on main before
+  any Day-13 task is dispatched). Runs branch-parallel with Day 11 (feat/day-11-trip-search) and
+  Day 15 (feat/day-15-payment-wallet); see cross-day conflict notes in Task 13.4 (Postman).
+- **Prior checklist**: docs/handoff/day-12-checklist.md (found — Day 12 READY; carry-overs CO1/CO2 Trip-owned forward deps. **C1/C2 BSOT reconciliation DONE in BSOT v1.10.0, 2026-06-12** — payment seam `/internal/v1/payments/charge` + BookingCode long-form `VR-yyyyMMdd-XXXXXXXX`.)
+- **Plan status**: APPROVED — PLAN-REVIEW ran 2026-06-12 (REVISION-REQUIRED), all blockers/findings patched same day (OQ2 resolved price-neutral-only; TripSnapshot.ReturnRouteId assigned to Task 13.0; BSOT 5.9 citations corrected; voucherCode deferral added; Postman cross-day note added)
+
+## Objective
+Extend the Day-12 Booking saga with two passenger-facing capabilities: (1) round-trip booking
+(POST /v1/bookings/round-trip) creating two independent Booking rows sharing a bookingGroupId,
+with all-or-nothing seat lock across both legs; (2) pickup/dropoff editing before the T-2h
+cutoff (POST /v1/bookings/{id}/edit-pickup PRICE-NEUTRAL-ONLY — allowed only when the new fare
+equals the current fare, any fare difference rejected; human decision 2026-06-12, BSOT v1.11.0,
+supersedes the technical_context_v7 downgrade-and-refund rule — + POST
+/v1/bookings/{id}/edit-dropoff no-reprice). Unblocks Day 14 voucher checkout (round-trip applies
+vouchers per-booking) and Day 16/17 payment+cancel (edit reuses the release/charge seams). No new
+DB tables required — the bookings table already carries booking_group_id, trip_direction, and the
+four pickup/dropoff columns from the Day-12 InitBookingSchema migration.
+
+## Success criteria (DoD — binary, verifiable)
+- [ ] POST /v1/bookings/round-trip creates 2 Booking rows sharing a non-null bookingGroupId, tripDirection=OUTBOUND/RETURN; seats on both legs locked all-or-nothing (if either leg lock fails, neither booking persists and held seats are released). (technical_context_v7 Round-trip lines 1707-1782; API Contract 723-761)
+- [ ] Round-trip eligibility at app layer: return trip departure must be after outbound estimated arrival; else 422 BOOKING_ROUND_TRIP_INVALID. (technical_context_v7 1749-1753; BSOT 5.9 line 1345)
+- [ ] edit-pickup before departureDateTime-2h: PRICE-NEUTRAL-ONLY — the change applies ONLY when new fare = current fare (fareDelta 0, refundAmount 0, no wallet/payment seam call); ANY fare difference (increase OR decrease) returns 409 BOOKING_EDIT_PICKUP_PRICE_CHANGED. After cutoff 409 BOOKING_CUTOFF_EXCEEDED. (BSOT v1.11.0 changelog — human decision 2026-06-12 superseding technical_context_v7 1639-1656; API Contract 830-858 price-neutral prose; BSOT 5.9 lines 1338, 1342)
+- [ ] edit-dropoff before cutoff updates dropoffStationId/dropoffStopId with no fare/refund/charge; validates dropoffStop.orderIndex greater than pickupStop.orderIndex, stop in trip RouteStops, allowDropoff=true (else 422 STOP_NOT_DROPOFF_ALLOWED / 404 STOP_NOT_FOUND). After cutoff 409 BOOKING_CUTOFF_EXCEEDED. (technical_context_v7 1658-1688; API Contract 860-885; BSOT 5.9 lines 1338, 1376, 1381)
+- [ ] Both edit endpoints require Idempotency-Key, owner-scoped (only the booking passengerUserId may edit), gated PASSENGER at Gateway and [Authorize(Roles=PASSENGER)] at controller. (API Contract 832,862)
+- [ ] dotnet build apps/booking/VietRide.Booking.sln -c Release is 0 Warning(s) 0 Error(s); dotnet format --verify-no-changes exit 0; NetArchTest layering still green; unit + integration tests pass with at least 1 happy + 1 error case per new endpoint.
+- [ ] Swagger exposes the 3 new endpoints; Gateway routes.ts proxies them (covered by existing /v1/bookings prefix — verify no new entry); Postman adds round-trip + edit requests.
+
+## Contract changes
+- **REST (new, PASSENGER-only, Idempotency-Key required)**:
+  - POST /v1/bookings/round-trip (API Contract 723-761)
+  - POST /v1/bookings/{bookingId}/edit-pickup (API Contract 830-858)
+  - POST /v1/bookings/{bookingId}/edit-dropoff (API Contract 860-885)
+- **Gateway route**: all three fall under the existing prefix /v1/bookings requiredRoles PASSENGER entry (routes.ts:174-179) — **no new route entry expected**; worker only ADDS a test asserting sub-paths route PASSENGER-only, must not duplicate the prefix.
+- **Events**: booking.booking.confirmed (existing, BSOT line 1737) reused for each confirmed round-trip leg. **OQ1 RESOLVED (option b)**: the downgrade refund path (technical_context_v7 line 1649) says Publish BookingUpdated + WalletCredited, but no booking.booking.updated routing key exists in the BSOT event registry (1737-1739). Decision: the edit endpoints publish NO event in Day 13 — state mutation + fareDelta/refundAmount in the response only; do NOT invent a routing key (see Task 13.2 forbidden scope and resolved OQ1).
+- **Error codes** (all already registered, BSOT 5.9 — none new): BOOKING_ROUND_TRIP_INVALID (422, line 1345), ROUTE_RETURN_NOT_CONFIGURED (422, BSOT 5.9 line 1385 — **pre-registered, not new**; round-trip with Route.returnRouteId NULL per technical_context_v7 line 1750 — the API Contract trip snapshot DTO now EXPOSES `returnRouteId` at line 1097, v1.10.0-patched; Trip implements it in Day-11 Task 11.4, see CO3; the Booking-side TripSnapshot gets the field in Task 13.0), BOOKING_CUTOFF_EXCEEDED (409, line 1338), BOOKING_EDIT_PICKUP_PRICE_CHANGED (409, line 1342 — renamed from BOOKING_EDIT_PICKUP_PRICE_INCREASE in BSOT v1.11.0, price-neutral-only policy), STOP_NOT_DROPOFF_ALLOWED (422, line 1381), BOOKING_NOT_FOUND (404, line 1340), STOP_NOT_FOUND (404, BSOT 5.9 line 1376; technical_context_v7 line 1681). No new code required.
+- **DB migration**: **none** — bookings already has booking_group_id, trip_direction, pickup_station_id/stop_id, dropoff_station_id/stop_id (20260611043137_InitBookingSchema.cs lines 39-50, 167-171). If a worker finds a column missing, STOP and report.
+
+## Tasks
+Day 13 lists **no Pre-reqs / architecture baseline** in BE_TIMELINE_VU.md, so there is no
+infrastructure Task 13.0. Task 13.0 below is instead the **shared Booking domain + seam
+extension** both feature clusters depend on (kept first so round-trip and edit tasks have stable
+building blocks).
+
+### Task 13.0 — Booking domain edit methods + repository find-by-id seam
+| Field | Value |
+|---|---|
+| stack/owner | dotnet |
+| implement agent | dotnet-worker |
+| review agent | dotnet-reviewer |
+| skill | (none) |
+| owned files (write set) | apps/booking/src/VietRide.Booking.Domain/Entities/Booking.cs (add ChangePickup, ChangeDropoff, round-trip group-assignment method/overload); apps/booking/src/VietRide.Booking.Application/Abstractions/Repositories/IBookingRepository.cs (add FindByIdAsync if absent); apps/booking/src/VietRide.Booking.Infrastructure/Persistence/Repositories/BookingRepository.cs (impl); apps/booking/src/VietRide.Booking.Application/Abstractions/ServiceClients/ITripServiceClient.cs (add `Guid? ReturnRouteId` to the TripSnapshot record — seam contract reconciliation per API Contract line 1097 v1.10.0; field shape MUST match what Day-11 Task 11.4 serves: `returnRouteId` uuid-or-null); apps/booking/src/VietRide.Booking.Infrastructure/Http/DevTripServiceClient.cs (populate ReturnRouteId in the stub — configurable/derivable so tests can exercise BOTH the null path (422 guard) and a non-null happy path); apps/booking/tests/VietRide.Booking.UnitTests/Domain/BookingTests.cs (new) |
+| forbidden scope | .env, secrets; any EF migration files (Migrations/**); EF Configurations (Persistence/Configurations/**) unless a new mapped property is added — if so STOP and confirm no migration drift; any other service; Gateway; git ops |
+| depends on | none |
+| invariant flags | CRLF/.cs; CPM no Version=; MediatR v11; Money to-the-đồng (BSOT v1.11.0 — use Money.FromRaw / Money ops, never raw long arithmetic; NO floor-1000; fractional results round nearest đồng via Money.FromDecimal); no cross-DB FK (pickup/dropoff stay logical UUIDs) |
+| acceptance | Build 0W/0E; dotnet format --verify-no-changes clean; new domain unit tests cover ChangePickup rejecting when status not CONFIRMED and enforcing exactly-one pickup target, ChangeDropoff enforcing at-most-one + clearing the other column, round-trip group assignment setting BookingGroupId+TripDirection; TripSnapshot record now carries `Guid? ReturnRouteId` and DevTripServiceClient populates it (existing CreateBooking tests still green — the new positional field must not break existing construction sites). NetArchTest still green. No new EF migration produced. |
+| source citations | Booking.cs:69-177 (factory/Confirm/Cancel pattern to mirror); schema.sql:64-110 (pickup/dropoff CHECK constraints, group columns); technical_context_v7:1664-1680 (dropoff transition cases), 1713-1718 (round-trip group/direction fields); BSOT 3.5 naming |
+
+### Task 13.1 — Round-trip booking command + handler + controller action
+| Field | Value |
+|---|---|
+| stack/owner | dotnet |
+| implement agent | dotnet-worker |
+| review agent | dotnet-reviewer |
+| skill | add-endpoint |
+| owned files (write set) | apps/booking/src/VietRide.Booking.Application/Features/Bookings/CreateRoundTripBooking/CreateRoundTripBookingCommand.cs, ...Handler.cs, ...Validator.cs, ...Result.cs; apps/booking/src/VietRide.Booking.Api/Controllers/Requests/CreateRoundTripBookingRequest.cs; apps/booking/src/VietRide.Booking.Api/Controllers/BookingsController.cs (add round-trip action ONLY); apps/booking/tests/VietRide.Booking.UnitTests/Features/Bookings/CreateRoundTripBookingCommandHandlerTests.cs; apps/booking/tests/VietRide.Booking.IntegrationTests/CreateRoundTripBookingIntegrationTests.cs |
+| forbidden scope | .env, secrets; CreateBooking/** (do not refactor the single-leg saga — reuse via shared domain methods / IBookingService only); EF migrations; other services; Gateway routes.ts (no new prefix); git ops; **do NOT implement voucherCode validation** — the request DTO (API Contract line 741) carries `voucherCode` but Voucher entities/VoucherUsage ship Day 14: accept the field on the request/command, handler MUST NOT call any voucher logic or apply discounts (discountAmount=0 for Day-13 bookings) |
+| depends on | 13.0 |
+| invariant flags | CRLF/.cs; CPM no Version=; MediatR v11; Money to-the-đồng (BSOT v1.11.0, no floor-1000); Outbox routing-key booking.booking.confirmed (reuse, one enqueue per confirmed leg); no cross-DB FK; idempotency (Idempotency-Key); tenant owner = JWT sub |
+| acceptance | POST /v1/bookings/round-trip returns 201 with bookingGroupId, outbound, return, grandTotal, paymentRedirectUrl (API Contract 747-760); 2 Booking rows persisted sharing bookingGroupId, tripDirection OUTBOUND/RETURN, independent fares; WALLET path confirms both legs + enqueues booking.booking.confirmed once per leg; return-departure-not-after-outbound-arrival to 422 BOOKING_ROUND_TRIP_INVALID (technical_context_v7 line 1752); **the ROUTE_RETURN_NOT_CONFIGURED (422) guard MUST exist in code** — when the round-trip request resolves to a Route whose returnRouteId is NULL, return 422 ROUTE_RETURN_NOT_CONFIGURED (technical_context_v7 line 1750; BSOT 5.9 line 1384, pre-registered). Per CO3, the API Contract snapshot DTO now EXPOSES `returnRouteId` (line 1097, v1.10.0-patched); the Booking-side TripSnapshot record gains the `ReturnRouteId` field in Task 13.0 and DevTripServiceClient stubs it, so the guard reads a real (stubbed) field — Trip serves the real value in Day-11 Task 11.4. Ship today: the guard branch + 1 unit test for the NULL path (422) + 1 happy-path test with a non-null stubbed value; the data-backed check goes live once Task 11.4 lands and Booking is flipped off the stub (CO3 = forward dependency on 11.4 only, no longer a contract or compile gap). If return-leg lock fails, outbound lock released and no booking persists. Build/format/tests green incl. 1 happy + 1 invalid-window case + 1 ROUTE_RETURN_NOT_CONFIGURED case; Swagger shows the endpoint. |
+| source citations | technical_context_v7:1707-1782 (structure, eligibility, independent fares, seat-lock all-or-nothing), 1721-1731 (independent lifecycle, no NO_SHOW cascade); API Contract:723-761; CreateBookingCommandHandler.cs:65-311 (saga pattern); BSOT 5.9 line 1345 (BOOKING_ROUND_TRIP_INVALID), line 1385 (ROUTE_RETURN_NOT_CONFIGURED) |
+
+### Task 13.2 — Edit pickup endpoint (price-neutral-only — BSOT v1.11.0)
+| Field | Value |
+|---|---|
+| stack/owner | dotnet |
+| implement agent | dotnet-worker |
+| review agent | dotnet-reviewer |
+| skill | add-endpoint |
+| owned files (write set) | apps/booking/src/VietRide.Booking.Application/Features/Bookings/EditPickup/EditPickupCommand.cs, ...Handler.cs, ...Validator.cs, ...Result.cs; apps/booking/src/VietRide.Booking.Api/Controllers/Requests/EditPickupRequest.cs; apps/booking/src/VietRide.Booking.Api/Controllers/BookingsController.cs (add edit-pickup action ONLY); apps/booking/tests/VietRide.Booking.UnitTests/Features/Bookings/EditPickupCommandHandlerTests.cs; apps/booking/tests/VietRide.Booking.IntegrationTests/EditPickupIntegrationTests.cs |
+| forbidden scope | .env, secrets; EF migrations; CreateBooking/** and CreateRoundTripBooking/**; other services; Gateway routes.ts; git ops. **Do NOT emit any event** (no BookingUpdated/WalletCredited — no such routing keys in BSOT 7.3; OQ1 option b). **Do NOT call ANY payment/wallet seam** — per the price-neutral-only policy (OQ2 RESOLVED 2026-06-12, BSOT v1.11.0) there is NO refund/charge path on this endpoint at all: any fare difference is rejected, so no IPaymentServiceClient method is invoked and no refund stub is needed. Do NOT implement repricing/refund logic from technical_context_v7 1639-1656 (superseded — see BSOT v1.11.0 changelog). |
+| depends on | 13.0 |
+| invariant flags | CRLF/.cs; CPM no Version=; MediatR v11; Money to-the-đồng (compare fares via Money equality — no floor, no delta arithmetic persisted); idempotency (Idempotency-Key); tenant only booking owner (JWT sub) may edit; no cross-DB FK; price-neutral-only (fare change of ANY direction → reject) |
+| acceptance | POST /v1/bookings/{id}/edit-pickup (API Contract 830-858, price-neutral prose): before cutoff + new fare EQUALS current fare to 200 with bookingId, pickup, fareDelta 0, refundAmount 0, paymentRedirectUrl null, pickup columns updated; new fare differs from current (higher OR lower) to 409 BOOKING_EDIT_PICKUP_PRICE_CHANGED (BSOT 5.9 line 1342, renamed in v1.11.0); after departureDateTime-2h to 409 BOOKING_CUTOFF_EXCEEDED; non-owner to 403; unknown booking to 404 BOOKING_NOT_FOUND. Fare from Trip snapshot: terminal pickup uses baseFare, along-route uses stop fareFromThisStop falling back to baseFare when null (API Contract 1100-1104). No payment/wallet seam called. Build/format/tests green incl. equal-fare-allowed + higher-fare-blocked + lower-fare-blocked cases. |
+| source citations | BSOT v1.11.0 changelog (price-neutral-only, human decision 2026-06-12 — SUPERSEDES technical_context_v7:1639-1656 downgrade-and-refund); API Contract:830-858 (price-neutral prose), 1100-1104 (fareFromThisStop fallback); BSOT 5.9 lines 1338 (BOOKING_CUTOFF_EXCEEDED), 1340 (BOOKING_NOT_FOUND), 1342 (BOOKING_EDIT_PICKUP_PRICE_CHANGED); EDIT_CUTOFF_HOURS=2 (BSOT ~2365) |
+
+### Task 13.3 — Edit dropoff endpoint (no reprice)
+| Field | Value |
+|---|---|
+| stack/owner | dotnet |
+| implement agent | dotnet-worker |
+| review agent | dotnet-reviewer |
+| skill | add-endpoint |
+| owned files (write set) | apps/booking/src/VietRide.Booking.Application/Features/Bookings/EditDropoff/EditDropoffCommand.cs, ...Handler.cs, ...Validator.cs, ...Result.cs; apps/booking/src/VietRide.Booking.Api/Controllers/Requests/EditDropoffRequest.cs; apps/booking/src/VietRide.Booking.Api/Controllers/BookingsController.cs (add edit-dropoff action ONLY); apps/booking/tests/VietRide.Booking.UnitTests/Features/Bookings/EditDropoffCommandHandlerTests.cs; apps/booking/tests/VietRide.Booking.IntegrationTests/EditDropoffIntegrationTests.cs |
+| forbidden scope | .env, secrets; EF migrations; other feature folders; other services; Gateway routes.ts; git ops |
+| depends on | 13.0 |
+| invariant flags | CRLF/.cs; CPM no Version=; MediatR v11; idempotency (Idempotency-Key); tenant only booking owner may edit; no cross-DB FK; NO fare/refund/charge side effects (v1 dropoff is price-neutral) |
+| acceptance | POST /v1/bookings/{id}/edit-dropoff (API Contract 860-885): before cutoff to 200 with bookingId, dropoff, fareDelta 0, dropoff columns updated (sets one, clears the other); validates dropoffStop.orderIndex greater than pickupStop.orderIndex, stop in trip RouteStops, allowDropoff=true (else 422 STOP_NOT_DROPOFF_ALLOWED), stop not on route to 404 STOP_NOT_FOUND (registry status — BSOT 5.9 line 1376 registers STOP_NOT_FOUND as 404; registry wins over the DoD's earlier 422 shorthand); after cutoff to 409 BOOKING_CUTOFF_EXCEEDED; non-owner to 403. No payment/refund seam called. Build/format/tests green incl. valid-change + allowDropoff-false cases. |
+| source citations | technical_context_v7:1658-1689 (dropoff transition cases + validation + price-neutral); API Contract:860-885; BSOT 5.9 lines 1338 (BOOKING_CUTOFF_EXCEEDED), 1376 (STOP_NOT_FOUND 404), 1381 (STOP_NOT_DROPOFF_ALLOWED); EDIT_CUTOFF_HOURS=2 (BSOT ~2365) |
+
+### Task 13.4 — Gateway sub-path RBAC test + Postman/Swagger cumulative artifacts
+| Field | Value |
+|---|---|
+| stack/owner | cross-cutting |
+| implement agent | worker |
+| review agent | reviewer (or /code-review) |
+| skill | (none) |
+| owned files (write set) | apps/gateway/src/proxy/proxy.access-gates.spec.ts (ADD assertions that /v1/bookings/round-trip and the edit-pickup/edit-dropoff sub-paths are PASSENGER-only via the existing prefix); docs/api/postman/vietride.postman_collection.json (add round-trip + edit-pickup + edit-dropoff requests). **CROSS-DAY CONFLICT NOTE:** the Postman JSON is also updated by Day-11 (post-merge Postman step) — JSON does not 3-way merge; whichever day merges to main SECOND must rebase and re-apply its Postman additions on top of the merged collection (coordinate at merge time, not at dispatch time) |
+| forbidden scope | .env, secrets; apps/gateway/src/config/routes.ts (must NOT add a new prefix — existing /v1/bookings entry covers sub-paths; verify only); any .NET source; other services; git ops |
+| depends on | 13.1, 13.2, 13.3 |
+| invariant flags | LF/.ts; LF/.json; no banned deps; no new Gateway route entry |
+| acceptance | nx run-many -t test --all --exclude VietRide.* --ci green incl. new Gateway gate assertions; nx run-many -t lint --all --exclude VietRide.* green; Postman JSON parses and contains the 3 new requests with Idempotency-Key header set. |
+| source citations | routes.ts:174-179 (existing PASSENGER /v1/bookings prefix); proxy.access-gates.spec.ts (existing gate-test pattern); day-12-checklist.md:37 (Day-12 PASSENGER gate precedent) |
+
+## Dispatch order
+1. **Task 13.0** (shared domain + repo seam) — must land first; all feature tasks depend on it.
+2. **Tasks 13.1 / 13.2 / 13.3** — each depends on 13.0. They share BookingsController.cs (each adds one action) and the Application Features/Bookings/** tree, so they are **NOT parallel-safe** against each other (overlapping write set on the controller). Run **serial**: 13.1 then 13.2 then 13.3.
+3. **Task 13.4** (cross-cutting Gateway/Postman) — after 13.1-13.3 land; disjoint write set (TS + JSON only).
+
+Parallel-safe matrix: 13.0 no; 13.1/13.2/13.3 no (shared controller); 13.4 yes (TS/JSON only) but gated by 13.1-13.3 for content correctness.
+
+## Progress tracker
+> Orchestrator bookkeeping — updated after each /implement-task (Step 3). Informational only;
+> /audit-day re-verifies independently against the SOT.
+
+| Task | Status | Review verdict | Date | Notes |
+|---|---|---|---|---|
+| 13.0 | todo | — | — | — |
+| 13.1 | todo | — | — | — |
+| 13.2 | todo | — | — | — |
+| 13.3 | todo | — | — | — |
+| 13.4 | todo | — | — | — |
+
+Legend: todo / in progress / done (reviewer APPROVED + human /verify) / done-with-carryover / blocked
+
+## Open questions
+1. **OQ1 — RESOLVED (option b).** technical_context_v7 line 1649 says the edit-pickup downgrade should Publish BookingUpdated + WalletCredited, but the BSOT event registry (1737-1739) has only confirmed/cancelled/refunded. Per conflict order (technical_context business beats BSOT) the rule wins, but the routing key shape is undefined. **Decision: option (b)** — Day-13 edit endpoints defer event emission, mutating state + returning fareDelta/refundAmount in the response only; no routing key invented. Reconciling the BSOT registry (whether to add booking.booking.updated + a WalletCredited equivalent) is carried over as C4 below.
+2. **OQ2 — RESOLVED 2026-06-12 (policy change, recorded in BSOT v1.11.0).** Human decision (Vũ): v1 does NOT support fare-changing pickup edits at all — "no lateral ticket exchange"; a passenger who wants a different-priced pickup cancels the booking and rebooks. edit-pickup is PRICE-NEUTRAL-ONLY: allowed only when new fare = current fare; any difference (increase OR decrease) → 409 BOOKING_EDIT_PICKUP_PRICE_CHANGED (renamed from BOOKING_EDIT_PICKUP_PRICE_INCREASE, BSOT 5.9 line 1342). The wallet-refund path from technical_context_v7 lines 1639-1656 is SUPERSEDED (erratum — business owner override, BSOT v1.11.0 changelog); no payment seam, no refund stub, no event. Task 13.2 rewritten accordingly.
+3. **OQ3 — RESOLVED, formalized as carry-over C5 (now DONE).** BSOT 5.6 line 1251 listed one combined `edit-pickup-dropoff` idempotency entry while the API Contract (higher precedence, lines 830-885) defines two separate POST endpoints. Decision: follow the API Contract (two endpoints). **BSOT reconciliation DONE in v1.10.0 (2026-06-12)** — §5.6 now has two separate rows (lines 1251/1252). See C5 below.
+4. **OQ4 — RESOLVED.** technical_context_v7 line 1750 requires Route.returnRouteId NOT NULL for round-trip. The API Contract trip snapshot DTO now EXPOSES `returnRouteId` (line 1097, v1.10.0-patched) — the contract gap is closed. **Decision:** Day-13 enforces the departure-after-arrival window rule (line 1752, data available) fully, AND ships the ROUTE_RETURN_NOT_CONFIGURED (422) guard + branch + unit test in code (per Task 13.1 acceptance). The Booking-side TripSnapshot gains `ReturnRouteId` in Task 13.0 (stubbed by DevTripServiceClient); the 422 guard validates against that field, and the full data-backed check goes live once Trip implements it in Day-11 Task 11.4 — carried over as CO3 below (forward dependency on Task 11.4 only).
+
+## Carry-over notes from Day 12 (context, not Day-13 tasks)
+- CO1/CO2 (real Trip Redis 50-way stress + key prefix) remain Trip-owned forward deps.
+- C1/C2 (BSOT payment-charge wording + BookingCode examples) **DONE in BSOT v1.10.0 (2026-06-12)** — §7.2 payment seam now `POST /internal/v1/payments/charge`; §9.10/§9.1 BookingCode now long-form `VR-yyyyMMdd-XXXXXXXX`.
+- Outbox publisher wiring still pending (events enqueued PENDING, not yet published) — not Day-13 scope.
+
+## Carry-over / reconciliation items raised by Day 13
+- **C3 (SOT CONTRADICTION — edit-pickup pricing) — RESOLVED 2026-06-12, superseded same day by the PRICE-NEUTRAL-ONLY policy (BSOT v1.11.0).** Final state: API Contract line ~858 prose now allows the edit ONLY when the new fare equals the current fare; ANY difference → `409 BOOKING_EDIT_PICKUP_PRICE_CHANGED` (renamed from ...PRICE_INCREASE). The technical_context_v7 downgrade-and-refund rule (lines 1639-1656) is an erratum overridden by the business owner — recorded in the BSOT v1.11.0 changelog. No contract gap remains.
+- **CO3 (Trip-owned forward dep — returnRouteId on trip snapshot) — contract gap CLOSED, forward dep remains.** The API Contract trip snapshot DTO now EXPOSES `returnRouteId` (line 1097, v1.10.0-patched; cites technical_context_v7 line 1750). Trip implements the field in **Day-11 Task 11.4**; Booking's 422 ROUTE_RETURN_NOT_CONFIGURED guard validates real data once 11.4 lands. Until then the guard reads the `ReturnRouteId` field added to TripSnapshot in Task 13.0 and stubbed by DevTripServiceClient. The guard + error code + branch + unit test exist in Day-13 code regardless (see Task 13.1 acceptance / resolved OQ4). CO3 is now a forward dependency on Task 11.4 ONLY — no longer a contract gap.
+- **C4 (BSOT event-registry reconciliation — booking.booking.updated).** Per resolved OQ1 (option b), Day-13 edit endpoints publish no event. With OQ2's price-neutral-only policy (BSOT v1.11.0) the WalletCredited-on-downgrade question is MOOT (no refund path exists); whether a booking.booking.updated key is ever needed for price-neutral edits is deferred — revisit only if a consumer appears.
+- **C5 (BSOT idempotency-registry reconciliation — edit endpoint naming) — RESOLVED 2026-06-12.** BSOT §5.6 previously listed a single combined `POST /v1/bookings/{id}/edit-pickup-dropoff` idempotency entry; **BSOT v1.10.0 now lists two separate rows** `POST /v1/bookings/{id}/edit-pickup` (line 1251) and `POST /v1/bookings/{id}/edit-dropoff` (line 1252), matching the API Contract's two endpoints. No reconciliation remains. (Formalizes prior OQ3.)

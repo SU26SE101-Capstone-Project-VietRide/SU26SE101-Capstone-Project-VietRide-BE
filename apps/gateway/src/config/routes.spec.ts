@@ -19,7 +19,8 @@ describe('buildRouteTable', () => {
         r.prefix.startsWith('/v1/auth') ||
         r.prefix.startsWith('/v1/users') ||
         r.prefix.startsWith('/v1/operator/profile') ||
-        r.prefix.startsWith('/v1/operator/users'),
+        r.prefix.startsWith('/v1/operator/users') ||
+        r.prefix.startsWith('/v1/admin/operator-users'),
     );
     expect(identityRoutes.length).toBeGreaterThan(0);
     identityRoutes.forEach((r) => expect(r.target).toBe(env.IDENTITY_BASE_URL));
@@ -37,6 +38,7 @@ describe('buildRouteTable', () => {
   it('admin routes require SYSTEM_ADMIN role and point at their owning services', () => {
     const expectedAdminRoutes = [
       ['/v1/admin/operators', env.IDENTITY_BASE_URL],
+      ['/v1/admin/operator-users', env.IDENTITY_BASE_URL],
       ['/v1/admin/users', env.IDENTITY_BASE_URL],
       ['/v1/admin/booking-stats', env.BOOKING_BASE_URL],
       ['/v1/admin/trip-settlements', env.PAYMENT_BASE_URL],
@@ -73,6 +75,7 @@ describe('buildRouteTable', () => {
     const cases = [
       ['/v1/admin/operators', env.IDENTITY_BASE_URL],
       ['/v1/admin/operators/11111111-1111-1111-1111-111111111111/approve', env.IDENTITY_BASE_URL],
+      ['/v1/admin/operator-users', env.IDENTITY_BASE_URL],
       ['/v1/admin/users', env.IDENTITY_BASE_URL],
       ['/v1/admin/booking-stats/aggregate', env.BOOKING_BASE_URL],
       ['/v1/admin/platform-wallet', env.PAYMENT_BASE_URL],
@@ -227,10 +230,7 @@ describe('buildRouteTable', () => {
   it('routes Day 9 vehicle and driver schedule families to Trip with operator role union', () => {
     const cases = [
       ['/v1/operator/vehicles', '/v1/operator/vehicles'],
-      [
-        '/v1/operator/vehicles/11111111-1111-1111-1111-111111111111',
-        '/v1/operator/vehicles',
-      ],
+      ['/v1/operator/vehicles/11111111-1111-1111-1111-111111111111', '/v1/operator/vehicles'],
       ['/v1/operator/driver-schedules', '/v1/operator/driver-schedules'],
       [
         '/v1/operator/driver-schedules/11111111-1111-1111-1111-111111111111',
@@ -254,10 +254,7 @@ describe('buildRouteTable', () => {
       routes,
       '/v1/operator/vehicles/11111111-1111-1111-1111-111111111111',
     );
-    const genericRoute = matchRoute(
-      routes,
-      '/v1/vehicles/11111111-1111-1111-1111-111111111111',
-    );
+    const genericRoute = matchRoute(routes, '/v1/vehicles/11111111-1111-1111-1111-111111111111');
 
     expect(operatorRoute?.prefix).toBe('/v1/operator/vehicles');
     expect(operatorRoute?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
@@ -268,14 +265,17 @@ describe('buildRouteTable', () => {
   it('keeps existing Identity operator routes distinct from Trip operator routes', () => {
     const profileRoute = matchRoute(routes, '/v1/operator/profile');
     const usersRoute = matchRoute(routes, '/v1/operator/users');
+    const adminOperatorUsersRoute = matchRoute(routes, '/v1/admin/operator-users');
     const operatorStationsRoute = matchRoute(routes, '/v1/operator/stations');
     const operatorStopsRoute = matchRoute(routes, '/v1/operator/stops');
 
     expect(profileRoute?.target).toBe(env.IDENTITY_BASE_URL);
     expect(usersRoute?.target).toBe(env.IDENTITY_BASE_URL);
+    expect(adminOperatorUsersRoute?.target).toBe(env.IDENTITY_BASE_URL);
     expect(operatorStationsRoute?.target).toBe(env.TRIP_BASE_URL);
     expect(operatorStopsRoute?.target).toBe(env.TRIP_BASE_URL);
     expect(routes.find((r) => r.prefix === '/v1/operator')).toBeUndefined();
+    expect(routes.find((r) => r.prefix === '/v1/admin')).toBeUndefined();
   });
 
   it('does not register a separate station search route or stop delete route', () => {
