@@ -24,6 +24,7 @@ public static class PersistenceServiceCollectionExtensions
         var connectionString = configuration.GetConnectionString(connectionStringName)
             ?? throw new InvalidOperationException(
                 $"ConnectionStrings:{connectionStringName} is not configured.");
+        var schemaName = typeof(TContext).GetField("SchemaName")?.GetRawConstantValue() as string;
 
         services.AddSingleton(_ =>
         {
@@ -35,7 +36,14 @@ public static class PersistenceServiceCollectionExtensions
 
         services.AddDbContext<TContext>((sp, options) =>
         {
-            options.UseNpgsql(sp.GetRequiredService<NpgsqlDataSource>(), ConfigureNpgsqlRetry);
+            options.UseNpgsql(sp.GetRequiredService<NpgsqlDataSource>(), npgsql =>
+            {
+                ConfigureNpgsqlRetry(npgsql);
+                if (!string.IsNullOrWhiteSpace(schemaName))
+                {
+                    npgsql.MigrationsHistoryTable("__ef_migrations_history", schemaName);
+                }
+            });
         });
 
         // Expose the concrete context as VietRideDbContextBase for shared services (e.g. OutboxStore).

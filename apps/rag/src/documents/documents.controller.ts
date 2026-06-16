@@ -44,7 +44,7 @@ export class DocumentsController {
       limits: { fileSize: RAG_DOCUMENT_UPLOAD_HARD_CAP_BYTES },
     }),
   )
-  @ApiOperation({ summary: 'Upload a RAG knowledge document' })
+  @ApiOperation({ summary: 'Upload, auto-approve, and request ingest for a RAG knowledge document' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
@@ -69,7 +69,7 @@ export class DocumentsController {
       },
     },
   })
-  @ApiResponse({ status: 201, description: 'Document uploaded' })
+  @ApiResponse({ status: 201, description: 'Document uploaded, approved, and queued for ingest' })
   @ApiResponse({ status: 400, description: 'Invalid payload or file' })
   @ApiResponse({ status: 401, description: 'Missing or invalid internal JWT' })
   @ApiResponse({ status: 403, description: 'SYSTEM_ADMIN role is required' })
@@ -82,7 +82,7 @@ export class DocumentsController {
   }
 
   @Put(':documentId/approve')
-  @ApiOperation({ summary: 'Approve a RAG knowledge document for ingest' })
+  @ApiOperation({ summary: 'Approve a pending RAG knowledge document for ingest' })
   @ApiParam({ name: 'documentId', format: 'uuid', description: 'Knowledge document ID' })
   @ApiResponse({ status: 200, description: 'Document approved' })
   @ApiResponse({ status: 401, description: 'Missing or invalid internal JWT' })

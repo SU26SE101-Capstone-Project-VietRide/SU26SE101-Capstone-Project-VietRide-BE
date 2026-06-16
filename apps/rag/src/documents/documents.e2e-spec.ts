@@ -29,6 +29,7 @@ describe('DocumentsController (e2e)', () => {
   beforeAll(async () => {
     repository = {
       create: jest.fn(),
+      createApproved: jest.fn(),
       findById: jest.fn(),
       approve: jest.fn(),
     } as unknown as jest.Mocked<DocumentsRepository>;
@@ -66,7 +67,13 @@ describe('DocumentsController (e2e)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    repository.create.mockResolvedValue(makeDocument());
+    repository.createApproved.mockResolvedValue(
+      makeDocument({
+        status: 'APPROVED',
+        approvedByUserId: ADMIN_USER_ID,
+        approvedAt: new Date('2026-06-13T00:00:00.000Z'),
+      }),
+    );
     repository.findById.mockResolvedValue(makeDocument({ status: 'PENDING_REVIEW' }));
     repository.approve.mockResolvedValue(
       makeDocument({
@@ -78,16 +85,17 @@ describe('DocumentsController (e2e)', () => {
     storageProvider.createSignedReadUrl.mockResolvedValue('https://preview.example/faq.txt');
   });
 
-  it('POST /api/v1/rag/documents returns 201 for SYSTEM_ADMIN TXT upload', async () => {
+  it('POST /api/v1/rag/documents auto-approves SYSTEM_ADMIN TXT upload', async () => {
     const response = await fetch(`${baseUrl}/api/v1/rag/documents`, {
       method: 'POST',
       headers: { 'X-Internal-Auth': await signInternalJwt(ADMIN_USER_ID, 'SYSTEM_ADMIN') },
       body: makeValidForm(),
     });
-    const body = (await response.json()) as { id?: string; previewUrl?: string };
+    const body = (await response.json()) as { id?: string; previewUrl?: string; status?: string };
 
     expect(response.status).toBe(201);
     expect(body.id).toBe(DOCUMENT_ID);
+    expect(body.status).toBe('APPROVED');
     expect(body.previewUrl).toBe('https://preview.example/faq.txt');
   });
 
