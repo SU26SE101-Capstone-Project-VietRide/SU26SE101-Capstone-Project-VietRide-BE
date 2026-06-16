@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Serilog;
 using VietRide.Booking.Application;
 using VietRide.Booking.Infrastructure;
@@ -30,6 +31,12 @@ builder.Services.AddVietRideIdempotency("booking");
 
 var app = builder.Build();
 
+if (!IsWebApplicationFactoryHost())
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    await scope.ServiceProvider.GetRequiredService<BookingDbContext>().Database.MigrateAsync();
+}
+
 app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseVietRideSwagger();
 app.UseAuthentication();
@@ -39,6 +46,10 @@ app.MapVietRideHealth(ServiceName);
 app.MapControllers();
 
 app.Run();
+
+static bool IsWebApplicationFactoryHost()
+    => AppDomain.CurrentDomain.GetAssemblies()
+        .Any(assembly => assembly.GetName().Name == "Microsoft.AspNetCore.Mvc.Testing");
 
 // Expose Program for WebApplicationFactory<Program> in integration tests.
 public partial class Program;

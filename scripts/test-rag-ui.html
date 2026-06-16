@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VietRide RAG Assistant Tester</title>
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;600&display=swap" rel="stylesheet">
+    <!-- Marked.js & DOMPurify -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js"></script>
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --panel-bg: rgba(30, 41, 59, 0.7);
+            --border-color: rgba(255, 255, 255, 0.1);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --user-msg: #3b82f6;
+            --assistant-msg: rgba(30, 41, 59, 0.8);
+            --success: #10b981;
+            --danger: #ef4444;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #020617 0%, #0f172a 100%);
+            color: var(--text-main);
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+        }
+
+        h1, h2, h3 {
+            font-family: 'Outfit', sans-serif;
+        }
+
+        /* Layout */
+        #app {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Sidebar Settings */
+        #sidebar {
+            width: 320px;
+            background: var(--panel-bg);
+            backdrop-filter: blur(12px);
+            border-right: 1px solid var(--border-color);
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            z-index: 10;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .brand i {
+            font-size: 32px;
+            color: var(--primary);
+        }
+
+        .brand h1 {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .form-group label {
+            font-size: 13px;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        input[type="text"], input[type="password"] {
+            width: 100%;
+            padding: 10px 12px;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: white;
+            font-family: 'Inter', sans-serif;
+            font-size: 14px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+        }
+
+        /* Main Chat Area */
+        #main-chat {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        #chat-history {
+            flex: 1;
+            padding: 40px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            scroll-behavior: smooth;
+        }
+
+        .message-wrapper {
+            display: flex;
+            flex-direction: column;
+            max-width: 80%;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message-wrapper.user {
+            align-self: flex-end;
+            align-items: flex-end;
+        }
+
+        .message-wrapper.assistant {
+            align-self: flex-start;
+            align-items: flex-start;
+        }
+
+        .message-content {
+            padding: 16px 20px;
+            border-radius: 16px;
+            line-height: 1.6;
+            font-size: 15px;
+        }
+
+        .message-wrapper.user .message-content {
+            background: var(--user-msg);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message-wrapper.assistant .message-content {
+            background: var(--assistant-msg);
+            border: 1px solid var(--border-color);
+            border-bottom-left-radius: 4px;
+            color: var(--text-main);
+        }
+
+        /* Markdown styling within assistant messages */
+        .message-content p { margin-bottom: 12px; }
+        .message-content p:last-child { margin-bottom: 0; }
+        .message-content pre {
+            background: rgba(0,0,0,0.3);
+            padding: 12px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 12px 0;
+        }
+        .message-content code {
+            font-family: monospace;
+            background: rgba(0,0,0,0.2);
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+
+        .message-meta {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 8px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .feedback-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-icon {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn-icon:hover {
+            background: rgba(255,255,255,0.1);
+            color: var(--text-main);
+        }
+
+        .btn-icon.active-up { color: var(--success); }
+        .btn-icon.active-down { color: var(--danger); }
+
+        /* Input Area */
+        #input-area {
+            padding: 24px 40px;
+            background: linear-gradient(to top, #020617 50%, transparent);
+        }
+
+        .input-container {
+            position: relative;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        #chat-input {
+            width: 100%;
+            background: rgba(30, 41, 59, 0.9);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 16px 56px 16px 20px;
+            color: white;
+            font-family: 'Inter', sans-serif;
+            font-size: 15px;
+            resize: none;
+            line-height: 1.5;
+            min-height: 56px;
+            max-height: 200px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            transition: border-color 0.2s;
+        }
+
+        #chat-input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        #send-btn {
+            position: absolute;
+            right: 12px;
+            bottom: 12px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        #send-btn:hover:not(:disabled) {
+            background: var(--primary-hover);
+        }
+
+        #send-btn:disabled {
+            background: var(--text-muted);
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+
+        .typing-indicator {
+            display: inline-flex;
+            gap: 4px;
+            align-items: center;
+            height: 24px;
+        }
+
+        .typing-indicator span {
+            width: 6px;
+            height: 6px;
+            background: var(--text-muted);
+            border-radius: 50%;
+            animation: bounce 1.4s infinite ease-in-out both;
+        }
+
+        .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
+        .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
+
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            background: var(--success);
+            color: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transform: translateY(-100px);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+            z-index: 100;
+        }
+
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .toast.error { background: var(--danger); }
+        
+        .btn-outline {
+            width: 100%;
+            padding: 10px;
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s;
+            margin-top: 10px;
+        }
+        .btn-outline:hover {
+            background: rgba(255,255,255,0.05);
+        }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <!-- Sidebar -->
+    <div id="sidebar">
+        <div class="brand">
+            <i class="ph ph-robot"></i>
+            <h1>RAG Tester</h1>
+        </div>
+
+        <div class="form-group">
+            <label for="base-url">API Base URL</label>
+            <input type="text" id="base-url" value="http://localhost:3000/v1/rag">
+        </div>
+
+        <div class="form-group">
+            <label for="token">Bearer Token (JWT)</label>
+            <input type="password" id="token" placeholder="eyJhbGci...">
+        </div>
+
+        <div class="form-group">
+            <label for="conv-id">Conversation ID</label>
+            <input type="text" id="conv-id" placeholder="Auto-generated on first message" readonly>
+        </div>
+        
+        <button class="btn-outline" onclick="startNewConversation()">Start New Conversation</button>
+        
+        <div style="flex:1"></div>
+        <div style="font-size: 12px; color: var(--text-muted);">
+            Ensure backend is running and you have a valid user JWT.
+        </div>
+    </div>
+
+    <!-- Main Chat -->
+    <div id="main-chat">
+        <div id="chat-history">
+            <!-- Messages will be appended here -->
+            <div class="message-wrapper assistant">
+                <div class="message-content">
+                    <p>Hello! I am the VietRide RAG Assistant. Send a message to test the retrieval and generation pipeline.</p>
+                </div>
+            </div>
+        </div>
+
+        <div id="input-area">
+            <div class="input-container">
+                <textarea id="chat-input" placeholder="Type your message... (Shift+Enter for newline, Enter to send)" rows="1"></textarea>
+                <button id="send-btn">
+                    <i class="ph ph-paper-plane-right" style="font-size: 20px;"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+    // Config
+    const DOM = {
+        baseUrl: document.getElementById('base-url'),
+        token: document.getElementById('token'),
+        convId: document.getElementById('conv-id'),
+        chatHistory: document.getElementById('chat-history'),
+        chatInput: document.getElementById('chat-input'),
+        sendBtn: document.getElementById('send-btn'),
+        toast: document.getElementById('toast'),
+    };
+
+    let isWaitingForResponse = false;
+
+    // Auto-resize textarea
+    DOM.chatInput.addEventListener('input', function() {
+        this.style.height = '56px';
+        this.style.height = (this.scrollHeight) + 'px';
+    });
+
+    // Handle Enter key
+    DOM.chatInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+        }
+    });
+
+    DOM.sendBtn.addEventListener('click', sendMessage);
+
+    function startNewConversation() {
+        DOM.convId.value = '';
+        DOM.chatHistory.innerHTML = `
+            <div class="message-wrapper assistant">
+                <div class="message-content">
+                    <p>Started a new conversation! Send a message.</p>
+                </div>
+            </div>
+        `;
+    }
+
+    function showToast(message, type = 'success') {
+        DOM.toast.textContent = message;
+        DOM.toast.className = `toast show ${type}`;
+        setTimeout(() => DOM.toast.classList.remove('show'), 3000);
+    }
+
+    async function sendMessage() {
+        const text = DOM.chatInput.value.trim();
+        if (!text || isWaitingForResponse) return;
+
+        const token = DOM.token.value.trim();
+        if (!token) {
+            showToast('Please provide a Bearer token', 'error');
+            return;
+        }
+
+        // Add user message to UI
+        appendMessage('user', text);
+        DOM.chatInput.value = '';
+        DOM.chatInput.style.height = '56px';
+        DOM.chatInput.disabled = true;
+        DOM.sendBtn.disabled = true;
+        isWaitingForResponse = true;
+
+        // Prepare Assistant message container
+        const assistantId = 'msg-' + Date.now();
+        appendAssistantPlaceholder(assistantId);
+        const contentEl = document.querySelector(`#${assistantId} .markdown-body`);
+
+        try {
+            const payload = { message: text };
+            if (DOM.convId.value) {
+                payload.conversationId = DOM.convId.value;
+            }
+
+            const response = await fetch(`${DOM.baseUrl.value}/chat`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.message || err.error?.message || `HTTP ${response.status}`);
+            }
+
+            // Read SSE stream manually because fetch doesn't have EventSource for POST natively without Polyfill
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let assistantText = '';
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop(); // keep last incomplete line
+
+                let currentEvent = null;
+                for (const line of lines) {
+                    if (line.startsWith('event: ')) {
+                        currentEvent = line.substring(7).trim();
+                    } else if (line.startsWith('data: ')) {
+                        const dataStr = line.substring(6).trim();
+                        if (!dataStr) continue;
+                        
+                        try {
+                            const data = JSON.parse(dataStr);
+                            
+                            if (currentEvent === 'token') {
+                                assistantText += data.content;
+                                contentEl.innerHTML = DOMPurify.sanitize(marked.parse(assistantText));
+                                scrollToBottom();
+                            } else if (currentEvent === 'done') {
+                                // Finalize message
+                                DOM.convId.value = data.conversationId;
+                                finalizeAssistantMessage(assistantId, data.assistantMessageId, data.citedChunkIds);
+                            } else if (currentEvent === 'error') {
+                                throw new Error(`[${data.code}] ${data.message}`);
+                            }
+                        } catch (e) {
+                            console.error('Failed to parse SSE data', e);
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            contentEl.innerHTML = `<span style="color: var(--danger)"><i class="ph ph-warning"></i> Error: ${error.message}</span>`;
+            document.querySelector(`#${assistantId} .typing-indicator`)?.remove();
+            showToast(error.message, 'error');
+        } finally {
+            DOM.chatInput.disabled = false;
+            DOM.sendBtn.disabled = false;
+            DOM.chatInput.focus();
+            isWaitingForResponse = false;
+        }
+    }
+
+    function appendMessage(role, text) {
+        const wrapper = document.createElement('div');
+        wrapper.className = `message-wrapper ${role}`;
+        
+        let safeHtml = DOMPurify.sanitize(marked.parse(text));
+        if (role === 'user') {
+            safeHtml = text.replace(/\n/g, '<br>'); // Simple text for user
+        }
+
+        wrapper.innerHTML = `
+            <div class="message-content markdown-body">
+                ${safeHtml}
+            </div>
+        `;
+        DOM.chatHistory.appendChild(wrapper);
+        scrollToBottom();
+    }
+
+    function appendAssistantPlaceholder(id) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'message-wrapper assistant';
+        wrapper.id = id;
+        wrapper.innerHTML = `
+            <div class="message-content">
+                <div class="markdown-body"></div>
+                <div class="typing-indicator">
+                    <span></span><span></span><span></span>
+                </div>
+            </div>
+        `;
+        DOM.chatHistory.appendChild(wrapper);
+        scrollToBottom();
+    }
+
+    function finalizeAssistantMessage(wrapperId, actualMessageId, citedChunkIds) {
+        const wrapper = document.getElementById(wrapperId);
+        if (!wrapper) return;
+        
+        // Remove typing indicator
+        wrapper.querySelector('.typing-indicator')?.remove();
+        
+        // Add meta/feedback footer
+        const meta = document.createElement('div');
+        meta.className = 'message-meta';
+        
+        let citationsHtml = '';
+        if (citedChunkIds && citedChunkIds.length > 0) {
+            citationsHtml = `<span><i class="ph ph-books"></i> ${citedChunkIds.length} sources cited</span>`;
+        }
+
+        meta.innerHTML = `
+            ${citationsHtml}
+            <div style="flex: 1"></div>
+            <div class="feedback-actions" data-msg-id="${actualMessageId}">
+                <button class="btn-icon" title="Good response" onclick="submitFeedback('${actualMessageId}', 1, this)">
+                    <i class="ph ph-thumbs-up"></i>
+                </button>
+                <button class="btn-icon" title="Bad response" onclick="submitFeedback('${actualMessageId}', -1, this)">
+                    <i class="ph ph-thumbs-down"></i>
+                </button>
+            </div>
+        `;
+        wrapper.appendChild(meta);
+        scrollToBottom();
+    }
+
+    async function submitFeedback(messageId, rating, btnEl) {
+        const token = DOM.token.value.trim();
+        if (!token) return showToast('No token for feedback', 'error');
+
+        try {
+            const res = await fetch(`${DOM.baseUrl.value}/messages/${messageId}/feedback`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ rating })
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.message || err.error?.message || 'Feedback failed');
+            }
+
+            // Update UI state
+            const container = btnEl.parentElement;
+            const btns = container.querySelectorAll('.btn-icon');
+            btns.forEach(b => b.className = 'btn-icon'); // reset
+
+            if (rating === 1) {
+                btns[0].classList.add('active-up');
+                btns[0].innerHTML = '<i class="ph-fill ph-thumbs-up"></i>';
+                btns[1].innerHTML = '<i class="ph ph-thumbs-down"></i>';
+            } else {
+                btns[1].classList.add('active-down');
+                btns[1].innerHTML = '<i class="ph-fill ph-thumbs-down"></i>';
+                btns[0].innerHTML = '<i class="ph ph-thumbs-up"></i>';
+            }
+            
+            showToast('Feedback submitted successfully');
+        } catch (error) {
+            showToast(error.message, 'error');
+        }
+    }
+
+    function scrollToBottom() {
+        DOM.chatHistory.scrollTop = DOM.chatHistory.scrollHeight;
+    }
+</script>
+
+</body>
+</html>

@@ -155,7 +155,7 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
     const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
     const handler = createProxyHandler(env, signer);
     const authorization = await makeAuthorizationHeader({ sub: 'passenger-1', role: 'PASSENGER' });
-    const req = makeRequest('/v1/admin/users', {
+    const req = makeRequest('/v1/admin/operator-users', {
       authorization,
       'x-request-id': 'req-rbac',
     });
@@ -424,6 +424,8 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
   it.each([
     ['/v1/admin/operators', env.IDENTITY_BASE_URL],
     ['/v1/admin/operators/11111111-1111-1111-1111-111111111111/approve', env.IDENTITY_BASE_URL],
+    ['/v1/admin/operator-users', env.IDENTITY_BASE_URL],
+    ['/v1/admin/operator-users?role=OPERATOR_ADMIN', env.IDENTITY_BASE_URL],
     ['/v1/admin/users', env.IDENTITY_BASE_URL],
     ['/v1/admin/booking-stats/aggregate', env.BOOKING_BASE_URL],
     ['/v1/admin/platform-wallet', env.PAYMENT_BASE_URL],

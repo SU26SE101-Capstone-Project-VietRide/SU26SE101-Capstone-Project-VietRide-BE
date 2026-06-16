@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Serilog;
 using StackExchange.Redis;
 using VietRide.Payment.Application.Features.Internal.Payments.BatchChargePayment;
@@ -37,6 +38,12 @@ builder.Services.AddVietRideIdempotency("payment");
 
 var app = builder.Build();
 
+if (!IsWebApplicationFactoryHost())
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    await scope.ServiceProvider.GetRequiredService<PaymentDbContext>().Database.MigrateAsync();
+}
+
 app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseVietRideSwagger();
 app.UseAuthentication();
@@ -46,6 +53,10 @@ app.MapVietRideHealth(ServiceName);
 app.MapControllers();
 
 app.Run();
+
+static bool IsWebApplicationFactoryHost()
+    => AppDomain.CurrentDomain.GetAssemblies()
+        .Any(assembly => assembly.GetName().Name == "Microsoft.AspNetCore.Mvc.Testing");
 
 // Expose Program for WebApplicationFactory<Program> in integration tests.
 public partial class Program;

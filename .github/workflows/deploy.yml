@@ -1,0 +1,75 @@
+name: Deploy (production)
+
+# Manual-only: trigger from the Actions tab → "Run workflow". Pick the image tag to roll out.
+# This deploys images that the "Docker Build & Push" workflow already published to GHCR —
+# it does NOT build anything. Build + push a tag (push a v* tag) BEFORE deploying it.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag to deploy (e.g. v1.0.0 or latest)'
+        required: true
+        default: 'latest'
+        type: string
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.tag }} to server
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy compose + nginx config to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          source: 'infra/docker/docker-compose.prod.yml,infra/nginx/nginx.prod.conf,infra/postgres/init.sql,infra/rabbitmq/definitions.json'
+          target: /opt/vietride
+          overwrite: true
+          strip_components: 0
+
+      - name: Pull images + restart stack
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script: |
+            set -euo pipefail
+            cd /opt/vietride/infra/docker
+
+            # .env (real secrets) must already exist on the server at this path.
+            if [ ! -f .env ]; then
+              echo "::error::/opt/vietride/infra/docker/.env not found — create it once (see DEPLOY.md)"; exit 1
+            fi
+
+            # Pin the tag chosen in this run (overrides IMAGE_TAG in .env for this deploy).
+            export IMAGE_TAG="${{ inputs.tag }}"
+
+            # Authenticate to GHCR so private images can be pulled.
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
+
+            docker compose -f docker-compose.prod.yml --env-file .env pull
+            docker compose -f docker-compose.prod.yml --env-file .env up -d --remove-orphans
+            docker image prune -f
+
+      - name: Health check via public domain
+        run: |
+          set -e
+          for i in $(seq 1 10); do
+            if curl -fsS "https://${{ secrets.APP_DOMAIN }}/health" >/dev/null 2>&1 \
+               || curl -fsS "http://${{ secrets.APP_DOMAIN }}/health" >/dev/null 2>&1; then
+              echo "✅ Health check passed"; exit 0
+            fi
+            echo "Attempt $i: not healthy yet, retrying in 15s..."; sleep 15
+          done
+          echo "::error::Health check failed after ~150s"; exit 1
