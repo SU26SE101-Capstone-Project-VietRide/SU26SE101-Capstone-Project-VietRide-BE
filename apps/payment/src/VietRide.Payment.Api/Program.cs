@@ -1,4 +1,5 @@
 using Hangfire;
+using Microsoft.EntityFrameworkCore;
 using Serilog;
 using VietRide.Payment.Application;
 using VietRide.Payment.Infrastructure;
@@ -41,6 +42,12 @@ builder.Services.AddVietRideIdempotency("payment");
 
 var app = builder.Build();
 
+if (!IsWebApplicationFactoryHost())
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    await scope.ServiceProvider.GetRequiredService<PaymentDbContext>().Database.MigrateAsync();
+}
+
 app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseVietRideSwagger();
 app.UseAuthentication();
@@ -60,6 +67,10 @@ if (registerMessaging)
 }
 
 app.Run();
+
+static bool IsWebApplicationFactoryHost()
+    => AppDomain.CurrentDomain.GetAssemblies()
+        .Any(assembly => assembly.GetName().Name == "Microsoft.AspNetCore.Mvc.Testing");
 
 // Expose Program for WebApplicationFactory<Program> in integration tests.
 public partial class Program;

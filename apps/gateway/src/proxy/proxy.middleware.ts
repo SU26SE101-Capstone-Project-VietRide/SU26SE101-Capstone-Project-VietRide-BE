@@ -275,9 +275,9 @@ export function createProxyHandler(env: Env, signer: InternalJwtSigner): Express
       upstreamPath = route.rewriteTo + search;
     } else if (route.stripPrefix) {
       const trail = fullPath.substring(route.prefix.length) || '/';
-      upstreamPath = trail + search;
+      upstreamPath = (route.prependPrefix || '') + trail + search;
     } else {
-      upstreamPath = fullPath + search;
+      upstreamPath = (route.prependPrefix || '') + fullPath + search;
     }
     req.url = upstreamPath;
     (req as Request & { originalUrl: string }).originalUrl = upstreamPath;

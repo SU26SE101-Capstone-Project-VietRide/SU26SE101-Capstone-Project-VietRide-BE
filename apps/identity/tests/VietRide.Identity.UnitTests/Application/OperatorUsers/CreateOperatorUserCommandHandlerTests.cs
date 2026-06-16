@@ -283,6 +283,13 @@ public sealed class CreateOperatorUserCommandHandlerTests
         public void Remove(User entity) { }
         public IQueryable<User> Query() => Array.Empty<User>().AsQueryable();
         public IQueryable<User> QueryNoTracking() => Array.Empty<User>().AsQueryable();
+        public Task<PagedResult<User>> ListOperatorUsersAsync(
+            QueryOptions options,
+            Guid? operatorId,
+            UserRole? role,
+            UserStatus? status,
+            CancellationToken ct = default)
+            => Task.FromResult(PagedResult<User>.Create([], 1, 20, 0));
     }
 
     private sealed class FakeOperatorRepository : IOperatorRepository

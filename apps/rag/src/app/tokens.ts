@@ -1,0 +1,4 @@
+export const ENV_TOKEN = Symbol('ENV_TOKEN');
+export const CHAT_COMPLETION_PROVIDER = Symbol('CHAT_COMPLETION_PROVIDER');
+export const EMBEDDING_PROVIDER = Symbol('EMBEDDING_PROVIDER');
+export const STORAGE_PROVIDER = Symbol('STORAGE_PROVIDER');

@@ -35,6 +35,8 @@ public static class SwaggerSetupExtensions
                 In = ParameterLocation.Header,
                 Description = "Internal JWT (HS256, 120s). For /internal/* endpoints only.",
             });
+
+            c.OperationFilter<AuthorizeOperationFilter>();
         });
 
         return services;

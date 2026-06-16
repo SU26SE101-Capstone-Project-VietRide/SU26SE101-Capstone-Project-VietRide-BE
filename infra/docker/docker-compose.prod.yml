@@ -1,0 +1,312 @@
+# VietRide PRODUCTION stack — runs on the Ubuntu server.
+# Unlike docker-compose.yml (which BUILDS from source for local dev), this file PULLS
+# pre-built images from GHCR that the "Docker Build & Push" workflow published.
+#
+# This file is copied to /opt/vietride/ on the server by the deploy workflow.
+# A gitignored .env (real secrets) must live next to it at /opt/vietride/.env.
+#
+# Required .env keys (beyond .env.example): IMAGE_PREFIX, IMAGE_TAG, APP_DOMAIN, ACME_EMAIL.
+#   IMAGE_PREFIX  e.g. ghcr.io/su26se101-capstone-project-vietride/vietride
+#   IMAGE_TAG     e.g. v1.0.0  (the version tag you pushed)
+#
+# Usage on the server (the deploy workflow runs these for you):
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# NOTE: tracking / notification / rag (NestJS) are commented out until their images
+# are published by docker-build.yml. Uncomment the blocks + their gateway *_BASE_URL
+# wiring once the BE for those services is ready.
+
+name: vietride
+
+x-dotnet-common: &dotnet-common
+  restart: unless-stopped
+  environment:
+    ASPNETCORE_ENVIRONMENT: Production
+    INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+  depends_on:
+    postgres:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+
+services:
+  # ── Infrastructure ──────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: vietride_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vietride}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required in prod}
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    # Bind to 127.0.0.1 ONLY — reachable from the server itself (and via SSH tunnel for
+    # Navicat/DBeaver), but NOT exposed to the internet.
+    ports:
+      - '127.0.0.1:5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-vietride}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: vietride_pgbouncer
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-vietride}:${POSTGRES_PASSWORD}@postgres:5432/postgres
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 200
+      DEFAULT_POOL_SIZE: 25
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'pidof pgbouncer >/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: vietride_redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: vietride_rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-vietride}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required in prod}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - ../rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', 'ping']
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  # ── .NET 8 services (pulled from GHCR) ──────────────────────────────────────
+  identity:
+    <<: *dotnet-common
+    image: ${IMAGE_PREFIX}-identity:${IMAGE_TAG:-latest}
+    container_name: vietride_identity
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      REDIS_URL: 'redis:6379,abortConnect=false'
+      SYSTEM_ADMIN_BOOTSTRAP_EMAIL: ${SYSTEM_ADMIN_BOOTSTRAP_EMAIL}
+      SYSTEM_ADMIN_BOOTSTRAP_PASSWORD: ${SYSTEM_ADMIN_BOOTSTRAP_PASSWORD}
+      SYSTEM_ADMIN_BOOTSTRAP_DISPLAY_NAME: ${SYSTEM_ADMIN_BOOTSTRAP_DISPLAY_NAME:-System Administrator}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET}
+      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_identity;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD}'
+      RabbitMq__HostName: rabbitmq
+      RabbitMq__Port: '5672'
+      RabbitMq__UserName: ${RABBITMQ_USER:-vietride}
+      RabbitMq__Password: ${RABBITMQ_PASSWORD}
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5001/health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  trip:
+    <<: *dotnet-common
+    image: ${IMAGE_PREFIX}-trip:${IMAGE_TAG:-latest}
+    container_name: vietride_trip
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_trip;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD}'
+      IDENTITY_SERVICE_BASE_URL: http://identity:5001
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5002/health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  booking:
+    <<: *dotnet-common
+    image: ${IMAGE_PREFIX}-booking:${IMAGE_TAG:-latest}
+    container_name: vietride_booking
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_booking;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD}'
+      REDIS_URL: redis:6379
+      TRIP_SERVICE_BASE_URL: http://trip:5002
+      PAYMENT_SERVICE_BASE_URL: http://payment:5004
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5003/health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  payment:
+    <<: *dotnet-common
+    image: ${IMAGE_PREFIX}-payment:${IMAGE_TAG:-latest}
+    container_name: vietride_payment
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_payment;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD}'
+      VNPAY_TMN_CODE: ${VNPAY_TMN_CODE}
+      VNPAY_HASH_SECRET: ${VNPAY_HASH_SECRET}
+      VNPAY_PAYMENT_URL: ${VNPAY_PAYMENT_URL}
+      VNPAY_RETURN_URL: ${VNPAY_RETURN_URL}
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5004/health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  parcel:
+    <<: *dotnet-common
+    image: ${IMAGE_PREFIX}-parcel:${IMAGE_TAG:-latest}
+    container_name: vietride_parcel
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_parcel;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD}'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5005/health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  # ── NestJS gateway (pulled from GHCR) ───────────────────────────────────────
+  gateway:
+    image: ${IMAGE_PREFIX}-gateway:${IMAGE_TAG:-latest}
+    container_name: vietride_gateway
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      GATEWAY_PORT: 3000
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      JWT_PUBLIC_KEY_URL: http://identity:5001/v1/.well-known/jwks.json
+      IDENTITY_BASE_URL: http://identity:5001
+      TRIP_BASE_URL: http://trip:5002
+      BOOKING_BASE_URL: http://booking:5003
+      PAYMENT_BASE_URL: http://payment:5004
+      PARCEL_BASE_URL: http://parcel:5005
+      # TRACKING_BASE_URL: http://tracking:3001       # enable when tracking image exists
+      # NOTIFICATION_BASE_URL: http://notification:3002
+      # RAG_BASE_URL: http://rag:3003
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      identity:
+        condition: service_healthy
+      trip:
+        condition: service_healthy
+      booking:
+        condition: service_healthy
+      payment:
+        condition: service_healthy
+      parcel:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  # ── tracking / notification / rag — enable once their GHCR images are published.
+  # tracking:
+  #   image: ${IMAGE_PREFIX}-tracking:${IMAGE_TAG:-latest}
+  #   container_name: vietride_tracking
+  #   restart: unless-stopped
+  #   environment:
+  #     NODE_ENV: production
+  #     PORT: 3001
+  #     INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+  #     DATABASE_URL: 'postgresql://${POSTGRES_USER:-vietride}:${POSTGRES_PASSWORD}@postgres:5432/${TRACKING_DB:-vietride_tracking}'
+  #     REDIS_HOST: redis
+  #     REDIS_PORT: 6379
+  #     RABBITMQ_URL: 'amqp://${RABBITMQ_USER:-vietride}:${RABBITMQ_PASSWORD}@rabbitmq:5672'
+  #     RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-vietride.events}
+  #   depends_on:
+  #     postgres: { condition: service_healthy }
+  #     redis: { condition: service_healthy }
+  #     rabbitmq: { condition: service_healthy }
+
+  # ── Edge: Nginx (internal reverse proxy — NO host port) ─────────────────────
+  # Not published to the host. Cloudflare Tunnel reaches it over the docker network
+  # (cloudflared → nginx:80). nginx terminates plain HTTP; TLS is handled at Cloudflare's
+  # edge, so no certs live here. nginx does the path routing (/ → FE, /v1/ → gateway).
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: vietride_nginx
+    restart: unless-stopped
+    volumes:
+      - ../nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://127.0.0.1/health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  # ── Adminer: web DB UI for the team ─────────────────────────────────────────
+  # NOT published to the host. Reached only via Cloudflare Tunnel (db.vietride.online)
+  # which MUST be locked behind Cloudflare Access (email allowlist) — see DEPLOY.md.
+  # Team logs in with the postgres credentials (server=postgres, user=vietride).
+  adminer:
+    image: adminer:latest
+    container_name: vietride_adminer
+    restart: unless-stopped
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── Cloudflare Tunnel: outbound-only link to the Cloudflare edge ────────────
+  # The server DIALS OUT to Cloudflare — no inbound port forwarding needed (works
+  # behind the provider NAT / the 24450–24460 restriction). Cloudflare serves 443
+  # publicly for api.vietride.app and routes requests through this tunnel to nginx:80.
+  # Map the hostname → http://nginx:80 in the Cloudflare Zero Trust dashboard (or
+  # config.yml) when you create the tunnel — see DEPLOY.md.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: vietride_cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?TUNNEL_TOKEN required — create the tunnel first, see DEPLOY.md}
+    depends_on:
+      nginx:
+        condition: service_healthy
+
+networks:
+  default:
+    name: vietride_net
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
