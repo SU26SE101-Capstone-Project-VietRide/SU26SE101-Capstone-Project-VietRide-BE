@@ -10,6 +10,7 @@ namespace VietRide.Booking.Infrastructure.Http;
 public sealed class DevTripServiceClient : ITripServiceClient
 {
     public static readonly Guid TripWithoutReturnRouteId = Guid.Parse("00000000-0000-4000-8000-000000000013");
+    public static readonly Guid RoundTripReturnTripId = Guid.Parse("00000000-0000-4000-8000-000000000113");
 
     private readonly ILogger<DevTripServiceClient> _logger;
 
@@ -29,14 +30,18 @@ public sealed class DevTripServiceClient : ITripServiceClient
             ? (Guid?)null
             : CreateDeterministicGuid($"return-route:{routeId}");
 
+        var isReturnTrip = tripId == RoundTripReturnTripId;
+        var departureDateTime = isReturnTrip ? now.AddHours(10) : now.AddHours(4);
+        var estimatedArrivalTime = isReturnTrip ? now.AddHours(14) : now.AddHours(8);
+
         var snapshot = new TripSnapshot(
             TripId: tripId,
             OperatorId: Guid.Parse("11111111-1111-4111-8111-111111111111"),
             RouteId: routeId,
             VehicleId: Guid.Parse("33333333-3333-4333-8333-333333333333"),
             Status: "SCHEDULED",
-            DepartureDateTime: now.AddHours(2),
-            EstimatedArrivalTime: now.AddHours(6),
+            DepartureDateTime: departureDateTime,
+            EstimatedArrivalTime: estimatedArrivalTime,
             BaseFare: 200_000,
             OriginStation: new TripStationSnapshot(
                 Guid.Parse("44444444-4444-4444-8444-444444444444"),
@@ -71,6 +76,39 @@ public sealed class DevTripServiceClient : ITripServiceClient
             DateTimeOffset.UtcNow.AddSeconds(ttlSeconds ?? 600));
 
         return Task.FromResult<LockSeatsOutcome>(new LockSeatsOutcome.Success(result));
+    }
+
+    public Task<LockRoundTripSeatsOutcome> LockRoundTripSeatsAsync(
+        Guid outboundTripId,
+        IReadOnlyList<string> outboundSeatNumbers,
+        Guid returnTripId,
+        IReadOnlyList<string> returnSeatNumbers,
+        Guid holdOwnerId,
+        string idempotencyKey,
+        int? ttlSeconds = null,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation(
+            "Using Day-12 dev Trip stub to atomically lock round-trip seats outbound {OutboundSeats} and return {ReturnSeats}.",
+            string.Join(",", outboundSeatNumbers),
+            string.Join(",", returnSeatNumbers));
+
+        var outboundToken = CreateDeterministicGuid($"{outboundTripId}:{idempotencyKey}:outbound:{string.Join(',', outboundSeatNumbers)}");
+        var returnToken = CreateDeterministicGuid($"{returnTripId}:{idempotencyKey}:return:{string.Join(',', returnSeatNumbers)}");
+
+        var outbound = new RoundTripSeatLockResult(
+            outboundTripId,
+            outboundToken,
+            outboundSeatNumbers.ToArray(),
+            DateTimeOffset.UtcNow.AddSeconds(ttlSeconds ?? 600));
+
+        var @return = new RoundTripSeatLockResult(
+            returnTripId,
+            returnToken,
+            returnSeatNumbers.ToArray(),
+            DateTimeOffset.UtcNow.AddSeconds(ttlSeconds ?? 600));
+
+        return Task.FromResult<LockRoundTripSeatsOutcome>(new LockRoundTripSeatsOutcome.Success(outbound, @return));
     }
 
     public Task<bool> BookSeatsAsync(

@@ -278,6 +278,30 @@
       "value": "<day12-pickup-station-id>"
     },
     {
+      "key": "day12DropoffStationId",
+      "value": "<day12-dropoff-station-id>"
+    },
+    {
+      "key": "day12ReturnTripId",
+      "value": "<day12-return-trip-id>"
+    },
+    {
+      "key": "day12ReturnPickupStationId",
+      "value": "<day12-return-pickup-station-id>"
+    },
+    {
+      "key": "day12ReturnDropoffStationId",
+      "value": "<day12-return-dropoff-station-id>"
+    },
+    {
+      "key": "day12AlternatePickupStationId",
+      "value": "<day12-alternate-pickup-station-id>"
+    },
+    {
+      "key": "day12AlternateDropoffStationId",
+      "value": "<day12-alternate-dropoff-station-id>"
+    },
+    {
       "key": "createdBookingId",
       "value": ""
     },
@@ -3689,6 +3713,8 @@
                   "  pm.expect(body.meta).to.have.property('traceId');",
                   "});",
                   "if (body && body.data) {",
+                  "  pm.environment.set('createdBookingId', body.data.bookingId || '');",
+                  "  pm.environment.set('createdBookingCode', body.data.bookingCode || '');",
                   "  pm.collectionVariables.set('createdBookingId', body.data.bookingId || '');",
                   "  pm.collectionVariables.set('createdBookingCode', body.data.bookingCode || '');",
                   "}"

@@ -86,30 +86,32 @@ public sealed class CreateRoundTripBookingCommandHandler
         var outboundSeatNumbers = request.Outbound.Seats.Select(s => s.SeatNumber).ToList();
         var returnSeatNumbers = request.Return.Seats.Select(s => s.SeatNumber).ToList();
 
-        var outboundLockToken = await LockLegAsync(
-            request.PassengerUserId,
+        var roundTripLockOutcome = await _tripClient.LockRoundTripSeatsAsync(
             request.Outbound.TripId,
             outboundSeatNumbers,
-            cancellationToken);
+            request.Return.TripId,
+            returnSeatNumbers,
+            request.PassengerUserId,
+            idempotencyKey: $"lock-round-trip-{request.IdempotencyKey}",
+            ttlSeconds: SeatLockTtlSeconds,
+            cancellationToken: cancellationToken);
 
-        Guid returnLockToken;
-        try
+        var (outboundLockToken, returnLockToken) = roundTripLockOutcome switch
         {
-            returnLockToken = await LockLegAsync(
-                request.PassengerUserId,
-                request.Return.TripId,
-                returnSeatNumbers,
-                cancellationToken);
-        }
-        catch
-        {
-            await _bookingService.ReleaseSeatsAsync(
-                request.Outbound.TripId,
-                outboundLockToken,
-                outboundSeatNumbers,
-                cancellationToken);
-            throw;
-        }
+            LockRoundTripSeatsOutcome.Success success => (success.Outbound.SeatLockToken, success.Return.SeatLockToken),
+            LockRoundTripSeatsOutcome.SeatUnavailable unavailable => throw new ConflictException(
+                "BOOKING_SEAT_UNAVAILABLE",
+                $"One or more seats are unavailable: {string.Join(", ", unavailable.UnavailableSeats)}."),
+            LockRoundTripSeatsOutcome.TripNotBookable notBookable => throw new ConflictException(
+                "BOOKING_TRIP_NOT_BOOKABLE",
+                notBookable.Message),
+            LockRoundTripSeatsOutcome.TripNotFound notFound => throw new CodedNotFoundException(
+                "TRIP_NOT_FOUND",
+                $"Trip '{notFound.TripId}' not found."),
+            LockRoundTripSeatsOutcome.TransportError transportError => throw new InvalidOperationException(
+                $"Round-trip seat lock failed: {transportError.Message}"),
+            _ => throw new InvalidOperationException("Round-trip seat lock failed: Unknown lock error."),
+        };
 
         var bookingGroupId = Guid.NewGuid();
         var outboundTotal = Money.FromRaw(outboundTrip.BaseFare);
@@ -222,40 +224,6 @@ public sealed class CreateRoundTripBookingCommandHandler
         return trip;
     }
 
-    private async Task<Guid> LockLegAsync(
-        Guid passengerUserId,
-        Guid tripId,
-        IReadOnlyList<string> seatNumbers,
-        CancellationToken cancellationToken)
-    {
-        var lockIdempotencyKey = $"lock-{passengerUserId}-{tripId}-{string.Join(",", seatNumbers)}";
-
-        var lockOutcome = await _tripClient.LockSeatsAsync(
-            tripId,
-            seatNumbers,
-            holdOwnerId: passengerUserId,
-            idempotencyKey: lockIdempotencyKey,
-            ttlSeconds: SeatLockTtlSeconds,
-            cancellationToken: cancellationToken);
-
-        return lockOutcome switch
-        {
-            LockSeatsOutcome.Success success => success.Data.SeatLockToken,
-            LockSeatsOutcome.SeatUnavailable unavailable => throw new ConflictException(
-                "BOOKING_SEAT_UNAVAILABLE",
-                $"One or more seats are unavailable: {string.Join(", ", unavailable.UnavailableSeats)}."),
-            LockSeatsOutcome.TripNotBookable notBookable => throw new ConflictException(
-                "BOOKING_TRIP_NOT_BOOKABLE",
-                notBookable.Message),
-            LockSeatsOutcome.TripNotFound => throw new CodedNotFoundException(
-                "TRIP_NOT_FOUND",
-                $"Trip '{tripId}' not found."),
-            LockSeatsOutcome.TransportError transportError => throw new InvalidOperationException(
-                $"Seat lock failed: {transportError.Message}"),
-            _ => throw new InvalidOperationException("Seat lock failed: Unknown lock error."),
-        };
-    }
-
     private BookingEntity CreatePendingBooking(
         Guid passengerUserId,
         CreateRoundTripBookingCommand.RoundTripBookingLegCommand leg,
@@ -322,7 +290,7 @@ public sealed class CreateRoundTripBookingCommandHandler
                 switch (batchOutcome)
                 {
                     case BatchChargeOutcome.Success success:
-                        EnsureWalletBatchSucceeded(success);
+                        EnsureWalletBatchSucceeded(success, outboundBooking.Id, returnBooking.Id);
                         return null;
                     case BatchChargeOutcome.InsufficientFunds insufficientFunds:
                         throw new ConflictException("PAYMENT_INSUFFICIENT_WALLET", insufficientFunds.Message);
@@ -362,14 +330,19 @@ public sealed class CreateRoundTripBookingCommandHandler
         }
     }
 
-    private static void EnsureWalletBatchSucceeded(BatchChargeOutcome.Success success)
+    private static void EnsureWalletBatchSucceeded(
+        BatchChargeOutcome.Success success,
+        Guid outboundBookingId,
+        Guid returnBookingId)
     {
         var payments = success.Payments;
+        var expectedReferenceIds = new HashSet<Guid> { outboundBookingId, returnBookingId };
 
         if (payments.Count != 2
             || payments.Any(p => !string.Equals(p.ReferenceType, "BOOKING", StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(p.Status, "SUCCEEDED", StringComparison.OrdinalIgnoreCase)
-                || p.ReferenceId == Guid.Empty))
+                || p.ReferenceId == Guid.Empty)
+            || !payments.Select(p => p.ReferenceId).ToHashSet().SetEquals(expectedReferenceIds))
         {
             throw new InvalidOperationException("Payment batch charge did not return succeeded BOOKING payments for both legs.");
         }

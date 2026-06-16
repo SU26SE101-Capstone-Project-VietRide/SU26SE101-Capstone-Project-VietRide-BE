@@ -131,10 +131,12 @@ public sealed class CodedNotFoundException : Exception
 public sealed class ConflictException : Exception
 {
     public string ErrorCode { get; }
+    public IReadOnlyList<ValidationError> Errors { get; }
 
-    public ConflictException(string errorCode, string message) : base(message)
+    public ConflictException(string errorCode, string message, IReadOnlyList<ValidationError>? errors = null) : base(message)
     {
         ErrorCode = errorCode;
+        Errors = errors ?? Array.Empty<ValidationError>();
     }
 }
 

@@ -193,7 +193,7 @@ public sealed class RouteEntityAndModelTests
     private static TripDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<TripDbContext>()
-            .UseNpgsql("Host=localhost;Database=vietride_trip_unit;Username=postgres;Password=postgres")
+            .UseNpgsql("Host=localhost;Database=vietride_trip_unit;Username=vietride;Password=vietride_dev")
             .Options;
 
         return new TripDbContext(options, new FrozenClock());

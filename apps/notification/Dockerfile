@@ -37,6 +37,9 @@ COPY --from=build /workspace/node_modules ./node_modules
 # symlinks with the compiled lib packages so require('@vietride/*') resolves at runtime.
 RUN rm -rf node_modules/@vietride
 COPY --from=build /workspace/dist/libs/shared ./node_modules/@vietride
+# Prisma generates native query-engine binaries outside the webpack bundle.
+# Keep the generated client beside the bundle at the path Prisma searches at runtime.
+COPY --from=build /workspace/apps/notification/src/generated ./src/generated
 COPY .env.example ./.env.example
 
 EXPOSE 3002

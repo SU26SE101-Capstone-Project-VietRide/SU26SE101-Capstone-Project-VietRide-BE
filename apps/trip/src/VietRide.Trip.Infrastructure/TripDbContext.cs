@@ -38,6 +38,10 @@ public sealed class TripDbContext : VietRideDbContextBase
 
     public DbSet<DriverSchedule> DriverSchedules => Set<DriverSchedule>();
 
+    public DbSet<TripEntity> Trips => Set<TripEntity>();
+
+    public DbSet<TripSeat> TripSeats => Set<TripSeat>();
+
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
         configurationBuilder.Conventions.Remove(typeof(ForeignKeyIndexConvention));
@@ -47,12 +51,18 @@ public sealed class TripDbContext : VietRideDbContextBase
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema(SchemaName);
+        modelBuilder.HasPostgresEnum<TripStatus>("trip_status");
+        modelBuilder.HasPostgresEnum<TripSource>("trip_source");
+        modelBuilder.HasPostgresEnum<TripSeatStatus>("trip_seat_status");
+        modelBuilder.HasPostgresEnum<TripSeatType>("trip_seat_type");
         base.OnModelCreating(modelBuilder);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(TripDbContext).Assembly);
         RemoveConventionIndex<Route>(modelBuilder, nameof(Route.DestinationStationId));
         RemoveConventionIndex<RouteStopFareTemplate>(modelBuilder, nameof(RouteStopFareTemplate.StopId));
         RemoveConventionIndex<AlternativeRoute>(modelBuilder, nameof(AlternativeRoute.DestinationStationId));
         RemoveConventionIndex<AlternativeRouteStop>(modelBuilder, nameof(AlternativeRouteStop.StopId));
+        RemoveConventionIndex<TripEntity>(modelBuilder, nameof(TripEntity.RouteId));
+        RemoveConventionIndex<TripEntity>(modelBuilder, nameof(TripEntity.VehicleId));
     }
 
     private static void RemoveConventionIndex<TEntity>(ModelBuilder modelBuilder, string propertyName)

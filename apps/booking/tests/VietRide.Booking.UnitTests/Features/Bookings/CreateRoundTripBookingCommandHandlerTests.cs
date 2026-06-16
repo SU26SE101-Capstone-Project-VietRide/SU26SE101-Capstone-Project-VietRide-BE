@@ -56,6 +56,18 @@ public class CreateRoundTripBookingCommandHandlerTests
         LockedSeats: ["A01"],
         ExpiresAt: DateTimeOffset.UtcNow.AddMinutes(10));
 
+    private static readonly RoundTripSeatLockResult OutboundLockData = new(
+        TripId: OutboundTripId,
+        SeatLockToken: SeatLockToken,
+        LockedSeats: ["A01"],
+        ExpiresAt: DateTimeOffset.UtcNow.AddMinutes(10));
+
+    private static readonly RoundTripSeatLockResult ReturnLockData = new(
+        TripId: ReturnTripId,
+        SeatLockToken: Guid.Parse("99999999-9999-4999-8999-999999999999"),
+        LockedSeats: ["A01"],
+        ExpiresAt: DateTimeOffset.UtcNow.AddMinutes(10));
+
     private readonly IBookingRepository _bookings = Substitute.For<IBookingRepository>();
     private readonly ITripServiceClient _tripClient = Substitute.For<ITripServiceClient>();
     private readonly IPaymentServiceClient _paymentClient = Substitute.For<IPaymentServiceClient>();
@@ -93,16 +105,12 @@ public class CreateRoundTripBookingCommandHandlerTests
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
         _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<CancellationToken>()).Returns(OutboundTrip);
         _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<CancellationToken>()).Returns(ReturnTrip);
-        _tripClient.LockSeatsAsync(default, default!, default, default!, default, default)
-            .ReturnsForAnyArgs(new LockSeatsOutcome.Success(LockData));
+        _tripClient.LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default)
+            .ReturnsForAnyArgs(new LockRoundTripSeatsOutcome.Success(OutboundLockData, ReturnLockData));
         _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
             .Returns(ci => ci.Arg<BookingEntity>());
         _paymentClient.BatchChargeAsync(default, default!, default!, default!, default)
-            .ReturnsForAnyArgs(new BatchChargeOutcome.Success(
-                [
-                    new BatchChargePaymentResult(Guid.NewGuid(), "BOOKING", Guid.NewGuid(), "SUCCEEDED", null),
-                    new BatchChargePaymentResult(Guid.NewGuid(), "BOOKING", Guid.NewGuid(), "SUCCEEDED", null),
-                ]));
+            .ReturnsForAnyArgs(ci => CreateSuccessfulBatchCharge(ci.Arg<IReadOnlyList<BatchChargeItem>>()));
         _tripClient.BookSeatsAsync(default, default, default, default!, default)
             .ReturnsForAnyArgs(true);
 
@@ -142,6 +150,18 @@ public class CreateRoundTripBookingCommandHandlerTests
             "charge-round-trip-round-trip-idempotency-key",
             Arg.Any<CancellationToken>());
 
+        await _tripClient.Received(1).LockRoundTripSeatsAsync(
+            OutboundTripId,
+            Arg.Is<IReadOnlyList<string>>(seats => seats.SequenceEqual(new[] { "A01" })),
+            ReturnTripId,
+            Arg.Is<IReadOnlyList<string>>(seats => seats.SequenceEqual(new[] { "A01" })),
+            PassengerUserId,
+            "lock-round-trip-round-trip-idempotency-key",
+            600,
+            Arg.Any<CancellationToken>());
+        await _tripClient.DidNotReceiveWithAnyArgs()
+            .LockSeatsAsync(default, default!, default, default!, default, default);
+
         await _outbox.Received(2).EnqueueAsync(
             Arg.Is("booking.booking.confirmed"),
             Arg.Any<string>(),
@@ -162,7 +182,7 @@ public class CreateRoundTripBookingCommandHandlerTests
             .Where(e => e.ErrorCode == "ROUTE_RETURN_NOT_CONFIGURED");
 
         await _tripClient.DidNotReceiveWithAnyArgs()
-            .LockSeatsAsync(default, default!, default, default!, default, default);
+            .LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default);
     }
 
     [Fact]
@@ -179,7 +199,7 @@ public class CreateRoundTripBookingCommandHandlerTests
             .Where(e => e.ErrorCode == "BOOKING_ROUND_TRIP_INVALID");
 
         await _tripClient.DidNotReceiveWithAnyArgs()
-            .LockSeatsAsync(default, default!, default, default!, default, default);
+            .LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default);
     }
 
     [Fact]
@@ -188,8 +208,8 @@ public class CreateRoundTripBookingCommandHandlerTests
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
         _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<CancellationToken>()).Returns(OutboundTrip);
         _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<CancellationToken>()).Returns(ReturnTrip);
-        _tripClient.LockSeatsAsync(default, default!, default, default!, default, default)
-            .ReturnsForAnyArgs(new LockSeatsOutcome.Success(LockData));
+        _tripClient.LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default)
+            .ReturnsForAnyArgs(new LockRoundTripSeatsOutcome.Success(OutboundLockData, ReturnLockData));
         _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
             .Returns(ci => ci.Arg<BookingEntity>());
         _paymentClient.BatchChargeAsync(default, default!, default!, default!, default)
@@ -207,7 +227,7 @@ public class CreateRoundTripBookingCommandHandlerTests
             Arg.Any<CancellationToken>());
         await _bookingService.Received(1).ReleaseSeatsAsync(
             ReturnTripId,
-            SeatLockToken,
+            ReturnLockData.SeatLockToken,
             Arg.Any<IReadOnlyList<string>>(),
             Arg.Any<CancellationToken>());
         await _tripClient.DidNotReceiveWithAnyArgs()
@@ -217,28 +237,74 @@ public class CreateRoundTripBookingCommandHandlerTests
     }
 
     [Fact]
-    public async Task Handle_ReturnLockFails_ReleasesOutboundAndDoesNotCharge()
+    public async Task Handle_BatchChargeReturnsUnexpectedReferenceId_ReleasesBothLocksAndDoesNotConfirm()
     {
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
         _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<CancellationToken>()).Returns(OutboundTrip);
         _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<CancellationToken>()).Returns(ReturnTrip);
-        _tripClient.LockSeatsAsync(OutboundTripId, Arg.Any<IReadOnlyList<string>>(), Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
-            .Returns(new LockSeatsOutcome.Success(LockData));
-        _tripClient.LockSeatsAsync(ReturnTripId, Arg.Any<IReadOnlyList<string>>(), Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
-            .Returns(new LockSeatsOutcome.SeatUnavailable(["A01"]));
+        _tripClient.LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default)
+            .ReturnsForAnyArgs(new LockRoundTripSeatsOutcome.Success(OutboundLockData, ReturnLockData));
+        _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.Arg<BookingEntity>());
+        _paymentClient.BatchChargeAsync(default, default!, default!, default!, default)
+            .ReturnsForAnyArgs(ci =>
+            {
+                var items = ci.Arg<IReadOnlyList<BatchChargeItem>>();
+                return new BatchChargeOutcome.Success(
+                    [
+                        new BatchChargePaymentResult(Guid.NewGuid(), "BOOKING", items[0].ReferenceId, "SUCCEEDED", null),
+                        new BatchChargePaymentResult(Guid.NewGuid(), "BOOKING", Guid.NewGuid(), "SUCCEEDED", null),
+                    ]);
+            });
 
         var act = () => BuildSut().Handle(BuildCommand(), CancellationToken.None);
 
-        await act.Should().ThrowAsync<ConflictException>()
-            .Where(e => e.ErrorCode == "BOOKING_SEAT_UNAVAILABLE");
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Payment batch charge did not return succeeded BOOKING payments for both legs.");
 
         await _bookingService.Received(1).ReleaseSeatsAsync(
             OutboundTripId,
             SeatLockToken,
             Arg.Any<IReadOnlyList<string>>(),
             Arg.Any<CancellationToken>());
+        await _bookingService.Received(1).ReleaseSeatsAsync(
+            ReturnTripId,
+            ReturnLockData.SeatLockToken,
+            Arg.Any<IReadOnlyList<string>>(),
+            Arg.Any<CancellationToken>());
+        await _tripClient.DidNotReceiveWithAnyArgs()
+            .BookSeatsAsync(default, default, default, default!, default);
+        await _outbox.DidNotReceiveWithAnyArgs()
+            .EnqueueAsync(default!, default!, default);
+    }
+
+    [Fact]
+    public async Task Handle_AtomicRoundTripLockFails_DoesNotReleaseOrCharge()
+    {
+        _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<CancellationToken>()).Returns(OutboundTrip);
+        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<CancellationToken>()).Returns(ReturnTrip);
+        _tripClient.LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default)
+            .ReturnsForAnyArgs(new LockRoundTripSeatsOutcome.SeatUnavailable(["A01"]));
+
+        var act = () => BuildSut().Handle(BuildCommand(), CancellationToken.None);
+
+        await act.Should().ThrowAsync<ConflictException>()
+            .Where(e => e.ErrorCode == "BOOKING_SEAT_UNAVAILABLE");
+
+        await _bookingService.DidNotReceiveWithAnyArgs()
+            .ReleaseSeatsAsync(default, default, default!, default);
 
         await _paymentClient.DidNotReceiveWithAnyArgs()
             .BatchChargeAsync(default, default!, default!, default!, default);
+        await _tripClient.DidNotReceiveWithAnyArgs()
+            .LockSeatsAsync(default, default!, default, default!, default, default);
     }
+
+    private static BatchChargeOutcome.Success CreateSuccessfulBatchCharge(IReadOnlyList<BatchChargeItem> items)
+        => new(
+            [
+                new BatchChargePaymentResult(Guid.NewGuid(), "BOOKING", items[0].ReferenceId, "SUCCEEDED", null),
+                new BatchChargePaymentResult(Guid.NewGuid(), "BOOKING", items[1].ReferenceId, "SUCCEEDED", null),
+            ]);
 }

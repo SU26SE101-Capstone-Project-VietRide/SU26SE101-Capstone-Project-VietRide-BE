@@ -73,26 +73,25 @@ public class CreateRoundTripBookingIntegrationTests
             .Returns(outboundTrip);
         _factory.TripClient.GetTripSnapshotAsync(returnTripId, Arg.Any<CancellationToken>())
             .Returns(returnTrip);
-        _factory.TripClient.LockSeatsAsync(
+        _factory.TripClient.LockRoundTripSeatsAsync(
+                Arg.Any<Guid>(),
+                Arg.Any<IReadOnlyList<string>>(),
                 Arg.Any<Guid>(),
                 Arg.Any<IReadOnlyList<string>>(),
                 Arg.Any<Guid>(),
                 Arg.Any<string>(),
                 Arg.Any<int?>(),
                 Arg.Any<CancellationToken>())
-            .Returns(new LockSeatsOutcome.Success(
-                new SeatLockResult(Guid.NewGuid(), ["A01"], DateTimeOffset.UtcNow.AddMinutes(10))));
+            .Returns(new LockRoundTripSeatsOutcome.Success(
+                new RoundTripSeatLockResult(outboundTripId, Guid.NewGuid(), ["A01"], DateTimeOffset.UtcNow.AddMinutes(10)),
+                new RoundTripSeatLockResult(returnTripId, Guid.NewGuid(), ["A01"], DateTimeOffset.UtcNow.AddMinutes(10))));
         _factory.PaymentClient.BatchChargeAsync(
                 Arg.Any<Guid>(),
                 Arg.Any<string>(),
                 Arg.Any<IReadOnlyList<BatchChargeItem>>(),
                 Arg.Any<string>(),
                 Arg.Any<CancellationToken>())
-            .Returns(new BatchChargeOutcome.Success(
-                [
-                    new BatchChargePaymentResult(Guid.NewGuid(), "BOOKING", Guid.NewGuid(), "SUCCEEDED", null),
-                    new BatchChargePaymentResult(Guid.NewGuid(), "BOOKING", Guid.NewGuid(), "SUCCEEDED", null),
-                ]));
+            .Returns(ci => CreateSuccessfulBatchCharge(ci.Arg<IReadOnlyList<BatchChargeItem>>()));
         _factory.TripClient.BookSeatsAsync(
                 Arg.Any<Guid>(),
                 Arg.Any<Guid>(),
@@ -163,7 +162,26 @@ public class CreateRoundTripBookingIntegrationTests
                 Arg.Any<IReadOnlyList<BatchChargeItem>>(),
                 $"charge-round-trip-{idempotencyKey}",
                 Arg.Any<CancellationToken>());
+        await _factory.TripClient.Received(1)
+            .LockRoundTripSeatsAsync(
+                outboundTripId,
+                Arg.Any<IReadOnlyList<string>>(),
+                returnTripId,
+                Arg.Any<IReadOnlyList<string>>(),
+                userId,
+                $"lock-round-trip-{idempotencyKey}",
+                600,
+                Arg.Any<CancellationToken>());
+        await _factory.TripClient.DidNotReceiveWithAnyArgs()
+            .LockSeatsAsync(default, default!, default, default!, default, default);
     }
+
+    private static BatchChargeOutcome.Success CreateSuccessfulBatchCharge(IReadOnlyList<BatchChargeItem> items)
+        => new(
+            [
+                new BatchChargePaymentResult(Guid.NewGuid(), "BOOKING", items[0].ReferenceId, "SUCCEEDED", null),
+                new BatchChargePaymentResult(Guid.NewGuid(), "BOOKING", items[1].ReferenceId, "SUCCEEDED", null),
+            ]);
 
     [Fact]
     public async Task PostRoundTrip_WithoutIdempotencyKey_Returns422AndDoesNotCallTripClient()
@@ -254,7 +272,7 @@ public class CreateRoundTripBookingIntegrationTests
         await _factory.TripClient.DidNotReceiveWithAnyArgs()
             .GetTripSnapshotAsync(default, default!);
         await _factory.TripClient.DidNotReceiveWithAnyArgs()
-            .LockSeatsAsync(default, default!, default, default!, default, default);
+            .LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default);
         await _factory.PaymentClient.DidNotReceiveWithAnyArgs()
             .BatchChargeAsync(default, default!, default!, default!, default);
     }
@@ -347,7 +365,7 @@ public class CreateRoundTripBookingIntegrationTests
         doc.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("ROUTE_RETURN_NOT_CONFIGURED");
 
         await _factory.TripClient.DidNotReceiveWithAnyArgs()
-            .LockSeatsAsync(default, default!, default, default!, default, default);
+            .LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default);
         await _factory.PaymentClient.DidNotReceiveWithAnyArgs()
             .BatchChargeAsync(default, default!, default!, default!, default);
     }

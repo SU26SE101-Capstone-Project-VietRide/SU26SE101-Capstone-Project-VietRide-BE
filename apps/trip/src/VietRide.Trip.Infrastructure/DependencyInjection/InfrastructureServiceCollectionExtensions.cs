@@ -1,12 +1,15 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using StackExchange.Redis;
 using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Http.Resilience;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Infrastructure.ExternalClients;
 using VietRide.Trip.Infrastructure.Persistence.Repositories;
+using VietRide.Trip.Infrastructure.SeatLocks;
 
 namespace VietRide.Trip.Infrastructure.DependencyInjection;
 
@@ -32,6 +35,13 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IVehicleTypeRepository, VehicleTypeRepository>();
         services.AddScoped<IVehicleRepository, VehicleRepository>();
         services.AddScoped<IDriverScheduleRepository, DriverScheduleRepository>();
+        services.AddScoped<ITripRepository, TripRepository>();
+        services.AddScoped<IRoundTripSeatLockStore, RedisRoundTripSeatLockStore>();
+
+        var redisConnectionString = ResolveRedisConnectionString(configuration);
+        var redisOptions = ConfigurationOptions.Parse(redisConnectionString);
+        redisOptions.AbortOnConnectFail = false;
+        services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(redisOptions));
 
         services.AddSingleton<IInternalJwtTokenProvider, InternalJwtTokenFactory>();
         services.AddHttpContextAccessor();
@@ -69,5 +79,16 @@ public static class InfrastructureServiceCollectionExtensions
         }
 
         return baseUrl;
+    }
+
+    private static string ResolveRedisConnectionString(IConfiguration configuration)
+    {
+        var connectionString = configuration["Redis:ConnectionString"]
+            ?? configuration.GetConnectionString("Redis")
+            ?? Environment.GetEnvironmentVariable("REDIS_CONNECTION_STRING")
+            ?? Environment.GetEnvironmentVariable("REDIS_URL")
+            ?? "localhost:6379";
+
+        return connectionString;
     }
 }

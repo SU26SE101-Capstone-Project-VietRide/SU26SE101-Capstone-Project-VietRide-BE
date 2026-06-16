@@ -1152,6 +1152,61 @@ Errors:
 - `409 BOOKING_SEAT_UNAVAILABLE` — ≥1 seat is `HELD` / `BOOKED` / `UNAVAILABLE`;
   `error.fields` lists the offending `seatNumbers`. No seat is held (all-or-nothing).
 
+### POST `/internal/v1/trips/round-trip/lock-seats`
+
+Auth: Internal JWT. Idempotency: required (replay with the same `Idempotency-Key` returns the
+same outbound/return lock tokens). **Round-trip atomic** — Trip locks both outbound and return
+seat sets in one Redis Lua script. If either leg cannot be locked, no seat is held on either leg
+(technical_context_v7 lines 1755-1757).
+
+Request:
+```json
+{
+  "outbound": {
+    "tripId": "uuid",
+    "seatNumbers": ["A01", "A02"]
+  },
+  "return": {
+    "tripId": "uuid",
+    "seatNumbers": ["A01", "A02"]
+  },
+  "holdOwnerId": "uuid",
+  "ttlSeconds": 600
+}
+```
+- `holdOwnerId` = passenger user id (lock owner). `ttlSeconds` optional; defaults to
+  `SEAT_LOCK_TTL_MINUTES` × 60 (= 600).
+- `outbound.tripId` and `return.tripId` must be different trip ids.
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "outbound": {
+      "tripId": "uuid",
+      "seatLockToken": "uuid",
+      "lockedSeats": ["A01", "A02"],
+      "expiresAt": "2026-05-18T08:10:00+07:00"
+    },
+    "return": {
+      "tripId": "uuid",
+      "seatLockToken": "uuid",
+      "lockedSeats": ["A01", "A02"],
+      "expiresAt": "2026-05-18T08:10:00+07:00"
+    }
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Errors:
+- `404 TRIP_NOT_FOUND` — outbound or return trip does not exist.
+- `409 BOOKING_TRIP_NOT_BOOKABLE` — outbound or return trip status ≠ `SCHEDULED`.
+- `409 BOOKING_SEAT_UNAVAILABLE` — ≥1 requested outbound/return seat is `HELD` / `BOOKED` /
+  `UNAVAILABLE`; `error.fields` lists the offending `seatNumbers`. No seat is held on either leg.
+
 ### POST `/internal/v1/trips/{tripId}/release-seats`
 
 Auth: Internal JWT. Compensation for payment fail / timeout / cancel. **Idempotent** —
