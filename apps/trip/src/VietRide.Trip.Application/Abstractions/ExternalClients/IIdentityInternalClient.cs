@@ -11,6 +11,15 @@ public interface IIdentityInternalClient
     Task<OperatorWriteEligibilityValidation> ValidateOperatorCanWriteAsync(
         Guid operatorId,
         CancellationToken cancellationToken = default);
+
+    Task<IdentityUserLookupResult> GetUserAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default);
+
+    Task<IdentityOperatorLookupResult> GetOperatorAsync(
+        Guid operatorId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(IdentityOperatorLookupResult.ValidationFailure("Identity operator lookup is not implemented."));
 }
 
 /// <summary>
@@ -35,4 +44,70 @@ public sealed record OperatorWriteEligibilityValidation(
         422,
         "VALIDATION_ERROR",
         message);
+}
+
+public sealed record IdentityUserLookupResult(
+    bool Found,
+    int? FailureStatusCode,
+    string? ErrorCode,
+    string? Message,
+    Guid? Id,
+    string? Role,
+    Guid? OperatorId,
+    string? Status)
+{
+    public static IdentityUserLookupResult Success(Guid id, string role, Guid? operatorId, string status)
+    {
+        return new IdentityUserLookupResult(true, null, null, null, id, role, operatorId, status);
+    }
+
+    public static IdentityUserLookupResult ValidationFailure(string message) => new(
+        false,
+        422,
+        "VALIDATION_ERROR",
+        message,
+        null,
+        null,
+        null,
+        null);
+
+    public static IdentityUserLookupResult Forbidden(string message) => new(
+        false,
+        403,
+        "FORBIDDEN",
+        message,
+        null,
+        null,
+        null,
+        null);
+}
+
+public sealed record IdentityOperatorLookupResult(
+    bool Found,
+    int? FailureStatusCode,
+    string? ErrorCode,
+    string? Message,
+    Guid? Id,
+    string? Name)
+{
+    public static IdentityOperatorLookupResult Success(Guid id, string name)
+    {
+        return new IdentityOperatorLookupResult(true, null, null, null, id, name);
+    }
+
+    public static IdentityOperatorLookupResult ValidationFailure(string message) => new(
+        false,
+        422,
+        "VALIDATION_ERROR",
+        message,
+        null,
+        null);
+
+    public static IdentityOperatorLookupResult Forbidden(string message) => new(
+        false,
+        403,
+        "FORBIDDEN",
+        message,
+        null,
+        null);
 }

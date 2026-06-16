@@ -92,6 +92,103 @@ public sealed class IdentityInternalClientTests
     }
 
     [Fact]
+    public async Task GetUserAsync_ReturnsUserLookup_WhenIdentityReturnsRawUser()
+    {
+        var userId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+        using var httpClient = CreateHttpClient(new JsonResponseHandler(HttpStatusCode.OK,
+            $$"""
+            {"id":"{{userId:D}}","role":"DRIVER","operatorId":"{{OperatorId:D}}","status":"ACTIVE"}
+            """));
+        var client = new IdentityInternalClient(httpClient);
+
+        var result = await client.GetUserAsync(userId);
+
+        result.Found.Should().BeTrue();
+        result.Id.Should().Be(userId);
+        result.Role.Should().Be("DRIVER");
+        result.OperatorId.Should().Be(OperatorId);
+        result.Status.Should().Be("ACTIVE");
+    }
+
+    [Fact]
+    public async Task GetUserAsync_ReturnsValidationError_WhenIdentityOmitsStatus()
+    {
+        var userId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+        using var httpClient = CreateHttpClient(new JsonResponseHandler(HttpStatusCode.OK,
+            $$"""
+            {"id":"{{userId:D}}","role":"DRIVER","operatorId":"{{OperatorId:D}}"}
+            """));
+        var client = new IdentityInternalClient(httpClient);
+
+        var result = await client.GetUserAsync(userId);
+
+        result.Found.Should().BeFalse();
+        result.FailureStatusCode.Should().Be(422);
+        result.ErrorCode.Should().Be("VALIDATION_ERROR");
+    }
+
+    [Fact]
+    public async Task GetOperatorAsync_ReturnsOperatorLookup_WhenIdentityReturnsContractPayload()
+    {
+        using var httpClient = CreateHttpClient(new JsonResponseHandler(HttpStatusCode.OK,
+            $$"""
+            {"operatorId":"{{OperatorId:D}}","name":"VietRide Express","registrationStatus":"APPROVED","isActive":true,"code":"OP-001"}
+            """));
+        var client = new IdentityInternalClient(httpClient);
+
+        var result = await client.GetOperatorAsync(OperatorId);
+
+        result.Found.Should().BeTrue();
+        result.Id.Should().Be(OperatorId);
+        result.Name.Should().Be("VietRide Express");
+    }
+
+    [Fact]
+    public async Task GetOperatorAsync_FallsBackToId_WhenOperatorIdMissing()
+    {
+        using var httpClient = CreateHttpClient(new JsonResponseHandler(HttpStatusCode.OK,
+            $$"""
+            {"id":"{{OperatorId:D}}","name":"Legacy Operator","registrationStatus":"APPROVED","isActive":true}
+            """));
+        var client = new IdentityInternalClient(httpClient);
+
+        var result = await client.GetOperatorAsync(OperatorId);
+
+        result.Found.Should().BeTrue();
+        result.Id.Should().Be(OperatorId);
+        result.Name.Should().Be("Legacy Operator");
+    }
+
+    [Fact]
+    public async Task GetOperatorAsync_ReturnsValidationError_WhenIdentityOmitsOperatorIdAndId()
+    {
+        using var httpClient = CreateHttpClient(new JsonResponseHandler(HttpStatusCode.OK,
+            $$"""
+            {"name":"Broken Operator","registrationStatus":"APPROVED","isActive":true}
+            """));
+        var client = new IdentityInternalClient(httpClient);
+
+        var result = await client.GetOperatorAsync(OperatorId);
+
+        result.Found.Should().BeFalse();
+        result.FailureStatusCode.Should().Be(422);
+        result.ErrorCode.Should().Be("VALIDATION_ERROR");
+    }
+
+    [Fact]
+    public async Task GetUserAsync_ReturnsValidationError_WhenIdentityReturnsNotFound()
+    {
+        using var httpClient = CreateHttpClient(new JsonResponseHandler(HttpStatusCode.NotFound, "{}"));
+        var client = new IdentityInternalClient(httpClient);
+
+        var result = await client.GetUserAsync(Guid.NewGuid());
+
+        result.Found.Should().BeFalse();
+        result.FailureStatusCode.Should().Be(422);
+        result.ErrorCode.Should().Be("VALIDATION_ERROR");
+    }
+
+    [Fact]
     public async Task InternalJwtHandler_AddsExpectedInternalAuthHeader()
     {
         var captureHandler = new CapturingHandler(HttpStatusCode.OK,

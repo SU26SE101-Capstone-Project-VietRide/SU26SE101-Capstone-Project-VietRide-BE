@@ -328,6 +328,9 @@ public sealed class RouteStopHandlersTests
 
         public Task<OperatorWriteEligibilityValidation> ValidateOperatorCanWriteAsync(Guid operatorId, CancellationToken cancellationToken = default)
             => Task.FromResult(eligibility);
+
+        public Task<IdentityUserLookupResult> GetUserAsync(Guid userId, CancellationToken cancellationToken = default)
+            => Task.FromResult(IdentityUserLookupResult.ValidationFailure("Identity user lookup is not configured for this test."));
     }
 
     private sealed class FakeUnitOfWork : IUnitOfWork

@@ -97,6 +97,9 @@ public sealed class ApiResponseExceptionFilter : IExceptionFilter
             ConflictException c
                 => (409, c.ErrorCode, c.Message, null),
 
+            CodedConflictException c
+                => (409, c.ErrorCode, c.Message, MapValidationErrors(c.Errors)),
+
             ForbiddenException f
                 => (403, f.ErrorCode, f.Message, null),
 

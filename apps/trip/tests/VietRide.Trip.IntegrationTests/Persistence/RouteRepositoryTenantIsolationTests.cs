@@ -91,7 +91,7 @@ public sealed class RouteRepositoryTenantIsolationTests
 
     private static string CreateConnectionString(string databaseName)
     {
-        const string defaultConnectionString = "Host=localhost;Port=5432;Database={databaseName};Username=postgres;Password=postgres";
+        const string defaultConnectionString = "Host=localhost;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
         var connectionString = Environment.GetEnvironmentVariable("VIETRIDE_TRIP_TEST_CONNECTION_STRING");
         if (string.IsNullOrWhiteSpace(connectionString))
         {

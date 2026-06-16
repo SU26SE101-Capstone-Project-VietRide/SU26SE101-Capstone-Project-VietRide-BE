@@ -21,11 +21,12 @@ builder.Host.UseSerilog((ctx, _, lc) => lc
     .WriteTo.Console());
 
 builder.Services.AddVietRideSharedWeb(builder.Configuration, ServiceName);
-builder.Services.AddVietRideDbContext<TripDbContext>(builder.Configuration);
+builder.Services.AddVietRideDbContext<TripDbContext>(
+    builder.Configuration,
+    configureDataSource: TripDbContext.ConfigurePostgresEnums);
 builder.Services.AddVietRideMediatRBehaviors(
     handlerAssemblies: [typeof(ApplicationAssemblyMarker).Assembly]);
 builder.Services.AddInfrastructure(builder.Configuration);
-
 var app = builder.Build();
 
 if (!IsWebApplicationFactoryHost())

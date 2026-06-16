@@ -193,10 +193,21 @@ public sealed class RouteEntityAndModelTests
     private static TripDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<TripDbContext>()
-            .UseNpgsql("Host=localhost;Database=vietride_trip_unit;Username=postgres;Password=postgres")
+            .UseNpgsql(CreateConnectionString("vietride_trip_unit"))
             .Options;
 
         return new TripDbContext(options, new FrozenClock());
+    }
+
+    private static string CreateConnectionString(string databaseName)
+    {
+        var connectionString = Environment.GetEnvironmentVariable("VIETRIDE_TRIP_TEST_CONNECTION_STRING");
+        if (!string.IsNullOrWhiteSpace(connectionString))
+        {
+            return connectionString.Replace("{databaseName}", databaseName, StringComparison.Ordinal);
+        }
+
+        return $"Host=localhost;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
     }
 
     private sealed class FrozenClock : IClock

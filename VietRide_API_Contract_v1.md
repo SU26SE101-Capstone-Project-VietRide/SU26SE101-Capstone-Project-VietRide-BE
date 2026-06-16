@@ -1166,6 +1166,7 @@ Errors:
 - `409 BOOKING_TRIP_NOT_BOOKABLE` — trip status ≠ `SCHEDULED` (closed / departed / cancelled).
 - `409 BOOKING_SEAT_UNAVAILABLE` — ≥1 seat is `HELD` / `BOOKED` / `UNAVAILABLE`;
   `error.fields` lists the offending `seatNumbers`. No seat is held (all-or-nothing).
+- `409 IDEMPOTENCY_REQUEST_PENDING` — same `Idempotency-Key` is still being processed.
 
 ### POST `/internal/v1/trips/{tripId}/release-seats`
 
@@ -2152,6 +2153,26 @@ Errors:
 - `403 FORBIDDEN` — caller is not `OPERATOR_ADMIN`, has no `operatorId`, or caller Operator is not currently `APPROVED`.
 - `404 RESOURCE_NOT_FOUND` — operator does not exist.
 - `422 VALIDATION_ERROR` — invalid policy JSON shape or invalid profile payload.
+
+### GET `/internal/v1/users/{userId}`
+
+Auth: Internal JWT via `X-Internal-Auth`. Not exposed through Gateway. Success response is raw DTO (no `ApiResponse` wrapper); errors use the standard ADR 0004 error envelope.
+
+Purpose: service-to-service logical-FK and role/operator validation, including Trip DriverSchedule create/activation validation.
+
+Response `200`:
+```json
+{
+  "id": "uuid",
+  "role": "DRIVER",
+  "operatorId": "uuid",
+  "status": "ACTIVE"
+}
+```
+
+`operatorId` is nullable for non-operator-scoped users; Trip DriverSchedule validation requires it to match the caller operator for `DRIVER` and `ASSISTANT` users.
+
+Error `404` — `RESOURCE_NOT_FOUND`.
 
 ### GET `/internal/v1/operators/{operatorId}`
 
@@ -3179,14 +3200,37 @@ Validation:
 - `validUntil`, when present, must be on or after `validFrom`; otherwise return `422 VALIDATION_ERROR` with `error.fields.validUntil`.
 - `routeId` must resolve to an active Route owned by the caller's operator. A missing, inactive, or cross-operator Route returns `404 ROUTE_NOT_FOUND`.
 - `vehicleId`, when present, must resolve to a non-soft-deleted Vehicle owned by the caller's operator; otherwise return `404 VEHICLE_NOT_FOUND`.
+- `driverUserId` must resolve through Identity `GET /internal/v1/users/{userId}` to a user with `role=DRIVER` under the caller operator. Missing Identity user, wrong role, wrong operator, or upstream logical-FK validation failure returns `422 VALIDATION_ERROR` with `error.fields.driverUserId`.
+- `assistantUserId`, when present, must resolve through Identity `GET /internal/v1/users/{userId}` to a user with `role=ASSISTANT` under the caller operator. Missing Identity user, wrong role, wrong operator, or upstream logical-FK validation failure returns `422 VALIDATION_ERROR` with `error.fields.assistantUserId`.
 - An active schedule conflicts when the same `driverUserId` has any intersecting `dayOfWeek`, the same local-ICT `departureTime`, and an overlapping `[validFrom, validUntil]` window. Return `409 TRIP_DRIVER_CONFLICT`.
-- Driver `role=DRIVER` and assistant `role=ASSISTANT` validation is deferred to Day 11. Day 9 does not reject this request based on those Identity roles.
 
 Response `201`: `DriverScheduleDto` in the ADR 0004 success envelope.
 
-Creating a DriverSchedule only persists the recurring assignment. Day 9 does not generate Trips or enqueue Trip generation.
+Creating a DriverSchedule persists the recurring assignment and, when active, is the Day-11 trigger for Trip generation enqueue after the schedule commit succeeds. Day 9 shipped persistence only; the Day-11 contract closes the deferred driver/assistant role+operator validation carryover.
 
-### Day-9 error examples
+### PATCH `/v1/operator/driver-schedules/{id}/activate`
+
+Auth: `OPERATOR_ADMIN`.
+
+Request body: none.
+
+Idempotency-Key: not required by BSOT §5.6. The endpoint is behavior-idempotent: if the schedule is already active, return the current `DriverScheduleDto` without a duplicate Trip-generation enqueue.
+
+Gateway impact: no new Gateway route is required; the existing `/v1/operator/driver-schedules` prefix covers this action.
+
+Scope: activation only. Full DriverSchedule edit/cascade (`departureTime`, `dayOfWeek`, `driverUserId`, `assistantUserId`, `vehicleId`, `validUntil`, FUTURE_ONLY/ALL_PENDING) remains out of scope for Day 11.
+
+Validation:
+- The target DriverSchedule must exist and belong to the caller operator. Missing or cross-operator schedules return `404 RESOURCE_NOT_FOUND`.
+- Caller operator write eligibility still applies. A non-`APPROVED` or inactive operator receives `403 FORBIDDEN`.
+- Before activation, validate the same driver/assistant role+operator rules as create: `driverUserId` must be `role=DRIVER` under the caller operator, and nullable `assistantUserId`, when present, must be `role=ASSISTANT` under the caller operator. Mismatch or Identity logical-FK validation failure returns `422 VALIDATION_ERROR` with `error.fields`.
+- Activation reuses active-schedule conflict checks. Enabling a conflicting schedule returns `409 TRIP_DRIVER_CONFLICT` and does not enqueue Trip generation.
+
+Response `200`: `DriverScheduleDto` in the ADR 0004 success envelope.
+
+On success, activation may only transition `isActive=false` to `isActive=true`; Trip generation is enqueued only after the activation commit succeeds.
+
+### Day-9/Day-11 error examples
 
 Seat-layout count failure:
 ```json
