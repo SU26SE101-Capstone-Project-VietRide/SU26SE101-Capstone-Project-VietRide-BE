@@ -1,0 +1,11 @@
+export const RAG_CHAT_SSE_EVENT_TOKEN = 'token';
+export const RAG_CHAT_SSE_EVENT_DONE = 'done';
+export const RAG_CHAT_SSE_EVENT_ERROR = 'error';
+export const RAG_CHAT_HISTORY_MESSAGE_LIMIT = 8;
+export const RAG_SUMMARY_MIN_MESSAGE_COUNT = 12;
+export const RAG_SUMMARY_HISTORY_MESSAGE_LIMIT = 12;
+export const RAG_MAX_SUMMARY_CHARS = 1_500;
+export const RAG_RERANK_CANDIDATE_LIMIT = 10;
+export const RAG_RERANK_FINAL_LIMIT = 5;
+export const RAG_RERANK_TIMEOUT_MS = 2_000;
+export const RAG_RERANK_CACHE_TTL_SECONDS = 10 * 60;

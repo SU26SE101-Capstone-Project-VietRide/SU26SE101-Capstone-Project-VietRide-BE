@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Serilog;
 using VietRide.Shared.Application.DependencyInjection;
 using VietRide.Shared.Persistence.DependencyInjection;
@@ -28,6 +29,12 @@ builder.Services.AddVietRideMediatRBehaviors(
 builder.Services.AddInfrastructure(builder.Configuration);
 var app = builder.Build();
 
+if (!IsWebApplicationFactoryHost())
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    await scope.ServiceProvider.GetRequiredService<TripDbContext>().Database.MigrateAsync();
+}
+
 app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseVietRideSwagger();
 app.UseAuthentication();
@@ -36,6 +43,10 @@ app.MapVietRideHealth(ServiceName);
 app.MapControllers();
 
 app.Run();
+
+static bool IsWebApplicationFactoryHost()
+    => AppDomain.CurrentDomain.GetAssemblies()
+        .Any(assembly => assembly.GetName().Name == "Microsoft.AspNetCore.Mvc.Testing");
 
 // Expose Program for WebApplicationFactory<Program> in integration tests.
 public partial class Program;

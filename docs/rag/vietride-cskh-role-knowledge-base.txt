@@ -1,0 +1,323 @@
+VietRide - Bộ dữ liệu tri thức CSKH và hướng dẫn theo vai trò
+
+Metadata đề xuất khi upload vào RAG:
+- title: VietRide - CSKH và hướng dẫn theo vai trò
+- accessLevel: PUBLIC
+- category: CUSTOMER_SUPPORT
+- documentType: GUIDE
+- audienceRoles: PASSENGER, DRIVER, ASSISTANT, OPERATOR_STAFF, OPERATOR_ADMIN, SYSTEM_ADMIN
+- language: vi
+
+Mục đích:
+Tài liệu này là dữ liệu mẫu để kiểm thử RAG AI Assistant của VietRide. Nội dung được viết theo hướng hỗ trợ khách hàng, giải thích nghiệp vụ ở mức an toàn, không chứa bí mật hệ thống, không chứa token, private key, mật khẩu, hoặc dữ liệu cá nhân thật.
+
+Nguyên tắc trả lời của AI CSKH VietRide:
+1. Luôn trả lời bằng tiếng Việt có dấu, rõ ràng, lịch sự.
+2. Không hứa hoàn tiền, hủy vé, đổi vé hoặc xử lý khiếu nại nếu chưa có dữ liệu đơn hàng thực tế.
+3. Khi cần kiểm tra thông tin cá nhân, chỉ hướng dẫn khách vào ứng dụng hoặc liên hệ tổng đài; không yêu cầu khách gửi mật khẩu, OTP, access token, refresh token.
+4. Nếu câu hỏi liên quan thanh toán, ví, hoàn tiền hoặc tranh chấp, cần nhắc khách kiểm tra trạng thái giao dịch trong ứng dụng và cung cấp mã đặt chỗ hoặc mã giao dịch cho kênh hỗ trợ chính thức.
+5. Nếu câu hỏi liên quan vị trí xe, luôn giải thích rằng GPS phụ thuộc vào tín hiệu thiết bị tài xế, kết nối mạng và trạng thái chuyến đi.
+6. Nếu câu hỏi vượt ngoài dữ liệu tài liệu, AI phải nói rõ chưa có đủ thông tin và đề xuất kênh hỗ trợ phù hợp.
+
+Tổng quan VietRide:
+VietRide là nền tảng đặt vé, định vị và quản lý xe khách. Hệ thống hỗ trợ hành khách đặt vé online, thanh toán, theo dõi xe thời gian thực, nhận thông báo, quản lý hàng ký gửi và liên hệ nhà xe. Nhà xe dùng VietRide để quản lý tuyến, chuyến, điểm đón, phương tiện, nhân sự, vận hành và báo cáo.
+
+Các vai trò chính:
+- Hành khách: đăng ký, đăng nhập, tìm chuyến, đặt vé, thanh toán, theo dõi xe, quản lý hàng ký gửi.
+- Tài xế: xem lịch làm việc, phát GPS, bắt đầu hoặc kết thúc chuyến, hỗ trợ xác nhận vận hành.
+- Phụ xe: hỗ trợ tài xế, xác nhận hành khách lên xe, quản lý hàng ký gửi, theo dõi điểm dừng.
+- Nhân viên vận hành nhà xe: quản lý thông tin vận hành, tuyến, chuyến, phương tiện, đặt chỗ và hỗ trợ khách.
+- Quản lý nhà xe: quản lý công ty, nhân sự, chính sách, phương tiện, tuyến, chuyến và hiệu quả vận hành.
+- Admin hệ thống: quản lý nền tảng, nhà xe, người dùng, dữ liệu hệ thống và kho tri thức RAG.
+
+Mục 1 - Tài khoản và đăng nhập
+
+Hỏi: Tôi đăng ký tài khoản VietRide như thế nào?
+Trả lời: Khách hàng đăng ký bằng email, mật khẩu, tên hiển thị và số điện thoại. Sau khi đăng ký, hệ thống gửi mã OTP để xác minh email. Tài khoản chỉ sử dụng đầy đủ sau khi email được xác minh và trạng thái tài khoản hợp lệ.
+Vai trò áp dụng: PASSENGER
+Hành động gợi ý: Nếu không nhận được OTP, kiểm tra hộp thư spam hoặc yêu cầu gửi lại mã xác minh.
+
+Hỏi: Tôi nhập sai OTP thì sao?
+Trả lời: Nếu mã OTP không đúng, hệ thống sẽ báo mã xác thực không hợp lệ. Khách cần nhập lại mã mới nhất đã nhận. Nếu mã đã hết hạn, khách cần yêu cầu gửi lại mã.
+Vai trò áp dụng: PASSENGER
+Hành động gợi ý: Không chia sẻ OTP cho bất kỳ ai, kể cả người tự xưng là nhân viên hỗ trợ.
+
+Hỏi: Vì sao tôi không đăng nhập được?
+Trả lời: Một số nguyên nhân thường gặp gồm email hoặc mật khẩu không đúng, email chưa xác minh, tài khoản bị khóa, hoặc tài khoản thuộc nhà xe chưa được hệ thống phê duyệt. Khách nên kiểm tra lại email, mật khẩu và trạng thái xác minh email.
+Vai trò áp dụng: PASSENGER, OPERATOR_ADMIN, OPERATOR_STAFF, DRIVER, ASSISTANT
+Hành động gợi ý: Nếu vẫn lỗi, gửi ảnh màn hình lỗi và email đăng nhập cho kênh hỗ trợ chính thức, không gửi mật khẩu.
+
+Hỏi: Access token và refresh token là gì?
+Trả lời: Access token dùng để xác thực phiên đăng nhập trong thời gian ngắn. Refresh token dùng để lấy access token mới khi phiên hết hạn. Người dùng không cần thao tác trực tiếp với token trong ứng dụng thông thường.
+Vai trò áp dụng: tất cả vai trò
+Hành động gợi ý: Không gửi token cho CSKH hoặc bên thứ ba.
+
+Mục 2 - Hồ sơ hành khách
+
+Hỏi: Vì sao hệ thống yêu cầu hoàn tất số điện thoại?
+Trả lời: Số điện thoại giúp nhà xe liên hệ khi cần xác nhận điểm đón, thay đổi lịch trình, hỗ trợ lên xe hoặc xử lý tình huống phát sinh. Với hành khách, một số chức năng có thể bị chặn nếu hồ sơ điện thoại chưa hoàn tất.
+Vai trò áp dụng: PASSENGER
+Hành động gợi ý: Cập nhật số điện thoại chính xác trong hồ sơ cá nhân.
+
+Hỏi: Tôi có thể xem thông tin cá nhân ở đâu?
+Trả lời: Người dùng có thể xem thông tin tài khoản hiện tại trong mục hồ sơ cá nhân. Thông tin cơ bản gồm mã người dùng, email, tên hiển thị, số điện thoại, vai trò, trạng thái và ảnh đại diện nếu có.
+Vai trò áp dụng: tất cả vai trò
+Hành động gợi ý: Nếu thông tin sai, cập nhật trong ứng dụng hoặc liên hệ hỗ trợ theo chính sách của VietRide.
+
+Mục 3 - Tìm chuyến và đặt vé
+
+Hỏi: Tôi có thể đặt vé xe khách trên VietRide như thế nào?
+Trả lời: Hành khách tìm chuyến theo điểm đi, điểm đến và thời gian khởi hành, chọn chuyến phù hợp, chọn ghế hoặc thông tin hành khách, chọn điểm đón hoặc điểm trả nếu hệ thống hỗ trợ, sau đó thanh toán để hoàn tất đặt vé.
+Vai trò áp dụng: PASSENGER
+Hành động gợi ý: Kiểm tra kỹ thời gian, điểm đón, điểm trả, số lượng ghế và tổng tiền trước khi thanh toán.
+
+Hỏi: Mã đặt chỗ VietRide có dạng gì?
+Trả lời: Mã đặt chỗ là mã người dùng có thể dùng để tra cứu hoặc cung cấp khi cần hỗ trợ. Ví dụ trong tài liệu hợp đồng API, mã đặt chỗ có dạng như VR-20260518-ABCD1234.
+Vai trò áp dụng: PASSENGER, OPERATOR_STAFF, OPERATOR_ADMIN
+Hành động gợi ý: Khi liên hệ CSKH, cung cấp mã đặt chỗ thay vì gửi thông tin thanh toán nhạy cảm.
+
+Hỏi: Đặt vé khứ hồi có khác đặt vé một chiều không?
+Trả lời: Đặt vé khứ hồi tạo thông tin cho cả lượt đi và lượt về. Hệ thống có thể trả về nhóm đặt chỗ, mã đặt chỗ lượt đi, mã đặt chỗ lượt về, tổng tiền từng lượt và đường dẫn thanh toán nếu thanh toán qua VNPay.
+Vai trò áp dụng: PASSENGER
+Hành động gợi ý: Kiểm tra ngày đi và ngày về trước khi xác nhận.
+
+Hỏi: Khi nào vé được xem là đặt thành công?
+Trả lời: Vé được xem là đặt thành công khi booking được tạo và thanh toán thành công theo phương thức đã chọn. Với ví, giao dịch có thể thành công ngay nếu số dư đủ. Với VNPay, khách cần hoàn tất thanh toán trên cổng VNPay và chờ hệ thống cập nhật kết quả.
+Vai trò áp dụng: PASSENGER
+Hành động gợi ý: Nếu đã thanh toán nhưng chưa thấy vé, kiểm tra lịch sử đặt chỗ hoặc liên hệ hỗ trợ kèm mã giao dịch.
+
+Mục 4 - Thanh toán, ví và hoàn tiền
+
+Hỏi: VietRide hỗ trợ những hình thức thanh toán nào?
+Trả lời: VietRide hỗ trợ thanh toán qua ví nội bộ và VNPay theo từng luồng nghiệp vụ. Một số giao dịch như đặt vé, ký gửi hàng hoặc nạp ví có thể tạo đường dẫn thanh toán VNPay.
+Vai trò áp dụng: PASSENGER
+Hành động gợi ý: Chỉ thanh toán qua đường dẫn chính thức trong ứng dụng VietRide.
+
+Hỏi: Ví VietRide dùng để làm gì?
+Trả lời: Ví VietRide dùng để lưu số dư của người dùng, thanh toán nhanh khi đủ tiền và nhận hoàn tiền trong các trường hợp đủ điều kiện. Giao dịch ví được ghi nhận trong lịch sử giao dịch.
+Vai trò áp dụng: PASSENGER
+Hành động gợi ý: Kiểm tra số dư ví và lịch sử giao dịch trước khi báo lỗi thanh toán.
+
+Hỏi: Tôi thanh toán VNPay rồi nhưng hệ thống chưa cập nhật thì sao?
+Trả lời: Trạng thái VNPay phụ thuộc vào callback thanh toán và quá trình đồng bộ kết quả. Nếu khách đã bị trừ tiền nhưng vé chưa xác nhận, cần kiểm tra lại lịch sử đặt chỗ sau vài phút và liên hệ hỗ trợ kèm mã đặt chỗ, thời gian thanh toán, số tiền và mã giao dịch nếu có.
+Vai trò áp dụng: PASSENGER
+Hành động gợi ý: Không thanh toán lại nhiều lần nếu chưa rõ trạng thái giao dịch.
+
+Hỏi: Khi hủy vé, tiền hoàn về đâu?
+Trả lời: Theo luồng hệ thống, hoàn tiền có thể được ghi nhận qua ví VietRide tùy chính sách và trạng thái giao dịch. Số tiền hoàn phụ thuộc vào điều kiện hủy, thời điểm hủy và chính sách nhà xe.
+Vai trò áp dụng: PASSENGER
+Hành động gợi ý: Kiểm tra chính sách hủy trước khi xác nhận hủy vé.
+
+Hỏi: CSKH có được cam kết số tiền hoàn ngay không?
+Trả lời: Không. CSKH chỉ nên giải thích nguyên tắc chung. Số tiền hoàn thực tế phải dựa trên dữ liệu booking, trạng thái chuyến, chính sách hủy và kết quả xử lý của hệ thống thanh toán.
+Vai trò áp dụng: OPERATOR_STAFF, OPERATOR_ADMIN, SYSTEM_ADMIN
+Hành động gợi ý: Tra cứu booking và giao dịch trước khi phản hồi số tiền cụ thể.
+
+Mục 5 - Hủy vé và chỉnh sửa điểm đón, điểm trả
+
+Hỏi: Tôi có thể hủy vé không?
+Trả lời: Hành khách có thể hủy booking nếu booking thuộc về mình và còn trong điều kiện cho phép. Hệ thống xử lý hủy theo trạng thái booking, trạng thái chuyến và chính sách hoàn tiền.
+Vai trò áp dụng: PASSENGER
+Hành động gợi ý: Vào chi tiết đặt chỗ để kiểm tra nút hủy và thông tin hoàn tiền dự kiến.
+
+Hỏi: Tôi có thể đổi điểm đón không?
+Trả lời: Hệ thống hỗ trợ chỉnh sửa điểm đón trước mốc giới hạn. Theo chính sách hiện tại, hành khách cần đổi điểm đón trước giờ khởi hành ít nhất 2 giờ. Nếu giá tăng, thay đổi chỉ áp dụng sau khi thanh toán phần chênh lệch thành công. Nếu giá giảm, phần chênh lệch có thể hoàn về ví.
+Vai trò áp dụng: PASSENGER
+Hành động gợi ý: Chỉnh điểm đón càng sớm càng tốt để tránh quá hạn.
+
+Hỏi: Tôi có thể đổi điểm trả không?
+Trả lời: Hệ thống hỗ trợ chỉnh sửa điểm trả trước mốc giới hạn. Theo chính sách hiện tại, hành khách cần đổi điểm trả trước giờ khởi hành ít nhất 2 giờ. Với phạm vi v1, giá vé vẫn tính theo điểm đón nên chỉnh điểm trả không nhất thiết tạo thanh toán hoặc hoàn tiền.
+Vai trò áp dụng: PASSENGER
+Hành động gợi ý: Kiểm tra lại điểm trả mới trước khi xác nhận.
+
+Mục 6 - Theo dõi xe thời gian thực
+
+Hỏi: Tôi theo dõi vị trí xe ở đâu?
+Trả lời: Hành khách có thể theo dõi xe trong chi tiết chuyến hoặc chi tiết đặt chỗ nếu chuyến hỗ trợ GPS và đang ở trạng thái phù hợp. Vị trí xe phụ thuộc vào thiết bị của tài xế, kết nối mạng và trạng thái chuyến.
+Vai trò áp dụng: PASSENGER
+Hành động gợi ý: Nếu bản đồ không cập nhật, thử tải lại ứng dụng hoặc kiểm tra sau vài phút.
+
+Hỏi: Vì sao xe không hiện vị trí?
+Trả lời: Có thể chuyến chưa bắt đầu, tài xế chưa phát GPS, thiết bị mất mạng, GPS bị tắt, hoặc hệ thống chưa nhận bản tin vị trí mới. Đây không nhất thiết là lỗi đặt vé.
+Vai trò áp dụng: PASSENGER, DRIVER, ASSISTANT, OPERATOR_STAFF
+Hành động gợi ý: CSKH nên kiểm tra trạng thái chuyến và dữ liệu GPS mới nhất trước khi phản hồi.
+
+Hỏi: ETA là gì?
+Trả lời: ETA là thời gian dự kiến xe đến điểm đón, điểm dừng hoặc điểm trả. ETA là ước tính, có thể thay đổi do giao thông, thời tiết, lộ trình và tín hiệu GPS.
+Vai trò áp dụng: PASSENGER, DRIVER, ASSISTANT, OPERATOR_STAFF
+Hành động gợi ý: Không cam kết tuyệt đối thời gian đến nếu chỉ có ETA ước tính.
+
+Mục 7 - Hàng ký gửi
+
+Hỏi: VietRide có hỗ trợ gửi hàng theo chuyến không?
+Trả lời: VietRide hỗ trợ quản lý hàng ký gửi theo chuyến nếu nhà xe có cấu hình và chuyến còn khả năng nhận hàng. Người gửi tạo yêu cầu, cung cấp thông tin người nhận, hàng hóa, điểm gửi, điểm nhận và thanh toán nếu có phí.
+Vai trò áp dụng: PASSENGER, OPERATOR_STAFF
+Hành động gợi ý: Kiểm tra kỹ thông tin người nhận và số điện thoại trước khi tạo đơn.
+
+Hỏi: Mã hàng ký gửi có dạng gì?
+Trả lời: Mã hàng ký gửi là mã tra cứu cho kiện hàng. Ví dụ trong hợp đồng API, mã có dạng như VRP-20260518-P7K3D9Q2.
+Vai trò áp dụng: PASSENGER, ASSISTANT, OPERATOR_STAFF
+Hành động gợi ý: Khi cần hỗ trợ, cung cấp mã hàng ký gửi thay vì gửi thông tin nhạy cảm.
+
+Hỏi: Người nhận xác nhận giao hàng như thế nào?
+Trả lời: Hệ thống có luồng xác nhận giao hàng qua token hoặc liên kết giao hàng. Người nhận có thể xác nhận hoặc từ chối nhận hàng theo trạng thái và thời hạn của token.
+Vai trò áp dụng: PASSENGER
+Hành động gợi ý: Chỉ mở liên kết xác nhận từ nguồn chính thức của VietRide hoặc nhà xe.
+
+Hỏi: Nếu hàng quá lớn thì sao?
+Trả lời: Một số hàng quá lớn có thể cần nhà xe xem xét trước. Trạng thái có thể chuyển sang chờ nhà xe duyệt. Nếu quá thời hạn hoặc bị từ chối, hệ thống xử lý theo chính sách, có thể bao gồm hoàn tiền nếu đã thanh toán.
+Vai trò áp dụng: PASSENGER, OPERATOR_STAFF
+Hành động gợi ý: Mô tả đúng kích thước, trọng lượng và loại hàng để tránh bị từ chối sau.
+
+Mục 8 - Vai trò tài xế và phụ xe
+
+Hỏi: Tài xế dùng VietRide để làm gì?
+Trả lời: Tài xế dùng VietRide để xem lịch làm việc, theo dõi thông tin chuyến, phát GPS, bắt đầu hoặc kết thúc chuyến và phối hợp với phụ xe trong quá trình vận hành.
+Vai trò áp dụng: DRIVER
+Hành động gợi ý: Trước chuyến đi, tài xế cần kiểm tra lịch, thiết bị, mạng và quyền vị trí.
+
+Hỏi: Phụ xe dùng VietRide để làm gì?
+Trả lời: Phụ xe hỗ trợ xác nhận hành khách lên xe, quản lý hàng ký gửi, theo dõi điểm dừng và phối hợp với tài xế trong quá trình đón trả khách.
+Vai trò áp dụng: ASSISTANT
+Hành động gợi ý: Phụ xe nên kiểm tra danh sách hành khách và hàng hóa trước khi xe rời bến.
+
+Hỏi: Nếu tài xế không phát GPS thì hành khách có theo dõi được xe không?
+Trả lời: Không đầy đủ. Theo dõi xe thời gian thực cần dữ liệu GPS từ thiết bị tài xế hoặc nguồn tracking hợp lệ. Nếu GPS không được phát, hành khách có thể không thấy vị trí mới nhất.
+Vai trò áp dụng: DRIVER, OPERATOR_STAFF, PASSENGER
+Hành động gợi ý: Nhà xe cần nhắc tài xế bật quyền vị trí, kết nối mạng và ứng dụng tracking trước chuyến.
+
+Mục 9 - Vai trò nhân viên vận hành nhà xe
+
+Hỏi: Nhân viên vận hành nhà xe có thể làm gì?
+Trả lời: Nhân viên vận hành nhà xe hỗ trợ quản lý tuyến, điểm dừng, chuyến, phương tiện, đặt chỗ và thông tin vận hành theo quyền được cấp. Một số thao tác ghi dữ liệu có thể chỉ dành cho quản lý nhà xe.
+Vai trò áp dụng: OPERATOR_STAFF
+Hành động gợi ý: Nếu không thấy chức năng, kiểm tra vai trò tài khoản hoặc liên hệ quản lý nhà xe.
+
+Hỏi: Vì sao nhân viên không tạo hoặc sửa được một số cấu hình?
+Trả lời: Theo ma trận quyền, một số thao tác như tạo, sửa hoặc xóa cấu hình vận hành chỉ dành cho OPERATOR_ADMIN. OPERATOR_STAFF thường được phép xem hoặc hỗ trợ vận hành theo phạm vi được cấp.
+Vai trò áp dụng: OPERATOR_STAFF, OPERATOR_ADMIN
+Hành động gợi ý: Quản lý nhà xe cần kiểm tra quyền tài khoản và trạng thái nhà xe.
+
+Mục 10 - Vai trò quản lý nhà xe
+
+Hỏi: Quản lý nhà xe có quyền gì?
+Trả lời: Quản lý nhà xe có quyền quản lý thông tin công ty, nhân sự, phương tiện, tuyến, điểm dừng, lịch tài xế, chính sách và dữ liệu vận hành trong phạm vi nhà xe của mình.
+Vai trò áp dụng: OPERATOR_ADMIN
+Hành động gợi ý: Không chia sẻ tài khoản quản lý; tạo tài khoản riêng cho từng nhân viên nếu hệ thống hỗ trợ.
+
+Hỏi: Vì sao nhà xe chưa đăng nhập được sau khi đăng ký?
+Trả lời: Nhà xe tự đăng ký có thể ở trạng thái chờ phê duyệt. Tài khoản quản lý nhà xe cần xác minh email và nhà xe cần được admin hệ thống phê duyệt trước khi truy cập đầy đủ.
+Vai trò áp dụng: OPERATOR_ADMIN
+Hành động gợi ý: Kiểm tra email xác minh và trạng thái phê duyệt.
+
+Hỏi: Nhà xe bị tạm ngưng thì sao?
+Trả lời: Khi nhà xe không còn ở trạng thái được phê duyệt hoặc bị tạm ngưng, các hành động ghi dữ liệu hoặc truy cập vận hành có thể bị chặn. Hệ thống trả lỗi không có quyền truy cập.
+Vai trò áp dụng: OPERATOR_ADMIN, OPERATOR_STAFF
+Hành động gợi ý: Liên hệ admin hệ thống hoặc bộ phận vận hành VietRide để kiểm tra lý do.
+
+Mục 11 - Vai trò admin hệ thống
+
+Hỏi: Admin hệ thống quản lý những gì?
+Trả lời: Admin hệ thống quản lý nền tảng, nhà xe, người dùng, dữ liệu hệ thống, doanh thu, cấu hình và kho tri thức RAG. Admin có thể phê duyệt, từ chối hoặc tạm ngưng nhà xe theo quy trình.
+Vai trò áp dụng: SYSTEM_ADMIN
+Hành động gợi ý: Khi thao tác với nhà xe, cần lưu lý do rõ ràng để phục vụ audit và hỗ trợ.
+
+Hỏi: Ai được upload tài liệu RAG?
+Trả lời: Theo luồng RAG document hiện tại, upload và phê duyệt tài liệu tri thức yêu cầu quyền SYSTEM_ADMIN qua internal authentication. Tài liệu cần có tiêu đề, cấp truy cập, danh mục, loại tài liệu, vai trò người đọc và ngôn ngữ.
+Vai trò áp dụng: SYSTEM_ADMIN
+Hành động gợi ý: Chỉ upload tài liệu đã được kiểm duyệt, không chứa bí mật hoặc dữ liệu cá nhân thật.
+
+Mục 12 - RAG AI Assistant
+
+Hỏi: RAG AI Assistant của VietRide dùng để làm gì?
+Trả lời: RAG AI Assistant hỗ trợ trả lời câu hỏi dựa trên kho tri thức đã được duyệt. Công cụ này có thể hỗ trợ khách hàng, nhân viên vận hành, nhà xe và admin tùy cấp truy cập tài liệu.
+Vai trò áp dụng: tất cả vai trò
+Hành động gợi ý: Nếu AI trả lời chưa đủ, chuyển sang CSKH hoặc người phụ trách nghiệp vụ.
+
+Hỏi: Vì sao AI không trả lời được câu hỏi của tôi?
+Trả lời: Có thể kho tri thức chưa có tài liệu phù hợp, tài liệu chưa được duyệt, quyền truy cập của người dùng không đủ, hoặc câu hỏi nằm ngoài phạm vi VietRide.
+Vai trò áp dụng: tất cả vai trò
+Hành động gợi ý: Hỏi lại cụ thể hơn, kèm mã đặt chỗ hoặc ngữ cảnh nếu cần, nhưng không gửi mật khẩu hoặc token.
+
+Hỏi: Passenger, Driver, Assistant và Operator có thấy cùng một dữ liệu RAG không?
+Trả lời: Không nhất thiết. Theo thiết kế, hành khách truy vấn được tài liệu PUBLIC. Tài xế, phụ xe và vai trò nhà xe có thể truy vấn PUBLIC và OPERATOR. Admin hệ thống có thể truy vấn mọi cấp truy cập, bao gồm ADMIN.
+Vai trò áp dụng: tất cả vai trò
+Hành động gợi ý: Khi upload tài liệu, chọn accessLevel đúng với mức nhạy cảm của nội dung.
+
+Mục 13 - Lỗi thường gặp và cách CSKH phản hồi
+
+Lỗi: Authorization header is required or access token is invalid.
+Ý nghĩa: Thiếu access token, token sai định dạng, token hết hạn, token không do Identity phát hành, hoặc Gateway không verify được JWKS.
+Cách trả lời khách: Phiên đăng nhập có thể đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại và thử lại. Nếu vẫn lỗi, gửi ảnh màn hình lỗi cho bộ phận hỗ trợ.
+Vai trò áp dụng: tất cả vai trò
+
+Lỗi: Access token invalid or expired.
+Ý nghĩa: Access token không hợp lệ hoặc hết hạn.
+Cách trả lời khách: Vui lòng đăng nhập lại để lấy phiên mới. Không gửi token cho CSKH.
+Vai trò áp dụng: tất cả vai trò
+
+Lỗi: Cannot POST /v1/rag/chat.
+Ý nghĩa: Request đang đi sai prefix hoặc Gateway đang forward sai đường dẫn đến RAG service. RAG service trực tiếp dùng đường dẫn có tiền tố /api, còn Gateway public dùng /v1/rag.
+Cách trả lời khi test nội bộ: Nếu gọi qua Gateway, dùng http://localhost:3000/v1/rag/chat. Nếu gọi trực tiếp RAG service, endpoint đúng là http://localhost:3003/api/v1/rag/chat và cần X-Internal-Auth, không dùng user Authorization.
+Vai trò áp dụng: SYSTEM_ADMIN, OPERATOR_STAFF khi test kỹ thuật
+
+Lỗi: FORBIDDEN.
+Ý nghĩa: Người dùng đã đăng nhập nhưng không có quyền với tài nguyên hoặc vai trò không phù hợp.
+Cách trả lời khách: Tài khoản hiện tại không có quyền thực hiện thao tác này. Vui lòng kiểm tra vai trò tài khoản hoặc liên hệ quản trị viên.
+Vai trò áp dụng: tất cả vai trò
+
+Lỗi: VALIDATION_ERROR hoặc VALIDATION_FAILED.
+Ý nghĩa: Dữ liệu nhập không đúng định dạng hoặc vi phạm điều kiện nghiệp vụ.
+Cách trả lời khách: Vui lòng kiểm tra lại các trường bắt buộc, định dạng ngày giờ, số điện thoại, email, số tiền hoặc lựa chọn trong biểu mẫu.
+Vai trò áp dụng: tất cả vai trò
+
+Lỗi: AUTH_PHONE_REQUIRED.
+Ý nghĩa: Hành khách cần hoàn tất hồ sơ số điện thoại trước khi tiếp tục một số chức năng.
+Cách trả lời khách: Vui lòng cập nhật số điện thoại trong hồ sơ cá nhân rồi thử lại.
+Vai trò áp dụng: PASSENGER
+
+Mục 14 - Kịch bản trả lời CSKH mẫu
+
+Tình huống: Khách nói đã thanh toán nhưng chưa thấy vé.
+Trả lời mẫu: VietRide đã ghi nhận thông tin của anh/chị. Trường hợp thanh toán qua VNPay có thể cần một khoảng thời gian ngắn để đồng bộ kết quả. Anh/chị vui lòng kiểm tra lại lịch sử đặt chỗ sau vài phút. Nếu vẫn chưa thấy vé, vui lòng cung cấp mã đặt chỗ, thời gian thanh toán và số tiền để bộ phận hỗ trợ kiểm tra. Anh/chị không cần gửi mật khẩu, OTP hoặc token.
+
+Tình huống: Khách hỏi xe đang ở đâu.
+Trả lời mẫu: Anh/chị vui lòng mở chi tiết chuyến hoặc chi tiết đặt chỗ để xem vị trí xe nếu chuyến đang hỗ trợ theo dõi GPS. Vị trí có thể chậm cập nhật nếu thiết bị tài xế mất mạng, GPS bị tắt hoặc chuyến chưa bắt đầu. Nếu quá lâu không cập nhật, anh/chị có thể liên hệ nhà xe hoặc CSKH để kiểm tra trạng thái chuyến.
+
+Tình huống: Khách muốn đổi điểm đón sát giờ chạy.
+Trả lời mẫu: VietRide hỗ trợ đổi điểm đón trước mốc giới hạn theo chính sách hệ thống. Theo luồng hiện tại, thay đổi điểm đón cần thực hiện trước giờ khởi hành 2 giờ. Nếu đã quá thời hạn, hệ thống có thể không cho đổi. Anh/chị nên liên hệ nhà xe để được hỗ trợ trực tiếp nếu có tình huống khẩn cấp.
+
+Tình huống: Khách hỏi có được hoàn tiền khi hủy vé không.
+Trả lời mẫu: Việc hoàn tiền phụ thuộc vào trạng thái vé, thời điểm hủy, trạng thái chuyến và chính sách nhà xe. Anh/chị vui lòng mở chi tiết đặt chỗ để xem thông tin hủy và hoàn tiền dự kiến. Nếu cần kiểm tra thêm, vui lòng cung cấp mã đặt chỗ cho kênh hỗ trợ chính thức.
+
+Tình huống: Nhà xe hỏi vì sao nhân viên không tạo được tuyến.
+Trả lời mẫu: Một số thao tác ghi dữ liệu vận hành chỉ dành cho tài khoản quản lý nhà xe. Nhân viên vận hành có thể bị giới hạn quyền tùy ma trận phân quyền. Quản lý nhà xe vui lòng kiểm tra vai trò tài khoản và trạng thái phê duyệt của nhà xe.
+
+Tình huống: Tài xế báo hành khách không thấy vị trí xe.
+Trả lời mẫu: Anh/chị vui lòng kiểm tra quyền vị trí của ứng dụng, kết nối mạng và trạng thái phát GPS. Nếu chuyến chưa bắt đầu hoặc thiết bị chưa gửi GPS, hành khách có thể chưa thấy vị trí mới nhất.
+
+Mục 15 - Dữ liệu test câu hỏi cho RAG
+
+Câu hỏi test 1: Tôi đã thanh toán VNPay nhưng chưa thấy vé thì làm gì?
+Câu trả lời kỳ vọng: Kiểm tra lịch sử đặt chỗ, chờ đồng bộ, cung cấp mã đặt chỗ, thời gian thanh toán, số tiền; không thanh toán lại nhiều lần khi chưa rõ trạng thái.
+
+Câu hỏi test 2: Hành khách có theo dõi xe thời gian thực không?
+Câu trả lời kỳ vọng: Có, nếu chuyến hỗ trợ GPS và đang ở trạng thái phù hợp; vị trí phụ thuộc thiết bị tài xế, mạng và trạng thái chuyến.
+
+Câu hỏi test 3: Tôi có đổi điểm đón được không?
+Câu trả lời kỳ vọng: Có thể đổi trước mốc giới hạn, theo hợp đồng hiện tại là trước giờ khởi hành 2 giờ; nếu tăng giá cần thanh toán phần chênh lệch, nếu giảm giá có thể hoàn về ví.
+
+Câu hỏi test 4: Vì sao token invalid?
+Câu trả lời kỳ vọng: Có thể thiếu token, token hết hạn, sai định dạng, không phải access token từ Identity, hoặc Gateway không verify được JWKS; người dùng nên đăng nhập lại.
+
+Câu hỏi test 5: Driver cần làm gì để hành khách thấy vị trí xe?
+Câu trả lời kỳ vọng: Bật ứng dụng, quyền vị trí, kết nối mạng, phát GPS và đảm bảo chuyến ở trạng thái phù hợp.
+
+Câu hỏi test 6: Ai được upload tài liệu RAG?
+Câu trả lời kỳ vọng: SYSTEM_ADMIN theo luồng hiện tại; tài liệu cần metadata và không chứa bí mật hoặc dữ liệu cá nhân thật.
+
+Câu hỏi test 7: Passenger có đọc được tài liệu OPERATOR không?
+Câu trả lời kỳ vọng: Không. Passenger truy vấn được PUBLIC; Driver, Assistant và vai trò nhà xe truy vấn được PUBLIC và OPERATOR; System Admin truy vấn được mọi cấp.
+
+Kết luận:
+VietRide tập trung vào đặt vé, theo dõi xe thời gian thực, thanh toán, ví, hàng ký gửi và vận hành nhà xe. CSKH nên trả lời theo nguyên tắc an toàn: không yêu cầu bí mật, không cam kết xử lý khi chưa có dữ liệu thực tế, hướng dẫn người dùng kiểm tra trong ứng dụng và chuyển tuyến hỗ trợ khi câu hỏi vượt ngoài kho tri thức.

@@ -50,7 +50,7 @@
         <mxCell id="tbl_knowledgedocument_r4_c1" value="" style="shape=partialRectangle;html=1;whiteSpace=wrap;connectable=0;strokeColor=inherit;overflow=hidden;fillColor=none;top=0;left=0;bottom=0;right=0;pointerEvents=1;fontSize=11;fontStyle=5;align=center;" vertex="1" parent="tbl_knowledgedocument_r4">
           <mxGeometry width="50" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tbl_knowledgedocument_r4_c2" value="fileUrl" style="shape=partialRectangle;html=1;whiteSpace=wrap;connectable=0;strokeColor=inherit;overflow=hidden;fillColor=none;top=0;left=0;bottom=0;right=0;pointerEvents=1;fontSize=12;align=left;spacingLeft=8;" vertex="1" parent="tbl_knowledgedocument_r4">
+        <mxCell id="tbl_knowledgedocument_r4_c2" value="storagePath" style="shape=partialRectangle;html=1;whiteSpace=wrap;connectable=0;strokeColor=inherit;overflow=hidden;fillColor=none;top=0;left=0;bottom=0;right=0;pointerEvents=1;fontSize=12;align=left;spacingLeft=8;" vertex="1" parent="tbl_knowledgedocument_r4">
           <mxGeometry x="50" width="180" height="30" as="geometry" />
         </mxCell>
         <mxCell id="tbl_knowledgedocument_r4_c3" value="text" style="shape=partialRectangle;html=1;whiteSpace=wrap;connectable=0;strokeColor=inherit;overflow=hidden;fillColor=none;top=0;left=0;bottom=0;right=0;pointerEvents=1;fontSize=12;align=left;spacingLeft=8;" vertex="1" parent="tbl_knowledgedocument_r4">
@@ -236,7 +236,7 @@
         <mxCell id="tbl_knowledgechunk_r6_c2" value="embedding" style="shape=partialRectangle;html=1;whiteSpace=wrap;connectable=0;strokeColor=inherit;overflow=hidden;fillColor=none;top=0;left=0;bottom=0;right=0;pointerEvents=1;fontSize=12;align=left;spacingLeft=8;" vertex="1" parent="tbl_knowledgechunk_r6">
           <mxGeometry x="50" width="180" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="tbl_knowledgechunk_r6_c3" value="vector(1536)" style="shape=partialRectangle;html=1;whiteSpace=wrap;connectable=0;strokeColor=inherit;overflow=hidden;fillColor=none;top=0;left=0;bottom=0;right=0;pointerEvents=1;fontSize=12;align=left;spacingLeft=8;" vertex="1" parent="tbl_knowledgechunk_r6">
+        <mxCell id="tbl_knowledgechunk_r6_c3" value="halfvec(2048)" style="shape=partialRectangle;html=1;whiteSpace=wrap;connectable=0;strokeColor=inherit;overflow=hidden;fillColor=none;top=0;left=0;bottom=0;right=0;pointerEvents=1;fontSize=12;align=left;spacingLeft=8;" vertex="1" parent="tbl_knowledgechunk_r6">
           <mxGeometry x="230" width="120" height="30" as="geometry" />
         </mxCell>
         <mxCell id="tbl_knowledgechunk_r7" value="" style="shape=tableRow;horizontal=0;startSize=0;swimlaneHead=0;swimlaneBody=0;strokeColor=inherit;top=0;left=0;bottom=0;right=0;collapsible=0;dropTarget=0;fillColor=none;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontSize=12;" vertex="1" parent="tbl_knowledgechunk">
