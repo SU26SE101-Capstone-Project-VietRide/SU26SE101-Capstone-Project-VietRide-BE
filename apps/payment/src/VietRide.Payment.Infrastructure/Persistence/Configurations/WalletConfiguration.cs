@@ -16,11 +16,38 @@ internal sealed class WalletConfiguration : IEntityTypeConfiguration<Wallet>
 
         builder.HasKey(x => x.UserId);
 
-        builder.Property(x => x.UserId).HasColumnName("user_id").HasColumnType("uuid").ValueGeneratedNever();
-        builder.Property(x => x.Balance).HasColumnName("balance").HasColumnType("bigint").HasConversion(m => m.Amount, amount => Money.FromRaw(amount)).HasDefaultValueSql("0").IsRequired();
-        builder.Property(x => x.Currency).HasColumnName("currency").HasMaxLength(3).HasDefaultValue("VND").IsRequired();
-        builder.Property(x => x.RowVersion).HasColumnName("row_version").HasDefaultValue(0).IsConcurrencyToken().IsRequired();
-        builder.Property(x => x.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()").IsRequired();
-        builder.Property(x => x.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("now()").IsRequired();
+        builder.Property(x => x.UserId)
+            .HasColumnName("user_id")
+            .HasColumnType("uuid")
+            .ValueGeneratedNever();
+
+        builder.Property(x => x.Balance)
+            .HasColumnName("balance")
+            .HasColumnType("bigint")
+            .HasConversion(m => m.Amount, amount => Money.FromRaw(amount))
+            .HasDefaultValueSql("0")
+            .IsRequired();
+
+        builder.Property(x => x.Currency)
+            .HasColumnName("currency")
+            .HasMaxLength(3)
+            .HasDefaultValue("VND")
+            .IsRequired();
+
+        builder.Property(x => x.RowVersion)
+            .HasColumnName("row_version")
+            .IsConcurrencyToken()
+            .HasDefaultValue(0)
+            .IsRequired();
+
+        builder.Property(x => x.CreatedAt)
+            .HasColumnName("created_at")
+            .HasDefaultValueSql("now()")
+            .IsRequired();
+
+        builder.Property(x => x.UpdatedAt)
+            .HasColumnName("updated_at")
+            .HasDefaultValueSql("now()")
+            .IsRequired();
     }
 }

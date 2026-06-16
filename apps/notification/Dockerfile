@@ -21,6 +21,9 @@ RUN npx nx run-many -t build --projects=contracts,nest-common,nest-config,nest-r
 # Copy sources needed to build notification (Nx will only build referenced projects).
 COPY apps/notification apps/notification
 
+# Generate Prisma client with its runtime engine before bundling.
+RUN npx prisma generate --schema=apps/notification/prisma/schema.prisma
+
 # Build via Nx (produces dist/apps/notification).
 RUN npx nx run notification:build --configuration=production --skip-nx-cache
 
@@ -32,6 +35,8 @@ ENV NODE_ENV=production
 # Copy built artifacts.
 COPY --from=build /workspace/dist/apps/notification ./
 COPY --from=build /workspace/node_modules ./node_modules
+COPY --from=build /workspace/apps/notification/src/generated ./src/generated
+COPY --from=build /workspace/apps/notification/prisma ./prisma
 # webpack externalizes the @vietride/* shared libs but they live as workspace symlinks
 # (→ /workspace/libs/shared) that don't exist in this stage. Replace those dangling
 # symlinks with the compiled lib packages so require('@vietride/*') resolves at runtime.
@@ -46,4 +51,4 @@ EXPOSE 3002
 HEALTHCHECK --interval=15s --timeout=3s --retries=5 \
   CMD wget -qO- http://127.0.0.1:3002/health || exit 1
 
-CMD ["node", "main.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy --schema=/app/prisma/schema.prisma && node main.js"]

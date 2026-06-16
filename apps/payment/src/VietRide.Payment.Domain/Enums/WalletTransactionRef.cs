@@ -1,6 +1,6 @@
 namespace VietRide.Payment.Domain.Enums;
 
-public enum WalletTransactionReferenceType
+public enum WalletTransactionRef
 {
     TOP_UP = 1,
     BOOKING_PAYMENT = 2,

@@ -13,21 +13,21 @@
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="NetArchTest.Rules" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\..\libs\dotnet\VietRide.Shared.Kernel\VietRide.Shared.Kernel.csproj" />
+    <ProjectReference Include="..\..\src\VietRide.Payment.Domain\VietRide.Payment.Domain.csproj" />
+    <ProjectReference Include="..\..\src\VietRide.Payment.Application\VietRide.Payment.Application.csproj" />
+    <ProjectReference Include="..\..\src\VietRide.Payment.Infrastructure\VietRide.Payment.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\VietRide.Payment.Api\VietRide.Payment.Api.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <Using Include="Xunit" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\..\src\VietRide.Payment.Domain\VietRide.Payment.Domain.csproj" />
-    <ProjectReference Include="..\..\src\VietRide.Payment.Application\VietRide.Payment.Application.csproj" />
   </ItemGroup>
 
 </Project>
