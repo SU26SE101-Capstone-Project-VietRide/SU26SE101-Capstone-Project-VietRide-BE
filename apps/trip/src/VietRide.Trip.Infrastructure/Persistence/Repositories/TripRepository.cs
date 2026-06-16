@@ -1,37 +1,36 @@
 using Microsoft.EntityFrameworkCore;
 using VietRide.Trip.Application.Abstractions.Repositories;
-using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Infrastructure.Persistence.Repositories;
 
 internal sealed class TripRepository : ITripRepository
 {
-    private readonly TripDbContext dbContext;
+    private readonly TripDbContext _dbContext;
 
     public TripRepository(TripDbContext dbContext)
     {
-        this.dbContext = dbContext;
+        _dbContext = dbContext;
     }
 
-    public Task<TripEntity?> GetByIdAsync(Guid id, CancellationToken ct)
-        => dbContext.Trips.FirstOrDefaultAsync(trip => trip.Id == id, ct);
+    public Task<Domain.Entities.Trip?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+        _dbContext.Trips.FindAsync(new object[] { id }, cancellationToken).AsTask();
 
-    public Task<TripEntity> AddAsync(TripEntity entity, CancellationToken ct)
+    public async Task<Domain.Entities.Trip> AddAsync(Domain.Entities.Trip entity, CancellationToken cancellationToken = default)
     {
-        dbContext.Trips.Add(entity);
-        return Task.FromResult(entity);
+        await _dbContext.Trips.AddAsync(entity, cancellationToken);
+        return entity;
     }
 
-    public void Update(TripEntity entity) => dbContext.Trips.Update(entity);
+    public void Update(Domain.Entities.Trip entity) => _dbContext.Trips.Update(entity);
 
-    public void Remove(TripEntity entity) => dbContext.Trips.Remove(entity);
+    public void Remove(Domain.Entities.Trip entity) => _dbContext.Trips.Remove(entity);
 
-    public IQueryable<TripEntity> Query() => dbContext.Trips;
+    public IQueryable<Domain.Entities.Trip> Query() => _dbContext.Trips;
 
-    public IQueryable<TripEntity> QueryNoTracking() => dbContext.Trips.AsNoTracking();
+    public IQueryable<Domain.Entities.Trip> QueryNoTracking() => _dbContext.Trips.AsNoTracking();
 
-    public Task<TripEntity?> GetWithSeatsAsync(Guid tripId, CancellationToken cancellationToken)
-        => dbContext.Trips
+    public Task<Domain.Entities.Trip?> GetWithSeatsAsync(Guid tripId, CancellationToken cancellationToken) =>
+        _dbContext.Trips
             .Include(trip => trip.Seats)
             .FirstOrDefaultAsync(trip => trip.Id == tripId, cancellationToken);
 }

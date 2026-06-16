@@ -113,7 +113,7 @@ public sealed class LockRoundTripSeatsHandler : IRequestHandler<LockRoundTripSea
             new LockRoundTripSeatsLegResult(request.Return.TripId, returnToken, returnSeats, expiresAt));
     }
 
-    private async Task<Domain.Entities.TripEntity> GetBookableTripAsync(
+    private async Task<Domain.Entities.Trip> GetBookableTripAsync(
         Guid tripId,
         CancellationToken cancellationToken)
     {

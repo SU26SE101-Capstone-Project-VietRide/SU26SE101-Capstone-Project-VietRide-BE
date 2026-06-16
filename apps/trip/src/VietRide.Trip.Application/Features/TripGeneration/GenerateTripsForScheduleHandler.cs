@@ -1,0 +1,72 @@
+using MediatR;
+using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Trip.Application.Abstractions.Repositories;
+
+namespace VietRide.Trip.Application.Features.TripGeneration;
+
+public sealed class GenerateTripsForScheduleHandler : IRequestHandler<GenerateTripsForScheduleCommand, GenerateTripsForScheduleResult>
+{
+    private readonly IDriverScheduleRepository driverScheduleRepository;
+    private readonly IClock clock;
+    private readonly IRouteRepository routeRepository;
+    private readonly IRouteStopFareTemplateRepository routeStopFareTemplateRepository;
+    private readonly IRouteStopRepository routeStopRepository;
+    private readonly ITripGenerationSkipLogRepository skipLogRepository;
+    private readonly ITripRepository tripRepository;
+    private readonly ITripSeatRepository tripSeatRepository;
+    private readonly ITripStopFareRepository tripStopFareRepository;
+    private readonly ITripStopRepository tripStopRepository;
+    private readonly IUnitOfWork unitOfWork;
+    private readonly IVehicleRepository vehicleRepository;
+
+    public GenerateTripsForScheduleHandler(
+        IClock clock,
+        IDriverScheduleRepository driverScheduleRepository,
+        IRouteRepository routeRepository,
+        IRouteStopRepository routeStopRepository,
+        IRouteStopFareTemplateRepository routeStopFareTemplateRepository,
+        IVehicleRepository vehicleRepository,
+        ITripRepository tripRepository,
+        ITripSeatRepository tripSeatRepository,
+        ITripStopRepository tripStopRepository,
+        ITripStopFareRepository tripStopFareRepository,
+        ITripGenerationSkipLogRepository skipLogRepository,
+        IUnitOfWork unitOfWork)
+    {
+        this.clock = clock;
+        this.driverScheduleRepository = driverScheduleRepository;
+        this.routeRepository = routeRepository;
+        this.routeStopRepository = routeStopRepository;
+        this.routeStopFareTemplateRepository = routeStopFareTemplateRepository;
+        this.vehicleRepository = vehicleRepository;
+        this.tripRepository = tripRepository;
+        this.tripSeatRepository = tripSeatRepository;
+        this.tripStopRepository = tripStopRepository;
+        this.tripStopFareRepository = tripStopFareRepository;
+        this.skipLogRepository = skipLogRepository;
+        this.unitOfWork = unitOfWork;
+    }
+
+    public async Task<GenerateTripsForScheduleResult> Handle(
+        GenerateTripsForScheduleCommand request,
+        CancellationToken cancellationToken)
+    {
+        var generationService = new TripGenerationService(
+            clock,
+            driverScheduleRepository,
+            routeRepository,
+            routeStopRepository,
+            routeStopFareTemplateRepository,
+            vehicleRepository,
+            tripRepository,
+            tripSeatRepository,
+            tripStopRepository,
+            tripStopFareRepository,
+            skipLogRepository);
+
+        var result = await generationService.GenerateAsync(request.DriverScheduleId, cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return result;
+    }
+}

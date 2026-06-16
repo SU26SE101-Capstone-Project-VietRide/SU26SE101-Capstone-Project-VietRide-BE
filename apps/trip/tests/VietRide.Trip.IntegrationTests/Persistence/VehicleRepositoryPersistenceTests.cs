@@ -119,7 +119,7 @@ public sealed class VehicleRepositoryPersistenceTests
     private static TripDbContext CreateDbContext(string databaseName)
     {
         var dataSourceBuilder = new NpgsqlDataSourceBuilder(CreateConnectionString(databaseName));
-        dataSourceBuilder.EnableUnmappedTypes();
+        TripDbContext.ConfigurePostgresEnums(dataSourceBuilder);
         var options = new DbContextOptionsBuilder<TripDbContext>()
             .UseNpgsql(dataSourceBuilder.Build())
             .Options;

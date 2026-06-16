@@ -3690,6 +3690,250 @@
       ]
     },
     {
+      "name": "Trip — Day 11 search + seat-lock flow",
+      "item": [
+        {
+          "name": "1. Activate driver schedule",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('DriverSchedule activation response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.have.property('isActive', true);",
+                  "  const scheduleId = body.data && (body.data.id || body.data.driverScheduleId);",
+                  "  pm.expect(scheduleId).to.equal(pm.variables.get('day11DriverScheduleId'));",
+                  "  pm.environment.set('day11DriverScheduleId', scheduleId);",
+                  "  pm.collectionVariables.set('day11DriverScheduleId', scheduleId);",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAdminAccessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/driver-schedules/{{day11DriverScheduleId}}/activate",
+              "host": ["{{baseUrl}}"],
+              "path": [
+                "v1",
+                "operator",
+                "driver-schedules",
+                "{{day11DriverScheduleId}}",
+                "activate"
+              ]
+            },
+            "description": "Day 11 — activates a deterministic inactive DriverSchedule through Gateway. The local harness now verifies the activation-generated Trip in DB after Newman and then exercises the internal Trip seam directly."
+          }
+        },
+        {
+          "name": "2. Search trips happy path",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Trip search returns at least one available trip', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  const items = body.data && Array.isArray(body.data.items) ? body.data.items : [];",
+                  "  pm.expect(items.length).to.be.greaterThan(0);",
+                  "  pm.expect(items[0]).to.have.property('availableSeats').that.is.at.least(1);",
+                  "  const tripId = items[0].tripId || items[0].id;",
+                  "  pm.expect(tripId).to.be.a('string').and.is.not.empty;",
+                  "  pm.collectionVariables.set('day11TripId', tripId);",
+                  "  pm.environment.set('day11TripId', tripId);",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/trips/search?originStationId={{day11OriginStationId}}&destinationStationId={{day11DestinationStationId}}&departureDate={{day11DepartureDate}}&passengerCount=1",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "trips", "search"],
+              "query": [
+                {
+                  "key": "originStationId",
+                  "value": "{{day11OriginStationId}}"
+                },
+                {
+                  "key": "destinationStationId",
+                  "value": "{{day11DestinationStationId}}"
+                },
+                {
+                  "key": "departureDate",
+                  "value": "{{day11DepartureDate}}"
+                },
+                {
+                  "key": "passengerCount",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Public Gateway search for the deterministic Day-11 Saigon → Can Tho generated trip."
+          }
+        },
+        {
+          "name": "3. Search trips empty adversarial case",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Missing station search returns an empty page', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  const items = body.data && Array.isArray(body.data.items) ? body.data.items : [];",
+                  "  pm.expect(items).to.have.length(0);",
+                  "  pm.expect(body.data.totalItems).to.equal(0);",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/trips/search?originStationId={{day11MissingStationId}}&destinationStationId={{day11DestinationStationId}}&departureDate={{day11DepartureDate}}&passengerCount=1",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "trips", "search"],
+              "query": [
+                {
+                  "key": "originStationId",
+                  "value": "{{day11MissingStationId}}"
+                },
+                {
+                  "key": "destinationStationId",
+                  "value": "{{day11DestinationStationId}}"
+                },
+                {
+                  "key": "departureDate",
+                  "value": "{{day11DepartureDate}}"
+                },
+                {
+                  "key": "passengerCount",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Review adversarial case: syntactically valid missing origin station returns 200 with empty items, not 404/500."
+          }
+        },
+        {
+          "name": "4. Get trip detail",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Trip detail response shape', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data.tripId || body.data.id).to.equal(pm.variables.get('day11TripId'));",
+                  "  pm.expect(body.data).to.have.property('routeId').that.is.a('string');",
+                  "  pm.expect(body.data).to.have.property('originStation');",
+                  "  pm.expect(body.data).to.have.property('destinationStation');",
+                  "  pm.expect(body.data).to.have.property('stops').that.is.an('array');",
+                  "  pm.expect(body.data).to.have.property('seatSummary');",
+                  "  pm.expect(body.data.seatSummary.availableSeats).to.be.at.least(1);",
+                  "  pm.expect(body.data).to.have.property('fareBreakdown');",
+                  "  pm.expect(body.data.fareBreakdown).to.have.property('baseFare');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passengerAccessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/trips/{{day11TripId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "trips", "{{day11TripId}}"]
+            },
+            "description": "Passenger-authenticated Trip detail through Gateway: route, stops, seat summary, and fare detail fields."
+          }
+        },
+        {
+          "name": "5. Get trip seat map",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Seat map includes A01 available', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data.tripId || body.data.id).to.equal(pm.variables.get('day11TripId'));",
+                  "  const seats = body.data && Array.isArray(body.data.seats) ? body.data.seats : [];",
+                  "  const a01 = seats.find((seat) => seat.seatNumber === 'A01');",
+                  "  pm.expect(a01).to.exist;",
+                  "  pm.expect(a01.status).to.equal('AVAILABLE');",
+                  "  pm.expect(a01).to.have.property('row');",
+                  "  pm.expect(a01).to.have.property('col');",
+                  "  pm.expect(a01).to.have.property('deck');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passengerAccessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/trips/{{day11TripId}}/seat-map",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "trips", "{{day11TripId}}", "seat-map"]
+            },
+            "description": "Passenger-authenticated seat-map projection through Gateway. Internal seat-lock endpoints stay out of Postman; the local harness verifies the activation-generated Trip in DB after Newman and exercises the internal Trip seam directly."
+          }
+        }
+      ]
+    },
+    {
       "name": "Booking — Bookings",
       "item": [
         {

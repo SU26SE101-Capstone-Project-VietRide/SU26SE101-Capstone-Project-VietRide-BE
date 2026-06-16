@@ -8,9 +8,10 @@ internal sealed class TripSeatConfiguration : IEntityTypeConfiguration<TripSeat>
 {
     public void Configure(EntityTypeBuilder<TripSeat> builder)
     {
-        builder.ToTable("trip_seats", TripDbContext.SchemaName);
+        builder.ToTable("trip_seats");
 
         builder.HasKey(seat => seat.Id).HasName("pk_trip_seats");
+        builder.Ignore(seat => seat.RowVersion);
 
         builder.Property(seat => seat.Id)
             .HasColumnName("id")
@@ -18,25 +19,27 @@ internal sealed class TripSeatConfiguration : IEntityTypeConfiguration<TripSeat>
         builder.Property(seat => seat.TripId).HasColumnName("trip_id");
         builder.Property(seat => seat.SeatNumber)
             .HasColumnName("seat_number")
-            .HasMaxLength(20)
-            .IsRequired();
+            .HasMaxLength(20);
         builder.Property(seat => seat.SeatType)
             .HasColumnName("seat_type")
-            .HasColumnType("trip_seat_type")
-            .HasDefaultValueSql("'STANDARD'::trip_seat_type");
+            .HasColumnType("vietride_trip.trip_seat_type")
+            .HasDefaultValue(TripSeatType.STANDARD);
         builder.Property(seat => seat.Status)
             .HasColumnName("status")
-            .HasColumnType("trip_seat_status")
-            .HasDefaultValueSql("'AVAILABLE'::trip_seat_status");
+            .HasColumnType("vietride_trip.trip_seat_status")
+            .HasDefaultValue(TripSeatStatus.AVAILABLE);
         builder.Property(seat => seat.DisabledReason).HasColumnName("disabled_reason");
-        builder.Property(seat => seat.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()");
-        builder.Property(seat => seat.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("now()");
-        builder.Ignore(seat => seat.RowVersion);
+        builder.Property(seat => seat.CreatedAt)
+            .HasColumnName("created_at")
+            .HasDefaultValueSql("now()");
+        builder.Property(seat => seat.UpdatedAt)
+            .HasColumnName("updated_at")
+            .HasDefaultValueSql("now()");
 
         builder.HasIndex(seat => new { seat.TripId, seat.SeatNumber })
             .IsUnique()
             .HasDatabaseName("uq_trip_seats_trip_seat");
-        builder.HasIndex(seat => new { seat.TripId, seat.Status })
-            .HasDatabaseName("idx_trip_seats_trip_status");
+        builder.HasIndex(seat => new { seat.TripId, seat.Status }).HasDatabaseName("idx_trip_seats_trip_status");
+
     }
 }

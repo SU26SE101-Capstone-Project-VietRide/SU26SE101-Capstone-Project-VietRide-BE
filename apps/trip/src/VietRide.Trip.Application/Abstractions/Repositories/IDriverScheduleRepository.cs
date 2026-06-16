@@ -11,5 +11,6 @@ public interface IDriverScheduleRepository : IRepository<DriverSchedule, Guid>
         TimeOnly departureTime,
         DateOnly validFrom,
         DateOnly? validUntil,
+        Guid? excludeScheduleId = null,
         CancellationToken cancellationToken = default);
 }

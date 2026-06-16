@@ -39,6 +39,8 @@ jobs:
             dockerfile: apps/parcel/Dockerfile
           - service: gateway
             dockerfile: apps/gateway/Dockerfile
+          - service: tracking
+            dockerfile: apps/tracking/Dockerfile
     steps:
       - uses: actions/checkout@v4
 

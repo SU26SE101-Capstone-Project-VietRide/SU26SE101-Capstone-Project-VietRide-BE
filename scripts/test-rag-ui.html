@@ -11,7 +11,7 @@
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js"></script>
     <!-- Phosphor Icons -->
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
-    
+
     <style>
         :root {
             --bg-color: #0f172a;
@@ -330,7 +330,7 @@
         }
 
         .toast.error { background: var(--danger); }
-        
+
         .btn-outline {
             width: 100%;
             padding: 10px;
@@ -372,9 +372,9 @@
             <label for="conv-id">Conversation ID</label>
             <input type="text" id="conv-id" placeholder="Auto-generated on first message" readonly>
         </div>
-        
+
         <button class="btn-outline" onclick="startNewConversation()">Start New Conversation</button>
-        
+
         <div style="flex:1"></div>
         <div style="font-size: 12px; color: var(--text-muted);">
             Ensure backend is running and you have a valid user JWT.
@@ -504,7 +504,7 @@
             while (true) {
                 const { value, done } = await reader.read();
                 if (done) break;
-                
+
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split('\n');
                 buffer = lines.pop(); // keep last incomplete line
@@ -516,10 +516,10 @@
                     } else if (line.startsWith('data: ')) {
                         const dataStr = line.substring(6).trim();
                         if (!dataStr) continue;
-                        
+
                         try {
                             const data = JSON.parse(dataStr);
-                            
+
                             if (currentEvent === 'token') {
                                 assistantText += data.content;
                                 contentEl.innerHTML = DOMPurify.sanitize(marked.parse(assistantText));
@@ -552,7 +552,7 @@
     function appendMessage(role, text) {
         const wrapper = document.createElement('div');
         wrapper.className = `message-wrapper ${role}`;
-        
+
         let safeHtml = DOMPurify.sanitize(marked.parse(text));
         if (role === 'user') {
             safeHtml = text.replace(/\n/g, '<br>'); // Simple text for user
@@ -586,14 +586,14 @@
     function finalizeAssistantMessage(wrapperId, actualMessageId, citedChunkIds) {
         const wrapper = document.getElementById(wrapperId);
         if (!wrapper) return;
-        
+
         // Remove typing indicator
         wrapper.querySelector('.typing-indicator')?.remove();
-        
+
         // Add meta/feedback footer
         const meta = document.createElement('div');
         meta.className = 'message-meta';
-        
+
         let citationsHtml = '';
         if (citedChunkIds && citedChunkIds.length > 0) {
             citationsHtml = `<span><i class="ph ph-books"></i> ${citedChunkIds.length} sources cited</span>`;
@@ -648,7 +648,7 @@
                 btns[1].innerHTML = '<i class="ph-fill ph-thumbs-down"></i>';
                 btns[0].innerHTML = '<i class="ph ph-thumbs-up"></i>';
             }
-            
+
             showToast('Feedback submitted successfully');
         } catch (error) {
             showToast(error.message, 'error');

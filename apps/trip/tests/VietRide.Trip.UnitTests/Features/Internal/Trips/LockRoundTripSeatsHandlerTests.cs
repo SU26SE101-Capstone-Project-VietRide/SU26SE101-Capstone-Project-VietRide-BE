@@ -5,6 +5,7 @@ using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.Internal.Trips.LockRoundTripSeats;
 using VietRide.Trip.Domain.Entities;
+using TripEntity = VietRide.Trip.Domain.Entities.Trip;
 
 namespace VietRide.Trip.UnitTests.Features.Internal.Trips;
 
@@ -137,17 +138,25 @@ public sealed class LockRoundTripSeatsHandlerTests
             Guid.NewGuid(),
             Guid.NewGuid(),
             Guid.NewGuid(),
+            null,
+            null,
             DateTimeOffset.UtcNow.AddHours(1),
             DateTimeOffset.UtcNow.AddHours(3),
+            TripSource.MANUAL,
             Money.FromRaw(100_000),
-            TripSource.MANUAL);
+            null,
+            0m);
 
         foreach (var seat in seats)
         {
             trip.AddSeat(TripSeat.Create(trip.Id, seat));
         }
 
-        trip.ChangeStatus(status);
+        if (status == TripStatus.BOARDING)
+        {
+            trip.MarkBoarding(DateTimeOffset.UtcNow.AddHours(1));
+        }
+
         return trip;
     }
 

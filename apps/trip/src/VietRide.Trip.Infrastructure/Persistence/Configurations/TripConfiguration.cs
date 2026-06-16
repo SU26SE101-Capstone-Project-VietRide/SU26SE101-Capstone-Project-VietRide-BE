@@ -5,19 +5,20 @@ using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Infrastructure.Persistence.Configurations;
 
-internal sealed class TripEntityConfiguration : IEntityTypeConfiguration<TripEntity>
+internal sealed class TripConfiguration : IEntityTypeConfiguration<Domain.Entities.Trip>
 {
-    public void Configure(EntityTypeBuilder<TripEntity> builder)
+    public void Configure(EntityTypeBuilder<Domain.Entities.Trip> builder)
     {
-        builder.ToTable("trips", TripDbContext.SchemaName, tableBuilder =>
+        builder.ToTable("trips", table =>
         {
-            tableBuilder.HasCheckConstraint("chk_trips_base_fare_non_negative", "base_fare >= 0");
-            tableBuilder.HasCheckConstraint(
+            table.HasCheckConstraint("chk_trips_base_fare_non_negative", "base_fare >= 0");
+            table.HasCheckConstraint(
                 "chk_trips_cargo_counters_non_negative",
                 "reserved_parcel_weight_kg >= 0 AND total_loaded_weight_kg >= 0");
         });
 
         builder.HasKey(trip => trip.Id).HasName("pk_trips");
+        builder.Ignore(trip => trip.RowVersion);
 
         builder.Property(trip => trip.Id)
             .HasColumnName("id")
@@ -39,32 +40,30 @@ internal sealed class TripEntityConfiguration : IEntityTypeConfiguration<TripEnt
         builder.Property(trip => trip.CancelledByUserId).HasColumnName("cancelled_by_user_id");
         builder.Property(trip => trip.CancelReason).HasColumnName("cancel_reason");
         builder.Property(trip => trip.CompletedByUserId).HasColumnName("completed_by_user_id");
-
         builder.Property(trip => trip.Status)
             .HasColumnName("status")
-            .HasColumnType("trip_status")
-            .HasDefaultValueSql("'SCHEDULED'::trip_status");
-
+            .HasColumnType("vietride_trip.trip_status")
+            .HasDefaultValue(Domain.Entities.TripStatus.SCHEDULED);
         builder.Property(trip => trip.Source)
             .HasColumnName("source")
-            .HasColumnType("trip_source");
-
+            .HasColumnType("vietride_trip.trip_source")
+            .HasComment("VEHICLE_SUBSTITUTION: created by 6.12 flow, exempt from maxTripsPerMonth counter check.");
         builder.Property(trip => trip.HasSubstitution)
             .HasColumnName("has_substitution")
-            .HasDefaultValue(false);
-
+            .HasDefaultValue(false)
+            .HasComment("Set true when Trip_old triggers Vehicle Substitution (6.12). Reporting field.");
         builder.Property(trip => trip.BaseFare)
             .HasColumnName("base_fare")
             .HasColumnType("bigint")
-            .HasConversion(money => money.Amount, amount => Money.FromRaw(amount));
-
+            .HasConversion(m => m.Amount, amount => Money.FromRaw(amount));
         builder.Property(trip => trip.MaxCargoWeightKg)
             .HasColumnName("max_cargo_weight_kg")
             .HasColumnType("decimal(8,2)");
         builder.Property(trip => trip.EstimatedPassengerLuggageKg)
             .HasColumnName("estimated_passenger_luggage_kg")
             .HasColumnType("decimal(8,2)")
-            .HasDefaultValue(0m);
+            .HasDefaultValue(0m)
+            .HasComment("Snapshot at Trip create from VehicleType.estimatedPassengerLuggageKgPerSeat ?? Operator.luggagePolicy ?? 10 kg/seat × totalSeats.");
         builder.Property(trip => trip.ReservedParcelWeightKg)
             .HasColumnName("reserved_parcel_weight_kg")
             .HasColumnType("decimal(8,2)")
@@ -73,29 +72,12 @@ internal sealed class TripEntityConfiguration : IEntityTypeConfiguration<TripEnt
             .HasColumnName("total_loaded_weight_kg")
             .HasColumnType("decimal(8,2)")
             .HasDefaultValue(0m);
-
-        builder.Property(trip => trip.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()");
-        builder.Property(trip => trip.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("now()");
-        builder.Ignore(trip => trip.RowVersion);
-
-        builder.HasMany(trip => trip.Seats)
-            .WithOne()
-            .HasForeignKey(seat => seat.TripId)
-            .OnDelete(DeleteBehavior.Cascade);
-        builder.Navigation(trip => trip.Seats).UsePropertyAccessMode(PropertyAccessMode.Field);
-
-        builder.HasOne<Route>()
-            .WithMany()
-            .HasForeignKey(trip => trip.RouteId)
-            .OnDelete(DeleteBehavior.Restrict);
-        builder.HasOne<Vehicle>()
-            .WithMany()
-            .HasForeignKey(trip => trip.VehicleId)
-            .OnDelete(DeleteBehavior.Restrict);
-        builder.HasOne<DriverSchedule>()
-            .WithMany()
-            .HasForeignKey(trip => trip.DriverScheduleId)
-            .OnDelete(DeleteBehavior.SetNull);
+        builder.Property(trip => trip.CreatedAt)
+            .HasColumnName("created_at")
+            .HasDefaultValueSql("now()");
+        builder.Property(trip => trip.UpdatedAt)
+            .HasColumnName("updated_at")
+            .HasDefaultValueSql("now()");
 
         builder.HasIndex(trip => new { trip.DriverUserId, trip.DepartureDateTime })
             .IsUnique()
@@ -114,5 +96,24 @@ internal sealed class TripEntityConfiguration : IEntityTypeConfiguration<TripEnt
         builder.HasIndex(trip => trip.DriverScheduleId)
             .HasDatabaseName("idx_trips_driver_schedule_id")
             .HasFilter("driver_schedule_id IS NOT NULL");
+
+        builder.HasOne<Route>()
+            .WithMany()
+            .HasForeignKey(trip => trip.RouteId)
+            .OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<Vehicle>()
+            .WithMany()
+            .HasForeignKey(trip => trip.VehicleId)
+            .OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<DriverSchedule>()
+            .WithMany()
+            .HasForeignKey(trip => trip.DriverScheduleId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasMany(trip => trip.Seats)
+            .WithOne()
+            .HasForeignKey(seat => seat.TripId)
+            .OnDelete(DeleteBehavior.Cascade);
+        builder.Navigation(trip => trip.Seats).UsePropertyAccessMode(PropertyAccessMode.Field);
     }
 }

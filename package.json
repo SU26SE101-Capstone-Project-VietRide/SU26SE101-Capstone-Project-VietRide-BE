@@ -21,6 +21,7 @@
     "postman:day8:local": "node scripts/run-day8-newman-local.js",
     "postman:day9:local": "node scripts/run-day9-newman-local.js",
     "postman:day13:local": "node scripts/run-day13-newman-local.js",
+    "postman:day11:local": "node scripts/run-day11-newman-local.js",
     "lint:ts": "nx run-many -t lint --exclude=\"VietRide.*\"",
     "test:ts": "nx run-many -t test --exclude=\"VietRide.*\" --ci --passWithNoTests",
     "build:ts": "nx run-many -t build --exclude=\"VietRide.*\""

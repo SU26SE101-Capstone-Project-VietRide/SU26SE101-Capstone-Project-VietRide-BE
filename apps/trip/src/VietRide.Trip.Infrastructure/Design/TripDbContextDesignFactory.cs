@@ -18,10 +18,7 @@ internal sealed class TripDbContextDesignFactory : IDesignTimeDbContextFactory<T
 
         var dataSourceBuilder = new Npgsql.NpgsqlDataSourceBuilder(connectionString);
         dataSourceBuilder.MapEnum<OutboxEventStatus>("outbox_event_status", new NpgsqlNullNameTranslator());
-        dataSourceBuilder.MapEnum<TripStatus>("trip_status", new NpgsqlNullNameTranslator());
-        dataSourceBuilder.MapEnum<TripSource>("trip_source", new NpgsqlNullNameTranslator());
-        dataSourceBuilder.MapEnum<TripSeatStatus>("trip_seat_status", new NpgsqlNullNameTranslator());
-        dataSourceBuilder.MapEnum<TripSeatType>("trip_seat_type", new NpgsqlNullNameTranslator());
+        TripDbContext.ConfigurePostgresEnums(dataSourceBuilder);
         var dataSource = dataSourceBuilder.Build();
 
         var options = new DbContextOptionsBuilder<TripDbContext>()

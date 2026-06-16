@@ -55,6 +55,7 @@ public sealed class DriverScheduleRepository : IDriverScheduleRepository
         TimeOnly departureTime,
         DateOnly validFrom,
         DateOnly? validUntil,
+        Guid? excludeScheduleId = null,
         CancellationToken cancellationToken = default)
     {
         var candidates = await dbContext.DriverSchedules
@@ -63,6 +64,7 @@ public sealed class DriverScheduleRepository : IDriverScheduleRepository
                 schedule.DriverUserId == driverUserId
                 && schedule.IsActive
                 && schedule.DepartureTime == departureTime
+                && (!excludeScheduleId.HasValue || schedule.Id != excludeScheduleId.Value)
                 && (!schedule.ValidUntil.HasValue || schedule.ValidUntil.Value >= validFrom)
                 && (!validUntil.HasValue || schedule.ValidFrom <= validUntil.Value))
             .Select(schedule => schedule.DayOfWeek)

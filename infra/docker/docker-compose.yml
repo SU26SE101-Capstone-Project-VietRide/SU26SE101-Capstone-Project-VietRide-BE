@@ -166,6 +166,7 @@ services:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_trip;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}'
+      REDIS_URL: 'redis:6379,abortConnect=false'
       IDENTITY_SERVICE_BASE_URL: http://identity:5001
     ports:
       - '${TRIP_PORT:-5002}:5002'
