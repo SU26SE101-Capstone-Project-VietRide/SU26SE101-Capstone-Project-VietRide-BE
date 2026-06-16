@@ -627,6 +627,27 @@ Error `422` — target user is not pending initial password:
 }
 ```
 
+### GET `/v1/admin/operator-users`
+
+Auth: `SYSTEM_ADMIN`. Lists Driver, Assistant, and Operator Staff users across all operators. Optional `operatorId` filters to a specific operator. Idempotency-Key: not required (read endpoint).
+
+Query parameters:
+- `page` — optional, default `1`, minimum `1`.
+- `pageSize` — optional, default `20`, range `1..100`.
+- `search` — optional, searches `email`, `displayName`, and normalized exact `phone` when the value is a valid phone number.
+- `sortBy` — optional, default `createdAt`; allowed: `createdAt`, `email`, `displayName`, `role`, `status`.
+- `sortDir` — optional, default `desc`; allowed: `asc`, `desc`.
+- `role` — optional; allowed: `DRIVER`, `ASSISTANT`, `OPERATOR_STAFF`.
+- `status` — optional; any valid `UserStatus` value.
+- `operatorId` — optional; filters by operator.
+
+Response `200`: same shape as `GET /v1/operator/users`.
+
+Errors:
+- `403 FORBIDDEN` — caller is not `SYSTEM_ADMIN`.
+- `400 INVALID_SORT_FIELD` — `sortBy` is not in the allow-list.
+- `422 VALIDATION_ERROR` — invalid paging/filter value.
+
 ### POST `/v1/admin/users`
 
 Auth: `SYSTEM_ADMIN`. Idempotency-Key: not required by BSOT §5.6.
@@ -1969,6 +1990,54 @@ Errors:
 - `422 VALIDATION_ERROR` — missing reason or invalid lifecycle transition.
 
 Notes: suspend writes no ActivityLog in Day 6 because canonical `activity_log_action` has no `SUSPEND_OPERATOR`. Outbox emission is deferred to Day 10.
+
+### GET `/v1/operator/users`
+
+Auth: `OPERATOR_ADMIN`. Tenant isolation: caller `operatorId` is used as the only operator scope. `OPERATOR_STAFF` is not allowed to list employees. Idempotency-Key: not required (read endpoint).
+
+Query parameters:
+- `page` — optional, default `1`, minimum `1`.
+- `pageSize` — optional, default `20`, range `1..100`.
+- `search` — optional, searches `email`, `displayName`, and normalized exact `phone` when the value is a valid phone number.
+- `sortBy` — optional, default `createdAt`; allowed: `createdAt`, `email`, `displayName`, `role`, `status`.
+- `sortDir` — optional, default `desc`; allowed: `asc`, `desc`.
+- `role` — optional; allowed: `DRIVER`, `ASSISTANT`, `OPERATOR_STAFF`.
+- `status` — optional; any valid `UserStatus` value.
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [
+      {
+        "userId": "uuid",
+        "email": "driver@example.com",
+        "phone": "+84901112222",
+        "displayName": "Driver One",
+        "role": "DRIVER",
+        "status": "PENDING_INITIAL_PASSWORD",
+        "operatorId": "uuid",
+        "createdAt": "2026-06-01T10:00:00Z",
+        "avatarUrl": null
+      }
+    ],
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 1,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Errors:
+- `403 FORBIDDEN` — caller is not `OPERATOR_ADMIN` or has no `operatorId`.
+- `400 INVALID_SORT_FIELD` — `sortBy` is not in the allow-list.
+- `422 VALIDATION_ERROR` — invalid paging/filter value.
 
 ### POST `/v1/operator/users`
 

@@ -12,7 +12,7 @@
 ## Audit verdict
 
 - **Truth-correct?** ✅ **Yes.** The Day-11 implementation matches the source-of-truth chain:
-  - `BACKEND_SOURCE_OF_TRUTH.md:3, 1408, 2686` are synchronized at `1.11.3` with
+  - `BACKEND_SOURCE_OF_TRUTH.md:3, 1408, 2686` are synchronized at `1.11.4` with
     `IDEMPOTENCY_REQUEST_PENDING` registered in §5.9.
   - `VietRide_API_Contract_v1.md:1143-1148` now lists `409 IDEMPOTENCY_REQUEST_PENDING` for
     `POST /internal/v1/trips/{tripId}/lock-seats`.
