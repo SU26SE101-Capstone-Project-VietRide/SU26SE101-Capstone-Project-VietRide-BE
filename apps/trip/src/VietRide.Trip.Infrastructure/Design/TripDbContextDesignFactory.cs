@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore.Design;
 using Npgsql.NameTranslation;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Persistence.Outbox;
+using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Infrastructure.Design;
 
@@ -17,6 +18,7 @@ internal sealed class TripDbContextDesignFactory : IDesignTimeDbContextFactory<T
 
         var dataSourceBuilder = new Npgsql.NpgsqlDataSourceBuilder(connectionString);
         dataSourceBuilder.MapEnum<OutboxEventStatus>("outbox_event_status", new NpgsqlNullNameTranslator());
+        TripDbContext.ConfigurePostgresEnums(dataSourceBuilder);
         var dataSource = dataSourceBuilder.Build();
 
         var options = new DbContextOptionsBuilder<TripDbContext>()

@@ -72,10 +72,26 @@ public sealed class TripPersistenceModelTests
 
     private static TripDbContext CreateDbContext()
     {
+        var connectionString = ResolveConnectionString("vietride_trip_model_tests");
         var options = new DbContextOptionsBuilder<TripDbContext>()
-            .UseNpgsql("Host=localhost;Port=5432;Database=vietride_trip_model_tests;Username=postgres;Password=postgres")
+            .UseNpgsql(connectionString)
             .Options;
 
         return new TripDbContext(options, new SystemClock());
+    }
+
+    private static string ResolveConnectionString(string databaseName)
+    {
+        const string defaultConnectionString = "Host=localhost;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
+
+        var connectionString = Environment.GetEnvironmentVariable("VIETRIDE_TRIP_TEST_CONNECTION_STRING");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            connectionString = defaultConnectionString;
+        }
+
+        return connectionString.Contains("{databaseName}", StringComparison.OrdinalIgnoreCase)
+            ? connectionString.Replace("{databaseName}", databaseName, StringComparison.OrdinalIgnoreCase)
+            : connectionString;
     }
 }

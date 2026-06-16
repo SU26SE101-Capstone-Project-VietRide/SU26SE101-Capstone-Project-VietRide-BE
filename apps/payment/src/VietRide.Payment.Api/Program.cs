@@ -1,7 +1,9 @@
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
+using StackExchange.Redis;
 using VietRide.Payment.Application;
+using VietRide.Payment.Application.Features.Internal.Payments.BatchChargePayment;
 using VietRide.Payment.Infrastructure;
 using VietRide.Payment.Infrastructure.DependencyInjection;
 using VietRide.Payment.Infrastructure.Jobs;
@@ -28,7 +30,13 @@ builder.Services.AddVietRideDbContext<PaymentDbContext>(
     builder.Configuration,
     configureDataSource: PaymentDbContext.ConfigurePostgresTypes);
 builder.Services.AddVietRideMediatRBehaviors(
-    handlerAssemblies: [typeof(ApplicationAssemblyMarker).Assembly]);
+    handlerAssemblies:
+    [
+        typeof(ApplicationAssemblyMarker).Assembly,
+        typeof(BatchChargePaymentCommandHandler).Assembly,
+    ]);
+builder.Services.AddScoped<IBatchChargePaymentDbContext>(sp => sp.GetRequiredService<PaymentDbContext>());
+
 var registerMessaging = !builder.Environment.IsEnvironment("Testing");
 if (registerMessaging)
 {
@@ -36,6 +44,13 @@ if (registerMessaging)
     builder.Services.AddPaymentHangfire(builder.Configuration);
     builder.Services.AddHangfireServer();
 }
+
+var redisUrl = builder.Configuration["REDIS_URL"]
+    ?? Environment.GetEnvironmentVariable("REDIS_URL")
+    ?? "localhost:6379";
+var redisOptions = ConfigurationOptions.Parse(redisUrl);
+redisOptions.AbortOnConnectFail = false;
+builder.Services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(redisOptions));
 
 builder.Services.AddInfrastructure(builder.Configuration, registerConsumers: registerMessaging);
 builder.Services.AddVietRideIdempotency("payment");

@@ -2,6 +2,6 @@ namespace VietRide.Payment.Domain.Enums;
 
 public enum WalletTransactionType
 {
-    CREDIT,
-    DEBIT,
+    CREDIT = 1,
+    DEBIT = 2,
 }

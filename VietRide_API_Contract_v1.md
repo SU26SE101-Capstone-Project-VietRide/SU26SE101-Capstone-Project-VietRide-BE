@@ -781,6 +781,12 @@ Response `201`:
 }
 ```
 
+Rules:
+- `paymentMethod=WALLET` is an all-or-nothing checkout across both legs. On success, each leg still has its own Payment record with `referenceType=BOOKING`; the client must never observe a retained first-leg debit if the second leg fails.
+- `paymentMethod=VNPAY` may use a combined checkout with `referenceType=BOOKING_GROUP` and one redirect for `grandTotal`.
+- `BOOKING_GROUP` is VNPay-only for this endpoint; WALLET success remains two per-booking payments.
+- `paymentRedirectUrl` is `null` for WALLET and populated only when VNPay returns a redirect.
+
 ### GET `/v1/bookings/history`
 
 Auth: `PASSENGER`.
@@ -1166,6 +1172,62 @@ Errors:
 - `409 BOOKING_TRIP_NOT_BOOKABLE` — trip status ≠ `SCHEDULED` (closed / departed / cancelled).
 - `409 BOOKING_SEAT_UNAVAILABLE` — ≥1 seat is `HELD` / `BOOKED` / `UNAVAILABLE`;
   `error.fields` lists the offending `seatNumbers`. No seat is held (all-or-nothing).
+- `409 IDEMPOTENCY_REQUEST_PENDING` — same `Idempotency-Key` is still being processed.
+
+### POST `/internal/v1/trips/round-trip/lock-seats`
+
+Auth: Internal JWT. Idempotency: required (replay with the same `Idempotency-Key` returns the
+same outbound/return lock tokens). **Round-trip atomic** — Trip locks both outbound and return
+seat sets in one Redis Lua script. If either leg cannot be locked, no seat is held on either leg
+(technical_context_v7 lines 1755-1757).
+
+Request:
+```json
+{
+  "outbound": {
+    "tripId": "uuid",
+    "seatNumbers": ["A01", "A02"]
+  },
+  "return": {
+    "tripId": "uuid",
+    "seatNumbers": ["A01", "A02"]
+  },
+  "holdOwnerId": "uuid",
+  "ttlSeconds": 600
+}
+```
+- `holdOwnerId` = passenger user id (lock owner). `ttlSeconds` optional; defaults to
+  `SEAT_LOCK_TTL_MINUTES` × 60 (= 600).
+- `outbound.tripId` and `return.tripId` must be different trip ids.
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "outbound": {
+      "tripId": "uuid",
+      "seatLockToken": "uuid",
+      "lockedSeats": ["A01", "A02"],
+      "expiresAt": "2026-05-18T08:10:00+07:00"
+    },
+    "return": {
+      "tripId": "uuid",
+      "seatLockToken": "uuid",
+      "lockedSeats": ["A01", "A02"],
+      "expiresAt": "2026-05-18T08:10:00+07:00"
+    }
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Errors:
+- `404 TRIP_NOT_FOUND` — outbound or return trip does not exist.
+- `409 BOOKING_TRIP_NOT_BOOKABLE` — outbound or return trip status ≠ `SCHEDULED`.
+- `409 BOOKING_SEAT_UNAVAILABLE` — ≥1 requested outbound/return seat is `HELD` / `BOOKED` /
+  `UNAVAILABLE`; `error.fields` lists the offending `seatNumbers`. No seat is held on either leg.
 
 ### POST `/internal/v1/trips/{tripId}/release-seats`
 
@@ -1616,6 +1678,39 @@ Response `200`:
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
+
+### POST `/internal/v1/payments/batch-charge`
+
+Auth: Internal JWT. Idempotency: required. Caller: Booking round-trip WALLET checkout.
+
+Request:
+```json
+{
+  "userId": "uuid",
+  "method": "WALLET",
+  "items": [
+    { "referenceType": "BOOKING", "referenceId": "uuid", "amount": 350000 },
+    { "referenceType": "BOOKING", "referenceId": "uuid", "amount": 350000 }
+  ]
+}
+```
+
+Response `200` (raw internal DTO):
+```json
+{
+  "payments": [
+    { "paymentId": "uuid", "referenceType": "BOOKING", "referenceId": "uuid", "status": "SUCCEEDED", "paymentRedirectUrl": null },
+    { "paymentId": "uuid", "referenceType": "BOOKING", "referenceId": "uuid", "status": "SUCCEEDED", "paymentRedirectUrl": null }
+  ]
+}
+```
+
+Rules:
+- Day-13 batch charge supports `method=WALLET` only and every item must use `referenceType=BOOKING`.
+- The operation is atomic in Payment service: if balance is insufficient, an item is invalid, or any payment insert/debit fails, no partial Payment rows and no retained wallet debit are committed.
+- On success, Payment service creates one `SUCCEEDED` Payment row per item (`payments.reference_type=BOOKING`, `payments.reference_id=<bookingId>`) and one WALLET debit ledger entry per item (`wallet_transactions.reference_type=BOOKING_PAYMENT`, `wallet_transactions.reference_id=<bookingId>`), all committed in one Payment DB transaction; total wallet balance decrease equals the sum of item amounts.
+- Batch idempotency is endpoint-level via `payment:idem:{key}` replay plus duplicate `(referenceType, referenceId)` guard; do not write the same header idempotency key into every `payments.idempotency_key` row because the unique index is per row.
+- `BOOKING_GROUP` is not accepted on this WALLET batch endpoint; it remains VNPay-only for round-trip combined redirects.
 
 ### POST `/internal/v1/wallet/refund`
 
@@ -2152,6 +2247,26 @@ Errors:
 - `403 FORBIDDEN` — caller is not `OPERATOR_ADMIN`, has no `operatorId`, or caller Operator is not currently `APPROVED`.
 - `404 RESOURCE_NOT_FOUND` — operator does not exist.
 - `422 VALIDATION_ERROR` — invalid policy JSON shape or invalid profile payload.
+
+### GET `/internal/v1/users/{userId}`
+
+Auth: Internal JWT via `X-Internal-Auth`. Not exposed through Gateway. Success response is raw DTO (no `ApiResponse` wrapper); errors use the standard ADR 0004 error envelope.
+
+Purpose: service-to-service logical-FK and role/operator validation, including Trip DriverSchedule create/activation validation.
+
+Response `200`:
+```json
+{
+  "id": "uuid",
+  "role": "DRIVER",
+  "operatorId": "uuid",
+  "status": "ACTIVE"
+}
+```
+
+`operatorId` is nullable for non-operator-scoped users; Trip DriverSchedule validation requires it to match the caller operator for `DRIVER` and `ASSISTANT` users.
+
+Error `404` — `RESOURCE_NOT_FOUND`.
 
 ### GET `/internal/v1/operators/{operatorId}`
 
@@ -3179,14 +3294,37 @@ Validation:
 - `validUntil`, when present, must be on or after `validFrom`; otherwise return `422 VALIDATION_ERROR` with `error.fields.validUntil`.
 - `routeId` must resolve to an active Route owned by the caller's operator. A missing, inactive, or cross-operator Route returns `404 ROUTE_NOT_FOUND`.
 - `vehicleId`, when present, must resolve to a non-soft-deleted Vehicle owned by the caller's operator; otherwise return `404 VEHICLE_NOT_FOUND`.
+- `driverUserId` must resolve through Identity `GET /internal/v1/users/{userId}` to a user with `role=DRIVER` under the caller operator. Missing Identity user, wrong role, wrong operator, or upstream logical-FK validation failure returns `422 VALIDATION_ERROR` with `error.fields.driverUserId`.
+- `assistantUserId`, when present, must resolve through Identity `GET /internal/v1/users/{userId}` to a user with `role=ASSISTANT` under the caller operator. Missing Identity user, wrong role, wrong operator, or upstream logical-FK validation failure returns `422 VALIDATION_ERROR` with `error.fields.assistantUserId`.
 - An active schedule conflicts when the same `driverUserId` has any intersecting `dayOfWeek`, the same local-ICT `departureTime`, and an overlapping `[validFrom, validUntil]` window. Return `409 TRIP_DRIVER_CONFLICT`.
-- Driver `role=DRIVER` and assistant `role=ASSISTANT` validation is deferred to Day 11. Day 9 does not reject this request based on those Identity roles.
 
 Response `201`: `DriverScheduleDto` in the ADR 0004 success envelope.
 
-Creating a DriverSchedule only persists the recurring assignment. Day 9 does not generate Trips or enqueue Trip generation.
+Creating a DriverSchedule persists the recurring assignment and, when active, is the Day-11 trigger for Trip generation enqueue after the schedule commit succeeds. Day 9 shipped persistence only; the Day-11 contract closes the deferred driver/assistant role+operator validation carryover.
 
-### Day-9 error examples
+### PATCH `/v1/operator/driver-schedules/{id}/activate`
+
+Auth: `OPERATOR_ADMIN`.
+
+Request body: none.
+
+Idempotency-Key: not required by BSOT §5.6. The endpoint is behavior-idempotent: if the schedule is already active, return the current `DriverScheduleDto` without a duplicate Trip-generation enqueue.
+
+Gateway impact: no new Gateway route is required; the existing `/v1/operator/driver-schedules` prefix covers this action.
+
+Scope: activation only. Full DriverSchedule edit/cascade (`departureTime`, `dayOfWeek`, `driverUserId`, `assistantUserId`, `vehicleId`, `validUntil`, FUTURE_ONLY/ALL_PENDING) remains out of scope for Day 11.
+
+Validation:
+- The target DriverSchedule must exist and belong to the caller operator. Missing or cross-operator schedules return `404 RESOURCE_NOT_FOUND`.
+- Caller operator write eligibility still applies. A non-`APPROVED` or inactive operator receives `403 FORBIDDEN`.
+- Before activation, validate the same driver/assistant role+operator rules as create: `driverUserId` must be `role=DRIVER` under the caller operator, and nullable `assistantUserId`, when present, must be `role=ASSISTANT` under the caller operator. Mismatch or Identity logical-FK validation failure returns `422 VALIDATION_ERROR` with `error.fields`.
+- Activation reuses active-schedule conflict checks. Enabling a conflicting schedule returns `409 TRIP_DRIVER_CONFLICT` and does not enqueue Trip generation.
+
+Response `200`: `DriverScheduleDto` in the ADR 0004 success envelope.
+
+On success, activation may only transition `isActive=false` to `isActive=true`; Trip generation is enqueued only after the activation commit succeeds.
+
+### Day-9/Day-11 error examples
 
 Seat-layout count failure:
 ```json

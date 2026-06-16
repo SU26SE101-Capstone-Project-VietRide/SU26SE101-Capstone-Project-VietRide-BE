@@ -415,6 +415,24 @@ public class CreateBookingCommandHandlerTests
                 : new LockSeatsOutcome.SeatUnavailable(seatNumbers));
         }
 
+        public Task<LockRoundTripSeatsOutcome> LockRoundTripSeatsAsync(
+            Guid outboundTripId,
+            IReadOnlyList<string> outboundSeatNumbers,
+            Guid returnTripId,
+            IReadOnlyList<string> returnSeatNumbers,
+            Guid holdOwnerId,
+            string idempotencyKey,
+            int? ttlSeconds = null,
+            CancellationToken cancellationToken = default)
+        {
+            var isWinner = Interlocked.CompareExchange(ref _lockWinnerChosen, 1, 0) == 0;
+            return Task.FromResult<LockRoundTripSeatsOutcome>(isWinner
+                ? new LockRoundTripSeatsOutcome.Success(
+                    new RoundTripSeatLockResult(outboundTripId, _lockData.SeatLockToken, outboundSeatNumbers, _lockData.ExpiresAt),
+                    new RoundTripSeatLockResult(returnTripId, _lockData.SeatLockToken, returnSeatNumbers, _lockData.ExpiresAt))
+                : new LockRoundTripSeatsOutcome.SeatUnavailable(outboundSeatNumbers.Concat(returnSeatNumbers).ToArray()));
+        }
+
         public Task<bool> BookSeatsAsync(
             Guid tripId,
             Guid seatLockToken,

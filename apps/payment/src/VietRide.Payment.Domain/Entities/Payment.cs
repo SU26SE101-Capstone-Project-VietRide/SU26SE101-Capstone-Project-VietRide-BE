@@ -6,6 +6,8 @@ namespace VietRide.Payment.Domain.Entities;
 
 public sealed class Payment : BaseEntity<Guid>
 {
+    private Payment() { }
+
     public PaymentReferenceType ReferenceType { get; private set; }
     public Guid ReferenceId { get; private set; }
     public Guid? UserId { get; private set; }
@@ -22,8 +24,6 @@ public sealed class Payment : BaseEntity<Guid>
     public DateTimeOffset? ExpiredAt { get; private set; }
     public DateTimeOffset? RefundedAt { get; private set; }
 
-    private Payment() { }
-
     public static Payment CreatePendingRedirect(
         PaymentReferenceType referenceType,
         Guid referenceId,
@@ -37,10 +37,8 @@ public sealed class Payment : BaseEntity<Guid>
     {
         if (referenceId == Guid.Empty)
             throw new ArgumentException("Reference id cannot be empty.", nameof(referenceId));
-
         if (userId == Guid.Empty)
             throw new ArgumentException("User id cannot be empty.", nameof(userId));
-
         if (operatorId == Guid.Empty)
             throw new ArgumentException("Operator id cannot be empty.", nameof(operatorId));
 
@@ -57,6 +55,32 @@ public sealed class Payment : BaseEntity<Guid>
             VnPayTxnRef = vnPayTxnRef,
             IdempotencyKey = idempotencyKey,
             PaymentRedirectUrl = paymentRedirectUrl,
+        };
+    }
+
+    public static Payment CreateSucceededWalletBookingCharge(
+        Guid referenceId,
+        Guid userId,
+        Money amount,
+        DateTimeOffset succeededAt)
+    {
+        if (referenceId == Guid.Empty)
+            throw new ArgumentException("Reference id is required.", nameof(referenceId));
+        if (userId == Guid.Empty)
+            throw new ArgumentException("User id is required.", nameof(userId));
+        if (amount.Amount <= 0)
+            throw new ArgumentOutOfRangeException(nameof(amount), "Payment amount must be positive.");
+
+        return new Payment
+        {
+            Id = Guid.NewGuid(),
+            ReferenceType = PaymentReferenceType.BOOKING,
+            ReferenceId = referenceId,
+            UserId = userId,
+            Amount = amount,
+            Method = PaymentMethod.WALLET,
+            Status = PaymentStatus.SUCCEEDED,
+            SucceededAt = succeededAt,
         };
     }
 

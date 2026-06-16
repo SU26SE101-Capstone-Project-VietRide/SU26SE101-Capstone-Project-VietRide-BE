@@ -41,10 +41,13 @@ COPY --from=build /workspace/dist/libs/shared ./node_modules/@vietride
 # Prisma generates native query-engine binaries outside the webpack bundle.
 # Keep the generated client beside the bundle at the path Prisma searches at runtime.
 COPY --from=build /workspace/apps/tracking/src/generated ./src/generated
+# Prisma schema + migration SQL — needed by `prisma migrate deploy` at startup.
+COPY --from=build /workspace/apps/tracking/prisma ./prisma
 COPY .env.example ./.env.example
 
 EXPOSE 3001
 HEALTHCHECK --interval=15s --timeout=3s --retries=5 \
   CMD wget -qO- http://127.0.0.1:3001/health || exit 1
 
-CMD ["node", "main.js"]
+# Apply pending Prisma migrations (creates the schema on first boot) then start.
+CMD ["sh", "-c", "npx prisma migrate deploy --schema=./prisma/schema.prisma && node main.js"]

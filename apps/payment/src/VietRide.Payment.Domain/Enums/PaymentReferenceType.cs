@@ -2,9 +2,9 @@ namespace VietRide.Payment.Domain.Enums;
 
 public enum PaymentReferenceType
 {
-    BOOKING,
-    BOOKING_GROUP,
-    PARCEL,
-    TOP_UP,
-    SUBSCRIPTION,
+    BOOKING = 1,
+    BOOKING_GROUP = 2,
+    PARCEL = 3,
+    TOP_UP = 4,
+    SUBSCRIPTION = 5,
 }

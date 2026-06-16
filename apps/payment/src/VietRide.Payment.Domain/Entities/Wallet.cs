@@ -1,37 +1,38 @@
-using System.ComponentModel.DataAnnotations;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Payment.Domain.Entities;
 
 /// <summary>
-/// Passenger wallet. Natural primary key is <see cref="UserId"/> (logical FK to Identity user).
+/// Passenger wallet. Natural primary key is UserId (logical FK to Identity user).
 /// </summary>
 public sealed class Wallet : IAuditable
 {
+    private Wallet() { }
+
+    public Wallet(Guid userId, Money balance, string currency = "VND")
+    {
+        if (userId == Guid.Empty)
+            throw new ArgumentException("User id is required.", nameof(userId));
+
+        UserId = userId;
+        Balance = balance;
+        Currency = currency;
+    }
+
     public Guid UserId { get; private set; }
     public Money Balance { get; private set; }
     public string Currency { get; private set; } = "VND";
-
-    [ConcurrencyCheck]
     public int RowVersion { get; set; }
-
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
-
-    private Wallet() { }
 
     public static Wallet Create(Guid userId)
     {
         if (userId == Guid.Empty)
             throw new ArgumentException("User id cannot be empty.", nameof(userId));
 
-        return new Wallet
-        {
-            UserId = userId,
-            Balance = Money.Zero,
-            Currency = "VND",
-        };
+        return new Wallet(userId, Money.Zero);
     }
 
     public void Credit(Money amount)
@@ -43,15 +44,16 @@ public sealed class Wallet : IAuditable
         RowVersion++;
     }
 
-    public void Debit(Money amount)
+    public (Money BalanceBefore, Money BalanceAfter) Debit(Money amount)
     {
         if (amount.Amount <= 0)
-            throw new ArgumentOutOfRangeException(nameof(amount), "Debit amount must be positive.");
-
+            throw new ArgumentOutOfRangeException(nameof(amount), "Wallet debit amount must be positive.");
         if (Balance < amount)
-            throw new InvalidOperationException("Wallet balance cannot be negative.");
+            throw new InvalidOperationException("Wallet balance is insufficient.");
 
+        var before = Balance;
         Balance -= amount;
         RowVersion++;
+        return (before, Balance);
     }
 }

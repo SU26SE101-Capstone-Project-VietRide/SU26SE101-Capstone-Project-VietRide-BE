@@ -55,7 +55,22 @@ public class VietRideWebApplicationFactory : WebApplicationFactory<Program>
     {
         Environment.SetEnvironmentVariable("INTERNAL_JWT_SECRET", "test-secret-at-least-32-chars-long-xxxxx");
         builder.UseSetting("INTERNAL_JWT_SECRET", "test-secret-at-least-32-chars-long-xxxxx");
-        builder.UseSetting("ConnectionStrings:Default", "Host=localhost;Port=5432;Database=test;Username=postgres;Password=postgres");
+        builder.UseSetting("ConnectionStrings:Default", ResolveConnectionString("test"));
         builder.UseEnvironment("Testing");
+    }
+
+    private static string ResolveConnectionString(string databaseName)
+    {
+        const string defaultConnectionString = "Host=localhost;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
+
+        var connectionString = Environment.GetEnvironmentVariable("VIETRIDE_TRIP_TEST_CONNECTION_STRING");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            connectionString = defaultConnectionString;
+        }
+
+        return connectionString.Contains("{databaseName}", StringComparison.OrdinalIgnoreCase)
+            ? connectionString.Replace("{databaseName}", databaseName, StringComparison.OrdinalIgnoreCase)
+            : connectionString;
     }
 }

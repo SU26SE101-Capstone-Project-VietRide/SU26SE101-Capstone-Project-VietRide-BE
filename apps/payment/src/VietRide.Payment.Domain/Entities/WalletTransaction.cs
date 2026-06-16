@@ -9,6 +9,8 @@ namespace VietRide.Payment.Domain.Entities;
 /// </summary>
 public sealed class WalletTransaction : BaseEntity<Guid>
 {
+    private WalletTransaction() { }
+
     public Guid UserId { get; private set; }
     public WalletTransactionType Type { get; private set; }
     public Money Amount { get; private set; }
@@ -17,8 +19,6 @@ public sealed class WalletTransaction : BaseEntity<Guid>
     public WalletTransactionRef ReferenceType { get; private set; }
     public Guid? ReferenceId { get; private set; }
     public string? Note { get; private set; }
-
-    private WalletTransaction() { }
 
     public static WalletTransaction Create(
         Guid userId,
@@ -32,7 +32,6 @@ public sealed class WalletTransaction : BaseEntity<Guid>
     {
         if (userId == Guid.Empty)
             throw new ArgumentException("User id cannot be empty.", nameof(userId));
-
         if (amount.Amount <= 0)
             throw new ArgumentOutOfRangeException(nameof(amount), "Transaction amount must be positive.");
 
@@ -48,5 +47,26 @@ public sealed class WalletTransaction : BaseEntity<Guid>
             ReferenceId = referenceId,
             Note = note,
         };
+    }
+
+    public static WalletTransaction CreateBookingPaymentDebit(
+        Guid userId,
+        Guid bookingId,
+        Money amount,
+        Money balanceBefore,
+        Money balanceAfter)
+    {
+        if (bookingId == Guid.Empty)
+            throw new ArgumentException("Booking id is required.", nameof(bookingId));
+
+        return Create(
+            userId,
+            WalletTransactionType.DEBIT,
+            amount,
+            balanceBefore,
+            balanceAfter,
+            WalletTransactionRef.BOOKING_PAYMENT,
+            bookingId,
+            "Round-trip wallet booking payment");
     }
 }

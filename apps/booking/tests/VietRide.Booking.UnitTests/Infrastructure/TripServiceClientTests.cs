@@ -134,6 +134,109 @@ public class TripServiceClientTests
     }
 
     // -----------------------------------------------------------------------
+    // LockRoundTripSeatsAsync
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task LockRoundTripSeatsAsync_SendsExpectedPathBodyAndIdempotencyHeader()
+    {
+        var outboundTripId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        var returnTripId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+        var body = RoundTripSuccessBody(outboundTripId, returnTripId);
+        var handler = new FakeMessageHandler(HttpStatusCode.OK, body);
+        var client = BuildClient(handler);
+
+        var result = await client.LockRoundTripSeatsAsync(
+            outboundTripId,
+            ["A01"],
+            returnTripId,
+            ["B01"],
+            UserId,
+            "round-idem-1",
+            600);
+
+        result.Should().BeOfType<LockRoundTripSeatsOutcome.Success>();
+        handler.LastRequest.Should().NotBeNull();
+        handler.LastRequest!.Method.Should().Be(HttpMethod.Post);
+        handler.LastRequest.RequestUri!.PathAndQuery.Should().Be("/internal/v1/trips/round-trip/lock-seats");
+        handler.LastRequest.Headers.GetValues("Idempotency-Key").Should().ContainSingle("round-idem-1");
+        handler.LastBody.Should().Contain(outboundTripId.ToString("D"));
+        handler.LastBody.Should().Contain(returnTripId.ToString("D"));
+        handler.LastBody.Should().Contain("A01");
+        handler.LastBody.Should().Contain("B01");
+    }
+
+    [Fact]
+    public async Task LockRoundTripSeatsAsync_Returns_Success_On_200()
+    {
+        var outboundTripId = Guid.NewGuid();
+        var returnTripId = Guid.NewGuid();
+        var client = BuildClient(HttpStatusCode.OK, RoundTripSuccessBody(outboundTripId, returnTripId));
+
+        var result = await client.LockRoundTripSeatsAsync(
+            outboundTripId,
+            ["A01"],
+            returnTripId,
+            ["B01"],
+            UserId,
+            "round-idem-2");
+
+        result.Should().BeOfType<LockRoundTripSeatsOutcome.Success>();
+        var ok = (LockRoundTripSeatsOutcome.Success)result;
+        ok.Outbound.TripId.Should().Be(outboundTripId);
+        ok.Return.LockedSeats.Should().BeEquivalentTo(["B01"]);
+    }
+
+    [Fact]
+    public async Task LockRoundTripSeatsAsync_Returns_SeatUnavailable_WithFields_On_409()
+    {
+        var body = JsonSerializer.Serialize(new
+        {
+            success = false,
+            statusCode = 409,
+            error = new
+            {
+                code = "BOOKING_SEAT_UNAVAILABLE",
+                message = "Seat unavailable.",
+                fields = new[]
+                {
+                    new { field = "seatNumbers", message = "A01" },
+                    new { field = "seatNumbers", message = "B01" },
+                },
+            },
+        }, JsonOptions);
+        var client = BuildClient(HttpStatusCode.Conflict, body);
+
+        var result = await client.LockRoundTripSeatsAsync(
+            Guid.NewGuid(), ["A01"], Guid.NewGuid(), ["B01"], UserId, "round-idem-3");
+
+        result.Should().BeOfType<LockRoundTripSeatsOutcome.SeatUnavailable>();
+        ((LockRoundTripSeatsOutcome.SeatUnavailable)result).UnavailableSeats.Should().BeEquivalentTo(["A01", "B01"]);
+    }
+
+    [Fact]
+    public async Task LockRoundTripSeatsAsync_Returns_TripNotBookable_On_409_BOOKING_TRIP_NOT_BOOKABLE()
+    {
+        var client = BuildClient(HttpStatusCode.Conflict, ErrorBody("BOOKING_TRIP_NOT_BOOKABLE", "Trip is boarding."));
+
+        var result = await client.LockRoundTripSeatsAsync(
+            Guid.NewGuid(), ["A01"], Guid.NewGuid(), ["B01"], UserId, "round-idem-4");
+
+        result.Should().BeOfType<LockRoundTripSeatsOutcome.TripNotBookable>();
+    }
+
+    [Fact]
+    public async Task LockRoundTripSeatsAsync_Returns_TripNotFound_On_404()
+    {
+        var client = BuildClient(HttpStatusCode.NotFound, ErrorBody("TRIP_NOT_FOUND", "Trip was not found."));
+
+        var result = await client.LockRoundTripSeatsAsync(
+            Guid.NewGuid(), ["A01"], Guid.NewGuid(), ["B01"], UserId, "round-idem-5");
+
+        result.Should().BeOfType<LockRoundTripSeatsOutcome.TripNotFound>();
+    }
+
+    // -----------------------------------------------------------------------
     // BookSeatsAsync
     // -----------------------------------------------------------------------
 
@@ -204,14 +307,40 @@ public class TripServiceClientTests
     // -----------------------------------------------------------------------
 
     private static TripServiceClient BuildClient(HttpStatusCode status, string body)
+        => BuildClient(new FakeMessageHandler(status, body));
+
+    private static TripServiceClient BuildClient(FakeMessageHandler handler)
     {
-        var handler = new FakeMessageHandler(status, body);
         var httpClient = new HttpClient(handler)
         {
             BaseAddress = new Uri("http://trip-service"),
         };
         return new TripServiceClient(httpClient, NullLogger<TripServiceClient>.Instance);
     }
+
+    private static string RoundTripSuccessBody(Guid outboundTripId, Guid returnTripId)
+        => JsonSerializer.Serialize(new
+        {
+            success = true,
+            statusCode = 200,
+            data = new
+            {
+                outbound = new
+                {
+                    tripId = outboundTripId,
+                    seatLockToken = LockToken,
+                    lockedSeats = new[] { "A01" },
+                    expiresAt = DateTimeOffset.UtcNow.AddMinutes(10),
+                },
+                @return = new
+                {
+                    tripId = returnTripId,
+                    seatLockToken = Guid.Parse("66666666-6666-6666-6666-666666666666"),
+                    lockedSeats = new[] { "B01" },
+                    expiresAt = DateTimeOffset.UtcNow.AddMinutes(10),
+                },
+            },
+        }, JsonOptions);
 
     private static string BuildTripSnapshotJson() => JsonSerializer.Serialize(new
     {
@@ -252,10 +381,16 @@ public class TripServiceClientTests
             _body = body;
         }
 
+        public HttpRequestMessage? LastRequest { get; private set; }
+
+        public string? LastBody { get; private set; }
+
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
+            LastRequest = request;
+            LastBody = request.Content?.ReadAsStringAsync(cancellationToken).GetAwaiter().GetResult();
             var response = new HttpResponseMessage(_status)
             {
                 Content = new StringContent(_body, Encoding.UTF8, "application/json"),

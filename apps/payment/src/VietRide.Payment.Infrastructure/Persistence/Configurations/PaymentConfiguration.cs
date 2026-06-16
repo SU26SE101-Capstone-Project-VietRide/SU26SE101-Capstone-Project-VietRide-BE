@@ -1,7 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using VietRide.Payment.Domain.Entities;
-using VietRide.Payment.Domain.Enums;
 using VietRide.Shared.Kernel.ValueObjects;
 using PaymentEntity = VietRide.Payment.Domain.Entities.Payment;
 
