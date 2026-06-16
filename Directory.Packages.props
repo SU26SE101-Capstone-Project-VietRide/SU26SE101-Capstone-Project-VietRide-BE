@@ -37,6 +37,10 @@
     <!-- Database -->
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.11" />
 
+    <!-- Background jobs -->
+    <PackageVersion Include="Hangfire.AspNetCore" Version="1.8.23" />
+    <PackageVersion Include="Hangfire.PostgreSql" Version="1.8.6" />
+
     <!-- Messaging -->
     <PackageVersion Include="RabbitMQ.Client" Version="6.8.1" />
 

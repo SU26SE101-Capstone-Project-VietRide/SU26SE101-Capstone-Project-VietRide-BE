@@ -176,6 +176,37 @@ describe('buildRouteTable', () => {
     expect(route?.requiredRoles).toEqual(['OPERATOR_ADMIN']);
   });
 
+  it('routes trip search through the mixed public subpath without a duplicate prefix', () => {
+    const route = matchRoute(routes, '/v1/trips/search');
+
+    expect(route?.prefix).toBe('/v1/trips');
+    expect(route?.target).toBe(env.TRIP_BASE_URL);
+    expect(route?.authRequired).toBe('mixed');
+    expect(route?.publicSubpaths).toEqual([{ method: 'GET', path: '/v1/trips/search' }]);
+    expect(routes.find((r) => r.prefix === '/v1/trips/search')).toBeUndefined();
+  });
+
+  it('keeps trip detail and seat-map protected by the mixed trips route', () => {
+    const cases = [
+      '/v1/trips/11111111-1111-1111-1111-111111111111',
+      '/v1/trips/11111111-1111-1111-1111-111111111111/seat-map',
+    ] as const;
+
+    cases.forEach((path) => {
+      const route = matchRoute(routes, path);
+
+      expect(route?.prefix).toBe('/v1/trips');
+      expect(route?.target).toBe(env.TRIP_BASE_URL);
+      expect(route?.authRequired).toBe('mixed');
+      expect(route?.publicSubpaths).toEqual([{ method: 'GET', path: '/v1/trips/search' }]);
+    });
+  });
+
+  it('does not expose internal trip endpoints through Gateway', () => {
+    expect(matchRoute(routes, '/internal/v1/trips/search')).toBeUndefined();
+    expect(routes.some((r) => r.prefix.startsWith('/internal'))).toBe(false);
+  });
+
   it('routes Day 7 station and operator stop families to Trip with operator role union', () => {
     const cases = [
       ['/v1/stations/search?q=Mien%20Tay', '/v1/stations'],

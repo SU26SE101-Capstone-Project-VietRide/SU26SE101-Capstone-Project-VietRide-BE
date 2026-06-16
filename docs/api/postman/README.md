@@ -77,6 +77,31 @@ The Day-9 helper supplies `operatorAdminAccessToken`, `operatorUserAccessToken`,
 happy path and validation errors, tenant-hidden Vehicle reads, and DriverSchedule conflict handling.
 Never commit real token values.
 
+Day-11 trip search/detail/seat-map audit coverage uses a deterministic local harness. It seeds
+approved Identity users plus prerequisite Trip config data only (Saigon → Can Tho stations,
+operator stations, route, stop/fare template, vehicle seats A01/A02, and an inactive Monday
+DriverSchedule), mints short-lived JWTs in-process, runs only the Day-11 activation/search/detail/
+seat-map folder through the Gateway (`http://localhost:3000`), then verifies the activation-
+generated Trip DB side effects after Newman:
+
+```bash
+node scripts/run-day11-newman-local.js
+# or
+npm run postman:day11:local
+```
+
+The Day-11 helper supplies `operatorAdminAccessToken`, `passengerAccessToken`,
+`day11DriverScheduleId`, `day11OriginStationId`, `day11DestinationStationId`, and
+`day11MissingStationId`, plus a runtime `day11DepartureDate` aligned to the next local ICT service
+day. The folder stays Gateway-only: it activates the seeded DriverSchedule,
+performs public trip search plus an empty-result adversarial search, and reads trip detail/seat-map
+as a passenger. After Newman, the harness polls for exactly one activation-generated scheduled/
+boarding Trip with generated A01/A02 seats, trip stops, and stop fares, then calls Trip service
+internal endpoints directly (`http://localhost:5002` by default) with `X-Internal-Auth` to verify
+lock/release/book/unavailable seat semantics. The harness prints `Day-11 generation evidence:` and
+`Day-11 internal seam evidence:` lines for checklist handoff; JWTs and lock tokens are not printed
+in full. Never commit real token values.
+
 If you run the Day-8 folder manually without the helper, provide equivalent local values:
 
 - `operatorAdminAccessToken` — a valid `OPERATOR_ADMIN` JWT for an `APPROVED`, active operator.

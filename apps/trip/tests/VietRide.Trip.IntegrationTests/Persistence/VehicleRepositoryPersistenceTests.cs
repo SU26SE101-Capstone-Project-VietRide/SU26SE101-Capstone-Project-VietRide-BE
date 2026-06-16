@@ -119,7 +119,7 @@ public sealed class VehicleRepositoryPersistenceTests
     private static TripDbContext CreateDbContext(string databaseName)
     {
         var dataSourceBuilder = new NpgsqlDataSourceBuilder(CreateConnectionString(databaseName));
-        dataSourceBuilder.EnableUnmappedTypes();
+        TripDbContext.ConfigurePostgresEnums(dataSourceBuilder);
         var options = new DbContextOptionsBuilder<TripDbContext>()
             .UseNpgsql(dataSourceBuilder.Build())
             .Options;
@@ -129,7 +129,7 @@ public sealed class VehicleRepositoryPersistenceTests
 
     private static string CreateConnectionString(string databaseName)
     {
-        const string defaultConnectionString = "Host=localhost;Port=5432;Database={databaseName};Username=postgres;Password=postgres";
+        const string defaultConnectionString = "Host=localhost;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
         var connectionString = Environment.GetEnvironmentVariable("VIETRIDE_TRIP_TEST_CONNECTION_STRING");
         if (string.IsNullOrWhiteSpace(connectionString))
             connectionString = defaultConnectionString;

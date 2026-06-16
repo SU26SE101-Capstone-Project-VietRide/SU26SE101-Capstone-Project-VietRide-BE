@@ -53,7 +53,6 @@ internal sealed class VehicleConfiguration : IEntityTypeConfiguration<Vehicle>
         builder.Property(vehicle => vehicle.Status)
             .HasColumnName("status")
             .HasColumnType("vehicle_status")
-            .HasConversion<string>()
             .HasDefaultValueSql("'ACTIVE'::vehicle_status");
 
         builder.Property(vehicle => vehicle.IsActive)
