@@ -109,5 +109,11 @@ internal sealed class TripConfiguration : IEntityTypeConfiguration<Domain.Entiti
             .WithMany()
             .HasForeignKey(trip => trip.DriverScheduleId)
             .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasMany(trip => trip.Seats)
+            .WithOne()
+            .HasForeignKey(seat => seat.TripId)
+            .OnDelete(DeleteBehavior.Cascade);
+        builder.Navigation(trip => trip.Seats).UsePropertyAccessMode(PropertyAccessMode.Field);
     }
 }

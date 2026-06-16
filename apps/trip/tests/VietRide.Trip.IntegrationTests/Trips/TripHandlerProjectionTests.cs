@@ -221,6 +221,9 @@ public sealed class TripHandlerProjectionTests
     {
         public InMemoryTripRepository(List<DomainTrip> trips)
             : base(trips, trip => trip.Id) { }
+
+        public Task<DomainTrip?> GetWithSeatsAsync(Guid tripId, CancellationToken cancellationToken) =>
+            GetByIdAsync(tripId, cancellationToken);
     }
 
     private sealed class InMemoryRouteRepository : InMemoryRepository<Route, Guid>, IRouteRepository

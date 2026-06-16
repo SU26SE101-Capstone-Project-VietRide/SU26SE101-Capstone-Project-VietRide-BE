@@ -95,7 +95,7 @@ public sealed class ApiResponseExceptionFilter : IExceptionFilter
                 => (404, "RESOURCE_NOT_FOUND", n.Message, null),
 
             ConflictException c
-                => (409, c.ErrorCode, c.Message, null),
+                => (409, c.ErrorCode, c.Message, MapValidationErrors(c.Errors)),
 
             CodedConflictException c
                 => (409, c.ErrorCode, c.Message, MapValidationErrors(c.Errors)),
@@ -109,7 +109,7 @@ public sealed class ApiResponseExceptionFilter : IExceptionFilter
             TooManyRequestsException t
                 => (429, t.ErrorCode, t.Message, null),
 
-            DomainException { ErrorCode: "SUBSCRIPTION_EXPIRED" } d
+            DomainException { ErrorCode: "SUBSCRIPTION_EXPIRED" or "PAYMENT_INSUFFICIENT_WALLET" } d
                 => (402, d.ErrorCode, d.Message, null),
 
             DomainException d

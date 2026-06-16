@@ -4576,7 +4576,7 @@ Role:              PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_AD
 **Reliability:**
 - **Outbox:** mỗi service có bảng `OutboxEvent {eventType, payload JSONB, status PENDING|PUBLISHING|PUBLISHED|FAILED, retryCount, lastError, createdAt, publishedAt}`. .NET dùng `BackgroundService` poll mỗi 5s. NestJS dùng BullMQ scheduled job poll mỗi 5s. Notification Service không có Outbox (chỉ consume).
 - **Compensation:** Payment fail → HTTP release seat về Trip-Route-Vehicle. VNPay timeout 15 phút → Hangfire release seat + EXPIRED.
-- **Idempotency:** `Idempotency-Key` header (UUID) cho 13 endpoints mutation quan trọng. Redis `<service>:idem:{key}` TTL 24h.
+- **Idempotency:** `Idempotency-Key` header (UUID) cho các mutation endpoints quan trọng. Redis `<service>:idem:{key}` TTL 24h.
 - **Hangfire scope (.NET) — chỉ dùng cho business scheduled jobs** (không dùng cho Outbox polling):
 
 | Service | Job |

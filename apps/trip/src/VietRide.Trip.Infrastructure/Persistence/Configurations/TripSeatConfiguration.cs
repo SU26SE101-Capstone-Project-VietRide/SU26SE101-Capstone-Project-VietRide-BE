@@ -41,9 +41,5 @@ internal sealed class TripSeatConfiguration : IEntityTypeConfiguration<TripSeat>
             .HasDatabaseName("uq_trip_seats_trip_seat");
         builder.HasIndex(seat => new { seat.TripId, seat.Status }).HasDatabaseName("idx_trip_seats_trip_status");
 
-        builder.HasOne<Domain.Entities.Trip>()
-            .WithMany()
-            .HasForeignKey(seat => seat.TripId)
-            .OnDelete(DeleteBehavior.Cascade);
     }
 }

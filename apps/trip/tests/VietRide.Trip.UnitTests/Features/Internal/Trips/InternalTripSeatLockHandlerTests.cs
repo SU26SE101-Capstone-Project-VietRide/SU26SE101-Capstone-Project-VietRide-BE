@@ -560,6 +560,9 @@ public sealed class InternalTripSeatLockHandlerTests
     private sealed class StubTripRepository : StubRepository<DomainTrip, Guid>, ITripRepository
     {
         public StubTripRepository(List<DomainTrip> items) : base(items, item => item.Id) { }
+
+        public Task<DomainTrip?> GetWithSeatsAsync(Guid tripId, CancellationToken cancellationToken) =>
+            GetByIdAsync(tripId, cancellationToken);
     }
 
     private sealed class StubTripSeatRepository : StubRepository<TripSeat, Guid>, ITripSeatRepository

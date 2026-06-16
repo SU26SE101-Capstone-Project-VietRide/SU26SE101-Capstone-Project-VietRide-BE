@@ -28,4 +28,9 @@ internal sealed class TripRepository : ITripRepository
     public IQueryable<Domain.Entities.Trip> Query() => _dbContext.Trips;
 
     public IQueryable<Domain.Entities.Trip> QueryNoTracking() => _dbContext.Trips.AsNoTracking();
+
+    public Task<Domain.Entities.Trip?> GetWithSeatsAsync(Guid tripId, CancellationToken cancellationToken) =>
+        _dbContext.Trips
+            .Include(trip => trip.Seats)
+            .FirstOrDefaultAsync(trip => trip.Id == tripId, cancellationToken);
 }

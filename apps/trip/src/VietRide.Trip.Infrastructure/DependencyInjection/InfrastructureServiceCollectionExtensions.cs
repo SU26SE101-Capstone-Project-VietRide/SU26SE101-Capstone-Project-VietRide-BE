@@ -8,10 +8,12 @@ using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Jobs;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Abstractions.SeatLock;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Infrastructure.ExternalClients;
 using VietRide.Trip.Infrastructure.Jobs;
 using VietRide.Trip.Infrastructure.Persistence.Repositories;
 using VietRide.Trip.Infrastructure.SeatLock;
+using VietRide.Trip.Infrastructure.SeatLocks;
 
 namespace VietRide.Trip.Infrastructure.DependencyInjection;
 
@@ -38,6 +40,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IVehicleRepository, VehicleRepository>();
         services.AddScoped<IDriverScheduleRepository, DriverScheduleRepository>();
         services.AddScoped<ITripRepository, TripRepository>();
+        services.AddScoped<IRoundTripSeatLockStore, RedisRoundTripSeatLockStore>();
         services.AddScoped<ITripSeatRepository, TripSeatRepository>();
         services.AddScoped<ITripStopRepository, TripStopRepository>();
         services.AddScoped<ITripStopFareRepository, TripStopFareRepository>();
@@ -102,4 +105,5 @@ public static class InfrastructureServiceCollectionExtensions
 
         return baseUrl;
     }
+
 }

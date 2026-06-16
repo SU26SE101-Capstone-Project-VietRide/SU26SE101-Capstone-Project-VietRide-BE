@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore.Design;
 using Npgsql.NameTranslation;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Persistence.Outbox;
+using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Infrastructure.Design;
 

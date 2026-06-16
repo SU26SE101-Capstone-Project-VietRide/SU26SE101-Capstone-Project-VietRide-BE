@@ -161,6 +161,7 @@ playground/
 # ── Agent harness config (Local) ─────────────────────────────────────────────
 # Per-developer agent instructions/settings. Each member may use different
 # Claude/OpenCode/Codex guidance, so these stay local and are not shared.
+.slim/deepwork/
 .claude/
 CLAUDE.md
 AGENTS.md

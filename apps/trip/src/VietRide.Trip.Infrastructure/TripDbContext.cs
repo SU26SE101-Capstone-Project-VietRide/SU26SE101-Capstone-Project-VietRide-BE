@@ -85,6 +85,8 @@ public sealed class TripDbContext : VietRideDbContextBase
         RemoveConventionIndex<RouteStopFareTemplate>(modelBuilder, nameof(RouteStopFareTemplate.StopId));
         RemoveConventionIndex<AlternativeRoute>(modelBuilder, nameof(AlternativeRoute.DestinationStationId));
         RemoveConventionIndex<AlternativeRouteStop>(modelBuilder, nameof(AlternativeRouteStop.StopId));
+        RemoveConventionIndex<Domain.Entities.Trip>(modelBuilder, nameof(Domain.Entities.Trip.RouteId));
+        RemoveConventionIndex<Domain.Entities.Trip>(modelBuilder, nameof(Domain.Entities.Trip.VehicleId));
     }
 
     private static void RemoveConventionIndex<TEntity>(ModelBuilder modelBuilder, string propertyName)

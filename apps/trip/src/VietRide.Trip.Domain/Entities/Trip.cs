@@ -3,28 +3,13 @@ using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Trip.Domain.Entities;
 
-public enum TripStatus
-{
-    SCHEDULED,
-    BOARDING,
-    IN_PROGRESS,
-    COMPLETED,
-    CANCELLED,
-    DISRUPTED,
-}
-
-public enum TripSource
-{
-    MANUAL,
-    AUTO_FROM_SCHEDULE,
-    VEHICLE_SUBSTITUTION,
-}
-
 /// <summary>
 /// Scheduled execution of a route with vehicle/crew snapshots.
 /// </summary>
 public sealed class Trip : BaseEntity<Guid>
 {
+    private readonly List<TripSeat> seats = [];
+
     public Guid OperatorId { get; private set; }
     public Guid RouteId { get; private set; }
     public Guid VehicleId { get; private set; }
@@ -49,6 +34,7 @@ public sealed class Trip : BaseEntity<Guid>
     public decimal EstimatedPassengerLuggageKg { get; private set; }
     public decimal ReservedParcelWeightKg { get; private set; }
     public decimal TotalLoadedWeightKg { get; private set; }
+    public IReadOnlyCollection<TripSeat> Seats => seats.AsReadOnly();
 
     private Trip() { }
 
@@ -160,6 +146,54 @@ public sealed class Trip : BaseEntity<Guid>
         TotalLoadedWeightKg = totalLoadedWeightKg;
     }
 
+    public bool IsBookable() => Status == TripStatus.SCHEDULED;
+
+    public IReadOnlyList<string> FindUnavailableSeats(IEnumerable<string> seatNumbers)
+    {
+        var requested = seatNumbers
+            .Select(NormalizeSeatNumber)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return requested
+            .Where(seatNumber => seats.FirstOrDefault(seat => seat.SeatNumber == seatNumber)?.Status != TripSeatStatus.AVAILABLE)
+            .ToArray();
+    }
+
+    public void HoldSeats(IEnumerable<string> seatNumbers)
+    {
+        var requested = seatNumbers
+            .Select(NormalizeSeatNumber)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var unavailable = FindUnavailableSeats(requested);
+        if (unavailable.Count > 0)
+        {
+            throw new InvalidOperationException("One or more seats are unavailable.");
+        }
+
+        foreach (var seatNumber in requested)
+        {
+            seats.First(seat => seat.SeatNumber == seatNumber).MarkHeld();
+        }
+    }
+
+    public void AddSeat(TripSeat seat)
+    {
+        ArgumentNullException.ThrowIfNull(seat);
+        if (seat.TripId != Id)
+        {
+            throw new ArgumentException("Seat belongs to a different trip.", nameof(seat));
+        }
+
+        if (seats.Any(existing => existing.SeatNumber == seat.SeatNumber))
+        {
+            throw new InvalidOperationException("Trip already has this seat number.");
+        }
+
+        seats.Add(seat);
+    }
+
     private void EnsureStatus(TripStatus expected, string operation)
     {
         if (Status != expected)
@@ -191,6 +225,16 @@ public sealed class Trip : BaseEntity<Guid>
     {
         var normalized = value?.Trim();
         return string.IsNullOrEmpty(normalized) ? null : normalized;
+    }
+
+    private static string NormalizeSeatNumber(string seatNumber)
+    {
+        if (string.IsNullOrWhiteSpace(seatNumber))
+        {
+            throw new ArgumentException("Seat number is required.", nameof(seatNumber));
+        }
+
+        return seatNumber.Trim().ToUpperInvariant();
     }
 
     private static void ValidateOptionalNonNegative(decimal? value, string parameterName)

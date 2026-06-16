@@ -781,6 +781,12 @@ Response `201`:
 }
 ```
 
+Rules:
+- `paymentMethod=WALLET` is an all-or-nothing checkout across both legs. On success, each leg still has its own Payment record with `referenceType=BOOKING`; the client must never observe a retained first-leg debit if the second leg fails.
+- `paymentMethod=VNPAY` may use a combined checkout with `referenceType=BOOKING_GROUP` and one redirect for `grandTotal`.
+- `BOOKING_GROUP` is VNPay-only for this endpoint; WALLET success remains two per-booking payments.
+- `paymentRedirectUrl` is `null` for WALLET and populated only when VNPay returns a redirect.
+
 ### GET `/v1/bookings/history`
 
 Auth: `PASSENGER`.
@@ -1167,6 +1173,61 @@ Errors:
 - `409 BOOKING_SEAT_UNAVAILABLE` — ≥1 seat is `HELD` / `BOOKED` / `UNAVAILABLE`;
   `error.fields` lists the offending `seatNumbers`. No seat is held (all-or-nothing).
 - `409 IDEMPOTENCY_REQUEST_PENDING` — same `Idempotency-Key` is still being processed.
+
+### POST `/internal/v1/trips/round-trip/lock-seats`
+
+Auth: Internal JWT. Idempotency: required (replay with the same `Idempotency-Key` returns the
+same outbound/return lock tokens). **Round-trip atomic** — Trip locks both outbound and return
+seat sets in one Redis Lua script. If either leg cannot be locked, no seat is held on either leg
+(technical_context_v7 lines 1755-1757).
+
+Request:
+```json
+{
+  "outbound": {
+    "tripId": "uuid",
+    "seatNumbers": ["A01", "A02"]
+  },
+  "return": {
+    "tripId": "uuid",
+    "seatNumbers": ["A01", "A02"]
+  },
+  "holdOwnerId": "uuid",
+  "ttlSeconds": 600
+}
+```
+- `holdOwnerId` = passenger user id (lock owner). `ttlSeconds` optional; defaults to
+  `SEAT_LOCK_TTL_MINUTES` × 60 (= 600).
+- `outbound.tripId` and `return.tripId` must be different trip ids.
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "outbound": {
+      "tripId": "uuid",
+      "seatLockToken": "uuid",
+      "lockedSeats": ["A01", "A02"],
+      "expiresAt": "2026-05-18T08:10:00+07:00"
+    },
+    "return": {
+      "tripId": "uuid",
+      "seatLockToken": "uuid",
+      "lockedSeats": ["A01", "A02"],
+      "expiresAt": "2026-05-18T08:10:00+07:00"
+    }
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Errors:
+- `404 TRIP_NOT_FOUND` — outbound or return trip does not exist.
+- `409 BOOKING_TRIP_NOT_BOOKABLE` — outbound or return trip status ≠ `SCHEDULED`.
+- `409 BOOKING_SEAT_UNAVAILABLE` — ≥1 requested outbound/return seat is `HELD` / `BOOKED` /
+  `UNAVAILABLE`; `error.fields` lists the offending `seatNumbers`. No seat is held on either leg.
 
 ### POST `/internal/v1/trips/{tripId}/release-seats`
 
@@ -1617,6 +1678,39 @@ Response `200`:
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
+
+### POST `/internal/v1/payments/batch-charge`
+
+Auth: Internal JWT. Idempotency: required. Caller: Booking round-trip WALLET checkout.
+
+Request:
+```json
+{
+  "userId": "uuid",
+  "method": "WALLET",
+  "items": [
+    { "referenceType": "BOOKING", "referenceId": "uuid", "amount": 350000 },
+    { "referenceType": "BOOKING", "referenceId": "uuid", "amount": 350000 }
+  ]
+}
+```
+
+Response `200` (raw internal DTO):
+```json
+{
+  "payments": [
+    { "paymentId": "uuid", "referenceType": "BOOKING", "referenceId": "uuid", "status": "SUCCEEDED", "paymentRedirectUrl": null },
+    { "paymentId": "uuid", "referenceType": "BOOKING", "referenceId": "uuid", "status": "SUCCEEDED", "paymentRedirectUrl": null }
+  ]
+}
+```
+
+Rules:
+- Day-13 batch charge supports `method=WALLET` only and every item must use `referenceType=BOOKING`.
+- The operation is atomic in Payment service: if balance is insufficient, an item is invalid, or any payment insert/debit fails, no partial Payment rows and no retained wallet debit are committed.
+- On success, Payment service creates one `SUCCEEDED` Payment row per item (`payments.reference_type=BOOKING`, `payments.reference_id=<bookingId>`) and one WALLET debit ledger entry per item (`wallet_transactions.reference_type=BOOKING_PAYMENT`, `wallet_transactions.reference_id=<bookingId>`), all committed in one Payment DB transaction; total wallet balance decrease equals the sum of item amounts.
+- Batch idempotency is endpoint-level via `payment:idem:{key}` replay plus duplicate `(referenceType, referenceId)` guard; do not write the same header idempotency key into every `payments.idempotency_key` row because the unique index is per row.
+- `BOOKING_GROUP` is not accepted on this WALLET batch endpoint; it remains VNPay-only for round-trip combined redirects.
 
 ### POST `/internal/v1/wallet/refund`
 

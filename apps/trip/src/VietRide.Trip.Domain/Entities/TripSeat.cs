@@ -2,23 +2,6 @@ using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Trip.Domain.Entities;
 
-public enum TripSeatStatus
-{
-    AVAILABLE,
-    HELD,
-    BOOKED,
-    UNAVAILABLE,
-}
-
-public enum TripSeatType
-{
-    STANDARD,
-    SLEEPER_LOWER,
-    SLEEPER_UPPER,
-    VIP,
-    DRIVER_AREA,
-}
-
 /// <summary>
 /// Seat state snapshot for a generated trip.
 /// </summary>
@@ -32,19 +15,42 @@ public sealed class TripSeat : BaseEntity<Guid>
 
     private TripSeat() { }
 
-    public static TripSeat Create(Guid tripId, string seatNumber, TripSeatType seatType = TripSeatType.STANDARD)
+    public static TripSeat Create(
+        Guid tripId,
+        string seatNumber,
+        TripSeatType seatType = TripSeatType.STANDARD,
+        TripSeatStatus status = TripSeatStatus.AVAILABLE,
+        string? disabledReason = null)
     {
-        ValidateGuid(tripId, nameof(tripId));
-        var normalizedSeatNumber = ValidateSeatNumber(seatNumber);
+        if (tripId == Guid.Empty)
+        {
+            throw new ArgumentException("Trip id cannot be empty.", nameof(tripId));
+        }
+
+        if (string.IsNullOrWhiteSpace(seatNumber))
+        {
+            throw new ArgumentException("Seat number is required.", nameof(seatNumber));
+        }
 
         return new TripSeat
         {
             Id = Guid.NewGuid(),
             TripId = tripId,
-            SeatNumber = normalizedSeatNumber,
+            SeatNumber = seatNumber.Trim().ToUpperInvariant(),
             SeatType = seatType,
-            Status = TripSeatStatus.AVAILABLE,
+            Status = status,
+            DisabledReason = disabledReason,
         };
+    }
+
+    public void Hold()
+    {
+        if (Status != TripSeatStatus.AVAILABLE)
+        {
+            throw new InvalidOperationException("Only available seats can be held.");
+        }
+
+        Status = TripSeatStatus.HELD;
     }
 
     public void MarkHeld()

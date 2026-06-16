@@ -215,6 +215,21 @@ public sealed class ApiResponseExceptionFilterTests
     }
 
     [Fact]
+    public void PaymentInsufficientWalletDomainException_Maps_To_402()
+    {
+        var filter = CreateFilter();
+        var ctx = BuildContext(new StubDomainException("PAYMENT_INSUFFICIENT_WALLET", "Wallet balance is insufficient."));
+
+        filter.OnException(ctx);
+
+        var result = ctx.Result.Should().BeOfType<ObjectResult>().Subject;
+        result.StatusCode.Should().Be(402);
+        var envelope = result.Value.Should().BeOfType<ApiResponse>().Subject;
+        envelope.Error.Code.Should().Be("PAYMENT_INSUFFICIENT_WALLET");
+        envelope.StatusCode.Should().Be(402);
+    }
+
+    [Fact]
     public void UnknownException_Maps_To_500_INTERNAL_ERROR()
     {
         var filter = CreateFilter();

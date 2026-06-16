@@ -1,6 +1,6 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.11.4
+> **Phiên bản:** 1.12.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
 > **Cập nhật lần cuối:** 2026-06-15
 > **Capstone:** SU26SE101 — SU26
@@ -1162,7 +1162,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 |---|---|---|
 | `Authorization: Bearer <token>` | Mọi public protected endpoint | User Access Token (JWT RS256) |
 | `X-Internal-Auth: Bearer <token>` | Mọi internal endpoint | Internal JWT (HS256, 120s TTL) |
-| `Idempotency-Key: <uuid>` | 13 endpoints mutation quan trọng (xem 5.6) | UUID v4 |
+| `Idempotency-Key: <uuid>` | Các mutation endpoints quan trọng (xem 5.6) | UUID v4 |
 | `X-Request-Id: <uuid>` | Optional client-supplied, fallback Gateway generate | UUID v4 — propagated qua tất cả services + log |
 | `Accept-Language` | Optional | `vi`, `en` (v1 chỉ phục vụ message kèm tài liệu i18n nội bộ — error code SCREAMING_SNAKE_CASE độc lập ngôn ngữ) |
 | `Content-Type: application/json` | Request body có data | |
@@ -1241,7 +1241,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 
 ### 5.6 Idempotency
 
-13 endpoints yêu cầu `Idempotency-Key: <uuid>` header:
+Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 
 | # | Endpoint | Service |
 |---|---|---|
@@ -1253,6 +1253,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 | 5 | `POST /v1/parcels` | Parcel |
 | 6 | `POST /v1/parcels/{id}/confirm-delivery` (passenger confirm) | Parcel |
 | 7 | `POST /v1/payments/wallet-charge` | Payment |
+| 7b | `POST /internal/v1/payments/batch-charge` | Payment |
 | 8 | `POST /v1/payments/vnpay-init` | Payment |
 | 9 | `POST /v1/wallet/top-up/init` | Payment |
 | 10 | `POST /v1/admin/trip-settlements/{id}/settle` | Payment |
@@ -1681,6 +1682,7 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 |---|---|---|
 | `GET /internal/v1/trips/{tripId}` | Booking, Parcel, Tracking, Payment | Lookup trip snapshot |
 | `POST /internal/v1/trips/{tripId}/lock-seats` | Booking | Lock seats trong checkout (TTL 10 phút Redis) |
+| `POST /internal/v1/trips/round-trip/lock-seats` | Booking | Lock outbound + return seats atomically in one Trip-owned Redis Lua script; if either leg fails, no seat is held |
 | `POST /internal/v1/trips/{tripId}/release-seats` | Booking | Release seat khi payment fail/timeout |
 | `POST /internal/v1/trips/{tripId}/book-seats` | Booking | Convert HELD → BOOKED khi payment success (API contract canonical name; was `confirm-seats`) |
 | `GET /internal/v1/trips/{tripId}/passengers-pending` | Booking | Cho operator dashboard |
@@ -1701,6 +1703,7 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | Method + Path | Caller | Mục đích |
 |---|---|---|
 | `POST /internal/v1/payments/charge` | Booking, Parcel | Wallet payment (instant SUCCEEDED) trong cùng DB transaction |
+| `POST /internal/v1/payments/batch-charge` | Booking | WALLET batch charge for round-trip: per-item Payment `referenceType=BOOKING`, per-item wallet ledger `referenceType=BOOKING_PAYMENT`, all-or-nothing in one Payment DB transaction |
 | `POST /internal/v1/payments/vnpay-init` | Booking, Parcel | Tạo VNPay redirect URL |
 | `GET /internal/v1/wallets/{userId}/balance` | Booking (preview) | Check balance UI trước checkout |
 | `POST /internal/v1/refunds` | Booking, Parcel | Trigger refund (event-driven preferred — HTTP fallback) |
@@ -2683,6 +2686,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.12.0** | 2026-06-15 | BE lead (Vũ) | **MINOR** — Day-13 round-trip checkout seams: (1) add Trip-owned internal `POST /internal/v1/trips/round-trip/lock-seats` to §7.2 for Booking round-trip checkout. The seam is Internal-JWT only, Idempotency-Key required, and locks outbound + return seat sets atomically in one Redis Lua script using Trip seat keys `seat_lock:{tripId}:{seatNumber}`; if either leg fails, no seat is held. Reuses existing error codes `TRIP_NOT_FOUND`, `BOOKING_TRIP_NOT_BOOKABLE`, and `BOOKING_SEAT_UNAVAILABLE`; no new event key. (2) add Payment-owned internal WALLET batch charge seam `POST /internal/v1/payments/batch-charge`; WALLET round-trip remains two per-booking Payment records (`payments.reference_type=BOOKING`) and two per-booking wallet debit ledger entries (`wallet_transactions.reference_type=BOOKING_PAYMENT`) committed all-or-nothing in one transaction; `BOOKING_GROUP` stays VNPay-only. Syncs §5.6, §7.2, `VietRide_API_Contract_v1.md`, and technical_context_v7 lines 1755-1757; no DB schema change. |
 | **1.11.4** | 2026-06-15 | BE lead (Vũ) | **PATCH** — Day-11 audit closeout: register `IDEMPOTENCY_REQUEST_PENDING` (HTTP 409) in §5.9 for replay-safe seat-lock idempotency when the same key is still being processed. Also backfill the cumulative Postman/local harness Day-11 real-app E2E coverage separately (`postman:day11:local`); no new event keys and no DDL change. |
 | **1.11.3** | 2026-06-13 | BE lead (Vũ) | **PATCH** — Day-11 Task 11.4 PLAN-REVIEW TTL config drift fix: add `SEAT_LOCK_TTL_MINUTES=10` to the Trip-Route-Vehicle env registry as the Trip-owned source for `SeatLock:TtlMinutes` / lock-seats `ttlSeconds` default 600s, while keeping the Booking-side line explicitly marked as client/default-only and not the Trip-owned registry. Docs-only; no code/DDL change. |
 | **1.11.2** | 2026-06-13 | BE lead (Vũ) | **PATCH** — Day-11 Task 11.2-pre SOT/contract patch: document `PATCH /v1/operator/driver-schedules/{id}/activate` as an OPERATOR_ADMIN, no-body, no-Idempotency-Key, behavior-idempotent activation endpoint covered by the existing Gateway `/v1/operator/driver-schedules` prefix; activation-only scope excludes full DriverSchedule edit/cascade. Close the Day-9 carryover by changing DriverSchedule create/activation validation from deferred to Identity logical-FK role/operator validation: `driverUserId` must be `DRIVER` under caller operator and nullable `assistantUserId` must be `ASSISTANT` under caller operator, with mismatches mapped to `422 VALIDATION_ERROR`. Clarify internal `GET /internal/v1/users/{userId}` raw success DTO `{ id, role, operatorId, status }`, Internal-JWT-only, no Gateway exposure. No new error codes, no event keys, no DDL/code change. |
@@ -2767,7 +2771,7 @@ PR fail nếu bất kỳ step nào fail.
 2. Check `Docs/API/VietRide_API_Contract_v1.md` — nếu chưa có, thêm vào đó trước.
 3. Implement Controller (thin) + Command/Query + Handler + Validator + DTO.
 4. Map errors qua canonical error code (Section 5.9).
-5. Idempotency-Key nếu là 1 trong 13 endpoint mutation (Section 5.6).
+5. Idempotency-Key nếu endpoint nằm trong danh sách mutation ở Section 5.6.
 6. Unit + integration test.
 7. Update changelog API contract.
 

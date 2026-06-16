@@ -532,6 +532,9 @@ public sealed class TripGenerationServiceTests
             : base(items, trip => trip.Id)
         {
         }
+
+        public Task<TripEntity?> GetWithSeatsAsync(Guid tripId, CancellationToken cancellationToken)
+            => GetByIdAsync(tripId, cancellationToken);
     }
 
     private sealed class InMemoryTripSeatRepository : InMemoryRepository<TripSeat, Guid>, ITripSeatRepository
