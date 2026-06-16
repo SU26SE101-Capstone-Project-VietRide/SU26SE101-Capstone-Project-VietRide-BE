@@ -58,6 +58,8 @@ public sealed class ConfirmTopUpIpnIntegrationTests
             && tx.BalanceAfter == Money.FromRaw(125_000)
             && tx.ReferenceType == WalletTransactionRef.TOP_UP);
         factory.Outbox.Events.Should().ContainSingle(evt => evt.EventType == "payment.wallet.credited");
+        factory.VnPay.ReservedTxnRefs.Should().HaveCount(2);
+        factory.VnPay.ReleasedTxnRefs.Should().BeEmpty();
     }
 
     private sealed class ConfirmTopUpWebApplicationFactory : WebApplicationFactory<Program>
@@ -107,6 +109,10 @@ public sealed class ConfirmTopUpIpnIntegrationTests
     {
         private readonly HashSet<string> _reserved = new(StringComparer.Ordinal);
 
+        public List<string> ReservedTxnRefs { get; } = [];
+
+        public List<string> ReleasedTxnRefs { get; } = [];
+
         public string CreateTopUpRedirectUrl(
             Guid userId,
             Money amount,
@@ -119,10 +125,14 @@ public sealed class ConfirmTopUpIpnIntegrationTests
             => parameters.TryGetValue("vnp_SecureHash", out var hash) && hash == "valid";
 
         public Task<bool> TryReserveIpnAsync(string vnPayTxnRef, CancellationToken cancellationToken)
-            => Task.FromResult(_reserved.Add(vnPayTxnRef));
+        {
+            ReservedTxnRefs.Add(vnPayTxnRef);
+            return Task.FromResult(_reserved.Add(vnPayTxnRef));
+        }
 
         public Task ReleaseIpnReservationAsync(string vnPayTxnRef, CancellationToken cancellationToken)
         {
+            ReleasedTxnRefs.Add(vnPayTxnRef);
             _reserved.Remove(vnPayTxnRef);
             return Task.CompletedTask;
         }
@@ -161,6 +171,12 @@ public sealed class ConfirmTopUpIpnIntegrationTests
 
         public Task<TopUpRequest?> FindByVnPayTxnRefAsync(string vnPayTxnRef, CancellationToken cancellationToken)
             => Task.FromResult(_topUps.FirstOrDefault(x => x.VnPayTxnRef == vnPayTxnRef));
+
+        public Task<TopUpRequest?> FindPendingByVnPayTxnRefForUpdateAsync(
+            string vnPayTxnRef,
+            CancellationToken cancellationToken)
+            => Task.FromResult(_topUps.FirstOrDefault(x =>
+                x.VnPayTxnRef == vnPayTxnRef && x.Status == TopUpRequestStatus.PENDING));
     }
 
     private sealed class FakeWalletRepository : IWalletRepository

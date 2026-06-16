@@ -59,35 +59,32 @@ public sealed class ConfirmTopUpCommandHandler : IRequestHandler<ConfirmTopUpCom
             return new ConfirmTopUpResult("01", "Order Not Found", 200);
         }
 
-        var topUpRequest = await _topUpRequests.FindByVnPayTxnRefAsync(vnPayTxnRef, cancellationToken);
-        if (topUpRequest is null)
+        var reservationAcquired = await _vnPayClient.TryReserveIpnAsync(vnPayTxnRef, cancellationToken);
+        if (!reservationAcquired)
         {
-            _logger.LogWarning("VNPay top-up IPN references unknown transaction {VnPayTxnRef}.", vnPayTxnRef);
-            return new ConfirmTopUpResult("01", "Order Not Found", 200);
-        }
-
-        if (topUpRequest.Status != TopUpRequestStatus.PENDING)
-        {
+            _logger.LogInformation("Skipping duplicate VNPay top-up IPN for transaction {VnPayTxnRef}.", vnPayTxnRef);
             return ConfirmSuccess();
         }
 
-        var reserved = await _vnPayClient.TryReserveIpnAsync(vnPayTxnRef, cancellationToken);
-        if (!reserved)
-        {
-            var currentTopUpRequest = await _topUpRequests.FindByVnPayTxnRefAsync(vnPayTxnRef, cancellationToken);
-            if (currentTopUpRequest is not null && currentTopUpRequest.Status != TopUpRequestStatus.PENDING)
-            {
-                return ConfirmSuccess();
-            }
-
-            _logger.LogWarning(
-                "VNPay top-up IPN {VnPayTxnRef} was deduped while the top-up request is still pending.",
-                vnPayTxnRef);
-            return ConfirmPending();
-        }
+        var shouldReleaseReservation = true;
 
         try
         {
+            var topUpRequest = await _topUpRequests.FindPendingByVnPayTxnRefForUpdateAsync(
+                vnPayTxnRef,
+                cancellationToken);
+            if (topUpRequest is null)
+            {
+                var currentTopUpRequest = await _topUpRequests.FindByVnPayTxnRefAsync(vnPayTxnRef, cancellationToken);
+                if (currentTopUpRequest is null)
+                {
+                    _logger.LogWarning("VNPay top-up IPN references unknown transaction {VnPayTxnRef}.", vnPayTxnRef);
+                    return new ConfirmTopUpResult("01", "Order Not Found", 200);
+                }
+
+                return ConfirmSuccess();
+            }
+
             var responseCode = request.Parameters.TryGetValue(VnPayResponseCodeKey, out var value)
                 ? value
                 : null;
@@ -148,27 +145,15 @@ public sealed class ConfirmTopUpCommandHandler : IRequestHandler<ConfirmTopUpCom
                 topUpRequest.UserId,
                 topUpRequest.Amount.Amount);
 
+            shouldReleaseReservation = false;
             return ConfirmSuccess();
         }
-        catch (Exception ex)
+        finally
         {
-            try
+            if (shouldReleaseReservation)
             {
-                await _vnPayClient.ReleaseIpnReservationAsync(vnPayTxnRef, CancellationToken.None);
+                await _vnPayClient.ReleaseIpnReservationAsync(vnPayTxnRef, cancellationToken);
             }
-            catch (Exception releaseEx)
-            {
-                _logger.LogWarning(
-                    releaseEx,
-                    "Failed to release VNPay IPN reservation for {VnPayTxnRef} after processing error.",
-                    vnPayTxnRef);
-            }
-
-            _logger.LogWarning(
-                ex,
-                "Failed to process VNPay top-up IPN {VnPayTxnRef} after reservation; reservation released so it can retry.",
-                vnPayTxnRef);
-            throw;
         }
     }
 
@@ -195,7 +180,4 @@ public sealed class ConfirmTopUpCommandHandler : IRequestHandler<ConfirmTopUpCom
 
     private static ConfirmTopUpResult ConfirmFailure()
         => new("99", "Confirm Failed", 200);
-
-    private static ConfirmTopUpResult ConfirmPending()
-        => new("99", "Order Processing", 200);
 }

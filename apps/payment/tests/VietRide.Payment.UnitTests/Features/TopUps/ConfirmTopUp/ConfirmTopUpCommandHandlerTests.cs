@@ -60,6 +60,47 @@ public sealed class ConfirmTopUpCommandHandlerTests
         wallets.CreditCount.Should().Be(1);
         wallets.Wallet!.Balance.Should().Be(Money.FromRaw(125_000));
         outbox.Events.Should().ContainSingle();
+        vnPay.ReservedTxnRefs.Should().HaveCount(2);
+        vnPay.ReleasedTxnRefs.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Handle_WhenIpnIsDuplicateReservation_ReturnsSuccessWithoutMutatingState()
+    {
+        var userId = Guid.NewGuid();
+        var topUp = TopUpRequest.Create(userId, Money.FromRaw(100_000), "txn-1");
+        var wallets = new FakeWalletRepository(userId, Money.FromRaw(25_000));
+        var outbox = new FakeIntegrationEventOutbox();
+        var vnPay = new FakeVnPayClient(isSignatureValid: true, reservedTxnRefs: ["txn-1"]);
+        var handler = CreateHandler(vnPay, new FakeTopUpRequestRepository(topUp), wallets, outbox);
+
+        var result = await handler.Handle(CreateCommand("txn-1", "00"), CancellationToken.None);
+
+        result.StatusCode.Should().Be(200);
+        result.RspCode.Should().Be("00");
+        wallets.CreditCount.Should().Be(0);
+        outbox.Events.Should().BeEmpty();
+        topUp.Status.Should().Be(TopUpRequestStatus.PENDING);
+        vnPay.ReleasedTxnRefs.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Handle_WhenWalletCreditFails_ReleasesReservationAndPropagatesError()
+    {
+        var userId = Guid.NewGuid();
+        var topUp = TopUpRequest.Create(userId, Money.FromRaw(100_000), "txn-1");
+        var wallets = new ThrowingWalletRepository(new InvalidOperationException("wallet credit failed"));
+        var outbox = new FakeIntegrationEventOutbox();
+        var vnPay = new FakeVnPayClient(isSignatureValid: true);
+        var handler = CreateHandler(vnPay, new FakeTopUpRequestRepository(topUp), wallets, outbox);
+
+        var action = async () => await handler.Handle(CreateCommand("txn-1", "00"), CancellationToken.None);
+
+        await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("wallet credit failed");
+        vnPay.ReservedTxnRefs.Should().ContainSingle(txnRef => txnRef == "txn-1");
+        vnPay.ReleasedTxnRefs.Should().ContainSingle(txnRef => txnRef == "txn-1");
+        outbox.Events.Should().BeEmpty();
+        topUp.Status.Should().Be(TopUpRequestStatus.SUCCEEDED);
     }
 
     [Fact]
@@ -223,6 +264,10 @@ public sealed class ConfirmTopUpCommandHandlerTests
             }
         }
 
+        public List<string> ReservedTxnRefs { get; } = [];
+
+        public List<string> ReleasedTxnRefs { get; } = [];
+
         public string CreateTopUpRedirectUrl(
             Guid userId,
             Money amount,
@@ -235,10 +280,14 @@ public sealed class ConfirmTopUpCommandHandlerTests
             => _isSignatureValid;
 
         public Task<bool> TryReserveIpnAsync(string vnPayTxnRef, CancellationToken cancellationToken)
-            => Task.FromResult(_reserved.Add(vnPayTxnRef));
+        {
+            ReservedTxnRefs.Add(vnPayTxnRef);
+            return Task.FromResult(_reserved.Add(vnPayTxnRef));
+        }
 
         public Task ReleaseIpnReservationAsync(string vnPayTxnRef, CancellationToken cancellationToken)
         {
+            ReleasedTxnRefs.Add(vnPayTxnRef);
             _reserved.Remove(vnPayTxnRef);
             return Task.CompletedTask;
         }
@@ -277,6 +326,12 @@ public sealed class ConfirmTopUpCommandHandlerTests
 
         public Task<TopUpRequest?> FindByVnPayTxnRefAsync(string vnPayTxnRef, CancellationToken cancellationToken)
             => Task.FromResult(_topUps.FirstOrDefault(x => x.VnPayTxnRef == vnPayTxnRef));
+
+        public Task<TopUpRequest?> FindPendingByVnPayTxnRefForUpdateAsync(
+            string vnPayTxnRef,
+            CancellationToken cancellationToken)
+            => Task.FromResult(_topUps.FirstOrDefault(x =>
+                x.VnPayTxnRef == vnPayTxnRef && x.Status == TopUpRequestStatus.PENDING));
     }
 
     private sealed class FakeWalletRepository : IWalletRepository

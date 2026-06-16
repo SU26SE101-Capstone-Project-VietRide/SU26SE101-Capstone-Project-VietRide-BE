@@ -8,6 +8,11 @@ public interface ITopUpRequestRepository : IRepository<TopUpRequest, Guid>
 {
     Task<TopUpRequest?> FindByVnPayTxnRefAsync(string vnPayTxnRef, CancellationToken cancellationToken);
 
+    Task<TopUpRequest?> FindPendingByVnPayTxnRefForUpdateAsync(
+        string vnPayTxnRef,
+        CancellationToken cancellationToken)
+        => FindByVnPayTxnRefAsync(vnPayTxnRef, cancellationToken);
+
     Task<int> ExpirePendingOlderThanAsync(
         DateTimeOffset expiresBefore,
         DateTimeOffset expiredAt,

@@ -51,6 +51,56 @@ public sealed class RabbitMqConsumerBackgroundServiceTests
     }
 
     [Fact]
+    public async Task StartAsync_DeclaresDeadLetterTopologyAndQueueArguments()
+    {
+        var handler = Substitute.For<IIntegrationEventHandler<TestIntegrationEvent>>();
+        var connection = Substitute.For<IConnection>();
+        var channel = Substitute.For<IModel>();
+        connection.CreateModel().Returns(channel);
+        channel.IsOpen.Returns(true);
+        var connections = Substitute.For<IRabbitMqConnectionFactory>();
+        connections.GetOrCreate().Returns(connection);
+        var service = CreateService(handler, connections);
+
+        await service.StartAsync(CancellationToken.None);
+
+        channel.Received(1).ExchangeDeclare(
+            "vietride.events",
+            ExchangeType.Topic,
+            true,
+            false,
+            null);
+        channel.Received(1).ExchangeDeclare(
+            "payment.wallet-bootstrap.dlx",
+            ExchangeType.Direct,
+            true,
+            false,
+            null);
+        channel.Received(1).QueueDeclare(
+            "payment.wallet-bootstrap.dlq",
+            true,
+            false,
+            false,
+            null);
+        channel.Received(1).QueueBind(
+            "payment.wallet-bootstrap.dlq",
+            "payment.wallet-bootstrap.dlx",
+            "payment.wallet-bootstrap.dead",
+            null);
+        channel.Received(1).QueueDeclare(
+            "payment.wallet-bootstrap",
+            true,
+            false,
+            false,
+            Arg.Is<IDictionary<string, object>>(arguments =>
+                (string)arguments["x-dead-letter-exchange"] == "payment.wallet-bootstrap.dlx"
+                && (string)arguments["x-dead-letter-routing-key"] == "payment.wallet-bootstrap.dead"));
+
+        await service.StopAsync(CancellationToken.None);
+        service.Dispose();
+    }
+
+    [Fact]
     public void AddVietRideEventConsumer_RegistersHandlerAndHostedServiceOptions()
     {
         var services = new ServiceCollection();
@@ -70,14 +120,15 @@ public sealed class RabbitMqConsumerBackgroundServiceTests
     }
 
     private static RabbitMqConsumerBackgroundService<TestIntegrationEvent> CreateService(
-        IIntegrationEventHandler<TestIntegrationEvent> handler)
+        IIntegrationEventHandler<TestIntegrationEvent> handler,
+        IRabbitMqConnectionFactory? connections = null)
     {
         var services = new ServiceCollection();
         services.AddScoped(_ => handler);
         var provider = services.BuildServiceProvider();
 
         return new RabbitMqConsumerBackgroundService<TestIntegrationEvent>(
-            Substitute.For<IRabbitMqConnectionFactory>(),
+            connections ?? Substitute.For<IRabbitMqConnectionFactory>(),
             Options.Create(new RabbitMqOptions()),
             Options.Create(new RabbitMqConsumerOptions<TestIntegrationEvent>
             {

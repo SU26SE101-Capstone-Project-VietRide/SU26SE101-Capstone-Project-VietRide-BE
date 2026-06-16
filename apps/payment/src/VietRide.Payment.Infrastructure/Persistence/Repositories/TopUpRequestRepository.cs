@@ -40,6 +40,20 @@ internal sealed class TopUpRequestRepository : ITopUpRequestRepository
             topUp => topUp.VnPayTxnRef == vnPayTxnRef,
             cancellationToken);
 
+    public async Task<TopUpRequest?> FindPendingByVnPayTxnRefForUpdateAsync(
+        string vnPayTxnRef,
+        CancellationToken cancellationToken)
+        => await _db.TopUpRequests
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_payment.top_up_requests
+                WHERE vnpay_txn_ref = {vnPayTxnRef}
+                  AND status = 'PENDING'
+                FOR UPDATE
+                """)
+            .AsTracking()
+            .SingleOrDefaultAsync(cancellationToken);
+
     public async Task<int> ExpirePendingOlderThanAsync(
         DateTimeOffset expiresBefore,
         DateTimeOffset expiredAt,

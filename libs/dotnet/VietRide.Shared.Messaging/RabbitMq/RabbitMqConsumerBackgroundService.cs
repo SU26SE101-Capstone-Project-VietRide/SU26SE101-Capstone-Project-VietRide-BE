@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using RabbitMQ.Client.Exceptions;
 using VietRide.Shared.Messaging.Abstractions;
 
 namespace VietRide.Shared.Messaging.RabbitMq;
@@ -56,12 +57,31 @@ public sealed class RabbitMqConsumerBackgroundService<TEvent> : BackgroundServic
             type: ExchangeType.Topic,
             durable: _rabbitMqOptions.ExchangePersistent,
             autoDelete: false);
+
+        _channel.ExchangeDeclare(
+            exchange: _consumerOptions.ResolvedDeadLetterExchangeName,
+            type: ExchangeType.Direct,
+            durable: true,
+            autoDelete: false);
+
         _channel.QueueDeclare(
-            queue: _consumerOptions.QueueName,
+            queue: _consumerOptions.ResolvedDeadLetterQueueName,
             durable: true,
             exclusive: false,
             autoDelete: false,
             arguments: null);
+        _channel.QueueBind(
+            queue: _consumerOptions.ResolvedDeadLetterQueueName,
+            exchange: _consumerOptions.ResolvedDeadLetterExchangeName,
+            routingKey: _consumerOptions.ResolvedDeadLetterRoutingKey);
+
+        var queueArguments = new Dictionary<string, object>
+        {
+            ["x-dead-letter-exchange"] = _consumerOptions.ResolvedDeadLetterExchangeName,
+            ["x-dead-letter-routing-key"] = _consumerOptions.ResolvedDeadLetterRoutingKey,
+        };
+
+        DeclareSourceQueueWithDeadLetterArguments(queueArguments);
 
         foreach (var bindingKey in _consumerOptions.BindingKeys)
         {
@@ -88,6 +108,60 @@ public sealed class RabbitMqConsumerBackgroundService<TEvent> : BackgroundServic
 
         return Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
     }
+
+    private void DeclareSourceQueueWithDeadLetterArguments(IDictionary<string, object> queueArguments)
+    {
+        try
+        {
+            DeclareSourceQueue(queueArguments);
+        }
+        catch (OperationInterruptedException ex) when (IsPreconditionFailed(ex))
+        {
+            _logger.LogWarning(
+                ex,
+                "RabbitMQ queue {Queue} exists with incompatible arguments; deleting it once to apply dead-letter topology.",
+                _consumerOptions.QueueName);
+
+            using var adminChannel = _connections.GetOrCreate().CreateModel();
+            adminChannel.QueueDelete(_consumerOptions.QueueName, ifUnused: false, ifEmpty: false);
+
+            _channel = _connections.GetOrCreate().CreateModel();
+            _channel.ExchangeDeclare(
+                exchange: _rabbitMqOptions.ExchangeName,
+                type: ExchangeType.Topic,
+                durable: _rabbitMqOptions.ExchangePersistent,
+                autoDelete: false);
+            _channel.ExchangeDeclare(
+                exchange: _consumerOptions.ResolvedDeadLetterExchangeName,
+                type: ExchangeType.Direct,
+                durable: true,
+                autoDelete: false);
+            _channel.QueueDeclare(
+                queue: _consumerOptions.ResolvedDeadLetterQueueName,
+                durable: true,
+                exclusive: false,
+                autoDelete: false,
+                arguments: null);
+            _channel.QueueBind(
+                queue: _consumerOptions.ResolvedDeadLetterQueueName,
+                exchange: _consumerOptions.ResolvedDeadLetterExchangeName,
+                routingKey: _consumerOptions.ResolvedDeadLetterRoutingKey);
+            DeclareSourceQueue(queueArguments);
+        }
+    }
+
+    private void DeclareSourceQueue(IDictionary<string, object> queueArguments)
+    {
+        _channel!.QueueDeclare(
+            queue: _consumerOptions.QueueName,
+            durable: true,
+            exclusive: false,
+            autoDelete: false,
+            arguments: queueArguments);
+    }
+
+    private static bool IsPreconditionFailed(OperationInterruptedException ex)
+        => ex.ShutdownReason?.ReplyCode == 406;
 
     /// <summary>
     /// Dispatches a single delivery to the registered handler and acknowledges

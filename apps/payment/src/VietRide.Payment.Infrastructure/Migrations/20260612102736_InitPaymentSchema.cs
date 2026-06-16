@@ -284,11 +284,45 @@ namespace VietRide.Payment.Infrastructure.Migrations
                 table: "wallet_transactions",
                 columns: new[] { "user_id", "created_at" },
                 descending: new[] { false, true });
+
+            migrationBuilder.Sql("""
+                CREATE OR REPLACE FUNCTION vietride_payment.trg_set_updated_at()
+                RETURNS TRIGGER AS $$
+                BEGIN
+                    NEW.updated_at = now();
+                    RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql;
+
+                CREATE TRIGGER trg_payments_updated_at
+                    BEFORE UPDATE ON vietride_payment.payments
+                    FOR EACH ROW EXECUTE FUNCTION vietride_payment.trg_set_updated_at();
+
+                CREATE TRIGGER trg_top_up_requests_updated_at
+                    BEFORE UPDATE ON vietride_payment.top_up_requests
+                    FOR EACH ROW EXECUTE FUNCTION vietride_payment.trg_set_updated_at();
+
+                CREATE TRIGGER trg_wallets_updated_at
+                    BEFORE UPDATE ON vietride_payment.wallets
+                    FOR EACH ROW EXECUTE FUNCTION vietride_payment.trg_set_updated_at();
+
+                CREATE TRIGGER trg_platform_wallets_updated_at
+                    BEFORE UPDATE ON vietride_payment.platform_wallets
+                    FOR EACH ROW EXECUTE FUNCTION vietride_payment.trg_set_updated_at();
+                """);
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.Sql("""
+                DROP TRIGGER IF EXISTS trg_payments_updated_at ON vietride_payment.payments;
+                DROP TRIGGER IF EXISTS trg_top_up_requests_updated_at ON vietride_payment.top_up_requests;
+                DROP TRIGGER IF EXISTS trg_wallets_updated_at ON vietride_payment.wallets;
+                DROP TRIGGER IF EXISTS trg_platform_wallets_updated_at ON vietride_payment.platform_wallets;
+                DROP FUNCTION IF EXISTS vietride_payment.trg_set_updated_at();
+                """);
+
             migrationBuilder.DropTable(
                 name: "outbox_events",
                 schema: "vietride_payment");

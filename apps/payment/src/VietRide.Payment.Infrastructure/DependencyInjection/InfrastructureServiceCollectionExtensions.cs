@@ -26,7 +26,7 @@ namespace VietRide.Payment.Infrastructure.DependencyInjection;
 /// </remarks>
 public static class InfrastructureServiceCollectionExtensions
 {
-    public const string HangfireSchemaName = "vietride_payment.hangfire";
+    public const string HangfireSchemaName = "hangfire";
 
     /// <summary>
     /// Adds Hangfire storage for Payment background jobs.

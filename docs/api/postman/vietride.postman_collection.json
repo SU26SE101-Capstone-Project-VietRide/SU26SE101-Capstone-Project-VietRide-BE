@@ -3776,6 +3776,379 @@
           }
         }
       ]
+    },
+    {
+      "name": "Payment - Wallet top-up (Day 15)",
+      "item": [
+        {
+          "name": "1. Get wallet before top-up",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('ADR 0004 wallet envelope', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.have.property('balance').that.is.a('number');",
+                  "  pm.expect(body.data).to.have.property('currency', 'VND');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});",
+                  "pm.collectionVariables.set('day15WalletBalanceBefore', String(body.data.balance));",
+                  "pm.environment.set('day15WalletBalanceBefore', String(body.data.balance));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/wallet",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "wallet"]
+            },
+            "description": "Day 15 ? read authenticated passenger wallet before top-up."
+          }
+        },
+        {
+          "name": "2. Create VNPay wallet top-up",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 201', function () { pm.response.to.have.status(201); });",
+                  "pm.test('ADR 0004 top-up envelope', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(201);",
+                  "  pm.expect(body.data).to.have.property('topUpRequestId').that.is.a('string').and.is.not.empty;",
+                  "  pm.expect(body.data).to.have.property('status', 'PENDING');",
+                  "  pm.expect(body.data).to.have.property('paymentRedirectUrl').that.includes('vnp_TxnRef=');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});",
+                  "const txnRefMatch = body.data.paymentRedirectUrl.match(/[?&]vnp_TxnRef=([^&]+)/);",
+                  "const txnRef = txnRefMatch ? decodeURIComponent(txnRefMatch[1]) : '';",
+                  "pm.expect(txnRef).to.be.a('string').and.is.not.empty;",
+                  "pm.collectionVariables.set('day15TopUpRequestId', body.data.topUpRequestId);",
+                  "pm.environment.set('day15TopUpRequestId', body.data.topUpRequestId);",
+                  "pm.collectionVariables.set('day15VnPayTxnRef', txnRef);",
+                  "pm.environment.set('day15VnPayTxnRef', txnRef);",
+                  "pm.collectionVariables.set('day15TopUpAmountRaw', String(Number(pm.variables.get('day15TopUpAmountVnd')) * 100));",
+                  "pm.environment.set('day15TopUpAmountRaw', String(Number(pm.variables.get('day15TopUpAmountVnd')) * 100));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/wallet/top-up",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "wallet", "top-up"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": {{day15TopUpAmountVnd}},\n  \"method\": \"VNPAY\"\n}"
+            },
+            "description": "Day 15 ? create PENDING VNPay wallet top-up redirect. Idempotency-Key required."
+          }
+        },
+        {
+          "name": "3. VNPay IPN success credits wallet",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const params = {",
+                  "  vnp_Amount: String(pm.variables.get('day15TopUpAmountRaw')),",
+                  "  vnp_ResponseCode: '00',",
+                  "  vnp_TransactionStatus: '00',",
+                  "  vnp_TxnRef: String(pm.variables.get('day15VnPayTxnRef'))",
+                  "};",
+                  "const query = Object.keys(params).sort().map(k => encodeURIComponent(k) + '=' + encodeURIComponent(params[k])).join('&');",
+                  "const secret = String(pm.variables.get('vnpayHashSecret'));",
+                  "pm.variables.set('day15IpnSecureHash', CryptoJS.HmacSHA512(query, secret).toString(CryptoJS.enc.Hex));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('VNPay raw success response', function () {",
+                  "  pm.expect(body).to.have.property('RspCode', '00');",
+                  "  pm.expect(body).to.have.property('Message', 'Confirm Success');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/payments/vnpay-topup-ipn?vnp_Amount={{day15TopUpAmountRaw}}&vnp_ResponseCode=00&vnp_TransactionStatus=00&vnp_TxnRef={{day15VnPayTxnRef}}&vnp_SecureHash={{day15IpnSecureHash}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "payments", "vnpay-topup-ipn"],
+              "query": [
+                {
+                  "key": "vnp_Amount",
+                  "value": "{{day15TopUpAmountRaw}}"
+                },
+                {
+                  "key": "vnp_ResponseCode",
+                  "value": "00"
+                },
+                {
+                  "key": "vnp_TransactionStatus",
+                  "value": "00"
+                },
+                {
+                  "key": "vnp_TxnRef",
+                  "value": "{{day15VnPayTxnRef}}"
+                },
+                {
+                  "key": "vnp_SecureHash",
+                  "value": "{{day15IpnSecureHash}}"
+                }
+              ]
+            },
+            "description": "Day 15 ? public VNPay IPN success. Raw VNPay JSON, no ApiResponse envelope."
+          }
+        },
+        {
+          "name": "4. Get wallet after top-up",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "const before = Number(pm.variables.get('day15WalletBalanceBefore'));",
+                  "const amount = Number(pm.variables.get('day15TopUpAmountVnd'));",
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Wallet balance increased by top-up amount', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.data.balance).to.equal(before + amount);",
+                  "  pm.expect(body.data.currency).to.equal('VND');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/wallet",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "wallet"]
+            },
+            "description": "Day 15 ? verify wallet side effect after IPN."
+          }
+        },
+        {
+          "name": "5. List wallet transactions includes top-up ledger",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Top-up ledger row exists', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  const rows = Array.isArray(body.data?.items) ? body.data.items : (Array.isArray(body.data) ? body.data : []);",
+                  "  const topUp = rows.find(row => row.referenceId === pm.variables.get('day15TopUpRequestId'));",
+                  "  pm.expect(topUp).to.exist;",
+                  "  pm.expect(topUp.type).to.equal('CREDIT');",
+                  "  pm.expect(topUp.amount).to.equal(Number(pm.variables.get('day15TopUpAmountVnd')));",
+                  "  pm.expect(topUp.referenceType).to.equal('TOP_UP');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/wallet/transactions?page=1&pageSize=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "wallet", "transactions"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Day 15 ? verify immutable wallet ledger row."
+          }
+        },
+        {
+          "name": "6. Replay VNPay IPN is idempotent",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const params = {",
+                  "  vnp_Amount: String(pm.variables.get('day15TopUpAmountRaw')),",
+                  "  vnp_ResponseCode: '00',",
+                  "  vnp_TransactionStatus: '00',",
+                  "  vnp_TxnRef: String(pm.variables.get('day15VnPayTxnRef'))",
+                  "};",
+                  "const query = Object.keys(params).sort().map(k => encodeURIComponent(k) + '=' + encodeURIComponent(params[k])).join('&');",
+                  "const secret = String(pm.variables.get('vnpayHashSecret'));",
+                  "pm.variables.set('day15IpnSecureHash', CryptoJS.HmacSHA512(query, secret).toString(CryptoJS.enc.Hex));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Replay returns success without double credit', function () { pm.expect(body).to.have.property('RspCode', '00'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/payments/vnpay-topup-ipn?vnp_Amount={{day15TopUpAmountRaw}}&vnp_ResponseCode=00&vnp_TransactionStatus=00&vnp_TxnRef={{day15VnPayTxnRef}}&vnp_SecureHash={{day15IpnSecureHash}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "payments", "vnpay-topup-ipn"],
+              "query": [
+                {
+                  "key": "vnp_Amount",
+                  "value": "{{day15TopUpAmountRaw}}"
+                },
+                {
+                  "key": "vnp_ResponseCode",
+                  "value": "00"
+                },
+                {
+                  "key": "vnp_TransactionStatus",
+                  "value": "00"
+                },
+                {
+                  "key": "vnp_TxnRef",
+                  "value": "{{day15VnPayTxnRef}}"
+                },
+                {
+                  "key": "vnp_SecureHash",
+                  "value": "{{day15IpnSecureHash}}"
+                }
+              ]
+            },
+            "description": "Day 15 review adversarial case - replay must not double-credit."
+          }
+        },
+        {
+          "name": "7. Invalid VNPay signature is rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 401', function () { pm.response.to.have.status(401); });",
+                  "pm.test('VNPay invalid signature response', function () {",
+                  "  pm.expect(body).to.have.property('RspCode', '97');",
+                  "  pm.expect(body).to.have.property('Message', 'PAYMENT_SIGNATURE_INVALID');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/payments/vnpay-topup-ipn?vnp_Amount={{day15TopUpAmountRaw}}&vnp_ResponseCode=00&vnp_TransactionStatus=00&vnp_TxnRef={{day15VnPayTxnRef}}&vnp_SecureHash=invalid-signature",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "payments", "vnpay-topup-ipn"],
+              "query": [
+                {
+                  "key": "vnp_Amount",
+                  "value": "{{day15TopUpAmountRaw}}"
+                },
+                {
+                  "key": "vnp_ResponseCode",
+                  "value": "00"
+                },
+                {
+                  "key": "vnp_TransactionStatus",
+                  "value": "00"
+                },
+                {
+                  "key": "vnp_TxnRef",
+                  "value": "{{day15VnPayTxnRef}}"
+                },
+                {
+                  "key": "vnp_SecureHash",
+                  "value": "invalid-signature"
+                }
+              ]
+            },
+            "description": "Day 15 review adversarial case ? forged IPN signature rejected."
+          }
+        }
+      ]
     }
   ]
 }

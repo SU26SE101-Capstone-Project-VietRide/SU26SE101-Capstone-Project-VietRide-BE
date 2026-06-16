@@ -20,6 +20,35 @@ public sealed class RabbitMqConsumerOptions
     /// <summary>Number of unacknowledged messages allowed per consumer.</summary>
     public ushort PrefetchCount { get; set; } = 1;
 
+    /// <summary>
+    /// Dead-letter exchange used when handler failures are nacked without requeue.
+    /// Defaults to a deterministic queue-scoped exchange.
+    /// </summary>
+    public string? DeadLetterExchangeName { get; set; }
+
+    /// <summary>
+    /// Dead-letter queue receiving failed deliveries. Defaults to <c>{QueueName}.dlq</c>.
+    /// </summary>
+    public string? DeadLetterQueueName { get; set; }
+
+    /// <summary>
+    /// Routing key used from the source queue to the DLX and bound by the DLQ.
+    /// Defaults to <c>{QueueName}.dead</c>.
+    /// </summary>
+    public string? DeadLetterRoutingKey { get; set; }
+
+    public string ResolvedDeadLetterExchangeName => string.IsNullOrWhiteSpace(DeadLetterExchangeName)
+        ? $"{QueueName}.dlx"
+        : DeadLetterExchangeName.Trim();
+
+    public string ResolvedDeadLetterQueueName => string.IsNullOrWhiteSpace(DeadLetterQueueName)
+        ? $"{QueueName}.dlq"
+        : DeadLetterQueueName.Trim();
+
+    public string ResolvedDeadLetterRoutingKey => string.IsNullOrWhiteSpace(DeadLetterRoutingKey)
+        ? $"{QueueName}.dead"
+        : DeadLetterRoutingKey.Trim();
+
     internal void Validate()
     {
         if (string.IsNullOrWhiteSpace(QueueName))
