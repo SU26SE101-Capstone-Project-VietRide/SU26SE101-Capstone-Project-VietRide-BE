@@ -41,6 +41,10 @@ jobs:
             dockerfile: apps/gateway/Dockerfile
           - service: tracking
             dockerfile: apps/tracking/Dockerfile
+          - service: notification
+            dockerfile: apps/notification/Dockerfile
+          - service: rag
+            dockerfile: apps/rag/Dockerfile
     steps:
       - uses: actions/checkout@v4
 

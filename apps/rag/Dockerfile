@@ -21,6 +21,9 @@ RUN npx nx run-many -t build --projects=contracts,nest-common,nest-config,nest-r
 # Copy sources needed to build rag (Nx will only build referenced projects).
 COPY apps/rag apps/rag
 
+# Generate Prisma client with its runtime engine before bundling.
+RUN npx prisma generate --schema=apps/rag/prisma/schema.prisma
+
 # Build via Nx (produces dist/apps/rag).
 RUN npx nx run rag:build --configuration=production --skip-nx-cache
 
@@ -37,10 +40,19 @@ COPY --from=build /workspace/node_modules ./node_modules
 # symlinks with the compiled lib packages so require('@vietride/*') resolves at runtime.
 RUN rm -rf node_modules/@vietride
 COPY --from=build /workspace/dist/libs/shared ./node_modules/@vietride
+# Prisma generates native query-engine binaries outside the webpack bundle.
+# Keep the generated client beside the bundle at the path Prisma searches at runtime.
+COPY --from=build /workspace/apps/rag/src/generated ./src/generated
+# Prisma schema + migration SQL — needed by `prisma migrate deploy` at startup.
+# The rag baseline migration also runs `CREATE EXTENSION IF NOT EXISTS "vector"`,
+# so the Postgres image MUST be pgvector/pgvector:pg16 (see docker-compose.prod.yml).
+COPY --from=build /workspace/apps/rag/prisma ./prisma
 COPY .env.example ./.env.example
 
 EXPOSE 3003
 HEALTHCHECK --interval=15s --timeout=3s --retries=5 \
   CMD wget -qO- http://127.0.0.1:3003/health || exit 1
 
-CMD ["node", "main.js"]
+# Apply pending Prisma migrations (creates the schema + pgvector extension on first
+# boot) then start.
+CMD ["sh", "-c", "npx prisma migrate deploy --schema=./prisma/schema.prisma && node main.js"]
