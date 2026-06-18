@@ -54,11 +54,14 @@ export class NotificationsService {
   ) {}
 
   async createNotification(dto: CreateNotificationDto): Promise<NotificationItemDto> {
-    const notification = await this.notificationsRepository.create(CreateNotificationSchema.parse(dto));
-    await this.fcmPushQueue.enqueue({
-      notificationId: notification.id,
-      userId: notification.userId,
-    });
+    const result = await this.notificationsRepository.create(CreateNotificationSchema.parse(dto));
+    const notification = result.notification;
+    if (result.created) {
+      await this.fcmPushQueue.enqueue({
+        notificationId: notification.id,
+        userId: notification.userId,
+      });
+    }
 
     return this.toDto(notification);
   }

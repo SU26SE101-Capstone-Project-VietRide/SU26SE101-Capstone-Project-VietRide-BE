@@ -84,6 +84,7 @@ function createNotification(): Notification {
     title: 'Dat ve thanh cong',
     body: 'Ve cua ban da duoc xac nhan.',
     data: { bookingId: 'VR123' },
+    dedupeKey: null,
     readAt: null,
     createdAt: new Date('2026-06-01T10:00:00.000Z'),
   };

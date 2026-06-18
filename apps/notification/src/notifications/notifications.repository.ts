@@ -29,20 +29,43 @@ export interface CreateEmailDeliveryRow {
   sanitizedData: unknown;
 }
 
+export interface CreateNotificationResult {
+  notification: Notification;
+  created: boolean;
+}
+
 @Injectable()
 export class NotificationsRepository {
   constructor(private readonly prisma: NotificationPrismaService) {}
 
-  async create(dto: NormalizedCreateNotificationDto): Promise<Notification> {
-    return this.prisma.notification.create({
-      data: {
-        userId: dto.userId,
-        type: dto.type,
-        title: dto.title,
-        body: dto.body,
-        data: dto.data === null ? NotificationPrisma.DbNull : (dto.data as Prisma.InputJsonValue),
-      },
-    });
+  async create(dto: NormalizedCreateNotificationDto): Promise<CreateNotificationResult> {
+    try {
+      const notification = await this.prisma.notification.create({
+        data: {
+          userId: dto.userId,
+          type: dto.type,
+          title: dto.title,
+          body: dto.body,
+          data: dto.data === null ? NotificationPrisma.DbNull : (dto.data as Prisma.InputJsonValue),
+          dedupeKey: dto.dedupeKey ?? null,
+        },
+      });
+
+      return { notification, created: true };
+    } catch (error) {
+      if (!dto.dedupeKey || !isUniqueConstraintError(error)) {
+        throw error;
+      }
+
+      const notification = await this.prisma.notification.findUnique({
+        where: { dedupeKey: dto.dedupeKey },
+      });
+      if (!notification) {
+        throw error;
+      }
+
+      return { notification, created: false };
+    }
   }
 
   async listForUser(userId: string, query: ListNotificationsQueryDto): Promise<PagedNotificationsRow> {
@@ -222,4 +245,11 @@ export class NotificationsRepository {
       },
     });
   }
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return (
+    error instanceof NotificationPrisma.PrismaClientKnownRequestError &&
+    error.code === 'P2002'
+  );
 }

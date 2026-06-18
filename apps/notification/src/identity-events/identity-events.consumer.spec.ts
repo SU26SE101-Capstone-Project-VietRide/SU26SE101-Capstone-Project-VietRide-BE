@@ -1,23 +1,58 @@
 import { Logger } from '@nestjs/common';
+import {
+  IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
+  IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
+  IDENTITY_USER_CREATED_ROUTING_KEY,
+} from '@vietride/contracts';
 import type { RabbitMqConsumer, RabbitMqHandler } from '@vietride/nest-rabbitmq';
+import type { ConsumeMessage } from 'amqplib';
+import { NotificationType } from '../generated/notification-prisma-client';
+import { MessageIdempotencyService } from '../notifications/message-idempotency.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import type { OperatorRecipientProvider } from '../notifications/operator-recipient.provider';
 import { IdentityEventsConsumer } from './identity-events.consumer';
+
+const USER_ID = '11111111-1111-4111-8111-111111111111';
+const OPERATOR_ID = '22222222-2222-4222-8222-222222222222';
+const MESSAGE_ID = 'identity-message-1';
 
 describe('IdentityEventsConsumer', () => {
   let handlers: Record<string, RabbitMqHandler>;
+  let rabbitConsumer: jest.Mocked<RabbitMqConsumer>;
+  let idempotency: jest.Mocked<MessageIdempotencyService>;
+  let notificationsService: jest.Mocked<NotificationsService>;
+  let operatorRecipientProvider: jest.Mocked<OperatorRecipientProvider>;
   let consumer: IdentityEventsConsumer;
 
   beforeEach(async () => {
     handlers = {};
-    const fakeConsumer = {
+    rabbitConsumer = {
       subscribe: jest.fn((_queue: string, routingKey: string, handler: RabbitMqHandler) => {
         handlers[routingKey] = handler;
         return Promise.resolve();
       }),
-    } as unknown as RabbitMqConsumer;
+    } as unknown as jest.Mocked<RabbitMqConsumer>;
+    idempotency = {
+      begin: jest.fn(),
+      markProcessed: jest.fn(),
+      release: jest.fn(),
+    } as unknown as jest.Mocked<MessageIdempotencyService>;
+    notificationsService = {
+      createNotification: jest.fn(),
+    } as unknown as jest.Mocked<NotificationsService>;
+    operatorRecipientProvider = {
+      resolveOperatorRecipientUserIds: jest.fn(),
+    };
 
     jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
 
-    consumer = new IdentityEventsConsumer(fakeConsumer);
+    consumer = new IdentityEventsConsumer(
+      rabbitConsumer,
+      idempotency,
+      notificationsService,
+      operatorRecipientProvider,
+    );
     await consumer.onModuleInit();
   });
 
@@ -31,52 +66,200 @@ describe('IdentityEventsConsumer', () => {
 
   it('subscribes one durable queue per identity routing key', () => {
     expect(Object.keys(handlers).sort()).toEqual([
-      'identity.operator.approved',
-      'identity.operator.suspended',
-      'identity.user.created',
+      IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
+      IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
+      IDENTITY_USER_CREATED_ROUTING_KEY,
     ]);
+    expect(rabbitConsumer.subscribe).toHaveBeenCalledWith(
+      'notification.identity.operator.approved',
+      IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
+      expect.any(Function),
+      { prefetch: 1, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
+    );
   });
 
-  it('validates and logs a well-formed identity.user.created payload', () => {
-    const logSpy = jest.spyOn(Logger.prototype, 'log');
+  it('validates and logs identity.user.created without creating notification', () => {
     expect(() =>
-      handlerFor('identity.user.created')(
+      handlerFor(IDENTITY_USER_CREATED_ROUTING_KEY)(
         {
-          userId: '11111111-1111-1111-1111-111111111111',
+          userId: USER_ID,
           role: 'PASSENGER',
           email: 'rider@example.com',
           createdAt: '2026-06-10T08:30:00+07:00',
         },
-        {} as never,
+        createMessage(undefined),
       ),
     ).not.toThrow();
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Consumed identity.user.created'));
+
+    expect(idempotency.begin).not.toHaveBeenCalled();
+    expect(notificationsService.createNotification).not.toHaveBeenCalled();
   });
 
-  it('throws on a malformed identity.user.created payload so the consumer nacks', async () => {
-    expect(() =>
-      handlerFor('identity.user.created')(
-        { userId: 'not-a-uuid', role: 'passenger', email: 'bad', createdAt: 'nope' },
-        {} as never,
-      ),
-    ).toThrow();
+  it('creates operator approved notification for resolved operator admins', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([USER_ID]);
+    notificationsService.createNotification.mockResolvedValue(
+      createNotification(NotificationType.OPERATOR_APPROVED),
+    );
+
+    await consumer.handleOperatorApproved(
+      {
+        operatorId: OPERATOR_ID,
+        approvedAt: '2026-06-10T08:30:00+07:00',
+      },
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(operatorRecipientProvider.resolveOperatorRecipientUserIds).toHaveBeenCalledWith(OPERATOR_ID);
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.OPERATOR_APPROVED,
+        data: { operatorId: OPERATOR_ID, approvedAt: '2026-06-10T08:30:00+07:00' },
+        dedupeKey: `${IDENTITY_OPERATOR_APPROVED_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:${NotificationType.OPERATOR_APPROVED}`,
+      }),
+    );
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
   });
 
-  it('validates a well-formed identity.operator.approved payload', () => {
-    expect(() =>
-      handlerFor('identity.operator.approved')(
+  it('creates operator suspended notification for resolved operator admins', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([USER_ID]);
+    notificationsService.createNotification.mockResolvedValue(
+      createNotification(NotificationType.OPERATOR_SUSPENDED),
+    );
+
+    await consumer.handleOperatorSuspended(
+      {
+        operatorId: OPERATOR_ID,
+        suspendedAt: '2026-06-10T08:30:00+07:00',
+      },
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.OPERATOR_SUSPENDED,
+        data: { operatorId: OPERATOR_ID, suspendedAt: '2026-06-10T08:30:00+07:00' },
+        dedupeKey: `${IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:${NotificationType.OPERATOR_SUSPENDED}`,
+      }),
+    );
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+  });
+
+  it('skips duplicate operator lifecycle message', async () => {
+    idempotency.begin.mockResolvedValue('duplicate');
+
+    await consumer.handleOperatorApproved(
+      {
+        operatorId: OPERATOR_ID,
+        approvedAt: '2026-06-10T08:30:00+07:00',
+      },
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(notificationsService.createNotification).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).not.toHaveBeenCalled();
+  });
+
+  it('marks empty operator recipients as processed without DLQ', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([]);
+
+    await expect(
+      consumer.handleOperatorApproved(
         {
-          operatorId: '22222222-2222-2222-2222-222222222222',
+          operatorId: OPERATOR_ID,
           approvedAt: '2026-06-10T08:30:00+07:00',
         },
-        {} as never,
+        createMessage(MESSAGE_ID),
       ),
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
+
+    expect(notificationsService.createNotification).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+    expect(idempotency.release).not.toHaveBeenCalled();
   });
 
-  it('throws on a malformed identity.operator.suspended payload', async () => {
-    expect(() =>
-      handlerFor('identity.operator.suspended')({ operatorId: 'not-a-uuid' }, {} as never),
-    ).toThrow();
+  it('releases idempotency and rethrows provider errors', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockRejectedValue(new Error('identity down'));
+
+    await expect(
+      consumer.handleOperatorApproved(
+        {
+          operatorId: OPERATOR_ID,
+          approvedAt: '2026-06-10T08:30:00+07:00',
+        },
+        createMessage(MESSAGE_ID),
+      ),
+    ).rejects.toThrow('identity down');
+
+    expect(idempotency.release).toHaveBeenCalledWith(
+      IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+  });
+
+  it('drops malformed operator lifecycle payload after marking processed', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+
+    await expect(
+      consumer.handleOperatorSuspended({ operatorId: 'not-a-uuid' }, createMessage(MESSAGE_ID)),
+    ).resolves.toBeUndefined();
+
+    expect(notificationsService.createNotification).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+    expect(idempotency.release).not.toHaveBeenCalled();
+  });
+
+  it('rejects operator lifecycle messages without id before idempotency check', async () => {
+    await expect(
+      consumer.handleOperatorApproved(
+        {
+          operatorId: OPERATOR_ID,
+          approvedAt: '2026-06-10T08:30:00+07:00',
+        },
+        createMessage(undefined),
+      ),
+    ).rejects.toThrow('MISSING_MESSAGE_ID');
+
+    expect(idempotency.begin).not.toHaveBeenCalled();
+    expect(notificationsService.createNotification).not.toHaveBeenCalled();
   });
 });
+
+function createMessage(messageId: string | undefined): ConsumeMessage {
+  return {
+    properties: {
+      messageId,
+      correlationId: undefined,
+    },
+  } as ConsumeMessage;
+}
+
+function createNotification(type: NotificationType) {
+  return {
+    id: '99999999-9999-4999-8999-999999999999',
+    userId: USER_ID,
+    type,
+    title: 'Title',
+    body: 'Body',
+    data: null,
+    readAt: null,
+    createdAt: '2026-06-01T10:00:00.000Z',
+  };
+}

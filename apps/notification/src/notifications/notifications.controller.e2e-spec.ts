@@ -144,7 +144,7 @@ describe('NotificationsController (e2e)', () => {
 
   it('returns 204 when owner marks notification as read', async () => {
     const token = await signIdentityToken(OWNER_USER_ID);
-    const response = await post(`/api/v1/notifications/${NOTIFICATION_ID}/read`, token);
+    const response = await patch(`/api/v1/notifications/${NOTIFICATION_ID}`, token);
 
     expect(response.status).toBe(204);
     expect(update).toHaveBeenCalledWith(
@@ -157,8 +157,8 @@ describe('NotificationsController (e2e)', () => {
 
   it('returns 404 when user marks another user notification as read', async () => {
     const token = await signIdentityToken(OTHER_USER_ID);
-    const response = await postJson<ApiEnvelope<unknown>>(
-      `/api/v1/notifications/${OTHER_NOTIFICATION_ID}/read`,
+    const response = await patchJson<ApiEnvelope<unknown>>(
+      `/api/v1/notifications/${OTHER_NOTIFICATION_ID}`,
       token,
     );
 
@@ -193,18 +193,22 @@ describe('NotificationsController (e2e)', () => {
     };
   }
 
-  async function post(path: string, token: string): Promise<Response> {
+  async function patch(path: string, token: string): Promise<Response> {
     return fetch(`http://127.0.0.1:${port}${path}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ read: true }),
     });
   }
 
-  async function postJson<TBody>(
+  async function patchJson<TBody>(
     path: string,
     token: string,
   ): Promise<{ status: number; body: TBody }> {
-    const response = await post(path, token);
+    const response = await patch(path, token);
     return {
       status: response.status,
       body: (await response.json()) as TBody,
@@ -220,6 +224,7 @@ function createNotification(overrides: Record<string, unknown>) {
     title: 'Dat ve thanh cong',
     body: 'Ve cua ban da duoc xac nhan.',
     data: { bookingId: '55555555-5555-4555-8555-555555555555' },
+    dedupeKey: null,
     readAt: null,
     createdAt: new Date('2026-06-01T10:00:00.000Z'),
     ...overrides,
