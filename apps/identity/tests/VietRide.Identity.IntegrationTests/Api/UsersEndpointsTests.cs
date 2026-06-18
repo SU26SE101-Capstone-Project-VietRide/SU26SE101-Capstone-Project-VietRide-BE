@@ -234,6 +234,11 @@ public sealed class UsersEndpointsTests : IClassFixture<AuthWebApplicationFactor
             UserStatus? status,
             CancellationToken ct = default)
             => Task.FromResult(PagedResult<User>.Create([], 1, 20, 0));
+
+        public Task<IReadOnlyList<Guid>> ListActiveOperatorAdminIdsAsync(
+            Guid operatorId,
+            CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<Guid>>([]);
     }
 
     private sealed class TestActivityLogRepository : IActivityLogRepository
