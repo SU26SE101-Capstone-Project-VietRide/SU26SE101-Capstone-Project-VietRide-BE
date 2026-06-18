@@ -5,7 +5,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  url      = env("NOTIFICATION_DATABASE_URL")
   schemas  = ["vietride_notification"]
 }
 
@@ -44,6 +44,8 @@ enum NotificationType {
   DRIVER_SCHEDULE_EDITED
   PAYOUT_PROCESSED
   PAYOUT_FAILED
+  OPERATOR_APPROVED
+  OPERATOR_SUSPENDED
 
   @@map("notification_type")
   @@schema("vietride_notification")
@@ -96,6 +98,7 @@ model Notification {
   title      String                 @db.VarChar(255)
   body       String
   data       Json?
+  dedupeKey  String?                @unique @map("dedupe_key") @db.VarChar(200)
   readAt     DateTime?              @map("read_at") @db.Timestamptz(6)
   createdAt  DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
   deliveries NotificationDelivery[]
@@ -117,7 +120,7 @@ model NotificationDelivery {
   lastError      String?                    @map("last_error")
   sentAt         DateTime?                  @map("sent_at") @db.Timestamptz(6)
   createdAt      DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime                   @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedAt      DateTime                   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   notification   Notification               @relation(fields: [notificationId], references: [id], onDelete: Cascade)
 
   @@index([notificationId], map: "idx_notification_deliveries_notification_id")
@@ -139,7 +142,7 @@ model EmailDelivery {
   providerMessageId String?             @map("provider_message_id") @db.VarChar(255)
   sentAt            DateTime?           @map("sent_at") @db.Timestamptz(6)
   createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime            @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedAt         DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   notification      Notification?       @relation(fields: [notificationId], references: [id], onDelete: SetNull)
 
   @@index([notificationId], map: "idx_email_deliveries_notification_id")
