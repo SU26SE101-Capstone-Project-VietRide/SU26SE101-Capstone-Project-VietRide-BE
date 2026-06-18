@@ -53,6 +53,72 @@ public sealed class IdentityInternalClient : IIdentityInternalClient
         }
     }
 
+    public async Task<IdentityUserLookupResult> GetUserAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var response = await _httpClient.GetAsync(
+                $"/internal/v1/users/{userId:D}",
+                cancellationToken).ConfigureAwait(false);
+
+            return response.StatusCode switch
+            {
+                HttpStatusCode.OK => await ReadUserAsync(response, cancellationToken).ConfigureAwait(false),
+                HttpStatusCode.Forbidden => IdentityUserLookupResult.Forbidden("Identity rejected the internal user lookup."),
+                HttpStatusCode.NotFound => IdentityUserLookupResult.ValidationFailure(
+                    $"Identity user '{userId}' was not found."),
+                >= HttpStatusCode.InternalServerError => IdentityUserLookupResult.ValidationFailure(
+                    "Identity user lookup failed due to an upstream server error."),
+                _ => IdentityUserLookupResult.ValidationFailure(
+                    $"Identity returned unexpected status code {(int)response.StatusCode}.")
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return IdentityUserLookupResult.ValidationFailure(
+                "Identity user lookup failed due to transport or circuit-breaker failure.");
+        }
+    }
+
+    public async Task<IdentityOperatorLookupResult> GetOperatorAsync(
+        Guid operatorId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var response = await _httpClient.GetAsync(
+                $"/internal/v1/operators/{operatorId:D}",
+                cancellationToken).ConfigureAwait(false);
+
+            return response.StatusCode switch
+            {
+                HttpStatusCode.OK => await ReadOperatorAsync(response, cancellationToken).ConfigureAwait(false),
+                HttpStatusCode.Forbidden => IdentityOperatorLookupResult.Forbidden("Identity rejected the internal operator lookup."),
+                HttpStatusCode.NotFound => IdentityOperatorLookupResult.ValidationFailure(
+                    $"Identity operator '{operatorId}' was not found."),
+                >= HttpStatusCode.InternalServerError => IdentityOperatorLookupResult.ValidationFailure(
+                    "Identity operator lookup failed due to an upstream server error."),
+                _ => IdentityOperatorLookupResult.ValidationFailure(
+                    $"Identity returned unexpected status code {(int)response.StatusCode}.")
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return IdentityOperatorLookupResult.ValidationFailure(
+                "Identity operator lookup failed due to transport or circuit-breaker failure.");
+        }
+    }
+
     private static async Task<OperatorWriteEligibilityValidation> ReadEligibilityAsync(
         HttpResponseMessage response,
         CancellationToken cancellationToken)
@@ -87,10 +153,65 @@ public sealed class IdentityInternalClient : IIdentityInternalClient
         return OperatorWriteEligibilityValidation.Forbidden(reason);
     }
 
+    private static async Task<IdentityUserLookupResult> ReadUserAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (payload.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+        {
+            return IdentityUserLookupResult.ValidationFailure("Identity returned an empty user payload.");
+        }
+
+        var id = GetGuidProperty(payload, "id");
+        var role = GetStringProperty(payload, "role");
+        var operatorId = GetGuidProperty(payload, "operatorId");
+        var status = GetStringProperty(payload, "status");
+        if (id is null || role is null || status is null)
+        {
+            return IdentityUserLookupResult.ValidationFailure("Identity user payload is missing id, role, or status.");
+        }
+
+        return IdentityUserLookupResult.Success(id.Value, role, operatorId, status);
+    }
+
+    private static async Task<IdentityOperatorLookupResult> ReadOperatorAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (payload.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+        {
+            return IdentityOperatorLookupResult.ValidationFailure("Identity returned an empty operator payload.");
+        }
+
+        var id = GetGuidProperty(payload, "operatorId") ?? GetGuidProperty(payload, "id");
+        var name = GetStringProperty(payload, "name");
+        if (id is null || string.IsNullOrWhiteSpace(name))
+        {
+            return IdentityOperatorLookupResult.ValidationFailure("Identity operator payload is missing operatorId/id or name.");
+        }
+
+        return IdentityOperatorLookupResult.Success(id.Value, name);
+    }
+
     private static string? GetStringProperty(JsonElement payload, string propertyName)
     {
         return payload.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
             ? property.GetString()
+            : null;
+    }
+
+    private static Guid? GetGuidProperty(JsonElement payload, string propertyName)
+    {
+        return payload.TryGetProperty(propertyName, out var property)
+            && property.ValueKind == JsonValueKind.String
+            && Guid.TryParse(property.GetString(), out var value)
+            ? value
             : null;
     }
 

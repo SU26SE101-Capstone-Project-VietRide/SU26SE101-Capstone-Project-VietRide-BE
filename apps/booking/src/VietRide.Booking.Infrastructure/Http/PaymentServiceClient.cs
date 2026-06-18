@@ -36,6 +36,69 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
     }
 
     /// <inheritdoc/>
+    public async Task<BatchChargeOutcome> BatchChargeAsync(
+        Guid userId,
+        string method,
+        IReadOnlyList<BatchChargeItem> items,
+        string idempotencyKey,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var body = new BatchChargeRequest(userId, method, items);
+            using var request = BuildJsonRequest(
+                HttpMethod.Post,
+                "/internal/v1/payments/batch-charge",
+                body,
+                idempotencyKey);
+
+            using var response = await _httpClient.SendAsync(request, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (response.StatusCode == HttpStatusCode.OK)
+            {
+                var data = await response.Content
+                    .ReadFromJsonAsync<BatchChargeData>(JsonOptions, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (data?.Payments is null)
+                    return new BatchChargeOutcome.TransportError("Payment service returned null batch data.");
+
+                var payments = data.Payments
+                    .Select(x => new BatchChargePaymentResult(
+                        x.PaymentId,
+                        x.ReferenceType,
+                        x.ReferenceId,
+                        x.Status,
+                        x.PaymentRedirectUrl))
+                    .ToList();
+
+                return new BatchChargeOutcome.Success(payments);
+            }
+
+            if (response.StatusCode == HttpStatusCode.PaymentRequired
+                || response.StatusCode == HttpStatusCode.UnprocessableEntity
+                || response.StatusCode == HttpStatusCode.Conflict)
+            {
+                return new BatchChargeOutcome.InsufficientFunds(
+                    $"Payment service rejected batch charge (status {(int)response.StatusCode}).");
+            }
+
+            return new BatchChargeOutcome.TransportError(
+                $"Payment service returned unexpected status {(int)response.StatusCode}.");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "PaymentServiceClient.BatchChargeAsync transport failure for {ItemCount} item(s)", items.Count);
+            return new BatchChargeOutcome.TransportError($"Payment service transport failure: {ex.Message}");
+        }
+    }
+
+    /// <inheritdoc/>
     public async Task<ChargeOutcome> ChargeAsync(
         string referenceType,
         Guid referenceId,
@@ -74,7 +137,8 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
                 return new ChargeOutcome.Success(result);
             }
 
-            if (response.StatusCode == HttpStatusCode.UnprocessableEntity
+            if (response.StatusCode == HttpStatusCode.PaymentRequired
+                || response.StatusCode == HttpStatusCode.UnprocessableEntity
                 || response.StatusCode == HttpStatusCode.Conflict)
             {
                 // Insufficient funds or business rule rejection
@@ -131,10 +195,25 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
         long Amount,
         string Method);
 
+    private sealed record BatchChargeRequest(
+        Guid UserId,
+        string Method,
+        IReadOnlyList<BatchChargeItem> Items);
+
     private sealed record ApiEnvelope<T>(T? Data);
 
     private sealed record ChargeData(
         Guid PaymentId,
+        string Status,
+        string? PaymentRedirectUrl);
+
+    private sealed record BatchChargeData(
+        IReadOnlyList<BatchChargePaymentData> Payments);
+
+    private sealed record BatchChargePaymentData(
+        Guid PaymentId,
+        string ReferenceType,
+        Guid ReferenceId,
         string Status,
         string? PaymentRedirectUrl);
 }

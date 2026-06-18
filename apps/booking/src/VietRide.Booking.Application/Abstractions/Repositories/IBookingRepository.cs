@@ -15,6 +15,11 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
     Task<BookingEntity?> FindByBookingCodeAsync(string bookingCode, CancellationToken ct = default);
 
     /// <summary>
+    /// Finds a booking by id using the aggregate-specific seam.
+    /// </summary>
+    Task<BookingEntity?> FindByIdAsync(Guid bookingId, CancellationToken ct = default);
+
+    /// <summary>
     /// Returns a booking with Passengers eagerly loaded.
     /// Used for saga compensation checks and cancellation.
     /// </summary>

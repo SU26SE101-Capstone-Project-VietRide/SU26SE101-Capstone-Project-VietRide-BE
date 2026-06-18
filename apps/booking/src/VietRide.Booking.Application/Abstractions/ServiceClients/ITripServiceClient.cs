@@ -21,7 +21,8 @@ public sealed record TripSnapshot(
     TripStationSnapshot OriginStation,
     TripStationSnapshot DestinationStation,
     IReadOnlyList<TripStopSnapshot> Stops,
-    TripSeatSummary SeatSummary);
+    TripSeatSummary SeatSummary,
+    Guid? ReturnRouteId = null);
 
 /// <summary>Station snapshot embedded in <see cref="TripSnapshot"/>.</summary>
 public sealed record TripStationSnapshot(Guid Id, string Name);
@@ -51,6 +52,13 @@ public sealed record SeatLockResult(
     IReadOnlyList<string> LockedSeats,
     DateTimeOffset ExpiresAt);
 
+/// <summary>One leg returned by the atomic round-trip lock seam.</summary>
+public sealed record RoundTripSeatLockResult(
+    Guid TripId,
+    Guid SeatLockToken,
+    IReadOnlyList<string> LockedSeats,
+    DateTimeOffset ExpiresAt);
+
 /// <summary>
 /// Discriminated-union result of <see cref="ITripServiceClient.LockSeatsAsync"/>.
 /// </summary>
@@ -75,6 +83,33 @@ public abstract record LockSeatsOutcome
 
     /// <summary>Unexpected HTTP / transport error.</summary>
     public sealed record TransportError(string Message) : LockSeatsOutcome;
+}
+
+/// <summary>
+/// Discriminated-union result of <see cref="ITripServiceClient.LockRoundTripSeatsAsync"/>.
+/// Trip owns the real Redis Lua script; Booking must call this single seam for round-trip
+/// checkout so both directions are held atomically, with no caller-visible half-lock window.
+/// </summary>
+public abstract record LockRoundTripSeatsOutcome
+{
+    private LockRoundTripSeatsOutcome() { }
+
+    /// <summary>Both outbound and return leg locks succeeded atomically.</summary>
+    public sealed record Success(
+        RoundTripSeatLockResult Outbound,
+        RoundTripSeatLockResult Return) : LockRoundTripSeatsOutcome;
+
+    /// <summary>409 BOOKING_SEAT_UNAVAILABLE — no seats were retained.</summary>
+    public sealed record SeatUnavailable(IReadOnlyList<string> UnavailableSeats) : LockRoundTripSeatsOutcome;
+
+    /// <summary>409 BOOKING_TRIP_NOT_BOOKABLE — at least one trip status ≠ SCHEDULED.</summary>
+    public sealed record TripNotBookable(string Message) : LockRoundTripSeatsOutcome;
+
+    /// <summary>404 TRIP_NOT_FOUND.</summary>
+    public sealed record TripNotFound(Guid TripId) : LockRoundTripSeatsOutcome;
+
+    /// <summary>Unexpected HTTP / transport error.</summary>
+    public sealed record TransportError(string Message) : LockRoundTripSeatsOutcome;
 }
 
 // ---------------------------------------------------------------------------
@@ -110,6 +145,21 @@ public interface ITripServiceClient
     Task<LockSeatsOutcome> LockSeatsAsync(
         Guid tripId,
         IReadOnlyList<string> seatNumbers,
+        Guid holdOwnerId,
+        string idempotencyKey,
+        int? ttlSeconds = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// POST /internal/v1/trips/round-trip/lock-seats — atomically holds seats for both
+    /// directions in one Trip-owned Redis Lua script. If either leg cannot be held, no
+    /// seats are retained and Booking receives a non-success outcome.
+    /// </summary>
+    Task<LockRoundTripSeatsOutcome> LockRoundTripSeatsAsync(
+        Guid outboundTripId,
+        IReadOnlyList<string> outboundSeatNumbers,
+        Guid returnTripId,
+        IReadOnlyList<string> returnSeatNumbers,
         Guid holdOwnerId,
         string idempotencyKey,
         int? ttlSeconds = null,

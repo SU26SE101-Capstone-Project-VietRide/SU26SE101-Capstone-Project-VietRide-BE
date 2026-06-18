@@ -164,6 +164,59 @@ public sealed class Booking : BaseEntity<Guid>
             throw new InvalidOperationException($"Booking is already in status {Status}; cannot set back to PENDING_PAYMENT.");
     }
 
+    /// <summary>
+    /// Changes the pickup target. Exactly one pickup station or pickup stop must be provided.
+    /// Only confirmed bookings may be edited.
+    /// </summary>
+    public void ChangePickup(Guid? pickupStationId, Guid? pickupStopId)
+    {
+        EnsureConfirmedForEdit();
+
+        if (CountProvided(pickupStationId, pickupStopId) != 1)
+            throw new ArgumentException("Exactly one of pickupStationId or pickupStopId must be provided.");
+
+        PickupStationId = pickupStationId;
+        PickupStopId = pickupStopId;
+    }
+
+    /// <summary>
+    /// Changes the dropoff target. At most one dropoff station or dropoff stop may be provided.
+    /// </summary>
+    public void ChangeDropoff(Guid? dropoffStationId, Guid? dropoffStopId)
+    {
+        EnsureConfirmedForEdit();
+
+        if (CountProvided(dropoffStationId, dropoffStopId) > 1)
+            throw new ArgumentException("At most one of dropoffStationId or dropoffStopId may be provided.");
+
+        DropoffStationId = dropoffStationId;
+        DropoffStopId = dropoffStopId;
+    }
+
+    /// <summary>
+    /// Links this booking to a round-trip display group and marks its trip direction.
+    /// </summary>
+    public void AssignRoundTripGroup(Guid bookingGroupId, TripDirection tripDirection)
+    {
+        if (bookingGroupId == Guid.Empty)
+            throw new ArgumentException("Booking group id must not be empty.", nameof(bookingGroupId));
+
+        if (!Enum.IsDefined(tripDirection))
+            throw new ArgumentOutOfRangeException(nameof(tripDirection), tripDirection, "Trip direction is invalid.");
+
+        BookingGroupId = bookingGroupId;
+        TripDirection = tripDirection;
+    }
+
+    private void EnsureConfirmedForEdit()
+    {
+        if (Status != BookingStatus.CONFIRMED)
+            throw new InvalidOperationException($"Cannot edit booking in status {Status}.");
+    }
+
+    private static int CountProvided(Guid? first, Guid? second)
+        => (first.HasValue ? 1 : 0) + (second.HasValue ? 1 : 0);
+
     /// <summary>Cancels the booking with the given reason.</summary>
     public void Cancel(BookingCancellationReason reason, DateTimeOffset cancelledAt, bool refundOverride = false)
     {

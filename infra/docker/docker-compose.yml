@@ -166,6 +166,7 @@ services:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_trip;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}'
+      REDIS_URL: 'redis:6379,abortConnect=false'
       IDENTITY_SERVICE_BASE_URL: http://identity:5001
     ports:
       - '${TRIP_PORT:-5002}:5002'
@@ -211,7 +212,18 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
-      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_payment;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}'
+      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_payment;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev};Search Path=vietride_payment,public'
+      REDIS_URL: redis:6379
+      RabbitMq__HostName: rabbitmq
+      RabbitMq__Port: '5672'
+      RabbitMq__UserName: ${RABBITMQ_USER:-vietride}
+      RabbitMq__Password: ${RABBITMQ_PASSWORD:-vietride_dev}
+      RabbitMq__ExchangeName: ${RABBITMQ_EXCHANGE:-vietride.events}
+      VNPAY_TMN_CODE: ${VNPAY_TMN_CODE:-sandbox-tmn-code}
+      VNPAY_HASH_SECRET: ${VNPAY_HASH_SECRET:-sandbox-hash-secret-for-local-dev-only}
+      VNPAY_BASE_URL: ${VNPAY_PAYMENT_URL:-https://sandbox.vnpayment.vn/paymentv2/vpcpay.html}
+      VNPAY_RETURN_URL: ${VNPAY_RETURN_URL:-https://app.vietride.app/payments/return}
+      VNPAY_IPN_URL: ${VNPAY_IPN_URL:-http://gateway:3000/v1/payments/vnpay-topup-ipn}
     ports:
       - '${PAYMENT_PORT:-5004}:5004'
     healthcheck:
@@ -329,14 +341,17 @@ services:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 3002
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      DATABASE_URL: 'postgresql://${POSTGRES_USER:-vietride}:${POSTGRES_PASSWORD:-vietride_dev}@postgres:5432/${NOTIFICATION_DB:-vietride_notification}'
       REDIS_HOST: redis
       REDIS_PORT: 6379
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: '5672'
       RABBITMQ_USER: ${RABBITMQ_USER:-vietride}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-vietride_dev}
-      RABBITMQ_EXCHANGE: vietride.events
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-vietride.events}
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
       rabbitmq:

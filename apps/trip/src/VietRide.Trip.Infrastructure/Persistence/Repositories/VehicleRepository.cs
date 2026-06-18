@@ -18,7 +18,7 @@ internal sealed class VehicleRepository : IVehicleRepository
             total_seats,
             max_cargo_weight_kg,
             max_cargo_volume_m3,
-            status::text AS status,
+            status,
             is_active,
             deleted_at,
             created_at,

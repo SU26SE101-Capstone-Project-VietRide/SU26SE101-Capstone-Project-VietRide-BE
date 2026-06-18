@@ -1,12 +1,19 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using StackExchange.Redis;
 using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Http.Resilience;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
+using VietRide.Trip.Application.Abstractions.Jobs;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.SeatLock;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Infrastructure.ExternalClients;
+using VietRide.Trip.Infrastructure.Jobs;
 using VietRide.Trip.Infrastructure.Persistence.Repositories;
+using VietRide.Trip.Infrastructure.SeatLock;
+using VietRide.Trip.Infrastructure.SeatLocks;
 
 namespace VietRide.Trip.Infrastructure.DependencyInjection;
 
@@ -32,6 +39,34 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IVehicleTypeRepository, VehicleTypeRepository>();
         services.AddScoped<IVehicleRepository, VehicleRepository>();
         services.AddScoped<IDriverScheduleRepository, DriverScheduleRepository>();
+        services.AddScoped<ITripRepository, TripRepository>();
+        services.AddScoped<IRoundTripSeatLockStore, RedisRoundTripSeatLockStore>();
+        services.AddScoped<ITripSeatRepository, TripSeatRepository>();
+        services.AddScoped<ITripStopRepository, TripStopRepository>();
+        services.AddScoped<ITripStopFareRepository, TripStopFareRepository>();
+        services.AddScoped<ITripGenerationSkipLogRepository, TripGenerationSkipLogRepository>();
+        services.AddScoped<ITripGenerationJobScheduler, HangfireTripGenerationJobScheduler>();
+
+        var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
+            ?? Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+        if (!string.Equals(environment, "Testing", StringComparison.OrdinalIgnoreCase))
+        {
+            services.AddHostedService<TripGenerationRecurringJobRegistrationHostedService>();
+        }
+
+        var redisUrl = configuration["REDIS_URL"]
+            ?? Environment.GetEnvironmentVariable("REDIS_URL")
+            ?? "localhost:6379";
+        var redisOptions = ConfigurationOptions.Parse(redisUrl);
+        redisOptions.AbortOnConnectFail = false;
+        services.AddSingleton<IConnectionMultiplexer>(_ =>
+            ConnectionMultiplexer.Connect(redisOptions));
+        services.AddSingleton<ISeatLockTtlProvider, SeatLockTtlProvider>();
+        services.AddSingleton<ISeatLockStore, RedisSeatLockStore>();
+        services.AddSingleton<ISeatLockIdempotencyStore, RedisSeatLockIdempotencyStore>();
+        services.AddScoped<IExpiredSeatLockReleaser, ExpiredSeatLockReleaser>();
+
+        services.AddTripHangfire(configuration);
 
         services.AddSingleton<IInternalJwtTokenProvider, InternalJwtTokenFactory>();
         services.AddHttpContextAccessor();
@@ -70,4 +105,5 @@ public static class InfrastructureServiceCollectionExtensions
 
         return baseUrl;
     }
+
 }

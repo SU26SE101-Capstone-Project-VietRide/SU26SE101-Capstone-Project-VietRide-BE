@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Conventions;
+using Npgsql;
+using Npgsql.NameTranslation;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Persistence;
 using VietRide.Trip.Domain.Entities;
@@ -11,9 +13,22 @@ public sealed class TripDbContext : VietRideDbContextBase
 {
     public const string SchemaName = "vietride_trip";
 
+    private static readonly INpgsqlNameTranslator PostgresEnumNameTranslator = new NpgsqlNullNameTranslator();
+
     public TripDbContext(DbContextOptions<TripDbContext> options, IClock clock)
         : base(options, clock)
     {
+    }
+
+    public static void ConfigurePostgresEnums(NpgsqlDataSourceBuilder builder)
+    {
+        builder.MapEnum<TripStatus>("trip_status", PostgresEnumNameTranslator);
+        builder.MapEnum<TripSource>("trip_source", PostgresEnumNameTranslator);
+        builder.MapEnum<TripSeatStatus>("trip_seat_status", PostgresEnumNameTranslator);
+        builder.MapEnum<TripSeatType>("trip_seat_type", PostgresEnumNameTranslator);
+        builder.MapEnum<TripStopStatus>("trip_stop_status", PostgresEnumNameTranslator);
+        builder.MapEnum<TripGenerationSkipReason>("trip_generation_skip_reason", PostgresEnumNameTranslator);
+        builder.MapEnum<VehicleStatus>("vehicle_status", PostgresEnumNameTranslator);
     }
 
     public DbSet<Station> Stations => Set<Station>();
@@ -38,6 +53,16 @@ public sealed class TripDbContext : VietRideDbContextBase
 
     public DbSet<DriverSchedule> DriverSchedules => Set<DriverSchedule>();
 
+    public DbSet<Domain.Entities.Trip> Trips => Set<Domain.Entities.Trip>();
+
+    public DbSet<TripSeat> TripSeats => Set<TripSeat>();
+
+    public DbSet<TripStop> TripStops => Set<TripStop>();
+
+    public DbSet<TripStopFare> TripStopFares => Set<TripStopFare>();
+
+    public DbSet<TripGenerationSkipLog> TripGenerationSkipLogs => Set<TripGenerationSkipLog>();
+
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
         configurationBuilder.Conventions.Remove(typeof(ForeignKeyIndexConvention));
@@ -47,12 +72,21 @@ public sealed class TripDbContext : VietRideDbContextBase
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema(SchemaName);
+        modelBuilder.HasPostgresEnum("trip_status", new[] { "SCHEDULED", "BOARDING", "IN_PROGRESS", "COMPLETED", "CANCELLED", "DISRUPTED" });
+        modelBuilder.HasPostgresEnum("trip_source", new[] { "MANUAL", "AUTO_FROM_SCHEDULE", "VEHICLE_SUBSTITUTION" });
+        modelBuilder.HasPostgresEnum("trip_seat_status", new[] { "AVAILABLE", "HELD", "BOOKED", "UNAVAILABLE" });
+        modelBuilder.HasPostgresEnum("trip_seat_type", new[] { "STANDARD", "SLEEPER_LOWER", "SLEEPER_UPPER", "VIP", "DRIVER_AREA" });
+        modelBuilder.HasPostgresEnum("trip_stop_status", new[] { "PENDING", "ARRIVED", "SKIPPED" });
+        modelBuilder.HasPostgresEnum("trip_generation_skip_reason", new[] { "SUBSCRIPTION_LIMIT_EXCEEDED", "VEHICLE_CONFLICT", "DRIVER_CONFLICT", "OTHER" });
+        modelBuilder.HasPostgresEnum("vehicle_status", new[] { "ACTIVE", "MAINTENANCE", "OFF_DUTY", "RETIRED" });
         base.OnModelCreating(modelBuilder);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(TripDbContext).Assembly);
         RemoveConventionIndex<Route>(modelBuilder, nameof(Route.DestinationStationId));
         RemoveConventionIndex<RouteStopFareTemplate>(modelBuilder, nameof(RouteStopFareTemplate.StopId));
         RemoveConventionIndex<AlternativeRoute>(modelBuilder, nameof(AlternativeRoute.DestinationStationId));
         RemoveConventionIndex<AlternativeRouteStop>(modelBuilder, nameof(AlternativeRouteStop.StopId));
+        RemoveConventionIndex<Domain.Entities.Trip>(modelBuilder, nameof(Domain.Entities.Trip.RouteId));
+        RemoveConventionIndex<Domain.Entities.Trip>(modelBuilder, nameof(Domain.Entities.Trip.VehicleId));
     }
 
     private static void RemoveConventionIndex<TEntity>(ModelBuilder modelBuilder, string propertyName)

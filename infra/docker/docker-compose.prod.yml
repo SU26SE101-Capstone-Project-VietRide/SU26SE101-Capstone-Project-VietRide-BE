@@ -33,7 +33,10 @@ x-dotnet-common: &dotnet-common
 services:
   # ── Infrastructure ──────────────────────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine
+    # pgvector image (Debian-based, same PG16 major) ships the `vector` extension that
+    # the rag service's baseline migration requires (halfvec/pgvector). Same major
+    # version as the previous postgres:16-alpine, so the existing data volume is reused.
+    image: pgvector/pgvector:pg16
     container_name: vietride_postgres
     restart: unless-stopped
     environment:
@@ -166,7 +169,17 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
-      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_payment;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD}'
+      # Search Path is REQUIRED: payment's outbox queries reference the
+      # `outbox_event_status` enum unqualified, which lives in the vietride_payment schema.
+      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_payment;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD};Search Path=vietride_payment,public'
+      REDIS_URL: redis:6379
+      # Payment runs the outbox publisher + RabbitMQ consumers — without these it dials
+      # the default localhost:5672 and crashes the host on boot (BrokerUnreachable).
+      RabbitMq__HostName: rabbitmq
+      RabbitMq__Port: '5672'
+      RabbitMq__UserName: ${RABBITMQ_USER:-vietride}
+      RabbitMq__Password: ${RABBITMQ_PASSWORD}
+      RabbitMq__ExchangeName: ${RABBITMQ_EXCHANGE:-vietride.events}
       VNPAY_TMN_CODE: ${VNPAY_TMN_CODE}
       VNPAY_HASH_SECRET: ${VNPAY_HASH_SECRET}
       VNPAY_PAYMENT_URL: ${VNPAY_PAYMENT_URL}
@@ -208,9 +221,9 @@ services:
       BOOKING_BASE_URL: http://booking:5003
       PAYMENT_BASE_URL: http://payment:5004
       PARCEL_BASE_URL: http://parcel:5005
-      # TRACKING_BASE_URL: http://tracking:3001       # enable when tracking image exists
-      # NOTIFICATION_BASE_URL: http://notification:3002
-      # RAG_BASE_URL: http://rag:3003
+      TRACKING_BASE_URL: http://tracking:3001
+      NOTIFICATION_BASE_URL: http://notification:3002
+      RAG_BASE_URL: http://rag:3003
       REDIS_HOST: redis
       REDIS_PORT: 6379
     depends_on:
@@ -233,24 +246,110 @@ services:
       retries: 5
       start_period: 60s
 
-  # ── tracking / notification / rag — enable once their GHCR images are published.
-  # tracking:
-  #   image: ${IMAGE_PREFIX}-tracking:${IMAGE_TAG:-latest}
-  #   container_name: vietride_tracking
-  #   restart: unless-stopped
-  #   environment:
-  #     NODE_ENV: production
-  #     PORT: 3001
-  #     INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
-  #     DATABASE_URL: 'postgresql://${POSTGRES_USER:-vietride}:${POSTGRES_PASSWORD}@postgres:5432/${TRACKING_DB:-vietride_tracking}'
-  #     REDIS_HOST: redis
-  #     REDIS_PORT: 6379
-  #     RABBITMQ_URL: 'amqp://${RABBITMQ_USER:-vietride}:${RABBITMQ_PASSWORD}@rabbitmq:5672'
-  #     RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-vietride.events}
-  #   depends_on:
-  #     postgres: { condition: service_healthy }
-  #     redis: { condition: service_healthy }
-  #     rabbitmq: { condition: service_healthy }
+  # ── NestJS Prisma services ──────────────────────────────────────────────────
+  tracking:
+    image: ${IMAGE_PREFIX}-tracking:${IMAGE_TAG:-latest}
+    container_name: vietride_tracking
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      DATABASE_URL: 'postgresql://${POSTGRES_USER:-vietride}:${POSTGRES_PASSWORD}@postgres:5432/${TRACKING_DB:-vietride_tracking}'
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      RABBITMQ_URL: 'amqp://${RABBITMQ_USER:-vietride}:${RABBITMQ_PASSWORD}@rabbitmq:5672'
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-vietride.events}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://127.0.0.1:3001/health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  notification:
+    image: ${IMAGE_PREFIX}-notification:${IMAGE_TAG:-latest}
+    container_name: vietride_notification
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      DATABASE_URL: 'postgresql://${POSTGRES_USER:-vietride}:${POSTGRES_PASSWORD}@postgres:5432/${NOTIFICATION_DB:-vietride_notification}'
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      RABBITMQ_URL: 'amqp://${RABBITMQ_USER:-vietride}:${RABBITMQ_PASSWORD}@rabbitmq:5672'
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-vietride.events}
+      # Optional — push (FCM) + email (SendGrid). Left unset, the service stays healthy
+      # but those deliveries are skipped. Add the keys to /opt/vietride/.env to enable.
+      FCM_PROJECT_ID: ${FCM_PROJECT_ID:-}
+      FCM_CLIENT_EMAIL: ${FCM_CLIENT_EMAIL:-}
+      FCM_PRIVATE_KEY: ${FCM_PRIVATE_KEY:-}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL:-}
+      SENDGRID_FROM_NAME: ${SENDGRID_FROM_NAME:-VietRide}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://127.0.0.1:3002/health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  # rag REQUIRES OPENROUTER_API_KEY + CLOUDINARY_* in /opt/vietride/.env — it crashes on
+  # boot without them (env schema marks them required). Its baseline Prisma migration
+  # creates the pgvector `vector` extension, which is why postgres uses the pgvector image.
+  rag:
+    image: ${IMAGE_PREFIX}-rag:${IMAGE_TAG:-latest}
+    container_name: vietride_rag
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3003
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      DATABASE_URL: 'postgresql://${POSTGRES_USER:-vietride}:${POSTGRES_PASSWORD}@postgres:5432/${RAG_DB:-vietride_rag}'
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      RABBITMQ_URL: 'amqp://${RABBITMQ_USER:-vietride}:${RABBITMQ_PASSWORD}@rabbitmq:5672'
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-vietride.events}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      OPENROUTER_CHAT_MODEL: ${OPENROUTER_CHAT_MODEL:-nex-agi/nex-n2-pro:free}
+      OPENROUTER_EMBEDDING_MODEL: ${OPENROUTER_EMBEDDING_MODEL:-nvidia/llama-nemotron-embed-vl-1b-v2:free}
+      OPENROUTER_HTTP_REFERER: ${OPENROUTER_HTTP_REFERER:-}
+      OPENROUTER_APP_TITLE: ${OPENROUTER_APP_TITLE:-VietRide RAG}
+      OPENROUTER_ALLOW_PAID_FALLBACK: ${OPENROUTER_ALLOW_PAID_FALLBACK:-false}
+      RAG_EMBEDDING_DIMENSIONS: ${RAG_EMBEDDING_DIMENSIONS:-auto}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
+      CLOUDINARY_RAG_FOLDER: ${CLOUDINARY_RAG_FOLDER:-rag/documents}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://127.0.0.1:3003/health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
   # ── Edge: Nginx (internal reverse proxy — NO host port) ─────────────────────
   # Not published to the host. Cloudflare Tunnel reaches it over the docker network

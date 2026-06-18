@@ -62,6 +62,12 @@ internal sealed class BookingRepository : IBookingRepository
     }
 
     /// <inheritdoc/>
+    public async Task<BookingEntity?> FindByIdAsync(
+        Guid bookingId,
+        CancellationToken ct = default)
+        => await _db.Bookings.FirstOrDefaultAsync(b => b.Id == bookingId, ct);
+
+    /// <inheritdoc/>
     public async Task<BookingEntity?> FindByIdWithPassengersAsync(
         Guid bookingId,
         CancellationToken ct = default)

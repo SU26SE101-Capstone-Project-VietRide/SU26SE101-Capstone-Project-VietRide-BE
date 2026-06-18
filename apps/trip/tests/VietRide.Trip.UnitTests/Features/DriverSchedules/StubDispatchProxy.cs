@@ -37,6 +37,10 @@ internal class StubDispatchProxy<T> : DispatchProxy
         callCounts[targetMethod.Name] = CallCount(targetMethod.Name) + 1;
         lastArguments[targetMethod.Name] = args;
         results.TryGetValue(targetMethod.Name, out var configuredResult);
+        if (configuredResult is Func<object?[]?, object?> resultFactory)
+        {
+            configuredResult = resultFactory(args);
+        }
 
         if (targetMethod.ReturnType == typeof(Task))
         {

@@ -1,6 +1,14 @@
+using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
+using StackExchange.Redis;
+using VietRide.Payment.Application;
+using VietRide.Payment.Application.Features.Internal.Payments.BatchChargePayment;
 using VietRide.Payment.Infrastructure;
+using VietRide.Payment.Infrastructure.DependencyInjection;
+using VietRide.Payment.Infrastructure.Jobs;
+using VietRide.Shared.Application.DependencyInjection;
+using VietRide.Shared.Messaging.DependencyInjection;
 using VietRide.Shared.Persistence.DependencyInjection;
 using VietRide.Shared.Web.DependencyInjection;
 using VietRide.Shared.Web.Health;
@@ -18,7 +26,34 @@ builder.Host.UseSerilog((ctx, _, lc) => lc
     .WriteTo.Console());
 
 builder.Services.AddVietRideSharedWeb(builder.Configuration, ServiceName);
-builder.Services.AddVietRideDbContext<PaymentDbContext>(builder.Configuration);
+builder.Services.AddVietRideDbContext<PaymentDbContext>(
+    builder.Configuration,
+    configureDataSource: PaymentDbContext.ConfigurePostgresTypes);
+builder.Services.AddVietRideMediatRBehaviors(
+    handlerAssemblies:
+    [
+        typeof(ApplicationAssemblyMarker).Assembly,
+        typeof(BatchChargePaymentCommandHandler).Assembly,
+    ]);
+builder.Services.AddScoped<IBatchChargePaymentDbContext>(sp => sp.GetRequiredService<PaymentDbContext>());
+
+var registerMessaging = !builder.Environment.IsEnvironment("Testing");
+if (registerMessaging)
+{
+    builder.Services.AddVietRideMessaging(builder.Configuration);
+    builder.Services.AddPaymentHangfire(builder.Configuration);
+    builder.Services.AddHangfireServer();
+}
+
+var redisUrl = builder.Configuration["REDIS_URL"]
+    ?? Environment.GetEnvironmentVariable("REDIS_URL")
+    ?? "localhost:6379";
+var redisOptions = ConfigurationOptions.Parse(redisUrl);
+redisOptions.AbortOnConnectFail = false;
+builder.Services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(redisOptions));
+
+builder.Services.AddInfrastructure(builder.Configuration, registerConsumers: registerMessaging);
+builder.Services.AddVietRideIdempotency("payment");
 
 var app = builder.Build();
 
@@ -32,8 +67,19 @@ app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseVietRideSwagger();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseVietRideIdempotency();
 app.MapVietRideHealth(ServiceName);
 app.MapControllers();
+
+if (registerMessaging)
+{
+    using var scope = app.Services.CreateScope();
+    var recurringJobs = scope.ServiceProvider.GetRequiredService<IRecurringJobManager>();
+    recurringJobs.AddOrUpdate<TopUpExpiredJob>(
+        TopUpExpiredJob.RecurringJobId,
+        job => job.RunAsync(CancellationToken.None),
+        Cron.Minutely());
+}
 
 app.Run();
 

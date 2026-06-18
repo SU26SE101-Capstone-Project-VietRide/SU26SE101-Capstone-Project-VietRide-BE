@@ -103,6 +103,59 @@ public sealed class TripServiceClient : ITripServiceClient
     }
 
     /// <inheritdoc/>
+    public async Task<LockRoundTripSeatsOutcome> LockRoundTripSeatsAsync(
+        Guid outboundTripId,
+        IReadOnlyList<string> outboundSeatNumbers,
+        Guid returnTripId,
+        IReadOnlyList<string> returnSeatNumbers,
+        Guid holdOwnerId,
+        string idempotencyKey,
+        int? ttlSeconds = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var body = new LockRoundTripSeatsRequest(
+                new LockRoundTripLegRequest(outboundTripId, outboundSeatNumbers),
+                new LockRoundTripLegRequest(returnTripId, returnSeatNumbers),
+                holdOwnerId,
+                ttlSeconds);
+
+            using var request = BuildJsonRequest(
+                HttpMethod.Post,
+                "/internal/v1/trips/round-trip/lock-seats",
+                body,
+                idempotencyKey);
+
+            using var response = await _httpClient.SendAsync(request, cancellationToken)
+                .ConfigureAwait(false);
+
+            return response.StatusCode switch
+            {
+                HttpStatusCode.OK => await ReadRoundTripLockSuccessAsync(response, cancellationToken)
+                    .ConfigureAwait(false),
+
+                HttpStatusCode.NotFound => new LockRoundTripSeatsOutcome.TripNotFound(Guid.Empty),
+
+                HttpStatusCode.Conflict => await ReadRoundTripLockConflictAsync(response, cancellationToken)
+                    .ConfigureAwait(false),
+
+                _ => new LockRoundTripSeatsOutcome.TransportError(
+                    $"Trip service returned unexpected status {(int)response.StatusCode} for round-trip lock."),
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return new LockRoundTripSeatsOutcome.TransportError(
+                $"Trip service round-trip lock transport failure: {ex.Message}");
+        }
+    }
+
+    /// <inheritdoc/>
     public async Task<bool> BookSeatsAsync(
         Guid tripId,
         Guid seatLockToken,
@@ -242,9 +295,7 @@ public sealed class TripServiceClient : ITripServiceClient
             {
                 var fields = envelope?.Error?.Fields?
                     .Where(f => f.Field == "seatNumbers")
-                    .SelectMany(f => f.Value is System.Text.Json.JsonElement el
-                        ? el.EnumerateArray().Select(e => e.GetString() ?? string.Empty)
-                        : [])
+                    .SelectMany(ExtractSeatNumbers)
                     .ToList() ?? [];
 
                 return new LockSeatsOutcome.SeatUnavailable(fields);
@@ -259,6 +310,88 @@ public sealed class TripServiceClient : ITripServiceClient
         }
     }
 
+    private static async Task<LockRoundTripSeatsOutcome> ReadRoundTripLockSuccessAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        var envelope = await response.Content
+            .ReadFromJsonAsync<ApiEnvelope<RoundTripLockSeatsData>>(JsonOptions, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (envelope?.Data is null)
+            return new LockRoundTripSeatsOutcome.TransportError("Trip round-trip lock returned null data.");
+
+        return new LockRoundTripSeatsOutcome.Success(
+            ToRoundTripSeatLockResult(envelope.Data.Outbound),
+            ToRoundTripSeatLockResult(envelope.Data.Return));
+    }
+
+    private static async Task<LockRoundTripSeatsOutcome> ReadRoundTripLockConflictAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var envelope = await response.Content
+                .ReadFromJsonAsync<ApiErrorEnvelope>(JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+
+            var code = envelope?.Error?.Code ?? string.Empty;
+            if (string.Equals(code, "BOOKING_SEAT_UNAVAILABLE", StringComparison.OrdinalIgnoreCase))
+            {
+                var fields = envelope?.Error?.Fields?
+                    .Where(f => f.Field == "seatNumbers")
+                    .SelectMany(ExtractSeatNumbers)
+                    .ToList() ?? [];
+
+                return new LockRoundTripSeatsOutcome.SeatUnavailable(fields);
+            }
+
+            return new LockRoundTripSeatsOutcome.TripNotBookable(
+                envelope?.Error?.Message ?? "One of the trips is not bookable.");
+        }
+        catch
+        {
+            return new LockRoundTripSeatsOutcome.TripNotBookable("One of the trips is not bookable.");
+        }
+    }
+
+    private static RoundTripSeatLockResult ToRoundTripSeatLockResult(RoundTripLockSeatData data)
+        => new(data.TripId, data.SeatLockToken, data.LockedSeats, data.ExpiresAt);
+
+    private static IEnumerable<string> ExtractSeatNumbers(ApiErrorField field)
+    {
+        if (!string.IsNullOrWhiteSpace(field.Message))
+        {
+            yield return field.Message;
+        }
+
+        if (field.Value is not JsonElement element)
+        {
+            yield break;
+        }
+
+        if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var value in element.EnumerateArray())
+            {
+                var seatNumber = value.GetString();
+                if (!string.IsNullOrWhiteSpace(seatNumber))
+                {
+                    yield return seatNumber;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.String)
+        {
+            var seatNumber = element.GetString();
+            if (!string.IsNullOrWhiteSpace(seatNumber))
+            {
+                yield return seatNumber;
+            }
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Internal request / response DTOs (not exposed past this file)
     // -----------------------------------------------------------------------
@@ -267,6 +400,14 @@ public sealed class TripServiceClient : ITripServiceClient
         IReadOnlyList<string> SeatNumbers,
         Guid HoldOwnerId,
         int? TtlSeconds);
+
+    private sealed record LockRoundTripSeatsRequest(
+        LockRoundTripLegRequest Outbound,
+        LockRoundTripLegRequest Return,
+        Guid HoldOwnerId,
+        int? TtlSeconds);
+
+    private sealed record LockRoundTripLegRequest(Guid TripId, IReadOnlyList<string> SeatNumbers);
 
     private sealed record BookSeatsRequest(
         Guid SeatLockToken,
@@ -287,10 +428,20 @@ public sealed class TripServiceClient : ITripServiceClient
 
     private sealed record ApiErrorBody(string Code, string Message, IReadOnlyList<ApiErrorField>? Fields);
 
-    private sealed record ApiErrorField(string Field, object? Value);
+    private sealed record ApiErrorField(string Field, string? Message, object? Value);
 
     // Lock-seats data payload
     private sealed record LockSeatsData(
+        Guid SeatLockToken,
+        IReadOnlyList<string> LockedSeats,
+        DateTimeOffset ExpiresAt);
+
+    private sealed record RoundTripLockSeatsData(
+        RoundTripLockSeatData Outbound,
+        RoundTripLockSeatData Return);
+
+    private sealed record RoundTripLockSeatData(
+        Guid TripId,
         Guid SeatLockToken,
         IReadOnlyList<string> LockedSeats,
         DateTimeOffset ExpiresAt);

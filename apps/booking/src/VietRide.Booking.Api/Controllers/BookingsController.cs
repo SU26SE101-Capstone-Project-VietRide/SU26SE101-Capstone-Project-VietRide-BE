@@ -4,6 +4,9 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Booking.Api.Controllers.Requests;
 using VietRide.Booking.Application.Features.Bookings.CreateBooking;
+using VietRide.Booking.Application.Features.Bookings.CreateRoundTripBooking;
+using VietRide.Booking.Application.Features.Bookings.EditDropoff;
+using VietRide.Booking.Application.Features.Bookings.EditPickup;
 using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Booking.Api.Controllers;
@@ -19,6 +22,7 @@ namespace VietRide.Booking.Api.Controllers;
 public sealed class BookingsController : ControllerBase
 {
     private const string PassengerRole = "PASSENGER";
+    private const string IdempotencyKeyHeader = "Idempotency-Key";
 
     private readonly ISender _sender;
 
@@ -72,9 +76,139 @@ public sealed class BookingsController : ControllerBase
         return StatusCode(StatusCodes.Status201Created, result);
     }
 
+    /// <summary>Create a round-trip booking as two independent linked booking rows.</summary>
+    /// <remarks>
+    /// Auth: PASSENGER (RS256 user token via JWKS).
+    /// Idempotency-Key header required.
+    /// WALLET uses one all-or-nothing batch charge for both BOOKING references.
+    /// VNPay may use one BOOKING_GROUP redirect.
+    /// </remarks>
+    [HttpPost("round-trip")]
+    [Authorize(Roles = PassengerRole)]
+    [ProducesResponseType(typeof(ApiResponse<CreateRoundTripBookingResult>), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> CreateRoundTripBooking(
+        [FromBody] CreateRoundTripBookingRequest request,
+        CancellationToken ct)
+    {
+        var passengerUserId = GetPassengerUserId();
+        var idempotencyKey = GetRequiredIdempotencyKey();
+
+        var command = new CreateRoundTripBookingCommand(
+            passengerUserId,
+            idempotencyKey,
+            ToCommandLeg(request.Outbound),
+            ToCommandLeg(request.Return),
+            request.VoucherCode,
+            request.PaymentMethod);
+
+        var result = await _sender.Send(command, ct);
+
+        return StatusCode(StatusCodes.Status201Created, result);
+    }
+
+    /// <summary>Edit pickup before cutoff with price-neutral-only policy.</summary>
+    /// <remarks>
+    /// Auth: PASSENGER (booking owner only).
+    /// Idempotency-Key header required.
+    /// Any fare difference is rejected with BOOKING_EDIT_PICKUP_PRICE_CHANGED.
+    /// </remarks>
+    [HttpPost("{bookingId:guid}/edit-pickup")]
+    [Authorize(Roles = PassengerRole)]
+    [ProducesResponseType(typeof(ApiResponse<EditPickupResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> EditPickup(
+        [FromRoute] Guid bookingId,
+        [FromBody] EditPickupRequest request,
+        CancellationToken ct)
+    {
+        var passengerUserId = GetPassengerUserId();
+        var idempotencyKey = GetRequiredIdempotencyKey();
+
+        var command = new EditPickupCommand(
+            BookingId: bookingId,
+            PassengerUserId: passengerUserId,
+            IdempotencyKey: idempotencyKey,
+            PickupStationId: request.Pickup?.StationId,
+            PickupStopId: request.Pickup?.StopId,
+            PaymentMethod: request.PaymentMethod);
+
+        var result = await _sender.Send(command, ct);
+
+        return StatusCode(StatusCodes.Status200OK, result);
+    }
+
+    /// <summary>Edit dropoff before cutoff without repricing.</summary>
+    /// <remarks>
+    /// Auth: PASSENGER (booking owner only).
+    /// Idempotency-Key header required.
+    /// Dropoff-stop edits validate route membership, allowDropoff, and stop order.
+    /// </remarks>
+    [HttpPost("{bookingId:guid}/edit-dropoff")]
+    [Authorize(Roles = PassengerRole)]
+    [ProducesResponseType(typeof(ApiResponse<EditDropoffResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> EditDropoff(
+        [FromRoute] Guid bookingId,
+        [FromBody] EditDropoffRequest request,
+        CancellationToken ct)
+    {
+        var passengerUserId = GetPassengerUserId();
+        var idempotencyKey = GetRequiredIdempotencyKey();
+
+        var command = new EditDropoffCommand(
+            BookingId: bookingId,
+            PassengerUserId: passengerUserId,
+            IdempotencyKey: idempotencyKey,
+            DropoffStationId: request.Dropoff?.StationId,
+            DropoffStopId: request.Dropoff?.StopId);
+
+        var result = await _sender.Send(command, ct);
+
+        return StatusCode(StatusCodes.Status200OK, result);
+    }
+
     // -----------------------------------------------------------------------
     // Private helpers
     // -----------------------------------------------------------------------
+
+    private static CreateRoundTripBookingCommand.RoundTripBookingLegCommand ToCommandLeg(CreateRoundTripBookingRequest.RoundTripBookingLegRequest leg)
+        => new(
+            TripId: leg.TripId,
+            PickupStationId: leg.Pickup?.StationId,
+            PickupStopId: leg.Pickup?.StopId,
+            DropoffStationId: leg.Dropoff?.StationId,
+            DropoffStopId: leg.Dropoff?.StopId,
+            Seats: leg.Seats
+                .Select(s => new CreateRoundTripBookingCommand.RoundTripSeatRequest(
+                    s.SeatNumber,
+                    s.Passenger.FullName,
+                    s.Passenger.PhoneNumber,
+                    s.Passenger.IdNumber))
+                .ToList());
+
+    private string GetRequiredIdempotencyKey()
+    {
+        var value = Request.Headers.TryGetValue(IdempotencyKeyHeader, out var values)
+            ? values.ToString()
+            : string.Empty;
+
+        if (string.IsNullOrWhiteSpace(value))
+            throw new VietRide.Shared.Application.Exceptions.CodedValidationException("VALIDATION_ERROR", "Idempotency-Key header is required.");
+
+        return value;
+    }
 
     private Guid GetPassengerUserId()
     {

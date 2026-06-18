@@ -119,7 +119,12 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     },
 
     // Trip / Vehicle
-    { prefix: '/v1/trips', target: env.TRIP_BASE_URL, authRequired: 'user' },
+    {
+      prefix: '/v1/trips',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'mixed',
+      publicSubpaths: [{ method: 'GET', path: '/v1/trips/search' }],
+    },
     { prefix: '/v1/routes', target: env.TRIP_BASE_URL, authRequired: 'user' },
     {
       prefix: '/v1/stations',
