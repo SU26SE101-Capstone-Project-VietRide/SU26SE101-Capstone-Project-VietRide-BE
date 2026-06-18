@@ -79,6 +79,19 @@ internal sealed class UserRepository : IUserRepository
         return PagedResult<User>.Create(items, options.Page, options.PageSize, totalItems);
     }
 
+    public async Task<IReadOnlyList<Guid>> ListActiveOperatorAdminIdsAsync(
+        Guid operatorId,
+        CancellationToken ct = default)
+        => await _db.Users
+            .AsNoTracking()
+            .Where(u =>
+                u.OperatorId == operatorId
+                && u.Role == UserRole.OPERATOR_ADMIN
+                && u.Status == UserStatus.ACTIVE)
+            .OrderBy(u => u.Id)
+            .Select(u => u.Id)
+            .ToListAsync(ct);
+
     public async Task<User> AddAsync(User entity, CancellationToken ct)
     {
         await _db.Users.AddAsync(entity, ct);
