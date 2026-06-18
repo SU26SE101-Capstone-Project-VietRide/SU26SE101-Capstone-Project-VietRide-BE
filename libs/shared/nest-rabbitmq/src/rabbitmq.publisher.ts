@@ -28,6 +28,8 @@ export class RabbitMqPublisher implements OnModuleDestroy {
   async publish(routingKey: string, payload: unknown, headers: Record<string, string> = {}): Promise<void> {
     const ch = await this.getChannel();
     const body = Buffer.from(JSON.stringify(payload));
+    const messageId = headers['eventId'];
+    const correlationId = headers['correlationId'];
     await new Promise<void>((resolve, reject) => {
       ch.publish(
         this.opts.exchange,
@@ -37,6 +39,8 @@ export class RabbitMqPublisher implements OnModuleDestroy {
           contentType: 'application/json',
           persistent: true,
           headers,
+          ...(messageId ? { messageId } : {}),
+          ...(correlationId ? { correlationId } : {}),
         },
         (err) => (err ? reject(err) : resolve()),
       );
