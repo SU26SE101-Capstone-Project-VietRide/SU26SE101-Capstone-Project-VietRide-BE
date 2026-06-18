@@ -60,7 +60,7 @@ export class DocumentsService {
       body: validFile.buffer,
     });
 
-    const document = await this.documentsRepository.create({
+    const document = await this.documentsRepository.createApproved({
       title: dto.title,
       storagePath,
       fileName: this.sanitizeFileName(validFile.originalname),
@@ -73,6 +73,7 @@ export class DocumentsService {
       audienceRoles: dto.audienceRoles,
       language: dto.language,
       uploadedByUserId: user.sub,
+      approvedByUserId: user.sub,
       ...(dto.description ? { description: dto.description } : {}),
       ...(dto.operatorId ? { operatorId: dto.operatorId } : {}),
     });
@@ -81,7 +82,7 @@ export class DocumentsService {
       expiresInSeconds: RAG_DOCUMENT_PREVIEW_URL_TTL_SECONDS,
     });
 
-    logger.info({ documentId: document.id }, 'RAG document uploaded');
+    logger.info({ documentId: document.id }, 'RAG document uploaded and ingest requested');
     return toKnowledgeDocumentResponse(document, previewUrl);
   }
 

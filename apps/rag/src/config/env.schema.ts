@@ -15,6 +15,7 @@ const optionalNonEmptyString = z.preprocess((value) => {
 export const envSchema = baseEnvSchema.merge(
   z.object({
     PORT: z.coerce.number().int().positive().default(3003),
+    RAG_DATABASE_URL: z.string().url().optional(),
     DATABASE_URL: z.string().url(),
     REDIS_URL: z.string().url(),
     RABBITMQ_URL: z.string().url(),
@@ -54,6 +55,12 @@ export const envSchema = baseEnvSchema.merge(
 export type Env = z.infer<typeof envSchema>;
 
 export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
+  const normalizedRaw = {
+    ...raw,
+    SENTRY_DSN: raw.SENTRY_DSN === '' ? undefined : raw.SENTRY_DSN,
+    INTERNAL_JWT_SECRET: raw.INTERNAL_JWT_SECRET === '' ? undefined : raw.INTERNAL_JWT_SECRET,
+    RAG_DATABASE_URL: raw.RAG_DATABASE_URL === '' ? undefined : raw.RAG_DATABASE_URL,
+  };
   const postgresHost = raw.POSTGRES_HOST;
   const postgresPort = raw.POSTGRES_PORT;
   const postgresUser = raw.POSTGRES_USER;
@@ -66,6 +73,7 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
   const rabbitUser = raw.RABBITMQ_USER;
   const rabbitPassword = raw.RABBITMQ_PASSWORD;
   const databaseUrl =
+    raw.RAG_DATABASE_URL ??
     raw.DATABASE_URL ??
     (postgresHost && postgresPort && postgresUser && postgresPassword
       ? `postgresql://${postgresUser}:${postgresPassword}@${postgresHost}:${postgresPort}/${ragDb}`
@@ -78,13 +86,12 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
       : undefined);
 
   if (databaseUrl) process.env.DATABASE_URL = databaseUrl;
+  if (databaseUrl) process.env.RAG_DATABASE_URL = databaseUrl;
   process.env.REDIS_URL = redisUrl;
   if (rabbitMqUrl) process.env.RABBITMQ_URL = rabbitMqUrl;
 
   return envSchema.parse({
-    ...raw,
-    SENTRY_DSN: raw.SENTRY_DSN === '' ? undefined : raw.SENTRY_DSN,
-    INTERNAL_JWT_SECRET: raw.INTERNAL_JWT_SECRET === '' ? undefined : raw.INTERNAL_JWT_SECRET,
+    ...normalizedRaw,
     DATABASE_URL: databaseUrl,
     REDIS_URL: redisUrl,
     RABBITMQ_URL: rabbitMqUrl,

@@ -44,7 +44,7 @@ describe('TripTrackingAlertEventsConsumer', () => {
         binding.queue,
         binding.routingKey,
         expect.any(Function),
-        { prefetch: 1, requeueOnError: true },
+        { prefetch: 1, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
       );
     }
   });
@@ -76,6 +76,7 @@ describe('TripTrackingAlertEventsConsumer', () => {
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.TRIP_DELAYED,
+        dedupeKey: `${TRIP_DELAYED_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:${NotificationType.TRIP_DELAYED}`,
       }),
     );
     expect(idempotency.markProcessed).toHaveBeenCalledWith(TRIP_DELAYED_ROUTING_KEY, MESSAGE_ID);

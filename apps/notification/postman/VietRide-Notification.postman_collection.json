@@ -1,0 +1,988 @@
+{
+  "info": {
+    "_postman_id": "a1b2c3d4-noti-4567-8901-vietridenoti01",
+    "name": "VietRide Notification API",
+    "description": "Test collection cho VietRide Notification service (NestJS, event-driven).\n\nMÔI TRƯỜNG / PATH (xem TEST_PLAN §1, §7):\n- User endpoints test QUA GATEWAY: {{baseUrlGateway}}{{notificationsPath}} (mặc định http://localhost:3000/v1/notifications).\n- Nếu gọi TRỰC TIẾP service: đổi {{notificationsPath}} thành /api/v1/notifications và baseUrl thành {{baseUrlService}}.\n- Health/Ready/Default + Internal emails: TRỰC TIẾP {{baseUrlService}} (http://localhost:3002).\n\nAUTH:\n- User token: login Identity thật (folder 01) -> {{accessToken}}.\n- Internal token: ký HS256 bằng {{internalJwtSecret}} (pre-request folder 06).\n\nLUỒNG (chạy bằng Collection Runner, đặt Delay ~1000ms cho bước poll):\n00 Health -> 01 Login -> 02 Seed Event (publish event + poll tạo notification thật) -> 03 List -> 04 Mark read -> 05 Event dedupe -> 06 Internal emails.\n\nLƯU Ý: KHÔNG có HTTP tạo notification. Notification sinh ra từ consumer RabbitMQ (folder 02). Insert DB tay chỉ là fallback/debug (xem TEST_PLAN §6).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 - Health & Probes",
+      "item": [
+        {
+          "name": "GET /health (liveness)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrlService}}/health", "host": ["{{baseUrlService}}"], "path": ["health"] },
+            "description": "Liveness probe (không prefix, không auth)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const env = pm.response.json();",
+                  "pm.test('envelope success=true', () => pm.expect(env.success).to.eql(true));",
+                  "pm.test('data.status = ok', () => pm.expect(env.data.status).to.eql('ok'));",
+                  "pm.test('data.service = notification', () => pm.expect(env.data.service).to.eql('notification'));",
+                  "pm.test('response < 800ms', () => pm.expect(pm.response.responseTime).to.be.below(800));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /ready (readiness) -> 200",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrlService}}/ready", "host": ["{{baseUrlService}}"], "path": ["ready"] },
+            "description": "Readiness — prisma+redis+rabbitmq. Run chính ASSERT 200 (đủ dependency). Nhánh 503 = chaos test thủ công riêng (hạ 1 dependency), KHÔNG nằm trong run tự động."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const env = pm.response.json();",
+                  "pm.test('envelope success=true', () => pm.expect(env.success).to.eql(true));",
+                  "pm.test('dependencies đều ok', () => {",
+                  "  pm.expect(env.data.dependencies).to.have.all.keys(['prisma', 'redis', 'rabbitmq']);",
+                  "  pm.expect(env.data.dependencies.prisma).to.eql('ok');",
+                  "  pm.expect(env.data.dependencies.redis).to.eql('ok');",
+                  "  pm.expect(env.data.dependencies.rabbitmq).to.eql('ok');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api (default)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrlService}}/api", "host": ["{{baseUrlService}}"], "path": ["api"] },
+            "description": "Default endpoint dưới prefix /api. Smoke check envelope."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const env = pm.response.json();",
+                  "pm.test('envelope success=true', () => pm.expect(env.success).to.eql(true));",
+                  "pm.test('có data.message', () => pm.expect(env.data).to.have.property('message'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 - Auth (Identity login)",
+      "item": [
+        {
+          "name": "POST /v1/auth/login (happy) -> lưu accessToken",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{identityEmail}}\",\n  \"password\": \"{{identityPassword}}\"\n}" },
+            "url": { "raw": "{{baseUrlGateway}}/v1/auth/login", "host": ["{{baseUrlGateway}}"], "path": ["v1", "auth", "login"] },
+            "description": "Login lấy user access token thật từ Identity (qua gateway). Lưu accessToken + userId + role."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const env = pm.response.json();",
+                  "pm.test('envelope success=true', () => pm.expect(env.success).to.eql(true));",
+                  "pm.test('có accessToken', () => pm.expect(env.data.accessToken).to.be.a('string').and.not.empty);",
+                  "pm.test('có user.id', () => pm.expect(env.data.user.id).to.be.a('string').and.not.empty);",
+                  "pm.test('response < 2000ms', () => pm.expect(pm.response.responseTime).to.be.below(2000));",
+                  "if (env.data && env.data.accessToken) {",
+                  "  pm.environment.set('accessToken', env.data.accessToken);",
+                  "  pm.environment.set('userId', env.data.user.id);",
+                  "  pm.environment.set('userRole', env.data.user.role);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/auth/login (sai mật khẩu) -> 4xx",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{identityEmail}}\",\n  \"password\": \"wrong-password-xxxx\"\n}" },
+            "url": { "raw": "{{baseUrlGateway}}/v1/auth/login", "host": ["{{baseUrlGateway}}"], "path": ["v1", "auth", "login"] },
+            "description": "Negative: sai mật khẩu. Mã lỗi cụ thể do Identity quyết định (cần xác nhận — TEST_PLAN §8 Q5)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 4xx', () => pm.expect(pm.response.code).to.be.within(400, 499));",
+                  "pm.test('envelope success=false', () => pm.expect(pm.response.json().success).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 - Seed Event (RabbitMQ -> consumer -> notification)",
+      "description": "Test luồng event-driven thật: publish domain event vào exchange vietride.events qua RabbitMQ Management API, rồi poll list tới khi consumer + mapper tạo notification trong DB. ĐIỀU KIỆN BẮT BUỘC (theo code): set properties.message_id; payload đúng schema (userId/bookingId là uuid); payload.userId = {{userId}}. Đặt Runner Delay ~1000ms để bước poll có khoảng nghỉ.",
+      "item": [
+        {
+          "name": "PUBLISH booking.booking.confirmed",
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{rabbitMgmtUser}}", "type": "string" },
+                { "key": "password", "value": "{{rabbitMgmtPass}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"properties\": { \"message_id\": \"{{seedMessageId}}\" },\n  \"routing_key\": \"booking.booking.confirmed\",\n  \"payload\": \"{\\\"userId\\\":\\\"{{userId}}\\\",\\\"bookingId\\\":\\\"{{seedBookingId}}\\\",\\\"bookingCode\\\":\\\"VR-QA-001\\\",\\\"routeName\\\":\\\"Sai Gon - Da Lat\\\"}\",\n  \"payload_encoding\": \"string\"\n}"
+            },
+            "url": {
+              "raw": "{{rabbitMgmtUrl}}/api/exchanges/{{rabbitVhost}}/{{rabbitExchange}}/publish",
+              "host": ["{{rabbitMgmtUrl}}"],
+              "path": ["api", "exchanges", "{{rabbitVhost}}", "{{rabbitExchange}}", "publish"]
+            },
+            "description": "Publish event BOOKING_CONFIRMED. Sinh message_id + bookingId mới mỗi lần ở pre-request. routed=true nghĩa là có queue nhận (consumer đang bind)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function uuidv4() {",
+                  "  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {",
+                  "    const r = Math.random() * 16 | 0; const v = c === 'x' ? r : (r & 0x3 | 0x8); return v.toString(16);",
+                  "  });",
+                  "}",
+                  "if (!pm.environment.get('userId')) { console.warn('Chưa có userId — chạy folder 01 Login trước.'); }",
+                  "pm.environment.set('seedBookingId', uuidv4());",
+                  "pm.environment.set('seedMessageId', 'qa-seed-' + Date.now());",
+                  "pm.environment.set('seedPollAttempt', '0');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200 (Mgmt API)', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('routed = true (có queue nhận event)', () => pm.expect(body.routed).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POLL list cho tới khi thấy notification (capture id)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrlGateway}}{{notificationsPath}}?pageSize=20&sortBy=createdAt&sortDir=desc",
+              "host": ["{{baseUrlGateway}}{{notificationsPath}}"],
+              "query": [
+                { "key": "pageSize", "value": "20" },
+                { "key": "sortBy", "value": "createdAt" },
+                { "key": "sortDir", "value": "desc" }
+              ]
+            },
+            "description": "Poll tới khi tìm thấy notification có data.bookingId == {{seedBookingId}}. Tự retry tối đa 10 lần (cần Runner Delay ~1000ms). Khi thấy: lưu {{notificationId}}."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const MAX = 10;",
+                  "let attempt = parseInt(pm.environment.get('seedPollAttempt') || '0', 10);",
+                  "const target = pm.environment.get('seedBookingId');",
+                  "let found = null;",
+                  "if (pm.response.code === 200) {",
+                  "  const env = pm.response.json();",
+                  "  if (env.data && Array.isArray(env.data.items)) {",
+                  "    found = env.data.items.find((n) => n.data && n.data.bookingId === target);",
+                  "  }",
+                  "}",
+                  "if (found) {",
+                  "  pm.environment.set('notificationId', found.id);",
+                  "  pm.environment.set('seedPollAttempt', '0');",
+                  "  pm.test('Seeded notification xuất hiện', () => pm.expect(found).to.be.an('object'));",
+                  "  pm.test('type = BOOKING_CONFIRMED', () => pm.expect(found.type).to.eql('BOOKING_CONFIRMED'));",
+                  "  pm.test('notification thuộc về user hiện tại', () => pm.expect(found.userId).to.eql(pm.environment.get('userId')));",
+                  "  pm.test('readAt = null (mới tạo, chưa đọc)', () => pm.expect(found.readAt).to.eql(null));",
+                  "} else {",
+                  "  attempt += 1;",
+                  "  pm.environment.set('seedPollAttempt', String(attempt));",
+                  "  if (attempt < MAX) {",
+                  "    console.log('Chưa thấy notification, retry lần ' + attempt + '/' + MAX);",
+                  "    pm.execution.setNextRequest(pm.info.requestName);",
+                  "  } else {",
+                  "    pm.environment.set('seedPollAttempt', '0');",
+                  "    pm.test('Notification xuất hiện sau ' + MAX + ' lần poll', () => {",
+                  "      pm.expect.fail('Không thấy notification cho bookingId ' + target + '. Kiểm tra: (1) message_id đã set? (2) payload userId/bookingId hợp lệ uuid? (3) payload.userId == userId login? (4) consumer/queue đang chạy? Xem log service.');",
+                  "    });",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 - Notifications: List (User API)",
+      "item": [
+        {
+          "name": "GET list (happy) -> fallback bắt notificationId",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrlGateway}}{{notificationsPath}}?page=1&pageSize=20&sortBy=createdAt&sortDir=desc",
+              "host": ["{{baseUrlGateway}}{{notificationsPath}}"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "pageSize", "value": "20" },
+                { "key": "sortBy", "value": "createdAt" },
+                { "key": "sortDir", "value": "desc" }
+              ]
+            },
+            "description": "List lịch sử notification. Kiểm tra envelope phân trang. Nếu chưa có notificationId (bỏ qua folder 02) thì bắt items[0].id."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const env = pm.response.json();",
+                  "pm.test('envelope success=true', () => pm.expect(env.success).to.eql(true));",
+                  "pm.test('có đủ field phân trang', () => pm.expect(env.data).to.have.all.keys(['items','page','pageSize','totalItems','totalPages','hasNextPage','hasPreviousPage']));",
+                  "pm.test('items là array', () => pm.expect(env.data.items).to.be.an('array'));",
+                  "pm.test('pageSize phản ánh query (20)', () => pm.expect(env.data.pageSize).to.eql(20));",
+                  "pm.test('response < 1000ms', () => pm.expect(pm.response.responseTime).to.be.below(1000));",
+                  "if (env.data.items.length > 0) {",
+                  "  const n = env.data.items[0];",
+                  "  pm.test('item có đủ field bắt buộc', () => pm.expect(n).to.include.all.keys(['id','userId','type','title','body','data','readAt','createdAt']));",
+                  "  pm.test('notification thuộc về user hiện tại', () => pm.expect(n.userId).to.eql(pm.environment.get('userId')));",
+                  "  if (!pm.environment.get('notificationId')) { pm.environment.set('notificationId', n.id); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET list ?unreadOnly=true",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrlGateway}}{{notificationsPath}}?unreadOnly=true",
+              "host": ["{{baseUrlGateway}}{{notificationsPath}}"],
+              "query": [{ "key": "unreadOnly", "value": "true" }]
+            },
+            "description": "Lọc chưa đọc — mọi item readAt = null."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const env = pm.response.json();",
+                  "pm.test('mọi item readAt = null', () => env.data.items.forEach((n) => pm.expect(n.readAt, 'item ' + n.id).to.eql(null)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET list ?pageSize=101 -> 400",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrlGateway}}{{notificationsPath}}?pageSize=101",
+              "host": ["{{baseUrlGateway}}{{notificationsPath}}"],
+              "query": [{ "key": "pageSize", "value": "101" }]
+            },
+            "description": "Validation: pageSize tối đa 100 -> 400 VALIDATION_FAILED."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "const env = pm.response.json();",
+                  "pm.test('success=false', () => pm.expect(env.success).to.eql(false));",
+                  "pm.test('error.code = VALIDATION_FAILED', () => pm.expect(env.error.code).to.eql('VALIDATION_FAILED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET list ?sortBy=hackerField -> 400",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrlGateway}}{{notificationsPath}}?sortBy=hackerField",
+              "host": ["{{baseUrlGateway}}{{notificationsPath}}"],
+              "query": [{ "key": "sortBy", "value": "hackerField" }]
+            },
+            "description": "Validation: sortBy chỉ chấp nhận createdAt|readAt|type -> 400."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('success=false', () => pm.expect(pm.response.json().success).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET list (thiếu token) -> 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrlGateway}}{{notificationsPath}}", "host": ["{{baseUrlGateway}}{{notificationsPath}}"] },
+            "description": "Auth: thiếu Authorization -> 401."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 401', () => pm.response.to.have.status(401));",
+                  "pm.test('success=false', () => pm.expect(pm.response.json().success).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET list (token sai) -> 401",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer not-a-real-jwt" }],
+            "url": { "raw": "{{baseUrlGateway}}{{notificationsPath}}", "host": ["{{baseUrlGateway}}{{notificationsPath}}"] },
+            "description": "Auth: token không hợp lệ -> 401."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 401', () => pm.response.to.have.status(401));",
+                  "pm.test('success=false', () => pm.expect(pm.response.json().success).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 - Notifications: Mark read",
+      "description": "Dùng {{notificationId}} từ folder 02 (Seed Event). Nếu bỏ folder 02, set {{seededNotificationId}} (fallback/debug).",
+      "item": [
+        {
+          "name": "PATCH mark read -> 204",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"read\": true\n}" },
+            "url": {
+              "raw": "{{baseUrlGateway}}{{notificationsPath}}/{{notificationId}}",
+              "host": ["{{baseUrlGateway}}{{notificationsPath}}"],
+              "path": ["{{notificationId}}"]
+            },
+            "description": "Đánh dấu đã đọc -> 204 không body."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('notificationId')) {",
+                  "  const seeded = pm.environment.get('seededNotificationId');",
+                  "  if (seeded) { pm.environment.set('notificationId', seeded); }",
+                  "  else { console.warn('Chưa có notificationId — chạy folder 02 trước hoặc set seededNotificationId.'); }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 204', () => pm.response.to.have.status(204));",
+                  "pm.test('không có body', () => pm.expect(pm.response.text()).to.be.empty);",
+                  "pm.test('response < 1000ms', () => pm.expect(pm.response.responseTime).to.be.below(1000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH mark read (gọi lại) -> 204 (idempotency)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"read\": true\n}" },
+            "url": {
+              "raw": "{{baseUrlGateway}}{{notificationsPath}}/{{notificationId}}",
+              "host": ["{{baseUrlGateway}}{{notificationsPath}}"],
+              "path": ["{{notificationId}}"]
+            },
+            "description": "Idempotency: mark read lần 2 vẫn 204, không double-write (service bỏ qua nếu đã readAt)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 204 (idempotent)', () => pm.response.to.have.status(204));",
+                  "pm.test('không có body', () => pm.expect(pm.response.text()).to.be.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET unreadOnly sau mark read -> id biến mất",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrlGateway}}{{notificationsPath}}?unreadOnly=true&pageSize=100",
+              "host": ["{{baseUrlGateway}}{{notificationsPath}}"],
+              "query": [
+                { "key": "unreadOnly", "value": "true" },
+                { "key": "pageSize", "value": "100" }
+              ]
+            },
+            "description": "Side-effect: notification vừa mark read không còn trong list unreadOnly."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const env = pm.response.json();",
+                  "const id = pm.environment.get('notificationId');",
+                  "pm.test('id đã đọc không còn trong unread list', () => pm.expect(env.data.items.map((n) => n.id)).to.not.include(id));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH <uuid không tồn tại> -> 404",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"read\": true\n}" },
+            "url": {
+              "raw": "{{baseUrlGateway}}{{notificationsPath}}/00000000-0000-4000-8000-000000000000",
+              "host": ["{{baseUrlGateway}}{{notificationsPath}}"],
+              "path": ["00000000-0000-4000-8000-000000000000"]
+            },
+            "description": "Business error: không tồn tại / không sở hữu -> 404 NOTIFICATION_NOT_FOUND (chống IDOR)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 404', () => pm.response.to.have.status(404));",
+                  "const env = pm.response.json();",
+                  "pm.test('success=false', () => pm.expect(env.success).to.eql(false));",
+                  "pm.test('error.code = NOTIFICATION_NOT_FOUND', () => pm.expect(env.error.code).to.eql('NOTIFICATION_NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH /not-a-uuid -> 400",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"read\": true\n}" },
+            "url": {
+              "raw": "{{baseUrlGateway}}{{notificationsPath}}/not-a-uuid",
+              "host": ["{{baseUrlGateway}}{{notificationsPath}}"],
+              "path": ["not-a-uuid"]
+            },
+            "description": "Validation: param phải uuid -> 400."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('success=false', () => pm.expect(pm.response.json().success).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH body {read:false} -> 400",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"read\": false\n}" },
+            "url": {
+              "raw": "{{baseUrlGateway}}{{notificationsPath}}/{{notificationId}}",
+              "host": ["{{baseUrlGateway}}{{notificationsPath}}"],
+              "path": ["{{notificationId}}"]
+            },
+            "description": "Validation: body chỉ chấp nhận literal read=true. read=false -> 400."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('success=false', () => pm.expect(pm.response.json().success).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH (thiếu token) -> 401",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"read\": true\n}" },
+            "url": {
+              "raw": "{{baseUrlGateway}}{{notificationsPath}}/{{notificationId}}",
+              "host": ["{{baseUrlGateway}}{{notificationsPath}}"],
+              "path": ["{{notificationId}}"]
+            },
+            "description": "Auth: thiếu token -> 401 (guard chạy trước validation)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 401', () => pm.response.to.have.status(401));",
+                  "pm.test('success=false', () => pm.expect(pm.response.json().success).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 - Event Dedupe (core event-driven)",
+      "description": "Republish CÙNG message_id của event đã seed (folder 02). Idempotency Redis + dedupeKey unique phải chặn -> KHÔNG tạo notification thứ 2.",
+      "item": [
+        {
+          "name": "REPUBLISH cùng message_id -> routed",
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{rabbitMgmtUser}}", "type": "string" },
+                { "key": "password", "value": "{{rabbitMgmtPass}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"properties\": { \"message_id\": \"{{seedMessageId}}\" },\n  \"routing_key\": \"booking.booking.confirmed\",\n  \"payload\": \"{\\\"userId\\\":\\\"{{userId}}\\\",\\\"bookingId\\\":\\\"{{seedBookingId}}\\\",\\\"bookingCode\\\":\\\"VR-QA-001\\\",\\\"routeName\\\":\\\"Sai Gon - Da Lat\\\"}\",\n  \"payload_encoding\": \"string\"\n}"
+            },
+            "url": {
+              "raw": "{{rabbitMgmtUrl}}/api/exchanges/{{rabbitVhost}}/{{rabbitExchange}}/publish",
+              "host": ["{{rabbitMgmtUrl}}"],
+              "path": ["api", "exchanges", "{{rabbitVhost}}", "{{rabbitExchange}}", "publish"]
+            },
+            "description": "KHÔNG regenerate seedMessageId/seedBookingId — gửi lại y hệt. routed=true nhưng consumer sẽ skip (duplicate)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('routed = true', () => pm.expect(pm.response.json().routed).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET list -> đúng 1 notification cho bookingId (không nhân đôi)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrlGateway}}{{notificationsPath}}?pageSize=100&sortBy=createdAt&sortDir=desc",
+              "host": ["{{baseUrlGateway}}{{notificationsPath}}"],
+              "query": [
+                { "key": "pageSize", "value": "100" },
+                { "key": "sortBy", "value": "createdAt" },
+                { "key": "sortDir", "value": "desc" }
+              ]
+            },
+            "description": "Verify dedupe: chỉ có ĐÚNG 1 notification mang data.bookingId == {{seedBookingId}}, dù đã publish 2 lần cùng message_id."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const env = pm.response.json();",
+                  "const target = pm.environment.get('seedBookingId');",
+                  "const matches = env.data.items.filter((n) => n.data && n.data.bookingId === target);",
+                  "pm.test('đúng 1 notification cho bookingId (dedupe ok)', () => pm.expect(matches.length).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 - Internal Emails (direct service :3002)",
+      "description": "POST /internal/v1/emails — KHÔNG qua gateway, gọi trực tiếp {{baseUrlService}}. Pre-request folder tự ký internal JWT HS256. Endpoint render template TRƯỚC khi enqueue: templateData phải đủ biến bắt buộc của templateKey (vd OPERATOR_SUBSCRIPTION_NOTICE cần 'message').",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "let secret = pm.environment.get('internalJwtSecret') || pm.collectionVariables.get('internalJwtSecret') || 'replace-me-with-32-byte-hex-secret';",
+              "secret = String(secret).trim().replace(/^\\\"|\\\"$/g, '');",
+              "if (!secret || secret.length < 32) { throw new Error('internalJwtSecret is missing or shorter than 32 chars'); }",
+              "pm.environment.set('internalJwtSecret', secret);",
+              "function b64url(input) {",
+              "  const wa = (typeof input === 'string') ? CryptoJS.enc.Utf8.parse(input) : input;",
+              "  return CryptoJS.enc.Base64.stringify(wa).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+              "}",
+              "const now = Math.floor(Date.now() / 1000);",
+              "const header = { alg: 'HS256', typ: 'JWT' };",
+              "const payload = { sub: 'qa-internal-tester', role: 'INTERNAL', iss: 'vietride-gateway', aud: 'vietride-internal', iat: now, exp: now + 120, reqId: 'qa-' + now };",
+              "const signingInput = b64url(JSON.stringify(header)) + '.' + b64url(JSON.stringify(payload));",
+              "const sig = b64url(CryptoJS.HmacSHA256(signingInput, secret));",
+              "const token = signingInput + '.' + sig;",
+              "pm.environment.set('internalToken', token);",
+              "pm.variables.set('internalToken', token);"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "POST email (happy, payload đúng biến) -> 202",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Internal-Auth", "value": "Bearer {{internalToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toEmail\": \"{{toEmail}}\",\n  \"templateKey\": \"OPERATOR_SUBSCRIPTION_NOTICE\",\n  \"templateData\": {\n    \"message\": \"Goi dich vu cua ban se het han sau 7 ngay. Vui long gia han.\",\n    \"title\": \"Thong bao goi dich vu VietRide\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrlService}}/internal/v1/emails",
+              "host": ["{{baseUrlService}}"],
+              "path": ["internal", "v1", "emails"]
+            },
+            "description": "Enqueue email. templateData CÓ 'message' (biến bắt buộc của OPERATOR_SUBSCRIPTION_NOTICE) -> render ok -> 202 PENDING. (Gửi SendGrid thật do worker; safe-local dùng fake provider.)"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 202', () => pm.response.to.have.status(202));",
+                  "const env = pm.response.json();",
+                  "pm.test('envelope success=true', () => pm.expect(env.success).to.eql(true));",
+                  "pm.test('có đủ field delivery', () => pm.expect(env.data).to.include.all.keys(['id','toEmail','templateKey','status','createdAt']));",
+                  "pm.test('status khởi tạo = PENDING', () => pm.expect(env.data.status).to.eql('PENDING'));",
+                  "pm.test('toEmail đúng', () => pm.expect(env.data.toEmail).to.eql(pm.environment.get('toEmail')));",
+                  "pm.test('response < 1500ms', () => pm.expect(pm.response.responseTime).to.be.below(1500));",
+                  "if (env.data && env.data.id) { pm.environment.set('emailDeliveryId', env.data.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST email (gọi lại) -> 202 + id MỚI (không dedupe)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Internal-Auth", "value": "Bearer {{internalToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toEmail\": \"{{toEmail}}\",\n  \"templateKey\": \"OPERATOR_SUBSCRIPTION_NOTICE\",\n  \"templateData\": {\n    \"message\": \"Goi dich vu cua ban se het han sau 7 ngay. Vui long gia han.\",\n    \"title\": \"Thong bao goi dich vu VietRide\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrlService}}/internal/v1/emails",
+              "host": ["{{baseUrlService}}"],
+              "path": ["internal", "v1", "emails"]
+            },
+            "description": "Side-effect: endpoint email KHÔNG idempotent + không dedupe -> tạo delivery id MỚI. (Nếu nghiệp vụ cần chống trùng -> TEST_PLAN §8 Q3.)"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 202', () => pm.response.to.have.status(202));",
+                  "pm.test('tạo delivery id MỚI (không dedupe)', () => pm.expect(pm.response.json().data.id).to.not.eql(pm.environment.get('emailDeliveryId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST email (thiếu token) -> 401",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toEmail\": \"{{toEmail}}\",\n  \"templateKey\": \"OPERATOR_SUBSCRIPTION_NOTICE\",\n  \"templateData\": { \"message\": \"x\" }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrlService}}/internal/v1/emails",
+              "host": ["{{baseUrlService}}"],
+              "path": ["internal", "v1", "emails"]
+            },
+            "description": "Auth: thiếu X-Internal-Auth -> 401."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 401', () => pm.response.to.have.status(401));",
+                  "pm.test('success=false', () => pm.expect(pm.response.json().success).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST email (token sai chữ ký) -> 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Internal-Auth", "value": "Bearer eyJhbGciOiJIUzI1NiJ9.invalid.signature" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toEmail\": \"{{toEmail}}\",\n  \"templateKey\": \"OPERATOR_SUBSCRIPTION_NOTICE\",\n  \"templateData\": { \"message\": \"x\" }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrlService}}/internal/v1/emails",
+              "host": ["{{baseUrlService}}"],
+              "path": ["internal", "v1", "emails"]
+            },
+            "description": "Auth: token không verify được (sai chữ ký/secret) -> 401."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 401', () => pm.response.to.have.status(401));",
+                  "pm.test('success=false', () => pm.expect(pm.response.json().success).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST email (email sai format) -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Internal-Auth", "value": "Bearer {{internalToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toEmail\": \"not-an-email\",\n  \"templateKey\": \"OPERATOR_SUBSCRIPTION_NOTICE\",\n  \"templateData\": { \"message\": \"x\" }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrlService}}/internal/v1/emails",
+              "host": ["{{baseUrlService}}"],
+              "path": ["internal", "v1", "emails"]
+            },
+            "description": "Validation: toEmail phải đúng format -> 400 VALIDATION_FAILED."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code = VALIDATION_FAILED', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_FAILED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST email (templateKey ngoài enum) -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Internal-Auth", "value": "Bearer {{internalToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toEmail\": \"{{toEmail}}\",\n  \"templateKey\": \"NOT_A_REAL_TEMPLATE\",\n  \"templateData\": { \"message\": \"x\" }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrlService}}/internal/v1/emails",
+              "host": ["{{baseUrlService}}"],
+              "path": ["internal", "v1", "emails"]
+            },
+            "description": "Validation: templateKey phải thuộc enum EmailTemplateKey -> 400."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('success=false', () => pm.expect(pm.response.json().success).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST email (thiếu templateData) -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Internal-Auth", "value": "Bearer {{internalToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toEmail\": \"{{toEmail}}\",\n  \"templateKey\": \"OPERATOR_SUBSCRIPTION_NOTICE\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrlService}}/internal/v1/emails",
+              "host": ["{{baseUrlService}}"],
+              "path": ["internal", "v1", "emails"]
+            },
+            "description": "Validation: thiếu field bắt buộc templateData -> 400."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('success=false', () => pm.expect(pm.response.json().success).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

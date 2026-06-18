@@ -809,4 +809,39 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
     expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
     expect(res.status).not.toHaveBeenCalled();
   });
+
+  it('preserves user Authorization for Notification while adding X-Internal-Auth', async () => {
+    const upstreamHandler = arrangeProxyPass();
+    const signer = {
+      sign: jest.fn().mockResolvedValue('internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({
+      sub: 'passenger-1',
+      role: 'PASSENGER',
+      hasPhone: true,
+    });
+    const req = makeRequest('/v1/notifications?pageSize=20', {
+      authorization,
+      'x-request-id': 'req-notification-auth',
+    }, 'GET');
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(signer.sign).toHaveBeenCalledWith({
+      sub: 'passenger-1',
+      reqId: 'req-notification-auth',
+      role: 'PASSENGER',
+    });
+    expect(req.headers.authorization).toBe(authorization);
+    expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
+    expect(req.url).toBe('/api/v1/notifications?pageSize=20');
+    expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+      expect.objectContaining({ target: env.NOTIFICATION_BASE_URL }),
+    );
+    expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+    expect(res.status).not.toHaveBeenCalled();
+  });
 });

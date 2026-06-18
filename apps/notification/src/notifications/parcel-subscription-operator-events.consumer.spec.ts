@@ -56,7 +56,7 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
         binding.queue,
         binding.routingKey,
         expect.any(Function),
-        { prefetch: 1, requeueOnError: true },
+        { prefetch: 1, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
       );
     }
   });
@@ -79,6 +79,7 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.PARCEL_LOADED,
+        dedupeKey: `${PARCEL_LOADED_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:${NotificationType.PARCEL_LOADED}`,
       }),
     );
     expect(idempotency.markProcessed).toHaveBeenCalledWith(PARCEL_LOADED_ROUTING_KEY, MESSAGE_ID);
@@ -105,8 +106,32 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.SUBSCRIPTION_LIMIT_EXCEEDED,
+        dedupeKey: `${SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:${NotificationType.SUBSCRIPTION_LIMIT_EXCEEDED}`,
       }),
     );
+  });
+
+  it('marks empty operator recipients as processed without DLQ', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([]);
+
+    await expect(
+      consumer.handle(
+        SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY,
+        {
+          operatorId: OPERATOR_ID,
+          planName: 'Starter',
+        },
+        createMessage(MESSAGE_ID),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(notificationsService.createNotification).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+    expect(idempotency.release).not.toHaveBeenCalled();
   });
 
   it('skips duplicate message id', async () => {
@@ -141,15 +166,15 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
     expect(idempotency.markProcessed).toHaveBeenCalledWith(PARCEL_LOADED_ROUTING_KEY, MESSAGE_ID);
   });
 
-  it('drops messages without id before idempotency check', async () => {
-    await consumer.handle(
+  it('rejects messages without id before idempotency check', async () => {
+    await expect(consumer.handle(
       PARCEL_LOADED_ROUTING_KEY,
       {
         userId: USER_ID,
         parcelId: PARCEL_ID,
       },
       createMessage(undefined),
-    );
+    )).rejects.toThrow('MISSING_MESSAGE_ID');
 
     expect(idempotency.begin).not.toHaveBeenCalled();
     expect(notificationsService.createNotification).not.toHaveBeenCalled();

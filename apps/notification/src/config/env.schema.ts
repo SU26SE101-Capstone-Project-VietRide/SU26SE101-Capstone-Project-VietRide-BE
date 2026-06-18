@@ -4,6 +4,7 @@ import { z } from 'zod';
 export const envSchema = baseEnvSchema.merge(
   z.object({
     PORT: z.coerce.number().int().positive().default(3002),
+    NOTIFICATION_DATABASE_URL: z.string().url().optional(),
     DATABASE_URL: z.string().url(),
     REDIS_URL: z.string().url(),
     RABBITMQ_URL: z.string().url(),
@@ -29,6 +30,7 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
     ...raw,
     SENTRY_DSN: raw.SENTRY_DSN === '' ? undefined : raw.SENTRY_DSN,
     INTERNAL_JWT_SECRET: raw.INTERNAL_JWT_SECRET === '' ? undefined : raw.INTERNAL_JWT_SECRET,
+    NOTIFICATION_DATABASE_URL: raw.NOTIFICATION_DATABASE_URL === '' ? undefined : raw.NOTIFICATION_DATABASE_URL,
     USER_JWT_PUBLIC_KEY: raw.USER_JWT_PUBLIC_KEY === '' ? undefined : raw.USER_JWT_PUBLIC_KEY,
     FCM_PROJECT_ID: raw.FCM_PROJECT_ID === '' ? undefined : raw.FCM_PROJECT_ID,
     FCM_CLIENT_EMAIL: raw.FCM_CLIENT_EMAIL === '' ? undefined : raw.FCM_CLIENT_EMAIL,
@@ -48,6 +50,7 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
   const rabbitUser = raw.RABBITMQ_USER;
   const rabbitPassword = raw.RABBITMQ_PASSWORD;
   const databaseUrl =
+    raw.NOTIFICATION_DATABASE_URL ??
     raw.DATABASE_URL ??
     (postgresHost && postgresPort && postgresUser && postgresPassword && notificationDb
       ? `postgresql://${postgresUser}:${postgresPassword}@${postgresHost}:${postgresPort}/${notificationDb}`
@@ -60,6 +63,7 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
       : undefined);
 
   if (databaseUrl) process.env.DATABASE_URL = databaseUrl;
+  if (databaseUrl) process.env.NOTIFICATION_DATABASE_URL = databaseUrl;
   process.env.REDIS_URL = redisUrl;
   if (rabbitMqUrl) process.env.RABBITMQ_URL = rabbitMqUrl;
 

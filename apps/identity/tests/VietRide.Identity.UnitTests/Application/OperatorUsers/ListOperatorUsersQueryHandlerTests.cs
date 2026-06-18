@@ -208,5 +208,10 @@ public sealed class ListOperatorUsersQueryHandlerTests
         public void Remove(User entity) { }
         public IQueryable<User> Query() => Array.Empty<User>().AsQueryable();
         public IQueryable<User> QueryNoTracking() => Array.Empty<User>().AsQueryable();
+
+        public Task<IReadOnlyList<Guid>> ListActiveOperatorAdminIdsAsync(
+            Guid operatorId,
+            CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<Guid>>([]);
     }
 }

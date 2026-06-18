@@ -30,6 +30,10 @@ export interface CreateKnowledgeDocumentInput {
   uploadedByUserId: string;
 }
 
+export interface CreateApprovedKnowledgeDocumentInput extends CreateKnowledgeDocumentInput {
+  approvedByUserId: string;
+}
+
 export interface ApproveKnowledgeDocumentInput {
   documentId: string;
   approvedByUserId: string;

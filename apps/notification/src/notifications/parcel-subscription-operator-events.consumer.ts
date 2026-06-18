@@ -36,7 +36,7 @@ export class ParcelSubscriptionOperatorEventsConsumer implements OnModuleInit {
           binding.queue,
           binding.routingKey,
           (payload, raw) => this.handle(binding.routingKey, payload, raw),
-          { prefetch: RABBITMQ_PREFETCH_ONE, requeueOnError: true },
+          { prefetch: RABBITMQ_PREFETCH_ONE, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
         ),
       ),
     );
@@ -49,17 +49,19 @@ export class ParcelSubscriptionOperatorEventsConsumer implements OnModuleInit {
   ): Promise<void> {
     const messageId = raw.properties.messageId ?? raw.properties.correlationId;
     if (!messageId) {
-      this.logger.warn({ routingKey }, 'Dropping parcel/subscription/operator message without message id');
-      return;
+      throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
     }
 
     const processingState = await this.idempotency.begin(routingKey, messageId);
-    if (processingState !== 'acquired') {
+    if (processingState === 'duplicate') {
       this.logger.info(
         { routingKey, messageId, processingState },
         'Skipping already handled parcel/subscription/operator message',
       );
       return;
+    }
+    if (processingState === 'locked') {
+      throw new Error(`MESSAGE_LOCKED_${routingKey}_${messageId}`);
     }
 
     try {
@@ -68,8 +70,26 @@ export class ParcelSubscriptionOperatorEventsConsumer implements OnModuleInit {
         payload,
         (operatorId) => this.operatorRecipientProvider.resolveOperatorRecipientUserIds(operatorId),
       );
+      if (notifications.length === 0) {
+        this.logger.warn(
+          { routingKey, messageId, recipientCount: 0 },
+          'No active operator recipients for parcel/subscription/operator notification event',
+        );
+        await this.idempotency.markProcessed(routingKey, messageId);
+        return;
+      }
       await Promise.all(
-        notifications.map((notification) => this.notificationsService.createNotification(notification)),
+        notifications.map((notification) =>
+          this.notificationsService.createNotification({
+            ...notification,
+            dedupeKey: buildNotificationDedupeKey(
+              routingKey,
+              messageId,
+              notification.userId,
+              notification.type,
+            ),
+          }),
+        ),
       );
       await this.idempotency.markProcessed(routingKey, messageId);
       this.logger.info(
@@ -90,4 +110,13 @@ export class ParcelSubscriptionOperatorEventsConsumer implements OnModuleInit {
       throw error;
     }
   }
+}
+
+function buildNotificationDedupeKey(
+  routingKey: string,
+  messageId: string,
+  userId: string,
+  type: string,
+): string {
+  return `${routingKey}:${messageId}:${userId}:${type}`;
 }

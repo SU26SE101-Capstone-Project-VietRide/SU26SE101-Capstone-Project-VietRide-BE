@@ -28,4 +28,8 @@ public interface IUserRepository : IRepository<User, Guid>
         UserRole? role,
         UserStatus? status,
         CancellationToken ct = default);
+
+    Task<IReadOnlyList<Guid>> ListActiveOperatorAdminIdsAsync(
+        Guid operatorId,
+        CancellationToken ct = default);
 }

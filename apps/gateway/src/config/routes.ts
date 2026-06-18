@@ -29,6 +29,8 @@ export interface ProxyRoute {
   rewriteTo?: string;
   /** Prepend a string to the final upstream path (e.g., '/api'). */
   prependPrefix?: string;
+  /** Keep the user Authorization bearer token when forwarding to downstream services that verify it themselves. */
+  forwardUserAuthorization?: boolean;
 }
 
 /**
@@ -226,8 +228,20 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     },
 
     // NestJS services
-    { prefix: '/v1/notifications', target: env.NOTIFICATION_BASE_URL, authRequired: 'user', prependPrefix: '/api' },
-    { prefix: '/v1/rag', target: env.RAG_BASE_URL, authRequired: 'user', prependPrefix: '/api' },
+    {
+      prefix: '/v1/notifications',
+      target: env.NOTIFICATION_BASE_URL,
+      authRequired: 'user',
+      prependPrefix: '/api',
+      forwardUserAuthorization: true,
+    },
+    {
+      prefix: '/v1/rag',
+      target: env.RAG_BASE_URL,
+      authRequired: 'user',
+      prependPrefix: '/api',
+      forwardUserAuthorization: true,
+    },
 
     // Swagger Specs Proxy
     {

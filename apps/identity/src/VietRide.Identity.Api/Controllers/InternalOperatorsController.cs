@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using VietRide.Identity.Api.Controllers.Requests;
 using VietRide.Identity.Application.Features.Internal.Operators.GetInternalOperator;
 using VietRide.Identity.Application.Features.Internal.Operators.GetInternalOperatorSubscription;
+using VietRide.Identity.Application.Features.Internal.Operators.GetOperatorRecipientUsers;
 using VietRide.Identity.Application.Features.Internal.Operators.IncrementOperatorUsage;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Authentication;
@@ -44,6 +45,18 @@ public sealed class InternalOperatorsController : ControllerBase
         CancellationToken cancellationToken)
     {
         var result = await _mediator.Send(new GetInternalOperatorSubscriptionQuery(operatorId), cancellationToken);
+
+        return Ok(result);
+    }
+
+    [HttpGet("{operatorId:guid}/recipient-users")]
+    [ProducesResponseType(typeof(IReadOnlyList<Guid>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<IReadOnlyList<Guid>>> GetRecipientUsersAsync(
+        Guid operatorId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(new GetOperatorRecipientUsersQuery(operatorId), cancellationToken);
 
         return Ok(result);
     }

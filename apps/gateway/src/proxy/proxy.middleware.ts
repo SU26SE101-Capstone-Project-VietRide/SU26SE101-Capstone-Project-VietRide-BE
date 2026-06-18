@@ -145,7 +145,7 @@ export function createProxyHandler(env: Env, signer: InternalJwtSigner): Express
   const userJwtVerifier = createUserJwtVerifier(env);
 
   function getProxy(route: ProxyRoute): RequestHandler {
-    const key = route.target;
+    const key = `${route.target}|forwardUserAuthorization=${route.forwardUserAuthorization === true}`;
     let handler = proxies.get(key);
     if (!handler) {
       handler = createProxyMiddleware({
@@ -153,7 +153,9 @@ export function createProxyHandler(env: Env, signer: InternalJwtSigner): Express
         changeOrigin: true,
         on: {
           proxyReq: (proxyReq) => {
-            proxyReq.removeHeader('authorization');
+            if (!route.forwardUserAuthorization) {
+              proxyReq.removeHeader('authorization');
+            }
           },
           error: (err, proxyReq, res) => {
             logger.error(`Upstream ${route.target} error: ${err.message}`);
@@ -260,8 +262,10 @@ export function createProxyHandler(env: Env, signer: InternalJwtSigner): Express
       ...(operatorId ? { operatorId } : {}),
     });
 
-    delete req.headers['authorization'];
-    delete req.headers['Authorization'];
+    if (!route.forwardUserAuthorization) {
+      delete req.headers['authorization'];
+      delete req.headers['Authorization'];
+    }
     req.headers['x-internal-auth'] = `Bearer ${internalJwt}`;
     req.headers['x-request-id'] = reqId;
 

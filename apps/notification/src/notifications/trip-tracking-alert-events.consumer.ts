@@ -33,7 +33,7 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
           binding.queue,
           binding.routingKey,
           (payload, raw) => this.handle(binding.routingKey, payload, raw),
-          { prefetch: RABBITMQ_PREFETCH_ONE, requeueOnError: true },
+          { prefetch: RABBITMQ_PREFETCH_ONE, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
         ),
       ),
     );
@@ -42,20 +42,32 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
   async handle(routingKey: TripTrackingAlertRoutingKey, payload: unknown, raw: ConsumeMessage): Promise<void> {
     const messageId = raw.properties.messageId ?? raw.properties.correlationId;
     if (!messageId) {
-      this.logger.warn({ routingKey }, 'Dropping alert message without message id');
-      return;
+      throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
     }
 
     const processingState = await this.idempotency.begin(routingKey, messageId);
-    if (processingState !== 'acquired') {
+    if (processingState === 'duplicate') {
       this.logger.info({ routingKey, messageId, processingState }, 'Skipping already handled alert message');
       return;
+    }
+    if (processingState === 'locked') {
+      throw new Error(`MESSAGE_LOCKED_${routingKey}_${messageId}`);
     }
 
     try {
       const notifications = mapTripTrackingAlertToNotifications(routingKey, payload);
       await Promise.all(
-        notifications.map((notification) => this.notificationsService.createNotification(notification)),
+        notifications.map((notification) =>
+          this.notificationsService.createNotification({
+            ...notification,
+            dedupeKey: buildNotificationDedupeKey(
+              routingKey,
+              messageId,
+              notification.userId,
+              notification.type,
+            ),
+          }),
+        ),
       );
       await this.idempotency.markProcessed(routingKey, messageId);
       this.logger.info(
@@ -73,4 +85,13 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
       throw error;
     }
   }
+}
+
+function buildNotificationDedupeKey(
+  routingKey: string,
+  messageId: string,
+  userId: string,
+  type: string,
+): string {
+  return `${routingKey}:${messageId}:${userId}:${type}`;
 }

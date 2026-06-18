@@ -24,7 +24,7 @@ export class EmailSendQueue implements OnModuleDestroy {
       defaultJobOptions: {
         attempts: EMAIL_SEND_ATTEMPTS,
         removeOnComplete: true,
-        removeOnFail: false,
+        removeOnFail: { age: 7 * 24 * 60 * 60, count: 1000 },
       },
     });
   }

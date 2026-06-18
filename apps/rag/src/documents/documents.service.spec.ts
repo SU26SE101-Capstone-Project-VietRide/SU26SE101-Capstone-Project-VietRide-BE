@@ -26,6 +26,7 @@ describe('DocumentsService', () => {
   beforeEach(() => {
     repository = {
       create: jest.fn(),
+      createApproved: jest.fn(),
       findById: jest.fn(),
       approve: jest.fn(),
     } as unknown as jest.Mocked<DocumentsRepository>;
@@ -40,8 +41,15 @@ describe('DocumentsService', () => {
     service = new DocumentsService(repository, storageProvider, runtimeConfig);
   });
 
-  it('uploads TXT document metadata and returns preview URL', async () => {
-    repository.create.mockResolvedValue(makeDocument({ storagePath: 'documents/doc.txt' }));
+  it('uploads, auto-approves, requests ingest, and returns preview URL', async () => {
+    repository.createApproved.mockResolvedValue(
+      makeDocument({
+        storagePath: 'documents/doc.txt',
+        status: 'APPROVED',
+        approvedByUserId: ADMIN_USER.sub,
+        approvedAt: new Date('2026-06-13T00:00:00.000Z'),
+      }),
+    );
     storageProvider.createSignedReadUrl.mockResolvedValue('https://preview.example/doc.txt');
 
     const result = await service.create(
@@ -60,14 +68,16 @@ describe('DocumentsService', () => {
     expect(storageProvider.uploadObject).toHaveBeenCalledWith(
       expect.objectContaining({ contentType: 'text/plain' }),
     );
-    expect(repository.create).toHaveBeenCalledWith(
+    expect(repository.createApproved).toHaveBeenCalledWith(
       expect.objectContaining({
         accessLevel: 'PUBLIC',
+        approvedByUserId: ADMIN_USER.sub,
         category: 'CUSTOMER_SUPPORT',
         fileType: 'TXT',
         uploadedByUserId: ADMIN_USER.sub,
       }),
     );
+    expect(result.status).toBe('APPROVED');
     expect(result.previewUrl).toBe('https://preview.example/doc.txt');
   });
 

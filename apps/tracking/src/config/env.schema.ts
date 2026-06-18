@@ -10,6 +10,7 @@ const booleanEnvSchema = z.preprocess((value) => {
 export const envSchema = baseEnvSchema.merge(
   z.object({
     PORT: z.coerce.number().int().positive().default(3001),
+    TRACKING_DATABASE_URL: z.string().url().optional(),
     DATABASE_URL: z.string().url(),
     REDIS_URL: z.string().url(),
     RABBITMQ_URL: z.string().url(),
@@ -40,6 +41,7 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
     ...raw,
     SENTRY_DSN: raw.SENTRY_DSN === '' ? undefined : raw.SENTRY_DSN,
     INTERNAL_JWT_SECRET: raw.INTERNAL_JWT_SECRET === '' ? undefined : raw.INTERNAL_JWT_SECRET,
+    TRACKING_DATABASE_URL: raw.TRACKING_DATABASE_URL === '' ? undefined : raw.TRACKING_DATABASE_URL,
     USER_JWT_PUBLIC_KEY: raw.USER_JWT_PUBLIC_KEY === '' ? undefined : raw.USER_JWT_PUBLIC_KEY,
   };
   const postgresHost = raw.POSTGRES_HOST;
@@ -54,6 +56,7 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
   const rabbitUser = raw.RABBITMQ_USER;
   const rabbitPassword = raw.RABBITMQ_PASSWORD;
   const databaseUrl =
+    raw.TRACKING_DATABASE_URL ??
     raw.DATABASE_URL ??
     (postgresHost && postgresPort && postgresUser && postgresPassword && trackingDb
       ? `postgresql://${postgresUser}:${postgresPassword}@${postgresHost}:${postgresPort}/${trackingDb}`
@@ -64,6 +67,7 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
       ? `amqp://${rabbitUser}:${rabbitPassword}@${rabbitHost}:${rabbitPort}`
       : undefined);
   if (databaseUrl) process.env.DATABASE_URL = databaseUrl;
+  if (databaseUrl) process.env.TRACKING_DATABASE_URL = databaseUrl;
   process.env.REDIS_URL = raw.REDIS_URL ?? `redis://${redisHost}:${redisPort}`;
   if (rabbitMqUrl) process.env.RABBITMQ_URL = rabbitMqUrl;
 

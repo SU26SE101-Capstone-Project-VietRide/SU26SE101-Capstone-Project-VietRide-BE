@@ -9,6 +9,7 @@ export const CreateNotificationSchema = z.object({
   title: z.string().trim().min(1).max(MAX_NOTIFICATION_TITLE_LENGTH),
   body: z.string().trim().min(1),
   data: z.unknown().nullable().optional().transform((value) => value ?? null),
+  dedupeKey: z.string().trim().min(1).max(200).optional(),
 });
 
 export type CreateNotificationDto = z.input<typeof CreateNotificationSchema>;

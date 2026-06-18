@@ -28,7 +28,7 @@ export class CoreEventsConsumer implements OnModuleInit {
           binding.queue,
           binding.routingKey,
           (payload, raw) => this.handle(binding.routingKey, payload, raw),
-          { prefetch: RABBITMQ_PREFETCH_ONE, requeueOnError: true },
+          { prefetch: RABBITMQ_PREFETCH_ONE, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
         ),
       ),
     );
@@ -37,19 +37,24 @@ export class CoreEventsConsumer implements OnModuleInit {
   async handle(routingKey: CoreEventRoutingKey, payload: unknown, raw: ConsumeMessage): Promise<void> {
     const messageId = raw.properties.messageId ?? raw.properties.correlationId;
     if (!messageId) {
-      this.logger.warn({ routingKey }, 'Dropping message without message id');
-      return;
+      throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
     }
 
     const processingState = await this.idempotency.begin(routingKey, messageId);
-    if (processingState !== 'acquired') {
+    if (processingState === 'duplicate') {
       this.logger.info({ routingKey, messageId, processingState }, 'Skipping already handled message');
       return;
+    }
+    if (processingState === 'locked') {
+      throw new Error(`MESSAGE_LOCKED_${routingKey}_${messageId}`);
     }
 
     try {
       const notification = mapCoreEventToNotification(routingKey, payload);
-      await this.notificationsService.createNotification(notification);
+      await this.notificationsService.createNotification({
+        ...notification,
+        dedupeKey: buildNotificationDedupeKey(routingKey, messageId, notification.userId, notification.type),
+      });
       await this.idempotency.markProcessed(routingKey, messageId);
       this.logger.info({ routingKey, messageId, userId: notification.userId }, 'Processed core notification event');
     } catch (error) {
@@ -63,4 +68,13 @@ export class CoreEventsConsumer implements OnModuleInit {
       throw error;
     }
   }
+}
+
+function buildNotificationDedupeKey(
+  routingKey: string,
+  messageId: string,
+  userId: string,
+  type: string,
+): string {
+  return `${routingKey}:${messageId}:${userId}:${type}`;
 }

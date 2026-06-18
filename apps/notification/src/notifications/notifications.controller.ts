@@ -3,13 +3,15 @@ import {
   Get,
   HttpCode,
   Param,
-  Post,
+  Body,
+  Patch,
   Query,
   Req,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import {
+  ApiBody,
   ApiBearerAuth,
   ApiOperation,
   ApiParam,
@@ -28,6 +30,16 @@ import {
   NotificationIdParamSchema,
   type NotificationIdParamDto,
 } from './dto/notification-param.dto';
+import {
+  MarkNotificationReadSchema,
+  type MarkNotificationReadDto,
+} from './dto/mark-notification-read.dto';
+import {
+  errorEnvelopeSchema,
+  markNotificationReadBodySchema,
+  pagedNotificationsSchema,
+  successEnvelopeSchema,
+} from '../swagger/api-response.schemas';
 import { NotificationsService, type PagedNotificationsDto } from './notifications.service';
 
 @ApiTags('Notifications')
@@ -44,9 +56,26 @@ export class NotificationsController {
   @ApiQuery({ name: 'pageSize', type: Number, required: false, description: 'Maximum 100' })
   @ApiQuery({ name: 'sortBy', enum: ['createdAt', 'readAt', 'type'], required: false })
   @ApiQuery({ name: 'sortDir', enum: ['asc', 'desc'], required: false })
-  @ApiResponse({ status: 200, description: 'Notification history retrieved successfully.' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 400, description: 'Invalid query options' })
+  @ApiResponse({
+    status: 200,
+    description: 'Notification history retrieved successfully. Runtime response is wrapped in ApiResponse<T>.',
+    schema: successEnvelopeSchema(200, pagedNotificationsSchema),
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid query options. Runtime response is an ApiResponse error envelope.',
+    schema: errorEnvelopeSchema(400, 'VALIDATION_FAILED', 'Validation failed', { fields: true }),
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid user access token. Runtime response is an ApiResponse error envelope.',
+    schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Unauthorized'),
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Unexpected system error. Runtime response is an ApiResponse error envelope.',
+    schema: errorEnvelopeSchema(500, 'INTERNAL_ERROR', 'Unexpected error'),
+  })
   async listNotifications(
     @Query(new ZodValidationPipe(ListNotificationsQuerySchema)) query: ListNotificationsQueryDto,
     @Req() request: RequestWithNotificationUser,
@@ -54,15 +83,41 @@ export class NotificationsController {
     return this.notificationsService.listForUser(this.readUserId(request), query);
   }
 
-  @Post(':notificationId/read')
+  @Patch(':notificationId')
   @HttpCode(204)
   @ApiOperation({ summary: 'Mark a notification as read for current user' })
   @ApiParam({ name: 'notificationId', type: String, format: 'uuid' })
-  @ApiResponse({ status: 204, description: 'Notification marked as read.' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 404, description: 'Notification not found' })
+  @ApiBody({
+    description: 'Partial update body. Only read=true is accepted. Runtime validation is Zod-backed.',
+    schema: markNotificationReadBodySchema,
+  })
+  @ApiResponse({
+    status: 204,
+    description: 'Notification marked as read. 204 responses intentionally have no envelope body.',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid notification id or body. Runtime response is an ApiResponse error envelope.',
+    schema: errorEnvelopeSchema(400, 'VALIDATION_FAILED', 'Validation failed', { fields: true }),
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid user access token. Runtime response is an ApiResponse error envelope.',
+    schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Unauthorized'),
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Notification does not exist or is not owned by the current user.',
+    schema: errorEnvelopeSchema(404, 'NOTIFICATION_NOT_FOUND', 'Notification 7e7d44b8-3d84-4dd5-b0a2-1f445de7c701 not found'),
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Unexpected system error. Runtime response is an ApiResponse error envelope.',
+    schema: errorEnvelopeSchema(500, 'INTERNAL_ERROR', 'Unexpected error'),
+  })
   async markRead(
     @Param(new ZodValidationPipe(NotificationIdParamSchema)) params: NotificationIdParamDto,
+    @Body(new ZodValidationPipe(MarkNotificationReadSchema)) _body: MarkNotificationReadDto,
     @Req() request: RequestWithNotificationUser,
   ): Promise<void> {
     await this.notificationsService.markRead(params.notificationId, this.readUserId(request));
