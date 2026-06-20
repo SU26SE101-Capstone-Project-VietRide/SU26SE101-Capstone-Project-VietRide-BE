@@ -15,6 +15,11 @@ export class OutboxPublisherService {
   ) {}
 
   async publishPendingOnce(limit: number): Promise<number> {
+    const recovered = await this.repository.recoverStalePublishingEvents();
+    if (recovered > 0) {
+      this.logger.warn({ recovered }, 'Recovered stale PUBLISHING outbox events');
+    }
+
     const events = await this.repository.findPublishable(limit);
     let published = 0;
 
@@ -41,7 +46,7 @@ export class OutboxPublisherService {
       await this.repository.markPublished(event.id, new Date());
       return true;
     } catch (error) {
-      await this.repository.markFailed(event.id, error);
+      await this.repository.markFailed(event.id, error, event.retryCount);
       this.logger.warn({ err: error, eventId: event.id, eventType: event.eventType }, 'Outbox event publish failed');
       return false;
     }

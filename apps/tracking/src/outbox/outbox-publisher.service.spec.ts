@@ -20,6 +20,7 @@ describe('OutboxPublisherService', () => {
 
   beforeEach(() => {
     repository = {
+      recoverStalePublishingEvents: jest.fn(async () => 0),
       findPublishable: jest.fn(),
       markPublishing: jest.fn(async () => true),
       markPublished: jest.fn(async () => undefined),
@@ -45,6 +46,7 @@ describe('OutboxPublisherService', () => {
     await expect(service.publishPendingOnce(25)).resolves.toBe(1);
 
     expect(repository.findPublishable).toHaveBeenCalledWith(25);
+    expect(repository.recoverStalePublishingEvents).toHaveBeenCalledTimes(1);
     expect(repository.markPublishing).toHaveBeenCalledWith(EVENT_ID);
     expect(publisher.publish).toHaveBeenCalledWith(
       TRACKING_TRIP_DELAYED_ROUTING_KEY,
@@ -82,8 +84,26 @@ describe('OutboxPublisherService', () => {
       expect.objectContaining({ tripId: EVENT_ID }),
       expect.objectContaining({ eventType: OFF_ROUTE_ALERT_EVENT_TYPE }),
     );
-    expect(repository.markFailed).toHaveBeenCalledWith(EVENT_ID, error);
+    expect(repository.markFailed).toHaveBeenCalledWith(EVENT_ID, error, 0);
     expect(repository.markPublished).not.toHaveBeenCalled();
+  });
+
+  it('does not retry when max retries exceeded', async () => {
+    repository.findPublishable.mockResolvedValueOnce([]);
+
+    await expect(service.publishPendingOnce(25)).resolves.toBe(0);
+
+    expect(repository.findPublishable).toHaveBeenCalledWith(25);
+  });
+
+  it('recovers stale publishing events before polling publishable rows', async () => {
+    repository.recoverStalePublishingEvents.mockResolvedValueOnce(1);
+    repository.findPublishable.mockResolvedValueOnce([]);
+
+    await expect(service.publishPendingOnce(25)).resolves.toBe(0);
+
+    expect(repository.recoverStalePublishingEvents).toHaveBeenCalledTimes(1);
+    expect(repository.findPublishable).toHaveBeenCalledWith(25);
   });
 
   it('does not crash poller for malformed payloads', async () => {
@@ -97,7 +117,7 @@ describe('OutboxPublisherService', () => {
     await expect(service.publishPendingOnce(25)).resolves.toBe(0);
 
     expect(publisher.publish).not.toHaveBeenCalled();
-    expect(repository.markFailed).toHaveBeenCalledWith(EVENT_ID, expect.any(Error));
+    expect(repository.markFailed).toHaveBeenCalledWith(EVENT_ID, expect.any(Error), 0);
   });
 
   it('routes approaching alerts to the gps approaching stop key', async () => {
@@ -133,6 +153,7 @@ function createEvent(overrides: Partial<OutboxEventRecord>): OutboxEventRecord {
     retryCount: 0,
     lastError: null,
     createdAt: new Date('2026-06-04T00:00:00.000Z'),
+    updatedAt: new Date('2026-06-04T00:00:00.000Z'),
     publishedAt: null,
     ...overrides,
   };
