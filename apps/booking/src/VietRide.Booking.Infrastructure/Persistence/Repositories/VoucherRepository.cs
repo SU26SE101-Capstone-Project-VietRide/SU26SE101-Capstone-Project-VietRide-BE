@@ -99,6 +99,25 @@ internal sealed class VoucherRepository : IVoucherRepository
     }
 
     // -----------------------------------------------------------------------
+    // Operator-scoped queries (Task 14.1b — appended; do not modify above)
+    // -----------------------------------------------------------------------
+
+    /// <inheritdoc/>
+    public async Task<Voucher?> FindByIdAndOwnerAsync(Guid id, Guid ownerOperatorId, CancellationToken ct = default)
+        => await _db.Vouchers
+            .FirstOrDefaultAsync(v => v.Id == id && v.OwnerOperatorId == ownerOperatorId, ct);
+
+    /// <inheritdoc/>
+    public async Task<Voucher?> FindByIdAndOwnerIgnoringSoftDeleteAsync(Guid id, Guid ownerOperatorId, CancellationToken ct = default)
+        => await _db.Vouchers
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(v => v.Id == id && v.OwnerOperatorId == ownerOperatorId, ct);
+
+    /// <inheritdoc/>
+    public async Task<int> CountUsagesAsync(Guid voucherId, CancellationToken ct = default)
+        => await _db.VoucherUsages.CountAsync(u => u.VoucherId == voucherId, ct);
+
+    // -----------------------------------------------------------------------
     // Private helpers
     // -----------------------------------------------------------------------
 

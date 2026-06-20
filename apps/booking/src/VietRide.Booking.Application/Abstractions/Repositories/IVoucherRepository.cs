@@ -41,4 +41,31 @@ public interface IVoucherRepository : IRepository<Voucher, Guid>
     /// Used by <c>CreateVoucherCommandHandler</c> for OPERATOR_FUNDED consent fan-out.
     /// </summary>
     Task AddConsentAsync(OperatorVoucherConsent consent, CancellationToken ct = default);
+
+    // -----------------------------------------------------------------------
+    // Operator-scoped queries (Task 14.1b — appended after 14.1 methods; do not modify above)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Returns the voucher with the given id scoped to the specified owner operator.
+    /// Returns <c>null</c> if the voucher does not exist, is soft-deleted, or belongs to a
+    /// different operator (cross-operator → caller maps to 404 VOUCHER_NOT_FOUND for tenant isolation).
+    /// </summary>
+    Task<Voucher?> FindByIdAndOwnerAsync(Guid id, Guid ownerOperatorId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns the voucher with the given id scoped to the specified owner operator,
+    /// bypassing the global soft-delete query filter (<c>IgnoreQueryFilters</c>).
+    /// Used by DELETE to implement idempotency: an already-soft-deleted voucher owned by the
+    /// caller is returned so the handler can detect and no-op; a non-existent or cross-operator
+    /// voucher still returns <c>null</c> → 404 VOUCHER_NOT_FOUND (tenant isolation preserved).
+    /// </summary>
+    Task<Voucher?> FindByIdAndOwnerIgnoringSoftDeleteAsync(Guid id, Guid ownerOperatorId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns the total number of <see cref="VoucherUsage"/> rows for the given voucher
+    /// (all users combined). Used by the PATCH freeze-on-first-use guard (Q6): if &gt;= 1
+    /// the economic fields are frozen.
+    /// </summary>
+    Task<int> CountUsagesAsync(Guid voucherId, CancellationToken ct = default);
 }
