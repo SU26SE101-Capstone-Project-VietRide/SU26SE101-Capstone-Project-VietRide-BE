@@ -997,6 +997,154 @@ Response `200`:
 }
 ```
 
+### GET `/v1/admin/vouchers`
+
+> **Day-14 (Task 14.0a).** Platform-governance oversight list of ALL vouchers (admin-created platform vouchers + operator self-created vouchers) for audit (Q7). Read-only — no Idempotency-Key.
+
+Auth: `SYSTEM_ADMIN`.
+
+Query: `ownerOperatorId?` (uuid — filter operator-owned vouchers of one operator; omit/null returns all incl. platform), `fundingType?` (`VIETRIDE_FUNDED` | `OPERATOR_FUNDED`), `isActive?` (bool), plus standard `QueryOptions` paging/sort (`page`/`pageSize` clamped 1..100, `sortBy` whitelisted — default `createdAt` `desc`; non-whitelisted → `400 INVALID_SORT_FIELD`). v1 returns only active (non-soft-deleted) vouchers (respects EF `HasQueryFilter(deleted_at == null)`); `includeDeleted` not supported in v1.
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [
+      {
+        "id": "uuid",
+        "code": "SUMMER26",
+        "name": "Summer Sale 20%",
+        "type": "PERCENT_OFF",
+        "value": 20,
+        "fundingType": "VIETRIDE_FUNDED",
+        "ownerOperatorId": null,
+        "isActive": true,
+        "validFrom": "2026-06-01T00:00:00+07:00",
+        "validUntil": "2026-08-31T23:59:59+07:00",
+        "createdAt": "2026-06-20T10:00:00+07:00"
+      }
+    ],
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 1,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-20T10:00:00+07:00" }
+}
+```
+
+Error `403` (non-SYSTEM_ADMIN) → `FORBIDDEN`.
+
+### POST `/v1/admin/vouchers`
+
+Auth: `SYSTEM_ADMIN`. Idempotency: required.
+
+Creates a platform voucher (`owner_operator_id = null`). `OPERATOR_FUNDED` requires non-null `applicableOperatorIds` (null → `422 VALIDATION_ERROR`, Q3); INSERTs one `PENDING` `OperatorVoucherConsent` per listed operator. `VIETRIDE_FUNDED` creates no consent rows. `code = null` → auto-generate 8-char uppercase base32 unique among non-deleted. Duplicate `code` (among non-soft-deleted) → `409 VOUCHER_CODE_CONFLICT`.
+
+Request:
+```json
+{
+  "code": "SUMMER26",
+  "name": "Summer Sale 20%",
+  "type": "PERCENT_OFF",
+  "value": 20,
+  "minOrderAmount": 100000,
+  "maxDiscountAmount": 50000,
+  "totalUsageLimit": 1000,
+  "perUserLimit": 1,
+  "validFrom": "2026-06-01T00:00:00+07:00",
+  "validUntil": "2026-08-31T23:59:59+07:00",
+  "applicableOperatorIds": null,
+  "applicableRouteIds": null,
+  "fundingType": "VIETRIDE_FUNDED"
+}
+```
+
+Response `201`:
+```json
+{
+  "success": true,
+  "statusCode": 201,
+  "data": {
+    "id": "uuid",
+    "code": "SUMMER26",
+    "name": "Summer Sale 20%",
+    "type": "PERCENT_OFF",
+    "value": 20,
+    "fundingType": "VIETRIDE_FUNDED",
+    "ownerOperatorId": null,
+    "isActive": true,
+    "validFrom": "2026-06-01T00:00:00+07:00",
+    "validUntil": "2026-08-31T23:59:59+07:00",
+    "createdAt": "2026-06-20T10:00:00+07:00"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-20T10:00:00+07:00" }
+}
+```
+
+### GET `/v1/admin/vouchers/{voucherId}/consents`
+
+Auth: `SYSTEM_ADMIN`. Source: v7:685-688. Returns operator-voucher consent records for a specific voucher (admin view of consent status across operators).
+
+Response `200`: `ApiResponse` of list `{ id, voucherId, operatorId, status, requestedAt, respondedAt, respondedByUserId, rejectReason }`.
+
+### POST `/v1/operator/vouchers`
+
+Auth: `OPERATOR_ADMIN`. Idempotency: required.
+
+Operator self-create operator-owned voucher. `fundingType` FORCED `OPERATOR_FUNDED` (body truyền `VIETRIDE_FUNDED` → `422 VOUCHER_FORBIDDEN_FUNDING`); `applicableOperatorIds` FORCED to caller operator; `ownerOperatorId` set server-side = caller operatorId. NO `OperatorVoucherConsent` rows (self-consented), NO integration event. Duplicate global code (among non-soft-deleted) → `409 VOUCHER_CODE_CONFLICT`. `code = null` → auto 8-char uppercase base32.
+
+Request (admin-only fields `fundingType`/`applicableOperatorIds`/`ownerOperatorId` omitted — server-forced):
+```json
+{
+  "code": "OPABCDEF",
+  "name": "Tết Discount 50k",
+  "type": "FIXED_AMOUNT",
+  "value": 50000,
+  "minOrderAmount": 100000,
+  "maxDiscountAmount": null,
+  "totalUsageLimit": 100,
+  "perUserLimit": 1,
+  "validFrom": "2026-06-01T00:00:00+07:00",
+  "validUntil": "2026-08-31T23:59:59+07:00",
+  "applicableRouteIds": null
+}
+```
+
+Response `201`: same shape as admin create with `ownerOperatorId` populated and `fundingType: "OPERATOR_FUNDED"`.
+
+### PATCH `/v1/operator/vouchers/{id}`
+
+Auth: `OPERATOR_ADMIN`. Idempotency: none (behavior-idempotent). Scoped to `owner_operator_id == caller` (cross-operator → `404 VOUCHER_NOT_FOUND`).
+
+Partial update of mutable fields: `name`, `value`, `minOrderAmount`, `maxDiscountAmount`, `totalUsageLimit`, `perUserLimit`, `validFrom`, `validUntil`, `applicableRouteIds`. `code`/`type`/`fundingType`/`ownerOperatorId` ALWAYS immutable (attempt rejected). Freeze-on-first-use (Q6): while `voucher_usages` count == 0 all listed fields editable; once >=1 usage exists the economic fields `value`/`minOrderAmount`/`maxDiscountAmount` FREEZE (edit → `409 VOUCHER_LOCKED`) — only `name`, EXTENDING `validUntil` (not shortening below current), LOOSENING limits, `applicableRouteIds`, and deactivate remain editable.
+
+Request: partial body of the mutable fields above. Response `200`: `ApiResponse` of the updated voucher (same shape as create response).
+
+### DELETE `/v1/operator/vouchers/{id}`
+
+Auth: `OPERATOR_ADMIN`. Idempotency: none. Soft-delete (sets `deleted_at`); code becomes reusable (partial unique `WHERE deleted_at IS NULL`). Scoped to owner (cross-operator → `404 VOUCHER_NOT_FOUND`). Response `200`: `ApiResponse` of `{ id, deletedAt }`.
+
+### POST `/v1/operator/vouchers/{id}/activate` + `/deactivate`
+
+Auth: `OPERATOR_ADMIN`. Idempotency: none (behavior-idempotent). No body. Flips `is_active` (IActivatable). Scoped to owner (cross-operator → `404 VOUCHER_NOT_FOUND`). Response `200`: `ApiResponse` of `{ id, isActive }`.
+
+### GET `/v1/operator/voucher-consents`
+
+Auth: `OPERATOR_STAFF`/`OPERATOR_ADMIN`. Source: v7:659-663. Query: `status?` (`PENDING`|`ACCEPTED`|`REJECTED`). Returns operator-scoped consents (tenant isolation — operator may only see consents for own `operatorId` from JWT). Response `200`: `ApiResponse` of list `{ id, voucherId, voucherCode, voucherType, voucherValue, validFrom, validUntil, minOrderAmount, maxDiscountAmount, applicableRouteIds, status, requestedAt, respondedAt, respondedByUserId }`.
+
+### POST `/v1/operator/voucher-consents/{id}/accept`
+
+Auth: `OPERATOR_ADMIN` only (OPERATOR_STAFF → `403 FORBIDDEN`, fine-grained in .NET controller). Idempotency: required. Source: v7:665-672. Precondition: `status = PENDING`. Flips `PENDING → ACCEPTED`, sets `respondedAt`/`respondedByUserId`, publishes `booking.voucher.consent_accepted { voucherId, operatorId }` via Outbox. Response `200`: `ApiResponse` of `{ id, status }`.
+
+### POST `/v1/operator/voucher-consents/{id}/reject`
+
+Auth: `OPERATOR_ADMIN` only. Idempotency: required. Source: v7:674-683. Precondition: `status IN (PENDING, ACCEPTED)`. Optional body `{ "reason": "text" }`. Flips → `REJECTED`, sets `respondedAt`/`respondedByUserId`/`rejectReason`, publishes `booking.voucher.consent_rejected { voucherId, operatorId, reason? }`. Revoke after accept (`ACCEPTED → REJECTED`) does NOT roll back discount on already-CONFIRMED bookings. Response `200`: `ApiResponse` of `{ id, status }`.
+
 ## Trip, Route & Vehicle Service
 
 > **Trip ↔ Booking seam (ownership & seat lifecycle).** `TripSeat` (per-trip seat

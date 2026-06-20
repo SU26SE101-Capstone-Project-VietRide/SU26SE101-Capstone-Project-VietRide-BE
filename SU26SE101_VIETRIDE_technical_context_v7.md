@@ -459,7 +459,7 @@ Streaming LLM response qua SSE, gọi vector DB, tích hợp nhiều external AP
 - Chọn **điểm đón**: tại bến xuất phát (Terminal) hoặc điểm dừng dọc tuyến (Along-route stop). Bến chính lớn có thể có **shuttle service** (xe trung chuyển) — xem section 6.14.
 - Chọn **điểm trả**: mặc định là bến đích (Terminal). Nếu chuyến có RouteStop dọc tuyến, passenger có thể chọn xuống tại bất kỳ stop nào trên route (sau pickup stop) — fare vẫn tính full theo pickup stop (xem 6.1)
 - **Đặt nhiều vé trong 1 booking (tối đa 5 ghế)** — chọn nhiều ghế trên sơ đồ. Booking chỉ lưu thông tin người mua (booking owner) — KHÔNG yêu cầu nhập họ tên/SĐT/CCCD của từng người ngồi xe. Giới hạn 5 ghế để ngăn đầu cơ/chiếm vé
-- Áp voucher/mã giảm giá (voucher do System Admin phát hành ở cấp platform — operator không tự phát hành), thanh toán qua Ví VietRide hoặc VNPay
+- Áp voucher/mã giảm giá (voucher do System Admin phát hành ở cấp platform HOẶC do OPERATOR_ADMIN tự tạo operator-owned OPERATOR_FUNDED voucher — xem 4.4), thanh toán qua Ví VietRide hoặc VNPay
 - Theo dõi vị trí xe thời gian thực trên bản đồ — **tính năng cốt lõi**
 - Xem ETA đến điểm đón của mình
 - Nhận push notification (xe sắp đến, thay đổi lộ trình, hủy chuyến, thay đổi giờ)
@@ -570,7 +570,7 @@ Cập nhật thông tin công ty vận tải và bến xe khai thác.
 - Quản lý hàng ký gửi: **chỉ monitor** (không tạo parcel thay người dùng — consistency với no walk-in), xem danh sách parcel theo chuyến, theo dõi trạng thái, review/approve EXTRA_LARGE parcel, theo dõi giới hạn trọng tải per chuyến
 - Dashboard: thống kê chuyến, doanh thu, tỷ lệ lấp đầy ghế, tỷ lệ hủy
 - **Export báo cáo Excel (.xlsx):** doanh thu theo chuyến/tuyến/tháng, vé bán, parcel, refund, tỷ lệ lấp đầy. Endpoint `GET /v1/operator/reports/export?reportType=...&format=xlsx`. Xem 4.5.
-- **Áp voucher do platform phát hành:** Operator KHÔNG tự tạo voucher. Operator chỉ xem báo cáo voucher đã được dùng cho chuyến của mình
+- **Áp voucher do platform phát hành + TỰ TẠO operator-owned voucher:** Operator có thể tự tạo/sửa/xóa (soft-delete) voucher `OPERATOR_FUNDED` scoped cho công ty mình (xem 4.4 — operator self-create flow, self-consented, NO consent fan-out). Operator cũng chỉ xem báo cáo voucher đã được dùng cho chuyến của mình. Voucher `OPERATOR_FUNDED` do System Admin targeted tới operator thì vẫn yêu cầu consent (xem funding block 4.4)
 - RAG AI assistant: tra cứu quy trình nội bộ, chính sách tuyến, hướng dẫn hệ thống
 
 ### 4.4 System Admin Web
@@ -621,7 +621,7 @@ Cùng codebase NextJS với Operator Web, phân biệt qua role SYSTEM_ADMIN. Na
   > - **Chuyến không hợp lệ:** Trip có `departureDateTime` < now + status = SCHEDULED (quá giờ nhưng chưa update status) → flag warning
   > Agent thiết kế DB/API KHÔNG cần implement validation engine này cho v1.
 - **Báo cáo & thống kê cấp nền tảng (aggregate across all operators):** doanh thu theo nhà xe + toàn hệ thống, số chuyến/hành khách, tỷ lệ lấp đầy ghế, tỷ lệ hủy vé, hiệu suất vận hành — khác với dashboard Operator (chỉ thấy dữ liệu công ty mình), System Admin thấy toàn bộ và so sánh giữa các operator
-- **Quản lý voucher và khuyến mãi cấp nền tảng (PLATFORM-WIDE ONLY):** Admin là người duy nhất tạo/sửa/xóa voucher. Trong v1, "promotion/khuyến mãi" được model bằng Voucher campaign, KHÔNG có entity `Promotion` riêng. Voucher áp dụng cho toàn hệ thống (tất cả operator hoặc subset operator). Mỗi voucher cấu hình: type (PERCENT_OFF / FIXED_AMOUNT), giá trị, min order, max discount, usage limit per user, total usage limit, validFrom, validUntil, applicableRouteIds (nullable — null = áp mọi route), applicableOperatorIds (nullable — null = áp mọi operator targeted).
+- **Quản lý voucher và khuyến mãi cấp nền tảng (PLATFORM-WIDE) + oversight operator-owned voucher:** System Admin tạo/sửa/xóa voucher platform-wide (cả `VIETRIDE_FUNDED` và `OPERATOR_FUNDED`). `OPERATOR_FUNDED` admin voucher vẫn đi qua consent fan-out flow (xem funding block bên dưới, v7:640-646 UNCHANGED). Trong v1, "promotion/khuyến mãi" được model bằng Voucher campaign, KHÔNG có entity `Promotion` riêng. Voucher áp dụng cho toàn hệ thống (tất cả operator hoặc subset operator). Mỗi voucher cấu hình: type (PERCENT_OFF / FIXED_AMOUNT), giá trị, min order, max discount, usage limit per user, total usage limit, validFrom, validUntil, applicableRouteIds (nullable — null = áp mọi route), applicableOperatorIds (nullable — null = áp mọi operator targeted). **NEW (re-plan 2026-06-19):** OPERATOR_ADMIN CŨNG được tự tạo operator-owned `OPERATOR_FUNDED` voucher (full CRUD) scoped cho công ty mình — xem funding block "Operator self-create flow" bên dưới. System Admin có endpoint oversight `GET /v1/admin/vouchers` (filter `?ownerOperatorId=`/`?fundingType=`/`?isActive=`) để audit mọi voucher (platform + operator-created).
 
   > **Voucher funding model:**
   >
@@ -648,7 +648,23 @@ Cùng codebase NextJS với Operator Web, phân biệt qua role SYSTEM_ADMIN. Na
   >
   > **applicableOperatorIds null behavior khác nhau:**
   > - `fundingType=VIETRIDE_FUNDED` + `applicableOperatorIds=null` → áp mọi operator (không cần opt-in vì VietRide chịu chi phí).
-  > - `fundingType=OPERATOR_FUNDED` + `applicableOperatorIds=null` → System tạo OperatorVoucherConsent PENDING cho **mọi operator** đang APPROVED. Chỉ operator ACCEPTED mới có voucher active. Use case hiếm, thường operator-funded sẽ targeted subset.
+  > - `fundingType=OPERATOR_FUNDED` + `applicableOperatorIds=null` → System tạo OperatorVoucherConsent PENDING cho **mọi operator** đang APPROVED. Chỉ operator ACCEPTED mới có voucher active. Use case hiếm, thường operator-funded sẽ targeted subset. (Lưu ý: Day-14 defer — admin `OPERATOR_FUNDED` yêu cầu `applicableOperatorIds` non-null, null bị reject `VALIDATION_ERROR`; fan-out mọi operator APPROVED là enhancement tương lai vì cần Identity feed.)
+  >
+  > **Operator self-create flow (NEW — re-plan 2026-06-19, human-approved):**
+  > - OPERATOR_ADMIN **được tự tạo** operator-owned voucher `OPERATOR_FUNDED` scoped cho công ty mình (full CRUD: create / PATCH / DELETE soft-delete / activate / deactivate). `owner_operator_id` = caller operator (set server-side), `funding_type` FORCED `OPERATOR_FUNDED` (nếu body truyền `VIETRIDE_FUNDED` → `VOUCHER_FORBIDDEN_FUNDING` 422). `applicableOperatorIds` FORCED bằng chính caller operator.
+  > - **Consent-skip (self-consented):** operator-owned voucher KHÔNG tạo `OperatorVoucherConsent` rows (operator tự tạo = tự đồng ý), KHÔNG đi qua consent fan-out flow ở v7:640-646 (flow đó chỉ áp cho admin `OPERATOR_FUNDED` voucher). Operator-owned voucher KHÔNG emit integration event (no consumer — Q7).
+  > - **PATCH freeze-on-first-use (Q6):** `code`/`type`/`fundingType`/`ownerOperatorId` ALWAYS immutable. While `voucher_usages` count == 0: operator được edit `name`/`value`/`minOrderAmount`/`maxDiscountAmount`/`totalUsageLimit`/`perUserLimit`/`validFrom`/`validUntil`/`applicableRouteIds`. Once >=1 usage exists: economic fields `value`/`minOrderAmount`/`maxDiscountAmount` FREEZE (edit → `VOUCHER_LOCKED` 409); chỉ còn `name`, EXTEND `validUntil` (không rút ngắn dưới hiện tại), LOOSEN limits, `applicableRouteIds`, và deactivate là editable.
+  > - **Tenant isolation:** mọi read/update/delete/activate scoped `owner_operator_id == caller` (cross-operator → `404 VOUCHER_NOT_FOUND`, không leak existence).
+  > - **Code uniqueness:** global unique among non-soft-deleted (`uq_vouchers_code` partial `WHERE deleted_at IS NULL`); duplicate → `VOUCHER_CODE_CONFLICT` 409. Soft-delete (set `deleted_at`) cho phép tái sử dụng code.
+  > - **Endpoints:** `POST /v1/operator/vouchers`, `PATCH /v1/operator/vouchers/{id}`, `DELETE /v1/operator/vouchers/{id}`, `POST /v1/operator/vouchers/{id}/activate`, `POST /v1/operator/vouchers/{id}/deactivate` — role `OPERATOR_ADMIN`. POST create yêu cầu `Idempotency-Key`; PATCH/DELETE/activate/deactivate behavior-idempotent (no key — mirror driver-schedule-activation precedent).
+  >
+  > **Checkout applicability branch (Q8 RESOLVED — canonical validation order):** khi passenger áp `voucherCode` tại `POST /v1/bookings` (và round-trip), voucher applicable iff EITHER:
+  > - **(a) Operator-owned voucher:** `owner_operator_id == Trip.operatorId` → self-funded, **SKIP consent check** AND skip operator-scope check (chỉ branch (a) bypass 2 check này). TẤT CẢ filter khác (route-scope `applicable_route_ids`, validity window, min_order, total/per-user usage limits) vẫn apply universally.
+  > - **(b) Platform/admin voucher:** `owner_operator_id IS NULL` → (VIETRIDE_FUNDED scope match) HOẶC (OPERATOR_FUNDED với `OperatorVoucherConsent.status=ACCEPTED` cho Trip.operatorId). Admin `OPERATOR_FUNDED` chưa ACCEPTED → `VOUCHER_NOT_APPLICABLE` (không reveal opt-in mechanics).
+  >
+  > Canonical validation order: (1) exists + not soft-deleted + `is_active`; (2) within `valid_from..valid_until`; (3) applicability — operator-scope [branch (a) auto-pass / branch (b) `applicableOperatorIds`] + route-scope + consent [branch (b) OPERATOR_FUNDED yêu cầu ACCEPTED]; (4) `min_order_amount` met; (5) usage limits (total + per-user) not exceeded; (6) compute discount (PERCENT_OFF cap `max_discount_amount`, FIXED_AMOUNT, round half-up `MidpointRounding.AwayFromZero`, NO floor-1000). Mỗi failure throw registered coded exception (`VOUCHER_NOT_FOUND` 404 / `VOUCHER_EXPIRED` / `VOUCHER_NOT_APPLICABLE` / `VOUCHER_USAGE_LIMIT_REACHED` / `VOUCHER_USER_LIMIT_REACHED` / `VOUCHER_MIN_ORDER_NOT_MET` 422). `voucher_usages.funded_by` = snapshot `funding_type` tại apply time.
+  >
+  > **Admin oversight list (Q7):** `GET /v1/admin/vouchers` (SYSTEM_ADMIN) — list ALL voucher (platform + operator-created) cho governance/audit, optional filter `?ownerOperatorId=`/`?fundingType=`/`?isActive=`, paged + sortBy-whitelisted (default `createdAt desc`), read-only (no Idempotency-Key). v1 returns chỉ active (non-soft-deleted) voucher — respects EF `HasQueryFilter(deleted_at == null)`; soft-deleted audit deferred.
   >
   > **Admin Web UI:** form tạo voucher có dropdown `fundingType`, multi-select `applicableOperatorIds` (autocomplete). Sau khi save, dashboard hiển thị consent status per operator (PENDING/ACCEPTED/REJECTED counts).
   >
@@ -4520,7 +4536,7 @@ Role:              PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_AD
 | **Service-to-service auth** | Internal JWT — Gateway ký, TTL 120s, HS256 shared secret |
 | **Saga pattern** | Hybrid — sync HTTP cho core booking path, async RabbitMQ cho side-effects. Outbox đảm bảo durability |
 | **Station vs Stop** | 2 entity riêng. Station = bến canonical cấp platform (không có operatorId). Stop = điểm dừng dọc tuyến thuộc operator. `Route.returnRouteId` self-FK link chiều về |
-| **Voucher** | Platform-wide only — chỉ System Admin tạo. Operator không tự phát hành |
+| **Voucher** | Platform-wide (System Admin tạo, cả `VIETRIDE_FUNDED` + `OPERATOR_FUNDED`) + operator self-create (OPERATOR_ADMIN tự tạo operator-owned `OPERATOR_FUNDED` voucher scoped công ty mình, self-consented, full CRUD). Xem 4.4 funding block |
 | **Cancellation policy** | Operator-configured. Lưu `Operator.cancellationPolicy` JSONB array `[{hoursBeforeDeparture, feePercent}]`. Không có mức hardcoded toàn platform. |
 | **Operator settlement model** | v1 wallet-internal (KHÔNG bank transfer). Doanh thu vào `PlatformWallet` holding pool, hold 7 ngày sau Trip terminal → Monday weekly auto-settle bằng cách debit `PlatformWallet` + credit `OperatorWallet`. Admin manual settle per-trip cũng support. Bank Withdrawal là v2. Xem 4.6. |
 | **Parcel size** | Category enum (SMALL/MEDIUM/LARGE/EXTRA_LARGE) — không dùng dimensions |
