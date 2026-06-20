@@ -3,6 +3,7 @@ import { RedisService } from '@vietride/nest-redis';
 import { trackingEtaKey, trackingLatestKey } from '../location/location.constants';
 import { UpdateLocationSchema } from '../location/dto/update-location.dto';
 import { TrackingPrismaService } from '../prisma/tracking-prisma.service';
+import { EtaResponseSchema } from './dto/eta-response.dto';
 import type { TrailQueryDto } from './dto/tracking-data-query.dto';
 
 export interface TrackingLatestDto {
@@ -49,38 +50,58 @@ export class TrackingDataRepository {
     };
   }
 
-  async findTrail(tripId: string, query: TrailQueryDto): Promise<TrackingTrailPointDto[]> {
-    const rows = await this.prisma.gpsTrail.findMany({
-      where: {
-        tripId,
-        recordedAt: {
-          ...(query.from ? { gte: new Date(query.from) } : {}),
-          ...(query.to ? { lte: new Date(query.to) } : {}),
-        },
+  async findTrail(
+    tripId: string,
+    query: TrailQueryDto,
+  ): Promise<{ items: TrackingTrailPointDto[]; totalItems: number }> {
+    const where = {
+      tripId,
+      recordedAt: {
+        ...(query.from ? { gte: new Date(query.from) } : {}),
+        ...(query.to ? { lte: new Date(query.to) } : {}),
       },
-      orderBy: { recordedAt: 'asc' },
-      take: query.limit,
-    });
+    };
 
-    return rows.map((row) => ({
-      id: row.id,
-      tripId: row.tripId,
-      latitude: Number(row.latitude),
-      longitude: Number(row.longitude),
-      ...(row.speedKmh !== null ? { speedKmh: Number(row.speedKmh) } : {}),
-      ...(row.headingDeg !== null ? { headingDeg: Number(row.headingDeg) } : {}),
-      recordedAt: row.recordedAt.toISOString(),
-    }));
+    const orderBy = { [query.sortBy]: query.sortDir } as const;
+
+    const [rows, totalItems] = await Promise.all([
+      this.prisma.gpsTrail.findMany({
+        where,
+        orderBy,
+        skip: (query.page - 1) * query.pageSize,
+        take: query.pageSize,
+      }),
+      this.prisma.gpsTrail.count({ where }),
+    ]);
+
+    return {
+      items: rows.map((row) => ({
+        id: row.id,
+        tripId: row.tripId,
+        latitude: Number(row.latitude),
+        longitude: Number(row.longitude),
+        ...(row.speedKmh !== null ? { speedKmh: Number(row.speedKmh) } : {}),
+        ...(row.headingDeg !== null ? { headingDeg: Number(row.headingDeg) } : {}),
+        recordedAt: row.recordedAt.toISOString(),
+      })),
+      totalItems,
+    };
   }
 
-  async findEta(tripId: string, stopId: string): Promise<unknown | null> {
+  async findEta(tripId: string, stopId: string): Promise<import('./dto/eta-response.dto').EtaResponseDto | null> {
     const payload = await this.redis.getClient().get(trackingEtaKey(tripId, stopId));
     if (!payload) return null;
 
+    let parsedJson: unknown;
     try {
-      return JSON.parse(payload) as unknown;
+      parsedJson = JSON.parse(payload);
     } catch {
       return null;
     }
+
+    const parsed = EtaResponseSchema.safeParse(parsedJson);
+    if (!parsed.success) return null;
+
+    return parsed.data;
   }
 }
