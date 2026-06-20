@@ -195,7 +195,7 @@ Day 14 delivers voucher checkout for the Booking service: the Voucher / VoucherU
 | 14.0 | done | APPROVED | 2026-06-20 | 100 tests pass; migration apply/rollback/reapply clean; NetArchTest green |
 | 14.1 | done | APPROVED | 2026-06-20 | admin create-voucher + OPERATOR_FUNDED consent fan-out + admin oversight GET list; 89 unit + 23 integration tests pass; NetArchTest green; APPROVE after 3 review rounds (idempotency-key enforce, 8-char auto-code stub, sortDir guard, IClock.UtcNow createdAt, Q3 validator test). Carry-over (non-blocking, pre-existing cross-service): INVALID_SORT_FIELD returns 422 via validator vs BSOT:1415 400; 2 NITs (cache clock once, doc-comment typo). Human /verify pending |
 | 14.1b | done | APPROVED | 2026-06-20 | operator self-create CRUD (POST/PATCH/DELETE/activate/deactivate); tenant isolation, OPERATOR_FUNDED forced, freeze-on-first-use (Q6), DELETE idempotent soft-delete, partial PATCH null=keep-current, contract response shapes; IVoucherRepository extended append-only; 112 unit + 23 integration pass; APPROVE after 4 review rounds. Human /verify pending |
-| 14.2 | todo | — | — | — |
+| 14.2 | done | APPROVED | 2026-06-20 | operator consent list/accept/reject + admin consents view + Outbox events (consent_accepted/rejected); IOperatorVoucherConsentRepository; 128 unit + 23 integration pass; NetArchTest green; Api domain-free (status parsed in handler). Required SOT addendum (BSOT 1.14.0, commit fd5f8a0): registered CONSENT_NOT_PENDING 409 + CONSENT_ALREADY_REJECTED 409 (human-approved). APPROVE after 2 review rounds (list-handler tests, accept/reject result trimmed to {id,status} per contract). Human /verify pending |
 | 14.3 | todo | — | — | — |
 | 14.4 | todo | — | — | — |
 | 14.5 | todo | — | — | — |
