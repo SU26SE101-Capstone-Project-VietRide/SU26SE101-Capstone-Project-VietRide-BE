@@ -59,12 +59,20 @@ CREATE TABLE outbox_events (
     status outbox_event_status NOT NULL DEFAULT 'PENDING',
     retry_count INT NOT NULL DEFAULT 0,
     last_error TEXT NULL,
+    next_retry_at TIMESTAMPTZ NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     published_at TIMESTAMPTZ NULL
 );
 
 CREATE INDEX idx_outbox_events_status_created
     ON outbox_events (status, created_at);
+
+CREATE INDEX idx_outbox_events_status_next_retry
+    ON outbox_events (status, next_retry_at);
+
+CREATE INDEX idx_outbox_events_status_updated
+    ON outbox_events (status, updated_at);
 
 -- =============================================================================
 -- NOTE: NestJS Tracking Service does NOT use Hangfire.
