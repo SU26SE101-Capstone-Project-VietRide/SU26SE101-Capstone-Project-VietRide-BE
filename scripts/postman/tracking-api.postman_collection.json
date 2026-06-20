@@ -1,0 +1,824 @@
+{
+  "info": {
+    "name": "VietRide Tracking API",
+    "description": "REST-only Postman collection for VietRide Tracking Service. WebSocket/realtime is intentionally excluded.\n\nRun order: 00 Health -> 01 Identity Login -> 02 Negative API -> 03 Tracking Data API.\n\nDirect Tracking service baseUrlService defaults to http://localhost:3001.\nTracking endpoints are under /api/v1/tracking/trips/* because main.ts sets global prefix api and controller uses /v1/tracking/trips.\n\nFolder 02 needs no seed/token and verifies routing, validation, auth, and ApiResponse errors.\nFolder 03 needs accessToken, downstream Trip/Booking/Parcel tracking authorization, and seeded Redis/Postgres data.\n\nSeed data command:\n$env:TRACKING_DATABASE_URL=\"postgresql://vietride:vietride_dev@localhost:5432/vietride_tracking\"\n$env:REDIS_URL=\"redis://localhost:6379\"\nnode scripts/postman/seed-tracking-postman-data.js",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 - Health & Probes",
+      "item": [
+        {
+          "name": "GET /health -> 200",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrlService}}/health",
+              "host": [
+                "{{baseUrlService}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Liveness probe, no auth."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const env = pm.response.json();",
+                  "pm.test('envelope success=true', () => pm.expect(env.success).to.eql(true));",
+                  "pm.test('statusCode matches HTTP', () => pm.expect(env.statusCode).to.eql(pm.response.code));",
+                  "pm.test('meta has timestamp', () => pm.expect(env.meta.timestamp).to.be.a('string').and.not.empty);",
+                  "pm.test('traceId is string when present', () => { if (env.meta.traceId !== undefined) pm.expect(env.meta.traceId).to.be.a('string').and.not.empty; });",
+                  "pm.test('data.status = ok', () => pm.expect(env.data.status).to.eql('ok'));",
+                  "pm.test('data.service = tracking', () => pm.expect(String(env.data.service).toLowerCase()).to.eql('tracking'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /ready -> 200",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrlService}}/ready",
+              "host": [
+                "{{baseUrlService}}"
+              ],
+              "path": [
+                "ready"
+              ]
+            },
+            "description": "Readiness probe, no auth."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const env = pm.response.json();",
+                  "pm.test('envelope success=true', () => pm.expect(env.success).to.eql(true));",
+                  "pm.test('statusCode matches HTTP', () => pm.expect(env.statusCode).to.eql(pm.response.code));",
+                  "pm.test('meta has timestamp', () => pm.expect(env.meta.timestamp).to.be.a('string').and.not.empty);",
+                  "pm.test('traceId is string when present', () => { if (env.meta.traceId !== undefined) pm.expect(env.meta.traceId).to.be.a('string').and.not.empty; });",
+                  "pm.test('data.status = ok', () => pm.expect(env.data.status).to.eql('ok'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 - Auth (Identity login)",
+      "item": [
+        {
+          "name": "POST /v1/auth/login -> save accessToken",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{identityEmail}}\",\n  \"password\": \"{{identityPassword}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrlGateway}}/v1/auth/login",
+              "host": [
+                "{{baseUrlGateway}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Login through Gateway. Saves accessToken/userId/userRole for Tracking requests."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const env = pm.response.json();",
+                  "pm.test('envelope success=true', () => pm.expect(env.success).to.eql(true));",
+                  "pm.test('has accessToken', () => pm.expect(env.data.accessToken).to.be.a('string').and.not.empty);",
+                  "if (env.data && env.data.accessToken) {",
+                  "  pm.environment.set('accessToken', env.data.accessToken);",
+                  "  if (env.data.user && env.data.user.id) pm.environment.set('userId', env.data.user.id);",
+                  "  if (env.data.user && env.data.user.role) pm.environment.set('userRole', env.data.user.role);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 - Negative API (no seed required)",
+      "description": "Verifies actual Tracking REST paths plus validation/auth errors without Redis/Postgres seed data.",
+      "item": [
+        {
+          "name": "GET latest (missing token) -> 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{tripId}}/latest",
+              "host": [
+                "{{baseUrlService}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tracking",
+                "trips",
+                "{{tripId}}",
+                "latest"
+              ]
+            },
+            "description": "Valid UUID path, no token."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 401', () => pm.response.to.have.status(401));",
+                  "const env = pm.response.json();",
+                  "pm.test('envelope success=false', () => pm.expect(env.success).to.eql(false));",
+                  "pm.test('statusCode matches HTTP', () => pm.expect(env.statusCode).to.eql(pm.response.code));",
+                  "pm.test('error.code = UNAUTHORIZED', () => pm.expect(env.error.code).to.eql('UNAUTHORIZED'));",
+                  "pm.test('meta has timestamp', () => pm.expect(env.meta.timestamp).to.be.a('string').and.not.empty);",
+                  "pm.test('traceId is string when present', () => { if (env.meta.traceId !== undefined) pm.expect(env.meta.traceId).to.be.a('string').and.not.empty; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET latest (invalid token) -> 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer invalid-jwt-token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{tripId}}/latest",
+              "host": [
+                "{{baseUrlService}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tracking",
+                "trips",
+                "{{tripId}}",
+                "latest"
+              ]
+            },
+            "description": "Invalid bearer token."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 401', () => pm.response.to.have.status(401));",
+                  "const env = pm.response.json();",
+                  "pm.test('envelope success=false', () => pm.expect(env.success).to.eql(false));",
+                  "pm.test('statusCode matches HTTP', () => pm.expect(env.statusCode).to.eql(pm.response.code));",
+                  "pm.test('error.code = UNAUTHORIZED', () => pm.expect(env.error.code).to.eql('UNAUTHORIZED'));",
+                  "pm.test('meta has timestamp', () => pm.expect(env.meta.timestamp).to.be.a('string').and.not.empty);",
+                  "pm.test('traceId is string when present', () => { if (env.meta.traceId !== undefined) pm.expect(env.meta.traceId).to.be.a('string').and.not.empty; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET latest (bad tripId) -> 400",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrlService}}/api/v1/tracking/trips/not-a-uuid/latest",
+              "host": [
+                "{{baseUrlService}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tracking",
+                "trips",
+                "not-a-uuid",
+                "latest"
+              ]
+            },
+            "description": "Invalid tripId param."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "const env = pm.response.json();",
+                  "pm.test('envelope success=false', () => pm.expect(env.success).to.eql(false));",
+                  "pm.test('statusCode matches HTTP', () => pm.expect(env.statusCode).to.eql(pm.response.code));",
+                  "pm.test('error.code = VALIDATION_FAILED', () => pm.expect(env.error.code).to.eql('VALIDATION_FAILED'));",
+                  "pm.test('meta has timestamp', () => pm.expect(env.meta.timestamp).to.be.a('string').and.not.empty);",
+                  "pm.test('traceId is string when present', () => { if (env.meta.traceId !== undefined) pm.expect(env.meta.traceId).to.be.a('string').and.not.empty; });",
+                  "pm.test('fields array exists when emitted', () => { if (env.error.fields !== undefined) pm.expect(env.error.fields).to.be.an('array'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET trail (page=0) -> 400",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{tripId}}/trail?page=0",
+              "host": [
+                "{{baseUrlService}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tracking",
+                "trips",
+                "{{tripId}}",
+                "trail"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "page must be >= 1."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "const env = pm.response.json();",
+                  "pm.test('envelope success=false', () => pm.expect(env.success).to.eql(false));",
+                  "pm.test('statusCode matches HTTP', () => pm.expect(env.statusCode).to.eql(pm.response.code));",
+                  "pm.test('error.code = VALIDATION_FAILED', () => pm.expect(env.error.code).to.eql('VALIDATION_FAILED'));",
+                  "pm.test('meta has timestamp', () => pm.expect(env.meta.timestamp).to.be.a('string').and.not.empty);",
+                  "pm.test('traceId is string when present', () => { if (env.meta.traceId !== undefined) pm.expect(env.meta.traceId).to.be.a('string').and.not.empty; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET trail (from > to) -> 400",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{tripId}}/trail?from={{endTime}}&to={{startTime}}",
+              "host": [
+                "{{baseUrlService}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tracking",
+                "trips",
+                "{{tripId}}",
+                "trail"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "{{endTime}}"
+                },
+                {
+                  "key": "to",
+                  "value": "{{startTime}}"
+                }
+              ]
+            },
+            "description": "from must be <= to."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "const env = pm.response.json();",
+                  "pm.test('envelope success=false', () => pm.expect(env.success).to.eql(false));",
+                  "pm.test('statusCode matches HTTP', () => pm.expect(env.statusCode).to.eql(pm.response.code));",
+                  "pm.test('error.code = VALIDATION_FAILED', () => pm.expect(env.error.code).to.eql('VALIDATION_FAILED'));",
+                  "pm.test('meta has timestamp', () => pm.expect(env.meta.timestamp).to.be.a('string').and.not.empty);",
+                  "pm.test('traceId is string when present', () => { if (env.meta.traceId !== undefined) pm.expect(env.meta.traceId).to.be.a('string').and.not.empty; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET eta (bad stopId) -> 400",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{tripId}}/eta?stopId=not-a-uuid",
+              "host": [
+                "{{baseUrlService}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tracking",
+                "trips",
+                "{{tripId}}",
+                "eta"
+              ],
+              "query": [
+                {
+                  "key": "stopId",
+                  "value": "not-a-uuid"
+                }
+              ]
+            },
+            "description": "stopId must be UUID."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "const env = pm.response.json();",
+                  "pm.test('envelope success=false', () => pm.expect(env.success).to.eql(false));",
+                  "pm.test('statusCode matches HTTP', () => pm.expect(env.statusCode).to.eql(pm.response.code));",
+                  "pm.test('error.code = VALIDATION_FAILED', () => pm.expect(env.error.code).to.eql('VALIDATION_FAILED'));",
+                  "pm.test('meta has timestamp', () => pm.expect(env.meta.timestamp).to.be.a('string').and.not.empty);",
+                  "pm.test('traceId is string when present', () => { if (env.meta.traceId !== undefined) pm.expect(env.meta.traceId).to.be.a('string').and.not.empty; });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 - Tracking Data API (seed + authz required)",
+      "description": "If downstream Trip/Booking/Parcel authz is unavailable, these requests should return 503 TRACKING_AUTH_UNAVAILABLE and still pass. When authz is available, they assert 200/403 data behavior.",
+      "item": [
+        {
+          "name": "GET latest (happy) -> 200 or 503 authz unavailable",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{tripId}}/latest",
+              "host": [
+                "{{baseUrlService}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tracking",
+                "trips",
+                "{{tripId}}",
+                "latest"
+              ]
+            },
+            "description": "Reads Redis tracking:latest:{tripId}."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is expected integration outcome', () => pm.expect([200, 503]).to.include(pm.response.code));",
+                  "const env = pm.response.json();",
+                  "pm.test('statusCode matches HTTP', () => pm.expect(env.statusCode).to.eql(pm.response.code));",
+                  "pm.test('meta has timestamp', () => pm.expect(env.meta.timestamp).to.be.a('string').and.not.empty);",
+                  "pm.test('traceId is string when present', () => { if (env.meta.traceId !== undefined) pm.expect(env.meta.traceId).to.be.a('string').and.not.empty; });",
+                  "if (pm.response.code === 503) {",
+                  "  pm.test('authz dependency unavailable is explicit', () => { pm.expect(env.success).to.eql(false); pm.expect(env.error.code).to.eql('TRACKING_AUTH_UNAVAILABLE'); });",
+                  "}",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('envelope success=true', () => pm.expect(env.success).to.eql(true));",
+                  "  pm.test('data.latest shape', () => {",
+                  "    pm.expect(env.data.latest).to.be.an('object');",
+                  "    pm.expect(env.data.latest.tripId).to.eql(pm.environment.get('tripId') || pm.collectionVariables.get('tripId'));",
+                  "    pm.expect(env.data.latest.latitude).to.be.a('number');",
+                  "    pm.expect(env.data.latest.longitude).to.be.a('number');",
+                  "    pm.expect(env.data.latest.recordedAt).to.be.a('string');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET latest (cache miss) -> 200 null or 503 authz unavailable",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{missingLatestTripId}}/latest",
+              "host": [
+                "{{baseUrlService}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tracking",
+                "trips",
+                "{{missingLatestTripId}}",
+                "latest"
+              ]
+            },
+            "description": "Authorized trip with no latest cache."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is expected integration outcome', () => pm.expect([200, 503]).to.include(pm.response.code));",
+                  "const env = pm.response.json();",
+                  "pm.test('statusCode matches HTTP', () => pm.expect(env.statusCode).to.eql(pm.response.code));",
+                  "pm.test('meta has timestamp', () => pm.expect(env.meta.timestamp).to.be.a('string').and.not.empty);",
+                  "pm.test('traceId is string when present', () => { if (env.meta.traceId !== undefined) pm.expect(env.meta.traceId).to.be.a('string').and.not.empty; });",
+                  "if (pm.response.code === 503) {",
+                  "  pm.test('authz dependency unavailable is explicit', () => { pm.expect(env.success).to.eql(false); pm.expect(env.error.code).to.eql('TRACKING_AUTH_UNAVAILABLE'); });",
+                  "}",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('envelope success=true', () => pm.expect(env.success).to.eql(true));",
+                  "  pm.test('data.latest = null', () => pm.expect(env.data.latest).to.eql(null));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET latest (forbidden) -> 403 or 503 authz unavailable",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{forbiddenTripId}}/latest",
+              "host": [
+                "{{baseUrlService}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tracking",
+                "trips",
+                "{{forbiddenTripId}}",
+                "latest"
+              ]
+            },
+            "description": "Authz denies trip."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is expected integration outcome', () => pm.expect([403, 503]).to.include(pm.response.code));",
+                  "const env = pm.response.json();",
+                  "pm.test('statusCode matches HTTP', () => pm.expect(env.statusCode).to.eql(pm.response.code));",
+                  "pm.test('meta has timestamp', () => pm.expect(env.meta.timestamp).to.be.a('string').and.not.empty);",
+                  "pm.test('traceId is string when present', () => { if (env.meta.traceId !== undefined) pm.expect(env.meta.traceId).to.be.a('string').and.not.empty; });",
+                  "if (pm.response.code === 503) {",
+                  "  pm.test('authz dependency unavailable is explicit', () => { pm.expect(env.success).to.eql(false); pm.expect(env.error.code).to.eql('TRACKING_AUTH_UNAVAILABLE'); });",
+                  "}",
+                  "if (pm.response.code === 403) {",
+                  "  pm.test('envelope success=false', () => pm.expect(env.success).to.eql(false));",
+                  "  pm.test('error.code = ACCESS_DENIED', () => pm.expect(env.error.code).to.eql('ACCESS_DENIED'));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET trail page 1 -> 200 or 503 authz unavailable",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{tripId}}/trail?page=1&pageSize=10&from={{startTime}}&to={{endTime}}",
+              "host": [
+                "{{baseUrlService}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tracking",
+                "trips",
+                "{{tripId}}",
+                "trail"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "10"
+                },
+                {
+                  "key": "from",
+                  "value": "{{startTime}}"
+                },
+                {
+                  "key": "to",
+                  "value": "{{endTime}}"
+                }
+              ]
+            },
+            "description": "Reads gps_trails."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is expected integration outcome', () => pm.expect([200, 503]).to.include(pm.response.code));",
+                  "const env = pm.response.json();",
+                  "pm.test('statusCode matches HTTP', () => pm.expect(env.statusCode).to.eql(pm.response.code));",
+                  "pm.test('meta has timestamp', () => pm.expect(env.meta.timestamp).to.be.a('string').and.not.empty);",
+                  "pm.test('traceId is string when present', () => { if (env.meta.traceId !== undefined) pm.expect(env.meta.traceId).to.be.a('string').and.not.empty; });",
+                  "if (pm.response.code === 503) {",
+                  "  pm.test('authz dependency unavailable is explicit', () => { pm.expect(env.success).to.eql(false); pm.expect(env.error.code).to.eql('TRACKING_AUTH_UNAVAILABLE'); });",
+                  "}",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('envelope success=true', () => pm.expect(env.success).to.eql(true));",
+                  "  pm.test('pagination shape', () => {",
+                  "    pm.expect(env.data).to.include.all.keys(['items','page','pageSize','totalItems','totalPages','hasNextPage','hasPreviousPage']);",
+                  "    pm.expect(env.data.page).to.eql(1);",
+                  "    pm.expect(env.data.pageSize).to.eql(10);",
+                  "    pm.expect(env.data.items).to.be.an('array');",
+                  "  });",
+                  "  pm.test('items have GPS shape when present', () => { env.data.items.forEach((p) => { pm.expect(p.tripId).to.eql(pm.environment.get('tripId') || pm.collectionVariables.get('tripId')); pm.expect(p.latitude).to.be.a('number'); pm.expect(p.longitude).to.be.a('number'); pm.expect(p.recordedAt).to.be.a('string'); }); });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET trail sortDir=desc -> 200 sorted or 503 authz unavailable",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{tripId}}/trail?page=1&pageSize=10&sortDir=desc&from={{startTime}}&to={{endTime}}",
+              "host": [
+                "{{baseUrlService}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tracking",
+                "trips",
+                "{{tripId}}",
+                "trail"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "10"
+                },
+                {
+                  "key": "sortDir",
+                  "value": "desc"
+                },
+                {
+                  "key": "from",
+                  "value": "{{startTime}}"
+                },
+                {
+                  "key": "to",
+                  "value": "{{endTime}}"
+                }
+              ]
+            },
+            "description": "Verifies recordedAt descending."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is expected integration outcome', () => pm.expect([200, 503]).to.include(pm.response.code));",
+                  "const env = pm.response.json();",
+                  "pm.test('statusCode matches HTTP', () => pm.expect(env.statusCode).to.eql(pm.response.code));",
+                  "pm.test('meta has timestamp', () => pm.expect(env.meta.timestamp).to.be.a('string').and.not.empty);",
+                  "pm.test('traceId is string when present', () => { if (env.meta.traceId !== undefined) pm.expect(env.meta.traceId).to.be.a('string').and.not.empty; });",
+                  "if (pm.response.code === 503) {",
+                  "  pm.test('authz dependency unavailable is explicit', () => { pm.expect(env.success).to.eql(false); pm.expect(env.error.code).to.eql('TRACKING_AUTH_UNAVAILABLE'); });",
+                  "}",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('envelope success=true', () => pm.expect(env.success).to.eql(true));",
+                  "  pm.test('items sorted desc by recordedAt', () => { const items = env.data.items; for (let i = 1; i < items.length; i++) { pm.expect(new Date(items[i - 1].recordedAt).getTime()).to.be.at.least(new Date(items[i].recordedAt).getTime()); } });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET eta (happy) -> 200 or 503 authz unavailable",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{tripId}}/eta?stopId={{stopId}}",
+              "host": [
+                "{{baseUrlService}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tracking",
+                "trips",
+                "{{tripId}}",
+                "eta"
+              ],
+              "query": [
+                {
+                  "key": "stopId",
+                  "value": "{{stopId}}"
+                }
+              ]
+            },
+            "description": "Reads Redis ETA cache."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is expected integration outcome', () => pm.expect([200, 503]).to.include(pm.response.code));",
+                  "const env = pm.response.json();",
+                  "pm.test('statusCode matches HTTP', () => pm.expect(env.statusCode).to.eql(pm.response.code));",
+                  "pm.test('meta has timestamp', () => pm.expect(env.meta.timestamp).to.be.a('string').and.not.empty);",
+                  "pm.test('traceId is string when present', () => { if (env.meta.traceId !== undefined) pm.expect(env.meta.traceId).to.be.a('string').and.not.empty; });",
+                  "if (pm.response.code === 503) {",
+                  "  pm.test('authz dependency unavailable is explicit', () => { pm.expect(env.success).to.eql(false); pm.expect(env.error.code).to.eql('TRACKING_AUTH_UNAVAILABLE'); });",
+                  "}",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('envelope success=true', () => pm.expect(env.success).to.eql(true));",
+                  "  pm.test('data.eta shape', () => {",
+                  "    pm.expect(env.data.eta).to.be.an('object');",
+                  "    pm.expect(env.data.eta.tripId).to.eql(pm.environment.get('tripId') || pm.collectionVariables.get('tripId'));",
+                  "    pm.expect(env.data.eta.stopId).to.eql(pm.environment.get('stopId') || pm.collectionVariables.get('stopId'));",
+                  "    pm.expect(env.data.eta.etaMinutes).to.be.a('number');",
+                  "    pm.expect(env.data.eta.estimatedArrivalTime).to.be.a('string');",
+                  "    pm.expect(env.data.eta.distanceMeters).to.be.a('number');",
+                  "    pm.expect(env.data.eta.updatedAt).to.be.a('string');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET eta (cache miss) -> 200 null or 503 authz unavailable",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{tripId}}/eta?stopId={{missingEtaStopId}}",
+              "host": [
+                "{{baseUrlService}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tracking",
+                "trips",
+                "{{tripId}}",
+                "eta"
+              ],
+              "query": [
+                {
+                  "key": "stopId",
+                  "value": "{{missingEtaStopId}}"
+                }
+              ]
+            },
+            "description": "Authorized trip with no ETA cache for stop."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is expected integration outcome', () => pm.expect([200, 503]).to.include(pm.response.code));",
+                  "const env = pm.response.json();",
+                  "pm.test('statusCode matches HTTP', () => pm.expect(env.statusCode).to.eql(pm.response.code));",
+                  "pm.test('meta has timestamp', () => pm.expect(env.meta.timestamp).to.be.a('string').and.not.empty);",
+                  "pm.test('traceId is string when present', () => { if (env.meta.traceId !== undefined) pm.expect(env.meta.traceId).to.be.a('string').and.not.empty; });",
+                  "if (pm.response.code === 503) {",
+                  "  pm.test('authz dependency unavailable is explicit', () => { pm.expect(env.success).to.eql(false); pm.expect(env.error.code).to.eql('TRACKING_AUTH_UNAVAILABLE'); });",
+                  "}",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('envelope success=true', () => pm.expect(env.success).to.eql(true));",
+                  "  pm.test('data.eta = null', () => pm.expect(env.data.eta).to.eql(null));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
