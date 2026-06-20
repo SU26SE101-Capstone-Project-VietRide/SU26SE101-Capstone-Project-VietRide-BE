@@ -157,7 +157,19 @@ export class HttpTrackingAuthorizationAdapter implements TrackingAuthorizationAd
         signal: controller.signal,
       });
 
-      return await this.mapResponse(response, request.expectedScopes);
+      const result = await this.mapResponse(response, request.expectedScopes);
+      if (!result.allowed && (result.error === 'ACCESS_DENIED' || result.error === 'TRIP_NOT_FOUND')) {
+        this.logger.info(
+          {
+            tripId: request.tripId,
+            userId: request.user.userId,
+            role: request.user.role,
+            error: result.error,
+          },
+          'Tracking authorization denied by downstream',
+        );
+      }
+      return result;
     } catch (error) {
       this.logger.warn({ err: error, tripId: request.tripId }, 'Tracking authorization downstream unavailable');
       return { allowed: false, error: 'TRACKING_AUTH_UNAVAILABLE' };
