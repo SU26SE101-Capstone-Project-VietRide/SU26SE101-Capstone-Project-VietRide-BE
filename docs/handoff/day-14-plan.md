@@ -192,7 +192,7 @@ Day 14 delivers voucher checkout for the Booking service: the Voucher / VoucherU
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
 | 14.0a | done | APPROVED | 2026-06-20 | Human-approved diff + committed; SOT baseline for Tasks 14.0-14.5 |
-| 14.0 | todo | — | — | — |
+| 14.0 | done | APPROVED | 2026-06-20 | 100 tests pass; migration apply/rollback/reapply clean; NetArchTest green |
 | 14.1 | todo | — | — | + admin oversight GET /v1/admin/vouchers (Q7) |
 | 14.1b | todo | — | — | NEW — operator self-create CRUD |
 | 14.2 | todo | — | — | — |
