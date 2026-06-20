@@ -118,6 +118,27 @@ internal sealed class VoucherRepository : IVoucherRepository
         => await _db.VoucherUsages.CountAsync(u => u.VoucherId == voucherId, ct);
 
     // -----------------------------------------------------------------------
+    // VoucherUsage methods (Task 14.3 — checkout record + compensation)
+    // -----------------------------------------------------------------------
+
+    /// <inheritdoc/>
+    public async Task AddUsageAsync(VoucherUsage usage, CancellationToken ct = default)
+        => await _db.VoucherUsages.AddAsync(usage, ct);
+
+    /// <inheritdoc/>
+    public async Task<int> CountUsagesByUserAsync(Guid voucherId, Guid userId, CancellationToken ct = default)
+        => await _db.VoucherUsages.CountAsync(u => u.VoucherId == voucherId && u.UserId == userId, ct);
+
+    /// <inheritdoc/>
+    public async Task DeleteUsageByBookingAsync(Guid bookingId, CancellationToken ct = default)
+    {
+        var usage = await _db.VoucherUsages
+            .FirstOrDefaultAsync(u => u.BookingId == bookingId, ct);
+        if (usage is not null)
+            _db.VoucherUsages.Remove(usage);
+    }
+
+    // -----------------------------------------------------------------------
     // Private helpers
     // -----------------------------------------------------------------------
 

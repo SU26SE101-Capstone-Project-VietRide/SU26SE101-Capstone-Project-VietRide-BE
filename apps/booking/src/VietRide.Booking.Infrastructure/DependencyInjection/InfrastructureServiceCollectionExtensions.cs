@@ -89,6 +89,11 @@ public static class InfrastructureServiceCollectionExtensions
         // VoucherCodeGenerator is stateless — registered as singleton.
         services.AddSingleton<IVoucherCodeGenerator, VoucherCodeGenerator>();
 
+        // Application service (Task 14.3)
+        // VoucherService validates + applies vouchers at checkout; scoped because it depends
+        // on scoped repositories (IVoucherRepository, IOperatorVoucherConsentRepository).
+        services.AddScoped<IVoucherService, VoucherService>();
+
         // Payment inter-service client (real debit lands Day 15/16).
         // Day-12 local/runtime seam can be enabled explicitly so WALLET reaches CONFIRMED
         // without requiring the future Payment charge endpoint.

@@ -68,4 +68,30 @@ public interface IVoucherRepository : IRepository<Voucher, Guid>
     /// the economic fields are frozen.
     /// </summary>
     Task<int> CountUsagesAsync(Guid voucherId, CancellationToken ct = default);
+
+    // -----------------------------------------------------------------------
+    // VoucherUsage methods (Task 14.3 — checkout record + compensation)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Adds a <see cref="VoucherUsage"/> to the change tracker in the same transaction
+    /// as the booking creation (same <see cref="BookingDbContext"/> unit-of-work).
+    /// </summary>
+    Task AddUsageAsync(VoucherUsage usage, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns the number of <see cref="VoucherUsage"/> rows for a (voucher, user) pair.
+    /// Used at checkout to check the per-user usage limit before recording a new usage.
+    /// </summary>
+    Task<int> CountUsagesByUserAsync(Guid voucherId, Guid userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Physically deletes the <see cref="VoucherUsage"/> row for the given booking (compensation).
+    /// Called when a booking is cancelled/refunded after a voucher was applied.
+    /// <para>
+    /// ON DELETE CASCADE does not fire for a booking soft-delete — this explicit delete is
+    /// required per v7:4562. Idempotent: no-op if no row exists for the booking.
+    /// </para>
+    /// </summary>
+    Task DeleteUsageByBookingAsync(Guid bookingId, CancellationToken ct = default);
 }
