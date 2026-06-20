@@ -42,10 +42,14 @@ model OutboxEvent {
   status      OutboxEventStatus @default(PENDING)
   retryCount  Int               @default(0) @map("retry_count")
   lastError   String?           @map("last_error")
+  nextRetryAt DateTime?         @map("next_retry_at") @db.Timestamptz(6)
   createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
   publishedAt DateTime?         @map("published_at") @db.Timestamptz(6)
 
   @@index([status, createdAt], map: "idx_outbox_events_status_created")
+  @@index([status, nextRetryAt], map: "idx_outbox_events_status_next_retry")
+  @@index([status, updatedAt], map: "idx_outbox_events_status_updated")
   @@map("outbox_events")
   @@schema("vietride_tracking")
 }

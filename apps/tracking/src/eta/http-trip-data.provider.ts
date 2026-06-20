@@ -1,0 +1,109 @@
+import { Inject, Injectable } from '@nestjs/common';
+import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
+import { ENV_TOKEN } from '../app/tokens';
+import type { Env } from '../config/env.schema';
+import {
+  TrackingInternalJwtClaims,
+  TrackingInternalJwtSigner,
+} from '../authorization/tracking-internal-jwt.signer';
+import type { TripDataProvider, TripStopSnapshot } from './trip-data.provider';
+
+const RouteStopSchema = z.object({
+  stopId: z.string(),
+  latitude: z.number(),
+  longitude: z.number(),
+  sequence: z.number().int().min(0),
+  alertRecipientUserIds: z.array(z.string()).optional(),
+  estimatedArrivalTime: z.string().optional(),
+});
+
+const RouteStopsDataSchema = z.object({
+  stops: z.array(RouteStopSchema),
+});
+
+const ApiResponseEnvelopeSchema = z.object({
+  success: z.literal(true),
+  data: z.unknown(),
+});
+
+const INTERNAL_AUTH_HEADER = 'X-Internal-Auth';
+const BEARER_PREFIX = 'Bearer ';
+
+interface CacheEntry {
+  data: TripStopSnapshot[];
+  expiresAt: number;
+}
+
+@Injectable()
+export class HttpTripDataProvider implements TripDataProvider {
+  private readonly cache = new Map<string, CacheEntry>();
+
+  constructor(
+    @Inject(ENV_TOKEN) private readonly env: Env,
+    private readonly signer: TrackingInternalJwtSigner,
+  ) {}
+
+  async getRouteStops(tripId: string): Promise<TripStopSnapshot[]> {
+    const cached = this.cache.get(tripId);
+    if (cached && Date.now() < cached.expiresAt) {
+      return cached.data;
+    }
+
+    const url = this.buildUrl(tripId);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.env.TRACKING_DATA_PROVIDER_TIMEOUT_MS);
+
+    try {
+      const claims: TrackingInternalJwtClaims = {
+        sub: 'tracking-service',
+        reqId: randomUUID(),
+      };
+      const token = await this.signer.sign(claims);
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          [INTERNAL_AUTH_HEADER]: `${BEARER_PREFIX}${token}`,
+        },
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        return [];
+      }
+
+      const body = await response.json();
+
+      const envelope = ApiResponseEnvelopeSchema.safeParse(body);
+      if (!envelope.success) return [];
+
+      const parsed = RouteStopsDataSchema.safeParse(envelope.data.data);
+      if (!parsed.success) return [];
+
+      const stops: TripStopSnapshot[] = parsed.data.stops.map((stop) => ({
+        stopId: stop.stopId,
+        latitude: stop.latitude,
+        longitude: stop.longitude,
+        sequence: stop.sequence,
+        ...(stop.alertRecipientUserIds?.length ? { alertRecipientUserIds: stop.alertRecipientUserIds } : {}),
+        ...(stop.estimatedArrivalTime !== undefined ? { estimatedArrivalTime: stop.estimatedArrivalTime } : {}),
+      }));
+
+      this.cache.set(tripId, {
+        data: stops,
+        expiresAt: Date.now() + this.env.TRACKING_ROUTE_STOPS_CACHE_TTL_SECONDS * 1000,
+      });
+
+      return stops;
+    } catch {
+      return [];
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private buildUrl(tripId: string): string {
+    const path = this.env.TRIP_ROUTE_STOPS_PATH.replace(':tripId', encodeURIComponent(tripId));
+    return new URL(path, this.env.TRIP_SERVICE_BASE_URL).toString();
+  }
+}

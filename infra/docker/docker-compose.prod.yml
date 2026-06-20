@@ -260,6 +260,13 @@ services:
       REDIS_PORT: 6379
       RABBITMQ_URL: 'amqp://${RABBITMQ_USER:-vietride}:${RABBITMQ_PASSWORD}@rabbitmq:5672'
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-vietride.events}
+      # CORS — restrict to FE domain in production. Default '*' allows all origins.
+      TRACKING_CORS_ORIGIN: ${TRACKING_CORS_ORIGIN:?TRACKING_CORS_ORIGIN is required in production}
+      TRACKING_SWAGGER_ENABLED: 'false'
+      # Worker flags — default false in code, must be true in production
+      TRACKING_GPS_FLUSH_ENABLED: 'true'
+      TRACKING_TRIP_DELAY_ENABLED: 'true'
+      TRACKING_OUTBOX_PUBLISH_ENABLED: 'true'
     depends_on:
       postgres:
         condition: service_healthy

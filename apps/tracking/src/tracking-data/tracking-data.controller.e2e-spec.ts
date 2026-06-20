@@ -48,6 +48,7 @@ describe('TrackingDataController REST fallback (e2e)', () => {
   let privateKey: KeyLike;
   let redisGet: jest.MockedFunction<(key: string) => Promise<string | null>>;
   let prismaFindMany: jest.MockedFunction<(args: unknown) => Promise<unknown[]>>;
+  let prismaCount: jest.MockedFunction<(args: unknown) => Promise<number>>;
 
   beforeAll(async () => {
     const generated = await generateKeyPair('RS256');
@@ -70,34 +71,43 @@ describe('TrackingDataController REST fallback (e2e)', () => {
           tripId: TEST_TRIP_ID,
           stopId: TEST_STOP_ID,
           etaMinutes: 12,
+          estimatedArrivalTime: '2026-06-03T10:13:00.000Z',
+          distanceMeters: 8500,
           updatedAt: '2026-06-03T10:01:00.000Z',
         });
       }
       return null;
     });
 
+    const trailRows = [
+      {
+        id: '55555555-5555-4555-8555-555555555555',
+        tripId: TEST_TRIP_ID,
+        latitude: '10.7626220',
+        longitude: '106.6601720',
+        speedKmh: '40.00',
+        headingDeg: '89.00',
+        recordedAt: new Date('2026-06-03T10:00:00.000Z'),
+      },
+      {
+        id: '66666666-6666-4666-8666-666666666666',
+        tripId: TEST_TRIP_ID,
+        latitude: '10.7630000',
+        longitude: '106.6610000',
+        speedKmh: null,
+        headingDeg: null,
+        recordedAt: new Date('2026-06-03T10:05:00.000Z'),
+      },
+    ];
+
     prismaFindMany = jest.fn(async (args: unknown) => {
       void args;
-      return [
-        {
-          id: '55555555-5555-4555-8555-555555555555',
-          tripId: TEST_TRIP_ID,
-          latitude: '10.7626220',
-          longitude: '106.6601720',
-          speedKmh: '40.00',
-          headingDeg: '89.00',
-          recordedAt: new Date('2026-06-03T10:00:00.000Z'),
-        },
-        {
-          id: '66666666-6666-4666-8666-666666666666',
-          tripId: TEST_TRIP_ID,
-          latitude: '10.7630000',
-          longitude: '106.6610000',
-          speedKmh: null,
-          headingDeg: null,
-          recordedAt: new Date('2026-06-03T10:05:00.000Z'),
-        },
-      ];
+      return trailRows;
+    });
+
+    prismaCount = jest.fn(async (args: unknown) => {
+      void args;
+      return trailRows.length;
     });
 
     const moduleRef = await Test.createTestingModule({
@@ -114,7 +124,7 @@ describe('TrackingDataController REST fallback (e2e)', () => {
         },
         {
           provide: TrackingPrismaService,
-          useValue: { gpsTrail: { findMany: prismaFindMany } },
+          useValue: { gpsTrail: { findMany: prismaFindMany, count: prismaCount } },
         },
         { provide: APP_FILTER, useValue: new ApiResponseExceptionFilter() },
         { provide: APP_INTERCEPTOR, useValue: new ApiResponseInterceptor() },
@@ -189,10 +199,18 @@ describe('TrackingDataController REST fallback (e2e)', () => {
     expect(response.body.data?.latest).toBeNull();
   });
 
-  it('returns trail points ordered by recordedAt ascending', async () => {
+  it('returns trail points with pagination metadata', async () => {
     const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
-    const response = await getJson<ApiEnvelope<{ items: Array<{ recordedAt: string }> }>>(
-      `/api/v1/tracking/trips/${TEST_TRIP_ID}/trail?from=2026-06-03T09:00:00.000Z&to=2026-06-03T11:00:00.000Z`,
+    const response = await getJson<ApiEnvelope<{
+      items: Array<{ recordedAt: string }>;
+      page: number;
+      pageSize: number;
+      totalItems: number;
+      totalPages: number;
+      hasNextPage: boolean;
+      hasPreviousPage: boolean;
+    }>>(
+      `/api/v1/tracking/trips/${TEST_TRIP_ID}/trail?from=2026-06-03T09:00:00.000Z&to=2026-06-03T11:00:00.000Z&page=1&pageSize=20`,
       token,
     );
 
@@ -206,6 +224,12 @@ describe('TrackingDataController REST fallback (e2e)', () => {
       '2026-06-03T10:00:00.000Z',
       '2026-06-03T10:05:00.000Z',
     ]);
+    expect(response.body.data?.page).toBe(1);
+    expect(response.body.data?.pageSize).toBe(20);
+    expect(response.body.data?.totalItems).toBe(2);
+    expect(response.body.data?.totalPages).toBe(1);
+    expect(response.body.data?.hasNextPage).toBe(false);
+    expect(response.body.data?.hasPreviousPage).toBe(false);
   });
 
   it('returns cached ETA from Redis', async () => {
@@ -297,10 +321,12 @@ function createTestEnv(publicKeyPem: string): Env {
     TRIP_SERVICE_BASE_URL: 'http://trip.test',
     BOOKING_SERVICE_BASE_URL: 'http://booking.test',
     PARCEL_SERVICE_BASE_URL: 'http://parcel.test',
-    TRIP_TRACKING_AUTH_PATH: '/internal/trips/:tripId/tracking-authorization',
-    BOOKING_TRACKING_AUTH_PATH: '/internal/trips/:tripId/tracking-authorization/bookings',
-    PARCEL_TRACKING_AUTH_PATH: '/internal/trips/:tripId/tracking-authorization/parcels',
+    TRIP_TRACKING_AUTH_PATH: '/internal/v1/trips/:tripId/tracking-authorization',
+    BOOKING_TRACKING_AUTH_PATH: '/internal/v1/trips/:tripId/tracking-authorization/bookings',
+    PARCEL_TRACKING_AUTH_PATH: '/internal/v1/trips/:tripId/tracking-authorization/parcels',
     TRACKING_AUTH_HTTP_TIMEOUT_MS: 2_000,
+    TRACKING_CORS_ORIGIN: '*',
+    TRACKING_SWAGGER_ENABLED: true,
     TRACKING_GPS_FLUSH_ENABLED: false,
     TRACKING_GPS_FLUSH_INTERVAL_MS: 300_000,
     TRACKING_TRIP_DELAY_ENABLED: false,
@@ -308,6 +334,12 @@ function createTestEnv(publicKeyPem: string): Env {
     TRACKING_OUTBOX_PUBLISH_ENABLED: false,
     TRACKING_OUTBOX_PUBLISH_INTERVAL_MS: 5_000,
     TRACKING_OUTBOX_PUBLISH_BATCH_SIZE: 25,
+    TRIP_ROUTE_STOPS_PATH: '/internal/v1/trips/:tripId/route-stops',
+    TRIP_ROUTE_GEOMETRY_PATH: '/internal/v1/trips/:tripId/route-geometry',
+    BOOKING_PICKUP_BOOKINGS_PATH: '/internal/v1/trips/:tripId/stops/:stopId/pickup-bookings',
+    TRACKING_DATA_PROVIDER_TIMEOUT_MS: 2_000,
+    TRACKING_ROUTE_STOPS_CACHE_TTL_SECONDS: 300,
+    TRACKING_ROUTE_GEOMETRY_CACHE_TTL_SECONDS: 600,
   };
 }
 

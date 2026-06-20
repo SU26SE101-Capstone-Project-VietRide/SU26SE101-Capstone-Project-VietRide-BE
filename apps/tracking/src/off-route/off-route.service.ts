@@ -65,7 +65,7 @@ export class OffRouteService {
     const detectedAtMs = new Date(gps.recordedAt).getTime();
     const state = await this.readState(stateKey);
     if (!state) {
-      await this.writeState(stateKey, { firstDetectedAt: gps.recordedAt });
+      await this.writeInitialState(stateKey, { firstDetectedAt: gps.recordedAt });
       return null;
     }
 
@@ -104,6 +104,10 @@ export class OffRouteService {
 
   private async writeState(key: string, state: OffRouteState): Promise<void> {
     await this.redis.getClient().set(key, JSON.stringify(state), 'EX', OFF_ROUTE_STATE_TTL_SECONDS);
+  }
+
+  private async writeInitialState(key: string, state: OffRouteState): Promise<void> {
+    await this.redis.getClient().set(key, JSON.stringify(state), 'EX', OFF_ROUTE_STATE_TTL_SECONDS, 'NX');
   }
 
   private async createOutboxEvent(payload: OffRouteAlertPayload): Promise<void> {

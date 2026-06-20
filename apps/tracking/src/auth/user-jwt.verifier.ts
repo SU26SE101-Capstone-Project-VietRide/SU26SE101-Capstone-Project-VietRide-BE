@@ -4,6 +4,9 @@ import type { Env } from '../config/env.schema';
 import { ENV_TOKEN } from '../app/tokens';
 import type { TrackingUser } from './tracking-user.types';
 
+// Small tolerance for clock drift between Identity and Tracking containers.
+const JWT_CLOCK_TOLERANCE_SECONDS = 5;
+
 export interface UserJwtVerifier {
   verify(token: string): Promise<TrackingUser>;
 }
@@ -25,12 +28,14 @@ export class JoseUserJwtVerifier implements UserJwtVerifier {
       ? await jwtVerify(token, await this.localPublicKey, {
           issuer: this.env.JWT_ISSUER,
           audience: this.env.JWT_AUDIENCE,
-          clockTolerance: 5,
+          algorithms: ['RS256'],
+          clockTolerance: JWT_CLOCK_TOLERANCE_SECONDS,
         })
       : await jwtVerify(token, this.remoteJwks, {
           issuer: this.env.JWT_ISSUER,
           audience: this.env.JWT_AUDIENCE,
-          clockTolerance: 5,
+          algorithms: ['RS256'],
+          clockTolerance: JWT_CLOCK_TOLERANCE_SECONDS,
         });
 
     const userId = result.payload.sub;

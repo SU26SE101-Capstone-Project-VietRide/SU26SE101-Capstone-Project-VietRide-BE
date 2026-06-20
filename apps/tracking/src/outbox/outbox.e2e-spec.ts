@@ -23,12 +23,17 @@ describe('OutboxModule (e2e)', () => {
       retryCount: 0,
       lastError: null,
       createdAt: new Date('2026-06-04T00:00:00.000Z'),
+      updatedAt: new Date('2026-06-04T00:00:00.000Z'),
       publishedAt: null,
     };
     const prisma = {
       outboxEvent: {
-        findMany: jest.fn(async () => [event]),
-        updateMany: jest.fn(async () => ({ count: 1 })),
+        findMany: jest.fn(async (args: { where?: { status?: string } }) => {
+          return args.where?.status === 'PENDING' ? [event] : [];
+        }),
+        updateMany: jest.fn(async (args: { where?: { id?: string } }) => ({
+          count: args.where?.id === EVENT_ID ? 1 : 0,
+        })),
         update: jest.fn(async () => event),
       },
     };
@@ -50,15 +55,9 @@ describe('OutboxModule (e2e)', () => {
 
     await expect(service.publishPendingOnce(25)).resolves.toBe(1);
 
-    expect(prisma.outboxEvent.findMany).toHaveBeenCalledWith({
-      where: {
-        status: {
-          in: ['PENDING', 'FAILED'],
-        },
-      },
-      orderBy: {
-        createdAt: 'asc',
-      },
+    expect(prisma.outboxEvent.findMany).toHaveBeenNthCalledWith(1, {
+      where: { status: 'PENDING' },
+      orderBy: { createdAt: 'asc' },
       take: 25,
     });
     expect(publisher.publish).toHaveBeenCalledWith(
@@ -102,10 +101,12 @@ function createTestEnv(): Env {
     TRIP_SERVICE_BASE_URL: 'http://trip.test',
     BOOKING_SERVICE_BASE_URL: 'http://booking.test',
     PARCEL_SERVICE_BASE_URL: 'http://parcel.test',
-    TRIP_TRACKING_AUTH_PATH: '/internal/trips/:tripId/tracking-authorization',
-    BOOKING_TRACKING_AUTH_PATH: '/internal/trips/:tripId/tracking-authorization/bookings',
-    PARCEL_TRACKING_AUTH_PATH: '/internal/trips/:tripId/tracking-authorization/parcels',
+    TRIP_TRACKING_AUTH_PATH: '/internal/v1/trips/:tripId/tracking-authorization',
+    BOOKING_TRACKING_AUTH_PATH: '/internal/v1/trips/:tripId/tracking-authorization/bookings',
+    PARCEL_TRACKING_AUTH_PATH: '/internal/v1/trips/:tripId/tracking-authorization/parcels',
     TRACKING_AUTH_HTTP_TIMEOUT_MS: 2_000,
+    TRACKING_CORS_ORIGIN: '*',
+    TRACKING_SWAGGER_ENABLED: true,
     TRACKING_GPS_FLUSH_ENABLED: false,
     TRACKING_GPS_FLUSH_INTERVAL_MS: 300_000,
     TRACKING_TRIP_DELAY_ENABLED: false,
@@ -113,6 +114,12 @@ function createTestEnv(): Env {
     TRACKING_OUTBOX_PUBLISH_ENABLED: false,
     TRACKING_OUTBOX_PUBLISH_INTERVAL_MS: 5_000,
     TRACKING_OUTBOX_PUBLISH_BATCH_SIZE: 25,
+    TRIP_ROUTE_STOPS_PATH: '/internal/v1/trips/:tripId/route-stops',
+    TRIP_ROUTE_GEOMETRY_PATH: '/internal/v1/trips/:tripId/route-geometry',
+    BOOKING_PICKUP_BOOKINGS_PATH: '/internal/v1/trips/:tripId/stops/:stopId/pickup-bookings',
+    TRACKING_DATA_PROVIDER_TIMEOUT_MS: 2_000,
+    TRACKING_ROUTE_STOPS_CACHE_TTL_SECONDS: 300,
+    TRACKING_ROUTE_GEOMETRY_CACHE_TTL_SECONDS: 600,
   };
 }
 

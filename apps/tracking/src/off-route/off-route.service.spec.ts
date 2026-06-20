@@ -94,6 +94,7 @@ describe('OffRouteService', () => {
       JSON.stringify({ firstDetectedAt: FIRST_RECORDED_AT }),
       'EX',
       OFF_ROUTE_STATE_TTL_SECONDS,
+      'NX',
     );
     expect(outboxCreate).not.toHaveBeenCalled();
   });

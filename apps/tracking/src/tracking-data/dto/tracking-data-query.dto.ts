@@ -1,7 +1,5 @@
 import { z } from 'zod';
-
-const DEFAULT_TRAIL_LIMIT = 500;
-const MAX_TRAIL_LIMIT = 1_000;
+import { QueryOptionsSchema } from '@vietride/contracts';
 
 export const TripIdParamSchema = z.object({
   tripId: z.string().uuid(),
@@ -13,8 +11,12 @@ export const TrailQuerySchema = z
   .object({
     from: z.string().datetime().optional(),
     to: z.string().datetime().optional(),
-    limit: z.coerce.number().int().positive().max(MAX_TRAIL_LIMIT).default(DEFAULT_TRAIL_LIMIT),
+    sortBy: z.enum(['recordedAt']).default('recordedAt'),
+    sortDir: z.enum(['asc', 'desc']).default('asc'),
   })
+  .merge(
+    QueryOptionsSchema.pick({ page: true, pageSize: true }),
+  )
   .refine(
     (query) => {
       if (!query.from || !query.to) return true;

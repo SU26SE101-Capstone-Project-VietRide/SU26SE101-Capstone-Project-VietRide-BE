@@ -1,12 +1,14 @@
 import { Module } from '@nestjs/common';
 import { EtaService } from './eta.service';
 import { TRIP_DATA_PROVIDER } from './eta.constants';
-import { NoopTripDataProvider } from './noop-trip-data.provider';
+import { HttpTripDataProvider } from './http-trip-data.provider';
+import { TrackingInternalJwtSigner } from '../authorization/tracking-internal-jwt.signer';
 
 @Module({
   providers: [
     EtaService,
-    { provide: TRIP_DATA_PROVIDER, useClass: NoopTripDataProvider },
+    TrackingInternalJwtSigner,
+    { provide: TRIP_DATA_PROVIDER, useClass: HttpTripDataProvider },
   ],
   exports: [EtaService, TRIP_DATA_PROVIDER],
 })

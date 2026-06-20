@@ -149,10 +149,12 @@ function createTestEnv(baseUrl: string): Env {
     TRIP_SERVICE_BASE_URL: baseUrl,
     BOOKING_SERVICE_BASE_URL: baseUrl,
     PARCEL_SERVICE_BASE_URL: baseUrl,
-    TRIP_TRACKING_AUTH_PATH: '/internal/trips/:tripId/tracking-authorization',
-    BOOKING_TRACKING_AUTH_PATH: '/internal/trips/:tripId/tracking-authorization/bookings',
-    PARCEL_TRACKING_AUTH_PATH: '/internal/trips/:tripId/tracking-authorization/parcels',
+    TRIP_TRACKING_AUTH_PATH: '/internal/v1/trips/:tripId/tracking-authorization',
+    BOOKING_TRACKING_AUTH_PATH: '/internal/v1/trips/:tripId/tracking-authorization/bookings',
+    PARCEL_TRACKING_AUTH_PATH: '/internal/v1/trips/:tripId/tracking-authorization/parcels',
     TRACKING_AUTH_HTTP_TIMEOUT_MS: TIMEOUT_MS,
+    TRACKING_CORS_ORIGIN: '*',
+    TRACKING_SWAGGER_ENABLED: true,
     TRACKING_GPS_FLUSH_ENABLED: false,
     TRACKING_GPS_FLUSH_INTERVAL_MS: 300_000,
     TRACKING_TRIP_DELAY_ENABLED: false,
@@ -160,6 +162,12 @@ function createTestEnv(baseUrl: string): Env {
     TRACKING_OUTBOX_PUBLISH_ENABLED: false,
     TRACKING_OUTBOX_PUBLISH_INTERVAL_MS: 5_000,
     TRACKING_OUTBOX_PUBLISH_BATCH_SIZE: 25,
+    TRIP_ROUTE_STOPS_PATH: '/internal/v1/trips/:tripId/route-stops',
+    TRIP_ROUTE_GEOMETRY_PATH: '/internal/v1/trips/:tripId/route-geometry',
+    BOOKING_PICKUP_BOOKINGS_PATH: '/internal/v1/trips/:tripId/stops/:stopId/pickup-bookings',
+    TRACKING_DATA_PROVIDER_TIMEOUT_MS: 2_000,
+    TRACKING_ROUTE_STOPS_CACHE_TTL_SECONDS: 300,
+    TRACKING_ROUTE_GEOMETRY_CACHE_TTL_SECONDS: 600,
   };
 }
 

@@ -3,48 +3,11 @@ Bạn là một Senior Engineer dày dạn kinh nghiệm, chuyên review code pr
 Ngữ cảnh
 
 
-Service làm gì: [notification service]
-Tech stack: [...Runtime	Node.js 20
-Framework	NestJS 11
-Monorepo	Nx 22
-Language	TypeScript
-ORM	Prisma 6
-Database	PostgreSQL, schema riêng vietride_notification
-Validation	Zod
-API docs	@nestjs/swagger
-Logging	pino cho business layer, Nest Logger cho infrastructure
-Auth verify	JWT RS256/JWKS từ Identity, jose
-Queue/job	BullMQ
-Redis client	ioredis + shared RedisService
-Message broker	RabbitMQ qua amqplib / @vietride/nest-rabbitmq
-Push notification	Firebase Admin SDK / FCM
-Email	SendGrid
-Observability	Sentry DSN optional, pino logs]
-Các service/hệ thống liên quan (DB, queue, API ngoài...): [API Nội Bộ / Service Khác
-Notification có liên quan các service sau:
+Service làm gì: [Tracking Service nhận và phát vị trí GPS realtime theo chuyến qua Socket.IO; xác thực JWT và kiểm tra quyền theo dõi; lưu vị trí mới nhất và ETA trong Redis; cung cấp REST API đọc vị trí mới nhất, GPS trail và ETA; flush GPS trail từ Redis xuống PostgreSQL theo batch; tạo và publish Outbox Event cho các cảnh báo tracking. Lưu ý: tính ETA, cảnh báo approaching-stop và off-route hiện chưa hoàn thiện end-to-end vì TripDataProvider, BookingDataProvider và RouteGeometryProvider vẫn đang dùng Noop implementation.]
 
-Service	Vai trò
-Gateway	Client thường đi qua gateway để gọi API notification
-Identity Service	Cấp JWKS để verify user JWT
-Identity Service	API nội bộ để lấy device token của user
-Identity Service	Phát event identity.user.created, identity.operator.approved, identity.operator.suspended
-Trip/Tracking	Phát event tracking/trip alert
-Booking/Payment/Parcel/Subscription	Phát core/domain events để tạo notification
-Redis	Queue/idempotency/lock/blacklist
-RabbitMQ	Event bus
-PostgreSQL	Lưu notification/email/delivery
-Firebase FCM	Gửi push notification thật
-SendGrid	Gửi email thật
-External APIs
-Notification đang phụ thuộc các API ngoài:
+Tech stack: [Node.js, TypeScript, NestJS, Socket.IO, Prisma ORM, PostgreSQL, Redis/ioredis, BullMQ, RabbitMQ, JOSE/JWT, Zod, Pino, Swagger/OpenAPI, Jest và Nx monorepo.]
 
-API ngoài	Dùng để
-Firebase Cloud Messaging	Gửi push notification tới thiết bị
-SendGrid	Gửi email
-Identity JWKS endpoint	Verify JWT user
-Identity internal API	Lấy FCM device token]
-Service này đã từng chạy production chưa, hay đang chuẩn bị deploy lần đầu: [...chưa chạy production lần nào ]
-
+Các service/hệ thống liên quan (DB, queue, API ngoài...): [PostgreSQL database vietride_tracking, schema vietride_tracking, lưu GpsTrail và OutboxEvent; Redis lưu GPS mới nhất, ETA, dữ liệu GPS chờ flush, trạng thái dedupe và làm connection cho BullMQ; RabbitMQ topic exchange vietride.events nhận event từ Outbox Publisher với routing key trip.trip.delayed, tracking.gps.off_route và tracking.gps.approaching_stop; Identity Service cung cấp JWKS để xác minh user JWT; Trip Service kiểm tra quyền tracking của DRIVER, ASSISTANT và OPERATOR; Booking Service kiểm tra quyền của chủ booking; Parcel Service kiểm tra quyền của người gửi/người nhận kiện hàng; API Gateway proxy HTTP và WebSocket tới Tracking Service. Không thấy tích hợp trực tiếp API bên thứ ba trong code hiện tại.]
 
 Yêu cầu review (đi qua từng mục, không bỏ sót)
 
@@ -73,6 +36,11 @@ Example value là dữ liệu thực tế hợp lý, không phải placeholder m
 Riêng với stack dùng Zod: vì @nestjs/swagger mặc định lấy schema qua reflection từ class DTO, KHÔNG tự đọc được Zod schema thuần. Kiểm tra DTO có được convert đúng sang OpenAPI schema qua cầu nối (nestjs-zod, zod-to-openapi, hoặc tương đương) không — nếu không, Swagger doc sẽ thiếu field hoặc sai type so với validation thật. Đây phải coi là lỗi Critical vì gây sai lệch giữa tài liệu và hành vi thật.
 Field nhạy cảm (token, password, secret) không xuất hiện trong example hoặc schema response.
 Version API (v1, v2...) thể hiện rõ trong tag/group Swagger để dễ phân biệt khi có version mới.
+9. **Phụ thuộc API từ service khác**: rà theo từng bước trong luồng, xác định bước nào cần gọi API/nhận event từ service khác (đã liệt kê ở phần Ngữ cảnh) để hoàn chỉnh luồng. Với mỗi phụ thuộc, chỉ rõ: cần API/event gì, từ service nào, mục đích dùng để làm gì, field nào bắt buộc phải có trong response/payload đó. Nếu hiện tại service đang giả định một API/field tồn tại mà chưa chắc đã có (hoặc chưa từng confirm với team kia), phải nêu rõ để xác nhận lại — không tự suy đoán là "chắc có sẵn".
+10. **Hardcode cấu hình hệ thống**: rà toàn bộ code tìm các giá trị đang bị viết cứng (URL service khác, timeout, retry limit, port, API key/secret, tên queue/topic, ngưỡng số lượng, nội dung template...) mà đáng lẽ phải lấy từ env/config. Với mỗi giá trị tìm được, phân loại:
+   - Chỉ khác theo môi trường (dev/staging/prod) → đề xuất chuyển vào env var/ConfigService, không cần thêm API.
+   - Là giá trị nghiệp vụ mà vận hành có thể cần đổi thường xuyên mà không muốn deploy lại code → đề xuất hướng làm API config cụ thể (vd: method/route, lưu ở đâu — DB hay cache, ai có quyền gọi, có cần audit log khi thay đổi không).
+   Không tự ý liệt kê mọi constant trong code là "cần config" — chỉ flag những giá trị thực sự có khả năng cần thay đổi theo môi trường hoặc theo vận hành.
 
 
 
@@ -96,6 +64,8 @@ Mỗi lỗi gồm: vị trí (file/function/dòng), mô tả lỗi, lý do nó l
 Mục riêng "RESTful & API coverage": các điểm chưa chuẩn REST (nếu có), và endpoint đề xuất bổ sung (nếu thực sự thiếu) kèm lý do tại sao thiếu nó thì luồng không chạy được.
 Mục riêng "Swagger config": liệt kê những gì chưa đúng convention chuẩn của @nestjs/swagger (hoặc framework Swagger tương ứng với tech stack ở phần Ngữ cảnh).
 Cuối cùng: 1 đoạn tóm tắt — service này đã sẵn sàng production chưa, và nếu chưa thì cần fix gì trước tiên.
+- Mục riêng "External dependency cần xác nhận": liệt kê API/event từ service khác mà luồng này phụ thuộc, kèm trạng thái (đã chắc chắn có / chưa rõ cần hỏi lại team liên quan / chưa có cần đề xuất họ bổ sung).
+- Mục riêng "Hardcode cần xử lý": liệt kê giá trị hardcode tìm được, vị trí (file/dòng), phân loại (env config / cần API config), và hướng xử lý đề xuất tương ứng.
 
 
 
