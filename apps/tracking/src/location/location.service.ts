@@ -17,6 +17,8 @@ export interface GpsUpdateEvent {
   recordedAt: string;
 }
 
+const GPS_REDIS_COMMANDS = ['set latest', 'push buffer', 'mark active trip'] as const;
+
 @Injectable()
 export class LocationService {
   constructor(private readonly redis: RedisService) {}
@@ -33,12 +35,27 @@ export class LocationService {
 
     const client = this.redis.getClient();
     const payload = JSON.stringify(event);
-    await client
-      .multi()
-      .set(trackingLatestKey(dto.tripId), payload, 'EX', TRACKING_LATEST_TTL_SECONDS)
-      .rpush(trackingGpsBufferKey(dto.tripId), payload)
-      .sadd(TRACKING_ACTIVE_TRIPS_KEY, dto.tripId)
-      .exec();
+    try {
+      const results = await client
+        .multi()
+        .set(trackingLatestKey(dto.tripId), payload, 'EX', TRACKING_LATEST_TTL_SECONDS)
+        .rpush(trackingGpsBufferKey(dto.tripId), payload)
+        .sadd(TRACKING_ACTIVE_TRIPS_KEY, dto.tripId)
+        .exec();
+
+      if (!results) {
+        throw new Error('Redis transaction returned no results');
+      }
+
+      for (const [index, [error]] of results.entries()) {
+        if (error) {
+          throw new Error(`Redis transaction failed at ${GPS_REDIS_COMMANDS[index] ?? 'unknown command'}: ${error.message}`);
+        }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`TRACKING_REDIS_WRITE_FAILED: ${message}`);
+    }
 
     return event;
   }

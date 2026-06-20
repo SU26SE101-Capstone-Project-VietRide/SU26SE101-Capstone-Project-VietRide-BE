@@ -46,7 +46,7 @@ interface RedisMultiMock {
   set: jest.MockedFunction<(key: string, value: string, mode: string, ttl: number) => RedisMultiMock>;
   rpush: jest.MockedFunction<(key: string, value: string) => RedisMultiMock>;
   sadd: jest.MockedFunction<(key: string, value: string) => RedisMultiMock>;
-  exec: jest.MockedFunction<() => Promise<unknown[]>>;
+  exec: jest.MockedFunction<() => Promise<Array<[Error | null, unknown]> | null>>;
 }
 
 describe('LocationGateway identity-backed realtime (e2e)', () => {
@@ -210,9 +210,47 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     expect(redisMulti.rpush).toHaveBeenCalledWith(trackingGpsBufferKey(TEST_TRIP_ID), expect.any(String));
     expect(redisMulti.sadd).toHaveBeenCalledWith('tracking:active_trips', TEST_TRIP_ID);
     expect(redisMulti.exec).toHaveBeenCalledTimes(1);
+    await waitForCondition(() => offRouteHandleGpsUpdate.mock.calls.length > 0);
+    await waitForCondition(() => etaHandleGpsUpdate.mock.calls.length > 0);
     expect(offRouteHandleGpsUpdate).toHaveBeenCalledWith(expect.objectContaining({ tripId: TEST_TRIP_ID }));
     expect(etaHandleGpsUpdate).toHaveBeenCalledWith(expect.objectContaining({ tripId: TEST_TRIP_ID }));
     expect(approachingHandleEtaUpdate).not.toHaveBeenCalled();
+    socket.disconnect();
+  });
+
+  it('returns ack before the detection chain completes', async () => {
+    const token = await signIdentityToken('DRIVER', TEST_OPERATOR_ID);
+    const socket = await connectSocket(token);
+    let releaseDetection: () => void = () => undefined;
+    const detectionStarted = new Promise<void>((resolve) => {
+      offRouteHandleGpsUpdate.mockImplementationOnce(async () => {
+        resolve();
+        await new Promise<void>((release) => {
+          releaseDetection = release;
+        });
+        return null;
+      });
+    });
+
+    const ack = await emitWithAck<GpsUpdateAck>(socket, 'gps:update', createGpsPayload());
+
+    expect(ack).toEqual({ success: true });
+    await detectionStarted;
+    releaseDetection();
+    await waitForCondition(() => etaHandleGpsUpdate.mock.calls.length > 0);
+    socket.disconnect();
+  });
+
+  it('rejects gps:update when Redis write fails', async () => {
+    const token = await signIdentityToken('DRIVER', TEST_OPERATOR_ID);
+    const socket = await connectSocket(token);
+    redisMulti.exec.mockRejectedValueOnce(new Error('REDIS_DOWN'));
+
+    const ack = await emitWithAck<GpsUpdateAck>(socket, 'gps:update', createGpsPayload());
+
+    expect(ack).toEqual({ success: false, error: 'TRACKING_UNAVAILABLE' });
+    expect(offRouteHandleGpsUpdate).not.toHaveBeenCalled();
+    expect(etaHandleGpsUpdate).not.toHaveBeenCalled();
     socket.disconnect();
   });
 
@@ -385,7 +423,7 @@ function createRedisMultiMock(): RedisMultiMock {
     void value;
     return multi;
   });
-  multi.exec = jest.fn(async () => []);
+  multi.exec = jest.fn(async () => createRedisExecResult());
   return multi;
 }
 
@@ -394,6 +432,26 @@ function resetRedisMultiMock(multi: RedisMultiMock): void {
   multi.rpush.mockClear();
   multi.sadd.mockClear();
   multi.exec.mockClear();
+  multi.exec.mockResolvedValue(createRedisExecResult());
+}
+
+function createRedisExecResult(): Array<[Error | null, unknown]> {
+  return [
+    [null, 'OK'],
+    [null, 1],
+    [null, 1],
+  ];
+}
+
+async function waitForCondition(condition: () => boolean): Promise<void> {
+  const deadline = Date.now() + ACK_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (condition()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error('WAIT_FOR_CONDITION_TIMEOUT');
 }
 
 function createTestEnv(publicKeyPem: string): Env {
@@ -417,10 +475,12 @@ function createTestEnv(publicKeyPem: string): Env {
     TRIP_SERVICE_BASE_URL: 'http://trip.test',
     BOOKING_SERVICE_BASE_URL: 'http://booking.test',
     PARCEL_SERVICE_BASE_URL: 'http://parcel.test',
-    TRIP_TRACKING_AUTH_PATH: '/internal/trips/:tripId/tracking-authorization',
-    BOOKING_TRACKING_AUTH_PATH: '/internal/trips/:tripId/tracking-authorization/bookings',
-    PARCEL_TRACKING_AUTH_PATH: '/internal/trips/:tripId/tracking-authorization/parcels',
+    TRIP_TRACKING_AUTH_PATH: '/internal/v1/trips/:tripId/tracking-authorization',
+    BOOKING_TRACKING_AUTH_PATH: '/internal/v1/trips/:tripId/tracking-authorization/bookings',
+    PARCEL_TRACKING_AUTH_PATH: '/internal/v1/trips/:tripId/tracking-authorization/parcels',
     TRACKING_AUTH_HTTP_TIMEOUT_MS: 2_000,
+    TRACKING_CORS_ORIGIN: '*',
+    TRACKING_SWAGGER_ENABLED: true,
     TRACKING_GPS_FLUSH_ENABLED: false,
     TRACKING_GPS_FLUSH_INTERVAL_MS: 300_000,
     TRACKING_TRIP_DELAY_ENABLED: false,
@@ -428,6 +488,12 @@ function createTestEnv(publicKeyPem: string): Env {
     TRACKING_OUTBOX_PUBLISH_ENABLED: false,
     TRACKING_OUTBOX_PUBLISH_INTERVAL_MS: 5_000,
     TRACKING_OUTBOX_PUBLISH_BATCH_SIZE: 25,
+    TRIP_ROUTE_STOPS_PATH: '/internal/v1/trips/:tripId/route-stops',
+    TRIP_ROUTE_GEOMETRY_PATH: '/internal/v1/trips/:tripId/route-geometry',
+    BOOKING_PICKUP_BOOKINGS_PATH: '/internal/v1/trips/:tripId/stops/:stopId/pickup-bookings',
+    TRACKING_DATA_PROVIDER_TIMEOUT_MS: 2_000,
+    TRACKING_ROUTE_STOPS_CACHE_TTL_SECONDS: 300,
+    TRACKING_ROUTE_GEOMETRY_CACHE_TTL_SECONDS: 600,
   };
 }
 

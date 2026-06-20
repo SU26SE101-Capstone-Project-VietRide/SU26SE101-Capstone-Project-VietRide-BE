@@ -50,7 +50,6 @@ interface GpsUpdateAck {
 
 @WebSocketGateway({
   path: TRACKING_SOCKET_PATH,
-  cors: { origin: true, credentials: true },
 })
 export class LocationGateway implements OnGatewayInit {
   private readonly logger = new Logger(LocationGateway.name);
@@ -140,15 +139,30 @@ export class LocationGateway implements OnGatewayInit {
       return { success: false, error: authorization.error ?? 'ACCESS_DENIED' };
     }
 
-    const event = await this.locationService.recordLocation(parsed.data);
-    await this.offRouteService.handleGpsUpdate(event);
+    let event: Awaited<ReturnType<LocationService['recordLocation']>>;
+    try {
+      event = await this.locationService.recordLocation(parsed.data);
+    } catch (error) {
+      this.logger.error(`Failed to record gps:update for trip ${parsed.data.tripId}: ${(error as Error).message}`);
+      return { success: false, error: 'TRACKING_UNAVAILABLE' };
+    }
+
     this.server.to(trackingTripRoom(parsed.data.tripId)).emit('gps:update', event);
+    void this.runDetection(event).catch((error) => {
+      this.logger.error(`Tracking detection chain failed for trip ${event.tripId}: ${(error as Error).message}`);
+    });
+    this.logger.debug(`Broadcasted gps:update for trip ${parsed.data.tripId}`);
+    return { success: true };
+  }
+
+  private async runDetection(event: Awaited<ReturnType<LocationService['recordLocation']>>): Promise<void> {
+    await this.offRouteService.handleGpsUpdate(event);
     const etaUpdate = await this.etaService.handleGpsUpdate(event);
     if (etaUpdate) {
       const tripDelayEtaUpdate = await this.tripDelayService.handleEtaUpdate(etaUpdate);
-      this.server.to(trackingTripRoom(parsed.data.tripId)).emit('eta:update', tripDelayEtaUpdate);
+      this.server.to(trackingTripRoom(event.tripId)).emit('eta:update', tripDelayEtaUpdate);
       if (tripDelayEtaUpdate.delayed) {
-        this.server.to(trackingTripRoom(parsed.data.tripId)).emit('trip:statusChanged', {
+        this.server.to(trackingTripRoom(event.tripId)).emit('trip:statusChanged', {
           tripId: tripDelayEtaUpdate.tripId,
           stopId: tripDelayEtaUpdate.stopId,
           status: 'DELAYED',
@@ -158,8 +172,6 @@ export class LocationGateway implements OnGatewayInit {
       }
       await this.approachingAlertService.handleEtaUpdate(tripDelayEtaUpdate);
     }
-    this.logger.debug(`Broadcasted gps:update for trip ${parsed.data.tripId}`);
-    return { success: true };
   }
 
   private readHandshakeToken(socket: Socket): string | undefined {
@@ -168,7 +180,7 @@ export class LocationGateway implements OnGatewayInit {
 
     const authorization = socket.handshake.headers.authorization;
     if (typeof authorization === 'string' && authorization.startsWith('Bearer ')) {
-      return authorization.slice('Bearer '.length);
+      return authorization.slice('Bearer '.length).trim();
     }
 
     return undefined;
