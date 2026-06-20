@@ -433,6 +433,9 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
       '/v1/admin/trip-settlements/11111111-1111-1111-1111-111111111111/settle',
       env.PAYMENT_BASE_URL,
     ],
+    ['/v1/admin/vouchers', env.BOOKING_BASE_URL],
+    ['/v1/admin/vouchers?fundingType=OPERATOR_FUNDED', env.BOOKING_BASE_URL],
+    ['/v1/admin/vouchers/11111111-1111-1111-1111-111111111111/consents', env.BOOKING_BASE_URL],
   ] as const)('routes SYSTEM_ADMIN request %s to %s', async (path, target) => {
     const upstreamHandler = arrangeProxyPass();
     const signer = {
@@ -455,6 +458,158 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
     expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
     expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
     expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['POST', '/v1/operator/vouchers'],
+    ['PATCH', '/v1/operator/vouchers/11111111-1111-1111-1111-111111111111'],
+    ['DELETE', '/v1/operator/vouchers/11111111-1111-1111-1111-111111111111'],
+    ['POST', '/v1/operator/vouchers/11111111-1111-1111-1111-111111111111/activate'],
+    ['POST', '/v1/operator/vouchers/11111111-1111-1111-1111-111111111111/deactivate'],
+  ] as const)('routes OPERATOR_ADMIN %s %s to Booking', async (method, path) => {
+    const upstreamHandler = arrangeProxyPass();
+    const signer = {
+      sign: jest.fn().mockResolvedValue('internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({
+      sub: 'operator-admin-1',
+      role: 'OPERATOR_ADMIN',
+      operatorId: 'operator-1',
+    });
+    const req = makeRequest(path, { authorization, 'x-request-id': 'req-op-voucher' }, method);
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(signer.sign).toHaveBeenCalledWith({
+      sub: 'operator-admin-1',
+      reqId: 'req-op-voucher',
+      role: 'OPERATOR_ADMIN',
+      operatorId: 'operator-1',
+    });
+    expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+      expect.objectContaining({ target: env.BOOKING_BASE_URL }),
+    );
+    expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
+    expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['GET', '/v1/operator/voucher-consents'],
+    ['GET', '/v1/operator/voucher-consents?status=PENDING'],
+  ] as const)('routes OPERATOR_STAFF %s %s to Booking (consent list)', async (method, path) => {
+    const upstreamHandler = arrangeProxyPass();
+    const signer = {
+      sign: jest.fn().mockResolvedValue('internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({
+      sub: 'operator-staff-1',
+      role: 'OPERATOR_STAFF',
+      operatorId: 'operator-1',
+    });
+    const req = makeRequest(path, { authorization, 'x-request-id': 'req-op-consent' }, method);
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(signer.sign).toHaveBeenCalledWith({
+      sub: 'operator-staff-1',
+      reqId: 'req-op-consent',
+      role: 'OPERATOR_STAFF',
+      operatorId: 'operator-1',
+    });
+    expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+      expect.objectContaining({ target: env.BOOKING_BASE_URL }),
+    );
+    expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
+    expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 FORBIDDEN for non-SYSTEM_ADMIN GET /v1/admin/vouchers', async () => {
+    const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({
+      sub: 'operator-admin-1',
+      role: 'OPERATOR_ADMIN',
+      operatorId: 'operator-1',
+    });
+    const req = makeRequest(
+      '/v1/admin/vouchers',
+      { authorization, 'x-request-id': 'req-admin-voucher-role' },
+      'GET',
+    );
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 403,
+      error: { code: 'FORBIDDEN' },
+      meta: { traceId: 'req-admin-voucher-role' },
+    });
+    expect(signer.sign).not.toHaveBeenCalled();
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 FORBIDDEN for non-OPERATOR_ADMIN POST /v1/operator/vouchers', async () => {
+    const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({ sub: 'passenger-1', role: 'PASSENGER' });
+    const req = makeRequest('/v1/operator/vouchers', {
+      authorization,
+      'x-request-id': 'req-op-voucher-role',
+    });
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 403,
+      error: { code: 'FORBIDDEN' },
+      meta: { traceId: 'req-op-voucher-role' },
+    });
+    expect(signer.sign).not.toHaveBeenCalled();
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 FORBIDDEN for non-operator roles on GET /v1/operator/voucher-consents', async () => {
+    const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({ sub: 'passenger-1', role: 'PASSENGER' });
+    const req = makeRequest(
+      '/v1/operator/voucher-consents',
+      { authorization, 'x-request-id': 'req-op-consent-role' },
+      'GET',
+    );
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 403,
+      error: { code: 'FORBIDDEN' },
+      meta: { traceId: 'req-op-consent-role' },
+    });
+    expect(signer.sign).not.toHaveBeenCalled();
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -821,10 +976,14 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
       role: 'PASSENGER',
       hasPhone: true,
     });
-    const req = makeRequest('/v1/notifications?pageSize=20', {
-      authorization,
-      'x-request-id': 'req-notification-auth',
-    }, 'GET');
+    const req = makeRequest(
+      '/v1/notifications?pageSize=20',
+      {
+        authorization,
+        'x-request-id': 'req-notification-auth',
+      },
+      'GET',
+    );
     const res = makeResponse();
     const next = jest.fn() as NextFunction;
 
