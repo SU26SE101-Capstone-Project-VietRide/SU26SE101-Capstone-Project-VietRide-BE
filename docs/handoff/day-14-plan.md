@@ -193,7 +193,7 @@ Day 14 delivers voucher checkout for the Booking service: the Voucher / VoucherU
 |---|---|---|---|---|
 | 14.0a | done | APPROVED | 2026-06-20 | Human-approved diff + committed; SOT baseline for Tasks 14.0-14.5 |
 | 14.0 | done | APPROVED | 2026-06-20 | 100 tests pass; migration apply/rollback/reapply clean; NetArchTest green |
-| 14.1 | todo | — | — | + admin oversight GET /v1/admin/vouchers (Q7) |
+| 14.1 | done | APPROVED | 2026-06-20 | admin create-voucher + OPERATOR_FUNDED consent fan-out + admin oversight GET list; 89 unit + 23 integration tests pass; NetArchTest green; APPROVE after 3 review rounds (idempotency-key enforce, 8-char auto-code stub, sortDir guard, IClock.UtcNow createdAt, Q3 validator test). Carry-over (non-blocking, pre-existing cross-service): INVALID_SORT_FIELD returns 422 via validator vs BSOT:1415 400; 2 NITs (cache clock once, doc-comment typo). Human /verify pending |
 | 14.1b | todo | — | — | NEW — operator self-create CRUD |
 | 14.2 | todo | — | — | — |
 | 14.3 | todo | — | — | — |
