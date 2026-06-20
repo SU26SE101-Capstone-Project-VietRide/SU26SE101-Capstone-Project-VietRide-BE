@@ -278,19 +278,19 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       prefix: '/api-specs/tracking',
       target: env.TRACKING_BASE_URL,
       authRequired: 'none',
-      rewriteTo: '/api-json',
+      rewriteTo: '/docs-json',
     },
     {
       prefix: '/api-specs/notification',
       target: env.NOTIFICATION_BASE_URL,
       authRequired: 'none',
-      rewriteTo: '/api-json',
+      rewriteTo: '/docs-json',
     },
     {
       prefix: '/api-specs/rag',
       target: env.RAG_BASE_URL,
       authRequired: 'none',
-      rewriteTo: '/api-json',
+      rewriteTo: '/docs-json',
     },
     // /tracking/socket.io/* is NOT routed via Gateway (Nginx direct upgrade).
   ];
