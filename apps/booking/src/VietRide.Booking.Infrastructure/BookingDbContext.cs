@@ -17,6 +17,9 @@ public sealed class BookingDbContext : VietRideDbContextBase
     public DbSet<BookingEntity> Bookings => Set<BookingEntity>();
     public DbSet<Passenger> Passengers => Set<Passenger>();
     public DbSet<BookingPendingAction> BookingPendingActions => Set<BookingPendingAction>();
+    public DbSet<Voucher> Vouchers => Set<Voucher>();
+    public DbSet<VoucherUsage> VoucherUsages => Set<VoucherUsage>();
+    public DbSet<OperatorVoucherConsent> OperatorVoucherConsents => Set<OperatorVoucherConsent>();
 
     public BookingDbContext(DbContextOptions<BookingDbContext> options, IClock clock)
         : base(options, clock)
@@ -34,6 +37,11 @@ public sealed class BookingDbContext : VietRideDbContextBase
             "passenger_boarding_status",
             Enum.GetNames<PassengerBoardingStatus>());
         modelBuilder.HasPostgresEnum("trip_direction", Enum.GetNames<TripDirection>());
+        modelBuilder.HasPostgresEnum("voucher_type", Enum.GetNames<VoucherType>());
+        modelBuilder.HasPostgresEnum("voucher_funding_type", Enum.GetNames<VoucherFundingType>());
+        modelBuilder.HasPostgresEnum(
+            "operator_voucher_consent_status",
+            Enum.GetNames<OperatorVoucherConsentStatus>());
 
         // Apply all IEntityTypeConfiguration<T> defined in this assembly BEFORE base
         // (base applies snake_case naming + OutboxEvent mapping).
@@ -52,5 +60,12 @@ public sealed class BookingDbContext : VietRideDbContextBase
             "passenger_boarding_status",
             new NpgsqlNullNameTranslator());
         dataSourceBuilder.MapEnum<TripDirection>("trip_direction", new NpgsqlNullNameTranslator());
+        dataSourceBuilder.MapEnum<VoucherType>("voucher_type", new NpgsqlNullNameTranslator());
+        dataSourceBuilder.MapEnum<VoucherFundingType>(
+            "voucher_funding_type",
+            new NpgsqlNullNameTranslator());
+        dataSourceBuilder.MapEnum<OperatorVoucherConsentStatus>(
+            "operator_voucher_consent_status",
+            new NpgsqlNullNameTranslator());
     }
 }

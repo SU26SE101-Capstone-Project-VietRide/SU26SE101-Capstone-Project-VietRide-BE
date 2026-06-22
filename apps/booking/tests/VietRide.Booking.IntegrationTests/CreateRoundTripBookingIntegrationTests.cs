@@ -11,8 +11,12 @@ using NSubstitute;
 using StackExchange.Redis;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
+using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Application.Features.Bookings.CreateRoundTripBooking;
+using VietRide.Booking.Domain.Entities;
+using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Shared.Kernel.ValueObjects;
 using BookingEntity = VietRide.Booking.Domain.Entities.Booking;
 
 namespace VietRide.Booking.IntegrationTests;
@@ -376,6 +380,8 @@ public class CreateRoundTripBookingIntegrationTests
         public ITripServiceClient TripClient { get; } = Substitute.For<ITripServiceClient>();
         public IPaymentServiceClient PaymentClient { get; } = Substitute.For<IPaymentServiceClient>();
         public IBookingRepository BookingRepository { get; } = Substitute.For<IBookingRepository>();
+        public IVoucherService VoucherService { get; } = Substitute.For<IVoucherService>();
+        public IVoucherRepository VoucherRepository { get; } = Substitute.For<IVoucherRepository>();
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -386,10 +392,49 @@ public class CreateRoundTripBookingIntegrationTests
                 "Host=localhost;Port=5432;Database=test;Username=postgres;Password=postgres");
             builder.UseEnvironment("Testing");
 
+            // Default stub: ValidateAndComputeDiscountAsync returns zero discount (no voucher applied).
+            // Individual tests can override via _factory.VoucherService.
+            VoucherService.ValidateAndComputeDiscountAsync(
+                    Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<Guid>(),
+                    Arg.Any<Money>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+                .Returns(ci => new VoucherValidationResult(Guid.NewGuid(), Money.Zero));
+            VoucherService.RecordUsageAsync(
+                    Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<Guid?>(),
+                    Arg.Any<Money>(), Arg.Any<CancellationToken>())
+                .Returns(Guid.NewGuid());
+
+            // Default stub: VoucherRepository.GetByIdAsync returns an unlimited VIETRIDE_FUNDED
+            // voucher so ComputeAllowedLegsAsync returns allowed=2 (both legs allowed).
+            // ValidateAndComputeDiscountAsync above already returns discount=Money.Zero, so
+            // grandTotal is unchanged regardless of limits here.
+            // Tests that send voucherCode may override this stub to exercise specific cap paths;
+            // tests that omit voucherCode (voucherCode=null) never reach ComputeAllowedLegsAsync.
+            var now = DateTimeOffset.UtcNow;
+            var unlimitedVoucher = Voucher.Create(
+                code: "SUMMER26",
+                name: "Integration Test Voucher",
+                type: VoucherType.FIXED_AMOUNT,
+                value: 1_000,
+                minOrderAmount: Money.FromRaw(0),
+                maxDiscountAmount: null,
+                totalUsageLimit: null,
+                perUserLimit: null,
+                validFrom: now.AddDays(-1),
+                validUntil: now.AddDays(30),
+                applicableOperatorIds: null,
+                applicableRouteIds: null,
+                fundingType: VoucherFundingType.VIETRIDE_FUNDED,
+                ownerOperatorId: null,
+                createdByUserId: Guid.NewGuid());
+            VoucherRepository.GetByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+                .Returns(unlimitedVoucher);
+
             builder.ConfigureTestServices(services =>
             {
                 services.AddSingleton(TripClient);
                 services.AddSingleton(PaymentClient);
+                services.AddSingleton(VoucherService);
+                services.AddSingleton(VoucherRepository);
 
                 BookingRepository.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
                     .Returns(ci => ci.Arg<BookingEntity>());

@@ -53,6 +53,11 @@ public class VietRideWebApplicationFactory : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        // Mirror the other Trip integration factories: the AddTripHangfire guard reads the OS-level
+        // ASPNETCORE_ENVIRONMENT/DOTNET_ENVIRONMENT (not the host environment set by UseEnvironment),
+        // so these MUST be set or Hangfire boots and tries to connect to the placeholder "test" DB.
+        Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Testing");
+        Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", "Testing");
         Environment.SetEnvironmentVariable("INTERNAL_JWT_SECRET", "test-secret-at-least-32-chars-long-xxxxx");
         builder.UseSetting("INTERNAL_JWT_SECRET", "test-secret-at-least-32-chars-long-xxxxx");
         builder.UseSetting("ConnectionStrings:Default", ResolveConnectionString("test"));

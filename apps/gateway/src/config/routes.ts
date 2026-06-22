@@ -192,6 +192,24 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       authRequired: 'user',
       requiredRoles: ['PASSENGER'],
     },
+    {
+      prefix: '/v1/admin/vouchers',
+      target: env.BOOKING_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
+      prefix: '/v1/operator/vouchers',
+      target: env.BOOKING_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    },
+    {
+      prefix: '/v1/operator/voucher-consents',
+      target: env.BOOKING_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
     { prefix: '/v1/vouchers', target: env.BOOKING_BASE_URL, authRequired: 'user' },
     {
       prefix: '/v1/booking/health',

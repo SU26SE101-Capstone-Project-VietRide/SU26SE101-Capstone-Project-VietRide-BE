@@ -224,11 +224,12 @@ COMMENT ON TABLE booking_stats IS
     'UPSERT-driven counter table from event consumers. (operator_id, stat_date, trip_id) unique key.';
 
 -- -----------------------------------------------------------------------------
--- vouchers (System Admin only — platform-wide)
+-- vouchers (System Admin + Operator self-create — platform-wide + operator-owned)
 -- -----------------------------------------------------------------------------
 CREATE TABLE vouchers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     code VARCHAR(50) NOT NULL,
+    name VARCHAR(120) NOT NULL,        -- human-readable label (e.g. "Summer Sale 20%", "Tết Discount 50k")
     type voucher_type NOT NULL,
     value BIGINT NOT NULL,            -- percent (1-100) for PERCENT_OFF, VND for FIXED_AMOUNT
     min_order_amount BIGINT NOT NULL DEFAULT 0,
@@ -237,21 +238,33 @@ CREATE TABLE vouchers (
     per_user_limit INT NULL,
     valid_from TIMESTAMPTZ NOT NULL,
     valid_until TIMESTAMPTZ NOT NULL,
-    applicable_operator_ids UUID[] NULL,    -- NULL = applies to all operators
+    applicable_operator_ids UUID[] NULL,    -- NULL = applies to all operators (admin VIETRIDE_FUNDED only; operator-owned forced to self)
     applicable_route_ids UUID[] NULL,       -- NULL = applies to all routes
     funding_type voucher_funding_type NOT NULL,
+    owner_operator_id UUID NULL,            -- NULL = platform admin voucher; NOT NULL = operator self-created (logical FK identity.operators, tenant-scoped)
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_by_user_id UUID NOT NULL,    -- logical FK SYSTEM_ADMIN
+    created_by_user_id UUID NOT NULL,    -- logical FK: SYSTEM_ADMIN (platform) or OPERATOR_ADMIN (operator-owned)
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ NULL,         -- soft-delete (ADR 0003)
     CONSTRAINT chk_vouchers_value_positive CHECK (value > 0),
     CONSTRAINT chk_vouchers_validity_window CHECK (valid_until > valid_from),
-    CONSTRAINT chk_vouchers_min_order_non_negative CHECK (min_order_amount >= 0)
+    CONSTRAINT chk_vouchers_min_order_non_negative CHECK (min_order_amount >= 0),
+    CONSTRAINT chk_vouchers_operator_owned_funding CHECK (owner_operator_id IS NULL OR funding_type = 'OPERATOR_FUNDED'::voucher_funding_type)
 );
 
-CREATE UNIQUE INDEX uq_vouchers_code ON vouchers (code);
+CREATE UNIQUE INDEX uq_vouchers_code ON vouchers (code) WHERE deleted_at IS NULL;
 CREATE INDEX idx_vouchers_active_validity
     ON vouchers (valid_until) WHERE is_active = TRUE;
+CREATE INDEX idx_vouchers_owner_operator ON vouchers (owner_operator_id)
+    WHERE owner_operator_id IS NOT NULL AND deleted_at IS NULL;
+
+COMMENT ON COLUMN vouchers.owner_operator_id IS
+    'NULL = platform admin voucher (owner_operator_id IS NULL); NOT NULL = operator self-created voucher scoped to that operator (logical FK identity.operators). Operator-owned vouchers are always OPERATOR_FUNDED (enforced by chk_vouchers_operator_owned_funding).';
+COMMENT ON COLUMN vouchers.created_by_user_id IS
+    'Logical FK identity.users. SYSTEM_ADMIN for platform vouchers; OPERATOR_ADMIN for operator-owned vouchers.';
+COMMENT ON COLUMN vouchers.deleted_at IS
+    'Soft-delete timestamp per ADR 0003. Code can be reused after soft-delete (partial unique index uq_vouchers_code WHERE deleted_at IS NULL).';
 
 -- -----------------------------------------------------------------------------
 -- voucher_usages (DELETE row when booking CANCELLED/REFUNDED per spec)

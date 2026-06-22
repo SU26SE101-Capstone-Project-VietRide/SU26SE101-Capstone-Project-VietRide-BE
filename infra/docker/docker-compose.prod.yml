@@ -122,7 +122,8 @@ services:
       RabbitMq__UserName: ${RABBITMQ_USER:-vietride}
       RabbitMq__Password: ${RABBITMQ_PASSWORD}
     healthcheck:
-      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5001/health || exit 1']
+      test:
+        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5001/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5
@@ -138,7 +139,8 @@ services:
       ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_trip;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD}'
       IDENTITY_SERVICE_BASE_URL: http://identity:5001
     healthcheck:
-      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5002/health || exit 1']
+      test:
+        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5002/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5
@@ -156,7 +158,8 @@ services:
       TRIP_SERVICE_BASE_URL: http://trip:5002
       PAYMENT_SERVICE_BASE_URL: http://payment:5004
     healthcheck:
-      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5003/health || exit 1']
+      test:
+        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5003/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5
@@ -185,7 +188,8 @@ services:
       VNPAY_PAYMENT_URL: ${VNPAY_PAYMENT_URL}
       VNPAY_RETURN_URL: ${VNPAY_RETURN_URL}
     healthcheck:
-      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5004/health || exit 1']
+      test:
+        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5004/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5
@@ -200,7 +204,8 @@ services:
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_parcel;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD}'
     healthcheck:
-      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5005/health || exit 1']
+      test:
+        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5005/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5
@@ -240,7 +245,8 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/health || exit 1']
+      test:
+        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5
@@ -256,6 +262,7 @@ services:
       PORT: 3001
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       DATABASE_URL: 'postgresql://${POSTGRES_USER:-vietride}:${POSTGRES_PASSWORD}@postgres:5432/${TRACKING_DB:-vietride_tracking}'
+      TRACKING_DATABASE_URL: 'postgresql://${POSTGRES_USER:-vietride}:${POSTGRES_PASSWORD}@postgres:5432/${TRACKING_DB:-vietride_tracking}'
       REDIS_HOST: redis
       REDIS_PORT: 6379
       RABBITMQ_URL: 'amqp://${RABBITMQ_USER:-vietride}:${RABBITMQ_PASSWORD}@rabbitmq:5672'
@@ -275,7 +282,8 @@ services:
       rabbitmq:
         condition: service_healthy
     healthcheck:
-      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://127.0.0.1:3001/health || exit 1']
+      test:
+        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://127.0.0.1:3001/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5
@@ -290,6 +298,7 @@ services:
       PORT: 3002
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       DATABASE_URL: 'postgresql://${POSTGRES_USER:-vietride}:${POSTGRES_PASSWORD}@postgres:5432/${NOTIFICATION_DB:-vietride_notification}'
+      NOTIFICATION_DATABASE_URL: 'postgresql://${POSTGRES_USER:-vietride}:${POSTGRES_PASSWORD}@postgres:5432/${NOTIFICATION_DB:-vietride_notification}'
       REDIS_HOST: redis
       REDIS_PORT: 6379
       RABBITMQ_URL: 'amqp://${RABBITMQ_USER:-vietride}:${RABBITMQ_PASSWORD}@rabbitmq:5672'
@@ -310,7 +319,8 @@ services:
       rabbitmq:
         condition: service_healthy
     healthcheck:
-      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://127.0.0.1:3002/health || exit 1']
+      test:
+        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://127.0.0.1:3002/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5
@@ -328,6 +338,7 @@ services:
       PORT: 3003
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       DATABASE_URL: 'postgresql://${POSTGRES_USER:-vietride}:${POSTGRES_PASSWORD}@postgres:5432/${RAG_DB:-vietride_rag}'
+      RAG_DATABASE_URL: 'postgresql://${POSTGRES_USER:-vietride}:${POSTGRES_PASSWORD}@postgres:5432/${RAG_DB:-vietride_rag}'
       REDIS_HOST: redis
       REDIS_PORT: 6379
       RABBITMQ_URL: 'amqp://${RABBITMQ_USER:-vietride}:${RABBITMQ_PASSWORD}@rabbitmq:5672'
@@ -352,7 +363,8 @@ services:
       rabbitmq:
         condition: service_healthy
     healthcheck:
-      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://127.0.0.1:3003/health || exit 1']
+      test:
+        ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://127.0.0.1:3003/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5

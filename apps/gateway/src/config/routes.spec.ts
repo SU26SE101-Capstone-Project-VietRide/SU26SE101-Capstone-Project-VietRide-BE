@@ -41,6 +41,7 @@ describe('buildRouteTable', () => {
       ['/v1/admin/operator-users', env.IDENTITY_BASE_URL],
       ['/v1/admin/users', env.IDENTITY_BASE_URL],
       ['/v1/admin/booking-stats', env.BOOKING_BASE_URL],
+      ['/v1/admin/vouchers', env.BOOKING_BASE_URL],
       ['/v1/admin/trip-settlements', env.PAYMENT_BASE_URL],
       ['/v1/admin/platform-wallet', env.PAYMENT_BASE_URL],
     ] as const;
@@ -78,6 +79,8 @@ describe('buildRouteTable', () => {
       ['/v1/admin/operator-users', env.IDENTITY_BASE_URL],
       ['/v1/admin/users', env.IDENTITY_BASE_URL],
       ['/v1/admin/booking-stats/aggregate', env.BOOKING_BASE_URL],
+      ['/v1/admin/vouchers', env.BOOKING_BASE_URL],
+      ['/v1/admin/vouchers/11111111-1111-1111-1111-111111111111/consents', env.BOOKING_BASE_URL],
       ['/v1/admin/platform-wallet', env.PAYMENT_BASE_URL],
       [
         '/v1/admin/trip-settlements/11111111-1111-1111-1111-111111111111/settle',

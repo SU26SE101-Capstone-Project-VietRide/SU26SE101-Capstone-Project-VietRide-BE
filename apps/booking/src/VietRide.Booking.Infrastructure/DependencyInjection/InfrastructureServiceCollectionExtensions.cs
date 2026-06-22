@@ -74,10 +74,25 @@ public static class InfrastructureServiceCollectionExtensions
         // Repositories (Task 12.3)
         services.AddScoped<IBookingRepository, BookingRepository>();
 
+        // Repositories (Task 14.1)
+        services.AddScoped<IVoucherRepository, VoucherRepository>();
+
+        // Repositories (Task 14.2)
+        services.AddScoped<IOperatorVoucherConsentRepository, OperatorVoucherConsentRepository>();
+
         // Application service (Task 12.3)
         // BookingService lives in Application layer; registered here because its ctor
         // depends on ITripServiceClient which is Infrastructure.
         services.AddScoped<IBookingService, BookingService>();
+
+        // Application service (Task 14.1)
+        // VoucherCodeGenerator is stateless — registered as singleton.
+        services.AddSingleton<IVoucherCodeGenerator, VoucherCodeGenerator>();
+
+        // Application service (Task 14.3)
+        // VoucherService validates + applies vouchers at checkout; scoped because it depends
+        // on scoped repositories (IVoucherRepository, IOperatorVoucherConsentRepository).
+        services.AddScoped<IVoucherService, VoucherService>();
 
         // Payment inter-service client (real debit lands Day 15/16).
         // Day-12 local/runtime seam can be enabled explicitly so WALLET reaches CONFIRMED

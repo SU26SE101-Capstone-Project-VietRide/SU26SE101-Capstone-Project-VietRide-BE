@@ -20,10 +20,14 @@ namespace VietRide.Booking.Application.Features.Bookings.CreateBooking;
 /// <list type="number">
 ///   <item>Fetch trip snapshot → validate trip is SCHEDULED.</item>
 ///   <item>Lock seats (all-or-nothing) via <see cref="ITripServiceClient"/>.</item>
-///   <item>Create <see cref="BookingEntity"/> PENDING_PAYMENT + N <see cref="Passenger"/> in one tx.</item>
+///   <item>Validate voucher + compute discount (read-only) via <see cref="IVoucherService"/>.</item>
+///   <item>Create <see cref="BookingEntity"/> PENDING_PAYMENT (with correct discount) + N
+///   <see cref="Passenger"/> rows in one tx.</item>
+///   <item>Record VoucherUsage row (same DbContext UoW) via <see cref="IVoucherService"/>.</item>
 ///   <item>Charge via <see cref="IPaymentServiceClient"/> (stub success this day).</item>
 ///   <item>On success: call book-seats → Confirm() → enqueue booking.booking.confirmed (same tx).</item>
-///   <item>On any downstream failure after lock: release-seats via <see cref="IBookingService"/>.</item>
+///   <item>On any downstream failure after lock: release-seats via <see cref="IBookingService"/>;
+///   if a VoucherUsage was written, physically DELETE it via <see cref="IVoucherService.CompensateAsync"/>.</item>
 /// </list>
 /// <para>
 /// Compensation (release-seats) lives in <see cref="IBookingService.ReleaseSeatsAsync"/>
@@ -40,6 +44,7 @@ public sealed class CreateBookingCommandHandler
     private readonly ITripServiceClient _tripClient;
     private readonly IPaymentServiceClient _paymentClient;
     private readonly IBookingService _bookingService;
+    private readonly IVoucherService _voucherService;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IClock _clock;
     private readonly ILogger<CreateBookingCommandHandler> _logger;
@@ -49,6 +54,7 @@ public sealed class CreateBookingCommandHandler
         ITripServiceClient tripClient,
         IPaymentServiceClient paymentClient,
         IBookingService bookingService,
+        IVoucherService voucherService,
         IIntegrationEventOutbox outbox,
         IClock clock,
         ILogger<CreateBookingCommandHandler> logger)
@@ -57,6 +63,7 @@ public sealed class CreateBookingCommandHandler
         _tripClient = tripClient;
         _paymentClient = paymentClient;
         _bookingService = bookingService;
+        _voucherService = voucherService;
         _outbox = outbox;
         _clock = clock;
         _logger = logger;
@@ -136,10 +143,31 @@ public sealed class CreateBookingCommandHandler
         }
 
         // -----------------------------------------------------------------------
-        // 4. Compute fare (D5: voucher is no-op this day; discount = 0)
+        // 4. Validate voucher + compute discount (read-only — no DB writes yet)
+        //    Voucher errors (VOUCHER_NOT_FOUND / _EXPIRED / _NOT_APPLICABLE etc.) propagate
+        //    before any booking row exists; seats are locked but a cleanup job handles orphaned locks.
         // -----------------------------------------------------------------------
+        var now = _clock.UtcNow;
         var baseFare = Money.FromRaw(trip.BaseFare);
-        var discountAmount = Money.Zero; // voucher deferred to Day 14
+
+        Money discountAmount = Money.Zero;
+        Guid? validatedVoucherId = null;
+
+        if (!string.IsNullOrWhiteSpace(request.VoucherCode))
+        {
+            var validation = await _voucherService.ValidateAndComputeDiscountAsync(
+                voucherCode: request.VoucherCode,
+                operatorId: trip.OperatorId,
+                routeId: trip.RouteId,
+                userId: request.PassengerUserId,
+                orderAmount: baseFare,
+                now: now,
+                ct: cancellationToken);
+
+            discountAmount = validation.Discount;
+            validatedVoucherId = validation.VoucherId;
+        }
+
         var totalAmount = baseFare - discountAmount;
 
         // -----------------------------------------------------------------------
@@ -147,9 +175,11 @@ public sealed class CreateBookingCommandHandler
         //    (TransactionBehavior wraps the handler — SaveChanges called by UoW)
         // -----------------------------------------------------------------------
         BookingEntity booking;
+        Guid? voucherUsageId = null;
+
         try
         {
-            var bookingCode = BookingCode.Generate(_clock.UtcNow);
+            var bookingCode = BookingCode.Generate(now);
 
             booking = BookingEntity.CreatePendingPayment(
                 bookingCode: bookingCode,
@@ -175,10 +205,23 @@ public sealed class CreateBookingCommandHandler
             }
 
             await _bookings.AddAsync(booking, cancellationToken);
+
+            // Record VoucherUsage row (same DbContext UoW) now that booking.Id is known.
+            if (validatedVoucherId.HasValue)
+            {
+                voucherUsageId = await _voucherService.RecordUsageAsync(
+                    voucherId: validatedVoucherId.Value,
+                    userId: request.PassengerUserId,
+                    bookingId: booking.Id,
+                    bookingGroupId: null,
+                    discountAmount: discountAmount,
+                    ct: cancellationToken);
+            }
         }
         catch
         {
-            // Booking entity creation failed — release the held seats (compensation)
+            // Booking entity creation failed — release the held seats (compensation).
+            // voucherUsageId is null here (usage row not yet committed) so no usage delete needed.
             await _bookingService.ReleaseSeatsAsync(
                 tripId: request.TripId,
                 seatLockToken: seatLockToken,
@@ -209,21 +252,15 @@ public sealed class CreateBookingCommandHandler
         catch (Exception ex)
         {
             _logger.LogError(ex, "Payment charge threw for booking {BookingId}; releasing seats.", booking.Id);
-            await _bookingService.ReleaseSeatsAsync(
-                request.TripId,
-                seatLockToken,
-                seatNumbers,
-                cancellationToken);
+            await CompensateSeatsAndVoucherAsync(
+                request.TripId, seatLockToken, seatNumbers, booking.Id, voucherUsageId, cancellationToken);
             throw;
         }
 
         if (chargeOutcome is ChargeOutcome.InsufficientFunds insuf)
         {
-            await _bookingService.ReleaseSeatsAsync(
-                request.TripId,
-                seatLockToken,
-                seatNumbers,
-                cancellationToken);
+            await CompensateSeatsAndVoucherAsync(
+                request.TripId, seatLockToken, seatNumbers, booking.Id, voucherUsageId, cancellationToken);
             // PAYMENT_INSUFFICIENT_WALLET (BSOT §5.9 registered code, 402).
             // ConflictException maps to 409; 402 mapping is deferred to Day 15/16 payment work.
             throw new ConflictException("PAYMENT_INSUFFICIENT_WALLET", insuf.Message);
@@ -231,7 +268,8 @@ public sealed class CreateBookingCommandHandler
 
         if (chargeOutcome is ChargeOutcome.TransportError transportError)
         {
-            await _bookingService.ReleaseSeatsAsync(request.TripId, seatLockToken, seatNumbers, cancellationToken);
+            await CompensateSeatsAndVoucherAsync(
+                request.TripId, seatLockToken, seatNumbers, booking.Id, voucherUsageId, cancellationToken);
             // TODO Day 15/16: map ChargeOutcome.TransportError to a registered BSOT §5.9
             // error code (e.g. PAYMENT_SERVICE_UNAVAILABLE) instead of surfacing 500 INTERNAL_ERROR.
             throw new InvalidOperationException($"Payment transport error: {transportError.Message}");
@@ -272,22 +310,24 @@ public sealed class CreateBookingCommandHandler
         if (!booked)
         {
             // Lock expired between lock and book — compensate and surface error
-            await _bookingService.ReleaseSeatsAsync(request.TripId, seatLockToken, seatNumbers, cancellationToken);
+            await CompensateSeatsAndVoucherAsync(
+                request.TripId, seatLockToken, seatNumbers, booking.Id, voucherUsageId, cancellationToken);
             throw new ConflictException(
                 "BOOKING_SEAT_UNAVAILABLE",
                 "Seat lock expired before booking could be confirmed.");
         }
 
-        booking.Confirm(_clock.UtcNow);
+        booking.Confirm(now);
 
-        // Enqueue booking.booking.confirmed (same tx — outbox committed by TransactionBehavior)
+        // Enqueue booking.booking.confirmed (same tx — outbox committed by TransactionBehavior).
+        // voucherUsageId propagated in event payload (BSOT:1741 optional field, replaces hardcoded null).
         var confirmedEvent = new
         {
             bookingId = booking.Id,
             tripId = booking.TripId,
             totalAmount = booking.TotalAmount.Amount,
             userId = booking.PassengerUserId,
-            voucherUsageId = (Guid?)null,
+            voucherUsageId,
         };
 
         await _outbox.EnqueueAsync(
@@ -308,5 +348,39 @@ public sealed class CreateBookingCommandHandler
             TotalAmount: booking.TotalAmount.Amount,
             DiscountAmount: booking.DiscountAmount.Amount,
             PaymentRedirectUrl: paymentRedirectUrl);
+    }
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Compensation: release seats and (if a voucher usage was created) physically delete it.
+    /// Best-effort — logs but does not re-throw (mirrors IBookingService.ReleaseSeatsAsync contract).
+    /// </summary>
+    private async Task CompensateSeatsAndVoucherAsync(
+        Guid tripId,
+        Guid seatLockToken,
+        IReadOnlyList<string> seatNumbers,
+        Guid bookingId,
+        Guid? voucherUsageId,
+        CancellationToken ct)
+    {
+        await _bookingService.ReleaseSeatsAsync(tripId, seatLockToken, seatNumbers, ct);
+
+        if (voucherUsageId.HasValue)
+        {
+            try
+            {
+                await _voucherService.CompensateAsync(bookingId, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Failed to delete voucher usage for booking {BookingId} during compensation.",
+                    bookingId);
+            }
+        }
     }
 }
