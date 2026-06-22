@@ -169,10 +169,9 @@ TASK.md
 CHANGELOG_AI.md
 /opencode.json
 /.opencode/
-# Codex CLI local config (machine-specific abs paths in hooks.json) + the
-# tool-agnostic skills mirror auto-generated from .claude/skills.
-.codex/
-.agents/skills/
+# Codex CLI config (.codex/) and the tool-agnostic skills mirror (.agents/skills/)
+# are now committed + shared so Codex-CLI teammates use the same agents/skills/hooks.
+# hooks.json uses repo-relative paths (node .codex/hooks/*.mjs) so it is portable.
 
 # ── Prisma / Generated code ──────────────────────────────────────────────────
 **/src/generated/
