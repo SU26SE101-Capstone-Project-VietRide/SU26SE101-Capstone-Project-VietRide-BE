@@ -201,6 +201,6 @@ public class ListVouchersQueryHandlerTests
 
         // Assert
         result.Items.Should().HaveCount(1);
-        result.Items[0].FundingType.Should().Be(VoucherFundingType.OPERATOR_FUNDED);
+        result.Items[0].FundingType.Should().Be("OPERATOR_FUNDED");
     }
 }

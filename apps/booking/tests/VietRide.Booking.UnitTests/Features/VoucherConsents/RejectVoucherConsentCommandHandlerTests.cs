@@ -4,7 +4,6 @@ using NSubstitute;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Features.VoucherConsents.RejectVoucherConsent;
 using VietRide.Booking.Domain.Entities;
-using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
@@ -67,7 +66,7 @@ public class RejectVoucherConsentCommandHandlerTests
 
         // Assert — result shape is { id, status } per API contract
         result.Id.Should().NotBeEmpty();
-        result.Status.Should().Be(OperatorVoucherConsentStatus.REJECTED);
+        result.Status.Should().Be("REJECTED");
 
         await _outbox.Received(1)
             .EnqueueAsync(
@@ -100,7 +99,7 @@ public class RejectVoucherConsentCommandHandlerTests
 
         // Assert — result shape is { id, status } per API contract
         result.Id.Should().NotBeEmpty();
-        result.Status.Should().Be(OperatorVoucherConsentStatus.REJECTED);
+        result.Status.Should().Be("REJECTED");
         await _outbox.Received(1)
             .EnqueueAsync(
                 "booking.voucher.consent_rejected",

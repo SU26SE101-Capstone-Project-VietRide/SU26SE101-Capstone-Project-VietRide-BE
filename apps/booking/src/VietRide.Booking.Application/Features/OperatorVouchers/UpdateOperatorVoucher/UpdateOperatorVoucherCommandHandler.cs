@@ -82,41 +82,41 @@ public sealed class UpdateOperatorVoucherCommandHandler
             // null = "keep current" → no violation.
             if (request.Value.HasValue && request.Value.Value != voucher.Value)
             {
-                throw new ConflictException("VOUCHER_LOCKED", LockedMessage);
+                throw new CodedConflictException("VOUCHER_LOCKED", LockedMessage);
             }
 
             if (request.MinOrderAmount.HasValue && request.MinOrderAmount.Value != voucher.MinOrderAmount.Amount)
             {
-                throw new ConflictException("VOUCHER_LOCKED", LockedMessage);
+                throw new CodedConflictException("VOUCHER_LOCKED", LockedMessage);
             }
 
             if (request.MaxDiscountAmount.HasValue && request.MaxDiscountAmount.Value != voucher.MaxDiscountAmount?.Amount)
             {
-                throw new ConflictException("VOUCHER_LOCKED", LockedMessage);
+                throw new CodedConflictException("VOUCHER_LOCKED", LockedMessage);
             }
 
             // validFrom is FROZEN once locked: reject only when the caller provides a changed value.
             if (request.ValidFrom.HasValue && request.ValidFrom.Value != voucher.ValidFrom)
             {
-                throw new ConflictException("VOUCHER_LOCKED", LockedDateMessage);
+                throw new CodedConflictException("VOUCHER_LOCKED", LockedDateMessage);
             }
 
             // validUntil may only be extended (not shortened) once locked.
             if (request.ValidUntil.HasValue && request.ValidUntil.Value < voucher.ValidUntil)
             {
-                throw new ConflictException("VOUCHER_LOCKED", LockedDateMessage);
+                throw new CodedConflictException("VOUCHER_LOCKED", LockedDateMessage);
             }
 
             // Limits may only be loosened once locked.
             // null = unlimited (loosest); going from null → finite is a tightening.
             if (IsTightening(voucher.TotalUsageLimit, request.TotalUsageLimit))
             {
-                throw new ConflictException("VOUCHER_LOCKED", LockedLimitMessage);
+                throw new CodedConflictException("VOUCHER_LOCKED", LockedLimitMessage);
             }
 
             if (IsTightening(voucher.PerUserLimit, request.PerUserLimit))
             {
-                throw new ConflictException("VOUCHER_LOCKED", LockedLimitMessage);
+                throw new CodedConflictException("VOUCHER_LOCKED", LockedLimitMessage);
             }
         }
 
@@ -172,9 +172,9 @@ public sealed class UpdateOperatorVoucherCommandHandler
             Id: voucher.Id,
             Code: voucher.Code,
             Name: voucher.Name,
-            Type: voucher.Type,
+            Type: voucher.Type.ToString(),
             Value: voucher.Value,
-            FundingType: voucher.FundingType,
+            FundingType: voucher.FundingType.ToString(),
             OwnerOperatorId: voucher.OwnerOperatorId!.Value,
             IsActive: voucher.IsActive,
             ValidFrom: voucher.ValidFrom,

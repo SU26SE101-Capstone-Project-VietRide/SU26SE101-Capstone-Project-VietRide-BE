@@ -46,7 +46,7 @@ public sealed class ListVoucherConsentsQueryHandler
             Id: c.Id,
             VoucherId: c.VoucherId,
             VoucherCode: c.Voucher!.Code,
-            VoucherType: c.Voucher.Type,
+            VoucherType: c.Voucher.Type.ToString(),
             VoucherValue: c.Voucher.Value,
             ValidFrom: c.Voucher.ValidFrom,
             ValidUntil: c.Voucher.ValidUntil,
@@ -55,7 +55,7 @@ public sealed class ListVoucherConsentsQueryHandler
             ApplicableRouteIds: c.Voucher.ApplicableRouteIds.Count > 0
                 ? c.Voucher.ApplicableRouteIds.AsReadOnly()
                 : null,
-            Status: c.Status,
+            Status: c.Status.ToString(),
             RequestedAt: c.RequestedAt,
             RespondedAt: c.RespondedAt,
             RespondedByUserId: c.RespondedByUserId))

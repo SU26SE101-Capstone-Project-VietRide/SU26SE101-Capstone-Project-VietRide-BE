@@ -1,5 +1,3 @@
-using VietRide.Booking.Domain.Enums;
-
 namespace VietRide.Booking.Application.Features.Vouchers.ListVouchers;
 
 /// <summary>
@@ -9,9 +7,9 @@ public sealed record VoucherListItem(
     Guid Id,
     string Code,
     string Name,
-    VoucherType Type,
+    string Type,
     long Value,
-    VoucherFundingType FundingType,
+    string FundingType,
     Guid? OwnerOperatorId,
     bool IsActive,
     DateTimeOffset ValidFrom,

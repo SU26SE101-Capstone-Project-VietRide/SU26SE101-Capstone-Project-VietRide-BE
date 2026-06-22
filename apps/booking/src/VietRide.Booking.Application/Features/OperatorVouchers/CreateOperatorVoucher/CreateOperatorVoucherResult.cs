@@ -1,5 +1,3 @@
-using VietRide.Booking.Domain.Enums;
-
 namespace VietRide.Booking.Application.Features.OperatorVouchers.CreateOperatorVoucher;
 
 /// <summary>
@@ -9,9 +7,9 @@ public sealed record CreateOperatorVoucherResult(
     Guid Id,
     string Code,
     string Name,
-    VoucherType Type,
+    string Type,
     long Value,
-    VoucherFundingType FundingType,
+    string FundingType,
     /// <summary>Always the caller's operatorId for operator-created vouchers.</summary>
     Guid OwnerOperatorId,
     bool IsActive,

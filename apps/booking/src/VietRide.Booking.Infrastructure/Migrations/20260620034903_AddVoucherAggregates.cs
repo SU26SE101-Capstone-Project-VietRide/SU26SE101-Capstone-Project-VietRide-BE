@@ -12,24 +12,14 @@ namespace VietRide.Booking.Infrastructure.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AlterDatabase()
-                .Annotation("Npgsql:Enum:booking_cancellation_reason", "USER_INITIATED,OPERATOR_CANCELLED_TRIP,OPERATOR_DISRUPTED_IN_PROGRESS,SCHEDULE_CHANGED,ROUTE_CHANGED_REFUSED,VEHICLE_SUBSTITUTION_DOWNGRADE,VEHICLE_SUBSTITUTION_NO_SEAT,STOP_DISABLED_REFUSED")
-                .Annotation("Npgsql:Enum:booking_status", "PENDING_PAYMENT,CONFIRMED,COMPLETED,EXPIRED,CANCELLED,NO_SHOW,PARTIAL_NO_SHOW,REFUNDED,DISRUPTED")
-                .Annotation("Npgsql:Enum:operator_voucher_consent_status", "PENDING,ACCEPTED,REJECTED")
-                .Annotation("Npgsql:Enum:outbox_event_status", "PENDING,PUBLISHING,PUBLISHED,FAILED")
-                .Annotation("Npgsql:Enum:passenger_boarding_status", "PENDING,BOARDED,NO_SHOW")
-                .Annotation("Npgsql:Enum:trip_direction", "OUTBOUND,RETURN")
-                .Annotation("Npgsql:Enum:voucher_funding_type", "VIETRIDE_FUNDED,OPERATOR_FUNDED")
-                .Annotation("Npgsql:Enum:voucher_type", "PERCENT_OFF,FIXED_AMOUNT")
-                .OldAnnotation("Npgsql:Enum:booking_cancellation_reason", "USER_INITIATED,OPERATOR_CANCELLED_TRIP,OPERATOR_DISRUPTED_IN_PROGRESS,SCHEDULE_CHANGED,ROUTE_CHANGED_REFUSED,VEHICLE_SUBSTITUTION_DOWNGRADE,VEHICLE_SUBSTITUTION_NO_SEAT,STOP_DISABLED_REFUSED")
-                .OldAnnotation("Npgsql:Enum:booking_status", "PENDING_PAYMENT,CONFIRMED,COMPLETED,EXPIRED,CANCELLED,NO_SHOW,PARTIAL_NO_SHOW,REFUNDED,DISRUPTED")
-                .OldAnnotation("Npgsql:Enum:outbox_event_status", "PENDING,PUBLISHING,PUBLISHED,FAILED")
-                .OldAnnotation("Npgsql:Enum:passenger_boarding_status", "PENDING,BOARDED,NO_SHOW")
-                .OldAnnotation("Npgsql:Enum:trip_direction", "OUTBOUND,RETURN");
-
             // Enum types — must exist before any table that references them. Created via explicit
-            // SQL to mirror InitBookingSchema (the HasPostgresEnum model annotations register the
-            // runtime native mapping only; they do not emit DDL in this Npgsql setup).
+            // SQL to mirror InitBookingSchema (booking_status et al. are created the same way and
+            // live as a SINGLE copy in the search_path schema). We deliberately do NOT also emit
+            // `AlterDatabase().Annotation("Npgsql:Enum:voucher_*")` here: that path would create a
+            // SECOND copy of each enum in the model's default schema (vietride_booking), leaving the
+            // type name ambiguous across two schemas and breaking every enum write at runtime
+            // ("More than one PostgreSQL type was found with the name voucher_funding_type"). One
+            // creator only — the raw SQL below — exactly as booking_status is created.
             migrationBuilder.Sql("CREATE TYPE voucher_type AS ENUM ('PERCENT_OFF', 'FIXED_AMOUNT');");
             migrationBuilder.Sql("CREATE TYPE voucher_funding_type AS ENUM ('VIETRIDE_FUNDED', 'OPERATOR_FUNDED');");
             migrationBuilder.Sql("CREATE TYPE operator_voucher_consent_status AS ENUM ('PENDING', 'ACCEPTED', 'REJECTED');");

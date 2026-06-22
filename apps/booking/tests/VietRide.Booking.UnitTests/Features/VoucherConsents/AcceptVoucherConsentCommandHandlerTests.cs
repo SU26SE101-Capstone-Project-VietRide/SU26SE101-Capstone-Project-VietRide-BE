@@ -4,7 +4,6 @@ using NSubstitute;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Features.VoucherConsents.AcceptVoucherConsent;
 using VietRide.Booking.Domain.Entities;
-using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
@@ -67,7 +66,7 @@ public class AcceptVoucherConsentCommandHandlerTests
 
         // Assert — result shape is { id, status } per API contract
         result.Id.Should().NotBeEmpty();
-        result.Status.Should().Be(OperatorVoucherConsentStatus.ACCEPTED);
+        result.Status.Should().Be("ACCEPTED");
 
         await _outbox.Received(1)
             .EnqueueAsync(

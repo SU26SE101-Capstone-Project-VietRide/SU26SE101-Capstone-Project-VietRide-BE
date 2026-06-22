@@ -74,7 +74,7 @@ public sealed class CreateOperatorVoucherCommandHandler
             var codeConflict = await _vouchers.CodeExistsAsync(code, cancellationToken);
             if (codeConflict)
             {
-                throw new ConflictException(
+                throw new CodedConflictException(
                     "VOUCHER_CODE_CONFLICT",
                     $"A voucher with code '{code}' already exists.");
             }
@@ -124,9 +124,9 @@ public sealed class CreateOperatorVoucherCommandHandler
             Id: voucher.Id,
             Code: voucher.Code,
             Name: voucher.Name,
-            Type: voucher.Type,
+            Type: voucher.Type.ToString(),
             Value: voucher.Value,
-            FundingType: voucher.FundingType,
+            FundingType: voucher.FundingType.ToString(),
             OwnerOperatorId: voucher.OwnerOperatorId!.Value,
             IsActive: voucher.IsActive,
             ValidFrom: voucher.ValidFrom,

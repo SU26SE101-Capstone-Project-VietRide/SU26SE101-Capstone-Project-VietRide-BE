@@ -99,6 +99,6 @@ public sealed class AcceptVoucherConsentCommandHandler
 
         return new AcceptVoucherConsentResult(
             Id: consent.Id,
-            Status: consent.Status);
+            Status: consent.Status.ToString());
     }
 }

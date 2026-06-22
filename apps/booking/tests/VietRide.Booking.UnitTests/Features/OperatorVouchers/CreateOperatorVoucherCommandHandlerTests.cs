@@ -5,7 +5,6 @@ using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Application.Features.OperatorVouchers.CreateOperatorVoucher;
 using VietRide.Booking.Domain.Entities;
-using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Abstractions;
 
@@ -80,7 +79,7 @@ public class CreateOperatorVoucherCommandHandlerTests
         // Assert
         result.Code.Should().Be("OPVCH001");
         result.OwnerOperatorId.Should().Be(OperatorId);
-        result.FundingType.Should().Be(VoucherFundingType.OPERATOR_FUNDED);
+        result.FundingType.Should().Be("OPERATOR_FUNDED");
         result.IsActive.Should().BeTrue();
 
         // applicableOperatorIds FORCED to [caller operatorId] server-side — not request-supplied
@@ -131,7 +130,7 @@ public class CreateOperatorVoucherCommandHandlerTests
         var act = () => sut.Handle(command, CancellationToken.None);
 
         // Assert
-        var ex = await act.Should().ThrowAsync<ConflictException>();
+        var ex = await act.Should().ThrowAsync<CodedConflictException>();
         ex.Which.ErrorCode.Should().Be("VOUCHER_CODE_CONFLICT");
     }
 

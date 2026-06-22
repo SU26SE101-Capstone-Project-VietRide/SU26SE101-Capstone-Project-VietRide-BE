@@ -27,7 +27,7 @@ public sealed class ListAdminVoucherConsentsQueryHandler
             Id: c.Id,
             OperatorId: c.OperatorId,
             VoucherId: c.VoucherId,
-            Status: c.Status,
+            Status: c.Status.ToString(),
             RequestedAt: c.RequestedAt,
             RespondedAt: c.RespondedAt,
             RespondedByUserId: c.RespondedByUserId,

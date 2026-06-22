@@ -5,7 +5,6 @@ using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Application.Features.Vouchers.CreateVoucher;
 using VietRide.Booking.Domain.Entities;
-using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Abstractions;
 
@@ -93,7 +92,7 @@ public class CreateVoucherCommandHandlerTests
         // Assert
         result.Code.Should().Be("PROMO2024");
         result.OwnerOperatorId.Should().BeNull();
-        result.FundingType.Should().Be(VoucherFundingType.VIETRIDE_FUNDED);
+        result.FundingType.Should().Be("VIETRIDE_FUNDED");
         result.IsActive.Should().BeTrue();
         result.Name.Should().Be("Summer Sale");
 
@@ -126,7 +125,7 @@ public class CreateVoucherCommandHandlerTests
         var result = await sut.Handle(command, CancellationToken.None);
 
         // Assert
-        result.FundingType.Should().Be(VoucherFundingType.OPERATOR_FUNDED);
+        result.FundingType.Should().Be("OPERATOR_FUNDED");
         result.OwnerOperatorId.Should().BeNull(); // admin-created
 
         // 2 consent rows fanned out — one per operator
@@ -152,7 +151,7 @@ public class CreateVoucherCommandHandlerTests
         var act = () => sut.Handle(command, CancellationToken.None);
 
         // Assert
-        var ex = await act.Should().ThrowAsync<ConflictException>();
+        var ex = await act.Should().ThrowAsync<CodedConflictException>();
         ex.Which.ErrorCode.Should().Be("VOUCHER_CODE_CONFLICT");
     }
 

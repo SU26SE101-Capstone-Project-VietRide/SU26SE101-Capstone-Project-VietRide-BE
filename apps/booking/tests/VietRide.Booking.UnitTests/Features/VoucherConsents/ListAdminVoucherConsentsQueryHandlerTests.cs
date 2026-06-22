@@ -3,7 +3,6 @@ using NSubstitute;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Features.VoucherConsents.ListVoucherConsents;
 using VietRide.Booking.Domain.Entities;
-using VietRide.Booking.Domain.Enums;
 
 namespace VietRide.Booking.UnitTests.Features.VoucherConsents;
 
@@ -108,7 +107,7 @@ public class ListAdminVoucherConsentsQueryHandlerTests
         // Assert
         result.Items.Should().HaveCount(1);
         var item = result.Items[0];
-        item.Status.Should().Be(OperatorVoucherConsentStatus.REJECTED);
+        item.Status.Should().Be("REJECTED");
         item.RespondedByUserId.Should().Be(operatorUserId);
         item.RespondedAt.Should().Be(now);
         item.RejectReason.Should().Be("Not interested");

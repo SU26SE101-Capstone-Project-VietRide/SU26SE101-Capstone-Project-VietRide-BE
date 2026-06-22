@@ -104,6 +104,6 @@ public sealed class RejectVoucherConsentCommandHandler
 
         return new RejectVoucherConsentResult(
             Id: consent.Id,
-            Status: consent.Status);
+            Status: consent.Status.ToString());
     }
 }

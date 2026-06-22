@@ -88,7 +88,7 @@ public class ListVoucherConsentsQueryHandlerTests
         result.Items.Should().HaveCount(1);
         result.Items[0].VoucherId.Should().Be(voucher.Id);
         result.Items[0].VoucherCode.Should().Be(voucher.Code);
-        result.Items[0].Status.Should().Be(OperatorVoucherConsentStatus.PENDING);
+        result.Items[0].Status.Should().Be("PENDING");
 
         await _consents.Received(1)
             .ListByOperatorAsync(OperatorId, OperatorVoucherConsentStatus.PENDING, Arg.Any<CancellationToken>());

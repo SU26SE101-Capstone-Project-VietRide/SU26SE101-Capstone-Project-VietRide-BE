@@ -1,5 +1,3 @@
-using VietRide.Booking.Domain.Enums;
-
 namespace VietRide.Booking.Application.Features.VoucherConsents.RejectVoucherConsent;
 
 /// <summary>
@@ -8,4 +6,4 @@ namespace VietRide.Booking.Application.Features.VoucherConsents.RejectVoucherCon
 /// </summary>
 public sealed record RejectVoucherConsentResult(
     Guid Id,
-    OperatorVoucherConsentStatus Status);
+    string Status);

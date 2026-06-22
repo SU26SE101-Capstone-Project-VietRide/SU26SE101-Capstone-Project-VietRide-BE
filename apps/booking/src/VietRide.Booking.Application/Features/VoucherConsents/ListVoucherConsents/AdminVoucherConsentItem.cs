@@ -1,5 +1,3 @@
-using VietRide.Booking.Domain.Enums;
-
 namespace VietRide.Booking.Application.Features.VoucherConsents.ListVoucherConsents;
 
 /// <summary>
@@ -9,7 +7,7 @@ public sealed record AdminVoucherConsentItem(
     Guid Id,
     Guid OperatorId,
     Guid VoucherId,
-    OperatorVoucherConsentStatus Status,
+    string Status,
     DateTimeOffset RequestedAt,
     DateTimeOffset? RespondedAt,
     Guid? RespondedByUserId,

@@ -123,7 +123,7 @@ public class UpdateOperatorVoucherCommandHandlerTests
         var act = () => sut.Handle(command, CancellationToken.None);
 
         // Assert
-        var ex = await act.Should().ThrowAsync<ConflictException>();
+        var ex = await act.Should().ThrowAsync<CodedConflictException>();
         ex.Which.ErrorCode.Should().Be("VOUCHER_LOCKED");
     }
 
@@ -225,7 +225,7 @@ public class UpdateOperatorVoucherCommandHandlerTests
         var act = () => sut.Handle(command, CancellationToken.None);
 
         // Assert
-        var ex = await act.Should().ThrowAsync<ConflictException>();
+        var ex = await act.Should().ThrowAsync<CodedConflictException>();
         ex.Which.ErrorCode.Should().Be("VOUCHER_LOCKED");
     }
 
@@ -264,7 +264,7 @@ public class UpdateOperatorVoucherCommandHandlerTests
         var act = () => sut.Handle(command, CancellationToken.None);
 
         // Assert
-        var ex = await act.Should().ThrowAsync<ConflictException>();
+        var ex = await act.Should().ThrowAsync<CodedConflictException>();
         ex.Which.ErrorCode.Should().Be("VOUCHER_LOCKED");
     }
 
@@ -339,7 +339,7 @@ public class UpdateOperatorVoucherCommandHandlerTests
         var act = () => sut.Handle(command, CancellationToken.None);
 
         // Assert
-        var ex = await act.Should().ThrowAsync<ConflictException>();
+        var ex = await act.Should().ThrowAsync<CodedConflictException>();
         ex.Which.ErrorCode.Should().Be("VOUCHER_LOCKED");
     }
 
@@ -393,7 +393,7 @@ public class UpdateOperatorVoucherCommandHandlerTests
         var act = () => sut.Handle(command, CancellationToken.None);
 
         // Assert
-        var ex = await act.Should().ThrowAsync<ConflictException>();
+        var ex = await act.Should().ThrowAsync<CodedConflictException>();
         ex.Which.ErrorCode.Should().Be("VOUCHER_LOCKED");
     }
 
