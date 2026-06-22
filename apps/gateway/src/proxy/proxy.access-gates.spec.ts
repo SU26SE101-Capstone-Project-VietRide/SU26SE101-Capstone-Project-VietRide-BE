@@ -586,6 +586,35 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
+  it('returns 403 FORBIDDEN for OPERATOR_STAFF POST /v1/operator/vouchers', async () => {
+    const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({
+      sub: 'operator-staff-1',
+      role: 'OPERATOR_STAFF',
+      operatorId: 'operator-1',
+    });
+    const req = makeRequest('/v1/operator/vouchers', {
+      authorization,
+      'x-request-id': 'req-op-voucher-staff',
+    });
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 403,
+      error: { code: 'FORBIDDEN' },
+      meta: { traceId: 'req-op-voucher-staff' },
+    });
+    expect(signer.sign).not.toHaveBeenCalled();
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it('returns 403 FORBIDDEN for non-operator roles on GET /v1/operator/voucher-consents', async () => {
     const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
     const handler = createProxyHandler(env, signer);
