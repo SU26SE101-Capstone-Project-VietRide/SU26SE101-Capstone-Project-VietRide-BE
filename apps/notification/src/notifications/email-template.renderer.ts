@@ -24,9 +24,10 @@ export class EmailTemplateRenderer {
   }
 
   private renderAuthOtp(data: EmailTemplateData): RenderedEmail {
-    const otpCode = this.requiredString(data, 'otpCode');
+    // Identity posts `code`; older callers/tests use `otpCode`. Accept both.
+    const otpCode = this.requiredString(data, 'otpCode', 'code');
     const ttlMinutes = this.optionalString(data, 'ttlMinutes') ?? '10';
-    const purpose = this.optionalString(data, 'purpose') ?? 'xac thuc';
+    const purpose = this.resolveOtpPurpose(this.optionalString(data, 'purpose'));
     const subject = 'Ma xac thuc VietRide';
     const text = `Ma ${purpose} cua ban la ${otpCode}. Ma co hieu luc trong ${ttlMinutes} phut.`;
 
@@ -41,7 +42,8 @@ export class EmailTemplateRenderer {
   }
 
   private renderSetInitialPassword(data: EmailTemplateData): RenderedEmail {
-    const setPasswordUrl = this.requiredString(data, 'setPasswordUrl');
+    // Identity posts `setInitialPasswordUrl`; older callers use `setPasswordUrl`.
+    const setPasswordUrl = this.requiredString(data, 'setPasswordUrl', 'setInitialPasswordUrl');
     const subject = 'Thiet lap mat khau VietRide';
     const text = `Tai khoan VietRide cua ban da duoc tao. Thiet lap mat khau tai: ${setPasswordUrl}`;
 
@@ -103,7 +105,10 @@ export class EmailTemplateRenderer {
     return {
       subject,
       text: lines.join('\n'),
-      html: this.paragraphs(subject, lines.map((line) => this.escapeHtml(line))),
+      html: this.paragraphs(
+        subject,
+        lines.map((line) => this.escapeHtml(line)),
+      ),
     };
   }
 
@@ -123,8 +128,19 @@ export class EmailTemplateRenderer {
     return `<h1>${this.escapeHtml(title)}</h1>${body}`;
   }
 
-  private requiredString(data: EmailTemplateData, key: string): string {
-    const value = this.optionalString(data, key);
+  private resolveOtpPurpose(rawPurpose: string | null): string {
+    switch (rawPurpose) {
+      case 'REGISTRATION':
+        return 'dang ky';
+      case 'PASSWORD_RESET':
+        return 'dat lai mat khau';
+      default:
+        return rawPurpose ?? 'xac thuc';
+    }
+  }
+
+  private requiredString(data: EmailTemplateData, key: string, ...fallbackKeys: string[]): string {
+    const value = this.optionalString(data, key, ...fallbackKeys);
     if (!value) {
       throw new Error(`EMAIL_TEMPLATE_MISSING_${key.toUpperCase()}`);
     }
@@ -132,13 +148,19 @@ export class EmailTemplateRenderer {
     return value;
   }
 
-  private optionalString(data: EmailTemplateData, key: string): string | null {
-    const value = data[key];
-    if (value === null || value === undefined) {
-      return null;
+  private optionalString(
+    data: EmailTemplateData,
+    key: string,
+    ...fallbackKeys: string[]
+  ): string | null {
+    for (const candidate of [key, ...fallbackKeys]) {
+      const value = data[candidate];
+      if (value !== null && value !== undefined) {
+        return typeof value === 'string' ? value : String(value);
+      }
     }
 
-    return typeof value === 'string' ? value : String(value);
+    return null;
   }
 
   private escapeHtml(value: string): string {
