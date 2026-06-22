@@ -318,6 +318,9 @@ services:
       REDIS_PORT: 6379
       RABBITMQ_URL: 'amqp://${RABBITMQ_USER:-vietride}:${RABBITMQ_PASSWORD:-vietride_dev}@rabbitmq:5672'
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-vietride.events}
+      # main.ts crashes in production NODE_ENV when CORS origin is '*' (default).
+      # Restrict it so the Socket.IO CORS adapter boots; override via .env for real FE origin.
+      TRACKING_CORS_ORIGIN: ${TRACKING_CORS_ORIGIN:-http://localhost:3000}
     depends_on:
       postgres:
         condition: service_healthy
