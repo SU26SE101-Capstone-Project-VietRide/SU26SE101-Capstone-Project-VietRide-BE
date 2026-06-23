@@ -63,6 +63,7 @@ public static class InfrastructureServiceCollectionExtensions
     {
         services.AddScoped<IWalletRepository, WalletRepository>();
         services.AddScoped<ITopUpRequestRepository, TopUpRequestRepository>();
+        services.AddScoped<IPlatformWalletRepository, PlatformWalletRepository>();
         services.Configure<VnPayOptions>(options =>
         {
             configuration.GetSection(VnPayOptions.SectionName).Bind(options);
