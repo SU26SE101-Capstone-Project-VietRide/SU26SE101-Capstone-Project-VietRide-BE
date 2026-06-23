@@ -140,7 +140,7 @@ cancellation (which calls the refund seam) and finishes the Sprint-3 booking-pay
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
 | 16.0 | done | APPROVE | 2026-06-23 | Approved after 2 patch rounds; DI registration scope human-approved; pending human /verify. |
-| 16.1 | todo | — | — | — |
+| 16.1 | done | APPROVE | 2026-06-23 | Approved after 1 patch round; advisory duplicate lock + ApiResponse envelope verified; pending human /verify. |
 | 16.2 | todo | — | — | — |
 | 16.3 | todo | — | — | — |
 | 16.4 | todo | — | — | — |

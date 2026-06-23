@@ -62,6 +62,7 @@ public static class InfrastructureServiceCollectionExtensions
         bool registerConsumers = true)
     {
         services.AddScoped<IWalletRepository, WalletRepository>();
+        services.AddScoped<IPaymentRepository, PaymentRepository>();
         services.AddScoped<ITopUpRequestRepository, TopUpRequestRepository>();
         services.AddScoped<IPlatformWalletRepository, PlatformWalletRepository>();
         services.Configure<VnPayOptions>(options =>
