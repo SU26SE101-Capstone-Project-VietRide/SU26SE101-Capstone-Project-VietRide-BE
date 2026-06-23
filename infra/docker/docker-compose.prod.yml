@@ -404,6 +404,11 @@ services:
     command: tunnel --no-autoupdate run
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN:?TUNNEL_TOKEN required — create the tunnel first, see DEPLOY.md}
+    # Lets the tunnel reach the HOST's sshd (host.docker.internal → host-gateway) so the
+    # ssh.<domain> public hostname can target ssh://host.docker.internal:22. The DB hostname
+    # targets tcp://postgres:5432 directly over vietride_net and needs none of this.
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     depends_on:
       nginx:
         condition: service_healthy
