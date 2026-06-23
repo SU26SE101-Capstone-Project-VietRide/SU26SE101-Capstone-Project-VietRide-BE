@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
+using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Booking.Domain.ValueObjects;
 using VietRide.Shared.Application.Exceptions;
@@ -22,7 +23,11 @@ namespace VietRide.Booking.Application.Features.Bookings.CreateRoundTripBooking;
 ///   <item>Fetch both trip snapshots and validate both are SCHEDULED.</item>
 ///   <item>Validate outbound route has returnRouteId and return departs after outbound arrival.</item>
 ///   <item>Lock outbound seats, then return seats; if return lock fails, release outbound.</item>
-///   <item>Create two PENDING_PAYMENT bookings with independent fares and discountAmount=0.</item>
+///   <item>Validate voucher per leg independently (read-only); apply group-level usage-limit cap
+///   (outbound-first) to prevent TOCTOU over-application when totalUsageLimit or perUserLimit
+///   would be exceeded across both legs.</item>
+///   <item>Create two PENDING_PAYMENT bookings with independent fares and per-leg discounts.</item>
+///   <item>Record one VoucherUsage row per leg (same transaction, each carries its booking_id + booking_group_id).</item>
 ///   <item>WALLET: batch-charge once for both BOOKING references. VNPay: one BOOKING_GROUP charge.</item>
 ///   <item>On WALLET success: book seats for both legs, confirm both, enqueue one confirmed event per leg.</item>
 /// </list>
@@ -37,6 +42,8 @@ public sealed class CreateRoundTripBookingCommandHandler
     private readonly ITripServiceClient _tripClient;
     private readonly IPaymentServiceClient _paymentClient;
     private readonly IBookingService _bookingService;
+    private readonly IVoucherService _voucherService;
+    private readonly IVoucherRepository _voucherRepository;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IClock _clock;
     private readonly ILogger<CreateRoundTripBookingCommandHandler> _logger;
@@ -46,6 +53,8 @@ public sealed class CreateRoundTripBookingCommandHandler
         ITripServiceClient tripClient,
         IPaymentServiceClient paymentClient,
         IBookingService bookingService,
+        IVoucherService voucherService,
+        IVoucherRepository voucherRepository,
         IIntegrationEventOutbox outbox,
         IClock clock,
         ILogger<CreateRoundTripBookingCommandHandler> logger)
@@ -54,6 +63,8 @@ public sealed class CreateRoundTripBookingCommandHandler
         _tripClient = tripClient;
         _paymentClient = paymentClient;
         _bookingService = bookingService;
+        _voucherService = voucherService;
+        _voucherRepository = voucherRepository;
         _outbox = outbox;
         _clock = clock;
         _logger = logger;
@@ -114,20 +125,143 @@ public sealed class CreateRoundTripBookingCommandHandler
         };
 
         var bookingGroupId = Guid.NewGuid();
-        var outboundTotal = Money.FromRaw(outboundTrip.BaseFare);
-        var returnTotal = Money.FromRaw(returnTrip.BaseFare);
-        var discountAmount = Money.Zero;
+        var now = _clock.UtcNow;
+        var outboundBaseFare = Money.FromRaw(outboundTrip.BaseFare);
+        var returnBaseFare = Money.FromRaw(returnTrip.BaseFare);
+
+        // -----------------------------------------------------------------------
+        // 4. Validate voucher per leg independently (read-only — no DB writes yet).
+        //
+        //    Each leg's min-order is checked against its own baseFare. VOUCHER_MIN_ORDER_NOT_MET
+        //    is caught and silently skips that leg (discount = 0, no usage row).
+        //
+        //    TOCTOU group-level cap (B1):
+        //    After both per-leg validations, we take a consistent snapshot of the current
+        //    usage counts and cap how many of the two legs can actually consume the voucher.
+        //    This prevents a totalUsageLimit=1 (or perUserLimit=1) voucher from being applied
+        //    to both legs because both saw the same stale count before either usage was written.
+        //    Semantics: outbound-first — if only one slot remains, only the outbound leg gets
+        //    the discount; the return leg is treated as no-voucher (discount 0, no usage row).
+        // -----------------------------------------------------------------------
+        var outboundDiscount = Money.Zero;
+        var returnDiscount = Money.Zero;
+        Guid? outboundValidatedVoucherId = null;
+        Guid? returnValidatedVoucherId = null;
+
+        if (!string.IsNullOrWhiteSpace(request.VoucherCode))
+        {
+            // Outbound leg
+            try
+            {
+                var outboundValidation = await _voucherService.ValidateAndComputeDiscountAsync(
+                    voucherCode: request.VoucherCode,
+                    operatorId: outboundTrip.OperatorId,
+                    routeId: outboundTrip.RouteId,
+                    userId: request.PassengerUserId,
+                    orderAmount: outboundBaseFare,
+                    now: now,
+                    ct: cancellationToken);
+                outboundDiscount = outboundValidation.Discount;
+                outboundValidatedVoucherId = outboundValidation.VoucherId;
+            }
+            catch (CodedValidationException ex) when (ex.ErrorCode == "VOUCHER_MIN_ORDER_NOT_MET")
+            {
+                // Outbound leg does not meet min-order — skip discount for this leg only.
+                _logger.LogDebug(
+                    "Voucher '{VoucherCode}' not applied to outbound leg: min-order not met.",
+                    request.VoucherCode);
+            }
+
+            // Return leg — use same voucher code; validate independently.
+            try
+            {
+                var returnValidation = await _voucherService.ValidateAndComputeDiscountAsync(
+                    voucherCode: request.VoucherCode,
+                    operatorId: returnTrip.OperatorId,
+                    routeId: returnTrip.RouteId,
+                    userId: request.PassengerUserId,
+                    orderAmount: returnBaseFare,
+                    now: now,
+                    ct: cancellationToken);
+                returnDiscount = returnValidation.Discount;
+                returnValidatedVoucherId = returnValidation.VoucherId;
+            }
+            catch (CodedValidationException ex) when (ex.ErrorCode == "VOUCHER_MIN_ORDER_NOT_MET")
+            {
+                // Return leg does not meet min-order — skip discount for this leg only.
+                _logger.LogDebug(
+                    "Voucher '{VoucherCode}' not applied to return leg: min-order not met.",
+                    request.VoucherCode);
+            }
+
+            // -----------------------------------------------------------------------
+            // Group-level usage-limit cap (B1 fix).
+            //
+            // Both ValidateAndComputeDiscountAsync calls read CountUsagesAsync /
+            // CountUsagesByUserAsync independently — they see the same pre-write count, so
+            // a voucher with remaining capacity = 1 passes both per-leg checks.
+            // We re-read the counts here (one snapshot after both validates) and cap the
+            // number of legs that can consume the voucher to the actual remaining slots.
+            //
+            // Only executed when at least one leg validated successfully AND both legs
+            // resolved to the same voucherId (same voucher object — normal case since the
+            // same voucherCode is used for both legs).
+            // -----------------------------------------------------------------------
+            if (outboundValidatedVoucherId.HasValue || returnValidatedVoucherId.HasValue)
+            {
+                // All successful validations resolve to the same voucherId for the same code.
+                var voucherId = outboundValidatedVoucherId ?? returnValidatedVoucherId!.Value;
+
+                var allowed = await ComputeAllowedLegsAsync(
+                    voucherId,
+                    request.PassengerUserId,
+                    legsWantingVoucher: (outboundValidatedVoucherId.HasValue ? 1 : 0)
+                                      + (returnValidatedVoucherId.HasValue ? 1 : 0),
+                    cancellationToken);
+
+                // Outbound is always preferred: if only 1 slot remains and both legs
+                // passed validation, the return leg loses its discount.
+                if (allowed == 0)
+                {
+                    // Neither leg can be covered despite per-leg validation passing.
+                    // (Race: another request consumed the last slot between validate and here.)
+                    outboundDiscount = Money.Zero;
+                    returnDiscount = Money.Zero;
+                    outboundValidatedVoucherId = null;
+                    returnValidatedVoucherId = null;
+                    _logger.LogDebug(
+                        "Voucher '{VoucherCode}' group-level cap: 0 slots remaining — no legs discounted.",
+                        request.VoucherCode);
+                }
+                else if (allowed == 1 && outboundValidatedVoucherId.HasValue && returnValidatedVoucherId.HasValue)
+                {
+                    // Only one slot remains — keep outbound, drop return.
+                    returnDiscount = Money.Zero;
+                    returnValidatedVoucherId = null;
+                    _logger.LogDebug(
+                        "Voucher '{VoucherCode}' group-level cap: 1 slot remaining — only outbound leg discounted.",
+                        request.VoucherCode);
+                }
+                // allowed >= 2: both legs keep their discounts (no cap needed).
+            }
+        }
+
+        var outboundTotal = outboundBaseFare - outboundDiscount;
+        var returnTotal = returnBaseFare - returnDiscount;
 
         BookingEntity outboundBooking;
         BookingEntity returnBooking;
+        Guid? outboundVoucherUsageId = null;
+        Guid? returnVoucherUsageId = null;
         try
         {
             outboundBooking = CreatePendingBooking(
                 request.PassengerUserId,
                 request.Outbound,
                 outboundTrip,
+                outboundBaseFare,
+                outboundDiscount,
                 outboundTotal,
-                discountAmount,
                 bookingGroupId,
                 TripDirection.OUTBOUND);
 
@@ -135,13 +269,38 @@ public sealed class CreateRoundTripBookingCommandHandler
                 request.PassengerUserId,
                 request.Return,
                 returnTrip,
+                returnBaseFare,
+                returnDiscount,
                 returnTotal,
-                discountAmount,
                 bookingGroupId,
                 TripDirection.RETURN);
 
             await _bookings.AddAsync(outboundBooking, cancellationToken);
             await _bookings.AddAsync(returnBooking, cancellationToken);
+
+            // Record VoucherUsage rows (same DbContext UoW) now that booking IDs are known.
+            // Each row carries its own booking_id + the shared booking_group_id.
+            if (outboundValidatedVoucherId.HasValue)
+            {
+                outboundVoucherUsageId = await _voucherService.RecordUsageAsync(
+                    voucherId: outboundValidatedVoucherId.Value,
+                    userId: request.PassengerUserId,
+                    bookingId: outboundBooking.Id,
+                    bookingGroupId: bookingGroupId,
+                    discountAmount: outboundDiscount,
+                    ct: cancellationToken);
+            }
+
+            if (returnValidatedVoucherId.HasValue)
+            {
+                returnVoucherUsageId = await _voucherService.RecordUsageAsync(
+                    voucherId: returnValidatedVoucherId.Value,
+                    userId: request.PassengerUserId,
+                    bookingId: returnBooking.Id,
+                    bookingGroupId: bookingGroupId,
+                    discountAmount: returnDiscount,
+                    ct: cancellationToken);
+            }
         }
         catch
         {
@@ -166,6 +325,8 @@ public sealed class CreateRoundTripBookingCommandHandler
             outboundSeatNumbers,
             returnLockToken,
             returnSeatNumbers,
+            outboundVoucherUsageId,
+            returnVoucherUsageId,
             cancellationToken);
 
         if (string.Equals(request.PaymentMethod, "VNPAY", StringComparison.OrdinalIgnoreCase))
@@ -178,6 +339,7 @@ public sealed class CreateRoundTripBookingCommandHandler
             request.Outbound.TripId,
             outboundLockToken,
             outboundSeatNumbers,
+            outboundVoucherUsageId,
             cancellationToken);
 
         await BookConfirmAndPublishAsync(
@@ -185,6 +347,7 @@ public sealed class CreateRoundTripBookingCommandHandler
             request.Return.TripId,
             returnLockToken,
             returnSeatNumbers,
+            returnVoucherUsageId,
             cancellationToken);
 
         _logger.LogInformation(
@@ -194,6 +357,53 @@ public sealed class CreateRoundTripBookingCommandHandler
             returnBooking.Id);
 
         return BuildResult(bookingGroupId, outboundBooking, returnBooking, grandTotal.Amount, paymentRedirectUrl);
+    }
+
+    // -----------------------------------------------------------------------
+    // Group-level usage-limit cap helper (B1)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Returns the number of round-trip legs (0, 1, or 2) that may consume the voucher,
+    /// based on a consistent post-validate snapshot of the usage counts.
+    /// <para>
+    /// <paramref name="legsWantingVoucher"/> is how many legs passed per-leg validation (1 or 2).
+    /// We cap to the minimum of: remaining total slots and remaining per-user slots.
+    /// </para>
+    /// </summary>
+    private async Task<int> ComputeAllowedLegsAsync(
+        Guid voucherId,
+        Guid userId,
+        int legsWantingVoucher,
+        CancellationToken ct)
+    {
+        var voucher = await _voucherRepository.GetByIdAsync(voucherId, ct);
+        if (voucher is null)
+        {
+            // Voucher disappeared between validate and cap check — treat as 0 allowed.
+            return 0;
+        }
+
+        // Remaining total slots (null limit = unlimited = int.MaxValue)
+        var remainingTotal = int.MaxValue;
+        if (voucher.TotalUsageLimit.HasValue)
+        {
+            var currentTotal = await _voucherRepository.CountUsagesAsync(voucherId, ct);
+            remainingTotal = Math.Max(0, voucher.TotalUsageLimit.Value - currentTotal);
+        }
+
+        // Remaining per-user slots (null limit = unlimited = int.MaxValue)
+        var remainingUser = int.MaxValue;
+        if (voucher.PerUserLimit.HasValue)
+        {
+            var currentUser = await _voucherRepository.CountUsagesByUserAsync(voucherId, userId, ct);
+            remainingUser = Math.Max(0, voucher.PerUserLimit.Value - currentUser);
+        }
+
+        var allowed = Math.Min(remainingTotal, remainingUser);
+
+        // Never exceed what the per-leg validations already approved.
+        return Math.Min(allowed, legsWantingVoucher);
     }
 
     private static void EnsureSeatCount(CreateRoundTripBookingCommand.RoundTripBookingLegCommand leg)
@@ -228,8 +438,9 @@ public sealed class CreateRoundTripBookingCommandHandler
         Guid passengerUserId,
         CreateRoundTripBookingCommand.RoundTripBookingLegCommand leg,
         TripSnapshot trip,
-        Money totalAmount,
+        Money baseFare,
         Money discountAmount,
+        Money totalAmount,
         Guid bookingGroupId,
         TripDirection tripDirection)
     {
@@ -242,7 +453,7 @@ public sealed class CreateRoundTripBookingCommandHandler
             pickupStopId: leg.PickupStopId,
             dropoffStationId: leg.DropoffStationId,
             dropoffStopId: leg.DropoffStopId,
-            baseFare: totalAmount,
+            baseFare: baseFare,
             discountAmount: discountAmount,
             totalAmount: totalAmount,
             tripSnapshotOriginName: trip.OriginStation.Name,
@@ -270,6 +481,8 @@ public sealed class CreateRoundTripBookingCommandHandler
         IReadOnlyList<string> outboundSeatNumbers,
         Guid returnLockToken,
         IReadOnlyList<string> returnSeatNumbers,
+        Guid? outboundVoucherUsageId,
+        Guid? returnVoucherUsageId,
         CancellationToken cancellationToken)
     {
         try
@@ -293,6 +506,10 @@ public sealed class CreateRoundTripBookingCommandHandler
                         EnsureWalletBatchSucceeded(success, outboundBooking.Id, returnBooking.Id);
                         return null;
                     case BatchChargeOutcome.InsufficientFunds insufficientFunds:
+                        await CompensateSeatsAndVouchersAsync(
+                            request, outboundLockToken, outboundSeatNumbers, returnLockToken, returnSeatNumbers,
+                            outboundBooking.Id, returnBooking.Id, outboundVoucherUsageId, returnVoucherUsageId,
+                            cancellationToken);
                         throw new ConflictException("PAYMENT_INSUFFICIENT_WALLET", insufficientFunds.Message);
                     case BatchChargeOutcome.TransportError transportError:
                         throw new InvalidOperationException($"Payment transport error: {transportError.Message}");
@@ -315,6 +532,11 @@ public sealed class CreateRoundTripBookingCommandHandler
                 case ChargeOutcome.Success success:
                     return success.Data.PaymentRedirectUrl;
                 case ChargeOutcome.InsufficientFunds insufficientFunds:
+                    // S1 fix: compensate voucher usages before re-throwing (mirrors WALLET path).
+                    await CompensateSeatsAndVouchersAsync(
+                        request, outboundLockToken, outboundSeatNumbers, returnLockToken, returnSeatNumbers,
+                        outboundBooking.Id, returnBooking.Id, outboundVoucherUsageId, returnVoucherUsageId,
+                        cancellationToken);
                     throw new ConflictException("PAYMENT_INSUFFICIENT_WALLET", insufficientFunds.Message);
                 case ChargeOutcome.TransportError transportError:
                     throw new InvalidOperationException($"Payment transport error: {transportError.Message}");
@@ -322,10 +544,25 @@ public sealed class CreateRoundTripBookingCommandHandler
                     throw new InvalidOperationException("Payment charge failed: Unknown payment error.");
             }
         }
+        catch (ConflictException)
+        {
+            // ConflictException paths above have already compensated; re-throw without a
+            // second compensation.
+            throw;
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Payment charge threw for round-trip booking group {BookingGroupId}; releasing seats.", bookingGroupId);
-            await ReleaseBothLegsAsync(request, outboundLockToken, outboundSeatNumbers, returnLockToken, returnSeatNumbers, cancellationToken);
+            // S2 fix: any non-ConflictException (e.g. EnsureWalletBatchSucceeded,
+            // TransportError → wrapped InvalidOperationException, network failure) must
+            // also compensate voucher usage rows, not only seats.
+            _logger.LogError(
+                ex,
+                "Payment charge threw for round-trip booking group {BookingGroupId}; compensating seats and voucher usages.",
+                bookingGroupId);
+            await CompensateSeatsAndVouchersAsync(
+                request, outboundLockToken, outboundSeatNumbers, returnLockToken, returnSeatNumbers,
+                outboundBooking.Id, returnBooking.Id, outboundVoucherUsageId, returnVoucherUsageId,
+                cancellationToken);
             throw;
         }
     }
@@ -353,6 +590,7 @@ public sealed class CreateRoundTripBookingCommandHandler
         Guid tripId,
         Guid seatLockToken,
         IReadOnlyList<string> seatNumbers,
+        Guid? voucherUsageId,
         CancellationToken cancellationToken)
     {
         var passengerAssignments = booking.Passengers
@@ -376,19 +614,80 @@ public sealed class CreateRoundTripBookingCommandHandler
 
         booking.Confirm(_clock.UtcNow);
 
+        // voucherUsageId propagated in event payload (BSOT:1741 optional field).
         var confirmedEvent = new
         {
             bookingId = booking.Id,
             tripId = booking.TripId,
             totalAmount = booking.TotalAmount.Amount,
             userId = booking.PassengerUserId,
-            voucherUsageId = (Guid?)null,
+            voucherUsageId,
         };
 
         await _outbox.EnqueueAsync(
             EventType,
             JsonSerializer.Serialize(confirmedEvent),
             cancellationToken);
+    }
+
+    /// <summary>
+    /// Compensation: release seats for both legs and (if voucher usages were created)
+    /// physically delete them. Best-effort — logs but does not re-throw.
+    /// </summary>
+    /// <param name="outboundVoucherUsageId">Presence guard — <c>.HasValue</c> indicates a usage
+    /// row was written for the outbound leg. CompensateAsync takes the booking ID, not the usage
+    /// ID; the value itself is not passed through.</param>
+    /// <param name="returnVoucherUsageId">Presence guard — same semantics as
+    /// <paramref name="outboundVoucherUsageId"/> for the return leg.</param>
+    private async Task CompensateSeatsAndVouchersAsync(
+        CreateRoundTripBookingCommand request,
+        Guid outboundLockToken,
+        IReadOnlyList<string> outboundSeatNumbers,
+        Guid returnLockToken,
+        IReadOnlyList<string> returnSeatNumbers,
+        Guid outboundBookingId,
+        Guid returnBookingId,
+        Guid? outboundVoucherUsageId,
+        Guid? returnVoucherUsageId,
+        CancellationToken cancellationToken)
+    {
+        await ReleaseBothLegsAsync(
+            request,
+            outboundLockToken,
+            outboundSeatNumbers,
+            returnLockToken,
+            returnSeatNumbers,
+            cancellationToken);
+
+        if (outboundVoucherUsageId.HasValue)
+        {
+            try
+            {
+                await _voucherService.CompensateAsync(outboundBookingId, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Failed to delete voucher usage for outbound booking {BookingId} during compensation.",
+                    outboundBookingId);
+            }
+        }
+
+        if (returnVoucherUsageId.HasValue)
+        {
+            try
+            {
+                await _voucherService.CompensateAsync(returnBookingId, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Failed to delete voucher usage for return booking {BookingId} during compensation.",
+                    returnBookingId);
+            }
+        }
     }
 
     private async Task ReleaseBothLegsAsync(

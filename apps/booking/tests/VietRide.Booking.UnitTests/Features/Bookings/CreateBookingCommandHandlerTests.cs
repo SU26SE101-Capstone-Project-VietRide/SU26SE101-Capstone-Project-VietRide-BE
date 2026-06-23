@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
@@ -9,6 +10,7 @@ using VietRide.Booking.Application.Features.Bookings.CreateBooking;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.ValueObjects;
 using BookingEntity = VietRide.Booking.Domain.Entities.Booking;
 
 namespace VietRide.Booking.UnitTests.Features.Bookings;
@@ -53,16 +55,18 @@ public class CreateBookingCommandHandlerTests
     private readonly ITripServiceClient _tripClient = Substitute.For<ITripServiceClient>();
     private readonly IPaymentServiceClient _paymentClient = Substitute.For<IPaymentServiceClient>();
     private readonly IBookingService _bookingService = Substitute.For<IBookingService>();
+    private readonly IVoucherService _voucherService = Substitute.For<IVoucherService>();
     private readonly IIntegrationEventOutbox _outbox = Substitute.For<IIntegrationEventOutbox>();
     private readonly IClock _clock = Substitute.For<IClock>();
 
     private CreateBookingCommandHandler BuildSut() => new(
-        _bookings, _tripClient, _paymentClient, _bookingService, _outbox, _clock,
+        _bookings, _tripClient, _paymentClient, _bookingService, _voucherService, _outbox, _clock,
         NullLogger<CreateBookingCommandHandler>.Instance);
 
     private static CreateBookingCommand BuildCommand(
         int seatCount = 1,
-        string paymentMethod = "WALLET") =>
+        string paymentMethod = "WALLET",
+        string? voucherCode = null) =>
         new(
             PassengerUserId: PassengerUserId,
             TripId: TripId,
@@ -73,7 +77,7 @@ public class CreateBookingCommandHandlerTests
             Seats: Enumerable.Range(1, seatCount)
                 .Select(i => new SeatRequest($"A{i:D2}", "Nguyen Van A", "0900000000", "012345678901"))
                 .ToList(),
-            VoucherCode: null,
+            VoucherCode: voucherCode,
             PaymentMethod: paymentMethod);
 
     // -----------------------------------------------------------------------
@@ -207,11 +211,14 @@ public class CreateBookingCommandHandlerTests
         paymentClient.ChargeAsync(default!, default, default, default, default!, default!, default)
             .ReturnsForAnyArgs(new ChargeOutcome.Success(new ChargeResult(PaymentId, "SUCCEEDED", null)));
 
+        var voucherService = Substitute.For<IVoucherService>();
+
         var handler = new CreateBookingCommandHandler(
             bookings,
             tripClient,
             paymentClient,
             bookingService,
+            voucherService,
             outbox,
             clock,
             NullLogger<CreateBookingCommandHandler>.Instance);
@@ -365,6 +372,73 @@ public class CreateBookingCommandHandlerTests
         // No outbox event for VNPAY — not yet confirmed
         await _outbox.DidNotReceiveWithAnyArgs()
             .EnqueueAsync(default!, default!, default);
+    }
+
+    // -----------------------------------------------------------------------
+    // BLOCKER-2: voucher-applied happy path
+    //   Stub VoucherService to return discount=10_000 and a voucherId,
+    //   stub RecordUsageAsync to return a non-empty usageId, then assert:
+    //   (a) result.DiscountAmount == 10_000 and result.TotalAmount == baseFare - 10_000
+    //   (b) the booking.booking.confirmed outbox payload carries the non-null voucherUsageId
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task Handle_WithVoucher_AppliesDiscountAndCarriesVoucherUsageIdInOutbox()
+    {
+        // Arrange
+        var voucherId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var usageId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        const long discount = 10_000;
+        const long baseFare = 200_000;
+
+        _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        _tripClient.GetTripSnapshotAsync(TripId, default).ReturnsForAnyArgs(ValidTrip);
+        _tripClient.LockSeatsAsync(default, default!, default, default!, default, default)
+            .ReturnsForAnyArgs(new LockSeatsOutcome.Success(LockData));
+        _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.Arg<BookingEntity>());
+        _paymentClient.ChargeAsync(default!, default, default, default, default!, default!, default)
+            .ReturnsForAnyArgs(new ChargeOutcome.Success(new ChargeResult(PaymentId, "SUCCEEDED", null)));
+        _tripClient.BookSeatsAsync(default, default, default, default!, default)
+            .ReturnsForAnyArgs(true);
+
+        _voucherService.ValidateAndComputeDiscountAsync(
+                default!, default, default, default, default!, default, default)
+            .ReturnsForAnyArgs(new VoucherValidationResult(
+                VoucherId: voucherId,
+                Discount: Money.FromRaw(discount)));
+
+        _voucherService.RecordUsageAsync(
+                default, default, default, default, default!, default)
+            .ReturnsForAnyArgs(usageId);
+
+        // Capture the outbox JSON payload
+        string? capturedJson = null;
+        await _outbox.EnqueueAsync(
+            Arg.Any<string>(),
+            Arg.Do<string>(json => capturedJson = json),
+            Arg.Any<CancellationToken>());
+
+        var handler = BuildSut();
+        var command = BuildCommand(seatCount: 1, paymentMethod: "WALLET", voucherCode: "VOUCHER10");
+
+        // Act
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        // Assert (a): result amounts reflect the discount
+        result.Status.Should().Be("CONFIRMED");
+        result.DiscountAmount.Should().Be(discount, "discount must equal the stub value");
+        result.TotalAmount.Should().Be(baseFare - discount, "total must be base fare minus discount");
+
+        // Assert (b): outbox payload carries the non-null voucherUsageId (replaces old hardcoded null)
+        capturedJson.Should().NotBeNull("outbox must have been enqueued for a CONFIRMED booking");
+        using var doc = JsonDocument.Parse(capturedJson!);
+        var root = doc.RootElement;
+
+        root.TryGetProperty("voucherUsageId", out var voucherUsageIdProp).Should().BeTrue(
+            "outbox payload must include voucherUsageId");
+        voucherUsageIdProp.GetGuid().Should().Be(usageId,
+            "voucherUsageId in outbox payload must equal the usageId returned by RecordUsageAsync");
     }
 
     private static async Task<AttemptResult> CaptureAsync(Func<Task<CreateBookingResult>> action)
