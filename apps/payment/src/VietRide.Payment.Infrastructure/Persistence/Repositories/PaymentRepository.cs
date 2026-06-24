@@ -84,6 +84,28 @@ internal sealed class PaymentRepository : IPaymentRepository
         return transaction;
     }
 
+    public async Task<bool> TryMarkRefundedByReferenceAsync(
+        PaymentReferenceType referenceType,
+        Guid referenceId,
+        DateTimeOffset refundedAt,
+        CancellationToken cancellationToken)
+    {
+        // Guarded on status = SUCCEEDED so a re-delivered wallet.credited event is an idempotent
+        // no-op (0 rows). updated_at is maintained by the trg_payments_updated_at DB trigger.
+        var affected = await _db.Payments
+            .Where(payment => payment.ReferenceType == referenceType
+                && payment.ReferenceId == referenceId
+                && payment.Status == PaymentStatus.SUCCEEDED)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(payment => payment.Status, PaymentStatus.REFUNDED)
+                    .SetProperty(payment => payment.RefundedAt, refundedAt),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return affected > 0;
+    }
+
     public async Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectOlderThanAsync(
         DateTimeOffset expiresBefore,
         DateTimeOffset expiredAt,

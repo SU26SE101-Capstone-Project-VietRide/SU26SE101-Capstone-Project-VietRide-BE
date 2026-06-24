@@ -37,7 +37,10 @@ public sealed class RefundFailureRetryJob
 
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
-        var failures = await _refundFailures.GetUnresolvedAsync(cancellationToken);
+        // Scope to retriable rows only (resolved_at IS NULL AND retry_count < max). Exhausted rows are
+        // left unresolved for Admin manual handling (BSOT §5.9 REFUND_FAILURE_PERSISTED) and must NOT be
+        // re-loaded here, otherwise the scan would re-surface REFUND_RETRY_EXHAUSTED on every run forever.
+        var failures = await _refundFailures.GetRetryableAsync(RefundFailureLog.MaxRetryCount, cancellationToken);
         var now = _clock.UtcNow;
         var retriedCount = 0;
 
@@ -72,7 +75,7 @@ public sealed class RefundFailureRetryJob
         if (failures.Count > 0)
         {
             _logger.LogInformation(
-                "Refund failure retry scan completed. Loaded {FailureCount} unresolved failure log(s), retried {RetryCount}.",
+                "Refund failure retry scan completed. Loaded {FailureCount} retryable failure log(s), retried {RetryCount}.",
                 failures.Count,
                 retriedCount);
         }

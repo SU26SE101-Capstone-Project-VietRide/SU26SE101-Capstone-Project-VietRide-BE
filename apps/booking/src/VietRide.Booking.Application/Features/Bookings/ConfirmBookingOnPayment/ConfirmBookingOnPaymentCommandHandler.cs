@@ -57,18 +57,42 @@ public sealed class ConfirmBookingOnPaymentCommandHandler
             return false;
         }
 
-        var seatLock = await ReplaySeatLockAsync(snapshot, cancellationToken);
-        var booked = await _tripClient.BookSeatsAsync(
-            snapshot.TripId,
-            seatLock.SeatLockToken,
-            snapshot.BookingId,
-            snapshot.PassengerSeatAssignments,
-            cancellationToken);
-        if (!booked)
+        // Seat booking is idempotent on the Trip side, so book first (self-healing: a crash before the
+        // Confirm commit leaves the booking PENDING_PAYMENT and re-delivery safely re-books + confirms).
+        // But a CONCURRENT re-delivery can lose the BookSeats/lock race after the winner already
+        // confirmed+booked — in that case do NOT throw (which would DLQ a correctly-confirmed booking):
+        // re-check status and treat an already-transitioned booking as an idempotent no-op.
+        try
         {
-            throw new ConflictException(
-                "BOOKING_SEAT_UNAVAILABLE",
-                "Seat lock expired before booking could be confirmed.");
+            var seatLock = await ReplaySeatLockAsync(snapshot, cancellationToken);
+            var booked = await _tripClient.BookSeatsAsync(
+                snapshot.TripId,
+                seatLock.SeatLockToken,
+                snapshot.BookingId,
+                snapshot.PassengerSeatAssignments,
+                cancellationToken);
+            if (!booked)
+            {
+                throw new ConflictException(
+                    "BOOKING_SEAT_UNAVAILABLE",
+                    "Seat lock expired before booking could be confirmed.");
+            }
+        }
+        catch (ConflictException)
+        {
+            var recheck = await _bookings.GetPendingPaymentTransitionSnapshotAsync(
+                snapshot.BookingId,
+                cancellationToken);
+            if (recheck is null)
+            {
+                _logger.LogInformation(
+                    "Payment succeeded event {PaymentId} no-op for booking {BookingId}; another delivery already confirmed it before seat re-book.",
+                    request.PaymentId,
+                    snapshot.BookingId);
+                return false;
+            }
+
+            throw;
         }
 
         var transitioned = await _bookings.TryConfirmPendingPaymentAsync(

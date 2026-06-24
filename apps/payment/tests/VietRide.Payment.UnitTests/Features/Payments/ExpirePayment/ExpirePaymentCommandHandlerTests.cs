@@ -154,6 +154,13 @@ public sealed class ExpirePaymentCommandHandlerTests
 
             return Task.FromResult<IReadOnlyList<PaymentEntity>>(expired);
         }
+
+        public Task<bool> TryMarkRefundedByReferenceAsync(
+            PaymentReferenceType referenceType,
+            Guid referenceId,
+            DateTimeOffset refundedAt,
+            CancellationToken cancellationToken)
+            => Task.FromResult(false);
     }
 
     private sealed class FakeIntegrationEventOutbox : IIntegrationEventOutbox

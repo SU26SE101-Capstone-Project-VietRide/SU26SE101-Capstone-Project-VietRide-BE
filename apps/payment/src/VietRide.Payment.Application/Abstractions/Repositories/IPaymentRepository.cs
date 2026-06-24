@@ -30,4 +30,15 @@ public interface IPaymentRepository : IRepository<PaymentEntity, Guid>
         DateTimeOffset expiresBefore,
         DateTimeOffset expiredAt,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Atomically transitions the SUCCEEDED Payment row for the given reference to REFUNDED
+    /// (BSOT §8.4). Returns false when no SUCCEEDED row matched (already refunded / not found) so
+    /// the wallet.credited consumer is an idempotent no-op on re-delivery.
+    /// </summary>
+    Task<bool> TryMarkRefundedByReferenceAsync(
+        PaymentReferenceType referenceType,
+        Guid referenceId,
+        DateTimeOffset refundedAt,
+        CancellationToken cancellationToken);
 }

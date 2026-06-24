@@ -4,7 +4,7 @@ namespace VietRide.Payment.Domain.Entities;
 
 public sealed class RefundFailureLog : BaseEntity<Guid>
 {
-    private const int MaxRetryCount = 5;
+    public const int MaxRetryCount = 5;
 
     private RefundFailureLog() { }
 

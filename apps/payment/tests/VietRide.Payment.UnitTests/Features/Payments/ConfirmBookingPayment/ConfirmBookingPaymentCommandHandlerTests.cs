@@ -248,6 +248,13 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
             DateTimeOffset expiredAt,
             CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<PaymentEntity>>([]);
+
+        public Task<bool> TryMarkRefundedByReferenceAsync(
+            PaymentReferenceType referenceType,
+            Guid referenceId,
+            DateTimeOffset refundedAt,
+            CancellationToken cancellationToken)
+            => Task.FromResult(false);
     }
 
     private sealed class FakePlatformWalletRepository : IPlatformWalletRepository

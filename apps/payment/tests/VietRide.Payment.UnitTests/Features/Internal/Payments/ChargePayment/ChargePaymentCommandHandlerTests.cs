@@ -286,6 +286,13 @@ public sealed class ChargePaymentCommandHandlerTests
             DateTimeOffset expiredAt,
             CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<PaymentEntity>>([]);
+
+        public Task<bool> TryMarkRefundedByReferenceAsync(
+            PaymentReferenceType referenceType,
+            Guid referenceId,
+            DateTimeOffset refundedAt,
+            CancellationToken cancellationToken)
+            => Task.FromResult(false);
     }
 
     private sealed class FakePlatformWalletRepository : IPlatformWalletRepository
@@ -369,6 +376,21 @@ public sealed class ChargePaymentCommandHandlerTests
             string clientIpAddress,
             DateTimeOffset createdAt)
         {
+            vnPayTxnRef.Should().NotBeEmpty();
+            clientIpAddress.Should().Be("203.0.113.10");
+            createdAt.Should().Be(Now);
+            return RedirectUrl;
+        }
+
+        public string CreateBookingPaymentRedirectUrl(
+            Guid bookingId,
+            Guid userId,
+            Money amount,
+            string vnPayTxnRef,
+            string clientIpAddress,
+            DateTimeOffset createdAt)
+        {
+            bookingId.Should().NotBeEmpty();
             vnPayTxnRef.Should().NotBeEmpty();
             clientIpAddress.Should().Be("203.0.113.10");
             createdAt.Should().Be(Now);

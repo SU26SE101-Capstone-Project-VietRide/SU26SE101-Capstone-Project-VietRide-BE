@@ -7,6 +7,7 @@ using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Payment.Application.Abstractions.Refunds;
 using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Application.Events;
+using VietRide.Payment.Application.Features.Payments.MarkPaymentRefunded;
 using VietRide.Payment.Application.Features.Wallets.BootstrapWallet;
 using VietRide.Payment.Infrastructure.Http;
 using VietRide.Payment.Infrastructure.Persistence.Repositories;
@@ -91,6 +92,14 @@ public static class InfrastructureServiceCollectionExtensions
             {
                 options.QueueName = "payment.wallet-bootstrap";
                 options.BindingKeys = [UserCreatedIntegrationEvent.EventType];
+            });
+
+            // BSOT §8.4: Payment consumes its own canonical wallet-credit event to drive the
+            // originating Payment row to REFUNDED for refund credits (BOOKING_REFUND / PARCEL_REFUND).
+            services.AddVietRideEventConsumer<WalletCreditedConsumerEvent, MarkPaymentRefundedCommandHandler>(options =>
+            {
+                options.QueueName = "payment.payment-refunded";
+                options.BindingKeys = [WalletCreditedConsumerEvent.EventType];
             });
         }
 

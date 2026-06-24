@@ -109,7 +109,8 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
     {
         var vnPayTxnRef = Guid.NewGuid().ToString("D");
         var now = _clock.UtcNow;
-        var redirectUrl = _vnPayClient.CreateTopUpRedirectUrl(
+        var redirectUrl = _vnPayClient.CreateBookingPaymentRedirectUrl(
+            request.ReferenceId,
             request.UserId,
             amount,
             vnPayTxnRef,
