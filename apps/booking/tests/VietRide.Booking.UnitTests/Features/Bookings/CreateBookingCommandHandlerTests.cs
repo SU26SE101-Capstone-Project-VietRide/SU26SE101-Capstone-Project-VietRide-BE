@@ -111,6 +111,11 @@ public class CreateBookingCommandHandlerTests
         result.DiscountAmount.Should().Be(0);
         result.PaymentRedirectUrl.Should().BeNull();
 
+        await _bookings.Received(1)
+            .AddAsync(
+                Arg.Is<BookingEntity>(booking => booking.SeatLockToken == SeatLockToken),
+                Arg.Any<CancellationToken>());
+
         // Confirm outbox was enqueued exactly once
         await _outbox.Received(1)
             .EnqueueAsync(

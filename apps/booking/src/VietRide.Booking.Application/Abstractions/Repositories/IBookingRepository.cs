@@ -24,4 +24,39 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
     /// Used for saga compensation checks and cancellation.
     /// </summary>
     Task<BookingEntity?> FindByIdWithPassengersAsync(Guid bookingId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns the data needed to replay the Trip seat-lock seam for a payment event.
+    /// Null means the booking is no longer PENDING_PAYMENT and the event is an idempotent no-op.
+    /// </summary>
+    Task<BookingPaymentTransitionSnapshot?> GetPendingPaymentTransitionSnapshotAsync(
+        Guid bookingId,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Status-guarded PENDING_PAYMENT -> CONFIRMED transition.
+    /// Returns true only when this call changed the row.
+    /// </summary>
+    Task<bool> TryConfirmPendingPaymentAsync(
+        Guid bookingId,
+        DateTimeOffset confirmedAt,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Status-guarded PENDING_PAYMENT -> EXPIRED transition.
+    /// Returns true only when this call changed the row.
+    /// </summary>
+    Task<bool> TryExpirePendingPaymentAsync(
+        Guid bookingId,
+        DateTimeOffset expiredAt,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Status-guarded CANCELLED -> REFUNDED transition.
+    /// Returns true only when this call changed the row.
+    /// </summary>
+    Task<bool> TryMarkCancelledRefundedAsync(
+        Guid bookingId,
+        DateTimeOffset refundedAt,
+        CancellationToken ct = default);
 }

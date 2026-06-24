@@ -144,7 +144,7 @@ cancellation (which calls the refund seam) and finishes the Sprint-3 booking-pay
 | 16.2 | done | APPROVE | 2026-06-24 | Approved without patch round; pending human /verify. |
 | 16.3 | done | APPROVE | 2026-06-24 | Approved after schema override + 1 patch round; retry payload/real executor connected; pending human /verify. |
 | 16.4 | done | APPROVE | 2026-06-24 | Approved after 2 patch rounds; temporary refund retry seam human-approved, Task 16.3 connects real executor; pending human /verify. |
-| 16.5 | todo | — | — | — |
+| 16.5 | done | APPROVE | 2026-06-24 | Approved after scope expansion + 2 patch rounds; Booking integration full suite needs local Postgres for /verify. |
 
 Legend: todo / in progress / done (reviewer APPROVED + human /verify) / done-with-carryover / blocked
 

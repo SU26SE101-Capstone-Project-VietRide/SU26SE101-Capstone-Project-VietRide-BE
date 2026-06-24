@@ -6,6 +6,7 @@ using VietRide.Booking.Application;
 using VietRide.Booking.Infrastructure;
 using VietRide.Booking.Infrastructure.DependencyInjection;
 using VietRide.Shared.Application.DependencyInjection;
+using VietRide.Shared.Messaging.DependencyInjection;
 using VietRide.Shared.Persistence.DependencyInjection;
 using VietRide.Shared.Web.DependencyInjection;
 using VietRide.Shared.Web.Health;
@@ -28,7 +29,13 @@ builder.Services.AddVietRideDbContext<BookingDbContext>(
     configureDataSource: BookingDbContext.ConfigurePostgresTypes);
 builder.Services.AddVietRideMediatRBehaviors(
     handlerAssemblies: [typeof(ApplicationAssemblyMarker).Assembly]);
-builder.Services.AddInfrastructure(builder.Configuration);
+var registerMessaging = !builder.Environment.IsEnvironment("Testing");
+if (registerMessaging)
+{
+    builder.Services.AddVietRideMessaging(builder.Configuration);
+}
+
+builder.Services.AddInfrastructure(builder.Configuration, registerConsumers: registerMessaging);
 builder.Services.AddVietRideIdempotency("booking");
 
 var app = builder.Build();

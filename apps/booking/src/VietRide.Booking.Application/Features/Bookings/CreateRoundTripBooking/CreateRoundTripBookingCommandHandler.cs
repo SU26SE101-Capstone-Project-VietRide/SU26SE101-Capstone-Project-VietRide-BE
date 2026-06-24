@@ -263,7 +263,8 @@ public sealed class CreateRoundTripBookingCommandHandler
                 outboundDiscount,
                 outboundTotal,
                 bookingGroupId,
-                TripDirection.OUTBOUND);
+                TripDirection.OUTBOUND,
+                outboundLockToken);
 
             returnBooking = CreatePendingBooking(
                 request.PassengerUserId,
@@ -273,7 +274,8 @@ public sealed class CreateRoundTripBookingCommandHandler
                 returnDiscount,
                 returnTotal,
                 bookingGroupId,
-                TripDirection.RETURN);
+                TripDirection.RETURN,
+                returnLockToken);
 
             await _bookings.AddAsync(outboundBooking, cancellationToken);
             await _bookings.AddAsync(returnBooking, cancellationToken);
@@ -442,7 +444,8 @@ public sealed class CreateRoundTripBookingCommandHandler
         Money discountAmount,
         Money totalAmount,
         Guid bookingGroupId,
-        TripDirection tripDirection)
+        TripDirection tripDirection,
+        Guid seatLockToken)
     {
         var booking = BookingEntity.CreatePendingPayment(
             bookingCode: BookingCode.Generate(_clock.UtcNow),
@@ -461,7 +464,8 @@ public sealed class CreateRoundTripBookingCommandHandler
             tripSnapshotDeparture: trip.DepartureDateTime,
             tripSnapshotRouteName: null,
             bookingGroupId: bookingGroupId,
-            tripDirection: tripDirection);
+            tripDirection: tripDirection,
+            seatLockToken: seatLockToken);
 
         foreach (var seat in leg.Seats)
         {

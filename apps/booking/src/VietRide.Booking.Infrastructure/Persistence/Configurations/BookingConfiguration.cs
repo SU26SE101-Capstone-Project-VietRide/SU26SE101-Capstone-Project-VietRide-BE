@@ -60,6 +60,11 @@ internal sealed class BookingConfiguration : IEntityTypeConfiguration<BookingEnt
             .HasColumnType("uuid")
             .IsRequired();
 
+        builder.Property(x => x.SeatLockToken)
+            .HasColumnName("seat_lock_token")
+            .HasColumnType("uuid")
+            .IsRequired(false);
+
         builder.Property(x => x.PickupStationId)
             .HasColumnName("pickup_station_id")
             .HasColumnType("uuid")
