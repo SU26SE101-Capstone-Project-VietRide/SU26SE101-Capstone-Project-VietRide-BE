@@ -26,6 +26,7 @@ public sealed class PaymentDbContext : VietRideDbContextBase, IBatchChargePaymen
     public DbSet<WalletTransaction> WalletTransactions => Set<WalletTransaction>();
     public DbSet<PlatformWallet> PlatformWallets => Set<PlatformWallet>();
     public DbSet<PlatformWalletTransaction> PlatformWalletTransactions => Set<PlatformWalletTransaction>();
+    public DbSet<RefundFailureLog> RefundFailureLogs => Set<RefundFailureLog>();
 
     public static void ConfigurePostgresTypes(NpgsqlDataSourceBuilder dataSourceBuilder)
     {

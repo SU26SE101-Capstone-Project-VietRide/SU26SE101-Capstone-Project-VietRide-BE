@@ -25,4 +25,9 @@ public interface IPaymentRepository : IRepository<PaymentEntity, Guid>
         Guid bookingId,
         Money amount,
         CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectOlderThanAsync(
+        DateTimeOffset expiresBefore,
+        DateTimeOffset expiredAt,
+        CancellationToken cancellationToken);
 }

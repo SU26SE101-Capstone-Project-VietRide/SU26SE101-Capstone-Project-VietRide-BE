@@ -79,6 +79,14 @@ if (registerMessaging)
         TopUpExpiredJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
         Cron.Minutely());
+    recurringJobs.AddOrUpdate<RefundFailureRetryJob>(
+        RefundFailureRetryJob.RecurringJobId,
+        job => job.RunAsync(CancellationToken.None),
+        "*/10 * * * *");
+    recurringJobs.AddOrUpdate<PaymentExpiredJob>(
+        PaymentExpiredJob.RecurringJobId,
+        job => job.RunAsync(CancellationToken.None),
+        Cron.Minutely());
 }
 
 app.Run();

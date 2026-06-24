@@ -280,6 +280,12 @@ public sealed class ChargePaymentCommandHandlerTests
             WalletTransactions.Add(transaction);
             return Task.FromResult(transaction);
         }
+
+        public Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectOlderThanAsync(
+            DateTimeOffset expiresBefore,
+            DateTimeOffset expiredAt,
+            CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<PaymentEntity>>([]);
     }
 
     private sealed class FakePlatformWalletRepository : IPlatformWalletRepository

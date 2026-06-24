@@ -143,7 +143,7 @@ cancellation (which calls the refund seam) and finishes the Sprint-3 booking-pay
 | 16.1 | done | APPROVE | 2026-06-23 | Approved after 1 patch round; advisory duplicate lock + ApiResponse envelope verified; pending human /verify. |
 | 16.2 | todo | — | — | — |
 | 16.3 | todo | — | — | — |
-| 16.4 | todo | — | — | — |
+| 16.4 | done | APPROVE | 2026-06-24 | Approved after 2 patch rounds; temporary refund retry seam human-approved, Task 16.3 connects real executor; pending human /verify. |
 | 16.5 | todo | — | — | — |
 
 Legend: todo / in progress / done (reviewer APPROVED + human /verify) / done-with-carryover / blocked

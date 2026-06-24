@@ -83,4 +83,23 @@ internal sealed class PaymentRepository : IPaymentRepository
         await _db.WalletTransactions.AddAsync(transaction, cancellationToken);
         return transaction;
     }
+
+    public async Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectOlderThanAsync(
+        DateTimeOffset expiresBefore,
+        DateTimeOffset expiredAt,
+        CancellationToken cancellationToken)
+        => await _db.Payments
+            .FromSqlInterpolated($"""
+                UPDATE vietride_payment.payments
+                SET status = 'EXPIRED',
+                    expired_at = {expiredAt},
+                    updated_at = {expiredAt}
+                WHERE status = 'PENDING_REDIRECT'
+                  AND method = 'VNPAY'
+                  AND reference_type = 'BOOKING'
+                  AND created_at < {expiresBefore}
+                RETURNING *
+                """)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
 }

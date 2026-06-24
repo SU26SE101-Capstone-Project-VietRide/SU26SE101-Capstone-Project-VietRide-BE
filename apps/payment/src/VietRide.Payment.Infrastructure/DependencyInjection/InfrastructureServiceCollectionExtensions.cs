@@ -4,11 +4,13 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using StackExchange.Redis;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
+using VietRide.Payment.Application.Abstractions.Refunds;
 using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Application.Events;
 using VietRide.Payment.Application.Features.Wallets.BootstrapWallet;
 using VietRide.Payment.Infrastructure.Http;
 using VietRide.Payment.Infrastructure.Persistence.Repositories;
+using VietRide.Payment.Infrastructure.Refunds;
 using VietRide.Payment.Infrastructure.VnPay;
 using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Kernel.Abstractions;
@@ -65,6 +67,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IPaymentRepository, PaymentRepository>();
         services.AddScoped<ITopUpRequestRepository, TopUpRequestRepository>();
         services.AddScoped<IPlatformWalletRepository, PlatformWalletRepository>();
+        services.AddScoped<IRefundFailureLogRepository, RefundFailureLogRepository>();
+        services.AddScoped<IRefundRetryExecutor, DeferredRefundRetryExecutor>();
         services.Configure<VnPayOptions>(options =>
         {
             configuration.GetSection(VnPayOptions.SectionName).Bind(options);
