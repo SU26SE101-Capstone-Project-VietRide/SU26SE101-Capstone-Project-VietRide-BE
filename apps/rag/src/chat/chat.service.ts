@@ -58,10 +58,20 @@ export class ChatService {
 
   async prepareChat(dto: CreateChatDto, user: RagInternalUser | undefined): Promise<RagChatPreparedStream> {
     const caller = this.assertCaller(user);
+
+    if (dto.operatorId && caller.role !== SYSTEM_ADMIN_ROLE) {
+      throw new ForbiddenException({
+        errorCode: 'RAG_OPERATOR_SCOPE_FORBIDDEN',
+        detail: 'Only SYSTEM_ADMIN can specify operatorId',
+      });
+    }
+
     const runtimeConfig = await this.runtimeConfig.getSnapshot();
     this.assertMessageLength(dto.message);
     await this.rateLimit.assertAllowed(caller);
-    const conversation = await this.resolveConversation(dto.conversationId, caller);
+    const { conversation, effectiveOperatorId } = await this.resolveConversation(
+      dto.conversationId, caller, caller.role === SYSTEM_ADMIN_ROLE ? dto.operatorId : undefined,
+    );
     const history = await this.chatRepository.findRecentMessages(
       conversation.id,
       RAG_CHAT_HISTORY_MESSAGE_LIMIT,
@@ -91,7 +101,8 @@ export class ChatService {
       queryText: retrievalQuery,
       queryEmbedding,
       accessLevels,
-      ...(caller.operatorId ? { operatorId: caller.operatorId } : {}),
+      ...(effectiveOperatorId ? { operatorId: effectiveOperatorId } : {}),
+      callerRole: caller.role,
       limit: this.env.RERANK_ENABLED ? RAG_RERANK_CANDIDATE_LIMIT : this.env.RAG_MAX_RETRIEVED_CHUNKS,
       hybridSearchEnabled: this.env.HYBRID_SEARCH_ENABLED,
     });
@@ -198,13 +209,16 @@ export class ChatService {
   private async resolveConversation(
     conversationId: string | undefined,
     user: RagInternalUser & { role: RagConversationRole },
-  ): Promise<RagConversation> {
+    dtoOperatorId: string | undefined,
+  ): Promise<{ conversation: RagConversation; effectiveOperatorId: string | undefined }> {
     if (!conversationId) {
-      return this.chatRepository.createConversation({
+      const effectiveOperatorId = user.role === SYSTEM_ADMIN_ROLE ? dtoOperatorId : user.operatorId;
+      const conversation = await this.chatRepository.createConversation({
         userId: user.sub,
         role: user.role,
-        ...(user.operatorId ? { operatorId: user.operatorId } : {}),
+        ...(effectiveOperatorId ? { operatorId: effectiveOperatorId } : {}),
       });
+      return { conversation, effectiveOperatorId };
     }
 
     const conversation = await this.chatRepository.findConversation(conversationId);
@@ -214,17 +228,32 @@ export class ChatService {
         detail: `RAG conversation ${conversationId} not found`,
       });
     }
-    if (
-      conversation.userId !== user.sub ||
-      conversation.role !== user.role ||
-      (conversation.operatorId ?? undefined) !== (user.operatorId ?? undefined)
-    ) {
+    if (conversation.userId !== user.sub || conversation.role !== user.role) {
       throw new ForbiddenException({
         errorCode: 'RAG_CONVERSATION_FORBIDDEN',
         detail: 'Conversation does not belong to caller',
       });
     }
-    return conversation;
+
+    if (user.role === SYSTEM_ADMIN_ROLE) {
+      if (dtoOperatorId && conversation.operatorId && dtoOperatorId !== conversation.operatorId) {
+        throw new ForbiddenException({
+          errorCode: 'RAG_CONVERSATION_SCOPE_MISMATCH',
+          detail: 'Cannot change operator scope of existing conversation',
+        });
+      }
+      const effectiveOperatorId = conversation.operatorId ?? dtoOperatorId;
+      return { conversation, effectiveOperatorId };
+    }
+
+    const effectiveOperatorId = user.operatorId;
+    if ((conversation.operatorId ?? null) !== (effectiveOperatorId ?? null)) {
+      throw new ForbiddenException({
+        errorCode: 'RAG_CONVERSATION_FORBIDDEN',
+        detail: 'Conversation does not belong to caller',
+      });
+    }
+    return { conversation, effectiveOperatorId };
   }
 
   private resolveAccessLevels(role: RagConversationRole): KnowledgeDocumentAccess[] {

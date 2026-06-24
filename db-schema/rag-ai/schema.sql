@@ -140,6 +140,8 @@ CREATE INDEX idx_knowledge_documents_operator_access_status
     ON knowledge_documents (operator_id, access_level, status);
 CREATE INDEX idx_knowledge_documents_category_status
     ON knowledge_documents (category, status);
+CREATE INDEX idx_knowledge_documents_audience_roles
+    ON knowledge_documents USING GIN (audience_roles);
 CREATE INDEX idx_knowledge_documents_uploaded_by
     ON knowledge_documents (uploaded_by_user_id, created_at DESC);
 
