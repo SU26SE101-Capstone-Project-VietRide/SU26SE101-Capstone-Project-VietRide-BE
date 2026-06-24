@@ -22,7 +22,7 @@ export const envSchema = baseEnvSchema.merge(
     RABBITMQ_EXCHANGE: z.string().default('vietride.events'),
     OPENROUTER_API_KEY: z.string().min(1),
     OPENROUTER_BASE_URL: z.string().url().default('https://openrouter.ai/api/v1'),
-    OPENROUTER_CHAT_MODEL: z.string().default('nex-agi/nex-n2-pro:free'),
+    OPENROUTER_CHAT_MODEL: z.string().default('openai/gpt-oss-120b:free'),
     OPENROUTER_EMBEDDING_MODEL: z
       .string()
       .default('nvidia/llama-nemotron-embed-vl-1b-v2:free'),
@@ -33,7 +33,7 @@ export const envSchema = baseEnvSchema.merge(
       .union([z.literal('auto'), z.coerce.number().int().positive()])
       .default('auto'),
     RAG_PROVIDER_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
-    RAG_MAX_MESSAGE_CHARS: z.coerce.number().int().positive().default(500),
+    RAG_MAX_MESSAGE_CHARS: z.coerce.number().int().positive().default(4000),
     RAG_MAX_CONTEXT_TOKENS: z.coerce.number().int().positive().default(4_000),
     RAG_MAX_RETRIEVED_CHUNKS: z.coerce.number().int().positive().max(10).default(5),
     RAG_USER_RATE_LIMIT_PER_HOUR: z.coerce.number().int().positive().default(20),
