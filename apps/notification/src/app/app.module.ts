@@ -13,8 +13,6 @@ import { NotificationConfigModule } from '../config/notification-config.module';
 import { IdentityEventsModule } from '../identity-events/identity-events.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { NotificationPrismaModule } from '../prisma/prisma.module';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { HealthController } from './health.controller';
 import { ReadyController } from './ready.controller';
 import { ReadinessService } from './readiness.service';
@@ -35,9 +33,8 @@ const env = loadEnv();
     NotificationsModule,
     IdentityEventsModule,
   ],
-  controllers: [AppController, HealthController, ReadyController],
+  controllers: [HealthController, ReadyController],
   providers: [
-    AppService,
     ReadinessService,
     { provide: APP_FILTER, useValue: new ApiResponseExceptionFilter() },
     { provide: APP_INTERCEPTOR, useValue: new LoggingInterceptor() },

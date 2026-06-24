@@ -9,6 +9,7 @@ import { loadEnv } from './config/env.schema';
 async function bootstrap(): Promise<void> {
   const env = loadEnv();
   const app = await NestFactory.create(AppModule);
+  app.enableShutdownHooks();
   const globalPrefix = 'api';
   // Exclude probes so docker-compose/Nginx can reach them without the API prefix.
   app.setGlobalPrefix(globalPrefix, {

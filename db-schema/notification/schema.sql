@@ -52,7 +52,9 @@ CREATE TYPE notification_type AS ENUM (
     'SUBSCRIPTION_APPROVED',
     'DRIVER_SCHEDULE_EDITED',
     'PAYOUT_PROCESSED',
-    'PAYOUT_FAILED'
+    'PAYOUT_FAILED',
+    'OPERATOR_APPROVED',
+    'OPERATOR_SUSPENDED'
 );
 
 CREATE TYPE notification_delivery_status AS ENUM (
@@ -87,6 +89,7 @@ CREATE TABLE notifications (
     title VARCHAR(255) NOT NULL,
     body TEXT NOT NULL,
     data JSONB NULL,           -- payload (bookingId, tripId, etc.) for app routing
+    dedupe_key VARCHAR(200) NULL,
     read_at TIMESTAMPTZ NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -95,6 +98,8 @@ CREATE INDEX idx_notifications_user_id_created_at
     ON notifications (user_id, created_at DESC);
 CREATE INDEX idx_notifications_user_id_unread
     ON notifications (user_id, created_at DESC) WHERE read_at IS NULL;
+CREATE UNIQUE INDEX notifications_dedupe_key_key
+    ON notifications (dedupe_key);
 CREATE INDEX idx_notifications_type_created_at
     ON notifications (type, created_at DESC);
 
