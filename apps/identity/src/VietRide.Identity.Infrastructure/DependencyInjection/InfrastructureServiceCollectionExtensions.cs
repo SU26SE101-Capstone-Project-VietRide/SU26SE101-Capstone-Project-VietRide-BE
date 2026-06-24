@@ -3,11 +3,16 @@ using Microsoft.Extensions.DependencyInjection;
 using StackExchange.Redis;
 using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
+using VietRide.Identity.Application.Abstractions.Http;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Infrastructure.ExternalClients;
+using VietRide.Identity.Infrastructure.Http;
 using VietRide.Identity.Infrastructure.Persistence.Repositories;
 using VietRide.Identity.Infrastructure.Security;
 using VietRide.Identity.Infrastructure.Seed;
+using VietRide.Shared.Http.Handlers;
+using VietRide.Shared.Http.Resilience;
+using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Identity.Infrastructure.DependencyInjection;
 
@@ -92,11 +97,15 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<ILoginLockoutCounter, RedisLoginLockoutCounter>();
 
         // ------------------------------------------------------------------
-        // External-client stubs
+        // Email delivery — provider switch (EMAIL_PROVIDER)
         // ------------------------------------------------------------------
-        // Day 3: LoggingEmailService logs OTP to Serilog.
-        // Day 10: replaced by OutboxBackedEmailService (Outbox → Notification Service → SendGrid).
-        services.AddSingleton<IEmailService, LoggingEmailService>();
+        // SENDGRID = real delivery via the Notification Service internal HTTP
+        //            endpoint (POST /internal/v1/emails → SendGrid). The
+        //            container/prod default (set in docker-compose).
+        // LOG      = LoggingEmailService (logs only) — the default when the
+        //            switch is absent, so local dev works without Notification
+        //            running and DI resolves without INTERNAL_JWT_SECRET.
+        AddEmailDelivery(services, configuration);
 
         // ------------------------------------------------------------------
         // Redis — OTP rate-limit (BSOT §6.9). Falls back gracefully if not configured.
@@ -109,5 +118,63 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IOtpRateLimiter, RedisOtpRateLimiter>();
 
         return services;
+    }
+
+    /// <summary>
+    /// Wires the <see cref="IEmailService"/> implementation selected by the
+    /// <c>EMAIL_PROVIDER</c> switch (default <c>LOG</c>). <c>SENDGRID</c> binds
+    /// <see cref="NotificationEmailService"/> on top of the typed
+    /// <see cref="INotificationEmailClient"/> with the standard Internal-JWT +
+    /// correlation-id + Polly pipeline (VietRide.Shared.Http).
+    /// </summary>
+    private static void AddEmailDelivery(
+        IServiceCollection services,
+        IConfiguration configuration)
+    {
+        var provider = (configuration["EMAIL_PROVIDER"]
+            ?? Environment.GetEnvironmentVariable("EMAIL_PROVIDER")
+            ?? "LOG").Trim();
+
+        if (!string.Equals(provider, "SENDGRID", StringComparison.OrdinalIgnoreCase))
+        {
+            services.AddSingleton<IEmailService, LoggingEmailService>();
+            return;
+        }
+
+        // Internal JWT signer + delegating handlers shared with the other
+        // .NET services (do not hand-roll a second signer per BSOT §5.3).
+        services.AddSingleton<IInternalJwtTokenProvider, InternalJwtTokenFactory>();
+        services.AddHttpContextAccessor();
+        services.AddTransient<InternalJwtDelegatingHandler>();
+        services.AddTransient<CorrelationIdDelegatingHandler>();
+
+        services
+            .AddHttpClient<INotificationEmailClient, NotificationEmailClient>(client =>
+            {
+                var baseUrl = ResolveNotificationBaseUrl(configuration);
+                client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
+                client.Timeout = TimeSpan.FromSeconds(30);
+                client.DefaultRequestHeaders.Accept.Clear();
+                client.DefaultRequestHeaders.Accept.Add(
+                    new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+            })
+            .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
+            .AddHttpMessageHandler<InternalJwtDelegatingHandler>()
+            .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
+            .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
+
+        services.AddScoped<IEmailService, NotificationEmailService>();
+    }
+
+    /// <summary>
+    /// Resolves the Notification Service base URL for the email endpoint from
+    /// <c>EMAIL_SERVICE_BASE_URL</c> (BSOT §3.5), defaulting to the compose
+    /// hostname <c>http://notification:3002</c> (BSOT line 2364).
+    /// </summary>
+    private static string ResolveNotificationBaseUrl(IConfiguration configuration)
+    {
+        return configuration["EMAIL_SERVICE_BASE_URL"]
+            ?? Environment.GetEnvironmentVariable("EMAIL_SERVICE_BASE_URL")
+            ?? "http://notification:3002";
     }
 }
