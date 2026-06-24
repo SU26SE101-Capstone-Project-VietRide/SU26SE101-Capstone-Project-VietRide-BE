@@ -317,33 +317,35 @@ public sealed class AuthEndpointsTests :
     }
 
     [Fact]
-    public async Task PostRegister_WhenHandlerFailsAfterEnqueue_RollsBackBothUserAndOutboxEvent()
+    public async Task PostRegister_WhenOtpEmailFails_StillSucceedsAndCommitsUserAndOutbox()
     {
         await _dbFactory.ResetAsync();
-        var email = UniqueEmail("passenger-rollback");
+        var email = UniqueEmail("passenger-emailfail");
         _dbFactory.EmailService.ThrowOnSendOtp = true;
         try
         {
             using var client = _dbFactory.CreateClient();
 
-            // OTP email send (step 8) runs AFTER the outbox enqueue (step 6b) but inside the
-            // handler, so its failure propagates out before TransactionBehavior commits.
+            // OTP email send (step 8) is NON-FATAL: a delivery-provider failure must NOT roll back
+            // a successful registration. The user + the outbox event (both committed in the same
+            // transaction) still persist, and the OTP is already saved for verify/resend.
             var response = await client.PostAsJsonAsync("/v1/auth/register", new
             {
                 email,
                 password = "Password123!",
-                displayName = "Rollback User",
+                displayName = "Email Fail User",
                 phone = $"09{Random.Shared.Next(10000000, 99999999)}",
             });
 
-            ((int)response.StatusCode).Should().BeGreaterThanOrEqualTo(500);
+            ((int)response.StatusCode).Should().Be(201);
 
             await using var scope = _dbFactory.Services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
 
-            // The transaction rolled back: neither the business write nor the outbox row persists.
-            (await db.Set<OutboxEvent>().CountAsync()).Should().Be(0);
-            (await db.Users.CountAsync(u => u.Email == email)).Should().Be(0);
+            // User and outbox row were committed together (same transaction) despite the email failure.
+            (await db.Users.CountAsync(u => u.Email == email)).Should().Be(1);
+            (await db.Set<OutboxEvent>().CountAsync(x => x.EventType == "identity.user.created"))
+                .Should().Be(1);
         }
         finally
         {

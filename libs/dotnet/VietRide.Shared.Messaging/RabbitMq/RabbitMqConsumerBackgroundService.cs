@@ -25,6 +25,8 @@ public sealed class RabbitMqConsumerBackgroundService<TEvent> : BackgroundServic
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    private const int ConnectRetryDelaySeconds = 5;
+
     private readonly IRabbitMqConnectionFactory _connections;
     private readonly RabbitMqOptions _rabbitMqOptions;
     private readonly RabbitMqConsumerOptions _consumerOptions;
@@ -47,10 +49,51 @@ public sealed class RabbitMqConsumerBackgroundService<TEvent> : BackgroundServic
         _logger = logger;
     }
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _consumerOptions.Validate();
 
+        // Resilient startup: a broker that is briefly unreachable at boot must NOT crash the host
+        // (BackgroundService default is StopHost on an unhandled exception). Retry the channel setup
+        // until it succeeds or the host is stopping.
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                StartConsuming(stoppingToken);
+                await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken).ConfigureAwait(false);
+                return;
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "RabbitMQ consumer setup failed for queue {Queue}; retrying in {Delay}s.",
+                    _consumerOptions.QueueName,
+                    ConnectRetryDelaySeconds);
+
+                try { _channel?.Dispose(); }
+                catch { /* best-effort cleanup before retry */ }
+                _channel = null;
+
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(ConnectRetryDelaySeconds), stoppingToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+            }
+        }
+    }
+
+    private void StartConsuming(CancellationToken stoppingToken)
+    {
         _channel = _connections.GetOrCreate().CreateModel();
         _channel.ExchangeDeclare(
             exchange: _rabbitMqOptions.ExchangeName,
@@ -105,8 +148,6 @@ public sealed class RabbitMqConsumerBackgroundService<TEvent> : BackgroundServic
             "RabbitMQ consumer started: queue={Queue} bindings={Bindings}.",
             _consumerOptions.QueueName,
             string.Join(",", _consumerOptions.BindingKeys));
-
-        return Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
     }
 
     private void DeclareSourceQueueWithDeadLetterArguments(IDictionary<string, object> queueArguments)

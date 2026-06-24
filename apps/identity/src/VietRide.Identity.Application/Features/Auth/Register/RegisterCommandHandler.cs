@@ -108,13 +108,32 @@ public sealed class RegisterCommandHandler : IRequestHandler<RegisterCommand, Re
         // 7. Generate OTP with retry on collision.
         var otpToken = await CreateOtpWithRetryAsync(user.Id, cancellationToken);
 
-        // 8. Send OTP email (LoggingEmailService in Day 3 — logs to Serilog).
-        await _email.SendOtpAsync(
-            to: user.Email,
-            code: otpToken.Code,
-            purpose: EmailOtpPurpose.REGISTRATION,
-            ttlMinutes: OtpTtlMinutes,
-            ct: cancellationToken);
+        // 8. Send OTP email — NON-FATAL. A delivery-provider hiccup (e.g. SendGrid/Notification
+        //    down or misconfigured) must NOT roll back a successful registration; the OTP is already
+        //    persisted (step 7) and the user can resend. We also log the OTP at Debug so local/dev
+        //    runs can complete verification without a real inbox (off in Production by log level).
+        try
+        {
+            await _email.SendOtpAsync(
+                to: user.Email,
+                code: otpToken.Code,
+                purpose: EmailOtpPurpose.REGISTRATION,
+                ttlMinutes: OtpTtlMinutes,
+                ct: cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "OTP email send failed for {Email}; registration continues (OTP persisted, user may resend).",
+                user.Email);
+        }
+
+        _logger.LogDebug(
+            "Registration OTP for {Email}: {Code} (purpose REGISTRATION, ttl {TtlMinutes}m).",
+            user.Email,
+            otpToken.Code,
+            OtpTtlMinutes);
 
         return new RegisterResponseDto(
             UserId: user.Id,
