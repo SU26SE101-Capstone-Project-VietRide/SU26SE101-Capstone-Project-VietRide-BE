@@ -67,7 +67,20 @@ Lý do:
 - Đây là default-deny cho tenant isolation.
 - Tránh admin chat vô tình trộn dữ liệu riêng của nhiều nhà xe.
 
-Khi cần admin audit:
+Cơ chế hiện tại:
 
-- Thiết kế explicit operator scope cho admin.
-- Không mở cross-tenant retrieval mặc định.
+- Admin gửi `operatorId` trong body `POST /v1/rag/chat` để chọn scope operator cụ thể.
+- Nếu không gửi `operatorId`, admin chỉ thấy tài liệu global (`operator_id IS NULL`).
+- Admin audit feedback qua `GET /v1/rag/feedback` (read-only, không POST feedback thay user khác).
+
+## `audienceRoles` kiểm soát role được phép xem tài liệu
+
+Trường `audienceRoles` trên `knowledge_documents` cho phép giới hạn tài liệu chỉ hiển thị cho một số role cụ thể.
+
+Cách hoạt động:
+
+- `audienceRoles` rỗng (`[]`): tài liệu hiển thị cho mọi caller có `accessLevel` phù hợp.
+- `audienceRoles` chứa danh sách role (vd `['DRIVER', 'OPERATOR_STAFF']`): chỉ caller có role trong danh sách mới retrieve được tài liệu đó.
+- `SYSTEM_ADMIN` bỏ qua filter `audienceRoles` — admin thấy tất cả tài liệu trong tenant scope đã chọn.
+
+Triển khai: GIN index trên `knowledge_documents.audience_roles` được khuyến nghị cho production performance.
