@@ -15,6 +15,7 @@ import {
   ApiBearerAuth,
   ApiBody,
   ApiConsumes,
+  ApiHeader,
   ApiOperation,
   ApiParam,
   ApiResponse,
@@ -30,9 +31,15 @@ import {
 } from './documents.constants';
 import { DocumentsService } from './documents.service';
 import type { KnowledgeDocumentResponse, UploadedDocumentFile } from './documents.types';
+import {
+  errorEnvelopeSchema,
+  internalAuthHeaderSchema,
+  successEnvelopeSchema,
+} from '../swagger/api-response.schemas';
 
 @ApiTags('RAG Documents')
 @ApiBearerAuth()
+@ApiHeader(internalAuthHeaderSchema)
 @UseGuards(InternalJwtAuthGuard)
 @Controller('v1/rag/documents')
 export class DocumentsController {
@@ -69,10 +76,12 @@ export class DocumentsController {
       },
     },
   })
-  @ApiResponse({ status: 201, description: 'Document uploaded, approved, and queued for ingest' })
-  @ApiResponse({ status: 400, description: 'Invalid payload or file' })
-  @ApiResponse({ status: 401, description: 'Missing or invalid internal JWT' })
-  @ApiResponse({ status: 403, description: 'SYSTEM_ADMIN role is required' })
+  @ApiResponse({ status: 201, description: 'Document uploaded, approved, and queued for ingest', schema: successEnvelopeSchema(201, { type: 'object', properties: { id: { type: 'string', format: 'uuid' } } }) })
+  @ApiResponse({ status: 400, description: 'Invalid payload or file', schema: errorEnvelopeSchema(400, 'VALIDATION_FAILED', 'Invalid payload or file', { fields: true }) })
+  @ApiResponse({ status: 401, description: 'Missing or invalid internal JWT', schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Missing or invalid internal JWT') })
+  @ApiResponse({ status: 403, description: 'SYSTEM_ADMIN role is required', schema: errorEnvelopeSchema(403, 'INSUFFICIENT_ROLE', 'SYSTEM_ADMIN role is required') })
+  @ApiResponse({ status: 500, description: 'Unexpected error', schema: errorEnvelopeSchema(500, 'INTERNAL_ERROR', 'Unexpected error') })
+  @ApiResponse({ status: 503, description: 'Storage or provider unavailable', schema: errorEnvelopeSchema(503, 'SERVICE_UNAVAILABLE', 'Storage or provider unavailable') })
   async create(
     @Body(new ZodValidationPipe(CreateDocumentSchema)) dto: CreateDocumentDto,
     @UploadedFile() file: UploadedDocumentFile | undefined,
@@ -84,11 +93,13 @@ export class DocumentsController {
   @Put(':documentId/approve')
   @ApiOperation({ summary: 'Approve a pending RAG knowledge document for ingest' })
   @ApiParam({ name: 'documentId', format: 'uuid', description: 'Knowledge document ID' })
-  @ApiResponse({ status: 200, description: 'Document approved' })
-  @ApiResponse({ status: 401, description: 'Missing or invalid internal JWT' })
-  @ApiResponse({ status: 403, description: 'SYSTEM_ADMIN role is required' })
-  @ApiResponse({ status: 404, description: 'Document not found' })
-  @ApiResponse({ status: 409, description: 'Document is not pending review' })
+  @ApiResponse({ status: 200, description: 'Document approved', schema: successEnvelopeSchema(200, { type: 'object', properties: { id: { type: 'string', format: 'uuid' }, status: { type: 'string' } } }) })
+  @ApiResponse({ status: 400, description: 'Invalid UUID', schema: errorEnvelopeSchema(400, 'VALIDATION_FAILED', 'Invalid UUID', { fields: true }) })
+  @ApiResponse({ status: 401, description: 'Missing or invalid internal JWT', schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Missing or invalid internal JWT') })
+  @ApiResponse({ status: 403, description: 'SYSTEM_ADMIN role is required', schema: errorEnvelopeSchema(403, 'INSUFFICIENT_ROLE', 'SYSTEM_ADMIN role is required') })
+  @ApiResponse({ status: 404, description: 'Document not found', schema: errorEnvelopeSchema(404, 'DOCUMENT_NOT_FOUND', 'Document not found') })
+  @ApiResponse({ status: 409, description: 'Document is not pending review', schema: errorEnvelopeSchema(409, 'DOCUMENT_NOT_PENDING', 'Document is not pending review') })
+  @ApiResponse({ status: 500, description: 'Unexpected error', schema: errorEnvelopeSchema(500, 'INTERNAL_ERROR', 'Unexpected error') })
   async approve(
     @Param('documentId', new ParseUUIDPipe()) documentId: string,
     @Req() req: RequestWithRagInternalUser,
