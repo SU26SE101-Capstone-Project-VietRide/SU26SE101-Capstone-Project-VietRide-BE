@@ -15,6 +15,7 @@ async function bootstrap(): Promise<void> {
   }
 
   const app = await NestFactory.create(AppModule);
+  app.enableShutdownHooks();
   app.useWebSocketAdapter(new CorsIoAdapter(app, env.TRACKING_CORS_ORIGIN));
   const globalPrefix = 'api';
   // Exclude probes so docker-compose/Nginx can reach them without the API prefix.

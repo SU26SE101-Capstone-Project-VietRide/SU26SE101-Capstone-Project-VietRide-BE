@@ -1,4 +1,4 @@
-import { Controller, Get, Headers, Param, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ZodValidationPipe } from '@vietride/nest-common';
 import {
@@ -15,6 +15,7 @@ import {
   type TrailTrackingResponseDto,
   TrackingDataService,
 } from './tracking-data.service';
+import { TrackingDataAuthGuard } from './tracking-data-auth.guard';
 import {
   ApiErrorEnvelopeDto,
   TrackingEtaEnvelopeDto,
@@ -24,6 +25,7 @@ import {
 
 @ApiTags('Tracking')
 @ApiBearerAuth()
+@UseGuards(TrackingDataAuthGuard)
 @Controller('/v1/tracking/trips')
 export class TrackingDataController {
   constructor(private readonly trackingDataService: TrackingDataService) {}
@@ -40,9 +42,8 @@ export class TrackingDataController {
   @ApiResponse({ status: 503, description: 'Authorization provider unavailable.', type: ApiErrorEnvelopeDto })
   async getLatest(
     @Param(new ZodValidationPipe(TripIdParamSchema)) params: TripIdParamDto,
-    @Headers('authorization') authorizationHeader: string | undefined,
   ): Promise<LatestTrackingResponseDto> {
-    return this.trackingDataService.getLatest(params.tripId, authorizationHeader);
+    return this.trackingDataService.getLatest(params.tripId);
   }
 
   @Get(':tripId/trail')
@@ -64,9 +65,8 @@ export class TrackingDataController {
   async getTrail(
     @Param(new ZodValidationPipe(TripIdParamSchema)) params: TripIdParamDto,
     @Query(new ZodValidationPipe(TrailQuerySchema)) query: TrailQueryDto,
-    @Headers('authorization') authorizationHeader: string | undefined,
   ): Promise<TrailTrackingResponseDto> {
-    return this.trackingDataService.getTrail(params.tripId, query, authorizationHeader);
+    return this.trackingDataService.getTrail(params.tripId, query);
   }
 
   @Get(':tripId/eta')
@@ -83,8 +83,7 @@ export class TrackingDataController {
   async getEta(
     @Param(new ZodValidationPipe(TripIdParamSchema)) params: TripIdParamDto,
     @Query(new ZodValidationPipe(EtaQuerySchema)) query: EtaQueryDto,
-    @Headers('authorization') authorizationHeader: string | undefined,
   ): Promise<EtaTrackingResponseDto> {
-    return this.trackingDataService.getEta(params.tripId, query, authorizationHeader);
+    return this.trackingDataService.getEta(params.tripId, query);
   }
 }

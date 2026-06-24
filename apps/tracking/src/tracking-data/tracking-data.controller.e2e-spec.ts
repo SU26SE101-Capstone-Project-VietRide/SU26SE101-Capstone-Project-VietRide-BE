@@ -23,6 +23,7 @@ import { trackingEtaKey, trackingLatestKey } from '../location/location.constant
 import { TrackingPrismaService } from '../prisma/tracking-prisma.service';
 import { TrackingDataController } from './tracking-data.controller';
 import { TrackingDataRepository } from './tracking-data.repository';
+import { TrackingDataAuthGuard } from './tracking-data-auth.guard';
 import { TrackingDataService } from './tracking-data.service';
 
 const TEST_TRIP_ID = '11111111-1111-4111-8111-111111111111';
@@ -115,6 +116,7 @@ describe('TrackingDataController REST fallback (e2e)', () => {
       providers: [
         TrackingDataService,
         TrackingDataRepository,
+        TrackingDataAuthGuard,
         { provide: ENV_TOKEN, useValue: createTestEnv(publicKeyPem) },
         { provide: TRACKING_JWT_VERIFIER, useClass: JoseUserJwtVerifier },
         { provide: TRACKING_AUTHORIZATION_ADAPTER, useClass: E2eTrackingAuthorizationAdapter },
@@ -157,6 +159,18 @@ describe('TrackingDataController REST fallback (e2e)', () => {
 
     expect(response.status).toBe(401);
     expect(response.body.error?.code).toBe('UNAUTHORIZED');
+  });
+
+  it('returns 400 envelope when tripId is not a valid UUID even with valid token', async () => {
+    const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
+    const response = await getJson<ApiEnvelope<unknown>>(
+      '/api/v1/tracking/trips/not-a-uuid/latest',
+      token,
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.body.success).toBe(false);
+    expect(response.body.error?.code).toBe('VALIDATION_FAILED');
   });
 
   it('returns 403 envelope when trip authorization denies access', async () => {
