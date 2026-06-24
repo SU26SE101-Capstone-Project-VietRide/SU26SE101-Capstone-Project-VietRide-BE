@@ -67,7 +67,6 @@ export class FeedbackService {
     message: RagMessageWithConversation,
     caller: RagInternalUser & { sub: string; role: string },
   ): void {
-    if (caller.role === SYSTEM_ADMIN_ROLE) return;
     if (
       message.conversation.userId !== caller.sub ||
       message.conversation.role !== caller.role ||

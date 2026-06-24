@@ -1,21 +1,10 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
-describe('AppController', () => {
-  let app: TestingModule;
-
-  beforeAll(async () => {
-    app = await Test.createTestingModule({
-      controllers: [AppController],
-      providers: [AppService],
-    }).compile();
-  });
-
-  describe('getData', () => {
-    it('should return "Hello API"', () => {
-      const appController = app.get<AppController>(AppController);
-      expect(appController.getData()).toEqual({message: 'Hello API'});
-    });
+// Legacy — AppController is NOT registered in AppModule for production.
+// This test covers isolated class behavior only.
+describe('AppService (legacy)', () => {
+  it('getData should return "Hello API"', () => {
+    const service = new AppService();
+    expect(service.getData()).toEqual({ message: 'Hello API' });
   });
 });

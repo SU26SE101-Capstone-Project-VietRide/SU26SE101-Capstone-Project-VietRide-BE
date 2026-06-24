@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
+import { SentryModule } from '@sentry/nestjs/setup';
 import {
-  ApiResponseExceptionFilter,
   ApiResponseInterceptor,
   LoggingInterceptor,
   NestCommonModule,
@@ -18,9 +18,8 @@ import { EmbeddingModule } from '../embedding/embedding.module';
 import { IngestModule } from '../ingest/ingest.module';
 import { RagPrismaModule } from '../prisma/prisma.module';
 import { ProvidersModule } from '../providers/providers.module';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { HealthController } from './health.controller';
+import { RagSentryExceptionFilter } from './rag-sentry-exception.filter';
 import { ReadyController } from './ready.controller';
 import { ReadinessService } from './readiness.service';
 
@@ -28,6 +27,7 @@ const env = loadEnv();
 
 @Module({
   imports: [
+    SentryModule.forRoot(),
     NestCommonModule,
     RagConfigModule,
     NestRedisModule.forRoot({ url: env.REDIS_URL }),
@@ -44,12 +44,11 @@ const env = loadEnv();
     ChatModule,
     RuntimeConfigAdminModule,
   ],
-  controllers: [AppController, HealthController, ReadyController],
+  controllers: [HealthController, ReadyController],
   providers: [
-    AppService,
     ReadinessService,
     InternalJwtAuthGuard,
-    { provide: APP_FILTER, useValue: new ApiResponseExceptionFilter() },
+    { provide: APP_FILTER, useClass: RagSentryExceptionFilter },
     { provide: APP_INTERCEPTOR, useValue: new LoggingInterceptor() },
     { provide: APP_INTERCEPTOR, useValue: new ApiResponseInterceptor() },
   ],

@@ -25,6 +25,8 @@ const INTERNAL_JWT_SECRET = 'test-secret-min-32-chars-aaaaaaaaaaaaaaaa';
 const INTERNAL_JWT_ISSUER = 'vietride-gateway';
 const INTERNAL_JWT_AUDIENCE = 'vietride-internal';
 const USER_ID = '11111111-1111-1111-1111-111111111111';
+const OTHER_USER_ID = '99999999-9999-9999-9999-999999999999';
+const OPERATOR_ID = '22222222-2222-2222-2222-222222222222';
 const CONVERSATION_ID = '33333333-3333-3333-3333-333333333333';
 const USER_MESSAGE_ID = '44444444-4444-4444-4444-444444444444';
 const ASSISTANT_MESSAGE_ID = '55555555-5555-5555-5555-555555555555';
@@ -260,9 +262,56 @@ describe('ChatController (e2e)', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Internal-Auth': await signInternalJwt('99999999-9999-9999-9999-999999999999', 'PASSENGER'),
+        'X-Internal-Auth': await signInternalJwt(OTHER_USER_ID, 'PASSENGER'),
       },
       body: JSON.stringify({ rating: -1 }),
+    });
+
+    expect(response.status).toBe(403);
+  });
+
+  it('POST /api/v1/rag/chat uses operatorId scope for SYSTEM_ADMIN', async () => {
+    repository.createConversation.mockResolvedValue(makeConversation({ operatorId: OPERATOR_ID }));
+
+    const response = await fetch(`${baseUrl}/api/v1/rag/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Auth': await signInternalJwt(USER_ID, 'SYSTEM_ADMIN'),
+      },
+      body: JSON.stringify({ message: 'Admin scope test', operatorId: OPERATOR_ID }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(repository.searchChunks).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorId: OPERATOR_ID,
+        callerRole: 'SYSTEM_ADMIN',
+      }),
+    );
+  });
+
+  it('POST /api/v1/rag/chat returns 403 for non-admin sending operatorId', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/rag/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Auth': await signInternalJwt(USER_ID, 'PASSENGER'),
+      },
+      body: JSON.stringify({ message: 'Test', operatorId: OPERATOR_ID }),
+    });
+
+    expect(response.status).toBe(403);
+  });
+
+  it('POST /api/v1/rag/messages/:id/feedback returns 403 when SYSTEM_ADMIN feedbacks non-owner message', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/rag/messages/${ASSISTANT_MESSAGE_ID}/feedback`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Auth': await signInternalJwt(OTHER_USER_ID, 'SYSTEM_ADMIN'),
+      },
+      body: JSON.stringify({ rating: 1 }),
     });
 
     expect(response.status).toBe(403);
@@ -287,7 +336,7 @@ function makeEnv() {
     LOG_LEVEL: 'info',
     OPENROUTER_API_KEY: 'test-key',
     OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1',
-    OPENROUTER_CHAT_MODEL: 'nex-agi/nex-n2-pro:free',
+    OPENROUTER_CHAT_MODEL: 'openai/gpt-oss-120b:free',
     OPENROUTER_EMBEDDING_MODEL: 'nvidia/llama-nemotron-embed-vl-1b-v2:free',
     OPENROUTER_HTTP_REFERER: undefined,
     OPENROUTER_APP_TITLE: 'VietRide RAG',
@@ -331,7 +380,7 @@ async function signInternalJwt(sub: string, role: string): Promise<string> {
   return `Bearer ${token}`;
 }
 
-function makeConversation(): RagConversation {
+function makeConversation(overrides: Partial<RagConversation> = {}): RagConversation {
   return {
     id: CONVERSATION_ID,
     userId: USER_ID,
@@ -343,6 +392,7 @@ function makeConversation(): RagConversation {
     startedAt: new Date('2026-06-13T00:00:00.000Z'),
     lastMessageAt: null,
     createdAt: new Date('2026-06-13T00:00:00.000Z'),
+    ...overrides,
   };
 }
 
@@ -358,10 +408,10 @@ function makeMessage(role: 'USER' | 'ASSISTANT', content: string): RagMessage {
   };
 }
 
-function makeMessageWithConversation(role: 'USER' | 'ASSISTANT') {
+function makeMessageWithConversation(role: 'USER' | 'ASSISTANT', overrides?: Partial<RagConversation>) {
   return {
     ...makeMessage(role, role === 'USER' ? 'Tôi cần hỗ trợ' : 'Xin chào'),
-    conversation: makeConversation(),
+    conversation: makeConversation(overrides),
   };
 }
 

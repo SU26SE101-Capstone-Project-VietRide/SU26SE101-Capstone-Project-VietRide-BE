@@ -24,7 +24,7 @@ Tài liệu này là timeline triển khai chính thức cho `apps/rag`. Mục t
 
 - Storage production: Cloudinary qua REST API, không thêm package mới.
 - Chat provider giai đoạn thử nghiệm: OpenRouter.
-- Chat model thử nghiệm: `nex-agi/nex-n2-pro:free`.
+- Chat model thử nghiệm: `openai/gpt-oss-120b:free`.
 - Embedding provider giai đoạn thử nghiệm: OpenRouter.
 - Embedding model thử nghiệm: `nvidia/llama-nemotron-embed-vl-1b-v2:free`.
 - Không tự fallback sang model trả phí nếu `OPENROUTER_ALLOW_PAID_FALLBACK=false`.
@@ -58,21 +58,33 @@ audienceRoles: string[]
 language: vi
 ```
 
-Rule retrieval:
+Rule retrieval (Phase 10 — đã thêm `audienceRoles` và `admin explicit operator scope`):
 
 ```text
 PASSENGER:
   accessLevel IN (PUBLIC)
   category = CUSTOMER_SUPPORT
   operatorId IS NULL
+  audienceRoles: empty OR contains PASSENGER
 
 DRIVER / ASSISTANT / OPERATOR_STAFF / OPERATOR_ADMIN:
   accessLevel IN (PUBLIC, OPERATOR)
   AND (operatorId IS NULL OR operatorId = caller.operatorId)
+  audienceRoles: empty OR contains caller role
 
-SYSTEM_ADMIN:
+SYSTEM_ADMIN (global — không gửi operatorId):
   accessLevel IN (PUBLIC, OPERATOR, ADMIN)
+  operatorId IS NULL
+  audienceRoles: BỎ QUA (admin thấy tất cả)
+
+SYSTEM_ADMIN (operator scope — gửi operatorId trong body):
+  accessLevel IN (PUBLIC, OPERATOR, ADMIN)
+  AND (operatorId IS NULL OR operatorId = selectedOperatorId)
+  audienceRoles: BỎ QUA (admin thấy tất cả)
 ```
+
+> **Lưu ý:** `category = CUSTOMER_SUPPORT` cho PASSENGER chưa implement ở Phase 10. Đây là business rule cần xác nhận với PO trước khi thêm filter.
+> GIN index trên `audience_roles` được khuyến nghị cho production performance.
 
 ## Biến môi trường bắt buộc
 
@@ -85,7 +97,7 @@ INTERNAL_JWT_SECRET=
 
 OPENROUTER_API_KEY=
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-OPENROUTER_CHAT_MODEL=nex-agi/nex-n2-pro:free
+OPENROUTER_CHAT_MODEL=openai/gpt-oss-120b:free
 OPENROUTER_EMBEDDING_MODEL=nvidia/llama-nemotron-embed-vl-1b-v2:free
 OPENROUTER_HTTP_REFERER=http://localhost:3000
 OPENROUTER_APP_TITLE=VietRide RAG
