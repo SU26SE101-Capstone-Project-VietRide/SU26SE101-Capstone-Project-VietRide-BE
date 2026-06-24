@@ -68,7 +68,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ITopUpRequestRepository, TopUpRequestRepository>();
         services.AddScoped<IPlatformWalletRepository, PlatformWalletRepository>();
         services.AddScoped<IRefundFailureLogRepository, RefundFailureLogRepository>();
-        services.AddScoped<IRefundRetryExecutor, DeferredRefundRetryExecutor>();
+        services.AddScoped<IRefundRetryExecutor, WalletRefundRetryExecutor>();
         services.Configure<VnPayOptions>(options =>
         {
             configuration.GetSection(VnPayOptions.SectionName).Bind(options);

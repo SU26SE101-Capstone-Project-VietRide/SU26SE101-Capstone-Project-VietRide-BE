@@ -42,6 +42,26 @@ internal sealed class RefundFailureLogConfiguration : IEntityTypeConfiguration<R
             .HasColumnType("text")
             .IsRequired();
 
+        builder.Property(x => x.UserId)
+            .HasColumnName("user_id")
+            .HasColumnType("uuid")
+            .IsRequired(false);
+
+        builder.Property(x => x.Amount)
+            .HasColumnName("amount")
+            .HasColumnType("bigint")
+            .IsRequired(false);
+
+        builder.Property(x => x.ReferenceType)
+            .HasColumnName("reference_type")
+            .HasMaxLength(50)
+            .IsRequired(false);
+
+        builder.Property(x => x.ReferenceId)
+            .HasColumnName("reference_id")
+            .HasColumnType("uuid")
+            .IsRequired(false);
+
         builder.Property(x => x.RetryCount)
             .HasColumnName("retry_count")
             .HasDefaultValue(0)
@@ -87,5 +107,9 @@ internal sealed class RefundFailureLogConfiguration : IEntityTypeConfiguration<R
         builder.HasIndex(x => x.ResolvedByUserId)
             .HasDatabaseName("idx_refund_failure_logs_resolved_by_user_id")
             .HasFilter("resolved_by_user_id IS NOT NULL");
+
+        builder.HasIndex(x => new { x.ReferenceType, x.ReferenceId })
+            .HasDatabaseName("idx_refund_failure_logs_reference")
+            .HasFilter("reference_type IS NOT NULL AND reference_id IS NOT NULL");
     }
 }

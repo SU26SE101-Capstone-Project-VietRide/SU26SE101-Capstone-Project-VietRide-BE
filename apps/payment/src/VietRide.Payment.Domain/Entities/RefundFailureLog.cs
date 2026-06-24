@@ -12,6 +12,10 @@ public sealed class RefundFailureLog : BaseEntity<Guid>
     public Guid? ParcelId { get; private set; }
     public string TriggerEventType { get; private set; } = string.Empty;
     public string FailureReason { get; private set; } = string.Empty;
+    public Guid? UserId { get; private set; }
+    public long? Amount { get; private set; }
+    public string? ReferenceType { get; private set; }
+    public Guid? ReferenceId { get; private set; }
     public int RetryCount { get; private set; }
     public DateTimeOffset LastAttemptAt { get; private set; }
     public DateTimeOffset? ResolvedAt { get; private set; }
@@ -25,24 +29,56 @@ public sealed class RefundFailureLog : BaseEntity<Guid>
         Guid bookingId,
         string triggerEventType,
         string failureReason,
-        DateTimeOffset occurredAt)
+        DateTimeOffset occurredAt,
+        Guid? userId = null,
+        long? amount = null,
+        string? referenceType = null,
+        Guid? referenceId = null)
     {
         if (bookingId == Guid.Empty)
             throw new ArgumentException("Booking id is required.", nameof(bookingId));
 
-        return Create(bookingId, parcelId: null, triggerEventType, failureReason, occurredAt);
+        return Create(bookingId, parcelId: null, triggerEventType, failureReason, occurredAt, userId, amount, referenceType, referenceId);
     }
 
     public static RefundFailureLog CreateForParcel(
         Guid parcelId,
         string triggerEventType,
         string failureReason,
-        DateTimeOffset occurredAt)
+        DateTimeOffset occurredAt,
+        Guid? userId = null,
+        long? amount = null,
+        string? referenceType = null,
+        Guid? referenceId = null)
     {
         if (parcelId == Guid.Empty)
             throw new ArgumentException("Parcel id is required.", nameof(parcelId));
 
-        return Create(bookingId: null, parcelId, triggerEventType, failureReason, occurredAt);
+        return Create(bookingId: null, parcelId, triggerEventType, failureReason, occurredAt, userId, amount, referenceType, referenceId);
+    }
+
+    public static RefundFailureLog CreateForBookingRefund(
+        Guid bookingId,
+        Guid userId,
+        long amount,
+        string triggerEventType,
+        string failureReason,
+        DateTimeOffset occurredAt)
+    {
+        if (userId == Guid.Empty)
+            throw new ArgumentException("User id is required.", nameof(userId));
+        if (amount <= 0)
+            throw new ArgumentOutOfRangeException(nameof(amount), "Refund amount must be positive.");
+
+        return CreateForBooking(
+            bookingId,
+            triggerEventType,
+            failureReason,
+            occurredAt,
+            userId,
+            amount,
+            "BOOKING_REFUND",
+            bookingId);
     }
 
     public void RecordRetryAttempt(DateTimeOffset attemptedAt)
@@ -89,7 +125,11 @@ public sealed class RefundFailureLog : BaseEntity<Guid>
         Guid? parcelId,
         string triggerEventType,
         string failureReason,
-        DateTimeOffset occurredAt)
+        DateTimeOffset occurredAt,
+        Guid? userId,
+        long? amount,
+        string? referenceType,
+        Guid? referenceId)
     {
         if (bookingId is null && parcelId is null)
             throw new ArgumentException("A booking or parcel target is required.");
@@ -97,6 +137,14 @@ public sealed class RefundFailureLog : BaseEntity<Guid>
             throw new ArgumentException("Trigger event type is required.", nameof(triggerEventType));
         if (string.IsNullOrWhiteSpace(failureReason))
             throw new ArgumentException("Failure reason is required.", nameof(failureReason));
+        if (userId == Guid.Empty)
+            throw new ArgumentException("User id cannot be empty.", nameof(userId));
+        if (amount <= 0)
+            throw new ArgumentOutOfRangeException(nameof(amount), "Refund amount must be positive.");
+        if (referenceId == Guid.Empty)
+            throw new ArgumentException("Reference id cannot be empty.", nameof(referenceId));
+        if (referenceType is not null && string.IsNullOrWhiteSpace(referenceType))
+            throw new ArgumentException("Reference type cannot be blank.", nameof(referenceType));
 
         return new RefundFailureLog
         {
@@ -105,6 +153,10 @@ public sealed class RefundFailureLog : BaseEntity<Guid>
             ParcelId = parcelId,
             TriggerEventType = triggerEventType,
             FailureReason = failureReason,
+            UserId = userId,
+            Amount = amount,
+            ReferenceType = referenceType,
+            ReferenceId = referenceId,
             LastAttemptAt = occurredAt,
         };
     }

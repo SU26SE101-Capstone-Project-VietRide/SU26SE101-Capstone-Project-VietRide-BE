@@ -1,0 +1,128 @@
+using System.Text.Json;
+using MediatR;
+using VietRide.Payment.Application.Abstractions.Repositories;
+using VietRide.Payment.Application.Events;
+using VietRide.Payment.Application.Exceptions;
+using VietRide.Payment.Domain.Entities;
+using VietRide.Payment.Domain.Enums;
+using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
+using VietRide.Shared.Kernel.ValueObjects;
+
+namespace VietRide.Payment.Application.Features.Internal.Wallets.RefundToWallet;
+
+public sealed class RefundToWalletCommandHandler : IRequestHandler<RefundToWalletCommand, RefundToWalletResult>
+{
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    private readonly IWalletRepository _wallets;
+    private readonly IPlatformWalletRepository _platformWallets;
+    private readonly IIntegrationEventOutbox _outbox;
+
+    public RefundToWalletCommandHandler(
+        IWalletRepository wallets,
+        IPlatformWalletRepository platformWallets,
+        IIntegrationEventOutbox outbox)
+    {
+        _wallets = wallets;
+        _platformWallets = platformWallets;
+        _outbox = outbox;
+    }
+
+    public async Task<RefundToWalletResult> Handle(
+        RefundToWalletCommand request,
+        CancellationToken cancellationToken)
+    {
+        var referenceType = ParseReferenceType(request.ReferenceType);
+        var amount = Money.FromRaw(request.Amount);
+
+        await _wallets.AcquireWalletTransactionReferenceLockAsync(
+                referenceType,
+                request.ReferenceId,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        var existing = await _wallets.FindTransactionByReferenceAsync(
+                referenceType,
+                request.ReferenceId,
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (existing is not null)
+        {
+            return ToResult(existing);
+        }
+
+        await DebitPlatformWalletAsync(amount, request.ReferenceId, cancellationToken).ConfigureAwait(false);
+        var transaction = await _wallets.CreditBookingRefundAsync(
+                request.UserId,
+                amount,
+                request.ReferenceId,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        await EnqueueWalletCreditedAsync(
+                request.UserId,
+                amount.Amount,
+                referenceType,
+                request.ReferenceId,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return ToResult(transaction);
+    }
+
+    private async Task DebitPlatformWalletAsync(
+        Money amount,
+        Guid referenceId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _platformWallets.DebitAsync(
+                    amount,
+                    PlatformWalletTransactionRef.BOOKING_REFUND,
+                    referenceId,
+                    "Booking refund",
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new PlatformWalletInsufficientBalanceException(ex.Message);
+        }
+    }
+
+    private async Task EnqueueWalletCreditedAsync(
+        Guid userId,
+        long amount,
+        WalletTransactionRef referenceType,
+        Guid referenceId,
+        CancellationToken cancellationToken)
+    {
+        var integrationEvent = new WalletCreditedIntegrationEvent(
+            userId,
+            amount,
+            referenceType.ToString(),
+            referenceId);
+
+        var payload = JsonSerializer.Serialize(new
+        {
+            integrationEvent.UserId,
+            integrationEvent.Amount,
+            integrationEvent.ReferenceType,
+            integrationEvent.ReferenceId,
+        }, JsonOptions);
+
+        await _outbox.EnqueueAsync(WalletCreditedIntegrationEvent.EventTypeValue, payload, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private static RefundToWalletResult ToResult(WalletTransaction transaction)
+        => new(transaction.Id, transaction.BalanceAfter.Amount);
+
+    private static WalletTransactionRef ParseReferenceType(string value)
+        => Enum.TryParse<WalletTransactionRef>(value, ignoreCase: false, out var referenceType)
+            && referenceType == WalletTransactionRef.BOOKING_REFUND
+            ? referenceType
+            : throw new CodedValidationException("VALIDATION_ERROR", "Refund supports BOOKING_REFUND references only.");
+}
