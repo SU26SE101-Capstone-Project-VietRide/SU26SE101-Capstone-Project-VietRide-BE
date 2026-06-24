@@ -8,7 +8,7 @@
     "generate": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "npx prisma generate --schema=prisma/schema.prisma",
+        "command": "node ../../scripts/prisma-generate-win.mjs prisma/schema.prisma",
         "cwd": "apps/rag"
       }
     },
@@ -87,11 +87,16 @@
       }
     },
     "test": {
+      "executor": "@nx/jest:jest",
       "dependsOn": [
         "generate"
       ],
+      "outputs": [
+        "{workspaceRoot}/coverage/apps/rag"
+      ],
       "options": {
-        "passWithNoTests": true
+        "jestConfig": "apps/rag/jest.config.cts",
+        "passWithNoTests": false
       }
     },
     "test:e2e": {

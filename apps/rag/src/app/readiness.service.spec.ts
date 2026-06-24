@@ -77,7 +77,7 @@ function makeEnv(): Env {
     LOG_LEVEL: 'info',
     OPENROUTER_API_KEY: 'test-key',
     OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1',
-    OPENROUTER_CHAT_MODEL: 'nex-agi/nex-n2-pro:free',
+    OPENROUTER_CHAT_MODEL: 'openai/gpt-oss-120b:free',
     OPENROUTER_EMBEDDING_MODEL: 'nvidia/llama-nemotron-embed-vl-1b-v2:free',
     OPENROUTER_HTTP_REFERER: undefined,
     OPENROUTER_APP_TITLE: 'VietRide RAG',
