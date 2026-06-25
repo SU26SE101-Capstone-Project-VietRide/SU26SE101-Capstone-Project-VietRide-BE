@@ -4,7 +4,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
-using VietRide.Payment.Domain.Enums;
 using VietRide.Payment.Infrastructure;
 
 #nullable disable
@@ -64,8 +63,7 @@ namespace VietRide.Payment.Infrastructure.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("idempotency_key");
 
-                    b.Property<PaymentMethod>("Method")
-                        .IsRequired()
+                    b.Property<int>("Method")
                         .HasColumnType("payment_method")
                         .HasColumnName("method");
 
@@ -81,8 +79,7 @@ namespace VietRide.Payment.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("reference_id");
 
-                    b.Property<PaymentReferenceType>("ReferenceType")
-                        .IsRequired()
+                    b.Property<int>("ReferenceType")
                         .HasColumnType("payment_reference_type")
                         .HasColumnName("reference_type");
 
@@ -90,8 +87,7 @@ namespace VietRide.Payment.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("refunded_at");
 
-                    b.Property<PaymentStatus>("Status")
-                        .IsRequired()
+                    b.Property<int>("Status")
                         .HasColumnType("payment_status")
                         .HasColumnName("status");
 
@@ -239,13 +235,11 @@ namespace VietRide.Payment.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("reference_id");
 
-                    b.Property<PlatformWalletTransactionRef>("ReferenceType")
-                        .IsRequired()
+                    b.Property<int>("ReferenceType")
                         .HasColumnType("platform_wallet_transaction_ref")
                         .HasColumnName("reference_type");
 
-                    b.Property<PlatformWalletTransactionType>("Type")
-                        .IsRequired()
+                    b.Property<int>("Type")
                         .HasColumnType("platform_wallet_transaction_type")
                         .HasColumnName("type");
 
@@ -265,6 +259,105 @@ namespace VietRide.Payment.Infrastructure.Migrations
                             t.HasCheckConstraint("chk_platform_wallet_transactions_amount_positive", "amount > 0");
 
                             t.HasCheckConstraint("chk_platform_wallet_transactions_balance_non_negative", "balance_before >= 0 AND balance_after >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("VietRide.Payment.Domain.Entities.RefundFailureLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<long?>("Amount")
+                        .HasColumnType("bigint")
+                        .HasColumnName("amount");
+
+                    b.Property<Guid?>("BookingId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("booking_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("FailureReason")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("failure_reason");
+
+                    b.Property<DateTimeOffset>("LastAttemptAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_attempt_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid?>("ParcelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("parcel_id");
+
+                    b.Property<Guid?>("ReferenceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("reference_id");
+
+                    b.Property<string>("ReferenceType")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("reference_type");
+
+                    b.Property<DateTimeOffset?>("ResolvedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("resolved_at");
+
+                    b.Property<Guid?>("ResolvedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("resolved_by_user_id");
+
+                    b.Property<int>("RetryCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("retry_count");
+
+                    b.Property<string>("TriggerEventType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("trigger_event_type");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_refund_failure_logs");
+
+                    b.HasIndex("BookingId")
+                        .HasDatabaseName("idx_refund_failure_logs_booking_id")
+                        .HasFilter("booking_id IS NOT NULL");
+
+                    b.HasIndex("LastAttemptAt")
+                        .HasDatabaseName("idx_refund_failure_logs_unresolved")
+                        .HasFilter("resolved_at IS NULL");
+
+                    b.HasIndex("ParcelId")
+                        .HasDatabaseName("idx_refund_failure_logs_parcel_id")
+                        .HasFilter("parcel_id IS NOT NULL");
+
+                    b.HasIndex("ResolvedByUserId")
+                        .HasDatabaseName("idx_refund_failure_logs_resolved_by_user_id")
+                        .HasFilter("resolved_by_user_id IS NOT NULL");
+
+                    b.HasIndex("ReferenceType", "ReferenceId")
+                        .HasDatabaseName("idx_refund_failure_logs_reference")
+                        .HasFilter("reference_type IS NOT NULL AND reference_id IS NOT NULL");
+
+                    b.ToTable("refund_failure_logs", "vietride_payment", t =>
+                        {
+                            t.HasCheckConstraint("chk_refund_failure_logs_target_exists", "booking_id IS NOT NULL OR parcel_id IS NOT NULL");
                         });
                 });
 
@@ -294,8 +387,7 @@ namespace VietRide.Payment.Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("payment_redirect_url");
 
-                    b.Property<TopUpRequestStatus>("Status")
-                        .IsRequired()
+                    b.Property<int>("Status")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("top_up_request_status")
                         .HasColumnName("status")
@@ -429,13 +521,11 @@ namespace VietRide.Payment.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("reference_id");
 
-                    b.Property<WalletTransactionRef>("ReferenceType")
-                        .IsRequired()
+                    b.Property<int>("ReferenceType")
                         .HasColumnType("wallet_transaction_ref")
                         .HasColumnName("reference_type");
 
-                    b.Property<WalletTransactionType>("Type")
-                        .IsRequired()
+                    b.Property<int>("Type")
                         .HasColumnType("wallet_transaction_type")
                         .HasColumnName("type");
 

@@ -43,4 +43,23 @@ public interface IWalletRepository : IRepository<Wallet, Guid>
         Guid topUpRequestId,
         CancellationToken cancellationToken)
         => throw new NotSupportedException("This wallet repository does not support top-up crediting.");
+
+    Task AcquireWalletTransactionReferenceLockAsync(
+        WalletTransactionRef referenceType,
+        Guid referenceId,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("This wallet repository does not support wallet transaction reference locks.");
+
+    Task<WalletTransaction?> FindTransactionByReferenceAsync(
+        WalletTransactionRef referenceType,
+        Guid referenceId,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("This wallet repository does not support wallet transaction reference lookups.");
+
+    Task<WalletTransaction> CreditBookingRefundAsync(
+        Guid userId,
+        Money amount,
+        Guid bookingId,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("This wallet repository does not support booking refund crediting.");
 }

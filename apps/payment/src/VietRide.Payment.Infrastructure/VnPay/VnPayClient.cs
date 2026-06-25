@@ -39,6 +39,35 @@ public sealed class VnPayClient : IVnPayClient
         if (amount.Amount < _options.MinimumTopUpAmount)
             throw new ArgumentOutOfRangeException(nameof(amount), "Top-up amount is below the configured minimum.");
 
+        return BuildRedirectUrl(
+            amount,
+            vnPayTxnRef,
+            clientIpAddress,
+            createdAt,
+            $"VietRide wallet top-up {vnPayTxnRef} for user {userId}");
+    }
+
+    public string CreateBookingPaymentRedirectUrl(
+        Guid bookingId,
+        Guid userId,
+        Money amount,
+        string vnPayTxnRef,
+        string clientIpAddress,
+        DateTimeOffset createdAt)
+        => BuildRedirectUrl(
+            amount,
+            vnPayTxnRef,
+            clientIpAddress,
+            createdAt,
+            $"VietRide booking payment {bookingId} for user {userId}");
+
+    private string BuildRedirectUrl(
+        Money amount,
+        string vnPayTxnRef,
+        string clientIpAddress,
+        DateTimeOffset createdAt,
+        string orderInfo)
+    {
         EnsureSignatureOptions();
 
         var parameters = new SortedDictionary<string, string>(StringComparer.Ordinal)
@@ -51,7 +80,7 @@ public sealed class VnPayClient : IVnPayClient
             ["vnp_CurrCode"] = CurrencyCode,
             ["vnp_IpAddr"] = string.IsNullOrWhiteSpace(clientIpAddress) ? "127.0.0.1" : clientIpAddress,
             ["vnp_Locale"] = Locale,
-            ["vnp_OrderInfo"] = $"VietRide wallet top-up {vnPayTxnRef} for user {userId}",
+            ["vnp_OrderInfo"] = orderInfo,
             ["vnp_OrderType"] = DefaultOrderType,
             ["vnp_ReturnUrl"] = _options.ReturnUrl,
             ["vnp_TxnRef"] = vnPayTxnRef,

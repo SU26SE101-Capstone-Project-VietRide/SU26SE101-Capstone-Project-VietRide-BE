@@ -6,10 +6,12 @@ using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Application.Services;
 using VietRide.Booking.Infrastructure.Http;
+using VietRide.Booking.Infrastructure.Messaging;
 using VietRide.Booking.Infrastructure.Persistence.Repositories;
 using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Http.Resilience;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Messaging.DependencyInjection;
 
 namespace VietRide.Booking.Infrastructure.DependencyInjection;
 
@@ -28,7 +30,8 @@ public static class InfrastructureServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        bool registerConsumers = true)
     {
         // Redis — required by IdempotencyMiddleware (wired in Program.cs via AddVietRideIdempotency).
         // Falls back gracefully if REDIS_URL is absent (AbortOnConnectFail = false).
@@ -93,6 +96,25 @@ public static class InfrastructureServiceCollectionExtensions
         // VoucherService validates + applies vouchers at checkout; scoped because it depends
         // on scoped repositories (IVoucherRepository, IOperatorVoucherConsentRepository).
         services.AddScoped<IVoucherService, VoucherService>();
+
+        if (registerConsumers)
+        {
+            services.AddVietRideEventConsumer<PaymentSucceededIntegrationEvent, PaymentSucceededIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "booking.payment-succeeded";
+                options.BindingKeys = [PaymentSucceededIntegrationEvent.EventType];
+            });
+            services.AddVietRideEventConsumer<PaymentExpiredIntegrationEvent, PaymentExpiredIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "booking.payment-expired";
+                options.BindingKeys = [PaymentExpiredIntegrationEvent.EventType];
+            });
+            services.AddVietRideEventConsumer<WalletCreditedIntegrationEvent, WalletCreditedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "booking.wallet-credited";
+                options.BindingKeys = [WalletCreditedIntegrationEvent.EventType];
+            });
+        }
 
         // Payment inter-service client (real debit lands Day 15/16).
         // Day-12 local/runtime seam can be enabled explicitly so WALLET reaches CONFIRMED

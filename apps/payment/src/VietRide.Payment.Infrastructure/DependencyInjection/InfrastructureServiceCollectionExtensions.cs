@@ -4,11 +4,14 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using StackExchange.Redis;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
+using VietRide.Payment.Application.Abstractions.Refunds;
 using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Application.Events;
+using VietRide.Payment.Application.Features.Payments.MarkPaymentRefunded;
 using VietRide.Payment.Application.Features.Wallets.BootstrapWallet;
 using VietRide.Payment.Infrastructure.Http;
 using VietRide.Payment.Infrastructure.Persistence.Repositories;
+using VietRide.Payment.Infrastructure.Refunds;
 using VietRide.Payment.Infrastructure.VnPay;
 using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Kernel.Abstractions;
@@ -62,7 +65,11 @@ public static class InfrastructureServiceCollectionExtensions
         bool registerConsumers = true)
     {
         services.AddScoped<IWalletRepository, WalletRepository>();
+        services.AddScoped<IPaymentRepository, PaymentRepository>();
         services.AddScoped<ITopUpRequestRepository, TopUpRequestRepository>();
+        services.AddScoped<IPlatformWalletRepository, PlatformWalletRepository>();
+        services.AddScoped<IRefundFailureLogRepository, RefundFailureLogRepository>();
+        services.AddScoped<IRefundRetryExecutor, WalletRefundRetryExecutor>();
         services.Configure<VnPayOptions>(options =>
         {
             configuration.GetSection(VnPayOptions.SectionName).Bind(options);
@@ -85,6 +92,14 @@ public static class InfrastructureServiceCollectionExtensions
             {
                 options.QueueName = "payment.wallet-bootstrap";
                 options.BindingKeys = [UserCreatedIntegrationEvent.EventType];
+            });
+
+            // BSOT §8.4: Payment consumes its own canonical wallet-credit event to drive the
+            // originating Payment row to REFUNDED for refund credits (BOOKING_REFUND / PARCEL_REFUND).
+            services.AddVietRideEventConsumer<WalletCreditedConsumerEvent, MarkPaymentRefundedCommandHandler>(options =>
+            {
+                options.QueueName = "payment.payment-refunded";
+                options.BindingKeys = [WalletCreditedConsumerEvent.EventType];
             });
         }
 

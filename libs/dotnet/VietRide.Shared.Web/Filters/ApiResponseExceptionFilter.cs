@@ -109,6 +109,9 @@ public sealed class ApiResponseExceptionFilter : IExceptionFilter
             TooManyRequestsException t
                 => (429, t.ErrorCode, t.Message, null),
 
+            ICodedHttpException c
+                => (c.StatusCode, c.ErrorCode, c.Message, null),
+
             DomainException { ErrorCode: "SUBSCRIPTION_EXPIRED" or "PAYMENT_INSUFFICIENT_WALLET" } d
                 => (402, d.ErrorCode, d.Message, null),
 

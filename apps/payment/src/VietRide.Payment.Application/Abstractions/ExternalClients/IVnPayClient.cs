@@ -11,6 +11,15 @@ public interface IVnPayClient
         string clientIpAddress,
         DateTimeOffset createdAt);
 
+    string CreateBookingPaymentRedirectUrl(
+        Guid bookingId,
+        Guid userId,
+        Money amount,
+        string vnPayTxnRef,
+        string clientIpAddress,
+        DateTimeOffset createdAt)
+        => throw new NotSupportedException("This VNPay client does not support booking-payment redirect URLs.");
+
     bool VerifySignature(IReadOnlyDictionary<string, string> parameters)
         => throw new NotSupportedException("This VNPay client does not support signature verification.");
 

@@ -439,6 +439,10 @@ CREATE TABLE refund_failure_logs (
     parcel_id UUID NULL,              -- logical FK
     trigger_event_type VARCHAR(100) NOT NULL,
     failure_reason TEXT NOT NULL,
+    user_id UUID NULL,                -- logical FK; retry payload
+    amount BIGINT NULL,               -- retry payload, VND
+    reference_type VARCHAR(50) NULL,  -- retry payload: BOOKING_REFUND / PARCEL_REFUND
+    reference_id UUID NULL,           -- retry payload bookingId / parcelId
     retry_count INT NOT NULL DEFAULT 0,
     last_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     resolved_at TIMESTAMPTZ NULL,
@@ -456,6 +460,9 @@ CREATE INDEX idx_refund_failure_logs_parcel_id ON refund_failure_logs (parcel_id
     WHERE parcel_id IS NOT NULL;
 CREATE INDEX idx_refund_failure_logs_resolved_by_user_id
     ON refund_failure_logs (resolved_by_user_id) WHERE resolved_by_user_id IS NOT NULL;
+CREATE INDEX idx_refund_failure_logs_reference
+    ON refund_failure_logs (reference_type, reference_id)
+    WHERE reference_type IS NOT NULL AND reference_id IS NOT NULL;
 
 -- -----------------------------------------------------------------------------
 -- outbox_events

@@ -43,4 +43,44 @@ public sealed class PlatformWalletTransaction : BaseEntity<Guid>
             Note = note,
         };
     }
+
+    public static PlatformWalletTransaction CreateBookingPaymentHold(
+        Money amount,
+        Money balanceBefore,
+        Money balanceAfter,
+        Guid bookingId,
+        string? note = null)
+    {
+        if (bookingId == Guid.Empty)
+            throw new ArgumentException("Booking id is required.", nameof(bookingId));
+
+        return Create(
+            PlatformWalletTransactionType.CREDIT,
+            amount,
+            balanceBefore,
+            balanceAfter,
+            PlatformWalletTransactionRef.BOOKING_PAYMENT_HOLD,
+            bookingId,
+            note);
+    }
+
+    public static PlatformWalletTransaction CreateBookingRefund(
+        Money amount,
+        Money balanceBefore,
+        Money balanceAfter,
+        Guid bookingId,
+        string? note = null)
+    {
+        if (bookingId == Guid.Empty)
+            throw new ArgumentException("Booking id is required.", nameof(bookingId));
+
+        return Create(
+            PlatformWalletTransactionType.DEBIT,
+            amount,
+            balanceBefore,
+            balanceAfter,
+            PlatformWalletTransactionRef.BOOKING_REFUND,
+            bookingId,
+            note);
+    }
 }

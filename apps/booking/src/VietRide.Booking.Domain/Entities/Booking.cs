@@ -23,6 +23,7 @@ public sealed class Booking : BaseEntity<Guid>
     public Guid PassengerUserId { get; private set; }
     public Guid TripId { get; private set; }
     public Guid OperatorId { get; private set; }
+    public Guid? SeatLockToken { get; private set; }
 
     // Pickup/dropoff — exactly one pickup, at most one dropoff (CHECK constraints)
     public Guid? PickupStationId { get; private set; }
@@ -83,7 +84,8 @@ public sealed class Booking : BaseEntity<Guid>
         DateTimeOffset? tripSnapshotDeparture = null,
         string? tripSnapshotRouteName = null,
         Guid? bookingGroupId = null,
-        Enums.TripDirection? tripDirection = null)
+        Enums.TripDirection? tripDirection = null,
+        Guid? seatLockToken = null)
     {
         // Pickup: exactly one must be set
         var pickupCount = (pickupStationId.HasValue ? 1 : 0) + (pickupStopId.HasValue ? 1 : 0);
@@ -106,6 +108,7 @@ public sealed class Booking : BaseEntity<Guid>
             PassengerUserId = passengerUserId,
             TripId = tripId,
             OperatorId = operatorId,
+            SeatLockToken = seatLockToken,
             PickupStationId = pickupStationId,
             PickupStopId = pickupStopId,
             DropoffStationId = dropoffStationId,
@@ -151,6 +154,19 @@ public sealed class Booking : BaseEntity<Guid>
 
         Status = BookingStatus.CONFIRMED;
         ConfirmedAt = confirmedAt;
+    }
+
+    /// <summary>
+    /// Marks an unpaid booking as EXPIRED after its payment window closes.
+    /// Only valid from PENDING_PAYMENT state.
+    /// </summary>
+    public void ExpirePayment(DateTimeOffset expiredAt)
+    {
+        if (Status != BookingStatus.PENDING_PAYMENT)
+            throw new InvalidOperationException($"Cannot expire booking in status {Status}.");
+
+        Status = BookingStatus.EXPIRED;
+        ExpiredAt = expiredAt;
     }
 
     /// <summary>
@@ -227,5 +243,18 @@ public sealed class Booking : BaseEntity<Guid>
         CancellationReason = reason;
         CancelledAt = cancelledAt;
         RefundOverride = refundOverride;
+    }
+
+    /// <summary>
+    /// Marks a cancelled booking as REFUNDED after wallet credit succeeds.
+    /// Only valid from CANCELLED state.
+    /// </summary>
+    public void MarkRefunded(DateTimeOffset refundedAt)
+    {
+        if (Status != BookingStatus.CANCELLED)
+            throw new InvalidOperationException($"Cannot refund booking in status {Status}.");
+
+        Status = BookingStatus.REFUNDED;
+        RefundedAt = refundedAt;
     }
 }

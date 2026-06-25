@@ -73,6 +73,32 @@ public class BookingAggregateTests
         booking.ConfirmedAt.Should().Be(now);
     }
 
+    [Fact]
+    public void ExpirePayment_FromPendingPayment_SetsExpiredStatus()
+    {
+        var booking = CreateBooking();
+        var now = DateTimeOffset.UtcNow;
+
+        booking.ExpirePayment(now);
+
+        booking.Status.Should().Be(BookingStatus.EXPIRED);
+        booking.ExpiredAt.Should().Be(now);
+    }
+
+    [Fact]
+    public void MarkRefunded_FromCancelled_SetsRefundedStatus()
+    {
+        var booking = CreateBooking();
+        var cancelledAt = DateTimeOffset.UtcNow;
+        var refundedAt = cancelledAt.AddMinutes(1);
+        booking.Cancel(BookingCancellationReason.USER_INITIATED, cancelledAt);
+
+        booking.MarkRefunded(refundedAt);
+
+        booking.Status.Should().Be(BookingStatus.REFUNDED);
+        booking.RefundedAt.Should().Be(refundedAt);
+    }
+
     // --- Error / guard tests ---
 
     [Fact]
@@ -144,6 +170,27 @@ public class BookingAggregateTests
         booking.Confirm(DateTimeOffset.UtcNow);
 
         var act = () => booking.Confirm(DateTimeOffset.UtcNow);
+
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void ExpirePayment_WhenConfirmed_Throws()
+    {
+        var booking = CreateBooking();
+        booking.Confirm(DateTimeOffset.UtcNow);
+
+        var act = () => booking.ExpirePayment(DateTimeOffset.UtcNow);
+
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void MarkRefunded_WhenPendingPayment_Throws()
+    {
+        var booking = CreateBooking();
+
+        var act = () => booking.MarkRefunded(DateTimeOffset.UtcNow);
 
         act.Should().Throw<InvalidOperationException>();
     }

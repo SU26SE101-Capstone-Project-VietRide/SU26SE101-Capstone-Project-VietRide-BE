@@ -60,7 +60,15 @@ var app = builder.Build();
 if (!IsWebApplicationFactoryHost())
 {
     await using var scope = app.Services.CreateAsyncScope();
-    await scope.ServiceProvider.GetRequiredService<PaymentDbContext>().Database.MigrateAsync();
+    var paymentDb = scope.ServiceProvider.GetRequiredService<PaymentDbContext>();
+    await paymentDb.Database.MigrateAsync();
+
+    // Ensure the singleton PlatformWallet row exists (the ledger every booking charge/refund
+    // moves money through). It lives only in db-schema/.../seed.sql, which the container does
+    // not run — without it GetSingletonAsync() throws on 0 rows. Idempotent.
+    await paymentDb.Database.ExecuteSqlRawAsync(
+        "INSERT INTO vietride_payment.platform_wallets (balance, currency) "
+        + "SELECT 0, 'VND' WHERE NOT EXISTS (SELECT 1 FROM vietride_payment.platform_wallets);");
 }
 
 app.UseMiddleware<RequestLoggingMiddleware>();
@@ -77,6 +85,14 @@ if (registerMessaging)
     var recurringJobs = scope.ServiceProvider.GetRequiredService<IRecurringJobManager>();
     recurringJobs.AddOrUpdate<TopUpExpiredJob>(
         TopUpExpiredJob.RecurringJobId,
+        job => job.RunAsync(CancellationToken.None),
+        Cron.Minutely());
+    recurringJobs.AddOrUpdate<RefundFailureRetryJob>(
+        RefundFailureRetryJob.RecurringJobId,
+        job => job.RunAsync(CancellationToken.None),
+        "*/10 * * * *");
+    recurringJobs.AddOrUpdate<PaymentExpiredJob>(
+        PaymentExpiredJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
         Cron.Minutely());
 }

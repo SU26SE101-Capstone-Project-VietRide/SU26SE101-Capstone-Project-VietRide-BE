@@ -132,4 +132,50 @@ internal sealed class WalletRepository : IWalletRepository
         await _db.WalletTransactions.AddAsync(transaction, cancellationToken);
         return transaction;
     }
+
+    public async Task AcquireWalletTransactionReferenceLockAsync(
+        WalletTransactionRef referenceType,
+        Guid referenceId,
+        CancellationToken cancellationToken)
+    {
+        var lockKey = $"wallet-transaction:{referenceType}:{referenceId:N}";
+        await _db.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock(hashtext({lockKey})::bigint)",
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<WalletTransaction?> FindTransactionByReferenceAsync(
+        WalletTransactionRef referenceType,
+        Guid referenceId,
+        CancellationToken cancellationToken)
+        => await _db.WalletTransactions
+            .FirstOrDefaultAsync(
+                transaction => transaction.ReferenceType == referenceType
+                    && transaction.ReferenceId == referenceId,
+                cancellationToken);
+
+    public async Task<WalletTransaction> CreditBookingRefundAsync(
+        Guid userId,
+        Money amount,
+        Guid bookingId,
+        CancellationToken cancellationToken)
+    {
+        var wallet = await _db.Wallets.FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken)
+            ?? throw new InvalidOperationException($"Wallet for user {userId} was not found.");
+
+        var balanceBefore = wallet.Balance;
+        wallet.Credit(amount);
+        var balanceAfter = wallet.Balance;
+
+        var transaction = WalletTransaction.CreateBookingRefundCredit(
+            userId,
+            bookingId,
+            amount,
+            balanceBefore,
+            balanceAfter);
+
+        await _db.WalletTransactions.AddAsync(transaction, cancellationToken);
+        return transaction;
+    }
 }

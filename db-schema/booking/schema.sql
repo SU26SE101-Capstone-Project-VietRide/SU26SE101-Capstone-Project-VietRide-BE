@@ -69,6 +69,7 @@ CREATE TABLE bookings (
     -- trip context (logical FKs)
     trip_id UUID NOT NULL,
     operator_id UUID NOT NULL,
+    seat_lock_token UUID NULL,
     -- pickup/dropoff: 4 columns mutually exclusive
     pickup_station_id UUID NULL,
     pickup_stop_id UUID NULL,
@@ -126,6 +127,8 @@ COMMENT ON COLUMN bookings.total_amount IS
     'IMMUTABLE after INSERT. Snapshot of fare at booking time. Operator fare edits do not affect existing bookings.';
 COMMENT ON COLUMN bookings.refund_override IS
     'true when refund 100% regardless of cancellation policy (operator-fault scenarios).';
+COMMENT ON COLUMN bookings.seat_lock_token IS
+    'Original Trip seat lock token returned during checkout. Nullable for legacy rows created before Booking persisted lock metadata.';
 
 -- -----------------------------------------------------------------------------
 -- passengers (sub-entity of Booking; 1–5 per booking; operational-only)

@@ -196,7 +196,8 @@ public sealed class CreateBookingCommandHandler
                 tripSnapshotOriginName: trip.OriginStation.Name,
                 tripSnapshotDestName: trip.DestinationStation.Name,
                 tripSnapshotDeparture: trip.DepartureDateTime,
-                tripSnapshotRouteName: null);
+                tripSnapshotRouteName: null,
+                seatLockToken: seatLockToken);
 
             // Add passenger rows (operational-only — no PII stored)
             foreach (var seat in request.Seats)
