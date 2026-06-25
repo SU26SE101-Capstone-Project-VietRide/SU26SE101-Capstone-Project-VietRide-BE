@@ -74,6 +74,29 @@ public static class InfrastructureServiceCollectionExtensions
                 .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
         }
 
+        // Identity operator lookup client (Task 17.0).
+        if (UseIdentityDevStub(configuration))
+        {
+            services.AddScoped<IOperatorServiceClient, DevOperatorServiceClient>();
+        }
+        else
+        {
+            services
+                .AddHttpClient<IOperatorServiceClient, OperatorServiceClient>(client =>
+                {
+                    var baseUrl = ResolveIdentityBaseUrl(configuration);
+                    client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
+                    client.Timeout = TimeSpan.FromSeconds(30);
+                    client.DefaultRequestHeaders.Accept.Clear();
+                    client.DefaultRequestHeaders.Accept.Add(
+                        new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+                })
+                .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
+                .AddHttpMessageHandler<InternalJwtDelegatingHandler>()
+                .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
+                .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
+        }
+
         // Repositories (Task 12.3)
         services.AddScoped<IBookingRepository, BookingRepository>();
 
@@ -166,12 +189,33 @@ public static class InfrastructureServiceCollectionExtensions
                 "true",
                 StringComparison.OrdinalIgnoreCase);
 
+    private static bool UseIdentityDevStub(IConfiguration configuration)
+        => configuration.GetValue("Identity:UseDevStub", false)
+            || string.Equals(
+                Environment.GetEnvironmentVariable("BOOKING_IDENTITY_USE_DEV_STUB"),
+                "true",
+                StringComparison.OrdinalIgnoreCase);
+
     private static bool UsePaymentDevStub(IConfiguration configuration)
         => configuration.GetValue("Payment:UseDevStub", false)
             || string.Equals(
                 Environment.GetEnvironmentVariable("BOOKING_PAYMENT_USE_DEV_STUB"),
                 "true",
                 StringComparison.OrdinalIgnoreCase);
+
+    private static string ResolveIdentityBaseUrl(IConfiguration configuration)
+    {
+        var baseUrl = configuration["Identity:BaseUrl"]
+            ?? Environment.GetEnvironmentVariable("IDENTITY_SERVICE_BASE_URL");
+
+        if (string.IsNullOrWhiteSpace(baseUrl))
+        {
+            throw new InvalidOperationException(
+                "Identity base URL must be configured via Identity:BaseUrl or IDENTITY_SERVICE_BASE_URL.");
+        }
+
+        return baseUrl;
+    }
 
     private static string ResolvePaymentBaseUrl(IConfiguration configuration)
     {
