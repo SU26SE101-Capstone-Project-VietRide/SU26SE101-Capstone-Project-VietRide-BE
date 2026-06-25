@@ -22,7 +22,6 @@ public sealed class RegisterCommandHandler : IRequestHandler<RegisterCommand, Re
     private readonly IUserRepository _users;
     private readonly IEmailVerificationTokenRepository _tokens;
     private readonly IPasswordHasher _hasher;
-    private readonly IEmailService _email;
     private readonly IOtpRateLimiter _rateLimiter;
     private readonly IClock _clock;
     private readonly IIntegrationEventOutbox _outbox;
@@ -32,7 +31,6 @@ public sealed class RegisterCommandHandler : IRequestHandler<RegisterCommand, Re
         IUserRepository users,
         IEmailVerificationTokenRepository tokens,
         IPasswordHasher hasher,
-        IEmailService email,
         IOtpRateLimiter rateLimiter,
         IClock clock,
         IIntegrationEventOutbox outbox,
@@ -41,7 +39,6 @@ public sealed class RegisterCommandHandler : IRequestHandler<RegisterCommand, Re
         _users = users;
         _tokens = tokens;
         _hasher = hasher;
-        _email = email;
         _rateLimiter = rateLimiter;
         _clock = clock;
         _outbox = outbox;
@@ -108,26 +105,20 @@ public sealed class RegisterCommandHandler : IRequestHandler<RegisterCommand, Re
         // 7. Generate OTP with retry on collision.
         var otpToken = await CreateOtpWithRetryAsync(user.Id, cancellationToken);
 
-        // 8. Send OTP email — NON-FATAL. A delivery-provider hiccup (e.g. SendGrid/Notification
-        //    down or misconfigured) must NOT roll back a successful registration; the OTP is already
-        //    persisted (step 7) and the user can resend. We also log the OTP at Debug so local/dev
-        //    runs can complete verification without a real inbox (off in Production by log level).
-        try
-        {
-            await _email.SendOtpAsync(
-                to: user.Email,
-                code: otpToken.Code,
-                purpose: EmailOtpPurpose.REGISTRATION,
-                ttlMinutes: OtpTtlMinutes,
-                ct: cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "OTP email send failed for {Email}; registration continues (OTP persisted, user may resend).",
-                user.Email);
-        }
+        // 8. Enqueue OTP email event into the Outbox (same EF transaction via TransactionBehavior).
+        //    The OutboxBackgroundService publishes to RabbitMQ; Notification Service consumes
+        //    and delivers the email asynchronously — Notification outages no longer block or
+        //    fail registration (BSOT §7.3 / ADR async-otp).
+        var otpEvent = new OtpRequestedIntegrationEvent(
+            user.Id,
+            user.Email,
+            otpToken.Code,
+            EmailOtpPurpose.REGISTRATION.ToString(),
+            OtpTtlMinutes);
+        await _outbox.EnqueueAsync(
+            OtpRequestedIntegrationEvent.EventType,
+            JsonSerializer.Serialize(otpEvent),
+            cancellationToken);
 
         _logger.LogDebug(
             "Registration OTP for {Email}: {Code} (purpose REGISTRATION, ttl {TtlMinutes}m).",

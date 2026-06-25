@@ -4,12 +4,9 @@ using VietRide.Identity.Application.Abstractions.ExternalClients;
 namespace VietRide.Identity.Infrastructure.ExternalClients;
 
 /// <summary>
-/// Day-3 stub implementation of <see cref="IEmailService"/>.
-/// Logs the OTP via Serilog; makes no real HTTP call and has no SendGrid SDK dependency.
-///
-/// Day 10 will replace this with <c>OutboxBackedEmailService</c> which inserts
-/// <c>identity.otp.requested</c> into the Outbox. The Notification Service consumer
-/// then delivers the email via SendGrid (BSOT §1.2 line 93 + §3.5 lines 419/471).
+/// Stub implementation of <see cref="IEmailService"/> for non-OTP transactional emails.
+/// OTP delivery is now fully async via Outbox → RabbitMQ → Notification Service
+/// (BSOT §1.2 line 93 + §3.5 lines 419/471).
 /// </summary>
 public sealed class LoggingEmailService : IEmailService
 {
@@ -18,24 +15,6 @@ public sealed class LoggingEmailService : IEmailService
     public LoggingEmailService(ILogger<LoggingEmailService> logger)
     {
         _logger = logger;
-    }
-
-    /// <inheritdoc />
-    public Task SendOtpAsync(
-        string to,
-        string code,
-        EmailOtpPurpose purpose,
-        int ttlMinutes,
-        CancellationToken ct = default)
-    {
-        _logger.LogInformation(
-            "[DEV] OTP email — to: {Email}, purpose: {Purpose}, code: {Code}, ttlMinutes: {Ttl}",
-            to,
-            purpose,
-            code,
-            ttlMinutes);
-
-        return Task.CompletedTask;
     }
 
     /// <inheritdoc />

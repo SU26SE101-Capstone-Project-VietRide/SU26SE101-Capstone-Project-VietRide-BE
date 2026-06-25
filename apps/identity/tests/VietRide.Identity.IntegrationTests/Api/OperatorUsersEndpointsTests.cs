@@ -1000,9 +1000,6 @@ public sealed class OperatorUsersEndpointsTests : IClassFixture<AuthWebApplicati
     {
         public List<(string To, AccountCreatedEmailDto Info)> SentAccountCreatedLinks { get; } = [];
 
-        public Task SendOtpAsync(string to, string code, EmailOtpPurpose purpose, int ttlMinutes, CancellationToken ct = default)
-            => throw new NotSupportedException();
-
         public Task SendAccountCreatedLinkAsync(
             string to,
             AccountCreatedEmailDto accountInfo,

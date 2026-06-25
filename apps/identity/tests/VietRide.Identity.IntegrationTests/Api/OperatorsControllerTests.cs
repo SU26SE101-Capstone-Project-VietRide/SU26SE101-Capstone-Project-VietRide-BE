@@ -29,6 +29,7 @@ using VietRide.Identity.Domain.Enums;
 using VietRide.Identity.Infrastructure;
 using VietRide.Identity.Infrastructure.DependencyInjection;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Persistence.Outbox;
 
 namespace VietRide.Identity.IntegrationTests.Api;
 
@@ -257,7 +258,14 @@ public sealed class OperatorsControllerTests :
         var token = await db.EmailVerificationTokens.SingleAsync(x => x.UserId == adminUser.Id && x.Purpose == EmailVerificationPurpose.REGISTRATION);
         token.Code.Should().HaveLength(6);
         token.UsedAt.Should().BeNull();
-        _dbFactory.EmailService.SentOtps.Should().ContainSingle(x => x.To == email && x.Code == token.Code);
+
+        // OTP delivery is now via Outbox (identity.otp.requested) — verify the outbox row.
+        var otpOutboxEvent = await db.Set<OutboxEvent>()
+            .SingleAsync(x => x.EventType == "identity.otp.requested");
+        using var otpPayload = JsonDocument.Parse(otpOutboxEvent.Payload);
+        otpPayload.RootElement.GetProperty("email").GetString().Should().Be(email);
+        otpPayload.RootElement.GetProperty("code").GetString().Should().Be(token.Code);
+        otpPayload.RootElement.GetProperty("purpose").GetString().Should().Be("REGISTRATION");
 
         var activityLog = await db.ActivityLogs.SingleAsync(x => x.UserId == adminUser.Id && x.Action == ActivityLogAction.CREATE_OPERATOR);
         using var metadata = JsonDocument.Parse(activityLog.Metadata!);
@@ -337,7 +345,7 @@ public sealed class OperatorsControllerTests :
             ValidRegisterPayload("existing", existingEmail, existingBrn, existingTaxCode, representativePhone: ExistingAdminPhone));
         created.StatusCode.Should().Be(HttpStatusCode.Created);
         var countsBefore = await _dbFactory.CountSideEffectsAsync();
-        var sentOtpCountBefore = _dbFactory.EmailService.SentOtps.Count;
+        var outboxCountBefore = await _dbFactory.CountOutboxEventsAsync();
 
         var duplicate = await client.PostAsJsonAsync(
             "/v1/operators/register",
@@ -347,7 +355,8 @@ public sealed class OperatorsControllerTests :
         using var doc = JsonDocument.Parse(await duplicate.Content.ReadAsStringAsync());
         AssertErrorEnvelope(doc, 409, expectedCode);
         (await _dbFactory.CountSideEffectsAsync()).Should().Be(countsBefore);
-        _dbFactory.EmailService.SentOtps.Should().HaveCount(sentOtpCountBefore);
+        // No new outbox events should be added for a failed registration.
+        (await _dbFactory.CountOutboxEventsAsync()).Should().Be(outboxCountBefore);
     }
 
     [Theory]
@@ -567,13 +576,12 @@ public sealed class OperatorsControllerTests :
         public async Task ResetAsync()
         {
             await InitializeAsync();
-            EmailService.SentOtps.Clear();
             EmailService.SentAccountCreatedLinks.Clear();
 
             await using var scope = Services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
             await db.Database.ExecuteSqlRawAsync(
-                "TRUNCATE TABLE vietride_identity.activity_logs, vietride_identity.email_verification_tokens, vietride_identity.operator_subscriptions, vietride_identity.users, vietride_identity.operators RESTART IDENTITY CASCADE;");
+                "TRUNCATE TABLE vietride_identity.activity_logs, vietride_identity.email_verification_tokens, vietride_identity.operator_subscriptions, vietride_identity.users, vietride_identity.operators, vietride_identity.outbox_events RESTART IDENTITY CASCADE;");
         }
 
         public async Task<DbSideEffectCounts> CountSideEffectsAsync()
@@ -587,6 +595,13 @@ public sealed class OperatorsControllerTests :
                 await db.OperatorSubscriptions.CountAsync(),
                 await db.EmailVerificationTokens.CountAsync(),
                 await db.ActivityLogs.CountAsync());
+        }
+
+        public async Task<int> CountOutboxEventsAsync()
+        {
+            await using var scope = Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            return await db.Set<OutboxEvent>().CountAsync();
         }
 
         public async Task SeedSystemAdminAsync(Guid userId)
@@ -683,14 +698,7 @@ public sealed class OperatorsControllerTests :
 
     public sealed class CapturingEmailService : IEmailService
     {
-        public List<(string To, string Code, EmailOtpPurpose Purpose, int TtlMinutes)> SentOtps { get; } = [];
         public List<(string To, AccountCreatedEmailDto Info)> SentAccountCreatedLinks { get; } = [];
-
-        public Task SendOtpAsync(string to, string code, EmailOtpPurpose purpose, int ttlMinutes, CancellationToken ct = default)
-        {
-            SentOtps.Add((to, code, purpose, ttlMinutes));
-            return Task.CompletedTask;
-        }
 
         public Task SendAccountCreatedLinkAsync(
             string to,

@@ -5,9 +5,11 @@ using Microsoft.Extensions.Logging;
 using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
 using VietRide.Identity.Application.Abstractions.Repositories;
+using VietRide.Identity.Application.Events;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 
@@ -25,7 +27,7 @@ public sealed class RegisterOperatorCommandHandler : IRequestHandler<RegisterOpe
     private readonly IEmailVerificationTokenRepository _tokens;
     private readonly IActivityLogRepository _activityLogs;
     private readonly IPasswordHasher _passwordHasher;
-    private readonly IEmailService _emailService;
+    private readonly IIntegrationEventOutbox _outbox;
     private readonly IClock _clock;
     private readonly ILogger<RegisterOperatorCommandHandler> _logger;
 
@@ -37,7 +39,7 @@ public sealed class RegisterOperatorCommandHandler : IRequestHandler<RegisterOpe
         IEmailVerificationTokenRepository tokens,
         IActivityLogRepository activityLogs,
         IPasswordHasher passwordHasher,
-        IEmailService emailService,
+        IIntegrationEventOutbox outbox,
         IClock clock,
         ILogger<RegisterOperatorCommandHandler> logger)
     {
@@ -48,7 +50,7 @@ public sealed class RegisterOperatorCommandHandler : IRequestHandler<RegisterOpe
         _tokens = tokens;
         _activityLogs = activityLogs;
         _passwordHasher = passwordHasher;
-        _emailService = emailService;
+        _outbox = outbox;
         _clock = clock;
         _logger = logger;
     }
@@ -110,12 +112,24 @@ public sealed class RegisterOperatorCommandHandler : IRequestHandler<RegisterOpe
 
         var token = await CreateOtpWithRetryAsync(adminUser.Id, cancellationToken);
 
-        await _emailService.SendOtpAsync(
+        // Enqueue OTP email event into the Outbox (same EF transaction via TransactionBehavior).
+        // Notification Service consumes and delivers the email asynchronously.
+        var otpEvent = new OtpRequestedIntegrationEvent(
+            adminUser.Id,
             adminUser.Email,
             token.Code,
-            EmailOtpPurpose.REGISTRATION,
-            OtpExpiresInMinutes,
+            EmailOtpPurpose.REGISTRATION.ToString(),
+            OtpExpiresInMinutes);
+        await _outbox.EnqueueAsync(
+            OtpRequestedIntegrationEvent.EventType,
+            JsonSerializer.Serialize(otpEvent),
             cancellationToken);
+
+        _logger.LogDebug(
+            "Operator registration OTP for {Email}: {Code} (purpose REGISTRATION, ttl {TtlMinutes}m).",
+            adminUser.Email,
+            token.Code,
+            OtpExpiresInMinutes);
 
         var metadata = JsonSerializer.Serialize(new
         {

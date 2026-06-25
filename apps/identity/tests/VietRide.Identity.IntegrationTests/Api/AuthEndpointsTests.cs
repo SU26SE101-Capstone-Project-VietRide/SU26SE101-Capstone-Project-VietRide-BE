@@ -211,7 +211,8 @@ public sealed class AuthEndpointsTests :
         var operatorId = registerDoc.RootElement.GetProperty("data").GetProperty("operatorId").GetGuid();
 
         var verificationCode = await _dbFactory.GetRegistrationCodeAsync(operatorId);
-        _dbFactory.EmailService.SentOtps.Should().ContainSingle(message => message.To == email && message.Code == verificationCode);
+        // OTP delivery is now via Outbox (identity.otp.requested) — the code is retrieved directly
+        // from the persisted EmailVerificationToken, not from a captured email send.
         var verifyResponse = await client.PostAsJsonAsync("/v1/auth/verify-email", new
         {
             email,
@@ -279,7 +280,7 @@ public sealed class AuthEndpointsTests :
     }
 
     [Fact]
-    public async Task PostRegister_Passenger_PersistsExactlyOneUserCreatedOutboxEventInSameTransaction()
+    public async Task PostRegister_Passenger_PersistsBothUserCreatedAndOtpRequestedOutboxEventsInSameTransaction()
     {
         await _dbFactory.ResetAsync();
         var email = UniqueEmail("passenger-outbox");
@@ -300,57 +301,62 @@ public sealed class AuthEndpointsTests :
         await using var scope = _dbFactory.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
 
-        var outboxEvent = await db.Set<OutboxEvent>().SingleAsync(x => x.EventType == "identity.user.created");
-        outboxEvent.Status.Should().Be(OutboxEventStatus.PENDING);
-        (await db.Set<OutboxEvent>().CountAsync()).Should().Be(1);
+        // Exactly 2 outbox events: identity.user.created + identity.otp.requested.
+        (await db.Set<OutboxEvent>().CountAsync()).Should().Be(2);
 
-        using var payload = JsonDocument.Parse(outboxEvent.Payload);
-        payload.RootElement.GetProperty("userId").GetGuid().Should().Be(userId);
-        payload.RootElement.GetProperty("role").GetString().Should().Be(UserRole.PASSENGER.ToString());
-        payload.RootElement.GetProperty("email").GetString().Should().Be(email);
-        payload.RootElement.TryGetProperty("createdAt", out _).Should().BeTrue();
-        payload.RootElement.EnumerateObject().Select(p => p.Name)
+        var userCreatedEvent = await db.Set<OutboxEvent>().SingleAsync(x => x.EventType == "identity.user.created");
+        userCreatedEvent.Status.Should().Be(OutboxEventStatus.PENDING);
+        using var userCreatedPayload = JsonDocument.Parse(userCreatedEvent.Payload);
+        userCreatedPayload.RootElement.GetProperty("userId").GetGuid().Should().Be(userId);
+        userCreatedPayload.RootElement.GetProperty("role").GetString().Should().Be(UserRole.PASSENGER.ToString());
+        userCreatedPayload.RootElement.GetProperty("email").GetString().Should().Be(email);
+        userCreatedPayload.RootElement.TryGetProperty("createdAt", out _).Should().BeTrue();
+        userCreatedPayload.RootElement.EnumerateObject().Select(p => p.Name)
             .Should().BeEquivalentTo(["userId", "role", "email", "createdAt"]);
 
-        // The user was committed in the same transaction as the outbox row.
+        var otpEvent = await db.Set<OutboxEvent>().SingleAsync(x => x.EventType == "identity.otp.requested");
+        otpEvent.Status.Should().Be(OutboxEventStatus.PENDING);
+        using var otpPayload = JsonDocument.Parse(otpEvent.Payload);
+        otpPayload.RootElement.GetProperty("userId").GetGuid().Should().Be(userId);
+        otpPayload.RootElement.GetProperty("email").GetString().Should().Be(email);
+        otpPayload.RootElement.GetProperty("purpose").GetString().Should().Be("REGISTRATION");
+        otpPayload.RootElement.GetProperty("ttlMinutes").GetInt32().Should().Be(5);
+        otpPayload.RootElement.GetProperty("code").GetString().Should().HaveLength(6);
+
+        // The user was committed in the same transaction as both outbox rows.
         (await db.Users.CountAsync(u => u.Id == userId)).Should().Be(1);
     }
 
     [Fact]
-    public async Task PostRegister_WhenOtpEmailFails_StillSucceedsAndCommitsUserAndOutbox()
+    public async Task PostRegister_OtpIsDeliveredViaOutbox_NotDirectEmailCall()
     {
         await _dbFactory.ResetAsync();
-        var email = UniqueEmail("passenger-emailfail");
-        _dbFactory.EmailService.ThrowOnSendOtp = true;
-        try
+        var email = UniqueEmail("passenger-otp-outbox");
+        using var client = _dbFactory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/v1/auth/register", new
         {
-            using var client = _dbFactory.CreateClient();
+            email,
+            password = "Password123!",
+            displayName = "Outbox OTP User",
+            phone = $"09{Random.Shared.Next(10000000, 99999999)}",
+        });
 
-            // OTP email send (step 8) is NON-FATAL: a delivery-provider failure must NOT roll back
-            // a successful registration. The user + the outbox event (both committed in the same
-            // transaction) still persist, and the OTP is already saved for verify/resend.
-            var response = await client.PostAsJsonAsync("/v1/auth/register", new
-            {
-                email,
-                password = "Password123!",
-                displayName = "Email Fail User",
-                phone = $"09{Random.Shared.Next(10000000, 99999999)}",
-            });
+        ((int)response.StatusCode).Should().Be(201);
+        using var responseDoc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var userId = responseDoc.RootElement.GetProperty("data").GetProperty("userId").GetGuid();
 
-            ((int)response.StatusCode).Should().Be(201);
+        await using var scope = _dbFactory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
 
-            await using var scope = _dbFactory.Services.CreateAsyncScope();
-            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
-
-            // User and outbox row were committed together (same transaction) despite the email failure.
-            (await db.Users.CountAsync(u => u.Email == email)).Should().Be(1);
-            (await db.Set<OutboxEvent>().CountAsync(x => x.EventType == "identity.user.created"))
-                .Should().Be(1);
-        }
-        finally
-        {
-            _dbFactory.EmailService.ThrowOnSendOtp = false;
-        }
+        var otpEvent = await db.Set<OutboxEvent>().SingleAsync(x => x.EventType == "identity.otp.requested");
+        otpEvent.Status.Should().Be(OutboxEventStatus.PENDING);
+        using var otpPayload = JsonDocument.Parse(otpEvent.Payload);
+        otpPayload.RootElement.GetProperty("userId").GetGuid().Should().Be(userId);
+        otpPayload.RootElement.GetProperty("email").GetString().Should().Be(email);
+        otpPayload.RootElement.GetProperty("purpose").GetString().Should().Be("REGISTRATION");
+        otpPayload.RootElement.GetProperty("ttlMinutes").GetInt32().Should().Be(5);
+        otpPayload.RootElement.GetProperty("code").GetString().Should().HaveLength(6);
     }
 
     [Fact]
@@ -834,7 +840,6 @@ public sealed class AuthEndpointsTests :
         public async Task ResetAsync()
         {
             await InitializeAsync();
-            EmailService.SentOtps.Clear();
             EmailService.SentAccountCreatedLinks.Clear();
 
             await using var scope = Services.CreateAsyncScope();
@@ -995,26 +1000,7 @@ public sealed class AuthEndpointsTests :
 
     public sealed class CapturingEmailService : IEmailService
     {
-        public List<(string To, string Code, EmailOtpPurpose Purpose, int TtlMinutes)> SentOtps { get; } = [];
         public List<(string To, AccountCreatedEmailDto Info)> SentAccountCreatedLinks { get; } = [];
-
-        /// <summary>
-        /// When true, <see cref="SendOtpAsync"/> throws. Used to force a handler failure
-        /// AFTER the outbox enqueue but before TransactionBehavior commits, proving the
-        /// outbox row and the business write roll back together (Task 10.2 atomicity).
-        /// </summary>
-        public bool ThrowOnSendOtp { get; set; }
-
-        public Task SendOtpAsync(string to, string code, EmailOtpPurpose purpose, int ttlMinutes, CancellationToken ct = default)
-        {
-            if (ThrowOnSendOtp)
-            {
-                throw new InvalidOperationException("Forced OTP send failure for rollback test.");
-            }
-
-            SentOtps.Add((to, code, purpose, ttlMinutes));
-            return Task.CompletedTask;
-        }
 
         public Task SendAccountCreatedLinkAsync(
             string to,

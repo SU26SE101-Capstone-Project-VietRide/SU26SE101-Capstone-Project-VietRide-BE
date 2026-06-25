@@ -6,11 +6,11 @@ using VietRide.Identity.Infrastructure.Http;
 namespace VietRide.Identity.Infrastructure.ExternalClients;
 
 /// <summary>
-/// Production <see cref="IEmailService"/> implementation. Delivers every
-/// transactional Identity email by POSTing to the Notification Service internal
-/// endpoint (<c>POST /internal/v1/emails</c>) via <see cref="INotificationEmailClient"/>.
-/// Identity takes no SendGrid dependency — SendGrid is Notification-only
-/// (BSOT §1.2 / §3.5).
+/// Production <see cref="IEmailService"/> implementation for non-OTP transactional emails.
+/// Delivers emails by POSTing to the Notification Service internal endpoint
+/// (<c>POST /internal/v1/emails</c>) via <see cref="INotificationEmailClient"/>.
+/// OTP delivery is now async via Outbox → RabbitMQ → Notification Service
+/// (BSOT §1.2 / §3.5). Identity takes no SendGrid dependency — SendGrid is Notification-only.
 ///
 /// Selected over <see cref="LoggingEmailService"/> when <c>EMAIL_PROVIDER=SENDGRID</c>
 /// (the container/prod default); local dev keeps <c>LoggingEmailService</c>.
@@ -18,7 +18,6 @@ namespace VietRide.Identity.Infrastructure.ExternalClients;
 public sealed class NotificationEmailService : IEmailService
 {
     // Notification EmailTemplateKey values (apps/notification prisma enum).
-    private const string AuthOtpTemplateKey = "AUTH_OTP";
     private const string SetInitialPasswordTemplateKey = "SET_INITIAL_PASSWORD";
 
     private readonly INotificationEmailClient _client;
@@ -30,28 +29,6 @@ public sealed class NotificationEmailService : IEmailService
     {
         _client = client;
         _logger = logger;
-    }
-
-    /// <inheritdoc />
-    public async Task SendOtpAsync(
-        string to,
-        string code,
-        EmailOtpPurpose purpose,
-        int ttlMinutes,
-        CancellationToken ct = default)
-    {
-        var request = new NotificationEmailRequest(
-            ToEmail: to,
-            TemplateKey: AuthOtpTemplateKey,
-            TemplateData: new Dictionary<string, object?>
-            {
-                ["code"] = code,
-                ["purpose"] = purpose.ToString(),
-                ["ttlMinutes"] = ttlMinutes,
-            });
-
-        // NOTE: never interpolate `code` into any log — only the recipient/purpose.
-        await SendAsync(request, $"OTP ({purpose})", to, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
