@@ -106,6 +106,9 @@ public static class InfrastructureServiceCollectionExtensions
         // Repositories (Task 14.2)
         services.AddScoped<IOperatorVoucherConsentRepository, OperatorVoucherConsentRepository>();
 
+        // Repositories (Task 17.3)
+        services.AddScoped<IBookingStatsRepository, BookingStatsRepository>();
+
         // Application service (Task 12.3)
         // BookingService lives in Application layer; registered here because its ctor
         // depends on ITripServiceClient which is Infrastructure.

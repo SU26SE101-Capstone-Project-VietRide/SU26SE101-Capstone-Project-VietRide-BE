@@ -206,6 +206,7 @@ CREATE INDEX idx_booking_transfers_new_trip_id ON booking_transfers (new_trip_id
 CREATE TABLE booking_stats (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     operator_id UUID NOT NULL,
+    operator_name TEXT NULL,
     stat_date DATE NOT NULL,
     trip_id UUID NULL,    -- nullable: per-operator-per-day aggregates have trip_id NULL
     total_bookings INT NOT NULL DEFAULT 0,

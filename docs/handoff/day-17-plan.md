@@ -171,7 +171,7 @@ Parallel-safe sets: {17.0, 17.6} may proceed immediately (none Q-blocked); **17.
 | 17.0 | done | APPROVE | 2026-06-26 | Refund/policy seam approved; DB-backed full tests need local Postgres rerun before /verify |
 | 17.1 | todo | - | - | Refund-amount calculator (pure domain) |
 | 17.2 | todo | - | - | POST /cancel endpoint — event-driven refund (emit cancelled, no sync Payment call); round-trip per-leg test |
-| 17.3 | todo | - | - | BookingStats entity + migration; ADDS operator_name column (Q3); NO total_partial_no_show |
+| 17.3 | done | APPROVE | 2026-06-26 | BookingStats entity + migration approved; EF apply/down/reapply verified with Docker Postgres |
 | 17.4 | todo | - | - | Stats consumers + operator_name snapshot (Q3); total_refunded on REFUNDED (Q4); BSOT/Contract doc edits |
 | 17.5 | todo | - | - | Stats read endpoints; operatorName from column; totalPartialNoShows=0 stub |
 | 17.6 | todo | - | - | Gateway route for /v1/operator/booking-stats |
