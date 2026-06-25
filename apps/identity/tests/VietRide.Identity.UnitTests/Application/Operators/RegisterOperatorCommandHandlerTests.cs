@@ -3,12 +3,12 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using VietRide.Identity.Application.Abstractions;
-using VietRide.Identity.Application.Abstractions.ExternalClients;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Application.Features.Operators.RegisterOperator;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Identity.UnitTests.Application.Operators;
@@ -23,12 +23,19 @@ public sealed class RegisterOperatorCommandHandlerTests
         var fixture = new Fixture();
         var command = ValidCommand();
         OperatorSubscription? capturedSubscription = null;
+        var capturedEvents = new List<(string EventType, string Payload)>();
 
         fixture.SubscriptionPlans.GetStarterPlanAsync(Arg.Any<CancellationToken>())
             .Returns(SubscriptionPlan.CreateStarter());
         fixture.OperatorSubscriptions
             .AddAsync(Arg.Do<OperatorSubscription>(x => capturedSubscription = x), Arg.Any<CancellationToken>())
             .Returns(call => Task.FromResult(call.Arg<OperatorSubscription>()));
+        fixture.Outbox.EnqueueAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                capturedEvents.Add((ci.ArgAt<string>(0), ci.ArgAt<string>(1)));
+                return Task.CompletedTask;
+            });
 
         var response = await fixture.Handler.Handle(command, CancellationToken.None);
 
@@ -37,12 +44,16 @@ public sealed class RegisterOperatorCommandHandlerTests
         capturedSubscription.Should().NotBeNull();
         capturedSubscription!.Status.Should().Be(SubscriptionStatus.PENDING_APPROVAL);
         capturedSubscription.CurrentOperatorUsers.Should().Be(1);
-        await fixture.EmailService.Received(1).SendOtpAsync(
-            "operator@example.com",
-            Arg.Any<string>(),
-            EmailOtpPurpose.REGISTRATION,
-            10,
-            Arg.Any<CancellationToken>());
+
+        // OTP delivery is now via Outbox (identity.otp.requested), not direct email.
+        var otpEntry = capturedEvents.Should().Contain(e => e.EventType == "identity.otp.requested").Which;
+        using var otpDoc = JsonDocument.Parse(otpEntry.Payload);
+        var otpRoot = otpDoc.RootElement;
+        otpRoot.GetProperty("email").GetString().Should().Be("operator@example.com");
+        otpRoot.GetProperty("purpose").GetString().Should().Be("REGISTRATION");
+        otpRoot.GetProperty("ttlMinutes").GetInt32().Should().Be(10);
+        otpRoot.GetProperty("code").GetString().Should().HaveLength(6);
+
         await fixture.ActivityLogs.Received(1).AddAsync(
             Arg.Is<ActivityLog>(x => x.Action == ActivityLogAction.CREATE_OPERATOR && HasCanonicalSelfRegisterMetadata(x.Metadata)),
             Arg.Any<CancellationToken>());
@@ -75,7 +86,7 @@ public sealed class RegisterOperatorCommandHandlerTests
     }
 
     [Fact]
-    public async Task Handle_OtpCollision_RetriesBeforeSendingEmail()
+    public async Task Handle_OtpCollision_RetriesBeforeEnqueuingOtpEvent()
     {
         var fixture = new Fixture();
         fixture.SubscriptionPlans.GetStarterPlanAsync(Arg.Any<CancellationToken>())
@@ -86,11 +97,10 @@ public sealed class RegisterOperatorCommandHandlerTests
         await fixture.Handler.Handle(ValidCommand(), CancellationToken.None);
 
         await fixture.Tokens.Received(2).TryAddAsync(Arg.Any<EmailVerificationToken>(), Arg.Any<CancellationToken>());
-        await fixture.EmailService.Received(1).SendOtpAsync(
-            "operator@example.com",
+        // OTP is now delivered via outbox — verify exactly one identity.otp.requested was enqueued.
+        await fixture.Outbox.Received(1).EnqueueAsync(
+            "identity.otp.requested",
             Arg.Any<string>(),
-            EmailOtpPurpose.REGISTRATION,
-            10,
             Arg.Any<CancellationToken>());
     }
 
@@ -172,7 +182,7 @@ public sealed class RegisterOperatorCommandHandlerTests
                 Tokens,
                 ActivityLogs,
                 PasswordHasher,
-                EmailService,
+                Outbox,
                 Clock,
                 NullLogger<RegisterOperatorCommandHandler>.Instance);
         }
@@ -184,7 +194,7 @@ public sealed class RegisterOperatorCommandHandlerTests
         public IEmailVerificationTokenRepository Tokens { get; } = Substitute.For<IEmailVerificationTokenRepository>();
         public IActivityLogRepository ActivityLogs { get; } = Substitute.For<IActivityLogRepository>();
         public IPasswordHasher PasswordHasher { get; } = Substitute.For<IPasswordHasher>();
-        public IEmailService EmailService { get; } = Substitute.For<IEmailService>();
+        public IIntegrationEventOutbox Outbox { get; } = Substitute.For<IIntegrationEventOutbox>();
         public IClock Clock { get; } = Substitute.For<IClock>();
         public RegisterOperatorCommandHandler Handler { get; }
     }

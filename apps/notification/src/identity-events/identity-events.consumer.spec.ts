@@ -2,11 +2,12 @@ import { Logger } from '@nestjs/common';
 import {
   IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
   IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
+  IDENTITY_OTP_REQUESTED_ROUTING_KEY,
   IDENTITY_USER_CREATED_ROUTING_KEY,
 } from '@vietride/contracts';
 import type { RabbitMqConsumer, RabbitMqHandler } from '@vietride/nest-rabbitmq';
 import type { ConsumeMessage } from 'amqplib';
-import { NotificationType } from '../generated/notification-prisma-client';
+import { EmailTemplateKey, NotificationType } from '../generated/notification-prisma-client';
 import { MessageIdempotencyService } from '../notifications/message-idempotency.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { OperatorRecipientProvider } from '../notifications/operator-recipient.provider';
@@ -39,6 +40,7 @@ describe('IdentityEventsConsumer', () => {
     } as unknown as jest.Mocked<MessageIdempotencyService>;
     notificationsService = {
       createNotification: jest.fn(),
+      enqueueEmail: jest.fn(),
     } as unknown as jest.Mocked<NotificationsService>;
     operatorRecipientProvider = {
       resolveOperatorRecipientUserIds: jest.fn(),
@@ -68,6 +70,7 @@ describe('IdentityEventsConsumer', () => {
     expect(Object.keys(handlers).sort()).toEqual([
       IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
       IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
+      IDENTITY_OTP_REQUESTED_ROUTING_KEY,
       IDENTITY_USER_CREATED_ROUTING_KEY,
     ]);
     expect(rabbitConsumer.subscribe).toHaveBeenCalledWith(
@@ -110,7 +113,9 @@ describe('IdentityEventsConsumer', () => {
       createMessage(MESSAGE_ID),
     );
 
-    expect(operatorRecipientProvider.resolveOperatorRecipientUserIds).toHaveBeenCalledWith(OPERATOR_ID);
+    expect(operatorRecipientProvider.resolveOperatorRecipientUserIds).toHaveBeenCalledWith(
+      OPERATOR_ID,
+    );
     expect(notificationsService.createNotification).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: USER_ID,
@@ -193,7 +198,9 @@ describe('IdentityEventsConsumer', () => {
 
   it('releases idempotency and rethrows provider errors', async () => {
     idempotency.begin.mockResolvedValue('acquired');
-    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockRejectedValue(new Error('identity down'));
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockRejectedValue(
+      new Error('identity down'),
+    );
 
     await expect(
       consumer.handleOperatorApproved(
@@ -239,6 +246,143 @@ describe('IdentityEventsConsumer', () => {
 
     expect(idempotency.begin).not.toHaveBeenCalled();
     expect(notificationsService.createNotification).not.toHaveBeenCalled();
+  });
+
+  // --- OTP handler tests ---
+
+  it('enqueues OTP email with correct args for a valid identity.otp.requested event', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    notificationsService.enqueueEmail.mockResolvedValue({
+      id: 'email-delivery-id',
+      toEmail: 'rider@example.com',
+      templateKey: EmailTemplateKey.AUTH_OTP,
+      status: 'PENDING',
+      createdAt: '2026-06-01T10:00:00.000Z',
+    });
+
+    await consumer.handleOtpRequested(
+      {
+        userId: USER_ID,
+        email: 'rider@example.com',
+        code: '123456',
+        purpose: 'REGISTRATION',
+        ttlMinutes: 5,
+      },
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(notificationsService.enqueueEmail).toHaveBeenCalledWith({
+      toEmail: 'rider@example.com',
+      templateKey: EmailTemplateKey.AUTH_OTP,
+      templateData: { code: '123456', purpose: 'REGISTRATION', ttlMinutes: 5 },
+    });
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      IDENTITY_OTP_REQUESTED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+  });
+
+  it('skips duplicate OTP message', async () => {
+    idempotency.begin.mockResolvedValue('duplicate');
+
+    await consumer.handleOtpRequested(
+      {
+        userId: USER_ID,
+        email: 'rider@example.com',
+        code: '123456',
+        purpose: 'REGISTRATION',
+        ttlMinutes: 5,
+      },
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(notificationsService.enqueueEmail).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).not.toHaveBeenCalled();
+  });
+
+  it('throws when OTP message is missing messageId', async () => {
+    await expect(
+      consumer.handleOtpRequested(
+        {
+          userId: USER_ID,
+          email: 'rider@example.com',
+          code: '123456',
+          purpose: 'REGISTRATION',
+          ttlMinutes: 5,
+        },
+        createMessage(undefined),
+      ),
+    ).rejects.toThrow(`MISSING_MESSAGE_ID_${IDENTITY_OTP_REQUESTED_ROUTING_KEY}`);
+
+    expect(idempotency.begin).not.toHaveBeenCalled();
+    expect(notificationsService.enqueueEmail).not.toHaveBeenCalled();
+  });
+
+  it('throws without releasing idempotency when locked OTP message arrives', async () => {
+    idempotency.begin.mockResolvedValue('locked');
+
+    await expect(
+      consumer.handleOtpRequested(
+        {
+          userId: USER_ID,
+          email: 'rider@example.com',
+          code: '123456',
+          purpose: 'REGISTRATION',
+          ttlMinutes: 5,
+        },
+        createMessage(MESSAGE_ID),
+      ),
+    ).rejects.toThrow(`MESSAGE_LOCKED_${IDENTITY_OTP_REQUESTED_ROUTING_KEY}_${MESSAGE_ID}`);
+
+    expect(notificationsService.enqueueEmail).not.toHaveBeenCalled();
+    expect(idempotency.release).not.toHaveBeenCalled();
+  });
+
+  it('drops malformed OTP payload after marking processed', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+
+    await expect(
+      consumer.handleOtpRequested(
+        {
+          userId: 'not-a-uuid',
+          email: 'bad',
+          code: '123456',
+          purpose: 'REGISTRATION',
+          ttlMinutes: 5,
+        },
+        createMessage(MESSAGE_ID),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(notificationsService.enqueueEmail).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      IDENTITY_OTP_REQUESTED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+    expect(idempotency.release).not.toHaveBeenCalled();
+  });
+
+  it('releases idempotency and rethrows enqueueEmail errors', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    notificationsService.enqueueEmail.mockRejectedValue(new Error('sendgrid down'));
+
+    await expect(
+      consumer.handleOtpRequested(
+        {
+          userId: USER_ID,
+          email: 'rider@example.com',
+          code: '123456',
+          purpose: 'REGISTRATION',
+          ttlMinutes: 5,
+        },
+        createMessage(MESSAGE_ID),
+      ),
+    ).rejects.toThrow('sendgrid down');
+
+    expect(idempotency.release).toHaveBeenCalledWith(
+      IDENTITY_OTP_REQUESTED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
   });
 });
 

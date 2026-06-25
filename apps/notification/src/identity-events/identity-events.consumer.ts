@@ -2,15 +2,17 @@ import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import {
   IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
   IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
+  IDENTITY_OTP_REQUESTED_ROUTING_KEY,
   IDENTITY_USER_CREATED_ROUTING_KEY,
   IdentityOperatorApprovedEventSchema,
   IdentityOperatorSuspendedEventSchema,
+  IdentityOtpRequestedEventSchema,
   IdentityUserCreatedEventSchema,
 } from '@vietride/contracts';
 import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
 import type { ConsumeMessage } from 'amqplib';
 import { ZodError } from 'zod';
-import { NotificationType } from '../generated/notification-prisma-client';
+import { EmailTemplateKey, NotificationType } from '../generated/notification-prisma-client';
 import { RABBITMQ_PREFETCH_ONE } from '../notifications/core-events.constants';
 import { MessageIdempotencyService } from '../notifications/message-idempotency.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -31,7 +33,8 @@ export class IdentityEventsConsumer implements OnModuleInit {
     private readonly consumer: RabbitMqConsumer,
     private readonly idempotency: MessageIdempotencyService,
     private readonly notificationsService: NotificationsService,
-    @Inject(OPERATOR_RECIPIENT_PROVIDER) private readonly operatorRecipientProvider: OperatorRecipientProvider,
+    @Inject(OPERATOR_RECIPIENT_PROVIDER)
+    private readonly operatorRecipientProvider: OperatorRecipientProvider,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -60,6 +63,13 @@ export class IdentityEventsConsumer implements OnModuleInit {
       (payload, raw) => this.handleOperatorSuspended(payload, raw),
       { prefetch: RABBITMQ_PREFETCH_ONE, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
     );
+
+    await this.consumer.subscribe(
+      'notification.identity.otp.requested',
+      IDENTITY_OTP_REQUESTED_ROUTING_KEY,
+      (payload, raw) => this.handleOtpRequested(payload, raw),
+      { prefetch: RABBITMQ_PREFETCH_ONE, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
+    );
   }
 
   async handleOperatorApproved(payload: unknown, raw: ConsumeMessage): Promise<void> {
@@ -84,8 +94,52 @@ export class IdentityEventsConsumer implements OnModuleInit {
     );
   }
 
+  async handleOtpRequested(payload: unknown, raw: ConsumeMessage): Promise<void> {
+    const routingKey = IDENTITY_OTP_REQUESTED_ROUTING_KEY;
+    const messageId = raw.properties.messageId ?? raw.properties.correlationId;
+    if (!messageId) {
+      throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
+    }
+
+    const processingState = await this.idempotency.begin(routingKey, messageId);
+    if (processingState === 'duplicate') {
+      this.logger.log(`Skipping already handled ${routingKey} messageId=${messageId}`);
+      return;
+    }
+    if (processingState === 'locked') {
+      throw new Error(`MESSAGE_LOCKED_${routingKey}_${messageId}`);
+    }
+
+    try {
+      const event = IdentityOtpRequestedEventSchema.parse(payload);
+      const emailDomain = event.email.split('@')[1] ?? 'unknown';
+
+      await this.notificationsService.enqueueEmail({
+        toEmail: event.email,
+        templateKey: EmailTemplateKey.AUTH_OTP,
+        templateData: { code: event.code, purpose: event.purpose, ttlMinutes: event.ttlMinutes },
+      });
+
+      await this.idempotency.markProcessed(routingKey, messageId);
+      this.logger.log(
+        `Processed ${routingKey} messageId=${messageId} userId=${event.userId} emailDomain=${emailDomain}`,
+      );
+    } catch (error) {
+      if (error instanceof ZodError) {
+        this.logger.warn(`Dropping malformed ${routingKey} messageId=${messageId}`);
+        await this.idempotency.markProcessed(routingKey, messageId);
+        return;
+      }
+
+      await this.idempotency.release(routingKey, messageId);
+      throw error;
+    }
+  }
+
   private async handleOperatorLifecycle(
-    routingKey: typeof IDENTITY_OPERATOR_APPROVED_ROUTING_KEY | typeof IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
+    routingKey:
+      | typeof IDENTITY_OPERATOR_APPROVED_ROUTING_KEY
+      | typeof IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
     payload: unknown,
     raw: ConsumeMessage,
     type: NotificationType,

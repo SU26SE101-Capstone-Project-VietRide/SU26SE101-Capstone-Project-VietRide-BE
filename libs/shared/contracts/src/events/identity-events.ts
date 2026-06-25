@@ -38,7 +38,17 @@ export const IdentityOperatorSuspendedEventSchema = z.object({
 });
 export type IdentityOperatorSuspendedEvent = z.infer<typeof IdentityOperatorSuspendedEventSchema>;
 
+export const IdentityOtpRequestedEventSchema = z.object({
+  userId: z.string().uuid(),
+  email: z.string().email(),
+  code: z.string().length(6),
+  purpose: z.enum(['REGISTRATION', 'PASSWORD_RESET']),
+  ttlMinutes: z.number().int().positive(),
+});
+export type IdentityOtpRequestedEvent = z.infer<typeof IdentityOtpRequestedEventSchema>;
+
 // <service>.<aggregate>.<verb_past> per BACKEND_SOURCE_OF_TRUTH §7.3.
 export const IDENTITY_USER_CREATED_ROUTING_KEY = 'identity.user.created';
 export const IDENTITY_OPERATOR_APPROVED_ROUTING_KEY = 'identity.operator.approved';
 export const IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY = 'identity.operator.suspended';
+export const IDENTITY_OTP_REQUESTED_ROUTING_KEY = 'identity.otp.requested';
