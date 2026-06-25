@@ -1983,19 +1983,37 @@ Response `200`:
 
 ### POST `/v1/rag/chat`
 
-Auth: any authenticated role. Retrieval access is filtered by role:
-`PASSENGER` can query `PUBLIC`; `DRIVER`/`ASSISTANT`/operator roles can query
-`PUBLIC` + `OPERATOR`; `SYSTEM_ADMIN` can query all access levels.
+Auth: any authenticated role. Retrieval access is filtered by role
+and optional tenant scope:
+
+| Role | Access levels | Tenant scope | `audienceRoles` filter |
+|------|---------------|-------------|----------------------|
+| `PASSENGER` | `PUBLIC` | Global (`operator_id IS NULL`) | Bắt buộc |
+| `DRIVER`, `ASSISTANT`, `OPERATOR_STAFF`, `OPERATOR_ADMIN` | `PUBLIC`, `OPERATOR` | Own operator (`operatorId` từ JWT) | Bắt buộc |
+| `SYSTEM_ADMIN` (global) | `PUBLIC`, `OPERATOR`, `ADMIN` | Global | Bỏ qua |
+| `SYSTEM_ADMIN` (operator scope) | `PUBLIC`, `OPERATOR`, `ADMIN` | Selected operator | Bỏ qua |
 
 Request:
 ```json
 {
   "conversationId": "uuid",
-  "message": "Quy trình xử lý hàng bị từ chối là gì?"
+  "message": "Quy trình xử lý hàng bị từ chối là gì?",
+  "operatorId": "uuid"
 }
 ```
 
+Fields:
+- `conversationId` (optional, UUID): reuse existing conversation.
+- `message` (required, string, 1-4000 chars): câu hỏi.
+- `operatorId` (optional, UUID, **SYSTEM_ADMIN only**): scope retrieval to a specific operator's documents.
+  Non-admin gửi `operatorId` trả 403. Khi reuse conversation đã có scope, không cần gửi lại;
+  gửi `operatorId` khác scope cũ trả 403.
+
 Response: Server-Sent Events stream with assistant tokens and final cited chunk IDs.
+
+Error codes:
+- `RAG_OPERATOR_SCOPE_FORBIDDEN` (403): non-admin gửi `operatorId`.
+- `RAG_CONVERSATION_SCOPE_MISMATCH` (403): đổi operator scope giữa các turn.
 
 ## Operator/Admin Management
 

@@ -12,16 +12,13 @@ import {
 import { ChatService } from './chat.service';
 import type { RagChatSseEvent } from './chat.types';
 import { CreateChatDto, CreateChatSchema } from './dto/create-chat.dto';
+import { errorEnvelopeSchema, internalAuthHeaderSchema } from '../swagger/api-response.schemas';
 
-const RAG_CHAT_SWAGGER_MAX_MESSAGE_CHARS = 500;
+const RAG_CHAT_REQUEST_MAX_MESSAGE_CHARS = 4_000;
 
 @ApiTags('RAG Chat')
 @ApiBearerAuth()
-@ApiHeader({
-  name: 'X-Internal-Auth',
-  description: 'Internal Gateway JWT header. Format: Bearer <token>.',
-  required: true,
-})
+@ApiHeader(internalAuthHeaderSchema)
 @UseGuards(InternalJwtAuthGuard)
 @Controller('v1/rag/chat')
 export class ChatController {
@@ -35,15 +32,18 @@ export class ChatController {
       required: ['message'],
       properties: {
         conversationId: { type: 'string', format: 'uuid' },
-        message: { type: 'string', minLength: 1, maxLength: RAG_CHAT_SWAGGER_MAX_MESSAGE_CHARS },
+        message: { type: 'string', minLength: 1, maxLength: RAG_CHAT_REQUEST_MAX_MESSAGE_CHARS },
+        operatorId: { type: 'string', format: 'uuid', description: 'SYSTEM_ADMIN only: scope retrieval to specific operator' },
       },
     },
   })
-  @ApiResponse({ status: 200, description: 'SSE stream with token and final citation events' })
-  @ApiResponse({ status: 400, description: 'Invalid payload' })
-  @ApiResponse({ status: 401, description: 'Missing or invalid internal JWT' })
-  @ApiResponse({ status: 403, description: 'Caller is not allowed to query RAG' })
-  @ApiResponse({ status: 404, description: 'Conversation not found' })
+  @ApiResponse({ status: 200, description: 'SSE text/event-stream. Events: token, done, error.' })
+  @ApiResponse({ status: 400, description: 'Invalid payload', schema: errorEnvelopeSchema(400, 'VALIDATION_FAILED', 'Validation failed', { fields: true }) })
+  @ApiResponse({ status: 401, description: 'Missing or invalid internal JWT', schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Missing or invalid internal JWT') })
+  @ApiResponse({ status: 403, description: 'Caller is not allowed to query RAG', schema: errorEnvelopeSchema(403, 'INSUFFICIENT_ROLE', 'Caller is not allowed to query RAG') })
+  @ApiResponse({ status: 404, description: 'Conversation not found', schema: errorEnvelopeSchema(404, 'RAG_CONVERSATION_NOT_FOUND', 'Conversation not found') })
+  @ApiResponse({ status: 429, description: 'Rate limit exceeded', schema: errorEnvelopeSchema(429, 'RATE_LIMIT_EXCEEDED', 'Rate limit exceeded') })
+  @ApiResponse({ status: 503, description: 'Provider unavailable or circuit open', schema: errorEnvelopeSchema(503, 'RAG_PROVIDER_UNAVAILABLE', 'Provider unavailable or circuit open') })
   async create(
     @Body(new ZodValidationPipe(CreateChatSchema)) dto: CreateChatDto,
     @Req() req: RequestWithRagInternalUser,

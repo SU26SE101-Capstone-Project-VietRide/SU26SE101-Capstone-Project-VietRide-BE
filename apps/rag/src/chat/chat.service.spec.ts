@@ -311,6 +311,62 @@ describe('ChatService', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it('rejects non-admin sending operatorId in DTO', async () => {
+    await expect(
+      service.prepareChat(
+        { message: 'Quy trình', operatorId: OPERATOR_ID },
+        { sub: USER_ID, role: 'PASSENGER' },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('uses DTO operatorId for SYSTEM_ADMIN retrieval scope', async () => {
+    repository.createConversation.mockResolvedValue(makeConversation({ operatorId: OPERATOR_ID }));
+
+    await service.prepareChat(
+      { message: 'Admin query', operatorId: OPERATOR_ID },
+      { sub: USER_ID, role: 'SYSTEM_ADMIN' },
+    );
+
+    expect(repository.createConversation).toHaveBeenCalledWith(
+      expect.objectContaining({ operatorId: OPERATOR_ID }),
+    );
+    expect(repository.searchChunks).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorId: OPERATOR_ID,
+        callerRole: 'SYSTEM_ADMIN',
+      }),
+    );
+  });
+
+  it('uses global scope for SYSTEM_ADMIN without operatorId', async () => {
+    await service.prepareChat(
+      { message: 'Admin global query' },
+      { sub: USER_ID, role: 'SYSTEM_ADMIN' },
+    );
+
+    expect(repository.searchChunks).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessLevels: ['PUBLIC', 'OPERATOR', 'ADMIN'],
+        callerRole: 'SYSTEM_ADMIN',
+      }),
+    );
+    expect(repository.searchChunks).toHaveBeenCalledWith(
+      expect.not.objectContaining({ operatorId: expect.anything() }),
+    );
+  });
+
+  it('passes callerRole for audience filtering in search', async () => {
+    await service.prepareChat(
+      { message: 'Test audience' },
+      { sub: USER_ID, role: 'PASSENGER' },
+    );
+
+    expect(repository.searchChunks).toHaveBeenCalledWith(
+      expect.objectContaining({ callerRole: 'PASSENGER' }),
+    );
+  });
+
   it('persists assistant message with retrieved citations after streaming', async () => {
     const prepared = await service.prepareChat(
       { message: 'Tôi cần hỗ trợ' },
@@ -409,7 +465,7 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     LOG_LEVEL: 'info',
     OPENROUTER_API_KEY: 'test-key',
     OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1',
-    OPENROUTER_CHAT_MODEL: 'nex-agi/nex-n2-pro:free',
+    OPENROUTER_CHAT_MODEL: 'openai/gpt-oss-120b:free',
     OPENROUTER_EMBEDDING_MODEL: 'nvidia/llama-nemotron-embed-vl-1b-v2:free',
     OPENROUTER_HTTP_REFERER: undefined,
     OPENROUTER_APP_TITLE: 'VietRide RAG',
@@ -442,7 +498,7 @@ function makeRuntimeConfigSnapshot(): RuntimeConfigSnapshot {
   );
 }
 
-function makeConversation(): RagConversation {
+function makeConversation(overrides: Partial<RagConversation> = {}): RagConversation {
   return {
     id: CONVERSATION_ID,
     userId: USER_ID,
@@ -454,6 +510,7 @@ function makeConversation(): RagConversation {
     startedAt: new Date('2026-06-13T00:00:00.000Z'),
     lastMessageAt: null,
     createdAt: new Date('2026-06-13T00:00:00.000Z'),
+    ...overrides,
   };
 }
 

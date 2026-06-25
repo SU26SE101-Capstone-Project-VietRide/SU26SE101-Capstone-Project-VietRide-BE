@@ -68,6 +68,16 @@ describe('FeedbackService', () => {
 
     expect(result.totalItems).toBe(1);
   });
+
+  it('rejects SYSTEM_ADMIN feedback on non-owned message', async () => {
+    await expect(
+      service.createFeedback(
+        ASSISTANT_MESSAGE_ID,
+        { rating: -1 },
+        { sub: OTHER_USER_ID, role: 'SYSTEM_ADMIN' },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
 });
 
 function makeMessage(role: 'USER' | 'ASSISTANT'): RagMessageWithConversation {

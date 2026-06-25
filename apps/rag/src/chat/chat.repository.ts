@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '../generated/rag-prisma-client';
 import type {
   KnowledgeDocumentAccess,
   RagConversation,
@@ -101,6 +102,7 @@ export class ChatRepository {
       },
       update: {
         rating: input.rating,
+        userId: input.userId,
         chunkIds: input.message.citedChunkIds,
         responseLength: input.message.content.length,
         updatedAt: new Date(),
@@ -159,6 +161,7 @@ export class ChatRepository {
     queryEmbedding: number[];
     accessLevels: KnowledgeDocumentAccess[];
     operatorId?: string;
+    callerRole: string;
     limit: number;
     hybridSearchEnabled: boolean;
   }): Promise<RagRetrievedChunk[]> {
@@ -172,8 +175,13 @@ export class ChatRepository {
     queryEmbedding: number[];
     accessLevels: KnowledgeDocumentAccess[];
     operatorId?: string;
+    callerRole: string;
     limit: number;
   }): Promise<RagRetrievedChunk[]> {
+    const audienceFilter = input.callerRole !== 'SYSTEM_ADMIN'
+      ? Prisma.sql`AND (d.audience_roles IS NULL OR d.audience_roles = '{}' OR d.audience_roles @> ARRAY[${input.callerRole}]::text[])`
+      : Prisma.sql``;
+
     return this.prisma.$queryRaw<RagRetrievedChunk[]>`
       SELECT
         c.id::text AS "id",
@@ -195,6 +203,7 @@ export class ChatRepository {
           c.operator_id IS NULL
           OR (${input.operatorId ?? null}::uuid IS NOT NULL AND c.operator_id = ${input.operatorId ?? null}::uuid)
         )
+        ${audienceFilter}
       ORDER BY c.embedding <=> ${this.toVectorLiteral(input.queryEmbedding)}::halfvec
       LIMIT ${input.limit}
     `;
@@ -205,8 +214,13 @@ export class ChatRepository {
     queryEmbedding: number[];
     accessLevels: KnowledgeDocumentAccess[];
     operatorId?: string;
+    callerRole: string;
     limit: number;
   }): Promise<RagRetrievedChunk[]> {
+    const audienceFilter = input.callerRole !== 'SYSTEM_ADMIN'
+      ? Prisma.sql`AND (d.audience_roles IS NULL OR d.audience_roles = '{}' OR d.audience_roles @> ARRAY[${input.callerRole}]::text[])`
+      : Prisma.sql``;
+
     return this.prisma.$queryRaw<RagRetrievedChunk[]>`
       WITH scoped_chunks AS (
         SELECT
@@ -230,6 +244,7 @@ export class ChatRepository {
             c.operator_id IS NULL
             OR (${input.operatorId ?? null}::uuid IS NOT NULL AND c.operator_id = ${input.operatorId ?? null}::uuid)
           )
+          ${audienceFilter}
       ),
       fts_candidates AS (
         SELECT
