@@ -155,6 +155,27 @@ internal sealed class BookingRepository : IBookingRepository
     }
 
     /// <inheritdoc/>
+    public async Task<bool> TryCancelAsync(
+        Guid bookingId,
+        BookingCancellationReason reason,
+        DateTimeOffset cancelledAt,
+        bool refundOverride,
+        CancellationToken ct = default)
+    {
+        var updated = await _db.Bookings
+            .Where(b => b.Id == bookingId
+                && (b.Status == BookingStatus.CONFIRMED || b.Status == BookingStatus.PENDING_PAYMENT))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(b => b.Status, BookingStatus.CANCELLED)
+                .SetProperty(b => b.CancellationReason, reason)
+                .SetProperty(b => b.CancelledAt, cancelledAt)
+                .SetProperty(b => b.RefundOverride, refundOverride)
+                .SetProperty(b => b.UpdatedAt, cancelledAt), ct);
+
+        return updated == 1;
+    }
+
+    /// <inheritdoc/>
     public async Task<bool> TryMarkCancelledRefundedAsync(
         Guid bookingId,
         DateTimeOffset refundedAt,

@@ -3,6 +3,7 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Booking.Api.Controllers.Requests;
+using VietRide.Booking.Application.Features.Bookings.CancelBooking;
 using VietRide.Booking.Application.Features.Bookings.CreateBooking;
 using VietRide.Booking.Application.Features.Bookings.CreateRoundTripBooking;
 using VietRide.Booking.Application.Features.Bookings.EditDropoff;
@@ -173,6 +174,39 @@ public sealed class BookingsController : ControllerBase
             IdempotencyKey: idempotencyKey,
             DropoffStationId: request.Dropoff?.StationId,
             DropoffStopId: request.Dropoff?.StopId);
+
+        var result = await _sender.Send(command, ct);
+
+        return StatusCode(StatusCodes.Status200OK, result);
+    }
+
+    /// <summary>Cancel a booking and enqueue an event-driven wallet refund.</summary>
+    /// <remarks>
+    /// Auth: PASSENGER (booking owner only).
+    /// Idempotency-Key header required.
+    /// Refund is asynchronous: response returns the preview amount; Payment credits the wallet from booking.booking.cancelled.
+    /// </remarks>
+    [HttpPost("{bookingId:guid}/cancel")]
+    [Authorize(Roles = PassengerRole)]
+    [ProducesResponseType(typeof(ApiResponse<CancelBookingResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> CancelBooking(
+        [FromRoute] Guid bookingId,
+        [FromBody] CancelBookingRequest request,
+        CancellationToken ct)
+    {
+        var passengerUserId = GetPassengerUserId();
+        var idempotencyKey = GetRequiredIdempotencyKey();
+
+        var command = new CancelBookingCommand(
+            BookingId: bookingId,
+            PassengerUserId: passengerUserId,
+            IdempotencyKey: idempotencyKey,
+            Reason: request.Reason);
 
         var result = await _sender.Send(command, ct);
 

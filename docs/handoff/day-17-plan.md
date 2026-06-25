@@ -170,7 +170,7 @@ Parallel-safe sets: {17.0, 17.6} may proceed immediately (none Q-blocked); **17.
 |---|---|---|---|---|
 | 17.0 | done | APPROVE | 2026-06-26 | Refund/policy seam approved; DB-backed full tests need local Postgres rerun before /verify |
 | 17.1 | done | APPROVE | 2026-06-26 | Refund calculator approved; Booking build/format/tests green |
-| 17.2 | todo | - | - | POST /cancel endpoint — event-driven refund (emit cancelled, no sync Payment call); round-trip per-leg test |
+| 17.2 | done | APPROVE | 2026-06-26 | Cancel endpoint approved after patch round; atomic cancel transition + event-driven refund |
 | 17.3 | done | APPROVE | 2026-06-26 | BookingStats entity + migration approved; EF apply/down/reapply verified with Docker Postgres |
 | 17.4 | todo | - | - | Stats consumers + operator_name snapshot (Q3); total_refunded on REFUNDED (Q4); BSOT/Contract doc edits |
 | 17.5 | todo | - | - | Stats read endpoints; operatorName from column; totalPartialNoShows=0 stub |
