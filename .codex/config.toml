@@ -10,6 +10,9 @@ args = [
 [mcp_servers.codegraph.tools.codegraph_node]
 approval_mode = "approve"
 
+[mcp_servers.codegraph.tools.codegraph_context]
+approval_mode = "approve"
+
 [mcp_servers.context7]
 command = "cmd"
 args = [
