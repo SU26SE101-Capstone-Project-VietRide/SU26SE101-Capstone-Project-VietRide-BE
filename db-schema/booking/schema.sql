@@ -227,6 +227,16 @@ CREATE INDEX idx_booking_stats_operator_date ON booking_stats (operator_id, stat
 COMMENT ON TABLE booking_stats IS
     'UPSERT-driven counter table from event consumers. (operator_id, stat_date, trip_id) unique key.';
 
+CREATE TABLE booking_stats_processed_events (
+    event_type VARCHAR(100) NOT NULL,
+    booking_id UUID NOT NULL,
+    processed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT pk_booking_stats_processed_events PRIMARY KEY (event_type, booking_id)
+);
+
+COMMENT ON TABLE booking_stats_processed_events IS
+    'Durable de-dupe marker for BookingStats lifecycle event consumers. No cross-service FK.';
+
 -- -----------------------------------------------------------------------------
 -- vouchers (System Admin + Operator self-create — platform-wide + operator-owned)
 -- -----------------------------------------------------------------------------

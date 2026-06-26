@@ -9,9 +9,18 @@ namespace VietRide.Booking.Application.Abstractions.Repositories;
 public interface IBookingStatsRepository : IRepository<BookingStats, Guid>
 {
     /// <summary>
-    /// Inserts or replaces the counter values for the natural key
-    /// <c>(operator_id, stat_date, COALESCE(trip_id, zero-uuid))</c>.
-    /// Replaying the same stats row is idempotent because counters are assigned, not incremented.
+    /// Claims a lifecycle event for BookingStats.
+    /// Returns <c>false</c> when the event was already processed.
     /// </summary>
-    Task UpsertAsync(BookingStats stats, CancellationToken ct = default);
+    Task<bool> TryClaimProcessedEventAsync(
+        string eventType,
+        Guid bookingId,
+        DateTimeOffset processedAt,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Applies additive counter deltas for the natural key
+    /// <c>(operator_id, stat_date, COALESCE(trip_id, zero-uuid))</c>.
+    /// </summary>
+    Task UpsertDeltaAsync(BookingStats delta, CancellationToken ct = default);
 }

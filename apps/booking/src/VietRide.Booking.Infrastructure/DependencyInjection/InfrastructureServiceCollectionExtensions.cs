@@ -140,6 +140,21 @@ public static class InfrastructureServiceCollectionExtensions
                 options.QueueName = "booking.wallet-credited";
                 options.BindingKeys = [WalletCreditedIntegrationEvent.EventType];
             });
+            services.AddVietRideEventConsumer<BookingConfirmedIntegrationEvent, BookingConfirmedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "booking.booking-confirmed-stats";
+                options.BindingKeys = [BookingConfirmedIntegrationEvent.EventType];
+            });
+            services.AddVietRideEventConsumer<BookingCancelledIntegrationEvent, BookingCancelledIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "booking.booking-cancelled-stats";
+                options.BindingKeys = [BookingCancelledIntegrationEvent.EventType];
+            });
+            services.AddVietRideEventConsumer<BookingRefundedIntegrationEvent, BookingRefundedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "booking.booking-refunded-stats";
+                options.BindingKeys = [BookingRefundedIntegrationEvent.EventType];
+            });
         }
 
         // Payment inter-service client (real debit lands Day 15/16).

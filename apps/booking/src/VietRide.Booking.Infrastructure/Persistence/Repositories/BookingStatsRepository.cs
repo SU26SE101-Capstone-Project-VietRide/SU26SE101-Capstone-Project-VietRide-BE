@@ -40,7 +40,29 @@ internal sealed class BookingStatsRepository : IBookingStatsRepository
     public IQueryable<BookingStats> QueryNoTracking()
         => _db.BookingStats.AsNoTracking();
 
-    public async Task UpsertAsync(BookingStats stats, CancellationToken ct = default)
+    public async Task<bool> TryClaimProcessedEventAsync(
+        string eventType,
+        Guid bookingId,
+        DateTimeOffset processedAt,
+        CancellationToken ct = default)
+    {
+        var claimed = await _db.Database.ExecuteSqlInterpolatedAsync($@"
+INSERT INTO vietride_booking.booking_stats_processed_events (
+    event_type,
+    booking_id,
+    processed_at
+)
+VALUES (
+    {eventType},
+    {bookingId},
+    {processedAt}
+)
+ON CONFLICT (event_type, booking_id) DO NOTHING;", ct);
+
+        return claimed == 1;
+    }
+
+    public async Task UpsertDeltaAsync(BookingStats delta, CancellationToken ct = default)
     {
         await _db.Database.ExecuteSqlInterpolatedAsync($@"
 INSERT INTO vietride_booking.booking_stats (
@@ -60,32 +82,32 @@ INSERT INTO vietride_booking.booking_stats (
     updated_at
 )
 VALUES (
-    {stats.Id},
-    {stats.OperatorId},
-    {stats.OperatorName},
-    {stats.StatDate},
-    {stats.TripId},
-    {stats.TotalBookings},
-    {stats.TotalConfirmed},
-    {stats.TotalCancelled},
-    {stats.TotalNoShow},
-    {stats.TotalCompleted},
-    {stats.TotalRevenue.Amount},
-    {stats.TotalRefunded.Amount},
-    {stats.TotalSeatsBooked},
+    {delta.Id},
+    {delta.OperatorId},
+    {delta.OperatorName},
+    {delta.StatDate},
+    {delta.TripId},
+    {delta.TotalBookings},
+    {delta.TotalConfirmed},
+    {delta.TotalCancelled},
+    {delta.TotalNoShow},
+    {delta.TotalCompleted},
+    {delta.TotalRevenue.Amount},
+    {delta.TotalRefunded.Amount},
+    {delta.TotalSeatsBooked},
     now()
 )
 ON CONFLICT (operator_id, stat_date, COALESCE(trip_id, '00000000-0000-0000-0000-000000000000'::uuid))
 DO UPDATE SET
     operator_name = COALESCE(EXCLUDED.operator_name, booking_stats.operator_name),
-    total_bookings = EXCLUDED.total_bookings,
-    total_confirmed = EXCLUDED.total_confirmed,
-    total_cancelled = EXCLUDED.total_cancelled,
-    total_no_show = EXCLUDED.total_no_show,
-    total_completed = EXCLUDED.total_completed,
-    total_revenue = EXCLUDED.total_revenue,
-    total_refunded = EXCLUDED.total_refunded,
-    total_seats_booked = EXCLUDED.total_seats_booked,
+    total_bookings = booking_stats.total_bookings + EXCLUDED.total_bookings,
+    total_confirmed = booking_stats.total_confirmed + EXCLUDED.total_confirmed,
+    total_cancelled = booking_stats.total_cancelled + EXCLUDED.total_cancelled,
+    total_no_show = booking_stats.total_no_show + EXCLUDED.total_no_show,
+    total_completed = booking_stats.total_completed + EXCLUDED.total_completed,
+    total_revenue = booking_stats.total_revenue + EXCLUDED.total_revenue,
+    total_refunded = booking_stats.total_refunded + EXCLUDED.total_refunded,
+    total_seats_booked = booking_stats.total_seats_booked + EXCLUDED.total_seats_booked,
     updated_at = now();", ct);
     }
 }
