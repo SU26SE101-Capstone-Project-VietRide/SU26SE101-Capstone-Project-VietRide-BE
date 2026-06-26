@@ -63,6 +63,26 @@ public class AddBookingStatsMigrationTests
     [Fact]
     public void BookingStatsRepository_DoesNotOpenNestedTransaction()
     {
+        var source = ReadBookingStatsRepositorySource();
+
+        source.Should().NotContain("BeginTransactionAsync");
+    }
+
+    [Fact]
+    public void BookingStatsReadQueries_SumMappedRevenueColumnDirectly()
+    {
+        var source = ReadBookingStatsRepositorySource();
+
+        source.Should().NotContain(
+            "Sum(stats => stats.TotalRevenue.Amount)",
+            because: "EF Core cannot translate aggregate access through the Money value object");
+        source.Should().Contain(
+            "SUM(total_revenue)",
+            because: "read aggregates must sum the mapped total_revenue bigint column in SQL");
+    }
+
+    private static string ReadBookingStatsRepositorySource()
+    {
         var repositoryPath = Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,
             "..",
@@ -75,9 +95,8 @@ public class AddBookingStatsMigrationTests
             "Persistence",
             "Repositories",
             "BookingStatsRepository.cs"));
-        var source = File.ReadAllText(repositoryPath);
 
-        source.Should().NotContain("BeginTransactionAsync");
+        return File.ReadAllText(repositoryPath);
     }
 
     private static IReadOnlyList<MigrationOperation> BuildOperations(Migration migration, string methodName)

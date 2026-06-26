@@ -3,6 +3,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
+using VietRide.Booking.Application.Features.BookingStats.GetAdminBookingStatsAggregate;
+using VietRide.Booking.Application.Features.BookingStats.GetOperatorBookingStats;
 using VietRide.Booking.Application.Features.BookingStats.UpdateBookingStats;
 using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
@@ -292,6 +294,20 @@ public sealed class UpdateBookingStatsCommandHandlerTests
 
         public BookingStatsEntity Single()
             => _rows.Single();
+
+        public Task<IReadOnlyList<OperatorBookingStatsReadModel>> GetOperatorStatsAsync(
+            Guid operatorId,
+            DateOnly? from,
+            DateOnly? to,
+            CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<AdminBookingStatsAggregateReadModel>> GetAdminAggregateStatsAsync(
+            DateOnly? from,
+            DateOnly? to,
+            string groupBy,
+            CancellationToken ct = default)
+            => throw new NotSupportedException();
     }
 
     private sealed class FakeBookingRepository : IBookingRepository

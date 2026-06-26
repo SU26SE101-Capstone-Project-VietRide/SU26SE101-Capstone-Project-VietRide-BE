@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using VietRide.Booking.Application.Abstractions.Repositories;
+using VietRide.Booking.Application.Features.BookingStats.GetAdminBookingStatsAggregate;
+using VietRide.Booking.Application.Features.BookingStats.GetOperatorBookingStats;
 using VietRide.Booking.Domain.Entities;
 using VietRide.Shared.Application.Repositories;
 
@@ -109,5 +111,152 @@ DO UPDATE SET
     total_refunded = booking_stats.total_refunded + EXCLUDED.total_refunded,
     total_seats_booked = booking_stats.total_seats_booked + EXCLUDED.total_seats_booked,
     updated_at = now();", ct);
+    }
+
+    public async Task<IReadOnlyList<OperatorBookingStatsReadModel>> GetOperatorStatsAsync(
+        Guid operatorId,
+        DateOnly? from,
+        DateOnly? to,
+        CancellationToken ct = default)
+    {
+        var rows = await _db.Database.SqlQuery<OperatorBookingStatsSqlRow>($@"
+SELECT
+    operator_id AS ""OperatorId"",
+    stat_date AS ""Date"",
+    COALESCE(SUM(total_bookings), 0)::integer AS ""TotalBookings"",
+    COALESCE(SUM(total_revenue), 0)::bigint AS ""TotalRevenue"",
+    COALESCE(SUM(total_cancelled), 0)::integer AS ""TotalCancellations"",
+    COALESCE(SUM(total_no_show), 0)::integer AS ""TotalNoShows"",
+    COALESCE(SUM(total_completed), 0)::integer AS ""TotalCompleted""
+FROM vietride_booking.booking_stats
+WHERE operator_id = {operatorId}
+  AND ({from}::date IS NULL OR stat_date >= {from}::date)
+  AND ({to}::date IS NULL OR stat_date <= {to}::date)
+GROUP BY operator_id, stat_date
+ORDER BY stat_date")
+            .ToListAsync(ct);
+
+        return rows.Select(row => new OperatorBookingStatsReadModel(
+                row.OperatorId,
+                row.Date,
+                row.TotalBookings,
+                row.TotalRevenue,
+                row.TotalCancellations,
+                row.TotalNoShows,
+                row.TotalCompleted))
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<AdminBookingStatsAggregateReadModel>> GetAdminAggregateStatsAsync(
+        DateOnly? from,
+        DateOnly? to,
+        string groupBy,
+        CancellationToken ct = default)
+    {
+        if (string.Equals(groupBy, "date", StringComparison.OrdinalIgnoreCase))
+        {
+            var rows = await _db.Database.SqlQuery<AdminBookingStatsAggregateSqlRow>($@"
+WITH filtered AS (
+    SELECT *
+    FROM vietride_booking.booking_stats
+    WHERE ({from}::date IS NULL OR stat_date >= {from}::date)
+      AND ({to}::date IS NULL OR stat_date <= {to}::date)
+),
+names AS (
+    SELECT DISTINCT ON (operator_id, stat_date)
+        operator_id,
+        stat_date,
+        operator_name
+    FROM filtered
+    WHERE operator_name IS NOT NULL
+    ORDER BY operator_id, stat_date, updated_at DESC, operator_name
+)
+SELECT
+    filtered.operator_id AS ""OperatorId"",
+    COALESCE(names.operator_name, '') AS ""OperatorName"",
+    filtered.stat_date AS ""Date"",
+    COALESCE(SUM(filtered.total_bookings), 0)::integer AS ""TotalBookings"",
+    COALESCE(SUM(filtered.total_revenue), 0)::bigint AS ""TotalRevenue"",
+    COALESCE(SUM(filtered.total_cancelled), 0)::integer AS ""TotalCancellations"",
+    COALESCE(SUM(filtered.total_no_show), 0)::integer AS ""TotalNoShows"",
+    COALESCE(SUM(filtered.total_completed), 0)::integer AS ""TotalCompleted""
+FROM filtered
+LEFT JOIN names
+    ON names.operator_id = filtered.operator_id
+   AND names.stat_date = filtered.stat_date
+GROUP BY filtered.operator_id, filtered.stat_date, names.operator_name
+ORDER BY filtered.stat_date, COALESCE(names.operator_name, '')")
+                .ToListAsync(ct);
+
+            return rows.Select(ToAdminReadModel).ToList();
+        }
+
+        var operatorRows = await _db.Database.SqlQuery<AdminBookingStatsAggregateSqlRow>($@"
+WITH filtered AS (
+    SELECT *
+    FROM vietride_booking.booking_stats
+    WHERE ({from}::date IS NULL OR stat_date >= {from}::date)
+      AND ({to}::date IS NULL OR stat_date <= {to}::date)
+),
+names AS (
+    SELECT DISTINCT ON (operator_id)
+        operator_id,
+        operator_name
+    FROM filtered
+    WHERE operator_name IS NOT NULL
+    ORDER BY operator_id, updated_at DESC, operator_name
+)
+SELECT
+    filtered.operator_id AS ""OperatorId"",
+    COALESCE(names.operator_name, '') AS ""OperatorName"",
+    NULL::date AS ""Date"",
+    COALESCE(SUM(filtered.total_bookings), 0)::integer AS ""TotalBookings"",
+    COALESCE(SUM(filtered.total_revenue), 0)::bigint AS ""TotalRevenue"",
+    COALESCE(SUM(filtered.total_cancelled), 0)::integer AS ""TotalCancellations"",
+    COALESCE(SUM(filtered.total_no_show), 0)::integer AS ""TotalNoShows"",
+    COALESCE(SUM(filtered.total_completed), 0)::integer AS ""TotalCompleted""
+FROM filtered
+LEFT JOIN names
+    ON names.operator_id = filtered.operator_id
+GROUP BY filtered.operator_id, names.operator_name
+ORDER BY COALESCE(names.operator_name, '')")
+            .ToListAsync(ct);
+
+        return operatorRows.Select(ToAdminReadModel).ToList();
+    }
+
+    private static AdminBookingStatsAggregateReadModel ToAdminReadModel(
+        AdminBookingStatsAggregateSqlRow row)
+        => new(
+            row.OperatorId,
+            row.OperatorName,
+            row.Date,
+            row.TotalBookings,
+            row.TotalRevenue,
+            row.TotalCancellations,
+            row.TotalNoShows,
+            row.TotalCompleted);
+
+    private sealed class OperatorBookingStatsSqlRow
+    {
+        public Guid OperatorId { get; set; }
+        public DateOnly Date { get; set; }
+        public int TotalBookings { get; set; }
+        public long TotalRevenue { get; set; }
+        public int TotalCancellations { get; set; }
+        public int TotalNoShows { get; set; }
+        public int TotalCompleted { get; set; }
+    }
+
+    private sealed class AdminBookingStatsAggregateSqlRow
+    {
+        public Guid OperatorId { get; set; }
+        public string OperatorName { get; set; } = string.Empty;
+        public DateOnly? Date { get; set; }
+        public int TotalBookings { get; set; }
+        public long TotalRevenue { get; set; }
+        public int TotalCancellations { get; set; }
+        public int TotalNoShows { get; set; }
+        public int TotalCompleted { get; set; }
     }
 }

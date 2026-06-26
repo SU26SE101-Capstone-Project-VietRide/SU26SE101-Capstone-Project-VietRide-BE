@@ -1,3 +1,5 @@
+using VietRide.Booking.Application.Features.BookingStats.GetAdminBookingStatsAggregate;
+using VietRide.Booking.Application.Features.BookingStats.GetOperatorBookingStats;
 using VietRide.Booking.Domain.Entities;
 using VietRide.Shared.Application.Repositories;
 
@@ -23,4 +25,16 @@ public interface IBookingStatsRepository : IRepository<BookingStats, Guid>
     /// <c>(operator_id, stat_date, COALESCE(trip_id, zero-uuid))</c>.
     /// </summary>
     Task UpsertDeltaAsync(BookingStats delta, CancellationToken ct = default);
+
+    Task<IReadOnlyList<OperatorBookingStatsReadModel>> GetOperatorStatsAsync(
+        Guid operatorId,
+        DateOnly? from,
+        DateOnly? to,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<AdminBookingStatsAggregateReadModel>> GetAdminAggregateStatsAsync(
+        DateOnly? from,
+        DateOnly? to,
+        string groupBy,
+        CancellationToken ct = default);
 }

@@ -173,7 +173,7 @@ Parallel-safe sets: {17.0, 17.6} may proceed immediately (none Q-blocked); **17.
 | 17.2 | done | APPROVE | 2026-06-26 | Cancel endpoint approved after patch round; atomic cancel transition + event-driven refund |
 | 17.3 | done | APPROVE | 2026-06-26 | BookingStats entity + migration approved; EF apply/down/reapply verified with Docker Postgres |
 | 17.4 | done | APPROVE | 2026-06-26 | Stats consumers approved after durable de-dupe plan patch; Docker DB live migration verification pending |
-| 17.5 | todo | - | - | Stats read endpoints; operatorName from column; totalPartialNoShows=0 stub |
+| 17.5 | done | APPROVE | 2026-06-26 | Stats read endpoints approved; DB-backed repository test pending local Postgres |
 | 17.6 | todo | - | - | Gateway route for /v1/operator/booking-stats |
 | 17.7 | done | APPROVE | 2026-06-26 | Payment booking.cancelled consumer approved; reuses RefundToWallet idempotency |
 
