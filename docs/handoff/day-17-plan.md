@@ -175,7 +175,7 @@ Parallel-safe sets: {17.0, 17.6} may proceed immediately (none Q-blocked); **17.
 | 17.4 | todo | - | - | Stats consumers + operator_name snapshot (Q3); total_refunded on REFUNDED (Q4); BSOT/Contract doc edits |
 | 17.5 | todo | - | - | Stats read endpoints; operatorName from column; totalPartialNoShows=0 stub |
 | 17.6 | todo | - | - | Gateway route for /v1/operator/booking-stats |
-| 17.7 | todo | - | - | NEW — Payment consumes booking.booking.cancelled (payload carries userId, S1) -> credit wallet (reuse RefundToWallet; idempotency via existing FindTransactionByReference guard, S2) -> emit payment.wallet.credited (Q4 event-driven refund) |
+| 17.7 | done | APPROVE | 2026-06-26 | Payment booking.cancelled consumer approved; reuses RefundToWallet idempotency |
 
 Legend: todo / in progress / done (reviewer APPROVED + human /verify) / done-with-carryover / blocked
 
