@@ -1,10 +1,14 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
+using Npgsql.NameTranslation;
+using VietRide.Parcel.Domain.Entities;
+using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Persistence;
+using ParcelEntity = VietRide.Parcel.Domain.Entities.Parcel;
 
 namespace VietRide.Parcel.Infrastructure;
 
-/// Parcel service EF Core context — owns schema `vietride_parcel`.
 public sealed class ParcelDbContext : VietRideDbContextBase
 {
     public const string SchemaName = "vietride_parcel";
@@ -14,9 +18,30 @@ public sealed class ParcelDbContext : VietRideDbContextBase
     {
     }
 
+    public DbSet<ParcelEntity> Parcels => Set<ParcelEntity>();
+    public DbSet<ParcelRouteFare> ParcelRouteFares => Set<ParcelRouteFare>();
+    public DbSet<ParcelStats> ParcelStats => Set<ParcelStats>();
+
+    public static void ConfigurePostgresTypes(NpgsqlDataSourceBuilder dataSourceBuilder)
+    {
+        var translator = new NpgsqlNullNameTranslator();
+        dataSourceBuilder.MapEnum<ParcelStatus>("parcel_status", translator);
+        dataSourceBuilder.MapEnum<ParcelSizeCategory>("parcel_size_category", translator);
+        dataSourceBuilder.MapEnum<ParcelReviewDecision>("parcel_review_decision", translator);
+        dataSourceBuilder.MapEnum<ParcelDeliveryMethod>("parcel_delivery_method", translator);
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema(SchemaName);
+
+        modelBuilder.HasPostgresEnum("parcel_status", Enum.GetNames<ParcelStatus>());
+        modelBuilder.HasPostgresEnum("parcel_size_category", Enum.GetNames<ParcelSizeCategory>());
+        modelBuilder.HasPostgresEnum("parcel_review_decision", Enum.GetNames<ParcelReviewDecision>());
+        modelBuilder.HasPostgresEnum("parcel_delivery_method", Enum.GetNames<ParcelDeliveryMethod>());
+
+        modelBuilder.ApplyConfigurationsFromAssembly(typeof(ParcelDbContext).Assembly);
+
         base.OnModelCreating(modelBuilder);
     }
 }

@@ -1,6 +1,12 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Serilog;
+using VietRide.Parcel.Application;
 using VietRide.Parcel.Infrastructure;
+using VietRide.Parcel.Infrastructure.DependencyInjection;
+using VietRide.Shared.Application.DependencyInjection;
+using VietRide.Shared.Messaging.DependencyInjection;
 using VietRide.Shared.Persistence.DependencyInjection;
 using VietRide.Shared.Web.DependencyInjection;
 using VietRide.Shared.Web.Health;
@@ -18,20 +24,48 @@ builder.Host.UseSerilog((ctx, _, lc) => lc
     .WriteTo.Console());
 
 builder.Services.AddVietRideSharedWeb(builder.Configuration, ServiceName);
-builder.Services.AddVietRideDbContext<ParcelDbContext>(builder.Configuration);
+builder.Services.AddVietRideDbContext<ParcelDbContext>(
+    builder.Configuration,
+    configureDataSource: ParcelDbContext.ConfigurePostgresTypes);
+builder.Services.AddVietRideMediatRBehaviors(
+    handlerAssemblies: [typeof(ApplicationAssemblyMarker).Assembly]);
+var registerMessaging = !builder.Environment.IsEnvironment("Testing");
+if (registerMessaging)
+{
+    builder.Services.AddVietRideMessaging(builder.Configuration);
+}
+
+builder.Services.AddInfrastructure(builder.Configuration, registerConsumers: registerMessaging);
+builder.Services.AddVietRideIdempotency("parcel");
 
 var app = builder.Build();
 
 if (!IsWebApplicationFactoryHost())
 {
     await using var scope = app.Services.CreateAsyncScope();
-    await scope.ServiceProvider.GetRequiredService<ParcelDbContext>().Database.MigrateAsync();
+    var dbContext = scope.ServiceProvider.GetRequiredService<ParcelDbContext>();
+    await dbContext.Database.MigrateAsync();
+
+    var connection = (NpgsqlConnection)dbContext.Database.GetDbConnection();
+    var wasClosed = connection.State != ConnectionState.Open;
+    if (wasClosed)
+    {
+        await connection.OpenAsync();
+    }
+
+    await connection.ReloadTypesAsync();
+
+    if (wasClosed)
+    {
+        await connection.CloseAsync();
+    }
 }
 
 app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseVietRideSwagger();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseVietRideIdempotency();
 app.MapVietRideHealth(ServiceName);
 app.MapControllers();
 
@@ -41,5 +75,4 @@ static bool IsWebApplicationFactoryHost()
     => AppDomain.CurrentDomain.GetAssemblies()
         .Any(assembly => assembly.GetName().Name == "Microsoft.AspNetCore.Mvc.Testing");
 
-// Expose Program for WebApplicationFactory<Program> in integration tests.
 public partial class Program;
