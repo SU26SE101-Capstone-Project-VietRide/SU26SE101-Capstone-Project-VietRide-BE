@@ -53,7 +53,7 @@ Production direction:
 ## Phase Progress
 
 - [x] Phase 1 — Foundation, Schema, Runtime Wiring
-- [ ] Phase 2 — Internal Clients Và Test Stubs
+- [x] Phase 2 — Internal Clients Và Test Stubs
 - [ ] Phase 3 — Fare Config Và Create Parcel
 - [ ] Phase 4 — Payment, Review, Reweigh
 - [ ] Phase 5 — Hangfire Jobs
@@ -150,6 +150,11 @@ dotnet test apps/parcel/VietRide.Parcel.sln -c Release --filter Architecture
 dotnet build apps/parcel/VietRide.Parcel.sln -c Release
 dotnet test apps/parcel/VietRide.Parcel.sln -c Release --filter "InternalClient|Stub"
 ```
+
+### Carry-over (dependency blockers cho Phase sau)
+
+1. **Booking real endpoint chưa tồn tại**: `GET /internal/v1/bookings/{bookingId}` cần được expose ở Booking service trước khi bật real mode hoặc trước Phase 3 (create parcel cần validate booking reference). Hiện tại real client sẽ 404; dev stub hoạt động bình thường.
+2. **Payment validators chỉ nhận BOOKING / BOOKING_REFUND**: Payment service cần mở rộng `ChargePaymentCommandValidator` (cho `PARCEL`) và `RefundToWalletCommandHandler` (cho `PARCEL_REFUND`) trước Phase 3/4 khi cần real payment/refund. Parcel client gửi `PARCEL` / `PARCEL_REFUND` là forward-looking seam.
 
 ---
 
