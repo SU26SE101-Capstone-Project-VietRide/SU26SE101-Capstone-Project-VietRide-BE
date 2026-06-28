@@ -11,6 +11,14 @@ on:
         required: true
         default: 'latest'
         type: string
+  # Callable by release.yml for the auto-deploy step. The manual trigger above stays
+  # as the rollback / hotfix escape hatch (re-run with any previous tag).
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Image tag to deploy'
+        required: true
+        type: string
 
 concurrency:
   group: deploy-production

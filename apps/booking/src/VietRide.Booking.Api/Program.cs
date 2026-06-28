@@ -1,6 +1,4 @@
-using System.Data;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 using Serilog;
 using VietRide.Booking.Application;
 using VietRide.Booking.Infrastructure;
@@ -44,27 +42,10 @@ if (!IsWebApplicationFactoryHost())
 {
     await using var scope = app.Services.CreateAsyncScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<BookingDbContext>();
-    await dbContext.Database.MigrateAsync();
-
-    // On a fresh database the shared NpgsqlDataSource caches the PG type catalog on its first
-    // connection — which is the MigrateAsync above, opened BEFORE the migration creates the enum
-    // types (voucher_type, voucher_funding_type, operator_voucher_consent_status, booking_status, …).
-    // Without a reload, every subsequent enum parameter write fails at runtime with
-    // "Cannot resolve '<enum>' to a fully qualified datatype name" until the process is restarted.
-    // Reload the catalog now so the mapped enums resolve on first boot against an empty DB.
-    var connection = (NpgsqlConnection)dbContext.Database.GetDbConnection();
-    var wasClosed = connection.State != ConnectionState.Open;
-    if (wasClosed)
-    {
-        await connection.OpenAsync();
-    }
-
-    await connection.ReloadTypesAsync();
-
-    if (wasClosed)
-    {
-        await connection.CloseAsync();
-    }
+    // Migrate, then reload the Npgsql type catalog so the native enums (voucher_type,
+    // booking_status, …) resolve on a fresh DB — otherwise the first enum read/write fails
+    // at runtime with DataTypeName '-'. See MigrateAndReloadTypesAsync for the full rationale.
+    await dbContext.MigrateAndReloadTypesAsync();
 }
 
 app.UseMiddleware<RequestLoggingMiddleware>();

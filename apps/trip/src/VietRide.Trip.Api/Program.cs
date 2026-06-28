@@ -32,7 +32,9 @@ var app = builder.Build();
 if (!IsWebApplicationFactoryHost())
 {
     await using var scope = app.Services.CreateAsyncScope();
-    await scope.ServiceProvider.GetRequiredService<TripDbContext>().Database.MigrateAsync();
+    // Migrate, then reload the Npgsql type catalog so the native enums resolve on a fresh
+    // DB — otherwise the first enum read fails at runtime with DataTypeName '-'.
+    await scope.ServiceProvider.GetRequiredService<TripDbContext>().MigrateAndReloadTypesAsync();
 }
 
 app.UseMiddleware<RequestLoggingMiddleware>();
