@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -5,6 +6,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Domain.Enums;
 using VietRide.Parcel.Infrastructure.Http;
 
 namespace VietRide.Parcel.UnitTests.Infrastructure;
@@ -95,6 +97,30 @@ public class TripServiceClientInternalClientTests
         var result = await client.GetTripParcelSnapshotAsync(TripId);
 
         result.Kind.Should().Be(TripSnapshotOutcomeKind.TransportError);
+    }
+
+    [Fact]
+    public async Task SearchAvailableParcelTripsAsync_Sends_Request_With_InvariantCulture()
+    {
+        var body = JsonSerializer.Serialize(new
+        {
+            items = Array.Empty<object>(),
+            total = 0,
+            page = 1,
+            pageSize = 20,
+        }, JsonOptions);
+
+        var client = BuildClient(HttpStatusCode.OK, body);
+
+        await client.SearchAvailableParcelTripsAsync(
+            Guid.NewGuid(), Guid.NewGuid(),
+            new DateOnly(2026, 7, 15),
+            5.5m, ParcelSizeCategory.MEDIUM, 1, 20);
+
+        _handler.LastRequest.Should().NotBeNull();
+        var query = _handler.LastRequest!.RequestUri!.Query;
+        query.Should().Contain("estimatedWeightKg=5.5");
+        query.Should().NotContain("estimatedWeightKg=5,5");
     }
 
     private TripServiceClient BuildClient(HttpStatusCode status, string body)

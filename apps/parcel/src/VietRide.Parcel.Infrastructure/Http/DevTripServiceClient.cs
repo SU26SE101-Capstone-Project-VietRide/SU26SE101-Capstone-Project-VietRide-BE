@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Domain.Enums;
 
 namespace VietRide.Parcel.Infrastructure.Http;
 
@@ -40,5 +41,59 @@ public sealed class DevTripServiceClient : ITripServiceClient
             ReturnRouteId: null);
 
         return Task.FromResult(new TripSnapshotOutcome(TripSnapshotOutcomeKind.Success, snapshot, null));
+    }
+
+    public Task<RouteOwnershipOutcome> ValidateRouteOwnershipAsync(
+        Guid routeId,
+        Guid operatorId,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Using dev Trip stub for ValidateRouteOwnershipAsync({RouteId}, {OperatorId}).", routeId, operatorId);
+        return Task.FromResult(new RouteOwnershipOutcome(RouteOwnershipOutcomeKind.Success, null));
+    }
+
+    public Task<ParcelTripSearchOutcome> SearchAvailableParcelTripsAsync(
+        Guid originStationId,
+        Guid destinationStationId,
+        DateOnly departureDate,
+        decimal estimatedWeightKg,
+        ParcelSizeCategory sizeCategory,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Using dev Trip stub for SearchAvailableParcelTripsAsync.");
+
+        var now = DateTimeOffset.UtcNow;
+        var operatorId = Guid.Parse("11111111-1111-4111-8111-111111111111");
+        var routeId = Guid.Parse("22222222-2222-4222-8222-222222222222");
+
+        var trips = new List<ParcelTripDto>
+        {
+            new(
+                TripId: Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"),
+                RouteId: routeId,
+                OperatorId: operatorId,
+                OperatorName: "Dev Operator",
+                DepartureDateTime: now.AddHours(4),
+                AvailableCargoWeightKg: 50m,
+                PriceVnd: 100_000),
+            new(
+                TripId: Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2"),
+                RouteId: routeId,
+                OperatorId: operatorId,
+                OperatorName: "Dev Operator",
+                DepartureDateTime: now.AddHours(8),
+                AvailableCargoWeightKg: 30m,
+                PriceVnd: 120_000),
+        };
+
+        return Task.FromResult(new ParcelTripSearchOutcome(
+            ParcelTripSearchOutcomeKind.Success,
+            trips,
+            trips.Count,
+            page,
+            pageSize,
+            null));
     }
 }
