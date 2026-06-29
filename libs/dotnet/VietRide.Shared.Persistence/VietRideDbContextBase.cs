@@ -39,7 +39,7 @@ public abstract class VietRideDbContextBase : DbContext
             b.Property(x => x.Payload).HasColumnType("jsonb").IsRequired();
             b.Property(x => x.Status)
                 .HasColumnType("outbox_event_status")
-                .HasDefaultValue(OutboxEventStatus.PENDING)
+                .HasDefaultValueSql("'PENDING'")
                 .IsRequired();
             b.Property(x => x.RetryCount).HasDefaultValue(0);
             b.Property(x => x.LastError);
