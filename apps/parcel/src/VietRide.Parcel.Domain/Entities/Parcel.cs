@@ -1,4 +1,5 @@
 using VietRide.Parcel.Domain.Enums;
+using VietRide.Shared.Kernel.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 
@@ -63,6 +64,11 @@ public sealed class Parcel : BaseEntity<Guid>
     public Guid? ReturnedByUserId { get; private set; }
 
     private Parcel() { }
+
+    public void AssignAdditionalPaymentId(Guid paymentId)
+    {
+        AdditionalPaymentId = paymentId;
+    }
 
     public static Parcel CreatePendingPayment(
         string parcelCode,

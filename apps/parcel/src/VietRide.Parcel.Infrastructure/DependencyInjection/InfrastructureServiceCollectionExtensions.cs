@@ -4,10 +4,12 @@ using StackExchange.Redis;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Infrastructure.Http;
+using VietRide.Parcel.Infrastructure.Messaging;
 using VietRide.Parcel.Infrastructure.Persistence.Repositories;
 using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Http.Resilience;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Messaging.DependencyInjection;
 
 namespace VietRide.Parcel.Infrastructure.DependencyInjection;
 
@@ -34,6 +36,25 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IParcelRepository, ParcelRepository>();
         services.AddScoped<IParcelRouteFareRepository, ParcelRouteFareRepository>();
         services.AddScoped<IParcelStatsRepository, ParcelStatsRepository>();
+
+        if (registerConsumers)
+        {
+            services.AddVietRideEventConsumer<PaymentSucceededIntegrationEvent, PaymentSucceededIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "parcel.payment-succeeded";
+                options.BindingKeys = [PaymentSucceededIntegrationEvent.EventType];
+            });
+            services.AddVietRideEventConsumer<PaymentFailedIntegrationEvent, PaymentFailedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "parcel.payment-failed";
+                options.BindingKeys = [PaymentFailedIntegrationEvent.EventType];
+            });
+            services.AddVietRideEventConsumer<PaymentExpiredIntegrationEvent, PaymentExpiredIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "parcel.payment-expired";
+                options.BindingKeys = [PaymentExpiredIntegrationEvent.EventType];
+            });
+        }
 
         RegisterTripClient(services, configuration);
         RegisterPaymentClient(services, configuration);
