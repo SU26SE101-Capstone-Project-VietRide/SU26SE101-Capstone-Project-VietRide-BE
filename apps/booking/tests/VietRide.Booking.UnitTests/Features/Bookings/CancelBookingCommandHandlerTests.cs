@@ -152,6 +152,30 @@ public sealed class CancelBookingCommandHandlerTests
     }
 
     [Fact]
+    public async Task Handle_TripBoarding_CancelsSuccessfully()
+    {
+        // technical_context_v7 6.2 (lines 2050/2166): cancellation is allowed while the trip is
+        // SCHEDULED or BOARDING; only IN_PROGRESS/COMPLETED block it.
+        var booking = CreateBooking(BookingStatus.CONFIRMED, SeatLockToken);
+        booking.AddPassenger("A01");
+        SetupBookingTripAndOperator(booking, CreateTripSnapshot("BOARDING", Now.AddHours(1)));
+
+        var result = await BuildSut().Handle(BuildCommand(booking.Id), CancellationToken.None);
+
+        result.Status.Should().Be("CANCELLED");
+        await _bookings.Received(1).TryCancelAsync(
+            booking.Id,
+            BookingCancellationReason.USER_INITIATED,
+            Now,
+            false,
+            Arg.Any<CancellationToken>());
+        await _outbox.Received(1).EnqueueAsync(
+            "booking.booking.cancelled",
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Handle_LegacyBookingWithoutSeatLockToken_SkipsReleaseAndStillCancels()
     {
         var booking = CreateBooking(BookingStatus.CONFIRMED, seatLockToken: null);

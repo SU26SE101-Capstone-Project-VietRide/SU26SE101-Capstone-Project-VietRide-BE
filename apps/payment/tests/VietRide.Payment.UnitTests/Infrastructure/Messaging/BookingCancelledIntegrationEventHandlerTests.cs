@@ -26,6 +26,25 @@ public sealed class BookingCancelledIntegrationEventHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsync_WhenRefundAmountIsZero_DoesNotSendRefundCommand()
+    {
+        // A PENDING_PAYMENT cancellation carries refundAmount=0; RefundToWalletCommandValidator
+        // requires Amount > 0, so the handler must skip the credit rather than dead-letter.
+        var sender = new CapturingSender();
+        var handler = CreateHandler(sender);
+        var zeroRefundEvent = new BookingCancelledIntegrationEvent(
+            Guid.Parse("11111111-1111-1111-1111-111111111111"),
+            Guid.Parse("33333333-3333-3333-3333-333333333333"),
+            0,
+            false,
+            "Passenger cancellation");
+
+        await handler.HandleAsync(zeroRefundEvent, CancellationToken.None);
+
+        sender.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task HandleAsync_WhenEventIsRedelivered_SendsSameReferenceSoRefundUseCaseCanNoOp()
     {
         var sender = new CapturingSender();

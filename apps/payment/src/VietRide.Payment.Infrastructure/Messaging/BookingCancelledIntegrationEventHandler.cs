@@ -26,6 +26,17 @@ public sealed class BookingCancelledIntegrationEventHandler
         BookingCancelledIntegrationEvent integrationEvent,
         CancellationToken cancellationToken)
     {
+        // A PENDING_PAYMENT cancellation carries no paid money, so refundAmount is 0.
+        // RefundToWalletCommandValidator requires Amount > 0; sending it would dead-letter the
+        // event. A 0-VND refund is a no-op — the booking correctly stays CANCELLED (never REFUNDED).
+        if (integrationEvent.RefundAmount <= 0)
+        {
+            _logger.LogInformation(
+                "Skipping wallet refund for booking {BookingId}: refund amount is 0.",
+                integrationEvent.BookingId);
+            return;
+        }
+
         var command = new RefundToWalletCommand(
             integrationEvent.UserId,
             integrationEvent.RefundAmount,

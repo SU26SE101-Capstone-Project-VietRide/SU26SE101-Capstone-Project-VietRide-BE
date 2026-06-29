@@ -151,8 +151,12 @@ public sealed class CancelBookingCommandHandler : IRequestHandler<CancelBookingC
             RefundMethod: RefundMethod);
     }
 
+    // A passenger may cancel while the trip has not yet departed.
+    // technical_context_v7 6.2: cancellable window is SCHEDULED or BOARDING (line 2050);
+    // cancellation is blocked only once the trip is IN_PROGRESS or COMPLETED (line 2166).
     private static bool IsTripCancellable(string status)
-        => string.Equals(status, "SCHEDULED", StringComparison.OrdinalIgnoreCase);
+        => string.Equals(status, "SCHEDULED", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, "BOARDING", StringComparison.OrdinalIgnoreCase);
 
     private static IReadOnlyList<CancellationPolicyTier>? ParseCancellationPolicy(JsonElement? policy)
     {
