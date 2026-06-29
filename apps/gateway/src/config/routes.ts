@@ -237,7 +237,18 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     },
 
     // Parcel
-    { prefix: '/v1/parcels', target: env.PARCEL_BASE_URL, authRequired: 'user' },
+    {
+      prefix: '/v1/operator/parcel-route-fares',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
+    {
+      prefix: '/v1/parcels',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['PASSENGER'],
+    },
     {
       prefix: '/v1/parcel/health',
       target: env.PARCEL_BASE_URL,
