@@ -84,6 +84,28 @@ internal sealed class PaymentRepository : IPaymentRepository
         return transaction;
     }
 
+    public async Task<WalletTransaction> DebitWalletPaymentAsync(
+        Guid userId,
+        Guid referenceId,
+        Money amount,
+        WalletTransactionRef walletRef,
+        CancellationToken cancellationToken)
+    {
+        var wallet = await _db.Wallets.FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken)
+            ?? throw new PaymentInsufficientWalletException("Wallet was not found for the requested user.");
+
+        if (wallet.Balance < amount)
+        {
+            throw new PaymentInsufficientWalletException("Wallet balance is insufficient for the payment.");
+        }
+
+        var (before, after) = wallet.Debit(amount);
+        var transaction = WalletTransaction.CreatePaymentDebit(userId, referenceId, amount, before, after, walletRef);
+
+        await _db.WalletTransactions.AddAsync(transaction, cancellationToken);
+        return transaction;
+    }
+
     public async Task<bool> TryMarkRefundedByReferenceAsync(
         PaymentReferenceType referenceType,
         Guid referenceId,
@@ -118,7 +140,7 @@ internal sealed class PaymentRepository : IPaymentRepository
                     updated_at = {expiredAt}
                 WHERE status = 'PENDING_REDIRECT'
                   AND method = 'VNPAY'
-                  AND reference_type = 'BOOKING'
+                  AND reference_type IN ('BOOKING', 'PARCEL', 'PARCEL_ADDITIONAL')
                   AND created_at < {expiresBefore}
                 RETURNING *
                 """)

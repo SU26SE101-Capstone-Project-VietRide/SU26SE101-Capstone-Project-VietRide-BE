@@ -52,7 +52,7 @@ public sealed class ExpirePaymentCommandHandler : IRequestHandler<ExpirePaymentC
         if (expiredPayments.Count > 0)
         {
             _logger.LogInformation(
-                "Expired {PaymentCount} pending VNPay booking payments older than {ExpiresBefore}.",
+                "Expired {PaymentCount} pending VNPay payments older than {ExpiresBefore}.",
                 expiredPayments.Count,
                 expiresBefore);
         }

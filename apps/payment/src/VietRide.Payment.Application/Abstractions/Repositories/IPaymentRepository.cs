@@ -26,6 +26,13 @@ public interface IPaymentRepository : IRepository<PaymentEntity, Guid>
         Money amount,
         CancellationToken cancellationToken);
 
+    Task<WalletTransaction> DebitWalletPaymentAsync(
+        Guid userId,
+        Guid referenceId,
+        Money amount,
+        WalletTransactionRef walletRef,
+        CancellationToken cancellationToken);
+
     Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectOlderThanAsync(
         DateTimeOffset expiresBefore,
         DateTimeOffset expiredAt,

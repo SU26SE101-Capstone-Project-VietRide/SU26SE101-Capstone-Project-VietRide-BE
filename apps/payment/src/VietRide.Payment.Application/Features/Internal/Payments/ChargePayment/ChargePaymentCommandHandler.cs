@@ -73,9 +73,10 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
         Money amount,
         CancellationToken cancellationToken)
     {
+        var referenceType = ParseReferenceType(request.ReferenceType);
         var now = _clock.UtcNow;
         var payment = PaymentEntity.CreatePendingRedirect(
-            PaymentReferenceType.BOOKING,
+            referenceType,
             request.ReferenceId,
             amount,
             PaymentMethod.WALLET,
@@ -83,17 +84,19 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
             idempotencyKey: request.IdempotencyKey);
         payment.MarkSucceeded(null, now);
 
-        await _payments.DebitWalletBookingPaymentAsync(
+        var (walletRef, platformRef) = MapChargeRefs(referenceType);
+        await _payments.DebitWalletPaymentAsync(
                 request.UserId,
                 request.ReferenceId,
                 amount,
+                walletRef,
                 cancellationToken)
             .ConfigureAwait(false);
         await _platformWallets.CreditAsync(
                 amount,
-                PlatformWalletTransactionRef.BOOKING_PAYMENT_HOLD,
+                platformRef,
                 request.ReferenceId,
-                "Booking payment hold",
+                $"{referenceType} payment hold",
                 cancellationToken)
             .ConfigureAwait(false);
         await _payments.AddAsync(payment, cancellationToken).ConfigureAwait(false);
@@ -107,6 +110,7 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
         Money amount,
         CancellationToken cancellationToken)
     {
+        var referenceType = ParseReferenceType(request.ReferenceType);
         var vnPayTxnRef = Guid.NewGuid().ToString("D");
         var now = _clock.UtcNow;
         var redirectUrl = _vnPayClient.CreateBookingPaymentRedirectUrl(
@@ -117,7 +121,8 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
             request.ClientIpAddress,
             now);
 
-        var payment = PaymentEntity.CreatePendingRedirectVnPayBooking(
+        var payment = PaymentEntity.CreatePendingRedirectVnPay(
+            referenceType,
             request.ReferenceId,
             request.UserId,
             amount,
@@ -129,6 +134,15 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
 
         return ToResult(payment);
     }
+
+    private static (WalletTransactionRef Wallet, PlatformWalletTransactionRef Platform) MapChargeRefs(
+        PaymentReferenceType referenceType) => referenceType switch
+    {
+        PaymentReferenceType.BOOKING => (WalletTransactionRef.BOOKING_PAYMENT, PlatformWalletTransactionRef.BOOKING_PAYMENT_HOLD),
+        PaymentReferenceType.PARCEL => (WalletTransactionRef.PARCEL_PAYMENT, PlatformWalletTransactionRef.PARCEL_PAYMENT_HOLD),
+        PaymentReferenceType.PARCEL_ADDITIONAL => (WalletTransactionRef.PARCEL_ADDITIONAL_PAYMENT, PlatformWalletTransactionRef.PARCEL_ADDITIONAL_PAYMENT_HOLD),
+        _ => throw new CodedValidationException("VALIDATION_ERROR", $"Unexpected reference type {referenceType}."),
+    };
 
     private async Task EnqueuePaymentSucceededAsync(PaymentEntity payment, CancellationToken cancellationToken)
     {
@@ -146,9 +160,12 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
 
     private static PaymentReferenceType ParseReferenceType(string value)
         => Enum.TryParse<PaymentReferenceType>(value, ignoreCase: false, out var referenceType)
-            && referenceType == PaymentReferenceType.BOOKING
+            && referenceType is PaymentReferenceType.BOOKING
+                or PaymentReferenceType.PARCEL
+                or PaymentReferenceType.PARCEL_ADDITIONAL
             ? referenceType
-            : throw new CodedValidationException("VALIDATION_ERROR", "Charge supports BOOKING references only.");
+            : throw new CodedValidationException("VALIDATION_ERROR",
+                "Charge supports BOOKING, PARCEL, or PARCEL_ADDITIONAL references only.");
 
     private static PaymentMethod ParseMethod(string value)
         => Enum.TryParse<PaymentMethod>(value, ignoreCase: false, out var method)

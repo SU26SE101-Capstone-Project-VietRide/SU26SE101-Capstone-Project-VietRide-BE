@@ -70,6 +70,29 @@ public sealed class WalletTransaction : BaseEntity<Guid>
             "Round-trip wallet booking payment");
     }
 
+    public static WalletTransaction CreatePaymentDebit(
+        Guid userId,
+        Guid referenceId,
+        Money amount,
+        Money balanceBefore,
+        Money balanceAfter,
+        WalletTransactionRef refType,
+        string? note = null)
+    {
+        if (referenceId == Guid.Empty)
+            throw new ArgumentException("Reference id is required.", nameof(referenceId));
+
+        return Create(
+            userId,
+            WalletTransactionType.DEBIT,
+            amount,
+            balanceBefore,
+            balanceAfter,
+            refType,
+            referenceId,
+            note);
+    }
+
     public static WalletTransaction CreateBookingRefundCredit(
         Guid userId,
         Guid bookingId,

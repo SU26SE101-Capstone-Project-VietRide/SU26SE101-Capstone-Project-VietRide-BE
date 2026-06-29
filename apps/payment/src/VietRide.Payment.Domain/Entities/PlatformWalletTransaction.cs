@@ -44,6 +44,28 @@ public sealed class PlatformWalletTransaction : BaseEntity<Guid>
         };
     }
 
+    public static PlatformWalletTransaction CreatePaymentHold(
+        PlatformWalletTransactionType type,
+        Money amount,
+        Money balanceBefore,
+        Money balanceAfter,
+        PlatformWalletTransactionRef refType,
+        Guid? referenceId = null,
+        string? note = null)
+    {
+        if (referenceId == Guid.Empty)
+            throw new ArgumentException("Reference id is required.", nameof(referenceId));
+
+        return Create(
+            type,
+            amount,
+            balanceBefore,
+            balanceAfter,
+            refType,
+            referenceId,
+            note);
+    }
+
     public static PlatformWalletTransaction CreateBookingPaymentHold(
         Money amount,
         Money balanceBefore,
