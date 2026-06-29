@@ -17,6 +17,7 @@ public sealed class Parcel : BaseEntity<Guid>
     public Guid OperatorId { get; private set; }
     public Guid TripId { get; private set; }
     public Guid? DropoffStopId { get; private set; }
+    public Guid? BookingId { get; private set; }
 
     public string? Description { get; private set; }
     public string? PhotoUrl { get; private set; }
@@ -73,6 +74,7 @@ public sealed class Parcel : BaseEntity<Guid>
         Guid operatorId,
         Guid tripId,
         Guid? dropoffStopId,
+        Guid? bookingId,
         string? description,
         string? photoUrl,
         ParcelSizeCategory sizeCategory,
@@ -92,6 +94,7 @@ public sealed class Parcel : BaseEntity<Guid>
             OperatorId = operatorId,
             TripId = tripId,
             DropoffStopId = dropoffStopId,
+            BookingId = bookingId,
             Description = description,
             PhotoUrl = photoUrl,
             SizeCategory = sizeCategory,
@@ -114,6 +117,7 @@ public sealed class Parcel : BaseEntity<Guid>
         Guid operatorId,
         Guid tripId,
         Guid? dropoffStopId,
+        Guid? bookingId,
         string? description,
         string? photoUrl,
         ParcelSizeCategory sizeCategory,
@@ -133,6 +137,7 @@ public sealed class Parcel : BaseEntity<Guid>
             OperatorId = operatorId,
             TripId = tripId,
             DropoffStopId = dropoffStopId,
+            BookingId = bookingId,
             Description = description,
             PhotoUrl = photoUrl,
             SizeCategory = sizeCategory,

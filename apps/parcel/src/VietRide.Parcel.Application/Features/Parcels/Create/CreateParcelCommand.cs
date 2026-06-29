@@ -1,0 +1,20 @@
+using MediatR;
+
+namespace VietRide.Parcel.Application.Features.Parcels.Create;
+
+public sealed record CreateParcelCommand(
+    Guid SenderUserId,
+    Guid? RecipientUserId,
+    string RecipientName,
+    string RecipientPhone,
+    string? RecipientEmail,
+    Guid TripId,
+    Guid? DropoffStopId,
+    Guid? BookingId,
+    string? ItemName,
+    string? Description,
+    string? PhotoUrl,
+    string SizeCategory,
+    decimal EstimatedWeightKg,
+    string DeliveryMethod,
+    string PaymentMethod) : IRequest<CreateParcelResponse>;
