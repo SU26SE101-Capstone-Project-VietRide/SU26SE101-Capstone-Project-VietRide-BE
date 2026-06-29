@@ -54,7 +54,7 @@ Production direction:
 
 - [x] Phase 1 — Foundation, Schema, Runtime Wiring
 - [x] Phase 2 — Internal Clients Và Test Stubs
-- [ ] Phase 3 — Fare Config Và Create Parcel
+- [x] Phase 3 — Fare Config Và Create Parcel
 - [ ] Phase 4 — Payment, Review, Reweigh
 - [ ] Phase 5 — Hangfire Jobs
 - [ ] Phase 6 — Load, Unload, Tracking Access
@@ -185,6 +185,33 @@ dotnet test apps/parcel/VietRide.Parcel.sln -c Release --filter "InternalClient|
 dotnet build apps/parcel/VietRide.Parcel.sln -c Release
 dotnet test apps/parcel/VietRide.Parcel.sln -c Release --filter "ParcelRouteFare|CreateParcel|AvailableTrips"
 ```
+
+### Kết quả phase
+
+**Ngày hoàn thành:** 2026-06-29
+
+**Implement agent:** OpenCode (NestJS Gen profile model cho logic + OpenCode cho review fixes)
+
+**Review agent:** OpenCode
+
+**Verify đã chạy:**
+```bash
+dotnet build apps/parcel/VietRide.Parcel.sln
+dotnet test apps/parcel/VietRide.Parcel.UnitTests
+dotnet test apps/parcel/VietRide.Parcel.IntegrationTests
+```
+
+**Kết quả review:**
+- Phase 3 code đã qua 3 pass review:
+  - **Pass 1 (5 findings — 3 P1, 2 P2):** Migration enum default mapping (`.HasDefaultValue` → `.HasDefaultValueSql`), thêm `PaymentMethod` vào command/validator/controller, fare price floor `≥1000` ở cả validator + handler, `AvailableTrips` throw `CodedValidationException` thay vì trả về empty page, `EffectiveUntil` clear debt ghi nhận.
+  - **Pass 2 (4 findings — P2):** Pagination guard (page≥1, pageSize 1..100) ở cả 2 handler, operator lookup switch xử lý đủ 4 `OperatorLookupOutcomeKind`, `InvariantCulture` cho decimal ở `TripServiceClient`, `AvailableTripsQueryValidator` thêm Page/PageSize rules.
+  - **Pass 3 (3 tests — P2/P3):** Unit tests cho operator NotFound/Forbidden + pagination guards, InvariantCulture URI test, validator rules.
+- **Hiện tại: 89 tests pass** (76 unit + 13 integration), build 0 lỗi, format 0 lỗi.
+
+**Carry-over:**
+1. `EffectiveUntil` không hỗ trợ clear qua PATCH (`null` = skip update) — cần thêm flag `clearEffectiveUntil: true` ở phase sau.
+2. `ParcelDependencyUnavailableException` hiện tại nằm ở `VietRide.Parcel.Application.Exceptions` — cần cân nhắc move lên shared lib nếu service khác cần dùng.
+3. `RequireIdempotencyKeyAttribute` là `IActionFilter` chạy sau model binding — 400 từ model binding có thể mask 422 idempotency. Cần refactor thành middleware nếu muốn gắt.
 
 ---
 
