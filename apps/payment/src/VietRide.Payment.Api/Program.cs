@@ -61,7 +61,10 @@ if (!IsWebApplicationFactoryHost())
 {
     await using var scope = app.Services.CreateAsyncScope();
     var paymentDb = scope.ServiceProvider.GetRequiredService<PaymentDbContext>();
-    await paymentDb.Database.MigrateAsync();
+    // Migrate, then reload the Npgsql type catalog so the native enums (payment_status,
+    // wallet_transaction_type, …) resolve on a fresh DB — otherwise the first enum read
+    // fails at runtime with DataTypeName '-'.
+    await paymentDb.MigrateAndReloadTypesAsync();
 
     // Ensure the singleton PlatformWallet row exists (the ledger every booking charge/refund
     // moves money through). It lives only in db-schema/.../seed.sql, which the container does
