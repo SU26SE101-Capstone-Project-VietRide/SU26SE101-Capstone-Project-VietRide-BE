@@ -72,6 +72,15 @@ describe('buildRouteTable', () => {
     });
   });
 
+  it('routes operator booking stats to Booking with operator role union', () => {
+    const route = matchRoute(routes, '/v1/operator/booking-stats');
+
+    expect(route?.prefix).toBe('/v1/operator/booking-stats');
+    expect(route?.target).toBe(env.BOOKING_BASE_URL);
+    expect(route?.authRequired).toBe('user');
+    expect(route?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
+  });
+
   it('matches cross-service admin routes to the correct upstream services', () => {
     const cases = [
       ['/v1/admin/operators', env.IDENTITY_BASE_URL],

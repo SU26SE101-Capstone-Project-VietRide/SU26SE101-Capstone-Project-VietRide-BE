@@ -2448,7 +2448,10 @@ Response `200`:
   "contactEmail": "ops@example.com",
   "contactPhone": "+84901234567",
   "businessRegistrationNumber": "0312345678",
-  "taxCode": "0312345678"
+  "taxCode": "0312345678",
+  "cancellationPolicy": [
+    { "hoursBeforeDeparture": 24, "feePercent": 10 }
+  ]
 }
 ```
 

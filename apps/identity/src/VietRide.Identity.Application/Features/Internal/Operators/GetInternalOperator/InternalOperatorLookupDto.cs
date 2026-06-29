@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace VietRide.Identity.Application.Features.Internal.Operators.GetInternalOperator;
 
 public sealed record InternalOperatorLookupDto(
@@ -8,4 +10,5 @@ public sealed record InternalOperatorLookupDto(
     string ContactEmail,
     string ContactPhone,
     string BusinessRegistrationNumber,
-    string TaxCode);
+    string TaxCode,
+    JsonElement? CancellationPolicy);

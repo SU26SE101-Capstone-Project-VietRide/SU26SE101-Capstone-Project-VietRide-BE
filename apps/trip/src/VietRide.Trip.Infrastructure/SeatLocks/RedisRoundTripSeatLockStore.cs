@@ -61,7 +61,7 @@ internal sealed class RedisRoundTripSeatLockStore : IRoundTripSeatLockStore
         var expiresAt = DateTimeOffset.UtcNow.Add(request.Ttl);
         var payload = BuildReplayPayload(request, expiresAt);
         var payloadJson = JsonSerializer.Serialize(payload, JsonOptions);
-        var seatValues = BuildSeatValues(request, expiresAt);
+        var seatOwners = BuildSeatOwners(request);
         var seatLabels = request.Outbound.SeatNumbers.Concat(request.Return.SeatNumbers).ToArray();
 
         var keys = new List<RedisKey> { IdempotencyKey(request.IdempotencyKey) };
@@ -73,7 +73,7 @@ internal sealed class RedisRoundTripSeatLockStore : IRoundTripSeatLockStore
             (long)request.Ttl.TotalMilliseconds,
             payloadJson,
         };
-        args.AddRange(seatValues.Select(value => (RedisValue)JsonSerializer.Serialize(value, JsonOptions)));
+        args.AddRange(seatOwners.Select(owner => (RedisValue)owner));
         args.AddRange(seatLabels.Select(seat => (RedisValue)seat));
 
         var result = (RedisResult[]?)await database.ScriptEvaluateAsync(
@@ -158,12 +158,14 @@ internal sealed class RedisRoundTripSeatLockStore : IRoundTripSeatLockStore
                 request.Return.SeatNumbers,
                 expiresAt));
 
-    private static IReadOnlyList<RedisSeatLockPayload> BuildSeatValues(
-        RoundTripSeatLockStoreRequest request,
-        DateTimeOffset expiresAt)
+    // Store the leg's seat-lock token (canonical "D" form) as each seat key's value, IDENTICAL to the
+    // single-trip RedisSeatLockStore. The round-trip book step reuses the single-trip BookSeatsHandler,
+    // whose IsOwnedByAsync compares the stored value to SeatLockToken.ToString("D"); a richer JSON value
+    // would never match, so both legs would fail to confirm. Keep the formats aligned.
+    private static IReadOnlyList<string> BuildSeatOwners(RoundTripSeatLockStoreRequest request)
         => request.Outbound.SeatNumbers
-            .Select(seat => new RedisSeatLockPayload(request.HoldOwnerId, request.Outbound.SeatLockToken, request.IdempotencyKey, request.Outbound.TripId, seat, expiresAt))
-            .Concat(request.Return.SeatNumbers.Select(seat => new RedisSeatLockPayload(request.HoldOwnerId, request.Return.SeatLockToken, request.IdempotencyKey, request.Return.TripId, seat, expiresAt)))
+            .Select(_ => request.Outbound.SeatLockToken.ToString("D"))
+            .Concat(request.Return.SeatNumbers.Select(_ => request.Return.SeatLockToken.ToString("D")))
             .ToArray();
 
     private static string ComputeRequestHash(RoundTripSeatLockStoreRequest request)
@@ -188,12 +190,4 @@ internal sealed class RedisRoundTripSeatLockStore : IRoundTripSeatLockStore
         string RequestHash,
         RoundTripSeatLockReplayLeg Outbound,
         RoundTripSeatLockReplayLeg Return);
-
-    private sealed record RedisSeatLockPayload(
-        Guid HoldOwnerId,
-        Guid SeatLockToken,
-        string IdempotencyKey,
-        Guid TripId,
-        string SeatNumber,
-        DateTimeOffset ExpiresAt);
 }
