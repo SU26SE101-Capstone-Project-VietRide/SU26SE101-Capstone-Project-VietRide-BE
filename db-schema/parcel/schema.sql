@@ -63,6 +63,7 @@ CREATE TABLE parcels (
     operator_id UUID NOT NULL,
     trip_id UUID NOT NULL,
     dropoff_stop_id UUID NULL,    -- null = destination station terminal; not null = along-route Stop
+    booking_id UUID NULL,         -- logical FK booking.bookings; null = parcel-only
     -- parcel info
     description TEXT NULL,
     photo_url TEXT NULL,

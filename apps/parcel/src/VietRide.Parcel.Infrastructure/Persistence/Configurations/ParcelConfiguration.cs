@@ -71,6 +71,11 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
             .HasColumnType("uuid")
             .IsRequired(false);
 
+        builder.Property(x => x.BookingId)
+            .HasColumnName("booking_id")
+            .HasColumnType("uuid")
+            .IsRequired(false);
+
         builder.Property(x => x.Description)
             .HasColumnName("description")
             .HasColumnType("text")
@@ -99,7 +104,7 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
         builder.Property(x => x.DeliveryMethod)
             .HasColumnName("delivery_method")
             .HasColumnType("parcel_delivery_method")
-            .HasDefaultValue(ParcelDeliveryMethod.TERMINAL_PICKUP)
+            .HasDefaultValueSql("'TERMINAL_PICKUP'")
             .IsRequired();
 
         builder.Property(x => x.DepositAmount)
