@@ -67,7 +67,12 @@ jobs:
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
 
             docker compose -f docker-compose.prod.yml --env-file .env pull
-            docker compose -f docker-compose.prod.yml --env-file .env up -d --remove-orphans
+            if ! docker compose -f docker-compose.prod.yml --env-file .env up -d --remove-orphans; then
+              echo "::error::Production stack failed to become healthy"
+              docker compose -f docker-compose.prod.yml --env-file .env ps
+              docker compose -f docker-compose.prod.yml --env-file .env logs --no-color --tail=200 booking
+              exit 1
+            fi
             docker image prune -f
 
       - name: Health check via public domain
