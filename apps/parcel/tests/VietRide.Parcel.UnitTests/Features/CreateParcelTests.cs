@@ -468,9 +468,23 @@ public sealed class CreateParcelTests
         ITripServiceClient trip,
         IParcelRepository parcelRepo,
         IParcelRouteFareRepository fareRepo,
-        IUnitOfWork uow)
+        IUnitOfWork uow,
+        IPaymentServiceClient? payment = null)
     {
-        return new CreateParcelCommandHandler(identity, booking, trip, parcelRepo, fareRepo, uow);
+        payment ??= CreatePaymentClient();
+        return new CreateParcelCommandHandler(identity, booking, trip, payment, parcelRepo, fareRepo, uow);
+    }
+
+    private static IPaymentServiceClient CreatePaymentClient()
+    {
+        var client = Substitute.For<IPaymentServiceClient>();
+        client.ChargeParcelPaymentAsync(
+                Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<Guid>(),
+                Arg.Any<long>(), Arg.Any<string>(), Arg.Any<string>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new ChargeOutcome(ChargeOutcomeKind.Success,
+                new ChargeResult(Guid.NewGuid(), "SUCCEEDED", null), null));
+        return client;
     }
 
     private static TripParcelSnapshot CreateTripSnapshot(string status)

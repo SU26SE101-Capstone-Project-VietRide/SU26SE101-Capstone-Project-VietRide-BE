@@ -16,6 +16,7 @@ public sealed class CreateParcelCommandHandler
     private readonly IIdentityServiceClient _identityClient;
     private readonly IBookingServiceClient _bookingClient;
     private readonly ITripServiceClient _tripClient;
+    private readonly IPaymentServiceClient _paymentClient;
     private readonly IParcelRepository _parcelRepository;
     private readonly IParcelRouteFareRepository _fareRepository;
     private readonly IUnitOfWork _unitOfWork;
@@ -24,6 +25,7 @@ public sealed class CreateParcelCommandHandler
         IIdentityServiceClient identityClient,
         IBookingServiceClient bookingClient,
         ITripServiceClient tripClient,
+        IPaymentServiceClient paymentClient,
         IParcelRepository parcelRepository,
         IParcelRouteFareRepository fareRepository,
         IUnitOfWork unitOfWork)
@@ -31,6 +33,7 @@ public sealed class CreateParcelCommandHandler
         _identityClient = identityClient;
         _bookingClient = bookingClient;
         _tripClient = tripClient;
+        _paymentClient = paymentClient;
         _parcelRepository = parcelRepository;
         _fareRepository = fareRepository;
         _unitOfWork = unitOfWork;
@@ -186,12 +189,43 @@ public sealed class CreateParcelCommandHandler
         await _parcelRepository.AddAsync(parcel, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        string? paymentRedirectUrl = null;
+
+        if (sizeCategory != ParcelSizeCategory.EXTRA_LARGE)
+        {
+            var idempotencyKey = $"parcel:deposit:{parcel.Id}";
+            var outcome = await _paymentClient.ChargeParcelPaymentAsync(
+                "PARCEL",
+                parcel.Id,
+                command.SenderUserId,
+                priceVnd.Amount,
+                command.PaymentMethod,
+                idempotencyKey,
+                cancellationToken);
+
+            if (outcome.Kind == ChargeOutcomeKind.InsufficientFunds)
+            {
+                throw new CodedValidationException(
+                    "INSUFFICIENT_FUNDS",
+                    outcome.ErrorMessage ?? "Insufficient wallet balance.");
+            }
+
+            if (outcome.Kind == ChargeOutcomeKind.TransportError)
+            {
+                throw new ParcelDependencyUnavailableException(
+                    "PAYMENT_SERVICE_ERROR",
+                    outcome.ErrorMessage ?? "Payment service unavailable.");
+            }
+
+            paymentRedirectUrl = outcome.Result?.PaymentRedirectUrl;
+        }
+
         return new CreateParcelResponse(
             parcel.Id,
             parcel.ParcelCode,
             parcel.Status.ToString(),
             priceVnd.Amount,
-            null);
+            paymentRedirectUrl);
     }
 
     private async Task<string> GenerateParcelCodeAsync(CancellationToken cancellationToken)

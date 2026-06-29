@@ -1,7 +1,9 @@
 using MediatR;
+using VietRide.Shared.Application.Behaviors;
 
 namespace VietRide.Parcel.Application.Features.Parcels.Create;
 
+[SkipTransaction]
 public sealed record CreateParcelCommand(
     Guid SenderUserId,
     Guid? RecipientUserId,
