@@ -133,6 +133,10 @@ public sealed class ExpirePaymentCommandHandlerTests
             CancellationToken cancellationToken)
             => throw new NotSupportedException("Payment expiration tests do not debit wallets.");
 
+        public Task<WalletTransaction> DebitWalletPaymentAsync(
+            Guid userId, Guid referenceId, Money amount, WalletTransactionRef walletRef, CancellationToken ct)
+            => throw new NotSupportedException("Payment expiration tests do not debit wallets.");
+
         public Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectOlderThanAsync(
             DateTimeOffset expiresBefore,
             DateTimeOffset expiredAt,
