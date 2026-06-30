@@ -943,6 +943,8 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
     ['POST', '/v1/operators/register'],
     ['POST', '/v1/payments/vnpay-ipn'],
     ['POST', '/v1/payments/vnpay-topup-ipn'],
+    ['POST', '/v1/parcels/delivery/confirm'],
+    ['POST', '/v1/parcels/delivery/reject'],
   ] as const)('lets public mixed endpoint %s %s pass anonymously', async (method, path) => {
     const upstreamHandler = arrangeProxyPass();
     const signer = {

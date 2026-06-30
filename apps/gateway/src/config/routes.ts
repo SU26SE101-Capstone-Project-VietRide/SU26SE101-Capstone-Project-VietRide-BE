@@ -244,10 +244,18 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
     },
     {
+      prefix: '/v1/parcels/delivery',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'mixed',
+      publicSubpaths: [
+        { method: 'POST', path: '/v1/parcels/delivery/confirm' },
+        { method: 'POST', path: '/v1/parcels/delivery/reject' },
+      ],
+    },
+    {
       prefix: '/v1/parcels',
       target: env.PARCEL_BASE_URL,
       authRequired: 'user',
-      requiredRoles: ['PASSENGER'],
     },
     {
       prefix: '/v1/parcel/health',

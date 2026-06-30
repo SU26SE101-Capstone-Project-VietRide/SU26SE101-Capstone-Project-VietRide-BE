@@ -336,19 +336,35 @@ describe('buildRouteTable', () => {
     expect(routes.find((r) => r.prefix === '/v1/operator/parcel-route-fares')).toBeDefined();
   });
 
-  it('tightens parcels route to require PASSENGER role', () => {
+  it('routes parcels to Parcel without a gateway-level role guard', () => {
     const route = matchRoute(routes, '/v1/parcels');
     const routeDetail = matchRoute(routes, '/v1/parcels/11111111-1111-1111-1111-111111111111');
 
     expect(route?.prefix).toBe('/v1/parcels');
     expect(route?.target).toBe(env.PARCEL_BASE_URL);
     expect(route?.authRequired).toBe('user');
-    expect(route?.requiredRoles).toEqual(['PASSENGER']);
+    expect(route?.requiredRoles).toBeUndefined();
 
     expect(routeDetail?.prefix).toBe('/v1/parcels');
     expect(routeDetail?.target).toBe(env.PARCEL_BASE_URL);
     expect(routeDetail?.authRequired).toBe('user');
-    expect(routeDetail?.requiredRoles).toEqual(['PASSENGER']);
+    expect(routeDetail?.requiredRoles).toBeUndefined();
+  });
+
+  it('routes parcel delivery token endpoints through the longer mixed prefix', () => {
+    const confirmRoute = matchRoute(routes, '/v1/parcels/delivery/confirm');
+    const rejectRoute = matchRoute(routes, '/v1/parcels/delivery/reject');
+
+    [confirmRoute, rejectRoute].forEach((route) => {
+      expect(route?.prefix).toBe('/v1/parcels/delivery');
+      expect(route?.target).toBe(env.PARCEL_BASE_URL);
+      expect(route?.authRequired).toBe('mixed');
+      expect(route?.requiredRoles).toBeUndefined();
+      expect(route?.publicSubpaths).toEqual([
+        { method: 'POST', path: '/v1/parcels/delivery/confirm' },
+        { method: 'POST', path: '/v1/parcels/delivery/reject' },
+      ]);
+    });
   });
 
   it('keeps operator parcel-route-fares distinct from operator routes', () => {
