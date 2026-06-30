@@ -1269,7 +1269,9 @@ Response `200` (raw):
     }
   ],
   "seatSummary": { "totalSeats": 40, "availableSeats": 18 },
-  "returnRouteId": "uuid | null"
+  "returnRouteId": "uuid | null",
+  "driverUserId": "uuid | null",
+  "assistantUserId": "uuid | null"
 }
 ```
 
@@ -1282,6 +1284,8 @@ Notes:
   self-FK. Booking uses this to validate `ROUTE_RETURN_NOT_CONFIGURED` (422) when the passenger
   requests a round-trip but the outbound route has no return route configured
   (technical_context_v7 line 1750). Trip will expose this field in Task 11.4.
+- `driverUserId` / `assistantUserId`: nullable UUID logical user keys used by downstream services
+  for trip-assignment authorization. They do not create cross-database foreign keys.
 - Errors: `404 TRIP_NOT_FOUND`.
 
 ### POST `/internal/v1/trips/{tripId}/lock-seats`
