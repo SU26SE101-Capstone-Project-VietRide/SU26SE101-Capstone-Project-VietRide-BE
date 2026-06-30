@@ -162,7 +162,7 @@ NOT yet in VietRide_API_Contract_v1.md (verified: only Day-9/11 DriverSchedule c
 | 18.3 | done | APPROVE | 2026-06-30 | APPROVE after 1 patch round (required Idempotency-Key); build/format/tests green (252/252); Q7 BSOT note broadened; human `/verify` pending |
 | 18.4 | done | APPROVE | 2026-06-30 | QR scan read-only route added; review APPROVE; build/format/tests green (221 unit + 41 integration); human `/verify` pending |
 | 18.5 | done | APPROVE | 2026-06-30 | Event contract registered with frozen 10-field schema; markdown/diff/EOL checks green; emitter deferred to Day 24 |
-| 18.6 | todo | - | - | add /v1/bookings/trips -> BOOKING (DRIVER/ASSISTANT) + add requiredRoles to /v1/driver + /v1/assistant |
+| 18.6 | done | APPROVE | 2026-06-30 | APPROVE after 1 patch round; gateway build/lint/tests green (102/102); Postman Day-17 carry-over + Day-18 flow added; full TS tests retain pre-existing rag:test failures; human `/verify` pending |
 
 Legend: todo / in progress / done (reviewer APPROVED + human /verify) / done-with-carryover / blocked
 
