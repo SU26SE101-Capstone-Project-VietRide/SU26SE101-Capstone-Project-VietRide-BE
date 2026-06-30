@@ -1,5 +1,6 @@
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Repositories;
+using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 using ParcelEntity = VietRide.Parcel.Domain.Entities.Parcel;
 
@@ -79,4 +80,56 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     /// </summary>
     Task<bool> TryAutoRejectPendingAsync(
         Guid parcelId, string reason, DateTimeOffset now, CancellationToken ct);
+
+    // ---- Phase 6: Loading / Unloading ----
+
+    /// <summary>
+    /// Atomic: PENDING -> LOADED. Guards Status==PENDING, TripId, ParcelCode.
+    /// </summary>
+    Task<ParcelPaymentTransitionSnapshot?> TryMarkLoadedAsync(
+        Guid parcelId, Guid tripId, string parcelCode, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
+    /// Atomic: IN_TRANSIT -> DELIVERED_PENDING_CONFIRM with token generation.
+    /// </summary>
+    Task<ParcelPaymentTransitionSnapshot?> TryUnloadToPendingConfirmAsync(
+        Guid parcelId, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
+    /// Bulk: LOADED -> IN_TRANSIT for all parcels on a trip (trip.started).
+    /// </summary>
+    Task<int> TryBulkSetInTransitByTripIdAsync(Guid tripId, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
+    /// Bulk: LOADED/IN_TRANSIT -> PENDING_OPERATOR_ACTION for all unresolved parcels on a trip (trip.completed).
+    /// </summary>
+    Task<int> TryBulkSetPendingOperatorActionByTripIdAsync(Guid tripId, DateTimeOffset now, CancellationToken ct);
+
+    // ---- Phase 6: Queries ----
+
+    /// <summary>
+    /// Paginated list of parcels where userId is RecipientUserId.
+    /// </summary>
+    Task<PagedResult<ParcelEntity>> ListReceivedByUserIdAsync(
+        Guid userId, int page, int pageSize, CancellationToken ct);
+
+    // ---- Phase 7: Delivery Token ----
+
+    /// <summary>
+    /// Find a parcel by its delivery token (non-revoked, non-expired check is done in handler).
+    /// </summary>
+    Task<ParcelEntity?> FindByDeliveryTokenAsync(Guid token, CancellationToken ct);
+
+    /// <summary>
+    /// Atomic: DELIVERED_PENDING_CONFIRM (or DELIVERY_REJECTED) -> DELIVERY_CONFIRMED.
+    /// Guards Status, DeliveryToken, DeliveryTokenRevokedAt==null.
+    /// </summary>
+    Task<ParcelPaymentTransitionSnapshot?> TryConfirmDeliveryAsync(
+        Guid parcelId, Guid token, string ip, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
+    /// Atomic: DELIVERED_PENDING_CONFIRM -> DELIVERY_REJECTED.
+    /// </summary>
+    Task<ParcelPaymentTransitionSnapshot?> TryRejectDeliveryAsync(
+        Guid parcelId, Guid token, string reason, DateTimeOffset now, CancellationToken ct);
 }

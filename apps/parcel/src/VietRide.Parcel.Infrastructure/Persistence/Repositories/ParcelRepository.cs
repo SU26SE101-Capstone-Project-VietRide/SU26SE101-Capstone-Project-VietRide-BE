@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
+using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 using ParcelEntity = VietRide.Parcel.Domain.Entities.Parcel;
 
@@ -274,6 +275,117 @@ internal sealed class ParcelRepository : IParcelRepository
                 .SetProperty(p => p.RejectedAt, now)
                 .SetProperty(p => p.UpdatedAt, now), ct);
         return affected > 0;
+    }
+
+    // ---- Phase 6: Loading / Unloading ----
+
+    public async Task<ParcelPaymentTransitionSnapshot?> TryMarkLoadedAsync(
+        Guid parcelId, Guid tripId, string parcelCode, DateTimeOffset now, CancellationToken ct)
+    {
+        var affected = await _db.Parcels
+            .Where(p => p.Id == parcelId
+                && p.Status == ParcelStatus.PENDING
+                && p.TripId == tripId
+                && p.ParcelCode == parcelCode)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(p => p.Status, ParcelStatus.LOADED)
+                .SetProperty(p => p.LoadedAt, now)
+                .SetProperty(p => p.UpdatedAt, now), ct);
+        return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
+    }
+
+    public async Task<ParcelPaymentTransitionSnapshot?> TryUnloadToPendingConfirmAsync(
+        Guid parcelId, DateTimeOffset now, CancellationToken ct)
+    {
+        var affected = await _db.Parcels
+            .Where(p => p.Id == parcelId && p.Status == ParcelStatus.IN_TRANSIT)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(p => p.Status, ParcelStatus.DELIVERED_PENDING_CONFIRM)
+                .SetProperty(p => p.UnloadedAt, now)
+                .SetProperty(p => p.DeliveredPendingConfirmAt, now)
+                .SetProperty(p => p.DeliveryToken, Guid.NewGuid())
+                .SetProperty(p => p.DeliveryTokenExpiresAt, now.AddHours(48))
+                .SetProperty(p => p.DeliveryTokenRevokedAt, (DateTimeOffset?)null)
+                .SetProperty(p => p.UpdatedAt, now), ct);
+        return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
+    }
+
+    public async Task<int> TryBulkSetInTransitByTripIdAsync(Guid tripId, DateTimeOffset now, CancellationToken ct)
+    {
+        return await _db.Parcels
+            .Where(p => p.TripId == tripId && p.Status == ParcelStatus.LOADED)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(p => p.Status, ParcelStatus.IN_TRANSIT)
+                .SetProperty(p => p.UpdatedAt, now), ct);
+    }
+
+    public async Task<int> TryBulkSetPendingOperatorActionByTripIdAsync(Guid tripId, DateTimeOffset now, CancellationToken ct)
+    {
+        return await _db.Parcels
+            .Where(p => p.TripId == tripId
+                && (p.Status == ParcelStatus.LOADED || p.Status == ParcelStatus.IN_TRANSIT))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(p => p.Status, ParcelStatus.PENDING_OPERATOR_ACTION)
+                .SetProperty(p => p.UpdatedAt, now), ct);
+    }
+
+    // ---- Phase 6: Queries ----
+
+    public async Task<PagedResult<ParcelEntity>> ListReceivedByUserIdAsync(
+        Guid userId, int page, int pageSize, CancellationToken ct)
+    {
+        var query = _db.Parcels
+            .Where(p => p.RecipientUserId == userId)
+            .OrderByDescending(p => p.CreatedAt);
+
+        var total = await query.CountAsync(ct);
+        var items = await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(ct);
+
+        return PagedResult<ParcelEntity>.Create(items, page, pageSize, total);
+    }
+
+    // ---- Phase 7: Delivery Token ----
+
+    public async Task<ParcelEntity?> FindByDeliveryTokenAsync(Guid token, CancellationToken ct)
+        => await _db.Parcels.FirstOrDefaultAsync(p => p.DeliveryToken == token, ct);
+
+    public async Task<ParcelPaymentTransitionSnapshot?> TryConfirmDeliveryAsync(
+        Guid parcelId, Guid token, string ip, DateTimeOffset now, CancellationToken ct)
+    {
+        var affected = await _db.Parcels
+            .Where(p => p.Id == parcelId
+                && p.DeliveryToken == token
+                && p.DeliveryTokenRevokedAt == null
+                && p.DeliveryTokenExpiresAt != null
+                && p.DeliveryTokenExpiresAt > now
+                && (p.Status == ParcelStatus.DELIVERED_PENDING_CONFIRM || p.Status == ParcelStatus.DELIVERY_REJECTED))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(p => p.Status, ParcelStatus.DELIVERY_CONFIRMED)
+                .SetProperty(p => p.ConfirmedAt, now)
+                .SetProperty(p => p.ConfirmedByIp, ip)
+                .SetProperty(p => p.UpdatedAt, now), ct);
+        return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
+    }
+
+    public async Task<ParcelPaymentTransitionSnapshot?> TryRejectDeliveryAsync(
+        Guid parcelId, Guid token, string reason, DateTimeOffset now, CancellationToken ct)
+    {
+        var affected = await _db.Parcels
+            .Where(p => p.Id == parcelId
+                && p.DeliveryToken == token
+                && p.DeliveryTokenRevokedAt == null
+                && p.DeliveryTokenExpiresAt != null
+                && p.DeliveryTokenExpiresAt > now
+                && p.Status == ParcelStatus.DELIVERED_PENDING_CONFIRM)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(p => p.Status, ParcelStatus.DELIVERY_REJECTED)
+                .SetProperty(p => p.RejectedAt, now)
+                .SetProperty(p => p.RejectionReason, reason)
+                .SetProperty(p => p.UpdatedAt, now), ct);
+        return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
     }
 
     private static ParcelPaymentTransitionSnapshot BuildSnapshot(ParcelEntity p)

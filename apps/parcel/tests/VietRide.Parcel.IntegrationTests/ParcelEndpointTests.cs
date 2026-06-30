@@ -100,6 +100,22 @@ public sealed class ParcelEndpointTests : IClassFixture<VietRideWebApplicationFa
 
         var availableTrips = await anonymous.GetAsync("/v1/parcels/available-trips");
         availableTrips.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+        var received = await anonymous.GetAsync("/v1/parcels/received");
+        received.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+        var detail = await anonymous.GetAsync("/v1/parcels/11111111-1111-1111-1111-111111111111");
+        detail.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+        var assistantUnload = await anonymous.PostAsJsonAsync(
+            "/v1/assistant/parcels/11111111-1111-1111-1111-111111111111/unload",
+            new { });
+        assistantUnload.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+        var internalMarkLoaded = await anonymous.PostAsJsonAsync(
+            "/internal/v1/parcels/11111111-1111-1111-1111-111111111111/mark-loaded",
+            new { tripId = NewId, parcelCode = "VRP-001" });
+        internalMarkLoaded.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     // ── Role authorization ──────────────────────────────────────────
@@ -140,6 +156,50 @@ public sealed class ParcelEndpointTests : IClassFixture<VietRideWebApplicationFa
 
         var availableTrips = await op.GetAsync("/v1/parcels/available-trips?originStationId=11111111-1111-1111-1111-111111111111&destinationStationId=22222222-2222-2222-2222-222222222222&departureDate=2026-07-15&estimatedWeightKg=5&sizeCategory=MEDIUM");
         await AssertForbiddenEnvelope(availableTrips);
+
+        var received = await op.GetAsync("/v1/parcels/received");
+        await AssertForbiddenEnvelope(received);
+    }
+
+    [Fact]
+    public async Task AssistantUnload_RejectsPassengerRole()
+    {
+        using var passenger = CreateAuthenticatedClient("PASSENGER");
+        passenger.DefaultRequestHeaders.Add("Idempotency-Key", Guid.NewGuid().ToString());
+
+        var response = await passenger.PostAsJsonAsync(
+            "/v1/assistant/parcels/11111111-1111-1111-1111-111111111111/unload",
+            new { });
+
+        await AssertForbiddenEnvelope(response);
+    }
+
+    [Fact]
+    public async Task PublicDeliveryEndpoints_AllowAnonymousButRequireIdempotencyKey()
+    {
+        using var anonymous = _factory.CreateClient();
+
+        var confirm = await anonymous.PostAsJsonAsync(
+            "/v1/parcels/delivery/confirm",
+            new { token = Guid.NewGuid() });
+        await AssertValidationEnvelope(confirm, HttpStatusCode.UnprocessableEntity);
+
+        var reject = await anonymous.PostAsJsonAsync(
+            "/v1/parcels/delivery/reject",
+            new { token = Guid.NewGuid(), rejectionReason = "damaged" });
+        await AssertValidationEnvelope(reject, HttpStatusCode.UnprocessableEntity);
+    }
+
+    [Fact]
+    public async Task InternalMarkLoaded_RequiresInternalJwtAndIdempotencyKey()
+    {
+        using var client = CreateAuthenticatedClient("DRIVER");
+
+        var response = await client.PostAsJsonAsync(
+            "/internal/v1/parcels/11111111-1111-1111-1111-111111111111/mark-loaded",
+            new { tripId = NewId, parcelCode = "VRP-001" });
+
+        await AssertValidationEnvelope(response, HttpStatusCode.UnprocessableEntity);
     }
 
     // ── Idempotency-Key: mutations without it → 422 ─────────────────

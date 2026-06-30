@@ -1,0 +1,332 @@
+using System.Reflection;
+using FluentAssertions;
+using NSubstitute;
+using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Features.Parcels.AccessCheck;
+using VietRide.Parcel.Application.Features.Parcels.ConfirmDelivery;
+using VietRide.Parcel.Application.Features.Parcels.MarkLoaded;
+using VietRide.Parcel.Application.Features.Parcels.Received;
+using VietRide.Parcel.Application.Features.Parcels.RejectDelivery;
+using VietRide.Parcel.Application.Features.Parcels.TripEvents;
+using VietRide.Parcel.Application.Features.Parcels.Unload;
+using VietRide.Parcel.Domain.Enums;
+using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Kernel.ValueObjects;
+using ParcelEntity = VietRide.Parcel.Domain.Entities.Parcel;
+
+namespace VietRide.Parcel.UnitTests.Features;
+
+public sealed class Phase67ParcelTests
+{
+    private static readonly Guid ParcelId = Guid.NewGuid();
+    private static readonly Guid SenderUserId = Guid.NewGuid();
+    private static readonly Guid RecipientUserId = Guid.NewGuid();
+    private static readonly Guid OperatorId = Guid.NewGuid();
+    private static readonly Guid TripId = Guid.NewGuid();
+    private static readonly Guid DropoffStopId = Guid.NewGuid();
+
+    [Fact]
+    public async Task MarkLoaded_HappyPath_UsesAtomicRepositoryTransition()
+    {
+        var parcel = CreateParcel(ParcelStatus.PENDING);
+        var repo = Substitute.For<IParcelRepository>();
+        repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
+        repo.TryMarkLoadedAsync(ParcelId, TripId, "VRP-001", Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(Snapshot(ParcelStatus.LOADED));
+
+        var handler = new MarkParcelLoadedCommandHandler(repo);
+        var result = await handler.Handle(new MarkParcelLoadedCommand(ParcelId, TripId, "VRP-001"), default);
+
+        result.Status.Should().Be("LOADED");
+        await repo.Received(1).TryMarkLoadedAsync(
+            ParcelId, TripId, "VRP-001", Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task MarkLoaded_WrongTripOrCode_ReturnsParcelNotFound()
+    {
+        var parcel = CreateParcel(ParcelStatus.PENDING);
+        var repo = Substitute.For<IParcelRepository>();
+        repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
+
+        var handler = new MarkParcelLoadedCommandHandler(repo);
+        var act = () => handler.Handle(new MarkParcelLoadedCommand(ParcelId, Guid.NewGuid(), "WRONG"), default);
+
+        await act.Should().ThrowAsync<CodedNotFoundException>()
+            .Where(e => e.ErrorCode == "PARCEL_NOT_FOUND");
+    }
+
+    [Fact]
+    public async Task Unload_NonOwner_ReturnsForbiddenBeforeStatusLeak()
+    {
+        var parcel = CreateParcel(ParcelStatus.PENDING);
+        var repo = Substitute.For<IParcelRepository>();
+        repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
+
+        var handler = new UnloadParcelCommandHandler(repo, Substitute.For<ITripServiceClient>());
+        var act = () => handler.Handle(new UnloadParcelCommand(ParcelId, Guid.NewGuid()), default);
+
+        await act.Should().ThrowAsync<ForbiddenException>()
+            .Where(e => e.ErrorCode == "FORBIDDEN");
+    }
+
+    [Fact]
+    public async Task Unload_HappyPath_ValidatesDropoffAndSetsPendingConfirm()
+    {
+        var parcel = CreateParcel(ParcelStatus.IN_TRANSIT);
+        var repo = Substitute.For<IParcelRepository>();
+        var tripClient = Substitute.For<ITripServiceClient>();
+        repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
+        tripClient.GetTripParcelSnapshotAsync(TripId, Arg.Any<CancellationToken>())
+            .Returns(new TripSnapshotOutcome(TripSnapshotOutcomeKind.Success, TripSnapshot(allowDropoff: true), null));
+        repo.TryUnloadToPendingConfirmAsync(ParcelId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(Snapshot(ParcelStatus.DELIVERED_PENDING_CONFIRM));
+
+        var handler = new UnloadParcelCommandHandler(repo, tripClient);
+        var result = await handler.Handle(new UnloadParcelCommand(ParcelId, OperatorId), default);
+
+        result.Status.Should().Be("DELIVERED_PENDING_CONFIRM");
+    }
+
+    [Fact]
+    public async Task Received_TripNotFound_IsBestEffortAndKeepsPage()
+    {
+        var parcel = CreateParcel(ParcelStatus.IN_TRANSIT);
+        var repo = Substitute.For<IParcelRepository>();
+        var tripClient = Substitute.For<ITripServiceClient>();
+        repo.ListReceivedByUserIdAsync(RecipientUserId, 1, 20, Arg.Any<CancellationToken>())
+            .Returns(PagedResult<ParcelEntity>.Create([parcel], 1, 20, 1));
+        tripClient.GetTripParcelSnapshotAsync(TripId, Arg.Any<CancellationToken>())
+            .Returns(new TripSnapshotOutcome(TripSnapshotOutcomeKind.TripNotFound, null, null));
+
+        var handler = new GetReceivedParcelsQueryHandler(repo, tripClient);
+        var result = await handler.Handle(new GetReceivedParcelsQuery(RecipientUserId, 1, 20), default);
+
+        result.Items.Should().HaveCount(1);
+        result.Items[0].OriginStation.Should().BeNull();
+        result.Items[0].DestinationStation.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Received_Success_UsesNestedStationContractShape()
+    {
+        var parcel = CreateParcel(ParcelStatus.IN_TRANSIT);
+        var repo = Substitute.For<IParcelRepository>();
+        var tripClient = Substitute.For<ITripServiceClient>();
+        repo.ListReceivedByUserIdAsync(RecipientUserId, 1, 20, Arg.Any<CancellationToken>())
+            .Returns(PagedResult<ParcelEntity>.Create([parcel], 1, 20, 1));
+        tripClient.GetTripParcelSnapshotAsync(TripId, Arg.Any<CancellationToken>())
+            .Returns(new TripSnapshotOutcome(TripSnapshotOutcomeKind.Success, TripSnapshot(allowDropoff: true), null));
+
+        var handler = new GetReceivedParcelsQueryHandler(repo, tripClient);
+        var result = await handler.Handle(new GetReceivedParcelsQuery(RecipientUserId, 1, 20), default);
+
+        var originStation = result.Items[0].OriginStation;
+        var destinationStation = result.Items[0].DestinationStation;
+        originStation.Should().NotBeNull();
+        destinationStation.Should().NotBeNull();
+        originStation!.Id.Should().NotBeEmpty();
+        originStation.Name.Should().Be("Origin");
+        destinationStation!.Name.Should().Be("Destination");
+    }
+
+    [Theory]
+    [InlineData("SENDER")]
+    [InlineData("RECIPIENT")]
+    [InlineData("OPERATOR")]
+    [InlineData("NONE")]
+    public async Task AccessCheck_CoversAllRoles(string expectedRole)
+    {
+        var parcel = CreateParcel(ParcelStatus.IN_TRANSIT);
+        var repo = Substitute.For<IParcelRepository>();
+        repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
+
+        var userId = expectedRole switch
+        {
+            "SENDER" => SenderUserId,
+            "RECIPIENT" => RecipientUserId,
+            _ => Guid.NewGuid(),
+        };
+        var operatorId = expectedRole == "OPERATOR" ? OperatorId : (Guid?)null;
+
+        var handler = new GetParcelAccessCheckQueryHandler(repo);
+        var result = await handler.Handle(new GetParcelAccessCheckQuery(ParcelId, userId, operatorId), default);
+
+        result.Role.Should().Be(expectedRole);
+        result.Allowed.Should().Be(expectedRole != "NONE");
+    }
+
+    [Fact]
+    public async Task ConfirmDelivery_InvalidToken_Returns400Code()
+    {
+        var repo = Substitute.For<IParcelRepository>();
+        repo.FindByDeliveryTokenAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((ParcelEntity?)null);
+
+        var handler = new ConfirmDeliveryCommandHandler(repo);
+        var act = () => handler.Handle(new ConfirmDeliveryCommand(Guid.NewGuid(), "127.0.0.1"), default);
+
+        await act.Should().ThrowAsync<BadRequestException>()
+            .Where(e => e.ErrorCode == "PARCEL_DELIVERY_TOKEN_INVALID");
+    }
+
+    [Fact]
+    public async Task ConfirmDelivery_WrongStatus_ReturnsParcelNotPendingConfirm400Code()
+    {
+        var token = Guid.NewGuid();
+        var parcel = CreateParcel(ParcelStatus.PENDING, token, DateTimeOffset.UtcNow.AddHours(1));
+        var repo = Substitute.For<IParcelRepository>();
+        repo.FindByDeliveryTokenAsync(token, Arg.Any<CancellationToken>()).Returns(parcel);
+
+        var handler = new ConfirmDeliveryCommandHandler(repo);
+        var act = () => handler.Handle(new ConfirmDeliveryCommand(token, "127.0.0.1"), default);
+
+        await act.Should().ThrowAsync<BadRequestException>()
+            .Where(e => e.ErrorCode == "PARCEL_NOT_PENDING_CONFIRM");
+    }
+
+    [Fact]
+    public async Task ConfirmDelivery_HappyPath_ConfirmsDelivery()
+    {
+        var token = Guid.NewGuid();
+        var parcel = CreateParcel(ParcelStatus.DELIVERED_PENDING_CONFIRM, token, DateTimeOffset.UtcNow.AddHours(1));
+        var repo = Substitute.For<IParcelRepository>();
+        repo.FindByDeliveryTokenAsync(token, Arg.Any<CancellationToken>()).Returns(parcel);
+        repo.TryConfirmDeliveryAsync(ParcelId, token, "127.0.0.1", Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(Snapshot(ParcelStatus.DELIVERY_CONFIRMED));
+
+        var handler = new ConfirmDeliveryCommandHandler(repo);
+        var result = await handler.Handle(new ConfirmDeliveryCommand(token, "127.0.0.1"), default);
+
+        result.Status.Should().Be("DELIVERY_CONFIRMED");
+        result.ConfirmedAt.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task RejectDelivery_WrongStatus_ReturnsParcelNotPendingConfirm400Code()
+    {
+        var token = Guid.NewGuid();
+        var parcel = CreateParcel(ParcelStatus.DELIVERY_CONFIRMED, token, DateTimeOffset.UtcNow.AddHours(1));
+        var repo = Substitute.For<IParcelRepository>();
+        repo.FindByDeliveryTokenAsync(token, Arg.Any<CancellationToken>()).Returns(parcel);
+
+        var handler = new RejectDeliveryCommandHandler(repo);
+        var act = () => handler.Handle(new RejectDeliveryCommand(token, "damaged"), default);
+
+        await act.Should().ThrowAsync<BadRequestException>()
+            .Where(e => e.ErrorCode == "PARCEL_NOT_PENDING_CONFIRM");
+    }
+
+    [Fact]
+    public async Task RejectDelivery_HappyPath_ReturnsCanUndoUntil()
+    {
+        var token = Guid.NewGuid();
+        var parcel = CreateParcel(ParcelStatus.DELIVERED_PENDING_CONFIRM, token, DateTimeOffset.UtcNow.AddHours(1));
+        var repo = Substitute.For<IParcelRepository>();
+        repo.FindByDeliveryTokenAsync(token, Arg.Any<CancellationToken>()).Returns(parcel);
+        repo.TryRejectDeliveryAsync(ParcelId, token, "damaged", Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(Snapshot(ParcelStatus.DELIVERY_REJECTED));
+
+        var handler = new RejectDeliveryCommandHandler(repo);
+        var result = await handler.Handle(new RejectDeliveryCommand(token, "damaged"), default);
+
+        result.Status.Should().Be("DELIVERY_REJECTED");
+        result.CanUndoUntil.Should().Be(result.RejectedAt.AddMinutes(15));
+    }
+
+    [Fact]
+    public async Task TripStartedCommand_IsIdempotentBulkLoadedToInTransit()
+    {
+        var repo = Substitute.For<IParcelRepository>();
+        repo.TryBulkSetInTransitByTripIdAsync(TripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(2);
+
+        var result = await new HandleTripStartedCommandHandler(repo)
+            .Handle(new HandleTripStartedCommand(TripId), default);
+
+        result.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task TripCompletedCommand_IsIdempotentBulkUnresolvedToPendingOperatorAction()
+    {
+        var repo = Substitute.For<IParcelRepository>();
+        repo.TryBulkSetPendingOperatorActionByTripIdAsync(TripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(3);
+
+        var result = await new HandleTripCompletedCommandHandler(repo)
+            .Handle(new HandleTripCompletedCommand(TripId), default);
+
+        result.Should().Be(3);
+    }
+
+    private static ParcelEntity CreateParcel(
+        ParcelStatus status,
+        Guid? deliveryToken = null,
+        DateTimeOffset? deliveryTokenExpiresAt = null)
+    {
+        var parcel = ParcelEntity.CreatePendingPayment(
+            "VRP-001",
+            SenderUserId,
+            RecipientUserId,
+            "Recipient",
+            PhoneNumber.Normalize("+84912345678"),
+            "recipient@example.com",
+            OperatorId,
+            TripId,
+            DropoffStopId,
+            null,
+            "Item",
+            null,
+            ParcelSizeCategory.MEDIUM,
+            5m,
+            ParcelDeliveryMethod.TERMINAL_PICKUP,
+            Money.FromRaw(100_000));
+
+        Set(parcel, nameof(parcel.Id), ParcelId);
+        Set(parcel, nameof(parcel.Status), status);
+        Set(parcel, nameof(parcel.DeliveryToken), deliveryToken);
+        Set(parcel, nameof(parcel.DeliveryTokenExpiresAt), deliveryTokenExpiresAt);
+        Set<DateTimeOffset?>(parcel, nameof(parcel.DeliveryTokenRevokedAt), null);
+        return parcel;
+    }
+
+    private static ParcelPaymentTransitionSnapshot Snapshot(ParcelStatus status)
+        => new(
+            ParcelId,
+            "VRP-001",
+            status,
+            100_000,
+            0,
+            OperatorId,
+            TripId,
+            null,
+            SenderUserId,
+            ParcelSizeCategory.MEDIUM,
+            null);
+
+    private static TripParcelSnapshot TripSnapshot(bool allowDropoff)
+        => new(
+            TripId,
+            OperatorId,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "IN_PROGRESS",
+            DateTimeOffset.UtcNow.AddHours(-1),
+            DateTimeOffset.UtcNow.AddHours(1),
+            100_000,
+            new TripStationDto(Guid.NewGuid(), "Origin"),
+            new TripStationDto(Guid.NewGuid(), "Destination"),
+            [new TripStopDto(DropoffStopId, 1, false, allowDropoff, DateTimeOffset.UtcNow, 10, null)],
+            new TripSeatSummaryDto(40, 10),
+            null);
+
+    private static void Set<T>(object target, string propertyName, T value)
+    {
+        var property = target.GetType().GetProperty(
+            propertyName,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        property!.SetValue(target, value);
+    }
+}

@@ -85,6 +85,16 @@ public static class InfrastructureServiceCollectionExtensions
                 options.QueueName = "parcel.payment-expired";
                 options.BindingKeys = [PaymentExpiredIntegrationEvent.EventType];
             });
+            services.AddVietRideEventConsumer<TripStartedIntegrationEvent, TripStartedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "parcel.trip-started";
+                options.BindingKeys = [TripStartedIntegrationEvent.EventType];
+            });
+            services.AddVietRideEventConsumer<TripCompletedIntegrationEvent, TripCompletedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "parcel.trip-completed";
+                options.BindingKeys = [TripCompletedIntegrationEvent.EventType];
+            });
         }
 
         RegisterTripClient(services, configuration);
