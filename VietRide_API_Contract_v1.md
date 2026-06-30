@@ -3692,3 +3692,44 @@ Error responses use the ADR 0004 envelope:
 - `404 BOOKING_NOT_FOUND`: the code is unknown or the booking is not `CONFIRMED`.
 - `422 BOOKING_NOT_FOR_THIS_TRIP`: the code belongs to a different trip.
 - `422 VALIDATION_ERROR`: the route parameter or booking-code format is invalid.
+
+## Integration Event Contracts
+
+### `trip.stop.departed_with_pending`
+
+Producer: Trip. Consumer: Notification (Driver App boarding warning). Exchange:
+`vietride.events`.
+
+Payload:
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-06-30T03:00:00Z",
+  "eventType": "trip.stop.departed_with_pending",
+  "tripId": "uuid",
+  "stopId": "uuid",
+  "stopName": "Ben xe Mien Dong Moi",
+  "pendingPassengerCount": 2,
+  "driverUserId": "uuid",
+  "assistantUserId": null,
+  "departedAt": "2026-06-30T03:00:00Z"
+}
+```
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `eventId` | `Guid` | yes | Stable event identity for consumer deduplication. |
+| `occurredAt` | `DateTime` | yes | UTC integration-event occurrence timestamp, matching `IntegrationEventBase` serialization. |
+| `eventType` | `string` | yes | Constant `trip.stop.departed_with_pending`; also used as the AMQP routing key. |
+| `tripId` | `Guid` | yes | Trip whose stop was departed. |
+| `stopId` | `Guid` | yes | Departed stop. |
+| `stopName` | `string` | yes | Snapshot used in the Driver App warning. |
+| `pendingPassengerCount` | `int` | yes | Positive integer (`> 0`): passengers still `PENDING` at the stop. |
+| `driverUserId` | `Guid` | yes | Assigned driver notification target. |
+| `assistantUserId` | `Guid?` | yes, nullable | Assigned assistant notification target when present. |
+| `departedAt` | `DateTimeOffset` | yes | Stop-departure timestamp serialized as UTC ISO-8601. |
+
+The payload contains exactly the fields above. Day 18 freezes the contract and registry entry
+only. The Trip Outbox emitter, handler wiring, emit-condition tests, and Day-24 `NO_SHOW`
+detection remain deferred to Day 24.
