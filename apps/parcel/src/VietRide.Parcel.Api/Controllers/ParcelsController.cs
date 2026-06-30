@@ -5,6 +5,8 @@ using VietRide.Parcel.Api.Controllers.Requests;
 using VietRide.Parcel.Api.Filters;
 using VietRide.Parcel.Application.Features.Parcels.AvailableTrips;
 using VietRide.Parcel.Application.Features.Parcels.Create;
+using VietRide.Parcel.Application.Features.Parcels.Detail;
+using VietRide.Parcel.Application.Features.Parcels.Received;
 using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Parcel.Api.Controllers;
@@ -84,5 +86,43 @@ public sealed class ParcelsController : ControllerBase
             cancellationToken);
 
         return StatusCode(StatusCodes.Status201Created, result);
+    }
+
+    [HttpGet("received")]
+    [Authorize(Roles = "PASSENGER")]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<ReceivedParcelResponse>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<PagedResult<ReceivedParcelResponse>>> GetReceivedAsync(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var userId = CurrentUserClaims.GetUserId(User);
+        var result = await _mediator.Send(
+            new GetReceivedParcelsQuery(userId, page, pageSize),
+            cancellationToken);
+
+        return Ok(result);
+    }
+
+    [HttpGet("{parcelId:guid}")]
+    [Authorize]
+    [ProducesResponseType(typeof(ApiResponse<ParcelDetailResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ParcelDetailResponse>> GetDetailAsync(
+        Guid parcelId,
+        CancellationToken cancellationToken)
+    {
+        var userId = CurrentUserClaims.GetUserId(User);
+        var operatorId = CurrentUserClaims.GetOperatorId(User);
+        var result = await _mediator.Send(
+            new GetParcelDetailQuery(parcelId, userId, operatorId),
+            cancellationToken);
+
+        return Ok(result);
     }
 }
