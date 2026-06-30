@@ -2,6 +2,7 @@ using System.Security.Claims;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using VietRide.Booking.Application.Features.Boarding.TickPassengerBoarded;
 using VietRide.Booking.Application.Features.Manifest.GetTripManifest;
 using VietRide.Shared.Kernel.Primitives;
 
@@ -13,6 +14,8 @@ namespace VietRide.Booking.Api.Controllers;
 [Authorize(Roles = "DRIVER,ASSISTANT")]
 public sealed class BoardingController : ControllerBase
 {
+    private const string IdempotencyKeyHeader = "Idempotency-Key";
+
     private readonly ISender _sender;
 
     public BoardingController(ISender sender)
@@ -36,6 +39,42 @@ public sealed class BoardingController : ControllerBase
             cancellationToken);
 
         return Ok(result);
+    }
+
+    /// <summary>Marks one passenger record as boarded for the assigned trip.</summary>
+    [HttpPost("boarding/passenger/{passengerRecordId:guid}")]
+    [ProducesResponseType(typeof(ApiResponse<TickPassengerBoardedResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<TickPassengerBoardedResult>> TickPassengerBoarded(
+        [FromRoute] Guid tripId,
+        [FromRoute] Guid passengerRecordId,
+        CancellationToken cancellationToken)
+    {
+        EnsureIdempotencyKeyIsPresent();
+
+        var result = await _sender.Send(
+            new TickPassengerBoardedCommand(tripId, passengerRecordId, GetCallerUserId()),
+            cancellationToken);
+
+        return Ok(result);
+    }
+
+    private void EnsureIdempotencyKeyIsPresent()
+    {
+        var value = Request.Headers.TryGetValue(IdempotencyKeyHeader, out var values)
+            ? values.ToString()
+            : string.Empty;
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new VietRide.Shared.Application.Exceptions.CodedValidationException(
+                "VALIDATION_ERROR",
+                "Idempotency-Key header is required.");
+        }
     }
 
     private Guid GetCallerUserId()

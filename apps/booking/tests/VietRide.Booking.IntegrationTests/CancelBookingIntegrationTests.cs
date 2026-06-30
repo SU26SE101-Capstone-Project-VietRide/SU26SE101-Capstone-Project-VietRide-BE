@@ -11,6 +11,7 @@ using NSubstitute;
 using StackExchange.Redis;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
+using VietRide.Booking.Application.Features.Boarding.TickPassengerBoarded;
 using VietRide.Booking.Application.Features.Bookings.CancelBooking;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Booking.Domain.ValueObjects;
@@ -249,6 +250,10 @@ public sealed class CancelBookingWebApplicationFactory : WebApplicationFactory<P
                     Arg.Any<Func<Task<CancelBookingResult>>>(),
                     Arg.Any<CancellationToken>())
                 .Returns(ci => ci.Arg<Func<Task<CancelBookingResult>>>()());
+            mockUow.ExecuteInTransactionAsync(
+                    Arg.Any<Func<Task<TickPassengerBoardedResult>>>(),
+                    Arg.Any<CancellationToken>())
+                .Returns(ci => ci.Arg<Func<Task<TickPassengerBoardedResult>>>()());
             services.AddSingleton(mockUow);
 
             services.AddSingleton<IConnectionMultiplexer>(_ => BuildRedis());

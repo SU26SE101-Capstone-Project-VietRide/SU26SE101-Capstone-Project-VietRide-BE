@@ -1343,7 +1343,7 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | | `BOOKING_NOT_FOUND` | 404 | |
 | | `BOOKING_NOT_CANCELLABLE` | 409 | Status không trong CONFIRMED/PENDING_PAYMENT |
 | | `BOOKING_EDIT_PICKUP_PRICE_CHANGED` | 409 | Edit pickup làm THAY ĐỔI giá vé (tăng hoặc giảm) — v1 chỉ cho đổi cùng giá (fareDelta=0); muốn đổi giá: hủy vé + đặt lại (v1.11.0, thay BOOKING_EDIT_PICKUP_PRICE_INCREASE) |
-| | `BOOKING_NOT_FOR_THIS_TRIP` | 422 | QR scan booking khác trip |
+| | `BOOKING_NOT_FOR_THIS_TRIP` | 422 | QR scan booking hoặc boarding-tick passenger khác trip |
 | | `BOOKING_PASSENGER_ALREADY_BOARDED` | 409 | Tick lại passenger đã BOARDED |
 | | `BOOKING_ROUND_TRIP_INVALID` | 422 | Return trip không hợp lệ |
 | **Voucher** | `VOUCHER_NOT_FOUND` | 404 | |

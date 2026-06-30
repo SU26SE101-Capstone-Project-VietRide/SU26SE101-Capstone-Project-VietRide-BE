@@ -3609,3 +3609,39 @@ Response `200` in the ADR 0004 success envelope:
 Each manifest item contains exactly `seatNumber`, `bookingCode`, `pickupStop`, and
 `boardingStatus`. A trip with no confirmed bookings returns `200` with `items: []`, not `404`.
 Unknown trip returns `404 TRIP_NOT_FOUND`; validation failures return `422 VALIDATION_ERROR`.
+
+### POST `/v1/bookings/trips/{tripId}/boarding/passenger/{passengerRecordId}`
+
+Auth: `DRIVER` or `ASSISTANT`. The authenticated JWT `sub` must equal the Trip snapshot's
+`driverUserId` or `assistantUserId`; otherwise the endpoint returns `403 FORBIDDEN`.
+
+Marks the selected passenger record `BOARDED`. The mutation is performed through the Booking
+aggregate, sets `boardedAt` to the current UTC instant, and leaves `boardedAtStopId` null when no
+physical boarding stop is supplied. The request has no body and requires `Idempotency-Key`.
+
+Response `200` in the ADR 0004 success envelope:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "passengerRecordId": "uuid",
+    "boardingStatus": "BOARDED",
+    "boardedAt": "2026-06-30T03:00:00Z",
+    "boardedAtStopId": null
+  },
+  "meta": {
+    "traceId": "req-abc123",
+    "timestamp": "2026-06-30T03:00:00Z"
+  }
+}
+```
+
+Error responses use the ADR 0004 envelope:
+
+- `403 FORBIDDEN`: caller is not the trip's assigned driver or assistant.
+- `404 BOOKING_NOT_FOUND`: `passengerRecordId` does not exist.
+- `409 BOOKING_PASSENGER_ALREADY_BOARDED`: passenger is already `BOARDED`.
+- `422 BOOKING_NOT_FOR_THIS_TRIP`: passenger exists but belongs to another trip.
+- `422 VALIDATION_ERROR`: route parameters are invalid.
