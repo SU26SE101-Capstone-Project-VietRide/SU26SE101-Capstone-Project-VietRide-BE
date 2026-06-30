@@ -3645,3 +3645,50 @@ Error responses use the ADR 0004 envelope:
 - `409 BOOKING_PASSENGER_ALREADY_BOARDED`: passenger is already `BOARDED`.
 - `422 BOOKING_NOT_FOR_THIS_TRIP`: passenger exists but belongs to another trip.
 - `422 VALIDATION_ERROR`: route parameters are invalid.
+
+### POST `/v1/bookings/trips/{tripId}/boarding/qr-scan`
+
+Auth: `DRIVER` or `ASSISTANT`. The authenticated JWT `sub` must equal the Trip snapshot's
+`driverUserId` or `assistantUserId`; otherwise the endpoint returns `403 FORBIDDEN`.
+
+The request body contains the plain booking code decoded by the Driver App. The service does not
+decode or persist QR image data and does not mutate Booking or Passenger state.
+
+```json
+{
+  "bookingCode": "VR-20260630-ABCD2345"
+}
+```
+
+`bookingCode` must match `^VR-\d{8}-[A-Z2-7]{8}$`.
+
+Response `200` in the ADR 0004 success envelope:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [
+      {
+        "seatNumber": "A01",
+        "boardingStatus": "PENDING"
+      }
+    ]
+  },
+  "meta": {
+    "traceId": "req-abc123",
+    "timestamp": "2026-06-30T03:00:00Z"
+  }
+}
+```
+
+Passenger items contain exactly `seatNumber` and `boardingStatus`. The scan is read-only; ticking
+a passenger uses the separate boarding-passenger endpoint.
+
+Error responses use the ADR 0004 envelope:
+
+- `403 FORBIDDEN`: caller is not the trip's assigned driver or assistant.
+- `404 BOOKING_NOT_FOUND`: the code is unknown or the booking is not `CONFIRMED`.
+- `422 BOOKING_NOT_FOR_THIS_TRIP`: the code belongs to a different trip.
+- `422 VALIDATION_ERROR`: the route parameter or booking-code format is invalid.

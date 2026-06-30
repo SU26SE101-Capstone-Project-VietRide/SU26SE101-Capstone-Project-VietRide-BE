@@ -2,6 +2,7 @@ using System.Security.Claims;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using VietRide.Booking.Application.Features.Boarding.ScanBookingCodeForTrip;
 using VietRide.Booking.Application.Features.Boarding.TickPassengerBoarded;
 using VietRide.Booking.Application.Features.Manifest.GetTripManifest;
 using VietRide.Shared.Kernel.Primitives;
@@ -58,6 +59,28 @@ public sealed class BoardingController : ControllerBase
 
         var result = await _sender.Send(
             new TickPassengerBoardedCommand(tripId, passengerRecordId, GetCallerUserId()),
+            cancellationToken);
+
+        return Ok(result);
+    }
+
+    /// <summary>Resolves a plain booking code to its passenger boarding records.</summary>
+    [HttpPost("boarding/qr-scan")]
+    [ProducesResponseType(typeof(ApiResponse<ScanBookingCodeForTripResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ScanBookingCodeForTripResult>> ScanBookingCodeForTrip(
+        [FromRoute] Guid tripId,
+        [FromBody] ScanBookingCodeForTripRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _sender.Send(
+            new ScanBookingCodeForTripQuery(
+                tripId,
+                request.BookingCode,
+                GetCallerUserId()),
             cancellationToken);
 
         return Ok(result);

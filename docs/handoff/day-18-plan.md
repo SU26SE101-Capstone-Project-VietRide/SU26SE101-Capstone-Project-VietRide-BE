@@ -159,7 +159,7 @@ NOT yet in VietRide_API_Contract_v1.md (verified: only Day-9/11 DriverSchedule c
 | 18.1 | done | APPROVE | 2026-06-30 | Q4 recorded; review APPROVE; build/format/unit tests green (205/205); full integration blocked by local PostgreSQL; human `/verify` pending |
 | 18.2 | done | APPROVE | 2026-06-30 | Q5 recorded; shared BoardingController created; review APPROVE; build/format/tests green (Unit 206/206, Integration 37/37); human `/verify` pending |
 | 18.3 | done | APPROVE | 2026-06-30 | APPROVE after 1 patch round (required Idempotency-Key); build/format/tests green (252/252); Q7 BSOT note broadened; human `/verify` pending |
-| 18.4 | todo | - | - | extends 18.2 controller |
+| 18.4 | done | APPROVE | 2026-06-30 | QR scan read-only route added; review APPROVE; build/format/tests green (221 unit + 41 integration); human `/verify` pending |
 | 18.5 | todo | - | - | registry-only by decision (Q3); routing key trip.stop.departed_with_pending; emitter deferred to Day 24 |
 | 18.6 | todo | - | - | add /v1/bookings/trips -> BOOKING (DRIVER/ASSISTANT) + add requiredRoles to /v1/driver + /v1/assistant |
 
