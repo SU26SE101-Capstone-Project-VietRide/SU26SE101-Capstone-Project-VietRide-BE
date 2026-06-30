@@ -1630,11 +1630,17 @@ Response `200`:
   "data": {
     "parcelId": "uuid",
     "status": "DELIVERY_REJECTED",
-    "rejectedAt": "2026-05-18T20:15:00+07:00"
+    "rejectedAt": "2026-05-18T20:15:00+07:00",
+    "canUndoUntil": "2026-05-18T20:30:00+07:00"
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
+
+Decision note: invalid, expired, and revoked delivery tokens return `400` with
+`PARCEL_DELIVERY_TOKEN_INVALID`, `PARCEL_DELIVERY_TOKEN_EXPIRED`, or
+`PARCEL_DELIVERY_TOKEN_REVOKED`. BSOT `401` and timeline `410` are known drift
+items to reconcile.
 
 ### POST `/internal/v1/parcels/{parcelId}/mark-loaded`
 

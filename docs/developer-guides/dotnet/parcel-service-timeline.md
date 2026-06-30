@@ -57,8 +57,8 @@ Production direction:
 - [x] Phase 3 — Fare Config Và Create Parcel
 - [x] Phase 4 — Payment, Review, Reweigh
 - [x] Phase 5 — Hangfire Jobs
-- [ ] Phase 6 — Load, Unload, Tracking Access
-- [ ] Phase 7 — Delivery Confirmation Và Gateway
+- [x] Phase 6 — Load, Unload, Tracking Access
+- [x] Phase 7 — Delivery Confirmation Và Gateway
 - [ ] Phase 8 — Transfer, Return, Override, PENDING_OPERATOR_ACTION
 - [ ] Phase 9 — Events, Stats, Final Acceptance
 
@@ -344,7 +344,7 @@ dotnet test apps/parcel/VietRide.Parcel.sln -c Release
 - Consume `trip.trip.started`: `LOADED -> IN_TRANSIT`.
 - Consume `trip.trip.completed`: affected unresolved `IN_TRANSIT`/operational parcels move to the correct terminal or operator-action path per technical context.
 - Parcel detail/list.
-- Capacity guarded updates.
+- Capacity guarded updates. **Chưa đạt trong Phase 6** — carry-over đã duyệt, chờ Trip cargo-counter integration.
 
 ### Output hoàn thành
 
@@ -358,6 +358,32 @@ dotnet test apps/parcel/VietRide.Parcel.sln -c Release
 dotnet build apps/parcel/VietRide.Parcel.sln -c Release
 dotnet test apps/parcel/VietRide.Parcel.sln -c Release --filter "Load|Unload|Tracking|TripStarted"
 ```
+
+### Kết quả phase
+
+**Ngày hoàn thành:** 2026-06-30
+
+**Implement agent:** OpenCode
+
+**Review agent:** OpenCode + user review findings
+
+**Verify đã chạy:**
+```bash
+dotnet build apps/parcel/VietRide.Parcel.sln -c Release
+dotnet test apps/parcel/VietRide.Parcel.sln -c Release --filter "Phase67|Load|Unload|TripStarted|TripCompleted|Received|Detail|AccessCheck|Delivery|Token|Reject"
+npx nx run gateway:test
+```
+
+**Kết quả review:**
+- Đã triển khai `POST /internal/v1/parcels/{parcelId}/mark-loaded`, `POST /v1/assistant/parcels/{parcelId}/unload`, `GET /v1/parcels/received`, `GET /v1/parcels/{parcelId}`, `GET /internal/v1/parcels/{id}`, và `GET /internal/v1/parcels/{id}/access-check`.
+- Phase 6 unload dùng pass-through 1 transaction: `IN_TRANSIT -> DELIVERED_PENDING_CONFIRM`, đồng thời giữ mốc business `UNLOADED` bằng `UnloadedAt` và set `DeliveredPendingConfirmAt` + delivery token.
+- `trip.trip.started` xử lý bulk idempotent `LOADED -> IN_TRANSIT`; `trip.trip.completed` xử lý bulk unresolved `LOADED/IN_TRANSIT -> PENDING_OPERATOR_ACTION` bằng status guard.
+- Tracking access-check đã cover sender, recipient, operator, none.
+- Received list trả nested `originStation` / `destinationStation` theo contract; Trip enrichment là best-effort để không khóa toàn page khi Trip snapshot thiếu.
+
+**Carry-over:**
+1. **Capacity counter chưa hoàn tất**: Phase 6 chỉ chuyển trạng thái và ghi mốc `LoadedAt` / `UnloadedAt`. `Trip.totalLoadedWeightKg` add/remove atomic và capacity-free theo `UnloadedAt` chưa làm, chờ Trip cargo-counter integration ở `BE_TIMELINE_VU.md` Day 28. Dòng scope `Capacity guarded updates` **chưa đạt**, không được hiểu là đã production-complete.
+2. **Outbox event cho unload/dependency downstream chưa phát**: `parcel.parcel.unloaded` deferred sang Phase 9. Capacity-free sau này phải bám vào `UnloadedAt` / event unload, không bám vào final status.
 
 ---
 
@@ -377,8 +403,9 @@ dotnet test apps/parcel/VietRide.Parcel.sln -c Release --filter "Load|Unload|Tra
 
 ### Output hoàn thành
 
-- Recipient confirm/reject được qua public email link.
+- Recipient confirm/reject được qua public token API khi có token hợp lệ.
 - Các Parcel endpoint khác vẫn cần JWT.
+- Phase 7 hiện là **backend token API only** nếu outbox/email còn defer; chưa claim email production-ready.
 
 ### Verify
 
@@ -387,6 +414,33 @@ dotnet build apps/parcel/VietRide.Parcel.sln -c Release
 dotnet test apps/parcel/VietRide.Parcel.sln -c Release --filter "Delivery|Token|Reject"
 npx nx run gateway:test
 ```
+
+### Kết quả phase
+
+**Ngày hoàn thành:** 2026-06-30
+
+**Implement agent:** OpenCode
+
+**Review agent:** OpenCode + user review findings
+
+**Verify đã chạy:**
+```bash
+dotnet build apps/parcel/VietRide.Parcel.sln -c Release
+dotnet test apps/parcel/VietRide.Parcel.sln -c Release --filter "Phase67|Load|Unload|TripStarted|TripCompleted|Received|Detail|AccessCheck|Delivery|Token|Reject"
+npx nx run gateway:test
+```
+
+**Kết quả review:**
+- Đã triển khai `POST /v1/parcels/delivery/confirm` và `POST /v1/parcels/delivery/reject` public token endpoints, `[AllowAnonymous]`, bắt buộc `Idempotency-Key`.
+- Token invalid/expired/revoked trả `400` với `PARCEL_DELIVERY_TOKEN_INVALID`, `PARCEL_DELIVERY_TOKEN_EXPIRED`, `PARCEL_DELIVERY_TOKEN_REVOKED`.
+- Wrong-status confirm/reject trả `400 PARCEL_NOT_PENDING_CONFIRM`.
+- Reject response chỉ thêm additive field `canUndoUntil`; không thêm `parcelCode` hoặc `message`.
+- Gateway route `/v1/parcels/delivery` dùng `authRequired: 'mixed'` với public POST subpaths confirm/reject và match bằng longest-prefix trước `/v1/parcels`.
+- Base route `/v1/parcels` bỏ gateway-level `requiredRoles`; .NET tự guard từng endpoint.
+
+**Carry-over:**
+1. **Outbox/email deferred Phase 9**: Chưa publish `parcel.parcel.delivered_pending_confirm`, `parcel.parcel.delivery_confirmed`, `parcel.parcel.delivery_rejected`; Notification/email link chưa production-ready. Phase 7 chỉ hoàn tất backend token API.
+2. **Email delivery flow chưa tick production-ready**: Recipient có thể confirm/reject khi có token, nhưng hệ thống chưa tự gửi email link cho người nhận cho đến khi outbox + Notification integration ở Phase 9 hoàn tất.
 
 ---
 
