@@ -4,7 +4,7 @@
 
 - **Timeline ref**: BE_TIMELINE_VU.md -> Day 18 — DriverSchedule + Manifest + Boarding APIs (Jira: SCV-92)
 - **Prior checklist**: docs/handoff/day-17-checklist.md (found — Day-17 closeable for its own scope; carry-over: RAG TS/Docker failures pre-existing and NOT Day-18; Postman cumulative collection still owes the cancel + booking-stats flow; round-trip real-Redis Testcontainers regression test recommended; dev DB holds Day-17 artifacts — reset via scripts/reset-local.sh for a clean E2E)
-- **Plan status**: APPROVED (human resolved gating Q1/Q2/Q3/Q6/Q7; decisions recorded below — Q4/Q5 remain non-gating, resolve before 18.1/18.2 dispatch respectively)
+- **Plan status**: APPROVED (human resolved gating Q1/Q2/Q3/Q4/Q6/Q7; decisions recorded below — Q5 remains non-gating, resolve before 18.2 dispatch)
 
 ## Objective
 Day 18 ships the Driver/Assistant operational layer: a driver/assistant reads their assigned trips, opens a PII-free passenger manifest ordered by pickup-stop sequence, ticks each passenger boarded (manually or via QR bookingCode scan), and the system flags a missing-passenger warning when a trip leaves a stop with un-ticked passengers. This makes the boarding lifecycle real (Passenger boardingStatus PENDING->BOARDED) and unblocks Day-24 NO_SHOW/PARTIAL_NO_SHOW detection. The work spans Trip (driver schedule read; the trip is the authorization anchor via Trip.DriverUserId/AssistantUserId) and Booking (it owns the Passenger entity whose boardingStatus the boarding tick mutates). Per the resolved decisions below, Booking owns the manifest read + both boarding POST endpoints (single owner of Passenger state) and calls the Trip internal snapshot for stop order + driver/assistant auth; the boarding-warning event is registered contract-only on Day 18 (emitter deferred to Day 24).
@@ -17,6 +17,7 @@ Day 18 ships the Driver/Assistant operational layer: a driver/assistant reads th
 - **Q3 — RESOLVED (contract-only now):** Register the boarding-warning event CONTRACT-ONLY on Day 18. Task 18.5 is registry-only — BSOT section 7 registry row + section 13 changelog + payload doc, NO emitter wired on Day 18. Routing key = trip.stop.departed_with_pending (well-formed: svc=trip, aggregate=stop, verb=departed_with_pending). Emitter is wired on Day 24 with NO_SHOW detection. DoD line 5 adjusted to event contract registered (emitter deferred to Day 24).
 - **Q6 — RESOLVED (Booking-owned gateway prefix):** Manifest/boarding move to a Booking-owned gateway prefix, NOT under /v1/trips. Final paths: GET /v1/bookings/trips/{tripId}/manifest; POST /v1/bookings/trips/{tripId}/boarding/passenger/{passengerRecordId}; POST /v1/bookings/trips/{tripId}/boarding/qr-scan. This prefix /v1/bookings/trips is longest-prefix-distinct from the existing /v1/bookings row (routes.ts line 190, requiredRoles PASSENGER) — confirmed against routes.ts: matchRoute is longest-prefix-wins (lines 324-328), /v1/bookings/trips out-specifics /v1/bookings, so the new prefix DRIVER/ASSISTANT gate applies and does NOT collide with the PASSENGER row. Target = BOOKING_BASE_URL.
 - **Q7 — RESOLVED (reuse, no new code):** REUSE BOOKING_NOT_FOR_THIS_TRIP (422) for passengerRecordId exists but not on this tripId in the boarding-tick path. Broaden its BSOT section 5.9 note (line 1346) to cover the boarding-tick path (not just QR-scan). No new error code, no extra BSOT section 13 row. Minor section 5.9 doc change owned by 18.3.
+- **Q4 — RESOLVED (ICT inclusive date bounds):** `from`/`to` are ICT (UTC+7) date bounds, inclusive at both ends. If both are omitted, default to today through today + 14 days. If exactly one is supplied, return 422 VALIDATION_ERROR.
 
 ## Success criteria (DoD — binary, verifiable)
 - [ ] GET /v1/driver/me/schedule returns trips assigned to the caller, filtered by driverId/assistantId from the User JWT (cross-operator/other-driver trips never appear). (BE_TIMELINE_VU Day 18; v7 line 478)
@@ -64,9 +65,9 @@ NOT yet in VietRide_API_Contract_v1.md (verified: only Day-9/11 DriverSchedule c
 | skill | add-endpoint |
 | owned files | new apps/trip/src/VietRide.Trip.Application/Features/DriverSchedules/GetMyDriverSchedule/ (Query+Handler+DTO+Validator); apps/trip/src/VietRide.Trip.Api/Controllers/DriverController.cs (DISCOVER existing /driver controller first); apps/trip/src/VietRide.Trip.Infrastructure/Persistence/Repositories/ (read query: trips where DriverUserId or AssistantUserId equals caller, date-ranged); unit tests under apps/trip/tests/VietRide.Trip.UnitTests/; VietRide_API_Contract_v1.md (new section) |
 | forbidden scope | .env, secrets; Booking/Identity/Payment/Parcel; gateway routes (the /v1/driver prefix already exists 179-180, do not duplicate); git ops; do NOT touch DriverSchedule create/activate (Day 9/11); do NOT mutate trip state |
-| depends on | 18.0. Resolve non-gating Q4 (from/to semantics) before dispatch. |
+| depends on | 18.0. Q4 resolved: ICT (UTC+7) inclusive date bounds; both omitted defaults to today..today+14 days; exactly one supplied returns 422 VALIDATION_ERROR. |
 | invariant flags | CRLF cs; CPM; MediatR v11; IQuery so TransactionBehavior skips tx (Day-17 read-query precedent); tenant isolation equals caller sub only (never trust a query-param driverId) |
-| acceptance | returns trips where DriverUserId matches sub OR AssistantUserId matches sub within from..to; a different sub sees only their own; ApiResponse envelope (ADR 0004); at least 1 happy + 1 isolation test; Swagger annotation; build/format/test green; contract section added |
+| acceptance | returns trips where DriverUserId matches sub OR AssistantUserId matches sub within from..to using ICT (UTC+7) date bounds inclusive at both ends; both omitted defaults to today..today+14 days; exactly one supplied returns 422 VALIDATION_ERROR; a different sub sees only their own; ApiResponse envelope (ADR 0004); at least 1 happy + 1 isolation test; Swagger annotation; build/format/test green; contract section added |
 | source citations | BE_TIMELINE_VU Day 18 (filtered by driverId from JWT); v7 478; Trip.cs 16-17; CurrentUserClaims.cs (Trip) 7-16 (sub); routes.ts 179-180 |
 
 ### Task 18.2 — GET /v1/bookings/trips/{tripId}/manifest (PII-free, pickup-order)
@@ -154,7 +155,7 @@ NOT yet in VietRide_API_Contract_v1.md (verified: only Day-9/11 DriverSchedule c
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
 | 18.0 | done | APPROVE | 2026-06-30 | Snapshot extension reviewed APPROVE; build/format/tests green; human `/verify` pending |
-| 18.1 | todo | - | - | resolve non-gating Q4 (from/to semantics) before dispatch |
+| 18.1 | done | APPROVE | 2026-06-30 | Q4 recorded; review APPROVE; build/format/unit tests green (205/205); full integration blocked by local PostgreSQL; human `/verify` pending |
 | 18.2 | todo | - | - | Booking-owned; creates shared Booking operational controller; resolve non-gating Q5 (terminal-pickup ordering) before dispatch |
 | 18.3 | todo | - | - | reuses BOOKING_NOT_FOR_THIS_TRIP 422 for wrong-trip (Q7 decided) + broadens section 5.9 note line 1346; no new error code |
 | 18.4 | todo | - | - | extends 18.2 controller |
@@ -166,5 +167,5 @@ Legend: todo / in progress / done (reviewer APPROVED + human /verify) / done-wit
 ## Open questions
 Remaining NON-GATING refinements only (gating Q1/Q2/Q3/Q6/Q7 resolved — see Resolved decisions). Resolve before the noted task dispatches. Do NOT guess.
 
-4. (non-gating; resolve before 18.1) from/to semantics on GET /v1/driver/me/schedule. Date-only (ICT local, like DriverSchedule departureTime) bounds on Trip.departureDateTime, inclusive? Default window if omitted (today, or today..+14d)? Not specified in v7/contract.
+4. **RESOLVED:** from/to use ICT (UTC+7) date bounds inclusive at both ends. If both are omitted, default to today..today+14 days. If exactly one is supplied, return 422 VALIDATION_ERROR.
 5. (non-gating; resolve before 18.2) Manifest ordering for terminal-pickup bookings. Bookings with pickupStationId (terminal, pickupStopId NULL, v7 2227) have no RouteStop orderIndex. Where do they sort — first (board at origin terminal, orderIndex 0) or a separate terminal group? v7 479 says ordered by pickup stop but does not cover terminal pickups.

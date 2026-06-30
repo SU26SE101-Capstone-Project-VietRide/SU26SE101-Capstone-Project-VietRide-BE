@@ -3527,3 +3527,49 @@ Driver schedule conflict:
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-11T10:00:00Z" }
 }
 ```
+
+## Day 18 — Driver operational schedule
+
+### GET `/v1/driver/me/schedule?from={yyyy-MM-dd}&to={yyyy-MM-dd}`
+
+Auth: `DRIVER` or `ASSISTANT`.
+
+Returns only Trips assigned to the authenticated JWT `sub`, where the caller is either the
+Trip's `driverUserId` or `assistantUserId`. A caller cannot supply or override a user identifier.
+
+`from` and `to` are ICT (`UTC+7`) calendar dates and are inclusive at both ends. Both parameters
+must be supplied together or omitted together. When both are omitted, the range defaults to the
+current ICT date through current ICT date plus 14 days. Supplying exactly one parameter, or a
+`to` date before `from`, returns `422 VALIDATION_ERROR`.
+
+Response `200`: `GetMyDriverScheduleResult` in the ADR 0004 success envelope.
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "from": "2026-06-30",
+    "to": "2026-07-14",
+    "trips": [
+      {
+        "tripId": "uuid",
+        "operatorId": "uuid",
+        "routeId": "uuid",
+        "vehicleId": "uuid",
+        "departureDateTime": "2026-06-30T01:00:00Z",
+        "estimatedArrivalTime": "2026-06-30T04:00:00Z",
+        "status": "SCHEDULED",
+        "assignmentRole": "DRIVER"
+      }
+    ]
+  },
+  "meta": {
+    "traceId": "req-abc123",
+    "timestamp": "2026-06-30T03:00:00Z"
+  }
+}
+```
+
+Trips are ordered by `departureDateTime`, then by `tripId`. Date filtering converts the inclusive
+ICT date range to UTC boundaries before querying. No Trip state is mutated.
