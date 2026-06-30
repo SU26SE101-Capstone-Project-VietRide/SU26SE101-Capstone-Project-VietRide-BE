@@ -29,6 +29,12 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     Task<ParcelPaymentTransitionSnapshot?> TryMarkAdditionalExpiredAsync(
         Guid parcelId, DateTimeOffset now, CancellationToken ct);
 
+    /// <summary>
+    /// Job path: rejects only when AdditionalPaymentDeadline has passed (atomic guard).
+    /// </summary>
+    Task<bool> TryMarkAdditionalExpiredByDeadlineAsync(
+        Guid parcelId, DateTimeOffset now, CancellationToken ct);
+
     // Operator review transitions (PENDING_OPERATOR_REVIEW)
     Task<ParcelPaymentTransitionSnapshot?> TryApproveReviewAsync(
         Guid parcelId, Guid reviewedByUserId, Money depositAmount, DateTimeOffset now, CancellationToken ct);
@@ -47,4 +53,30 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     // Additional payment idempotent assignment (PENDING_ADDITIONAL_PAYMENT)
     Task<bool> TryAssignAdditionalPaymentIdAsync(
         Guid parcelId, Guid paymentId, DateTimeOffset now, CancellationToken ct);
+
+    // ---- Hangfire job candidates (lightweight projections) ----
+
+    Task<IReadOnlyList<Guid>> ListReviewTimedOutIdsAsync(
+        DateTimeOffset cutoff, int maxBatch, CancellationToken ct);
+
+    Task<IReadOnlyList<Guid>> ListAdditionalPaymentTimedOutIdsAsync(
+        DateTimeOffset now, int maxBatch, CancellationToken ct);
+
+    Task<IReadOnlyList<PendingParcelTripRef>> ListPendingForLoadCheckAsync(
+        int maxBatch, CancellationToken ct);
+
+    // ---- Hangfire job atomic transitions ----
+
+    /// <summary>
+    /// Auto-reject review (no human reviewer). Guards Status==PENDING_OPERATOR_REVIEW &amp;&amp; ReviewDecision==PENDING.
+    /// </summary>
+    Task<bool> TryAutoRejectReviewAsync(
+        Guid parcelId, string reason, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
+    /// Auto-reject pending parcel when trip is IN_PROGRESS + 30min window passed.
+    /// Guards Status==PENDING.
+    /// </summary>
+    Task<bool> TryAutoRejectPendingAsync(
+        Guid parcelId, string reason, DateTimeOffset now, CancellationToken ct);
 }

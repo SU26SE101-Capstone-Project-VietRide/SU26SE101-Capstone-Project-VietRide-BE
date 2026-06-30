@@ -107,8 +107,26 @@ internal sealed class ParcelRepository : IParcelRepository
             .Where(p => p.Id == parcelId && p.Status == ParcelStatus.PENDING_ADDITIONAL_PAYMENT)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(p => p.Status, ParcelStatus.REJECTED)
+                .SetProperty(p => p.RejectionReason, "PARCEL_ADDITIONAL_PAYMENT_TIMEOUT")
+                .SetProperty(p => p.RejectedAt, now)
                 .SetProperty(p => p.UpdatedAt, now), ct);
         return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
+    }
+
+    public async Task<bool> TryMarkAdditionalExpiredByDeadlineAsync(
+        Guid parcelId, DateTimeOffset now, CancellationToken ct)
+    {
+        var affected = await _db.Parcels
+            .Where(p => p.Id == parcelId
+                && p.Status == ParcelStatus.PENDING_ADDITIONAL_PAYMENT
+                && p.AdditionalPaymentDeadline != null
+                && p.AdditionalPaymentDeadline <= now)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(p => p.Status, ParcelStatus.REJECTED)
+                .SetProperty(p => p.RejectionReason, "PARCEL_ADDITIONAL_PAYMENT_TIMEOUT")
+                .SetProperty(p => p.RejectedAt, now)
+                .SetProperty(p => p.UpdatedAt, now), ct);
+        return affected > 0;
     }
 
     // ---- Operator review transitions (PENDING_OPERATOR_REVIEW) ----
@@ -184,6 +202,76 @@ internal sealed class ParcelRepository : IParcelRepository
             .Where(p => p.Id == parcelId && p.Status == ParcelStatus.PENDING_ADDITIONAL_PAYMENT)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(p => p.AdditionalPaymentId, paymentId)
+                .SetProperty(p => p.UpdatedAt, now), ct);
+        return affected > 0;
+    }
+
+    // ---- Hangfire job candidate queries (lightweight projections) ----
+
+    public async Task<IReadOnlyList<Guid>> ListReviewTimedOutIdsAsync(
+        DateTimeOffset cutoff, int maxBatch, CancellationToken ct)
+    {
+        return await _db.Parcels
+            .Where(p => p.Status == ParcelStatus.PENDING_OPERATOR_REVIEW
+                && p.ReviewDecision == ParcelReviewDecision.PENDING
+                && p.CreatedAt <= cutoff)
+            .OrderBy(p => p.CreatedAt)
+            .Take(maxBatch)
+            .Select(p => p.Id)
+            .ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<Guid>> ListAdditionalPaymentTimedOutIdsAsync(
+        DateTimeOffset now, int maxBatch, CancellationToken ct)
+    {
+        return await _db.Parcels
+            .Where(p => p.Status == ParcelStatus.PENDING_ADDITIONAL_PAYMENT
+                && p.AdditionalPaymentDeadline != null
+                && p.AdditionalPaymentDeadline <= now)
+            .OrderBy(p => p.AdditionalPaymentDeadline)
+            .Take(maxBatch)
+            .Select(p => p.Id)
+            .ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<PendingParcelTripRef>> ListPendingForLoadCheckAsync(
+        int maxBatch, CancellationToken ct)
+    {
+        return await _db.Parcels
+            .Where(p => p.Status == ParcelStatus.PENDING)
+            .OrderBy(p => p.CreatedAt)
+            .Take(maxBatch)
+            .Select(p => new PendingParcelTripRef(p.Id, p.TripId, p.CreatedAt))
+            .ToListAsync(ct);
+    }
+
+    // ---- Hangfire job atomic transitions ----
+
+    public async Task<bool> TryAutoRejectReviewAsync(
+        Guid parcelId, string reason, DateTimeOffset now, CancellationToken ct)
+    {
+        var affected = await _db.Parcels
+            .Where(p => p.Id == parcelId
+                && p.Status == ParcelStatus.PENDING_OPERATOR_REVIEW
+                && p.ReviewDecision == ParcelReviewDecision.PENDING)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(p => p.Status, ParcelStatus.REJECTED)
+                .SetProperty(p => p.ReviewDecision, ParcelReviewDecision.REJECTED)
+                .SetProperty(p => p.ReviewedAt, now)
+                .SetProperty(p => p.RejectionReason, reason)
+                .SetProperty(p => p.UpdatedAt, now), ct);
+        return affected > 0;
+    }
+
+    public async Task<bool> TryAutoRejectPendingAsync(
+        Guid parcelId, string reason, DateTimeOffset now, CancellationToken ct)
+    {
+        var affected = await _db.Parcels
+            .Where(p => p.Id == parcelId && p.Status == ParcelStatus.PENDING)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(p => p.Status, ParcelStatus.REJECTED)
+                .SetProperty(p => p.RejectionReason, reason)
+                .SetProperty(p => p.RejectedAt, now)
                 .SetProperty(p => p.UpdatedAt, now), ct);
         return affected > 0;
     }

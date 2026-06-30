@@ -55,8 +55,8 @@ Production direction:
 - [x] Phase 1 — Foundation, Schema, Runtime Wiring
 - [x] Phase 2 — Internal Clients Và Test Stubs
 - [x] Phase 3 — Fare Config Và Create Parcel
-- [ ] Phase 4 — Payment, Review, Reweigh
-- [ ] Phase 5 — Hangfire Jobs
+- [x] Phase 4 — Payment, Review, Reweigh
+- [x] Phase 5 — Hangfire Jobs
 - [ ] Phase 6 — Load, Unload, Tracking Access
 - [ ] Phase 7 — Delivery Confirmation Và Gateway
 - [ ] Phase 8 — Transfer, Return, Override, PENDING_OPERATOR_ACTION
@@ -241,28 +241,57 @@ dotnet build apps/parcel/VietRide.Parcel.sln -c Release
 dotnet test apps/parcel/VietRide.Parcel.sln -c Release --filter "Payment|Review|Reweigh"
 ```
 
+### Kết quả phase
+
+**Ngày hoàn thành:** 2026-06-29
+
+**Implement agent:** OpenCode
+
+**Review agent:** Codex
+
+**Verify đã chạy:**
+```bash
+dotnet build apps/parcel/VietRide.Parcel.sln
+dotnet test apps/parcel/VietRide.Parcel.UnitTests
+dotnet test apps/payment/VietRide.Payment.sln
+```
+
+**Kết quả review:**
+- Phase 4 code đã qua 1 pass review với **6 findings** — 3 P1, 2 P2, 1 P3:
+  - **P1 (3):** Commit-before-external-call — thêm `[SkipTransaction]` attribute, `TransactionBehavior` bỏ qua request có attribute, 3 command được annotate. Payment HTTP gọi sau khi Parcel state đã commit thật. Dọn `IUnitOfWork` không dùng khỏi `ReviewParcelCommandHandler` và `ReweighParcelCommandHandler`. Reweigh stale entity — thêm `TryAssignAdditionalPaymentIdAsync` bằng `ExecuteUpdateAsync`, handler không còn `Update(parcel)` trên tracked stale entity. Race condition additional payment — `TryMarkAdditionalSucceededAsync` nhận thêm `paymentId` và atomically set `AdditionalPaymentId` cùng lúc với status transition.
+  - **P2 (2):** `PaymentMethod` bắt buộc khi reject — sửa thành nullable, chỉ validate khi `Decision == APPROVED`. IdempotencyMiddleware cache cả 5xx — thêm guard skip SETNX khi `statusCode >= 500` để retry cùng Idempotency-Key được re-execute.
+  - **P3 (1):** `ParcelRepository.cs` LF line ending — chuyển sang CRLF bằng .NET API an toàn.
+- **Migration Down** ghi nhận ngoại lệ có chủ đích so với reversible rule (PostgreSQL không hỗ trợ `ALTER TYPE ... DROP VALUE`).
+- **Hiện tại: 88 Parcel unit tests + 60 Payment unit tests + 73 Shared.Web unit tests pass**, build 0 lỗi.
+
+**Carry-over:**
+1. `[SkipTransaction]` khiến Payment transport fail sau khi Parcel đã commit — IdempotencyMiddleware đã patch không cache 5xx, nhưng response vẫn trả lỗi. Cần endpoint retry-payment hoặc saga nếu muốn automatic recovery.
+2. `AssignAdditionalPaymentId()` domain method trên `Parcel` entity hiện unused — có thể xoá ở phase sau.
+3. `EffectiveUntil` chưa hỗ trợ clear qua PATCH — carry-over từ Phase 3.
+
 ---
 
 ## Phase 5 — Hangfire Jobs
 
-**Thời lượng:** 1-2 ngày
+**Thời lượng:** 1 ngày
 **Mục tiêu:** Không để Parcel bị kẹt trạng thái treo.
 
-### Scope
+### Scope (implemented subset — deferred items in carry-over)
 
-- Wire Hangfire infrastructure: NuGet, DI (`AddHangfire`, `UseHangfireServer`), dashboard.
-- Review timeout.
-- Additional payment timeout.
-- Pending parcel after trip started auto-reject.
-- Transfer confirm timeout.
-- Operator action re-alert.
-- Delivery pending confirm reminder.
-- Reject undo window.
+- Wire Hangfire infrastructure: NuGet, DI (`AddParcelHangfire`, `AddHangfireServer`).
+- Review timeout job (PENDING_OPERATOR_REVIEW → REJECTED sau 24h).
+- Additional payment timeout job (PENDING_ADDITIONAL_PAYMENT → REJECTED quá deadline).
+- Pending parcel auto-reject job (PENDING → REJECTED khi trip IN_PROGRESS + 30 phút).
+- Cả 3 jobs chạy cron `*/5 * * * *`, idempotent, guarded by status predicate.
+- **Dashboard cố ý không expose** (cần auth guard trước khi mở — deferred).
 
 ### Output hoàn thành
 
-- Không còn trạng thái treo vô hạn.
-- Jobs idempotent, guarded by expected status.
+- 3 recurring Hangfire jobs đăng ký và chạy ở môi trường không phải Testing.
+- Transition chỉ đơn thuần chuyển trạng thái — chưa emit refund/outbox events (deferred sang Phase 9).
+- `TryMarkAdditionalExpiredAsync` được mở rộng ghi thêm RejectionReason + RejectedAt để đồng bộ với job path.
+- `TryMarkAdditionalExpiredByDeadlineAsync` — job path với guard deadline atomic.
+- Atomic transitions dùng `ExecuteUpdateAsync` với WHERE status predicate — idempotent, không double-count.
 
 ### Verify
 
@@ -270,6 +299,32 @@ dotnet test apps/parcel/VietRide.Parcel.sln -c Release --filter "Payment|Review|
 dotnet build apps/parcel/VietRide.Parcel.sln -c Release
 dotnet test apps/parcel/VietRide.Parcel.sln -c Release --filter "Job|Timeout|Reminder"
 ```
+
+### Kết quả phase
+
+**Ngày hoàn thành:** 2026-06-30
+
+**Implement agent:** OpenCode
+
+**Review agent:** (pending — model khác review sau)
+
+**Verify đã chạy:**
+```bash
+dotnet build apps/parcel/VietRide.Parcel.sln -c Release
+dotnet test apps/parcel/VietRide.Parcel.sln -c Release --filter "Job|Timeout|Reminder"
+# => 22 tests pass (toàn bộ unit test cho 3 handlers + 3 jobs)
+dotnet test apps/parcel/VietRide.Parcel.sln -c Release
+# => 110 unit tests pass (regression từ Phase 1-4 giữ nguyên xanh)
+```
+
+**Kết quả review:**
+- Codex review — 2 findings fixed: (1) P2 — `OperationCanceledException` rethrow guard trong `AutoRejectPendingParcelCommandHandler`; (2) P3 — xoá Phase 10 ngoài scope (`Procduct ready`) khỏi timeline.
+
+**Carry-over:**
+1. **Hoàn tiền + outbox events** (`parcel.refund.initiated` / `parcel.parcel.auto_rejected`) cho mọi auto-reject: deferred sang Phase 9.
+2. **4 job forward** (transfer-confirm escalation, operator-action re-alert, delivery-confirm reminder, reject-undo window): deferred sang Phase 7/8 vì các trạng thái nguồn chưa tồn tại.
+3. **Hangfire dashboard cố ý hoãn** vì lý do bảo mật (cần auth filter / internal guard trước khi expose).
+4. **Trip-unresolved skip path**: Parcel bị skip do TripNotFound/TransportError sẽ stuck vô thời hạn. Cần admin-review / dead-letter path (error code e.g. `PARCEL_TRIP_UNRESOLVED`) — ghi nhận cho Phase 8/9.
 
 ---
 

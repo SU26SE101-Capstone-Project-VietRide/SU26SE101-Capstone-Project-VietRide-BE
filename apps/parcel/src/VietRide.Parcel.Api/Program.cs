@@ -1,10 +1,12 @@
 using System.Data;
+using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Serilog;
 using VietRide.Parcel.Application;
 using VietRide.Parcel.Infrastructure;
 using VietRide.Parcel.Infrastructure.DependencyInjection;
+using VietRide.Parcel.Infrastructure.Jobs;
 using VietRide.Shared.Application.DependencyInjection;
 using VietRide.Shared.Messaging.DependencyInjection;
 using VietRide.Shared.Persistence.DependencyInjection;
@@ -33,6 +35,8 @@ var registerMessaging = !builder.Environment.IsEnvironment("Testing");
 if (registerMessaging)
 {
     builder.Services.AddVietRideMessaging(builder.Configuration);
+    builder.Services.AddParcelHangfire(builder.Configuration);
+    builder.Services.AddHangfireServer();
 }
 
 builder.Services.AddInfrastructure(builder.Configuration, registerConsumers: registerMessaging);
@@ -68,6 +72,24 @@ app.UseAuthorization();
 app.UseVietRideIdempotency();
 app.MapVietRideHealth(ServiceName);
 app.MapControllers();
+
+if (registerMessaging)
+{
+    using var scope = app.Services.CreateScope();
+    var recurringJobs = scope.ServiceProvider.GetRequiredService<IRecurringJobManager>();
+    recurringJobs.AddOrUpdate<ParcelReviewTimeoutJob>(
+        ParcelReviewTimeoutJob.RecurringJobId,
+        job => job.RunAsync(CancellationToken.None),
+        "*/5 * * * *");
+    recurringJobs.AddOrUpdate<ParcelAdditionalPaymentTimeoutJob>(
+        ParcelAdditionalPaymentTimeoutJob.RecurringJobId,
+        job => job.RunAsync(CancellationToken.None),
+        "*/5 * * * *");
+    recurringJobs.AddOrUpdate<ParcelPendingAutoRejectJob>(
+        ParcelPendingAutoRejectJob.RecurringJobId,
+        job => job.RunAsync(CancellationToken.None),
+        "*/5 * * * *");
+}
 
 app.Run();
 

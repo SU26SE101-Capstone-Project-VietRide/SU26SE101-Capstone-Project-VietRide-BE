@@ -1,9 +1,12 @@
+using Hangfire;
+using Hangfire.PostgreSql;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using StackExchange.Redis;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Infrastructure.Http;
+using VietRide.Parcel.Infrastructure.Jobs;
 using VietRide.Parcel.Infrastructure.Messaging;
 using VietRide.Parcel.Infrastructure.Persistence.Repositories;
 using VietRide.Shared.Http.Handlers;
@@ -15,6 +18,34 @@ namespace VietRide.Parcel.Infrastructure.DependencyInjection;
 
 public static class InfrastructureServiceCollectionExtensions
 {
+    public const string HangfireSchemaName = "hangfire";
+
+    public static IServiceCollection AddParcelHangfire(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        var connectionString = configuration.GetConnectionString("Default")
+            ?? throw new InvalidOperationException("ConnectionStrings:Default is not configured.");
+
+        services.AddHangfire(config => config
+            .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+            .UseSimpleAssemblyNameTypeSerializer()
+            .UseRecommendedSerializerSettings()
+            .UsePostgreSqlStorage(
+                connectionString,
+                new PostgreSqlStorageOptions
+                {
+                    SchemaName = HangfireSchemaName,
+                    PrepareSchemaIfNecessary = true,
+                }));
+
+        services.AddScoped<ParcelReviewTimeoutJob>();
+        services.AddScoped<ParcelAdditionalPaymentTimeoutJob>();
+        services.AddScoped<ParcelPendingAutoRejectJob>();
+
+        return services;
+    }
+
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services,
         IConfiguration configuration,
