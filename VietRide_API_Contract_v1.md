@@ -3573,3 +3573,39 @@ Response `200`: `GetMyDriverScheduleResult` in the ADR 0004 success envelope.
 
 Trips are ordered by `departureDateTime`, then by `tripId`. Date filtering converts the inclusive
 ICT date range to UTC boundaries before querying. No Trip state is mutated.
+
+### GET `/v1/bookings/trips/{tripId}/manifest`
+
+Auth: `DRIVER` or `ASSISTANT`. The authenticated JWT `sub` must equal the Trip snapshot's
+`driverUserId` or `assistantUserId`; otherwise the endpoint returns `403 FORBIDDEN`.
+
+Returns only confirmed Booking passenger records and exposes no passenger or buyer PII. Items are
+ordered by the Trip snapshot stop `orderIndex`. A terminal pickup (`pickupStationId` set and
+`pickupStopId` null) is treated as the origin with `orderIndex = 0` and sorts first.
+
+Response `200` in the ADR 0004 success envelope:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [
+      {
+        "seatNumber": "A01",
+        "bookingCode": "VR-20260630-ABCD1234",
+        "pickupStop": "uuid-or-null",
+        "boardingStatus": "PENDING"
+      }
+    ]
+  },
+  "meta": {
+    "traceId": "req-abc123",
+    "timestamp": "2026-06-30T03:00:00Z"
+  }
+}
+```
+
+Each manifest item contains exactly `seatNumber`, `bookingCode`, `pickupStop`, and
+`boardingStatus`. A trip with no confirmed bookings returns `200` with `items: []`, not `404`.
+Unknown trip returns `404 TRIP_NOT_FOUND`; validation failures return `422 VALIDATION_ERROR`.
