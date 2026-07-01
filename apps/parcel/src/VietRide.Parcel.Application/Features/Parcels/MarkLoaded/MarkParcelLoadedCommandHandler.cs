@@ -1,7 +1,9 @@
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 
 namespace VietRide.Parcel.Application.Features.Parcels.MarkLoaded;
 
@@ -9,10 +11,17 @@ public sealed class MarkParcelLoadedCommandHandler
     : IRequestHandler<MarkParcelLoadedCommand, MarkParcelLoadedResponse>
 {
     private readonly IParcelRepository _parcelRepository;
+    private readonly IIntegrationEventOutbox _outbox;
+    private readonly IParcelStatsRepository _statsRepository;
 
-    public MarkParcelLoadedCommandHandler(IParcelRepository parcelRepository)
+    public MarkParcelLoadedCommandHandler(
+        IParcelRepository parcelRepository,
+        IIntegrationEventOutbox outbox,
+        IParcelStatsRepository statsRepository)
     {
         _parcelRepository = parcelRepository;
+        _outbox = outbox;
+        _statsRepository = statsRepository;
     }
 
     public async Task<MarkParcelLoadedResponse> Handle(
@@ -52,6 +61,18 @@ public sealed class MarkParcelLoadedCommandHandler
             throw new CodedConflictException(
                 "RACE_LOST",
                 $"Parcel '{command.ParcelId}' status changed concurrently; cannot mark loaded.");
+
+        await ParcelOutboxEvents.EnqueueAsync(
+            _outbox,
+            ParcelOutboxEvents.Loaded,
+            new { parcelId = snapshot.ParcelId, tripId = snapshot.TripId, actualWeightKg = parcel.ActualWeightKg ?? parcel.EstimatedWeightKg },
+            cancellationToken);
+
+        await _statsRepository.UpsertIncrementAsync(
+            snapshot.OperatorId,
+            DateOnly.FromDateTime(now.UtcDateTime),
+            0, 1, 0, 0, 0, 0, 0,
+            cancellationToken);
 
         return new MarkParcelLoadedResponse(snapshot.ParcelId, snapshot.ParcelCode, snapshot.Status.ToString());
     }

@@ -17,9 +17,11 @@ public sealed class HandleTripCompletedCommandHandler
         HandleTripCompletedCommand command,
         CancellationToken cancellationToken)
     {
-        return await _parcelRepository.TryBulkSetPendingOperatorActionByTripIdAsync(
+        var updated = await _parcelRepository.TryBulkSetPendingOperatorActionByTripIdAsync(
             command.TripId,
             DateTimeOffset.UtcNow,
             cancellationToken);
+
+        return updated.Count;
     }
 }

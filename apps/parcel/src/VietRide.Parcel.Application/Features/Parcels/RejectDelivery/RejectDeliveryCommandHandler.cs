@@ -1,7 +1,9 @@
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using ParcelEntity = VietRide.Parcel.Domain.Entities.Parcel;
 
 namespace VietRide.Parcel.Application.Features.Parcels.RejectDelivery;
@@ -10,10 +12,17 @@ public sealed class RejectDeliveryCommandHandler
     : IRequestHandler<RejectDeliveryCommand, RejectDeliveryResponse>
 {
     private readonly IParcelRepository _parcelRepository;
+    private readonly IIntegrationEventOutbox _outbox;
+    private readonly IParcelStatsRepository _statsRepository;
 
-    public RejectDeliveryCommandHandler(IParcelRepository parcelRepository)
+    public RejectDeliveryCommandHandler(
+        IParcelRepository parcelRepository,
+        IIntegrationEventOutbox outbox,
+        IParcelStatsRepository statsRepository)
     {
         _parcelRepository = parcelRepository;
+        _outbox = outbox;
+        _statsRepository = statsRepository;
     }
 
     public async Task<RejectDeliveryResponse> Handle(
@@ -57,6 +66,18 @@ public sealed class RejectDeliveryCommandHandler
             throw new CodedConflictException(
                 "RACE_LOST",
                 $"Parcel '{parcel.Id}' status changed concurrently; cannot reject delivery.");
+
+        await ParcelOutboxEvents.EnqueueAsync(
+            _outbox,
+            ParcelOutboxEvents.DeliveryRejected,
+            new { parcelId = snapshot.ParcelId, reason = command.RejectionReason },
+            cancellationToken);
+
+        await _statsRepository.UpsertIncrementAsync(
+            snapshot.OperatorId,
+            DateOnly.FromDateTime(now.UtcDateTime),
+            0, 0, 0, 1, 0, 0, 0,
+            cancellationToken);
 
         var rejectedAt = now;
         return new RejectDeliveryResponse(

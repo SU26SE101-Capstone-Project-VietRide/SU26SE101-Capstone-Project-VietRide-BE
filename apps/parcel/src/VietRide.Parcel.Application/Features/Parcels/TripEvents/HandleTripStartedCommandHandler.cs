@@ -17,9 +17,11 @@ public sealed class HandleTripStartedCommandHandler
         HandleTripStartedCommand command,
         CancellationToken cancellationToken)
     {
-        return await _parcelRepository.TryBulkSetInTransitByTripIdAsync(
+        var updated = await _parcelRepository.TryBulkSetInTransitByTripIdAsync(
             command.TripId,
             DateTimeOffset.UtcNow,
             cancellationToken);
+
+        return updated.Count;
     }
 }

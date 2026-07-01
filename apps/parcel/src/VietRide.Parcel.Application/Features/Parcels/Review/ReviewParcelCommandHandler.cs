@@ -2,8 +2,11 @@ using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Exceptions;
+using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
+using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Parcel.Application.Features.Parcels.Review;
@@ -13,13 +16,22 @@ public sealed class ReviewParcelCommandHandler
 {
     private readonly IParcelRepository _parcelRepository;
     private readonly IPaymentServiceClient _paymentClient;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly IIntegrationEventOutbox _outbox;
+    private readonly IParcelStatsRepository _statsRepository;
 
     public ReviewParcelCommandHandler(
         IParcelRepository parcelRepository,
-        IPaymentServiceClient paymentClient)
+        IPaymentServiceClient paymentClient,
+        IUnitOfWork unitOfWork,
+        IIntegrationEventOutbox outbox,
+        IParcelStatsRepository statsRepository)
     {
         _parcelRepository = parcelRepository;
         _paymentClient = paymentClient;
+        _unitOfWork = unitOfWork;
+        _outbox = outbox;
+        _statsRepository = statsRepository;
     }
 
     public async Task<ReviewParcelResponse> Handle(
@@ -64,12 +76,22 @@ public sealed class ReviewParcelCommandHandler
                     "VALIDATION_ERROR", "PaymentMethod must be WALLET or VNPAY.");
 
             var depositAmount = Money.FromRaw(floored);
-            var snapshot = await _parcelRepository.TryApproveReviewAsync(
-                command.ParcelId, command.ReviewedByUserId, depositAmount, now, cancellationToken);
-
-            if (snapshot is null)
-                throw new CodedConflictException(
-                    "RACE_LOST", "Parcel was already reviewed or status changed.");
+            await _unitOfWork.BeginTransactionAsync(cancellationToken);
+            ParcelPaymentTransitionSnapshot snapshot;
+            try
+            {
+                snapshot = await _parcelRepository.TryApproveReviewAsync(
+                    command.ParcelId, command.ReviewedByUserId, depositAmount, now, cancellationToken)
+                    ?? throw new CodedConflictException(
+                        "RACE_LOST", "Parcel was already reviewed or status changed.");
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await _unitOfWork.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
+            }
 
             // Initiate payment after atomic status transition
             var idempotencyKey = $"parcel:deposit:{command.ParcelId}";
@@ -119,12 +141,32 @@ public sealed class ReviewParcelCommandHandler
                 throw new CodedValidationException(
                     "VALIDATION_ERROR", "Reason is required for REJECTED decision.");
 
-            var snapshot = await _parcelRepository.TryRejectReviewAsync(
-                command.ParcelId, command.ReviewedByUserId, command.Reason, now, cancellationToken);
-
-            if (snapshot is null)
-                throw new CodedConflictException(
-                    "RACE_LOST", "Parcel was already reviewed or status changed.");
+            await _unitOfWork.BeginTransactionAsync(cancellationToken);
+            ParcelPaymentTransitionSnapshot snapshot;
+            try
+            {
+                snapshot = await _parcelRepository.TryRejectReviewAsync(
+                    command.ParcelId, command.ReviewedByUserId, command.Reason, now, cancellationToken)
+                    ?? throw new CodedConflictException(
+                        "RACE_LOST", "Parcel was already reviewed or status changed.");
+                await ParcelOutboxEvents.EnqueueAsync(
+                    _outbox,
+                    ParcelOutboxEvents.Rejected,
+                    new { parcelId = snapshot.ParcelId },
+                    cancellationToken);
+                await _statsRepository.UpsertIncrementAsync(
+                    snapshot.OperatorId,
+                    DateOnly.FromDateTime(now.UtcDateTime),
+                    0, 0, 0, 1, 0, 0, 0,
+                    cancellationToken);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await _unitOfWork.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
+            }
 
             return new ReviewParcelResponse(
                 command.ParcelId,

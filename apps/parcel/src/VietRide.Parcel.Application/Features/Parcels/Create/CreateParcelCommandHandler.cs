@@ -4,6 +4,7 @@ using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Exceptions;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.ValueObjects;
 using ParcelEntity = VietRide.Parcel.Domain.Entities.Parcel;
@@ -20,6 +21,8 @@ public sealed class CreateParcelCommandHandler
     private readonly IParcelRepository _parcelRepository;
     private readonly IParcelRouteFareRepository _fareRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IIntegrationEventOutbox _outbox;
+    private readonly IParcelStatsRepository _statsRepository;
 
     public CreateParcelCommandHandler(
         IIdentityServiceClient identityClient,
@@ -28,7 +31,9 @@ public sealed class CreateParcelCommandHandler
         IPaymentServiceClient paymentClient,
         IParcelRepository parcelRepository,
         IParcelRouteFareRepository fareRepository,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IIntegrationEventOutbox outbox,
+        IParcelStatsRepository statsRepository)
     {
         _identityClient = identityClient;
         _bookingClient = bookingClient;
@@ -37,6 +42,8 @@ public sealed class CreateParcelCommandHandler
         _parcelRepository = parcelRepository;
         _fareRepository = fareRepository;
         _unitOfWork = unitOfWork;
+        _outbox = outbox;
+        _statsRepository = statsRepository;
     }
 
     public async Task<CreateParcelResponse> Handle(
@@ -186,8 +193,45 @@ public sealed class CreateParcelCommandHandler
                 deliveryMethod,
                 priceVnd);
 
-        await _parcelRepository.AddAsync(parcel, cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            await _parcelRepository.AddAsync(parcel, cancellationToken);
+            await ParcelOutboxEvents.EnqueueAsync(
+                _outbox,
+                ParcelOutboxEvents.Created,
+                new { parcelId = parcel.Id, tripId = parcel.TripId, senderUserId = parcel.SenderUserId, recipientUserId = parcel.RecipientUserId },
+                cancellationToken);
+
+            if (sizeCategory == ParcelSizeCategory.EXTRA_LARGE)
+            {
+                await ParcelOutboxEvents.EnqueueAsync(
+                    _outbox,
+                    ParcelOutboxEvents.ReviewRequested,
+                    new { parcelId = parcel.Id, operatorId = parcel.OperatorId },
+                    cancellationToken);
+            }
+
+            await _statsRepository.UpsertIncrementAsync(
+                parcel.OperatorId,
+                DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime),
+                totalParcels: 1,
+                totalLoaded: 0,
+                totalDelivered: 0,
+                totalRejected: 0,
+                totalReturned: 0,
+                totalRevenue: 0,
+                totalRefunded: 0,
+                cancellationToken);
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await _unitOfWork.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await _unitOfWork.RollbackAsync(cancellationToken);
+            throw;
+        }
 
         string? paymentRedirectUrl = null;
 

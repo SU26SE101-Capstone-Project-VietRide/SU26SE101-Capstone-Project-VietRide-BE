@@ -1,7 +1,9 @@
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using ParcelEntity = VietRide.Parcel.Domain.Entities.Parcel;
 
 namespace VietRide.Parcel.Application.Features.Parcels.ConfirmDelivery;
@@ -10,10 +12,17 @@ public sealed class ConfirmDeliveryCommandHandler
     : IRequestHandler<ConfirmDeliveryCommand, ConfirmDeliveryResponse>
 {
     private readonly IParcelRepository _parcelRepository;
+    private readonly IIntegrationEventOutbox _outbox;
+    private readonly IParcelStatsRepository _statsRepository;
 
-    public ConfirmDeliveryCommandHandler(IParcelRepository parcelRepository)
+    public ConfirmDeliveryCommandHandler(
+        IParcelRepository parcelRepository,
+        IIntegrationEventOutbox outbox,
+        IParcelStatsRepository statsRepository)
     {
         _parcelRepository = parcelRepository;
+        _outbox = outbox;
+        _statsRepository = statsRepository;
     }
 
     public async Task<ConfirmDeliveryResponse> Handle(
@@ -53,6 +62,18 @@ public sealed class ConfirmDeliveryCommandHandler
             throw new CodedConflictException(
                 "RACE_LOST",
                 $"Parcel '{parcel.Id}' status changed concurrently; cannot confirm delivery.");
+
+        await ParcelOutboxEvents.EnqueueAsync(
+            _outbox,
+            ParcelOutboxEvents.DeliveryConfirmed,
+            new { parcelId = snapshot.ParcelId },
+            cancellationToken);
+
+        await _statsRepository.UpsertIncrementAsync(
+            snapshot.OperatorId,
+            DateOnly.FromDateTime(now.UtcDateTime),
+            0, 0, 1, 0, 0, 0, 0,
+            cancellationToken);
 
         return new ConfirmDeliveryResponse(snapshot.ParcelId, snapshot.Status.ToString(), now);
     }

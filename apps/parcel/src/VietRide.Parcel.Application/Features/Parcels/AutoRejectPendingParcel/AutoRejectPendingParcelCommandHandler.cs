@@ -2,6 +2,9 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Features.Parcels;
+using VietRide.Shared.Application.Outbox;
+using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Parcel.Application.Features.Parcels.AutoRejectPendingParcel;
@@ -14,17 +17,26 @@ public sealed class AutoRejectPendingParcelCommandHandler
     private readonly IParcelRepository _parcelRepository;
     private readonly ITripServiceClient _tripClient;
     private readonly IClock _clock;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly IIntegrationEventOutbox _outbox;
+    private readonly IParcelStatsRepository _statsRepository;
     private readonly ILogger<AutoRejectPendingParcelCommandHandler> _logger;
 
     public AutoRejectPendingParcelCommandHandler(
         IParcelRepository parcelRepository,
         ITripServiceClient tripClient,
         IClock clock,
-        ILogger<AutoRejectPendingParcelCommandHandler> logger)
+        IUnitOfWork unitOfWork,
+        IIntegrationEventOutbox outbox,
+        ILogger<AutoRejectPendingParcelCommandHandler> logger,
+        IParcelStatsRepository statsRepository)
     {
         _parcelRepository = parcelRepository;
         _tripClient = tripClient;
         _clock = clock;
+        _unitOfWork = unitOfWork;
+        _outbox = outbox;
+        _statsRepository = statsRepository;
         _logger = logger;
     }
 
@@ -101,10 +113,43 @@ public sealed class AutoRejectPendingParcelCommandHandler
                 if (now < cutoff)
                     continue;
 
-                var ok = await _parcelRepository.TryAutoRejectPendingAsync(
-                    parcelRef.ParcelId, ParcelRejectionReasons.LateLoad, now, cancellationToken);
-                if (ok)
+                await _unitOfWork.BeginTransactionAsync(cancellationToken);
+                try
+                {
+                    var snapshot = await _parcelRepository.TryAutoRejectPendingAsync(
+                        parcelRef.ParcelId, ParcelRejectionReasons.LateLoad, now, cancellationToken);
+                    if (snapshot is null)
+                    {
+                        await _unitOfWork.RollbackAsync(cancellationToken);
+                        continue;
+                    }
+
+                    var refundAmount = snapshot.DepositAmount + snapshot.AdditionalAmount;
+                    await ParcelOutboxEvents.EnqueueAsync(
+                        _outbox,
+                        ParcelOutboxEvents.AutoRejected,
+                        new { parcelId = snapshot.ParcelId, refundAmount },
+                        cancellationToken);
+                    await ParcelOutboxEvents.EnqueueAsync(
+                        _outbox,
+                        ParcelOutboxEvents.RefundInitiated,
+                        new { parcelId = snapshot.ParcelId, refundAmount },
+                        cancellationToken);
+                    await _statsRepository.UpsertIncrementAsync(
+                        snapshot.OperatorId,
+                        DateOnly.FromDateTime(now.UtcDateTime),
+                        0, 0, 0, 1, 0, 0, refundAmount,
+                        cancellationToken);
+
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    await _unitOfWork.CommitAsync(cancellationToken);
                     rejectedCount++;
+                }
+                catch
+                {
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                    throw;
+                }
             }
         }
 

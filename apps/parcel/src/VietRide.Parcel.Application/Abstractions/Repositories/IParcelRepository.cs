@@ -33,7 +33,7 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     /// <summary>
     /// Job path: rejects only when AdditionalPaymentDeadline has passed (atomic guard).
     /// </summary>
-    Task<bool> TryMarkAdditionalExpiredByDeadlineAsync(
+    Task<ParcelPaymentTransitionSnapshot?> TryMarkAdditionalExpiredByDeadlineAsync(
         Guid parcelId, DateTimeOffset now, CancellationToken ct);
 
     // Operator review transitions (PENDING_OPERATOR_REVIEW)
@@ -71,14 +71,14 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     /// <summary>
     /// Auto-reject review (no human reviewer). Guards Status==PENDING_OPERATOR_REVIEW &amp;&amp; ReviewDecision==PENDING.
     /// </summary>
-    Task<bool> TryAutoRejectReviewAsync(
+    Task<ParcelPaymentTransitionSnapshot?> TryAutoRejectReviewAsync(
         Guid parcelId, string reason, DateTimeOffset now, CancellationToken ct);
 
     /// <summary>
     /// Auto-reject pending parcel when trip is IN_PROGRESS + 30min window passed.
     /// Guards Status==PENDING.
     /// </summary>
-    Task<bool> TryAutoRejectPendingAsync(
+    Task<ParcelPaymentTransitionSnapshot?> TryAutoRejectPendingAsync(
         Guid parcelId, string reason, DateTimeOffset now, CancellationToken ct);
 
     // ---- Phase 6: Loading / Unloading ----
@@ -93,17 +93,34 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     /// Atomic: IN_TRANSIT -> DELIVERED_PENDING_CONFIRM with token generation.
     /// </summary>
     Task<ParcelPaymentTransitionSnapshot?> TryUnloadToPendingConfirmAsync(
-        Guid parcelId, DateTimeOffset now, CancellationToken ct);
+        Guid parcelId, Guid deliveryToken, DateTimeOffset deliveryTokenExpiresAt, DateTimeOffset now, CancellationToken ct);
 
     /// <summary>
     /// Bulk: LOADED -> IN_TRANSIT for all parcels on a trip (trip.started).
     /// </summary>
-    Task<int> TryBulkSetInTransitByTripIdAsync(Guid tripId, DateTimeOffset now, CancellationToken ct);
+    Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkSetInTransitByTripIdAsync(Guid tripId, DateTimeOffset now, CancellationToken ct);
 
     /// <summary>
     /// Bulk: LOADED/IN_TRANSIT -> PENDING_OPERATOR_ACTION for all unresolved parcels on a trip (trip.completed).
     /// </summary>
-    Task<int> TryBulkSetPendingOperatorActionByTripIdAsync(Guid tripId, DateTimeOffset now, CancellationToken ct);
+    Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkSetPendingOperatorActionByTripIdAsync(Guid tripId, DateTimeOffset now, CancellationToken ct);
+
+    // ---- Phase 8: Operational recovery ----
+
+    Task<ParcelPaymentTransitionSnapshot?> TryRequestTransferAsync(
+        Guid parcelId, Guid operatorId, Guid targetTripId, DateTimeOffset now, CancellationToken ct);
+
+    Task<ParcelPaymentTransitionSnapshot?> TryConfirmTransferAsync(
+        Guid parcelId, Guid targetTripId, string parcelCode, Guid confirmedByUserId, DateTimeOffset now, CancellationToken ct);
+
+    Task<ParcelPaymentTransitionSnapshot?> TryReturnAsync(
+        Guid parcelId, Guid operatorId, Guid returnedByUserId, string reason, DateTimeOffset now, CancellationToken ct);
+
+    Task<IReadOnlyList<ParcelEventSnapshot>> TryRejectPreAcceptanceByTripIdAsync(
+        Guid tripId, DateTimeOffset now, CancellationToken ct);
+
+    Task<IReadOnlyList<ParcelEventSnapshot>> TryCancelPendingByTripIdAsync(
+        Guid tripId, DateTimeOffset now, CancellationToken ct);
 
     // ---- Phase 6: Queries ----
 

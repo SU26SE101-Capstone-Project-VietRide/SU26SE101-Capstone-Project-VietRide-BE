@@ -4,6 +4,7 @@ using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Exceptions;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Parcel.Application.Features.Parcels.Reweigh;
@@ -17,17 +18,20 @@ public sealed class ReweighParcelCommandHandler
     private readonly IParcelRouteFareRepository _fareRepository;
     private readonly ITripServiceClient _tripClient;
     private readonly IPaymentServiceClient _paymentClient;
+    private readonly IUnitOfWork _unitOfWork;
 
     public ReweighParcelCommandHandler(
         IParcelRepository parcelRepository,
         IParcelRouteFareRepository fareRepository,
         ITripServiceClient tripClient,
-        IPaymentServiceClient paymentClient)
+        IPaymentServiceClient paymentClient,
+        IUnitOfWork unitOfWork)
     {
         _parcelRepository = parcelRepository;
         _fareRepository = fareRepository;
         _tripClient = tripClient;
         _paymentClient = paymentClient;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ReweighParcelResponse> Handle(
@@ -81,13 +85,22 @@ public sealed class ReweighParcelCommandHandler
 
         if (additionalRaw == 0)
         {
-            // No additional fee - just record actual weight/size
-            var snapshot = await _parcelRepository.TryReweighNoFeeAsync(
-                command.ParcelId, command.ActualWeightKg, actualSize, now, cancellationToken);
-
-            if (snapshot is null)
-                throw new CodedConflictException(
-                    "RACE_LOST", "Parcel status changed during reweigh.");
+            await _unitOfWork.BeginTransactionAsync(cancellationToken);
+            ParcelPaymentTransitionSnapshot snapshot;
+            try
+            {
+                snapshot = await _parcelRepository.TryReweighNoFeeAsync(
+                    command.ParcelId, command.ActualWeightKg, actualSize, now, cancellationToken)
+                    ?? throw new CodedConflictException(
+                        "RACE_LOST", "Parcel status changed during reweigh.");
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await _unitOfWork.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
+            }
 
             return new ReweighParcelResponse(
                 command.ParcelId, snapshot.ParcelCode, ParcelStatus.PENDING.ToString(), 0, null);
@@ -96,13 +109,23 @@ public sealed class ReweighParcelCommandHandler
         {
             // Additional fee required - transition to PENDING_ADDITIONAL_PAYMENT
             var deadline = now + AdditionalPaymentTimeout;
-            var snapshot = await _parcelRepository.TryReweighWithFeeAsync(
-                command.ParcelId, command.ActualWeightKg, actualSize,
-                additionalAmount, deadline, now, cancellationToken);
-
-            if (snapshot is null)
-                throw new CodedConflictException(
-                    "RACE_LOST", "Parcel status changed during reweigh.");
+            await _unitOfWork.BeginTransactionAsync(cancellationToken);
+            ParcelPaymentTransitionSnapshot snapshot;
+            try
+            {
+                snapshot = await _parcelRepository.TryReweighWithFeeAsync(
+                    command.ParcelId, command.ActualWeightKg, actualSize,
+                    additionalAmount, deadline, now, cancellationToken)
+                    ?? throw new CodedConflictException(
+                        "RACE_LOST", "Parcel status changed during reweigh.");
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await _unitOfWork.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
+            }
 
             // Initiate additional payment
             var idempotencyKey = $"parcel:additional:{command.ParcelId}";

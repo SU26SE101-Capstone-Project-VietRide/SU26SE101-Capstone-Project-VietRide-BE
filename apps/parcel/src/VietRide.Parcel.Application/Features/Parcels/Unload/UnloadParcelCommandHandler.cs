@@ -2,8 +2,10 @@ using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Exceptions;
+using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 
 namespace VietRide.Parcel.Application.Features.Parcels.Unload;
 
@@ -12,13 +14,16 @@ public sealed class UnloadParcelCommandHandler
 {
     private readonly IParcelRepository _parcelRepository;
     private readonly ITripServiceClient _tripClient;
+    private readonly IIntegrationEventOutbox _outbox;
 
     public UnloadParcelCommandHandler(
         IParcelRepository parcelRepository,
-        ITripServiceClient tripClient)
+        ITripServiceClient tripClient,
+        IIntegrationEventOutbox outbox)
     {
         _parcelRepository = parcelRepository;
         _tripClient = tripClient;
+        _outbox = outbox;
     }
 
     public async Task<UnloadParcelResponse> Handle(
@@ -70,13 +75,26 @@ public sealed class UnloadParcelCommandHandler
         }
 
         var now = DateTimeOffset.UtcNow;
+        var deliveryToken = Guid.NewGuid();
+        var deliveryTokenExpiresAt = now.AddHours(48);
         var snapshot = await _parcelRepository.TryUnloadToPendingConfirmAsync(
-            command.ParcelId, now, cancellationToken);
+            command.ParcelId, deliveryToken, deliveryTokenExpiresAt, now, cancellationToken);
 
         if (snapshot is null)
             throw new CodedConflictException(
                 "RACE_LOST",
                 $"Parcel '{command.ParcelId}' status changed concurrently; cannot unload.");
+
+        await ParcelOutboxEvents.EnqueueAsync(
+            _outbox,
+            ParcelOutboxEvents.Unloaded,
+            new { parcelId = snapshot.ParcelId, tripId = snapshot.TripId },
+            cancellationToken);
+        await ParcelOutboxEvents.EnqueueAsync(
+            _outbox,
+            ParcelOutboxEvents.DeliveredPendingConfirm,
+            new { parcelId = snapshot.ParcelId, recipientUserId = parcel.RecipientUserId, deliveryToken, expiresAt = deliveryTokenExpiresAt },
+            cancellationToken);
 
         return new UnloadParcelResponse(
             snapshot.ParcelId,
