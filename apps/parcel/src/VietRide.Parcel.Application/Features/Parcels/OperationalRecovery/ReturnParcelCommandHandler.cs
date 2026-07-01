@@ -1,0 +1,81 @@
+using MediatR;
+using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Features.Parcels;
+using VietRide.Parcel.Domain.Enums;
+using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
+
+namespace VietRide.Parcel.Application.Features.Parcels.OperationalRecovery;
+
+public sealed class ReturnParcelCommandHandler
+    : IRequestHandler<ReturnParcelCommand, OperationalParcelResponse>
+{
+    private readonly IParcelRepository _parcelRepository;
+    private readonly IIntegrationEventOutbox _outbox;
+    private readonly IParcelStatsRepository _statsRepository;
+
+    public ReturnParcelCommandHandler(
+        IParcelRepository parcelRepository,
+        IIntegrationEventOutbox outbox,
+        IParcelStatsRepository statsRepository)
+    {
+        _parcelRepository = parcelRepository;
+        _outbox = outbox;
+        _statsRepository = statsRepository;
+    }
+
+    public async Task<OperationalParcelResponse> Handle(
+        ReturnParcelCommand command,
+        CancellationToken cancellationToken)
+    {
+        var parcel = await _parcelRepository.GetByIdAsync(command.ParcelId, cancellationToken);
+        if (parcel is null)
+            throw new CodedNotFoundException("PARCEL_NOT_FOUND", $"Parcel '{command.ParcelId}' not found.");
+
+        if (parcel.OperatorId != command.OperatorId)
+            throw new ForbiddenException("FORBIDDEN", "Parcel does not belong to this operator.");
+
+        if (parcel.Status is not (ParcelStatus.PENDING_OPERATOR_ACTION or ParcelStatus.TRANSFER_ESCALATED))
+            throw new CodedConflictException("INVALID_TRANSITION", $"Parcel status '{parcel.Status}' cannot be returned.");
+
+        if (string.IsNullOrWhiteSpace(command.Reason))
+            throw new CodedValidationException("VALIDATION_ERROR", "Return reason is required.");
+
+        var now = DateTimeOffset.UtcNow;
+        var snapshot = await _parcelRepository.TryReturnAsync(
+            command.ParcelId,
+            command.OperatorId,
+            command.ReturnedByUserId,
+            command.Reason.Trim(),
+            now,
+            cancellationToken);
+
+        if (snapshot is null)
+            throw new CodedConflictException("RACE_LOST", "Parcel status changed concurrently; cannot return.");
+
+        await ParcelOutboxEvents.EnqueueAsync(
+            _outbox,
+            ParcelOutboxEvents.Returned,
+            new { parcelId = snapshot.ParcelId, refundAmount = snapshot.DepositAmount + snapshot.AdditionalAmount },
+            cancellationToken);
+        await ParcelOutboxEvents.EnqueueAsync(
+            _outbox,
+            ParcelOutboxEvents.RefundInitiated,
+            new { parcelId = snapshot.ParcelId, refundAmount = snapshot.DepositAmount + snapshot.AdditionalAmount },
+            cancellationToken);
+
+        await _statsRepository.UpsertIncrementAsync(
+            snapshot.OperatorId,
+            DateOnly.FromDateTime(now.UtcDateTime),
+            0, 0, 0, 0, 1, 0, snapshot.DepositAmount + snapshot.AdditionalAmount,
+            cancellationToken);
+
+        return new OperationalParcelResponse(
+            snapshot.ParcelId,
+            snapshot.ParcelCode,
+            snapshot.Status.ToString(),
+            TripId: snapshot.TripId,
+            ReturnReason: command.Reason.Trim(),
+            ReturnedAt: now);
+    }
+}
