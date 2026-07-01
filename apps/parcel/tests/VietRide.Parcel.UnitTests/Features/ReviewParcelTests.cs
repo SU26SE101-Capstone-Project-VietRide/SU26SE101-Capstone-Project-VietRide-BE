@@ -6,6 +6,8 @@ using VietRide.Parcel.Application.Features.Parcels.Review;
 using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
+using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.ValueObjects;
 using ParcelEntity = VietRide.Parcel.Domain.Entities.Parcel;
 
@@ -44,7 +46,7 @@ public sealed class ReviewParcelTests
             .Returns(new ChargeOutcome(ChargeOutcomeKind.Success,
                 new ChargeResult(Guid.NewGuid(), "SUCCEEDED", null), null));
 
-        var handler = new ReviewParcelCommandHandler(repo, paymentClient);
+        var handler = new ReviewParcelCommandHandler(repo, paymentClient, UnitOfWork(), Outbox(), Stats());
         var result = await handler.Handle(new ReviewParcelCommand(
             ParcelId, OperatorId, OperatorId, "APPROVED", 200_000, null, "VNPAY"), default);
 
@@ -63,7 +65,7 @@ public sealed class ReviewParcelTests
                 0, 0, OperatorId, TripId, null, SenderUserId, ParcelSizeCategory.EXTRA_LARGE, null));
 
         var handler = new ReviewParcelCommandHandler(repo,
-            Substitute.For<IPaymentServiceClient>());
+            Substitute.For<IPaymentServiceClient>(), UnitOfWork(), Outbox(), Stats());
         var result = await handler.Handle(new ReviewParcelCommand(
             ParcelId, OperatorId, OperatorId, "REJECTED", null, "Overweight", "VNPAY"), default);
 
@@ -77,11 +79,20 @@ public sealed class ReviewParcelTests
         repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns((ParcelEntity?)null);
 
         var handler = new ReviewParcelCommandHandler(repo,
-            Substitute.For<IPaymentServiceClient>());
+            Substitute.For<IPaymentServiceClient>(), UnitOfWork(), Outbox(), Stats());
         var act = () => handler.Handle(new ReviewParcelCommand(
             ParcelId, OperatorId, OperatorId, "APPROVED", 200_000, null, "VNPAY"), default);
 
         await act.Should().ThrowAsync<CodedNotFoundException>()
             .Where(e => e.ErrorCode == "PARCEL_NOT_FOUND");
-    }
+}
+
+    private static IUnitOfWork UnitOfWork()
+        => Substitute.For<IUnitOfWork>();
+
+    private static IIntegrationEventOutbox Outbox()
+        => Substitute.For<IIntegrationEventOutbox>();
+
+    private static IParcelStatsRepository Stats()
+        => Substitute.For<IParcelStatsRepository>();
 }

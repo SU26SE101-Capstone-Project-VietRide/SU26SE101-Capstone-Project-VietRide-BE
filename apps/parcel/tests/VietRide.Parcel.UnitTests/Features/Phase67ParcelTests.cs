@@ -12,6 +12,7 @@ using VietRide.Parcel.Application.Features.Parcels.TripEvents;
 using VietRide.Parcel.Application.Features.Parcels.Unload;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 using ParcelEntity = VietRide.Parcel.Domain.Entities.Parcel;
@@ -36,7 +37,7 @@ public sealed class Phase67ParcelTests
         repo.TryMarkLoadedAsync(ParcelId, TripId, "VRP-001", Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(Snapshot(ParcelStatus.LOADED));
 
-        var handler = new MarkParcelLoadedCommandHandler(repo);
+        var handler = new MarkParcelLoadedCommandHandler(repo, Outbox(), Stats());
         var result = await handler.Handle(new MarkParcelLoadedCommand(ParcelId, TripId, "VRP-001"), default);
 
         result.Status.Should().Be("LOADED");
@@ -51,7 +52,7 @@ public sealed class Phase67ParcelTests
         var repo = Substitute.For<IParcelRepository>();
         repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
 
-        var handler = new MarkParcelLoadedCommandHandler(repo);
+        var handler = new MarkParcelLoadedCommandHandler(repo, Outbox(), Stats());
         var act = () => handler.Handle(new MarkParcelLoadedCommand(ParcelId, Guid.NewGuid(), "WRONG"), default);
 
         await act.Should().ThrowAsync<CodedNotFoundException>()
@@ -65,7 +66,7 @@ public sealed class Phase67ParcelTests
         var repo = Substitute.For<IParcelRepository>();
         repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
 
-        var handler = new UnloadParcelCommandHandler(repo, Substitute.For<ITripServiceClient>());
+        var handler = new UnloadParcelCommandHandler(repo, Substitute.For<ITripServiceClient>(), Outbox());
         var act = () => handler.Handle(new UnloadParcelCommand(ParcelId, Guid.NewGuid()), default);
 
         await act.Should().ThrowAsync<ForbiddenException>()
@@ -81,10 +82,10 @@ public sealed class Phase67ParcelTests
         repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
         tripClient.GetTripParcelSnapshotAsync(TripId, Arg.Any<CancellationToken>())
             .Returns(new TripSnapshotOutcome(TripSnapshotOutcomeKind.Success, TripSnapshot(allowDropoff: true), null));
-        repo.TryUnloadToPendingConfirmAsync(ParcelId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+        repo.TryUnloadToPendingConfirmAsync(ParcelId, Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(Snapshot(ParcelStatus.DELIVERED_PENDING_CONFIRM));
 
-        var handler = new UnloadParcelCommandHandler(repo, tripClient);
+        var handler = new UnloadParcelCommandHandler(repo, tripClient, Outbox());
         var result = await handler.Handle(new UnloadParcelCommand(ParcelId, OperatorId), default);
 
         result.Status.Should().Be("DELIVERED_PENDING_CONFIRM");
@@ -164,7 +165,7 @@ public sealed class Phase67ParcelTests
         var repo = Substitute.For<IParcelRepository>();
         repo.FindByDeliveryTokenAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((ParcelEntity?)null);
 
-        var handler = new ConfirmDeliveryCommandHandler(repo);
+        var handler = new ConfirmDeliveryCommandHandler(repo, Outbox(), Stats());
         var act = () => handler.Handle(new ConfirmDeliveryCommand(Guid.NewGuid(), "127.0.0.1"), default);
 
         await act.Should().ThrowAsync<BadRequestException>()
@@ -179,7 +180,7 @@ public sealed class Phase67ParcelTests
         var repo = Substitute.For<IParcelRepository>();
         repo.FindByDeliveryTokenAsync(token, Arg.Any<CancellationToken>()).Returns(parcel);
 
-        var handler = new ConfirmDeliveryCommandHandler(repo);
+        var handler = new ConfirmDeliveryCommandHandler(repo, Outbox(), Stats());
         var act = () => handler.Handle(new ConfirmDeliveryCommand(token, "127.0.0.1"), default);
 
         await act.Should().ThrowAsync<BadRequestException>()
@@ -196,7 +197,7 @@ public sealed class Phase67ParcelTests
         repo.TryConfirmDeliveryAsync(ParcelId, token, "127.0.0.1", Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(Snapshot(ParcelStatus.DELIVERY_CONFIRMED));
 
-        var handler = new ConfirmDeliveryCommandHandler(repo);
+        var handler = new ConfirmDeliveryCommandHandler(repo, Outbox(), Stats());
         var result = await handler.Handle(new ConfirmDeliveryCommand(token, "127.0.0.1"), default);
 
         result.Status.Should().Be("DELIVERY_CONFIRMED");
@@ -211,7 +212,7 @@ public sealed class Phase67ParcelTests
         var repo = Substitute.For<IParcelRepository>();
         repo.FindByDeliveryTokenAsync(token, Arg.Any<CancellationToken>()).Returns(parcel);
 
-        var handler = new RejectDeliveryCommandHandler(repo);
+        var handler = new RejectDeliveryCommandHandler(repo, Outbox(), Stats());
         var act = () => handler.Handle(new RejectDeliveryCommand(token, "damaged"), default);
 
         await act.Should().ThrowAsync<BadRequestException>()
@@ -228,7 +229,7 @@ public sealed class Phase67ParcelTests
         repo.TryRejectDeliveryAsync(ParcelId, token, "damaged", Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(Snapshot(ParcelStatus.DELIVERY_REJECTED));
 
-        var handler = new RejectDeliveryCommandHandler(repo);
+        var handler = new RejectDeliveryCommandHandler(repo, Outbox(), Stats());
         var result = await handler.Handle(new RejectDeliveryCommand(token, "damaged"), default);
 
         result.Status.Should().Be("DELIVERY_REJECTED");
@@ -240,7 +241,10 @@ public sealed class Phase67ParcelTests
     {
         var repo = Substitute.For<IParcelRepository>();
         repo.TryBulkSetInTransitByTripIdAsync(TripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns(2);
+            .Returns([
+                EventSnapshot(ParcelStatus.IN_TRANSIT),
+                EventSnapshot(ParcelStatus.IN_TRANSIT),
+            ]);
 
         var result = await new HandleTripStartedCommandHandler(repo)
             .Handle(new HandleTripStartedCommand(TripId), default);
@@ -253,7 +257,11 @@ public sealed class Phase67ParcelTests
     {
         var repo = Substitute.For<IParcelRepository>();
         repo.TryBulkSetPendingOperatorActionByTripIdAsync(TripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns(3);
+            .Returns([
+                EventSnapshot(ParcelStatus.PENDING_OPERATOR_ACTION),
+                EventSnapshot(ParcelStatus.PENDING_OPERATOR_ACTION),
+                EventSnapshot(ParcelStatus.PENDING_OPERATOR_ACTION),
+            ]);
 
         var result = await new HandleTripCompletedCommandHandler(repo)
             .Handle(new HandleTripCompletedCommand(TripId), default);
@@ -329,4 +337,13 @@ public sealed class Phase67ParcelTests
             BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
         property!.SetValue(target, value);
     }
+
+    private static ParcelEventSnapshot EventSnapshot(ParcelStatus status)
+        => new(Guid.NewGuid(), "VRP-001", OperatorId, TripId, status);
+
+    private static IIntegrationEventOutbox Outbox()
+        => Substitute.For<IIntegrationEventOutbox>();
+
+    private static IParcelStatsRepository Stats()
+        => Substitute.For<IParcelStatsRepository>();
 }

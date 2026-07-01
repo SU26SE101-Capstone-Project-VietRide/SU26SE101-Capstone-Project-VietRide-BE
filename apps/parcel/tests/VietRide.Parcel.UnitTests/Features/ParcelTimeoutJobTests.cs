@@ -7,7 +7,10 @@ using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Features.Parcels.AutoRejectPendingParcel;
 using VietRide.Parcel.Application.Features.Parcels.ExpireParcelAdditionalPayment;
 using VietRide.Parcel.Application.Features.Parcels.ExpireParcelReview;
+using VietRide.Parcel.Domain.Enums;
 using VietRide.Parcel.Infrastructure.Jobs;
+using VietRide.Shared.Application.Outbox;
+using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Parcel.UnitTests.Features;
@@ -52,7 +55,7 @@ public sealed class ParcelTimeoutJobTests
             .Returns(new List<Guid> { ParcelId });
 
         repo.TryAutoRejectReviewAsync(ParcelId, "PARCEL_REVIEW_TIMEOUT", Now, Arg.Any<CancellationToken>())
-            .Returns(true);
+            .Returns(Snapshot(ParcelStatus.REJECTED));
 
         var handler = CreateReviewHandler(repo, clock);
         var result = await handler.Handle(new ExpireParcelReviewCommand(), default);
@@ -71,7 +74,7 @@ public sealed class ParcelTimeoutJobTests
             .Returns(new List<Guid> { ParcelId });
 
         repo.TryAutoRejectReviewAsync(ParcelId, "PARCEL_REVIEW_TIMEOUT", Now, Arg.Any<CancellationToken>())
-            .Returns(false);
+            .Returns((ParcelPaymentTransitionSnapshot?)null);
 
         var handler = CreateReviewHandler(repo, clock);
         var result = await handler.Handle(new ExpireParcelReviewCommand(), default);
@@ -92,7 +95,7 @@ public sealed class ParcelTimeoutJobTests
             .Returns(new List<Guid> { ParcelId });
 
         repo.TryAutoRejectReviewAsync(ParcelId, "PARCEL_REVIEW_TIMEOUT", Now, Arg.Any<CancellationToken>())
-            .Returns(true);
+            .Returns(Snapshot(ParcelStatus.REJECTED));
 
         var handler = CreateReviewHandler(repo, clock);
         var result = await handler.Handle(new ExpireParcelReviewCommand(), default);
@@ -131,7 +134,7 @@ public sealed class ParcelTimeoutJobTests
 
         repo.TryAutoRejectReviewAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<DateTimeOffset>(),
                 Arg.Any<CancellationToken>())
-            .Returns(true);
+            .Returns(Snapshot(ParcelStatus.REJECTED));
 
         var handler = CreateReviewHandler(repo, clock);
         var result = await handler.Handle(new ExpireParcelReviewCommand(), default);
@@ -187,7 +190,7 @@ public sealed class ParcelTimeoutJobTests
             .Returns(new List<Guid> { ParcelId });
 
         repo.TryMarkAdditionalExpiredByDeadlineAsync(ParcelId, Now, Arg.Any<CancellationToken>())
-            .Returns(true);
+            .Returns(Snapshot(ParcelStatus.REJECTED));
 
         var handler = CreateAdditionalPaymentHandler(repo, clock);
         var result = await handler.Handle(new ExpireParcelAdditionalPaymentCommand(), default);
@@ -207,7 +210,7 @@ public sealed class ParcelTimeoutJobTests
             .Returns(new List<Guid> { ParcelId });
 
         repo.TryMarkAdditionalExpiredByDeadlineAsync(ParcelId, Now, Arg.Any<CancellationToken>())
-            .Returns(false);
+            .Returns((ParcelPaymentTransitionSnapshot?)null);
 
         var handler = CreateAdditionalPaymentHandler(repo, clock);
         var result = await handler.Handle(new ExpireParcelAdditionalPaymentCommand(), default);
@@ -226,7 +229,7 @@ public sealed class ParcelTimeoutJobTests
             .Returns(new List<Guid> { ParcelId });
 
         repo.TryMarkAdditionalExpiredByDeadlineAsync(ParcelId, Now, Arg.Any<CancellationToken>())
-            .Returns(true);
+            .Returns(Snapshot(ParcelStatus.REJECTED));
 
         var handler = CreateAdditionalPaymentHandler(repo, clock);
         var result = await handler.Handle(new ExpireParcelAdditionalPaymentCommand(), default);
@@ -291,7 +294,7 @@ public sealed class ParcelTimeoutJobTests
             });
 
         repo.TryAutoRejectPendingAsync(ParcelId, "PARCEL_LATE_LOAD", Now, Arg.Any<CancellationToken>())
-            .Returns(true);
+            .Returns(Snapshot(ParcelStatus.REJECTED));
 
         var handler = CreatePendingAutoRejectHandler(repo, tripClient, clock);
         var result = await handler.Handle(new AutoRejectPendingParcelCommand(), default);
@@ -426,7 +429,7 @@ public sealed class ParcelTimeoutJobTests
             });
 
         repo.TryAutoRejectPendingAsync(Arg.Any<Guid>(), "PARCEL_LATE_LOAD", Now, Arg.Any<CancellationToken>())
-            .Returns(true);
+            .Returns(Snapshot(ParcelStatus.REJECTED));
 
         var handler = CreatePendingAutoRejectHandler(repo, tripClient, clock);
         var result = await handler.Handle(new AutoRejectPendingParcelCommand(), default);
@@ -462,7 +465,7 @@ public sealed class ParcelTimeoutJobTests
             });
 
         repo.TryAutoRejectPendingAsync(goodParcelId, "PARCEL_LATE_LOAD", Now, Arg.Any<CancellationToken>())
-            .Returns(true);
+            .Returns(Snapshot(ParcelStatus.REJECTED));
 
         var handler = CreatePendingAutoRejectHandler(repo, tripClient, clock);
         var result = await handler.Handle(new AutoRejectPendingParcelCommand(), default);
@@ -507,6 +510,7 @@ public sealed class ParcelTimeoutJobTests
         IParcelRepository repo, IClock clock)
     {
         return new ExpireParcelReviewCommandHandler(repo, clock,
+            UnitOfWork(), Outbox(), Stats(),
             Substitute.For<ILogger<ExpireParcelReviewCommandHandler>>());
     }
 
@@ -514,14 +518,16 @@ public sealed class ParcelTimeoutJobTests
         IParcelRepository repo, IClock clock)
     {
         return new ExpireParcelAdditionalPaymentCommandHandler(repo, clock,
-            Substitute.For<ILogger<ExpireParcelAdditionalPaymentCommandHandler>>());
+            UnitOfWork(), Outbox(),
+            Substitute.For<ILogger<ExpireParcelAdditionalPaymentCommandHandler>>(), Stats());
     }
 
     private static AutoRejectPendingParcelCommandHandler CreatePendingAutoRejectHandler(
         IParcelRepository repo, ITripServiceClient tripClient, IClock clock)
     {
         return new AutoRejectPendingParcelCommandHandler(repo, tripClient, clock,
-            Substitute.For<ILogger<AutoRejectPendingParcelCommandHandler>>());
+            UnitOfWork(), Outbox(),
+            Substitute.For<ILogger<AutoRejectPendingParcelCommandHandler>>(), Stats());
     }
 
     private static TripParcelSnapshot CreateTripSnapshot(string status, DateTimeOffset departure, Guid? tripId = null)
@@ -535,4 +541,16 @@ public sealed class ParcelTimeoutJobTests
             new TripSeatSummaryDto(40, 35),
             null);
     }
+
+    private static ParcelPaymentTransitionSnapshot Snapshot(ParcelStatus status)
+        => new(ParcelId, "VRP-001", status, 100_000, 0, OperatorId, TripId, null, Guid.NewGuid(), ParcelSizeCategory.MEDIUM, null);
+
+    private static IUnitOfWork UnitOfWork()
+        => Substitute.For<IUnitOfWork>();
+
+    private static IIntegrationEventOutbox Outbox()
+        => Substitute.For<IIntegrationEventOutbox>();
+
+    private static IParcelStatsRepository Stats()
+        => Substitute.For<IParcelStatsRepository>();
 }

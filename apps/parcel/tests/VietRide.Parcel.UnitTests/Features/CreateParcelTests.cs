@@ -7,6 +7,7 @@ using VietRide.Parcel.Application.Features.Parcels.Create;
 using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.ValueObjects;
 using ParcelEntity = VietRide.Parcel.Domain.Entities.Parcel;
@@ -472,7 +473,7 @@ public sealed class CreateParcelTests
         IPaymentServiceClient? payment = null)
     {
         payment ??= CreatePaymentClient();
-        return new CreateParcelCommandHandler(identity, booking, trip, payment, parcelRepo, fareRepo, uow);
+        return new CreateParcelCommandHandler(identity, booking, trip, payment, parcelRepo, fareRepo, uow, Outbox(), Stats());
     }
 
     private static IPaymentServiceClient CreatePaymentClient()
@@ -486,6 +487,12 @@ public sealed class CreateParcelTests
                 new ChargeResult(Guid.NewGuid(), "SUCCEEDED", null), null));
         return client;
     }
+
+    private static IIntegrationEventOutbox Outbox()
+        => Substitute.For<IIntegrationEventOutbox>();
+
+    private static IParcelStatsRepository Stats()
+        => Substitute.For<IParcelStatsRepository>();
 
     private static TripParcelSnapshot CreateTripSnapshot(string status)
     {
