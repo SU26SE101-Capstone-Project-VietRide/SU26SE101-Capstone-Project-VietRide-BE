@@ -6,6 +6,7 @@ using VietRide.Parcel.Api.Filters;
 using VietRide.Parcel.Application.Features.Parcels.AccessCheck;
 using VietRide.Parcel.Application.Features.Parcels.InternalDetail;
 using VietRide.Parcel.Application.Features.Parcels.MarkLoaded;
+using VietRide.Parcel.Application.Features.Parcels.OperationalRecovery;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Authentication;
 
@@ -38,6 +39,24 @@ public sealed class InternalParcelsController : ControllerBase
     {
         var result = await _mediator.Send(
             new MarkParcelLoadedCommand(parcelId, request.TripId, request.ParcelCode),
+            cancellationToken);
+
+        return Ok(result);
+    }
+
+    [HttpPost("{parcelId:guid}/confirm-transfer")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<OperationalParcelResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<OperationalParcelResponse>> ConfirmTransferAsync(
+        Guid parcelId,
+        [FromBody] ConfirmTransferRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(
+            new ConfirmTransferCommand(parcelId, request.TargetTripId, request.ParcelCode, request.ConfirmedByUserId),
             cancellationToken);
 
         return Ok(result);

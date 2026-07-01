@@ -95,6 +95,16 @@ public static class InfrastructureServiceCollectionExtensions
                 options.QueueName = "parcel.trip-completed";
                 options.BindingKeys = [TripCompletedIntegrationEvent.EventType];
             });
+            services.AddVietRideEventConsumer<TripCancelledIntegrationEvent, TripCancelledIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "parcel.trip-cancelled";
+                options.BindingKeys = [TripCancelledIntegrationEvent.EventType];
+            });
+            services.AddVietRideEventConsumer<TripDisruptedIntegrationEvent, TripDisruptedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "parcel.trip-disrupted";
+                options.BindingKeys = [TripDisruptedIntegrationEvent.EventType];
+            });
         }
 
         RegisterTripClient(services, configuration);
