@@ -59,8 +59,8 @@ Production direction:
 - [x] Phase 5 — Hangfire Jobs
 - [x] Phase 6 — Load, Unload, Tracking Access
 - [x] Phase 7 — Delivery Confirmation Và Gateway
-- [ ] Phase 8 — Transfer, Return, Override, PENDING_OPERATOR_ACTION
-- [ ] Phase 9 — Events, Stats, Final Acceptance
+- [x] Phase 8 — Transfer, Return, Override, PENDING_OPERATOR_ACTION
+- [x] Phase 9 — Events, Stats, Final Acceptance
 
 ---
 
