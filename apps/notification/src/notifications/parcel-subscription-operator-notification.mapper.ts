@@ -12,7 +12,11 @@ import {
   PARCEL_LOADED_ROUTING_KEY,
   PARCEL_REJECTED_ROUTING_KEY,
   PARCEL_RETURNED_ROUTING_KEY,
+  PARCEL_RETURN_INITIATED_ROUTING_KEY,
   PARCEL_REVIEW_REQUESTED_ROUTING_KEY,
+  PARCEL_PENDING_OPERATOR_ACTION_ROUTING_KEY,
+  PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY,
+  PARCEL_TRANSFER_ESCALATED_ROUTING_KEY,
   PARCEL_TRANSFER_INITIATED_ROUTING_KEY,
   PARCEL_UNLOADED_ROUTING_KEY,
   PAYOUT_FAILED_ROUTING_KEY,
@@ -95,6 +99,10 @@ export type ParcelSubscriptionOperatorRoutingKey =
   | typeof PARCEL_AUTO_REJECTED_ROUTING_KEY
   | typeof PARCEL_REVIEW_REQUESTED_ROUTING_KEY
   | typeof PARCEL_TRANSFER_INITIATED_ROUTING_KEY
+  | typeof PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY
+  | typeof PARCEL_TRANSFER_ESCALATED_ROUTING_KEY
+  | typeof PARCEL_RETURN_INITIATED_ROUTING_KEY
+  | typeof PARCEL_PENDING_OPERATOR_ACTION_ROUTING_KEY
   | typeof SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY
   | typeof SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY
   | typeof SUBSCRIPTION_EXPIRED_ROUTING_KEY
@@ -146,6 +154,14 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
         resolveOperatorRecipientUserIds,
         mapParcelTransferInitiated,
       );
+    case PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY:
+      return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelTransferConfirmed);
+    case PARCEL_TRANSFER_ESCALATED_ROUTING_KEY:
+      return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelTransferEscalated);
+    case PARCEL_RETURN_INITIATED_ROUTING_KEY:
+      return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelReturnInitiated);
+    case PARCEL_PENDING_OPERATOR_ACTION_ROUTING_KEY:
+      return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelPendingOperatorAction);
     case SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY:
       return fanOut(SubscriptionLimitPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapSubscriptionLimit);
     case SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY:
@@ -294,6 +310,46 @@ function mapParcelTransferInitiated(
     body: `${formatParcelLabel(payload)} dang duoc chuyen sang chuyen xe phu hop hon.`,
     data: buildNotificationData(payload),
   };
+}
+
+function mapParcelTransferConfirmed(userId: string, payload: ParcelPayload): CreateNotificationDto {
+  return buildParcelNotification(
+    userId,
+    payload,
+    NotificationType.PARCEL_IN_TRANSIT,
+    'Da xac nhan chuyen chuyen xe',
+    'da duoc xac nhan chuyen sang chuyen xe moi.',
+  );
+}
+
+function mapParcelTransferEscalated(userId: string, payload: ParcelPayload): CreateNotificationDto {
+  return buildParcelNotification(
+    userId,
+    payload,
+    NotificationType.PARCEL_IN_TRANSIT,
+    'Can xu ly chuyen chuyen xe',
+    'qua thoi gian xac nhan chuyen chuyen xe va can van hanh xu ly.',
+  );
+}
+
+function mapParcelReturnInitiated(userId: string, payload: ParcelPayload): CreateNotificationDto {
+  return buildParcelNotification(
+    userId,
+    payload,
+    NotificationType.PARCEL_RETURNED,
+    'Bat dau hoan tra hang',
+    'da bat dau quy trinh hoan tra.',
+  );
+}
+
+function mapParcelPendingOperatorAction(userId: string, payload: ParcelPayload): CreateNotificationDto {
+  return buildParcelNotification(
+    userId,
+    payload,
+    NotificationType.PARCEL_IN_TRANSIT,
+    'Can van hanh xu ly don gui hang',
+    'can nha xe xu ly thu cong.',
+  );
 }
 
 function mapSubscriptionLimit(
@@ -456,4 +512,3 @@ function buildNotificationData(payload: RecipientPayload & Record<string, unknow
 function isString(value: string | undefined): value is string {
   return typeof value === 'string';
 }
-

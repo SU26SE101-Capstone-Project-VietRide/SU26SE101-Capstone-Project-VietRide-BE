@@ -4,6 +4,7 @@ import {
   INVOICE_ISSUED_ROUTING_KEY,
   PARCEL_LOADED_ROUTING_KEY,
   PARCEL_REVIEW_REQUESTED_ROUTING_KEY,
+  PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY,
   PAYOUT_FAILED_ROUTING_KEY,
   SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY,
   TRIP_SETTLEMENT_COMPLETED_ROUTING_KEY,
@@ -69,6 +70,27 @@ describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
       expect.objectContaining({
         userId: SECOND_USER_ID,
         type: NotificationType.PARCEL_REVIEW_REQUESTED,
+      }),
+    ]);
+  });
+
+  it('maps parcel transfer confirmed without reusing loaded notification type', async () => {
+    await expect(
+      mapParcelSubscriptionOperatorEventToNotifications(
+        PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY,
+        {
+          userId: USER_ID,
+          parcelId: PARCEL_ID,
+          parcelCode: 'PRC123',
+          tripId: TRIP_ID,
+        },
+        resolveNoOperatorRecipients,
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.PARCEL_IN_TRANSIT,
+        title: 'Da xac nhan chuyen chuyen xe',
       }),
     ]);
   });
@@ -178,4 +200,3 @@ async function resolveNoOperatorRecipients(operatorId: string): Promise<string[]
   void operatorId;
   return [];
 }
-

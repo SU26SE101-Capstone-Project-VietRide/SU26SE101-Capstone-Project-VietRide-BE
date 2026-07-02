@@ -12,6 +12,10 @@ export const PARCEL_RETURNED_ROUTING_KEY = 'parcel.parcel.returned';
 export const PARCEL_AUTO_REJECTED_ROUTING_KEY = 'parcel.parcel.auto_rejected';
 export const PARCEL_REVIEW_REQUESTED_ROUTING_KEY = 'parcel.parcel.review_requested';
 export const PARCEL_TRANSFER_INITIATED_ROUTING_KEY = 'parcel.parcel.transfer_initiated';
+export const PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY = 'parcel.parcel.transfer_confirmed';
+export const PARCEL_TRANSFER_ESCALATED_ROUTING_KEY = 'parcel.parcel.transfer_escalated';
+export const PARCEL_RETURN_INITIATED_ROUTING_KEY = 'parcel.parcel.return_initiated';
+export const PARCEL_PENDING_OPERATOR_ACTION_ROUTING_KEY = 'parcel.parcel.pending_operator_action';
 
 export const SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY = 'subscription.limit.trip_skipped';
 export const SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY = 'subscription.subscription.trial_expiring';
@@ -38,6 +42,10 @@ export const PARCEL_SUBSCRIPTION_OPERATOR_QUEUE_BINDINGS = [
   { queue: 'notification:parcel-auto-rejected', routingKey: PARCEL_AUTO_REJECTED_ROUTING_KEY },
   { queue: 'notification:parcel-review-requested', routingKey: PARCEL_REVIEW_REQUESTED_ROUTING_KEY },
   { queue: 'notification:parcel-transfer-initiated', routingKey: PARCEL_TRANSFER_INITIATED_ROUTING_KEY },
+  { queue: 'notification:parcel-transfer-confirmed', routingKey: PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY },
+  { queue: 'notification:parcel-transfer-escalated', routingKey: PARCEL_TRANSFER_ESCALATED_ROUTING_KEY },
+  { queue: 'notification:parcel-return-initiated', routingKey: PARCEL_RETURN_INITIATED_ROUTING_KEY },
+  { queue: 'notification:parcel-pending-operator-action', routingKey: PARCEL_PENDING_OPERATOR_ACTION_ROUTING_KEY },
   { queue: 'notification:subscription-limit-trip-skipped', routingKey: SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY },
   { queue: 'notification:subscription-trial-expiring', routingKey: SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY },
   { queue: 'notification:subscription-expired', routingKey: SUBSCRIPTION_EXPIRED_ROUTING_KEY },
@@ -47,4 +55,3 @@ export const PARCEL_SUBSCRIPTION_OPERATOR_QUEUE_BINDINGS = [
   { queue: 'notification:payout-processed', routingKey: PAYOUT_PROCESSED_ROUTING_KEY },
   { queue: 'notification:payout-failed', routingKey: PAYOUT_FAILED_ROUTING_KEY },
 ] as const;
-
