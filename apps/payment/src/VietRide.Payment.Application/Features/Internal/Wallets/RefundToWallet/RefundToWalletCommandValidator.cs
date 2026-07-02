@@ -9,8 +9,8 @@ public sealed class RefundToWalletCommandValidator : AbstractValidator<RefundToW
         RuleFor(x => x.UserId).NotEmpty();
         RuleFor(x => x.Amount).GreaterThan(0);
         RuleFor(x => x.ReferenceType)
-            .Equal("BOOKING_REFUND")
-            .WithMessage("Refund supports BOOKING_REFUND references only.");
+            .Must(value => value is "BOOKING_REFUND" or "PARCEL_REFUND")
+            .WithMessage("Refund supports BOOKING_REFUND or PARCEL_REFUND references only.");
         RuleFor(x => x.ReferenceId).NotEmpty();
         RuleFor(x => x.IdempotencyKey).NotEmpty();
     }

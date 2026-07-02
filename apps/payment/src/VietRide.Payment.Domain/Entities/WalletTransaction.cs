@@ -93,15 +93,18 @@ public sealed class WalletTransaction : BaseEntity<Guid>
             note);
     }
 
-    public static WalletTransaction CreateBookingRefundCredit(
+    public static WalletTransaction CreateRefundCredit(
         Guid userId,
-        Guid bookingId,
+        WalletTransactionRef referenceType,
+        Guid referenceId,
         Money amount,
         Money balanceBefore,
         Money balanceAfter)
     {
-        if (bookingId == Guid.Empty)
-            throw new ArgumentException("Booking id is required.", nameof(bookingId));
+        if (referenceType is not (WalletTransactionRef.BOOKING_REFUND or WalletTransactionRef.PARCEL_REFUND))
+            throw new ArgumentException("Refund reference type is required.", nameof(referenceType));
+        if (referenceId == Guid.Empty)
+            throw new ArgumentException("Reference id is required.", nameof(referenceId));
 
         return Create(
             userId,
@@ -109,8 +112,22 @@ public sealed class WalletTransaction : BaseEntity<Guid>
             amount,
             balanceBefore,
             balanceAfter,
+            referenceType,
+            referenceId,
+            referenceType == WalletTransactionRef.PARCEL_REFUND ? "Parcel refund" : "Booking refund");
+    }
+
+    public static WalletTransaction CreateBookingRefundCredit(
+        Guid userId,
+        Guid bookingId,
+        Money amount,
+        Money balanceBefore,
+        Money balanceAfter)
+        => CreateRefundCredit(
+            userId,
             WalletTransactionRef.BOOKING_REFUND,
             bookingId,
-            "Booking refund");
-    }
+            amount,
+            balanceBefore,
+            balanceAfter);
 }

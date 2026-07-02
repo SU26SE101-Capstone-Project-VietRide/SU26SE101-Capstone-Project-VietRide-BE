@@ -155,10 +155,11 @@ internal sealed class WalletRepository : IWalletRepository
                     && transaction.ReferenceId == referenceId,
                 cancellationToken);
 
-    public async Task<WalletTransaction> CreditBookingRefundAsync(
+    public async Task<WalletTransaction> CreditRefundAsync(
         Guid userId,
         Money amount,
-        Guid bookingId,
+        WalletTransactionRef referenceType,
+        Guid referenceId,
         CancellationToken cancellationToken)
     {
         var wallet = await _db.Wallets.FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken)
@@ -168,9 +169,10 @@ internal sealed class WalletRepository : IWalletRepository
         wallet.Credit(amount);
         var balanceAfter = wallet.Balance;
 
-        var transaction = WalletTransaction.CreateBookingRefundCredit(
+        var transaction = WalletTransaction.CreateRefundCredit(
             userId,
-            bookingId,
+            referenceType,
+            referenceId,
             amount,
             balanceBefore,
             balanceAfter);

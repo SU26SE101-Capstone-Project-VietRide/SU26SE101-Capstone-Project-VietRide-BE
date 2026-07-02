@@ -7,6 +7,7 @@ using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Payment.Application.Abstractions.Refunds;
 using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Application.Events;
+using VietRide.Payment.Application.Features.Internal.Wallets.RefundToWallet;
 using VietRide.Payment.Application.Features.Payments.MarkPaymentRefunded;
 using VietRide.Payment.Application.Features.Wallets.BootstrapWallet;
 using VietRide.Payment.Infrastructure.Http;
@@ -100,6 +101,12 @@ public static class InfrastructureServiceCollectionExtensions
             {
                 options.QueueName = "payment.payment-refunded";
                 options.BindingKeys = [WalletCreditedConsumerEvent.EventType];
+            });
+
+            services.AddVietRideEventConsumer<ParcelRefundInitiatedIntegrationEvent, ParcelRefundInitiatedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "payment.parcel-refund-initiated";
+                options.BindingKeys = [ParcelRefundInitiatedIntegrationEvent.EventTypeValue];
             });
         }
 

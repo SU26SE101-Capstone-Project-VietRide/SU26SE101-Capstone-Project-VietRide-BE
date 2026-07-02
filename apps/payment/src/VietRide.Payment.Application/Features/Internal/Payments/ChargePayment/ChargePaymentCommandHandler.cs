@@ -137,12 +137,12 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
 
     private static (WalletTransactionRef Wallet, PlatformWalletTransactionRef Platform) MapChargeRefs(
         PaymentReferenceType referenceType) => referenceType switch
-    {
-        PaymentReferenceType.BOOKING => (WalletTransactionRef.BOOKING_PAYMENT, PlatformWalletTransactionRef.BOOKING_PAYMENT_HOLD),
-        PaymentReferenceType.PARCEL => (WalletTransactionRef.PARCEL_PAYMENT, PlatformWalletTransactionRef.PARCEL_PAYMENT_HOLD),
-        PaymentReferenceType.PARCEL_ADDITIONAL => (WalletTransactionRef.PARCEL_ADDITIONAL_PAYMENT, PlatformWalletTransactionRef.PARCEL_ADDITIONAL_PAYMENT_HOLD),
-        _ => throw new CodedValidationException("VALIDATION_ERROR", $"Unexpected reference type {referenceType}."),
-    };
+        {
+            PaymentReferenceType.BOOKING => (WalletTransactionRef.BOOKING_PAYMENT, PlatformWalletTransactionRef.BOOKING_PAYMENT_HOLD),
+            PaymentReferenceType.PARCEL => (WalletTransactionRef.PARCEL_PAYMENT, PlatformWalletTransactionRef.PARCEL_PAYMENT_HOLD),
+            PaymentReferenceType.PARCEL_ADDITIONAL => (WalletTransactionRef.PARCEL_ADDITIONAL_PAYMENT, PlatformWalletTransactionRef.PARCEL_ADDITIONAL_PAYMENT_HOLD),
+            _ => throw new CodedValidationException("VALIDATION_ERROR", $"Unexpected reference type {referenceType}."),
+        };
 
     private async Task EnqueuePaymentSucceededAsync(PaymentEntity payment, CancellationToken cancellationToken)
     {
