@@ -2,6 +2,7 @@ using Hangfire;
 using Hangfire.PostgreSql;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using StackExchange.Redis;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
@@ -42,6 +43,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ParcelReviewTimeoutJob>();
         services.AddScoped<ParcelAdditionalPaymentTimeoutJob>();
         services.AddScoped<ParcelPendingAutoRejectJob>();
+        services.AddScoped<ParcelLifecycleSweepJob>();
+        services.AddScoped<ParcelDeliveryPendingConfirmReminderJob>();
 
         return services;
     }
@@ -49,6 +52,7 @@ public static class InfrastructureServiceCollectionExtensions
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services,
         IConfiguration configuration,
+        IHostEnvironment hostEnvironment,
         bool registerConsumers = true)
     {
         var redisUrl = configuration["REDIS_URL"]
@@ -107,17 +111,17 @@ public static class InfrastructureServiceCollectionExtensions
             });
         }
 
-        RegisterTripClient(services, configuration);
-        RegisterPaymentClient(services, configuration);
-        RegisterBookingClient(services, configuration);
-        RegisterIdentityClient(services, configuration);
+        RegisterTripClient(services, configuration, hostEnvironment);
+        RegisterPaymentClient(services, configuration, hostEnvironment);
+        RegisterBookingClient(services, configuration, hostEnvironment);
+        RegisterIdentityClient(services, configuration, hostEnvironment);
 
         return services;
     }
 
-    private static void RegisterTripClient(IServiceCollection services, IConfiguration configuration)
+    private static void RegisterTripClient(IServiceCollection services, IConfiguration configuration, IHostEnvironment hostEnvironment)
     {
-        if (UseDevStub(configuration, "Trip"))
+        if (UseDevStub(configuration, hostEnvironment, "Trip"))
         {
             services.AddScoped<ITripServiceClient, DevTripServiceClient>();
         }
@@ -140,9 +144,9 @@ public static class InfrastructureServiceCollectionExtensions
         }
     }
 
-    private static void RegisterPaymentClient(IServiceCollection services, IConfiguration configuration)
+    private static void RegisterPaymentClient(IServiceCollection services, IConfiguration configuration, IHostEnvironment hostEnvironment)
     {
-        if (UseDevStub(configuration, "Payment"))
+        if (UseDevStub(configuration, hostEnvironment, "Payment"))
         {
             services.AddScoped<IPaymentServiceClient, DevPaymentServiceClient>();
         }
@@ -165,9 +169,9 @@ public static class InfrastructureServiceCollectionExtensions
         }
     }
 
-    private static void RegisterBookingClient(IServiceCollection services, IConfiguration configuration)
+    private static void RegisterBookingClient(IServiceCollection services, IConfiguration configuration, IHostEnvironment hostEnvironment)
     {
-        if (UseDevStub(configuration, "Booking"))
+        if (UseDevStub(configuration, hostEnvironment, "Booking"))
         {
             services.AddScoped<IBookingServiceClient, DevBookingServiceClient>();
         }
@@ -190,9 +194,9 @@ public static class InfrastructureServiceCollectionExtensions
         }
     }
 
-    private static void RegisterIdentityClient(IServiceCollection services, IConfiguration configuration)
+    private static void RegisterIdentityClient(IServiceCollection services, IConfiguration configuration, IHostEnvironment hostEnvironment)
     {
-        if (UseDevStub(configuration, "Identity"))
+        if (UseDevStub(configuration, hostEnvironment, "Identity"))
         {
             services.AddScoped<IIdentityServiceClient, DevIdentityServiceClient>();
         }
@@ -229,10 +233,19 @@ public static class InfrastructureServiceCollectionExtensions
         return baseUrl;
     }
 
-    private static bool UseDevStub(IConfiguration configuration, string serviceName)
-        => configuration.GetValue($"{serviceName}:UseDevStub", false)
+    private static bool UseDevStub(IConfiguration configuration, IHostEnvironment hostEnvironment, string serviceName)
+    {
+        var enabled = configuration.GetValue($"{serviceName}:UseDevStub", false)
             || string.Equals(
                 Environment.GetEnvironmentVariable($"{serviceName.ToUpperInvariant()}_USE_DEV_STUB"),
                 "true",
                 StringComparison.OrdinalIgnoreCase);
+
+        if (enabled && hostEnvironment.IsProduction())
+        {
+            throw new InvalidOperationException($"{serviceName} dev stub cannot be enabled in Production.");
+        }
+
+        return enabled;
+    }
 }
