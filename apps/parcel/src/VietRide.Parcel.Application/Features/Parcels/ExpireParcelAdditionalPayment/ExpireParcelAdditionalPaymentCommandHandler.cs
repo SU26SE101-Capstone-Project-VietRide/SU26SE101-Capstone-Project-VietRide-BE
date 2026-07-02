@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
 using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
@@ -12,6 +13,7 @@ public sealed class ExpireParcelAdditionalPaymentCommandHandler
     : IRequestHandler<ExpireParcelAdditionalPaymentCommand, int>
 {
     private readonly IParcelRepository _parcelRepository;
+    private readonly IIdentityServiceClient _identityClient;
     private readonly IClock _clock;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IIntegrationEventOutbox _outbox;
@@ -20,6 +22,7 @@ public sealed class ExpireParcelAdditionalPaymentCommandHandler
 
     public ExpireParcelAdditionalPaymentCommandHandler(
         IParcelRepository parcelRepository,
+        IIdentityServiceClient identityClient,
         IClock clock,
         IUnitOfWork unitOfWork,
         IIntegrationEventOutbox outbox,
@@ -27,6 +30,7 @@ public sealed class ExpireParcelAdditionalPaymentCommandHandler
         IParcelStatsRepository statsRepository)
     {
         _parcelRepository = parcelRepository;
+        _identityClient = identityClient;
         _clock = clock;
         _unitOfWork = unitOfWork;
         _outbox = outbox;
@@ -68,16 +72,29 @@ public sealed class ExpireParcelAdditionalPaymentCommandHandler
                     continue;
                 }
 
-                var refundAmount = snapshot.DepositAmount;
-                await ParcelOutboxEvents.EnqueueAsync(
-                    _outbox,
-                    ParcelOutboxEvents.AutoRejected,
-                    new { parcelId = snapshot.ParcelId, refundAmount },
+                var refundAmount = await ParcelRefundAmountCalculator.CalculateRefundAsync(
+                    _identityClient,
+                    snapshot.OperatorId,
+                    snapshot.DepositAmount,
                     cancellationToken);
                 await ParcelOutboxEvents.EnqueueAsync(
                     _outbox,
-                    ParcelOutboxEvents.RefundInitiated,
-                    new { parcelId = snapshot.ParcelId, refundAmount },
+                    ParcelOutboxEvents.AutoRejected,
+                    new
+                    {
+                        parcelId = snapshot.ParcelId,
+                        parcelCode = snapshot.ParcelCode,
+                        operatorId = snapshot.OperatorId,
+                        userId = snapshot.SenderUserId,
+                        tripId = snapshot.TripId,
+                        refundAmount,
+                    },
+                    cancellationToken);
+                await ParcelOutboxEvents.EnqueueRefundAsync(
+                    _outbox,
+                    snapshot.ParcelId,
+                    snapshot.SenderUserId,
+                    refundAmount,
                     cancellationToken);
                 await _statsRepository.UpsertIncrementAsync(
                     snapshot.OperatorId,

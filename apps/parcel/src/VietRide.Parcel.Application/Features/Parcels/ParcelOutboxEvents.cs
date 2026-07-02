@@ -19,6 +19,10 @@ public static class ParcelOutboxEvents
     public const string AutoRejected = "parcel.parcel.auto_rejected";
     public const string ReviewRequested = "parcel.parcel.review_requested";
     public const string TransferInitiated = "parcel.parcel.transfer_initiated";
+    public const string TransferConfirmed = "parcel.parcel.transfer_confirmed";
+    public const string TransferEscalated = "parcel.parcel.transfer_escalated";
+    public const string ReturnInitiated = "parcel.parcel.return_initiated";
+    public const string PendingOperatorAction = "parcel.parcel.pending_operator_action";
     public const string RefundInitiated = "parcel.refund.initiated";
 
     public static Task EnqueueAsync(
@@ -27,4 +31,24 @@ public static class ParcelOutboxEvents
         object payload,
         CancellationToken cancellationToken)
         => outbox.EnqueueAsync(eventType, JsonSerializer.Serialize(payload, JsonOptions), cancellationToken);
+
+    public static Task EnqueueRefundAsync(
+        IIntegrationEventOutbox outbox,
+        Guid parcelId,
+        Guid senderUserId,
+        long amount,
+        CancellationToken cancellationToken)
+        => EnqueueAsync(
+            outbox,
+            RefundInitiated,
+            new
+            {
+                parcelId,
+                senderUserId,
+                amount,
+                referenceType = "PARCEL_REFUND",
+                referenceId = parcelId,
+                idempotencyKey = $"parcel:refund:{parcelId:D}",
+            },
+            cancellationToken);
 }

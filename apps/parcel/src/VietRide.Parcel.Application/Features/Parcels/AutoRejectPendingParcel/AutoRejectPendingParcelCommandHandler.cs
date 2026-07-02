@@ -16,6 +16,7 @@ public sealed class AutoRejectPendingParcelCommandHandler
 
     private readonly IParcelRepository _parcelRepository;
     private readonly ITripServiceClient _tripClient;
+    private readonly IIdentityServiceClient _identityClient;
     private readonly IClock _clock;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IIntegrationEventOutbox _outbox;
@@ -25,6 +26,7 @@ public sealed class AutoRejectPendingParcelCommandHandler
     public AutoRejectPendingParcelCommandHandler(
         IParcelRepository parcelRepository,
         ITripServiceClient tripClient,
+        IIdentityServiceClient identityClient,
         IClock clock,
         IUnitOfWork unitOfWork,
         IIntegrationEventOutbox outbox,
@@ -33,6 +35,7 @@ public sealed class AutoRejectPendingParcelCommandHandler
     {
         _parcelRepository = parcelRepository;
         _tripClient = tripClient;
+        _identityClient = identityClient;
         _clock = clock;
         _unitOfWork = unitOfWork;
         _outbox = outbox;
@@ -124,16 +127,29 @@ public sealed class AutoRejectPendingParcelCommandHandler
                         continue;
                     }
 
-                    var refundAmount = snapshot.DepositAmount + snapshot.AdditionalAmount;
-                    await ParcelOutboxEvents.EnqueueAsync(
-                        _outbox,
-                        ParcelOutboxEvents.AutoRejected,
-                        new { parcelId = snapshot.ParcelId, refundAmount },
+                    var refundAmount = await ParcelRefundAmountCalculator.CalculateRefundAsync(
+                        _identityClient,
+                        snapshot.OperatorId,
+                        snapshot.DepositAmount + snapshot.AdditionalAmount,
                         cancellationToken);
                     await ParcelOutboxEvents.EnqueueAsync(
                         _outbox,
-                        ParcelOutboxEvents.RefundInitiated,
-                        new { parcelId = snapshot.ParcelId, refundAmount },
+                        ParcelOutboxEvents.AutoRejected,
+                        new
+                        {
+                            parcelId = snapshot.ParcelId,
+                            parcelCode = snapshot.ParcelCode,
+                            operatorId = snapshot.OperatorId,
+                            userId = snapshot.SenderUserId,
+                            tripId = snapshot.TripId,
+                            refundAmount,
+                        },
+                        cancellationToken);
+                    await ParcelOutboxEvents.EnqueueRefundAsync(
+                        _outbox,
+                        snapshot.ParcelId,
+                        snapshot.SenderUserId,
+                        refundAmount,
                         cancellationToken);
                     await _statsRepository.UpsertIncrementAsync(
                         snapshot.OperatorId,

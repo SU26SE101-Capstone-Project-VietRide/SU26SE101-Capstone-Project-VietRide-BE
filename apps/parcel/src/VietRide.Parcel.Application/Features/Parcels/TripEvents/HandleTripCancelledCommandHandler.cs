@@ -1,5 +1,6 @@
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Shared.Application.Outbox;
 
@@ -9,14 +10,20 @@ public sealed class HandleTripCancelledCommandHandler
     : IRequestHandler<HandleTripCancelledCommand, int>
 {
     private readonly IParcelRepository _parcelRepository;
+    private readonly IIdentityServiceClient _identityClient;
     private readonly IIntegrationEventOutbox _outbox;
+    private readonly IParcelStatsRepository _statsRepository;
 
     public HandleTripCancelledCommandHandler(
         IParcelRepository parcelRepository,
-        IIntegrationEventOutbox outbox)
+        IIdentityServiceClient identityClient,
+        IIntegrationEventOutbox outbox,
+        IParcelStatsRepository statsRepository)
     {
         _parcelRepository = parcelRepository;
+        _identityClient = identityClient;
         _outbox = outbox;
+        _statsRepository = statsRepository;
     }
 
     public async Task<int> Handle(
@@ -27,27 +34,86 @@ public sealed class HandleTripCancelledCommandHandler
         var rejected = await _parcelRepository.TryRejectPreAcceptanceByTripIdAsync(command.TripId, now, cancellationToken);
         var cancelled = await _parcelRepository.TryCancelPendingByTripIdAsync(command.TripId, now, cancellationToken);
         var operatorAction = await _parcelRepository.TryBulkSetPendingOperatorActionByTripIdAsync(command.TripId, now, cancellationToken);
+        var refundAmounts = new Dictionary<Guid, long>();
 
         foreach (var parcel in rejected)
         {
             await ParcelOutboxEvents.EnqueueAsync(
                 _outbox,
                 ParcelOutboxEvents.Rejected,
-                new { parcelId = parcel.ParcelId },
+                new
+                {
+                    parcelId = parcel.ParcelId,
+                    parcelCode = parcel.ParcelCode,
+                    operatorId = parcel.OperatorId,
+                    userId = parcel.SenderUserId,
+                    tripId = parcel.TripId,
+                },
                 cancellationToken);
         }
 
         foreach (var parcel in cancelled)
         {
+            var refundAmount = await ParcelRefundAmountCalculator.CalculateRefundAsync(
+                _identityClient,
+                parcel.OperatorId,
+                parcel.DepositAmount + parcel.AdditionalAmount,
+                cancellationToken);
+            refundAmounts[parcel.ParcelId] = refundAmount;
             await ParcelOutboxEvents.EnqueueAsync(
                 _outbox,
                 ParcelOutboxEvents.Cancelled,
-                new { parcelId = parcel.ParcelId },
+                new
+                {
+                    parcelId = parcel.ParcelId,
+                    parcelCode = parcel.ParcelCode,
+                    operatorId = parcel.OperatorId,
+                    userId = parcel.SenderUserId,
+                    tripId = parcel.TripId,
+                    refundAmount,
+                },
                 cancellationToken);
+            await ParcelOutboxEvents.EnqueueRefundAsync(
+                _outbox,
+                parcel.ParcelId,
+                parcel.SenderUserId,
+                refundAmount,
+                cancellationToken);
+        }
+
+        foreach (var parcel in operatorAction)
+        {
             await ParcelOutboxEvents.EnqueueAsync(
                 _outbox,
-                ParcelOutboxEvents.RefundInitiated,
-                new { parcelId = parcel.ParcelId, refundAmount = parcel.DepositAmount + parcel.AdditionalAmount },
+                ParcelOutboxEvents.PendingOperatorAction,
+                new
+                {
+                    parcelId = parcel.ParcelId,
+                    parcelCode = parcel.ParcelCode,
+                    operatorId = parcel.OperatorId,
+                    userId = parcel.SenderUserId,
+                    tripId = parcel.TripId,
+                },
+                cancellationToken);
+        }
+
+        foreach (var group in rejected.GroupBy(parcel => parcel.OperatorId))
+        {
+            await _statsRepository.UpsertIncrementAsync(
+                group.Key,
+                DateOnly.FromDateTime(now.UtcDateTime),
+                0, 0, 0, group.Count(), 0, 0, 0,
+                cancellationToken);
+        }
+
+        foreach (var group in cancelled.GroupBy(parcel => parcel.OperatorId))
+        {
+            var totalRefunded = group.Sum(parcel => refundAmounts[parcel.ParcelId]);
+
+            await _statsRepository.UpsertIncrementAsync(
+                group.Key,
+                DateOnly.FromDateTime(now.UtcDateTime),
+                0, 0, 0, group.Count(), 0, 0, totalRefunded,
                 cancellationToken);
         }
 
