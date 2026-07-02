@@ -61,7 +61,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ../postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-vietride}']
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-vietride} -d postgres']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -137,6 +137,7 @@ services:
       # Real email delivery via Notification internal endpoint (POST /internal/v1/emails).
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-SENDGRID}
       EMAIL_SERVICE_BASE_URL: http://notification:3002
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:5173}
       SYSTEM_ADMIN_BOOTSTRAP_EMAIL: ${SYSTEM_ADMIN_BOOTSTRAP_EMAIL}
       SYSTEM_ADMIN_BOOTSTRAP_PASSWORD: ${SYSTEM_ADMIN_BOOTSTRAP_PASSWORD}
       SYSTEM_ADMIN_BOOTSTRAP_DISPLAY_NAME: ${SYSTEM_ADMIN_BOOTSTRAP_DISPLAY_NAME:-System Administrator}

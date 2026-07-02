@@ -124,6 +124,7 @@ Response `200`:
     "user": {
       "id": "uuid",
       "email": "user@example.com",
+      "phone": "+84901234567",
       "displayName": "Nguyen Van A",
       "role": "PASSENGER",
       "operatorId": null,
@@ -253,6 +254,7 @@ Response `200`:
     "user": {
       "id": "uuid",
       "email": "user@example.com",
+      "phone": null,
       "displayName": "Nguyen Van A",
       "role": "PASSENGER",
       "operatorId": null,

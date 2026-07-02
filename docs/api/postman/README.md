@@ -121,15 +121,26 @@ If you run the Day-8 folder manually without the helper, provide equivalent loca
 
 Or import both files into the Postman app (Collection + Environment) and run the folders.
 
-The Day-17 carry-over and Day-18 driver folders run through Gateway on `{{baseUrl}}`. Before
-running them, provide valid `passengerAccessToken`, `operatorAdminAccessToken`,
-`driverAccessToken`, and (when testing the same flow as an assistant) `assistantAccessToken`.
+The Day-17 carry-over and Day-18 driver folders run through Gateway on `{{baseUrl}}`. Run Day 18
+reproducibly against the local Docker stack with `npm run postman:day18:local`. The helper seeds two
+trips assigned to one driver plus a CONFIRMED booking/passenger, mints short-lived development
+DRIVER/PASSENGER JWTs, runs Newman, and verifies the persisted BOARDED side effect without printing
+tokens or secrets. For a manual run, provide valid `passengerAccessToken`,
+`operatorAdminAccessToken`, `driverAccessToken`, and (when testing the same flow as an assistant)
+`assistantAccessToken`.
 Day 17 also needs a confirmed `day17BookingId`. Day 18 needs assigned `day18TripId` and
 `day18OtherTripId` fixtures, plus `day18PassengerRecordId` and `day18BookingCode` from a confirmed
 booking on the assigned trip. `day18OtherTripId` must identify a different trip assigned to the
 same driver or assistant; otherwise the wrong-trip cases stop at authorization with `403` instead
 of reaching the intended `422 BOOKING_NOT_FOR_THIS_TRIP`. The committed environment contains
 placeholders only; never commit real JWTs or fixture secrets.
+
+To execute every self-contained local day harness in dependency order, use
+`npm run postman:full:local`. It starts the application profile, runs Days 6/7/8/9/11 against real
+service integrations, temporarily enables the documented Booking development stubs for Days
+13/14/15/17, restores real integrations, and finishes with Day 18 plus its persisted boarding-state
+check. The command exits non-zero if any stage fails. Google OAuth is not included because it
+requires a real external Google ID token.
 
 ## Notes
 

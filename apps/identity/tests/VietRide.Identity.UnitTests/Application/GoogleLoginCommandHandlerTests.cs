@@ -64,6 +64,7 @@ public sealed class GoogleLoginCommandHandlerTests
             User: new UserSummaryDto(
                 Id: user.Id,
                 Email: user.Email,
+                Phone: user.Phone?.Value,
                 DisplayName: user.DisplayName,
                 Role: user.Role.ToString(),
                 OperatorId: user.OperatorId,

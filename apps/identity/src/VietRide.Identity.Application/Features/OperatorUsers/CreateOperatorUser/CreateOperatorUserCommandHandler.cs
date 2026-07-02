@@ -15,7 +15,6 @@ namespace VietRide.Identity.Application.Features.OperatorUsers.CreateOperatorUse
 public sealed class CreateOperatorUserCommandHandler
     : IRequestHandler<CreateOperatorUserCommand, CreateOperatorUserResponseDto>
 {
-    private const string SetInitialPasswordUrlBase = "https://app.vietride.app/auth/set-password?token=";
 
     private readonly IUserRepository _users;
     private readonly IOperatorRepository _operators;
@@ -106,7 +105,7 @@ public sealed class CreateOperatorUserCommandHandler
                 "SUBSCRIPTION_LIMIT_EXCEEDED",
                 "Subscription limit exceeded for this operator user role.");
 
-        var setInitialPasswordUrl = SetInitialPasswordUrlBase + code;
+        var setInitialPasswordUrl = _initialPasswordTokens.BuildSetInitialPasswordUrl(code);
         await _emailService.SendAccountCreatedLinkAsync(
             user.Email,
             new AccountCreatedEmailDto(user.Id, user.DisplayName, setInitialPasswordUrl, expiresAt),

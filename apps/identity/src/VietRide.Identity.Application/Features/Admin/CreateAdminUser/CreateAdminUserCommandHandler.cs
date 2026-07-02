@@ -11,7 +11,6 @@ namespace VietRide.Identity.Application.Features.Admin.CreateAdminUser;
 
 public sealed class CreateAdminUserCommandHandler : IRequestHandler<CreateAdminUserCommand, CreateAdminUserResponseDto>
 {
-    private const string SetInitialPasswordUrlBase = "https://app.vietride.app/auth/set-password?token=";
 
     private readonly IUserRepository _users;
     private readonly IEmailVerificationTokenRepository _tokens;
@@ -72,7 +71,7 @@ public sealed class CreateAdminUserCommandHandler : IRequestHandler<CreateAdminU
 
         await _tokens.AddAsync(token, cancellationToken);
 
-        var setInitialPasswordUrl = SetInitialPasswordUrlBase + code;
+        var setInitialPasswordUrl = _initialPasswordTokens.BuildSetInitialPasswordUrl(code);
         await _emailService.SendAccountCreatedLinkAsync(
             user.Email,
             new AccountCreatedEmailDto(user.Id, user.DisplayName, setInitialPasswordUrl, expiresAt),

@@ -4636,7 +4636,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"reason\": \"Day 17 Postman cancellation verification\"\n}"
+          "raw": "{\n  \"reason\": \"USER_INITIATED\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/v1/bookings/{{day17BookingId}}/cancel",
@@ -5005,7 +5005,7 @@
               { "key": "Authorization", "value": "Bearer {{driverAccessToken}}" },
               { "key": "Content-Type", "value": "application/json" }
             ],
-            "body": { "mode": "raw", "raw": "{\n  \"bookingCode\": \"VR-00000000-ABCDEFGH\"\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"bookingCode\": \"VR-20260101-ABCDEFGH\"\n}" },
             "url": {
               "raw": "{{baseUrl}}/v1/bookings/trips/{{day18TripId}}/boarding/qr-scan",
               "host": ["{{baseUrl}}"],

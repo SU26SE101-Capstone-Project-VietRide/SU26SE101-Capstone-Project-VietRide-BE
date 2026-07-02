@@ -26,6 +26,7 @@ const seed = {
   nonApprovedOperatorId: '20000000-0000-0000-0000-000000000007',
   nonApprovedAdminUserId: '20000000-0000-0000-0000-0000000000a7',
   mienTayStationId: '30000000-0000-0000-0000-000000000007',
+  missingStationId: '30000000-0000-0000-0000-0000000000f7',
   crossOperatorStopId: '40000000-0000-0000-0000-000000000007',
 };
 
@@ -293,6 +294,7 @@ async function main() {
     nonApprovedOperatorAccessToken,
     operatorId: seed.approvedOperatorId,
     stationSearchResultId: seed.mienTayStationId,
+    missingStationId: seed.missingStationId,
     crossOperatorStopId: seed.crossOperatorStopId,
   });
   process.exitCode = exitCode;

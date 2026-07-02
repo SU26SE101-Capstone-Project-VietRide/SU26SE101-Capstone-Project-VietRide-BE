@@ -14,7 +14,6 @@ namespace VietRide.Identity.Application.Features.Auth.ResendInitialPassword;
 public sealed class ResendInitialPasswordCommandHandler
     : IRequestHandler<ResendInitialPasswordCommand, ResendInitialPasswordResponseDto>
 {
-    private const string SetInitialPasswordUrlBase = "https://app.vietride.app/auth/set-password?token=";
 
     private readonly IUserRepository _users;
     private readonly IOperatorRepository _operators;
@@ -85,7 +84,7 @@ public sealed class ResendInitialPasswordCommandHandler
 
         await _tokens.AddAsync(token, cancellationToken);
 
-        var setInitialPasswordUrl = SetInitialPasswordUrlBase + code;
+        var setInitialPasswordUrl = _initialPasswordTokens.BuildSetInitialPasswordUrl(code);
         await _emailService.SendAccountCreatedLinkAsync(
             user.Email,
             new AccountCreatedEmailDto(user.Id, user.DisplayName, setInitialPasswordUrl, expiresAt),

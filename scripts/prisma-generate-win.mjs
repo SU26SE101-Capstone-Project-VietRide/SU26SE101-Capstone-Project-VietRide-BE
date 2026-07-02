@@ -6,9 +6,10 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
 
-const schema = process.argv[2] || 'apps/rag/prisma/schema.prisma';
-const cwd = join(root, 'apps/rag');
-const generatedDir = join(cwd, 'src', 'generated', 'rag-prisma-client');
+const schema = process.argv[2] || 'prisma/schema.prisma';
+const project = process.argv[3] || 'rag';
+const cwd = join(root, 'apps', project);
+const generatedDir = join(cwd, 'src', 'generated', `${project}-prisma-client`);
 
 function cleanStaleTemp() {
   if (!existsSync(generatedDir)) return;
