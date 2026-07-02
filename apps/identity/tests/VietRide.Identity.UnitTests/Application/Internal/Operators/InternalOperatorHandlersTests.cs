@@ -32,6 +32,33 @@ public sealed class InternalOperatorHandlersTests
         result.ContactPhone.Should().Be("+84901234567");
         result.BusinessRegistrationNumber.Should().Be("0312345678");
         result.TaxCode.Should().Be("0312345678");
+        result.ParcelNoShowPolicy.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetInternalOperator_WithParcelNoShowPolicy_ReturnsParsedPolicy()
+    {
+        var operatorEntity = CreateOperator();
+        SetProperty(operatorEntity, nameof(Operator.ParcelNoShowPolicy), "{\"noShowFeePercent\":25,\"additionalPaymentTimeoutMinutes\":45}");
+        var handler = new GetInternalOperatorQueryHandler(new FakeOperatorRepository(operatorEntity));
+
+        var result = await handler.Handle(new GetInternalOperatorQuery(OperatorId), CancellationToken.None);
+
+        result.ParcelNoShowPolicy.Should().NotBeNull();
+        result.ParcelNoShowPolicy!.NoShowFeePercent.Should().Be(25);
+        result.ParcelNoShowPolicy.AdditionalPaymentTimeoutMinutes.Should().Be(45);
+    }
+
+    [Fact]
+    public async Task GetInternalOperator_WithMalformedParcelNoShowPolicy_ReturnsNullPolicy()
+    {
+        var operatorEntity = CreateOperator();
+        SetProperty(operatorEntity, nameof(Operator.ParcelNoShowPolicy), "not-json");
+        var handler = new GetInternalOperatorQueryHandler(new FakeOperatorRepository(operatorEntity));
+
+        var result = await handler.Handle(new GetInternalOperatorQuery(OperatorId), CancellationToken.None);
+
+        result.ParcelNoShowPolicy.Should().BeNull();
     }
 
     [Fact]

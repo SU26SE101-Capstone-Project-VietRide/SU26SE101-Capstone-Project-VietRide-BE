@@ -103,7 +103,7 @@ public sealed class IdentityServiceClient : IIdentityServiceClient
                         return new OperatorLookupOutcome(OperatorLookupOutcomeKind.TransportError, null,
                             "Identity operator payload missing required fields.");
 
-                    var opInfo = new IdentityOperatorInfo(Guid.Parse(id), name);
+                    var opInfo = new IdentityOperatorInfo(Guid.Parse(id), name, ReadParcelNoShowPolicy(json));
                     return new OperatorLookupOutcome(OperatorLookupOutcomeKind.Success, opInfo, null);
 
                 case HttpStatusCode.NotFound:
@@ -135,5 +135,20 @@ public sealed class IdentityServiceClient : IIdentityServiceClient
         return json.TryGetProperty(propertyName, out var prop) && prop.ValueKind == JsonValueKind.String
             ? prop.GetString()
             : null;
+    }
+
+    private static ParcelNoShowPolicy ReadParcelNoShowPolicy(JsonElement json)
+    {
+        if (!json.TryGetProperty("parcelNoShowPolicy", out var policy) || policy.ValueKind != JsonValueKind.Object)
+            return ParcelNoShowPolicy.Default;
+
+        var noShowFeePercent = policy.TryGetProperty("noShowFeePercent", out var fee) && fee.TryGetDecimal(out var feeValue)
+            ? feeValue
+            : ParcelNoShowPolicy.Default.NoShowFeePercent;
+        var additionalPaymentTimeoutMinutes = policy.TryGetProperty("additionalPaymentTimeoutMinutes", out var timeout) && timeout.TryGetInt32(out var timeoutValue) && timeoutValue > 0
+            ? timeoutValue
+            : ParcelNoShowPolicy.Default.AdditionalPaymentTimeoutMinutes;
+
+        return new ParcelNoShowPolicy(noShowFeePercent, additionalPaymentTimeoutMinutes);
     }
 }

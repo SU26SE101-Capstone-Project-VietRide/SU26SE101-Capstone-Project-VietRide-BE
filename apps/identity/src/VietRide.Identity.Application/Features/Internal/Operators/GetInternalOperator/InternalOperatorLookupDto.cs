@@ -8,4 +8,9 @@ public sealed record InternalOperatorLookupDto(
     string ContactEmail,
     string ContactPhone,
     string BusinessRegistrationNumber,
-    string TaxCode);
+    string TaxCode,
+    InternalParcelNoShowPolicyDto? ParcelNoShowPolicy);
+
+public sealed record InternalParcelNoShowPolicyDto(
+    decimal NoShowFeePercent,
+    int AdditionalPaymentTimeoutMinutes);

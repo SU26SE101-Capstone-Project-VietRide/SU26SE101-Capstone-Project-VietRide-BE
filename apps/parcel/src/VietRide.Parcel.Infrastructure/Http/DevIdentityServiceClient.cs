@@ -35,7 +35,8 @@ public sealed class DevIdentityServiceClient : IIdentityServiceClient
 
         var opInfo = new IdentityOperatorInfo(
             Id: operatorId,
-            Name: "Dev Operator");
+            Name: "Dev Operator",
+            ParcelNoShowPolicy: ParcelNoShowPolicy.Default);
 
         return Task.FromResult(new OperatorLookupOutcome(OperatorLookupOutcomeKind.Success, opInfo, null));
     }

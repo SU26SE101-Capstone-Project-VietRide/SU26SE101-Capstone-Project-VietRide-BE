@@ -1,3 +1,4 @@
+using System.Text.Json;
 using MediatR;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Domain.Entities;
@@ -29,6 +30,22 @@ public sealed class GetInternalOperatorQueryHandler : IRequestHandler<GetInterna
             operatorEntity.ContactEmail,
             operatorEntity.ContactPhone,
             operatorEntity.BusinessRegistrationNumber,
-            operatorEntity.TaxCode);
+            operatorEntity.TaxCode,
+            ParseParcelNoShowPolicy(operatorEntity.ParcelNoShowPolicy));
+    }
+
+    private static InternalParcelNoShowPolicyDto? ParseParcelNoShowPolicy(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<InternalParcelNoShowPolicyDto>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 }
