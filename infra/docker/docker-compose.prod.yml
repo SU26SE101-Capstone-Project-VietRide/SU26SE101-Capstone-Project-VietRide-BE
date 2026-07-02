@@ -51,7 +51,7 @@ services:
     ports:
       - '127.0.0.1:5432:5432'
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-vietride}']
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-vietride} -d postgres']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -111,6 +111,11 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       REDIS_URL: 'redis:6379,abortConnect=false'
+      # Non-OTP transactional emails (including set-initial-password links) must
+      # be delivered by Notification -> SendGrid in production, never log-only.
+      EMAIL_PROVIDER: SENDGRID
+      EMAIL_SERVICE_BASE_URL: http://notification:3002
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:?PUBLIC_APP_URL is required in production}
       SYSTEM_ADMIN_BOOTSTRAP_EMAIL: ${SYSTEM_ADMIN_BOOTSTRAP_EMAIL}
       SYSTEM_ADMIN_BOOTSTRAP_PASSWORD: ${SYSTEM_ADMIN_BOOTSTRAP_PASSWORD}
       SYSTEM_ADMIN_BOOTSTRAP_DISPLAY_NAME: ${SYSTEM_ADMIN_BOOTSTRAP_DISPLAY_NAME:-System Administrator}
@@ -319,8 +324,8 @@ services:
       FCM_PROJECT_ID: ${FCM_PROJECT_ID:-}
       FCM_CLIENT_EMAIL: ${FCM_CLIENT_EMAIL:-}
       FCM_PRIVATE_KEY: ${FCM_PRIVATE_KEY:-}
-      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
-      SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL:-}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:?SENDGRID_API_KEY is required in production}
+      SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL:?SENDGRID_FROM_EMAIL is required in production}
       SENDGRID_FROM_NAME: ${SENDGRID_FROM_NAME:-VietRide}
     depends_on:
       postgres:

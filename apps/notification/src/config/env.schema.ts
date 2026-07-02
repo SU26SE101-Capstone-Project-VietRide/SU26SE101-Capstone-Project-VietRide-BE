@@ -21,7 +21,25 @@ export const envSchema = baseEnvSchema.merge(
     NOTIFICATION_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
     NOTIFICATION_RETENTION_JOB_INTERVAL_MS: z.coerce.number().int().positive().default(86_400_000),
   }),
-);
+).superRefine((env, ctx) => {
+  if (env.NODE_ENV !== 'production') return;
+
+  if (!env.SENDGRID_API_KEY) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['SENDGRID_API_KEY'],
+      message: 'SENDGRID_API_KEY is required in production',
+    });
+  }
+
+  if (!env.SENDGRID_FROM_EMAIL) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['SENDGRID_FROM_EMAIL'],
+      message: 'SENDGRID_FROM_EMAIL is required in production',
+    });
+  }
+});
 
 export type Env = z.infer<typeof envSchema>;
 

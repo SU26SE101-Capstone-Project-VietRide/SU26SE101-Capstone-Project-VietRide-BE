@@ -308,6 +308,38 @@
     {
       "key": "createdBookingCode",
       "value": ""
+    },
+    {
+      "key": "passengerAccessToken",
+      "value": "<passenger-access-token>"
+    },
+    {
+      "key": "driverAccessToken",
+      "value": "<driver-access-token>"
+    },
+    {
+      "key": "assistantAccessToken",
+      "value": "<assistant-access-token>"
+    },
+    {
+      "key": "day17BookingId",
+      "value": "<day17-confirmed-booking-id>"
+    },
+    {
+      "key": "day18TripId",
+      "value": "<day18-trip-id>"
+    },
+    {
+      "key": "day18OtherTripId",
+      "value": "<day18-other-trip-id>"
+    },
+    {
+      "key": "day18PassengerRecordId",
+      "value": "<day18-passenger-record-id>"
+    },
+    {
+      "key": "day18BookingCode",
+      "value": "<day18-booking-code>"
     }
   ],
   "item": [
@@ -4568,6 +4600,417 @@
               ]
             },
             "description": "Day 15 review adversarial case ? forged IPN signature rejected."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Booking - Day 17 cancellation + booking stats carry-over",
+      "item": [
+        {
+          "name": "1. Cancel confirmed booking",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Cancellation uses ADR 0004 envelope', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.have.property('status', 'CANCELLED');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" }
+            ],
+            "body": {
+              "mode": "raw",
+          "raw": "{\n  \"reason\": \"USER_INITIATED\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/bookings/{{day17BookingId}}/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "bookings", "{{day17BookingId}}", "cancel"]
+            },
+            "description": "Day 17 carry-over: cancel a confirmed booking through Gateway with a fresh idempotency key."
+          }
+        },
+        {
+          "name": "2. Read operator booking stats after cancellation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Booking stats use ADR 0004 envelope', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  pm.expect(body.data).to.be.an('object');",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/booking-stats",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "booking-stats"]
+            },
+            "description": "Day 17 carry-over: read tenant-scoped booking stats through Gateway after the cancellation event is consumed."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Driver - Day 18 schedule + manifest + boarding flow",
+      "item": [
+        {
+          "name": "1. Get my driver schedule (default ICT window)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Schedule uses ADR 0004 envelope', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(200);",
+                  "  const trips = body.data && Array.isArray(body.data.trips) ? body.data.trips : [];",
+                  "  if (trips.length > 0) {",
+                  "    const tripId = trips[0].tripId || trips[0].id;",
+                  "    if (tripId) { pm.environment.set('day18TripId', tripId); pm.collectionVariables.set('day18TripId', tripId); }",
+                  "  }",
+                  "  pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{driverAccessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/driver/me/schedule",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "driver", "me", "schedule"]
+            },
+            "description": "Driver schedule through Gateway. Omitting both from/to exercises the inclusive ICT today..today+14 default."
+          }
+        },
+        {
+          "name": "2. PASSENGER cannot access driver schedule",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Gateway returns 403', function () { pm.response.to.have.status(403); });",
+                  "pm.test('Gateway role gate uses ADR 0004 error envelope', function () {",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.error.code).to.equal('FORBIDDEN');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/driver/me/schedule",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "driver", "me", "schedule"]
+            },
+            "description": "Security regression: PASSENGER is rejected by Gateway before Trip is called."
+          }
+        },
+        {
+          "name": "3. PASSENGER cannot access assistant routes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Gateway returns 403', function () { pm.response.to.have.status(403); });",
+                  "pm.test('Assistant prefix is role-gated', function () { pm.expect(body.error.code).to.equal('FORBIDDEN'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/assistant/role-gate-check",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "assistant", "role-gate-check"]
+            },
+            "description": "Any assistant subpath must be denied to PASSENGER at Gateway, independently of downstream route existence."
+          }
+        },
+        {
+          "name": "4. Get trip manifest",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Manifest contains operational fields and no PII', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  const items = Array.isArray(body.data) ? body.data : (body.data && Array.isArray(body.data.items) ? body.data.items : []);",
+                  "  pm.expect(JSON.stringify(body.data)).not.to.match(/fullName|phoneNumber|idNumber|email/i);",
+                  "  if (items.length > 0) {",
+                  "    pm.expect(items[0]).to.have.all.keys('seatNumber', 'bookingCode', 'pickupStop', 'boardingStatus');",
+                  "    if (items[0].bookingCode) { pm.environment.set('day18BookingCode', items[0].bookingCode); }",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{driverAccessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/bookings/trips/{{day18TripId}}/manifest",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "bookings", "trips", "{{day18TripId}}", "manifest"]
+            },
+            "description": "Driver reads the operational manifest through the longer /v1/bookings/trips Gateway prefix."
+          }
+        },
+        {
+          "name": "5. Tick passenger boarded",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Passenger is boarded', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.data.boardingStatus).to.equal('BOARDED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{driverAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/bookings/trips/{{day18TripId}}/boarding/passenger/{{day18PassengerRecordId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "bookings", "trips", "{{day18TripId}}", "boarding", "passenger", "{{day18PassengerRecordId}}"]
+            }
+          }
+        },
+        {
+          "name": "5a. PASSENGER cannot access trip manifest",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Gateway returns 403', function () { pm.response.to.have.status(403); });",
+                  "pm.test('Operational booking prefix is role-gated', function () { pm.expect(body.error.code).to.equal('FORBIDDEN'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/v1/bookings/trips/{{day18TripId}}/manifest",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "bookings", "trips", "{{day18TripId}}", "manifest"]
+            },
+            "description": "Longest-prefix regression: the operational route wins over /v1/bookings and rejects PASSENGER at Gateway."
+          }
+        },
+        {
+          "name": "6. Re-tick boarded passenger returns 409",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 409', function () { pm.response.to.have.status(409); });",
+                  "pm.test('Already boarded error code', function () { pm.expect(body.error.code).to.equal('BOOKING_PASSENGER_ALREADY_BOARDED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{driverAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/bookings/trips/{{day18TripId}}/boarding/passenger/{{day18PassengerRecordId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "bookings", "trips", "{{day18TripId}}", "boarding", "passenger", "{{day18PassengerRecordId}}"]
+            }
+          }
+        },
+        {
+          "name": "7. Tick passenger against wrong trip returns 422",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 422', function () { pm.response.to.have.status(422); });",
+                  "pm.test('Wrong trip error code', function () { pm.expect(body.error.code).to.equal('BOOKING_NOT_FOR_THIS_TRIP'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{driverAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/bookings/trips/{{day18OtherTripId}}/boarding/passenger/{{day18PassengerRecordId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "bookings", "trips", "{{day18OtherTripId}}", "boarding", "passenger", "{{day18PassengerRecordId}}"]
+            }
+          }
+        },
+        {
+          "name": "8. Scan booking code",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('QR scan returns passenger records without mutating them', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  const items = Array.isArray(body.data) ? body.data : (body.data && Array.isArray(body.data.items) ? body.data.items : []);",
+                  "  pm.expect(items).to.be.an('array');",
+                  "  if (items.length > 0) { pm.expect(items[0]).to.include.all.keys('seatNumber', 'boardingStatus'); }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{driverAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"bookingCode\": \"{{day18BookingCode}}\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/v1/bookings/trips/{{day18TripId}}/boarding/qr-scan",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "bookings", "trips", "{{day18TripId}}", "boarding", "qr-scan"]
+            }
+          }
+        },
+        {
+          "name": "9. Scan code against wrong trip returns 422",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 422', function () { pm.response.to.have.status(422); });",
+                  "pm.test('Wrong trip error code', function () { pm.expect(body.error.code).to.equal('BOOKING_NOT_FOR_THIS_TRIP'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{driverAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"bookingCode\": \"{{day18BookingCode}}\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/v1/bookings/trips/{{day18OtherTripId}}/boarding/qr-scan",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "bookings", "trips", "{{day18OtherTripId}}", "boarding", "qr-scan"]
+            }
+          }
+        },
+        {
+          "name": "10. Scan unknown booking code returns 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 404', function () { pm.response.to.have.status(404); });",
+                  "pm.test('Unknown code error', function () { pm.expect(body.error.code).to.equal('BOOKING_NOT_FOUND'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{driverAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"bookingCode\": \"VR-20260101-ABCDEFGH\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/v1/bookings/trips/{{day18TripId}}/boarding/qr-scan",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "bookings", "trips", "{{day18TripId}}", "boarding", "qr-scan"]
+            }
           }
         }
       ]

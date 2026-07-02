@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Domain.Enums;
+using VietRide.Booking.Domain.ValueObjects;
 using VietRide.Shared.Application.Repositories;
 using BookingEntity = VietRide.Booking.Domain.Entities.Booking;
 
@@ -55,12 +56,13 @@ internal sealed class BookingRepository : IBookingRepository
         string bookingCode,
         CancellationToken ct = default)
     {
-        // Compare the converted string primitive directly to avoid fragile EF translation
-        // of struct equality through a value converter.
+        var code = BookingCode.Parse(bookingCode);
+
+        // Compare the mapped value object. Its configured value converter translates the
+        // constant to the booking_code column; EF.Property must use the model property name,
+        // not the physical snake_case column name.
         return await _db.Bookings
-            .FirstOrDefaultAsync(
-                b => EF.Property<string>(b, "booking_code") == bookingCode,
-                ct);
+            .FirstOrDefaultAsync(b => b.BookingCode == code, ct);
     }
 
     /// <inheritdoc/>

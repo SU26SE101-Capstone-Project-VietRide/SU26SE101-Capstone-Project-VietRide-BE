@@ -135,10 +135,16 @@ public static class InfrastructureServiceCollectionExtensions
             ?? Environment.GetEnvironmentVariable("EMAIL_PROVIDER")
             ?? "LOG").Trim();
 
-        if (!string.Equals(provider, "SENDGRID", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(provider, "LOG", StringComparison.OrdinalIgnoreCase))
         {
             services.AddSingleton<IEmailService, LoggingEmailService>();
             return;
+        }
+
+        if (!string.Equals(provider, "SENDGRID", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "EMAIL_PROVIDER must be either 'LOG' or 'SENDGRID'.");
         }
 
         // Internal JWT signer + delegating handlers shared with the other

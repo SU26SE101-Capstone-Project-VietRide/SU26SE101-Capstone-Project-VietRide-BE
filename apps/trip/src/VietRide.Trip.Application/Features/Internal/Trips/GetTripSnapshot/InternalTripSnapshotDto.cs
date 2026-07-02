@@ -13,4 +13,6 @@ public sealed record InternalTripSnapshotDto(
     InternalTripStationSnapshotDto DestinationStation,
     IReadOnlyList<InternalTripStopSnapshotDto> Stops,
     InternalTripSeatSummaryDto SeatSummary,
-    Guid? ReturnRouteId);
+    Guid? ReturnRouteId,
+    Guid? DriverUserId,
+    Guid? AssistantUserId);

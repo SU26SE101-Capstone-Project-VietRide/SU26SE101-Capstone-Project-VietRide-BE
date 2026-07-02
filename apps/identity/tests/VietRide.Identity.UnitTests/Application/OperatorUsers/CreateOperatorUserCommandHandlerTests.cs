@@ -212,6 +212,8 @@ public sealed class CreateOperatorUserCommandHandlerTests
         var tokens = Substitute.For<IInitialPasswordTokenService>();
         tokens.GenerateCode().Returns("initial-code");
         tokens.GetExpiresAt(Now).Returns(ExpiresAt);
+        tokens.BuildSetInitialPasswordUrl("initial-code")
+            .Returns("https://test.vietride.app/auth/set-password?token=initial-code");
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
 

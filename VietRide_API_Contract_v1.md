@@ -124,6 +124,7 @@ Response `200`:
     "user": {
       "id": "uuid",
       "email": "user@example.com",
+      "phone": "+84901234567",
       "displayName": "Nguyen Van A",
       "role": "PASSENGER",
       "operatorId": null,
@@ -253,6 +254,7 @@ Response `200`:
     "user": {
       "id": "uuid",
       "email": "user@example.com",
+      "phone": null,
       "displayName": "Nguyen Van A",
       "role": "PASSENGER",
       "operatorId": null,
@@ -1269,7 +1271,9 @@ Response `200` (raw):
     }
   ],
   "seatSummary": { "totalSeats": 40, "availableSeats": 18 },
-  "returnRouteId": "uuid | null"
+  "returnRouteId": "uuid | null",
+  "driverUserId": "uuid | null",
+  "assistantUserId": "uuid | null"
 }
 ```
 
@@ -1282,6 +1286,8 @@ Notes:
   self-FK. Booking uses this to validate `ROUTE_RETURN_NOT_CONFIGURED` (422) when the passenger
   requests a round-trip but the outbound route has no return route configured
   (technical_context_v7 line 1750). Trip will expose this field in Task 11.4.
+- `driverUserId` / `assistantUserId`: nullable UUID logical user keys used by downstream services
+  for trip-assignment authorization. They do not create cross-database foreign keys.
 - Errors: `404 TRIP_NOT_FOUND`.
 
 ### POST `/internal/v1/trips/{tripId}/lock-seats`
@@ -3523,3 +3529,209 @@ Driver schedule conflict:
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-11T10:00:00Z" }
 }
 ```
+
+## Day 18 — Driver operational schedule
+
+### GET `/v1/driver/me/schedule?from={yyyy-MM-dd}&to={yyyy-MM-dd}`
+
+Auth: `DRIVER` or `ASSISTANT`.
+
+Returns only Trips assigned to the authenticated JWT `sub`, where the caller is either the
+Trip's `driverUserId` or `assistantUserId`. A caller cannot supply or override a user identifier.
+
+`from` and `to` are ICT (`UTC+7`) calendar dates and are inclusive at both ends. Both parameters
+must be supplied together or omitted together. When both are omitted, the range defaults to the
+current ICT date through current ICT date plus 14 days. Supplying exactly one parameter, or a
+`to` date before `from`, returns `422 VALIDATION_ERROR`.
+
+Response `200`: `GetMyDriverScheduleResult` in the ADR 0004 success envelope.
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "from": "2026-06-30",
+    "to": "2026-07-14",
+    "trips": [
+      {
+        "tripId": "uuid",
+        "operatorId": "uuid",
+        "routeId": "uuid",
+        "vehicleId": "uuid",
+        "departureDateTime": "2026-06-30T01:00:00Z",
+        "estimatedArrivalTime": "2026-06-30T04:00:00Z",
+        "status": "SCHEDULED",
+        "assignmentRole": "DRIVER"
+      }
+    ]
+  },
+  "meta": {
+    "traceId": "req-abc123",
+    "timestamp": "2026-06-30T03:00:00Z"
+  }
+}
+```
+
+Trips are ordered by `departureDateTime`, then by `tripId`. Date filtering converts the inclusive
+ICT date range to UTC boundaries before querying. No Trip state is mutated.
+
+### GET `/v1/bookings/trips/{tripId}/manifest`
+
+Auth: `DRIVER` or `ASSISTANT`. The authenticated JWT `sub` must equal the Trip snapshot's
+`driverUserId` or `assistantUserId`; otherwise the endpoint returns `403 FORBIDDEN`.
+
+Returns only confirmed Booking passenger records and exposes no passenger or buyer PII. Items are
+ordered by the Trip snapshot stop `orderIndex`. A terminal pickup (`pickupStationId` set and
+`pickupStopId` null) is treated as the origin with `orderIndex = 0` and sorts first.
+
+Response `200` in the ADR 0004 success envelope:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [
+      {
+        "seatNumber": "A01",
+        "bookingCode": "VR-20260630-ABCD1234",
+        "pickupStop": "uuid-or-null",
+        "boardingStatus": "PENDING"
+      }
+    ]
+  },
+  "meta": {
+    "traceId": "req-abc123",
+    "timestamp": "2026-06-30T03:00:00Z"
+  }
+}
+```
+
+Each manifest item contains exactly `seatNumber`, `bookingCode`, `pickupStop`, and
+`boardingStatus`. A trip with no confirmed bookings returns `200` with `items: []`, not `404`.
+Unknown trip returns `404 TRIP_NOT_FOUND`; validation failures return `422 VALIDATION_ERROR`.
+
+### POST `/v1/bookings/trips/{tripId}/boarding/passenger/{passengerRecordId}`
+
+Auth: `DRIVER` or `ASSISTANT`. The authenticated JWT `sub` must equal the Trip snapshot's
+`driverUserId` or `assistantUserId`; otherwise the endpoint returns `403 FORBIDDEN`.
+
+Marks the selected passenger record `BOARDED`. The mutation is performed through the Booking
+aggregate, sets `boardedAt` to the current UTC instant, and leaves `boardedAtStopId` null when no
+physical boarding stop is supplied. The request has no body and requires `Idempotency-Key`.
+
+Response `200` in the ADR 0004 success envelope:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "passengerRecordId": "uuid",
+    "boardingStatus": "BOARDED",
+    "boardedAt": "2026-06-30T03:00:00Z",
+    "boardedAtStopId": null
+  },
+  "meta": {
+    "traceId": "req-abc123",
+    "timestamp": "2026-06-30T03:00:00Z"
+  }
+}
+```
+
+Error responses use the ADR 0004 envelope:
+
+- `403 FORBIDDEN`: caller is not the trip's assigned driver or assistant.
+- `404 BOOKING_NOT_FOUND`: `passengerRecordId` does not exist.
+- `409 BOOKING_PASSENGER_ALREADY_BOARDED`: passenger is already `BOARDED`.
+- `422 BOOKING_NOT_FOR_THIS_TRIP`: passenger exists but belongs to another trip.
+- `422 VALIDATION_ERROR`: route parameters are invalid.
+
+### POST `/v1/bookings/trips/{tripId}/boarding/qr-scan`
+
+Auth: `DRIVER` or `ASSISTANT`. The authenticated JWT `sub` must equal the Trip snapshot's
+`driverUserId` or `assistantUserId`; otherwise the endpoint returns `403 FORBIDDEN`.
+
+The request body contains the plain booking code decoded by the Driver App. The service does not
+decode or persist QR image data and does not mutate Booking or Passenger state.
+
+```json
+{
+  "bookingCode": "VR-20260630-ABCD2345"
+}
+```
+
+`bookingCode` must match `^VR-\d{8}-[A-Z2-7]{8}$`.
+
+Response `200` in the ADR 0004 success envelope:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [
+      {
+        "seatNumber": "A01",
+        "boardingStatus": "PENDING"
+      }
+    ]
+  },
+  "meta": {
+    "traceId": "req-abc123",
+    "timestamp": "2026-06-30T03:00:00Z"
+  }
+}
+```
+
+Passenger items contain exactly `seatNumber` and `boardingStatus`. The scan is read-only; ticking
+a passenger uses the separate boarding-passenger endpoint.
+
+Error responses use the ADR 0004 envelope:
+
+- `403 FORBIDDEN`: caller is not the trip's assigned driver or assistant.
+- `404 BOOKING_NOT_FOUND`: the code is unknown or the booking is not `CONFIRMED`.
+- `422 BOOKING_NOT_FOR_THIS_TRIP`: the code belongs to a different trip.
+- `422 VALIDATION_ERROR`: the route parameter or booking-code format is invalid.
+
+## Integration Event Contracts
+
+### `trip.stop.departed_with_pending`
+
+Producer: Trip. Consumer: Notification (Driver App boarding warning). Exchange:
+`vietride.events`.
+
+Payload:
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-06-30T03:00:00Z",
+  "eventType": "trip.stop.departed_with_pending",
+  "tripId": "uuid",
+  "stopId": "uuid",
+  "stopName": "Ben xe Mien Dong Moi",
+  "pendingPassengerCount": 2,
+  "driverUserId": "uuid",
+  "assistantUserId": null,
+  "departedAt": "2026-06-30T03:00:00Z"
+}
+```
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `eventId` | `Guid` | yes | Stable event identity for consumer deduplication. |
+| `occurredAt` | `DateTime` | yes | UTC integration-event occurrence timestamp, matching `IntegrationEventBase` serialization. |
+| `eventType` | `string` | yes | Constant `trip.stop.departed_with_pending`; also used as the AMQP routing key. |
+| `tripId` | `Guid` | yes | Trip whose stop was departed. |
+| `stopId` | `Guid` | yes | Departed stop. |
+| `stopName` | `string` | yes | Snapshot used in the Driver App warning. |
+| `pendingPassengerCount` | `int` | yes | Positive integer (`> 0`): passengers still `PENDING` at the stop. |
+| `driverUserId` | `Guid` | yes | Assigned driver notification target. |
+| `assistantUserId` | `Guid?` | yes, nullable | Assigned assistant notification target when present. |
+| `departedAt` | `DateTimeOffset` | yes | Stop-departure timestamp serialized as UTC ISO-8601. |
+
+The payload contains exactly the fields above. Day 18 freezes the contract and registry entry
+only. The Trip Outbox emitter, handler wiring, emit-condition tests, and Day-24 `NO_SHOW`
+detection remain deferred to Day 24.

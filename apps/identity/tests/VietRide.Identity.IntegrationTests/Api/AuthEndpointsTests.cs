@@ -1068,6 +1068,7 @@ internal sealed class HappyPathAuthSender : ISender
             new UserSummaryDto(
                 UserId,
                 email,
+                "+84901234567",
                 "Test User",
                 "PASSENGER",
                 null,

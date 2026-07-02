@@ -13,7 +13,6 @@ namespace VietRide.Identity.Application.Features.Admin.CreateOperator;
 
 public sealed class CreateOperatorCommandHandler : IRequestHandler<CreateOperatorCommand, CreateOperatorResponseDto>
 {
-    private const string SetInitialPasswordUrlBase = "https://app.vietride.app/auth/set-password?token=";
 
     private readonly IOperatorRepository _operators;
     private readonly IUserRepository _users;
@@ -123,7 +122,7 @@ public sealed class CreateOperatorCommandHandler : IRequestHandler<CreateOperato
             tokenExpiresAt);
         await _tokens.AddAsync(token, cancellationToken);
 
-        var setInitialPasswordUrl = SetInitialPasswordUrlBase + code;
+        var setInitialPasswordUrl = _initialPasswordTokens.BuildSetInitialPasswordUrl(code);
         await _emailService.SendAccountCreatedLinkAsync(
             adminUser.Email,
             new AccountCreatedEmailDto(adminUser.Id, adminUser.DisplayName, setInitialPasswordUrl, tokenExpiresAt),

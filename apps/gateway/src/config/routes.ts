@@ -176,8 +176,18 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
     },
     { prefix: '/v1/vehicles', target: env.TRIP_BASE_URL, authRequired: 'user' },
-    { prefix: '/v1/driver', target: env.TRIP_BASE_URL, authRequired: 'user' },
-    { prefix: '/v1/assistant', target: env.TRIP_BASE_URL, authRequired: 'user' },
+    {
+      prefix: '/v1/driver',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['DRIVER', 'ASSISTANT'],
+    },
+    {
+      prefix: '/v1/assistant',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['DRIVER', 'ASSISTANT'],
+    },
     {
       prefix: '/v1/trip/health',
       target: env.TRIP_BASE_URL,
@@ -191,6 +201,12 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       target: env.BOOKING_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['PASSENGER'],
+    },
+    {
+      prefix: '/v1/bookings/trips',
+      target: env.BOOKING_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['DRIVER', 'ASSISTANT'],
     },
     {
       prefix: '/v1/admin/vouchers',

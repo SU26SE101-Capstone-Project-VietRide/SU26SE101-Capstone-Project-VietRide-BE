@@ -117,6 +117,7 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
             User: new UserSummaryDto(
                 Id: authenticatedUser.Id,
                 Email: authenticatedUser.Email,
+                Phone: authenticatedUser.Phone?.Value,
                 DisplayName: authenticatedUser.DisplayName,
                 Role: authenticatedUser.Role.ToString(),
                 OperatorId: authenticatedUser.OperatorId,

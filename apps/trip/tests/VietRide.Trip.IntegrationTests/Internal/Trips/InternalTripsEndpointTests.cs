@@ -33,7 +33,9 @@ public sealed class InternalTripsEndpointTests
     public async Task GetTrip_Happy_ReturnsRawDto()
     {
         var tripId = Guid.NewGuid();
-        var snapshot = CreateSnapshot(tripId);
+        var driverUserId = Guid.NewGuid();
+        var assistantUserId = Guid.NewGuid();
+        var snapshot = CreateSnapshot(tripId, driverUserId, assistantUserId);
         var mediator = new StubMediator(_ => snapshot);
         using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
         using var client = factory.CreateClient();
@@ -45,6 +47,8 @@ public sealed class InternalTripsEndpointTests
         document.RootElement.TryGetProperty("success", out _).Should().BeFalse();
         document.RootElement.GetProperty("tripId").GetGuid().Should().Be(tripId);
         document.RootElement.GetProperty("returnRouteId").ValueKind.Should().Be(JsonValueKind.Null);
+        document.RootElement.GetProperty("driverUserId").GetGuid().Should().Be(driverUserId);
+        document.RootElement.GetProperty("assistantUserId").GetGuid().Should().Be(assistantUserId);
         mediator.LastRequest.Should().BeOfType<GetTripSnapshotQuery>()
             .Which.TripId.Should().Be(tripId);
     }
@@ -445,7 +449,10 @@ public sealed class InternalTripsEndpointTests
         return request;
     }
 
-    private static InternalTripSnapshotDto CreateSnapshot(Guid tripId) => new(
+    private static InternalTripSnapshotDto CreateSnapshot(
+        Guid tripId,
+        Guid? driverUserId = null,
+        Guid? assistantUserId = null) => new(
         tripId,
         Guid.NewGuid(),
         Guid.NewGuid(),
@@ -458,7 +465,9 @@ public sealed class InternalTripsEndpointTests
         new InternalTripStationSnapshotDto(Guid.NewGuid(), "Destination"),
         [],
         new InternalTripSeatSummaryDto(1, 1),
-        null);
+        null,
+        driverUserId,
+        assistantUserId);
 
     private static CodedConflictException SeatUnavailable() => new(
         "BOOKING_SEAT_UNAVAILABLE",
