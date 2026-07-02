@@ -1,9 +1,12 @@
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Exceptions;
 using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
+using VietRide.Shared.Application.UnitOfWork;
 
 namespace VietRide.Parcel.Application.Features.Parcels.OperationalRecovery;
 
@@ -11,17 +14,20 @@ public sealed class ConfirmTransferCommandHandler
     : IRequestHandler<ConfirmTransferCommand, OperationalParcelResponse>
 {
     private readonly IParcelRepository _parcelRepository;
+    private readonly ITripServiceClient _tripClient;
     private readonly IIntegrationEventOutbox _outbox;
-    private readonly IParcelStatsRepository _statsRepository;
+    private readonly IUnitOfWork _unitOfWork;
 
     public ConfirmTransferCommandHandler(
         IParcelRepository parcelRepository,
+        ITripServiceClient tripClient,
         IIntegrationEventOutbox outbox,
-        IParcelStatsRepository statsRepository)
+        IUnitOfWork unitOfWork)
     {
         _parcelRepository = parcelRepository;
+        _tripClient = tripClient;
         _outbox = outbox;
-        _statsRepository = statsRepository;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<OperationalParcelResponse> Handle(
@@ -41,29 +47,54 @@ public sealed class ConfirmTransferCommandHandler
         if (parcel.ParcelCode != command.ParcelCode)
             throw new CodedNotFoundException("PARCEL_NOT_FOUND", $"Parcel '{command.ParcelId}' not found.");
 
+        var targetTrip = await _tripClient.GetTripParcelSnapshotAsync(command.TargetTripId, cancellationToken);
+        switch (targetTrip.Kind)
+        {
+            case TripSnapshotOutcomeKind.TripNotFound:
+                throw new CodedNotFoundException("TRIP_NOT_FOUND", $"Trip '{command.TargetTripId}' not found.");
+            case TripSnapshotOutcomeKind.TransportError:
+                throw new ParcelDependencyUnavailableException("TRIP_SERVICE_UNAVAILABLE", targetTrip.ErrorMessage ?? "Trip service unavailable.");
+        }
+
+        if (targetTrip.Snapshot!.OperatorId != parcel.OperatorId)
+            throw new ForbiddenException("FORBIDDEN", "Target trip does not belong to this parcel operator.");
+
         var now = DateTimeOffset.UtcNow;
-        var snapshot = await _parcelRepository.TryConfirmTransferAsync(
-            command.ParcelId,
-            command.TargetTripId,
-            command.ParcelCode,
-            command.ConfirmedByUserId,
-            now,
-            cancellationToken);
+        ParcelPaymentTransitionSnapshot snapshot;
+        await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            snapshot = await _parcelRepository.TryConfirmTransferAsync(
+                command.ParcelId,
+                command.TargetTripId,
+                command.ParcelCode,
+                command.ConfirmedByUserId,
+                now,
+                cancellationToken)
+                ?? throw new CodedConflictException("RACE_LOST", "Parcel status changed concurrently; cannot confirm transfer.");
 
-        if (snapshot is null)
-            throw new CodedConflictException("RACE_LOST", "Parcel status changed concurrently; cannot confirm transfer.");
+            await ParcelOutboxEvents.EnqueueAsync(
+                _outbox,
+                ParcelOutboxEvents.TransferConfirmed,
+                new
+                {
+                    parcelId = snapshot.ParcelId,
+                    parcelCode = snapshot.ParcelCode,
+                    operatorId = snapshot.OperatorId,
+                    userId = snapshot.SenderUserId,
+                    tripId = snapshot.TripId,
+                    confirmedByUserId = command.ConfirmedByUserId,
+                },
+                cancellationToken);
 
-        await ParcelOutboxEvents.EnqueueAsync(
-            _outbox,
-            ParcelOutboxEvents.Loaded,
-            new { parcelId = snapshot.ParcelId, tripId = snapshot.TripId, actualWeightKg = parcel.ActualWeightKg ?? parcel.EstimatedWeightKg },
-            cancellationToken);
-
-        await _statsRepository.UpsertIncrementAsync(
-            snapshot.OperatorId,
-            DateOnly.FromDateTime(now.UtcDateTime),
-            0, 1, 0, 0, 0, 0, 0,
-            cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await _unitOfWork.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await _unitOfWork.RollbackAsync(cancellationToken);
+            throw;
+        }
 
         return new OperationalParcelResponse(
             snapshot.ParcelId,

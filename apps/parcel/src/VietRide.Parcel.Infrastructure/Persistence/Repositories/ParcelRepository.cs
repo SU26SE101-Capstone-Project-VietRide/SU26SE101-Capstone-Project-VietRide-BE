@@ -55,6 +55,13 @@ internal sealed class ParcelRepository : IParcelRepository
         return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
     }
 
+    public async Task<ParcelPaymentTransitionSnapshot?> GetPaymentTransitionSnapshotAsync(
+        Guid parcelId, CancellationToken ct)
+    {
+        var parcel = await _db.Parcels.AsNoTracking().FirstOrDefaultAsync(p => p.Id == parcelId, ct);
+        return parcel is null ? null : BuildSnapshot(parcel);
+    }
+
     public async Task<ParcelPaymentTransitionSnapshot?> TryMarkDepositFailedAsync(
         Guid parcelId, DateTimeOffset now, CancellationToken ct)
     {
@@ -278,10 +285,173 @@ internal sealed class ParcelRepository : IParcelRepository
         return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
     }
 
+    public async Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkEscalatePendingTransfersAsync(
+        DateTimeOffset cutoff, DateTimeOffset now, int maxBatch, CancellationToken ct)
+    {
+        return await ExecuteBulkReturningAsync(
+            """
+            WITH candidates AS (
+                SELECT id
+                FROM vietride_parcel.parcels
+                WHERE status = CAST(@source_status AS vietride_parcel.parcel_status)
+                  AND transfer_requested_at IS NOT NULL
+                  AND transfer_requested_at <= @cutoff
+                ORDER BY transfer_requested_at
+                LIMIT @max_batch
+            )
+            UPDATE vietride_parcel.parcels p
+            SET status = CAST(@target_status AS vietride_parcel.parcel_status),
+                updated_at = @now
+            FROM candidates
+            WHERE p.id = candidates.id
+            RETURNING p.id, p.parcel_code, p.operator_id, p.trip_id, p.status::text, p.deposit_amount, p.additional_amount, p.sender_user_id, p.recipient_user_id;
+            """,
+            command =>
+            {
+                AddParameter(command, "source_status", ParcelStatus.PENDING_TRANSFER_CONFIRM.ToString());
+                AddParameter(command, "target_status", ParcelStatus.TRANSFER_ESCALATED.ToString());
+                AddParameter(command, "cutoff", cutoff);
+                AddParameter(command, "now", now);
+                AddParameter(command, "max_batch", maxBatch);
+            },
+            ct);
+    }
+
+    public async Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkInitiateReturnForRejectedDeliveriesAsync(
+        DateTimeOffset cutoff, DateTimeOffset now, int maxBatch, CancellationToken ct)
+    {
+        return await ExecuteBulkReturningAsync(
+            """
+            WITH candidates AS (
+                SELECT id
+                FROM vietride_parcel.parcels
+                WHERE status = CAST(@source_status AS vietride_parcel.parcel_status)
+                  AND rejected_at IS NOT NULL
+                  AND rejected_at <= @cutoff
+                ORDER BY rejected_at
+                LIMIT @max_batch
+            )
+            UPDATE vietride_parcel.parcels p
+            SET status = CAST(@target_status AS vietride_parcel.parcel_status),
+                updated_at = @now
+            FROM candidates
+            WHERE p.id = candidates.id
+            RETURNING p.id, p.parcel_code, p.operator_id, p.trip_id, p.status::text, p.deposit_amount, p.additional_amount, p.sender_user_id, p.recipient_user_id;
+            """,
+            command =>
+            {
+                AddParameter(command, "source_status", ParcelStatus.DELIVERY_REJECTED.ToString());
+                AddParameter(command, "target_status", ParcelStatus.RETURN_INITIATED.ToString());
+                AddParameter(command, "cutoff", cutoff);
+                AddParameter(command, "now", now);
+                AddParameter(command, "max_batch", maxBatch);
+            },
+            ct);
+    }
+
+    public async Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkSetPendingOperatorActionForExpiredConfirmationsAsync(
+        DateTimeOffset cutoff, DateTimeOffset now, int maxBatch, CancellationToken ct)
+    {
+        return await ExecuteBulkReturningAsync(
+            """
+            WITH candidates AS (
+                SELECT id
+                FROM vietride_parcel.parcels
+                WHERE status = CAST(@source_status AS vietride_parcel.parcel_status)
+                  AND delivered_pending_confirm_at IS NOT NULL
+                  AND delivered_pending_confirm_at <= @cutoff
+                ORDER BY delivered_pending_confirm_at
+                LIMIT @max_batch
+            )
+            UPDATE vietride_parcel.parcels p
+            SET status = CAST(@target_status AS vietride_parcel.parcel_status),
+                updated_at = @now
+            FROM candidates
+            WHERE p.id = candidates.id
+            RETURNING p.id, p.parcel_code, p.operator_id, p.trip_id, p.status::text, p.deposit_amount, p.additional_amount, p.sender_user_id, p.recipient_user_id;
+            """,
+            command =>
+            {
+                AddParameter(command, "source_status", ParcelStatus.DELIVERED_PENDING_CONFIRM.ToString());
+                AddParameter(command, "target_status", ParcelStatus.PENDING_OPERATOR_ACTION.ToString());
+                AddParameter(command, "cutoff", cutoff);
+                AddParameter(command, "now", now);
+                AddParameter(command, "max_batch", maxBatch);
+            },
+            ct);
+    }
+
+    public async Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkExpireOrphanPendingPaymentsAsync(
+        DateTimeOffset cutoff, DateTimeOffset now, int maxBatch, CancellationToken ct)
+    {
+        return await ExecuteBulkReturningAsync(
+            """
+            WITH candidates AS (
+                SELECT id
+                FROM vietride_parcel.parcels
+                WHERE status = CAST(@source_status AS vietride_parcel.parcel_status)
+                  AND created_at <= @cutoff
+                ORDER BY created_at
+                LIMIT @max_batch
+            )
+            UPDATE vietride_parcel.parcels p
+            SET status = CAST(@target_status AS vietride_parcel.parcel_status),
+                updated_at = @now
+            FROM candidates
+            WHERE p.id = candidates.id
+            RETURNING p.id, p.parcel_code, p.operator_id, p.trip_id, p.status::text, p.deposit_amount, p.additional_amount, p.sender_user_id, p.recipient_user_id;
+            """,
+            command =>
+            {
+                AddParameter(command, "source_status", ParcelStatus.PENDING_PAYMENT.ToString());
+                AddParameter(command, "target_status", ParcelStatus.EXPIRED.ToString());
+                AddParameter(command, "cutoff", cutoff);
+                AddParameter(command, "now", now);
+                AddParameter(command, "max_batch", maxBatch);
+            },
+            ct);
+    }
+
+    public async Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkReissueDeliveryPendingConfirmRemindersAsync(
+        DateTimeOffset expiryCutoff, DateTimeOffset reminderCutoff, DateTimeOffset now, int maxBatch, CancellationToken ct)
+    {
+        return await ExecuteBulkReturningAsync(
+            """
+            WITH candidates AS (
+                SELECT id
+                FROM vietride_parcel.parcels
+                WHERE status = CAST(@status AS vietride_parcel.parcel_status)
+                  AND delivered_pending_confirm_at IS NOT NULL
+                  AND delivered_pending_confirm_at > @expiry_cutoff
+                  AND (last_reminder_at IS NULL OR last_reminder_at <= @reminder_cutoff)
+                ORDER BY delivered_pending_confirm_at
+                LIMIT @max_batch
+            )
+            UPDATE vietride_parcel.parcels p
+            SET delivery_token = gen_random_uuid(),
+                delivery_token_expires_at = p.delivered_pending_confirm_at + INTERVAL '7 days',
+                delivery_token_revoked_at = NULL,
+                last_reminder_at = @now,
+                updated_at = @now
+            FROM candidates
+            WHERE p.id = candidates.id
+            RETURNING p.id, p.parcel_code, p.operator_id, p.trip_id, p.status::text, p.deposit_amount, p.additional_amount, p.sender_user_id, p.recipient_user_id, p.delivery_token, p.delivery_token_expires_at;
+            """,
+            command =>
+            {
+                AddParameter(command, "status", ParcelStatus.DELIVERED_PENDING_CONFIRM.ToString());
+                AddParameter(command, "expiry_cutoff", expiryCutoff);
+                AddParameter(command, "reminder_cutoff", reminderCutoff);
+                AddParameter(command, "now", now);
+                AddParameter(command, "max_batch", maxBatch);
+            },
+            ct);
+    }
+
     // ---- Phase 6: Loading / Unloading ----
 
     public async Task<ParcelPaymentTransitionSnapshot?> TryMarkLoadedAsync(
-        Guid parcelId, Guid tripId, string parcelCode, DateTimeOffset now, CancellationToken ct)
+        Guid parcelId, Guid tripId, string parcelCode, Guid? loadedByUserId, DateTimeOffset now, CancellationToken ct)
     {
         var affected = await _db.Parcels
             .Where(p => p.Id == parcelId
@@ -291,6 +461,7 @@ internal sealed class ParcelRepository : IParcelRepository
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(p => p.Status, ParcelStatus.LOADED)
                 .SetProperty(p => p.LoadedAt, now)
+                .SetProperty(p => p.LoadedByUserId, loadedByUserId)
                 .SetProperty(p => p.UpdatedAt, now), ct);
         return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
     }
@@ -320,7 +491,7 @@ internal sealed class ParcelRepository : IParcelRepository
                 updated_at = @now
             WHERE trip_id = @trip_id
               AND status = CAST(@source_status AS vietride_parcel.parcel_status)
-            RETURNING id, parcel_code, operator_id, trip_id, status::text, deposit_amount, additional_amount;
+            RETURNING id, parcel_code, operator_id, trip_id, status::text, deposit_amount, additional_amount, sender_user_id, recipient_user_id;
             """,
             command =>
             {
@@ -340,10 +511,10 @@ internal sealed class ParcelRepository : IParcelRepository
             SET status = CAST(@target_status AS vietride_parcel.parcel_status),
                 updated_at = @now
             WHERE trip_id = @trip_id
-              AND status IN (
-                  CAST(@loaded_status AS vietride_parcel.parcel_status),
-                  CAST(@in_transit_status AS vietride_parcel.parcel_status))
-            RETURNING id, parcel_code, operator_id, trip_id, status::text, deposit_amount, additional_amount;
+                  AND status IN (
+                      CAST(@loaded_status AS vietride_parcel.parcel_status),
+                      CAST(@in_transit_status AS vietride_parcel.parcel_status))
+            RETURNING id, parcel_code, operator_id, trip_id, status::text, deposit_amount, additional_amount, sender_user_id, recipient_user_id;
             """,
             command =>
             {
@@ -423,7 +594,7 @@ internal sealed class ParcelRepository : IParcelRepository
               AND status IN (
                   CAST(@pending_payment_status AS vietride_parcel.parcel_status),
                   CAST(@pending_review_status AS vietride_parcel.parcel_status))
-            RETURNING id, parcel_code, operator_id, trip_id, status::text, deposit_amount, additional_amount;
+            RETURNING id, parcel_code, operator_id, trip_id, status::text, deposit_amount, additional_amount, sender_user_id, recipient_user_id;
             """,
             command =>
             {
@@ -448,7 +619,7 @@ internal sealed class ParcelRepository : IParcelRepository
                 updated_at = @now
             WHERE trip_id = @trip_id
               AND status = CAST(@source_status AS vietride_parcel.parcel_status)
-            RETURNING id, parcel_code, operator_id, trip_id, status::text, deposit_amount, additional_amount;
+            RETURNING id, parcel_code, operator_id, trip_id, status::text, deposit_amount, additional_amount, sender_user_id, recipient_user_id;
             """,
             command =>
             {
@@ -493,6 +664,8 @@ internal sealed class ParcelRepository : IParcelRepository
                 && p.DeliveryTokenRevokedAt == null
                 && p.DeliveryTokenExpiresAt != null
                 && p.DeliveryTokenExpiresAt > now
+                && (p.Status != ParcelStatus.DELIVERY_REJECTED
+                    || (p.RejectedAt != null && p.RejectedAt.Value.AddMinutes(15) > now))
                 && (p.Status == ParcelStatus.DELIVERED_PENDING_CONFIRM || p.Status == ParcelStatus.DELIVERY_REJECTED))
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(p => p.Status, ParcelStatus.DELIVERY_CONFIRMED)
@@ -552,7 +725,11 @@ internal sealed class ParcelRepository : IParcelRepository
                 reader.GetGuid(3),
                 Enum.Parse<ParcelStatus>(reader.GetString(4)),
                 reader.FieldCount > 5 ? reader.GetInt64(5) : 0,
-                reader.FieldCount > 6 ? reader.GetInt64(6) : 0));
+                reader.FieldCount > 6 ? reader.GetInt64(6) : 0,
+                reader.FieldCount > 7 ? reader.GetGuid(7) : Guid.Empty,
+                reader.FieldCount > 8 && !reader.IsDBNull(8) ? reader.GetGuid(8) : null,
+                reader.FieldCount > 9 && !reader.IsDBNull(9) ? reader.GetGuid(9) : null,
+                reader.FieldCount > 10 && !reader.IsDBNull(10) ? reader.GetFieldValue<DateTimeOffset>(10) : null));
         }
 
         return snapshots;

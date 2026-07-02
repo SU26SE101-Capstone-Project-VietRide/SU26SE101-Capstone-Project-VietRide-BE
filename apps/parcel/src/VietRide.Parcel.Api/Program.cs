@@ -39,7 +39,7 @@ if (registerMessaging)
     builder.Services.AddHangfireServer();
 }
 
-builder.Services.AddInfrastructure(builder.Configuration, registerConsumers: registerMessaging);
+builder.Services.AddInfrastructure(builder.Configuration, builder.Environment, registerConsumers: registerMessaging);
 builder.Services.AddVietRideIdempotency("parcel");
 
 var app = builder.Build();
@@ -77,6 +77,7 @@ if (registerMessaging)
 {
     using var scope = app.Services.CreateScope();
     var recurringJobs = scope.ServiceProvider.GetRequiredService<IRecurringJobManager>();
+    var vietnamTimeZone = ResolveVietnamTimeZone();
     recurringJobs.AddOrUpdate<ParcelReviewTimeoutJob>(
         ParcelReviewTimeoutJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
@@ -89,6 +90,15 @@ if (registerMessaging)
         ParcelPendingAutoRejectJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
         "*/5 * * * *");
+    recurringJobs.AddOrUpdate<ParcelLifecycleSweepJob>(
+        ParcelLifecycleSweepJob.RecurringJobId,
+        job => job.RunAsync(CancellationToken.None),
+        "*/5 * * * *");
+    recurringJobs.AddOrUpdate<ParcelDeliveryPendingConfirmReminderJob>(
+        ParcelDeliveryPendingConfirmReminderJob.RecurringJobId,
+        job => job.RunAsync(CancellationToken.None),
+        "0 9 * * *",
+        new RecurringJobOptions { TimeZone = vietnamTimeZone });
 }
 
 app.Run();
@@ -96,5 +106,17 @@ app.Run();
 static bool IsWebApplicationFactoryHost()
     => AppDomain.CurrentDomain.GetAssemblies()
         .Any(assembly => assembly.GetName().Name == "Microsoft.AspNetCore.Mvc.Testing");
+
+static TimeZoneInfo ResolveVietnamTimeZone()
+{
+    try
+    {
+        return TimeZoneInfo.FindSystemTimeZoneById("Asia/Saigon");
+    }
+    catch (TimeZoneNotFoundException)
+    {
+        return TimeZoneInfo.FindSystemTimeZoneById("SE Asia Standard Time");
+    }
+}
 
 public partial class Program;

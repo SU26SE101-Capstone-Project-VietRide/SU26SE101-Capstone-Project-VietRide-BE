@@ -1,5 +1,6 @@
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
@@ -11,15 +12,18 @@ public sealed class ReturnParcelCommandHandler
     : IRequestHandler<ReturnParcelCommand, OperationalParcelResponse>
 {
     private readonly IParcelRepository _parcelRepository;
+    private readonly IIdentityServiceClient _identityClient;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IParcelStatsRepository _statsRepository;
 
     public ReturnParcelCommandHandler(
         IParcelRepository parcelRepository,
+        IIdentityServiceClient identityClient,
         IIntegrationEventOutbox outbox,
         IParcelStatsRepository statsRepository)
     {
         _parcelRepository = parcelRepository;
+        _identityClient = identityClient;
         _outbox = outbox;
         _statsRepository = statsRepository;
     }
@@ -53,21 +57,36 @@ public sealed class ReturnParcelCommandHandler
         if (snapshot is null)
             throw new CodedConflictException("RACE_LOST", "Parcel status changed concurrently; cannot return.");
 
+        var refundAmount = await ParcelRefundAmountCalculator.CalculateRefundAsync(
+            _identityClient,
+            snapshot.OperatorId,
+            snapshot.DepositAmount + snapshot.AdditionalAmount,
+            cancellationToken);
+
         await ParcelOutboxEvents.EnqueueAsync(
             _outbox,
             ParcelOutboxEvents.Returned,
-            new { parcelId = snapshot.ParcelId, refundAmount = snapshot.DepositAmount + snapshot.AdditionalAmount },
+            new
+            {
+                parcelId = snapshot.ParcelId,
+                parcelCode = snapshot.ParcelCode,
+                operatorId = snapshot.OperatorId,
+                userId = snapshot.SenderUserId,
+                tripId = snapshot.TripId,
+                refundAmount,
+            },
             cancellationToken);
-        await ParcelOutboxEvents.EnqueueAsync(
+        await ParcelOutboxEvents.EnqueueRefundAsync(
             _outbox,
-            ParcelOutboxEvents.RefundInitiated,
-            new { parcelId = snapshot.ParcelId, refundAmount = snapshot.DepositAmount + snapshot.AdditionalAmount },
+            snapshot.ParcelId,
+            snapshot.SenderUserId,
+            refundAmount,
             cancellationToken);
 
         await _statsRepository.UpsertIncrementAsync(
             snapshot.OperatorId,
             DateOnly.FromDateTime(now.UtcDateTime),
-            0, 0, 0, 0, 1, 0, snapshot.DepositAmount + snapshot.AdditionalAmount,
+            0, 0, 0, 0, 1, 0, refundAmount,
             cancellationToken);
 
         return new OperationalParcelResponse(

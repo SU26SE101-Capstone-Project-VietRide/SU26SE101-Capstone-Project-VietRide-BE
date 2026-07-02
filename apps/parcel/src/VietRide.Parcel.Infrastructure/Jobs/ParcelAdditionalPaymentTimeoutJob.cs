@@ -1,3 +1,4 @@
+using Hangfire;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using VietRide.Parcel.Application.Features.Parcels.ExpireParcelAdditionalPayment;
@@ -17,6 +18,7 @@ public sealed class ParcelAdditionalPaymentTimeoutJob
         _logger = logger;
     }
 
+    [DisableConcurrentExecution(timeoutInSeconds: 300)]
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
         var count = await _mediator.Send(new ExpireParcelAdditionalPaymentCommand(), cancellationToken);

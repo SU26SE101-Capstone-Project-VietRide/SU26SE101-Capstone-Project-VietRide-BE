@@ -4,9 +4,9 @@ using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Exceptions;
 using VietRide.Parcel.Application.Features.Parcels.AvailableTrips;
-using VietRide.Shared.Application.Exceptions;
 using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
+using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Parcel.UnitTests.Features;
@@ -164,7 +164,7 @@ public sealed class AvailableTripsTests
         identityClient.GetOperatorInfoAsync(OperatorId, Arg.Any<CancellationToken>())
             .Returns(new OperatorLookupOutcome(
                 OperatorLookupOutcomeKind.Success,
-                new IdentityOperatorInfo(OperatorId, "Enriched Operator"),
+                new IdentityOperatorInfo(OperatorId, "Enriched Operator", ParcelNoShowPolicy.Default),
                 null));
 
         var fare = ParcelRouteFare.Create(RouteId, ParcelSizeCategory.MEDIUM, OperatorId,

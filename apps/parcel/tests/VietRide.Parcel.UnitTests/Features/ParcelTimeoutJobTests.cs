@@ -4,9 +4,11 @@ using Microsoft.Extensions.Logging;
 using NSubstitute;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Parcel.Application.Features.Parcels.AutoRejectPendingParcel;
 using VietRide.Parcel.Application.Features.Parcels.ExpireParcelAdditionalPayment;
 using VietRide.Parcel.Application.Features.Parcels.ExpireParcelReview;
+using VietRide.Parcel.Application.Features.Parcels.SendDeliveryPendingConfirmReminders;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Parcel.Infrastructure.Jobs;
 using VietRide.Shared.Application.Outbox;
@@ -42,6 +44,51 @@ public sealed class ParcelTimeoutJobTests
         await mediator.Received(1).Send(
             Arg.Is<ExpireParcelReviewCommand>(c => true),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DeliveryPendingConfirmReminder_ReissuesTokenAndEmitsReminderEvent()
+    {
+        var repo = Substitute.For<IParcelRepository>();
+        var clock = Substitute.For<IClock>();
+        var unitOfWork = UnitOfWork();
+        var outbox = Outbox();
+        var deliveryToken = Guid.NewGuid();
+        var senderUserId = Guid.NewGuid();
+        var recipientUserId = Guid.NewGuid();
+        var tokenExpiresAt = Now.AddDays(6);
+        clock.UtcNow.Returns(Now);
+        repo.TryBulkReissueDeliveryPendingConfirmRemindersAsync(
+                Now.AddDays(-7),
+                Now.AddHours(-23),
+                Now,
+                Arg.Any<int>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new List<ParcelEventSnapshot>
+            {
+                new(ParcelId, "VRP-001", OperatorId, TripId, ParcelStatus.DELIVERED_PENDING_CONFIRM,
+                    SenderUserId: senderUserId, RecipientUserId: recipientUserId,
+                    DeliveryToken: deliveryToken, DeliveryTokenExpiresAt: tokenExpiresAt),
+            });
+
+        var handler = new SendDeliveryPendingConfirmRemindersCommandHandler(
+            repo,
+            outbox,
+            unitOfWork,
+            clock,
+            Substitute.For<ILogger<SendDeliveryPendingConfirmRemindersCommandHandler>>());
+
+        var result = await handler.Handle(new SendDeliveryPendingConfirmRemindersCommand(), default);
+
+        result.Should().Be(1);
+        await outbox.Received(1).EnqueueAsync(
+            ParcelOutboxEvents.DeliveredPendingConfirm,
+            Arg.Is<string>(payload => payload.Contains("VRP-001")
+                && payload.Contains(deliveryToken.ToString())
+                && payload.Contains(recipientUserId.ToString())
+                && !payload.Contains(senderUserId.ToString())),
+            Arg.Any<CancellationToken>());
+        await unitOfWork.Received(1).CommitAsync(Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -517,7 +564,7 @@ public sealed class ParcelTimeoutJobTests
     private static ExpireParcelAdditionalPaymentCommandHandler CreateAdditionalPaymentHandler(
         IParcelRepository repo, IClock clock)
     {
-        return new ExpireParcelAdditionalPaymentCommandHandler(repo, clock,
+        return new ExpireParcelAdditionalPaymentCommandHandler(repo, Identity(), clock,
             UnitOfWork(), Outbox(),
             Substitute.For<ILogger<ExpireParcelAdditionalPaymentCommandHandler>>(), Stats());
     }
@@ -525,9 +572,20 @@ public sealed class ParcelTimeoutJobTests
     private static AutoRejectPendingParcelCommandHandler CreatePendingAutoRejectHandler(
         IParcelRepository repo, ITripServiceClient tripClient, IClock clock)
     {
-        return new AutoRejectPendingParcelCommandHandler(repo, tripClient, clock,
+        return new AutoRejectPendingParcelCommandHandler(repo, tripClient, Identity(), clock,
             UnitOfWork(), Outbox(),
             Substitute.For<ILogger<AutoRejectPendingParcelCommandHandler>>(), Stats());
+    }
+
+    private static IIdentityServiceClient Identity()
+    {
+        var identity = Substitute.For<IIdentityServiceClient>();
+        identity.GetOperatorInfoAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(call => new OperatorLookupOutcome(
+                OperatorLookupOutcomeKind.Success,
+                new IdentityOperatorInfo((Guid)call[0], "Operator", ParcelNoShowPolicy.Default),
+                null));
+        return identity;
     }
 
     private static TripParcelSnapshot CreateTripSnapshot(string status, DateTimeOffset departure, Guid? tripId = null)

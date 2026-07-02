@@ -14,6 +14,9 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     Task<ParcelPaymentTransitionSnapshot?> TryMarkDepositSucceededAsync(
         Guid parcelId, long depositAmount, DateTimeOffset now, CancellationToken ct);
 
+    Task<ParcelPaymentTransitionSnapshot?> GetPaymentTransitionSnapshotAsync(
+        Guid parcelId, CancellationToken ct);
+
     Task<ParcelPaymentTransitionSnapshot?> TryMarkDepositFailedAsync(
         Guid parcelId, DateTimeOffset now, CancellationToken ct);
 
@@ -81,13 +84,28 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     Task<ParcelPaymentTransitionSnapshot?> TryAutoRejectPendingAsync(
         Guid parcelId, string reason, DateTimeOffset now, CancellationToken ct);
 
+    Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkEscalatePendingTransfersAsync(
+        DateTimeOffset cutoff, DateTimeOffset now, int maxBatch, CancellationToken ct);
+
+    Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkInitiateReturnForRejectedDeliveriesAsync(
+        DateTimeOffset cutoff, DateTimeOffset now, int maxBatch, CancellationToken ct);
+
+    Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkSetPendingOperatorActionForExpiredConfirmationsAsync(
+        DateTimeOffset cutoff, DateTimeOffset now, int maxBatch, CancellationToken ct);
+
+    Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkReissueDeliveryPendingConfirmRemindersAsync(
+        DateTimeOffset expiryCutoff, DateTimeOffset reminderCutoff, DateTimeOffset now, int maxBatch, CancellationToken ct);
+
+    Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkExpireOrphanPendingPaymentsAsync(
+        DateTimeOffset cutoff, DateTimeOffset now, int maxBatch, CancellationToken ct);
+
     // ---- Phase 6: Loading / Unloading ----
 
     /// <summary>
     /// Atomic: PENDING -> LOADED. Guards Status==PENDING, TripId, ParcelCode.
     /// </summary>
     Task<ParcelPaymentTransitionSnapshot?> TryMarkLoadedAsync(
-        Guid parcelId, Guid tripId, string parcelCode, DateTimeOffset now, CancellationToken ct);
+        Guid parcelId, Guid tripId, string parcelCode, Guid? loadedByUserId, DateTimeOffset now, CancellationToken ct);
 
     /// <summary>
     /// Atomic: IN_TRANSIT -> DELIVERED_PENDING_CONFIRM with token generation.
