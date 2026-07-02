@@ -66,16 +66,11 @@ public sealed class ReviewParcelCommandHandler
                 throw new CodedValidationException(
                     "VALIDATION_ERROR", "Deposit amount is required and must be positive for APPROVED decision.");
 
-            var floored = (command.DepositAmount.Value / 1000) * 1000;
-            if (floored < 1000)
-                throw new CodedValidationException(
-                    "VALIDATION_ERROR", "Deposit amount must be at least 1000 VND after flooring.");
-
             if (command.PaymentMethod is not ("WALLET" or "VNPAY"))
                 throw new CodedValidationException(
                     "VALIDATION_ERROR", "PaymentMethod must be WALLET or VNPAY.");
 
-            var depositAmount = Money.FromRaw(floored);
+            var depositAmount = Money.FromRaw(command.DepositAmount.Value);
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
             ParcelPaymentTransitionSnapshot snapshot;
             try

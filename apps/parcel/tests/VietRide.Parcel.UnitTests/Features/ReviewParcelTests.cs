@@ -85,7 +85,7 @@ public sealed class ReviewParcelTests
 
         await act.Should().ThrowAsync<CodedNotFoundException>()
             .Where(e => e.ErrorCode == "PARCEL_NOT_FOUND");
-}
+    }
 
     private static IUnitOfWork UnitOfWork()
         => Substitute.For<IUnitOfWork>();

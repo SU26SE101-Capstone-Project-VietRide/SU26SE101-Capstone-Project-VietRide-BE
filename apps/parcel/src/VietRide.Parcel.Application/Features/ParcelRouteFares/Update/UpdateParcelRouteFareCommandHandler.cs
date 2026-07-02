@@ -60,10 +60,9 @@ public sealed class UpdateParcelRouteFareCommandHandler : IRequestHandler<Update
 
         if (command.PriceVnd.HasValue)
         {
-            var floored = (command.PriceVnd.Value / 1000) * 1000;
-            if (floored < 1000)
-                throw new CodedValidationException("VALIDATION_ERROR", "Price must be at least 1000 VND after flooring.");
-            fare.UpdatePrice(Money.FromRaw(floored));
+            if (command.PriceVnd.Value <= 0)
+                throw new CodedValidationException("VALIDATION_ERROR", "Price must be positive.");
+            fare.UpdatePrice(Money.FromRaw(command.PriceVnd.Value));
         }
 
         if (command.EffectiveFrom.HasValue || command.EffectiveUntil is not null)

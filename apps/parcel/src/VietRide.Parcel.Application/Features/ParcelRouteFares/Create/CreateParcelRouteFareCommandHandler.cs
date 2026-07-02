@@ -62,10 +62,9 @@ public sealed class CreateParcelRouteFareCommandHandler : IRequestHandler<Create
                 "FARE_ALREADY_EXISTS",
                 $"A fare for route '{command.RouteId}' and size '{command.SizeCategory}' already exists.");
 
-        var floored = (command.PriceVnd / 1000) * 1000;
-        if (floored < 1000)
-            throw new CodedValidationException("VALIDATION_ERROR", "Price must be at least 1000 VND after flooring.");
-        var price = Money.FromRaw(floored);
+        if (command.PriceVnd <= 0)
+            throw new CodedValidationException("VALIDATION_ERROR", "Price must be positive.");
+        var price = Money.FromRaw(command.PriceVnd);
 
         var fare = ParcelRouteFare.Create(
             command.RouteId,

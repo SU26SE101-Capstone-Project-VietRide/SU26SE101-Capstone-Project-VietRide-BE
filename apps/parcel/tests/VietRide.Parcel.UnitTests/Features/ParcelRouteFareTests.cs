@@ -132,7 +132,7 @@ public sealed class ParcelRouteFareTests
     }
 
     [Fact]
-    public async Task Create_FloorsPriceToNearest1000()
+    public async Task Create_StoresExactPriceVnd()
     {
         var repo = Substitute.For<IParcelRouteFareRepository>();
         var tripClient = Substitute.For<ITripServiceClient>();
@@ -161,12 +161,12 @@ public sealed class ParcelRouteFareTests
 
         var result = await handler.Handle(command, CancellationToken.None);
 
-        result.PriceVnd.Should().Be(123_000);
-        captured!.PriceVnd.Amount.Should().Be(123_000);
+        result.PriceVnd.Should().Be(123_500);
+        captured!.PriceVnd.Amount.Should().Be(123_500);
     }
 
     [Fact]
-    public async Task Create_FlooredPrice999_ThrowsValidationError()
+    public async Task Create_NonPositivePrice_ThrowsValidationError()
     {
         var repo = Substitute.For<IParcelRouteFareRepository>();
         var tripClient = Substitute.For<ITripServiceClient>();
@@ -180,7 +180,7 @@ public sealed class ParcelRouteFareTests
             .Returns((ParcelRouteFare?)null);
 
         var handler = new CreateParcelRouteFareCommandHandler(repo, tripClient, uow, clock);
-        var command = new CreateParcelRouteFareCommand(OperatorId, RouteId, "SMALL", 999, Now, null);
+        var command = new CreateParcelRouteFareCommand(OperatorId, RouteId, "SMALL", 0, Now, null);
 
         var ex = await Assert.ThrowsAsync<CodedValidationException>(() =>
             handler.Handle(command, CancellationToken.None));
@@ -390,7 +390,7 @@ public sealed class ParcelRouteFareTests
     }
 
     [Fact]
-    public async Task Update_FlooredPrice999_ThrowsValidationError()
+    public async Task Update_NonPositivePrice_ThrowsValidationError()
     {
         var repo = Substitute.For<IParcelRouteFareRepository>();
         var tripClient = Substitute.For<ITripServiceClient>();
@@ -404,7 +404,7 @@ public sealed class ParcelRouteFareTests
             .Returns(existing);
 
         var handler = new UpdateParcelRouteFareCommandHandler(repo, tripClient, uow);
-        var command = new UpdateParcelRouteFareCommand(OperatorId, RouteId, "MEDIUM", 999, null, null);
+        var command = new UpdateParcelRouteFareCommand(OperatorId, RouteId, "MEDIUM", 0, null, null);
 
         var ex = await Assert.ThrowsAsync<CodedValidationException>(() =>
             handler.Handle(command, CancellationToken.None));

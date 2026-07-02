@@ -12,11 +12,12 @@ namespace VietRide.Parcel.Application.Features.Parcels.Reweigh;
 public sealed class ReweighParcelCommandHandler
     : IRequestHandler<ReweighParcelCommand, ReweighParcelResponse>
 {
-    private static readonly TimeSpan AdditionalPaymentTimeout = TimeSpan.FromMinutes(15);
+    private const int FallbackAdditionalPaymentTimeoutMinutes = 30;
 
     private readonly IParcelRepository _parcelRepository;
     private readonly IParcelRouteFareRepository _fareRepository;
     private readonly ITripServiceClient _tripClient;
+    private readonly IIdentityServiceClient _identityClient;
     private readonly IPaymentServiceClient _paymentClient;
     private readonly IUnitOfWork _unitOfWork;
 
@@ -24,12 +25,14 @@ public sealed class ReweighParcelCommandHandler
         IParcelRepository parcelRepository,
         IParcelRouteFareRepository fareRepository,
         ITripServiceClient tripClient,
+        IIdentityServiceClient identityClient,
         IPaymentServiceClient paymentClient,
         IUnitOfWork unitOfWork)
     {
         _parcelRepository = parcelRepository;
         _fareRepository = fareRepository;
         _tripClient = tripClient;
+        _identityClient = identityClient;
         _paymentClient = paymentClient;
         _unitOfWork = unitOfWork;
     }
@@ -71,6 +74,7 @@ public sealed class ReweighParcelCommandHandler
                 tripOutcome.ErrorMessage ?? "Trip service unavailable.");
 
         var routeId = tripOutcome.Snapshot!.RouteId;
+        var departureDateTime = tripOutcome.Snapshot.DepartureDateTime;
 
         // Look up fare for the actual size category
         var fare = await _fareRepository.FindByCompositeAsync(routeId, actualSize, cancellationToken);
@@ -107,8 +111,12 @@ public sealed class ReweighParcelCommandHandler
         }
         else
         {
-            // Additional fee required - transition to PENDING_ADDITIONAL_PAYMENT
-            var deadline = now + AdditionalPaymentTimeout;
+            // Additional fee required - transition to PENDING_ADDITIONAL_PAYMENT.
+            var policyOutcome = await _identityClient.GetOperatorInfoAsync(parcel.OperatorId, cancellationToken);
+            var timeoutMinutes = policyOutcome.Kind == OperatorLookupOutcomeKind.Success
+                ? policyOutcome.OperatorInfo!.ParcelNoShowPolicy.AdditionalPaymentTimeoutMinutes
+                : FallbackAdditionalPaymentTimeoutMinutes;
+            var deadline = Min(now.AddMinutes(timeoutMinutes), departureDateTime);
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
             ParcelPaymentTransitionSnapshot snapshot;
             try
@@ -166,4 +174,7 @@ public sealed class ReweighParcelCommandHandler
                 outcome.Result?.PaymentRedirectUrl);
         }
     }
+
+    private static DateTimeOffset Min(DateTimeOffset left, DateTimeOffset right)
+        => left <= right ? left : right;
 }
