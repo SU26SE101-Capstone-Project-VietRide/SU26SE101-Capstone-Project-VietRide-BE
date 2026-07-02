@@ -13,6 +13,7 @@ using VietRide.Parcel.Application.Features.Parcels.Unload;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
+using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 using ParcelEntity = VietRide.Parcel.Domain.Entities.Parcel;
@@ -34,15 +35,15 @@ public sealed class Phase67ParcelTests
         var parcel = CreateParcel(ParcelStatus.PENDING);
         var repo = Substitute.For<IParcelRepository>();
         repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
-        repo.TryMarkLoadedAsync(ParcelId, TripId, "VRP-001", Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+        repo.TryMarkLoadedAsync(ParcelId, TripId, "VRP-001", null, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(Snapshot(ParcelStatus.LOADED));
 
         var handler = new MarkParcelLoadedCommandHandler(repo, Outbox(), Stats());
-        var result = await handler.Handle(new MarkParcelLoadedCommand(ParcelId, TripId, "VRP-001"), default);
+        var result = await handler.Handle(new MarkParcelLoadedCommand(ParcelId, TripId, "VRP-001", null), default);
 
         result.Status.Should().Be("LOADED");
         await repo.Received(1).TryMarkLoadedAsync(
-            ParcelId, TripId, "VRP-001", Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+            ParcelId, TripId, "VRP-001", null, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -53,7 +54,7 @@ public sealed class Phase67ParcelTests
         repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
 
         var handler = new MarkParcelLoadedCommandHandler(repo, Outbox(), Stats());
-        var act = () => handler.Handle(new MarkParcelLoadedCommand(ParcelId, Guid.NewGuid(), "WRONG"), default);
+        var act = () => handler.Handle(new MarkParcelLoadedCommand(ParcelId, Guid.NewGuid(), "WRONG", null), default);
 
         await act.Should().ThrowAsync<CodedNotFoundException>()
             .Where(e => e.ErrorCode == "PARCEL_NOT_FOUND");
@@ -66,7 +67,7 @@ public sealed class Phase67ParcelTests
         var repo = Substitute.For<IParcelRepository>();
         repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
 
-        var handler = new UnloadParcelCommandHandler(repo, Substitute.For<ITripServiceClient>(), Outbox());
+        var handler = new UnloadParcelCommandHandler(repo, Substitute.For<ITripServiceClient>(), Outbox(), UnitOfWork());
         var act = () => handler.Handle(new UnloadParcelCommand(ParcelId, Guid.NewGuid()), default);
 
         await act.Should().ThrowAsync<ForbiddenException>()
@@ -85,7 +86,7 @@ public sealed class Phase67ParcelTests
         repo.TryUnloadToPendingConfirmAsync(ParcelId, Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(Snapshot(ParcelStatus.DELIVERED_PENDING_CONFIRM));
 
-        var handler = new UnloadParcelCommandHandler(repo, tripClient, Outbox());
+        var handler = new UnloadParcelCommandHandler(repo, tripClient, Outbox(), UnitOfWork());
         var result = await handler.Handle(new UnloadParcelCommand(ParcelId, OperatorId), default);
 
         result.Status.Should().Be("DELIVERED_PENDING_CONFIRM");
@@ -343,6 +344,9 @@ public sealed class Phase67ParcelTests
 
     private static IIntegrationEventOutbox Outbox()
         => Substitute.For<IIntegrationEventOutbox>();
+
+    private static IUnitOfWork UnitOfWork()
+        => Substitute.For<IUnitOfWork>();
 
     private static IParcelStatsRepository Stats()
         => Substitute.For<IParcelStatsRepository>();

@@ -45,6 +45,7 @@ public sealed class Parcel : BaseEntity<Guid>
     public DateTimeOffset? DeliveryTokenRevokedAt { get; private set; }
 
     public DateTimeOffset? LoadedAt { get; private set; }
+    public Guid? LoadedByUserId { get; private set; }
     public DateTimeOffset? UnloadedAt { get; private set; }
     public DateTimeOffset? DeliveredPendingConfirmAt { get; private set; }
     public DateTimeOffset? ConfirmedAt { get; private set; }

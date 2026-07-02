@@ -54,6 +54,7 @@ public sealed class MarkParcelLoadedCommandHandler
             command.ParcelId,
             command.TripId,
             command.ParcelCode,
+            command.LoadedByUserId,
             now,
             cancellationToken);
 

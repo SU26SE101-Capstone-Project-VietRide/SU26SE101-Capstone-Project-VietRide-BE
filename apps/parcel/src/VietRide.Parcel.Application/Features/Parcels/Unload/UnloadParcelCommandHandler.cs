@@ -6,24 +6,30 @@ using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
+using VietRide.Shared.Application.UnitOfWork;
 
 namespace VietRide.Parcel.Application.Features.Parcels.Unload;
 
 public sealed class UnloadParcelCommandHandler
     : IRequestHandler<UnloadParcelCommand, UnloadParcelResponse>
 {
+    private static readonly TimeSpan DeliveryConfirmWindow = TimeSpan.FromDays(7);
+
     private readonly IParcelRepository _parcelRepository;
     private readonly ITripServiceClient _tripClient;
     private readonly IIntegrationEventOutbox _outbox;
+    private readonly IUnitOfWork _unitOfWork;
 
     public UnloadParcelCommandHandler(
         IParcelRepository parcelRepository,
         ITripServiceClient tripClient,
-        IIntegrationEventOutbox outbox)
+        IIntegrationEventOutbox outbox,
+        IUnitOfWork unitOfWork)
     {
         _parcelRepository = parcelRepository;
         _tripClient = tripClient;
         _outbox = outbox;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<UnloadParcelResponse> Handle(
@@ -76,29 +82,76 @@ public sealed class UnloadParcelCommandHandler
 
         var now = DateTimeOffset.UtcNow;
         var deliveryToken = Guid.NewGuid();
-        var deliveryTokenExpiresAt = now.AddHours(48);
-        var snapshot = await _parcelRepository.TryUnloadToPendingConfirmAsync(
-            command.ParcelId, deliveryToken, deliveryTokenExpiresAt, now, cancellationToken);
+        var deliveryTokenExpiresAt = now.Add(DeliveryConfirmWindow);
+        ParcelPaymentTransitionSnapshot snapshot;
 
-        if (snapshot is null)
-            throw new CodedConflictException(
-                "RACE_LOST",
-                $"Parcel '{command.ParcelId}' status changed concurrently; cannot unload.");
+        await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            snapshot = await _parcelRepository.TryUnloadToPendingConfirmAsync(
+                command.ParcelId, deliveryToken, deliveryTokenExpiresAt, now, cancellationToken)
+                ?? throw new CodedConflictException(
+                    "RACE_LOST",
+                    $"Parcel '{command.ParcelId}' status changed concurrently; cannot unload.");
 
-        await ParcelOutboxEvents.EnqueueAsync(
-            _outbox,
-            ParcelOutboxEvents.Unloaded,
-            new { parcelId = snapshot.ParcelId, tripId = snapshot.TripId },
-            cancellationToken);
-        await ParcelOutboxEvents.EnqueueAsync(
-            _outbox,
-            ParcelOutboxEvents.DeliveredPendingConfirm,
-            new { parcelId = snapshot.ParcelId, recipientUserId = parcel.RecipientUserId, deliveryToken, expiresAt = deliveryTokenExpiresAt },
-            cancellationToken);
+            await ParcelOutboxEvents.EnqueueAsync(
+                _outbox,
+                ParcelOutboxEvents.Unloaded,
+                new { parcelId = snapshot.ParcelId, tripId = snapshot.TripId },
+                cancellationToken);
+            await ParcelOutboxEvents.EnqueueAsync(
+                _outbox,
+                ParcelOutboxEvents.DeliveredPendingConfirm,
+                BuildDeliveredPendingConfirmPayload(
+                    snapshot.ParcelId,
+                    snapshot.ParcelCode,
+                    snapshot.OperatorId,
+                    parcel.RecipientUserId,
+                    snapshot.TripId,
+                    deliveryToken,
+                    deliveryTokenExpiresAt),
+                cancellationToken);
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await _unitOfWork.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await _unitOfWork.RollbackAsync(cancellationToken);
+            throw;
+        }
 
         return new UnloadParcelResponse(
             snapshot.ParcelId,
             snapshot.ParcelCode,
             snapshot.Status.ToString());
+    }
+
+    private static Dictionary<string, object?> BuildDeliveredPendingConfirmPayload(
+        Guid parcelId,
+        string parcelCode,
+        Guid operatorId,
+        Guid? recipientUserId,
+        Guid tripId,
+        Guid deliveryToken,
+        DateTimeOffset expiresAt)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["parcelId"] = parcelId,
+            ["parcelCode"] = parcelCode,
+            ["operatorId"] = operatorId,
+            ["tripId"] = tripId,
+            ["deliveryToken"] = deliveryToken,
+            ["expiresAt"] = expiresAt,
+        };
+
+        if (recipientUserId.HasValue)
+        {
+            payload["userId"] = recipientUserId.Value;
+            payload["recipientUserIds"] = new[] { recipientUserId.Value };
+        }
+
+        return payload;
     }
 }

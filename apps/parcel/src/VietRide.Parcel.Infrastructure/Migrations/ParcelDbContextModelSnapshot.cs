@@ -131,6 +131,10 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("loaded_at");
 
+                    b.Property<Guid?>("LoadedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("loaded_by_user_id");
+
                     b.Property<Guid>("OperatorId")
                         .HasColumnType("uuid")
                         .HasColumnName("operator_id");
@@ -259,6 +263,10 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .IsUnique()
                         .HasDatabaseName("uq_parcels_delivery_token")
                         .HasFilter("delivery_token IS NOT NULL");
+
+                    b.HasIndex("LoadedByUserId")
+                        .HasDatabaseName("idx_parcels_loaded_by_user_id")
+                        .HasFilter("loaded_by_user_id IS NOT NULL");
 
                     b.HasIndex("ParcelCode")
                         .IsUnique()

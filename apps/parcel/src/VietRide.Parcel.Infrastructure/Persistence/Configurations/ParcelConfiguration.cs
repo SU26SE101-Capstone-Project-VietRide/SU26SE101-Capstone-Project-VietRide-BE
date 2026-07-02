@@ -172,6 +172,7 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
             .IsRequired(false);
 
         builder.Property(x => x.LoadedAt).HasColumnName("loaded_at").IsRequired(false);
+        builder.Property(x => x.LoadedByUserId).HasColumnName("loaded_by_user_id").HasColumnType("uuid").IsRequired(false);
         builder.Property(x => x.UnloadedAt).HasColumnName("unloaded_at").IsRequired(false);
         builder.Property(x => x.DeliveredPendingConfirmAt).HasColumnName("delivered_pending_confirm_at").IsRequired(false);
         builder.Property(x => x.ConfirmedAt).HasColumnName("confirmed_at").IsRequired(false);
