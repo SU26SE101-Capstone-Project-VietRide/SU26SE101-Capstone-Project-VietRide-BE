@@ -3,6 +3,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 
 namespace VietRide.Parcel.IntegrationTests;
 
@@ -56,6 +57,16 @@ public class VietRideWebApplicationFactory : WebApplicationFactory<Program>
         Environment.SetEnvironmentVariable("INTERNAL_JWT_SECRET", "test-secret-at-least-32-chars-long-xxxxx");
         builder.UseSetting("INTERNAL_JWT_SECRET", "test-secret-at-least-32-chars-long-xxxxx");
         builder.UseSetting("ConnectionStrings:Default", "Host=localhost;Port=5432;Database=test;Username=postgres;Password=postgres");
+        builder.ConfigureAppConfiguration((_, configuration) =>
+        {
+            configuration.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Trip:UseDevStub"] = "true",
+                ["Payment:UseDevStub"] = "true",
+                ["Booking:UseDevStub"] = "true",
+                ["Identity:UseDevStub"] = "true",
+            });
+        });
         builder.UseEnvironment("Testing");
     }
 }

@@ -3,10 +3,10 @@ using Npgsql;
 using Npgsql.NameTranslation;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
-using VietRide.Shared.Persistence.Outbox;
 using VietRide.Identity.Infrastructure.Persistence.Configurations;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Persistence;
+using VietRide.Shared.Persistence.Outbox;
 
 namespace VietRide.Identity.Infrastructure;
 
