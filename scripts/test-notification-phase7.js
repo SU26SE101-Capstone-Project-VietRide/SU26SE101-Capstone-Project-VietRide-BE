@@ -52,7 +52,7 @@ async function assertNotificationReady() {
 }
 
 async function assertAuthFailEnvelope() {
-  const response = await fetch(`${notificationUrl}/api/v1/notifications`);
+  const response = await fetch(`${notificationUrl}/v1/notifications`);
   assert(response.status === 401, `expected 401, got ${response.status}`);
   const body = await response.json();
   assert(body.success === false, 'expected ApiResponse failure envelope');

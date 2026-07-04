@@ -213,4 +213,34 @@ public sealed class IdempotencyMiddlewareTests
         downstreamCalled.Should().BeTrue();
         await db.DidNotReceive().StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
     }
+
+    // ------------------------------------------------------------------
+    // 6. 5xx response → pass-through, NOT stored in Redis
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task FirstRequest_5xx_DoesNotStoreInRedis()
+    {
+        var (mux, db) = FakeRedis();
+        db.StringGetAsync(RedisKey(Key)).Returns(RedisValue.Null);
+
+        var downstreamCalled = false;
+        RequestDelegate next = async c =>
+        {
+            downstreamCalled = true;
+            c.Response.StatusCode = 503;
+            await c.Response.Body.WriteAsync(Encoding.UTF8.GetBytes("{\"serviceUnavailable\":true}"));
+        };
+
+        var ctx = BuildContext("POST", Key, "{\"a\":1}");
+        await Create(next, mux).InvokeAsync(ctx);
+
+        downstreamCalled.Should().BeTrue();
+        ctx.Response.StatusCode.Should().Be(503);
+        ReadResponse(ctx).Should().Be("{\"serviceUnavailable\":true}");
+
+        await db.DidNotReceive().StringSetAsync(
+            Arg.Any<RedisKey>(), Arg.Any<RedisValue>(),
+            Arg.Any<TimeSpan?>(), Arg.Any<When>(), Arg.Any<CommandFlags>());
+    }
 }

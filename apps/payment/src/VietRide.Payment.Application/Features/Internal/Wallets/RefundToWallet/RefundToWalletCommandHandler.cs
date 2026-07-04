@@ -52,13 +52,21 @@ public sealed class RefundToWalletCommandHandler : IRequestHandler<RefundToWalle
             return ToResult(existing);
         }
 
-        await DebitPlatformWalletAsync(amount, request.ReferenceId, cancellationToken).ConfigureAwait(false);
-        var transaction = await _wallets.CreditBookingRefundAsync(
-                request.UserId,
-                amount,
-                request.ReferenceId,
-                cancellationToken)
-            .ConfigureAwait(false);
+        await DebitPlatformWalletAsync(amount, referenceType, request.ReferenceId, cancellationToken).ConfigureAwait(false);
+        var transaction = referenceType == WalletTransactionRef.PARCEL_REFUND
+            ? await _wallets.CreditRefundAsync(
+                    request.UserId,
+                    amount,
+                    referenceType,
+                    request.ReferenceId,
+                    cancellationToken)
+                .ConfigureAwait(false)
+            : await _wallets.CreditBookingRefundAsync(
+                    request.UserId,
+                    amount,
+                    request.ReferenceId,
+                    cancellationToken)
+                .ConfigureAwait(false);
 
         await EnqueueWalletCreditedAsync(
                 request.UserId,
@@ -73,6 +81,7 @@ public sealed class RefundToWalletCommandHandler : IRequestHandler<RefundToWalle
 
     private async Task DebitPlatformWalletAsync(
         Money amount,
+        WalletTransactionRef referenceType,
         Guid referenceId,
         CancellationToken cancellationToken)
     {
@@ -80,9 +89,11 @@ public sealed class RefundToWalletCommandHandler : IRequestHandler<RefundToWalle
         {
             await _platformWallets.DebitAsync(
                     amount,
-                    PlatformWalletTransactionRef.BOOKING_REFUND,
+                    referenceType == WalletTransactionRef.PARCEL_REFUND
+                        ? PlatformWalletTransactionRef.PARCEL_REFUND
+                        : PlatformWalletTransactionRef.BOOKING_REFUND,
                     referenceId,
-                    "Booking refund",
+                    referenceType == WalletTransactionRef.PARCEL_REFUND ? "Parcel refund" : "Booking refund",
                     cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -122,7 +133,7 @@ public sealed class RefundToWalletCommandHandler : IRequestHandler<RefundToWalle
 
     private static WalletTransactionRef ParseReferenceType(string value)
         => Enum.TryParse<WalletTransactionRef>(value, ignoreCase: false, out var referenceType)
-            && referenceType == WalletTransactionRef.BOOKING_REFUND
+            && referenceType is WalletTransactionRef.BOOKING_REFUND or WalletTransactionRef.PARCEL_REFUND
             ? referenceType
-            : throw new CodedValidationException("VALIDATION_ERROR", "Refund supports BOOKING_REFUND references only.");
+            : throw new CodedValidationException("VALIDATION_ERROR", "Refund supports BOOKING_REFUND or PARCEL_REFUND references only.");
 }

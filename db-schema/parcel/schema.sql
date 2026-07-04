@@ -63,6 +63,7 @@ CREATE TABLE parcels (
     operator_id UUID NOT NULL,
     trip_id UUID NOT NULL,
     dropoff_stop_id UUID NULL,    -- null = destination station terminal; not null = along-route Stop
+    booking_id UUID NULL,         -- logical FK booking.bookings; null = parcel-only
     -- parcel info
     description TEXT NULL,
     photo_url TEXT NULL,
@@ -89,6 +90,7 @@ CREATE TABLE parcels (
     delivery_token_revoked_at TIMESTAMPTZ NULL,
     -- lifecycle timestamps
     loaded_at TIMESTAMPTZ NULL,
+    loaded_by_user_id UUID NULL,
     unloaded_at TIMESTAMPTZ NULL,
     delivered_pending_confirm_at TIMESTAMPTZ NULL,
     confirmed_at TIMESTAMPTZ NULL,
@@ -142,6 +144,8 @@ CREATE INDEX idx_parcels_additional_payment_id
     ON parcels (additional_payment_id) WHERE additional_payment_id IS NOT NULL;
 CREATE INDEX idx_parcels_reviewed_by_user_id
     ON parcels (reviewed_by_user_id) WHERE reviewed_by_user_id IS NOT NULL;
+CREATE INDEX idx_parcels_loaded_by_user_id
+    ON parcels (loaded_by_user_id) WHERE loaded_by_user_id IS NOT NULL;
 CREATE INDEX idx_parcels_confirmed_by_user_id
     ON parcels (confirmed_by_user_id) WHERE confirmed_by_user_id IS NOT NULL;
 CREATE INDEX idx_parcels_transfer_confirmed_by_user_id

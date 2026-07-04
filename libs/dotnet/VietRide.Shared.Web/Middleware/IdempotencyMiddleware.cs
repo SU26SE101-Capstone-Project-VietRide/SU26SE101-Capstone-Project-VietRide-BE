@@ -108,6 +108,15 @@ public sealed class IdempotencyMiddleware
         buffer.Position = 0;
         var responseBytes = buffer.ToArray();
 
+        // Do NOT cache 5xx responses — the downstream may have committed state
+        // before the error (e.g. Parcel committed before Payment transport failure),
+        // so retries with the same Idempotency-Key must re-execute, not replay the error.
+        if (ctx.Response.StatusCode >= 500)
+        {
+            await ctx.Response.Body.WriteAsync(responseBytes);
+            return;
+        }
+
         var entry = new CachedResponse(
             ctx.Response.StatusCode,
             Convert.ToBase64String(responseBytes),

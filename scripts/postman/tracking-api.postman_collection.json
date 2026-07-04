@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "VietRide Tracking API",
-    "description": "REST-only Postman collection for VietRide Tracking Service. WebSocket/realtime is intentionally excluded.\n\nRun order: 00 Health -> 01 Identity Login -> 02 Negative API -> 03 Tracking Data API.\n\nDirect Tracking service baseUrlService defaults to http://localhost:3001.\nTracking endpoints are under /api/v1/tracking/trips/* because main.ts sets global prefix api and controller uses /v1/tracking/trips.\n\nFolder 02 needs no seed/token and verifies routing, validation, auth, and ApiResponse errors.\nFolder 03 needs accessToken, downstream Trip/Booking/Parcel tracking authorization, and seeded Redis/Postgres data.\n\nSeed data command:\n$env:TRACKING_DATABASE_URL=\"postgresql://vietride:vietride_dev@localhost:5432/vietride_tracking\"\n$env:REDIS_URL=\"redis://localhost:6379\"\nnode scripts/postman/seed-tracking-postman-data.js",
+    "description": "REST-only Postman collection for VietRide Tracking Service. WebSocket/realtime is intentionally excluded.\n\nRun order: 00 Health -> 01 Identity Login -> 02 Negative API -> 03 Tracking Data API.\n\nDirect Tracking service baseUrlService defaults to http://localhost:3001.\nTracking endpoints are under /v1/tracking/trips/* because controllers expose /v1 paths directly.\n\nFolder 02 needs no seed/token and verifies routing, validation, auth, and ApiResponse errors.\nFolder 03 needs accessToken, downstream Trip/Booking/Parcel tracking authorization, and seeded Redis/Postgres data.\n\nSeed data command:\n$env:TRACKING_DATABASE_URL=\"postgresql://vietride:vietride_dev@localhost:5432/vietride_tracking\"\n$env:REDIS_URL=\"redis://localhost:6379\"\nnode scripts/postman/seed-tracking-postman-data.js",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -141,7 +141,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{tripId}}/latest",
+              "raw": "{{baseUrlService}}/v1/tracking/trips/{{tripId}}/latest",
               "host": [
                 "{{baseUrlService}}"
               ],
@@ -185,7 +185,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{tripId}}/latest",
+              "raw": "{{baseUrlService}}/v1/tracking/trips/{{tripId}}/latest",
               "host": [
                 "{{baseUrlService}}"
               ],
@@ -224,7 +224,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrlService}}/api/v1/tracking/trips/not-a-uuid/latest",
+              "raw": "{{baseUrlService}}/v1/tracking/trips/not-a-uuid/latest",
               "host": [
                 "{{baseUrlService}}"
               ],
@@ -264,7 +264,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{tripId}}/trail?page=0",
+              "raw": "{{baseUrlService}}/v1/tracking/trips/{{tripId}}/trail?page=0",
               "host": [
                 "{{baseUrlService}}"
               ],
@@ -309,7 +309,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{tripId}}/trail?from={{endTime}}&to={{startTime}}",
+              "raw": "{{baseUrlService}}/v1/tracking/trips/{{tripId}}/trail?from={{endTime}}&to={{startTime}}",
               "host": [
                 "{{baseUrlService}}"
               ],
@@ -358,7 +358,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{tripId}}/eta?stopId=not-a-uuid",
+              "raw": "{{baseUrlService}}/v1/tracking/trips/{{tripId}}/eta?stopId=not-a-uuid",
               "host": [
                 "{{baseUrlService}}"
               ],
@@ -414,7 +414,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{tripId}}/latest",
+              "raw": "{{baseUrlService}}/v1/tracking/trips/{{tripId}}/latest",
               "host": [
                 "{{baseUrlService}}"
               ],
@@ -469,7 +469,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{missingLatestTripId}}/latest",
+              "raw": "{{baseUrlService}}/v1/tracking/trips/{{missingLatestTripId}}/latest",
               "host": [
                 "{{baseUrlService}}"
               ],
@@ -518,7 +518,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{forbiddenTripId}}/latest",
+              "raw": "{{baseUrlService}}/v1/tracking/trips/{{forbiddenTripId}}/latest",
               "host": [
                 "{{baseUrlService}}"
               ],
@@ -567,7 +567,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{tripId}}/trail?page=1&pageSize=10&from={{startTime}}&to={{endTime}}",
+              "raw": "{{baseUrlService}}/v1/tracking/trips/{{tripId}}/trail?page=1&pageSize=10&from={{startTime}}&to={{endTime}}",
               "host": [
                 "{{baseUrlService}}"
               ],
@@ -640,7 +640,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{tripId}}/trail?page=1&pageSize=10&sortDir=desc&from={{startTime}}&to={{endTime}}",
+              "raw": "{{baseUrlService}}/v1/tracking/trips/{{tripId}}/trail?page=1&pageSize=10&sortDir=desc&from={{startTime}}&to={{endTime}}",
               "host": [
                 "{{baseUrlService}}"
               ],
@@ -711,7 +711,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{tripId}}/eta?stopId={{stopId}}",
+              "raw": "{{baseUrlService}}/v1/tracking/trips/{{tripId}}/eta?stopId={{stopId}}",
               "host": [
                 "{{baseUrlService}}"
               ],
@@ -774,7 +774,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrlService}}/api/v1/tracking/trips/{{tripId}}/eta?stopId={{missingEtaStopId}}",
+              "raw": "{{baseUrlService}}/v1/tracking/trips/{{tripId}}/eta?stopId={{missingEtaStopId}}",
               "host": [
                 "{{baseUrlService}}"
               ],

@@ -10,6 +10,7 @@ import {
   TRIP_INCIDENT_REPORTED_ROUTING_KEY,
   TRIP_ROUTE_CHANGED_ROUTING_KEY,
   TRIP_SCHEDULE_CHANGED_ROUTING_KEY,
+  TRIP_STOP_DISABLED_ROUTING_KEY,
 } from './trip-tracking-alert-events.constants';
 
 const APPROACHING_WAVE_ONE = 1;
@@ -97,8 +98,30 @@ const ApproachingStopPayloadSchema = BaseTripAlertPayloadSchema.and(
   }),
 );
 
+const StopDisabledPayloadSchema = z
+  .object({
+    stopId: z.string().uuid(),
+    replacedByStopId: z.string().uuid().optional(),
+    stopName: z.string().trim().min(1).optional(),
+    routeName: z.string().trim().min(1).optional(),
+    reason: z.string().trim().min(1).optional(),
+  })
+  .merge(RecipientPayloadSchema)
+  .passthrough()
+  .superRefine((payload, ctx) => {
+    if (!payload.userId && !payload.userIds?.length && !payload.recipientUserIds?.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'At least one recipient user id is required',
+        path: ['userId'],
+      });
+    }
+  });
+
+type RecipientPayload = z.infer<typeof RecipientPayloadSchema>;
 type BaseTripAlertPayload = z.infer<typeof BaseTripAlertPayloadSchema>;
 type ApproachingStopPayload = z.infer<typeof ApproachingStopPayloadSchema>;
+type StopDisabledPayload = z.infer<typeof StopDisabledPayloadSchema>;
 
 export type TripTrackingAlertRoutingKey =
   | typeof TRIP_BOARDING_STARTED_ROUTING_KEY
@@ -107,6 +130,7 @@ export type TripTrackingAlertRoutingKey =
   | typeof TRIP_CANCELLED_ROUTING_KEY
   | typeof TRIP_DELAYED_ROUTING_KEY
   | typeof TRIP_INCIDENT_REPORTED_ROUTING_KEY
+  | typeof TRIP_STOP_DISABLED_ROUTING_KEY
   | typeof TRACKING_GPS_OFF_ROUTE_ROUTING_KEY
   | typeof TRACKING_GPS_APPROACHING_STOP_ROUTING_KEY;
 
@@ -127,6 +151,8 @@ export function mapTripTrackingAlertToNotifications(
       return fanOut(TripDelayedPayloadSchema.parse(payload), mapTripDelayed);
     case TRIP_INCIDENT_REPORTED_ROUTING_KEY:
       return fanOut(IncidentReportedPayloadSchema.parse(payload), mapIncidentReported);
+    case TRIP_STOP_DISABLED_ROUTING_KEY:
+      return fanOut(StopDisabledPayloadSchema.parse(payload), mapStopDisabled);
     case TRACKING_GPS_OFF_ROUTE_ROUTING_KEY:
       return fanOut(OffRoutePayloadSchema.parse(payload), mapOffRoute);
     case TRACKING_GPS_APPROACHING_STOP_ROUTING_KEY:
@@ -228,14 +254,29 @@ function mapApproachingStop(userId: string, payload: ApproachingStopPayload): Cr
   };
 }
 
-function fanOut<TPayload extends BaseTripAlertPayload>(
+function mapStopDisabled(userId: string, payload: StopDisabledPayload): CreateNotificationDto {
+  const stopLabel = payload.stopName ?? `diem dung ${payload.stopId}`;
+  const replacementText = payload.replacedByStopId
+    ? ` Diem dung thay the: ${payload.replacedByStopId}.`
+    : '';
+
+  return {
+    userId,
+    type: NotificationType.STOP_DISABLED,
+    title: 'Diem dung tam ngung phuc vu',
+    body: `${stopLabel} tam ngung phuc vu.${replacementText}`,
+    data: buildStopData(payload),
+  };
+}
+
+function fanOut<TPayload extends RecipientPayload>(
   payload: TPayload,
   mapper: (userId: string, payload: TPayload) => CreateNotificationDto,
 ): CreateNotificationDto[] {
   return collectRecipientUserIds(payload).map((userId) => mapper(userId, payload));
 }
 
-function collectRecipientUserIds(payload: BaseTripAlertPayload): string[] {
+function collectRecipientUserIds(payload: RecipientPayload): string[] {
   return [...new Set([payload.userId, ...(payload.userIds ?? []), ...(payload.recipientUserIds ?? [])].filter(isString))];
 }
 
@@ -248,6 +289,17 @@ function formatTripLabel(payload: BaseTripAlertPayload): string {
 }
 
 function buildTripData(payload: BaseTripAlertPayload): Record<string, unknown> {
+  const { userId, userIds, recipientUserIds, ...data } = payload;
+
+  return {
+    ...data,
+    userId: userId ?? null,
+    userIds: userIds ?? null,
+    recipientUserIds: recipientUserIds ?? null,
+  };
+}
+
+function buildStopData(payload: StopDisabledPayload): Record<string, unknown> {
   const { userId, userIds, recipientUserIds, ...data } = payload;
 
   return {

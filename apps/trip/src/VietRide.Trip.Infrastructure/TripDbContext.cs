@@ -61,6 +61,8 @@ public sealed class TripDbContext : VietRideDbContextBase
 
     public DbSet<TripStopFare> TripStopFares => Set<TripStopFare>();
 
+    public DbSet<TripCargoParcel> TripCargoParcels => Set<TripCargoParcel>();
+
     public DbSet<TripGenerationSkipLog> TripGenerationSkipLogs => Set<TripGenerationSkipLog>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)

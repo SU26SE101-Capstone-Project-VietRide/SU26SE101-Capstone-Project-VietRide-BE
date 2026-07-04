@@ -23,12 +23,12 @@ namespace VietRide.Payment.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "outbox_event_status", new[] { "PENDING", "PUBLISHING", "PUBLISHED", "FAILED" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "payment_method", new[] { "WALLET", "VNPAY" });
-            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "payment_reference_type", new[] { "BOOKING", "BOOKING_GROUP", "PARCEL", "TOP_UP", "SUBSCRIPTION" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "payment_reference_type", new[] { "BOOKING", "BOOKING_GROUP", "PARCEL", "PARCEL_ADDITIONAL", "TOP_UP", "SUBSCRIPTION" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "payment_status", new[] { "PENDING_REDIRECT", "SUCCEEDED", "FAILED", "EXPIRED", "REFUNDED" });
-            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "platform_wallet_transaction_ref", new[] { "BOOKING_PAYMENT_HOLD", "PARCEL_PAYMENT_HOLD", "BOOKING_REFUND", "PARCEL_REFUND", "TRIP_SETTLEMENT", "SUBSCRIPTION_PAYMENT", "MANUAL_ADJUSTMENT" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "platform_wallet_transaction_ref", new[] { "BOOKING_PAYMENT_HOLD", "PARCEL_PAYMENT_HOLD", "PARCEL_ADDITIONAL_PAYMENT_HOLD", "BOOKING_REFUND", "PARCEL_REFUND", "TRIP_SETTLEMENT", "SUBSCRIPTION_PAYMENT", "MANUAL_ADJUSTMENT" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "platform_wallet_transaction_type", new[] { "CREDIT", "DEBIT" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "top_up_request_status", new[] { "PENDING", "SUCCEEDED", "FAILED", "EXPIRED" });
-            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "wallet_transaction_ref", new[] { "TOP_UP", "BOOKING_PAYMENT", "BOOKING_REFUND", "PARCEL_PAYMENT", "PARCEL_REFUND", "MANUAL_ADJUSTMENT" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "wallet_transaction_ref", new[] { "TOP_UP", "BOOKING_PAYMENT", "BOOKING_REFUND", "PARCEL_PAYMENT", "PARCEL_REFUND", "PARCEL_ADDITIONAL_PAYMENT", "MANUAL_ADJUSTMENT" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "wallet_transaction_type", new[] { "CREDIT", "DEBIT" });
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 

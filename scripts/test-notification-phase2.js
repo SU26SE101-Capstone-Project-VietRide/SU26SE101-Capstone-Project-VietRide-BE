@@ -9,20 +9,20 @@ async function main() {
   const failures = [];
 
   await runCase('auth fail: list requires bearer token', failures, async () => {
-    const response = await request('/api/v1/notifications');
+    const response = await request('/v1/notifications');
     assertStatus(response, 401);
     assertErrorEnvelope(await response.json(), 'UNAUTHORIZED');
   });
 
   await runCase('validation fail: pageSize must be <= 100', failures, async () => {
-    const response = await request('/api/v1/notifications?pageSize=101', accessToken);
+    const response = await request('/v1/notifications?pageSize=101', accessToken);
     assertStatus(response, 400);
     assertErrorEnvelope(await response.json());
   });
 
   await runCase('happy path: list notifications with bearer token', failures, async () => {
     requireAccessToken();
-    const response = await request('/api/v1/notifications?page=1&pageSize=20', accessToken);
+    const response = await request('/v1/notifications?page=1&pageSize=20', accessToken);
     assertStatus(response, 200);
     const body = await response.json();
     assertSuccessEnvelope(body);
@@ -33,7 +33,7 @@ async function main() {
 
   await runCase('happy path: mark notification read', failures, async () => {
     requireAccessToken();
-    const response = await request(`/api/v1/notifications/${notificationId}/read`, accessToken, {
+    const response = await request(`/v1/notifications/${notificationId}/read`, accessToken, {
       method: 'POST',
     });
     assertStatus(response, 204);

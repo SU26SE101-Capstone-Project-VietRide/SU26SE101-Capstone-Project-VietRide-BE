@@ -56,10 +56,18 @@ public interface IWalletRepository : IRepository<Wallet, Guid>
         CancellationToken cancellationToken)
         => throw new NotSupportedException("This wallet repository does not support wallet transaction reference lookups.");
 
+    Task<WalletTransaction> CreditRefundAsync(
+        Guid userId,
+        Money amount,
+        WalletTransactionRef referenceType,
+        Guid referenceId,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("This wallet repository does not support refund crediting.");
+
     Task<WalletTransaction> CreditBookingRefundAsync(
         Guid userId,
         Money amount,
         Guid bookingId,
         CancellationToken cancellationToken)
-        => throw new NotSupportedException("This wallet repository does not support booking refund crediting.");
+        => CreditRefundAsync(userId, amount, WalletTransactionRef.BOOKING_REFUND, bookingId, cancellationToken);
 }

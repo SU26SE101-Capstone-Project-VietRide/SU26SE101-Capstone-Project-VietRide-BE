@@ -80,9 +80,12 @@ describe('HttpTrackingAuthorizationAdapter (e2e)', () => {
 
     if (url.pathname.endsWith('/tracking-authorization/bookings')) {
       writeJson(response, {
-        allowed: url.searchParams.get('userId') === OWNER_USER_ID,
-        scope: 'BOOKING_OWNER',
-        error: url.searchParams.get('userId') === OWNER_USER_ID ? undefined : 'ACCESS_DENIED',
+        success: true,
+        data: {
+          allowed: url.searchParams.get('userId') === OWNER_USER_ID,
+          scope: url.searchParams.get('userId') === OWNER_USER_ID ? 'BOOKING_OWNER' : null,
+          error: url.searchParams.get('userId') === OWNER_USER_ID ? null : 'ACCESS_DENIED',
+        },
       });
       return;
     }

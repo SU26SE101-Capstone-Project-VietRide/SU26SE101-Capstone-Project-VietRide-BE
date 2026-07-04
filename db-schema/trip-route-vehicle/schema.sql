@@ -402,6 +402,28 @@ COMMENT ON COLUMN trips.source IS
     'VEHICLE_SUBSTITUTION: created by 6.12 flow, exempt from maxTripsPerMonth counter check.';
 
 -- -----------------------------------------------------------------------------
+-- trip_cargo_parcels (Parcel-owned items tracked by Trip cargo counter)
+-- -----------------------------------------------------------------------------
+CREATE TABLE trip_cargo_parcels (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    trip_id UUID NOT NULL REFERENCES trips (id) ON DELETE CASCADE,
+    parcel_id UUID NOT NULL, -- logical FK to Parcel service
+    weight_kg DECIMAL(8,2) NOT NULL,
+    state VARCHAR(20) NOT NULL,
+    loaded_at TIMESTAMPTZ NULL,
+    released_at TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_trip_cargo_parcels_weight_positive CHECK (weight_kg > 0),
+    CONSTRAINT chk_trip_cargo_parcels_state CHECK (state IN ('RESERVED', 'LOADED', 'RELEASED'))
+);
+
+CREATE UNIQUE INDEX uq_trip_cargo_parcels_trip_parcel
+    ON trip_cargo_parcels (trip_id, parcel_id);
+CREATE INDEX idx_trip_cargo_parcels_trip_state
+    ON trip_cargo_parcels (trip_id, state);
+
+-- -----------------------------------------------------------------------------
 -- trip_seats
 -- -----------------------------------------------------------------------------
 CREATE TABLE trip_seats (

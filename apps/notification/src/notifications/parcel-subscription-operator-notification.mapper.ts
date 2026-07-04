@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { NotificationType } from '../generated/notification-prisma-client';
 import type { CreateNotificationDto } from './dto/create-notification.dto';
 import {
+  BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY,
+  BOOKING_VOUCHER_CONSENT_REJECTED_ROUTING_KEY,
   INVOICE_ISSUED_ROUTING_KEY,
   PARCEL_AUTO_REJECTED_ROUTING_KEY,
   PARCEL_CANCELLED_ROUTING_KEY,
@@ -12,7 +14,11 @@ import {
   PARCEL_LOADED_ROUTING_KEY,
   PARCEL_REJECTED_ROUTING_KEY,
   PARCEL_RETURNED_ROUTING_KEY,
+  PARCEL_RETURN_INITIATED_ROUTING_KEY,
   PARCEL_REVIEW_REQUESTED_ROUTING_KEY,
+  PARCEL_PENDING_OPERATOR_ACTION_ROUTING_KEY,
+  PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY,
+  PARCEL_TRANSFER_ESCALATED_ROUTING_KEY,
   PARCEL_TRANSFER_INITIATED_ROUTING_KEY,
   PARCEL_UNLOADED_ROUTING_KEY,
   PAYOUT_FAILED_ROUTING_KEY,
@@ -20,8 +26,12 @@ import {
   SUBSCRIPTION_APPROVED_ROUTING_KEY,
   SUBSCRIPTION_EXPIRED_ROUTING_KEY,
   SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY,
+  SUBSCRIPTION_PAYMENT_AUTO_REVERTED_ROUTING_KEY,
+  SUBSCRIPTION_PAYMENT_PENDING_WARN_ROUTING_KEY,
   SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY,
+  TRIP_STOP_ARRIVED_ROUTING_KEY,
   TRIP_SETTLEMENT_COMPLETED_ROUTING_KEY,
+  TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY,
 } from './parcel-subscription-operator-events.constants';
 
 const MoneyAmountSchema = z.union([z.number().int().nonnegative(), z.string().regex(/^\d+$/)]).optional();
@@ -82,7 +92,28 @@ const SubscriptionLimitPayloadSchema = BaseOperatorPayloadSchema.and(
   }),
 );
 
+const VoucherConsentPayloadSchema = BaseOperatorPayloadSchema.and(
+  z.object({
+    voucherId: z.string().uuid(),
+    reason: z.string().trim().min(1).optional(),
+  }),
+);
+
+const SubscriptionPaymentPendingWarnPayloadSchema = BaseOperatorPayloadSchema.and(
+  z.object({
+    dueDate: z.string().datetime().optional(),
+  }),
+);
+
+const SubscriptionPaymentAutoRevertedPayloadSchema = BaseOperatorPayloadSchema.and(
+  z.object({
+    previousPlanId: z.string().uuid().optional(),
+  }),
+);
+
 export type ParcelSubscriptionOperatorRoutingKey =
+  | typeof BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY
+  | typeof BOOKING_VOUCHER_CONSENT_REJECTED_ROUTING_KEY
   | typeof PARCEL_CREATED_ROUTING_KEY
   | typeof PARCEL_LOADED_ROUTING_KEY
   | typeof PARCEL_UNLOADED_ROUTING_KEY
@@ -95,10 +126,18 @@ export type ParcelSubscriptionOperatorRoutingKey =
   | typeof PARCEL_AUTO_REJECTED_ROUTING_KEY
   | typeof PARCEL_REVIEW_REQUESTED_ROUTING_KEY
   | typeof PARCEL_TRANSFER_INITIATED_ROUTING_KEY
+  | typeof PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY
+  | typeof PARCEL_TRANSFER_ESCALATED_ROUTING_KEY
+  | typeof PARCEL_RETURN_INITIATED_ROUTING_KEY
+  | typeof PARCEL_PENDING_OPERATOR_ACTION_ROUTING_KEY
+  | typeof TRIP_STOP_ARRIVED_ROUTING_KEY
+  | typeof TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY
   | typeof SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY
   | typeof SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY
   | typeof SUBSCRIPTION_EXPIRED_ROUTING_KEY
   | typeof SUBSCRIPTION_APPROVED_ROUTING_KEY
+  | typeof SUBSCRIPTION_PAYMENT_PENDING_WARN_ROUTING_KEY
+  | typeof SUBSCRIPTION_PAYMENT_AUTO_REVERTED_ROUTING_KEY
   | typeof INVOICE_ISSUED_ROUTING_KEY
   | typeof TRIP_SETTLEMENT_COMPLETED_ROUTING_KEY
   | typeof PAYOUT_PROCESSED_ROUTING_KEY
@@ -114,6 +153,18 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
   resolveOperatorRecipientUserIds: (operatorId: string) => Promise<string[]>,
 ): Promise<CreateNotificationDto[]> {
   switch (routingKey) {
+    case BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY:
+      return fanOut(
+        VoucherConsentPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapVoucherConsentAccepted,
+      );
+    case BOOKING_VOUCHER_CONSENT_REJECTED_ROUTING_KEY:
+      return fanOut(
+        VoucherConsentPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapVoucherConsentRejected,
+      );
     case PARCEL_CREATED_ROUTING_KEY:
       return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelCreated);
     case PARCEL_LOADED_ROUTING_KEY:
@@ -146,6 +197,18 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
         resolveOperatorRecipientUserIds,
         mapParcelTransferInitiated,
       );
+    case PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY:
+      return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelTransferConfirmed);
+    case PARCEL_TRANSFER_ESCALATED_ROUTING_KEY:
+      return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelTransferEscalated);
+    case PARCEL_RETURN_INITIATED_ROUTING_KEY:
+      return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelReturnInitiated);
+    case PARCEL_PENDING_OPERATOR_ACTION_ROUTING_KEY:
+      return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelPendingOperatorAction);
+    case TRIP_STOP_ARRIVED_ROUTING_KEY:
+      return fanOut(BaseOperatorPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapTripStopArrived);
+    case TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY:
+      return fanOut(BaseOperatorPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapTripVehicleSubstituted);
     case SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY:
       return fanOut(SubscriptionLimitPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapSubscriptionLimit);
     case SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY:
@@ -154,6 +217,18 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
       return fanOut(BaseOperatorPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapSubscriptionExpired);
     case SUBSCRIPTION_APPROVED_ROUTING_KEY:
       return fanOut(BaseOperatorPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapSubscriptionApproved);
+    case SUBSCRIPTION_PAYMENT_PENDING_WARN_ROUTING_KEY:
+      return fanOut(
+        SubscriptionPaymentPendingWarnPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapSubscriptionPaymentPendingWarn,
+      );
+    case SUBSCRIPTION_PAYMENT_AUTO_REVERTED_ROUTING_KEY:
+      return fanOut(
+        SubscriptionPaymentAutoRevertedPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapSubscriptionPaymentAutoReverted,
+      );
     case INVOICE_ISSUED_ROUTING_KEY:
       return fanOut(BaseOperatorPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapInvoiceIssued);
     case TRIP_SETTLEMENT_COMPLETED_ROUTING_KEY:
@@ -163,6 +238,34 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
     case PAYOUT_FAILED_ROUTING_KEY:
       return fanOut(BaseOperatorPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapPayoutFailed);
   }
+}
+
+function mapVoucherConsentAccepted(
+  userId: string,
+  payload: z.infer<typeof VoucherConsentPayloadSchema>,
+): CreateNotificationDto {
+  return {
+    userId,
+    type: NotificationType.VOUCHER_CONSENT_ACCEPTED,
+    title: 'Da chap nhan voucher',
+    body: `${formatOperatorLabel(payload)} da chap nhan voucher ${payload.voucherId}.`,
+    data: buildNotificationData(payload),
+  };
+}
+
+function mapVoucherConsentRejected(
+  userId: string,
+  payload: z.infer<typeof VoucherConsentPayloadSchema>,
+): CreateNotificationDto {
+  return {
+    userId,
+    type: NotificationType.VOUCHER_CONSENT_REJECTED,
+    title: 'Da tu choi voucher',
+    body: `${formatOperatorLabel(payload)} da tu choi voucher ${payload.voucherId}.${
+      payload.reason ? ` Ly do: ${payload.reason}.` : ''
+    }`,
+    data: buildNotificationData(payload),
+  };
 }
 
 function mapParcelCreated(userId: string, payload: ParcelPayload): CreateNotificationDto {
@@ -296,6 +399,66 @@ function mapParcelTransferInitiated(
   };
 }
 
+function mapParcelTransferConfirmed(userId: string, payload: ParcelPayload): CreateNotificationDto {
+  return buildParcelNotification(
+    userId,
+    payload,
+    NotificationType.PARCEL_IN_TRANSIT,
+    'Da xac nhan chuyen chuyen xe',
+    'da duoc xac nhan chuyen sang chuyen xe moi.',
+  );
+}
+
+function mapParcelTransferEscalated(userId: string, payload: ParcelPayload): CreateNotificationDto {
+  return buildParcelNotification(
+    userId,
+    payload,
+    NotificationType.PARCEL_IN_TRANSIT,
+    'Can xu ly chuyen chuyen xe',
+    'qua thoi gian xac nhan chuyen chuyen xe va can van hanh xu ly.',
+  );
+}
+
+function mapParcelReturnInitiated(userId: string, payload: ParcelPayload): CreateNotificationDto {
+  return buildParcelNotification(
+    userId,
+    payload,
+    NotificationType.PARCEL_RETURNED,
+    'Bat dau hoan tra hang',
+    'da bat dau quy trinh hoan tra.',
+  );
+}
+
+function mapParcelPendingOperatorAction(userId: string, payload: ParcelPayload): CreateNotificationDto {
+  return buildParcelNotification(
+    userId,
+    payload,
+    NotificationType.PARCEL_IN_TRANSIT,
+    'Can van hanh xu ly don gui hang',
+    'can nha xe xu ly thu cong.',
+  );
+}
+
+function mapTripStopArrived(userId: string, payload: OperatorPayload): CreateNotificationDto {
+  return {
+    userId,
+    type: NotificationType.TRIP_VEHICLE_APPROACHING,
+    title: 'Xe da den diem dung',
+    body: `Chuyen ${payload.tripId ?? 'xe'} da ghi nhan den diem dung.`,
+    data: buildNotificationData(payload),
+  };
+}
+
+function mapTripVehicleSubstituted(userId: string, payload: OperatorPayload): CreateNotificationDto {
+  return {
+    userId,
+    type: NotificationType.VEHICLE_SUBSTITUTED,
+    title: 'Da thay xe cho chuyen',
+    body: `Chuyen ${payload.tripId ?? 'xe'} da duoc gan xe thay the.${payload.reason ? ` Ly do: ${payload.reason}.` : ''}`,
+    data: buildNotificationData(payload),
+  };
+}
+
 function mapSubscriptionLimit(
   userId: string,
   payload: z.infer<typeof SubscriptionLimitPayloadSchema>,
@@ -335,6 +498,32 @@ function mapSubscriptionApproved(userId: string, payload: OperatorPayload): Crea
     type: NotificationType.SUBSCRIPTION_APPROVED,
     title: 'Goi dich vu da duoc duyet',
     body: `${formatOperatorLabel(payload)} da duoc kich hoat goi dich vu.`,
+    data: buildNotificationData(payload),
+  };
+}
+
+function mapSubscriptionPaymentPendingWarn(
+  userId: string,
+  payload: z.infer<typeof SubscriptionPaymentPendingWarnPayloadSchema>,
+): CreateNotificationDto {
+  return {
+    userId,
+    type: NotificationType.SUBSCRIPTION_PAYMENT_PENDING_WARN,
+    title: 'Can thanh toan goi dich vu',
+    body: `${formatOperatorLabel(payload)} co thanh toan goi dich vu sap den han${payload.dueDate ? ` vao ${payload.dueDate}` : ''}.`,
+    data: buildNotificationData(payload),
+  };
+}
+
+function mapSubscriptionPaymentAutoReverted(
+  userId: string,
+  payload: z.infer<typeof SubscriptionPaymentAutoRevertedPayloadSchema>,
+): CreateNotificationDto {
+  return {
+    userId,
+    type: NotificationType.SUBSCRIPTION_PAYMENT_AUTO_REVERTED,
+    title: 'Goi dich vu da duoc hoan ve',
+    body: `${formatOperatorLabel(payload)} da duoc hoan ve goi truoc do.`,
     data: buildNotificationData(payload),
   };
 }
@@ -456,4 +645,3 @@ function buildNotificationData(payload: RecipientPayload & Record<string, unknow
 function isString(value: string | undefined): value is string {
   return typeof value === 'string';
 }
-

@@ -1521,6 +1521,7 @@ Request:
 ```json
 {
   "tripId": "uuid",
+  "dropoffStopId": "uuid",
   "bookingId": "uuid",
   "itemName": "Thùng quà",
   "description": "Hàng dễ vỡ",
@@ -1544,7 +1545,7 @@ Response `201`:
   "statusCode": 201,
   "data": {
     "parcelId": "uuid",
-    "parcelCode": "VRP-20260518-P7K3D9Q2",
+    "parcelCode": "VR-PCL-20260518-P7K3D9Q2",
     "status": "PENDING_PAYMENT",
     "totalAmount": 150000,
     "paymentRedirectUrl": "https://vnpay.vn/..."
@@ -1566,7 +1567,7 @@ Response `200`:
     "items": [
       {
         "parcelId": "uuid",
-        "parcelCode": "VRP-20260518-P7K3D9Q2",
+        "parcelCode": "VR-PCL-20260518-P7K3D9Q2",
         "tripId": "uuid",
         "status": "IN_TRANSIT",
         "originStation": { "id": "uuid", "name": "Bến xe Miền Đông" },
@@ -1636,11 +1637,42 @@ Response `200`:
   "data": {
     "parcelId": "uuid",
     "status": "DELIVERY_REJECTED",
-    "rejectedAt": "2026-05-18T20:15:00+07:00"
+    "rejectedAt": "2026-05-18T20:15:00+07:00",
+    "canUndoUntil": "2026-05-18T20:30:00+07:00"
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
+
+
+### POST `/v1/parcels/delivery/undo-reject`
+
+Auth: public token link. Idempotency: required.
+
+Request:
+```json
+{
+  "token": "delivery-token"
+}
+```
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "parcelId": "uuid",
+    "status": "DELIVERED_PENDING_CONFIRM",
+    "undoneAt": "2026-05-18T20:20:00+07:00"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+Decision note: invalid, expired, and revoked delivery tokens return 400 with
+`PARCEL_DELIVERY_TOKEN_INVALID`, `PARCEL_DELIVERY_TOKEN_EXPIRED`, or
+`PARCEL_DELIVERY_TOKEN_REVOKED`. BSOT `401` and timeline `410` are known drift
+items to reconcile.
 
 ### POST `/internal/v1/parcels/{parcelId}/mark-loaded`
 
@@ -1650,7 +1682,7 @@ Request:
 ```json
 {
   "tripId": "uuid",
-  "parcelCode": "VRP-20260518-P7K3D9Q2",
+  "parcelCode": "VR-PCL-20260518-P7K3D9Q2",
   "confirmedByUserId": "uuid"
 }
 ```
@@ -1676,7 +1708,7 @@ Request:
 ```json
 {
   "targetTripId": "uuid",
-  "parcelCode": "VRP-20260518-P7K3D9Q2",
+  "parcelCode": "VR-PCL-20260518-P7K3D9Q2",
   "confirmedByUserId": "uuid"
 }
 ```

@@ -262,6 +262,11 @@ services:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_parcel;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}'
+      RabbitMq__HostName: rabbitmq
+      RabbitMq__Port: '5672'
+      RabbitMq__UserName: ${RABBITMQ_USER:-vietride}
+      RabbitMq__Password: ${RABBITMQ_PASSWORD:-vietride_dev}
+      RabbitMq__VirtualHost: ${RABBITMQ_VHOST:-/}
     ports:
       - '${PARCEL_PORT:-5005}:5005'
     healthcheck:
@@ -412,7 +417,7 @@ services:
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-vietride.events}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
-      OPENROUTER_CHAT_MODEL: ${OPENROUTER_CHAT_MODEL:-openai/gpt-oss-120b:free}
+      OPENROUTER_CHAT_MODEL: ${OPENROUTER_CHAT_MODEL:-nvidia/nemotron-3-ultra-550b-a55b:free}
       OPENROUTER_EMBEDDING_MODEL: ${OPENROUTER_EMBEDDING_MODEL:-nvidia/llama-nemotron-embed-vl-1b-v2:free}
       OPENROUTER_HTTP_REFERER: ${OPENROUTER_HTTP_REFERER:-http://localhost:3000}
       OPENROUTER_APP_TITLE: ${OPENROUTER_APP_TITLE:-VietRide RAG}

@@ -1,3 +1,4 @@
+using System.Reflection;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using VietRide.Shared.Application.Cqrs;
@@ -30,7 +31,7 @@ public sealed class TransactionBehavior<TRequest, TResponse>
         RequestHandlerDelegate<TResponse> next,
         CancellationToken cancellationToken)
     {
-        if (_unitOfWork is null || IsQueryRequest())
+        if (_unitOfWork is null || IsQueryRequest() || HasSkipTransaction())
         {
             return await next();
         }
@@ -55,4 +56,7 @@ public sealed class TransactionBehavior<TRequest, TResponse>
     private static bool IsQueryRequest()
         => typeof(TRequest).GetInterfaces().Any(i =>
             i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IQuery<>));
+
+    private static bool HasSkipTransaction()
+        => typeof(TRequest).GetCustomAttribute<SkipTransactionAttribute>() is not null;
 }

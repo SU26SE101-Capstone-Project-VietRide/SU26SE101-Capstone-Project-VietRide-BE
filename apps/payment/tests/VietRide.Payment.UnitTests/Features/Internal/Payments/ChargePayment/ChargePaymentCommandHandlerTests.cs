@@ -281,6 +281,21 @@ public sealed class ChargePaymentCommandHandlerTests
             return Task.FromResult(transaction);
         }
 
+        public Task<WalletTransaction> DebitWalletPaymentAsync(
+            Guid userId, Guid referenceId, Money amount, WalletTransactionRef walletRef, CancellationToken ct)
+        {
+            if (userId != _userId || WalletBalance < amount)
+            {
+                throw new PaymentInsufficientWalletException("Wallet balance is insufficient for the payment.");
+            }
+
+            var before = WalletBalance;
+            WalletBalance -= amount;
+            var transaction = WalletTransaction.CreatePaymentDebit(userId, referenceId, amount, before, WalletBalance, walletRef);
+            WalletTransactions.Add(transaction);
+            return Task.FromResult(transaction);
+        }
+
         public Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectOlderThanAsync(
             DateTimeOffset expiresBefore,
             DateTimeOffset expiredAt,

@@ -188,18 +188,6 @@ export const pagedNotificationsSchema: SchemaObject = {
   },
 };
 
-export const markNotificationReadBodySchema: SchemaObject = {
-  type: 'object',
-  required: ['read'],
-  properties: {
-    read: {
-      type: 'boolean',
-      enum: [true],
-      example: true,
-    },
-  },
-};
-
 export const createEmailSendBodySchema: SchemaObject = {
   type: 'object',
   required: ['toEmail', 'templateKey', 'templateData'],

@@ -47,6 +47,37 @@ public sealed class RefundToWalletCommandHandlerTests
     }
 
     [Fact]
+    public async Task Handle_WhenParcelRefundIsValid_UsesParcelRefundReferences()
+    {
+        var userId = Guid.NewGuid();
+        var parcelId = Guid.NewGuid();
+        var wallets = new FakeWalletRepository(userId, Money.FromRaw(1_000_000));
+        var platformWallets = new FakePlatformWalletRepository(Money.FromRaw(500_000));
+        var outbox = new FakeIntegrationEventOutbox();
+        var handler = new RefundToWalletCommandHandler(wallets, platformWallets, outbox);
+
+        var result = await handler.Handle(
+            CreateCommand(userId, parcelId, referenceType: "PARCEL_REFUND"),
+            CancellationToken.None);
+
+        result.BalanceAfter.Should().Be(1_175_000);
+        wallets.Transactions.Should().ContainSingle(x =>
+            x.Type == WalletTransactionType.CREDIT
+            && x.ReferenceType == WalletTransactionRef.PARCEL_REFUND
+            && x.ReferenceId == parcelId);
+        wallets.AcquiredReferenceLocks.Should().ContainSingle(x =>
+            x.ReferenceType == WalletTransactionRef.PARCEL_REFUND && x.ReferenceId == parcelId);
+        platformWallets.Transactions.Should().ContainSingle(x =>
+            x.Type == PlatformWalletTransactionType.DEBIT
+            && x.ReferenceType == PlatformWalletTransactionRef.PARCEL_REFUND
+            && x.ReferenceId == parcelId);
+        outbox.Events.Should().ContainSingle(evt => evt.EventType == "payment.wallet.credited");
+        using var payload = JsonDocument.Parse(outbox.Events.Single().PayloadJson);
+        payload.RootElement.GetProperty("referenceType").GetString().Should().Be("PARCEL_REFUND");
+        payload.RootElement.GetProperty("referenceId").GetGuid().Should().Be(parcelId);
+    }
+
+    [Fact]
     public async Task Handle_WhenReferenceWasAlreadyRefunded_ReturnsExistingTransactionWithoutDoubleCredit()
     {
         var userId = Guid.NewGuid();
@@ -91,8 +122,9 @@ public sealed class RefundToWalletCommandHandlerTests
     private static RefundToWalletCommand CreateCommand(
         Guid userId,
         Guid bookingId,
-        string idempotencyKey = "idem-key")
-        => new(userId, 175_000, "BOOKING_REFUND", bookingId, idempotencyKey);
+        string idempotencyKey = "idem-key",
+        string referenceType = "BOOKING_REFUND")
+        => new(userId, 175_000, referenceType, bookingId, idempotencyKey);
 
     private sealed class FakeWalletRepository : IWalletRepository
     {
@@ -153,11 +185,19 @@ public sealed class RefundToWalletCommandHandlerTests
             Money amount,
             Guid bookingId,
             CancellationToken cancellationToken)
+            => CreditRefundAsync(userId, amount, WalletTransactionRef.BOOKING_REFUND, bookingId, cancellationToken);
+
+        public Task<WalletTransaction> CreditRefundAsync(
+            Guid userId,
+            Money amount,
+            WalletTransactionRef referenceType,
+            Guid referenceId,
+            CancellationToken cancellationToken)
         {
             userId.Should().Be(_userId);
             var before = Balance;
             Balance += amount;
-            var transaction = WalletTransaction.CreateBookingRefundCredit(userId, bookingId, amount, before, Balance);
+            var transaction = WalletTransaction.CreateRefundCredit(userId, referenceType, referenceId, amount, before, Balance);
             _transactions.Add(transaction);
             return Task.FromResult(transaction);
         }

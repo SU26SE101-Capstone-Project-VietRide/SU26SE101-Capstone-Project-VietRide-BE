@@ -85,8 +85,7 @@ describe('NotificationsController (e2e)', () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
-    app.setGlobalPrefix('api');
-    await app.listen(0);
+        await app.listen(0);
     port = readListeningPort(app);
   });
 
@@ -95,7 +94,7 @@ describe('NotificationsController (e2e)', () => {
   });
 
   it('returns 401 envelope when auth is missing', async () => {
-    const response = await getJson<ApiEnvelope<unknown>>('/api/v1/notifications');
+    const response = await getJson<ApiEnvelope<unknown>>('/v1/notifications');
 
     expect(response.status).toBe(401);
     expect(response.body.success).toBe(false);
@@ -103,7 +102,7 @@ describe('NotificationsController (e2e)', () => {
   });
 
   it('returns 401 envelope when token is invalid', async () => {
-    const response = await getJson<ApiEnvelope<unknown>>('/api/v1/notifications', 'not-a-jwt');
+    const response = await getJson<ApiEnvelope<unknown>>('/v1/notifications', 'not-a-jwt');
 
     expect(response.status).toBe(401);
     expect(response.body.error?.code).toBe('UNAUTHORIZED');
@@ -111,7 +110,7 @@ describe('NotificationsController (e2e)', () => {
 
   it('returns 400 envelope when query options are invalid', async () => {
     const token = await signIdentityToken(OWNER_USER_ID);
-    const response = await getJson<ApiEnvelope<unknown>>('/api/v1/notifications?pageSize=101', token);
+    const response = await getJson<ApiEnvelope<unknown>>('/v1/notifications?pageSize=101', token);
 
     expect(response.status).toBe(400);
     expect(response.body.success).toBe(false);
@@ -120,7 +119,7 @@ describe('NotificationsController (e2e)', () => {
   it('returns owner notification history', async () => {
     const token = await signIdentityToken(OWNER_USER_ID);
     const response = await getJson<ApiEnvelope<{ items: Array<{ id: string; readAt: string | null }> }>>(
-      '/api/v1/notifications?unreadOnly=true&page=1&pageSize=20&sortBy=createdAt&sortDir=desc',
+      '/v1/notifications?unreadOnly=true&page=1&pageSize=20&sortBy=createdAt&sortDir=desc',
       token,
     );
 
@@ -144,7 +143,7 @@ describe('NotificationsController (e2e)', () => {
 
   it('returns 204 when owner marks notification as read', async () => {
     const token = await signIdentityToken(OWNER_USER_ID);
-    const response = await patch(`/api/v1/notifications/${NOTIFICATION_ID}`, token);
+    const response = await post(`/v1/notifications/${NOTIFICATION_ID}/read`, token);
 
     expect(response.status).toBe(204);
     expect(update).toHaveBeenCalledWith(
@@ -157,13 +156,20 @@ describe('NotificationsController (e2e)', () => {
 
   it('returns 404 when user marks another user notification as read', async () => {
     const token = await signIdentityToken(OTHER_USER_ID);
-    const response = await patchJson<ApiEnvelope<unknown>>(
-      `/api/v1/notifications/${OTHER_NOTIFICATION_ID}`,
+    const response = await postJson<ApiEnvelope<unknown>>(
+      `/v1/notifications/${OTHER_NOTIFICATION_ID}/read`,
       token,
     );
 
     expect(response.status).toBe(404);
     expect(response.body.error?.code).toBe('NOTIFICATION_NOT_FOUND');
+  });
+
+  it('does not expose the old PATCH mark-read route', async () => {
+    const token = await signIdentityToken(OWNER_USER_ID);
+    const response = await patch(`/v1/notifications/${NOTIFICATION_ID}`, token);
+
+    expect(response.status).toBe(404);
   });
 
   async function signIdentityToken(userId: string): Promise<string> {
@@ -204,11 +210,20 @@ describe('NotificationsController (e2e)', () => {
     });
   }
 
-  async function patchJson<TBody>(
+  async function post(path: string, token: string): Promise<Response> {
+    return fetch(`http://127.0.0.1:${port}${path}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  }
+
+  async function postJson<TBody>(
     path: string,
     token: string,
   ): Promise<{ status: number; body: TBody }> {
-    const response = await patch(path, token);
+    const response = await post(path, token);
     return {
       status: response.status,
       body: (await response.json()) as TBody,

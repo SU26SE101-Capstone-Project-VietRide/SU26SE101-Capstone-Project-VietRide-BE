@@ -17,7 +17,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- =============================================================================
 
 CREATE TYPE payment_reference_type AS ENUM (
-    'BOOKING', 'BOOKING_GROUP', 'PARCEL', 'TOP_UP', 'SUBSCRIPTION'
+    'BOOKING', 'BOOKING_GROUP', 'PARCEL', 'PARCEL_ADDITIONAL', 'TOP_UP', 'SUBSCRIPTION'
 );
 
 CREATE TYPE payment_method AS ENUM ('WALLET', 'VNPAY');
@@ -34,7 +34,7 @@ CREATE TYPE wallet_transaction_type AS ENUM ('CREDIT', 'DEBIT');
 
 CREATE TYPE wallet_transaction_ref AS ENUM (
     'TOP_UP', 'BOOKING_PAYMENT', 'BOOKING_REFUND',
-    'PARCEL_PAYMENT', 'PARCEL_REFUND', 'MANUAL_ADJUSTMENT'
+    'PARCEL_PAYMENT', 'PARCEL_REFUND', 'PARCEL_ADDITIONAL_PAYMENT', 'MANUAL_ADJUSTMENT'
 );
 
 CREATE TYPE invoice_status AS ENUM ('DRAFT', 'ISSUED', 'CANCELLED');
@@ -45,6 +45,7 @@ CREATE TYPE platform_wallet_transaction_type AS ENUM ('CREDIT', 'DEBIT');
 CREATE TYPE platform_wallet_transaction_ref AS ENUM (
     'BOOKING_PAYMENT_HOLD',
     'PARCEL_PAYMENT_HOLD',
+    'PARCEL_ADDITIONAL_PAYMENT_HOLD',
     'BOOKING_REFUND',
     'PARCEL_REFUND',
     'TRIP_SETTLEMENT',

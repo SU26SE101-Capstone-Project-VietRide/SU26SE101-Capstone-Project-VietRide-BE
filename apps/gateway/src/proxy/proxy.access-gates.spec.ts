@@ -943,6 +943,9 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
     ['POST', '/v1/operators/register'],
     ['POST', '/v1/payments/vnpay-ipn'],
     ['POST', '/v1/payments/vnpay-topup-ipn'],
+    ['POST', '/v1/parcels/delivery/confirm'],
+    ['POST', '/v1/parcels/delivery/reject'],
+    ['POST', '/v1/parcels/delivery/undo-reject'],
   ] as const)('lets public mixed endpoint %s %s pass anonymously', async (method, path) => {
     const upstreamHandler = arrangeProxyPass();
     const signer = {
@@ -1025,7 +1028,7 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
     });
     expect(req.headers.authorization).toBe(authorization);
     expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
-    expect(req.url).toBe('/api/v1/notifications?pageSize=20');
+    expect(req.url).toBe('/v1/notifications?pageSize=20');
     expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
       expect.objectContaining({ target: env.NOTIFICATION_BASE_URL }),
     );

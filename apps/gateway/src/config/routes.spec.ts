@@ -381,6 +381,90 @@ describe('buildRouteTable', () => {
     expect(routes.find((r) => r.prefix === '/v1/operator/stops/delete')).toBeUndefined();
   });
 
+  it('routes operator parcel-route-fares to Parcel with OPERATOR_ADMIN/STAFF roles', () => {
+    const route = matchRoute(routes, '/v1/operator/parcel-route-fares');
+    const routeWithId = matchRoute(
+      routes,
+      '/v1/operator/parcel-route-fares/22222222-2222-4222-8222-222222222222/SMALL',
+    );
+
+    expect(route?.prefix).toBe('/v1/operator/parcel-route-fares');
+    expect(route?.target).toBe(env.PARCEL_BASE_URL);
+    expect(route?.authRequired).toBe('user');
+    expect(route?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
+
+    expect(routeWithId?.prefix).toBe('/v1/operator/parcel-route-fares');
+    expect(routeWithId?.target).toBe(env.PARCEL_BASE_URL);
+    expect(routeWithId?.authRequired).toBe('user');
+    expect(routeWithId?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
+    expect(routes.find((r) => r.prefix === '/v1/operator/parcel-route-fares')).toBeDefined();
+  });
+
+  it('routes assistant and operator parcel actions to Parcel without gateway-level role guards', () => {
+    const cases = [
+      ['/v1/assistant/parcels/11111111-1111-1111-1111-111111111111/load', '/v1/assistant/parcels'],
+      [
+        '/v1/assistant/parcels/11111111-1111-1111-1111-111111111111/confirm-delivery',
+        '/v1/assistant/parcels',
+      ],
+      [
+        '/v1/operator/parcels/11111111-1111-1111-1111-111111111111/confirm-delivery',
+        '/v1/operator/parcels',
+      ],
+    ] as const;
+
+    cases.forEach(([path, prefix]) => {
+      const route = matchRoute(routes, path);
+
+      expect(route?.prefix).toBe(prefix);
+      expect(route?.target).toBe(env.PARCEL_BASE_URL);
+      expect(route?.authRequired).toBe('user');
+      expect(route?.requiredRoles).toBeUndefined();
+    });
+  });
+  it('routes parcels to Parcel without a gateway-level role guard', () => {
+    const route = matchRoute(routes, '/v1/parcels');
+    const routeDetail = matchRoute(routes, '/v1/parcels/11111111-1111-1111-1111-111111111111');
+
+    expect(route?.prefix).toBe('/v1/parcels');
+    expect(route?.target).toBe(env.PARCEL_BASE_URL);
+    expect(route?.authRequired).toBe('user');
+    expect(route?.requiredRoles).toBeUndefined();
+
+    expect(routeDetail?.prefix).toBe('/v1/parcels');
+    expect(routeDetail?.target).toBe(env.PARCEL_BASE_URL);
+    expect(routeDetail?.authRequired).toBe('user');
+    expect(routeDetail?.requiredRoles).toBeUndefined();
+  });
+
+  it('routes parcel delivery token endpoints through the longer mixed prefix', () => {
+    const confirmRoute = matchRoute(routes, '/v1/parcels/delivery/confirm');
+    const rejectRoute = matchRoute(routes, '/v1/parcels/delivery/reject');
+    const undoRejectRoute = matchRoute(routes, '/v1/parcels/delivery/undo-reject');
+
+    [confirmRoute, rejectRoute, undoRejectRoute].forEach((route) => {
+      expect(route?.prefix).toBe('/v1/parcels/delivery');
+      expect(route?.target).toBe(env.PARCEL_BASE_URL);
+      expect(route?.authRequired).toBe('mixed');
+      expect(route?.requiredRoles).toBeUndefined();
+      expect(route?.publicSubpaths).toEqual([
+        { method: 'POST', path: '/v1/parcels/delivery/confirm' },
+        { method: 'POST', path: '/v1/parcels/delivery/reject' },
+        { method: 'POST', path: '/v1/parcels/delivery/undo-reject' },
+      ]);
+    });
+  });
+
+  it('keeps operator parcel-route-fares distinct from operator routes', () => {
+    const parcelFareRoute = matchRoute(routes, '/v1/operator/parcel-route-fares');
+    const operatorRoute = matchRoute(routes, '/v1/operator/routes');
+
+    expect(parcelFareRoute?.target).toBe(env.PARCEL_BASE_URL);
+    expect(operatorRoute?.target).toBe(env.TRIP_BASE_URL);
+    expect(parcelFareRoute?.prefix).not.toBe(operatorRoute?.prefix);
+    expect(routes.find((r) => r.prefix === '/v1/operator')).toBeUndefined();
+  });
+
   it('prefixes are unique', () => {
     const prefixes = routes.map((r) => r.prefix);
     const set = new Set(prefixes);

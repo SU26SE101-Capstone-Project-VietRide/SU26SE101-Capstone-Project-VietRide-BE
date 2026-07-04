@@ -58,7 +58,8 @@ public sealed class Payment : BaseEntity<Guid>
         };
     }
 
-    public static Payment CreateSucceededWalletBookingCharge(
+    public static Payment CreateSucceededWalletCharge(
+        PaymentReferenceType referenceType,
         Guid referenceId,
         Guid userId,
         Money amount,
@@ -74,7 +75,7 @@ public sealed class Payment : BaseEntity<Guid>
         return new Payment
         {
             Id = Guid.NewGuid(),
-            ReferenceType = PaymentReferenceType.BOOKING,
+            ReferenceType = referenceType,
             ReferenceId = referenceId,
             UserId = userId,
             Amount = amount,
@@ -84,7 +85,15 @@ public sealed class Payment : BaseEntity<Guid>
         };
     }
 
-    public static Payment CreatePendingRedirectVnPayBooking(
+    public static Payment CreateSucceededWalletBookingCharge(
+        Guid referenceId,
+        Guid userId,
+        Money amount,
+        DateTimeOffset succeededAt)
+        => CreateSucceededWalletCharge(PaymentReferenceType.BOOKING, referenceId, userId, amount, succeededAt);
+
+    public static Payment CreatePendingRedirectVnPay(
+        PaymentReferenceType referenceType,
         Guid referenceId,
         Guid userId,
         Money amount,
@@ -108,7 +117,7 @@ public sealed class Payment : BaseEntity<Guid>
         return new Payment
         {
             Id = Guid.NewGuid(),
-            ReferenceType = PaymentReferenceType.BOOKING,
+            ReferenceType = referenceType,
             ReferenceId = referenceId,
             UserId = userId,
             Amount = amount,
@@ -119,6 +128,16 @@ public sealed class Payment : BaseEntity<Guid>
             PaymentRedirectUrl = paymentRedirectUrl,
         };
     }
+
+    public static Payment CreatePendingRedirectVnPayBooking(
+        Guid referenceId,
+        Guid userId,
+        Money amount,
+        string vnPayTxnRef,
+        string idempotencyKey,
+        string paymentRedirectUrl)
+        => CreatePendingRedirectVnPay(PaymentReferenceType.BOOKING, referenceId, userId, amount,
+            vnPayTxnRef, idempotencyKey, paymentRedirectUrl);
 
     public void MarkSucceeded(string? vnPayResponseCode, DateTimeOffset succeededAt)
     {

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 using VietRide.Shared.Application.DependencyInjection;
+using VietRide.Shared.Messaging.DependencyInjection;
 using VietRide.Shared.Persistence.DependencyInjection;
 using VietRide.Shared.Web.DependencyInjection;
 using VietRide.Shared.Web.Health;
@@ -24,9 +25,11 @@ builder.Services.AddVietRideSharedWeb(builder.Configuration, ServiceName);
 builder.Services.AddVietRideDbContext<TripDbContext>(
     builder.Configuration,
     configureDataSource: TripDbContext.ConfigurePostgresEnums);
+builder.Services.AddVietRideMessaging(builder.Configuration);
 builder.Services.AddVietRideMediatRBehaviors(
     handlerAssemblies: [typeof(ApplicationAssemblyMarker).Assembly]);
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddVietRideIdempotency("trip");
 var app = builder.Build();
 
 if (!IsWebApplicationFactoryHost())
@@ -41,6 +44,7 @@ app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseVietRideSwagger();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseVietRideIdempotency();
 app.MapVietRideHealth(ServiceName);
 app.MapControllers();
 

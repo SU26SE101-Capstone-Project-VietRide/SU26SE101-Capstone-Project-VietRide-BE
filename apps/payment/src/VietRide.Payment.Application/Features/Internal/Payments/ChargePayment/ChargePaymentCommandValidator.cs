@@ -6,7 +6,9 @@ public sealed class ChargePaymentCommandValidator : AbstractValidator<ChargePaym
 {
     public ChargePaymentCommandValidator()
     {
-        RuleFor(x => x.ReferenceType).Equal("BOOKING").WithMessage("Charge supports BOOKING references only.");
+        RuleFor(x => x.ReferenceType)
+            .Must(rt => rt is "BOOKING" or "PARCEL" or "PARCEL_ADDITIONAL")
+            .WithMessage("Charge supports BOOKING, PARCEL, or PARCEL_ADDITIONAL references only.");
         RuleFor(x => x.ReferenceId).NotEmpty();
         RuleFor(x => x.UserId).NotEmpty();
         RuleFor(x => x.Amount).GreaterThan(0);

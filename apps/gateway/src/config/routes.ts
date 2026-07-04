@@ -25,7 +25,7 @@ export interface ProxyRoute {
   requiredRoles?: string[];
   /** Strip prefix before forwarding? Default false. Cannot be combined with rewriteTo. */
   stripPrefix?: boolean;
-  /** Rewrite the matched prefix to a different path before forwarding (e.g., /v1/identity/health → /health). */
+  /** Rewrite the matched prefix to a different path before forwarding (e.g., /v1/identity/health â†’ /health). */
   rewriteTo?: string;
   /** Prepend a string to the final upstream path (e.g., '/api'). */
   prependPrefix?: string;
@@ -109,8 +109,8 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['SYSTEM_ADMIN'],
     },
     { prefix: '/v1/.well-known', target: env.IDENTITY_BASE_URL, authRequired: 'none' },
-    // Day 2 placeholder health passthrough — each downstream service has /health.
-    // Convention: /v1/<service>/health → service /health (FE tests connectivity).
+    // Day 2 placeholder health passthrough â€” each downstream service has /health.
+    // Convention: /v1/<service>/health â†’ service /health (FE tests connectivity).
     {
       prefix: '/v1/identity/health',
       target: env.IDENTITY_BASE_URL,
@@ -119,6 +119,12 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     },
 
     // Trip / Vehicle
+    {
+      prefix: '/v1/operator/trips',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
     {
       prefix: '/v1/trips',
       target: env.TRIP_BASE_URL,
@@ -259,7 +265,29 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     },
 
     // Parcel
-    { prefix: '/v1/parcels', target: env.PARCEL_BASE_URL, authRequired: 'user' },
+    { prefix: '/v1/assistant/parcels', target: env.PARCEL_BASE_URL, authRequired: 'user' },
+    { prefix: '/v1/operator/parcels', target: env.PARCEL_BASE_URL, authRequired: 'user' },
+    {
+      prefix: '/v1/operator/parcel-route-fares',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
+    {
+      prefix: '/v1/parcels/delivery',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'mixed',
+      publicSubpaths: [
+        { method: 'POST', path: '/v1/parcels/delivery/confirm' },
+        { method: 'POST', path: '/v1/parcels/delivery/reject' },
+        { method: 'POST', path: '/v1/parcels/delivery/undo-reject' },
+      ],
+    },
+    {
+      prefix: '/v1/parcels',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+    },
     {
       prefix: '/v1/parcel/health',
       target: env.PARCEL_BASE_URL,
@@ -272,14 +300,25 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       prefix: '/v1/notifications',
       target: env.NOTIFICATION_BASE_URL,
       authRequired: 'user',
-      prependPrefix: '/api',
       forwardUserAuthorization: true,
     },
     {
       prefix: '/v1/rag',
       target: env.RAG_BASE_URL,
       authRequired: 'user',
-      prependPrefix: '/api',
+      forwardUserAuthorization: true,
+    },
+    {
+      prefix: '/v1/admin/rag-config',
+      target: env.RAG_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+      forwardUserAuthorization: true,
+    },
+    {
+      prefix: '/v1/tracking',
+      target: env.TRACKING_BASE_URL,
+      authRequired: 'user',
       forwardUserAuthorization: true,
     },
 

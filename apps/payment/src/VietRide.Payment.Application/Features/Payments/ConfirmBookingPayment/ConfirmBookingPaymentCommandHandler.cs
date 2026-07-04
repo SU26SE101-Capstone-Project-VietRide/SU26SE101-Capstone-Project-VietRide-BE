@@ -131,18 +131,19 @@ public sealed class ConfirmBookingPaymentCommandHandler
             payment.MarkSucceeded(responseCode, _clock.UtcNow);
             _payments.Update(payment);
 
+            var platformRef = MapHoldRef(payment.ReferenceType);
             await _platformWallets.CreditAsync(
                     payment.Amount,
-                    PlatformWalletTransactionRef.BOOKING_PAYMENT_HOLD,
+                    platformRef,
                     payment.ReferenceId,
-                    "Booking payment hold",
+                    $"{payment.ReferenceType} payment hold",
                     cancellationToken)
                 .ConfigureAwait(false);
 
             await EnqueuePaymentSucceededAsync(payment, cancellationToken).ConfigureAwait(false);
 
             _logger.LogInformation(
-                "Confirmed VNPay booking payment {PaymentId} for reference {ReferenceType}/{ReferenceId} and credited platform hold {Amount} VND.",
+                "Confirmed VNPay payment {PaymentId} for reference {ReferenceType}/{ReferenceId} and credited platform hold {Amount} VND.",
                 payment.Id,
                 payment.ReferenceType,
                 payment.ReferenceId,
@@ -168,7 +169,9 @@ public sealed class ConfirmBookingPaymentCommandHandler
                 payment.VnPayTxnRef == vnPayTxnRef
                 && payment.Method == PaymentMethod.VNPAY
                 && (payment.ReferenceType == PaymentReferenceType.BOOKING
-                    || payment.ReferenceType == PaymentReferenceType.BOOKING_GROUP));
+                    || payment.ReferenceType == PaymentReferenceType.BOOKING_GROUP
+                    || payment.ReferenceType == PaymentReferenceType.PARCEL
+                    || payment.ReferenceType == PaymentReferenceType.PARCEL_ADDITIONAL));
 
         if (pendingOnly)
         {
@@ -242,4 +245,16 @@ public sealed class ConfirmBookingPaymentCommandHandler
 
     private static ConfirmBookingPaymentResult OrderNotFound()
         => new("01", "Order Not Found", 200);
+
+    private static PlatformWalletTransactionRef MapHoldRef(PaymentReferenceType referenceType)
+        => referenceType switch
+        {
+            PaymentReferenceType.BOOKING or PaymentReferenceType.BOOKING_GROUP
+                => PlatformWalletTransactionRef.BOOKING_PAYMENT_HOLD,
+            PaymentReferenceType.PARCEL
+                => PlatformWalletTransactionRef.PARCEL_PAYMENT_HOLD,
+            PaymentReferenceType.PARCEL_ADDITIONAL
+                => PlatformWalletTransactionRef.PARCEL_ADDITIONAL_PAYMENT_HOLD,
+            _ => PlatformWalletTransactionRef.BOOKING_PAYMENT_HOLD,
+        };
 }

@@ -137,6 +137,11 @@ public sealed class Trip : BaseEntity<Guid>
         Status = TripStatus.DISRUPTED;
     }
 
+    public void MarkSubstitution(bool hasSubstitution)
+    {
+        HasSubstitution = hasSubstitution;
+    }
+
     public void UpdateCargoCounters(decimal reservedParcelWeightKg, decimal totalLoadedWeightKg)
     {
         ValidateNonNegative(reservedParcelWeightKg, nameof(reservedParcelWeightKg));

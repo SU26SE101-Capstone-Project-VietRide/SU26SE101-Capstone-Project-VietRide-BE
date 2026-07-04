@@ -72,7 +72,7 @@ async function testOffTopicRefusal(token) {
 }
 
 async function postChat({ token, payload }) {
-  return fetch(`${BASE_URL}/api/v1/rag/chat`, {
+  return fetch(`${BASE_URL}/v1/rag/chat`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

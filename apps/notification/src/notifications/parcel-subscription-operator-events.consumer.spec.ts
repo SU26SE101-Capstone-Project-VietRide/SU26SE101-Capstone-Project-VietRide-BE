@@ -6,6 +6,7 @@ import { NotificationsService } from './notifications.service';
 import type { OperatorRecipientProvider } from './operator-recipient.provider';
 import {
   OPERATOR_RECIPIENT_PROVIDER,
+  BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY,
   PARCEL_LOADED_ROUTING_KEY,
   PARCEL_SUBSCRIPTION_OPERATOR_QUEUE_BINDINGS,
   SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY,
@@ -15,6 +16,7 @@ import { ParcelSubscriptionOperatorEventsConsumer } from './parcel-subscription-
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const OPERATOR_ID = '33333333-3333-4333-8333-333333333333';
 const PARCEL_ID = '44444444-4444-4444-8444-444444444444';
+const VOUCHER_ID = '55555555-5555-4555-8555-555555555555';
 const MESSAGE_ID = 'phase-6-message-1';
 
 describe('ParcelSubscriptionOperatorEventsConsumer', () => {
@@ -107,6 +109,33 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
         userId: USER_ID,
         type: NotificationType.SUBSCRIPTION_LIMIT_EXCEEDED,
         dedupeKey: `${SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:${NotificationType.SUBSCRIPTION_LIMIT_EXCEEDED}`,
+      }),
+    );
+  });
+
+  it('creates voucher consent notification for operator recipients', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([USER_ID]);
+    notificationsService.createNotification.mockResolvedValue(
+      createNotification(NotificationType.VOUCHER_CONSENT_ACCEPTED),
+    );
+
+    await consumer.handle(
+      BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY,
+      {
+        operatorId: OPERATOR_ID,
+        voucherId: VOUCHER_ID,
+      },
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.VOUCHER_CONSENT_ACCEPTED,
+        dedupeKey:
+          `${BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY}:` +
+          `${MESSAGE_ID}:${USER_ID}:${NotificationType.VOUCHER_CONSENT_ACCEPTED}`,
       }),
     );
   });

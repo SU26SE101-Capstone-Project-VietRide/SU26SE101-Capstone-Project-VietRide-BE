@@ -11,4 +11,9 @@ public sealed record InternalOperatorLookupDto(
     string ContactPhone,
     string BusinessRegistrationNumber,
     string TaxCode,
-    JsonElement? CancellationPolicy);
+    JsonElement? CancellationPolicy,
+    InternalParcelNoShowPolicyDto? ParcelNoShowPolicy);
+
+public sealed record InternalParcelNoShowPolicyDto(
+    decimal NoShowFeePercent,
+    int AdditionalPaymentTimeoutMinutes);

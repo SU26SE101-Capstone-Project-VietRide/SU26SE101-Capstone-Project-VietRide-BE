@@ -52,6 +52,8 @@ test-results/
 .claude/
 CLAUDE.md
 AGENTS.md
+AGENTS_NESTJS.md
+AGENTS_DOTNET.md
 
 # CodeGraph MCP — local symbol index (rebuilt per clone via `codegraph init -i`)
 .codegraph/
@@ -106,10 +108,11 @@ TestResults/
 
 # ── Environment / secrets ────────────────────────────────────────────────────
 .env
+.env.rag-full-flow
 .env.local
 .env.*.local
 !.env.example
-
+.env.rag-full-flow.example
 # Service-local config overrides
 **/appsettings.Local.json
 **/appsettings.*.local.json
@@ -165,6 +168,8 @@ playground/
 .claude/
 CLAUDE.md
 AGENTS.md
+AGENTS_NESTJS.md
+AGENTS_DOTNET.md
 TASK.md
 CHANGELOG_AI.md
 /opencode.json

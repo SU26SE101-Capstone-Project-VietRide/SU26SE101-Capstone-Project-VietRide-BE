@@ -7,5 +7,6 @@ public enum WalletTransactionRef
     BOOKING_REFUND = 3,
     PARCEL_PAYMENT = 4,
     PARCEL_REFUND = 5,
+    PARCEL_ADDITIONAL_PAYMENT = 7,
     MANUAL_ADJUSTMENT = 6,
 }
