@@ -22,7 +22,7 @@ export const envSchema = baseEnvSchema.merge(
     RABBITMQ_EXCHANGE: z.string().default('vietride.events'),
     OPENROUTER_API_KEY: z.string().min(1),
     OPENROUTER_BASE_URL: z.string().url().default('https://openrouter.ai/api/v1'),
-    OPENROUTER_CHAT_MODEL: z.string().default('openai/gpt-oss-120b:free'),
+    OPENROUTER_CHAT_MODEL: z.string().default('nvidia/nemotron-3-ultra-550b-a55b:free'),
     OPENROUTER_EMBEDDING_MODEL: z
       .string()
       .default('nvidia/llama-nemotron-embed-vl-1b-v2:free'),

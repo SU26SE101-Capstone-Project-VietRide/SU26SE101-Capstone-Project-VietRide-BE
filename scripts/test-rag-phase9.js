@@ -70,7 +70,7 @@ async function testFeedbackOwnershipFail(token, assistantMessageId) {
 }
 
 async function postChat({ token, payload }) {
-  return fetch(`${BASE_URL}/api/v1/rag/chat`, {
+  return fetch(`${BASE_URL}/v1/rag/chat`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -81,7 +81,7 @@ async function postChat({ token, payload }) {
 }
 
 async function postFeedback({ token, assistantMessageId, payload }) {
-  return fetch(`${BASE_URL}/api/v1/rag/messages/${assistantMessageId}/feedback`, {
+  return fetch(`${BASE_URL}/v1/rag/messages/${assistantMessageId}/feedback`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

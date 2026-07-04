@@ -39,8 +39,7 @@ describe('RuntimeConfigAdminController (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
-    app.setGlobalPrefix('api');
-    await app.listen(0);
+        await app.listen(0);
     const address = app.getHttpServer().address() as AddressInfo;
     baseUrl = `http://127.0.0.1:${address.port}`;
   });
@@ -62,8 +61,8 @@ describe('RuntimeConfigAdminController (e2e)', () => {
     runtimeConfig.reload.mockResolvedValue(undefined);
   });
 
-  it('GET /api/v1/admin/rag-config returns config list for SYSTEM_ADMIN', async () => {
-    const response = await fetch(`${baseUrl}/api/v1/admin/rag-config`, {
+  it('GET /v1/admin/rag-config returns config list for SYSTEM_ADMIN', async () => {
+    const response = await fetch(`${baseUrl}/v1/admin/rag-config`, {
       headers: { 'X-Internal-Auth': await signInternalJwt(ADMIN_USER_ID, 'SYSTEM_ADMIN') },
     });
     const body = (await response.json()) as RuntimeConfigItem[];
@@ -75,14 +74,14 @@ describe('RuntimeConfigAdminController (e2e)', () => {
     expect(firstConfig?.key).toBe('intent.off_topic_refusal');
   });
 
-  it('GET /api/v1/admin/rag-config returns 401 without internal JWT', async () => {
-    const response = await fetch(`${baseUrl}/api/v1/admin/rag-config`);
+  it('GET /v1/admin/rag-config returns 401 without internal JWT', async () => {
+    const response = await fetch(`${baseUrl}/v1/admin/rag-config`);
 
     expect(response.status).toBe(401);
   });
 
-  it('PATCH /api/v1/admin/rag-config/:key returns 403 for non-admin caller', async () => {
-    const response = await fetch(`${baseUrl}/api/v1/admin/rag-config/intent.off_topic_refusal`, {
+  it('PATCH /v1/admin/rag-config/:key returns 403 for non-admin caller', async () => {
+    const response = await fetch(`${baseUrl}/v1/admin/rag-config/intent.off_topic_refusal`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -95,8 +94,8 @@ describe('RuntimeConfigAdminController (e2e)', () => {
     expect(runtimeConfig.update).not.toHaveBeenCalled();
   });
 
-  it('PATCH /api/v1/admin/rag-config/:key updates config value for SYSTEM_ADMIN', async () => {
-    const response = await fetch(`${baseUrl}/api/v1/admin/rag-config/intent.off_topic_refusal`, {
+  it('PATCH /v1/admin/rag-config/:key updates config value for SYSTEM_ADMIN', async () => {
+    const response = await fetch(`${baseUrl}/v1/admin/rag-config/intent.off_topic_refusal`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -118,8 +117,8 @@ describe('RuntimeConfigAdminController (e2e)', () => {
     );
   });
 
-  it('PATCH /api/v1/admin/rag-config/:key updates prompt config for SYSTEM_ADMIN', async () => {
-    const response = await fetch(`${baseUrl}/api/v1/admin/rag-config/chat.system_prompt`, {
+  it('PATCH /v1/admin/rag-config/:key updates prompt config for SYSTEM_ADMIN', async () => {
+    const response = await fetch(`${baseUrl}/v1/admin/rag-config/chat.system_prompt`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -140,8 +139,8 @@ describe('RuntimeConfigAdminController (e2e)', () => {
     );
   });
 
-  it('POST /api/v1/admin/rag-config/reload reloads config cache for SYSTEM_ADMIN', async () => {
-    const response = await fetch(`${baseUrl}/api/v1/admin/rag-config/reload`, {
+  it('POST /v1/admin/rag-config/reload reloads config cache for SYSTEM_ADMIN', async () => {
+    const response = await fetch(`${baseUrl}/v1/admin/rag-config/reload`, {
       method: 'POST',
       headers: { 'X-Internal-Auth': await signInternalJwt(ADMIN_USER_ID, 'SYSTEM_ADMIN') },
     });
@@ -152,8 +151,8 @@ describe('RuntimeConfigAdminController (e2e)', () => {
     expect(runtimeConfig.reload).toHaveBeenCalled();
   });
 
-  it('POST /api/v1/admin/rag-config/reload returns 403 for non-admin caller', async () => {
-    const response = await fetch(`${baseUrl}/api/v1/admin/rag-config/reload`, {
+  it('POST /v1/admin/rag-config/reload returns 403 for non-admin caller', async () => {
+    const response = await fetch(`${baseUrl}/v1/admin/rag-config/reload`, {
       method: 'POST',
       headers: { 'X-Internal-Auth': await signInternalJwt(PASSENGER_USER_ID, 'PASSENGER') },
     });

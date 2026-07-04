@@ -55,8 +55,7 @@ describe('DocumentsController (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
-    app.setGlobalPrefix('api');
-    await app.listen(0);
+        await app.listen(0);
     const address = app.getHttpServer().address() as AddressInfo;
     baseUrl = `http://127.0.0.1:${address.port}`;
   });
@@ -85,8 +84,8 @@ describe('DocumentsController (e2e)', () => {
     storageProvider.createSignedReadUrl.mockResolvedValue('https://preview.example/faq.txt');
   });
 
-  it('POST /api/v1/rag/documents auto-approves SYSTEM_ADMIN TXT upload', async () => {
-    const response = await fetch(`${baseUrl}/api/v1/rag/documents`, {
+  it('POST /v1/rag/documents auto-approves SYSTEM_ADMIN TXT upload', async () => {
+    const response = await fetch(`${baseUrl}/v1/rag/documents`, {
       method: 'POST',
       headers: { 'X-Internal-Auth': await signInternalJwt(ADMIN_USER_ID, 'SYSTEM_ADMIN') },
       body: makeValidForm(),
@@ -99,8 +98,8 @@ describe('DocumentsController (e2e)', () => {
     expect(body.previewUrl).toBe('https://preview.example/faq.txt');
   });
 
-  it('POST /api/v1/rag/documents returns 401 without internal JWT', async () => {
-    const response = await fetch(`${baseUrl}/api/v1/rag/documents`, {
+  it('POST /v1/rag/documents returns 401 without internal JWT', async () => {
+    const response = await fetch(`${baseUrl}/v1/rag/documents`, {
       method: 'POST',
       body: makeValidForm(),
     });
@@ -108,8 +107,8 @@ describe('DocumentsController (e2e)', () => {
     expect(response.status).toBe(401);
   });
 
-  it('POST /api/v1/rag/documents returns 403 for non-admin caller', async () => {
-    const response = await fetch(`${baseUrl}/api/v1/rag/documents`, {
+  it('POST /v1/rag/documents returns 403 for non-admin caller', async () => {
+    const response = await fetch(`${baseUrl}/v1/rag/documents`, {
       method: 'POST',
       headers: { 'X-Internal-Auth': await signInternalJwt(PASSENGER_USER_ID, 'PASSENGER') },
       body: makeValidForm(),
@@ -118,11 +117,11 @@ describe('DocumentsController (e2e)', () => {
     expect(response.status).toBe(403);
   });
 
-  it('POST /api/v1/rag/documents returns 400 for invalid file', async () => {
+  it('POST /v1/rag/documents returns 400 for invalid file', async () => {
     const form = makeValidForm();
     form.set('file', new Blob(['bad'], { type: 'application/pdf' }), 'bad.pdf');
 
-    const response = await fetch(`${baseUrl}/api/v1/rag/documents`, {
+    const response = await fetch(`${baseUrl}/v1/rag/documents`, {
       method: 'POST',
       headers: { 'X-Internal-Auth': await signInternalJwt(ADMIN_USER_ID, 'SYSTEM_ADMIN') },
       body: form,
@@ -131,8 +130,8 @@ describe('DocumentsController (e2e)', () => {
     expect(response.status).toBe(400);
   });
 
-  it('PUT /api/v1/rag/documents/{documentId}/approve returns 200 for SYSTEM_ADMIN', async () => {
-    const response = await fetch(`${baseUrl}/api/v1/rag/documents/${DOCUMENT_ID}/approve`, {
+  it('PUT /v1/rag/documents/{documentId}/approve returns 200 for SYSTEM_ADMIN', async () => {
+    const response = await fetch(`${baseUrl}/v1/rag/documents/${DOCUMENT_ID}/approve`, {
       method: 'PUT',
       headers: { 'X-Internal-Auth': await signInternalJwt(ADMIN_USER_ID, 'SYSTEM_ADMIN') },
     });
@@ -142,7 +141,7 @@ describe('DocumentsController (e2e)', () => {
     expect(body.status).toBe('APPROVED');
   });
 
-  it('PUT /api/v1/rag/documents/{documentId}/approve returns 403 for non-admin caller', async () => {
+  it('PUT /v1/rag/documents/{documentId}/approve returns 403 for non-admin caller', async () => {
     jest.spyOn(DocumentsService.prototype, 'approve').mockRejectedValueOnce(
       new ForbiddenException({
         errorCode: 'INSUFFICIENT_ROLE',
@@ -150,7 +149,7 @@ describe('DocumentsController (e2e)', () => {
       }),
     );
 
-    const response = await fetch(`${baseUrl}/api/v1/rag/documents/${DOCUMENT_ID}/approve`, {
+    const response = await fetch(`${baseUrl}/v1/rag/documents/${DOCUMENT_ID}/approve`, {
       method: 'PUT',
       headers: { 'X-Internal-Auth': await signInternalJwt(PASSENGER_USER_ID, 'PASSENGER') },
     });

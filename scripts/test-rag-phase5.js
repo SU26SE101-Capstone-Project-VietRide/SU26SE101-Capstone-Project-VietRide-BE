@@ -1,6 +1,6 @@
 const DEFAULT_RAG_URL = 'http://localhost:3003';
 const SERVICE_URL = process.env.BASE_URL || process.env.RAG_URL || DEFAULT_RAG_URL;
-const CHAT_URL = `${SERVICE_URL.replace(/\/$/, '')}/api/v1/rag/chat`;
+const CHAT_URL = `${SERVICE_URL.replace(/\/$/, '')}/v1/rag/chat`;
 const TEST_USER_ID = process.env.USER_ID || '11111111-1111-1111-1111-111111111111';
 const TEST_ROLE = process.env.RAG_TEST_ROLE || 'PASSENGER';
 const TEST_OPERATOR_ID = process.env.OPERATOR_ID;

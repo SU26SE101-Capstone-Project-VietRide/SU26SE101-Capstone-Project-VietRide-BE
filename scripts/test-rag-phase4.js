@@ -41,7 +41,7 @@ async function main() {
 }
 
 async function assertMissingAuth() {
-  const response = await fetch(`${baseUrl}/api/v1/rag/documents`, {
+  const response = await fetch(`${baseUrl}/v1/rag/documents`, {
     method: 'POST',
     body: makeDocumentForm('faq-phase4.txt', 'text/plain'),
   });
@@ -52,7 +52,7 @@ async function assertMissingAuth() {
 }
 
 async function assertPermissionFail(passengerToken) {
-  const response = await fetch(`${baseUrl}/api/v1/rag/documents`, {
+  const response = await fetch(`${baseUrl}/v1/rag/documents`, {
     method: 'POST',
     headers: { 'X-Internal-Auth': passengerToken },
     body: makeDocumentForm('faq-phase4.txt', 'text/plain'),
@@ -64,7 +64,7 @@ async function assertPermissionFail(passengerToken) {
 }
 
 async function assertValidationFail(adminToken) {
-  const response = await fetch(`${baseUrl}/api/v1/rag/documents`, {
+  const response = await fetch(`${baseUrl}/v1/rag/documents`, {
     method: 'POST',
     headers: { 'X-Internal-Auth': adminToken },
     body: makeDocumentForm('bad.pdf', 'application/pdf'),
@@ -76,7 +76,7 @@ async function assertValidationFail(adminToken) {
 }
 
 async function assertCreateDocument(adminToken) {
-  const response = await fetch(`${baseUrl}/api/v1/rag/documents`, {
+  const response = await fetch(`${baseUrl}/v1/rag/documents`, {
     method: 'POST',
     headers: { 'X-Internal-Auth': adminToken },
     body: makeDocumentForm(`faq-phase4-${Date.now()}.md`, 'text/markdown'),
@@ -90,7 +90,7 @@ async function assertCreateDocument(adminToken) {
 }
 
 async function assertApproveDocument(adminToken, documentId) {
-  const response = await fetch(`${baseUrl}/api/v1/rag/documents/${documentId}/approve`, {
+  const response = await fetch(`${baseUrl}/v1/rag/documents/${documentId}/approve`, {
     method: 'PUT',
     headers: { 'X-Internal-Auth': adminToken },
   });

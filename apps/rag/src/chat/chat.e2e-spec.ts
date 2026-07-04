@@ -99,8 +99,7 @@ describe('ChatController (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
-    app.setGlobalPrefix('api');
-    await app.listen(0);
+        await app.listen(0);
     const address = app.getHttpServer().address() as AddressInfo;
     baseUrl = `http://127.0.0.1:${address.port}`;
   });
@@ -134,8 +133,8 @@ describe('ChatController (e2e)', () => {
     chatProvider.stream.mockReturnValue(makeTokenStream(['Xin ', 'chào']));
   });
 
-  it('POST /api/v1/rag/chat streams token and done events', async () => {
-    const response = await fetch(`${baseUrl}/api/v1/rag/chat`, {
+  it('POST /v1/rag/chat streams token and done events', async () => {
+    const response = await fetch(`${baseUrl}/v1/rag/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -155,8 +154,8 @@ describe('ChatController (e2e)', () => {
     );
   });
 
-  it('POST /api/v1/rag/chat returns 401 without internal JWT', async () => {
-    const response = await fetch(`${baseUrl}/api/v1/rag/chat`, {
+  it('POST /v1/rag/chat returns 401 without internal JWT', async () => {
+    const response = await fetch(`${baseUrl}/v1/rag/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: 'Tôi cần hỗ trợ' }),
@@ -165,8 +164,8 @@ describe('ChatController (e2e)', () => {
     expect(response.status).toBe(401);
   });
 
-  it('POST /api/v1/rag/chat returns 400 for invalid payload', async () => {
-    const response = await fetch(`${baseUrl}/api/v1/rag/chat`, {
+  it('POST /v1/rag/chat returns 400 for invalid payload', async () => {
+    const response = await fetch(`${baseUrl}/v1/rag/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -178,7 +177,7 @@ describe('ChatController (e2e)', () => {
     expect(response.status).toBe(400);
   });
 
-  it('POST /api/v1/rag/chat returns 429 when rate limit is exceeded', async () => {
+  it('POST /v1/rag/chat returns 429 when rate limit is exceeded', async () => {
     rateLimit.assertAllowed.mockRejectedValue(
       new HttpException(
         {
@@ -189,7 +188,7 @@ describe('ChatController (e2e)', () => {
       ),
     );
 
-    const response = await fetch(`${baseUrl}/api/v1/rag/chat`, {
+    const response = await fetch(`${baseUrl}/v1/rag/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -201,8 +200,8 @@ describe('ChatController (e2e)', () => {
     expect(response.status).toBe(429);
   });
 
-  it('POST /api/v1/rag/chat refuses off-topic messages when intent filter is enabled', async () => {
-    const response = await fetch(`${baseUrl}/api/v1/rag/chat`, {
+  it('POST /v1/rag/chat refuses off-topic messages when intent filter is enabled', async () => {
+    const response = await fetch(`${baseUrl}/v1/rag/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -218,8 +217,8 @@ describe('ChatController (e2e)', () => {
     expect(repository.searchChunks).not.toHaveBeenCalled();
   });
 
-  it('POST /api/v1/rag/messages/:id/feedback records assistant feedback', async () => {
-    const response = await fetch(`${baseUrl}/api/v1/rag/messages/${ASSISTANT_MESSAGE_ID}/feedback`, {
+  it('POST /v1/rag/messages/:id/feedback records assistant feedback', async () => {
+    const response = await fetch(`${baseUrl}/v1/rag/messages/${ASSISTANT_MESSAGE_ID}/feedback`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -234,8 +233,8 @@ describe('ChatController (e2e)', () => {
     expect(repository.upsertMessageFeedback).toHaveBeenCalled();
   });
 
-  it('POST /api/v1/rag/messages/:id/feedback returns 401 without internal JWT', async () => {
-    const response = await fetch(`${baseUrl}/api/v1/rag/messages/${ASSISTANT_MESSAGE_ID}/feedback`, {
+  it('POST /v1/rag/messages/:id/feedback returns 401 without internal JWT', async () => {
+    const response = await fetch(`${baseUrl}/v1/rag/messages/${ASSISTANT_MESSAGE_ID}/feedback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ rating: 1 }),
@@ -244,8 +243,8 @@ describe('ChatController (e2e)', () => {
     expect(response.status).toBe(401);
   });
 
-  it('POST /api/v1/rag/messages/:id/feedback returns 400 for invalid payload', async () => {
-    const response = await fetch(`${baseUrl}/api/v1/rag/messages/${ASSISTANT_MESSAGE_ID}/feedback`, {
+  it('POST /v1/rag/messages/:id/feedback returns 400 for invalid payload', async () => {
+    const response = await fetch(`${baseUrl}/v1/rag/messages/${ASSISTANT_MESSAGE_ID}/feedback`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -257,8 +256,8 @@ describe('ChatController (e2e)', () => {
     expect(response.status).toBe(400);
   });
 
-  it('POST /api/v1/rag/messages/:id/feedback returns 403 for non-owner feedback', async () => {
-    const response = await fetch(`${baseUrl}/api/v1/rag/messages/${ASSISTANT_MESSAGE_ID}/feedback`, {
+  it('POST /v1/rag/messages/:id/feedback returns 403 for non-owner feedback', async () => {
+    const response = await fetch(`${baseUrl}/v1/rag/messages/${ASSISTANT_MESSAGE_ID}/feedback`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -270,10 +269,10 @@ describe('ChatController (e2e)', () => {
     expect(response.status).toBe(403);
   });
 
-  it('POST /api/v1/rag/chat uses operatorId scope for SYSTEM_ADMIN', async () => {
+  it('POST /v1/rag/chat uses operatorId scope for SYSTEM_ADMIN', async () => {
     repository.createConversation.mockResolvedValue(makeConversation({ operatorId: OPERATOR_ID }));
 
-    const response = await fetch(`${baseUrl}/api/v1/rag/chat`, {
+    const response = await fetch(`${baseUrl}/v1/rag/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -291,8 +290,8 @@ describe('ChatController (e2e)', () => {
     );
   });
 
-  it('POST /api/v1/rag/chat returns 403 for non-admin sending operatorId', async () => {
-    const response = await fetch(`${baseUrl}/api/v1/rag/chat`, {
+  it('POST /v1/rag/chat returns 403 for non-admin sending operatorId', async () => {
+    const response = await fetch(`${baseUrl}/v1/rag/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -304,8 +303,8 @@ describe('ChatController (e2e)', () => {
     expect(response.status).toBe(403);
   });
 
-  it('POST /api/v1/rag/messages/:id/feedback returns 403 when SYSTEM_ADMIN feedbacks non-owner message', async () => {
-    const response = await fetch(`${baseUrl}/api/v1/rag/messages/${ASSISTANT_MESSAGE_ID}/feedback`, {
+  it('POST /v1/rag/messages/:id/feedback returns 403 when SYSTEM_ADMIN feedbacks non-owner message', async () => {
+    const response = await fetch(`${baseUrl}/v1/rag/messages/${ASSISTANT_MESSAGE_ID}/feedback`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -335,8 +334,8 @@ function makeEnv() {
     JWT_AUDIENCE: 'vietride-api',
     LOG_LEVEL: 'info',
     OPENROUTER_API_KEY: 'test-key',
-    OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1',
-    OPENROUTER_CHAT_MODEL: 'openai/gpt-oss-120b:free',
+    OPENROUTER_BASE_URL: 'https://openrouter.ai/v1',
+    OPENROUTER_CHAT_MODEL: 'nvidia/nemotron-3-ultra-550b-a55b:free',
     OPENROUTER_EMBEDDING_MODEL: 'nvidia/llama-nemotron-embed-vl-1b-v2:free',
     OPENROUTER_HTTP_REFERER: undefined,
     OPENROUTER_APP_TITLE: 'VietRide RAG',
