@@ -7,4 +7,6 @@ public sealed record InternalTripStopSnapshotDto(
     bool AllowDropoff,
     DateTimeOffset EstimatedArrivalTime,
     double? DistanceFromOriginKm,
-    long? FareFromThisStop);
+    long? FareFromThisStop,
+    string Status,
+    DateTimeOffset? ActualArrivalTime);

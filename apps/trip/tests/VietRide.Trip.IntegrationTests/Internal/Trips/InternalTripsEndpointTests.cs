@@ -23,6 +23,7 @@ using VietRide.Trip.Application.Features.Internal.Trips.BookSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.GetTripSnapshot;
 using VietRide.Trip.Application.Features.Internal.Trips.LockSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.ReleaseSeats;
+using VietRide.Trip.Application.Features.Internal.Trips.Tracking;
 using VietRide.Trip.Infrastructure.SeatLock;
 
 namespace VietRide.Trip.IntegrationTests.Internal.Trips;
@@ -60,6 +61,79 @@ public sealed class InternalTripsEndpointTests
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         await AssertErrorEnvelopeAsync(response, "TRIP_NOT_FOUND", hasFields: false);
+    }
+
+    [Fact]
+    public async Task TrackingAuthorization_Happy_ReturnsApiResponseEnvelope()
+    {
+        var tripId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var operatorId = Guid.NewGuid();
+        var mediator = new StubMediator(_ => new TrackingAuthorizationResponse(true, "DRIVER"));
+        using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
+        using var client = factory.CreateClient();
+
+        var response = await client.SendAsync(CreateAuthorizedRequest(
+            HttpMethod.Get,
+            $"/internal/v1/trips/{tripId}/tracking-authorization?userId={userId}&role=DRIVER&operatorId={operatorId}"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        document.RootElement.GetProperty("success").GetBoolean().Should().BeTrue();
+        document.RootElement.GetProperty("data").GetProperty("allowed").GetBoolean().Should().BeTrue();
+        document.RootElement.GetProperty("data").GetProperty("scope").GetString().Should().Be("DRIVER");
+        var query = mediator.LastRequest.Should().BeOfType<GetTripTrackingAuthorizationQuery>().Subject;
+        query.TripId.Should().Be(tripId);
+        query.UserId.Should().Be(userId);
+        query.Role.Should().Be("DRIVER");
+        query.OperatorId.Should().Be(operatorId);
+    }
+
+    [Fact]
+    public async Task RouteStops_Happy_ReturnsApiResponseEnvelope()
+    {
+        var tripId = Guid.NewGuid();
+        var stopId = Guid.NewGuid();
+        var eta = DateTimeOffset.UtcNow.AddMinutes(30);
+        var mediator = new StubMediator(_ => new TripRouteStopsTrackingResponse(
+        [
+            new TripRouteStopTrackingDto(stopId, 10.75, 106.67, 1, [Guid.NewGuid()], eta),
+        ]));
+        using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
+        using var client = factory.CreateClient();
+
+        var response = await client.SendAsync(CreateAuthorizedRequest(HttpMethod.Get, $"/internal/v1/trips/{tripId}/route-stops"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        document.RootElement.GetProperty("success").GetBoolean().Should().BeTrue();
+        var stop = document.RootElement.GetProperty("data").GetProperty("stops")[0];
+        stop.GetProperty("stopId").GetGuid().Should().Be(stopId);
+        stop.GetProperty("estimatedArrivalTime").GetDateTimeOffset().Should().Be(eta);
+        mediator.LastRequest.Should().BeOfType<GetTripRouteStopsTrackingQuery>()
+            .Which.TripId.Should().Be(tripId);
+    }
+
+    [Fact]
+    public async Task RouteGeometry_Happy_ReturnsApiResponseEnvelope()
+    {
+        var tripId = Guid.NewGuid();
+        var mediator = new StubMediator(_ => new TripRouteGeometryTrackingResponse(
+            tripId,
+            [new RouteGeometryPointDto(10.75, 106.67)],
+            [Guid.NewGuid()]));
+        using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
+        using var client = factory.CreateClient();
+
+        var response = await client.SendAsync(CreateAuthorizedRequest(HttpMethod.Get, $"/internal/v1/trips/{tripId}/route-geometry"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        document.RootElement.GetProperty("success").GetBoolean().Should().BeTrue();
+        document.RootElement.GetProperty("data").GetProperty("tripId").GetGuid().Should().Be(tripId);
+        document.RootElement.GetProperty("data").GetProperty("points").GetArrayLength().Should().Be(1);
+        mediator.LastRequest.Should().BeOfType<GetTripRouteGeometryTrackingQuery>()
+            .Which.TripId.Should().Be(tripId);
     }
 
     [Fact]

@@ -8,11 +8,13 @@ using VietRide.Shared.Web.Middleware;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Api.Filters;
 using VietRide.Trip.Application.Features.Internal.Trips.BookSeats;
+using VietRide.Trip.Application.Features.Internal.Trips.Cargo;
 using VietRide.Trip.Application.Features.Internal.Trips.GetTripSnapshot;
 using VietRide.Trip.Application.Features.Internal.Trips.LockRoundTripSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.LockSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.ReleaseSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.Requests;
+using VietRide.Trip.Application.Features.Internal.Trips.Tracking;
 
 namespace VietRide.Trip.Api.Controllers;
 
@@ -36,6 +38,48 @@ public sealed class InternalTripsController : ControllerBase
     {
         var result = await mediator.Send(new GetTripSnapshotQuery(tripId), cancellationToken);
         return Ok(result);
+    }
+
+    [HttpGet("{tripId:guid}/tracking-authorization")]
+    [ProducesResponseType(typeof(ApiResponse<TrackingAuthorizationResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ApiResponse<TrackingAuthorizationResponse>>> GetTrackingAuthorizationAsync(
+        Guid tripId,
+        [FromQuery] Guid? userId,
+        [FromQuery] string? role,
+        [FromQuery] Guid? operatorId,
+        CancellationToken cancellationToken)
+    {
+        var result = await mediator.Send(
+            new GetTripTrackingAuthorizationQuery(tripId, userId, role, operatorId),
+            cancellationToken);
+
+        return Ok(ApiResponse<TrackingAuthorizationResponse>.Ok(result, ApiMeta.Create(HttpContext.TraceIdentifier)));
+    }
+
+    [HttpGet("{tripId:guid}/route-stops")]
+    [ProducesResponseType(typeof(ApiResponse<TripRouteStopsTrackingResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ApiResponse<TripRouteStopsTrackingResponse>>> GetRouteStopsForTrackingAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        var result = await mediator.Send(new GetTripRouteStopsTrackingQuery(tripId), cancellationToken);
+        return Ok(ApiResponse<TripRouteStopsTrackingResponse>.Ok(result, ApiMeta.Create(HttpContext.TraceIdentifier)));
+    }
+
+    [HttpGet("{tripId:guid}/route-geometry")]
+    [ProducesResponseType(typeof(ApiResponse<TripRouteGeometryTrackingResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ApiResponse<TripRouteGeometryTrackingResponse>>> GetRouteGeometryForTrackingAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        var result = await mediator.Send(new GetTripRouteGeometryTrackingQuery(tripId), cancellationToken);
+        return Ok(ApiResponse<TripRouteGeometryTrackingResponse>.Ok(result, ApiMeta.Create(HttpContext.TraceIdentifier)));
     }
 
     [HttpPost("{tripId:guid}/lock-seats")]
@@ -84,6 +128,53 @@ public sealed class InternalTripsController : ControllerBase
             new BookSeatsCommand(tripId, request.SeatLockToken, request.BookingId, request.PassengerSeatAssignments),
             cancellationToken);
         return NoContent();
+    }
+
+    [HttpPost("{tripId:guid}/cargo/reserve")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<CargoCapacityDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<CargoCapacityDto>> ReserveCargoAsync(
+        Guid tripId,
+        [FromBody] CargoMutationRequest request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await mediator.Send(
+            new CargoMutationCommand(tripId, request.ParcelId, request.WeightKg, "reserve"),
+            cancellationToken));
+    }
+
+    [HttpPost("{tripId:guid}/cargo/load")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<CargoCapacityDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<CargoCapacityDto>> LoadCargoAsync(
+        Guid tripId,
+        [FromBody] CargoMutationRequest request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await mediator.Send(
+            new CargoMutationCommand(tripId, request.ParcelId, request.WeightKg, "load"),
+            cancellationToken));
+    }
+
+    [HttpPost("{tripId:guid}/cargo/release")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<CargoCapacityDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<CargoCapacityDto>> ReleaseCargoAsync(
+        Guid tripId,
+        [FromBody] CargoMutationRequest request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await mediator.Send(
+            new CargoMutationCommand(tripId, request.ParcelId, request.WeightKg, "release"),
+            cancellationToken));
     }
 
     [HttpPost("round-trip/lock-seats")]

@@ -53,7 +53,9 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
                 stop.AllowDropoff,
                 stop.EstimatedArrivalTime,
                 stop.DistanceFromOriginKm.HasValue ? (double)stop.DistanceFromOriginKm.Value : null,
-                fares.TryGetValue(stop.StopId, out var fare) ? fare : null))
+                fares.TryGetValue(stop.StopId, out var fare) ? fare : null,
+                stop.Status.ToString(),
+                stop.ActualArrivalTime))
             .ToArray();
         var seats = tripSeatRepository.QueryNoTracking().Where(seat => seat.TripId == trip.Id).ToArray();
 

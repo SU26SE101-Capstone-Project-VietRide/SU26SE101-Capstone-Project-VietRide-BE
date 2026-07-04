@@ -11,6 +11,7 @@
     <ProjectReference Include="..\VietRide.Trip.Infrastructure\VietRide.Trip.Infrastructure.csproj" />
     <ProjectReference Include="..\..\..\..\libs\dotnet\VietRide.Shared.Web\VietRide.Shared.Web.csproj" />
     <ProjectReference Include="..\..\..\..\libs\dotnet\VietRide.Shared.Persistence\VietRide.Shared.Persistence.csproj" />
+    <ProjectReference Include="..\..\..\..\libs\dotnet\VietRide.Shared.Messaging\VietRide.Shared.Messaging.csproj" />
   </ItemGroup>
 
   <ItemGroup>
