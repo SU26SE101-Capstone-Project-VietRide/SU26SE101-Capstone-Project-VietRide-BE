@@ -27,7 +27,7 @@ Production direction:
 
 ## Quyết Định Đã Chốt
 
-- Parcel code format: `VRP-yyyyMMdd-XXXXXXXX`.
+- Định dạng mã kiện hàng: `VR-PCL-yyyyMMdd-XXXXXXXX`; hậu tố dùng alphabet không gây nhầm lẫn `A-HJ-NP-Z2-9`.
 - `PENDING` nghĩa là đã thanh toán/accepted, đang chờ load.
 - `PENDING_PAYMENT` nghĩa là chưa thanh toán xong.
 - `EXTRA_LARGE` bắt đầu ở `PENDING_OPERATOR_REVIEW`, chưa charge.
@@ -588,3 +588,5 @@ Người dùng chỉ cần nói:
 > Đọc AGENTS.md, AGENTS_DOTNET.md và docs/developer-guides/dotnet/parcel-service-timeline.md. Tiếp tục phase Parcel đầu tiên chưa tick, không làm phase sau.
 
 Agent sẽ đọc timeline, thấy phase đầu tiên chưa `[x]`, rồi làm đúng phase đó.
+
+- Carry-over Day 28/39: Điểm neo arrival cho destination terminal khi dropoffStopId = null vẫn chưa nằm trong P0; P0 chỉ xác thực stop thật khi client truyền dropoffStopId.

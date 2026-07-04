@@ -108,10 +108,11 @@ TestResults/
 
 # ── Environment / secrets ────────────────────────────────────────────────────
 .env
+.env.rag-full-flow
 .env.local
 .env.*.local
 !.env.example
-
+.env.rag-full-flow.example
 # Service-local config overrides
 **/appsettings.Local.json
 **/appsettings.*.local.json

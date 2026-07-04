@@ -24,7 +24,7 @@ Tài liệu này là timeline triển khai chính thức cho `apps/rag`. Mục t
 
 - Storage production: Cloudinary qua REST API, không thêm package mới.
 - Chat provider giai đoạn thử nghiệm: OpenRouter.
-- Chat model thử nghiệm: `openai/gpt-oss-120b:free`.
+- Chat model thử nghiệm: `nvidia/nemotron-3-ultra-550b-a55b:free`.
 - Embedding provider giai đoạn thử nghiệm: OpenRouter.
 - Embedding model thử nghiệm: `nvidia/llama-nemotron-embed-vl-1b-v2:free`.
 - Không tự fallback sang model trả phí nếu `OPENROUTER_ALLOW_PAID_FALLBACK=false`.
@@ -97,7 +97,7 @@ INTERNAL_JWT_SECRET=
 
 OPENROUTER_API_KEY=
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-OPENROUTER_CHAT_MODEL=openai/gpt-oss-120b:free
+OPENROUTER_CHAT_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
 OPENROUTER_EMBEDDING_MODEL=nvidia/llama-nemotron-embed-vl-1b-v2:free
 OPENROUTER_HTTP_REFERER=http://localhost:3000
 OPENROUTER_APP_TITLE=VietRide RAG

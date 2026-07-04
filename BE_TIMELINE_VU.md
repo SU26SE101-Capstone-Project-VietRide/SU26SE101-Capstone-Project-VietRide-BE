@@ -286,7 +286,7 @@
 - **Review**: unload before stop ARRIVED returns 422; operator override audit log persisted
 
 ### Day 28 — Wed 2026-07-01 — Parcel: Dropoff at Stop + Capacity counter ([SCV-108](https://hoangvutran088.atlassian.net/browse/SCV-108))
-- `dropoffStopId` field on Parcel: null = destination terminal, else must be RouteStop with allowDropoff=true
+- `dropoffStopId` field on Parcel: null = destination terminal, else must be RouteStop with allowDropoff=true. Carry-over: arrival anchor cho destination terminal xử lý ở Day 28/39; P0 chỉ gate stop thật khi có `dropoffStopId`.
 - Trip cargo counters: `totalReservedWeightKg`, `totalLoadedWeightKg`, atomic update with parcel status transitions
 - Near-full alert: when `totalLoadedWeightKg >= 0.8 * vehicleMaxCargoKg`, emit `trip.cargo_near_full` event
 - `GET /operator/trips/{id}/cargo-capacity` returns reserved/loaded/max/percentFull
@@ -322,7 +322,7 @@
 - Manual confirm endpoint for assistant/operator if no email (with audit note)
 - Hangfire: 7-day re-alert if no confirmation; expired token does NOT auto-confirm
 - **DoD**: recipient receives email → opens link → accepts → parcel DELIVERED; resend revokes old token
-- **Review**: expired token returns 410; reject + undo within 15min reverts to UNLOADED state
+- **Review**: expired token returns 400 `PARCEL_DELIVERY_TOKEN_EXPIRED`; reject + `POST /v1/parcels/delivery/undo-reject` within 15min reverts to `DELIVERED_PENDING_CONFIRM`
 
 ### Day 32 — Tue 2026-07-07 — Parcel cancel/return/transfer flows
 - Parcel auto-cancel after Trip cancel (with refund per parcelNoShowPolicy)
