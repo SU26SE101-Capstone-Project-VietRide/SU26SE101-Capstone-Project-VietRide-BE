@@ -17,9 +17,6 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
   app.enableShutdownHooks();
   app.useWebSocketAdapter(new CorsIoAdapter(app, env.TRACKING_CORS_ORIGIN));
-  const globalPrefix = 'api';
-  // Exclude probes so docker-compose/Nginx can reach them without the API prefix.
-  app.setGlobalPrefix(globalPrefix, { exclude: ['health', 'ready'] });
 
   if (env.TRACKING_SWAGGER_ENABLED) {
     const swaggerConfig = new DocumentBuilder()
@@ -32,7 +29,7 @@ async function bootstrap(): Promise<void> {
   }
   const port = env.PORT;
   await app.listen(env.PORT, '0.0.0.0');
-  Logger.log(`🚀 Application is running on: http://localhost:${port}/${globalPrefix}`);
+  Logger.log(`🚀 Application is running on: http://localhost:${port}`);
 }
 
 bootstrap();

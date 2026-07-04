@@ -9,14 +9,14 @@ async function main() {
   const results = [];
 
   results.push(await runCase('auth fail returns 401 envelope', async () => {
-    const response = await request(`/api/v1/tracking/trips/${readTripIdForNegativeCase()}/latest`);
+    const response = await request(`/v1/tracking/trips/${readTripIdForNegativeCase()}/latest`);
     assert(response.status === 401, `expected 401, got ${response.status}`);
     assertEnvelope(response.body, false);
     assert(response.body.error?.code === 'UNAUTHORIZED', 'expected UNAUTHORIZED');
   }));
 
   results.push(await runCase('validation fail returns 400 envelope', async () => {
-    const response = await request('/api/v1/tracking/trips/not-a-uuid/latest', accessToken);
+    const response = await request('/v1/tracking/trips/not-a-uuid/latest', accessToken);
     assert(response.status === 400, `expected 400, got ${response.status}`);
     assertEnvelope(response.body, false);
   }));
@@ -26,17 +26,17 @@ async function main() {
     requireEnv('TRIP_ID', tripId);
     requireEnv('STOP_ID', stopId);
 
-    const latest = await request(`/api/v1/tracking/trips/${tripId}/latest`, accessToken);
+    const latest = await request(`/v1/tracking/trips/${tripId}/latest`, accessToken);
     assert(latest.status === 200, `latest expected 200, got ${latest.status}`);
     assertEnvelope(latest.body, true);
     assert('latest' in latest.body.data, 'latest response missing data.latest');
 
-    const trail = await request(`/api/v1/tracking/trips/${tripId}/trail`, accessToken);
+    const trail = await request(`/v1/tracking/trips/${tripId}/trail`, accessToken);
     assert(trail.status === 200, `trail expected 200, got ${trail.status}`);
     assertEnvelope(trail.body, true);
     assert(Array.isArray(trail.body.data.items), 'trail response missing data.items array');
 
-    const eta = await request(`/api/v1/tracking/trips/${tripId}/eta?stopId=${stopId}`, accessToken);
+    const eta = await request(`/v1/tracking/trips/${tripId}/eta?stopId=${stopId}`, accessToken);
     assert(eta.status === 200, `eta expected 200, got ${eta.status}`);
     assertEnvelope(eta.body, true);
     assert('eta' in eta.body.data, 'eta response missing data.eta');

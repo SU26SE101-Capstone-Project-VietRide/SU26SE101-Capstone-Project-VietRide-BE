@@ -134,8 +134,7 @@ describe('TrackingDataController REST fallback (e2e)', () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
-    app.setGlobalPrefix('api');
-    await app.listen(0);
+        await app.listen(0);
     port = readListeningPort(app);
   });
 
@@ -144,7 +143,7 @@ describe('TrackingDataController REST fallback (e2e)', () => {
   });
 
   it('returns 401 envelope when auth is missing', async () => {
-    const response = await getJson<ApiEnvelope<unknown>>(`/api/v1/tracking/trips/${TEST_TRIP_ID}/latest`);
+    const response = await getJson<ApiEnvelope<unknown>>(`/v1/tracking/trips/${TEST_TRIP_ID}/latest`);
 
     expect(response.status).toBe(401);
     expect(response.body.success).toBe(false);
@@ -153,7 +152,7 @@ describe('TrackingDataController REST fallback (e2e)', () => {
 
   it('returns 401 envelope when token is invalid', async () => {
     const response = await getJson<ApiEnvelope<unknown>>(
-      `/api/v1/tracking/trips/${TEST_TRIP_ID}/latest`,
+      `/v1/tracking/trips/${TEST_TRIP_ID}/latest`,
       'not-a-jwt',
     );
 
@@ -164,7 +163,7 @@ describe('TrackingDataController REST fallback (e2e)', () => {
   it('returns 400 envelope when tripId is not a valid UUID even with valid token', async () => {
     const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
     const response = await getJson<ApiEnvelope<unknown>>(
-      '/api/v1/tracking/trips/not-a-uuid/latest',
+      '/v1/tracking/trips/not-a-uuid/latest',
       token,
     );
 
@@ -176,7 +175,7 @@ describe('TrackingDataController REST fallback (e2e)', () => {
   it('returns 403 envelope when trip authorization denies access', async () => {
     const token = await signIdentityToken('PASSENGER', UNAUTHORIZED_USER_ID);
     const response = await getJson<ApiEnvelope<unknown>>(
-      `/api/v1/tracking/trips/${TEST_TRIP_ID}/latest`,
+      `/v1/tracking/trips/${TEST_TRIP_ID}/latest`,
       token,
     );
 
@@ -187,7 +186,7 @@ describe('TrackingDataController REST fallback (e2e)', () => {
   it('returns latest tracking data from Redis', async () => {
     const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
     const response = await getJson<ApiEnvelope<{ latest: { tripId: string; latitude: number } }>>(
-      `/api/v1/tracking/trips/${TEST_TRIP_ID}/latest`,
+      `/v1/tracking/trips/${TEST_TRIP_ID}/latest`,
       token,
     );
 
@@ -205,7 +204,7 @@ describe('TrackingDataController REST fallback (e2e)', () => {
     const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
     const missingTripId = '77777777-7777-4777-8777-777777777777';
     const response = await getJson<ApiEnvelope<{ latest: null }>>(
-      `/api/v1/tracking/trips/${missingTripId}/latest`,
+      `/v1/tracking/trips/${missingTripId}/latest`,
       token,
     );
 
@@ -224,7 +223,7 @@ describe('TrackingDataController REST fallback (e2e)', () => {
       hasNextPage: boolean;
       hasPreviousPage: boolean;
     }>>(
-      `/api/v1/tracking/trips/${TEST_TRIP_ID}/trail?from=2026-06-03T09:00:00.000Z&to=2026-06-03T11:00:00.000Z&page=1&pageSize=20`,
+      `/v1/tracking/trips/${TEST_TRIP_ID}/trail?from=2026-06-03T09:00:00.000Z&to=2026-06-03T11:00:00.000Z&page=1&pageSize=20`,
       token,
     );
 
@@ -249,7 +248,7 @@ describe('TrackingDataController REST fallback (e2e)', () => {
   it('returns cached ETA from Redis', async () => {
     const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
     const response = await getJson<ApiEnvelope<{ eta: { etaMinutes: number } }>>(
-      `/api/v1/tracking/trips/${TEST_TRIP_ID}/eta?stopId=${TEST_STOP_ID}`,
+      `/v1/tracking/trips/${TEST_TRIP_ID}/eta?stopId=${TEST_STOP_ID}`,
       token,
     );
 
@@ -264,7 +263,7 @@ describe('TrackingDataController REST fallback (e2e)', () => {
   it('returns 400 envelope when ETA stopId is invalid', async () => {
     const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
     const response = await getJson<ApiEnvelope<unknown>>(
-      `/api/v1/tracking/trips/${TEST_TRIP_ID}/eta?stopId=bad-stop-id`,
+      `/v1/tracking/trips/${TEST_TRIP_ID}/eta?stopId=bad-stop-id`,
       token,
     );
 
