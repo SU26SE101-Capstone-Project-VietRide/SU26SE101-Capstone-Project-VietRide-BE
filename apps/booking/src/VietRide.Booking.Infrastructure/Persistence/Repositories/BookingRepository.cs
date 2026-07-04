@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Domain.Enums;
+using VietRide.Booking.Domain.ValueObjects;
 using VietRide.Shared.Application.Repositories;
 using BookingEntity = VietRide.Booking.Domain.Entities.Booking;
 
@@ -55,12 +56,13 @@ internal sealed class BookingRepository : IBookingRepository
         string bookingCode,
         CancellationToken ct = default)
     {
-        // Compare the converted string primitive directly to avoid fragile EF translation
-        // of struct equality through a value converter.
+        var code = BookingCode.Parse(bookingCode);
+
+        // Compare the mapped value object. Its configured value converter translates the
+        // constant to the booking_code column; EF.Property must use the model property name,
+        // not the physical snake_case column name.
         return await _db.Bookings
-            .FirstOrDefaultAsync(
-                b => EF.Property<string>(b, "booking_code") == bookingCode,
-                ct);
+            .FirstOrDefaultAsync(b => b.BookingCode == code, ct);
     }
 
     /// <inheritdoc/>
@@ -150,6 +152,27 @@ internal sealed class BookingRepository : IBookingRepository
                 .SetProperty(b => b.Status, BookingStatus.EXPIRED)
                 .SetProperty(b => b.ExpiredAt, expiredAt)
                 .SetProperty(b => b.UpdatedAt, expiredAt), ct);
+
+        return updated == 1;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> TryCancelAsync(
+        Guid bookingId,
+        BookingCancellationReason reason,
+        DateTimeOffset cancelledAt,
+        bool refundOverride,
+        CancellationToken ct = default)
+    {
+        var updated = await _db.Bookings
+            .Where(b => b.Id == bookingId
+                && (b.Status == BookingStatus.CONFIRMED || b.Status == BookingStatus.PENDING_PAYMENT))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(b => b.Status, BookingStatus.CANCELLED)
+                .SetProperty(b => b.CancellationReason, reason)
+                .SetProperty(b => b.CancelledAt, cancelledAt)
+                .SetProperty(b => b.RefundOverride, refundOverride)
+                .SetProperty(b => b.UpdatedAt, cancelledAt), ct);
 
         return updated == 1;
     }

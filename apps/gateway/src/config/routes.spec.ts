@@ -72,6 +72,70 @@ describe('buildRouteTable', () => {
     });
   });
 
+  it('routes trip operations to Booking instead of the passenger booking route', () => {
+    const route = matchRoute(
+      routes,
+      '/v1/bookings/trips/11111111-1111-1111-1111-111111111111/manifest',
+    );
+
+    expect(route?.prefix).toBe('/v1/bookings/trips');
+    expect(route?.target).toBe(env.BOOKING_BASE_URL);
+    expect(route?.authRequired).toBe('user');
+    expect(route?.requiredRoles).toEqual(['DRIVER', 'ASSISTANT']);
+    expect(route?.prefix).not.toBe('/v1/bookings');
+  });
+
+  it('role-gates driver and assistant route families from PASSENGER users', () => {
+    const driverRoute = matchRoute(routes, '/v1/driver/me/schedule');
+    const assistantRoute = matchRoute(routes, '/v1/assistant/me');
+
+    [driverRoute, assistantRoute].forEach((route) => {
+      expect(route?.target).toBe(env.TRIP_BASE_URL);
+      expect(route?.authRequired).toBe('user');
+      expect(route?.requiredRoles).toEqual(['DRIVER', 'ASSISTANT']);
+      expect(route?.requiredRoles).not.toContain('PASSENGER');
+    });
+  });
+
+  it('proxies every Day 18 driver endpoint through its owning service', () => {
+    const cases = [
+      ['/v1/driver/me/schedule', '/v1/driver', env.TRIP_BASE_URL],
+      [
+        '/v1/bookings/trips/11111111-1111-1111-1111-111111111111/manifest',
+        '/v1/bookings/trips',
+        env.BOOKING_BASE_URL,
+      ],
+      [
+        '/v1/bookings/trips/11111111-1111-1111-1111-111111111111/boarding/passenger/22222222-2222-2222-2222-222222222222',
+        '/v1/bookings/trips',
+        env.BOOKING_BASE_URL,
+      ],
+      [
+        '/v1/bookings/trips/11111111-1111-1111-1111-111111111111/boarding/qr-scan',
+        '/v1/bookings/trips',
+        env.BOOKING_BASE_URL,
+      ],
+    ] as const;
+
+    cases.forEach(([path, prefix, target]) => {
+      const route = matchRoute(routes, path);
+
+      expect(route?.prefix).toBe(prefix);
+      expect(route?.target).toBe(target);
+      expect(route?.authRequired).toBe('user');
+      expect(route?.requiredRoles).toEqual(['DRIVER', 'ASSISTANT']);
+    });
+  });
+
+  it('routes operator booking stats to Booking with operator role union', () => {
+    const route = matchRoute(routes, '/v1/operator/booking-stats');
+
+    expect(route?.prefix).toBe('/v1/operator/booking-stats');
+    expect(route?.target).toBe(env.BOOKING_BASE_URL);
+    expect(route?.authRequired).toBe('user');
+    expect(route?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
+  });
+
   it('matches cross-service admin routes to the correct upstream services', () => {
     const cases = [
       ['/v1/admin/operators', env.IDENTITY_BASE_URL],

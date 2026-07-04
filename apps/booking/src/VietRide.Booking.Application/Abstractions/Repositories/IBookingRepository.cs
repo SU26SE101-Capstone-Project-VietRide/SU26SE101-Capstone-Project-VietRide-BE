@@ -1,3 +1,4 @@
+using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Repositories;
 using BookingEntity = VietRide.Booking.Domain.Entities.Booking;
 
@@ -49,6 +50,17 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
     Task<bool> TryExpirePendingPaymentAsync(
         Guid bookingId,
         DateTimeOffset expiredAt,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Status-guarded CONFIRMED/PENDING_PAYMENT -> CANCELLED transition.
+    /// Returns true only when this call changed the row.
+    /// </summary>
+    Task<bool> TryCancelAsync(
+        Guid bookingId,
+        BookingCancellationReason reason,
+        DateTimeOffset cancelledAt,
+        bool refundOverride,
         CancellationToken ct = default);
 
     /// <summary>

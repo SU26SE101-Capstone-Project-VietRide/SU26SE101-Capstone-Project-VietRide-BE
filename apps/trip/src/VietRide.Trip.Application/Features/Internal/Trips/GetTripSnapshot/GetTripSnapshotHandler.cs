@@ -72,7 +72,9 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
             new InternalTripStationSnapshotDto(destinationStation.Id, destinationStation.Name),
             stops,
             new InternalTripSeatSummaryDto(seats.Length, seats.Count(seat => seat.Status == TripSeatStatus.AVAILABLE)),
-            route.ReturnRouteId);
+            route.ReturnRouteId,
+            trip.DriverUserId,
+            trip.AssistantUserId);
 
         return Task.FromResult(dto);
     }

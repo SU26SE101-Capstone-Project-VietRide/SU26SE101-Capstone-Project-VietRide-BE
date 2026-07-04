@@ -51,8 +51,10 @@ var app = builder.Build();
 if (!IsWebApplicationFactoryHost())
 {
     await using var scope = app.Services.CreateAsyncScope();
-    // Apply pending EF Core migrations before seeding (creates the schema on first boot).
-    await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Database.MigrateAsync();
+    // Apply pending EF Core migrations before seeding (creates the schema on first boot),
+    // then reload the Npgsql type catalog so the native enums (user_role, user_status, …)
+    // resolve on a fresh DB — otherwise the first enum read fails with DataTypeName '-'.
+    await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().MigrateAndReloadTypesAsync();
     var bootstrapAdminSeeder = scope.ServiceProvider.GetRequiredService<BootstrapAdminSeeder>();
     await bootstrapAdminSeeder.SeedAsync();
 }

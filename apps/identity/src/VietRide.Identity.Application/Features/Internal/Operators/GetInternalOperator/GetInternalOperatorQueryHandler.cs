@@ -1,6 +1,7 @@
 using System.Text.Json;
 using MediatR;
 using VietRide.Identity.Application.Abstractions.Repositories;
+using VietRide.Identity.Application.Features.Operators;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Shared.Application.Exceptions;
 
@@ -31,6 +32,7 @@ public sealed class GetInternalOperatorQueryHandler : IRequestHandler<GetInterna
             operatorEntity.ContactPhone,
             operatorEntity.BusinessRegistrationNumber,
             operatorEntity.TaxCode,
+            OperatorProfilePolicyValidator.ToNullableJsonElement(operatorEntity.CancellationPolicy),
             ParseParcelNoShowPolicy(operatorEntity.ParcelNoShowPolicy));
     }
 

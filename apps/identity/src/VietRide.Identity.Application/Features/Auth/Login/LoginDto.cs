@@ -10,6 +10,7 @@ public sealed record TokenBundleDto(
 public sealed record UserSummaryDto(
     Guid Id,
     string Email,
+    string? Phone,
     string DisplayName,
     string Role,
     Guid? OperatorId,

@@ -6,8 +6,6 @@ const { pathToFileURL } = require('node:url');
 
 require('dotenv').config({ path: path.resolve(process.cwd(), '.env') });
 
-const { Client } = require('pg');
-
 const repoRoot = process.cwd();
 const collectionPath = path.join(repoRoot, 'docs/api/postman/vietride.postman_collection.json');
 const environmentPath = path.join(
@@ -23,14 +21,36 @@ const harnessHost = '127.0.0.1';
 const harnessPort = Number(process.env.DAY6_HARNESS_PORT || 3056);
 const schemaName = 'vietride_identity';
 
-function postgresConfig() {
-  return {
-    host: process.env.POSTGRES_HOST || '127.0.0.1',
-    port: Number(process.env.POSTGRES_PORT || 5432),
-    database: process.env.IDENTITY_DB || 'vietride_identity',
-    user: process.env.POSTGRES_USER || 'vietride',
-    password: process.env.POSTGRES_PASSWORD || 'vietride_dev',
-  };
+function sqlLiteral(value) {
+  if (value === null || value === undefined) return 'NULL';
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+class PsqlClient {
+  async connect() {}
+
+  async end() {}
+
+  async query(statement, parameters = []) {
+    let sql = statement.trim().replace(/;\s*$/, '');
+    for (let index = parameters.length; index >= 1; index -= 1) {
+      sql = sql.replaceAll(`$${index}`, sqlLiteral(parameters[index - 1]));
+    }
+    const wrapped = /^insert\s/i.test(sql)
+      ? `WITH q AS (${sql}) SELECT COALESCE(json_agg(q), '[]'::json) FROM q`
+      : `SELECT COALESCE(json_agg(q), '[]'::json) FROM (${sql}) q`;
+    const result = childProcess.spawnSync(
+      'docker',
+      [
+        'exec', 'vietride_postgres', 'psql', '-v', 'ON_ERROR_STOP=1', '-U',
+        process.env.POSTGRES_USER || 'vietride', '-d',
+        process.env.IDENTITY_DB || 'vietride_identity', '-Atc', wrapped,
+      ],
+      { encoding: 'utf8' },
+    );
+    if (result.status !== 0) throw new Error(result.stderr || 'psql query failed');
+    return { rows: JSON.parse(result.stdout.trim() || '[]') };
+  }
 }
 
 function jsonResponse(res, statusCode, body) {
@@ -247,7 +267,7 @@ async function runNewman() {
 }
 
 async function main() {
-  const client = new Client(postgresConfig());
+  const client = new PsqlClient();
   await client.connect();
 
   const server = await createServer(client);

@@ -134,6 +134,10 @@ values
    'Day 9 Approved Operator Admin', 'OPERATOR_ADMIN'::user_role, 'ACTIVE'::user_status, '${seed.approvedOperatorId}'),
   ('${seed.approvedStaffUserId}', 'day9-approved-staff@example.test', '+84909000012', null,
    'Day 9 Approved Operator Staff', 'OPERATOR_STAFF'::user_role, 'ACTIVE'::user_status, '${seed.approvedOperatorId}'),
+  ('${seed.driverUserId}', 'day9-driver@example.test', '+84909000014', null,
+   'Day 9 Driver', 'DRIVER'::user_role, 'ACTIVE'::user_status, '${seed.approvedOperatorId}'),
+  ('${seed.assistantUserId}', 'day9-assistant@example.test', '+84909000015', null,
+   'Day 9 Assistant', 'ASSISTANT'::user_role, 'ACTIVE'::user_status, '${seed.approvedOperatorId}'),
   ('${seed.otherAdminUserId}', 'day9-other-admin@example.test', '+84909000013', null,
    'Day 9 Other Operator Admin', 'OPERATOR_ADMIN'::user_role, 'ACTIVE'::user_status, '${seed.otherOperatorId}')
 on conflict (id) do update set
@@ -157,6 +161,14 @@ function seedTrip() {
     `begin;
 
 create extension if not exists pgcrypto;
+
+delete from ${tripSchema}.trips
+ where operator_id in ('${seed.approvedOperatorId}', '${seed.otherOperatorId}')
+    or vehicle_id in (
+      select id from ${tripSchema}.vehicles
+       where operator_id in ('${seed.approvedOperatorId}', '${seed.otherOperatorId}')
+          or license_plate like 'DAY9-%'
+    );
 
 delete from ${tripSchema}.driver_schedules
  where operator_id in ('${seed.approvedOperatorId}', '${seed.otherOperatorId}')

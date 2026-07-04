@@ -21,7 +21,12 @@
     "postman:day8:local": "node scripts/run-day8-newman-local.js",
     "postman:day9:local": "node scripts/run-day9-newman-local.js",
     "postman:day13:local": "node scripts/run-day13-newman-local.js",
+    "postman:day15:local": "node scripts/run-day15-newman-local.mjs",
+    "postman:day17:local": "node scripts/run-day17-newman-local.mjs",
     "postman:day11:local": "node scripts/run-day11-newman-local.js",
+    "postman:day18:local": "node scripts/run-day18-newman-local.mjs",
+    "postman:day18:crossday": "node scripts/run-day18-crossday-local.mjs",
+    "postman:full:local": "node scripts/run-full-e2e-local.mjs",
     "lint:ts": "nx run-many -t lint --exclude=\"VietRide.*\"",
     "test:ts": "nx run-many -t test --exclude=\"VietRide.*\" --ci --passWithNoTests",
     "build:ts": "nx run-many -t build --exclude=\"VietRide.*\""

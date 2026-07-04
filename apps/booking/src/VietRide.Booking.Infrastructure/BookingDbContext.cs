@@ -20,6 +20,8 @@ public sealed class BookingDbContext : VietRideDbContextBase
     public DbSet<Voucher> Vouchers => Set<Voucher>();
     public DbSet<VoucherUsage> VoucherUsages => Set<VoucherUsage>();
     public DbSet<OperatorVoucherConsent> OperatorVoucherConsents => Set<OperatorVoucherConsent>();
+    public DbSet<BookingStats> BookingStats => Set<BookingStats>();
+    public DbSet<BookingStatsProcessedEvent> BookingStatsProcessedEvents => Set<BookingStatsProcessedEvent>();
 
     public BookingDbContext(DbContextOptions<BookingDbContext> options, IClock clock)
         : base(options, clock)

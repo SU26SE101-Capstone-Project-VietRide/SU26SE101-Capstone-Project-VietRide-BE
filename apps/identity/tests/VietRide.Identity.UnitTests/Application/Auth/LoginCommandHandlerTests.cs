@@ -125,6 +125,7 @@ public sealed class LoginCommandHandlerTests
         result.RefreshToken.Should().Be("rawtoken123");
         result.ExpiresInSeconds.Should().Be(900);
         result.User.Email.Should().Be("user@example.com");
+        result.User.Phone.Should().Be(TestPhone.Value);
         result.User.Role.Should().Be(UserRole.PASSENGER.ToString());
 
         await lockoutCounter.Received(1).ResetAsync(user.Id, Arg.Any<CancellationToken>());

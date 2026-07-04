@@ -90,6 +90,7 @@ public sealed class RefreshCommandHandlerTests
         result.Should().NotBeNull();
         result.RefreshToken.Should().Be("newraw");
         result.AccessToken.Should().Be("new.access.token");
+        result.User.Phone.Should().Be(TestPhone.Value);
 
         // Old token must be revoked.
         existingToken.RevokedReason.Should().Be(RefreshTokenRevokeReason.NORMAL_ROTATION);

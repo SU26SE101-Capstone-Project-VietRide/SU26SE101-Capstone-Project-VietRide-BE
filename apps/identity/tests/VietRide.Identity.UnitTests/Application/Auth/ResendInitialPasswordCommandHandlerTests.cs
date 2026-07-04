@@ -255,6 +255,9 @@ public sealed class ResendInitialPasswordCommandHandlerTests
         public string GenerateCode() => "new-token";
 
         public DateTimeOffset GetExpiresAt(DateTimeOffset now) => now.AddHours(48);
+
+        public string BuildSetInitialPasswordUrl(string code)
+            => $"https://test.vietride.app/auth/set-password?token={code}";
     }
 
     private sealed class CapturingEmailService : IEmailService

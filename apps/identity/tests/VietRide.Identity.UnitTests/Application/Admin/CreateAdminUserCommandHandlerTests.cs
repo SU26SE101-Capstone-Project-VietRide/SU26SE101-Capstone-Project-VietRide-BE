@@ -148,6 +148,8 @@ public sealed class CreateAdminUserCommandHandlerTests
         var initialPasswordTokens = Substitute.For<IInitialPasswordTokenService>();
         initialPasswordTokens.GenerateCode().Returns("initial-token");
         initialPasswordTokens.GetExpiresAt(Now).Returns(Now.AddHours(48));
+        initialPasswordTokens.BuildSetInitialPasswordUrl("initial-token")
+            .Returns("https://test.vietride.app/auth/set-password?token=initial-token");
         clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
 

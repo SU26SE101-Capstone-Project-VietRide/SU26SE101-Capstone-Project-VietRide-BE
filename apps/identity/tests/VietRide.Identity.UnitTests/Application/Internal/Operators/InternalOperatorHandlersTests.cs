@@ -33,6 +33,9 @@ public sealed class InternalOperatorHandlersTests
         result.BusinessRegistrationNumber.Should().Be("0312345678");
         result.TaxCode.Should().Be("0312345678");
         result.ParcelNoShowPolicy.Should().BeNull();
+        result.CancellationPolicy.Should().NotBeNull();
+        result.CancellationPolicy!.Value[0].GetProperty("hoursBeforeDeparture").GetInt32().Should().Be(24);
+        result.CancellationPolicy!.Value[0].GetProperty("feePercent").GetInt32().Should().Be(10);
     }
 
     [Fact]
@@ -156,6 +159,20 @@ public sealed class InternalOperatorHandlersTests
             Guid.Parse("11111111-1111-1111-1111-111111111111"),
             Now);
         SetProperty(operatorEntity, nameof(Operator.Id), OperatorId);
+        operatorEntity.UpdateProfile(
+            "VietRide Limousine",
+            "ops@example.com",
+            "+84901234567",
+            logoUrl: null,
+            addressStreet: null,
+            addressWard: null,
+            addressDistrict: null,
+            addressProvince: null,
+            representativeName: null,
+            representativePhone: null,
+            cancellationPolicy: """[{"hoursBeforeDeparture":24,"feePercent":10}]""",
+            parcelNoShowPolicy: null,
+            luggagePolicy: null);
         return operatorEntity;
     }
 
