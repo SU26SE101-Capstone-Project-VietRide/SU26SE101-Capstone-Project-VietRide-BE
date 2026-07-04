@@ -11,8 +11,6 @@ namespace VietRide.Parcel.Application.Features.Parcels.ConfirmDelivery;
 public sealed class ConfirmDeliveryCommandHandler
     : IRequestHandler<ConfirmDeliveryCommand, ConfirmDeliveryResponse>
 {
-    private static readonly TimeSpan DeliveryRejectedUndoWindow = TimeSpan.FromMinutes(15);
-
     private readonly IParcelRepository _parcelRepository;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IParcelStatsRepository _statsRepository;
@@ -51,17 +49,11 @@ public sealed class ConfirmDeliveryCommandHandler
                 "PARCEL_DELIVERY_TOKEN_REVOKED",
                 "The delivery token has been revoked.");
 
-        if (parcel.Status != ParcelStatus.DELIVERED_PENDING_CONFIRM &&
-            parcel.Status != ParcelStatus.DELIVERY_REJECTED)
+        if (parcel.Status != ParcelStatus.DELIVERED_PENDING_CONFIRM)
             throw new BadRequestException(
                 "PARCEL_NOT_PENDING_CONFIRM",
                 $"Parcel is in status '{parcel.Status}' and cannot be confirmed.");
 
-        var wasRejected = parcel.Status == ParcelStatus.DELIVERY_REJECTED;
-        if (wasRejected && (!parcel.RejectedAt.HasValue || parcel.RejectedAt.Value.Add(DeliveryRejectedUndoWindow) <= now))
-            throw new BadRequestException(
-                "PARCEL_DELIVERY_REJECTED_WINDOW_EXPIRED",
-                "The delivery rejection undo window has expired.");
 
         var snapshot = await _parcelRepository.TryConfirmDeliveryAsync(
             parcel.Id, command.DeliveryToken, command.IpAddress, now, cancellationToken);
@@ -80,7 +72,7 @@ public sealed class ConfirmDeliveryCommandHandler
         await _statsRepository.UpsertIncrementAsync(
             snapshot.OperatorId,
             DateOnly.FromDateTime(now.UtcDateTime),
-            0, 0, 1, wasRejected ? -1 : 0, 0, 0, 0,
+            0, 0, 1, 0, 0, 0, 0,
             cancellationToken);
 
         return new ConfirmDeliveryResponse(snapshot.ParcelId, snapshot.Status.ToString(), now);

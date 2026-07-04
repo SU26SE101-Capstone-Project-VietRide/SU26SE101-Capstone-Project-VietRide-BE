@@ -4,8 +4,10 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using StackExchange.Redis;
+using VietRide.Parcel.Application.Abstractions.Caching;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Infrastructure.Caching;
 using VietRide.Parcel.Infrastructure.Http;
 using VietRide.Parcel.Infrastructure.Jobs;
 using VietRide.Parcel.Infrastructure.Messaging;
@@ -71,6 +73,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IParcelRepository, ParcelRepository>();
         services.AddScoped<IParcelRouteFareRepository, ParcelRouteFareRepository>();
         services.AddScoped<IParcelStatsRepository, ParcelStatsRepository>();
+        services.AddScoped<IParcelReportCache, RedisParcelReportCache>();
 
         if (registerConsumers)
         {
@@ -108,6 +111,11 @@ public static class InfrastructureServiceCollectionExtensions
             {
                 options.QueueName = "parcel.trip-disrupted";
                 options.BindingKeys = [TripDisruptedIntegrationEvent.EventType];
+            });
+            services.AddVietRideEventConsumer<TripVehicleSubstitutedIntegrationEvent, TripVehicleSubstitutedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "parcel.trip-vehicle-substituted";
+                options.BindingKeys = [TripVehicleSubstitutedIntegrationEvent.EventType];
             });
         }
 

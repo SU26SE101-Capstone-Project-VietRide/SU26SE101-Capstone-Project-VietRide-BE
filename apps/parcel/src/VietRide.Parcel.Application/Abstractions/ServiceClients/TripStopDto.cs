@@ -7,4 +7,6 @@ public sealed record TripStopDto(
     bool AllowDropoff,
     DateTimeOffset EstimatedArrivalTime,
     double DistanceFromOriginKm,
-    long? FareFromThisStop);
+    long? FareFromThisStop,
+    string Status = "PENDING",
+    DateTimeOffset? ActualArrivalTime = null);

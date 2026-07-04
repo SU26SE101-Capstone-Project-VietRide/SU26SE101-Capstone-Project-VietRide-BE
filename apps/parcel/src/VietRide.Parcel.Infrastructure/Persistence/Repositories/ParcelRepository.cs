@@ -429,7 +429,7 @@ internal sealed class ParcelRepository : IParcelRepository
             )
             UPDATE vietride_parcel.parcels p
             SET delivery_token = gen_random_uuid(),
-                delivery_token_expires_at = p.delivered_pending_confirm_at + INTERVAL '7 days',
+                delivery_token_expires_at = @now + INTERVAL '48 hours',
                 delivery_token_revoked_at = NULL,
                 last_reminder_at = @now,
                 updated_at = @now
@@ -632,6 +632,99 @@ internal sealed class ParcelRepository : IParcelRepository
             ct);
     }
 
+    public async Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkRequestTransferByTripIdAsync(
+        Guid oldTripId,
+        Guid newTripId,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        return await ExecuteBulkReturningAsync(
+            """
+            UPDATE vietride_parcel.parcels
+            SET status = CAST(@target_status AS vietride_parcel.parcel_status),
+                transfer_target_trip_id = @new_trip_id,
+                transfer_requested_at = @now,
+                updated_at = @now
+            WHERE trip_id = @old_trip_id
+                  AND status IN (
+                      CAST(@loaded_status AS vietride_parcel.parcel_status),
+                      CAST(@in_transit_status AS vietride_parcel.parcel_status))
+            RETURNING id, parcel_code, operator_id, trip_id, status::text, deposit_amount, additional_amount, sender_user_id, recipient_user_id, transfer_target_trip_id;
+            """,
+            command =>
+            {
+                AddParameter(command, "target_status", ParcelStatus.PENDING_TRANSFER_CONFIRM.ToString());
+                AddParameter(command, "loaded_status", ParcelStatus.LOADED.ToString());
+                AddParameter(command, "in_transit_status", ParcelStatus.IN_TRANSIT.ToString());
+                AddParameter(command, "old_trip_id", oldTripId);
+                AddParameter(command, "new_trip_id", newTripId);
+                AddParameter(command, "now", now);
+            },
+            ct);
+    }
+
+    public async Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkRealertPendingOperatorActionAsync(
+        DateTimeOffset cutoff,
+        DateTimeOffset reminderCutoff,
+        DateTimeOffset now,
+        int maxBatch,
+        CancellationToken ct)
+    {
+        return await ExecuteBulkReturningAsync(
+            """
+            WITH candidates AS (
+                SELECT id
+                FROM vietride_parcel.parcels
+                WHERE status = CAST(@status AS vietride_parcel.parcel_status)
+                  AND updated_at <= @cutoff
+                  AND (last_reminder_at IS NULL OR last_reminder_at <= @reminder_cutoff)
+                ORDER BY updated_at
+                LIMIT @max_batch
+            )
+            UPDATE vietride_parcel.parcels p
+            SET last_reminder_at = @now,
+                updated_at = @now
+            FROM candidates
+            WHERE p.id = candidates.id
+            RETURNING p.id, p.parcel_code, p.operator_id, p.trip_id, p.status::text, p.deposit_amount, p.additional_amount, p.sender_user_id, p.recipient_user_id;
+            """,
+            command =>
+            {
+                AddParameter(command, "status", ParcelStatus.PENDING_OPERATOR_ACTION.ToString());
+                AddParameter(command, "cutoff", cutoff);
+                AddParameter(command, "reminder_cutoff", reminderCutoff);
+                AddParameter(command, "now", now);
+                AddParameter(command, "max_batch", maxBatch);
+            },
+            ct);
+    }
+
+    public async Task<ParcelPaymentTransitionSnapshot?> TryManualCancelAsync(
+        Guid parcelId,
+        Guid operatorId,
+        ParcelStatus targetStatus,
+        string reason,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        var sourceStatuses = targetStatus == ParcelStatus.REJECTED
+            ? new[] { ParcelStatus.PENDING_PAYMENT, ParcelStatus.PENDING_OPERATOR_REVIEW }
+            : new[] { ParcelStatus.PENDING, ParcelStatus.PENDING_ADDITIONAL_PAYMENT };
+
+        var affected = await _db.Parcels
+            .Where(p => p.Id == parcelId
+                && p.OperatorId == operatorId
+                && sourceStatuses.Contains(p.Status))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(p => p.Status, targetStatus)
+                .SetProperty(p => p.CancellationReason, reason)
+                .SetProperty(p => p.RejectionReason, targetStatus == ParcelStatus.REJECTED ? reason : (string?)null)
+                .SetProperty(p => p.RejectedAt, targetStatus == ParcelStatus.REJECTED ? now : (DateTimeOffset?)null)
+                .SetProperty(p => p.UpdatedAt, now), ct);
+
+        return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
+    }
+
     // ---- Phase 6: Queries ----
 
     public async Task<PagedResult<ParcelEntity>> ListReceivedByUserIdAsync(
@@ -664,9 +757,7 @@ internal sealed class ParcelRepository : IParcelRepository
                 && p.DeliveryTokenRevokedAt == null
                 && p.DeliveryTokenExpiresAt != null
                 && p.DeliveryTokenExpiresAt > now
-                && (p.Status != ParcelStatus.DELIVERY_REJECTED
-                    || (p.RejectedAt != null && p.RejectedAt.Value.AddMinutes(15) > now))
-                && (p.Status == ParcelStatus.DELIVERED_PENDING_CONFIRM || p.Status == ParcelStatus.DELIVERY_REJECTED))
+                && p.Status == ParcelStatus.DELIVERED_PENDING_CONFIRM)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(p => p.Status, ParcelStatus.DELIVERY_CONFIRMED)
                 .SetProperty(p => p.ConfirmedAt, now)
@@ -693,6 +784,41 @@ internal sealed class ParcelRepository : IParcelRepository
         return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
     }
 
+    public async Task<ParcelPaymentTransitionSnapshot?> TryUndoRejectDeliveryAsync(
+        Guid parcelId, Guid token, DateTimeOffset now, CancellationToken ct)
+    {
+        var affected = await _db.Parcels
+            .Where(p => p.Id == parcelId
+                && p.DeliveryToken == token
+                && p.DeliveryTokenRevokedAt == null
+                && p.DeliveryTokenExpiresAt != null
+                && p.DeliveryTokenExpiresAt > now
+                && p.Status == ParcelStatus.DELIVERY_REJECTED
+                && p.RejectedAt != null
+                && p.RejectedAt.Value.AddMinutes(15) > now)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(p => p.Status, ParcelStatus.DELIVERED_PENDING_CONFIRM)
+                .SetProperty(p => p.RejectedAt, (DateTimeOffset?)null)
+                .SetProperty(p => p.RejectionReason, (string?)null)
+                .SetProperty(p => p.UpdatedAt, now), ct);
+        return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
+    }
+
+    public async Task<ParcelPaymentTransitionSnapshot?> TryManualConfirmDeliveryAsync(
+        Guid parcelId, Guid operatorId, Guid actorUserId, string note, DateTimeOffset now, CancellationToken ct)
+    {
+        var affected = await _db.Parcels
+            .Where(p => p.Id == parcelId
+                && p.OperatorId == operatorId
+                && p.Status == ParcelStatus.DELIVERED_PENDING_CONFIRM)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(p => p.Status, ParcelStatus.DELIVERY_CONFIRMED)
+                .SetProperty(p => p.ConfirmedAt, now)
+                .SetProperty(p => p.ConfirmedByUserId, actorUserId)
+                .SetProperty(p => p.ConfirmNote, note)
+                .SetProperty(p => p.UpdatedAt, now), ct);
+        return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
+    }
     private static ParcelPaymentTransitionSnapshot BuildSnapshot(ParcelEntity p)
         => new(
             p.Id, p.ParcelCode, p.Status, p.DepositAmount.Amount, p.AdditionalAmount.Amount,

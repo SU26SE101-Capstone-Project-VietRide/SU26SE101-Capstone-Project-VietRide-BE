@@ -8,6 +8,8 @@ public sealed record TripDisruptedIntegrationEvent : IIntegrationEvent
     public const string EventType = "trip.trip.disrupted";
 
     public Guid TripId { get; init; }
+    public bool HasSubstitution { get; init; }
+    public decimal TraveledRatio { get; init; }
     public Guid EventId { get; init; }
     public DateTime OccurredAt { get; init; }
 

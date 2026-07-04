@@ -74,7 +74,7 @@ public sealed class ParcelsController : ControllerBase
                 request.Recipient.PhoneNumber,
                 request.Recipient.Email,
                 request.TripId,
-                null,
+                request.DropoffStopId,
                 request.BookingId,
                 request.ItemName,
                 request.Description,

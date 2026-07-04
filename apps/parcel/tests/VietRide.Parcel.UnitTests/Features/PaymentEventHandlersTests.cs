@@ -41,6 +41,14 @@ public sealed class PaymentEventHandlersTests
         return identity;
     }
 
+    private static ITripServiceClient Trip()
+    {
+        var trip = Substitute.For<ITripServiceClient>();
+        trip.ReserveCargoAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<decimal>(), Arg.Any<CancellationToken>())
+            .Returns(new TripCargoOutcome(TripCargoOutcomeKind.Success, null));
+        return trip;
+    }
+
     [Fact]
     public async Task EnqueueRefundAsync_UsesCanonicalParcelRefundPayload()
     {
@@ -80,7 +88,7 @@ public sealed class PaymentEventHandlersTests
         repo.TryMarkDepositSucceededAsync(ParcelId, 100_000, Now, Arg.Any<CancellationToken>())
             .Returns(MakeSnapshot(ParcelStatus.PENDING));
 
-        var handler = new ConfirmPaymentForParcelCommandHandler(repo, Outbox(), Stats(), clock,
+        var handler = new ConfirmPaymentForParcelCommandHandler(repo, Outbox(), Stats(), Trip(), clock,
             Substitute.For<ILogger<ConfirmPaymentForParcelCommandHandler>>());
         var result = await handler.Handle(new ConfirmPaymentForParcelCommand(PaymentId, "PARCEL", ParcelId, 100_000), default);
 
@@ -96,7 +104,7 @@ public sealed class PaymentEventHandlersTests
         repo.TryMarkAdditionalSucceededAsync(ParcelId, 50_000, Arg.Any<Guid>(), Now, Arg.Any<CancellationToken>())
             .Returns(MakeSnapshot(ParcelStatus.PENDING));
 
-        var handler = new ConfirmPaymentForParcelCommandHandler(repo, Outbox(), Stats(), clock,
+        var handler = new ConfirmPaymentForParcelCommandHandler(repo, Outbox(), Stats(), Trip(), clock,
             Substitute.For<ILogger<ConfirmPaymentForParcelCommandHandler>>());
         var result = await handler.Handle(new ConfirmPaymentForParcelCommand(PaymentId, "PARCEL_ADDITIONAL", ParcelId, 50_000), default);
 
@@ -108,7 +116,7 @@ public sealed class PaymentEventHandlersTests
     {
         var repo = Substitute.For<IParcelRepository>();
         var clock = Substitute.For<IClock>();
-        var handler = new ConfirmPaymentForParcelCommandHandler(repo, Outbox(), Stats(), clock,
+        var handler = new ConfirmPaymentForParcelCommandHandler(repo, Outbox(), Stats(), Trip(), clock,
             Substitute.For<ILogger<ConfirmPaymentForParcelCommandHandler>>());
         var result = await handler.Handle(new ConfirmPaymentForParcelCommand(PaymentId, "BOOKING", ParcelId, 100_000), default);
 
@@ -124,7 +132,7 @@ public sealed class PaymentEventHandlersTests
         repo.TryMarkDepositSucceededAsync(ParcelId, 100_000, Now, Arg.Any<CancellationToken>())
             .Returns((ParcelPaymentTransitionSnapshot?)null);
 
-        var handler = new ConfirmPaymentForParcelCommandHandler(repo, Outbox(), Stats(), clock,
+        var handler = new ConfirmPaymentForParcelCommandHandler(repo, Outbox(), Stats(), Trip(), clock,
             Substitute.For<ILogger<ConfirmPaymentForParcelCommandHandler>>());
         var result = await handler.Handle(new ConfirmPaymentForParcelCommand(PaymentId, "PARCEL", ParcelId, 100_000), default);
 
@@ -143,7 +151,7 @@ public sealed class PaymentEventHandlersTests
         repo.GetPaymentTransitionSnapshotAsync(ParcelId, Arg.Any<CancellationToken>())
             .Returns(MakeSnapshot(ParcelStatus.CANCELLED));
 
-        var handler = new ConfirmPaymentForParcelCommandHandler(repo, outbox, Stats(), clock,
+        var handler = new ConfirmPaymentForParcelCommandHandler(repo, outbox, Stats(), Trip(), clock,
             Substitute.For<ILogger<ConfirmPaymentForParcelCommandHandler>>());
         var result = await handler.Handle(new ConfirmPaymentForParcelCommand(PaymentId, "PARCEL", ParcelId, 100_000), default);
 
@@ -163,7 +171,7 @@ public sealed class PaymentEventHandlersTests
         repo.GetPaymentTransitionSnapshotAsync(ParcelId, Arg.Any<CancellationToken>())
             .Returns(MakeSnapshot(ParcelStatus.CANCELLED, deposit: 100_000));
 
-        var handler = new ConfirmPaymentForParcelCommandHandler(repo, outbox, Stats(), clock,
+        var handler = new ConfirmPaymentForParcelCommandHandler(repo, outbox, Stats(), Trip(), clock,
             Substitute.For<ILogger<ConfirmPaymentForParcelCommandHandler>>());
         var result = await handler.Handle(new ConfirmPaymentForParcelCommand(PaymentId, "PARCEL", ParcelId, 90_000), default);
 

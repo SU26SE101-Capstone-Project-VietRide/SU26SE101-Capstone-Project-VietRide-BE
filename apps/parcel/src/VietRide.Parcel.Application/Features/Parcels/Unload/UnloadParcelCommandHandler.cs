@@ -13,7 +13,7 @@ namespace VietRide.Parcel.Application.Features.Parcels.Unload;
 public sealed class UnloadParcelCommandHandler
     : IRequestHandler<UnloadParcelCommand, UnloadParcelResponse>
 {
-    private static readonly TimeSpan DeliveryConfirmWindow = TimeSpan.FromDays(7);
+    private static readonly TimeSpan DeliveryConfirmWindow = TimeSpan.FromHours(48);
 
     private readonly IParcelRepository _parcelRepository;
     private readonly ITripServiceClient _tripClient;
@@ -54,30 +54,36 @@ public sealed class UnloadParcelCommandHandler
 
         if (parcel.DropoffStopId.HasValue)
         {
-            var tripOutcome = await _tripClient.GetTripParcelSnapshotAsync(parcel.TripId, cancellationToken);
-            switch (tripOutcome.Kind)
-            {
-                case TripSnapshotOutcomeKind.TripNotFound:
-                    throw new CodedNotFoundException(
-                        "TRIP_NOT_FOUND",
-                        $"Trip with id '{parcel.TripId}' not found.");
-                case TripSnapshotOutcomeKind.TransportError:
-                    throw new ParcelDependencyUnavailableException(
-                        "TRIP_SERVICE_UNAVAILABLE",
-                        tripOutcome.ErrorMessage ?? "Trip service unavailable.");
-            }
-
-            var trip = tripOutcome.Snapshot!;
+            var trip = await GetRequiredTripSnapshotAsync(parcel.TripId, cancellationToken);
             var stop = trip.Stops.FirstOrDefault(s => s.StopId == parcel.DropoffStopId.Value);
             if (stop is null)
-                throw new CodedConflictException(
+                throw new CodedValidationException(
                     "DROP_OFF_STOP_NOT_FOUND",
                     $"Drop-off stop '{parcel.DropoffStopId}' not found in trip '{parcel.TripId}'.");
 
             if (!stop.AllowDropoff)
-                throw new CodedConflictException(
+                throw new CodedValidationException(
                     "DROP_OFF_STOP_NOT_ALLOWED",
                     $"Drop-off stop '{parcel.DropoffStopId}' does not allow drop-off.");
+
+            if (!string.Equals(stop.Status, "ARRIVED", StringComparison.OrdinalIgnoreCase))
+                throw new CodedValidationException(
+                    "DROP_OFF_STOP_NOT_ARRIVED",
+                    $"Drop-off stop '{parcel.DropoffStopId}' has not arrived.");
+        }
+        else
+        {
+            var trip = await GetRequiredTripSnapshotAsync(parcel.TripId, cancellationToken);
+            var finalStop = trip.Stops.OrderBy(s => s.OrderIndex).LastOrDefault();
+            if (finalStop is null)
+                throw new CodedValidationException(
+                    "DROP_OFF_STOP_NOT_FOUND",
+                    $"Trip '{parcel.TripId}' does not have a final stop.");
+
+            if (!string.Equals(finalStop.Status, "ARRIVED", StringComparison.OrdinalIgnoreCase))
+                throw new CodedValidationException(
+                    "DROP_OFF_STOP_NOT_ARRIVED",
+                    $"Final stop '{finalStop.StopId}' has not arrived.");
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -111,6 +117,13 @@ public sealed class UnloadParcelCommandHandler
                     deliveryToken,
                     deliveryTokenExpiresAt),
                 cancellationToken);
+
+            await EnsureCargoSuccessAsync(
+                await _tripClient.ReleaseCargoAsync(
+                    snapshot.TripId,
+                    snapshot.ParcelId,
+                    parcel.ActualWeightKg ?? parcel.EstimatedWeightKg,
+                    cancellationToken));
 
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await _unitOfWork.CommitAsync(cancellationToken);
@@ -153,5 +166,42 @@ public sealed class UnloadParcelCommandHandler
         }
 
         return payload;
+    }
+
+    private async Task<TripParcelSnapshot> GetRequiredTripSnapshotAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        var tripOutcome = await _tripClient.GetTripParcelSnapshotAsync(tripId, cancellationToken);
+        switch (tripOutcome.Kind)
+        {
+            case TripSnapshotOutcomeKind.TripNotFound:
+                throw new CodedNotFoundException(
+                    "TRIP_NOT_FOUND",
+                    $"Trip with id '{tripId}' not found.");
+            case TripSnapshotOutcomeKind.TransportError:
+                throw new ParcelDependencyUnavailableException(
+                    "TRIP_SERVICE_UNAVAILABLE",
+                    tripOutcome.ErrorMessage ?? "Trip service unavailable.");
+        }
+
+        return tripOutcome.Snapshot!;
+    }
+
+    private static Task EnsureCargoSuccessAsync(TripCargoOutcome outcome)
+    {
+        return outcome.Kind switch
+        {
+            TripCargoOutcomeKind.Success => Task.CompletedTask,
+            TripCargoOutcomeKind.TripNotFound => throw new ParcelDependencyUnavailableException(
+                "TRIP_NOT_FOUND",
+                outcome.ErrorMessage ?? "Trip was not found."),
+            TripCargoOutcomeKind.CapacityExceeded => throw new ParcelDependencyUnavailableException(
+                "TRIP_CARGO_CAPACITY_EXCEEDED",
+                outcome.ErrorMessage ?? "Trip cargo capacity would be exceeded."),
+            _ => throw new ParcelDependencyUnavailableException(
+                "TRIP_SERVICE_UNAVAILABLE",
+                outcome.ErrorMessage ?? "Trip service unavailable."),
+        };
     }
 }

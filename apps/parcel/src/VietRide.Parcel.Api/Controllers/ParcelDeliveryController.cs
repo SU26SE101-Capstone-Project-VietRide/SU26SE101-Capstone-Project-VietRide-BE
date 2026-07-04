@@ -5,6 +5,7 @@ using VietRide.Parcel.Api.Controllers.Requests;
 using VietRide.Parcel.Api.Filters;
 using VietRide.Parcel.Application.Features.Parcels.ConfirmDelivery;
 using VietRide.Parcel.Application.Features.Parcels.RejectDelivery;
+using VietRide.Parcel.Application.Features.Parcels.UndoRejectDelivery;
 using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Parcel.Api.Controllers;
@@ -51,6 +52,21 @@ public sealed class ParcelDeliveryController : ControllerBase
     {
         var result = await _mediator.Send(
             new RejectDeliveryCommand(request.Token, request.RejectionReason),
+            cancellationToken);
+
+        return Ok(result);
+    }
+    [HttpPost("undo-reject")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<UndoRejectDeliveryResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<UndoRejectDeliveryResponse>> UndoRejectAsync(
+        [FromBody] UndoRejectDeliveryRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(
+            new UndoRejectDeliveryCommand(request.Token),
             cancellationToken);
 
         return Ok(result);

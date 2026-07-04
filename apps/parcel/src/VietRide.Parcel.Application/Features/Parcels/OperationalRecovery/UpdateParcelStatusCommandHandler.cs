@@ -31,7 +31,8 @@ public sealed class UpdateParcelStatusCommandHandler
                 command.ParcelId,
                 command.OperatorId,
                 command.UserId,
-                command.Reason ?? "OPERATOR_STATUS_OVERRIDE_RETURNED"),
+                command.Reason!,
+                IsStatusOverride: true),
             cancellationToken);
     }
 }

@@ -1,6 +1,8 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
 using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Exceptions;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
@@ -16,6 +18,7 @@ public sealed class ConfirmPaymentForParcelCommandHandler
     private readonly IParcelRepository _parcelRepository;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IParcelStatsRepository _statsRepository;
+    private readonly ITripServiceClient _tripClient;
     private readonly IClock _clock;
     private readonly ILogger<ConfirmPaymentForParcelCommandHandler> _logger;
 
@@ -23,12 +26,14 @@ public sealed class ConfirmPaymentForParcelCommandHandler
         IParcelRepository parcelRepository,
         IIntegrationEventOutbox outbox,
         IParcelStatsRepository statsRepository,
+        ITripServiceClient tripClient,
         IClock clock,
         ILogger<ConfirmPaymentForParcelCommandHandler> logger)
     {
         _parcelRepository = parcelRepository;
         _outbox = outbox;
         _statsRepository = statsRepository;
+        _tripClient = tripClient;
         _clock = clock;
         _logger = logger;
     }
@@ -54,6 +59,12 @@ public sealed class ConfirmPaymentForParcelCommandHandler
                 DateOnly.FromDateTime(now.UtcDateTime),
                 0, 0, 0, 0, 0, snapshot.DepositAmount, 0,
                 cancellationToken);
+            await EnsureCargoSuccessAsync(
+                await _tripClient.ReserveCargoAsync(
+                    snapshot.TripId,
+                    snapshot.ParcelId,
+                    await GetCargoWeightAsync(snapshot.ParcelId, cancellationToken),
+                    cancellationToken));
             return true;
         }
 
@@ -76,6 +87,12 @@ public sealed class ConfirmPaymentForParcelCommandHandler
                 DateOnly.FromDateTime(now.UtcDateTime),
                 0, 0, 0, 0, 0, snapshot.AdditionalAmount, 0,
                 cancellationToken);
+            await EnsureCargoSuccessAsync(
+                await _tripClient.ReserveCargoAsync(
+                    snapshot.TripId,
+                    snapshot.ParcelId,
+                    await GetCargoWeightAsync(snapshot.ParcelId, cancellationToken),
+                    cancellationToken));
             return true;
         }
 
@@ -133,4 +150,27 @@ public sealed class ConfirmPaymentForParcelCommandHandler
             or ParcelStatus.EXPIRED
             or ParcelStatus.RETURNED
             or ParcelStatus.DELIVERY_CONFIRMED;
+
+    private static Task EnsureCargoSuccessAsync(TripCargoOutcome outcome)
+    {
+        return outcome.Kind switch
+        {
+            TripCargoOutcomeKind.Success => Task.CompletedTask,
+            TripCargoOutcomeKind.TripNotFound => throw new ParcelDependencyUnavailableException(
+                "TRIP_NOT_FOUND",
+                outcome.ErrorMessage ?? "Trip was not found."),
+            TripCargoOutcomeKind.CapacityExceeded => throw new ParcelDependencyUnavailableException(
+                "TRIP_CARGO_CAPACITY_EXCEEDED",
+                outcome.ErrorMessage ?? "Trip cargo capacity would be exceeded."),
+            _ => throw new ParcelDependencyUnavailableException(
+                "TRIP_SERVICE_UNAVAILABLE",
+                outcome.ErrorMessage ?? "Trip service unavailable."),
+        };
+    }
+
+    private async Task<decimal> GetCargoWeightAsync(Guid parcelId, CancellationToken cancellationToken)
+    {
+        var parcel = await _parcelRepository.GetByIdAsync(parcelId, cancellationToken);
+        return parcel?.ActualWeightKg ?? parcel?.EstimatedWeightKg ?? 0m;
+    }
 }

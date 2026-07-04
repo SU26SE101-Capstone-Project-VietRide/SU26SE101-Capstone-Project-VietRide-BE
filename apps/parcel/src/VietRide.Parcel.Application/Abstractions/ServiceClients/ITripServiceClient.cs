@@ -22,4 +22,22 @@ public interface ITripServiceClient
         int page,
         int pageSize,
         CancellationToken cancellationToken = default);
+
+    Task<TripCargoOutcome> ReserveCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        CancellationToken cancellationToken = default);
+
+    Task<TripCargoOutcome> LoadCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        CancellationToken cancellationToken = default);
+
+    Task<TripCargoOutcome> ReleaseCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        CancellationToken cancellationToken = default);
 }

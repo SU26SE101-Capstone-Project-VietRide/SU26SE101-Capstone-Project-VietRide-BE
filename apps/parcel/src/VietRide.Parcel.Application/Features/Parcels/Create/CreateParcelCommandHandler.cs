@@ -3,6 +3,7 @@ using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Exceptions;
 using VietRide.Parcel.Domain.Enums;
+using VietRide.Parcel.Domain.Helpers;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
@@ -117,10 +118,24 @@ public sealed class CreateParcelCommandHandler
         }
 
         var trip = tripOutcome.Snapshot!;
-        if (trip.Status != "SCHEDULED")
+        if (trip.Status != "SCHEDULED" && trip.Status != "BOARDING")
             throw new CodedConflictException(
                 "TRIP_NOT_ACCEPTING_PARCEL",
                 $"Trip '{command.TripId}' is in status '{trip.Status}' and is not accepting parcels.");
+
+        if (command.DropoffStopId.HasValue)
+        {
+            var dropoffStop = trip.Stops.FirstOrDefault(stop => stop.StopId == command.DropoffStopId.Value);
+            if (dropoffStop is null)
+                throw new CodedValidationException(
+                    "DROP_OFF_STOP_NOT_FOUND",
+                    $"Drop-off stop '{command.DropoffStopId}' not found in trip '{command.TripId}'.");
+
+            if (!dropoffStop.AllowDropoff)
+                throw new CodedValidationException(
+                    "DROP_OFF_STOP_NOT_ALLOWED",
+                    $"Drop-off stop '{command.DropoffStopId}' does not allow drop-off.");
+        }
 
         if (!Enum.TryParse<ParcelSizeCategory>(command.SizeCategory, ignoreCase: true, out var sizeCategory))
             throw new CodedValidationException(
@@ -274,11 +289,9 @@ public sealed class CreateParcelCommandHandler
 
     private async Task<string> GenerateParcelCodeAsync(CancellationToken cancellationToken)
     {
-        var datePart = DateTimeOffset.UtcNow.ToString("yyyyMMdd");
-
         for (var attempt = 0; attempt < 3; attempt++)
         {
-            var code = $"VRP-{datePart}-{Random.Shared.Next():X8}";
+            var code = ParcelCodeGenerator.Generate(DateTimeOffset.UtcNow);
             var existing = await _parcelRepository.FindByParcelCodeAsync(code, cancellationToken);
             if (existing is null)
             {

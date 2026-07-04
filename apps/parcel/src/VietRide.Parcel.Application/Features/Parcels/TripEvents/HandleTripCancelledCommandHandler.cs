@@ -1,6 +1,7 @@
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Exceptions;
 using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Shared.Application.Outbox;
 
@@ -11,17 +12,20 @@ public sealed class HandleTripCancelledCommandHandler
 {
     private readonly IParcelRepository _parcelRepository;
     private readonly IIdentityServiceClient _identityClient;
+    private readonly ITripServiceClient _tripClient;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IParcelStatsRepository _statsRepository;
 
     public HandleTripCancelledCommandHandler(
         IParcelRepository parcelRepository,
         IIdentityServiceClient identityClient,
+        ITripServiceClient tripClient,
         IIntegrationEventOutbox outbox,
         IParcelStatsRepository statsRepository)
     {
         _parcelRepository = parcelRepository;
         _identityClient = identityClient;
+        _tripClient = tripClient;
         _outbox = outbox;
         _statsRepository = statsRepository;
     }
@@ -54,6 +58,13 @@ public sealed class HandleTripCancelledCommandHandler
 
         foreach (var parcel in cancelled)
         {
+            await EnsureCargoSuccessAsync(
+                await _tripClient.ReleaseCargoAsync(
+                    parcel.TripId,
+                    parcel.ParcelId,
+                    0m,
+                    cancellationToken));
+
             var refundAmount = await ParcelRefundAmountCalculator.CalculateRefundAsync(
                 _identityClient,
                 parcel.OperatorId,
@@ -118,5 +129,22 @@ public sealed class HandleTripCancelledCommandHandler
         }
 
         return rejected.Count + cancelled.Count + operatorAction.Count;
+    }
+
+    private static Task EnsureCargoSuccessAsync(TripCargoOutcome outcome)
+    {
+        return outcome.Kind switch
+        {
+            TripCargoOutcomeKind.Success => Task.CompletedTask,
+            TripCargoOutcomeKind.TripNotFound => throw new ParcelDependencyUnavailableException(
+                "TRIP_NOT_FOUND",
+                outcome.ErrorMessage ?? "Trip was not found."),
+            TripCargoOutcomeKind.CapacityExceeded => throw new ParcelDependencyUnavailableException(
+                "TRIP_CARGO_CAPACITY_EXCEEDED",
+                outcome.ErrorMessage ?? "Trip cargo capacity would be exceeded."),
+            _ => throw new ParcelDependencyUnavailableException(
+                "TRIP_SERVICE_UNAVAILABLE",
+                outcome.ErrorMessage ?? "Trip service unavailable."),
+        };
     }
 }

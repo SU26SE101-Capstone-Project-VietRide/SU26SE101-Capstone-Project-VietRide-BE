@@ -36,7 +36,19 @@ public sealed class DevTripServiceClient : ITripServiceClient
             DestinationStation: new TripStationDto(
                 Guid.Parse("55555555-5555-4555-8555-555555555555"),
                 "Dev Destination"),
-            Stops: Array.Empty<TripStopDto>(),
+            Stops: new[]
+            {
+                new TripStopDto(
+                    Guid.Parse("66666666-6666-4666-8666-666666666666"),
+                    1,
+                    false,
+                    true,
+                    now.AddHours(6),
+                    120,
+                    null,
+                    "ARRIVED",
+                    now),
+            },
             SeatSummary: new TripSeatSummaryDto(40, 40),
             ReturnRouteId: null);
 
@@ -95,5 +107,35 @@ public sealed class DevTripServiceClient : ITripServiceClient
             page,
             pageSize,
             null));
+    }
+
+    public Task<TripCargoOutcome> ReserveCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Using dev Trip stub for ReserveCargoAsync({TripId}, {ParcelId}).", tripId, parcelId);
+        return Task.FromResult(new TripCargoOutcome(TripCargoOutcomeKind.Success, null));
+    }
+
+    public Task<TripCargoOutcome> LoadCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Using dev Trip stub for LoadCargoAsync({TripId}, {ParcelId}).", tripId, parcelId);
+        return Task.FromResult(new TripCargoOutcome(TripCargoOutcomeKind.Success, null));
+    }
+
+    public Task<TripCargoOutcome> ReleaseCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Using dev Trip stub for ReleaseCargoAsync({TripId}, {ParcelId}).", tripId, parcelId);
+        return Task.FromResult(new TripCargoOutcome(TripCargoOutcomeKind.Success, null));
     }
 }

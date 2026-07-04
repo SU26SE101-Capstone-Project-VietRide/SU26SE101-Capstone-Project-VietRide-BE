@@ -2,6 +2,7 @@ namespace VietRide.Parcel.Api.Controllers.Requests;
 
 public sealed record CreateParcelRequest(
     Guid TripId,
+    Guid? DropoffStopId,
     Guid? BookingId,
     string? ItemName,
     string? Description,

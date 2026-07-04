@@ -501,7 +501,10 @@ public sealed class CreateParcelTests
             TripId, OperatorId, RouteId, Guid.NewGuid(), status,
             Departure, EstimatedArrival, 100_000,
             station, station,
-            new List<TripStopDto>(),
+            new List<TripStopDto>
+            {
+                new(DropoffStopId, 1, false, true, EstimatedArrival, 10, null, "PENDING", null),
+            },
             new TripSeatSummaryDto(40, 35),
             null);
     }

@@ -1,5 +1,7 @@
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Exceptions;
 using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
@@ -11,15 +13,18 @@ public sealed class MarkParcelLoadedCommandHandler
     : IRequestHandler<MarkParcelLoadedCommand, MarkParcelLoadedResponse>
 {
     private readonly IParcelRepository _parcelRepository;
+    private readonly ITripServiceClient _tripClient;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IParcelStatsRepository _statsRepository;
 
     public MarkParcelLoadedCommandHandler(
         IParcelRepository parcelRepository,
+        ITripServiceClient tripClient,
         IIntegrationEventOutbox outbox,
         IParcelStatsRepository statsRepository)
     {
         _parcelRepository = parcelRepository;
+        _tripClient = tripClient;
         _outbox = outbox;
         _statsRepository = statsRepository;
     }
@@ -38,6 +43,11 @@ public sealed class MarkParcelLoadedCommandHandler
             throw new CodedConflictException(
                 "INVALID_STATUS",
                 $"Parcel '{command.ParcelId}' is in status '{parcel.Status}' and cannot be loaded.");
+
+        if (command.OperatorId.HasValue && parcel.OperatorId != command.OperatorId.Value)
+            throw new ForbiddenException(
+                "FORBIDDEN",
+                $"Operator '{command.OperatorId}' is not assigned to parcel '{command.ParcelId}'.");
 
         if (parcel.TripId != command.TripId)
             throw new CodedNotFoundException(
@@ -63,6 +73,13 @@ public sealed class MarkParcelLoadedCommandHandler
                 "RACE_LOST",
                 $"Parcel '{command.ParcelId}' status changed concurrently; cannot mark loaded.");
 
+        await EnsureCargoSuccessAsync(
+            await _tripClient.LoadCargoAsync(
+                snapshot.TripId,
+                snapshot.ParcelId,
+                parcel.ActualWeightKg ?? parcel.EstimatedWeightKg,
+                cancellationToken));
+
         await ParcelOutboxEvents.EnqueueAsync(
             _outbox,
             ParcelOutboxEvents.Loaded,
@@ -76,5 +93,22 @@ public sealed class MarkParcelLoadedCommandHandler
             cancellationToken);
 
         return new MarkParcelLoadedResponse(snapshot.ParcelId, snapshot.ParcelCode, snapshot.Status.ToString());
+    }
+
+    private static Task EnsureCargoSuccessAsync(TripCargoOutcome outcome)
+    {
+        return outcome.Kind switch
+        {
+            TripCargoOutcomeKind.Success => Task.CompletedTask,
+            TripCargoOutcomeKind.TripNotFound => throw new ParcelDependencyUnavailableException(
+                "TRIP_NOT_FOUND",
+                outcome.ErrorMessage ?? "Trip was not found."),
+            TripCargoOutcomeKind.CapacityExceeded => throw new ParcelDependencyUnavailableException(
+                "TRIP_CARGO_CAPACITY_EXCEEDED",
+                outcome.ErrorMessage ?? "Trip cargo capacity would be exceeded."),
+            _ => throw new ParcelDependencyUnavailableException(
+                "TRIP_SERVICE_UNAVAILABLE",
+                outcome.ErrorMessage ?? "Trip service unavailable."),
+        };
     }
 }

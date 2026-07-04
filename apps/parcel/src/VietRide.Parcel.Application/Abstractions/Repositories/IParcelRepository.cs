@@ -99,6 +99,13 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkExpireOrphanPendingPaymentsAsync(
         DateTimeOffset cutoff, DateTimeOffset now, int maxBatch, CancellationToken ct);
 
+    Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkRealertPendingOperatorActionAsync(
+        DateTimeOffset cutoff,
+        DateTimeOffset reminderCutoff,
+        DateTimeOffset now,
+        int maxBatch,
+        CancellationToken ct);
+
     // ---- Phase 6: Loading / Unloading ----
 
     /// <summary>
@@ -123,6 +130,12 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     /// </summary>
     Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkSetPendingOperatorActionByTripIdAsync(Guid tripId, DateTimeOffset now, CancellationToken ct);
 
+    Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkRequestTransferByTripIdAsync(
+        Guid oldTripId,
+        Guid newTripId,
+        DateTimeOffset now,
+        CancellationToken ct);
+
     // ---- Phase 8: Operational recovery ----
 
     Task<ParcelPaymentTransitionSnapshot?> TryRequestTransferAsync(
@@ -140,6 +153,14 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     Task<IReadOnlyList<ParcelEventSnapshot>> TryCancelPendingByTripIdAsync(
         Guid tripId, DateTimeOffset now, CancellationToken ct);
 
+    Task<ParcelPaymentTransitionSnapshot?> TryManualCancelAsync(
+        Guid parcelId,
+        Guid operatorId,
+        ParcelStatus targetStatus,
+        string reason,
+        DateTimeOffset now,
+        CancellationToken ct);
+
     // ---- Phase 6: Queries ----
 
     /// <summary>
@@ -156,7 +177,7 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     Task<ParcelEntity?> FindByDeliveryTokenAsync(Guid token, CancellationToken ct);
 
     /// <summary>
-    /// Atomic: DELIVERED_PENDING_CONFIRM (or DELIVERY_REJECTED) -> DELIVERY_CONFIRMED.
+    /// Atomic: DELIVERED_PENDING_CONFIRM -> DELIVERY_CONFIRMED.
     /// Guards Status, DeliveryToken, DeliveryTokenRevokedAt==null.
     /// </summary>
     Task<ParcelPaymentTransitionSnapshot?> TryConfirmDeliveryAsync(
@@ -167,4 +188,16 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     /// </summary>
     Task<ParcelPaymentTransitionSnapshot?> TryRejectDeliveryAsync(
         Guid parcelId, Guid token, string reason, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
+    /// Atomic: DELIVERY_REJECTED -> DELIVERED_PENDING_CONFIRM within undo window.
+    /// </summary>
+    Task<ParcelPaymentTransitionSnapshot?> TryUndoRejectDeliveryAsync(
+        Guid parcelId, Guid token, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
+    /// Atomic: DELIVERED_PENDING_CONFIRM -> DELIVERY_CONFIRMED by operator/assistant.
+    /// </summary>
+    Task<ParcelPaymentTransitionSnapshot?> TryManualConfirmDeliveryAsync(
+        Guid parcelId, Guid operatorId, Guid actorUserId, string note, DateTimeOffset now, CancellationToken ct);
 }

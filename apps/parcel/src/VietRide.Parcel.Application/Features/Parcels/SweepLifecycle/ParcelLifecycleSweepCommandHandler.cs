@@ -14,6 +14,7 @@ public sealed class ParcelLifecycleSweepCommandHandler : IRequestHandler<ParcelL
     private static readonly TimeSpan DeliveryRejectedUndoWindow = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan DeliveryPendingConfirmWindow = TimeSpan.FromDays(7);
     private static readonly TimeSpan PendingPaymentWindow = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan PendingOperatorActionRealertWindow = TimeSpan.FromHours(2);
     private const int MaxBatch = 200;
 
     private readonly IParcelRepository _parcelRepository;
@@ -56,6 +57,15 @@ public sealed class ParcelLifecycleSweepCommandHandler : IRequestHandler<ParcelL
         processed += await SweepAsync(
             () => _parcelRepository.TryBulkExpireOrphanPendingPaymentsAsync(now.Subtract(PendingPaymentWindow), now, MaxBatch, cancellationToken),
             ParcelOutboxEvents.Rejected,
+            cancellationToken);
+        processed += await SweepAsync(
+            () => _parcelRepository.TryBulkRealertPendingOperatorActionAsync(
+                now.Subtract(PendingOperatorActionRealertWindow),
+                now.Subtract(PendingOperatorActionRealertWindow),
+                now,
+                MaxBatch,
+                cancellationToken),
+            ParcelOutboxEvents.PendingOperatorActionRealert,
             cancellationToken);
 
         if (processed > 0)

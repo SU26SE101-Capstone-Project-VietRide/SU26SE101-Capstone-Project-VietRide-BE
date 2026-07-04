@@ -13,6 +13,8 @@ public static class ParcelOutboxEvents
     public const string DeliveredPendingConfirm = "parcel.parcel.delivered_pending_confirm";
     public const string DeliveryConfirmed = "parcel.parcel.delivery_confirmed";
     public const string DeliveryRejected = "parcel.parcel.delivery_rejected";
+    public const string DeliveryRejectUndone = "parcel.parcel.delivery_reject_undone";
+    public const string StatusOverridden = "parcel.parcel.status_overridden";
     public const string Cancelled = "parcel.parcel.cancelled";
     public const string Rejected = "parcel.parcel.rejected";
     public const string Returned = "parcel.parcel.returned";
@@ -23,6 +25,7 @@ public static class ParcelOutboxEvents
     public const string TransferEscalated = "parcel.parcel.transfer_escalated";
     public const string ReturnInitiated = "parcel.parcel.return_initiated";
     public const string PendingOperatorAction = "parcel.parcel.pending_operator_action";
+    public const string PendingOperatorActionRealert = "parcel.parcel.pending_operator_action_realert";
     public const string RefundInitiated = "parcel.refund.initiated";
 
     public static Task EnqueueAsync(
@@ -38,6 +41,15 @@ public static class ParcelOutboxEvents
         Guid senderUserId,
         long amount,
         CancellationToken cancellationToken)
+        => EnqueueRefundAsync(outbox, parcelId, senderUserId, amount, $"parcel:refund:{parcelId:D}", cancellationToken);
+
+    public static Task EnqueueRefundAsync(
+        IIntegrationEventOutbox outbox,
+        Guid parcelId,
+        Guid senderUserId,
+        long amount,
+        string idempotencyKey,
+        CancellationToken cancellationToken)
         => EnqueueAsync(
             outbox,
             RefundInitiated,
@@ -48,7 +60,7 @@ public static class ParcelOutboxEvents
                 amount,
                 referenceType = "PARCEL_REFUND",
                 referenceId = parcelId,
-                idempotencyKey = $"parcel:refund:{parcelId:D}",
+                idempotencyKey,
             },
             cancellationToken);
 }

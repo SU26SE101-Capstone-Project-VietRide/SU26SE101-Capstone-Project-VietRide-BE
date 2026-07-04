@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Parcel.Api.Controllers.Requests;
 using VietRide.Parcel.Api.Filters;
+using VietRide.Parcel.Application.Features.Parcels.ManualConfirmDelivery;
+using VietRide.Parcel.Application.Features.Parcels.MarkLoaded;
 using VietRide.Parcel.Application.Features.Parcels.Reweigh;
 using VietRide.Parcel.Application.Features.Parcels.Unload;
 using VietRide.Shared.Application.Exceptions;
@@ -48,6 +50,29 @@ public sealed class AssistantParcelsController : ControllerBase
         return Ok(result);
     }
 
+    [HttpPost("{parcelId:guid}/confirm-delivery")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<ManualConfirmDeliveryResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ManualConfirmDeliveryResponse>> ConfirmDeliveryAsync(
+        Guid parcelId,
+        [FromBody] ManualConfirmDeliveryRequest request,
+        CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        var userId = CurrentUserClaims.GetUserId(User);
+
+        var result = await _mediator.Send(
+            new ManualConfirmDeliveryCommand(parcelId, userId, operatorId, request.Note),
+            cancellationToken);
+
+        return Ok(result);
+    }
     [HttpPost("{parcelId:guid}/unload")]
     [RequireIdempotencyKey]
     [ProducesResponseType(typeof(ApiResponse<UnloadParcelResponse>), StatusCodes.Status200OK)]

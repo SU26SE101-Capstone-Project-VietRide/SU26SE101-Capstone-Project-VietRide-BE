@@ -6,4 +6,5 @@ public sealed record ReturnParcelCommand(
     Guid ParcelId,
     Guid OperatorId,
     Guid ReturnedByUserId,
-    string Reason) : IRequest<OperationalParcelResponse>;
+    string Reason,
+    bool IsStatusOverride = false) : IRequest<OperationalParcelResponse>;

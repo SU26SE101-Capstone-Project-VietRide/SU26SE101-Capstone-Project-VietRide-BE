@@ -165,4 +165,69 @@ public sealed class TripServiceClient : ITripServiceClient
                 $"Trip service transport failure: {ex.Message}");
         }
     }
+
+    public Task<TripCargoOutcome> ReserveCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        CancellationToken cancellationToken = default)
+        => SendCargoMutationAsync("reserve", tripId, parcelId, weightKg, cancellationToken);
+
+    public Task<TripCargoOutcome> LoadCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        CancellationToken cancellationToken = default)
+        => SendCargoMutationAsync("load", tripId, parcelId, weightKg, cancellationToken);
+
+    public Task<TripCargoOutcome> ReleaseCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        CancellationToken cancellationToken = default)
+        => SendCargoMutationAsync("release", tripId, parcelId, weightKg, cancellationToken);
+
+    private async Task<TripCargoOutcome> SendCargoMutationAsync(
+        string action,
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"/internal/v1/trips/{tripId:D}/cargo/{action}")
+            {
+                Content = JsonContent.Create(new
+                {
+                    parcelId,
+                    weightKg,
+                    idempotencyKey = $"parcel:cargo:{action}:{parcelId:D}",
+                }, options: JsonOptions),
+            };
+
+            request.Headers.TryAddWithoutValidation("Idempotency-Key", $"parcel:cargo:{action}:{parcelId:D}");
+            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            return response.StatusCode switch
+            {
+                HttpStatusCode.OK => new TripCargoOutcome(TripCargoOutcomeKind.Success, null),
+                HttpStatusCode.NotFound => new TripCargoOutcome(TripCargoOutcomeKind.TripNotFound, null),
+                HttpStatusCode.Conflict => new TripCargoOutcome(TripCargoOutcomeKind.CapacityExceeded, "Trip cargo capacity would be exceeded."),
+                _ => new TripCargoOutcome(TripCargoOutcomeKind.TransportError,
+                    $"Trip cargo endpoint returned status {(int)response.StatusCode}."),
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "TripServiceClient cargo {Action} failed for parcel {ParcelId}.", action, parcelId);
+            return new TripCargoOutcome(TripCargoOutcomeKind.TransportError,
+                $"Trip service transport failure: {ex.Message}");
+        }
+    }
 }
