@@ -135,11 +135,11 @@ public static class InfrastructureServiceCollectionExtensions
         }
         else
         {
+            var baseUrl = ResolveBaseUrl(configuration, "Trip:BaseUrl", "TRIP_SERVICE_BASE_URL");
             services
                 .AddHttpClient<ITripServiceClient, TripServiceClient>(client =>
                 {
-                    client.BaseAddress = new Uri(ResolveBaseUrl(configuration,
-                        "Trip:BaseUrl", "TRIP_SERVICE_BASE_URL"));
+                    client.BaseAddress = new Uri(baseUrl);
                     client.Timeout = TimeSpan.FromSeconds(30);
                     client.DefaultRequestHeaders.Accept.Clear();
                     client.DefaultRequestHeaders.Accept.Add(
@@ -160,11 +160,11 @@ public static class InfrastructureServiceCollectionExtensions
         }
         else
         {
+            var baseUrl = ResolveBaseUrl(configuration, "Payment:BaseUrl", "PAYMENT_SERVICE_BASE_URL");
             services
                 .AddHttpClient<IPaymentServiceClient, PaymentServiceClient>(client =>
                 {
-                    client.BaseAddress = new Uri(ResolveBaseUrl(configuration,
-                        "Payment:BaseUrl", "PAYMENT_SERVICE_BASE_URL"));
+                    client.BaseAddress = new Uri(baseUrl);
                     client.Timeout = TimeSpan.FromSeconds(30);
                     client.DefaultRequestHeaders.Accept.Clear();
                     client.DefaultRequestHeaders.Accept.Add(
@@ -185,11 +185,11 @@ public static class InfrastructureServiceCollectionExtensions
         }
         else
         {
+            var baseUrl = ResolveBaseUrl(configuration, "Booking:BaseUrl", "BOOKING_SERVICE_BASE_URL");
             services
                 .AddHttpClient<IBookingServiceClient, BookingServiceClient>(client =>
                 {
-                    client.BaseAddress = new Uri(ResolveBaseUrl(configuration,
-                        "Booking:BaseUrl", "BOOKING_SERVICE_BASE_URL"));
+                    client.BaseAddress = new Uri(baseUrl);
                     client.Timeout = TimeSpan.FromSeconds(30);
                     client.DefaultRequestHeaders.Accept.Clear();
                     client.DefaultRequestHeaders.Accept.Add(
@@ -210,11 +210,11 @@ public static class InfrastructureServiceCollectionExtensions
         }
         else
         {
+            var baseUrl = ResolveBaseUrl(configuration, "Identity:BaseUrl", "IDENTITY_SERVICE_BASE_URL");
             services
                 .AddHttpClient<IIdentityServiceClient, IdentityServiceClient>(client =>
                 {
-                    client.BaseAddress = new Uri(ResolveBaseUrl(configuration,
-                        "Identity:BaseUrl", "IDENTITY_SERVICE_BASE_URL"));
+                    client.BaseAddress = new Uri(baseUrl);
                     client.Timeout = TimeSpan.FromSeconds(30);
                     client.DefaultRequestHeaders.Accept.Clear();
                     client.DefaultRequestHeaders.Accept.Add(

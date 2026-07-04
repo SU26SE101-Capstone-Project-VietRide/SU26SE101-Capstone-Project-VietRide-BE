@@ -25,20 +25,20 @@ public sealed class ParcelDbContext : VietRideDbContextBase
     public static void ConfigurePostgresTypes(NpgsqlDataSourceBuilder dataSourceBuilder)
     {
         var translator = new NpgsqlNullNameTranslator();
-        dataSourceBuilder.MapEnum<ParcelStatus>("parcel_status", translator);
-        dataSourceBuilder.MapEnum<ParcelSizeCategory>("parcel_size_category", translator);
-        dataSourceBuilder.MapEnum<ParcelReviewDecision>("parcel_review_decision", translator);
-        dataSourceBuilder.MapEnum<ParcelDeliveryMethod>("parcel_delivery_method", translator);
+        dataSourceBuilder.MapEnum<ParcelStatus>($"{SchemaName}.parcel_status", translator);
+        dataSourceBuilder.MapEnum<ParcelSizeCategory>($"{SchemaName}.parcel_size_category", translator);
+        dataSourceBuilder.MapEnum<ParcelReviewDecision>($"{SchemaName}.parcel_review_decision", translator);
+        dataSourceBuilder.MapEnum<ParcelDeliveryMethod>($"{SchemaName}.parcel_delivery_method", translator);
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema(SchemaName);
 
-        modelBuilder.HasPostgresEnum("parcel_status", Enum.GetNames<ParcelStatus>());
-        modelBuilder.HasPostgresEnum("parcel_size_category", Enum.GetNames<ParcelSizeCategory>());
-        modelBuilder.HasPostgresEnum("parcel_review_decision", Enum.GetNames<ParcelReviewDecision>());
-        modelBuilder.HasPostgresEnum("parcel_delivery_method", Enum.GetNames<ParcelDeliveryMethod>());
+        modelBuilder.HasPostgresEnum(SchemaName, "parcel_status", Enum.GetNames<ParcelStatus>());
+        modelBuilder.HasPostgresEnum(SchemaName, "parcel_size_category", Enum.GetNames<ParcelSizeCategory>());
+        modelBuilder.HasPostgresEnum(SchemaName, "parcel_review_decision", Enum.GetNames<ParcelReviewDecision>());
+        modelBuilder.HasPostgresEnum(SchemaName, "parcel_delivery_method", Enum.GetNames<ParcelDeliveryMethod>());
 
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(ParcelDbContext).Assembly);
 

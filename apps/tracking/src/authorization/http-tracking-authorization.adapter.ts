@@ -22,14 +22,25 @@ const HTTP_FORBIDDEN = 403;
 const HTTP_UNAUTHORIZED = 401;
 const HTTP_SERVER_ERROR_MIN = 500;
 
+const TrackingScopeSchema = z.enum([
+  'BOOKING_OWNER',
+  'DRIVER',
+  'ASSISTANT',
+  'OPERATOR',
+  'PARCEL_SENDER',
+  'PARCEL_RECIPIENT',
+]);
+const TrackingAuthorizationErrorSchema = z.enum([
+  'TRIP_NOT_FOUND',
+  'ACCESS_DENIED',
+  'TRACKING_TRIP_NOT_ACTIVE',
+  'TRACKING_AUTH_UNAVAILABLE',
+]);
+
 const DownstreamAuthorizationSchema = z.object({
   allowed: z.boolean(),
-  scope: z
-    .enum(['BOOKING_OWNER', 'DRIVER', 'ASSISTANT', 'OPERATOR', 'PARCEL_SENDER', 'PARCEL_RECIPIENT'])
-    .optional(),
-  error: z
-    .enum(['TRIP_NOT_FOUND', 'ACCESS_DENIED', 'TRACKING_TRIP_NOT_ACTIVE', 'TRACKING_AUTH_UNAVAILABLE'])
-    .optional(),
+  scope: TrackingScopeSchema.nullish().transform((value) => value ?? undefined),
+  error: TrackingAuthorizationErrorSchema.nullish().transform((value) => value ?? undefined),
 });
 
 const ApiEnvelopeAuthorizationSchema = z.object({

@@ -28,7 +28,19 @@ public abstract class VietRideDbContextBase : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        modelBuilder.HasPostgresEnum("outbox_event_status", Enum.GetNames<OutboxEventStatus>());
+        var schemaName = GetType().GetField("SchemaName")?.GetRawConstantValue() as string;
+        var outboxEventStatusTypeName = string.IsNullOrWhiteSpace(schemaName)
+            ? "outbox_event_status"
+            : $"{schemaName}.outbox_event_status";
+
+        if (string.IsNullOrWhiteSpace(schemaName))
+        {
+            modelBuilder.HasPostgresEnum("outbox_event_status", Enum.GetNames<OutboxEventStatus>());
+        }
+        else
+        {
+            modelBuilder.HasPostgresEnum(schemaName, "outbox_event_status", Enum.GetNames<OutboxEventStatus>());
+        }
 
         modelBuilder.Entity<OutboxEvent>(b =>
         {
@@ -38,7 +50,7 @@ public abstract class VietRideDbContextBase : DbContext
             b.Property(x => x.EventType).IsRequired().HasMaxLength(100);
             b.Property(x => x.Payload).HasColumnType("jsonb").IsRequired();
             b.Property(x => x.Status)
-                .HasColumnType("outbox_event_status")
+                .HasColumnType(outboxEventStatusTypeName)
                 .HasDefaultValueSql("'PENDING'")
                 .IsRequired();
             b.Property(x => x.RetryCount).HasDefaultValue(0);
@@ -47,7 +59,7 @@ public abstract class VietRideDbContextBase : DbContext
             b.Property(x => x.PublishedAt);
             b.HasIndex(x => new { x.Status, x.CreatedAt })
                 .HasDatabaseName("idx_outbox_events_status_created")
-                .HasFilter("status IN ('PENDING', 'PUBLISHING', 'FAILED')");
+                .HasFilter($"status IN ('PENDING'::{outboxEventStatusTypeName}, 'PUBLISHING'::{outboxEventStatusTypeName}, 'FAILED'::{outboxEventStatusTypeName})");
         });
 
         modelBuilder.ApplySnakeCaseNaming();

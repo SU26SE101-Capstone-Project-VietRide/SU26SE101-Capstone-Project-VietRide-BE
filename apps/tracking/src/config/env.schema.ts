@@ -45,12 +45,18 @@ export const envSchema = baseEnvSchema.merge(
 export type Env = z.infer<typeof envSchema>;
 
 export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
+  const tripServiceBaseUrl = raw.TRIP_SERVICE_BASE_URL || raw.TRIP_BASE_URL;
+  const bookingServiceBaseUrl = raw.BOOKING_SERVICE_BASE_URL || raw.BOOKING_BASE_URL;
+  const parcelServiceBaseUrl = raw.PARCEL_SERVICE_BASE_URL || raw.PARCEL_BASE_URL;
   const normalizedRaw = {
     ...raw,
     SENTRY_DSN: raw.SENTRY_DSN === '' ? undefined : raw.SENTRY_DSN,
     INTERNAL_JWT_SECRET: raw.INTERNAL_JWT_SECRET === '' ? undefined : raw.INTERNAL_JWT_SECRET,
     TRACKING_DATABASE_URL: raw.TRACKING_DATABASE_URL === '' ? undefined : raw.TRACKING_DATABASE_URL,
     USER_JWT_PUBLIC_KEY: raw.USER_JWT_PUBLIC_KEY === '' ? undefined : raw.USER_JWT_PUBLIC_KEY,
+    TRIP_SERVICE_BASE_URL: tripServiceBaseUrl === '' ? undefined : tripServiceBaseUrl,
+    BOOKING_SERVICE_BASE_URL: bookingServiceBaseUrl === '' ? undefined : bookingServiceBaseUrl,
+    PARCEL_SERVICE_BASE_URL: parcelServiceBaseUrl === '' ? undefined : parcelServiceBaseUrl,
   };
   const postgresHost = raw.POSTGRES_HOST;
   const postgresPort = raw.POSTGRES_PORT;

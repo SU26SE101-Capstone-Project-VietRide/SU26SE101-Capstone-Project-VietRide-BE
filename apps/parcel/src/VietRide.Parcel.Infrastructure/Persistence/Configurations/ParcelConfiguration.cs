@@ -9,6 +9,11 @@ namespace VietRide.Parcel.Infrastructure.Persistence.Configurations;
 
 internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntity>
 {
+    private const string ParcelSizeCategoryType = $"{ParcelDbContext.SchemaName}.parcel_size_category";
+    private const string ParcelDeliveryMethodType = $"{ParcelDbContext.SchemaName}.parcel_delivery_method";
+    private const string ParcelStatusType = $"{ParcelDbContext.SchemaName}.parcel_status";
+    private const string ParcelReviewDecisionType = $"{ParcelDbContext.SchemaName}.parcel_review_decision";
+
     public void Configure(EntityTypeBuilder<ParcelEntity> builder)
     {
         builder.ToTable("parcels", table =>
@@ -88,7 +93,7 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
 
         builder.Property(x => x.SizeCategory)
             .HasColumnName("size_category")
-            .HasColumnType("parcel_size_category")
+            .HasColumnType(ParcelSizeCategoryType)
             .IsRequired();
 
         builder.Property(x => x.EstimatedWeightKg)
@@ -103,7 +108,7 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
 
         builder.Property(x => x.DeliveryMethod)
             .HasColumnName("delivery_method")
-            .HasColumnType("parcel_delivery_method")
+            .HasColumnType(ParcelDeliveryMethodType)
             .HasDefaultValueSql("'TERMINAL_PICKUP'")
             .IsRequired();
 
@@ -131,7 +136,7 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
 
         builder.Property(x => x.Status)
             .HasColumnName("status")
-            .HasColumnType("parcel_status")
+            .HasColumnType(ParcelStatusType)
             .IsRequired();
 
         builder.Property(x => x.RejectionReason)
@@ -146,7 +151,7 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
 
         builder.Property(x => x.ReviewDecision)
             .HasColumnName("review_decision")
-            .HasColumnType("parcel_review_decision")
+            .HasColumnType(ParcelReviewDecisionType)
             .IsRequired(false);
 
         builder.Property(x => x.ReviewedAt)
@@ -240,11 +245,11 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
 
         builder.HasIndex(x => new { x.Status, x.UpdatedAt })
             .HasDatabaseName("idx_parcels_status_updated_at")
-            .HasFilter("status IN ('PENDING', 'PENDING_ADDITIONAL_PAYMENT', 'PENDING_OPERATOR_REVIEW', 'PENDING_OPERATOR_ACTION', 'PENDING_TRANSFER_CONFIRM', 'DELIVERED_PENDING_CONFIRM', 'DELIVERY_REJECTED', 'TRANSFER_ESCALATED')");
+            .HasFilter($"status IN ('PENDING'::{ParcelStatusType}, 'PENDING_ADDITIONAL_PAYMENT'::{ParcelStatusType}, 'PENDING_OPERATOR_REVIEW'::{ParcelStatusType}, 'PENDING_OPERATOR_ACTION'::{ParcelStatusType}, 'PENDING_TRANSFER_CONFIRM'::{ParcelStatusType}, 'DELIVERED_PENDING_CONFIRM'::{ParcelStatusType}, 'DELIVERY_REJECTED'::{ParcelStatusType}, 'TRANSFER_ESCALATED'::{ParcelStatusType})");
 
         builder.HasIndex(x => x.AdditionalPaymentDeadline)
             .HasDatabaseName("idx_parcels_additional_payment_deadline")
-            .HasFilter("status = 'PENDING_ADDITIONAL_PAYMENT'");
+            .HasFilter($"status = 'PENDING_ADDITIONAL_PAYMENT'::{ParcelStatusType}");
 
         builder.HasIndex(x => x.TransferTargetTripId)
             .HasDatabaseName("idx_parcels_transfer_target_trip_id")
@@ -257,6 +262,10 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
         builder.HasIndex(x => x.ReviewedByUserId)
             .HasDatabaseName("idx_parcels_reviewed_by_user_id")
             .HasFilter("reviewed_by_user_id IS NOT NULL");
+
+        builder.HasIndex(x => x.LoadedByUserId)
+            .HasDatabaseName("idx_parcels_loaded_by_user_id")
+            .HasFilter("loaded_by_user_id IS NOT NULL");
 
         builder.HasIndex(x => x.ConfirmedByUserId)
             .HasDatabaseName("idx_parcels_confirmed_by_user_id")

@@ -7,6 +7,8 @@ namespace VietRide.Parcel.Infrastructure.Persistence.Configurations;
 
 internal sealed class ParcelRouteFareConfiguration : IEntityTypeConfiguration<ParcelRouteFare>
 {
+    private const string ParcelSizeCategoryType = $"{ParcelDbContext.SchemaName}.parcel_size_category";
+
     public void Configure(EntityTypeBuilder<ParcelRouteFare> builder)
     {
         builder.ToTable("parcel_route_fares", table =>
@@ -24,7 +26,7 @@ internal sealed class ParcelRouteFareConfiguration : IEntityTypeConfiguration<Pa
 
         builder.Property(x => x.SizeCategory)
             .HasColumnName("size_category")
-            .HasColumnType("parcel_size_category")
+            .HasColumnType(ParcelSizeCategoryType)
             .IsRequired();
 
         builder.Property(x => x.OperatorId)

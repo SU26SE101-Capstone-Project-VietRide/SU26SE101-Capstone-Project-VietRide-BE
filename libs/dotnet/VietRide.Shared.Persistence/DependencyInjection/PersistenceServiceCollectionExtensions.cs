@@ -29,7 +29,7 @@ public static class PersistenceServiceCollectionExtensions
         services.AddSingleton(_ =>
         {
             var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
-            ConfigureSharedPostgresTypes(dataSourceBuilder);
+            ConfigureSharedPostgresTypes(dataSourceBuilder, schemaName);
             configureDataSource?.Invoke(dataSourceBuilder);
             return dataSourceBuilder.Build();
         });
@@ -38,7 +38,7 @@ public static class PersistenceServiceCollectionExtensions
         {
             options.UseNpgsql(sp.GetRequiredService<NpgsqlDataSource>(), npgsql =>
             {
-                ConfigureNpgsqlRetry(npgsql);
+                ConfigureNpgsqlRetry(npgsql, configuration);
                 if (!string.IsNullOrWhiteSpace(schemaName))
                 {
                     npgsql.MigrationsHistoryTable("__ef_migrations_history", schemaName);
@@ -60,16 +60,30 @@ public static class PersistenceServiceCollectionExtensions
         return services;
     }
 
-    private static void ConfigureSharedPostgresTypes(NpgsqlDataSourceBuilder dataSourceBuilder)
+    private static void ConfigureSharedPostgresTypes(NpgsqlDataSourceBuilder dataSourceBuilder, string? schemaName)
     {
+        var outboxEventStatusTypeName = string.IsNullOrWhiteSpace(schemaName)
+            ? "outbox_event_status"
+            : $"{schemaName}.outbox_event_status";
+
         dataSourceBuilder.MapEnum<OutboxEventStatus>(
-            "outbox_event_status",
+            outboxEventStatusTypeName,
             new NpgsqlNullNameTranslator());
     }
 
     private static void ConfigureNpgsqlRetry(
-        Npgsql.EntityFrameworkCore.PostgreSQL.Infrastructure.NpgsqlDbContextOptionsBuilder npgsql)
+        Npgsql.EntityFrameworkCore.PostgreSQL.Infrastructure.NpgsqlDbContextOptionsBuilder npgsql,
+        IConfiguration configuration)
     {
+        var enableRetry = bool.TryParse(
+            configuration["Database:EnableRetryOnFailure"],
+            out var configuredEnableRetry)
+            && configuredEnableRetry;
+        if (!enableRetry)
+        {
+            return;
+        }
+
         npgsql.EnableRetryOnFailure(
             maxRetryCount: 5,
             maxRetryDelay: TimeSpan.FromSeconds(10),
