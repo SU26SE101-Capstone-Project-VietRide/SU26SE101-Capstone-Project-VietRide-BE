@@ -336,6 +336,28 @@ describe('buildRouteTable', () => {
     expect(routes.find((r) => r.prefix === '/v1/operator/parcel-route-fares')).toBeDefined();
   });
 
+  it('routes assistant and operator parcel actions to Parcel without gateway-level role guards', () => {
+    const cases = [
+      ['/v1/assistant/parcels/11111111-1111-1111-1111-111111111111/load', '/v1/assistant/parcels'],
+      [
+        '/v1/assistant/parcels/11111111-1111-1111-1111-111111111111/confirm-delivery',
+        '/v1/assistant/parcels',
+      ],
+      [
+        '/v1/operator/parcels/11111111-1111-1111-1111-111111111111/confirm-delivery',
+        '/v1/operator/parcels',
+      ],
+    ] as const;
+
+    cases.forEach(([path, prefix]) => {
+      const route = matchRoute(routes, path);
+
+      expect(route?.prefix).toBe(prefix);
+      expect(route?.target).toBe(env.PARCEL_BASE_URL);
+      expect(route?.authRequired).toBe('user');
+      expect(route?.requiredRoles).toBeUndefined();
+    });
+  });
   it('routes parcels to Parcel without a gateway-level role guard', () => {
     const route = matchRoute(routes, '/v1/parcels');
     const routeDetail = matchRoute(routes, '/v1/parcels/11111111-1111-1111-1111-111111111111');
@@ -354,8 +376,9 @@ describe('buildRouteTable', () => {
   it('routes parcel delivery token endpoints through the longer mixed prefix', () => {
     const confirmRoute = matchRoute(routes, '/v1/parcels/delivery/confirm');
     const rejectRoute = matchRoute(routes, '/v1/parcels/delivery/reject');
+    const undoRejectRoute = matchRoute(routes, '/v1/parcels/delivery/undo-reject');
 
-    [confirmRoute, rejectRoute].forEach((route) => {
+    [confirmRoute, rejectRoute, undoRejectRoute].forEach((route) => {
       expect(route?.prefix).toBe('/v1/parcels/delivery');
       expect(route?.target).toBe(env.PARCEL_BASE_URL);
       expect(route?.authRequired).toBe('mixed');
@@ -363,6 +386,7 @@ describe('buildRouteTable', () => {
       expect(route?.publicSubpaths).toEqual([
         { method: 'POST', path: '/v1/parcels/delivery/confirm' },
         { method: 'POST', path: '/v1/parcels/delivery/reject' },
+        { method: 'POST', path: '/v1/parcels/delivery/undo-reject' },
       ]);
     });
   });
