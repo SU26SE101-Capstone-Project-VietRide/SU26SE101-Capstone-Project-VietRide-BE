@@ -1,5 +1,5 @@
-using MediatR;
 using System.Text.Json;
+using MediatR;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;

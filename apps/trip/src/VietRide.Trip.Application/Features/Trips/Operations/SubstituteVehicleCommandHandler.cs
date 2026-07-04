@@ -1,6 +1,6 @@
+using System.Text.Json;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;

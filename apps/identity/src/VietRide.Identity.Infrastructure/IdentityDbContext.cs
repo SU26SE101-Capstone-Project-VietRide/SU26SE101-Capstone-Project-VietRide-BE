@@ -3,6 +3,7 @@ using Npgsql;
 using Npgsql.NameTranslation;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
+using VietRide.Shared.Persistence.Outbox;
 using VietRide.Identity.Infrastructure.Persistence.Configurations;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Persistence;
@@ -33,6 +34,7 @@ public sealed class IdentityDbContext : VietRideDbContextBase
         builder.MapEnum<OperatorRegistrationStatus>("operator_registration_status", PostgresEnumNameTranslator);
         builder.MapEnum<SubscriptionStatus>("subscription_status", PostgresEnumNameTranslator);
         builder.MapEnum<SubscriptionPaymentMethod>("subscription_payment_method", PostgresEnumNameTranslator);
+        builder.MapEnum<OutboxEventStatus>("outbox_event_status", PostgresEnumNameTranslator);
     }
 
     // --- DbSets ---
