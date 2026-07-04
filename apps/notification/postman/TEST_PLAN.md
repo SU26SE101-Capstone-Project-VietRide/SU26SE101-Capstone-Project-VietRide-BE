@@ -11,7 +11,7 @@
 | **Service** | VietRide Notification (NestJS, **event-driven**) |
 | **Tech stack** | NestJS, Prisma (Postgres schema `vietride_notification`), Redis + BullMQ (queue + idempotency), RabbitMQ (consumer), Zod (validation), `jose` (JWT), SendGrid (email), Firebase FCM (push) |
 | **Base URL — gateway** | `http://localhost:3000` → user path `/v1/notifications` |
-| **Base URL — service trực tiếp** | `http://localhost:3002` → user path `/api/v1/notifications`; + `/health`, `/ready`, `/api`, `/internal/v1/emails` |
+| **Base URL — service trực tiếp** | `http://localhost:3002` → user path `/v1/notifications`; + `/health`, `/ready`, `/api`, `/internal/v1/emails` |
 | **Auth user** | RS256 access token từ Identity (login). Header `Authorization: Bearer <token>`. issuer `vietride-identity`, aud `vietride-api` |
 | **Auth internal** | HS256 ký bằng `INTERNAL_JWT_SECRET`. Header `X-Internal-Auth: Bearer <token>`. issuer `vietride-gateway`, aud `vietride-internal` |
 
@@ -28,8 +28,8 @@
 | E1 | — | `GET /health` | none | Liveness |
 | E2 | — | `GET /ready` | none | Readiness (prisma+redis+rabbitmq) |
 | E3 | — | `GET /api` | none | Default/smoke |
-| E4 | `GET /v1/notifications` | `GET /api/v1/notifications` | user JWT | List notification (paging/sort/unreadOnly) |
-| E5 | `PATCH /v1/notifications/:id` | `PATCH /api/v1/notifications/:id` | user JWT | Mark read → 204 |
+| E4 | `GET /v1/notifications` | `GET /v1/notifications` | user JWT | List notification (paging/sort/unreadOnly) |
+| E5 | `PATCH /v1/notifications/:id` | `PATCH /v1/notifications/:id` | user JWT | Mark read → 204 |
 | E6 | — (không qua gateway) | `POST /internal/v1/emails` | internal JWT | Enqueue email → 202 |
 
 > Routing keys consumer (folder 02), từ `core-events.constants.ts`:
@@ -87,7 +87,7 @@
 |---|---|---|
 | `mode` | điền tay | `safe-local` (fake provider) hoặc `staging-real` (provider thật) — §8 |
 | `baseUrlGateway` / `baseUrlService` | điền tay | `:3000` / `:3002` |
-| `notificationsPath` | điền tay | `/v1/notifications` (gateway) **hoặc** `/api/v1/notifications` (trực tiếp service) |
+| `notificationsPath` | điền tay | `/v1/notifications` (gateway) **hoặc** `/v1/notifications` (trực tiếp service) |
 | `identityEmail` / `identityPassword` | điền tay | tài khoản PASSENGER **đã seed** |
 | `internalJwtSecret` | điền tay | = `INTERNAL_JWT_SECRET` của môi trường test (≥32 ký tự) |
 | `rabbitMgmtUrl` / `rabbitMgmtUser` / `rabbitMgmtPass` / `rabbitVhost` / `rabbitExchange` | điền tay | RabbitMQ Management API để publish event (folder 02) |
@@ -165,4 +165,4 @@
 2. Điền: `identityEmail`, `identityPassword`, `internalJwtSecret`, `rabbitMgmtUser/Pass` (và `mode` nếu test real).
 3. Khởi động stack: `docker compose -f infra/docker/docker-compose.yml up` (gateway :3000, notification :3002, identity, postgres, redis, rabbitmq + mgmt :15672).
 4. Chạy bằng **Collection Runner** theo thứ tự folder 00→06, **đặt Delay ~1000ms** (cho bước poll folder 02).
-5. Để test trực tiếp service thay vì gateway: đổi `notificationsPath=/api/v1/notifications` và sửa các request user sang `{{baseUrlService}}`.
+5. Để test trực tiếp service thay vì gateway: đổi `notificationsPath=/v1/notifications` và sửa các request user sang `{{baseUrlService}}`.

@@ -3,15 +3,13 @@ import {
   Get,
   HttpCode,
   Param,
-  Body,
-  Patch,
+  Post,
   Query,
   Req,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import {
-  ApiBody,
   ApiBearerAuth,
   ApiOperation,
   ApiParam,
@@ -31,12 +29,7 @@ import {
   type NotificationIdParamDto,
 } from './dto/notification-param.dto';
 import {
-  MarkNotificationReadSchema,
-  type MarkNotificationReadDto,
-} from './dto/mark-notification-read.dto';
-import {
   errorEnvelopeSchema,
-  markNotificationReadBodySchema,
   pagedNotificationsSchema,
   successEnvelopeSchema,
 } from '../swagger/api-response.schemas';
@@ -83,14 +76,10 @@ export class NotificationsController {
     return this.notificationsService.listForUser(this.readUserId(request), query);
   }
 
-  @Patch(':notificationId')
+  @Post(':notificationId/read')
   @HttpCode(204)
   @ApiOperation({ summary: 'Mark a notification as read for current user' })
   @ApiParam({ name: 'notificationId', type: String, format: 'uuid' })
-  @ApiBody({
-    description: 'Partial update body. Only read=true is accepted. Runtime validation is Zod-backed.',
-    schema: markNotificationReadBodySchema,
-  })
   @ApiResponse({
     status: 204,
     description: 'Notification marked as read. 204 responses intentionally have no envelope body.',
@@ -108,7 +97,11 @@ export class NotificationsController {
   @ApiResponse({
     status: 404,
     description: 'Notification does not exist or is not owned by the current user.',
-    schema: errorEnvelopeSchema(404, 'NOTIFICATION_NOT_FOUND', 'Notification 7e7d44b8-3d84-4dd5-b0a2-1f445de7c701 not found'),
+    schema: errorEnvelopeSchema(
+      404,
+      'NOTIFICATION_NOT_FOUND',
+      'Notification 7e7d44b8-3d84-4dd5-b0a2-1f445de7c701 not found',
+    ),
   })
   @ApiResponse({
     status: 500,
@@ -117,7 +110,6 @@ export class NotificationsController {
   })
   async markRead(
     @Param(new ZodValidationPipe(NotificationIdParamSchema)) params: NotificationIdParamDto,
-    @Body(new ZodValidationPipe(MarkNotificationReadSchema)) _body: MarkNotificationReadDto,
     @Req() request: RequestWithNotificationUser,
   ): Promise<void> {
     await this.notificationsService.markRead(params.notificationId, this.readUserId(request));

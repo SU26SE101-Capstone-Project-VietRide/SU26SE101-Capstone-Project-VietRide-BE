@@ -1,11 +1,15 @@
 import { ZodError } from 'zod';
 import { NotificationType } from '../generated/notification-prisma-client';
 import {
+  BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY,
+  BOOKING_VOUCHER_CONSENT_REJECTED_ROUTING_KEY,
   INVOICE_ISSUED_ROUTING_KEY,
   PARCEL_LOADED_ROUTING_KEY,
   PARCEL_REVIEW_REQUESTED_ROUTING_KEY,
   PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY,
   PAYOUT_FAILED_ROUTING_KEY,
+  SUBSCRIPTION_PAYMENT_AUTO_REVERTED_ROUTING_KEY,
+  SUBSCRIPTION_PAYMENT_PENDING_WARN_ROUTING_KEY,
   SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY,
   TRIP_SETTLEMENT_COMPLETED_ROUTING_KEY,
 } from './parcel-subscription-operator-events.constants';
@@ -19,6 +23,8 @@ const TRIP_ID = '55555555-5555-4555-8555-555555555555';
 const SETTLEMENT_ID = '66666666-6666-4666-8666-666666666666';
 const INVOICE_ID = '77777777-7777-4777-8777-777777777777';
 const PAYOUT_ID = '88888888-8888-4888-8888-888888888888';
+const VOUCHER_ID = '99999999-9999-4999-8999-999999999999';
+const PLAN_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
 describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
   it('maps parcel loaded event to a sender notification', async () => {
@@ -115,6 +121,87 @@ describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
         userId: USER_ID,
         type: NotificationType.SUBSCRIPTION_LIMIT_EXCEEDED,
         title: 'Vuot gioi han goi dich vu',
+      }),
+    ]);
+  });
+
+  it('maps voucher consent accepted to operator recipients', async () => {
+    await expect(
+      mapParcelSubscriptionOperatorEventToNotifications(
+        BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY,
+        {
+          operatorId: OPERATOR_ID,
+          voucherId: VOUCHER_ID,
+        },
+        async (operatorId) => {
+          expect(operatorId).toBe(OPERATOR_ID);
+          return [USER_ID];
+        },
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.VOUCHER_CONSENT_ACCEPTED,
+        title: 'Da chap nhan voucher',
+      }),
+    ]);
+  });
+
+  it('maps voucher consent rejected with reason', async () => {
+    await expect(
+      mapParcelSubscriptionOperatorEventToNotifications(
+        BOOKING_VOUCHER_CONSENT_REJECTED_ROUTING_KEY,
+        {
+          userId: USER_ID,
+          operatorId: OPERATOR_ID,
+          voucherId: VOUCHER_ID,
+          reason: 'Budget exceeded',
+        },
+        resolveNoOperatorRecipients,
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.VOUCHER_CONSENT_REJECTED,
+        body: expect.stringContaining('Budget exceeded'),
+      }),
+    ]);
+  });
+
+  it('maps subscription payment pending warning', async () => {
+    await expect(
+      mapParcelSubscriptionOperatorEventToNotifications(
+        SUBSCRIPTION_PAYMENT_PENDING_WARN_ROUTING_KEY,
+        {
+          userId: USER_ID,
+          operatorId: OPERATOR_ID,
+          dueDate: '2026-07-10T00:00:00.000Z',
+        },
+        resolveNoOperatorRecipients,
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.SUBSCRIPTION_PAYMENT_PENDING_WARN,
+      }),
+    ]);
+  });
+
+  it('maps subscription payment auto reverted', async () => {
+    await expect(
+      mapParcelSubscriptionOperatorEventToNotifications(
+        SUBSCRIPTION_PAYMENT_AUTO_REVERTED_ROUTING_KEY,
+        {
+          userId: USER_ID,
+          operatorId: OPERATOR_ID,
+          previousPlanId: PLAN_ID,
+        },
+        resolveNoOperatorRecipients,
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.SUBSCRIPTION_PAYMENT_AUTO_REVERTED,
       }),
     ]);
   });

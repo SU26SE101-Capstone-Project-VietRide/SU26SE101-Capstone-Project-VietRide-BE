@@ -33,7 +33,7 @@ const checks = [
   {
     name: 'notifications API rejects missing auth with ApiResponse envelope',
     run: async () => {
-      const response = await fetch(`${baseUrl}/api/v1/notifications`);
+      const response = await fetch(`${baseUrl}/v1/notifications`);
       const body = await response.json();
       assert(response.status === 401, `expected 401, got ${response.status}`);
       assert(body.success === false, 'expected error envelope success=false');

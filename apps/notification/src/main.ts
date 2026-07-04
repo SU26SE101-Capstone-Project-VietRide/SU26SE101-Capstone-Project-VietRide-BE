@@ -1,6 +1,6 @@
 import './bootstrap-env';
 
-import { Logger, RequestMethod } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app/app.module';
@@ -10,15 +10,6 @@ async function bootstrap(): Promise<void> {
   const env = loadEnv();
   const app = await NestFactory.create(AppModule);
   app.enableShutdownHooks();
-  const globalPrefix = 'api';
-  // Exclude probes so docker-compose/Nginx can reach them without the API prefix.
-  app.setGlobalPrefix(globalPrefix, {
-    exclude: [
-      'health',
-      'ready',
-      { path: 'internal/(.*)', method: RequestMethod.ALL },
-    ],
-  });
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('VietRide Notification API')
@@ -29,7 +20,7 @@ async function bootstrap(): Promise<void> {
   SwaggerModule.setup('docs', app, document);
   const port = env.PORT;
   await app.listen(port, '0.0.0.0');
-  Logger.log(`Application is running on: http://localhost:${port}/${globalPrefix}`);
+  Logger.log(`Application is running on: http://localhost:${port}`);
 }
 
 bootstrap().catch((error) => {

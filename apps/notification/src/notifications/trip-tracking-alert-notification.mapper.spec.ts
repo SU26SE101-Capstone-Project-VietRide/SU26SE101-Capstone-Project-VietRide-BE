@@ -5,6 +5,7 @@ import {
   TRACKING_GPS_OFF_ROUTE_ROUTING_KEY,
   TRIP_DELAYED_ROUTING_KEY,
   TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+  TRIP_STOP_DISABLED_ROUTING_KEY,
 } from './trip-tracking-alert-events.constants';
 import { mapTripTrackingAlertToNotifications } from './trip-tracking-alert-notification.mapper';
 
@@ -109,6 +110,28 @@ describe('mapTripTrackingAlertToNotifications', () => {
         type: NotificationType.INCIDENT_REPORTED,
         title: 'Co su co tren chuyen xe',
         body: `Chuyen ${TRIP_ID} vua ghi nhan su co: SAFETY.`,
+      }),
+    ]);
+  });
+
+  it('maps stop disabled event for explicit recipients', () => {
+    expect(
+      mapTripTrackingAlertToNotifications(TRIP_STOP_DISABLED_ROUTING_KEY, {
+        userId: USER_ID,
+        stopId: STOP_ID,
+        stopName: 'Ben xe Da Lat',
+        replacedByStopId: '66666666-6666-4666-8666-666666666666',
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.STOP_DISABLED,
+        title: 'Diem dung tam ngung phuc vu',
+        body: expect.stringContaining('Ben xe Da Lat'),
+        data: expect.objectContaining({
+          stopId: STOP_ID,
+          replacedByStopId: '66666666-6666-4666-8666-666666666666',
+        }),
       }),
     ]);
   });

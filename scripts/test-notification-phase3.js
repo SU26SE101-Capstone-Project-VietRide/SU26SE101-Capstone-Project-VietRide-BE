@@ -10,21 +10,21 @@ async function main() {
   const failures = [];
 
   await runCase('auth fail: list requires bearer token', failures, async () => {
-    const response = await request('/api/v1/notifications');
+    const response = await request('/v1/notifications');
     assertStatus(response, 401);
     assertErrorEnvelope(await response.json(), 'UNAUTHORIZED');
   });
 
   await runCase('validation fail: query rejects pageSize above max', failures, async () => {
     requireAccessToken();
-    const response = await request('/api/v1/notifications?pageSize=101', accessToken);
+    const response = await request('/v1/notifications?pageSize=101', accessToken);
     assertStatus(response, 400);
     assertErrorEnvelope(await response.json());
   });
 
   await runCase('happy path: list uses ApiResponse envelope', failures, async () => {
     requireAccessToken();
-    const response = await request('/api/v1/notifications?page=1&pageSize=20&sortBy=createdAt&sortDir=desc', accessToken);
+    const response = await request('/v1/notifications?page=1&pageSize=20&sortBy=createdAt&sortDir=desc', accessToken);
     assertStatus(response, 200);
     const body = await response.json();
     assertSuccessEnvelope(body);
@@ -36,12 +36,12 @@ async function main() {
   await runCase('happy path: mark read is idempotent for an owned notification', failures, async () => {
     requireAccessToken();
     requireNotificationId();
-    const firstResponse = await request(`/api/v1/notifications/${notificationId}/read`, accessToken, {
+    const firstResponse = await request(`/v1/notifications/${notificationId}/read`, accessToken, {
       method: 'POST',
     });
     assertStatus(firstResponse, 204);
 
-    const secondResponse = await request(`/api/v1/notifications/${notificationId}/read`, accessToken, {
+    const secondResponse = await request(`/v1/notifications/${notificationId}/read`, accessToken, {
       method: 'POST',
     });
     assertStatus(secondResponse, 204);
@@ -49,7 +49,7 @@ async function main() {
 
   await runCase('permission fail: missing or unowned notification returns envelope', failures, async () => {
     requireAccessToken();
-    const response = await request(`/api/v1/notifications/${missingNotificationId}/read`, accessToken, {
+    const response = await request(`/v1/notifications/${missingNotificationId}/read`, accessToken, {
       method: 'POST',
     });
     assertStatus(response, 404);
