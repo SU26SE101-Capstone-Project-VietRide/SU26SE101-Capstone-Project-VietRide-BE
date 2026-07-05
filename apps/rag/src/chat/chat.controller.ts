@@ -1,5 +1,5 @@
 import { Body, Controller, Post, Req, Res, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiBody, ApiHeader, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ZodValidationPipe } from '@vietride/nest-common';
 import type { Response } from 'express';
 import { InternalJwtAuthGuard } from '../auth/internal-jwt-auth.guard';
@@ -12,13 +12,12 @@ import {
 import { ChatService } from './chat.service';
 import type { RagChatSseEvent } from './chat.types';
 import { CreateChatDto, CreateChatSchema } from './dto/create-chat.dto';
-import { errorEnvelopeSchema, internalAuthHeaderSchema } from '../swagger/api-response.schemas';
+import { errorEnvelopeSchema } from '../swagger/api-response.schemas';
 
 const RAG_CHAT_REQUEST_MAX_MESSAGE_CHARS = 4_000;
 
 @ApiTags('RAG Chat')
 @ApiBearerAuth()
-@ApiHeader(internalAuthHeaderSchema)
 @UseGuards(InternalJwtAuthGuard)
 @Controller('v1/rag/chat')
 export class ChatController {
@@ -39,7 +38,7 @@ export class ChatController {
   })
   @ApiResponse({ status: 200, description: 'SSE text/event-stream. Events: token, done, error.' })
   @ApiResponse({ status: 400, description: 'Invalid payload', schema: errorEnvelopeSchema(400, 'VALIDATION_FAILED', 'Validation failed', { fields: true }) })
-  @ApiResponse({ status: 401, description: 'Missing or invalid internal JWT', schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Missing or invalid internal JWT') })
+  @ApiResponse({ status: 401, description: 'Missing or invalid access token', schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Missing or invalid access token') })
   @ApiResponse({ status: 403, description: 'Caller is not allowed to query RAG', schema: errorEnvelopeSchema(403, 'INSUFFICIENT_ROLE', 'Caller is not allowed to query RAG') })
   @ApiResponse({ status: 404, description: 'Conversation not found', schema: errorEnvelopeSchema(404, 'RAG_CONVERSATION_NOT_FOUND', 'Conversation not found') })
   @ApiResponse({ status: 429, description: 'Rate limit exceeded', schema: errorEnvelopeSchema(429, 'RATE_LIMIT_EXCEEDED', 'Rate limit exceeded') })
