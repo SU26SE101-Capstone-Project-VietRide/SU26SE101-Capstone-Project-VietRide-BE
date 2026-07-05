@@ -18,15 +18,14 @@ async function bootstrap(): Promise<void> {
   app.enableShutdownHooks();
   app.useWebSocketAdapter(new CorsIoAdapter(app, env.TRACKING_CORS_ORIGIN));
 
-  if (env.TRACKING_SWAGGER_ENABLED) {
-    const swaggerConfig = new DocumentBuilder()
-      .setTitle('VietRide Tracking API')
-      .setVersion('v1')
-      .addBearerAuth()
-      .build();
-    const document = SwaggerModule.createDocument(app, swaggerConfig);
-    SwaggerModule.setup('docs', app, document);
-  }
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('VietRide Tracking API')
+    .setVersion('v1')
+    .addBearerAuth()
+    .build();
+  const document = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup('docs', app, document);
+
   const port = env.PORT;
   await app.listen(env.PORT, '0.0.0.0');
   Logger.log(`🚀 Application is running on: http://localhost:${port}`);
