@@ -7,6 +7,7 @@ using VietRide.Identity.Application.Features.Auth.Login;
 using VietRide.Identity.Application.Features.Auth.Logout;
 using VietRide.Identity.Application.Features.Auth.Refresh;
 using VietRide.Identity.Application.Features.Auth.Register;
+using VietRide.Identity.Application.Features.Auth.ResendVerificationEmail;
 using VietRide.Identity.Application.Features.Auth.SetInitialPassword;
 using VietRide.Identity.Application.Features.Auth.VerifyEmail;
 using VietRide.Shared.Kernel.Primitives;
@@ -72,6 +73,30 @@ public sealed class AuthController : ControllerBase
     {
         var result = await _sender.Send(
             new VerifyEmailCommand(request.Email, request.Code, request.Purpose),
+            ct);
+
+        return Ok(result);
+    }
+
+    /// <summary>Resend an email verification OTP for an account pending email verification.</summary>
+    /// <remarks>
+    /// Already verified email → 409 AUTH_EMAIL_ALREADY_VERIFIED.
+    /// Unknown email or invalid purpose → 400 AUTH_OTP_INVALID.
+    /// OTP rate limit exceeded → 429 AUTH_OTP_RATE_LIMIT_EXCEEDED.
+    /// </remarks>
+    [HttpPost("resend-verification-email")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiResponse<ResendVerificationEmailResponseDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status429TooManyRequests)]
+    public async Task<IActionResult> ResendVerificationEmail(
+        [FromBody] ResendVerificationEmailRequest request,
+        CancellationToken ct)
+    {
+        var result = await _sender.Send(
+            new ResendVerificationEmailCommand(request.Email, request.Purpose),
             ct);
 
         return Ok(result);

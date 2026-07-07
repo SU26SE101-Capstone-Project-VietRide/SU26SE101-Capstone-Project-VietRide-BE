@@ -198,6 +198,18 @@ public sealed class Phase67ParcelTests
     }
 
     [Theory]
+    [InlineData(0, 20)]
+    [InlineData(1, 0)]
+    [InlineData(1, 101)]
+    public void Received_Validator_RejectsInvalidPagination(int page, int pageSize)
+    {
+        var validator = new GetReceivedParcelsQueryValidator();
+        var result = validator.Validate(new GetReceivedParcelsQuery(RecipientUserId, page, pageSize));
+
+        result.IsValid.Should().BeFalse();
+    }
+
+    [Theory]
     [InlineData("SENDER")]
     [InlineData("RECIPIENT")]
     [InlineData("OPERATOR")]

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Npgsql;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.Repositories;
@@ -122,6 +123,7 @@ public sealed class VehicleRepositoryPersistenceTests
         TripDbContext.ConfigurePostgresEnums(dataSourceBuilder);
         var options = new DbContextOptionsBuilder<TripDbContext>()
             .UseNpgsql(dataSourceBuilder.Build())
+            .ConfigureWarnings(warnings => warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning))
             .Options;
 
         return new TripDbContext(options, new SystemClock());
