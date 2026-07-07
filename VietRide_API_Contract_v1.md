@@ -100,6 +100,62 @@ Error `400` — expired OTP:
 }
 ```
 
+### POST `/v1/auth/resend-verification-email`
+
+Auth: public. Resends a registration OTP for an account in `PENDING_EMAIL_VERIFICATION`.
+
+Request:
+```json
+{
+  "email": "user@example.com",
+  "purpose": "REGISTRATION"
+}
+```
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "email": "user@example.com",
+    "status": "PENDING_EMAIL_VERIFICATION",
+    "otpTtlMinutes": 5
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `400` - unknown email or invalid purpose:
+```json
+{
+  "success": false,
+  "statusCode": 400,
+  "error": { "code": "AUTH_OTP_INVALID", "message": "Ma xac thuc khong dung." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `409` - email already verified:
+```json
+{
+  "success": false,
+  "statusCode": 409,
+  "error": { "code": "AUTH_EMAIL_ALREADY_VERIFIED", "message": "Email da duoc xac minh." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `429` - OTP rate limit exceeded:
+```json
+{
+  "success": false,
+  "statusCode": 429,
+  "error": { "code": "AUTH_OTP_RATE_LIMIT_EXCEEDED", "message": "Too many OTP requests. Please try again later." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
 ### POST `/v1/auth/login`
 
 Auth: public.

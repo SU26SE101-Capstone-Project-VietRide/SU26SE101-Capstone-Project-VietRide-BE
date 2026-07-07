@@ -177,6 +177,15 @@ CHANGELOG_AI.md
 # Codex CLI config (.codex/) and the tool-agnostic skills mirror (.agents/skills/)
 # are now committed + shared so Codex-CLI teammates use the same agents/skills/hooks.
 # hooks.json uses repo-relative paths (node .codex/hooks/*.mjs) so it is portable.
+API-Tracking.md
+API-Notification.md
+API-Parcel.md
+API-RAG.md
+
+
+
+
+
 
 # ── Prisma / Generated code ──────────────────────────────────────────────────
 **/src/generated/

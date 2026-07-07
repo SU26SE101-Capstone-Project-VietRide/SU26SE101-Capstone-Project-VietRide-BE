@@ -22,6 +22,7 @@ using VietRide.Identity.Application.Features.Auth.Login;
 using VietRide.Identity.Application.Features.Auth.Logout;
 using VietRide.Identity.Application.Features.Auth.Refresh;
 using VietRide.Identity.Application.Features.Auth.Register;
+using VietRide.Identity.Application.Features.Auth.ResendVerificationEmail;
 using VietRide.Identity.Application.Features.Auth.SetInitialPassword;
 using VietRide.Identity.Application.Features.Auth.VerifyEmail;
 using VietRide.Identity.Domain.Entities;
@@ -127,6 +128,27 @@ public sealed class AuthEndpointsTests :
         AssertSuccessEnvelope(doc, 200);
         var data = doc.RootElement.GetProperty("data");
         data.GetProperty("status").GetString().Should().Be("ACTIVE");
+    }
+
+    [Fact]
+    public async Task PostResendVerificationEmail_HappyPath_Returns200Envelope()
+    {
+        using var client = CreateClientWithSender(new HappyPathAuthSender());
+
+        var response = await client.PostAsJsonAsync("/v1/auth/resend-verification-email", new
+        {
+            email = "user@example.com",
+            purpose = "REGISTRATION",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        AssertSuccessEnvelope(doc, 200);
+        var data = doc.RootElement.GetProperty("data");
+        data.GetProperty("email").GetString().Should().Be("user@example.com");
+        data.GetProperty("status").GetString().Should().Be("PENDING_EMAIL_VERIFICATION");
+        data.GetProperty("otpTtlMinutes").GetInt32().Should().Be(5);
     }
 
     [Fact]
@@ -357,6 +379,73 @@ public sealed class AuthEndpointsTests :
         otpPayload.RootElement.GetProperty("purpose").GetString().Should().Be("REGISTRATION");
         otpPayload.RootElement.GetProperty("ttlMinutes").GetInt32().Should().Be(5);
         otpPayload.RootElement.GetProperty("code").GetString().Should().HaveLength(6);
+    }
+
+    [Fact]
+    public async Task PostResendVerificationEmail_PendingPassenger_RevokesOldOtpCreatesNewOtpAndAllowsVerify()
+    {
+        await _dbFactory.ResetAsync();
+        var email = UniqueEmail("passenger-resend");
+        using var client = _dbFactory.CreateClient();
+
+        var registerResponse = await client.PostAsJsonAsync("/v1/auth/register", new
+        {
+            email,
+            password = "Password123!",
+            displayName = "Resend OTP User",
+            phone = $"09{Random.Shared.Next(10000000, 99999999)}",
+        });
+        registerResponse.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        await using var firstScope = _dbFactory.Services.CreateAsyncScope();
+        var firstDb = firstScope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var user = await firstDb.Users.SingleAsync(u => u.Email == email);
+        var oldToken = await firstDb.EmailVerificationTokens.SingleAsync(t =>
+            t.UserId == user.Id && t.Purpose == EmailVerificationPurpose.REGISTRATION);
+        var oldCode = oldToken.Code;
+
+        var resendResponse = await client.PostAsJsonAsync("/v1/auth/resend-verification-email", new
+        {
+            email,
+            purpose = EmailVerificationPurpose.REGISTRATION.ToString(),
+        });
+
+        resendResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var resendDoc = JsonDocument.Parse(await resendResponse.Content.ReadAsStringAsync());
+        AssertSuccessEnvelope(resendDoc, 200);
+        resendDoc.RootElement.GetProperty("data").GetProperty("otpTtlMinutes").GetInt32().Should().Be(5);
+
+        await using var secondScope = _dbFactory.Services.CreateAsyncScope();
+        var secondDb = secondScope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var tokens = await secondDb.EmailVerificationTokens
+            .Where(t => t.UserId == user.Id && t.Purpose == EmailVerificationPurpose.REGISTRATION)
+            .ToListAsync();
+        tokens.Should().HaveCount(2);
+        var revokedToken = tokens.Single(t => t.Code == oldCode);
+        var newToken = tokens.Single(t => t.UsedAt == null);
+        revokedToken.UsedAt.Should().NotBeNull();
+        newToken.Code.Should().NotBe(oldCode);
+
+        var verifyOldResponse = await client.PostAsJsonAsync("/v1/auth/verify-email", new
+        {
+            email,
+            code = oldCode,
+            purpose = EmailVerificationPurpose.REGISTRATION.ToString(),
+        });
+        verifyOldResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        var verifyNewResponse = await client.PostAsJsonAsync("/v1/auth/verify-email", new
+        {
+            email,
+            code = newToken.Code,
+            purpose = EmailVerificationPurpose.REGISTRATION.ToString(),
+        });
+        verifyNewResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        await using var finalScope = _dbFactory.Services.CreateAsyncScope();
+        var finalDb = finalScope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var verifiedUser = await finalDb.Users.SingleAsync(u => u.Id == user.Id);
+        verifiedUser.Status.Should().Be(UserStatus.ACTIVE);
     }
 
     [Fact]
@@ -1043,6 +1132,10 @@ internal sealed class HappyPathAuthSender : ISender
         {
             RegisterCommand command => new RegisterResponseDto(
                 UserId,
+                command.Email,
+                "PENDING_EMAIL_VERIFICATION",
+                5),
+            ResendVerificationEmailCommand command => new ResendVerificationEmailResponseDto(
                 command.Email,
                 "PENDING_EMAIL_VERIFICATION",
                 5),
