@@ -64,6 +64,7 @@ public sealed class TickPassengerBoardedIntegrationTests
         data.GetProperty("passengerRecordId").GetGuid().Should().Be(passenger.Id);
         data.GetProperty("boardingStatus").GetString().Should().Be("BOARDED");
         data.GetProperty("boardedAt").GetDateTimeOffset().Should().Be(Now);
+        data.GetProperty("ticketStatus").GetString().Should().Be("USED");
 
         await _factory.TripClient.Received(1)
             .GetTripSnapshotAsync(tripId, Arg.Any<CancellationToken>());
@@ -142,7 +143,12 @@ public sealed class TickPassengerBoardedIntegrationTests
             baseFare: Money.FromRaw(200_000),
             discountAmount: Money.Zero,
             totalAmount: Money.FromRaw(200_000));
-        booking.AddPassenger("A01");
+        booking.AddTicketedPassenger(
+            "A01",
+            TicketCode.Generate(Now),
+            Money.FromRaw(200_000),
+            Money.Zero,
+            Money.FromRaw(200_000));
         booking.Confirm(Now.AddMinutes(-10));
         return booking;
     }

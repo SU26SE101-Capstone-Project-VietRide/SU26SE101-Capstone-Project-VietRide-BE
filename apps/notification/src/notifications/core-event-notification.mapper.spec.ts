@@ -33,11 +33,33 @@ describe('mapCoreEventToNotification', () => {
         bookingId: BOOKING_ID,
         tripId: TRIP_ID,
         bookingCode: 'VR123',
+        ticketCodes: null,
+        ticketCount: null,
         routeName: 'Sai Gon - Da Lat',
         reason: null,
         refundAmount: null,
       },
     });
+  });
+
+  it('maps booking ticket metadata when present', () => {
+    expect(
+      mapCoreEventToNotification(BOOKING_CONFIRMED_ROUTING_KEY, {
+        userId: USER_ID,
+        bookingId: BOOKING_ID,
+        tripId: TRIP_ID,
+        bookingCode: 'VR123',
+        ticketCodes: ['VT-20260706-ABCDEFGH', 'VT-20260706-HGFEDCBA'],
+        ticketCount: 2,
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          ticketCodes: ['VT-20260706-ABCDEFGH', 'VT-20260706-HGFEDCBA'],
+          ticketCount: 2,
+        }),
+      }),
+    );
   });
 
   it('maps booking cancelled event', () => {

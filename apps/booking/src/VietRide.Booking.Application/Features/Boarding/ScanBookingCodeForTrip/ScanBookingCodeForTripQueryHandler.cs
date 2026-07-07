@@ -41,9 +41,13 @@ public sealed class ScanBookingCodeForTripQueryHandler
                 "Caller is not assigned to this trip.");
         }
 
-        var booking = await _bookings.FindByBookingCodeAsync(
-            request.BookingCode,
-            cancellationToken);
+        var booking = !string.IsNullOrWhiteSpace(request.TicketCode)
+            ? await _bookings.FindByTicketCodeWithPassengersAsync(
+                request.TicketCode,
+                cancellationToken)
+            : await _bookings.FindByBookingCodeAsync(
+                request.BookingCode!,
+                cancellationToken);
 
         if (booking is null)
         {
@@ -62,36 +66,84 @@ public sealed class ScanBookingCodeForTripQueryHandler
             throw BookingNotFound();
         }
 
-        var bookingWithPassengers = await _bookings.FindByIdWithPassengersAsync(
-            booking.Id,
-            cancellationToken);
+        if (string.IsNullOrWhiteSpace(request.TicketCode))
+        {
+            booking = await _bookings.FindByIdWithPassengersAsync(
+                booking.Id,
+                cancellationToken);
 
-        if (bookingWithPassengers is null)
+            if (booking is null)
+            {
+                throw BookingNotFound();
+            }
+        }
+
+        var items = !string.IsNullOrWhiteSpace(request.TicketCode)
+            ? BuildTicketCodeItems(booking, request.TicketCode)
+            : BuildLegacyBookingCodeItems(booking);
+
+        if (items.Count == 0)
         {
             throw BookingNotFound();
         }
-
-        if (bookingWithPassengers.TripId != request.TripId)
-        {
-            throw new CodedValidationException(
-                "BOOKING_NOT_FOR_THIS_TRIP",
-                "Booking does not belong to this trip.");
-        }
-
-        if (bookingWithPassengers.Status != BookingStatus.CONFIRMED)
-        {
-            throw BookingNotFound();
-        }
-
-        var items = bookingWithPassengers.Passengers
-            .OrderBy(passenger => passenger.SeatNumber, StringComparer.Ordinal)
-            .Select(passenger => new ScanBookingCodePassengerItem(
-                passenger.SeatNumber,
-                passenger.BoardingStatus.ToString()))
-            .ToArray();
 
         return new ScanBookingCodeForTripResult(items);
     }
+
+    private static IReadOnlyList<ScanBookingCodePassengerItem> BuildTicketCodeItems(
+        VietRide.Booking.Domain.Entities.Booking booking,
+        string ticketCode)
+    {
+        var ticket = booking.Tickets.SingleOrDefault(candidate =>
+            string.Equals(candidate.TicketCode.Value, ticketCode, StringComparison.OrdinalIgnoreCase));
+
+        if (ticket is null || !IsBoardableTicket(ticket.Status))
+        {
+            return [];
+        }
+
+        var passenger = booking.Passengers.SingleOrDefault(candidate =>
+            candidate.Id == ticket.PassengerId);
+
+        return passenger is null
+            ? []
+            :
+            [
+                new ScanBookingCodePassengerItem(
+                    passenger.Id,
+                    ticket.Id,
+                    ticket.TicketCode.Value,
+                    ticket.SeatNumber,
+                    passenger.BoardingStatus.ToString()),
+            ];
+    }
+
+    private static IReadOnlyList<ScanBookingCodePassengerItem> BuildLegacyBookingCodeItems(
+        VietRide.Booking.Domain.Entities.Booking booking)
+    {
+        var passengersById = booking.Passengers.ToDictionary(passenger => passenger.Id);
+
+        return booking.Tickets
+            .Where(ticket => IsBoardableTicket(ticket.Status))
+            .OrderBy(ticket => ticket.SeatNumber, StringComparer.Ordinal)
+            .Select(ticket => new
+            {
+                Ticket = ticket,
+                HasPassenger = passengersById.TryGetValue(ticket.PassengerId, out var passenger),
+                Passenger = passenger,
+            })
+            .Where(entry => entry.HasPassenger && entry.Passenger is not null)
+            .Select(entry => new ScanBookingCodePassengerItem(
+                entry.Passenger!.Id,
+                entry.Ticket.Id,
+                entry.Ticket.TicketCode.Value,
+                entry.Ticket.SeatNumber,
+                entry.Passenger.BoardingStatus.ToString()))
+            .ToArray();
+    }
+
+    private static bool IsBoardableTicket(TicketStatus status)
+        => status is TicketStatus.ISSUED or TicketStatus.USED;
 
     private static CodedNotFoundException BookingNotFound()
         => new("BOOKING_NOT_FOUND", "Booking not found.");

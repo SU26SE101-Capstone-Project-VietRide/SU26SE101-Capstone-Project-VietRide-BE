@@ -81,6 +81,23 @@ public sealed class TickPassengerBoardedCommandHandler
                 "Passenger record was not found.");
         }
 
+        var ticket = booking!.Tickets.SingleOrDefault(
+            candidate => candidate.PassengerId == request.PassengerRecordId);
+
+        if (ticket is null)
+        {
+            throw new CodedNotFoundException(
+                "TICKET_NOT_FOUND",
+                "Ticket was not found for this passenger record.");
+        }
+
+        if (ticket.Status != TicketStatus.ISSUED)
+        {
+            throw new ConflictException(
+                "TICKET_NOT_BOARDABLE",
+                "Ticket is not in ISSUED status.");
+        }
+
         if (passenger.BoardingStatus == PassengerBoardingStatus.BOARDED)
         {
             throw new ConflictException(
@@ -90,11 +107,15 @@ public sealed class TickPassengerBoardedCommandHandler
 
         var boardedAt = _clock.UtcNow;
         passenger.MarkBoarded(boardedAt);
+        ticket.MarkUsed(boardedAt);
 
         return new TickPassengerBoardedResult(
             passenger.Id,
             passenger.BoardingStatus.ToString(),
             boardedAt,
-            passenger.BoardedAtStopId);
+            passenger.BoardedAtStopId,
+            ticket.Id,
+            ticket.TicketCode.Value,
+            ticket.Status.ToString());
     }
 }

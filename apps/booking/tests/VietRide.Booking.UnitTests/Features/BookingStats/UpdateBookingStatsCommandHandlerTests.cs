@@ -341,6 +341,10 @@ public sealed class UpdateBookingStatsCommandHandlerTests
         public Task<BookingEntity?> FindByBookingCodeAsync(string bookingCode, CancellationToken ct = default)
             => Task.FromResult(_bookings.Values.FirstOrDefault(b => b.BookingCode.Value == bookingCode));
 
+        public Task<BookingEntity?> FindByTicketCodeWithPassengersAsync(string ticketCode, CancellationToken ct = default)
+            => Task.FromResult(_bookings.Values.FirstOrDefault(b =>
+                b.Tickets.Any(t => t.TicketCode.Value == ticketCode)));
+
         public Task<BookingEntity?> FindByIdAsync(Guid bookingId, CancellationToken ct = default)
             => GetByIdAsync(bookingId, ct);
 

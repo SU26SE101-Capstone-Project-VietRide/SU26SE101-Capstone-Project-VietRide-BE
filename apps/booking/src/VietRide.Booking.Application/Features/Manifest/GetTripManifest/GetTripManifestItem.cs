@@ -5,6 +5,9 @@ namespace VietRide.Booking.Application.Features.Manifest.GetTripManifest;
 /// A null pickup stop denotes terminal pickup at the trip origin.
 /// </summary>
 public sealed record GetTripManifestItem(
+    Guid PassengerRecordId,
+    Guid TicketId,
+    string TicketCode,
     string SeatNumber,
     string BookingCode,
     Guid? PickupStop,

@@ -102,6 +102,10 @@ public sealed class CreateParcelCommandHandler
                 throw new CodedConflictException(
                     "BOOKING_NOT_ATTACHABLE",
                     $"Booking is in status '{booking.Status}' and cannot be attached to a parcel.");
+            if (booking.ActiveTicketCount <= 0)
+                throw new CodedConflictException(
+                    "BOOKING_NOT_ATTACHABLE",
+                    "Booking has no active ticket that can be attached to a parcel.");
         }
 
         var tripOutcome = await _tripClient.GetTripParcelSnapshotAsync(command.TripId, cancellationToken);

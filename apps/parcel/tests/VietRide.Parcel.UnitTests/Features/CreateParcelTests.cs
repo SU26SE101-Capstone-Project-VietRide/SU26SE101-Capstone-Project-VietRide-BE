@@ -350,7 +350,7 @@ public sealed class CreateParcelTests
 
         booking.GetBookingSnapshotAsync(BookingId, Arg.Any<CancellationToken>())
             .Returns(new BookingLookupOutcome(BookingLookupOutcomeKind.Success,
-                new BookingSnapshot(BookingId, SenderUserId, TripId, "CONFIRMED"), null));
+                new BookingSnapshot(BookingId, SenderUserId, TripId, "CONFIRMED", ActiveTicketCount: 1), null));
 
         trip.GetTripParcelSnapshotAsync(TripId, Arg.Any<CancellationToken>())
             .Returns(new TripSnapshotOutcome(TripSnapshotOutcomeKind.Success,

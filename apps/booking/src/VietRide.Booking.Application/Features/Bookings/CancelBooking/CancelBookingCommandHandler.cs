@@ -133,10 +133,13 @@ public sealed class CancelBookingCommandHandler : IRequestHandler<CancelBookingC
         var cancelledEvent = new
         {
             bookingId = booking.Id,
+            bookingCode = booking.BookingCode.Value,
             userId = booking.PassengerUserId,
             refundAmount = refundAmount.Amount,
             refundOverride,
             cancellationReason = reason.ToString(),
+            ticketCodes = booking.Tickets.Select(ticket => ticket.TicketCode.Value).ToArray(),
+            ticketCount = booking.Tickets.Count,
         };
 
         await _outbox.EnqueueAsync(

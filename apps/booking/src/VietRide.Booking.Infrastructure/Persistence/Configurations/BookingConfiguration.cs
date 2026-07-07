@@ -188,6 +188,11 @@ internal sealed class BookingConfiguration : IEntityTypeConfiguration<BookingEnt
             .HasForeignKey(p => p.BookingId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        builder.HasMany(x => x.Tickets)
+            .WithOne(t => t.Booking)
+            .HasForeignKey(t => t.BookingId)
+            .OnDelete(DeleteBehavior.Cascade);
+
         builder.HasMany(x => x.PendingActions)
             .WithOne(pa => pa.Booking)
             .HasForeignKey(pa => pa.BookingId)

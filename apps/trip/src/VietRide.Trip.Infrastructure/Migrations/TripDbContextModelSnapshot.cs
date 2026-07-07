@@ -23,7 +23,7 @@ namespace VietRide.Trip.Infrastructure.Migrations
                 .HasAnnotation("ProductVersion", "8.0.11")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
-            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "outbox_event_status", new[] { "PENDING", "PUBLISHING", "PUBLISHED", "FAILED" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_trip", "outbox_event_status", new[] { "PENDING", "PUBLISHING", "PUBLISHED", "FAILED" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "trip_generation_skip_reason", new[] { "SUBSCRIPTION_LIMIT_EXCEEDED", "VEHICLE_CONFLICT", "DRIVER_CONFLICT", "OTHER" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "trip_seat_status", new[] { "AVAILABLE", "HELD", "BOOKED", "UNAVAILABLE" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "trip_seat_type", new[] { "STANDARD", "SLEEPER_LOWER", "SLEEPER_UPPER", "VIP", "DRIVER_AREA" });
@@ -73,7 +73,7 @@ namespace VietRide.Trip.Infrastructure.Migrations
 
                     b.Property<OutboxEventStatus>("Status")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("outbox_event_status")
+                        .HasColumnType("vietride_trip.outbox_event_status")
                         .HasDefaultValue(OutboxEventStatus.PENDING)
                         .HasColumnName("status");
 
@@ -82,7 +82,7 @@ namespace VietRide.Trip.Infrastructure.Migrations
 
                     b.HasIndex("Status", "CreatedAt")
                         .HasDatabaseName("idx_outbox_events_status_created")
-                        .HasFilter("status IN ('PENDING', 'PUBLISHING', 'FAILED')");
+                        .HasFilter("status IN ('PENDING'::vietride_trip.outbox_event_status, 'PUBLISHING'::vietride_trip.outbox_event_status, 'FAILED'::vietride_trip.outbox_event_status)");
 
                     b.ToTable("outbox_events", "vietride_trip");
                 });

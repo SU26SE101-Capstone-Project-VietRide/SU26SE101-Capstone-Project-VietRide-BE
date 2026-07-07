@@ -9,4 +9,5 @@ public sealed record BookingPaymentTransitionSnapshot(
     Guid? SeatLockToken,
     long TotalAmount,
     Guid? VoucherUsageId,
-    IReadOnlyList<PassengerSeatAssignment> PassengerSeatAssignments);
+    IReadOnlyList<PassengerSeatAssignment> PassengerSeatAssignments,
+    IReadOnlyList<string> TicketCodes);

@@ -2,6 +2,7 @@ using System.Text.Json;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using VietRide.Booking.Application.Abstractions.Repositories;
+using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 
@@ -39,6 +40,19 @@ public sealed class MarkBookingRefundedCommandHandler
             return false;
         }
 
+        var metadata = _bookings.QueryNoTracking()
+            .Where(booking => booking.Id == request.ReferenceId && booking.Status == BookingStatus.CANCELLED)
+            .Select(booking => new
+            {
+                BookingCode = booking.BookingCode.Value,
+                TicketCodes = booking.Tickets
+                    .Where(ticket => ticket.Status == TicketStatus.CANCELLED)
+                    .OrderBy(ticket => ticket.SeatNumber)
+                    .Select(ticket => ticket.TicketCode.Value)
+                    .ToArray(),
+            })
+            .FirstOrDefault();
+
         var transitioned = await _bookings.TryMarkCancelledRefundedAsync(
             request.ReferenceId,
             _clock.UtcNow,
@@ -54,8 +68,11 @@ public sealed class MarkBookingRefundedCommandHandler
         var refundedEvent = new
         {
             bookingId = request.ReferenceId,
+            bookingCode = metadata?.BookingCode,
             userId = request.UserId,
             amount = request.Amount,
+            ticketCodes = metadata?.TicketCodes ?? [],
+            ticketCount = metadata?.TicketCodes.Length ?? 0,
         };
 
         await _outbox.EnqueueAsync(

@@ -7,11 +7,7 @@ using VietRide.Parcel.Application.Abstractions.ServiceClients;
 namespace VietRide.Parcel.Infrastructure.Http;
 
 /// <summary>
-/// NOTE: The target endpoint GET /internal/v1/bookings/{bookingId} does not
-/// exist in the Booking service as of Phase 2. This seam is forward-looking:
-/// - Dev stub (DevBookingServiceClient) returns a valid snapshot for testing.
-/// - Real mode requires the Booking service to expose this endpoint.
-/// Until that endpoint lands, real mode will return TransportError on 404.
+/// Calls Booking's internal booking snapshot endpoint for Parcel attach validation.
 /// </summary>
 public sealed class BookingServiceClient : IBookingServiceClient
 {
@@ -39,8 +35,7 @@ public sealed class BookingServiceClient : IBookingServiceClient
             switch (response.StatusCode)
             {
                 case HttpStatusCode.OK:
-                    var snapshot = await response.Content
-                        .ReadFromJsonAsync<BookingSnapshot>(JsonOptions, cancellationToken)
+                    var snapshot = await DeserializeSnapshotAsync(response, cancellationToken)
                         .ConfigureAwait(false);
 
                     if (snapshot is null)
@@ -67,5 +62,25 @@ public sealed class BookingServiceClient : IBookingServiceClient
             return new BookingLookupOutcome(BookingLookupOutcomeKind.TransportError, null,
                 $"Booking service transport failure: {ex.Message}");
         }
+    }
+
+    private static async Task<BookingSnapshot?> DeserializeSnapshotAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        await using var stream = await response.Content
+            .ReadAsStreamAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        using var document = await JsonDocument
+            .ParseAsync(stream, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+
+        var root = document.RootElement;
+        var payload = root.TryGetProperty("data", out var data)
+            ? data
+            : root;
+
+        return payload.Deserialize<BookingSnapshot>(JsonOptions);
     }
 }

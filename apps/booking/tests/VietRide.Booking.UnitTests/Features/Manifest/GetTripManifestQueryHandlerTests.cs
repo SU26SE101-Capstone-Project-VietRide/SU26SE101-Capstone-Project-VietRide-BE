@@ -98,8 +98,16 @@ public sealed class GetTripManifestQueryHandlerTests
         var properties = document.RootElement.EnumerateObject().Select(property => property.Name);
 
         properties.Should().BeEquivalentTo(
-            ["seatNumber", "bookingCode", "pickupStop", "boardingStatus"]);
-        document.RootElement.EnumerateObject().Should().HaveCount(4);
+            [
+                "passengerRecordId",
+                "ticketId",
+                "ticketCode",
+                "seatNumber",
+                "bookingCode",
+                "pickupStop",
+                "boardingStatus",
+            ]);
+        document.RootElement.EnumerateObject().Should().HaveCount(7);
         JsonSerializer.Serialize(result).Should().NotContainAny(
             "passengerUserId",
             "fullName",
@@ -144,7 +152,12 @@ public sealed class GetTripManifestQueryHandlerTests
             baseFare: Money.FromRaw(200_000),
             discountAmount: Money.Zero,
             totalAmount: Money.FromRaw(200_000));
-        booking.AddPassenger(seatNumber);
+        booking.AddTicketedPassenger(
+            seatNumber,
+            TicketCode.Generate(DateTimeOffset.UtcNow),
+            Money.FromRaw(200_000),
+            Money.Zero,
+            Money.FromRaw(200_000));
         return booking;
     }
 

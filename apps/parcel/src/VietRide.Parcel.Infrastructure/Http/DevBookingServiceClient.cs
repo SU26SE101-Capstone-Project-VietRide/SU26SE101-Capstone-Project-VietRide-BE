@@ -22,7 +22,8 @@ public sealed class DevBookingServiceClient : IBookingServiceClient
             BookingId: bookingId,
             UserId: Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
             TripId: Guid.Parse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
-            Status: "CONFIRMED");
+            Status: "CONFIRMED",
+            ActiveTicketCount: 1);
 
         return Task.FromResult(new BookingLookupOutcome(BookingLookupOutcomeKind.Success, snapshot, null));
     }

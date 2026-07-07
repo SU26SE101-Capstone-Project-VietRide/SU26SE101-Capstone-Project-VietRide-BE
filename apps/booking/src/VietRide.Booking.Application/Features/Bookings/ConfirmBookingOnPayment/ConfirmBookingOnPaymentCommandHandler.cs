@@ -115,6 +115,8 @@ public sealed class ConfirmBookingOnPaymentCommandHandler
             totalAmount = snapshot.TotalAmount,
             userId = snapshot.PassengerUserId,
             voucherUsageId = snapshot.VoucherUsageId,
+            ticketCodes = snapshot.TicketCodes,
+            ticketCount = snapshot.TicketCodes.Count,
         };
 
         await _outbox.EnqueueAsync(

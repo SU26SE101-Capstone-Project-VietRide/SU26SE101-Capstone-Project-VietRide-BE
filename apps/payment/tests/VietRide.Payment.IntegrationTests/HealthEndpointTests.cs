@@ -47,6 +47,19 @@ public class HealthEndpointTests : IClassFixture<VietRideWebApplicationFactory>
         doc.RootElement.GetProperty("statusCode").GetInt32().Should().Be((int)HttpStatusCode.OK);
         doc.RootElement.GetProperty("data").GetProperty("service").GetString().Should().Be("Payment");
     }
+
+    [Fact]
+    public async Task GetSwagger_Returns200()
+    {
+        using var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/swagger/v1/swagger.json");
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        body.Should().Contain("BatchChargePaymentRequestItem");
+        body.Should().Contain("BatchChargePaymentResultItem");
+    }
 }
 
 public class VietRideWebApplicationFactory : WebApplicationFactory<Program>

@@ -33,5 +33,15 @@ public sealed record CreateRoundTripBookingResult
         Guid BookingId,
         string BookingCode,
         long TotalAmount,
-        long DiscountAmount);
+        long DiscountAmount,
+        IReadOnlyList<RoundTripTicketResult> Tickets);
+
+    public sealed record RoundTripTicketResult(
+        Guid TicketId,
+        string TicketCode,
+        string SeatNumber,
+        string Status,
+        long FareAmount,
+        long DiscountAmount,
+        long PaidAmount);
 }

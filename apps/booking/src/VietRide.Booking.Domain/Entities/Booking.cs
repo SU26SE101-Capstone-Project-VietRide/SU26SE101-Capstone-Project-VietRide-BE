@@ -15,6 +15,7 @@ namespace VietRide.Booking.Domain.Entities;
 public sealed class Booking : BaseEntity<Guid>
 {
     private readonly List<Passenger> _passengers = [];
+    private readonly List<Ticket> _tickets = [];
     private readonly List<BookingPendingAction> _pendingActions = [];
 
     public BookingCode BookingCode { get; private set; }
@@ -59,6 +60,7 @@ public sealed class Booking : BaseEntity<Guid>
 
     // Collections
     public IReadOnlyList<Passenger> Passengers => _passengers.AsReadOnly();
+    public IReadOnlyList<Ticket> Tickets => _tickets.AsReadOnly();
     public IReadOnlyList<BookingPendingAction> PendingActions => _pendingActions.AsReadOnly();
 
     private Booking() { }
@@ -143,6 +145,26 @@ public sealed class Booking : BaseEntity<Guid>
         return passenger;
     }
 
+    public Ticket AddTicketedPassenger(
+        string seatNumber,
+        TicketCode ticketCode,
+        Money fareAmount,
+        Money discountAmount,
+        Money paidAmount)
+    {
+        var passenger = AddPassenger(seatNumber);
+        var ticket = Ticket.CreatePendingPayment(
+            Id,
+            passenger.Id,
+            ticketCode,
+            passenger.SeatNumber,
+            fareAmount,
+            discountAmount,
+            paidAmount);
+        _tickets.Add(ticket);
+        return ticket;
+    }
+
     /// <summary>
     /// Marks the booking as CONFIRMED (after successful payment).
     /// Only valid from PENDING_PAYMENT state.
@@ -154,6 +176,11 @@ public sealed class Booking : BaseEntity<Guid>
 
         Status = BookingStatus.CONFIRMED;
         ConfirmedAt = confirmedAt;
+
+        foreach (var ticket in _tickets.Where(ticket => ticket.Status == TicketStatus.PENDING_PAYMENT))
+        {
+            ticket.Issue(confirmedAt);
+        }
     }
 
     /// <summary>
@@ -167,6 +194,11 @@ public sealed class Booking : BaseEntity<Guid>
 
         Status = BookingStatus.EXPIRED;
         ExpiredAt = expiredAt;
+
+        foreach (var ticket in _tickets.Where(ticket => ticket.Status == TicketStatus.PENDING_PAYMENT))
+        {
+            ticket.Expire(expiredAt);
+        }
     }
 
     /// <summary>
@@ -243,6 +275,12 @@ public sealed class Booking : BaseEntity<Guid>
         CancellationReason = reason;
         CancelledAt = cancelledAt;
         RefundOverride = refundOverride;
+
+        foreach (var ticket in _tickets.Where(ticket =>
+            ticket.Status is TicketStatus.PENDING_PAYMENT or TicketStatus.ISSUED))
+        {
+            ticket.Cancel(cancelledAt);
+        }
     }
 
     /// <summary>
@@ -256,5 +294,10 @@ public sealed class Booking : BaseEntity<Guid>
 
         Status = BookingStatus.REFUNDED;
         RefundedAt = refundedAt;
+
+        foreach (var ticket in _tickets.Where(ticket => ticket.Status == TicketStatus.CANCELLED))
+        {
+            ticket.Refund(refundedAt);
+        }
     }
 }

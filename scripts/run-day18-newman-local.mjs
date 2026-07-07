@@ -14,6 +14,8 @@ const otherTripId = '18181818-1818-4181-8181-181818181812';
 const bookingId = '18181818-1818-4181-8181-181818181821';
 const passengerRecordId = '18181818-1818-4181-8181-181818181831';
 const bookingCode = 'VR-20260701-DAYE2E22';
+const ticketId = '18181818-1818-4181-8181-181818181851';
+const ticketCode = 'VT-20260701-DAYE2E22';
 
 function psql(database, sql) {
   return execFileSync(
@@ -53,7 +55,13 @@ psql(
      ('${bookingId}', '${bookingCode}', '${passengerUserId}', '${tripId}', '${operatorId}',
       '18181818-1818-4181-8181-181818181841', 200000, 0, 200000, 'CONFIRMED', now());
    INSERT INTO vietride_booking.passengers (id, booking_id, seat_number, boarding_status)
-   VALUES ('${passengerRecordId}', '${bookingId}', 'A01', 'PENDING');`,
+   VALUES ('${passengerRecordId}', '${bookingId}', 'A01', 'PENDING');
+   INSERT INTO vietride_booking.tickets
+     (id, booking_id, passenger_id, ticket_code, seat_number, status, fare_amount,
+      discount_amount, paid_amount, issued_at)
+   VALUES
+     ('${ticketId}', '${bookingId}', '${passengerRecordId}', '${ticketCode}', 'A01',
+      'ISSUED', 200000, 0, 200000, now());`,
 );
 
 const settings = JSON.parse(
@@ -92,6 +100,7 @@ const run = spawnSync(
     '--env-var', `day18OtherTripId=${otherTripId}`,
     '--env-var', `day18PassengerRecordId=${passengerRecordId}`,
     '--env-var', `day18BookingCode=${bookingCode}`,
+    '--env-var', `day18TicketCode=${ticketCode}`,
     '--reporters', 'cli',
   ],
   { cwd: root, shell: process.platform === 'win32', stdio: 'inherit' },

@@ -14,6 +14,8 @@ namespace VietRide.Booking.UnitTests.Features.Boarding;
 public sealed class ScanBookingCodeForTripQueryHandlerTests
 {
     private const string BookingCodeValue = "VR-20260630-ABCD2345";
+    private const string TicketCodeA01 = "VT-20260630-ABCDEFGH";
+    private const string TicketCodeB02 = "VT-20260630-HGFEDCBA";
 
     private static readonly Guid TripId = Guid.Parse("11111111-1111-4111-8111-111111111111");
     private static readonly Guid OtherTripId = Guid.Parse("22222222-2222-4222-8222-222222222222");
@@ -28,15 +30,15 @@ public sealed class ScanBookingCodeForTripQueryHandlerTests
     [Fact]
     public async Task Handle_ConfirmedBooking_ReturnsSeatAndBoardingStatusWithoutMutation()
     {
-        var booking = CreateBooking(TripId, confirmed: true);
-        booking.AddPassenger("B02");
+        var booking = CreateBooking(TripId, confirmed: true, ["A01", "B02"]);
         Arrange(booking, booking, CreateTripSnapshot());
 
         var result = await CreateHandler().Handle(CreateQuery(), CancellationToken.None);
 
-        result.Items.Should().Equal(
-            new ScanBookingCodePassengerItem("A01", "PENDING"),
-            new ScanBookingCodePassengerItem("B02", "PENDING"));
+        result.Items.Select(item => (item.TicketCode, item.SeatNumber, item.BoardingStatus))
+            .Should().Equal(
+                (TicketCodeA01, "A01", "PENDING"),
+                (TicketCodeB02, "B02", "PENDING"));
         booking.Status.Should().Be(BookingStatus.CONFIRMED);
         booking.Passengers.Should().OnlyContain(
             passenger => passenger.BoardingStatus == PassengerBoardingStatus.PENDING);
@@ -105,17 +107,17 @@ public sealed class ScanBookingCodeForTripQueryHandlerTests
     public void Validator_InvalidBookingCode_ReturnsValidationError(string bookingCode)
     {
         var result = new ScanBookingCodeForTripQueryValidator().Validate(
-            new ScanBookingCodeForTripQuery(TripId, bookingCode, DriverUserId));
+            new ScanBookingCodeForTripQuery(TripId, null, bookingCode, DriverUserId));
 
         result.IsValid.Should().BeFalse();
-        result.Errors.Should().Contain(error => error.PropertyName == "BookingCode");
+        result.Errors.Should().NotBeEmpty();
     }
 
     private ScanBookingCodeForTripQueryHandler CreateHandler()
         => new(_bookings, _tripServiceClient);
 
     private static ScanBookingCodeForTripQuery CreateQuery(Guid? callerUserId = null)
-        => new(TripId, BookingCodeValue, callerUserId ?? DriverUserId);
+        => new(TripId, null, BookingCodeValue, callerUserId ?? DriverUserId);
 
     private void Arrange(
         BookingEntity? bookingByCode,
@@ -135,7 +137,10 @@ public sealed class ScanBookingCodeForTripQueryHandlerTests
         }
     }
 
-    private static BookingEntity CreateBooking(Guid tripId, bool confirmed)
+    private static BookingEntity CreateBooking(
+        Guid tripId,
+        bool confirmed,
+        IReadOnlyList<string>? seatNumbers = null)
     {
         var booking = BookingEntity.CreatePendingPayment(
             bookingCode: BookingCode.Parse(BookingCodeValue),
@@ -149,7 +154,21 @@ public sealed class ScanBookingCodeForTripQueryHandlerTests
             baseFare: Money.FromRaw(200_000),
             discountAmount: Money.Zero,
             totalAmount: Money.FromRaw(200_000));
-        booking.AddPassenger("A01");
+
+        foreach (var seatNumber in seatNumbers ?? ["A01"])
+        {
+            var ticketCode = seatNumber == "A01"
+                ? TicketCode.Parse(TicketCodeA01)
+                : TicketCode.Parse(TicketCodeB02);
+
+            booking.AddTicketedPassenger(
+                seatNumber,
+                ticketCode,
+                Money.FromRaw(200_000),
+                Money.Zero,
+                Money.FromRaw(200_000));
+        }
+
         if (confirmed)
         {
             booking.Confirm(Now.AddMinutes(-10));

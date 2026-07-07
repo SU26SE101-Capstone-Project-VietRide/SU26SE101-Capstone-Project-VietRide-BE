@@ -10,4 +10,14 @@ public sealed record CreateBookingResult(
     string Status,
     long TotalAmount,
     long DiscountAmount,
-    string? PaymentRedirectUrl);
+    string? PaymentRedirectUrl,
+    IReadOnlyList<CreateBookingTicketResult> Tickets);
+
+public sealed record CreateBookingTicketResult(
+    Guid TicketId,
+    string TicketCode,
+    string SeatNumber,
+    string Status,
+    long FareAmount,
+    long DiscountAmount,
+    long PaidAmount);

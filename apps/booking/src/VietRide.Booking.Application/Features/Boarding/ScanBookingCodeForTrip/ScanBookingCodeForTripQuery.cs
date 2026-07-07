@@ -4,5 +4,6 @@ namespace VietRide.Booking.Application.Features.Boarding.ScanBookingCodeForTrip;
 
 public sealed record ScanBookingCodeForTripQuery(
     Guid TripId,
-    string BookingCode,
+    string? TicketCode,
+    string? BookingCode,
     Guid CallerUserId) : IQuery<ScanBookingCodeForTripResult>;

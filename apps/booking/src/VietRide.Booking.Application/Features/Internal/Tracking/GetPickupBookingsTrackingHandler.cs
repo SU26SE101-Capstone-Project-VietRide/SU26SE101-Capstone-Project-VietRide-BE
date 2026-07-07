@@ -23,7 +23,9 @@ public sealed class GetPickupBookingsTrackingHandler
             .Where(booking =>
                 booking.TripId == request.TripId
                 && booking.PickupStopId == request.StopId
-                && booking.Status == BookingStatus.CONFIRMED)
+                && booking.Status == BookingStatus.CONFIRMED
+                && booking.Tickets.Any(ticket =>
+                    ticket.Status == TicketStatus.ISSUED || ticket.Status == TicketStatus.USED))
             .Select(booking => new PickupBookingTrackingDto(
                 booking.Id,
                 booking.PassengerUserId,
