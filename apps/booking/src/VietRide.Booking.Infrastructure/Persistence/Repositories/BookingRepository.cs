@@ -66,6 +66,19 @@ internal sealed class BookingRepository : IBookingRepository
     }
 
     /// <inheritdoc/>
+    public async Task<BookingEntity?> FindByTicketCodeWithPassengersAsync(
+        string ticketCode,
+        CancellationToken ct = default)
+    {
+        var code = TicketCode.Parse(ticketCode);
+
+        return await _db.Bookings
+            .Include(b => b.Passengers)
+            .Include(b => b.Tickets)
+            .FirstOrDefaultAsync(b => b.Tickets.Any(t => t.TicketCode == code), ct);
+    }
+
+    /// <inheritdoc/>
     public async Task<BookingEntity?> FindByIdAsync(
         Guid bookingId,
         CancellationToken ct = default)
@@ -77,6 +90,7 @@ internal sealed class BookingRepository : IBookingRepository
         CancellationToken ct = default)
         => await _db.Bookings
             .Include(b => b.Passengers)
+            .Include(b => b.Tickets)
             .FirstOrDefaultAsync(b => b.Id == bookingId, ct);
 
     /// <inheritdoc/>
@@ -114,6 +128,13 @@ internal sealed class BookingRepository : IBookingRepository
             .Select(vu => (Guid?)vu.Id)
             .FirstOrDefaultAsync(ct);
 
+        var ticketCodes = await _db.Tickets
+            .AsNoTracking()
+            .Where(t => t.BookingId == bookingId)
+            .OrderBy(t => t.SeatNumber)
+            .Select(t => t.TicketCode.Value)
+            .ToArrayAsync(ct);
+
         return new BookingPaymentTransitionSnapshot(
             booking.Id,
             booking.PassengerUserId,
@@ -121,7 +142,8 @@ internal sealed class BookingRepository : IBookingRepository
             booking.SeatLockToken,
             booking.TotalAmount,
             voucherUsageId,
-            passengerSeatAssignments);
+            passengerSeatAssignments,
+            ticketCodes);
     }
 
     /// <inheritdoc/>
@@ -136,6 +158,16 @@ internal sealed class BookingRepository : IBookingRepository
                 .SetProperty(b => b.Status, BookingStatus.CONFIRMED)
                 .SetProperty(b => b.ConfirmedAt, confirmedAt)
                 .SetProperty(b => b.UpdatedAt, confirmedAt), ct);
+
+        if (updated == 1)
+        {
+            await _db.Tickets
+                .Where(t => t.BookingId == bookingId && t.Status == TicketStatus.PENDING_PAYMENT)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(t => t.Status, TicketStatus.ISSUED)
+                    .SetProperty(t => t.IssuedAt, confirmedAt)
+                    .SetProperty(t => t.UpdatedAt, confirmedAt), ct);
+        }
 
         return updated == 1;
     }
@@ -152,6 +184,16 @@ internal sealed class BookingRepository : IBookingRepository
                 .SetProperty(b => b.Status, BookingStatus.EXPIRED)
                 .SetProperty(b => b.ExpiredAt, expiredAt)
                 .SetProperty(b => b.UpdatedAt, expiredAt), ct);
+
+        if (updated == 1)
+        {
+            await _db.Tickets
+                .Where(t => t.BookingId == bookingId && t.Status == TicketStatus.PENDING_PAYMENT)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(t => t.Status, TicketStatus.EXPIRED)
+                    .SetProperty(t => t.ExpiredAt, expiredAt)
+                    .SetProperty(t => t.UpdatedAt, expiredAt), ct);
+        }
 
         return updated == 1;
     }
@@ -174,6 +216,17 @@ internal sealed class BookingRepository : IBookingRepository
                 .SetProperty(b => b.RefundOverride, refundOverride)
                 .SetProperty(b => b.UpdatedAt, cancelledAt), ct);
 
+        if (updated == 1)
+        {
+            await _db.Tickets
+                .Where(t => t.BookingId == bookingId
+                    && (t.Status == TicketStatus.PENDING_PAYMENT || t.Status == TicketStatus.ISSUED))
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(t => t.Status, TicketStatus.CANCELLED)
+                    .SetProperty(t => t.CancelledAt, cancelledAt)
+                    .SetProperty(t => t.UpdatedAt, cancelledAt), ct);
+        }
+
         return updated == 1;
     }
 
@@ -189,6 +242,16 @@ internal sealed class BookingRepository : IBookingRepository
                 .SetProperty(b => b.Status, BookingStatus.REFUNDED)
                 .SetProperty(b => b.RefundedAt, refundedAt)
                 .SetProperty(b => b.UpdatedAt, refundedAt), ct);
+
+        if (updated == 1)
+        {
+            await _db.Tickets
+                .Where(t => t.BookingId == bookingId && t.Status == TicketStatus.CANCELLED)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(t => t.Status, TicketStatus.REFUNDED)
+                    .SetProperty(t => t.RefundedAt, refundedAt)
+                    .SetProperty(t => t.UpdatedAt, refundedAt), ct);
+        }
 
         return updated == 1;
     }

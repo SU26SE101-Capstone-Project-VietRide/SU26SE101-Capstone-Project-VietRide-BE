@@ -16,6 +16,82 @@ namespace VietRide.Parcel.Infrastructure.Migrations
 
             migrationBuilder.Sql("CREATE EXTENSION IF NOT EXISTS \"pgcrypto\";");
 
+            migrationBuilder.Sql(
+                """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM pg_type t
+                        JOIN pg_namespace n ON n.oid = t.typnamespace
+                        WHERE t.typname = 'outbox_event_status'
+                          AND n.nspname = 'public'
+                    ) THEN
+                        CREATE TYPE public.outbox_event_status AS ENUM ('PENDING', 'PUBLISHING', 'PUBLISHED', 'FAILED');
+                    END IF;
+
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM pg_type t
+                        JOIN pg_namespace n ON n.oid = t.typnamespace
+                        WHERE t.typname = 'parcel_status'
+                          AND n.nspname = 'public'
+                    ) THEN
+                        CREATE TYPE public.parcel_status AS ENUM (
+                            'PENDING_OPERATOR_REVIEW',
+                            'PENDING_PAYMENT',
+                            'PENDING',
+                            'PENDING_ADDITIONAL_PAYMENT',
+                            'LOADED',
+                            'IN_TRANSIT',
+                            'PENDING_TRANSFER_CONFIRM',
+                            'TRANSFER_ESCALATED',
+                            'UNLOADED',
+                            'DELIVERED_PENDING_CONFIRM',
+                            'DELIVERY_CONFIRMED',
+                            'DELIVERY_REJECTED',
+                            'RETURN_INITIATED',
+                            'RETURNED',
+                            'PENDING_OPERATOR_ACTION',
+                            'CANCELLED',
+                            'REJECTED',
+                            'EXPIRED'
+                        );
+                    END IF;
+
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM pg_type t
+                        JOIN pg_namespace n ON n.oid = t.typnamespace
+                        WHERE t.typname = 'parcel_size_category'
+                          AND n.nspname = 'public'
+                    ) THEN
+                        CREATE TYPE public.parcel_size_category AS ENUM ('SMALL', 'MEDIUM', 'LARGE', 'EXTRA_LARGE');
+                    END IF;
+
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM pg_type t
+                        JOIN pg_namespace n ON n.oid = t.typnamespace
+                        WHERE t.typname = 'parcel_review_decision'
+                          AND n.nspname = 'public'
+                    ) THEN
+                        CREATE TYPE public.parcel_review_decision AS ENUM ('PENDING', 'APPROVED', 'REJECTED');
+                    END IF;
+
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM pg_type t
+                        JOIN pg_namespace n ON n.oid = t.typnamespace
+                        WHERE t.typname = 'parcel_delivery_method'
+                          AND n.nspname = 'public'
+                    ) THEN
+                        CREATE TYPE public.parcel_delivery_method AS ENUM ('TERMINAL_PICKUP');
+                    END IF;
+
+                END $$;
+                """);
+
             migrationBuilder.AlterDatabase()
                 .Annotation("Npgsql:Enum:outbox_event_status", "PENDING,PUBLISHING,PUBLISHED,FAILED")
                 .Annotation("Npgsql:Enum:parcel_delivery_method", "TERMINAL_PICKUP")
@@ -290,6 +366,12 @@ namespace VietRide.Parcel.Infrastructure.Migrations
             migrationBuilder.DropTable(
                 name: "parcels",
                 schema: "vietride_parcel");
+
+            migrationBuilder.Sql("DROP TYPE IF EXISTS public.parcel_delivery_method;");
+            migrationBuilder.Sql("DROP TYPE IF EXISTS public.parcel_review_decision;");
+            migrationBuilder.Sql("DROP TYPE IF EXISTS public.parcel_size_category;");
+            migrationBuilder.Sql("DROP TYPE IF EXISTS public.parcel_status;");
+            migrationBuilder.Sql("DROP TYPE IF EXISTS public.outbox_event_status;");
 
             migrationBuilder.Sql("DROP EXTENSION IF EXISTS \"pgcrypto\";");
         }

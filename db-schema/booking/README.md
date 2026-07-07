@@ -13,6 +13,8 @@ Quản lý **booking lifecycle, multi-passenger per booking, seat reference, vou
 
 | Entity | Purpose | Key business fields |
 |---|---|---|
+| `Booking` | Order/giao dich mua ve. Existing legacy row below used to describe Booking as the ticket; new design separates Ticket as proof of travel. | `bookingCode` UNIQUE, booking-level amount/status, trip snapshot, round-trip group |
+| `Ticket` | Per-seat proof of travel / QR identity. | `ticketCode` UNIQUE, `passengerId` UNIQUE, `seatNumber`, `status`, fare/discount/paid snapshot, lifecycle timestamps |
 | `Booking` | Vé của 1 buyer cho 1 trip. | `bookingCode` UNIQUE, 4 pickup/dropoff FK (exclusive), `totalAmount` immutable snapshot, 4 trip snapshot fields, `bookingGroupId`/`tripDirection` round-trip, `cancellationReason` enum, `refundOverride` |
 | `Passenger` | Sub-entity của Booking (1–5/booking). Operational-only. | `seatNumber`, `boardingStatus`, `boardedAt`, `boardedAtStopId` |
 | `BookingPendingAction` | Pending action passenger cần phản hồi. | `reason` enum, `severity` enum (MEDIUM/MAJOR), `deadline`, `metadata` JSONB; **partial unique 1 active per booking** |

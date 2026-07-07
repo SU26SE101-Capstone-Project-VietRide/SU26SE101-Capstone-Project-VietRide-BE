@@ -12,6 +12,8 @@ public static class SwaggerSetupExtensions
         services.AddEndpointsApiExplorer();
         services.AddSwaggerGen(c =>
         {
+            c.CustomSchemaIds(GetSchemaId);
+
             c.SwaggerDoc(version, new OpenApiInfo
             {
                 Title = $"VietRide {serviceName} API",
@@ -47,5 +49,19 @@ public static class SwaggerSetupExtensions
         app.UseSwagger();
         app.UseSwaggerUI();
         return app;
+    }
+
+    private static string GetSchemaId(Type type)
+    {
+        if (type.IsConstructedGenericType)
+        {
+            var genericArguments = string.Concat(type.GetGenericArguments().Select(GetSchemaId));
+            var genericTypeName = type.Name[..type.Name.IndexOf('`')];
+            return $"{genericArguments}{genericTypeName}";
+        }
+
+        return type.DeclaringType is null
+            ? type.Name.Replace("[]", "Array")
+            : $"{GetSchemaId(type.DeclaringType)}{type.Name}";
     }
 }

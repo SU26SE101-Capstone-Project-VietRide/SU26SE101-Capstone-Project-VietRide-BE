@@ -22,6 +22,7 @@ public sealed class Passenger : BaseEntity<Guid>
 
     // Navigation (EF)
     public Booking? Booking { get; private set; }
+    public Ticket? Ticket { get; private set; }
 
     private Passenger() { }
 

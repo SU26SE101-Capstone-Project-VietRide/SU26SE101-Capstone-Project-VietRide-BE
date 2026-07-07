@@ -60,7 +60,8 @@ public sealed class ScanBookingCodeForTripIntegrationTests
         var item = items[0];
         item.GetProperty("seatNumber").GetString().Should().Be("A01");
         item.GetProperty("boardingStatus").GetString().Should().Be("PENDING");
-        item.EnumerateObject().Should().HaveCount(2);
+        item.GetProperty("ticketCode").GetString().Should().StartWith("VT-");
+        item.EnumerateObject().Should().HaveCount(5);
     }
 
     private static BookingEntity CreateConfirmedBooking(Guid tripId, Guid operatorId)
@@ -77,7 +78,12 @@ public sealed class ScanBookingCodeForTripIntegrationTests
             baseFare: Money.FromRaw(200_000),
             discountAmount: Money.Zero,
             totalAmount: Money.FromRaw(200_000));
-        booking.AddPassenger("A01");
+        booking.AddTicketedPassenger(
+            "A01",
+            TicketCode.Generate(Now),
+            Money.FromRaw(200_000),
+            Money.Zero,
+            Money.FromRaw(200_000));
         booking.Confirm(Now.AddMinutes(-10));
         return booking;
     }

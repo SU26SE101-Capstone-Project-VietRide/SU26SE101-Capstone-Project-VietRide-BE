@@ -39,8 +39,10 @@ public sealed class TickPassengerBoardedCommandHandlerTests
         result.PassengerRecordId.Should().Be(passenger.Id);
         result.BoardingStatus.Should().Be("BOARDED");
         result.BoardedAt.Should().Be(Now);
+        result.TicketStatus.Should().Be("USED");
         passenger.BoardingStatus.Should().Be(PassengerBoardingStatus.BOARDED);
         passenger.BoardedAt.Should().Be(Now);
+        booking.Tickets.Single().Status.Should().Be(TicketStatus.USED);
     }
 
     [Fact]
@@ -152,7 +154,12 @@ public sealed class TickPassengerBoardedCommandHandlerTests
             baseFare: Money.FromRaw(200_000),
             discountAmount: Money.Zero,
             totalAmount: Money.FromRaw(200_000));
-        booking.AddPassenger("A01");
+        booking.AddTicketedPassenger(
+            "A01",
+            TicketCode.Generate(Now),
+            Money.FromRaw(200_000),
+            Money.Zero,
+            Money.FromRaw(200_000));
         booking.Confirm(Now.AddMinutes(-10));
         return booking;
     }

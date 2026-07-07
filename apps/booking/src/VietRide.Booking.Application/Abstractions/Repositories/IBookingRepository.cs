@@ -16,12 +16,17 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
     Task<BookingEntity?> FindByBookingCodeAsync(string bookingCode, CancellationToken ct = default);
 
     /// <summary>
+    /// Finds a booking containing the ticket code and eagerly loads passengers + tickets.
+    /// </summary>
+    Task<BookingEntity?> FindByTicketCodeWithPassengersAsync(string ticketCode, CancellationToken ct = default);
+
+    /// <summary>
     /// Finds a booking by id using the aggregate-specific seam.
     /// </summary>
     Task<BookingEntity?> FindByIdAsync(Guid bookingId, CancellationToken ct = default);
 
     /// <summary>
-    /// Returns a booking with Passengers eagerly loaded.
+    /// Returns a booking with Passengers and Tickets eagerly loaded.
     /// Used for saga compensation checks and cancellation.
     /// </summary>
     Task<BookingEntity?> FindByIdWithPassengersAsync(Guid bookingId, CancellationToken ct = default);

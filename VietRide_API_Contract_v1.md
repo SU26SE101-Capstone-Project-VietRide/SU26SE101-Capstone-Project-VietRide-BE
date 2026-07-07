@@ -793,7 +793,18 @@ Response `201`:
     "status": "CONFIRMED",
     "totalAmount": 350000,
     "discountAmount": 50000,
-    "paymentRedirectUrl": null
+    "paymentRedirectUrl": null,
+    "tickets": [
+      {
+        "ticketId": "uuid",
+        "ticketCode": "VT-20260518-ABCDEFGH",
+        "seatNumber": "A01",
+        "status": "ISSUED",
+        "fareAmount": 400000,
+        "discountAmount": 50000,
+        "paidAmount": 350000
+      }
+    ]
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
@@ -830,8 +841,8 @@ Response `201`:
   "statusCode": 201,
   "data": {
     "bookingGroupId": "uuid",
-    "outbound": { "bookingId": "uuid", "bookingCode": "VR-20260518-ABCD1234", "totalAmount": 350000, "discountAmount": 50000 },
-    "return": { "bookingId": "uuid", "bookingCode": "VR-20260519-EFGH5678", "totalAmount": 350000, "discountAmount": 50000 },
+    "outbound": { "bookingId": "uuid", "bookingCode": "VR-20260518-ABCD1234", "totalAmount": 350000, "discountAmount": 50000, "tickets": [{ "ticketId": "uuid", "ticketCode": "VT-20260518-ABCDEFGH", "seatNumber": "A01", "status": "PENDING_PAYMENT", "fareAmount": 400000, "discountAmount": 50000, "paidAmount": 350000 }] },
+    "return": { "bookingId": "uuid", "bookingCode": "VR-20260519-EFGH5678", "totalAmount": 350000, "discountAmount": 50000, "tickets": [{ "ticketId": "uuid", "ticketCode": "VT-20260519-HGFEDCBA", "seatNumber": "A01", "status": "PENDING_PAYMENT", "fareAmount": 400000, "discountAmount": 50000, "paidAmount": 350000 }] },
     "grandTotal": 700000,
     "paymentRedirectUrl": "https://vnpay.vn/..."
   },
@@ -885,6 +896,37 @@ Response `200`:
 Auth: booking owner or authorized operator.
 
 Response `200`: booking detail with passengers, pickup/dropoff, payment summary, pendingActions.
+
+### GET `/internal/v1/bookings/{bookingId}`
+
+Auth: Internal JWT. Used by Parcel to validate that a parcel can attach to a booking.
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "bookingId": "uuid",
+    "userId": "uuid",
+    "tripId": "uuid",
+    "status": "CONFIRMED",
+    "activeTicketCount": 1,
+    "tickets": [
+      {
+        "ticketId": "uuid",
+        "ticketCode": "VT-20260518-ABCDEFGH",
+        "seatNumber": "A01",
+        "status": "ISSUED"
+      }
+    ]
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+`activeTicketCount` counts tickets in `ISSUED` or `USED`. Parcel attach must reject bookings with
+`activeTicketCount = 0`.
 
 ### POST `/v1/bookings/{bookingId}/cancel`
 
@@ -3682,6 +3724,9 @@ Response `200` in the ADR 0004 success envelope:
   "data": {
     "items": [
       {
+        "passengerRecordId": "uuid",
+        "ticketId": "uuid",
+        "ticketCode": "VT-20260630-ABCDEFGH",
         "seatNumber": "A01",
         "bookingCode": "VR-20260630-ABCD1234",
         "pickupStop": "uuid-or-null",
@@ -3696,8 +3741,9 @@ Response `200` in the ADR 0004 success envelope:
 }
 ```
 
-Each manifest item contains exactly `seatNumber`, `bookingCode`, `pickupStop`, and
-`boardingStatus`. A trip with no confirmed bookings returns `200` with `items: []`, not `404`.
+Each manifest item contains `passengerRecordId`, `ticketId`, `ticketCode`, `seatNumber`,
+`bookingCode`, `pickupStop`, and `boardingStatus`, and only includes tickets in `ISSUED` or
+`USED` status. A trip with no confirmed active/used tickets returns `200` with `items: []`, not `404`.
 Unknown trip returns `404 TRIP_NOT_FOUND`; validation failures return `422 VALIDATION_ERROR`.
 
 ### POST `/v1/bookings/trips/{tripId}/boarding/passenger/{passengerRecordId}`
@@ -3719,7 +3765,10 @@ Response `200` in the ADR 0004 success envelope:
     "passengerRecordId": "uuid",
     "boardingStatus": "BOARDED",
     "boardedAt": "2026-06-30T03:00:00Z",
-    "boardedAtStopId": null
+    "boardedAtStopId": null,
+    "ticketId": "uuid",
+    "ticketCode": "VT-20260630-ABCDEFGH",
+    "ticketStatus": "USED"
   },
   "meta": {
     "traceId": "req-abc123",
@@ -3732,7 +3781,9 @@ Error responses use the ADR 0004 envelope:
 
 - `403 FORBIDDEN`: caller is not the trip's assigned driver or assistant.
 - `404 BOOKING_NOT_FOUND`: `passengerRecordId` does not exist.
+- `404 TICKET_NOT_FOUND`: the passenger record has no linked ticket.
 - `409 BOOKING_PASSENGER_ALREADY_BOARDED`: passenger is already `BOARDED`.
+- `409 TICKET_NOT_BOARDABLE`: linked ticket is not `ISSUED`.
 - `422 BOOKING_NOT_FOR_THIS_TRIP`: passenger exists but belongs to another trip.
 - `422 VALIDATION_ERROR`: route parameters are invalid.
 
@@ -3741,16 +3792,17 @@ Error responses use the ADR 0004 envelope:
 Auth: `DRIVER` or `ASSISTANT`. The authenticated JWT `sub` must equal the Trip snapshot's
 `driverUserId` or `assistantUserId`; otherwise the endpoint returns `403 FORBIDDEN`.
 
-The request body contains the plain booking code decoded by the Driver App. The service does not
-decode or persist QR image data and does not mutate Booking or Passenger state.
+The request body contains the plain ticket code decoded by the Driver App. The service does not
+decode or persist QR image data and does not mutate Booking, Ticket, or Passenger state.
 
 ```json
 {
-  "bookingCode": "VR-20260630-ABCD2345"
+  "ticketCode": "VT-20260630-ABCDEFGH"
 }
 ```
 
-`bookingCode` must match `^VR-\d{8}-[A-Z2-7]{8}$`.
+`ticketCode` must match `^VT-\d{8}-[0-9A-HJ-NP-TV-Z]{8}$`. Legacy clients may send exactly one
+`bookingCode` (`^VR-\d{8}-[A-Z2-7]{8}$`) instead; new clients must use `ticketCode`.
 
 Response `200` in the ADR 0004 success envelope:
 
@@ -3761,6 +3813,9 @@ Response `200` in the ADR 0004 success envelope:
   "data": {
     "items": [
       {
+        "passengerRecordId": "uuid",
+        "ticketId": "uuid",
+        "ticketCode": "VT-20260630-ABCDEFGH",
         "seatNumber": "A01",
         "boardingStatus": "PENDING"
       }
@@ -3773,13 +3828,14 @@ Response `200` in the ADR 0004 success envelope:
 }
 ```
 
-Passenger items contain exactly `seatNumber` and `boardingStatus`. The scan is read-only; ticking
-a passenger uses the separate boarding-passenger endpoint.
+With `ticketCode`, the response contains exactly one passenger item. Legacy `bookingCode` may
+return multiple issued/used ticket items for the booking. The scan is read-only; ticking a
+passenger uses the separate boarding-passenger endpoint.
 
 Error responses use the ADR 0004 envelope:
 
 - `403 FORBIDDEN`: caller is not the trip's assigned driver or assistant.
-- `404 BOOKING_NOT_FOUND`: the code is unknown or the booking is not `CONFIRMED`.
+- `404 BOOKING_NOT_FOUND`: the code is unknown, the booking is not `CONFIRMED`, or the ticket is not `ISSUED`/`USED`.
 - `422 BOOKING_NOT_FOR_THIS_TRIP`: the code belongs to a different trip.
 - `422 VALIDATION_ERROR`: the route parameter or booking-code format is invalid.
 

@@ -86,7 +86,7 @@ Khi conflict, ưu tiên theo thứ tự sau:
 | 0 | **API Gateway** | NestJS | — (stateless) | — | — | JWT validate (RS256 JWKS), Internal JWT sign (HS256 120s), reverse proxy, rate limit, phone-completion gate |
 | 1 | **Identity & User** | .NET 8 + EF Core 8 | `vietride_identity` | ✓ | — | Auth (OAuth/email/OTP), RBAC, User/Operator profile, refresh token rotation, SubscriptionPlan + OperatorSubscription, ActivityLog, UserDevice (FCM token) |
 | 2 | **Trip-Route-Vehicle** | .NET 8 + EF Core 8 | `vietride_trip` | ✓ | — | Station/Stop/Route/RouteStop, Vehicle + VehicleType, Trip + TripSeat + TripStop + TripStopFare, DriverSchedule + Hangfire generate, AlternativeRoute, ShuttleTrip, Incident |
-| 3 | **Booking** | .NET 8 + EF Core 8 | `vietride_booking` | ✓ | — | Booking + Passenger + BookingTransfer, BookingPendingAction, Voucher + VoucherUsage + OperatorVoucherConsent, BookingStats, seat lock TTL (Redis) |
+| 3 | **Booking** | .NET 8 + EF Core 8 | `vietride_booking` | ✓ | — | Booking order + per-seat Ticket + Passenger boarding record + BookingTransfer, BookingPendingAction, Voucher + VoucherUsage + OperatorVoucherConsent, BookingStats, seat lock TTL (Redis) |
 | 4 | **Payment & Wallet** | .NET 8 + EF Core 8 | `vietride_payment` | ✓ | — | Payment (BOOKING/PARCEL/TOP_UP/SUBSCRIPTION), Wallet + WalletTransaction (passenger), PlatformWallet + OperatorWallet + OperatorLedgerEntry + OperatorTripSettlement, Invoice + PDF, VNPay integration, RefundFailureLog |
 | 5 | **Parcel** | .NET 8 + EF Core 8 | `vietride_parcel` | ✓ | — | Parcel lifecycle, ParcelRouteFare, deliveryToken email-link, transfer/return flows, ParcelStats |
 | 6 | **Tracking** | NestJS + Prisma | `vietride_tracking` | — | ✓ | Socket.IO GPS streaming (`/tracking`), ETA caching (Redis 60s), off-route detection, batch-write `GpsTrail` từ Redis buffer mỗi 5 phút |
@@ -1070,7 +1070,7 @@ Idempotent: chạy migration 2 lần không lỗi (EF Core / Prisma migrations h
 
 #### Booking (`vietride_booking`)
 
-`Booking` · `BookingPendingAction` · `Passenger` · `BookingTransfer` · `BookingStats` · `Voucher` · `VoucherUsage` · `OperatorVoucherConsent` · `OutboxEvent`
+`Booking` · `Ticket` · `BookingPendingAction` · `Passenger` · `BookingTransfer` · `BookingStats` · `Voucher` · `VoucherUsage` · `OperatorVoucherConsent` · `OutboxEvent`
 
 #### Payment & Wallet (`vietride_payment`)
 
@@ -1701,7 +1701,7 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 
 | Method + Path | Caller | Mục đích |
 |---|---|---|
-| `GET /internal/v1/bookings/{id}` | Tracking, Payment | Lookup booking |
+| `GET /internal/v1/bookings/{id}` | Tracking, Payment, Parcel | Lookup booking snapshot, including active ticket count for parcel attach |
 | `GET /internal/v1/bookings/{id}/access-check?userId=` | Tracking | Verify Socket.IO joinTripTracking authz |
 | `GET /internal/v1/vouchers/by-code/{code}` | Booking (own service); also exposed for admin reports |
 
@@ -1749,9 +1749,9 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `identity.user.deleted` | Identity | Booking, Payment | `{ userId }` (soft delete cascade) |
 | `identity.operator.approved` | Identity | Payment (init OperatorWallet) | `{ operatorId, approvedAt }` |
 | `identity.operator.suspended` | Identity | Trip, Booking | `{ operatorId, suspendedAt }` |
-| `booking.booking.confirmed` | Booking | Notification, Payment (settle hold), Booking (BookingStats counter) | `{ bookingId, tripId, totalAmount, userId, voucherUsageId? }` |
-| `booking.booking.cancelled` | Booking | Notification, Trip (release seats), Payment (refund), Booking (BookingStats counter) | `{ bookingId, userId, refundAmount, refundOverride, cancellationReason }` |
-| `booking.booking.refunded` | Booking | Notification, Booking (BookingStats counter) | `{ bookingId, userId, amount }` |
+| `booking.booking.confirmed` | Booking | Notification, Payment (settle hold), Booking (BookingStats counter) | `{ bookingId, tripId, totalAmount, userId, voucherUsageId?, bookingCode?, ticketCodes?, ticketCount? }` |
+| `booking.booking.cancelled` | Booking | Notification, Trip (release seats), Payment (refund), Booking (BookingStats counter) | `{ bookingId, userId, refundAmount, refundOverride, cancellationReason, bookingCode?, ticketCodes?, ticketCount? }` |
+| `booking.booking.refunded` | Booking | Notification, Booking (BookingStats counter) | `{ bookingId, userId, amount, bookingCode?, ticketCodes?, ticketCount? }` |
 | `booking.voucher.consent_accepted` | Booking | Notification | `{ voucherId, operatorId }` |
 | `booking.voucher.consent_rejected` | Booking | Notification | `{ voucherId, operatorId, reason? }` |
 | `trip.trip.boarding_started` | Trip | Notification | `{ tripId, boardingStartedAt }` |
@@ -2698,6 +2698,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.20.0** | 2026-07-06 | BE lead (Vu) | **MINOR** - Split Booking order from per-seat Ticket. Booking remains the order/history aggregate; Ticket is the proof of travel and QR identity (`ticketCode` format `VT-yyyyMMdd-XXXXXXXX`), linked 1:1 with Passenger boarding records. Register Booking internal snapshot `GET /internal/v1/bookings/{id}` for Parcel with active ticket count, extend booking integration event payloads with optional `bookingCode`, `ticketCodes`, and `ticketCount`, and add boarding errors `TICKET_NOT_FOUND` / `TICKET_NOT_BOARDABLE`. |
 | **1.19.0** | 2026-06-30 | BE lead (Vũ) | **MINOR** — Freeze the Day-18 boarding-warning integration-event contract: register `trip.stop.departed_with_pending` with payload `{ eventId: Guid, occurredAt: DateTime (UTC), eventType: "trip.stop.departed_with_pending", tripId: Guid, stopId: Guid, stopName: string, pendingPassengerCount: int (> 0), driverUserId: Guid, assistantUserId: Guid?, departedAt: DateTimeOffset (UTC ISO-8601) }` for the Notification-owned Driver App alert consumer. `eventType` is the constant routing key; `occurredAt` matches `IntegrationEventBase` serialization, while `departedAt` is serialized as UTC. Day 18 is registry/contract only; the Trip Outbox emitter and the Day-24 `NO_SHOW` detection flow remain explicitly deferred to Day 24. No service code, handler wiring, test, or DDL change. |
 | **1.18.0** | 2026-06-30 | BE lead (Vũ) | **MINOR** — Day-18 additive extension of the FROZEN Trip→Booking `TripSnapshot` inter-service DTO: append nullable `DriverUserId` and `AssistantUserId` (`Guid?`) without removing, reordering, or retyping existing fields. The mirrored `GET /internal/v1/trips/{tripId}` raw-DTO contract now exposes `driverUserId`/`assistantUserId` as logical user keys for downstream trip-assignment authorization; no cross-database FK or EF relationship is introduced. |
 | **1.17.0** | 2026-06-26 | BE lead (Vũ) | **MINOR** - Day-17 BookingStats consumer ownership correction + event-driven counters. Booking self-consumes `booking.booking.confirmed`/`.cancelled`/`.refunded` to maintain BookingStats, so the stale `Trip (BookingStats counter)` consumer entry is corrected to Booking ownership. `booking.booking.cancelled` payload registry now includes `userId`; `booking.booking.refunded` registry now matches the emitted shape `{ bookingId, userId, amount }` (the money field is `amount`, not `refundAmount`). BookingStats consumers use a durable `booking_stats_processed_events` marker keyed by `(event_type, booking_id)` in the same local transaction as the stats UPSERT. |

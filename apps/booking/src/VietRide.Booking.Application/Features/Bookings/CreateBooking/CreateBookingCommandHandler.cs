@@ -148,7 +148,9 @@ public sealed class CreateBookingCommandHandler
         //    before any booking row exists; seats are locked but a cleanup job handles orphaned locks.
         // -----------------------------------------------------------------------
         var now = _clock.UtcNow;
-        var baseFare = Money.FromRaw(trip.BaseFare);
+        var seatCount = request.Seats.Count;
+        var perSeatFare = Money.FromRaw(trip.BaseFare);
+        var baseFare = Money.FromRaw(perSeatFare.Amount * seatCount);
 
         Money discountAmount = Money.Zero;
         Guid? validatedVoucherId = null;
@@ -200,9 +202,15 @@ public sealed class CreateBookingCommandHandler
                 seatLockToken: seatLockToken);
 
             // Add passenger rows (operational-only — no PII stored)
-            foreach (var seat in request.Seats)
+            var ticketAllocations = BuildTicketAllocations(request.Seats, perSeatFare, discountAmount, now);
+            foreach (var allocation in ticketAllocations)
             {
-                booking.AddPassenger(seat.SeatNumber);
+                booking.AddTicketedPassenger(
+                    allocation.SeatNumber,
+                    allocation.TicketCode,
+                    allocation.FareAmount,
+                    allocation.DiscountAmount,
+                    allocation.PaidAmount);
             }
 
             await _bookings.AddAsync(booking, cancellationToken);
@@ -290,7 +298,8 @@ public sealed class CreateBookingCommandHandler
                 Status: booking.Status.ToString(),
                 TotalAmount: booking.TotalAmount.Amount,
                 DiscountAmount: booking.DiscountAmount.Amount,
-                PaymentRedirectUrl: paymentRedirectUrl);
+                PaymentRedirectUrl: paymentRedirectUrl,
+                Tickets: ToTicketResults(booking));
         }
 
         // -----------------------------------------------------------------------
@@ -329,6 +338,8 @@ public sealed class CreateBookingCommandHandler
             totalAmount = booking.TotalAmount.Amount,
             userId = booking.PassengerUserId,
             voucherUsageId,
+            ticketCodes = booking.Tickets.Select(ticket => ticket.TicketCode.Value).ToArray(),
+            ticketCount = booking.Tickets.Count,
         };
 
         await _outbox.EnqueueAsync(
@@ -348,7 +359,8 @@ public sealed class CreateBookingCommandHandler
             Status: booking.Status.ToString(),
             TotalAmount: booking.TotalAmount.Amount,
             DiscountAmount: booking.DiscountAmount.Amount,
-            PaymentRedirectUrl: paymentRedirectUrl);
+            PaymentRedirectUrl: paymentRedirectUrl,
+            Tickets: ToTicketResults(booking));
     }
 
     // -----------------------------------------------------------------------
@@ -384,4 +396,53 @@ public sealed class CreateBookingCommandHandler
             }
         }
     }
+
+    private static IReadOnlyList<TicketAllocation> BuildTicketAllocations(
+        IReadOnlyList<SeatRequest> seats,
+        Money perSeatFare,
+        Money totalDiscount,
+        DateTimeOffset now)
+    {
+        var orderedSeats = seats
+            .Select(seat => seat.SeatNumber)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var count = orderedSeats.Length;
+        var baseDiscount = count == 0 ? 0 : totalDiscount.Amount / count;
+        var remainder = count == 0 ? 0 : totalDiscount.Amount % count;
+
+        return orderedSeats
+            .Select((seatNumber, index) =>
+            {
+                var discount = Money.FromRaw(baseDiscount + (index < remainder ? 1 : 0));
+                return new TicketAllocation(
+                    seatNumber,
+                    TicketCode.Generate(now),
+                    perSeatFare,
+                    discount,
+                    perSeatFare - discount);
+            })
+            .ToArray();
+    }
+
+    private static IReadOnlyList<CreateBookingTicketResult> ToTicketResults(BookingEntity booking)
+        => booking.Tickets
+            .OrderBy(ticket => ticket.SeatNumber, StringComparer.OrdinalIgnoreCase)
+            .Select(ticket => new CreateBookingTicketResult(
+                ticket.Id,
+                ticket.TicketCode.Value,
+                ticket.SeatNumber,
+                ticket.Status.ToString(),
+                ticket.FareAmount.Amount,
+                ticket.DiscountAmount.Amount,
+                ticket.PaidAmount.Amount))
+            .ToArray();
+
+    private sealed record TicketAllocation(
+        string SeatNumber,
+        TicketCode TicketCode,
+        Money FareAmount,
+        Money DiscountAmount,
+        Money PaidAmount);
 }

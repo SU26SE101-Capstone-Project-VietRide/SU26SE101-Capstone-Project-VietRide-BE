@@ -64,7 +64,7 @@ public sealed class BoardingController : ControllerBase
         return Ok(result);
     }
 
-    /// <summary>Resolves a plain booking code to its passenger boarding records.</summary>
+    /// <summary>Resolves a ticket QR code to its passenger boarding record.</summary>
     [HttpPost("boarding/qr-scan")]
     [ProducesResponseType(typeof(ApiResponse<ScanBookingCodeForTripResult>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
@@ -79,6 +79,7 @@ public sealed class BoardingController : ControllerBase
         var result = await _sender.Send(
             new ScanBookingCodeForTripQuery(
                 tripId,
+                request.TicketCode,
                 request.BookingCode,
                 GetCallerUserId()),
             cancellationToken);

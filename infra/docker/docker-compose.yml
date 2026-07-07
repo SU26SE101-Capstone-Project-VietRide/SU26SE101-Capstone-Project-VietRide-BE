@@ -25,7 +25,7 @@ x-dotnet-common: &dotnet-common
   environment:
     ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
     INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
-    ConnectionStrings__Default: 'Host=postgres;Port=5432;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev};Database='
+    ConnectionStrings__Default: 'Host=postgres;Port=5432;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev};Database=;Maximum Pool Size=10;Minimum Pool Size=0;Connection Idle Lifetime=15'
   depends_on:
     postgres:
       condition: service_healthy
@@ -143,7 +143,7 @@ services:
       SYSTEM_ADMIN_BOOTSTRAP_DISPLAY_NAME: ${SYSTEM_ADMIN_BOOTSTRAP_DISPLAY_NAME:-System Administrator}
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID}
       GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET}
-      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_identity;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}'
+      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_identity;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev};Maximum Pool Size=10;Minimum Pool Size=0;Connection Idle Lifetime=15'
       # Outbox publisher must reach the broker by its compose hostname, not localhost
       # (appsettings RabbitMq:HostName defaults to localhost for host-run dev).
       RabbitMq__HostName: rabbitmq
@@ -169,7 +169,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
-      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_trip;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}'
+      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_trip;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev};Maximum Pool Size=10;Minimum Pool Size=0;Connection Idle Lifetime=15'
       REDIS_URL: 'redis:6379,abortConnect=false'
       IDENTITY_SERVICE_BASE_URL: http://identity:5001
     ports:
@@ -191,7 +191,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
-      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_booking;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}'
+      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_booking;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev};Maximum Pool Size=10;Minimum Pool Size=0;Connection Idle Lifetime=15'
       REDIS_URL: redis:6379
       RabbitMq__HostName: rabbitmq
       RabbitMq__Port: '5672'
@@ -230,7 +230,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
-      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_payment;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev};Search Path=vietride_payment,public'
+      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_payment;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev};Search Path=vietride_payment,public;Maximum Pool Size=10;Minimum Pool Size=0;Connection Idle Lifetime=15'
       REDIS_URL: redis:6379
       RabbitMq__HostName: rabbitmq
       RabbitMq__Port: '5672'
@@ -261,7 +261,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
-      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_parcel;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev}'
+      ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_parcel;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev};Maximum Pool Size=10;Minimum Pool Size=0;Connection Idle Lifetime=15'
       RabbitMq__HostName: rabbitmq
       RabbitMq__Port: '5672'
       RabbitMq__UserName: ${RABBITMQ_USER:-vietride}

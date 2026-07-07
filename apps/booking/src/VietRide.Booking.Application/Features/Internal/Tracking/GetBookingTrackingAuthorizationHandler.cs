@@ -36,7 +36,9 @@ public sealed class GetBookingTrackingAuthorizationHandler
         var allowed = await bookingRepository.QueryNoTracking().AnyAsync(booking =>
             booking.TripId == request.TripId
             && booking.PassengerUserId == request.UserId.Value
-            && TrackableStatuses.Contains(booking.Status),
+            && TrackableStatuses.Contains(booking.Status)
+            && booking.Tickets.Any(ticket =>
+                ticket.Status == TicketStatus.ISSUED || ticket.Status == TicketStatus.USED),
             cancellationToken);
 
         return allowed

@@ -31,6 +31,11 @@ CREATE TYPE trip_direction AS ENUM ('OUTBOUND', 'RETURN');
 
 CREATE TYPE passenger_boarding_status AS ENUM ('PENDING', 'BOARDED', 'NO_SHOW');
 
+CREATE TYPE ticket_status AS ENUM (
+    'PENDING_PAYMENT', 'ISSUED', 'USED',
+    'CANCELLED', 'REFUNDED', 'EXPIRED'
+);
+
 CREATE TYPE booking_pending_action_reason AS ENUM (
     'ROUTE_CHANGE',
     'SEAT_DOWNGRADE',
@@ -122,7 +127,7 @@ CREATE INDEX idx_bookings_status_created_at ON bookings (status, created_at)
 CREATE INDEX idx_bookings_trip_snapshot_departure ON bookings (trip_snapshot_departure DESC);
 
 COMMENT ON COLUMN bookings.booking_code IS
-    'Format VR-yyyyMMdd-XXXXXXXX (8 chars base32 uppercase). QR code encodes this string directly.';
+    'Format VR-yyyyMMdd-XXXXXXXX (8 chars base32 uppercase). Booking/order code for history and backward compatibility; ticket QR uses tickets.ticket_code.';
 COMMENT ON COLUMN bookings.total_amount IS
     'IMMUTABLE after INSERT. Snapshot of fare at booking time. Operator fare edits do not affect existing bookings.';
 COMMENT ON COLUMN bookings.refund_override IS
@@ -150,6 +155,42 @@ CREATE INDEX idx_passengers_boarding_status ON passengers (booking_id, boarding_
 
 COMMENT ON TABLE passengers IS
     'Operational-only — no PII (no fullName/phone/idNumber). Max 5 per booking enforced by app-layer AND DB trigger (trg_passengers_max_5_per_booking).';
+
+-- -----------------------------------------------------------------------------
+-- tickets (1 per seat; proof of travel / QR token)
+-- -----------------------------------------------------------------------------
+CREATE TABLE tickets (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    booking_id UUID NOT NULL REFERENCES bookings (id) ON DELETE CASCADE,
+    passenger_id UUID NOT NULL REFERENCES passengers (id) ON DELETE CASCADE,
+    ticket_code VARCHAR(30) NOT NULL,    -- "VT-yyyyMMdd-XXXXXXXX"
+    seat_number VARCHAR(20) NOT NULL,
+    status ticket_status NOT NULL DEFAULT 'PENDING_PAYMENT',
+    fare_amount BIGINT NOT NULL,
+    discount_amount BIGINT NOT NULL DEFAULT 0,
+    paid_amount BIGINT NOT NULL,
+    issued_at TIMESTAMPTZ NULL,
+    used_at TIMESTAMPTZ NULL,
+    cancelled_at TIMESTAMPTZ NULL,
+    refunded_at TIMESTAMPTZ NULL,
+    expired_at TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_tickets_amounts_non_negative
+        CHECK (fare_amount >= 0 AND discount_amount >= 0 AND paid_amount >= 0),
+    CONSTRAINT chk_tickets_paid_le_fare
+        CHECK (paid_amount <= fare_amount)
+);
+
+CREATE UNIQUE INDEX uq_tickets_ticket_code ON tickets (ticket_code);
+CREATE UNIQUE INDEX uq_tickets_passenger_id ON tickets (passenger_id);
+CREATE INDEX idx_tickets_booking_status ON tickets (booking_id, status);
+CREATE INDEX idx_tickets_seat_number ON tickets (seat_number);
+
+COMMENT ON TABLE tickets IS
+    'One ticket per booked seat. Booking is the order; Ticket is the per-seat proof of travel and QR identity.';
+COMMENT ON COLUMN tickets.ticket_code IS
+    'Format VT-yyyyMMdd-XXXXXXXX (8 chars uppercase Crockford-style base32). New boarding QR encodes this string.';
 
 -- -----------------------------------------------------------------------------
 -- booking_pending_actions
@@ -185,6 +226,7 @@ CREATE TABLE booking_transfers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     booking_id UUID NOT NULL REFERENCES bookings (id) ON DELETE RESTRICT,
     passenger_id UUID NOT NULL REFERENCES passengers (id) ON DELETE RESTRICT,
+    ticket_id UUID NULL REFERENCES tickets (id) ON DELETE RESTRICT,
     original_trip_id UUID NOT NULL,
     new_trip_id UUID NOT NULL,
     original_seat_number VARCHAR(20) NOT NULL,
@@ -197,6 +239,7 @@ CREATE TABLE booking_transfers (
 
 CREATE INDEX idx_booking_transfers_booking_id ON booking_transfers (booking_id);
 CREATE INDEX idx_booking_transfers_passenger_id ON booking_transfers (passenger_id);
+CREATE INDEX idx_booking_transfers_ticket_id ON booking_transfers (ticket_id);
 CREATE INDEX idx_booking_transfers_original_trip_id ON booking_transfers (original_trip_id);
 CREATE INDEX idx_booking_transfers_new_trip_id ON booking_transfers (new_trip_id);
 
@@ -357,6 +400,8 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER trg_bookings_updated_at BEFORE UPDATE ON bookings
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 CREATE TRIGGER trg_passengers_updated_at BEFORE UPDATE ON passengers
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+CREATE TRIGGER trg_tickets_updated_at BEFORE UPDATE ON tickets
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 CREATE TRIGGER trg_booking_pending_actions_updated_at BEFORE UPDATE ON booking_pending_actions
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();

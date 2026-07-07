@@ -126,8 +126,10 @@ public sealed class CreateRoundTripBookingCommandHandler
 
         var bookingGroupId = Guid.NewGuid();
         var now = _clock.UtcNow;
-        var outboundBaseFare = Money.FromRaw(outboundTrip.BaseFare);
-        var returnBaseFare = Money.FromRaw(returnTrip.BaseFare);
+        var outboundPerSeatFare = Money.FromRaw(outboundTrip.BaseFare);
+        var returnPerSeatFare = Money.FromRaw(returnTrip.BaseFare);
+        var outboundBaseFare = Money.FromRaw(outboundPerSeatFare.Amount * outboundSeatNumbers.Count);
+        var returnBaseFare = Money.FromRaw(returnPerSeatFare.Amount * returnSeatNumbers.Count);
 
         // -----------------------------------------------------------------------
         // 4. Validate voucher per leg independently (read-only — no DB writes yet).
@@ -262,6 +264,7 @@ public sealed class CreateRoundTripBookingCommandHandler
                 outboundBaseFare,
                 outboundDiscount,
                 outboundTotal,
+                outboundPerSeatFare,
                 bookingGroupId,
                 TripDirection.OUTBOUND,
                 outboundLockToken);
@@ -273,6 +276,7 @@ public sealed class CreateRoundTripBookingCommandHandler
                 returnBaseFare,
                 returnDiscount,
                 returnTotal,
+                returnPerSeatFare,
                 bookingGroupId,
                 TripDirection.RETURN,
                 returnLockToken);
@@ -443,6 +447,7 @@ public sealed class CreateRoundTripBookingCommandHandler
         Money baseFare,
         Money discountAmount,
         Money totalAmount,
+        Money perSeatFare,
         Guid bookingGroupId,
         TripDirection tripDirection,
         Guid seatLockToken)
@@ -467,9 +472,15 @@ public sealed class CreateRoundTripBookingCommandHandler
             tripDirection: tripDirection,
             seatLockToken: seatLockToken);
 
-        foreach (var seat in leg.Seats)
+        var ticketAllocations = BuildTicketAllocations(leg.Seats, perSeatFare, discountAmount, _clock.UtcNow);
+        foreach (var allocation in ticketAllocations)
         {
-            booking.AddPassenger(seat.SeatNumber);
+            booking.AddTicketedPassenger(
+                allocation.SeatNumber,
+                allocation.TicketCode,
+                allocation.FareAmount,
+                allocation.DiscountAmount,
+                allocation.PaidAmount);
         }
 
         return booking;
@@ -626,6 +637,8 @@ public sealed class CreateRoundTripBookingCommandHandler
             totalAmount = booking.TotalAmount.Amount,
             userId = booking.PassengerUserId,
             voucherUsageId,
+            ticketCodes = booking.Tickets.Select(ticket => ticket.TicketCode.Value).ToArray(),
+            ticketCount = booking.Tickets.Count,
         };
 
         await _outbox.EnqueueAsync(
@@ -727,12 +740,64 @@ public sealed class CreateRoundTripBookingCommandHandler
                 outboundBooking.Id,
                 outboundBooking.BookingCode.Value,
                 outboundBooking.TotalAmount.Amount,
-                outboundBooking.DiscountAmount.Amount),
+                outboundBooking.DiscountAmount.Amount,
+                ToTicketResults(outboundBooking)),
             new CreateRoundTripBookingResult.RoundTripBookingResult(
                 returnBooking.Id,
                 returnBooking.BookingCode.Value,
                 returnBooking.TotalAmount.Amount,
-                returnBooking.DiscountAmount.Amount),
+                returnBooking.DiscountAmount.Amount,
+                ToTicketResults(returnBooking)),
             grandTotal,
             paymentRedirectUrl);
+
+    private static IReadOnlyList<TicketAllocation> BuildTicketAllocations(
+        IReadOnlyList<CreateRoundTripBookingCommand.RoundTripSeatRequest> seats,
+        Money perSeatFare,
+        Money totalDiscount,
+        DateTimeOffset now)
+    {
+        var orderedSeats = seats
+            .Select(seat => seat.SeatNumber)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var count = orderedSeats.Length;
+        var baseDiscount = count == 0 ? 0 : totalDiscount.Amount / count;
+        var remainder = count == 0 ? 0 : totalDiscount.Amount % count;
+
+        return orderedSeats
+            .Select((seatNumber, index) =>
+            {
+                var discount = Money.FromRaw(baseDiscount + (index < remainder ? 1 : 0));
+                return new TicketAllocation(
+                    seatNumber,
+                    TicketCode.Generate(now),
+                    perSeatFare,
+                    discount,
+                    perSeatFare - discount);
+            })
+            .ToArray();
+    }
+
+    private static IReadOnlyList<CreateRoundTripBookingResult.RoundTripTicketResult> ToTicketResults(
+        BookingEntity booking)
+        => booking.Tickets
+            .OrderBy(ticket => ticket.SeatNumber, StringComparer.OrdinalIgnoreCase)
+            .Select(ticket => new CreateRoundTripBookingResult.RoundTripTicketResult(
+                ticket.Id,
+                ticket.TicketCode.Value,
+                ticket.SeatNumber,
+                ticket.Status.ToString(),
+                ticket.FareAmount.Amount,
+                ticket.DiscountAmount.Amount,
+                ticket.PaidAmount.Amount))
+            .ToArray();
+
+    private sealed record TicketAllocation(
+        string SeatNumber,
+        TicketCode TicketCode,
+        Money FareAmount,
+        Money DiscountAmount,
+        Money PaidAmount);
 }

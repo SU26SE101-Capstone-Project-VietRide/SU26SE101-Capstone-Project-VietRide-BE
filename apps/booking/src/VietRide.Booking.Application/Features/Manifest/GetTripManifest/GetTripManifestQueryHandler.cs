@@ -53,23 +53,49 @@ public sealed class GetTripManifestQueryHandler
                 Passengers = booking.Passengers
                     .Select(passenger => new
                     {
+                        passenger.Id,
                         passenger.SeatNumber,
                         passenger.BoardingStatus,
+                    })
+                    .ToArray(),
+                Tickets = booking.Tickets
+                    .Where(ticket => ticket.Status == TicketStatus.ISSUED || ticket.Status == TicketStatus.USED)
+                    .Select(ticket => new
+                    {
+                        ticket.Id,
+                        ticket.PassengerId,
+                        ticket.TicketCode,
+                        ticket.SeatNumber,
                     })
                     .ToArray(),
             })
             .ToList();
 
         var items = confirmedBookings
-            .SelectMany(booking => booking.Passengers.Select(passenger => new
+            .SelectMany(booking =>
             {
-                Item = new GetTripManifestItem(
-                    passenger.SeatNumber,
-                    booking.BookingCode.Value,
-                    booking.PickupStopId,
-                    passenger.BoardingStatus.ToString()),
-                PickupOrder = GetPickupOrder(booking.PickupStopId, pickupOrderByStopId),
-            }))
+                var passengersById = booking.Passengers.ToDictionary(passenger => passenger.Id);
+
+                return booking.Tickets
+                    .Where(ticket => passengersById.ContainsKey(ticket.PassengerId))
+                    .Select(ticket =>
+                    {
+                        var passenger = passengersById[ticket.PassengerId];
+
+                        return new
+                        {
+                            Item = new GetTripManifestItem(
+                                passenger.Id,
+                                ticket.Id,
+                                ticket.TicketCode.Value,
+                                ticket.SeatNumber,
+                                booking.BookingCode.Value,
+                                booking.PickupStopId,
+                                passenger.BoardingStatus.ToString()),
+                            PickupOrder = GetPickupOrder(booking.PickupStopId, pickupOrderByStopId),
+                        };
+                    });
+            })
             .OrderBy(entry => entry.PickupOrder)
             .ThenBy(entry => entry.Item.SeatNumber, StringComparer.Ordinal)
             .ThenBy(entry => entry.Item.BookingCode, StringComparer.Ordinal)

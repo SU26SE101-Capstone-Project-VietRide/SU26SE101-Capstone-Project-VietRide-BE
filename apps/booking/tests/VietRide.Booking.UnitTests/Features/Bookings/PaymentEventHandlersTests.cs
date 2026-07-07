@@ -232,5 +232,6 @@ public sealed class PaymentEventHandlersTests
             SeatLockToken,
             200_000,
             VoucherUsageId: null,
-            [new PassengerSeatAssignment(PassengerId, "A01")]);
+            [new PassengerSeatAssignment(PassengerId, "A01")],
+            ["VT-20260630-ABCDEFGH"]);
 }

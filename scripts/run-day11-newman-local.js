@@ -203,6 +203,10 @@ delete from ${tripSchema}.trip_stop_fares where trip_id = '${seed.legacyTripId}'
 delete from ${tripSchema}.trip_stops where trip_id = '${seed.legacyTripId}' or trip_id in (select id from ${tripSchema}.trips where driver_schedule_id = '${seed.driverScheduleId}');
 delete from ${tripSchema}.trip_seats where trip_id = '${seed.legacyTripId}' or trip_id in (select id from ${tripSchema}.trips where driver_schedule_id = '${seed.driverScheduleId}');
 delete from ${tripSchema}.trips where id = '${seed.legacyTripId}' or driver_schedule_id = '${seed.driverScheduleId}';
+delete from ${tripSchema}.trip_stop_fares where trip_id in (select t.id from ${tripSchema}.trips t join ${tripSchema}.vehicles v on v.id = t.vehicle_id where v.id = '${seed.vehicleId}' or v.license_plate like 'DAY11-%');
+delete from ${tripSchema}.trip_stops where trip_id in (select t.id from ${tripSchema}.trips t join ${tripSchema}.vehicles v on v.id = t.vehicle_id where v.id = '${seed.vehicleId}' or v.license_plate like 'DAY11-%');
+delete from ${tripSchema}.trip_seats where trip_id in (select t.id from ${tripSchema}.trips t join ${tripSchema}.vehicles v on v.id = t.vehicle_id where v.id = '${seed.vehicleId}' or v.license_plate like 'DAY11-%');
+delete from ${tripSchema}.trips where vehicle_id in (select id from ${tripSchema}.vehicles where id = '${seed.vehicleId}' or license_plate like 'DAY11-%');
 delete from ${tripSchema}.trip_generation_skip_logs where driver_schedule_id = '${seed.driverScheduleId}';
 delete from ${tripSchema}.driver_schedules where id = '${seed.driverScheduleId}' or operator_id = '${seed.operatorId}';
 delete from ${tripSchema}.vehicles where id = '${seed.vehicleId}' or license_plate like 'DAY11-%';

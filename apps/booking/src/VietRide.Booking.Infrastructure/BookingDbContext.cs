@@ -16,6 +16,7 @@ public sealed class BookingDbContext : VietRideDbContextBase
 
     public DbSet<BookingEntity> Bookings => Set<BookingEntity>();
     public DbSet<Passenger> Passengers => Set<Passenger>();
+    public DbSet<Ticket> Tickets => Set<Ticket>();
     public DbSet<BookingPendingAction> BookingPendingActions => Set<BookingPendingAction>();
     public DbSet<Voucher> Vouchers => Set<Voucher>();
     public DbSet<VoucherUsage> VoucherUsages => Set<VoucherUsage>();
@@ -38,6 +39,7 @@ public sealed class BookingDbContext : VietRideDbContextBase
         modelBuilder.HasPostgresEnum(
             "passenger_boarding_status",
             Enum.GetNames<PassengerBoardingStatus>());
+        modelBuilder.HasPostgresEnum("public", "ticket_status", Enum.GetNames<TicketStatus>());
         modelBuilder.HasPostgresEnum("trip_direction", Enum.GetNames<TripDirection>());
         modelBuilder.HasPostgresEnum("voucher_type", Enum.GetNames<VoucherType>());
         modelBuilder.HasPostgresEnum("voucher_funding_type", Enum.GetNames<VoucherFundingType>());
@@ -61,6 +63,7 @@ public sealed class BookingDbContext : VietRideDbContextBase
         dataSourceBuilder.MapEnum<PassengerBoardingStatus>(
             "passenger_boarding_status",
             new NpgsqlNullNameTranslator());
+        dataSourceBuilder.MapEnum<TicketStatus>("public.ticket_status", new NpgsqlNullNameTranslator());
         dataSourceBuilder.MapEnum<TripDirection>("trip_direction", new NpgsqlNullNameTranslator());
         dataSourceBuilder.MapEnum<VoucherType>("voucher_type", new NpgsqlNullNameTranslator());
         dataSourceBuilder.MapEnum<VoucherFundingType>(

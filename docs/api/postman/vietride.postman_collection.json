@@ -4789,8 +4789,9 @@
                   "  const items = Array.isArray(body.data) ? body.data : (body.data && Array.isArray(body.data.items) ? body.data.items : []);",
                   "  pm.expect(JSON.stringify(body.data)).not.to.match(/fullName|phoneNumber|idNumber|email/i);",
                   "  if (items.length > 0) {",
-                  "    pm.expect(items[0]).to.have.all.keys('seatNumber', 'bookingCode', 'pickupStop', 'boardingStatus');",
+                  "    pm.expect(items[0]).to.include.all.keys('seatNumber', 'ticketCode', 'bookingCode', 'pickupStop', 'boardingStatus');",
                   "    if (items[0].bookingCode) { pm.environment.set('day18BookingCode', items[0].bookingCode); }",
+                  "    if (items[0].ticketCode) { pm.environment.set('day18TicketCode', items[0].ticketCode); }",
                   "  }",
                   "});"
                 ]
@@ -4875,7 +4876,7 @@
                 "exec": [
                   "const body = pm.response.json();",
                   "pm.test('Status code is 409', function () { pm.response.to.have.status(409); });",
-                  "pm.test('Already boarded error code', function () { pm.expect(body.error.code).to.equal('BOOKING_PASSENGER_ALREADY_BOARDED'); });"
+                  "pm.test('Ticket cannot be boarded twice', function () { pm.expect(body.error.code).to.equal('TICKET_NOT_BOARDABLE'); });"
                 ]
               }
             }
@@ -4922,7 +4923,7 @@
           }
         },
         {
-          "name": "8. Scan booking code",
+          "name": "8. Scan ticket code",
           "event": [
             {
               "listen": "test",
@@ -4935,7 +4936,7 @@
                   "  pm.expect(body.success).to.equal(true);",
                   "  const items = Array.isArray(body.data) ? body.data : (body.data && Array.isArray(body.data.items) ? body.data.items : []);",
                   "  pm.expect(items).to.be.an('array');",
-                  "  if (items.length > 0) { pm.expect(items[0]).to.include.all.keys('seatNumber', 'boardingStatus'); }",
+                  "  if (items.length > 0) { pm.expect(items[0]).to.include.all.keys('ticketCode', 'seatNumber', 'boardingStatus'); }",
                   "});"
                 ]
               }
@@ -4947,7 +4948,7 @@
               { "key": "Authorization", "value": "Bearer {{driverAccessToken}}" },
               { "key": "Content-Type", "value": "application/json" }
             ],
-            "body": { "mode": "raw", "raw": "{\n  \"bookingCode\": \"{{day18BookingCode}}\"\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"ticketCode\": \"{{day18TicketCode}}\"\n}" },
             "url": {
               "raw": "{{baseUrl}}/v1/bookings/trips/{{day18TripId}}/boarding/qr-scan",
               "host": ["{{baseUrl}}"],
@@ -4976,7 +4977,7 @@
               { "key": "Authorization", "value": "Bearer {{driverAccessToken}}" },
               { "key": "Content-Type", "value": "application/json" }
             ],
-            "body": { "mode": "raw", "raw": "{\n  \"bookingCode\": \"{{day18BookingCode}}\"\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"ticketCode\": \"{{day18TicketCode}}\"\n}" },
             "url": {
               "raw": "{{baseUrl}}/v1/bookings/trips/{{day18OtherTripId}}/boarding/qr-scan",
               "host": ["{{baseUrl}}"],
@@ -4985,7 +4986,7 @@
           }
         },
         {
-          "name": "10. Scan unknown booking code returns 404",
+          "name": "10. Scan unknown ticket code returns 404",
           "event": [
             {
               "listen": "test",
@@ -5005,7 +5006,7 @@
               { "key": "Authorization", "value": "Bearer {{driverAccessToken}}" },
               { "key": "Content-Type", "value": "application/json" }
             ],
-            "body": { "mode": "raw", "raw": "{\n  \"bookingCode\": \"VR-20260101-ABCDEFGH\"\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"ticketCode\": \"VT-20260101-ABCDEFGH\"\n}" },
             "url": {
               "raw": "{{baseUrl}}/v1/bookings/trips/{{day18TripId}}/boarding/qr-scan",
               "host": ["{{baseUrl}}"],

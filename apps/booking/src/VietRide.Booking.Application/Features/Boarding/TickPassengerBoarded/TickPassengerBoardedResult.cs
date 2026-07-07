@@ -4,4 +4,7 @@ public sealed record TickPassengerBoardedResult(
     Guid PassengerRecordId,
     string BoardingStatus,
     DateTimeOffset BoardedAt,
-    Guid? BoardedAtStopId);
+    Guid? BoardedAtStopId,
+    Guid TicketId,
+    string TicketCode,
+    string TicketStatus);
