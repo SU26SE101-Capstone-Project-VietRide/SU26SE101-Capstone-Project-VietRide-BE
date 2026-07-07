@@ -11,6 +11,7 @@ import {
 import { InternalJwtSigner } from '../auth/internal-jwt.signer';
 import { UserJwtMiddleware } from '../auth/user-jwt.middleware';
 import { loadEnv, type Env } from '../config/env.schema';
+import { DeeplinkController } from '../deeplink/deeplink.controller';
 import { HealthController } from '../health/health.controller';
 import { ENV_TOKEN } from './tokens';
 
@@ -49,7 +50,7 @@ const throttlerStorage =
       ...(throttlerStorage ? { storage: throttlerStorage } : {}),
     }),
   ],
-  controllers: [HealthController],
+  controllers: [HealthController, DeeplinkController],
   providers: [
     { provide: ENV_TOKEN, useValue: env },
     {
@@ -71,6 +72,9 @@ export class AppModule implements NestModule {
     const publicPaths = [
       { path: 'health', method: RequestMethod.ALL },
       { path: 'ready', method: RequestMethod.ALL },
+      // Deep-link endpoints served on the apex domain (no user JWT).
+      { path: '.well-known/*path', method: RequestMethod.ALL },
+      { path: 'auth/set-password', method: RequestMethod.GET },
       { path: 'v1/auth/register', method: RequestMethod.ALL },
       { path: 'v1/auth/verify-email', method: RequestMethod.ALL },
       { path: 'v1/auth/set-initial-password', method: RequestMethod.POST },

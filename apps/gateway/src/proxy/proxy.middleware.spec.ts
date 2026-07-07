@@ -74,6 +74,24 @@ describe('createProxyHandler auth enforcement', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
+  it.each(['/.well-known/assetlinks.json', '/auth/set-password'])(
+    'lets %s fall through to Nest controllers',
+    async (path) => {
+      const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
+      const handler = createProxyHandler(env, signer);
+      const req = makeRequest(path, {}, 'GET');
+      const res = makeResponse();
+      const next = jest.fn() as NextFunction;
+
+      await handler(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+      expect(res.status).not.toHaveBeenCalled();
+      expect(signer.sign).not.toHaveBeenCalled();
+      expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+    },
+  );
+
   it('returns 401 for POST /v1/auth/logout without Authorization', async () => {
     const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
     const handler = createProxyHandler(env, signer);

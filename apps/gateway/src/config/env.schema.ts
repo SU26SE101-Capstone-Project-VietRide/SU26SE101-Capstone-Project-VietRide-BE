@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
+// Docker compose passes "" for unset host vars (`${VAR:-}`); treat as absent.
+const emptyToUndefined = (value: unknown): unknown => (value === '' ? undefined : value);
+
 // Zod schema validating env at startup. Throws if INTERNAL_JWT_SECRET < 32 chars.
 export const envSchema = z.object({
   GATEWAY_PORT: z.coerce.number().int().positive().default(3000),
@@ -31,6 +34,13 @@ export const envSchema = z.object({
   // Rate-limit default per BACKEND_SOURCE_OF_TRUTH §11.3 — 120 req/min per IP per route.
   // Per-route overrides Day 3+.
   RATE_LIMIT_DEFAULT_PER_MIN: z.coerce.number().int().positive().default(120),
+
+  // Deep link (Android App Links) — served on the apex domain by DeeplinkController.
+  // All optional: assetlinks.json returns 404 until package + fingerprints are set.
+  DEEPLINK_ANDROID_PACKAGE: z.preprocess(emptyToUndefined, z.string().optional()),
+  DEEPLINK_ANDROID_SHA256_FINGERPRINTS: z.preprocess(emptyToUndefined, z.string().optional()),
+  DEEPLINK_APP_SCHEME: z.preprocess(emptyToUndefined, z.string().default('vietride')),
+  DEEPLINK_ANDROID_STORE_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
 });
 
 export type Env = z.infer<typeof envSchema>;

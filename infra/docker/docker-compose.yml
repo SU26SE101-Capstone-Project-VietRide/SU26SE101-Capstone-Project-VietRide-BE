@@ -298,6 +298,11 @@ services:
       NOTIFICATION_BASE_URL: http://notification:3002
       RAG_BASE_URL: http://rag:3003
       REDIS_HOST: redis
+      # Deep link (Android App Links) — optional; empty = endpoints return 404.
+      DEEPLINK_ANDROID_PACKAGE: ${DEEPLINK_ANDROID_PACKAGE:-}
+      DEEPLINK_ANDROID_SHA256_FINGERPRINTS: ${DEEPLINK_ANDROID_SHA256_FINGERPRINTS:-}
+      DEEPLINK_APP_SCHEME: ${DEEPLINK_APP_SCHEME:-vietride}
+      DEEPLINK_ANDROID_STORE_URL: ${DEEPLINK_ANDROID_STORE_URL:-}
     ports:
       - '${GATEWAY_PORT:-3000}:3000'
     depends_on:

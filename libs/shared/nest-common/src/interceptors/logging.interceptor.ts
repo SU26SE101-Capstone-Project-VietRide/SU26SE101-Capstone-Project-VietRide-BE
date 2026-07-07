@@ -8,6 +8,12 @@ import type { Request, Response } from 'express';
 import pino, { type Logger as PinoLogger } from 'pino';
 import { Observable, tap } from 'rxjs';
 
+// Set-password / verify-email links carry a credential-equivalent token in the
+// query string; never let it reach the logs.
+function redactSensitiveQuery(url: string): string {
+  return url.replace(/([?&]token=)[^&#]*/gi, '$1[REDACTED]');
+}
+
 /**
  * Logs inbound HTTP requests + their duration / status using pino.
  *
@@ -35,7 +41,7 @@ export class LoggingInterceptor implements NestInterceptor {
 
     const baseFields = {
       method: req.method,
-      url: req.originalUrl ?? req.url,
+      url: redactSensitiveQuery(req.originalUrl ?? req.url),
       requestId,
     };
 

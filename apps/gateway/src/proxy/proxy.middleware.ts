@@ -196,8 +196,15 @@ export function createProxyHandler(env: Env, signer: InternalJwtSigner): Express
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const fullPath = (req.originalUrl || req.url).split('?')[0] || '/';
 
-    // Let local gateway routes through (health, ready, docs) — Nest controllers handle them.
-    if (fullPath === '/health' || fullPath === '/ready' || fullPath.startsWith('/docs')) {
+    // Let local gateway routes through (health, ready, docs, deep-link endpoints)
+    // — Nest controllers handle them.
+    if (
+      fullPath === '/health' ||
+      fullPath === '/ready' ||
+      fullPath.startsWith('/docs') ||
+      fullPath === '/auth/set-password' ||
+      fullPath.startsWith('/.well-known/')
+    ) {
       return next();
     }
 
