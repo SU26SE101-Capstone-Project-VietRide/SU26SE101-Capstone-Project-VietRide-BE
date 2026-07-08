@@ -1,0 +1,36 @@
+name: Rescue - authorize SSH key
+
+# One-off rescue: the server is publickey-only since the 2026-07-07 hardening,
+# but the admin's laptop key was never installed. This uses the deploy key
+# (which still authenticates) to append the laptop's PUBLIC key to
+# authorized_keys. Safe to delete this file after a successful run.
+on:
+  workflow_dispatch:
+
+jobs:
+  authorize-key:
+    name: Append laptop public key to authorized_keys
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Install public key on server
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script: |
+            set -euo pipefail
+            PUBKEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHkb6WU1puE5uUF/qE95ZtZjCttc0dvV0astOxjBPTsS gmncp284@gmail.com'
+            mkdir -p ~/.ssh
+            chmod 700 ~/.ssh
+            touch ~/.ssh/authorized_keys
+            chmod 600 ~/.ssh/authorized_keys
+            if grep -qxF "$PUBKEY" ~/.ssh/authorized_keys; then
+              echo "Key already present — nothing to do."
+            else
+              echo "$PUBKEY" >> ~/.ssh/authorized_keys
+              echo "Key appended."
+            fi
+            echo "authorized_keys now has $(wc -l < ~/.ssh/authorized_keys) line(s)."
