@@ -23,7 +23,7 @@ internal sealed class PaymentConfiguration : IEntityTypeConfiguration<PaymentEnt
 
         builder.Property(x => x.ReferenceType)
             .HasColumnName("reference_type")
-            .HasColumnType("payment_reference_type")
+            .HasColumnType($"{PaymentDbContext.SchemaName}.payment_reference_type")
             .IsRequired();
 
         builder.Property(x => x.ReferenceId)
@@ -49,12 +49,12 @@ internal sealed class PaymentConfiguration : IEntityTypeConfiguration<PaymentEnt
 
         builder.Property(x => x.Method)
             .HasColumnName("method")
-            .HasColumnType("payment_method")
+            .HasColumnType($"{PaymentDbContext.SchemaName}.payment_method")
             .IsRequired();
 
         builder.Property(x => x.Status)
             .HasColumnName("status")
-            .HasColumnType("payment_status")
+            .HasColumnType($"{PaymentDbContext.SchemaName}.payment_status")
             .IsRequired();
 
         builder.Property(x => x.VnPayTxnRef)
@@ -119,6 +119,6 @@ internal sealed class PaymentConfiguration : IEntityTypeConfiguration<PaymentEnt
 
         builder.HasIndex(x => new { x.Status, x.CreatedAt })
             .HasDatabaseName("idx_payments_status_created_at")
-            .HasFilter("status IN ('PENDING_REDIRECT')");
+            .HasFilter($"status IN ('PENDING_REDIRECT'::{PaymentDbContext.SchemaName}.payment_status)");
     }
 }

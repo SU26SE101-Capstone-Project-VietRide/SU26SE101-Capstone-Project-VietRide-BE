@@ -26,7 +26,7 @@ internal sealed class PlatformWalletTransactionConfiguration : IEntityTypeConfig
 
         builder.Property(x => x.Type)
             .HasColumnName("type")
-            .HasColumnType("platform_wallet_transaction_type")
+            .HasColumnType($"{PaymentDbContext.SchemaName}.platform_wallet_transaction_type")
             .IsRequired();
 
         builder.Property(x => x.Amount)
@@ -49,7 +49,7 @@ internal sealed class PlatformWalletTransactionConfiguration : IEntityTypeConfig
 
         builder.Property(x => x.ReferenceType)
             .HasColumnName("reference_type")
-            .HasColumnType("platform_wallet_transaction_ref")
+            .HasColumnType($"{PaymentDbContext.SchemaName}.platform_wallet_transaction_ref")
             .IsRequired();
 
         builder.Property(x => x.ReferenceId)

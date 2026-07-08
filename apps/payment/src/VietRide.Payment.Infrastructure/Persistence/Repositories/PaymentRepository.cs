@@ -135,12 +135,15 @@ internal sealed class PaymentRepository : IPaymentRepository
         => await _db.Payments
             .FromSqlInterpolated($"""
                 UPDATE vietride_payment.payments
-                SET status = 'EXPIRED',
+                SET status = 'EXPIRED'::vietride_payment.payment_status,
                     expired_at = {expiredAt},
                     updated_at = {expiredAt}
-                WHERE status = 'PENDING_REDIRECT'
-                  AND method = 'VNPAY'
-                  AND reference_type IN ('BOOKING', 'PARCEL', 'PARCEL_ADDITIONAL')
+                WHERE status = 'PENDING_REDIRECT'::vietride_payment.payment_status
+                  AND method = 'VNPAY'::vietride_payment.payment_method
+                  AND reference_type IN (
+                      'BOOKING'::vietride_payment.payment_reference_type,
+                      'PARCEL'::vietride_payment.payment_reference_type,
+                      'PARCEL_ADDITIONAL'::vietride_payment.payment_reference_type)
                   AND created_at < {expiresBefore}
                 RETURNING *
                 """)

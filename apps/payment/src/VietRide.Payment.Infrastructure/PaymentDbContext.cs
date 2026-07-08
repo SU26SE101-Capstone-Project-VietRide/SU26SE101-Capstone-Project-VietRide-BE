@@ -31,14 +31,14 @@ public sealed class PaymentDbContext : VietRideDbContextBase, IBatchChargePaymen
     public static void ConfigurePostgresTypes(NpgsqlDataSourceBuilder dataSourceBuilder)
     {
         var translator = new NpgsqlNullNameTranslator();
-        dataSourceBuilder.MapEnum<PaymentReferenceType>("payment_reference_type", translator);
-        dataSourceBuilder.MapEnum<PaymentMethod>("payment_method", translator);
-        dataSourceBuilder.MapEnum<PaymentStatus>("payment_status", translator);
-        dataSourceBuilder.MapEnum<TopUpRequestStatus>("top_up_request_status", translator);
-        dataSourceBuilder.MapEnum<WalletTransactionType>("wallet_transaction_type", translator);
-        dataSourceBuilder.MapEnum<WalletTransactionRef>("wallet_transaction_ref", translator);
-        dataSourceBuilder.MapEnum<PlatformWalletTransactionType>("platform_wallet_transaction_type", translator);
-        dataSourceBuilder.MapEnum<PlatformWalletTransactionRef>("platform_wallet_transaction_ref", translator);
+        dataSourceBuilder.MapEnum<PaymentReferenceType>($"{SchemaName}.payment_reference_type", translator);
+        dataSourceBuilder.MapEnum<PaymentMethod>($"{SchemaName}.payment_method", translator);
+        dataSourceBuilder.MapEnum<PaymentStatus>($"{SchemaName}.payment_status", translator);
+        dataSourceBuilder.MapEnum<TopUpRequestStatus>($"{SchemaName}.top_up_request_status", translator);
+        dataSourceBuilder.MapEnum<WalletTransactionType>($"{SchemaName}.wallet_transaction_type", translator);
+        dataSourceBuilder.MapEnum<WalletTransactionRef>($"{SchemaName}.wallet_transaction_ref", translator);
+        dataSourceBuilder.MapEnum<PlatformWalletTransactionType>($"{SchemaName}.platform_wallet_transaction_type", translator);
+        dataSourceBuilder.MapEnum<PlatformWalletTransactionRef>($"{SchemaName}.platform_wallet_transaction_ref", translator);
     }
 
     public Task<Wallet?> FindWalletAsync(Guid userId, CancellationToken cancellationToken)
@@ -73,14 +73,14 @@ public sealed class PaymentDbContext : VietRideDbContextBase, IBatchChargePaymen
     {
         modelBuilder.HasDefaultSchema(SchemaName);
 
-        modelBuilder.HasPostgresEnum("payment_reference_type", Enum.GetNames<PaymentReferenceType>());
-        modelBuilder.HasPostgresEnum("payment_method", Enum.GetNames<PaymentMethod>());
-        modelBuilder.HasPostgresEnum("payment_status", Enum.GetNames<PaymentStatus>());
-        modelBuilder.HasPostgresEnum("top_up_request_status", Enum.GetNames<TopUpRequestStatus>());
-        modelBuilder.HasPostgresEnum("wallet_transaction_type", Enum.GetNames<WalletTransactionType>());
-        modelBuilder.HasPostgresEnum("wallet_transaction_ref", Enum.GetNames<WalletTransactionRef>());
-        modelBuilder.HasPostgresEnum("platform_wallet_transaction_type", Enum.GetNames<PlatformWalletTransactionType>());
-        modelBuilder.HasPostgresEnum("platform_wallet_transaction_ref", Enum.GetNames<PlatformWalletTransactionRef>());
+        modelBuilder.HasPostgresEnum(SchemaName, "payment_reference_type", Enum.GetNames<PaymentReferenceType>());
+        modelBuilder.HasPostgresEnum(SchemaName, "payment_method", Enum.GetNames<PaymentMethod>());
+        modelBuilder.HasPostgresEnum(SchemaName, "payment_status", Enum.GetNames<PaymentStatus>());
+        modelBuilder.HasPostgresEnum(SchemaName, "top_up_request_status", Enum.GetNames<TopUpRequestStatus>());
+        modelBuilder.HasPostgresEnum(SchemaName, "wallet_transaction_type", Enum.GetNames<WalletTransactionType>());
+        modelBuilder.HasPostgresEnum(SchemaName, "wallet_transaction_ref", Enum.GetNames<WalletTransactionRef>());
+        modelBuilder.HasPostgresEnum(SchemaName, "platform_wallet_transaction_type", Enum.GetNames<PlatformWalletTransactionType>());
+        modelBuilder.HasPostgresEnum(SchemaName, "platform_wallet_transaction_ref", Enum.GetNames<PlatformWalletTransactionRef>());
 
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(PaymentDbContext).Assembly);
 
