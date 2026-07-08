@@ -1,0 +1,13 @@
+using MediatR;
+using VietRide.Shared.Kernel.Primitives;
+
+namespace VietRide.Trip.Application.Features.Internal.Trips.ParcelAvailability;
+
+public sealed record SearchParcelAvailableTripsQuery(
+    Guid OriginStationId,
+    Guid DestinationStationId,
+    DateOnly DepartureDate,
+    decimal EstimatedWeightKg,
+    string SizeCategory,
+    int Page,
+    int PageSize) : IRequest<PagedResult<ParcelTripAvailabilityItemDto>>;

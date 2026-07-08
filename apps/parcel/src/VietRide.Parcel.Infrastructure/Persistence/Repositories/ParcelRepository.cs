@@ -47,8 +47,9 @@ internal sealed class ParcelRepository : IParcelRepository
     public async Task<ParcelPaymentTransitionSnapshot?> TryMarkDepositSucceededAsync(
         Guid parcelId, long depositAmount, DateTimeOffset now, CancellationToken ct)
     {
+        var expectedDepositAmount = Money.FromRaw(depositAmount);
         var affected = await _db.Parcels
-            .Where(p => p.Id == parcelId && p.Status == ParcelStatus.PENDING_PAYMENT && p.DepositAmount.Amount == depositAmount)
+            .Where(p => p.Id == parcelId && p.Status == ParcelStatus.PENDING_PAYMENT && p.DepositAmount == expectedDepositAmount)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(p => p.Status, ParcelStatus.PENDING)
                 .SetProperty(p => p.UpdatedAt, now), ct);
@@ -89,8 +90,9 @@ internal sealed class ParcelRepository : IParcelRepository
     public async Task<ParcelPaymentTransitionSnapshot?> TryMarkAdditionalSucceededAsync(
         Guid parcelId, long additionalAmount, Guid paymentId, DateTimeOffset now, CancellationToken ct)
     {
+        var expectedAdditionalAmount = Money.FromRaw(additionalAmount);
         var affected = await _db.Parcels
-            .Where(p => p.Id == parcelId && p.Status == ParcelStatus.PENDING_ADDITIONAL_PAYMENT && p.AdditionalAmount.Amount == additionalAmount)
+            .Where(p => p.Id == parcelId && p.Status == ParcelStatus.PENDING_ADDITIONAL_PAYMENT && p.AdditionalAmount == expectedAdditionalAmount)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(p => p.Status, ParcelStatus.PENDING)
                 .SetProperty(p => p.AdditionalPaymentId, paymentId)

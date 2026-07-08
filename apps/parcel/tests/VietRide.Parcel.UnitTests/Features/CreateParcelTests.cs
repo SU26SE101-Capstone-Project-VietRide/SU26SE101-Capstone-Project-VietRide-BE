@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
@@ -473,7 +474,17 @@ public sealed class CreateParcelTests
         IPaymentServiceClient? payment = null)
     {
         payment ??= CreatePaymentClient();
-        return new CreateParcelCommandHandler(identity, booking, trip, payment, parcelRepo, fareRepo, uow, Outbox(), Stats());
+        return new CreateParcelCommandHandler(
+            identity,
+            booking,
+            trip,
+            payment,
+            parcelRepo,
+            fareRepo,
+            uow,
+            Outbox(),
+            Stats(),
+            NullLogger<CreateParcelCommandHandler>.Instance);
     }
 
     private static IPaymentServiceClient CreatePaymentClient()

@@ -25,15 +25,18 @@ public sealed class VoucherService : IVoucherService
 {
     private readonly IVoucherRepository _vouchers;
     private readonly IOperatorVoucherConsentRepository _consents;
+    private readonly IBookingRepository _bookings;
     private readonly ILogger<VoucherService> _logger;
 
     public VoucherService(
         IVoucherRepository vouchers,
         IOperatorVoucherConsentRepository consents,
+        IBookingRepository bookings,
         ILogger<VoucherService> logger)
     {
         _vouchers = vouchers;
         _consents = consents;
+        _bookings = bookings;
         _logger = logger;
     }
 
@@ -45,7 +48,9 @@ public sealed class VoucherService : IVoucherService
         Guid userId,
         Money orderAmount,
         DateTimeOffset now,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string service = "BOOKING",
+        string? paymentMethod = null)
     {
         // -----------------------------------------------------------------------
         // Step 1: Exists + not soft-deleted (FindByCodeAsync respects HasQueryFilter) + is_active
@@ -74,6 +79,35 @@ public sealed class VoucherService : IVoucherService
             throw new CodedValidationException(
                 "VOUCHER_EXPIRED",
                 $"Voucher '{voucherCode}' is not valid at this time.");
+        }
+
+        var normalizedService = service.Trim().ToUpperInvariant();
+        if (voucher.ApplicableServices.Count > 0
+            && !voucher.ApplicableServices.Contains(normalizedService, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new CodedValidationException(
+                "VOUCHER_NOT_APPLICABLE",
+                $"Voucher '{voucherCode}' is not applicable to {normalizedService}.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(paymentMethod)
+            && voucher.ApplicablePaymentMethods.Count > 0
+            && !voucher.ApplicablePaymentMethods.Contains(paymentMethod.Trim().ToUpperInvariant(), StringComparer.OrdinalIgnoreCase))
+        {
+            throw new CodedValidationException(
+                "VOUCHER_PAYMENT_METHOD_NOT_APPLICABLE",
+                $"Voucher '{voucherCode}' is not applicable to payment method '{paymentMethod}'.");
+        }
+
+        if (voucher.NewUserOnly)
+        {
+            var hasConfirmedBooking = await _bookings.HasConfirmedBookingAsync(userId, ct);
+            if (hasConfirmedBooking)
+            {
+                throw new CodedValidationException(
+                    "VOUCHER_NEW_USER_ONLY",
+                    $"Voucher '{voucherCode}' is only available for users without confirmed bookings.");
+            }
         }
 
         // -----------------------------------------------------------------------
@@ -188,10 +222,21 @@ public sealed class VoucherService : IVoucherService
     }
 
     /// <inheritdoc/>
-    public async Task<Guid> RecordUsageAsync(
+    public Task<Guid> RecordUsageAsync(
         Guid voucherId,
         Guid userId,
         Guid bookingId,
+        Guid? bookingGroupId,
+        Money discountAmount,
+        CancellationToken ct = default)
+        => RecordUsageForReferenceAsync(voucherId, userId, "BOOKING", bookingId, bookingGroupId, discountAmount, ct);
+
+    /// <inheritdoc/>
+    public async Task<Guid> RecordUsageForReferenceAsync(
+        Guid voucherId,
+        Guid userId,
+        string? referenceType,
+        Guid referenceId,
         Guid? bookingGroupId,
         Money discountAmount,
         CancellationToken ct = default)
@@ -204,7 +249,8 @@ public sealed class VoucherService : IVoucherService
         var usage = VoucherUsage.Create(
             voucherId: voucherId,
             userId: userId,
-            bookingId: bookingId,
+            referenceType: referenceType ?? "BOOKING",
+            referenceId: referenceId,
             bookingGroupId: bookingGroupId,
             discountAmount: discountAmount,
             fundedBy: voucher.FundingType);
@@ -212,9 +258,10 @@ public sealed class VoucherService : IVoucherService
         await _vouchers.AddUsageAsync(usage, ct);
 
         _logger.LogInformation(
-            "Voucher {VoucherId} usage recorded for booking {BookingId}: discount {Discount} VND (usage {UsageId}).",
+            "Voucher {VoucherId} usage recorded for {ReferenceType} {ReferenceId}: discount {Discount} VND (usage {UsageId}).",
             voucherId,
-            bookingId,
+            referenceType ?? "BOOKING",
+            referenceId,
             discountAmount.Amount,
             usage.Id);
 
@@ -229,6 +276,17 @@ public sealed class VoucherService : IVoucherService
         _logger.LogInformation(
             "Voucher usage for booking {BookingId} physically deleted (compensation).",
             bookingId);
+    }
+
+    /// <inheritdoc/>
+    public async Task CompensateByReferenceAsync(string referenceType, Guid referenceId, CancellationToken ct = default)
+    {
+        await _vouchers.DeleteUsageByReferenceAsync(referenceType, referenceId, ct);
+
+        _logger.LogInformation(
+            "Voucher usage for {ReferenceType} {ReferenceId} physically deleted (compensation).",
+            referenceType,
+            referenceId);
     }
 
     // -----------------------------------------------------------------------

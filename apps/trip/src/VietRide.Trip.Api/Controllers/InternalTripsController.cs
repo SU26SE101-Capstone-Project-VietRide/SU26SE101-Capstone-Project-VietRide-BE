@@ -12,6 +12,7 @@ using VietRide.Trip.Application.Features.Internal.Trips.Cargo;
 using VietRide.Trip.Application.Features.Internal.Trips.GetTripSnapshot;
 using VietRide.Trip.Application.Features.Internal.Trips.LockRoundTripSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.LockSeats;
+using VietRide.Trip.Application.Features.Internal.Trips.ParcelAvailability;
 using VietRide.Trip.Application.Features.Internal.Trips.ReleaseSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.Requests;
 using VietRide.Trip.Application.Features.Internal.Trips.Tracking;
@@ -37,6 +38,34 @@ public sealed class InternalTripsController : ControllerBase
     public async Task<ActionResult<InternalTripSnapshotDto>> GetAsync(Guid tripId, CancellationToken cancellationToken)
     {
         var result = await mediator.Send(new GetTripSnapshotQuery(tripId), cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpGet("parcel-availability")]
+    [ProducesResponseType(typeof(PagedResult<ParcelTripAvailabilityItemDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<PagedResult<ParcelTripAvailabilityItemDto>>> SearchParcelAvailabilityAsync(
+        [FromQuery] Guid originStationId,
+        [FromQuery] Guid destinationStationId,
+        [FromQuery] DateOnly departureDate,
+        [FromQuery] decimal estimatedWeightKg,
+        [FromQuery] string sizeCategory,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await mediator.Send(
+            new SearchParcelAvailableTripsQuery(
+                originStationId,
+                destinationStationId,
+                departureDate,
+                estimatedWeightKg,
+                sizeCategory,
+                page,
+                pageSize),
+            cancellationToken);
+
         return Ok(result);
     }
 

@@ -19,4 +19,5 @@ public sealed record CreateParcelCommand(
     string SizeCategory,
     decimal EstimatedWeightKg,
     string DeliveryMethod,
-    string PaymentMethod) : IRequest<CreateParcelResponse>;
+    string PaymentMethod,
+    string? VoucherCode = null) : IRequest<CreateParcelResponse>;

@@ -74,7 +74,10 @@ public sealed class AdminVouchersController : ControllerBase
             ApplicableOperatorIds: request.ApplicableOperatorIds,
             ApplicableRouteIds: request.ApplicableRouteIds,
             FundingType: request.FundingType,
-            CreatedByUserId: adminUserId);
+            CreatedByUserId: adminUserId,
+            NewUserOnly: request.NewUserOnly,
+            ApplicablePaymentMethods: request.ApplicablePaymentMethods,
+            ApplicableServices: request.ApplicableServices);
 
         var result = await _sender.Send(command, ct);
 

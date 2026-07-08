@@ -255,4 +255,10 @@ internal sealed class BookingRepository : IBookingRepository
 
         return updated == 1;
     }
+
+    /// <inheritdoc/>
+    public async Task<bool> HasConfirmedBookingAsync(Guid passengerUserId, CancellationToken ct = default)
+        => await _db.Bookings
+            .AsNoTracking()
+            .AnyAsync(b => b.PassengerUserId == passengerUserId && b.Status == BookingStatus.CONFIRMED, ct);
 }

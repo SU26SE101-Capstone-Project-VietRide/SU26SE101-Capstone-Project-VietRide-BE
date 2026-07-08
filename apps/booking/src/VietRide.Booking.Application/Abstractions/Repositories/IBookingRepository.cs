@@ -76,4 +76,6 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
         Guid bookingId,
         DateTimeOffset refundedAt,
         CancellationToken ct = default);
+
+    Task<bool> HasConfirmedBookingAsync(Guid passengerUserId, CancellationToken ct = default);
 }

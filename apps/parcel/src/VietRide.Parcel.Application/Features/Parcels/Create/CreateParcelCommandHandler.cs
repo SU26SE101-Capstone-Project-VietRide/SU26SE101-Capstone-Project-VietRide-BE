@@ -1,4 +1,5 @@
 using MediatR;
+using Microsoft.Extensions.Logging;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Exceptions;
@@ -24,6 +25,7 @@ public sealed class CreateParcelCommandHandler
     private readonly IUnitOfWork _unitOfWork;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IParcelStatsRepository _statsRepository;
+    private readonly ILogger<CreateParcelCommandHandler> _logger;
 
     public CreateParcelCommandHandler(
         IIdentityServiceClient identityClient,
@@ -34,7 +36,8 @@ public sealed class CreateParcelCommandHandler
         IParcelRouteFareRepository fareRepository,
         IUnitOfWork unitOfWork,
         IIntegrationEventOutbox outbox,
-        IParcelStatsRepository statsRepository)
+        IParcelStatsRepository statsRepository,
+        ILogger<CreateParcelCommandHandler> logger)
     {
         _identityClient = identityClient;
         _bookingClient = bookingClient;
@@ -45,6 +48,7 @@ public sealed class CreateParcelCommandHandler
         _unitOfWork = unitOfWork;
         _outbox = outbox;
         _statsRepository = statsRepository;
+        _logger = logger;
     }
 
     public async Task<CreateParcelResponse> Handle(
@@ -162,9 +166,13 @@ public sealed class CreateParcelCommandHandler
         var recipientPhone = PhoneNumber.Normalize(command.RecipientPhone);
 
         Money priceVnd;
+        var originalDepositAmount = Money.Zero;
+        var discountAmount = Money.Zero;
+        Guid? validatedVoucherId = null;
         if (sizeCategory == ParcelSizeCategory.EXTRA_LARGE)
         {
             priceVnd = Money.FromRaw(0);
+            originalDepositAmount = priceVnd;
         }
         else
         {
@@ -174,6 +182,33 @@ public sealed class CreateParcelCommandHandler
                     "FARE_NOT_CONFIGURED",
                     $"No fare configured for route '{trip.RouteId}' and size category '{command.SizeCategory}'.");
             priceVnd = fare.PriceVnd;
+            originalDepositAmount = priceVnd;
+
+            if (!string.IsNullOrWhiteSpace(command.VoucherCode))
+            {
+                var voucherOutcome = await _bookingClient.ValidateVoucherAsync(
+                    command.VoucherCode,
+                    trip.OperatorId,
+                    trip.RouteId,
+                    command.SenderUserId,
+                    originalDepositAmount.Amount,
+                    command.PaymentMethod,
+                    cancellationToken);
+
+                if (voucherOutcome.Kind == VoucherValidationOutcomeKind.TransportError)
+                    throw new ParcelDependencyUnavailableException(
+                        "BOOKING_SERVICE_UNAVAILABLE",
+                        voucherOutcome.ErrorMessage ?? "Booking service unavailable.");
+
+                if (voucherOutcome.Kind == VoucherValidationOutcomeKind.Invalid || !voucherOutcome.VoucherId.HasValue)
+                    throw new CodedValidationException(
+                        "VOUCHER_NOT_APPLICABLE",
+                        voucherOutcome.ErrorMessage ?? "Voucher is not applicable to this parcel.");
+
+                validatedVoucherId = voucherOutcome.VoucherId.Value;
+                discountAmount = Money.FromRaw(voucherOutcome.DiscountAmount);
+                priceVnd = originalDepositAmount - discountAmount;
+            }
         }
 
         var parcel = sizeCategory == ParcelSizeCategory.EXTRA_LARGE
@@ -193,7 +228,11 @@ public sealed class CreateParcelCommandHandler
                 sizeCategory,
                 command.EstimatedWeightKg,
                 deliveryMethod,
-                priceVnd)
+                priceVnd,
+                originalDepositAmount,
+                discountAmount,
+                null,
+                null)
             : ParcelEntity.CreatePendingPayment(
                 parcelCode,
                 command.SenderUserId,
@@ -210,12 +249,39 @@ public sealed class CreateParcelCommandHandler
                 sizeCategory,
                 command.EstimatedWeightKg,
                 deliveryMethod,
-                priceVnd);
+                priceVnd,
+                originalDepositAmount,
+                discountAmount,
+                command.VoucherCode,
+                null);
 
         await _unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {
             await _parcelRepository.AddAsync(parcel, cancellationToken);
+
+            if (validatedVoucherId.HasValue)
+            {
+                var usageOutcome = await _bookingClient.RecordVoucherUsageAsync(
+                    validatedVoucherId.Value,
+                    command.SenderUserId,
+                    parcel.Id,
+                    discountAmount.Amount,
+                    cancellationToken);
+
+                if (usageOutcome.Kind == VoucherUsageOutcomeKind.TransportError)
+                    throw new ParcelDependencyUnavailableException(
+                        "BOOKING_SERVICE_UNAVAILABLE",
+                        usageOutcome.ErrorMessage ?? "Booking service unavailable.");
+
+                if (usageOutcome.Kind == VoucherUsageOutcomeKind.Invalid || !usageOutcome.UsageId.HasValue)
+                    throw new CodedValidationException(
+                        "VOUCHER_USAGE_REJECTED",
+                        usageOutcome.ErrorMessage ?? "Voucher usage was rejected.");
+
+                parcel.AttachVoucherUsage(usageOutcome.UsageId.Value);
+            }
+
             await ParcelOutboxEvents.EnqueueAsync(
                 _outbox,
                 ParcelOutboxEvents.Created,
@@ -268,6 +334,9 @@ public sealed class CreateParcelCommandHandler
 
             if (outcome.Kind == ChargeOutcomeKind.InsufficientFunds)
             {
+                if (parcel.VoucherUsageId.HasValue)
+                    await CompensateVoucherUsageAsync(parcel.Id, cancellationToken);
+
                 throw new CodedValidationException(
                     "INSUFFICIENT_FUNDS",
                     outcome.ErrorMessage ?? "Insufficient wallet balance.");
@@ -275,6 +344,9 @@ public sealed class CreateParcelCommandHandler
 
             if (outcome.Kind == ChargeOutcomeKind.TransportError)
             {
+                if (parcel.VoucherUsageId.HasValue)
+                    await CompensateVoucherUsageAsync(parcel.Id, cancellationToken);
+
                 throw new ParcelDependencyUnavailableException(
                     "PAYMENT_SERVICE_ERROR",
                     outcome.ErrorMessage ?? "Payment service unavailable.");
@@ -288,6 +360,9 @@ public sealed class CreateParcelCommandHandler
             parcel.ParcelCode,
             parcel.Status.ToString(),
             priceVnd.Amount,
+            originalDepositAmount.Amount,
+            discountAmount.Amount,
+            parcel.VoucherCode,
             paymentRedirectUrl);
     }
 
@@ -306,5 +381,20 @@ public sealed class CreateParcelCommandHandler
         throw new CodedConflictException(
             "PARCEL_CODE_COLLISION",
             "Failed to generate a unique parcel code after 3 attempts.");
+    }
+
+    private async Task CompensateVoucherUsageAsync(Guid parcelId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _bookingClient.DeleteVoucherUsageByReferenceAsync(parcelId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to compensate voucher usage for parcel {ParcelId} after payment failure.",
+                parcelId);
+        }
     }
 }

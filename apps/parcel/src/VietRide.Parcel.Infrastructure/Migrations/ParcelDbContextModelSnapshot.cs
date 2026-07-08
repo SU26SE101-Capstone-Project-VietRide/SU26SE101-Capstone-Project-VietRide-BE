@@ -115,6 +115,12 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("description");
 
+                    b.Property<long>("DiscountAmount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("discount_amount")
+                        .HasDefaultValueSql("0");
+
                     b.Property<Guid?>("DropoffStopId")
                         .HasColumnType("uuid")
                         .HasColumnName("dropoff_stop_id");
@@ -138,6 +144,10 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                     b.Property<Guid>("OperatorId")
                         .HasColumnType("uuid")
                         .HasColumnName("operator_id");
+
+                    b.Property<long>("OriginalDepositAmount")
+                        .HasColumnType("bigint")
+                        .HasColumnName("original_deposit_amount");
 
                     b.Property<string>("ParcelCode")
                         .IsRequired()
@@ -244,6 +254,15 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasColumnName("updated_at")
                         .HasDefaultValueSql("now()");
 
+                    b.Property<string>("VoucherCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("voucher_code");
+
+                    b.Property<Guid?>("VoucherUsageId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("voucher_usage_id");
+
                     b.HasKey("Id")
                         .HasName("pk_parcels");
 
@@ -264,6 +283,10 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasDatabaseName("uq_parcels_delivery_token")
                         .HasFilter("delivery_token IS NOT NULL");
 
+                    b.HasIndex("LoadedByUserId")
+                        .HasDatabaseName("idx_parcels_loaded_by_user_id")
+                        .HasFilter("loaded_by_user_id IS NOT NULL");
+
                     b.HasIndex("ParcelCode")
                         .IsUnique()
                         .HasDatabaseName("uq_parcels_parcel_code");
@@ -276,10 +299,6 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasDatabaseName("idx_parcels_reviewed_by_user_id")
                         .HasFilter("reviewed_by_user_id IS NOT NULL");
 
-                    b.HasIndex("LoadedByUserId")
-                        .HasDatabaseName("idx_parcels_loaded_by_user_id")
-                        .HasFilter("loaded_by_user_id IS NOT NULL");
-
                     b.HasIndex("TransferConfirmedByUserId")
                         .HasDatabaseName("idx_parcels_transfer_confirmed_by_user_id")
                         .HasFilter("transfer_confirmed_by_user_id IS NOT NULL");
@@ -287,6 +306,10 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                     b.HasIndex("TransferTargetTripId")
                         .HasDatabaseName("idx_parcels_transfer_target_trip_id")
                         .HasFilter("transfer_target_trip_id IS NOT NULL");
+
+                    b.HasIndex("VoucherUsageId")
+                        .HasDatabaseName("idx_parcels_voucher_usage_id")
+                        .HasFilter("voucher_usage_id IS NOT NULL");
 
                     b.HasIndex("OperatorId", "Status")
                         .HasDatabaseName("idx_parcels_operator_id_status");

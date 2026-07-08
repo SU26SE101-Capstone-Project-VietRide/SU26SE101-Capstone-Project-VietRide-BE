@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
+using VietRide.Payment.Domain.Enums;
 using VietRide.Payment.Infrastructure;
 
 #nullable disable
@@ -21,15 +22,15 @@ namespace VietRide.Payment.Infrastructure.Migrations
                 .HasAnnotation("ProductVersion", "8.0.11")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
-            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "payment_method", new[] { "WALLET", "VNPAY" });
-            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "payment_reference_type", new[] { "BOOKING", "BOOKING_GROUP", "PARCEL", "TOP_UP", "SUBSCRIPTION", "PARCEL_ADDITIONAL" });
-            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "payment_status", new[] { "PENDING_REDIRECT", "SUCCEEDED", "FAILED", "EXPIRED", "REFUNDED" });
-            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "platform_wallet_transaction_ref", new[] { "BOOKING_PAYMENT_HOLD", "PARCEL_PAYMENT_HOLD", "PARCEL_ADDITIONAL_PAYMENT_HOLD", "BOOKING_REFUND", "PARCEL_REFUND", "TRIP_SETTLEMENT", "SUBSCRIPTION_PAYMENT", "MANUAL_ADJUSTMENT" });
-            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "platform_wallet_transaction_type", new[] { "CREDIT", "DEBIT" });
-            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "top_up_request_status", new[] { "PENDING", "SUCCEEDED", "FAILED", "EXPIRED" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_payment", "outbox_event_status", new[] { "PENDING", "PUBLISHING", "PUBLISHED", "FAILED" });
-            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "wallet_transaction_ref", new[] { "TOP_UP", "BOOKING_PAYMENT", "BOOKING_REFUND", "PARCEL_PAYMENT", "PARCEL_REFUND", "MANUAL_ADJUSTMENT", "PARCEL_ADDITIONAL_PAYMENT" });
-            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "wallet_transaction_type", new[] { "CREDIT", "DEBIT" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_payment", "payment_method", new[] { "WALLET", "VNPAY" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_payment", "payment_reference_type", new[] { "BOOKING", "BOOKING_GROUP", "PARCEL", "TOP_UP", "SUBSCRIPTION", "PARCEL_ADDITIONAL" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_payment", "payment_status", new[] { "PENDING_REDIRECT", "SUCCEEDED", "FAILED", "EXPIRED", "REFUNDED" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_payment", "platform_wallet_transaction_ref", new[] { "BOOKING_PAYMENT_HOLD", "PARCEL_PAYMENT_HOLD", "PARCEL_ADDITIONAL_PAYMENT_HOLD", "BOOKING_REFUND", "PARCEL_REFUND", "TRIP_SETTLEMENT", "SUBSCRIPTION_PAYMENT", "MANUAL_ADJUSTMENT" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_payment", "platform_wallet_transaction_type", new[] { "CREDIT", "DEBIT" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_payment", "top_up_request_status", new[] { "PENDING", "SUCCEEDED", "FAILED", "EXPIRED" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_payment", "wallet_transaction_ref", new[] { "TOP_UP", "BOOKING_PAYMENT", "BOOKING_REFUND", "PARCEL_PAYMENT", "PARCEL_REFUND", "MANUAL_ADJUSTMENT", "PARCEL_ADDITIONAL_PAYMENT" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_payment", "wallet_transaction_type", new[] { "CREDIT", "DEBIT" });
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("VietRide.Payment.Domain.Entities.Payment", b =>
@@ -63,8 +64,8 @@ namespace VietRide.Payment.Infrastructure.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("idempotency_key");
 
-                    b.Property<int>("Method")
-                        .HasColumnType("payment_method")
+                    b.Property<PaymentMethod>("Method")
+                        .HasColumnType("vietride_payment.payment_method")
                         .HasColumnName("method");
 
                     b.Property<Guid?>("OperatorId")
@@ -79,16 +80,16 @@ namespace VietRide.Payment.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("reference_id");
 
-                    b.Property<int>("ReferenceType")
-                        .HasColumnType("payment_reference_type")
+                    b.Property<PaymentReferenceType>("ReferenceType")
+                        .HasColumnType("vietride_payment.payment_reference_type")
                         .HasColumnName("reference_type");
 
                     b.Property<DateTimeOffset?>("RefundedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("refunded_at");
 
-                    b.Property<int>("Status")
-                        .HasColumnType("payment_status")
+                    b.Property<PaymentStatus>("Status")
+                        .HasColumnType("vietride_payment.payment_status")
                         .HasColumnName("status");
 
                     b.Property<DateTimeOffset?>("SucceededAt")
@@ -138,7 +139,7 @@ namespace VietRide.Payment.Infrastructure.Migrations
 
                     b.HasIndex("Status", "CreatedAt")
                         .HasDatabaseName("idx_payments_status_created_at")
-                        .HasFilter("status IN ('PENDING_REDIRECT')");
+                        .HasFilter("status IN ('PENDING_REDIRECT'::vietride_payment.payment_status)");
 
                     b.HasIndex("UserId", "CreatedAt")
                         .IsDescending(false, true)
@@ -235,12 +236,12 @@ namespace VietRide.Payment.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("reference_id");
 
-                    b.Property<int>("ReferenceType")
-                        .HasColumnType("platform_wallet_transaction_ref")
+                    b.Property<PlatformWalletTransactionRef>("ReferenceType")
+                        .HasColumnType("vietride_payment.platform_wallet_transaction_ref")
                         .HasColumnName("reference_type");
 
-                    b.Property<int>("Type")
-                        .HasColumnType("platform_wallet_transaction_type")
+                    b.Property<PlatformWalletTransactionType>("Type")
+                        .HasColumnType("vietride_payment.platform_wallet_transaction_type")
                         .HasColumnName("type");
 
                     b.HasKey("Id")
@@ -387,11 +388,11 @@ namespace VietRide.Payment.Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("payment_redirect_url");
 
-                    b.Property<int>("Status")
+                    b.Property<TopUpRequestStatus>("Status")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("top_up_request_status")
+                        .HasColumnType("vietride_payment.top_up_request_status")
                         .HasColumnName("status")
-                        .HasDefaultValueSql("'PENDING'");
+                        .HasDefaultValueSql("'PENDING'::vietride_payment.top_up_request_status");
 
                     b.Property<DateTimeOffset?>("SucceededAt")
                         .HasColumnType("timestamp with time zone")
@@ -427,7 +428,7 @@ namespace VietRide.Payment.Infrastructure.Migrations
 
                     b.HasIndex("Status", "CreatedAt")
                         .HasDatabaseName("idx_top_up_requests_status_created_at")
-                        .HasFilter("status = 'PENDING'");
+                        .HasFilter("status = 'PENDING'::vietride_payment.top_up_request_status");
 
                     b.HasIndex("UserId", "CreatedAt")
                         .IsDescending(false, true)
@@ -521,12 +522,12 @@ namespace VietRide.Payment.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("reference_id");
 
-                    b.Property<int>("ReferenceType")
-                        .HasColumnType("wallet_transaction_ref")
+                    b.Property<WalletTransactionRef>("ReferenceType")
+                        .HasColumnType("vietride_payment.wallet_transaction_ref")
                         .HasColumnName("reference_type");
 
-                    b.Property<int>("Type")
-                        .HasColumnType("wallet_transaction_type")
+                    b.Property<WalletTransactionType>("Type")
+                        .HasColumnType("vietride_payment.wallet_transaction_type")
                         .HasColumnName("type");
 
                     b.Property<Guid>("UserId")

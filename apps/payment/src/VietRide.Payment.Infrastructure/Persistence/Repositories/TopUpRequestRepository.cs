@@ -48,7 +48,7 @@ internal sealed class TopUpRequestRepository : ITopUpRequestRepository
                 SELECT *
                 FROM vietride_payment.top_up_requests
                 WHERE vnpay_txn_ref = {vnPayTxnRef}
-                  AND status = 'PENDING'
+                  AND status = 'PENDING'::vietride_payment.top_up_request_status
                 FOR UPDATE
                 """)
             .AsTracking()

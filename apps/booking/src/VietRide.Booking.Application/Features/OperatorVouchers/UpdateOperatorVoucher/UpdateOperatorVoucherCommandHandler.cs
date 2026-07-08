@@ -158,6 +158,9 @@ public sealed class UpdateOperatorVoucherCommandHandler
             perUserLimit: effectivePerUserLimit,
             validFrom: effectiveValidFrom,
             validUntil: effectiveValidUntil,
+            newUserOnly: voucher.NewUserOnly,
+            applicablePaymentMethods: voucher.ApplicablePaymentMethods,
+            applicableServices: voucher.ApplicableServices,
             applicableRouteIds: effectiveApplicableRouteIds);
 
         _vouchers.Update(voucher);

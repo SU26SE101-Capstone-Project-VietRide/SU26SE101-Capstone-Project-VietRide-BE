@@ -210,6 +210,7 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     },
 
     // Booking
+    { prefix: '/v1/promotions', target: env.BOOKING_BASE_URL, authRequired: 'none' },
     {
       prefix: '/v1/bookings',
       target: env.BOOKING_BASE_URL,
@@ -224,6 +225,12 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     },
     {
       prefix: '/v1/admin/vouchers',
+      target: env.BOOKING_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
+      prefix: '/v1/admin/campaigns',
       target: env.BOOKING_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['SYSTEM_ADMIN'],

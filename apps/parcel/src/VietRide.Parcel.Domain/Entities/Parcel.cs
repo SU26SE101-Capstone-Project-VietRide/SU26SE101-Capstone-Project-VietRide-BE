@@ -28,6 +28,10 @@ public sealed class Parcel : BaseEntity<Guid>
     public ParcelDeliveryMethod DeliveryMethod { get; private set; }
 
     public Money DepositAmount { get; private set; }
+    public Money OriginalDepositAmount { get; private set; }
+    public Money DiscountAmount { get; private set; }
+    public string? VoucherCode { get; private set; }
+    public Guid? VoucherUsageId { get; private set; }
     public Money AdditionalAmount { get; private set; }
     public Guid? AdditionalPaymentId { get; private set; }
     public DateTimeOffset? AdditionalPaymentDeadline { get; private set; }
@@ -87,7 +91,11 @@ public sealed class Parcel : BaseEntity<Guid>
         ParcelSizeCategory sizeCategory,
         decimal estimatedWeightKg,
         ParcelDeliveryMethod deliveryMethod,
-        Money depositAmount)
+        Money depositAmount,
+        Money? originalDepositAmount = null,
+        Money? discountAmount = null,
+        string? voucherCode = null,
+        Guid? voucherUsageId = null)
     {
         return new Parcel
         {
@@ -108,6 +116,10 @@ public sealed class Parcel : BaseEntity<Guid>
             EstimatedWeightKg = estimatedWeightKg,
             DeliveryMethod = deliveryMethod,
             DepositAmount = depositAmount,
+            OriginalDepositAmount = originalDepositAmount ?? depositAmount,
+            DiscountAmount = discountAmount ?? Money.Zero,
+            VoucherCode = voucherCode,
+            VoucherUsageId = voucherUsageId,
             AdditionalAmount = Money.Zero,
             Status = ParcelStatus.PENDING_PAYMENT,
             ReviewDecision = ParcelReviewDecision.PENDING,
@@ -130,7 +142,11 @@ public sealed class Parcel : BaseEntity<Guid>
         ParcelSizeCategory sizeCategory,
         decimal estimatedWeightKg,
         ParcelDeliveryMethod deliveryMethod,
-        Money depositAmount)
+        Money depositAmount,
+        Money? originalDepositAmount = null,
+        Money? discountAmount = null,
+        string? voucherCode = null,
+        Guid? voucherUsageId = null)
     {
         return new Parcel
         {
@@ -151,9 +167,18 @@ public sealed class Parcel : BaseEntity<Guid>
             EstimatedWeightKg = estimatedWeightKg,
             DeliveryMethod = deliveryMethod,
             DepositAmount = depositAmount,
+            OriginalDepositAmount = originalDepositAmount ?? depositAmount,
+            DiscountAmount = discountAmount ?? Money.Zero,
+            VoucherCode = voucherCode,
+            VoucherUsageId = voucherUsageId,
             AdditionalAmount = Money.Zero,
             Status = ParcelStatus.PENDING_OPERATOR_REVIEW,
             ReviewDecision = ParcelReviewDecision.PENDING,
         };
+    }
+
+    public void AttachVoucherUsage(Guid voucherUsageId)
+    {
+        VoucherUsageId = voucherUsageId;
     }
 }

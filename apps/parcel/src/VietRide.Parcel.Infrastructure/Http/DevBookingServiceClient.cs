@@ -27,4 +27,38 @@ public sealed class DevBookingServiceClient : IBookingServiceClient
 
         return Task.FromResult(new BookingLookupOutcome(BookingLookupOutcomeKind.Success, snapshot, null));
     }
+
+    public Task<VoucherValidationOutcome> ValidateVoucherAsync(
+        string voucherCode,
+        Guid operatorId,
+        Guid routeId,
+        Guid userId,
+        long orderAmount,
+        string paymentMethod,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(new VoucherValidationOutcome(
+            VoucherValidationOutcomeKind.Success,
+            Guid.Parse("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+            Math.Min(10_000, orderAmount),
+            null));
+
+    public Task<VoucherUsageOutcome> RecordVoucherUsageAsync(
+        Guid voucherId,
+        Guid userId,
+        Guid parcelId,
+        long discountAmount,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(new VoucherUsageOutcome(VoucherUsageOutcomeKind.Success, Guid.NewGuid(), null));
+
+    public Task DeleteVoucherUsageByReferenceAsync(Guid parcelId, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
+    public Task<IReadOnlyList<AvailableVoucherDto>> GetAvailableParcelVouchersAsync(
+        Guid userId,
+        Guid operatorId,
+        Guid routeId,
+        string? paymentMethod,
+        long? orderAmount,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<AvailableVoucherDto>>([]);
 }

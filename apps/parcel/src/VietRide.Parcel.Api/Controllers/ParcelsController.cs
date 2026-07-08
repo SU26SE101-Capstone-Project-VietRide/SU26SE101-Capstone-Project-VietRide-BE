@@ -3,10 +3,12 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Parcel.Api.Controllers.Requests;
 using VietRide.Parcel.Api.Filters;
+using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Features.Parcels.AvailableTrips;
 using VietRide.Parcel.Application.Features.Parcels.Create;
 using VietRide.Parcel.Application.Features.Parcels.Detail;
 using VietRide.Parcel.Application.Features.Parcels.Received;
+using VietRide.Parcel.Application.Features.Vouchers;
 using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Parcel.Api.Controllers;
@@ -82,10 +84,28 @@ public sealed class ParcelsController : ControllerBase
                 request.SizeCategory,
                 request.EstimatedWeightKg,
                 request.DeliveryMethod,
-                request.PaymentMethod),
+                request.PaymentMethod,
+                request.VoucherCode),
             cancellationToken);
 
         return StatusCode(StatusCodes.Status201Created, result);
+    }
+
+    [HttpGet("vouchers/available")]
+    [Authorize(Roles = "PASSENGER")]
+    [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<AvailableVoucherDto>>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetAvailableVouchersAsync(
+        [FromQuery] Guid tripId,
+        [FromQuery] string sizeCategory,
+        [FromQuery] string? paymentMethod,
+        [FromQuery] long? orderAmount,
+        CancellationToken cancellationToken)
+    {
+        var userId = CurrentUserClaims.GetUserId(User);
+        var result = await _mediator.Send(
+            new GetParcelAvailableVouchersQuery(userId, tripId, sizeCategory, paymentMethod, orderAmount),
+            cancellationToken);
+        return Ok(result);
     }
 
     [HttpGet("received")]

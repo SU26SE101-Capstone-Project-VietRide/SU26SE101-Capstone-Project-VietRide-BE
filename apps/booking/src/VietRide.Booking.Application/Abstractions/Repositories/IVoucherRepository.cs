@@ -94,4 +94,6 @@ public interface IVoucherRepository : IRepository<Voucher, Guid>
     /// </para>
     /// </summary>
     Task DeleteUsageByBookingAsync(Guid bookingId, CancellationToken ct = default);
+
+    Task DeleteUsageByReferenceAsync(string referenceType, Guid referenceId, CancellationToken ct = default);
 }

@@ -295,6 +295,9 @@ CREATE TABLE vouchers (
     per_user_limit INT NULL,
     valid_from TIMESTAMPTZ NOT NULL,
     valid_until TIMESTAMPTZ NOT NULL,
+    new_user_only BOOLEAN NOT NULL DEFAULT FALSE,
+    applicable_payment_methods TEXT[] NULL,     -- NULL/empty = all payment methods
+    applicable_services TEXT[] NOT NULL DEFAULT ARRAY['BOOKING']::TEXT[], -- BOOKING, PARCEL
     applicable_operator_ids UUID[] NULL,    -- NULL = applies to all operators (admin VIETRIDE_FUNDED only; operator-owned forced to self)
     applicable_route_ids UUID[] NULL,       -- NULL = applies to all routes
     funding_type voucher_funding_type NOT NULL,
@@ -307,7 +310,9 @@ CREATE TABLE vouchers (
     CONSTRAINT chk_vouchers_value_positive CHECK (value > 0),
     CONSTRAINT chk_vouchers_validity_window CHECK (valid_until > valid_from),
     CONSTRAINT chk_vouchers_min_order_non_negative CHECK (min_order_amount >= 0),
-    CONSTRAINT chk_vouchers_operator_owned_funding CHECK (owner_operator_id IS NULL OR funding_type = 'OPERATOR_FUNDED'::voucher_funding_type)
+    CONSTRAINT chk_vouchers_operator_owned_funding CHECK (owner_operator_id IS NULL OR funding_type = 'OPERATOR_FUNDED'::voucher_funding_type),
+    CONSTRAINT chk_vouchers_applicable_services_valid CHECK (applicable_services <@ ARRAY['BOOKING', 'PARCEL']::text[] AND cardinality(applicable_services) > 0),
+    CONSTRAINT chk_vouchers_applicable_payment_methods_valid CHECK (applicable_payment_methods IS NULL OR applicable_payment_methods <@ ARRAY['WALLET', 'VNPAY']::text[])
 );
 
 CREATE UNIQUE INDEX uq_vouchers_code ON vouchers (code) WHERE deleted_at IS NULL;
@@ -315,6 +320,7 @@ CREATE INDEX idx_vouchers_active_validity
     ON vouchers (valid_until) WHERE is_active = TRUE;
 CREATE INDEX idx_vouchers_owner_operator ON vouchers (owner_operator_id)
     WHERE owner_operator_id IS NOT NULL AND deleted_at IS NULL;
+CREATE INDEX idx_vouchers_new_user_only ON vouchers (new_user_only);
 
 COMMENT ON COLUMN vouchers.owner_operator_id IS
     'NULL = platform admin voucher (owner_operator_id IS NULL); NOT NULL = operator self-created voucher scoped to that operator (logical FK identity.operators). Operator-owned vouchers are always OPERATOR_FUNDED (enforced by chk_vouchers_operator_owned_funding).';
@@ -330,7 +336,9 @@ CREATE TABLE voucher_usages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     voucher_id UUID NOT NULL REFERENCES vouchers (id) ON DELETE RESTRICT,
     user_id UUID NOT NULL,    -- logical FK
-    booking_id UUID NOT NULL REFERENCES bookings (id) ON DELETE CASCADE,
+    booking_id UUID NULL REFERENCES bookings (id) ON DELETE CASCADE,
+    reference_type VARCHAR(20) NOT NULL DEFAULT 'BOOKING', -- BOOKING or PARCEL
+    reference_id UUID NOT NULL,
     booking_group_id UUID NULL,    -- for round-trip limit count
     discount_amount BIGINT NOT NULL,
     funded_by voucher_funding_type NOT NULL,    -- snapshot at apply time
@@ -340,10 +348,45 @@ CREATE TABLE voucher_usages (
 CREATE INDEX idx_voucher_usages_voucher_user ON voucher_usages (voucher_id, user_id);
 CREATE INDEX idx_voucher_usages_voucher_group ON voucher_usages (voucher_id, booking_group_id)
     WHERE booking_group_id IS NOT NULL;
-CREATE INDEX idx_voucher_usages_booking_id ON voucher_usages (booking_id);
+CREATE INDEX idx_voucher_usages_booking_id ON voucher_usages (booking_id)
+    WHERE booking_id IS NOT NULL;
+CREATE INDEX idx_voucher_usages_reference ON voucher_usages (reference_type, reference_id);
 
 COMMENT ON COLUMN voucher_usages.funded_by IS
     'Snapshot of voucher.funding_type at apply time — used for settlement reconcile if voucher changes later.';
+
+-- -----------------------------------------------------------------------------
+-- campaigns + campaign_vouchers
+-- -----------------------------------------------------------------------------
+CREATE TABLE campaigns (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(120) NOT NULL,
+    description TEXT NULL,
+    owner_operator_id UUID NULL,
+    valid_from TIMESTAMPTZ NOT NULL,
+    valid_until TIMESTAMPTZ NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by_user_id UUID NOT NULL,
+    deleted_at TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_campaigns_validity_window CHECK (valid_until > valid_from)
+);
+
+CREATE INDEX idx_campaigns_active_validity ON campaigns (is_active, valid_until);
+CREATE INDEX idx_campaigns_owner_operator ON campaigns (owner_operator_id)
+    WHERE owner_operator_id IS NOT NULL AND deleted_at IS NULL;
+
+CREATE TABLE campaign_vouchers (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    campaign_id UUID NOT NULL REFERENCES campaigns (id) ON DELETE CASCADE,
+    voucher_id UUID NOT NULL REFERENCES vouchers (id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX uq_campaign_vouchers_campaign_voucher
+    ON campaign_vouchers (campaign_id, voucher_id);
+CREATE INDEX idx_campaign_vouchers_voucher_id ON campaign_vouchers (voucher_id);
 
 -- -----------------------------------------------------------------------------
 -- operator_voucher_consents

@@ -32,6 +32,16 @@ internal sealed class VoucherUsageConfiguration : IEntityTypeConfiguration<Vouch
         builder.Property(x => x.BookingId)
             .HasColumnName("booking_id")
             .HasColumnType("uuid")
+            .IsRequired(false);
+
+        builder.Property(x => x.ReferenceType)
+            .HasColumnName("reference_type")
+            .HasMaxLength(20)
+            .IsRequired();
+
+        builder.Property(x => x.ReferenceId)
+            .HasColumnName("reference_id")
+            .HasColumnType("uuid")
             .IsRequired();
 
         builder.Property(x => x.BookingGroupId)
@@ -80,6 +90,10 @@ internal sealed class VoucherUsageConfiguration : IEntityTypeConfiguration<Vouch
             .HasFilter("booking_group_id IS NOT NULL");
 
         builder.HasIndex(x => x.BookingId)
-            .HasDatabaseName("idx_voucher_usages_booking_id");
+            .HasDatabaseName("idx_voucher_usages_booking_id")
+            .HasFilter("booking_id IS NOT NULL");
+
+        builder.HasIndex(x => new { x.ReferenceType, x.ReferenceId })
+            .HasDatabaseName("idx_voucher_usages_reference");
     }
 }

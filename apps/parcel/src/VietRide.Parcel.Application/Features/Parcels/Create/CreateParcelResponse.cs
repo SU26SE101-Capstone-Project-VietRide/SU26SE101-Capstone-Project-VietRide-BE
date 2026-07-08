@@ -5,4 +5,7 @@ public sealed record CreateParcelResponse(
     string ParcelCode,
     string Status,
     long TotalAmount,
+    long OriginalDepositAmount,
+    long DiscountAmount,
+    string? VoucherCode,
     string? PaymentRedirectUrl);

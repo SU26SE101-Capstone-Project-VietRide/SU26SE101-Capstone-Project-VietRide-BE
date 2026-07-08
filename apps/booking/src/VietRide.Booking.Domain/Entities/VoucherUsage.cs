@@ -28,7 +28,9 @@ public sealed class VoucherUsage : BaseEntity<Guid>
     /// <summary>Logical FK identity.users — the buyer who redeemed the voucher.</summary>
     public Guid UserId { get; private set; }
 
-    public Guid BookingId { get; private set; }
+    public Guid? BookingId { get; private set; }
+    public string ReferenceType { get; private set; } = "BOOKING";
+    public Guid ReferenceId { get; private set; }
 
     /// <summary>Round-trip group — shared by the two legs of a round-trip booking for limit counting.</summary>
     public Guid? BookingGroupId { get; private set; }
@@ -48,7 +50,8 @@ public sealed class VoucherUsage : BaseEntity<Guid>
     public static VoucherUsage Create(
         Guid voucherId,
         Guid userId,
-        Guid bookingId,
+        string? referenceType,
+        Guid referenceId,
         Guid? bookingGroupId,
         Money discountAmount,
         VoucherFundingType fundedBy)
@@ -61,7 +64,9 @@ public sealed class VoucherUsage : BaseEntity<Guid>
             Id = Guid.NewGuid(),
             VoucherId = voucherId,
             UserId = userId,
-            BookingId = bookingId,
+            BookingId = string.Equals(referenceType ?? "BOOKING", "BOOKING", StringComparison.OrdinalIgnoreCase) ? referenceId : null,
+            ReferenceType = (referenceType ?? "BOOKING").Trim().ToUpperInvariant(),
+            ReferenceId = referenceId,
             BookingGroupId = bookingGroupId,
             DiscountAmount = discountAmount,
             FundedBy = fundedBy,

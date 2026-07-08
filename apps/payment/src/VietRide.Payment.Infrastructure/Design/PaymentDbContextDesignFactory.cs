@@ -13,8 +13,12 @@ internal sealed class PaymentDbContextDesignFactory : IDesignTimeDbContextFactor
         var connectionString = Environment.GetEnvironmentVariable("PAYMENT_DESIGN_CONNECTION")
             ?? "Host=localhost;Port=5432;Database=vietride_payment;Username=vietride;Password=vietride_dev";
 
+        var dataSourceBuilder = new Npgsql.NpgsqlDataSourceBuilder(connectionString);
+        PaymentDbContext.ConfigurePostgresTypes(dataSourceBuilder);
+        var dataSource = dataSourceBuilder.Build();
+
         var options = new DbContextOptionsBuilder<PaymentDbContext>()
-            .UseNpgsql(connectionString, npgsql =>
+            .UseNpgsql(dataSource, npgsql =>
                 npgsql.MigrationsHistoryTable("__ef_migrations_history", PaymentDbContext.SchemaName))
             .Options;
 

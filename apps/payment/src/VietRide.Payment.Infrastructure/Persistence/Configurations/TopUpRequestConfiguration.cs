@@ -35,8 +35,8 @@ internal sealed class TopUpRequestConfiguration : IEntityTypeConfiguration<TopUp
 
         builder.Property(x => x.Status)
             .HasColumnName("status")
-            .HasColumnType("top_up_request_status")
-            .HasDefaultValueSql("'PENDING'")
+            .HasColumnType($"{PaymentDbContext.SchemaName}.top_up_request_status")
+            .HasDefaultValueSql($"'PENDING'::{PaymentDbContext.SchemaName}.top_up_request_status")
             .IsRequired();
 
         builder.Property(x => x.VnPayTxnRef)
@@ -79,6 +79,6 @@ internal sealed class TopUpRequestConfiguration : IEntityTypeConfiguration<TopUp
 
         builder.HasIndex(x => new { x.Status, x.CreatedAt })
             .HasDatabaseName("idx_top_up_requests_status_created_at")
-            .HasFilter("status = 'PENDING'");
+            .HasFilter($"status = 'PENDING'::{PaymentDbContext.SchemaName}.top_up_request_status");
     }
 }
