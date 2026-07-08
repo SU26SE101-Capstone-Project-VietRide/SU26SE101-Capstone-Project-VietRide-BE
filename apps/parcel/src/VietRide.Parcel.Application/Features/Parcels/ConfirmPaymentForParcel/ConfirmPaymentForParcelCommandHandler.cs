@@ -59,12 +59,7 @@ public sealed class ConfirmPaymentForParcelCommandHandler
                 DateOnly.FromDateTime(now.UtcDateTime),
                 0, 0, 0, 0, 0, snapshot.DepositAmount, 0,
                 cancellationToken);
-            await EnsureCargoSuccessAsync(
-                await _tripClient.ReserveCargoAsync(
-                    snapshot.TripId,
-                    snapshot.ParcelId,
-                    await GetCargoWeightAsync(snapshot.ParcelId, cancellationToken),
-                    cancellationToken));
+            await TryReserveCargoAfterPaymentAsync(snapshot, request.PaymentId, cancellationToken);
             return true;
         }
 
@@ -87,12 +82,7 @@ public sealed class ConfirmPaymentForParcelCommandHandler
                 DateOnly.FromDateTime(now.UtcDateTime),
                 0, 0, 0, 0, 0, snapshot.AdditionalAmount, 0,
                 cancellationToken);
-            await EnsureCargoSuccessAsync(
-                await _tripClient.ReserveCargoAsync(
-                    snapshot.TripId,
-                    snapshot.ParcelId,
-                    await GetCargoWeightAsync(snapshot.ParcelId, cancellationToken),
-                    cancellationToken));
+            await TryReserveCargoAfterPaymentAsync(snapshot, request.PaymentId, cancellationToken);
             return true;
         }
 
@@ -151,21 +141,49 @@ public sealed class ConfirmPaymentForParcelCommandHandler
             or ParcelStatus.RETURNED
             or ParcelStatus.DELIVERY_CONFIRMED;
 
-    private static Task EnsureCargoSuccessAsync(TripCargoOutcome outcome)
+    private async Task TryReserveCargoAfterPaymentAsync(
+        ParcelPaymentTransitionSnapshot snapshot,
+        Guid paymentId,
+        CancellationToken cancellationToken)
     {
-        return outcome.Kind switch
+        var weightKg = await GetCargoWeightAsync(snapshot.ParcelId, cancellationToken);
+        var outcome = await _tripClient.ReserveCargoAsync(
+            snapshot.TripId,
+            snapshot.ParcelId,
+            weightKg,
+            cancellationToken);
+
+        if (outcome.Kind == TripCargoOutcomeKind.Success)
         {
-            TripCargoOutcomeKind.Success => Task.CompletedTask,
-            TripCargoOutcomeKind.TripNotFound => throw new ParcelDependencyUnavailableException(
-                "TRIP_NOT_FOUND",
-                outcome.ErrorMessage ?? "Trip was not found."),
-            TripCargoOutcomeKind.CapacityExceeded => throw new ParcelDependencyUnavailableException(
-                "TRIP_CARGO_CAPACITY_EXCEEDED",
-                outcome.ErrorMessage ?? "Trip cargo capacity would be exceeded."),
-            _ => throw new ParcelDependencyUnavailableException(
-                "TRIP_SERVICE_UNAVAILABLE",
-                outcome.ErrorMessage ?? "Trip service unavailable."),
+            return;
+        }
+
+        var reason = outcome.Kind switch
+        {
+            TripCargoOutcomeKind.TripNotFound => "TRIP_NOT_FOUND",
+            TripCargoOutcomeKind.CapacityExceeded => "TRIP_CARGO_CAPACITY_EXCEEDED",
+            _ => "TRIP_SERVICE_UNAVAILABLE",
         };
+
+        _logger.LogError(
+            "Payment succeeded for parcel {ParcelId} via payment {PaymentId}, but cargo reservation failed with {Reason}: {Message}.",
+            snapshot.ParcelId,
+            paymentId,
+            reason,
+            outcome.ErrorMessage);
+
+        await ParcelOutboxEvents.EnqueueAsync(
+            _outbox,
+            ParcelOutboxEvents.PendingOperatorAction,
+            new
+            {
+                parcelId = snapshot.ParcelId,
+                operatorId = snapshot.OperatorId,
+                reason,
+                message = outcome.ErrorMessage,
+                paymentId,
+            },
+            cancellationToken);
     }
 
     private async Task<decimal> GetCargoWeightAsync(Guid parcelId, CancellationToken cancellationToken)

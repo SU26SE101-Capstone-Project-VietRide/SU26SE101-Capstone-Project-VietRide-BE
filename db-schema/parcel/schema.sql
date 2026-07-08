@@ -73,6 +73,10 @@ CREATE TABLE parcels (
     delivery_method parcel_delivery_method NOT NULL DEFAULT 'TERMINAL_PICKUP',
     -- pricing
     deposit_amount BIGINT NOT NULL,
+    original_deposit_amount BIGINT NOT NULL DEFAULT 0,
+    discount_amount BIGINT NOT NULL DEFAULT 0,
+    voucher_code VARCHAR(50) NULL,
+    voucher_usage_id UUID NULL,
     additional_amount BIGINT NOT NULL DEFAULT 0,
     additional_payment_id UUID NULL,    -- logical FK payment.payments
     additional_payment_deadline TIMESTAMPTZ NULL,
@@ -111,7 +115,7 @@ CREATE TABLE parcels (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_parcels_amounts_non_negative
-        CHECK (deposit_amount >= 0 AND additional_amount >= 0),
+        CHECK (deposit_amount >= 0 AND original_deposit_amount >= 0 AND discount_amount >= 0 AND additional_amount >= 0),
     CONSTRAINT chk_parcels_weight_positive
         CHECK (estimated_weight_kg > 0),
     CONSTRAINT chk_parcels_actual_weight_positive
@@ -121,6 +125,8 @@ CREATE TABLE parcels (
 CREATE UNIQUE INDEX uq_parcels_parcel_code ON parcels (parcel_code);
 CREATE UNIQUE INDEX uq_parcels_delivery_token ON parcels (delivery_token)
     WHERE delivery_token IS NOT NULL;
+CREATE INDEX idx_parcels_voucher_usage_id ON parcels (voucher_usage_id)
+    WHERE voucher_usage_id IS NOT NULL;
 CREATE INDEX idx_parcels_sender_user_id_created_at
     ON parcels (sender_user_id, created_at DESC);
 CREATE INDEX idx_parcels_recipient_user_id_created_at

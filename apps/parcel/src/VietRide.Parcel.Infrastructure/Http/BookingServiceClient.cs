@@ -64,6 +64,135 @@ public sealed class BookingServiceClient : IBookingServiceClient
         }
     }
 
+    public async Task<VoucherValidationOutcome> ValidateVoucherAsync(
+        string voucherCode,
+        Guid operatorId,
+        Guid routeId,
+        Guid userId,
+        long orderAmount,
+        string paymentMethod,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var response = await _httpClient.PostAsJsonAsync(
+                "/internal/v1/vouchers/validate",
+                new
+                {
+                    voucherCode,
+                    operatorId,
+                    routeId,
+                    userId,
+                    orderAmount,
+                    service = "PARCEL",
+                    paymentMethod,
+                },
+                cancellationToken).ConfigureAwait(false);
+
+            if (response.StatusCode == HttpStatusCode.OK)
+            {
+                var payload = await ReadDataAsync<InternalValidateVoucherResponse>(response, cancellationToken)
+                    .ConfigureAwait(false);
+                return payload is null
+                    ? new VoucherValidationOutcome(VoucherValidationOutcomeKind.TransportError, null, 0, "Booking returned empty voucher validation response.")
+                    : new VoucherValidationOutcome(VoucherValidationOutcomeKind.Success, payload.VoucherId, payload.DiscountAmount, null);
+            }
+
+            if ((int)response.StatusCode is >= 400 and < 500)
+                return new VoucherValidationOutcome(VoucherValidationOutcomeKind.Invalid, null, 0, $"Booking rejected voucher with status {(int)response.StatusCode}.");
+
+            return new VoucherValidationOutcome(VoucherValidationOutcomeKind.TransportError, null, 0, $"Booking returned status {(int)response.StatusCode}.");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "BookingServiceClient.ValidateVoucherAsync({VoucherCode}) failed.", voucherCode);
+            return new VoucherValidationOutcome(VoucherValidationOutcomeKind.TransportError, null, 0, ex.Message);
+        }
+    }
+
+    public async Task<VoucherUsageOutcome> RecordVoucherUsageAsync(
+        Guid voucherId,
+        Guid userId,
+        Guid parcelId,
+        long discountAmount,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/internal/v1/vouchers/usages")
+            {
+                Content = JsonContent.Create(new
+                {
+                    voucherId,
+                    userId,
+                    referenceType = "PARCEL",
+                    referenceId = parcelId,
+                    discountAmount,
+                }),
+            };
+            request.Headers.TryAddWithoutValidation("Idempotency-Key", $"parcel-voucher-usage-{parcelId:D}");
+
+            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+
+            if (response.StatusCode == HttpStatusCode.Created)
+            {
+                var payload = await ReadDataAsync<InternalRecordVoucherUsageResponse>(response, cancellationToken)
+                    .ConfigureAwait(false);
+                return payload is null
+                    ? new VoucherUsageOutcome(VoucherUsageOutcomeKind.TransportError, null, "Booking returned empty usage response.")
+                    : new VoucherUsageOutcome(VoucherUsageOutcomeKind.Success, payload.UsageId, null);
+            }
+
+            if ((int)response.StatusCode is >= 400 and < 500)
+                return new VoucherUsageOutcome(VoucherUsageOutcomeKind.Invalid, null, $"Booking rejected voucher usage with status {(int)response.StatusCode}.");
+
+            return new VoucherUsageOutcome(VoucherUsageOutcomeKind.TransportError, null, $"Booking returned status {(int)response.StatusCode}.");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "BookingServiceClient.RecordVoucherUsageAsync({ParcelId}) failed.", parcelId);
+            return new VoucherUsageOutcome(VoucherUsageOutcomeKind.TransportError, null, ex.Message);
+        }
+    }
+
+    public async Task DeleteVoucherUsageByReferenceAsync(Guid parcelId, CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Delete,
+            $"/internal/v1/vouchers/usages/by-reference?referenceType=PARCEL&referenceId={parcelId:D}");
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", $"parcel-voucher-usage-delete-{parcelId:D}");
+        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<AvailableVoucherDto>> GetAvailableParcelVouchersAsync(
+        Guid userId,
+        Guid operatorId,
+        Guid routeId,
+        string? paymentMethod,
+        long? orderAmount,
+        CancellationToken cancellationToken = default)
+    {
+        var url = $"/internal/v1/vouchers/available?userId={userId:D}&service=PARCEL&operatorId={operatorId:D}&routeId={routeId:D}&orderAmount={orderAmount ?? 0}";
+        if (!string.IsNullOrWhiteSpace(paymentMethod))
+            url += $"&paymentMethod={Uri.EscapeDataString(paymentMethod)}";
+
+        using var response = await _httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode != HttpStatusCode.OK)
+            return [];
+
+        var payload = await ReadDataAsync<IReadOnlyList<AvailableVoucherDto>>(response, cancellationToken)
+            .ConfigureAwait(false);
+        return payload ?? [];
+    }
+
     private static async Task<BookingSnapshot?> DeserializeSnapshotAsync(
         HttpResponseMessage response,
         CancellationToken cancellationToken)
@@ -83,4 +212,21 @@ public sealed class BookingServiceClient : IBookingServiceClient
 
         return payload.Deserialize<BookingSnapshot>(JsonOptions);
     }
+
+    private static async Task<T?> ReadDataAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var root = document.RootElement;
+        var payload = root.ValueKind == JsonValueKind.Object && root.TryGetProperty("data", out var data)
+            ? data
+            : root.ValueKind == JsonValueKind.Object && root.TryGetProperty("value", out var value)
+                ? value
+                : root;
+        return payload.Deserialize<T>(JsonOptions);
+    }
+
+    private sealed record InternalValidateVoucherResponse(Guid VoucherId, long DiscountAmount);
+
+    private sealed record InternalRecordVoucherUsageResponse(Guid UsageId);
 }

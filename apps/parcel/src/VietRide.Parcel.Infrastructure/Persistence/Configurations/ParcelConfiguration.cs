@@ -118,6 +118,29 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
             .HasConversion(m => m.Amount, amount => Money.FromRaw(amount))
             .IsRequired();
 
+        builder.Property(x => x.OriginalDepositAmount)
+            .HasColumnName("original_deposit_amount")
+            .HasColumnType("bigint")
+            .HasConversion(m => m.Amount, amount => Money.FromRaw(amount))
+            .IsRequired();
+
+        builder.Property(x => x.DiscountAmount)
+            .HasColumnName("discount_amount")
+            .HasColumnType("bigint")
+            .HasConversion(m => m.Amount, amount => Money.FromRaw(amount))
+            .HasDefaultValueSql("0")
+            .IsRequired();
+
+        builder.Property(x => x.VoucherCode)
+            .HasColumnName("voucher_code")
+            .HasMaxLength(50)
+            .IsRequired(false);
+
+        builder.Property(x => x.VoucherUsageId)
+            .HasColumnName("voucher_usage_id")
+            .HasColumnType("uuid")
+            .IsRequired(false);
+
         builder.Property(x => x.AdditionalAmount)
             .HasColumnName("additional_amount")
             .HasColumnType("bigint")
@@ -258,6 +281,10 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
         builder.HasIndex(x => x.AdditionalPaymentId)
             .HasDatabaseName("idx_parcels_additional_payment_id")
             .HasFilter("additional_payment_id IS NOT NULL");
+
+        builder.HasIndex(x => x.VoucherUsageId)
+            .HasDatabaseName("idx_parcels_voucher_usage_id")
+            .HasFilter("voucher_usage_id IS NOT NULL");
 
         builder.HasIndex(x => x.ReviewedByUserId)
             .HasDatabaseName("idx_parcels_reviewed_by_user_id")

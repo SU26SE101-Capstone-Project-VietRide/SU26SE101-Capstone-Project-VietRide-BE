@@ -5,4 +5,32 @@ public interface IBookingServiceClient
     Task<BookingLookupOutcome> GetBookingSnapshotAsync(
         Guid bookingId,
         CancellationToken cancellationToken = default);
+
+    Task<VoucherValidationOutcome> ValidateVoucherAsync(
+        string voucherCode,
+        Guid operatorId,
+        Guid routeId,
+        Guid userId,
+        long orderAmount,
+        string paymentMethod,
+        CancellationToken cancellationToken = default);
+
+    Task<VoucherUsageOutcome> RecordVoucherUsageAsync(
+        Guid voucherId,
+        Guid userId,
+        Guid parcelId,
+        long discountAmount,
+        CancellationToken cancellationToken = default);
+
+    Task DeleteVoucherUsageByReferenceAsync(
+        Guid parcelId,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<AvailableVoucherDto>> GetAvailableParcelVouchersAsync(
+        Guid userId,
+        Guid operatorId,
+        Guid routeId,
+        string? paymentMethod,
+        long? orderAmount,
+        CancellationToken cancellationToken = default);
 }

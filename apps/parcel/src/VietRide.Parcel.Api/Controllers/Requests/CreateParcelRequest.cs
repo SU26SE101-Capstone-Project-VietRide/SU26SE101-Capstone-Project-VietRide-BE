@@ -11,4 +11,5 @@ public sealed record CreateParcelRequest(
     string? PhotoUrl,
     RecipientRequest Recipient,
     string DeliveryMethod,
-    string PaymentMethod);
+    string PaymentMethod,
+    string? VoucherCode);

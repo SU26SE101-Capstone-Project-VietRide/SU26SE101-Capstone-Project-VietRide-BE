@@ -96,6 +96,27 @@ public sealed class PaymentEventHandlersTests
     }
 
     [Fact]
+    public async Task ConfirmPaymentForParcel_CargoReservationFails_StillConfirmsPaymentAndEnqueuesOperatorAction()
+    {
+        var repo = Substitute.For<IParcelRepository>();
+        var clock = Substitute.For<IClock>();
+        var outbox = new RecordingOutbox();
+        var trip = Substitute.For<ITripServiceClient>();
+        clock.UtcNow.Returns(Now);
+        repo.TryMarkDepositSucceededAsync(ParcelId, 100_000, Now, Arg.Any<CancellationToken>())
+            .Returns(MakeSnapshot(ParcelStatus.PENDING));
+        trip.ReserveCargoAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<decimal>(), Arg.Any<CancellationToken>())
+            .Returns(new TripCargoOutcome(TripCargoOutcomeKind.TransportError, "Trip service unavailable."));
+
+        var handler = new ConfirmPaymentForParcelCommandHandler(repo, outbox, Stats(), trip, clock,
+            Substitute.For<ILogger<ConfirmPaymentForParcelCommandHandler>>());
+        var result = await handler.Handle(new ConfirmPaymentForParcelCommand(PaymentId, "PARCEL", ParcelId, 100_000), default);
+
+        result.Should().BeTrue();
+        outbox.Events.Should().ContainSingle(evt => evt.EventType == ParcelOutboxEvents.PendingOperatorAction);
+    }
+
+    [Fact]
     public async Task ConfirmPaymentForParcel_PARCEL_ADDITIONAL_Succeeded()
     {
         var repo = Substitute.For<IParcelRepository>();

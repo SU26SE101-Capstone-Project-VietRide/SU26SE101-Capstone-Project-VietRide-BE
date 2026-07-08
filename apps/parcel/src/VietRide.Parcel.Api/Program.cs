@@ -36,7 +36,10 @@ if (registerMessaging)
 {
     builder.Services.AddVietRideMessaging(builder.Configuration);
     builder.Services.AddParcelHangfire(builder.Configuration);
-    builder.Services.AddHangfireServer();
+    builder.Services.AddHangfireServer(options =>
+    {
+        options.WorkerCount = builder.Configuration.GetValue("Hangfire:WorkerCount", 2);
+    });
 }
 
 builder.Services.AddInfrastructure(builder.Configuration, builder.Environment, registerConsumers: registerMessaging);
