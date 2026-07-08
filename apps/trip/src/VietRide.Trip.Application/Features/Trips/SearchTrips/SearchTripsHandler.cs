@@ -14,6 +14,7 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
     private const int PageSize = 20;
 
     private readonly IIdentityInternalClient identityInternalClient;
+    private readonly ILocationRepository? locationRepository;
     private readonly IRouteRepository routeRepository;
     private readonly IStationRepository stationRepository;
     private readonly ITripRepository tripRepository;
@@ -26,6 +27,7 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
         IStationRepository stationRepository,
         ITripSeatRepository tripSeatRepository,
         ITripStopRepository tripStopRepository,
+        ILocationRepository locationRepository,
         IIdentityInternalClient identityInternalClient)
     {
         this.tripRepository = tripRepository;
@@ -33,7 +35,26 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
         this.stationRepository = stationRepository;
         this.tripSeatRepository = tripSeatRepository;
         this.tripStopRepository = tripStopRepository;
+        this.locationRepository = locationRepository;
         this.identityInternalClient = identityInternalClient;
+    }
+
+    public SearchTripsHandler(
+        ITripRepository tripRepository,
+        IRouteRepository routeRepository,
+        IStationRepository stationRepository,
+        ITripSeatRepository tripSeatRepository,
+        ITripStopRepository tripStopRepository,
+        IIdentityInternalClient identityInternalClient)
+        : this(
+            tripRepository,
+            routeRepository,
+            stationRepository,
+            tripSeatRepository,
+            tripStopRepository,
+            null!,
+            identityInternalClient)
+    {
     }
 
     public async Task<SearchTripsResult> Handle(SearchTripsQuery request, CancellationToken cancellationToken)
@@ -41,9 +62,15 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
         var localStart = new DateTimeOffset(request.DepartureDate.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(7));
         var start = localStart.ToUniversalTime();
         var end = localStart.AddDays(1).ToUniversalTime();
+        var stationFilter = await ResolveStationFilterAsync(request, cancellationToken);
+        if (stationFilter.OriginStationIds.Count == 0 || stationFilter.DestinationStationIds.Count == 0)
+        {
+            return SearchTripsResult.Create([], Page, PageSize, 0);
+        }
+
         var routes = routeRepository.QueryNoTracking()
-            .Where(route => route.OriginStationId == request.OriginStationId
-                && route.DestinationStationId == request.DestinationStationId
+            .Where(route => stationFilter.OriginStationIds.Contains(route.OriginStationId)
+                && stationFilter.DestinationStationIds.Contains(route.DestinationStationId)
                 && route.DeletedAt == null
                 && route.IsActive)
             .ToDictionary(route => route.Id);
@@ -53,12 +80,21 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
             return SearchTripsResult.Create([], Page, PageSize, 0);
         }
 
-        var originStation = GetStation(request.OriginStationId);
-        var destinationStation = GetStation(request.DestinationStationId);
-        if (originStation is null || destinationStation is null)
+        var projectedStationIds = routes.Values
+            .SelectMany(route => new[] { route.OriginStationId, route.DestinationStationId })
+            .ToHashSet();
+        var stationsById = stationRepository.QueryNoTracking()
+            .Where(station => projectedStationIds.Contains(station.Id))
+            .ToDictionary(station => station.Id);
+        routes = routes.Values
+            .Where(route => stationsById.ContainsKey(route.OriginStationId)
+                && stationsById.ContainsKey(route.DestinationStationId))
+            .ToDictionary(route => route.Id);
+        if (routes.Count == 0)
         {
             return SearchTripsResult.Create([], Page, PageSize, 0);
         }
+
         var routeIds = routes.Keys.ToHashSet();
         var candidates = tripRepository.QueryNoTracking()
             .Where(trip => routeIds.Contains(trip.RouteId)
@@ -100,8 +136,8 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
                 item.Trip,
                 routes[item.Trip.RouteId],
                 operatorNames[item.Trip.OperatorId],
-                originStation,
-                destinationStation,
+                stationsById[routes[item.Trip.RouteId].OriginStationId],
+                stationsById[routes[item.Trip.RouteId].DestinationStationId],
                 item.Seats,
                 item.Stops))
             .ToList();
@@ -135,6 +171,51 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
         return names;
     }
 
-    private Station? GetStation(Guid stationId) =>
-        stationRepository.QueryNoTracking().FirstOrDefault(station => station.Id == stationId);
+    private async Task<StationFilter> ResolveStationFilterAsync(
+        SearchTripsQuery request,
+        CancellationToken cancellationToken)
+    {
+        if (request.OriginStationId.HasValue && request.DestinationStationId.HasValue)
+        {
+            return new StationFilter(
+                new HashSet<Guid> { request.OriginStationId.Value },
+                new HashSet<Guid> { request.DestinationStationId.Value });
+        }
+
+        if (locationRepository is null)
+        {
+            throw new InvalidOperationException("Location repository is required when location codes are provided.");
+        }
+
+        var originLocation = await locationRepository.GetActiveByCodeAsync(request.OriginLocationCode!, cancellationToken);
+        if (originLocation is null)
+        {
+            throw new ValidationException(
+                "Origin location was not found or inactive.",
+                [new ValidationError(nameof(SearchTripsQuery.OriginLocationCode), "Origin location was not found or inactive.")]);
+        }
+
+        var destinationLocation = await locationRepository.GetActiveByCodeAsync(request.DestinationLocationCode!, cancellationToken);
+        if (destinationLocation is null)
+        {
+            throw new ValidationException(
+                "Destination location was not found or inactive.",
+                [new ValidationError(nameof(SearchTripsQuery.DestinationLocationCode), "Destination location was not found or inactive.")]);
+        }
+
+        var originStationIds = stationRepository.QueryNoTracking()
+            .Where(station => station.LocationId == originLocation.Id && station.IsActive && station.DeletedAt == null)
+            .Select(station => station.Id)
+            .ToHashSet();
+        var destinationStationIds = stationRepository.QueryNoTracking()
+            .Where(station => station.LocationId == destinationLocation.Id && station.IsActive && station.DeletedAt == null)
+            .Select(station => station.Id)
+            .ToHashSet();
+
+        return new StationFilter(originStationIds, destinationStationIds);
+    }
+
+    private sealed record StationFilter(
+        IReadOnlySet<Guid> OriginStationIds,
+        IReadOnlySet<Guid> DestinationStationIds);
 }

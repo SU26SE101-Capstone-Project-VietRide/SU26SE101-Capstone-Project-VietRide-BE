@@ -19,4 +19,6 @@ public sealed record CreateOrLinkOperatorStationCommand(
     string? DisplayNameOverride,
     string? CounterLocation,
     string? OperatorStationContactPhone,
-    string? Instructions) : IRequest<CreateOrLinkOperatorStationResponse>;
+    string? Instructions,
+    Guid? LocationId = null,
+    string? LocationCode = null) : IRequest<CreateOrLinkOperatorStationResponse>;

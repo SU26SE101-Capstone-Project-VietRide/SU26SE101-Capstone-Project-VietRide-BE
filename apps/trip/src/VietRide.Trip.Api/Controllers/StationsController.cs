@@ -10,8 +10,6 @@ namespace VietRide.Trip.Api.Controllers;
 [Route("v1/stations")]
 public sealed class StationsController : ControllerBase
 {
-    private const string OperatorRoles = "OPERATOR_STAFF,OPERATOR_ADMIN";
-
     private readonly IMediator mediator;
 
     public StationsController(IMediator mediator)
@@ -20,9 +18,8 @@ public sealed class StationsController : ControllerBase
     }
 
     [HttpGet("search")]
-    [Authorize(Roles = OperatorRoles)]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<StationSearchResult>>), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<IReadOnlyList<StationSearchResult>>> SearchAsync(
         [FromQuery(Name = "q")] string? q,

@@ -40,6 +40,13 @@ public sealed class CreateOrLinkOperatorStationValidator : AbstractValidator<Cre
             RuleFor(command => command.Province)
                 .NotEmpty()
                 .MaximumLength(100);
+            RuleFor(command => command.LocationId)
+                .Must(locationId => locationId != Guid.Empty)
+                .WithMessage("Location id must be valid.")
+                .When(command => command.LocationId.HasValue);
+            RuleFor(command => command.LocationCode)
+                .MaximumLength(20)
+                .When(command => !string.IsNullOrWhiteSpace(command.LocationCode));
             RuleFor(command => command.AddressStreet)
                 .MaximumLength(500)
                 .When(command => !string.IsNullOrWhiteSpace(command.AddressStreet));

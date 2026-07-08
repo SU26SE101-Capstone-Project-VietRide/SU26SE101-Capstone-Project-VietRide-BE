@@ -9,4 +9,6 @@ public sealed record CreateStopCommand(
     decimal? Longitude,
     string? Description,
     string? Address,
-    string? GooglePlaceId) : IRequest<StopDto>;
+    string? GooglePlaceId,
+    Guid? LocationId = null,
+    string? LocationCode = null) : IRequest<StopDto>;

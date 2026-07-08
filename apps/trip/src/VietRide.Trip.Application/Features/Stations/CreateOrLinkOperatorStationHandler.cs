@@ -15,20 +15,32 @@ public sealed class CreateOrLinkOperatorStationHandler : IRequestHandler<CreateO
     private const double DuplicateNearbyMeters = 100D;
 
     private readonly IIdentityInternalClient identityInternalClient;
+    private readonly ILocationRepository? locationRepository;
     private readonly IOperatorStationRepository operatorStationRepository;
     private readonly IStationRepository stationRepository;
     private readonly IUnitOfWork unitOfWork;
 
     public CreateOrLinkOperatorStationHandler(
         IIdentityInternalClient identityInternalClient,
+        ILocationRepository locationRepository,
         IOperatorStationRepository operatorStationRepository,
         IStationRepository stationRepository,
         IUnitOfWork unitOfWork)
     {
         this.identityInternalClient = identityInternalClient;
+        this.locationRepository = locationRepository;
         this.operatorStationRepository = operatorStationRepository;
         this.stationRepository = stationRepository;
         this.unitOfWork = unitOfWork;
+    }
+
+    public CreateOrLinkOperatorStationHandler(
+        IIdentityInternalClient identityInternalClient,
+        IOperatorStationRepository operatorStationRepository,
+        IStationRepository stationRepository,
+        IUnitOfWork unitOfWork)
+        : this(identityInternalClient, null!, operatorStationRepository, stationRepository, unitOfWork)
+    {
     }
 
     public async Task<CreateOrLinkOperatorStationResponse> Handle(
@@ -88,6 +100,7 @@ public sealed class CreateOrLinkOperatorStationHandler : IRequestHandler<CreateO
             return CreateOrLinkOperatorStationResponse.DuplicateNearby(duplicateNearby);
         }
 
+        var locationId = await ResolveLocationIdAsync(request.LocationId, request.LocationCode, cancellationToken);
         var station = Station.Create(
             request.Name!,
             CreateCollisionSafeSlug(request),
@@ -100,7 +113,8 @@ public sealed class CreateOrLinkOperatorStationHandler : IRequestHandler<CreateO
             request.ContactEmail,
             request.OperatingHours,
             request.Facilities,
-            request.SupportsShuttle);
+            request.SupportsShuttle,
+            locationId);
 
         await stationRepository.AddAsync(station, cancellationToken);
 
@@ -133,6 +147,47 @@ public sealed class CreateOrLinkOperatorStationHandler : IRequestHandler<CreateO
         throw new ValidationException(
             eligibility.Message ?? "Operator logical FK validation failed.",
             [new ValidationError("operatorId", eligibility.Message ?? "Operator logical FK validation failed.")]);
+    }
+
+    private async Task<Guid?> ResolveLocationIdAsync(Guid? locationId, string? locationCode, CancellationToken cancellationToken)
+    {
+        if (locationId.HasValue)
+        {
+            if (locationRepository is null)
+            {
+                throw new InvalidOperationException("Location repository is required when locationId is provided.");
+            }
+
+            var location = await locationRepository.GetActiveByIdAsync(locationId.Value, cancellationToken);
+            if (location is null)
+            {
+                throw new ValidationException(
+                    "Location logical FK validation failed.",
+                    [new ValidationError("locationId", "Location was not found or inactive.")]);
+            }
+
+            return location.Id;
+        }
+
+        if (string.IsNullOrWhiteSpace(locationCode))
+        {
+            return null;
+        }
+
+        if (locationRepository is null)
+        {
+            throw new InvalidOperationException("Location repository is required when locationCode is provided.");
+        }
+
+        var locationByCode = await locationRepository.GetActiveByCodeAsync(locationCode, cancellationToken);
+        if (locationByCode is null)
+        {
+            throw new ValidationException(
+                "Location logical FK validation failed.",
+                [new ValidationError("locationCode", "Location was not found or inactive.")]);
+        }
+
+        return locationByCode.Id;
     }
 
     private IReadOnlyList<StationSearchResult> FindNearbyStations(decimal latitude, decimal longitude)

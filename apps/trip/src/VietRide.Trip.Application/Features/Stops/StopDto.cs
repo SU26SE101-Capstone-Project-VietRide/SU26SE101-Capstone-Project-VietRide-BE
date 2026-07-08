@@ -11,4 +11,5 @@ public sealed record StopDto(
     string? GooglePlaceId,
     bool IsActive,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    Guid? LocationId = null);

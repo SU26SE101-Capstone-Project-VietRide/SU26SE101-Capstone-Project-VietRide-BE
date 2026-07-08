@@ -33,6 +33,11 @@ internal sealed class StationConfiguration : IEntityTypeConfiguration<Station>
             .HasMaxLength(500)
             .IsRequired(false);
 
+        builder.Property(x => x.LocationId)
+            .HasColumnName("location_id")
+            .HasColumnType("uuid")
+            .IsRequired(false);
+
         builder.Property(x => x.City)
             .HasColumnName("city")
             .HasMaxLength(100)
@@ -110,9 +115,18 @@ internal sealed class StationConfiguration : IEntityTypeConfiguration<Station>
             .HasDatabaseName("idx_stations_city_province")
             .HasFilter("is_active = TRUE");
 
+        builder.HasIndex(x => x.LocationId)
+            .HasDatabaseName("idx_stations_location_id")
+            .HasFilter("location_id IS NOT NULL AND is_active = TRUE");
+
         builder.HasIndex(x => x.SupportsShuttle)
             .HasDatabaseName("idx_stations_supports_shuttle")
             .HasFilter("is_active = TRUE");
+
+        builder.HasOne<Location>()
+            .WithMany()
+            .HasForeignKey(x => x.LocationId)
+            .OnDelete(DeleteBehavior.SetNull);
 
         builder.HasIndex(x => x.Name)
             .HasDatabaseName("idx_stations_name_trgm")

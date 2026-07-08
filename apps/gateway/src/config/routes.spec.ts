@@ -40,6 +40,7 @@ describe('buildRouteTable', () => {
       ['/v1/admin/operators', env.IDENTITY_BASE_URL],
       ['/v1/admin/operator-users', env.IDENTITY_BASE_URL],
       ['/v1/admin/users', env.IDENTITY_BASE_URL],
+      ['/v1/admin/locations', env.TRIP_BASE_URL],
       ['/v1/admin/booking-stats', env.BOOKING_BASE_URL],
       ['/v1/admin/vouchers', env.BOOKING_BASE_URL],
       ['/v1/admin/trip-settlements', env.PAYMENT_BASE_URL],
@@ -142,6 +143,7 @@ describe('buildRouteTable', () => {
       ['/v1/admin/operators/11111111-1111-1111-1111-111111111111/approve', env.IDENTITY_BASE_URL],
       ['/v1/admin/operator-users', env.IDENTITY_BASE_URL],
       ['/v1/admin/users', env.IDENTITY_BASE_URL],
+      ['/v1/admin/locations', env.TRIP_BASE_URL],
       ['/v1/admin/booking-stats/aggregate', env.BOOKING_BASE_URL],
       ['/v1/admin/vouchers', env.BOOKING_BASE_URL],
       ['/v1/admin/vouchers/11111111-1111-1111-1111-111111111111/consents', env.BOOKING_BASE_URL],
@@ -170,6 +172,8 @@ describe('buildRouteTable', () => {
       '/v1/auth/google',
       '/v1/auth/refresh',
       '/v1/.well-known',
+      '/v1/locations',
+      '/v1/stations/search',
     ];
     publicPrefixes.forEach((p) => {
       const route = routes.find((r) => r.prefix === p);
@@ -274,9 +278,17 @@ describe('buildRouteTable', () => {
     expect(routes.some((r) => r.prefix.startsWith('/internal'))).toBe(false);
   });
 
-  it('routes Day 7 station and operator stop families to Trip with operator role union', () => {
+  it('routes Day 7 public station search to Trip without auth', () => {
+    const route = matchRoute(routes, '/v1/stations/search');
+
+    expect(route?.prefix).toBe('/v1/stations/search');
+    expect(route?.target).toBe(env.TRIP_BASE_URL);
+    expect(route?.authRequired).toBe('none');
+    expect(route?.requiredRoles).toBeUndefined();
+  });
+
+  it('routes Day 7 station and operator stop mutations to Trip with operator role union', () => {
     const cases = [
-      ['/v1/stations/search?q=Mien%20Tay', '/v1/stations'],
       ['/v1/operator/stations', '/v1/operator/stations'],
       ['/v1/operator/stops', '/v1/operator/stops'],
       ['/v1/operator/stops/11111111-1111-1111-1111-111111111111', '/v1/operator/stops'],
@@ -376,8 +388,8 @@ describe('buildRouteTable', () => {
     expect(routes.find((r) => r.prefix === '/v1/admin')).toBeUndefined();
   });
 
-  it('does not register a separate station search route or stop delete route', () => {
-    expect(routes.find((r) => r.prefix === '/v1/stations/search')).toBeUndefined();
+  it('registers public station search separately but no stop delete route', () => {
+    expect(routes.find((r) => r.prefix === '/v1/stations/search')).toBeDefined();
     expect(routes.find((r) => r.prefix === '/v1/operator/stops/delete')).toBeUndefined();
   });
 

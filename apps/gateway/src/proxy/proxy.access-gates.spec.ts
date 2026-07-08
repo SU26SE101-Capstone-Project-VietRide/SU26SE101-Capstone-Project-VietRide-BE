@@ -301,7 +301,6 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
   );
 
   it.each([
-    ['GET', '/v1/stations/search?q=Mien%20Tay'],
     ['POST', '/v1/operator/stations'],
     ['GET', '/v1/operator/stops'],
     ['POST', '/v1/operator/stops'],
@@ -946,7 +945,9 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
     ['POST', '/v1/parcels/delivery/confirm'],
     ['POST', '/v1/parcels/delivery/reject'],
     ['POST', '/v1/parcels/delivery/undo-reject'],
-  ] as const)('lets public mixed endpoint %s %s pass anonymously', async (method, path) => {
+    ['GET', '/v1/locations'],
+    ['GET', '/v1/stations/search?q=Mien%20Tay'],
+  ] as const)('lets public endpoint %s %s pass anonymously', async (method, path) => {
     const upstreamHandler = arrangeProxyPass();
     const signer = {
       sign: jest.fn().mockResolvedValue('internal-token'),

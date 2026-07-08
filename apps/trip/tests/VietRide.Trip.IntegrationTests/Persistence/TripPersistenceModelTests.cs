@@ -55,6 +55,7 @@ public sealed class TripPersistenceModelTests
 
         station.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "uq_stations_slug" && x.IsUnique);
         station.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "idx_stations_city_province");
+        station.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "idx_stations_location_id");
         station.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "idx_stations_supports_shuttle");
         station.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "idx_stations_name_trgm");
 
@@ -64,8 +65,9 @@ public sealed class TripPersistenceModelTests
         operatorStation.GetForeignKeys().Should().OnlyContain(x => x.PrincipalEntityType.ClrType == typeof(Station));
 
         stop.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "idx_stops_operator_id");
+        stop.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "idx_stops_location_id");
         stop.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "idx_stops_replaced_by");
-        stop.GetForeignKeys().Should().OnlyContain(x => x.PrincipalEntityType.ClrType == typeof(Stop));
+        stop.GetForeignKeys().Should().OnlyContain(x => x.PrincipalEntityType.ClrType == typeof(Stop) || x.PrincipalEntityType.ClrType == typeof(Location));
         stop.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "idx_stops_shared_suggestion");
         stop.GetCheckConstraints().Should().Contain(x => x.Name == "chk_stops_no_self_replacement");
     }

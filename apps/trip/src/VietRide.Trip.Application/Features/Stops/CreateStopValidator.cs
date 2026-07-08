@@ -20,6 +20,13 @@ public sealed class CreateStopValidator : AbstractValidator<CreateStopCommand>
         RuleFor(command => command.GooglePlaceId)
             .MaximumLength(255)
             .When(command => !string.IsNullOrWhiteSpace(command.GooglePlaceId));
+        RuleFor(command => command.LocationId)
+            .Must(locationId => locationId != Guid.Empty)
+            .WithMessage("Location id must be valid.")
+            .When(command => command.LocationId.HasValue);
+        RuleFor(command => command.LocationCode)
+            .MaximumLength(20)
+            .When(command => !string.IsNullOrWhiteSpace(command.LocationCode));
         RuleFor(command => command.Latitude)
             .NotNull()
             .InclusiveBetween(-90m, 90m);

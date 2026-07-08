@@ -125,6 +125,13 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       authRequired: 'user',
       requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
     },
+    { prefix: '/v1/locations', target: env.TRIP_BASE_URL, authRequired: 'none' },
+    {
+      prefix: '/v1/admin/locations',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    },
     {
       prefix: '/v1/trips',
       target: env.TRIP_BASE_URL,
@@ -132,6 +139,7 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       publicSubpaths: [{ method: 'GET', path: '/v1/trips/search' }],
     },
     { prefix: '/v1/routes', target: env.TRIP_BASE_URL, authRequired: 'user' },
+    { prefix: '/v1/stations/search', target: env.TRIP_BASE_URL, authRequired: 'none' },
     {
       prefix: '/v1/stations',
       target: env.TRIP_BASE_URL,

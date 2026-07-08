@@ -63,6 +63,29 @@ public sealed class TripHandlerProjectionTests
     }
 
     [Fact]
+    public async Task Search_ByLocationCodes_MapsToRouteStations()
+    {
+        var fixture = SearchFixture.Create();
+        var trip = CreateTrip(fixture.OperatorId, fixture.Route.Id, DateTimeOffset.Parse("2026-05-18T08:00:00+07:00"));
+        fixture.Trips.Add(trip);
+        fixture.Seats.Add(TripSeat.Create(trip.Id, "A01"));
+
+        var query = new SearchTripsQuery(
+            null,
+            null,
+            new DateOnly(2026, 5, 18),
+            1,
+            false,
+            "HCM",
+            "HN");
+
+        var result = await fixture.Handler.Handle(query, CancellationToken.None);
+
+        result.Items.Should().ContainSingle()
+            .Which.TripId.Should().Be(trip.Id);
+    }
+
+    [Fact]
     public async Task GetSeatMap_UsesGeometryFromVehicleSeatLayoutJson()
     {
         var operatorId = Guid.NewGuid();
@@ -133,10 +156,41 @@ public sealed class TripHandlerProjectionTests
         private SearchFixture(string operatorName)
         {
             OperatorId = Guid.NewGuid();
+            OriginLocation = Location.Create("HCM", "Ho Chi Minh City", Location.MunicipalityType, 5);
+            DestinationLocation = Location.Create("HN", "Ha Noi", Location.MunicipalityType, 1);
             OriginStation = Station.Create("Bến xe Miền Đông", "ben-xe-mien-dong", "Hồ Chí Minh", "Hồ Chí Minh");
             DestinationStation = Station.Create("Bến xe Mỹ Đình", "ben-xe-my-dinh", "Hà Nội", "Hà Nội");
+            OriginStation.UpdateProfile(
+                OriginStation.Name,
+                OriginStation.Slug,
+                OriginStation.City,
+                OriginStation.Province,
+                OriginStation.AddressStreet,
+                OriginLocation.Id,
+                OriginStation.Latitude,
+                OriginStation.Longitude,
+                OriginStation.ContactPhone,
+                OriginStation.ContactEmail,
+                OriginStation.OperatingHours,
+                OriginStation.Facilities,
+                OriginStation.SupportsShuttle);
+            DestinationStation.UpdateProfile(
+                DestinationStation.Name,
+                DestinationStation.Slug,
+                DestinationStation.City,
+                DestinationStation.Province,
+                DestinationStation.AddressStreet,
+                DestinationLocation.Id,
+                DestinationStation.Latitude,
+                DestinationStation.Longitude,
+                DestinationStation.ContactPhone,
+                DestinationStation.ContactEmail,
+                DestinationStation.OperatingHours,
+                DestinationStation.Facilities,
+                DestinationStation.SupportsShuttle);
             Route = Route.Create(OperatorId, "HCM - HN", OriginStation.Id, DestinationStation.Id, Money.FromRaw(400000), 1000m, 720);
             Stations.AddRange([OriginStation, DestinationStation]);
+            Locations.AddRange([OriginLocation, DestinationLocation]);
             Identity = new FakeIdentityInternalClient(new Dictionary<Guid, string> { [OperatorId] = operatorName });
             Handler = new SearchTripsHandler(
                 new InMemoryTripRepository(Trips),
@@ -144,14 +198,18 @@ public sealed class TripHandlerProjectionTests
                 new InMemoryStationRepository(Stations),
                 new InMemoryTripSeatRepository(Seats),
                 new InMemoryTripStopRepository(Stops),
+                new InMemoryLocationRepository(Locations),
                 Identity);
             Query = new SearchTripsQuery(OriginStation.Id, DestinationStation.Id, new DateOnly(2026, 5, 18), 1, false);
         }
 
         public Guid OperatorId { get; }
+        public Location OriginLocation { get; }
+        public Location DestinationLocation { get; }
         public Station OriginStation { get; }
         public Station DestinationStation { get; }
         public Route Route { get; }
+        public List<Location> Locations { get; } = [];
         public List<Station> Stations { get; } = [];
         public List<DomainTrip> Trips { get; } = [];
         public List<TripSeat> Seats { get; } = [];
@@ -242,6 +300,39 @@ public sealed class TripHandlerProjectionTests
 
         public Task<bool> ExistsActiveOwnedByOperatorAsync(Guid operatorId, Guid routeId, CancellationToken cancellationToken) =>
             Task.FromResult(Query().Any(route => route.OperatorId == operatorId && route.Id == routeId && route.IsActive));
+    }
+
+    private sealed class InMemoryLocationRepository : InMemoryRepository<Location, Guid>, ILocationRepository
+    {
+        public InMemoryLocationRepository(List<Location> locations)
+            : base(locations, location => location.Id) { }
+
+        public Task<Location?> GetActiveByIdAsync(Guid id, CancellationToken cancellationToken) =>
+            Task.FromResult(Query().FirstOrDefault(location => location.Id == id && location.IsActive));
+
+        public Task<Location?> GetActiveByCodeAsync(string code, CancellationToken cancellationToken) =>
+            Task.FromResult(Query().FirstOrDefault(location =>
+                location.Code == code.Trim().ToUpperInvariant() && location.IsActive));
+
+        public Task<bool> ExistsByCodeAsync(string code, Guid? exceptId, CancellationToken cancellationToken) =>
+            Task.FromResult(Query().Any(location =>
+                location.Code == code.Trim().ToUpperInvariant()
+                && (!exceptId.HasValue || location.Id != exceptId.Value)));
+
+        public Task<IReadOnlyList<Location>> ListActiveAsync(CancellationToken cancellationToken) =>
+            Task.FromResult((IReadOnlyList<Location>)Query()
+                .Where(location => location.IsActive)
+                .OrderBy(location => location.SortOrder)
+                .ThenBy(location => location.Name)
+                .ToList());
+
+        public Task<PagedResult<Location>> ListAsync(
+            int page,
+            int pageSize,
+            string? search,
+            bool? isActive,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 
     private sealed class InMemoryStationRepository : InMemoryRepository<Station, Guid>, IStationRepository

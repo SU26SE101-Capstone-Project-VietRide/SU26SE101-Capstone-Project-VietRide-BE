@@ -36,6 +36,7 @@ public static class HangfireServiceCollectionExtensions
 
         var schemaName = configuration["Hangfire:SchemaName"] ?? DefaultSchemaName;
         var queueName = configuration["Hangfire:QueueName"] ?? DefaultQueueName;
+        var workerCount = configuration.GetValue<int?>("Hangfire:WorkerCount") ?? 2;
 
         services.AddHangfire(globalConfiguration => globalConfiguration
             .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
@@ -52,6 +53,7 @@ public static class HangfireServiceCollectionExtensions
         {
             options.ServerName = "vietride-trip";
             options.Queues = [queueName];
+            options.WorkerCount = workerCount;
         });
         services.AddHostedService<ExpiredSeatLockReleaseJobRegistrationHostedService>();
 
