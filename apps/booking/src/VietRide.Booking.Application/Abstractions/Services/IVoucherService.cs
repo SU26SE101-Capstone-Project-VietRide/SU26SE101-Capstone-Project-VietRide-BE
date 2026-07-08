@@ -56,7 +56,9 @@ public interface IVoucherService
         Guid userId,
         Money orderAmount,
         DateTimeOffset now,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        string service = "BOOKING",
+        string? paymentMethod = null);
 
     /// <summary>
     /// Writes the <c>VoucherUsage</c> row in the current unit-of-work (same DbContext transaction
@@ -71,6 +73,15 @@ public interface IVoucherService
         Money discountAmount,
         CancellationToken ct = default);
 
+    Task<Guid> RecordUsageForReferenceAsync(
+        Guid voucherId,
+        Guid userId,
+        string? referenceType,
+        Guid referenceId,
+        Guid? bookingGroupId,
+        Money discountAmount,
+        CancellationToken ct = default);
+
     /// <summary>
     /// Physically deletes the <c>VoucherUsage</c> row for the given booking (compensation path).
     /// <para>
@@ -80,6 +91,8 @@ public interface IVoucherService
     /// </para>
     /// </summary>
     Task CompensateAsync(Guid bookingId, CancellationToken ct = default);
+
+    Task CompensateByReferenceAsync(string referenceType, Guid referenceId, CancellationToken ct = default);
 }
 
 /// <summary>

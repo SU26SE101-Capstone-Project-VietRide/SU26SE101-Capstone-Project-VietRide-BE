@@ -28,6 +28,14 @@ internal sealed class VoucherConfiguration : IEntityTypeConfiguration<Voucher>
             table.HasCheckConstraint(
                 "chk_vouchers_operator_owned_funding",
                 "owner_operator_id IS NULL OR funding_type = 'OPERATOR_FUNDED'::voucher_funding_type");
+
+            table.HasCheckConstraint(
+                "chk_vouchers_applicable_services_valid",
+                "applicable_services <@ ARRAY['BOOKING', 'PARCEL']::text[] AND cardinality(applicable_services) > 0");
+
+            table.HasCheckConstraint(
+                "chk_vouchers_applicable_payment_methods_valid",
+                "applicable_payment_methods IS NULL OR applicable_payment_methods <@ ARRAY['WALLET', 'VNPAY']::text[]");
         });
 
         // BSOT sec 9.6 — soft-delete query filter excludes soft-deleted vouchers from normal queries.
@@ -92,6 +100,21 @@ internal sealed class VoucherConfiguration : IEntityTypeConfiguration<Voucher>
             .HasColumnName("valid_until")
             .IsRequired();
 
+        builder.Property(x => x.NewUserOnly)
+            .HasColumnName("new_user_only")
+            .HasDefaultValue(false)
+            .IsRequired();
+
+        builder.Property(x => x.ApplicablePaymentMethods)
+            .HasColumnName("applicable_payment_methods")
+            .HasColumnType("text[]")
+            .IsRequired(false);
+
+        builder.Property(x => x.ApplicableServices)
+            .HasColumnName("applicable_services")
+            .HasColumnType("text[]")
+            .IsRequired();
+
         builder.Property(x => x.ApplicableOperatorIds)
             .HasColumnName("applicable_operator_ids")
             .HasColumnType("uuid[]")
@@ -151,5 +174,8 @@ internal sealed class VoucherConfiguration : IEntityTypeConfiguration<Voucher>
         builder.HasIndex(x => x.OwnerOperatorId)
             .HasDatabaseName("idx_vouchers_owner_operator")
             .HasFilter("owner_operator_id IS NOT NULL AND deleted_at IS NULL");
+
+        builder.HasIndex(x => x.NewUserOnly)
+            .HasDatabaseName("idx_vouchers_new_user_only");
     }
 }

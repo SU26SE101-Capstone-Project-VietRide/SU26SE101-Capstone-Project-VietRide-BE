@@ -133,7 +133,17 @@ internal sealed class VoucherRepository : IVoucherRepository
     public async Task DeleteUsageByBookingAsync(Guid bookingId, CancellationToken ct = default)
     {
         var usage = await _db.VoucherUsages
-            .FirstOrDefaultAsync(u => u.BookingId == bookingId, ct);
+            .FirstOrDefaultAsync(u => u.ReferenceType == "BOOKING" && u.ReferenceId == bookingId, ct);
+        if (usage is not null)
+            _db.VoucherUsages.Remove(usage);
+    }
+
+    /// <inheritdoc/>
+    public async Task DeleteUsageByReferenceAsync(string referenceType, Guid referenceId, CancellationToken ct = default)
+    {
+        var normalized = referenceType.Trim().ToUpperInvariant();
+        var usage = await _db.VoucherUsages
+            .FirstOrDefaultAsync(u => u.ReferenceType == normalized && u.ReferenceId == referenceId, ct);
         if (usage is not null)
             _db.VoucherUsages.Remove(usage);
     }

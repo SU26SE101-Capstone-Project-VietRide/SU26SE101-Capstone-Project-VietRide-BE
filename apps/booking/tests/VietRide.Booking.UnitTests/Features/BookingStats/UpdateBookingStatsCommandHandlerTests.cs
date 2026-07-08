@@ -351,6 +351,9 @@ public sealed class UpdateBookingStatsCommandHandlerTests
         public Task<BookingEntity?> FindByIdWithPassengersAsync(Guid bookingId, CancellationToken ct = default)
             => GetByIdAsync(bookingId, ct);
 
+        public Task<bool> HasConfirmedBookingAsync(Guid passengerUserId, CancellationToken ct = default)
+            => Task.FromResult(_bookings.Values.Any(b => b.PassengerUserId == passengerUserId && b.Status == BookingStatus.CONFIRMED));
+
         public Task<BookingPaymentTransitionSnapshot?> GetPendingPaymentTransitionSnapshotAsync(
             Guid bookingId,
             CancellationToken ct = default)

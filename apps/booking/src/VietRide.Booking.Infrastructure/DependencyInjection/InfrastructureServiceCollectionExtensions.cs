@@ -108,6 +108,7 @@ public static class InfrastructureServiceCollectionExtensions
 
         // Repositories (Task 17.3)
         services.AddScoped<IBookingStatsRepository, BookingStatsRepository>();
+        services.AddScoped<ICampaignRepository, CampaignRepository>();
 
         // Application service (Task 12.3)
         // BookingService lives in Application layer; registered here because its ctor

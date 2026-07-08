@@ -36,6 +36,9 @@ public sealed class Voucher : BaseEntity<Guid>, ISoftDeletable, IActivatable
     public int? PerUserLimit { get; private set; }
     public DateTimeOffset ValidFrom { get; private set; }
     public DateTimeOffset ValidUntil { get; private set; }
+    public bool NewUserOnly { get; private set; }
+    public List<string> ApplicablePaymentMethods { get; private set; } = [];
+    public List<string> ApplicableServices { get; private set; } = ["BOOKING"];
 
     /// <summary>Logical FK identity.operators. NULL = applies to all operators (admin VIETRIDE_FUNDED only).</summary>
     public List<Guid> ApplicableOperatorIds { get; private set; } = [];
@@ -78,6 +81,45 @@ public sealed class Voucher : BaseEntity<Guid>, ISoftDeletable, IActivatable
         VoucherFundingType fundingType,
         Guid? ownerOperatorId,
         Guid createdByUserId)
+        => Create(
+            code,
+            name,
+            type,
+            value,
+            minOrderAmount,
+            maxDiscountAmount,
+            totalUsageLimit,
+            perUserLimit,
+            validFrom,
+            validUntil,
+            false,
+            null,
+            ["BOOKING"],
+            applicableOperatorIds,
+            applicableRouteIds,
+            fundingType,
+            ownerOperatorId,
+            createdByUserId);
+
+    public static Voucher Create(
+        string code,
+        string name,
+        VoucherType type,
+        long value,
+        Money minOrderAmount,
+        Money? maxDiscountAmount,
+        int? totalUsageLimit,
+        int? perUserLimit,
+        DateTimeOffset validFrom,
+        DateTimeOffset validUntil,
+        bool newUserOnly,
+        IReadOnlyCollection<string>? applicablePaymentMethods,
+        IReadOnlyCollection<string>? applicableServices,
+        IReadOnlyCollection<Guid>? applicableOperatorIds,
+        IReadOnlyCollection<Guid>? applicableRouteIds,
+        VoucherFundingType fundingType,
+        Guid? ownerOperatorId,
+        Guid createdByUserId)
     {
         if (string.IsNullOrWhiteSpace(code))
             throw new ArgumentException("Voucher code cannot be null or whitespace.", nameof(code));
@@ -115,6 +157,13 @@ public sealed class Voucher : BaseEntity<Guid>, ISoftDeletable, IActivatable
             PerUserLimit = perUserLimit,
             ValidFrom = validFrom,
             ValidUntil = validUntil,
+            NewUserOnly = newUserOnly,
+            ApplicablePaymentMethods = applicablePaymentMethods is null
+                ? []
+                : [.. applicablePaymentMethods.Select(x => x.Trim().ToUpperInvariant()).Where(x => x.Length > 0).Distinct()],
+            ApplicableServices = applicableServices is null || applicableServices.Count == 0
+                ? ["BOOKING"]
+                : [.. applicableServices.Select(x => x.Trim().ToUpperInvariant()).Where(x => x.Length > 0).Distinct()],
             ApplicableOperatorIds = applicableOperatorIds is null
                 ? []
                 : [.. applicableOperatorIds],
@@ -160,6 +209,33 @@ public sealed class Voucher : BaseEntity<Guid>, ISoftDeletable, IActivatable
         DateTimeOffset validFrom,
         DateTimeOffset validUntil,
         IReadOnlyCollection<Guid>? applicableRouteIds)
+        => UpdateMutableFields(
+            name,
+            value,
+            minOrderAmount,
+            maxDiscountAmount,
+            totalUsageLimit,
+            perUserLimit,
+            validFrom,
+            validUntil,
+            NewUserOnly,
+            ApplicablePaymentMethods,
+            ApplicableServices,
+            applicableRouteIds);
+
+    public void UpdateMutableFields(
+        string name,
+        long value,
+        Money minOrderAmount,
+        Money? maxDiscountAmount,
+        int? totalUsageLimit,
+        int? perUserLimit,
+        DateTimeOffset validFrom,
+        DateTimeOffset validUntil,
+        bool newUserOnly,
+        IReadOnlyCollection<string>? applicablePaymentMethods,
+        IReadOnlyCollection<string>? applicableServices,
+        IReadOnlyCollection<Guid>? applicableRouteIds)
     {
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("Voucher name cannot be null or whitespace.", nameof(name));
@@ -183,6 +259,13 @@ public sealed class Voucher : BaseEntity<Guid>, ISoftDeletable, IActivatable
         PerUserLimit = perUserLimit;
         ValidFrom = validFrom;
         ValidUntil = validUntil;
+        NewUserOnly = newUserOnly;
+        ApplicablePaymentMethods = applicablePaymentMethods is null
+            ? []
+            : [.. applicablePaymentMethods.Select(x => x.Trim().ToUpperInvariant()).Where(x => x.Length > 0).Distinct()];
+        ApplicableServices = applicableServices is null || applicableServices.Count == 0
+            ? ["BOOKING"]
+            : [.. applicableServices.Select(x => x.Trim().ToUpperInvariant()).Where(x => x.Length > 0).Distinct()];
         ApplicableRouteIds = applicableRouteIds is null
             ? []
             : [.. applicableRouteIds];

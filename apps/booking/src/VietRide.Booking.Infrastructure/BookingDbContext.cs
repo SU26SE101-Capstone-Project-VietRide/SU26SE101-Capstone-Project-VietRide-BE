@@ -20,6 +20,8 @@ public sealed class BookingDbContext : VietRideDbContextBase
     public DbSet<BookingPendingAction> BookingPendingActions => Set<BookingPendingAction>();
     public DbSet<Voucher> Vouchers => Set<Voucher>();
     public DbSet<VoucherUsage> VoucherUsages => Set<VoucherUsage>();
+    public DbSet<Campaign> Campaigns => Set<Campaign>();
+    public DbSet<CampaignVoucher> CampaignVouchers => Set<CampaignVoucher>();
     public DbSet<OperatorVoucherConsent> OperatorVoucherConsents => Set<OperatorVoucherConsent>();
     public DbSet<BookingStats> BookingStats => Set<BookingStats>();
     public DbSet<BookingStatsProcessedEvent> BookingStatsProcessedEvents => Set<BookingStatsProcessedEvent>();

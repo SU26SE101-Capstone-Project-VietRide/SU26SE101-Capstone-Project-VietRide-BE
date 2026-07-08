@@ -31,10 +31,12 @@ public class VoucherServiceTests
 
     private readonly IVoucherRepository _vouchers = Substitute.For<IVoucherRepository>();
     private readonly IOperatorVoucherConsentRepository _consents = Substitute.For<IOperatorVoucherConsentRepository>();
+    private readonly IBookingRepository _bookings = Substitute.For<IBookingRepository>();
 
     private Application.Services.VoucherService BuildSut() => new(
         _vouchers,
         _consents,
+        _bookings,
         NullLogger<Application.Services.VoucherService>.Instance);
 
     /// <summary>Creates a fully valid active platform VIETRIDE_FUNDED voucher.</summary>

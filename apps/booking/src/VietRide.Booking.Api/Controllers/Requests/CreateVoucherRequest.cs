@@ -31,6 +31,12 @@ public sealed class CreateVoucherRequest
 
     public DateTimeOffset ValidUntil { get; init; }
 
+    public bool NewUserOnly { get; init; }
+
+    public IReadOnlyList<string>? ApplicablePaymentMethods { get; init; }
+
+    public IReadOnlyList<string>? ApplicableServices { get; init; }
+
     /// <summary>Required for OPERATOR_FUNDED; optional for VIETRIDE_FUNDED (null = all operators).</summary>
     public IReadOnlyList<Guid>? ApplicableOperatorIds { get; init; }
 

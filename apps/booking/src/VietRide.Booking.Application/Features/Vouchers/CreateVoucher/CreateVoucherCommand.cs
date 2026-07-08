@@ -33,4 +33,7 @@ public sealed record CreateVoucherCommand(
     /// <summary>VIETRIDE_FUNDED or OPERATOR_FUNDED.</summary>
     string FundingType,
     /// <summary>JWT sub claim of the SYSTEM_ADMIN calling the endpoint.</summary>
-    Guid CreatedByUserId) : IRequest<CreateVoucherResult>;
+    Guid CreatedByUserId,
+    bool NewUserOnly = false,
+    IReadOnlyList<string>? ApplicablePaymentMethods = null,
+    IReadOnlyList<string>? ApplicableServices = null) : IRequest<CreateVoucherResult>;

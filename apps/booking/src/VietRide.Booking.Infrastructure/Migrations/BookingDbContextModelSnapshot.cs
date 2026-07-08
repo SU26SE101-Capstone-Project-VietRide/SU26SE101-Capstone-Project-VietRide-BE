@@ -385,6 +385,113 @@ namespace VietRide.Booking.Infrastructure.Migrations
                     b.ToTable("booking_stats_processed_events", "vietride_booking");
                 });
 
+            modelBuilder.Entity("VietRide.Booking.Domain.Entities.Campaign", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by_user_id");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text")
+                        .HasColumnName("description");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid?>("OwnerOperatorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("owner_operator_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<DateTimeOffset>("ValidFrom")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("valid_from");
+
+                    b.Property<DateTimeOffset>("ValidUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("valid_until");
+
+                    b.HasKey("Id")
+                        .HasName("pk_campaigns");
+
+                    b.HasIndex("OwnerOperatorId")
+                        .HasDatabaseName("idx_campaigns_owner_operator")
+                        .HasFilter("owner_operator_id IS NOT NULL AND deleted_at IS NULL");
+
+                    b.HasIndex("IsActive", "ValidUntil")
+                        .HasDatabaseName("idx_campaigns_active_validity");
+
+                    b.ToTable("campaigns", "vietride_booking", t =>
+                        {
+                            t.HasCheckConstraint("chk_campaigns_validity_window", "valid_until > valid_from");
+                        });
+                });
+
+            modelBuilder.Entity("VietRide.Booking.Domain.Entities.CampaignVoucher", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("campaign_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid>("VoucherId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("voucher_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_campaign_vouchers");
+
+                    b.HasIndex("VoucherId")
+                        .HasDatabaseName("idx_campaign_vouchers_voucher_id");
+
+                    b.HasIndex("CampaignId", "VoucherId")
+                        .IsUnique()
+                        .HasDatabaseName("uq_campaign_vouchers_campaign_voucher");
+
+                    b.ToTable("campaign_vouchers", "vietride_booking");
+                });
+
             modelBuilder.Entity("VietRide.Booking.Domain.Entities.OperatorVoucherConsent", b =>
                 {
                     b.Property<Guid>("Id")
@@ -625,9 +732,18 @@ namespace VietRide.Booking.Infrastructure.Migrations
                         .HasColumnType("uuid[]")
                         .HasColumnName("applicable_operator_ids");
 
+                    b.Property<List<string>>("ApplicablePaymentMethods")
+                        .HasColumnType("text[]")
+                        .HasColumnName("applicable_payment_methods");
+
                     b.Property<List<Guid>>("ApplicableRouteIds")
                         .HasColumnType("uuid[]")
                         .HasColumnName("applicable_route_ids");
+
+                    b.Property<List<string>>("ApplicableServices")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("applicable_services");
 
                     b.Property<string>("Code")
                         .IsRequired()
@@ -675,6 +791,12 @@ namespace VietRide.Booking.Infrastructure.Migrations
                         .HasColumnType("character varying(120)")
                         .HasColumnName("name");
 
+                    b.Property<bool>("NewUserOnly")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("new_user_only");
+
                     b.Property<Guid?>("OwnerOperatorId")
                         .HasColumnType("uuid")
                         .HasColumnName("owner_operator_id");
@@ -717,6 +839,9 @@ namespace VietRide.Booking.Infrastructure.Migrations
                         .HasDatabaseName("uq_vouchers_code")
                         .HasFilter("deleted_at IS NULL");
 
+                    b.HasIndex("NewUserOnly")
+                        .HasDatabaseName("idx_vouchers_new_user_only");
+
                     b.HasIndex("OwnerOperatorId")
                         .HasDatabaseName("idx_vouchers_owner_operator")
                         .HasFilter("owner_operator_id IS NOT NULL AND deleted_at IS NULL");
@@ -727,6 +852,10 @@ namespace VietRide.Booking.Infrastructure.Migrations
 
                     b.ToTable("vouchers", "vietride_booking", t =>
                         {
+                            t.HasCheckConstraint("chk_vouchers_applicable_payment_methods_valid", "applicable_payment_methods IS NULL OR applicable_payment_methods <@ ARRAY['WALLET', 'VNPAY']::text[]");
+
+                            t.HasCheckConstraint("chk_vouchers_applicable_services_valid", "applicable_services <@ ARRAY['BOOKING', 'PARCEL']::text[] AND cardinality(applicable_services) > 0");
+
                             t.HasCheckConstraint("chk_vouchers_min_order_non_negative", "min_order_amount >= 0");
 
                             t.HasCheckConstraint("chk_vouchers_operator_owned_funding", "owner_operator_id IS NULL OR funding_type = 'OPERATOR_FUNDED'::voucher_funding_type");
@@ -749,7 +878,7 @@ namespace VietRide.Booking.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("booking_group_id");
 
-                    b.Property<Guid>("BookingId")
+                    b.Property<Guid?>("BookingId")
                         .HasColumnType("uuid")
                         .HasColumnName("booking_id");
 
@@ -767,6 +896,16 @@ namespace VietRide.Booking.Infrastructure.Migrations
                         .HasColumnType("voucher_funding_type")
                         .HasColumnName("funded_by");
 
+                    b.Property<Guid>("ReferenceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("reference_id");
+
+                    b.Property<string>("ReferenceType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("reference_type");
+
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid")
                         .HasColumnName("user_id");
@@ -779,7 +918,11 @@ namespace VietRide.Booking.Infrastructure.Migrations
                         .HasName("pk_voucher_usages");
 
                     b.HasIndex("BookingId")
-                        .HasDatabaseName("idx_voucher_usages_booking_id");
+                        .HasDatabaseName("idx_voucher_usages_booking_id")
+                        .HasFilter("booking_id IS NOT NULL");
+
+                    b.HasIndex("ReferenceType", "ReferenceId")
+                        .HasDatabaseName("idx_voucher_usages_reference");
 
                     b.HasIndex("VoucherId", "BookingGroupId")
                         .HasDatabaseName("idx_voucher_usages_voucher_group")
@@ -858,6 +1001,27 @@ namespace VietRide.Booking.Infrastructure.Migrations
                     b.Navigation("Booking");
                 });
 
+            modelBuilder.Entity("VietRide.Booking.Domain.Entities.CampaignVoucher", b =>
+                {
+                    b.HasOne("VietRide.Booking.Domain.Entities.Campaign", "Campaign")
+                        .WithMany()
+                        .HasForeignKey("CampaignId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_campaign_vouchers_campaigns_campaign_id");
+
+                    b.HasOne("VietRide.Booking.Domain.Entities.Voucher", "Voucher")
+                        .WithMany()
+                        .HasForeignKey("VoucherId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_campaign_vouchers_vouchers_voucher_id");
+
+                    b.Navigation("Campaign");
+
+                    b.Navigation("Voucher");
+                });
+
             modelBuilder.Entity("VietRide.Booking.Domain.Entities.OperatorVoucherConsent", b =>
                 {
                     b.HasOne("VietRide.Booking.Domain.Entities.Voucher", "Voucher")
@@ -909,7 +1073,6 @@ namespace VietRide.Booking.Infrastructure.Migrations
                         .WithMany()
                         .HasForeignKey("BookingId")
                         .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
                         .HasConstraintName("fk_voucher_usages_bookings_booking_id");
 
                     b.HasOne("VietRide.Booking.Domain.Entities.Voucher", "Voucher")
