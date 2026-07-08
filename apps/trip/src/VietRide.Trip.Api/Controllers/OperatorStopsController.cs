@@ -40,7 +40,9 @@ public sealed class OperatorStopsController : ControllerBase
                 request.Longitude,
                 request.Description,
                 request.Address,
-                request.GooglePlaceId),
+                request.GooglePlaceId,
+                request.LocationId,
+                request.LocationCode),
             cancellationToken);
 
         return StatusCode(StatusCodes.Status201Created, response);

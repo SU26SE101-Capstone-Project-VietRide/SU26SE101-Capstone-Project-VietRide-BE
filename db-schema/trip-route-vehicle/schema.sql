@@ -61,6 +61,28 @@ CREATE TYPE outbox_event_status AS ENUM (
 -- -----------------------------------------------------------------------------
 -- stations (canonical platform-level — no operatorId)
 -- -----------------------------------------------------------------------------
+CREATE TABLE locations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code VARCHAR(20) NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    type VARCHAR(20) NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    sort_order INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_locations_type CHECK (type IN ('PROVINCE', 'MUNICIPALITY')),
+    CONSTRAINT chk_locations_sort_order_non_negative CHECK (sort_order >= 0)
+);
+
+CREATE UNIQUE INDEX uq_locations_code ON locations (code);
+CREATE INDEX idx_locations_active_sort ON locations (is_active, sort_order, name);
+
+COMMENT ON TABLE locations IS
+    'Admin-managed location catalog for FE trip search/cache. Stations and Stops point here via nullable location_id.';
+
+-- -----------------------------------------------------------------------------
+-- stations (canonical platform-level)
+-- -----------------------------------------------------------------------------
 CREATE TABLE stations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
@@ -68,6 +90,7 @@ CREATE TABLE stations (
     address_street VARCHAR(500) NULL,
     city VARCHAR(100) NOT NULL,
     province VARCHAR(100) NOT NULL,
+    location_id UUID NULL REFERENCES locations (id) ON DELETE SET NULL,
     latitude DECIMAL(10,7) NULL,
     longitude DECIMAL(10,7) NULL,
     contact_phone VARCHAR(20) NULL,
@@ -85,6 +108,8 @@ CREATE TABLE stations (
 
 CREATE UNIQUE INDEX uq_stations_slug ON stations (slug) WHERE deleted_at IS NULL;
 CREATE INDEX idx_stations_city_province ON stations (city, province) WHERE is_active = TRUE;
+CREATE INDEX idx_stations_location_id ON stations (location_id)
+    WHERE location_id IS NOT NULL AND is_active = TRUE;
 CREATE INDEX idx_stations_supports_shuttle ON stations (supports_shuttle) WHERE is_active = TRUE;
 CREATE INDEX idx_stations_name_trgm ON stations USING gin (name gin_trgm_ops)
     WHERE FALSE; -- placeholder: enable with pg_trgm if fuzzy autocomplete needed
@@ -125,6 +150,7 @@ CREATE TABLE stops (
     description TEXT NULL,
     latitude DECIMAL(10,7) NOT NULL,
     longitude DECIMAL(10,7) NOT NULL,
+    location_id UUID NULL REFERENCES locations (id) ON DELETE SET NULL,
     address VARCHAR(500) NULL,
     google_place_id VARCHAR(255) NULL,
     shared_suggestion BOOLEAN NOT NULL DEFAULT FALSE,
@@ -137,6 +163,8 @@ CREATE TABLE stops (
 );
 
 CREATE INDEX idx_stops_operator_id ON stops (operator_id) WHERE is_active = TRUE;
+CREATE INDEX idx_stops_location_id ON stops (location_id)
+    WHERE location_id IS NOT NULL AND is_active = TRUE;
 CREATE INDEX idx_stops_replaced_by ON stops (replaced_by_stop_id) WHERE replaced_by_stop_id IS NOT NULL;
 CREATE INDEX idx_stops_shared_suggestion ON stops (shared_suggestion) WHERE shared_suggestion = TRUE AND is_active = TRUE;
 

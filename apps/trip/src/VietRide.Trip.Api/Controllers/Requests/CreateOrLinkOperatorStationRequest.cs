@@ -17,4 +17,6 @@ public sealed record CreateOrLinkOperatorStationRequest(
     string? ContactEmail,
     JsonElement? OperatingHours,
     JsonElement? Facilities,
-    bool SupportsShuttle);
+    bool SupportsShuttle,
+    Guid? LocationId = null,
+    string? LocationCode = null);

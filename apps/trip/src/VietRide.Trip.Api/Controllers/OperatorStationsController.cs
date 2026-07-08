@@ -54,7 +54,9 @@ public sealed class OperatorStationsController : ControllerBase
             request.DisplayNameOverride,
             request.CounterLocation,
             isLinkBranch ? request.ContactPhone : null,
-            request.Instructions);
+            request.Instructions,
+            request.LocationId,
+            request.LocationCode);
 
         var response = await mediator.Send(command, cancellationToken);
         if (response.Warning is not null)

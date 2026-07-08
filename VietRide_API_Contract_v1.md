@@ -1272,11 +1272,74 @@ Auth: `OPERATOR_ADMIN` only. Idempotency: required. Source: v7:674-683. Precondi
 > track (calls them through an internal Trip HTTP client, mockable until Trip lands them).
 > Neither side may change the request/response shapes below without updating this section.
 
+## Location Catalog
+
+### GET `/v1/locations`
+
+Auth: public.
+
+Purpose: FE loads this once at app start and caches it for the origin/destination search UI. FE must not hardcode provinces/cities.
+
+Response `200`: active locations sorted by `sortOrder`, then `name`.
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": [
+    {
+      "id": "uuid",
+      "code": "HCM",
+      "name": "Ho Chi Minh City",
+      "type": "MUNICIPALITY",
+      "isActive": true,
+      "sortOrder": 5
+    }
+  ],
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-08T00:00:00Z" }
+}
+```
+
+### Admin Location APIs
+
+Auth: `SYSTEM_ADMIN`.
+
+Endpoints:
+- `GET /v1/admin/locations?page=&pageSize=&search=&isActive=`
+- `POST /v1/admin/locations`
+- `PATCH /v1/admin/locations/{id}`
+- `DELETE /v1/admin/locations/{id}` soft-deactivates the location.
+
+Create/update request:
+```json
+{
+  "code": "HCM",
+  "name": "Ho Chi Minh City",
+  "type": "MUNICIPALITY",
+  "sortOrder": 5,
+  "isActive": true
+}
+```
+
+Rules:
+- `code` is unique and normalized to uppercase.
+- `type` is `PROVINCE` or `MUNICIPALITY`.
+- Duplicate code returns `409 LOCATION_CODE_CONFLICT`.
+- Missing/inactive location references in station/stop/trip search validation return `422 VALIDATION_ERROR`.
+
 ### GET `/v1/trips/search`
 
 Auth: optional/passenger.
 
-Query: `originStationId`, `destinationStationId`, `departureDate`, `passengerCount`, `allowAlongRoutePickup?`.
+Query:
+- Specific station mode: `originStationId`, `destinationStationId`, `departureDate`, `passengerCount`, `allowAlongRoutePickup?`.
+- FE city/province mode: `originLocationCode`, `destinationLocationCode`, `departureDate`, `passengerCount`, `allowAlongRoutePickup?`.
+
+If both station IDs and location codes are sent, station IDs win because they are the more specific filter. Location-code mode finds active Stations under each Location, then searches Routes/Trips using those exact Stations. Response still returns concrete origin/destination Stations for display.
+
+Errors:
+- `422 VALIDATION_ERROR` if neither a station pair nor a location-code pair is provided.
+- `422 VALIDATION_ERROR` if a location code does not exist or is inactive.
+- No matching station/route/trip returns an empty `200` list.
 
 Response `200`:
 ```json
@@ -2660,7 +2723,9 @@ Errors:
 
 ### GET `/v1/stations/search`
 
-Auth: `OPERATOR_STAFF`, `OPERATOR_ADMIN`.
+Auth: public.
+
+Purpose: passenger/FE station autocomplete. Mutation endpoints remain operator/admin-only.
 
 Query: `q`, `city?`, `province?`.
 
@@ -2681,6 +2746,7 @@ Response `200`: `StationSearchResult[]` in the ADR 0004 success envelope.
   "name": "Bến xe Miền Tây",
   "city": "Ho Chi Minh City",
   "province": "Ho Chi Minh",
+  "locationId": "uuid",
   "latitude": 10.7212345,
   "longitude": 106.6267890,
   "addressStreet": "Kinh Dương Vương",
@@ -2714,6 +2780,8 @@ Create-Station branch request (field names derive from `stations` columns; JSON 
   "name": "Bến xe Miền Tây",
   "city": "Ho Chi Minh City",
   "province": "Ho Chi Minh",
+  "locationId": "uuid",
+  "locationCode": "HCM",
   "latitude": 10.7212345,
   "longitude": 106.6267890,
   "addressStreet": "Kinh Dương Vương",
@@ -2802,6 +2870,8 @@ Request:
   "description": "Điểm đón phía trước cổng chính",
   "latitude": 10.7321000,
   "longitude": 106.6142000,
+  "locationId": "uuid",
+  "locationCode": "HCM",
   "address": "123 Hồng Bàng, Quận 6",
   "googlePlaceId": "ChIJ1234567890"
 }

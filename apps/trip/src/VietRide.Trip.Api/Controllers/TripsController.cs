@@ -23,8 +23,10 @@ public sealed class TripsController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse<SearchTripsResult>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<SearchTripsResult>> SearchAsync(
-        [FromQuery] Guid originStationId,
-        [FromQuery] Guid destinationStationId,
+        [FromQuery] Guid? originStationId,
+        [FromQuery] Guid? destinationStationId,
+        [FromQuery] string? originLocationCode,
+        [FromQuery] string? destinationLocationCode,
         [FromQuery] DateOnly departureDate,
         [FromQuery] int passengerCount,
         [FromQuery] bool? allowAlongRoutePickup,
@@ -36,7 +38,9 @@ public sealed class TripsController : ControllerBase
                 destinationStationId,
                 departureDate,
                 passengerCount,
-                allowAlongRoutePickup),
+                allowAlongRoutePickup,
+                originLocationCode,
+                destinationLocationCode),
             cancellationToken));
     }
 

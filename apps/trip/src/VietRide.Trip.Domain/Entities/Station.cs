@@ -12,6 +12,7 @@ public sealed class Station : BaseEntity<Guid>, ISoftDeletable, IActivatable
     public string Name { get; private set; } = string.Empty;
     public string Slug { get; private set; } = string.Empty;
     public string? AddressStreet { get; private set; }
+    public Guid? LocationId { get; private set; }
     public string City { get; private set; } = string.Empty;
     public string Province { get; private set; } = string.Empty;
     public decimal? Latitude { get; private set; }
@@ -38,12 +39,14 @@ public sealed class Station : BaseEntity<Guid>, ISoftDeletable, IActivatable
         string? contactEmail = null,
         string? operatingHours = null,
         string? facilities = null,
-        bool supportsShuttle = false)
+        bool supportsShuttle = false,
+        Guid? locationId = null)
     {
         ValidateRequired(name, nameof(name));
         ValidateRequired(slug, nameof(slug));
         ValidateRequired(city, nameof(city));
         ValidateRequired(province, nameof(province));
+        ValidateOptionalGuid(locationId, nameof(locationId));
 
         return new Station
         {
@@ -53,6 +56,7 @@ public sealed class Station : BaseEntity<Guid>, ISoftDeletable, IActivatable
             City = city.Trim(),
             Province = province.Trim(),
             AddressStreet = NormalizeOptional(addressStreet),
+            LocationId = locationId,
             Latitude = latitude,
             Longitude = longitude,
             ContactPhone = NormalizeOptional(contactPhone),
@@ -70,6 +74,7 @@ public sealed class Station : BaseEntity<Guid>, ISoftDeletable, IActivatable
         string city,
         string province,
         string? addressStreet,
+        Guid? locationId,
         decimal? latitude,
         decimal? longitude,
         string? contactPhone,
@@ -82,12 +87,14 @@ public sealed class Station : BaseEntity<Guid>, ISoftDeletable, IActivatable
         ValidateRequired(slug, nameof(slug));
         ValidateRequired(city, nameof(city));
         ValidateRequired(province, nameof(province));
+        ValidateOptionalGuid(locationId, nameof(locationId));
 
         Name = name.Trim();
         Slug = slug.Trim();
         City = city.Trim();
         Province = province.Trim();
         AddressStreet = NormalizeOptional(addressStreet);
+        LocationId = locationId;
         Latitude = latitude;
         Longitude = longitude;
         ContactPhone = NormalizeOptional(contactPhone);
@@ -114,6 +121,14 @@ public sealed class Station : BaseEntity<Guid>, ISoftDeletable, IActivatable
         if (string.IsNullOrWhiteSpace(value))
         {
             throw new ArgumentException("Value cannot be null or whitespace.", parameterName);
+        }
+    }
+
+    private static void ValidateOptionalGuid(Guid? value, string parameterName)
+    {
+        if (value == Guid.Empty)
+        {
+            throw new ArgumentException("Value cannot be empty.", parameterName);
         }
     }
 }

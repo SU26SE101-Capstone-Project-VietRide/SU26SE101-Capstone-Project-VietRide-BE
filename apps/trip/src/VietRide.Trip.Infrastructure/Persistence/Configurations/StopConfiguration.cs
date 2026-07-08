@@ -36,6 +36,11 @@ internal sealed class StopConfiguration : IEntityTypeConfiguration<Stop>
             .HasColumnName("description")
             .IsRequired(false);
 
+        builder.Property(x => x.LocationId)
+            .HasColumnName("location_id")
+            .HasColumnType("uuid")
+            .IsRequired(false);
+
         builder.Property(x => x.Latitude)
             .HasColumnName("latitude")
             .HasColumnType("decimal(10,7)")
@@ -96,6 +101,10 @@ internal sealed class StopConfiguration : IEntityTypeConfiguration<Stop>
             .HasDatabaseName("idx_stops_operator_id")
             .HasFilter("is_active = TRUE");
 
+        builder.HasIndex(x => x.LocationId)
+            .HasDatabaseName("idx_stops_location_id")
+            .HasFilter("location_id IS NOT NULL AND is_active = TRUE");
+
         builder.HasIndex(x => x.ReplacedByStopId)
             .HasDatabaseName("idx_stops_replaced_by")
             .HasFilter("replaced_by_stop_id IS NOT NULL");
@@ -105,5 +114,10 @@ internal sealed class StopConfiguration : IEntityTypeConfiguration<Stop>
             .HasFilter("shared_suggestion = TRUE AND is_active = TRUE");
 
         builder.HasQueryFilter(x => x.DeletedAt == null);
+
+        builder.HasOne<Location>()
+            .WithMany()
+            .HasForeignKey(x => x.LocationId)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }

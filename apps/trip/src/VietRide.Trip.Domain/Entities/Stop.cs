@@ -12,6 +12,7 @@ public sealed class Stop : BaseEntity<Guid>, ISoftDeletable, IActivatable
     public Guid OperatorId { get; private set; }
     public string Name { get; private set; } = string.Empty;
     public string? Description { get; private set; }
+    public Guid? LocationId { get; private set; }
     public decimal Latitude { get; private set; }
     public decimal Longitude { get; private set; }
     public string? Address { get; private set; }
@@ -30,10 +31,12 @@ public sealed class Stop : BaseEntity<Guid>, ISoftDeletable, IActivatable
         decimal longitude,
         string? description = null,
         string? address = null,
-        string? googlePlaceId = null)
+        string? googlePlaceId = null,
+        Guid? locationId = null)
     {
         ValidateGuid(operatorId, nameof(operatorId));
         ValidateRequired(name, nameof(name));
+        ValidateOptionalGuid(locationId, nameof(locationId));
         ValidateCoordinates(latitude, longitude);
 
         return new Stop
@@ -41,6 +44,7 @@ public sealed class Stop : BaseEntity<Guid>, ISoftDeletable, IActivatable
             Id = Guid.NewGuid(),
             OperatorId = operatorId,
             Name = name.Trim(),
+            LocationId = locationId,
             Latitude = latitude,
             Longitude = longitude,
             Description = NormalizeOptional(description),
@@ -56,13 +60,16 @@ public sealed class Stop : BaseEntity<Guid>, ISoftDeletable, IActivatable
         decimal latitude,
         decimal longitude,
         string? description,
+        Guid? locationId,
         string? address,
         string? googlePlaceId)
     {
         ValidateRequired(name, nameof(name));
+        ValidateOptionalGuid(locationId, nameof(locationId));
         ValidateCoordinates(latitude, longitude);
 
         Name = name.Trim();
+        LocationId = locationId;
         Latitude = latitude;
         Longitude = longitude;
         Description = NormalizeOptional(description);
@@ -104,6 +111,14 @@ public sealed class Stop : BaseEntity<Guid>, ISoftDeletable, IActivatable
     }
 
     private static void ValidateGuid(Guid value, string parameterName)
+    {
+        if (value == Guid.Empty)
+        {
+            throw new ArgumentException("Value cannot be empty.", parameterName);
+        }
+    }
+
+    private static void ValidateOptionalGuid(Guid? value, string parameterName)
     {
         if (value == Guid.Empty)
         {

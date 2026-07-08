@@ -31,6 +31,8 @@ public sealed class TripDbContext : VietRideDbContextBase
         builder.MapEnum<VehicleStatus>("vehicle_status", PostgresEnumNameTranslator);
     }
 
+    public DbSet<Location> Locations => Set<Location>();
+
     public DbSet<Station> Stations => Set<Station>();
 
     public DbSet<OperatorStation> OperatorStations => Set<OperatorStation>();

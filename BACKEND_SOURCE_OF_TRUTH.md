@@ -1066,6 +1066,8 @@ Idempotent: chạy migration 2 lần không lỗi (EF Core / Prisma migrations h
 
 #### Trip-Route-Vehicle (`vietride_trip`)
 
+`Location` is the admin-managed public origin/destination catalog used by FE trip search; `Station.locationId` and `Stop.locationId` are nullable links to this catalog.
+
 `Station` · `OperatorStation` · `Stop` · `Route` · `RouteStop` · `RouteStopFareTemplate` · `AlternativeRoute` · `AlternativeRouteStop` · `VehicleType` · `Vehicle` · `Trip` · `TripSeat` · `TripStop` · `TripStopFare` · `DriverSchedule` · `TripGenerationSkipLog` · `ShuttleTrip` · `ShuttlePassenger` · `Incident` · `OutboxEvent`
 
 #### Booking (`vietride_booking`)
@@ -1394,6 +1396,8 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | | `ALTERNATIVE_ROUTE_LIMIT_EXCEEDED` | 422 | Day-8 config-time third active AlternativeRoute for the same Route |
 | **Station** | `STATION_NOT_FOUND` | 404 | Day-7 Trip Station handlers use coded 404 path |
 | | `STATION_DUPLICATE_NEARBY` | 200 (warning) | Operator tạo Station < 100m gần Station hiện có |
+| **Location** | `LOCATION_NOT_FOUND` | 404 | Admin Location update/deactivate target does not exist |
+| | `LOCATION_CODE_CONFLICT` | 409 | Admin Location code already exists |
 | **Invoice** | `INVOICE_NOT_FOUND` | 404 | |
 | | `INVOICE_PDF_GENERATION_FAILED` | 500 | Hangfire retry job |
 | **Operator** | `OPERATOR_DUPLICATE_REGISTRATION` | 409 | businessRegistrationNumber trùng |
@@ -2698,6 +2702,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.21.0** | 2026-07-08 | BE lead (Vu) | **MINOR** - Add Trip-owned `Location` catalog for FE origin/destination search. Public `GET /v1/locations` supplies cacheable active locations; `SYSTEM_ADMIN` manages `/v1/admin/locations`; `GET /v1/trips/search` supports `originLocationCode`/`destinationLocationCode` while keeping station-id search; Station/Stop create accept `locationId` or `locationCode`; `GET /v1/stations/search` is public for passenger/FE autocomplete. Register Location error codes `LOCATION_NOT_FOUND` and `LOCATION_CODE_CONFLICT`. |
 | **1.20.0** | 2026-07-06 | BE lead (Vu) | **MINOR** - Split Booking order from per-seat Ticket. Booking remains the order/history aggregate; Ticket is the proof of travel and QR identity (`ticketCode` format `VT-yyyyMMdd-XXXXXXXX`), linked 1:1 with Passenger boarding records. Register Booking internal snapshot `GET /internal/v1/bookings/{id}` for Parcel with active ticket count, extend booking integration event payloads with optional `bookingCode`, `ticketCodes`, and `ticketCount`, and add boarding errors `TICKET_NOT_FOUND` / `TICKET_NOT_BOARDABLE`. |
 | **1.19.0** | 2026-06-30 | BE lead (Vũ) | **MINOR** — Freeze the Day-18 boarding-warning integration-event contract: register `trip.stop.departed_with_pending` with payload `{ eventId: Guid, occurredAt: DateTime (UTC), eventType: "trip.stop.departed_with_pending", tripId: Guid, stopId: Guid, stopName: string, pendingPassengerCount: int (> 0), driverUserId: Guid, assistantUserId: Guid?, departedAt: DateTimeOffset (UTC ISO-8601) }` for the Notification-owned Driver App alert consumer. `eventType` is the constant routing key; `occurredAt` matches `IntegrationEventBase` serialization, while `departedAt` is serialized as UTC. Day 18 is registry/contract only; the Trip Outbox emitter and the Day-24 `NO_SHOW` detection flow remain explicitly deferred to Day 24. No service code, handler wiring, test, or DDL change. |
 | **1.18.0** | 2026-06-30 | BE lead (Vũ) | **MINOR** — Day-18 additive extension of the FROZEN Trip→Booking `TripSnapshot` inter-service DTO: append nullable `DriverUserId` and `AssistantUserId` (`Guid?`) without removing, reordering, or retyping existing fields. The mirrored `GET /internal/v1/trips/{tripId}` raw-DTO contract now exposes `driverUserId`/`assistantUserId` as logical user keys for downstream trip-assignment authorization; no cross-database FK or EF relationship is introduced. |

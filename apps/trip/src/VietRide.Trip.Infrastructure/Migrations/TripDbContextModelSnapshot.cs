@@ -87,6 +87,74 @@ namespace VietRide.Trip.Infrastructure.Migrations
                     b.ToTable("outbox_events", "vietride_trip");
                 });
 
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.Location", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<int>("SortOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("sort_order");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("type");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("Id")
+                        .HasName("pk_locations");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("uq_locations_code");
+
+                    b.HasIndex("IsActive", "SortOrder", "Name")
+                        .HasDatabaseName("idx_locations_active_sort");
+
+                    b.ToTable("locations", "vietride_trip", t =>
+                        {
+                            t.HasCheckConstraint("chk_locations_sort_order_non_negative", "sort_order >= 0");
+
+                            t.HasCheckConstraint("chk_locations_type", "type IN ('PROVINCE', 'MUNICIPALITY')");
+                        });
+                });
+
             modelBuilder.Entity("VietRide.Trip.Domain.Entities.AlternativeRoute", b =>
                 {
                     b.Property<Guid>("Id")
@@ -613,6 +681,10 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .HasColumnType("decimal(10,7)")
                         .HasColumnName("longitude");
 
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("location_id");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(255)
@@ -664,6 +736,10 @@ namespace VietRide.Trip.Infrastructure.Migrations
                     b.HasIndex("SupportsShuttle")
                         .HasDatabaseName("idx_stations_supports_shuttle")
                         .HasFilter("is_active = TRUE");
+
+                    b.HasIndex("LocationId")
+                        .HasDatabaseName("idx_stations_location_id")
+                        .HasFilter("location_id IS NOT NULL AND is_active = TRUE");
 
                     b.HasIndex("City", "Province")
                         .HasDatabaseName("idx_stations_city_province")
@@ -718,6 +794,10 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .HasColumnType("decimal(10,7)")
                         .HasColumnName("longitude");
 
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("location_id");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(255)
@@ -758,6 +838,10 @@ namespace VietRide.Trip.Infrastructure.Migrations
                     b.HasIndex("SharedSuggestion")
                         .HasDatabaseName("idx_stops_shared_suggestion")
                         .HasFilter("shared_suggestion = TRUE AND is_active = TRUE");
+
+                    b.HasIndex("LocationId")
+                        .HasDatabaseName("idx_stops_location_id")
+                        .HasFilter("location_id IS NOT NULL AND is_active = TRUE");
 
                     b.ToTable("stops", "vietride_trip", t =>
                         {
@@ -1466,8 +1550,21 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.Station", b =>
+                {
+                    b.HasOne("VietRide.Trip.Domain.Entities.Location", null)
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
             modelBuilder.Entity("VietRide.Trip.Domain.Entities.Stop", b =>
                 {
+                    b.HasOne("VietRide.Trip.Domain.Entities.Location", null)
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("VietRide.Trip.Domain.Entities.Stop", null)
                         .WithMany()
                         .HasForeignKey("ReplacedByStopId")

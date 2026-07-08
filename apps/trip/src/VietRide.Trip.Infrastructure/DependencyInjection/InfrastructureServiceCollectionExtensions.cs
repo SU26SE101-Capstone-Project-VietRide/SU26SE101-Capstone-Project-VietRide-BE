@@ -29,6 +29,7 @@ public static class InfrastructureServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
+        services.AddScoped<ILocationRepository, LocationRepository>();
         services.AddScoped<IStationRepository, StationRepository>();
         services.AddScoped<IOperatorStationRepository, OperatorStationRepository>();
         services.AddScoped<IStopRepository, StopRepository>();

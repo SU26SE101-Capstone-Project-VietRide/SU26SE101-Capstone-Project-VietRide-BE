@@ -16,5 +16,6 @@ internal static class StopMapper
             stop.GooglePlaceId,
             stop.IsActive,
             stop.CreatedAt,
-            stop.UpdatedAt);
+            stop.UpdatedAt,
+            stop.LocationId);
 }

@@ -6,4 +6,6 @@ public sealed record CreateStopRequest(
     decimal? Longitude,
     string? Description,
     string? Address,
-    string? GooglePlaceId);
+    string? GooglePlaceId,
+    Guid? LocationId = null,
+    string? LocationCode = null);

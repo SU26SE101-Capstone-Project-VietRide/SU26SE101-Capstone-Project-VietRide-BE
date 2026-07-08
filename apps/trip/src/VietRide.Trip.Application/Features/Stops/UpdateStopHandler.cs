@@ -45,6 +45,7 @@ public sealed class UpdateStopHandler : IRequestHandler<UpdateStopCommand, StopD
             request.Latitude ?? stop.Latitude,
             request.Longitude ?? stop.Longitude,
             request.Description ?? stop.Description,
+            stop.LocationId,
             request.Address ?? stop.Address,
             request.GooglePlaceId ?? stop.GooglePlaceId);
 
