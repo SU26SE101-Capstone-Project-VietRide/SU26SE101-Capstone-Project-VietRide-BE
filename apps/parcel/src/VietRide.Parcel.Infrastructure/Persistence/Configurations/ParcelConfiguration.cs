@@ -20,7 +20,10 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
         {
             table.HasCheckConstraint("chk_parcels_amounts_non_negative", "deposit_amount >= 0 AND additional_amount >= 0");
             table.HasCheckConstraint("chk_parcels_weight_positive", "estimated_weight_kg > 0");
+            table.HasCheckConstraint("chk_parcels_dimensions_positive", "estimated_length_cm > 0 AND estimated_width_cm > 0 AND estimated_height_cm > 0");
+            table.HasCheckConstraint("chk_parcels_volume_positive", "estimated_volume_m3 > 0");
             table.HasCheckConstraint("chk_parcels_actual_weight_positive", "actual_weight_kg IS NULL OR actual_weight_kg > 0");
+            table.HasCheckConstraint("chk_parcels_actual_dimensions_positive", "(actual_length_cm IS NULL AND actual_width_cm IS NULL AND actual_height_cm IS NULL) OR (actual_length_cm > 0 AND actual_width_cm > 0 AND actual_height_cm > 0)");
         });
 
         builder.HasKey(x => x.Id);
@@ -96,13 +99,61 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
             .HasColumnType(ParcelSizeCategoryType)
             .IsRequired();
 
+        builder.Property(x => x.EstimatedLengthCm)
+            .HasColumnName("estimated_length_cm")
+            .HasColumnType("decimal(8,2)")
+            .HasDefaultValue(1m);
+        builder.Property(x => x.EstimatedWidthCm)
+            .HasColumnName("estimated_width_cm")
+            .HasColumnType("decimal(8,2)")
+            .HasDefaultValue(1m);
+        builder.Property(x => x.EstimatedHeightCm)
+            .HasColumnName("estimated_height_cm")
+            .HasColumnType("decimal(8,2)")
+            .HasDefaultValue(1m);
         builder.Property(x => x.EstimatedWeightKg)
             .HasColumnName("estimated_weight_kg")
             .HasColumnType("decimal(8,2)")
             .IsRequired();
+        builder.Property(x => x.EstimatedVolumeM3)
+            .HasColumnName("estimated_volume_m3")
+            .HasColumnType("decimal(10,4)")
+            .HasDefaultValue(0.0001m);
+        builder.Property(x => x.EstimatedDimWeightKg)
+            .HasColumnName("estimated_dim_weight_kg")
+            .HasColumnType("decimal(8,2)")
+            .HasDefaultValue(0.01m);
+        builder.Property(x => x.EstimatedChargeableWeightKg)
+            .HasColumnName("estimated_chargeable_weight_kg")
+            .HasColumnType("decimal(8,2)")
+            .HasDefaultValue(0.01m);
 
+        builder.Property(x => x.ActualLengthCm)
+            .HasColumnName("actual_length_cm")
+            .HasColumnType("decimal(8,2)")
+            .IsRequired(false);
+        builder.Property(x => x.ActualWidthCm)
+            .HasColumnName("actual_width_cm")
+            .HasColumnType("decimal(8,2)")
+            .IsRequired(false);
+        builder.Property(x => x.ActualHeightCm)
+            .HasColumnName("actual_height_cm")
+            .HasColumnType("decimal(8,2)")
+            .IsRequired(false);
         builder.Property(x => x.ActualWeightKg)
             .HasColumnName("actual_weight_kg")
+            .HasColumnType("decimal(8,2)")
+            .IsRequired(false);
+        builder.Property(x => x.ActualVolumeM3)
+            .HasColumnName("actual_volume_m3")
+            .HasColumnType("decimal(10,4)")
+            .IsRequired(false);
+        builder.Property(x => x.ActualDimWeightKg)
+            .HasColumnName("actual_dim_weight_kg")
+            .HasColumnType("decimal(8,2)")
+            .IsRequired(false);
+        builder.Property(x => x.ActualChargeableWeightKg)
+            .HasColumnName("actual_chargeable_weight_kg")
             .HasColumnType("decimal(8,2)")
             .IsRequired(false);
 
@@ -112,6 +163,17 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
             .HasDefaultValueSql("'TERMINAL_PICKUP'")
             .IsRequired();
 
+        builder.Property(x => x.TotalPrice)
+            .HasColumnName("total_price_vnd")
+            .HasColumnType("bigint")
+            .HasConversion(m => m.Amount, amount => Money.FromRaw(amount))
+            .HasDefaultValueSql("0")
+            .IsRequired();
+        builder.Property(x => x.DepositPercent)
+            .HasColumnName("deposit_percent")
+            .HasColumnType("decimal(5,2)")
+            .HasDefaultValue(100m)
+            .IsRequired();
         builder.Property(x => x.DepositAmount)
             .HasColumnName("deposit_amount")
             .HasColumnType("bigint")
@@ -147,6 +209,12 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
             .HasConversion(m => m.Amount, amount => Money.FromRaw(amount))
             .HasDefaultValueSql("0")
             .IsRequired();
+        builder.Property(x => x.RefundAmount)
+            .HasColumnName("refund_amount")
+            .HasColumnType("bigint")
+            .HasConversion(m => m.Amount, amount => Money.FromRaw(amount))
+            .HasDefaultValueSql("0")
+            .IsRequired();
 
         builder.Property(x => x.AdditionalPaymentId)
             .HasColumnName("additional_payment_id")
@@ -161,6 +229,15 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
             .HasColumnName("status")
             .HasColumnType(ParcelStatusType)
             .IsRequired();
+        builder.Property(x => x.PendingActionType)
+            .HasColumnName("pending_action_type")
+            .HasConversion<string>()
+            .HasMaxLength(40)
+            .IsRequired(false);
+        builder.Property(x => x.PendingActionReason)
+            .HasColumnName("pending_action_reason")
+            .HasColumnType("text")
+            .IsRequired(false);
 
         builder.Property(x => x.RejectionReason)
             .HasColumnName("rejection_reason")

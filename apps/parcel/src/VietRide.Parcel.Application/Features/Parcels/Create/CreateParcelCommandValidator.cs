@@ -34,6 +34,13 @@ public sealed class CreateParcelCommandValidator : AbstractValidator<CreateParce
         RuleFor(x => x.EstimatedWeightKg)
             .GreaterThan(0);
 
+        RuleFor(x => x.LengthCm)
+            .GreaterThan(0);
+        RuleFor(x => x.WidthCm)
+            .GreaterThan(0);
+        RuleFor(x => x.HeightCm)
+            .GreaterThan(0);
+
         RuleFor(x => x.DeliveryMethod)
             .NotEmpty()
             .Must(v => v == "TERMINAL_PICKUP")

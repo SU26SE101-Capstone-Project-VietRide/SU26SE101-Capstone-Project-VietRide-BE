@@ -10,6 +10,8 @@ public sealed class ParcelRouteFare : BaseEntity<Guid>
     public ParcelSizeCategory SizeCategory { get; private set; }
     public Guid OperatorId { get; private set; }
     public Money PriceVnd { get; private set; }
+    public Money PricePerChargeableKgVnd { get; private set; }
+    public Money MinimumPriceVnd { get; private set; }
     public DateTimeOffset EffectiveFrom { get; private set; }
     public DateTimeOffset? EffectiveUntil { get; private set; }
 
@@ -30,6 +32,8 @@ public sealed class ParcelRouteFare : BaseEntity<Guid>
             SizeCategory = sizeCategory,
             OperatorId = operatorId,
             PriceVnd = priceVnd,
+            PricePerChargeableKgVnd = priceVnd,
+            MinimumPriceVnd = Money.Zero,
             EffectiveFrom = effectiveFrom,
             EffectiveUntil = effectiveUntil,
         };
@@ -38,6 +42,13 @@ public sealed class ParcelRouteFare : BaseEntity<Guid>
     public void UpdatePrice(Money newPrice)
     {
         PriceVnd = newPrice;
+        PricePerChargeableKgVnd = newPrice;
+    }
+
+    public void UpdateWeightPricing(Money pricePerChargeableKg, Money minimumPrice)
+    {
+        PricePerChargeableKgVnd = pricePerChargeableKg;
+        MinimumPriceVnd = minimumPrice;
     }
 
     public void UpdateEffectiveWindow(DateTimeOffset effectiveFrom, DateTimeOffset? effectiveUntil)
