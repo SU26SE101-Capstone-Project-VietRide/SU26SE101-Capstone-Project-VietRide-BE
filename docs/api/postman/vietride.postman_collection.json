@@ -389,6 +389,50 @@
           }
         },
         {
+          "name": "Forgot password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/forgot-password",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "auth", "forgot-password"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\"\n}"
+            },
+            "description": "Requests a PASSWORD_RESET OTP. Unknown or non-eligible emails still return generic 200 success."
+          }
+        },
+        {
+          "name": "Reset password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/reset-password",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "auth", "reset-password"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"code\": \"{{otpCode}}\",\n  \"newPassword\": \"{{password}}\"\n}"
+            },
+            "description": "Consumes a PASSWORD_RESET OTP and revokes active refresh tokens on success."
+          }
+        },
+        {
           "name": "Login passenger",
           "event": [
             {

@@ -167,6 +167,8 @@ describe('buildRouteTable', () => {
     const publicPrefixes = [
       '/v1/auth/register',
       '/v1/auth/verify-email',
+      '/v1/auth/forgot-password',
+      '/v1/auth/reset-password',
       '/v1/auth/set-initial-password',
       '/v1/auth/login',
       '/v1/auth/google',
@@ -191,6 +193,16 @@ describe('buildRouteTable', () => {
     expect(route?.prefix).toBe('/v1/auth/set-initial-password');
     expect(route?.authRequired).toBe('none');
     expect(route?.target).toBe(env.IDENTITY_BASE_URL);
+  });
+
+  it('matches password reset endpoints to dedicated public auth routes', () => {
+    const forgotRoute = matchRoute(routes, '/v1/auth/forgot-password');
+    const resetRoute = matchRoute(routes, '/v1/auth/reset-password');
+
+    [forgotRoute, resetRoute].forEach((route) => {
+      expect(route?.target).toBe(env.IDENTITY_BASE_URL);
+      expect(route?.authRequired).toBe('none');
+    });
   });
 
   it('logout and other non-public auth paths require user auth', () => {

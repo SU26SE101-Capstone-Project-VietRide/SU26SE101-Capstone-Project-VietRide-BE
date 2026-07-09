@@ -1559,6 +1559,7 @@ Booking → Trip:      sign new Internal JWT với callerService="booking" (gi�
 - VNPay IPN callback (`POST /v1/payments/vnpay-ipn`, `/v1/payments/vnpay-topup-ipn`) — verify HMAC-SHA512.
 - Parcel delivery email link confirmation (token-based, no JWT).
 - Public registration / OTP request endpoints (`POST /v1/auth/register`, `POST /v1/operators/register`).
+- Public password reset endpoints (`POST /v1/auth/forgot-password`, `POST /v1/auth/reset-password`).
 - JWKS public endpoint.
 
 ### 6.5 Socket.IO authentication (Tracking)
@@ -1634,12 +1635,13 @@ PENDING | APPROVED | REJECTED | SUSPENDED
 - Min 8 ký tự, ≥1 chữ + ≥1 số.
 - Hash bcrypt cost 12.
 - Password change require verify mật khẩu cũ.
+- Password reset for any `ACTIVE` user role uses a `PASSWORD_RESET` email OTP. `forgot-password` returns generic success for unknown/non-eligible emails; `reset-password` marks the OTP used, hashes the new password, and revokes active refresh tokens with reason `PASSWORD_RESET`.
 - **Account lockout:** 5 lần sai trong 15 phút → `User.status = LOCKED`. Chỉ System Admin mở khóa. Login thành công reset counter.
 - Track `failedLoginAttempts` + `lastFailedLoginAt` trên User entity.
 
 ### 6.9 Email OTP — 2 lớp bảo vệ
 
-- **Rate limit:** Redis `identity:otp_rate:{email}` max 3/giờ TTL 1h.
+- **Rate limit:** Redis `identity:otp_rate:{email}` max 3/giờ TTL 1h for registration OTP, and `identity:pwd_reset_rate:{email}` max 3/giờ TTL 1h for password reset OTP.
 - **Brute-force:** `EmailVerificationToken.failedAttempts` increment mỗi nhập sai; invalidate sau 5 lần.
 
 ### 6.10 RBAC enforcement pattern
@@ -2705,6 +2707,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.23.0** | 2026-07-09 | BE lead (Vu) | **MINOR** - Add public Identity password reset for all `ACTIVE` user roles. `POST /v1/auth/forgot-password` issues a generic response and sends a `PASSWORD_RESET` OTP only for eligible accounts; `POST /v1/auth/reset-password` consumes the OTP, hashes the new password, and revokes active refresh tokens with `PASSWORD_RESET`. No DDL, dependency, or event-key change; reuses `email_verification_tokens`, `identity.otp.requested`, and Redis `identity:pwd_reset_rate:{email}`. |
 | **1.22.0** | 2026-07-09 | BE lead (Vu) | **MINOR** - Add operator-managed Google precision-5 path geometry for Route and AlternativeRoute. Register two `PUT .../geometry` endpoints, nullable `path_polyline` storage, validation/error codes, safe invalidation after route-shape edits, and Trip internal route-geometry preference with TripStop fallback. No new event, dependency, Gateway prefix, or Idempotency-Key requirement. |
 | **1.21.0** | 2026-07-08 | BE lead (Vu) | **MINOR** - Add Trip-owned `Location` catalog for FE origin/destination search. Public `GET /v1/locations` supplies cacheable active locations; `SYSTEM_ADMIN` manages `/v1/admin/locations`; `GET /v1/trips/search` supports `originLocationCode`/`destinationLocationCode` while keeping station-id search; Station/Stop create accept `locationId` or `locationCode`; `GET /v1/stations/search` is public for passenger/FE autocomplete. Register Location error codes `LOCATION_NOT_FOUND` and `LOCATION_CODE_CONFLICT`. |
 | **1.20.0** | 2026-07-06 | BE lead (Vu) | **MINOR** - Split Booking order from per-seat Ticket. Booking remains the order/history aggregate; Ticket is the proof of travel and QR identity (`ticketCode` format `VT-yyyyMMdd-XXXXXXXX`), linked 1:1 with Passenger boarding records. Register Booking internal snapshot `GET /internal/v1/bookings/{id}` for Parcel with active ticket count, extend booking integration event payloads with optional `bookingCode`, `ticketCodes`, and `ticketCount`, and add boarding errors `TICKET_NOT_FOUND` / `TICKET_NOT_BOARDABLE`. |

@@ -156,6 +156,86 @@ Error `429` - OTP rate limit exceeded:
 }
 ```
 
+### POST `/v1/auth/forgot-password`
+
+Auth: public. Requests a password-reset OTP for an `ACTIVE` user. To prevent account enumeration, unknown emails and non-eligible accounts return the same `200` shape without sending an OTP.
+
+Request:
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "email": "user@example.com",
+    "otpTtlMinutes": 5
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `429` - password reset OTP rate limit exceeded:
+```json
+{
+  "success": false,
+  "statusCode": 429,
+  "error": { "code": "AUTH_OTP_RATE_LIMIT_EXCEEDED", "message": "Too many OTP requests. Please try again later." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+### POST `/v1/auth/reset-password`
+
+Auth: public. Resets the password for an `ACTIVE` user using a `PASSWORD_RESET` OTP. On success, all active refresh tokens for that user are revoked with reason `PASSWORD_RESET`.
+
+Request:
+```json
+{
+  "email": "user@example.com",
+  "code": "123456",
+  "newPassword": "Password123!"
+}
+```
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "userId": "uuid",
+    "status": "ACTIVE"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `400` - wrong OTP code or non-eligible account:
+```json
+{
+  "success": false,
+  "statusCode": 400,
+  "error": { "code": "AUTH_OTP_INVALID", "message": "Ma xac thuc khong dung." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Error `400` - expired OTP:
+```json
+{
+  "success": false,
+  "statusCode": 400,
+  "error": { "code": "AUTH_OTP_EXPIRED", "message": "Ma xac thuc da het han." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
 ### POST `/v1/auth/login`
 
 Auth: public.
