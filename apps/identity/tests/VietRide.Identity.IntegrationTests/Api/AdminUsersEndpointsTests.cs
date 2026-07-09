@@ -9,6 +9,7 @@ using MediatR;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
@@ -18,6 +19,8 @@ using VietRide.Identity.Application.Features.Admin.CreateAdminUser;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Identity.Infrastructure;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Persistence;
+using VietRide.Shared.Persistence.Outbox;
 
 namespace VietRide.Identity.IntegrationTests.Api;
 
@@ -209,8 +212,29 @@ public sealed class AdminUsersEndpointsTests : IClassFixture<AuthWebApplicationF
 
             builder.ConfigureServices(services =>
             {
+                services.RemoveAll<NpgsqlDataSource>();
                 services.RemoveAll<IEmailService>();
+                services.RemoveAll<DbContextOptions<IdentityDbContext>>();
+                services.RemoveAll<IdentityDbContext>();
+                services.RemoveAll<VietRideDbContextBase>();
+                services.AddSingleton(_ =>
+                {
+                    var dataSourceBuilder = new NpgsqlDataSourceBuilder(_connectionString);
+                    IdentityDbContext.ConfigurePostgresEnums(dataSourceBuilder);
+                    dataSourceBuilder.MapEnum<OutboxEventStatus>(
+                        "outbox_event_status",
+                        new Npgsql.NameTranslation.NpgsqlNullNameTranslator());
+                    return dataSourceBuilder.Build();
+                });
+
                 services.AddSingleton<IEmailService>(EmailService);
+                services.AddDbContext<IdentityDbContext>((sp, options) =>
+                {
+                    options
+                        .UseNpgsql(sp.GetRequiredService<NpgsqlDataSource>())
+                        .ConfigureWarnings(warnings => warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning));
+                });
+                services.AddScoped<VietRideDbContextBase>(sp => sp.GetRequiredService<IdentityDbContext>());
             });
         }
 
@@ -240,7 +264,7 @@ public sealed class AdminUsersEndpointsTests : IClassFixture<AuthWebApplicationF
             await terminateCommand.ExecuteNonQueryAsync();
 
             await using var dropCommand = connection.CreateCommand();
-            dropCommand.CommandText = $"DROP DATABASE IF EXISTS \"{_databaseName}\"";
+            dropCommand.CommandText = $"DROP DATABASE IF EXISTS \"{_databaseName}\" WITH (FORCE)";
             await dropCommand.ExecuteNonQueryAsync();
             _databaseCreated = false;
         }
