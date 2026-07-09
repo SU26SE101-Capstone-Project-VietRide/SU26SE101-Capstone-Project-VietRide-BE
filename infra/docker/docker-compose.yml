@@ -171,6 +171,7 @@ services:
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_trip;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev};Maximum Pool Size=10;Minimum Pool Size=0;Connection Idle Lifetime=15'
       REDIS_URL: 'redis:6379,abortConnect=false'
+      Identity__BaseUrl: http://identity:5001
       IDENTITY_SERVICE_BASE_URL: http://identity:5001
     ports:
       - '${TRIP_PORT:-5002}:5002'

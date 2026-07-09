@@ -14,6 +14,7 @@ public sealed class AlternativeRoute : BaseEntity<Guid>, IActivatable
     public Guid DestinationStationId { get; private set; }
     public decimal? TotalDistanceKm { get; private set; }
     public int? EstimatedDurationMinutes { get; private set; }
+    public string? PathPolyline { get; private set; }
     public bool IsActive { get; private set; } = true;
 
     private AlternativeRoute() { }
@@ -65,6 +66,8 @@ public sealed class AlternativeRoute : BaseEntity<Guid>, IActivatable
     }
 
     public void Activate() => IsActive = true;
+
+    public void SetPathGeometry(string? encodedPolyline) => PathPolyline = encodedPolyline;
 
     public void Deactivate() => IsActive = false;
 

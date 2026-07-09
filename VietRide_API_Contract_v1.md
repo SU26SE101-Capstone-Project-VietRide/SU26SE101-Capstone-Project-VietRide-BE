@@ -2966,6 +2966,7 @@ Route create/update money fields are VND BIGINT-compatible JSON numbers. Persist
   "baseFare": 250000,
   "totalDistanceKm": 308.50,
   "estimatedDurationMinutes": 420,
+  "pathPolyline": "encoded-google-polyline-precision-5",
   "isActive": true,
   "createdAt": "2026-06-10T10:00:00Z",
   "updatedAt": "2026-06-10T10:00:00Z"
@@ -2973,6 +2974,8 @@ Route create/update money fields are VND BIGINT-compatible JSON numbers. Persist
 ```
 
 `returnRouteId` is nullable and one-way: setting Route A `returnRouteId = B` does not mutate Route B.
+
+`pathPolyline` is nullable and appears on Route detail/mutation responses only. `GET /v1/operator/routes` returns `PagedResult<RouteListItemDto>` with the same fields except `pathPolyline`, preventing a large geometry string per list item.
 
 ### POST `/v1/operator/routes`
 
@@ -3043,6 +3046,16 @@ Request: partial Route update.
 Validation mirrors Route create for mutable fields. `returnRouteId`, when present, must reference an existing, active, non-soft-deleted Route owned by the same caller operator; missing or cross-operator target returns `404 ROUTE_NOT_FOUND`.
 
 Response `200`: updated `RouteDto` in the ADR 0004 success envelope.
+
+### PUT `/v1/operator/routes/{id}/geometry`
+
+Auth: `OPERATOR_ADMIN`. Idempotency-Key: not required by BSOT §5.6.
+
+Request: `{ "pathPolyline": "<Google encoded polyline precision-5>" }`; send `{ "pathPolyline": null }` to clear it.
+
+Validation order: UTF-8 size at most 100 KiB; valid Google precision-5 decode; 2–10,000 decoded points; latitude/longitude ranges; every RouteStop and every origin/destination Station that has coordinates must be within 500 m of the polyline. Mismatch returns `422 ROUTE_GEOMETRY_STOP_MISMATCH`; `error.fields.stopIds` and/or `error.fields.stationIds` contain comma-separated UUIDs. Invalid encoding/range/count returns `422 ROUTE_GEOMETRY_INVALID`; oversize returns `422 ROUTE_GEOMETRY_TOO_LARGE`. Missing/cross-operator Route returns `404 ROUTE_NOT_FOUND`.
+
+Response `200`: updated `RouteDto` including `pathPolyline`.
 
 ### RouteStop DTOs
 
@@ -3179,6 +3192,7 @@ Response `200`: `PagedResult<RouteStopFareTemplateDto>` in the ADR 0004 success 
   "destinationStationId": "uuid",
   "totalDistanceKm": 320.00,
   "estimatedDurationMinutes": 450,
+  "pathPolyline": "encoded-google-polyline-precision-5",
   "isActive": true,
   "stops": [
     {
@@ -3197,6 +3211,8 @@ Response `200`: `PagedResult<RouteStopFareTemplateDto>` in the ADR 0004 success 
 ```
 
 Each main Route can have at most two active AlternativeRoutes. AlternativeRoute stops are an independent stop sequence and do not reuse RouteStop rows.
+
+`pathPolyline` is nullable and appears on create/update/geometry responses only. The paged alternative-route list uses `AlternativeRouteListItemDto` without `pathPolyline`.
 
 ### POST `/v1/operator/routes/{id}/alternative-routes`
 
@@ -3271,6 +3287,14 @@ Request: partial AlternativeRoute update.
 Validation mirrors AlternativeRoute create for mutable fields. Missing AlternativeRoute or AlternativeRoute whose parent Route belongs to another operator returns `404 ROUTE_NOT_FOUND`.
 
 Response `200`: updated `AlternativeRouteDto` in the ADR 0004 success envelope.
+
+### PUT `/v1/operator/alternative-routes/{altId}/geometry`
+
+Auth: `OPERATOR_ADMIN`. Idempotency-Key: not required by BSOT §5.6.
+
+Request and base validation match Route geometry. Waypoint matching checks AlternativeRoute stops, the parent Route origin Station, and the AlternativeRoute destination Station. Mismatch fields use comma-separated `stopIds` and/or `stationIds`. Missing/cross-operator AlternativeRoute returns `404 ROUTE_NOT_FOUND`.
+
+Response `200`: updated `AlternativeRouteDto` including `pathPolyline`.
 
 ### DELETE `/v1/operator/alternative-routes/{altId}`
 

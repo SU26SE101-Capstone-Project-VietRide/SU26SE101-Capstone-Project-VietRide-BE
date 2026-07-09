@@ -184,6 +184,7 @@ CREATE TABLE routes (
     base_fare BIGINT NOT NULL,
     total_distance_km DECIMAL(8,2) NULL,
     estimated_duration_minutes INT NULL,
+    path_polyline TEXT NULL,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     deleted_at TIMESTAMPTZ NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -199,6 +200,8 @@ CREATE INDEX idx_routes_return_route_id ON routes (return_route_id) WHERE return
 
 COMMENT ON COLUMN routes.return_route_id IS
     'Self-FK pointing to the reverse-direction Route. Used by DriverSchedule round-trip UX pairing.';
+COMMENT ON COLUMN routes.path_polyline IS
+    'Google encoded polyline, precision 5. Nullable until operator confirms route geometry.';
 
 -- -----------------------------------------------------------------------------
 -- route_stops (junction: only intermediate stops; not origin/destination Station)
@@ -260,12 +263,16 @@ CREATE TABLE alternative_routes (
     destination_station_id UUID NOT NULL REFERENCES stations (id) ON DELETE RESTRICT,
     total_distance_km DECIMAL(8,2) NULL,
     estimated_duration_minutes INT NULL,
+    path_polyline TEXT NULL,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_alternative_routes_route_id ON alternative_routes (route_id) WHERE is_active = TRUE;
+
+COMMENT ON COLUMN alternative_routes.path_polyline IS
+    'Google encoded polyline, precision 5. Stored for future alternative-route tracking selection.';
 
 -- -----------------------------------------------------------------------------
 -- alternative_route_stops (independent stop sequence — NOT reuse RouteStop)

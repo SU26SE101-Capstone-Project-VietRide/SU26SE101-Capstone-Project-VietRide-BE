@@ -7,4 +7,4 @@ public sealed record ListAlternativeRoutesQuery(
     Guid OperatorId,
     Guid RouteId,
     int? Page,
-    int? PageSize) : IRequest<PagedResult<AlternativeRouteDto>>;
+    int? PageSize) : IRequest<PagedResult<AlternativeRouteListItemDto>>;

@@ -1,6 +1,6 @@
 namespace VietRide.Trip.Application.Features.Routes;
 
-public sealed record RouteDto(
+public sealed record RouteListItemDto(
     Guid Id,
     Guid OperatorId,
     string Name,
@@ -10,7 +10,6 @@ public sealed record RouteDto(
     long BaseFare,
     decimal? TotalDistanceKm,
     int? EstimatedDurationMinutes,
-    string? PathPolyline,
     bool IsActive,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);

@@ -60,12 +60,21 @@ public sealed class UpdateAlternativeRouteHandler : IRequestHandler<UpdateAltern
             await ValidateStopsAsync(request.OperatorId, request.Stops!, cancellationToken);
         }
 
+        var geometryChanged = request.HasStops
+            || (request.HasDestinationStationId
+                && request.DestinationStationId != alternativeRoute.DestinationStationId);
+
         alternativeRoute.UpdateDetails(
             request.HasName ? request.Name! : alternativeRoute.Name,
             request.HasDestinationStationId ? request.DestinationStationId!.Value : alternativeRoute.DestinationStationId,
             request.HasTotalDistanceKm ? request.TotalDistanceKm : alternativeRoute.TotalDistanceKm,
             request.HasEstimatedDurationMinutes ? request.EstimatedDurationMinutes : alternativeRoute.EstimatedDurationMinutes,
             request.HasDescription ? request.Description : alternativeRoute.Description);
+
+        if (geometryChanged)
+        {
+            alternativeRoute.SetPathGeometry(null);
+        }
 
         if (request.IsActive == true)
         {

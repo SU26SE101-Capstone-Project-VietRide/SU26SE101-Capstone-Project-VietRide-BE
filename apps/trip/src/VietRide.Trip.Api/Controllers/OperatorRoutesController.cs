@@ -54,10 +54,10 @@ public sealed class OperatorRoutesController : ControllerBase
 
     [HttpGet]
     [Authorize(Roles = OperatorReadRoles)]
-    [ProducesResponseType(typeof(ApiResponse<PagedResult<RouteDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<RouteListItemDto>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
-    public async Task<ActionResult<PagedResult<RouteDto>>> GetAsync(
+    public async Task<ActionResult<PagedResult<RouteListItemDto>>> GetAsync(
         [FromQuery] int? page,
         [FromQuery] int? pageSize,
         [FromQuery] string? search,
@@ -100,6 +100,22 @@ public sealed class OperatorRoutesController : ControllerBase
                 request.TotalDistanceKm,
                 request.EstimatedDurationMinutes,
                 request.IsActive),
+            cancellationToken));
+    }
+
+    [HttpPut("{id:guid}/geometry")]
+    [Authorize(Roles = OperatorWriteRoles)]
+    [ProducesResponseType(typeof(ApiResponse<RouteDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<RouteDto>> PutGeometryAsync(
+        Guid id,
+        [FromBody] SetRouteGeometryRequest request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await mediator.Send(
+            new SetRouteGeometryCommand(GetRequiredOperatorId(), id, request.PathPolyline),
             cancellationToken));
     }
 
@@ -213,11 +229,11 @@ public sealed class OperatorRoutesController : ControllerBase
 
     [HttpGet("{id:guid}/alternative-routes")]
     [Authorize(Roles = OperatorReadRoles)]
-    [ProducesResponseType(typeof(ApiResponse<PagedResult<AlternativeRouteDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<AlternativeRouteListItemDto>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
-    public async Task<ActionResult<PagedResult<AlternativeRouteDto>>> GetAlternativeRoutesAsync(
+    public async Task<ActionResult<PagedResult<AlternativeRouteListItemDto>>> GetAlternativeRoutesAsync(
         Guid id,
         [FromQuery] int? page,
         [FromQuery] int? pageSize,

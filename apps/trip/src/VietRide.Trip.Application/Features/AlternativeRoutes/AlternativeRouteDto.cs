@@ -8,6 +8,7 @@ public sealed record AlternativeRouteDto(
     Guid DestinationStationId,
     decimal? TotalDistanceKm,
     int? EstimatedDurationMinutes,
+    string? PathPolyline,
     bool IsActive,
     IReadOnlyList<AlternativeRouteStopDto> Stops,
     DateTimeOffset CreatedAt,

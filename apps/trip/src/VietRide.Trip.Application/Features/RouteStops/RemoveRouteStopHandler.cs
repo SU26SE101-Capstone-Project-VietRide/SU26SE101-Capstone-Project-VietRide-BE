@@ -46,6 +46,8 @@ public sealed class RemoveRouteStopHandler : IRequestHandler<RemoveRouteStopComm
         }
 
         routeStopRepository.Remove(routeStop);
+        route.SetPathGeometry(null);
+        routeRepository.Update(route);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Unit.Value;

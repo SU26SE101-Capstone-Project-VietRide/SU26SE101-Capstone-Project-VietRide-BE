@@ -1,6 +1,6 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.15.0
+> **Phiên bản:** 1.22.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
 > **Cập nhật lần cuối:** 2026-06-22
 > **Capstone:** SU26SE101 — SU26
@@ -1392,6 +1392,9 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | | `ROUTE_NOT_FOUND` | 404 | |
 | | `ROUTE_STOP_ORDER_CONFLICT` | 422 | Day-8 config-time RouteStop `orderIndex` conflict within the same Route |
 | | `ROUTE_STOP_FLAGS_INVALID` | 422 | Day-8 config-time RouteStop `allowPickup=false` and `allowDropoff=false` |
+| | `ROUTE_GEOMETRY_TOO_LARGE` | 422 | Encoded route polyline exceeds 100 KiB |
+| | `ROUTE_GEOMETRY_INVALID` | 422 | Encoded route polyline cannot be decoded as Google precision-5 or has points/count outside accepted bounds |
+| | `ROUTE_GEOMETRY_STOP_MISMATCH` | 422 | One or more configured Stop/Station coordinates are farther than 500 m from the submitted route polyline; `error.fields` uses `stopIds`/`stationIds` |
 | | `ROUTE_RETURN_NOT_CONFIGURED` | 422 | returnRouteId NULL khi đặt round-trip |
 | | `ALTERNATIVE_ROUTE_LIMIT_EXCEEDED` | 422 | Day-8 config-time third active AlternativeRoute for the same Route |
 | **Station** | `STATION_NOT_FOUND` | 404 | Day-7 Trip Station handlers use coded 404 path |
@@ -2702,6 +2705,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.22.0** | 2026-07-09 | BE lead (Vu) | **MINOR** - Add operator-managed Google precision-5 path geometry for Route and AlternativeRoute. Register two `PUT .../geometry` endpoints, nullable `path_polyline` storage, validation/error codes, safe invalidation after route-shape edits, and Trip internal route-geometry preference with TripStop fallback. No new event, dependency, Gateway prefix, or Idempotency-Key requirement. |
 | **1.21.0** | 2026-07-08 | BE lead (Vu) | **MINOR** - Add Trip-owned `Location` catalog for FE origin/destination search. Public `GET /v1/locations` supplies cacheable active locations; `SYSTEM_ADMIN` manages `/v1/admin/locations`; `GET /v1/trips/search` supports `originLocationCode`/`destinationLocationCode` while keeping station-id search; Station/Stop create accept `locationId` or `locationCode`; `GET /v1/stations/search` is public for passenger/FE autocomplete. Register Location error codes `LOCATION_NOT_FOUND` and `LOCATION_CODE_CONFLICT`. |
 | **1.20.0** | 2026-07-06 | BE lead (Vu) | **MINOR** - Split Booking order from per-seat Ticket. Booking remains the order/history aggregate; Ticket is the proof of travel and QR identity (`ticketCode` format `VT-yyyyMMdd-XXXXXXXX`), linked 1:1 with Passenger boarding records. Register Booking internal snapshot `GET /internal/v1/bookings/{id}` for Parcel with active ticket count, extend booking integration event payloads with optional `bookingCode`, `ticketCodes`, and `ticketCount`, and add boarding errors `TICKET_NOT_FOUND` / `TICKET_NOT_BOARDABLE`. |
 | **1.19.0** | 2026-06-30 | BE lead (Vũ) | **MINOR** — Freeze the Day-18 boarding-warning integration-event contract: register `trip.stop.departed_with_pending` with payload `{ eventId: Guid, occurredAt: DateTime (UTC), eventType: "trip.stop.departed_with_pending", tripId: Guid, stopId: Guid, stopName: string, pendingPassengerCount: int (> 0), driverUserId: Guid, assistantUserId: Guid?, departedAt: DateTimeOffset (UTC ISO-8601) }` for the Notification-owned Driver App alert consumer. `eventType` is the constant routing key; `occurredAt` matches `IntegrationEventBase` serialization, while `departedAt` is serialized as UTC. Day 18 is registry/contract only; the Trip Outbox emitter and the Day-24 `NO_SHOW` detection flow remain explicitly deferred to Day 24. No service code, handler wiring, test, or DDL change. |

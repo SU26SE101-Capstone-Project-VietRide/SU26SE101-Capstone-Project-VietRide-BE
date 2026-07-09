@@ -214,6 +214,7 @@ public sealed class AlternativeRouteHandlersTests
         var oldStop = CreateStop(OperatorId);
         var newStop = CreateStop(OperatorId);
         var alternativeRoute = AlternativeRoute.Create(route.Id, "Alt", destination.Id, null, null);
+        alternativeRoute.SetPathGeometry("??BB");
         var alternativeRouteRepository = new FakeAlternativeRouteRepository([alternativeRoute], [route]);
         alternativeRouteRepository.Stops.Add(AlternativeRouteStop.Create(alternativeRoute.Id, oldStop.Id, 1, 10, 3m));
         var handler = CreateUpdateHandler(
@@ -240,6 +241,7 @@ public sealed class AlternativeRouteHandlersTests
 
         result.Stops.Should().ContainSingle().Which.StopId.Should().Be(newStop.Id);
         alternativeRouteRepository.Stops.Should().ContainSingle().Which.StopId.Should().Be(newStop.Id);
+        alternativeRoute.PathPolyline.Should().BeNull();
     }
 
     [Fact]
@@ -347,10 +349,45 @@ public sealed class AlternativeRouteHandlersTests
     }
 
     [Fact]
+    public async Task OperatorAlternativeRoutesController_PutGeometry_UsesWriteRoleAndDispatchesCommand()
+    {
+        var alternativeRouteId = Guid.NewGuid();
+        const string pathPolyline = "_p~iF~ps|U_ulLnnqC_mqNvxq`@";
+        var responseDto = new AlternativeRouteDto(
+            alternativeRouteId,
+            Guid.NewGuid(),
+            "Alt",
+            null,
+            Guid.NewGuid(),
+            null,
+            null,
+            pathPolyline,
+            true,
+            [],
+            default,
+            default);
+        var mediator = new CapturingMediator(responseDto);
+        var controller = CreateAlternativeRoutesController(mediator);
+
+        var response = await controller.PutGeometryAsync(
+            alternativeRouteId,
+            new SetRouteGeometryRequest(pathPolyline),
+            CancellationToken.None);
+
+        response.Result.Should().BeOfType<OkObjectResult>();
+        var command = mediator.LastRequest.Should().BeOfType<SetAlternativeRouteGeometryCommand>().Subject;
+        command.OperatorId.Should().Be(OperatorId);
+        command.AlternativeRouteId.Should().Be(alternativeRouteId);
+        command.PathPolyline.Should().Be(pathPolyline);
+        typeof(OperatorAlternativeRoutesController).GetMethod(nameof(OperatorAlternativeRoutesController.PutGeometryAsync))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be("OPERATOR_ADMIN");
+    }
+
+    [Fact]
     public async Task OperatorRoutesController_AddAlternativeRoute_UsesWriteRoleAndSendsCommand()
     {
         var routeId = Guid.NewGuid();
-        var response = new AlternativeRouteDto(Guid.NewGuid(), routeId, "Alt", null, Guid.NewGuid(), null, null, true, [], default, default);
+        var response = new AlternativeRouteDto(Guid.NewGuid(), routeId, "Alt", null, Guid.NewGuid(), null, null, null, true, [], default, default);
         var mediator = new CapturingMediator(response);
         var controller = CreateRoutesController(mediator);
         var request = new CreateAlternativeRouteRequest(

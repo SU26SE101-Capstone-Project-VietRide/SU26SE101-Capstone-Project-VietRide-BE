@@ -4,7 +4,7 @@ using VietRide.Trip.Application.Abstractions.Repositories;
 
 namespace VietRide.Trip.Application.Features.Routes;
 
-public sealed class ListRoutesHandler : IRequestHandler<ListRoutesQuery, PagedResult<RouteDto>>
+public sealed class ListRoutesHandler : IRequestHandler<ListRoutesQuery, PagedResult<RouteListItemDto>>
 {
     private const int DefaultPage = 1;
     private const int DefaultPageSize = 20;
@@ -17,7 +17,7 @@ public sealed class ListRoutesHandler : IRequestHandler<ListRoutesQuery, PagedRe
         this.routeRepository = routeRepository;
     }
 
-    public Task<PagedResult<RouteDto>> Handle(ListRoutesQuery request, CancellationToken cancellationToken)
+    public Task<PagedResult<RouteListItemDto>> Handle(ListRoutesQuery request, CancellationToken cancellationToken)
     {
         var page = request.Page ?? DefaultPage;
         var pageSize = Math.Min(request.PageSize ?? DefaultPageSize, MaxPageSize);
@@ -36,9 +36,9 @@ public sealed class ListRoutesHandler : IRequestHandler<ListRoutesQuery, PagedRe
             .ThenBy(route => route.Id)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(RouteMapper.ToDto)
+            .Select(RouteMapper.ToListItemDto)
             .ToList();
 
-        return Task.FromResult(PagedResult<RouteDto>.Create(items, page, pageSize, totalItems));
+        return Task.FromResult(PagedResult<RouteListItemDto>.Create(items, page, pageSize, totalItems));
     }
 }

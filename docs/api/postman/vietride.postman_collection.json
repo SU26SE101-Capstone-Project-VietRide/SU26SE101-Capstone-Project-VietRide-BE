@@ -3358,6 +3358,62 @@
             },
             "description": "Writes require an approved, active operator."
           }
+        },
+        {
+          "name": "20. Clear Route path geometry",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "const body = pm.response.json();",
+                "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                "pm.test('Route geometry is null', function () { pm.expect(body.data).to.have.property('pathPolyline', null); });"
+              ],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/geometry",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "routes", "{{day8RouteId}}", "geometry"]
+            },
+            "body": { "mode": "raw", "raw": "{\n  \"pathPolyline\": null\n}" },
+            "description": "Clears Route Google precision-5 path geometry. Non-null geometry is validated against stops and stations."
+          }
+        },
+        {
+          "name": "21. Clear AlternativeRoute path geometry",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "const body = pm.response.json();",
+                "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                "pm.test('AlternativeRoute geometry is null', function () { pm.expect(body.data).to.have.property('pathPolyline', null); });"
+              ],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/alternative-routes/{{day8AlternativeRouteId2}}/geometry",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "alternative-routes", "{{day8AlternativeRouteId2}}", "geometry"]
+            },
+            "body": { "mode": "raw", "raw": "{\n  \"pathPolyline\": null\n}" },
+            "description": "Clears AlternativeRoute Google precision-5 path geometry."
+          }
         }
       ]
     },

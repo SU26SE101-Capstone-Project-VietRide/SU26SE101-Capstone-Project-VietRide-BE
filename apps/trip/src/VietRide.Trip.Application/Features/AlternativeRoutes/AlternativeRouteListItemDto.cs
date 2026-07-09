@@ -1,16 +1,14 @@
-namespace VietRide.Trip.Application.Features.Routes;
+namespace VietRide.Trip.Application.Features.AlternativeRoutes;
 
-public sealed record RouteDto(
+public sealed record AlternativeRouteListItemDto(
     Guid Id,
-    Guid OperatorId,
+    Guid RouteId,
     string Name,
-    Guid OriginStationId,
+    string? Description,
     Guid DestinationStationId,
-    Guid? ReturnRouteId,
-    long BaseFare,
     decimal? TotalDistanceKm,
     int? EstimatedDurationMinutes,
-    string? PathPolyline,
     bool IsActive,
+    IReadOnlyList<AlternativeRouteStopDto> Stops,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);

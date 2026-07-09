@@ -4,6 +4,22 @@ namespace VietRide.Trip.Application.Features.AlternativeRoutes;
 
 internal static class AlternativeRouteMapper
 {
+    public static AlternativeRouteListItemDto ToListItemDto(
+        AlternativeRoute alternativeRoute,
+        IReadOnlyList<AlternativeRouteStop> stops)
+        => new(
+            alternativeRoute.Id,
+            alternativeRoute.RouteId,
+            alternativeRoute.Name,
+            alternativeRoute.Description,
+            alternativeRoute.DestinationStationId,
+            alternativeRoute.TotalDistanceKm,
+            alternativeRoute.EstimatedDurationMinutes,
+            alternativeRoute.IsActive,
+            stops.OrderBy(stop => stop.OrderIndex).ThenBy(stop => stop.StopId).Select(ToDto).ToList(),
+            alternativeRoute.CreatedAt,
+            alternativeRoute.UpdatedAt);
+
     public static AlternativeRouteDto ToDto(AlternativeRoute alternativeRoute, IReadOnlyList<AlternativeRouteStop> stops)
         => new(
             alternativeRoute.Id,
@@ -13,6 +29,7 @@ internal static class AlternativeRouteMapper
             alternativeRoute.DestinationStationId,
             alternativeRoute.TotalDistanceKm,
             alternativeRoute.EstimatedDurationMinutes,
+            alternativeRoute.PathPolyline,
             alternativeRoute.IsActive,
             stops.OrderBy(stop => stop.OrderIndex).ThenBy(stop => stop.StopId).Select(ToDto).ToList(),
             alternativeRoute.CreatedAt,
