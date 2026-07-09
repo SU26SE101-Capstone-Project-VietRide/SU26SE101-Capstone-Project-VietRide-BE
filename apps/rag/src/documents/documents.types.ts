@@ -3,8 +3,11 @@ import type {
   KnowledgeDocumentAccess,
   KnowledgeDocumentCategory,
   KnowledgeDocumentFileType,
+  KnowledgeDocumentIngestStatus,
+  KnowledgeDocumentStatus,
   KnowledgeDocumentType,
 } from '../generated/rag-prisma-client';
+import type { ListDocumentsQueryDto } from './dto/list-documents.dto';
 
 export interface UploadedDocumentFile {
   originalname: string;
@@ -39,6 +42,13 @@ export interface ApproveKnowledgeDocumentInput {
   approvedByUserId: string;
 }
 
+export type ListKnowledgeDocumentsInput = ListDocumentsQueryDto;
+
+export interface ListKnowledgeDocumentsResult {
+  items: KnowledgeDocument[];
+  totalItems: number;
+}
+
 export interface KnowledgeDocumentResponse {
   id: string;
   title: string;
@@ -60,6 +70,16 @@ export interface KnowledgeDocumentResponse {
   createdAt: string;
   updatedAt: string;
   approvedAt: string | null;
+}
+
+export interface KnowledgeDocumentPage {
+  items: KnowledgeDocumentResponse[];
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
 }
 
 export function toKnowledgeDocumentResponse(
@@ -88,4 +108,21 @@ export function toKnowledgeDocumentResponse(
     updatedAt: document.updatedAt.toISOString(),
     approvedAt: document.approvedAt?.toISOString() ?? null,
   };
+}
+
+export type KnowledgeDocumentListSortBy =
+  | 'createdAt'
+  | 'updatedAt'
+  | 'title'
+  | 'status'
+  | 'ingestStatus';
+
+export interface KnowledgeDocumentListFilters {
+  status?: KnowledgeDocumentStatus;
+  ingestStatus?: KnowledgeDocumentIngestStatus;
+  accessLevel?: KnowledgeDocumentAccess;
+  category?: KnowledgeDocumentCategory;
+  documentType?: KnowledgeDocumentType;
+  operatorId?: string;
+  q?: string;
 }

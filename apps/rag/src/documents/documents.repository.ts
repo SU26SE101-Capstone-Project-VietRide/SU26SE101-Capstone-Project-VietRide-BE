@@ -7,6 +7,8 @@ import type {
   ApproveKnowledgeDocumentInput,
   CreateApprovedKnowledgeDocumentInput,
   CreateKnowledgeDocumentInput,
+  ListKnowledgeDocumentsInput,
+  ListKnowledgeDocumentsResult,
 } from './documents.types';
 
 @Injectable()
@@ -43,6 +45,24 @@ export class DocumentsRepository {
     return this.prisma.knowledgeDocument.findUnique({
       where: { id: documentId },
     });
+  }
+
+  async list(input: ListKnowledgeDocumentsInput): Promise<ListKnowledgeDocumentsResult> {
+    const where = this.toListWhere(input);
+    const orderBy = this.toListOrderBy(input);
+    const skip = (input.page - 1) * input.pageSize;
+
+    const [items, totalItems] = await this.prisma.$transaction([
+      this.prisma.knowledgeDocument.findMany({
+        where,
+        orderBy,
+        skip,
+        take: input.pageSize,
+      }),
+      this.prisma.knowledgeDocument.count({ where }),
+    ]);
+
+    return { items, totalItems };
   }
 
   async approve(input: ApproveKnowledgeDocumentInput): Promise<KnowledgeDocument> {
@@ -83,6 +103,30 @@ export class DocumentsRepository {
       ...(input.description ? { description: input.description } : {}),
       ...(input.operatorId ? { operatorId: input.operatorId } : {}),
     };
+  }
+
+  private toListWhere(input: ListKnowledgeDocumentsInput): Prisma.KnowledgeDocumentWhereInput {
+    return {
+      ...(input.status ? { status: input.status } : {}),
+      ...(input.ingestStatus ? { ingestStatus: input.ingestStatus } : {}),
+      ...(input.accessLevel ? { accessLevel: input.accessLevel } : {}),
+      ...(input.category ? { category: input.category } : {}),
+      ...(input.documentType ? { documentType: input.documentType } : {}),
+      ...(input.operatorId ? { operatorId: input.operatorId } : {}),
+      ...(input.q
+        ? {
+            OR: [
+              { title: { contains: input.q, mode: 'insensitive' } },
+              { fileName: { contains: input.q, mode: 'insensitive' } },
+              { description: { contains: input.q, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+  }
+
+  private toListOrderBy(input: ListKnowledgeDocumentsInput): Prisma.KnowledgeDocumentOrderByWithRelationInput {
+    return { [input.sortBy]: input.sortDir };
   }
 
   private toIngestRequestedOutboxData(document: KnowledgeDocument): Prisma.OutboxEventUncheckedCreateInput {
