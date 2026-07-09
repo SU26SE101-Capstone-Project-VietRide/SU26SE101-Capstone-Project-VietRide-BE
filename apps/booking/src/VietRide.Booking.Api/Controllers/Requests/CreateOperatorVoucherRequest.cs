@@ -32,6 +32,9 @@ public sealed class CreateOperatorVoucherRequest
 
     public DateTimeOffset ValidUntil { get; init; }
 
+    /// <summary>Optional. BOOKING, PARCEL, or both. Null defaults to BOOKING.</summary>
+    public IReadOnlyList<string>? ApplicableServices { get; init; }
+
     public IReadOnlyList<Guid>? ApplicableRouteIds { get; init; }
 
     /// <summary>

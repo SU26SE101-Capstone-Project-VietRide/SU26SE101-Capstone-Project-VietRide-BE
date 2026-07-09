@@ -34,7 +34,8 @@ public class CreateOperatorVoucherCommandHandlerTests
 
     private static CreateOperatorVoucherCommand BuildCommand(
         string? code = "OPVCH001",
-        string? fundingType = null) =>
+        string? fundingType = null,
+        IReadOnlyList<string>? applicableServices = null) =>
         new(
             Code: code,
             Name: "Operator Discount",
@@ -46,6 +47,7 @@ public class CreateOperatorVoucherCommandHandlerTests
             PerUserLimit: 1,
             ValidFrom: DateTimeOffset.UtcNow.AddDays(1),
             ValidUntil: DateTimeOffset.UtcNow.AddDays(30),
+            ApplicableServices: applicableServices,
             ApplicableRouteIds: null,
             FundingType: fundingType,
             OwnerOperatorId: OperatorId,
@@ -87,10 +89,35 @@ public class CreateOperatorVoucherCommandHandlerTests
         capturedVoucher!.ApplicableOperatorIds.Should().ContainSingle()
             .Which.Should().Be(OperatorId,
                 "applicableOperatorIds must be forced to [ownerOperatorId] server-side, never request-supplied");
+        capturedVoucher.ApplicableServices.Should().Equal("BOOKING");
 
         // No consent fan-out — operator-created vouchers are self-consented
         await _vouchers.DidNotReceive()
             .AddConsentAsync(Arg.Any<OperatorVoucherConsent>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_ParcelApplicableServices_CreatesParcelVoucher()
+    {
+        var now = DateTimeOffset.UtcNow;
+        _clock.UtcNow.Returns(now);
+        _vouchers.CodeExistsAsync("OPVCH001", Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        Voucher? capturedVoucher = null;
+        _vouchers.AddAsync(
+            Arg.Do<Voucher>(v => capturedVoucher = v),
+            Arg.Any<CancellationToken>())
+            .Returns(args => args.Arg<Voucher>());
+
+        var sut = BuildSut();
+        var command = BuildCommand("OPVCH001", applicableServices: ["PARCEL"]);
+
+        var result = await sut.Handle(command, CancellationToken.None);
+
+        result.Code.Should().Be("OPVCH001");
+        capturedVoucher.Should().NotBeNull();
+        capturedVoucher!.ApplicableServices.Should().Equal("PARCEL");
     }
 
     // -----------------------------------------------------------------------

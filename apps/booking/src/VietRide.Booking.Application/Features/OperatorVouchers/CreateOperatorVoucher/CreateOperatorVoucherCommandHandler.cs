@@ -108,7 +108,7 @@ public sealed class CreateOperatorVoucherCommandHandler
             validUntil: request.ValidUntil,
             newUserOnly: false,
             applicablePaymentMethods: null,
-            applicableServices: ["BOOKING"],
+            applicableServices: request.ApplicableServices,
             applicableOperatorIds: [request.OwnerOperatorId],
             applicableRouteIds: request.ApplicableRouteIds,
             fundingType: VoucherFundingType.OPERATOR_FUNDED,

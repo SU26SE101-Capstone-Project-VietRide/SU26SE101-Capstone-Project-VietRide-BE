@@ -3,6 +3,8 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Booking.Api.Controllers.Requests;
+using VietRide.Booking.Application.Features.AdminVouchers.DeleteAdminVoucher;
+using VietRide.Booking.Application.Features.AdminVouchers.UpdateAdminVoucher;
 using VietRide.Booking.Application.Features.Vouchers.CreateVoucher;
 using VietRide.Booking.Application.Features.Vouchers.ListVouchers;
 using VietRide.Shared.Kernel.Primitives;
@@ -14,6 +16,8 @@ namespace VietRide.Booking.Api.Controllers;
 /// <list type="bullet">
 ///   <item>POST /v1/admin/vouchers — create platform voucher + optional OPERATOR_FUNDED consent fan-out.</item>
 ///   <item>GET /v1/admin/vouchers — platform voucher list.</item>
+///   <item>PATCH /v1/admin/vouchers/{id} — partial update of platform voucher fields.</item>
+///   <item>DELETE /v1/admin/vouchers/{id} — soft-delete a platform voucher.</item>
 /// </list>
 /// All responses wrapped in <see cref="ApiResponse{T}"/> by ApiResponseResultFilter (ADR 0004).
 /// All errors wrapped by ApiResponseExceptionFilter.
@@ -123,6 +127,66 @@ public sealed class AdminVouchersController : ControllerBase
             });
 
         var result = await _sender.Send(query, ct);
+
+        return Ok(result);
+    }
+
+    /// <summary>Partially updates a platform-owned voucher.</summary>
+    /// <remarks>
+    /// Auth: SYSTEM_ADMIN (RS256 user token via JWKS). Idempotency-Key header required.
+    /// Only platform vouchers (owner_operator_id IS NULL) are addressable through this endpoint.
+    /// code, type, fundingType, ownerOperatorId and createdByUserId are immutable.
+    /// </remarks>
+    [HttpPatch("{id:guid}")]
+    [ProducesResponseType(typeof(ApiResponse<UpdateAdminVoucherResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> UpdateVoucher(
+        [FromRoute] Guid id,
+        [FromBody] UpdateAdminVoucherRequest request,
+        CancellationToken ct)
+    {
+        GetRequiredIdempotencyKey();
+
+        var command = new UpdateAdminVoucherCommand(
+            VoucherId: id,
+            Name: request.Name,
+            Value: request.Value,
+            MinOrderAmount: request.MinOrderAmount,
+            MaxDiscountAmount: request.MaxDiscountAmount,
+            TotalUsageLimit: request.TotalUsageLimit,
+            PerUserLimit: request.PerUserLimit,
+            ValidFrom: request.ValidFrom,
+            ValidUntil: request.ValidUntil,
+            NewUserOnly: request.NewUserOnly,
+            ApplicablePaymentMethods: request.ApplicablePaymentMethods,
+            ApplicableServices: request.ApplicableServices,
+            ApplicableRouteIds: request.ApplicableRouteIds);
+
+        var result = await _sender.Send(command, ct);
+
+        return Ok(result);
+    }
+
+    /// <summary>Soft-deletes a platform-owned voucher.</summary>
+    /// <remarks>
+    /// Auth: SYSTEM_ADMIN (RS256 user token via JWKS). Idempotency-Key header required.
+    /// Idempotent: deleting an already soft-deleted platform voucher returns the existing deletedAt timestamp.
+    /// Operator-owned vouchers are not addressable and return 404 VOUCHER_NOT_FOUND.
+    /// </remarks>
+    [HttpDelete("{id:guid}")]
+    [ProducesResponseType(typeof(ApiResponse<DeleteAdminVoucherResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> DeleteVoucher(
+        [FromRoute] Guid id,
+        CancellationToken ct)
+    {
+        GetRequiredIdempotencyKey();
+
+        var result = await _sender.Send(new DeleteAdminVoucherCommand(id), ct);
 
         return Ok(result);
     }

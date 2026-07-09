@@ -58,6 +58,17 @@ internal sealed class VoucherRepository : IVoucherRepository
         => await _db.Vouchers.FirstOrDefaultAsync(v => v.Code == code, ct);
 
     /// <inheritdoc/>
+    public async Task<Voucher?> FindPlatformByIdAsync(Guid id, CancellationToken ct = default)
+        => await _db.Vouchers
+            .FirstOrDefaultAsync(v => v.Id == id && v.OwnerOperatorId == null, ct);
+
+    /// <inheritdoc/>
+    public async Task<Voucher?> FindPlatformByIdIgnoringSoftDeleteAsync(Guid id, CancellationToken ct = default)
+        => await _db.Vouchers
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(v => v.Id == id && v.OwnerOperatorId == null, ct);
+
+    /// <inheritdoc/>
     public async Task<(IReadOnlyList<Voucher> Items, long Total)> ListAsync(
         Guid? ownerOperatorId,
         bool platformOnly,

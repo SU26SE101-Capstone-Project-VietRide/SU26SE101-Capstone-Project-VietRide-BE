@@ -24,6 +24,8 @@ public sealed record CreateOperatorVoucherCommand(
     int? PerUserLimit,
     DateTimeOffset ValidFrom,
     DateTimeOffset ValidUntil,
+    /// <summary>BOOKING, PARCEL, or both. Null defaults to BOOKING.</summary>
+    IReadOnlyList<string>? ApplicableServices,
     IReadOnlyList<Guid>? ApplicableRouteIds,
     /// <summary>
     /// Optional. If supplied and not OPERATOR_FUNDED → handler throws 422 VOUCHER_FORBIDDEN_FUNDING.
