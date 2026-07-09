@@ -61,6 +61,34 @@ public class CreateVoucherCommandValidatorTests
         result.IsValid.Should().BeTrue();
     }
 
+    [Fact]
+    public void Validate_ApplicableServicesBookingAndParcel_IsValid()
+    {
+        var command = BuildVietrideFundedCommand(applicableOperatorIds: null) with
+        {
+            ApplicableServices = ["BOOKING", "PARCEL"],
+        };
+
+        var result = _validator.Validate(command);
+
+        result.IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Validate_InvalidApplicableService_Fails()
+    {
+        var command = BuildVietrideFundedCommand(applicableOperatorIds: null) with
+        {
+            ApplicableServices = ["RIDESHARE"],
+        };
+
+        var result = _validator.Validate(command);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e =>
+            e.PropertyName.StartsWith(nameof(CreateVoucherCommand.ApplicableServices), StringComparison.Ordinal));
+    }
+
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------

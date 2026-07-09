@@ -460,6 +460,35 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
   });
 
   it.each([
+    ['PATCH', '/v1/admin/vouchers/11111111-1111-1111-1111-111111111111'],
+    ['DELETE', '/v1/admin/vouchers/11111111-1111-1111-1111-111111111111'],
+  ] as const)('routes SYSTEM_ADMIN %s %s to Booking', async (method, path) => {
+    const upstreamHandler = arrangeProxyPass();
+    const signer = {
+      sign: jest.fn().mockResolvedValue('internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({ sub: 'admin-1', role: 'SYSTEM_ADMIN' });
+    const req = makeRequest(path, { authorization, 'x-request-id': 'req-admin-voucher' }, method);
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(signer.sign).toHaveBeenCalledWith({
+      sub: 'admin-1',
+      reqId: 'req-admin-voucher',
+      role: 'SYSTEM_ADMIN',
+    });
+    expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+      expect.objectContaining({ target: env.BOOKING_BASE_URL }),
+    );
+    expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
+    expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it.each([
     ['POST', '/v1/operator/vouchers'],
     ['PATCH', '/v1/operator/vouchers/11111111-1111-1111-1111-111111111111'],
     ['DELETE', '/v1/operator/vouchers/11111111-1111-1111-1111-111111111111'],
