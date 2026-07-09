@@ -60,6 +60,7 @@ internal sealed class VoucherRepository : IVoucherRepository
     /// <inheritdoc/>
     public async Task<(IReadOnlyList<Voucher> Items, long Total)> ListAsync(
         Guid? ownerOperatorId,
+        bool platformOnly,
         VoucherFundingType? fundingType,
         bool? isActive,
         int page,
@@ -70,7 +71,9 @@ internal sealed class VoucherRepository : IVoucherRepository
     {
         var query = _db.Vouchers.AsNoTracking();
 
-        if (ownerOperatorId.HasValue)
+        if (platformOnly)
+            query = query.Where(v => v.OwnerOperatorId == null);
+        else if (ownerOperatorId.HasValue)
             query = query.Where(v => v.OwnerOperatorId == ownerOperatorId.Value);
 
         if (fundingType.HasValue)

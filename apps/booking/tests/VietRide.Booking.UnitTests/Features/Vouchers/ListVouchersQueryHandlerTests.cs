@@ -25,30 +25,36 @@ public class ListVouchersQueryHandlerTests
     private static Voucher CreateVoucher(
         string code,
         VoucherFundingType funding = VoucherFundingType.VIETRIDE_FUNDED,
-        Guid? ownerOperatorId = null) =>
+        Guid? ownerOperatorId = null,
+        IReadOnlyCollection<string>? applicableServices = null,
+        IReadOnlyCollection<string>? applicablePaymentMethods = null,
+        IReadOnlyCollection<Guid>? applicableRouteIds = null) =>
         Voucher.Create(
             code: code,
             name: "Test Voucher",
             type: VoucherType.FIXED_AMOUNT,
             value: 10_000,
-            minOrderAmount: Money.FromRaw(0),
-            maxDiscountAmount: null,
-            totalUsageLimit: null,
-            perUserLimit: null,
+            minOrderAmount: Money.FromRaw(50_000),
+            maxDiscountAmount: Money.FromRaw(20_000),
+            totalUsageLimit: 100,
+            perUserLimit: 2,
             validFrom: DateTimeOffset.UtcNow.AddDays(-1),
             validUntil: DateTimeOffset.UtcNow.AddDays(10),
+            newUserOnly: true,
+            applicablePaymentMethods: applicablePaymentMethods ?? ["VNPAY", "WALLET"],
+            applicableServices: applicableServices ?? ["BOOKING", "PARCEL"],
             applicableOperatorIds: ownerOperatorId.HasValue ? [ownerOperatorId.Value] : null,
-            applicableRouteIds: null,
+            applicableRouteIds: applicableRouteIds,
             fundingType: funding,
             ownerOperatorId: ownerOperatorId,
             createdByUserId: AdminUserId);
 
     // -----------------------------------------------------------------------
-    // Happy path — unfiltered returns all vouchers paged
+    // Happy path — platform-only returns platform vouchers paged
     // -----------------------------------------------------------------------
 
     [Fact]
-    public async Task Handle_Unfiltered_ReturnsPaged()
+    public async Task Handle_PlatformOnly_ReturnsPagedPlatformVouchers()
     {
         // Arrange
         var voucher1 = CreateVoucher("CODE1");
@@ -57,6 +63,7 @@ public class ListVouchersQueryHandlerTests
 
         _vouchers.ListAsync(
                 ownerOperatorId: null,
+                platformOnly: true,
                 fundingType: null,
                 isActive: null,
                 page: 1,
@@ -69,6 +76,7 @@ public class ListVouchersQueryHandlerTests
         var sut = BuildSut();
         var query = new ListVouchersQuery(
             OwnerOperatorId: null,
+            PlatformOnly: true,
             FundingType: null,
             IsActive: null,
             Options: new QueryOptions { Page = 1, PageSize = 20 });
@@ -80,6 +88,13 @@ public class ListVouchersQueryHandlerTests
         result.Items.Should().HaveCount(2);
         result.TotalItems.Should().Be(2);
         result.Page.Should().Be(1);
+        result.Items[0].MinOrderAmount.Should().Be(50_000);
+        result.Items[0].MaxDiscountAmount.Should().Be(20_000);
+        result.Items[0].TotalUsageLimit.Should().Be(100);
+        result.Items[0].PerUserLimit.Should().Be(2);
+        result.Items[0].NewUserOnly.Should().BeTrue();
+        result.Items[0].ApplicableServices.Should().BeEquivalentTo(["BOOKING", "PARCEL"]);
+        result.Items[0].ApplicablePaymentMethods.Should().BeEquivalentTo(["VNPAY", "WALLET"]);
     }
 
     // -----------------------------------------------------------------------
@@ -99,6 +114,7 @@ public class ListVouchersQueryHandlerTests
 
         _vouchers.ListAsync(
                 ownerOperatorId: OperatorId,
+                platformOnly: false,
                 fundingType: null,
                 isActive: null,
                 page: 1,
@@ -111,6 +127,7 @@ public class ListVouchersQueryHandlerTests
         var sut = BuildSut();
         var query = new ListVouchersQuery(
             OwnerOperatorId: OperatorId,
+            PlatformOnly: false,
             FundingType: null,
             IsActive: null,
             Options: new QueryOptions { Page = 1, PageSize = 20 });
@@ -122,6 +139,8 @@ public class ListVouchersQueryHandlerTests
         result.Items.Should().HaveCount(1);
         result.Items[0].Code.Should().Be("OPCODE1");
         result.Items[0].OwnerOperatorId.Should().Be(OperatorId);
+        result.Items[0].ApplicableServices.Should().BeEquivalentTo(["BOOKING", "PARCEL"]);
+        result.Items[0].ApplicableOperatorIds.Should().BeEquivalentTo([OperatorId]);
         result.TotalItems.Should().Be(1);
     }
 
@@ -136,6 +155,7 @@ public class ListVouchersQueryHandlerTests
         var validator = new ListVouchersQueryValidator();
         var query = new ListVouchersQuery(
             OwnerOperatorId: null,
+            PlatformOnly: true,
             FundingType: null,
             IsActive: null,
             Options: new QueryOptions { Page = 1, PageSize = 20, SortBy = "nonExistentField" });
@@ -155,6 +175,7 @@ public class ListVouchersQueryHandlerTests
         var validator = new ListVouchersQueryValidator();
         var query = new ListVouchersQuery(
             OwnerOperatorId: null,
+            PlatformOnly: true,
             FundingType: null,
             IsActive: null,
             Options: new QueryOptions { Page = 1, PageSize = 20, SortBy = "createdAt" });
@@ -179,6 +200,7 @@ public class ListVouchersQueryHandlerTests
 
         _vouchers.ListAsync(
                 ownerOperatorId: null,
+                platformOnly: true,
                 fundingType: VoucherFundingType.OPERATOR_FUNDED,
                 isActive: null,
                 page: 1,
@@ -192,6 +214,7 @@ public class ListVouchersQueryHandlerTests
         // Pass fundingType as a string (matches controller → query flow)
         var query = new ListVouchersQuery(
             OwnerOperatorId: null,
+            PlatformOnly: true,
             FundingType: "OPERATOR_FUNDED",
             IsActive: null,
             Options: new QueryOptions { Page = 1, PageSize = 20 });

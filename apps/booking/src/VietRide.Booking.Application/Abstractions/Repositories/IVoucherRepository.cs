@@ -23,11 +23,12 @@ public interface IVoucherRepository : IRepository<Voucher, Guid>
     Task<Voucher?> FindByCodeAsync(string code, CancellationToken ct = default);
 
     /// <summary>
-    /// Returns a paged list of vouchers with optional filters for the admin oversight endpoint.
+    /// Returns a paged list of vouchers with explicit owner scope and optional filters.
     /// Respects HasQueryFilter (soft-deleted vouchers excluded).
     /// </summary>
     Task<(IReadOnlyList<Voucher> Items, long Total)> ListAsync(
         Guid? ownerOperatorId,
+        bool platformOnly,
         VoucherFundingType? fundingType,
         bool? isActive,
         int page,
