@@ -1099,11 +1099,11 @@ Response `200`:
 
 ### GET `/v1/admin/vouchers`
 
-> **Day-14 (Task 14.0a).** Platform-governance oversight list of ALL vouchers (admin-created platform vouchers + operator self-created vouchers) for audit (Q7). Read-only — no Idempotency-Key.
+> Platform voucher list only: returns vouchers where `ownerOperatorId = null`. Read-only — no Idempotency-Key.
 
 Auth: `SYSTEM_ADMIN`.
 
-Query: `ownerOperatorId?` (uuid — filter operator-owned vouchers of one operator; omit/null returns all incl. platform), `fundingType?` (`VIETRIDE_FUNDED` | `OPERATOR_FUNDED`), `isActive?` (bool), plus standard `QueryOptions` paging/sort (`page`/`pageSize` clamped 1..100, `sortBy` whitelisted — default `createdAt` `desc`; non-whitelisted → `400 INVALID_SORT_FIELD`). v1 returns only active (non-soft-deleted) vouchers (respects EF `HasQueryFilter(deleted_at == null)`); `includeDeleted` not supported in v1.
+Query: `fundingType?` (`VIETRIDE_FUNDED` | `OPERATOR_FUNDED`), `isActive?` (bool), plus standard `QueryOptions` paging/sort (`page`/`pageSize` clamped 1..100, `sortBy` whitelisted — default `createdAt` `desc`; non-whitelisted → `422 INVALID_SORT_FIELD`). `ownerOperatorId` is not supported on this endpoint and must not expose operator-owned vouchers. `applicableServices` in each item contains `BOOKING`, `PARCEL`, or both. v1 returns only active (non-soft-deleted) vouchers (respects EF `HasQueryFilter(deleted_at == null)`); `includeDeleted` not supported in v1.
 
 Response `200`:
 ```json
@@ -1118,6 +1118,15 @@ Response `200`:
         "name": "Summer Sale 20%",
         "type": "PERCENT_OFF",
         "value": 20,
+        "minOrderAmount": 100000,
+        "maxDiscountAmount": 50000,
+        "totalUsageLimit": 1000,
+        "perUserLimit": 1,
+        "newUserOnly": false,
+        "applicableServices": ["BOOKING", "PARCEL"],
+        "applicablePaymentMethods": ["VNPAY", "WALLET"],
+        "applicableOperatorIds": ["operator-uuid"],
+        "applicableRouteIds": ["route-uuid"],
         "fundingType": "VIETRIDE_FUNDED",
         "ownerOperatorId": null,
         "isActive": true,
@@ -1191,6 +1200,18 @@ Response `201`:
 Auth: `SYSTEM_ADMIN`. Source: v7:685-688. Returns operator-voucher consent records for a specific voucher (admin view of consent status across operators).
 
 Response `200`: `ApiResponse` of list `{ id, voucherId, operatorId, status, requestedAt, respondedAt, respondedByUserId, rejectReason }`.
+
+### GET `/v1/operator/vouchers`
+
+Auth: `OPERATOR_ADMIN`.
+
+Lists vouchers owned by the caller operator. The service takes `operatorId` from the authenticated JWT claim and always filters `ownerOperatorId = caller.operatorId`; client-supplied `ownerOperatorId` is not accepted. Read-only — no Idempotency-Key.
+
+Query: `isActive?` (bool), plus standard `QueryOptions` paging/sort (`page`/`pageSize` clamped 1..100, `sortBy` whitelisted — default `createdAt` `desc`; non-whitelisted → `422 INVALID_SORT_FIELD`). No `fundingType` query in v1. v1 returns only non-soft-deleted vouchers.
+
+Response `200`: same paged `VoucherListItem` shape as `GET /v1/admin/vouchers`, with `ownerOperatorId` populated. `applicableServices` identifies whether the voucher applies to `BOOKING`, `PARCEL`, or both.
+
+Errors: missing/invalid `operatorId` claim → `401 UNAUTHORIZED`; non-`OPERATOR_ADMIN` → `403 FORBIDDEN`; invalid sort/filter → `422`.
 
 ### POST `/v1/operator/vouchers`
 
@@ -1641,11 +1662,21 @@ Response `200`:
 
 ## Parcel Service
 
+Parcel cargo policy:
+- Dimension unit: centimeters; weight unit: kilograms.
+- Volume precision: `decimal(10,4)` m3.
+- Weight/DIM/chargeable precision: `decimal(8,2)` kg.
+- Money is VND `BIGINT`, floored to 1000 before persistence.
+- `PENDING_OPERATOR_ACTION` is disambiguated by `pendingActionType`: `CAPACITY_EXCEEDED`, `RESERVE_FAILED`, `REFUND_CONFIRMATION`.
+
 ### GET `/v1/parcels/available-trips`
 
 Auth: `PASSENGER`.
 
-Query: `originStationId`, `destinationStationId`, `departureDate`, `estimatedWeightKg`, `sizeCategory`.
+Query: `originStationId`, `destinationStationId`, `departureDate`, `lengthCm`, `widthCm`, `heightCm`, `estimatedWeightKg`, `sizeCategory`.
+
+Backend calculates `volumeM3`, `dimWeightKg`, and `chargeableWeightKg = max(estimatedWeightKg, dimWeightKg)`.
+Customer response must not expose raw remaining cargo capacity. Trips that cannot accept both estimated volume and estimated weight are filtered out.
 
 Response `200`:
 ```json
@@ -1659,8 +1690,8 @@ Response `200`:
         "routeId": "uuid",
         "operatorName": "VietRide Express",
         "departureDateTime": "2026-05-18T08:00:00+07:00",
-        "availableCargoWeightKg": 120,
-        "priceVnd": 150000
+        "estimatedPriceVnd": 150000,
+        "estimatedDepositVnd": 30000
       }
     ],
     "page": 1,
@@ -1687,6 +1718,9 @@ Request:
   "itemName": "Thùng quà",
   "description": "Hàng dễ vỡ",
   "sizeCategory": "MEDIUM",
+  "lengthCm": 60,
+  "widthCm": 40,
+  "heightCm": 35,
   "estimatedWeightKg": 12.5,
   "photoUrl": "https://storage.googleapis.com/...",
   "recipient": {
@@ -1708,7 +1742,10 @@ Response `201`:
     "parcelId": "uuid",
     "parcelCode": "VR-PCL-20260518-P7K3D9Q2",
     "status": "PENDING_PAYMENT",
-    "totalAmount": 150000,
+    "totalAmount": 30000,
+    "originalTotalAmount": 30000,
+    "discountAmount": 0,
+    "voucherCode": null,
     "paymentRedirectUrl": "https://vnpay.vn/..."
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
@@ -1835,6 +1872,47 @@ Decision note: invalid, expired, and revoked delivery tokens return 400 with
 `PARCEL_DELIVERY_TOKEN_REVOKED`. BSOT `401` and timeline `410` are known drift
 items to reconcile.
 
+### POST `/v1/assistant/parcels/{parcelId}/reweigh`
+
+Auth: `ASSISTANT`. Idempotency: required.
+
+Request:
+```json
+{
+  "actualLengthCm": 62,
+  "actualWidthCm": 42,
+  "actualHeightCm": 36,
+  "actualWeightKg": 13.2,
+  "actualSizeCategory": "MEDIUM",
+  "paymentMethod": "VNPAY"
+}
+```
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "parcelId": "uuid",
+    "parcelCode": "VR-PCL-20260518-P7K3D9Q2",
+    "status": "PENDING_ADDITIONAL_PAYMENT",
+    "actualChargeableWeightKg": 15.62,
+    "totalPriceVnd": 180000,
+    "additionalAmount": 30000,
+    "refundAmount": 0,
+    "paymentRedirectUrl": "https://vnpay.vn/..."
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Decision notes:
+- Capacity is resolved before pricing.
+- If actual cargo exceeds trip capacity beyond auto-overflow, status becomes `PENDING_OPERATOR_ACTION` with pending action type `CAPACITY_EXCEEDED`.
+- If actual price is lower outside tolerance, status becomes `PENDING_OPERATOR_ACTION` with pending action type `REFUND_CONFIRMATION`.
+- If actual price is higher outside tolerance, status becomes `PENDING_ADDITIONAL_PAYMENT`.
+
 ### POST `/internal/v1/parcels/{parcelId}/mark-loaded`
 
 Auth: Internal JWT or Driver/Assistant through Driver App facade.
@@ -1910,6 +1988,62 @@ Response `200`:
     "parcelId": "uuid",
     "status": "PENDING_TRANSFER_CONFIRM",
     "transferTargetTripId": "uuid"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+### POST `/v1/operator/parcels/{parcelId}/confirm-refund`
+
+Auth: `OPERATOR_ADMIN` or `OPERATOR_STAFF` for parcel's operator. Idempotency: required.
+
+Valid only when parcel status is `PENDING_OPERATOR_ACTION` and pending action type is `REFUND_CONFIRMATION`.
+
+Request:
+```json
+{
+  "reason": "Confirmed actual cargo is smaller than estimated"
+}
+```
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "parcelId": "uuid",
+    "parcelCode": "VR-PCL-20260518-P7K3D9Q2",
+    "status": "PENDING",
+    "tripId": "uuid"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+### POST `/v1/operator/parcels/{parcelId}/override-capacity`
+
+Auth: `OPERATOR_ADMIN` or `OPERATOR_STAFF` with `CAN_OVERRIDE_CAPACITY`. Idempotency: required.
+
+Valid only when parcel status is `PENDING_OPERATOR_ACTION` and pending action type is `CAPACITY_EXCEEDED` or `RESERVE_FAILED`.
+
+Request:
+```json
+{
+  "reason": "Driver approved loading within manual buffer"
+}
+```
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "parcelId": "uuid",
+    "parcelCode": "VR-PCL-20260518-P7K3D9Q2",
+    "status": "PENDING",
+    "tripId": "uuid"
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
@@ -2143,6 +2277,63 @@ Server broadcasts to room `trip:{tripId}`:
 - `trip:statusChanged`
 
 ## RAG AI Service
+
+### GET `/v1/rag/documents`
+
+Auth: `SYSTEM_ADMIN`.
+
+Query:
+- `page` (optional, default `1`)
+- `pageSize` (optional, default `20`, max `100`)
+- `sortBy` (optional): `createdAt`, `updatedAt`, `title`, `status`, `ingestStatus`
+- `sortDir` (optional): `asc`, `desc`
+- `status` (optional): `PENDING_REVIEW`, `APPROVED`, `REJECTED`, `ARCHIVED`
+- `ingestStatus` (optional): `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`
+- `accessLevel` (optional): `PUBLIC`, `OPERATOR`, `ADMIN`
+- `category` (optional): `CUSTOMER_SUPPORT`, `OPERATOR_POLICY`, `PLATFORM_ADMIN`
+- `documentType` (optional): `FAQ`, `POLICY`, `SOP`, `GUIDE`, `TERMS`
+- `operatorId` (optional, UUID)
+- `q` (optional): search title, file name, or description.
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [
+      {
+        "id": "uuid",
+        "title": "Chính sách hủy vé",
+        "description": null,
+        "storagePath": "documents/file.md",
+        "fileName": "policy.md",
+        "mimeType": "text/markdown",
+        "fileSize": "1024",
+        "fileType": "MARKDOWN",
+        "accessLevel": "PUBLIC",
+        "operatorId": null,
+        "category": "CUSTOMER_SUPPORT",
+        "documentType": "POLICY",
+        "audienceRoles": [],
+        "language": "vi",
+        "status": "APPROVED",
+        "ingestStatus": "COMPLETED",
+        "createdAt": "2026-06-01T10:00:00Z",
+        "updatedAt": "2026-06-01T10:00:00Z",
+        "approvedAt": "2026-06-01T10:00:00Z"
+      }
+    ],
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 1,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
 
 ### POST `/v1/rag/documents`
 
