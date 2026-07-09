@@ -50,6 +50,7 @@ public sealed class InternalTripsController : ControllerBase
         [FromQuery] Guid destinationStationId,
         [FromQuery] DateOnly departureDate,
         [FromQuery] decimal estimatedWeightKg,
+        [FromQuery] decimal estimatedVolumeM3,
         [FromQuery] string sizeCategory,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
@@ -61,6 +62,7 @@ public sealed class InternalTripsController : ControllerBase
                 destinationStationId,
                 departureDate,
                 estimatedWeightKg,
+                estimatedVolumeM3,
                 sizeCategory,
                 page,
                 pageSize),
@@ -171,7 +173,34 @@ public sealed class InternalTripsController : ControllerBase
         CancellationToken cancellationToken)
     {
         return Ok(await mediator.Send(
-            new CargoMutationCommand(tripId, request.ParcelId, request.WeightKg, "reserve"),
+            new CargoMutationCommand(tripId, request.ParcelId, request.WeightKg, request.VolumeM3, request.AllowCapacityOverflow, "reserve"),
+            cancellationToken));
+    }
+
+    [HttpGet("{tripId:guid}/cargo/capacity")]
+    [ProducesResponseType(typeof(ApiResponse<CargoCapacityDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<CargoCapacityDto>> GetCargoCapacityAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await mediator.Send(new GetCargoCapacityQuery(tripId, OperatorId: null), cancellationToken));
+    }
+
+    [HttpPost("{tripId:guid}/cargo/remeasure")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<CargoCapacityDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<CargoCapacityDto>> RemeasureCargoAsync(
+        Guid tripId,
+        [FromBody] CargoMutationRequest request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await mediator.Send(
+            new CargoMutationCommand(tripId, request.ParcelId, request.WeightKg, request.VolumeM3, request.AllowCapacityOverflow, "remeasure"),
             cancellationToken));
     }
 
@@ -187,7 +216,7 @@ public sealed class InternalTripsController : ControllerBase
         CancellationToken cancellationToken)
     {
         return Ok(await mediator.Send(
-            new CargoMutationCommand(tripId, request.ParcelId, request.WeightKg, "load"),
+            new CargoMutationCommand(tripId, request.ParcelId, request.WeightKg, request.VolumeM3, request.AllowCapacityOverflow, "load"),
             cancellationToken));
     }
 
@@ -202,7 +231,7 @@ public sealed class InternalTripsController : ControllerBase
         CancellationToken cancellationToken)
     {
         return Ok(await mediator.Send(
-            new CargoMutationCommand(tripId, request.ParcelId, request.WeightKg, "release"),
+            new CargoMutationCommand(tripId, request.ParcelId, request.WeightKg, request.VolumeM3, request.AllowCapacityOverflow, "release"),
             cancellationToken));
     }
 

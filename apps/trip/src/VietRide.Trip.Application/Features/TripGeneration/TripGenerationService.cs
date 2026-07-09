@@ -143,6 +143,7 @@ public sealed class TripGenerationService
                     TripSource.AUTO_FROM_SCHEDULE,
                     route.BaseFare,
                     vehicle.MaxCargoWeightKg,
+                    vehicle.MaxCargoVolumeM3,
                     0m);
 
                 await tripRepository.AddAsync(trip, cancellationToken);

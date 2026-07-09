@@ -37,6 +37,14 @@ public sealed class SearchParcelAvailableTripsQueryHandler
                 [new ValidationError(nameof(request.EstimatedWeightKg), "estimatedWeightKg must be greater than 0.")]);
         }
 
+        if (request.EstimatedVolumeM3 <= 0)
+        {
+            throw new CodedValidationException(
+                "VALIDATION_ERROR",
+                "estimatedVolumeM3 must be greater than 0.",
+                [new ValidationError(nameof(request.EstimatedVolumeM3), "estimatedVolumeM3 must be greater than 0.")]);
+        }
+
         var page = Math.Max(request.Page, 1);
         var pageSize = Math.Clamp(request.PageSize, 1, 100);
         var localStart = new DateTimeOffset(request.DepartureDate.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(7));
@@ -72,8 +80,10 @@ public sealed class SearchParcelAvailableTripsQueryHandler
             {
                 Trip = trip,
                 AvailableCargoWeightKg = GetAvailableCargoWeightKg(trip),
+                AvailableCargoVolumeM3 = GetAvailableCargoVolumeM3(trip),
             })
-            .Where(item => item.AvailableCargoWeightKg >= request.EstimatedWeightKg)
+            .Where(item => item.AvailableCargoWeightKg >= request.EstimatedWeightKg
+                && item.AvailableCargoVolumeM3 >= request.EstimatedVolumeM3)
             .ToList();
 
         var pageItems = candidates
@@ -92,7 +102,8 @@ public sealed class SearchParcelAvailableTripsQueryHandler
                 item.Trip.OperatorId,
                 ResolveOperatorName(operatorNames, item.Trip.OperatorId),
                 item.Trip.DepartureDateTime,
-                item.AvailableCargoWeightKg))
+                item.AvailableCargoWeightKg,
+                item.AvailableCargoVolumeM3))
             .ToList();
 
         return PagedResult<ParcelTripAvailabilityItemDto>.Create(items, page, pageSize, candidates.Count);
@@ -130,5 +141,15 @@ public sealed class SearchParcelAvailableTripsQueryHandler
         }
 
         return Math.Max(0m, trip.MaxCargoWeightKg.Value - trip.ReservedParcelWeightKg - trip.TotalLoadedWeightKg);
+    }
+
+    private static decimal GetAvailableCargoVolumeM3(Domain.Entities.Trip trip)
+    {
+        if (!trip.MaxCargoVolumeM3.HasValue)
+        {
+            return 0m;
+        }
+
+        return Math.Max(0m, trip.MaxCargoVolumeM3.Value - trip.ReservedParcelVolumeM3 - trip.TotalLoadedVolumeM3);
     }
 }

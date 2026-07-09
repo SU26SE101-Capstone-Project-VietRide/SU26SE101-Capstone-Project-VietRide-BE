@@ -14,7 +14,7 @@ internal sealed class TripConfiguration : IEntityTypeConfiguration<Domain.Entiti
             table.HasCheckConstraint("chk_trips_base_fare_non_negative", "base_fare >= 0");
             table.HasCheckConstraint(
                 "chk_trips_cargo_counters_non_negative",
-                "reserved_parcel_weight_kg >= 0 AND total_loaded_weight_kg >= 0");
+                "reserved_parcel_weight_kg >= 0 AND reserved_parcel_volume_m3 >= 0 AND total_loaded_weight_kg >= 0 AND total_loaded_volume_m3 >= 0");
         });
 
         builder.HasKey(trip => trip.Id).HasName("pk_trips");
@@ -59,6 +59,9 @@ internal sealed class TripConfiguration : IEntityTypeConfiguration<Domain.Entiti
         builder.Property(trip => trip.MaxCargoWeightKg)
             .HasColumnName("max_cargo_weight_kg")
             .HasColumnType("decimal(8,2)");
+        builder.Property(trip => trip.MaxCargoVolumeM3)
+            .HasColumnName("max_cargo_volume_m3")
+            .HasColumnType("decimal(10,4)");
         builder.Property(trip => trip.EstimatedPassengerLuggageKg)
             .HasColumnName("estimated_passenger_luggage_kg")
             .HasColumnType("decimal(8,2)")
@@ -68,9 +71,17 @@ internal sealed class TripConfiguration : IEntityTypeConfiguration<Domain.Entiti
             .HasColumnName("reserved_parcel_weight_kg")
             .HasColumnType("decimal(8,2)")
             .HasDefaultValue(0m);
+        builder.Property(trip => trip.ReservedParcelVolumeM3)
+            .HasColumnName("reserved_parcel_volume_m3")
+            .HasColumnType("decimal(10,4)")
+            .HasDefaultValue(0m);
         builder.Property(trip => trip.TotalLoadedWeightKg)
             .HasColumnName("total_loaded_weight_kg")
             .HasColumnType("decimal(8,2)")
+            .HasDefaultValue(0m);
+        builder.Property(trip => trip.TotalLoadedVolumeM3)
+            .HasColumnName("total_loaded_volume_m3")
+            .HasColumnType("decimal(10,4)")
             .HasDefaultValue(0m);
         builder.Property(trip => trip.CreatedAt)
             .HasColumnName("created_at")

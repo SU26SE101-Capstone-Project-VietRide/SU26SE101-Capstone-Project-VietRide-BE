@@ -937,6 +937,10 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .HasColumnType("decimal(8,2)")
                         .HasColumnName("max_cargo_weight_kg");
 
+                    b.Property<decimal?>("MaxCargoVolumeM3")
+                        .HasColumnType("decimal(10,4)")
+                        .HasColumnName("max_cargo_volume_m3");
+
                     b.Property<Guid>("OperatorId")
                         .HasColumnType("uuid")
                         .HasColumnName("operator_id");
@@ -946,6 +950,12 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .HasColumnType("decimal(8,2)")
                         .HasDefaultValue(0m)
                         .HasColumnName("reserved_parcel_weight_kg");
+
+                    b.Property<decimal>("ReservedParcelVolumeM3")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(10,4)")
+                        .HasDefaultValue(0m)
+                        .HasColumnName("reserved_parcel_volume_m3");
 
                     b.Property<Guid>("RouteId")
                         .HasColumnType("uuid")
@@ -969,6 +979,12 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .HasColumnType("decimal(8,2)")
                         .HasDefaultValue(0m)
                         .HasColumnName("total_loaded_weight_kg");
+
+                    b.Property<decimal>("TotalLoadedVolumeM3")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(10,4)")
+                        .HasDefaultValue(0m)
+                        .HasColumnName("total_loaded_volume_m3");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .ValueGeneratedOnAdd()
@@ -1014,7 +1030,7 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         {
                             t.HasCheckConstraint("chk_trips_base_fare_non_negative", "base_fare >= 0");
 
-                            t.HasCheckConstraint("chk_trips_cargo_counters_non_negative", "reserved_parcel_weight_kg >= 0 AND total_loaded_weight_kg >= 0");
+                            t.HasCheckConstraint("chk_trips_cargo_counters_non_negative", "reserved_parcel_weight_kg >= 0 AND reserved_parcel_volume_m3 >= 0 AND total_loaded_weight_kg >= 0 AND total_loaded_volume_m3 >= 0");
                         });
                 });
 
@@ -1085,6 +1101,14 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("loaded_at");
 
+                    b.Property<decimal?>("ActualWeightKg")
+                        .HasColumnType("decimal(8,2)")
+                        .HasColumnName("actual_weight_kg");
+
+                    b.Property<decimal?>("ActualVolumeM3")
+                        .HasColumnType("decimal(10,4)")
+                        .HasColumnName("actual_volume_m3");
+
                     b.Property<Guid>("ParcelId")
                         .HasColumnType("uuid")
                         .HasColumnName("parcel_id");
@@ -1113,6 +1137,10 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .HasColumnType("decimal(8,2)")
                         .HasColumnName("weight_kg");
 
+                    b.Property<decimal>("VolumeM3")
+                        .HasColumnType("decimal(10,4)")
+                        .HasColumnName("volume_m3");
+
                     b.HasKey("Id")
                         .HasName("pk_trip_cargo_parcels");
 
@@ -1128,6 +1156,12 @@ namespace VietRide.Trip.Infrastructure.Migrations
                             t.HasCheckConstraint("chk_trip_cargo_parcels_state", "state IN ('RESERVED', 'LOADED', 'RELEASED')");
 
                             t.HasCheckConstraint("chk_trip_cargo_parcels_weight_positive", "weight_kg > 0");
+
+                            t.HasCheckConstraint("chk_trip_cargo_parcels_volume_positive", "volume_m3 > 0");
+
+                            t.HasCheckConstraint("chk_trip_cargo_parcels_actual_weight_positive", "actual_weight_kg IS NULL OR actual_weight_kg > 0");
+
+                            t.HasCheckConstraint("chk_trip_cargo_parcels_actual_volume_positive", "actual_volume_m3 IS NULL OR actual_volume_m3 > 0");
                         });
                 });
 

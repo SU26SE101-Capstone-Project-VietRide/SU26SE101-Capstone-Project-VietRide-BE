@@ -6,4 +6,5 @@ public sealed record ParcelTripAvailabilityItemDto(
     Guid OperatorId,
     string OperatorName,
     DateTimeOffset DepartureDateTime,
-    decimal AvailableCargoWeightKg);
+    decimal AvailableCargoWeightKg,
+    decimal AvailableCargoVolumeM3);

@@ -28,13 +28,19 @@ public sealed class GetCargoCapacityQueryHandler : IRequestHandler<GetCargoCapac
             throw new ForbiddenException("FORBIDDEN", "Trip does not belong to this operator.");
         }
 
-        var max = trip.MaxCargoWeightKg ?? 0m;
-        var percentFull = max <= 0m ? 0m : Math.Round(trip.TotalLoadedWeightKg / max * 100m, 2);
+        var maxWeight = trip.MaxCargoWeightKg ?? 0m;
+        var maxVolume = trip.MaxCargoVolumeM3 ?? 0m;
+        var percentFull = maxWeight <= 0m ? 0m : Math.Round(trip.TotalLoadedWeightKg / maxWeight * 100m, 2);
         return new CargoCapacityDto(
             trip.Id,
             trip.ReservedParcelWeightKg,
+            trip.ReservedParcelVolumeM3,
             trip.TotalLoadedWeightKg,
-            max,
+            trip.TotalLoadedVolumeM3,
+            maxWeight,
+            maxVolume,
+            Math.Max(0m, maxWeight - trip.ReservedParcelWeightKg - trip.TotalLoadedWeightKg),
+            Math.Max(0m, maxVolume - trip.ReservedParcelVolumeM3 - trip.TotalLoadedVolumeM3),
             percentFull);
     }
 }
