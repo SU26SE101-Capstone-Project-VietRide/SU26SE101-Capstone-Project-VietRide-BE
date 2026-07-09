@@ -43,6 +43,9 @@ public sealed class AssistantParcelsController : ControllerBase
         var result = await _mediator.Send(new ReweighParcelCommand(
             parcelId,
             operatorId,
+            request.ActualLengthCm,
+            request.ActualWidthCm,
+            request.ActualHeightCm,
             request.ActualWeightKg,
             request.ActualSizeCategory,
             request.PaymentMethod), cancellationToken);

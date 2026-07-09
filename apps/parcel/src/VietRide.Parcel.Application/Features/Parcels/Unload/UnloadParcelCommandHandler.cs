@@ -123,6 +123,7 @@ public sealed class UnloadParcelCommandHandler
                     snapshot.TripId,
                     snapshot.ParcelId,
                     parcel.ActualWeightKg ?? parcel.EstimatedWeightKg,
+                    parcel.ActualVolumeM3 ?? parcel.EstimatedVolumeM3,
                     cancellationToken));
 
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -190,6 +191,9 @@ public sealed class UnloadParcelCommandHandler
 
     private static Task EnsureCargoSuccessAsync(TripCargoOutcome outcome)
     {
+        if (outcome is null)
+            return Task.CompletedTask;
+
         return outcome.Kind switch
         {
             TripCargoOutcomeKind.Success => Task.CompletedTask,

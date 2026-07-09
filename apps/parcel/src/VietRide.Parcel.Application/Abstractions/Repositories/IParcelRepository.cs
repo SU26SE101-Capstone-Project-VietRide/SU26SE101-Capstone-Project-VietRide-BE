@@ -17,6 +17,20 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     Task<ParcelPaymentTransitionSnapshot?> GetPaymentTransitionSnapshotAsync(
         Guid parcelId, CancellationToken ct);
 
+    Task<bool> TrySetPendingOperatorActionAsync(
+        Guid parcelId,
+        PendingActionType actionType,
+        string reason,
+        Money? refundAmount,
+        DateTimeOffset now,
+        CancellationToken ct);
+
+    Task<ParcelPaymentTransitionSnapshot?> TryResolvePendingOperatorActionAsync(
+        Guid parcelId,
+        PendingActionType expectedActionType,
+        DateTimeOffset now,
+        CancellationToken ct);
+
     Task<ParcelPaymentTransitionSnapshot?> TryMarkDepositFailedAsync(
         Guid parcelId, DateTimeOffset now, CancellationToken ct);
 
@@ -48,11 +62,34 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
 
     // Reweigh transition (PENDING)
     Task<ParcelPaymentTransitionSnapshot?> TryReweighNoFeeAsync(
-        Guid parcelId, decimal actualWeightKg, ParcelSizeCategory actualSizeCategory, DateTimeOffset now, CancellationToken ct);
+        Guid parcelId,
+        decimal actualLengthCm,
+        decimal actualWidthCm,
+        decimal actualHeightCm,
+        decimal actualWeightKg,
+        decimal actualVolumeM3,
+        decimal actualDimWeightKg,
+        decimal actualChargeableWeightKg,
+        ParcelSizeCategory actualSizeCategory,
+        Money totalPrice,
+        DateTimeOffset now,
+        CancellationToken ct);
 
     Task<ParcelPaymentTransitionSnapshot?> TryReweighWithFeeAsync(
-        Guid parcelId, decimal actualWeightKg, ParcelSizeCategory actualSizeCategory,
-        Money additionalAmount, DateTimeOffset deadline, DateTimeOffset now, CancellationToken ct);
+        Guid parcelId,
+        decimal actualLengthCm,
+        decimal actualWidthCm,
+        decimal actualHeightCm,
+        decimal actualWeightKg,
+        decimal actualVolumeM3,
+        decimal actualDimWeightKg,
+        decimal actualChargeableWeightKg,
+        ParcelSizeCategory actualSizeCategory,
+        Money totalPrice,
+        Money additionalAmount,
+        DateTimeOffset deadline,
+        DateTimeOffset now,
+        CancellationToken ct);
 
     // Additional payment idempotent assignment (PENDING_ADDITIONAL_PAYMENT)
     Task<bool> TryAssignAdditionalPaymentIdAsync(

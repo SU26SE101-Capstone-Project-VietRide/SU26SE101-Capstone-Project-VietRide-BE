@@ -146,12 +146,22 @@ public sealed class ConfirmPaymentForParcelCommandHandler
         Guid paymentId,
         CancellationToken cancellationToken)
     {
-        var weightKg = await GetCargoWeightAsync(snapshot.ParcelId, cancellationToken);
+        var cargo = await GetCargoAsync(snapshot.ParcelId, cancellationToken);
         var outcome = await _tripClient.ReserveCargoAsync(
             snapshot.TripId,
             snapshot.ParcelId,
-            weightKg,
+            cargo.WeightKg,
+            cargo.VolumeM3,
             cancellationToken);
+
+        outcome ??= await _tripClient.ReserveCargoAsync(
+            snapshot.TripId,
+            snapshot.ParcelId,
+            cargo.WeightKg,
+            cancellationToken);
+
+        if (outcome is null)
+            return;
 
         if (outcome.Kind == TripCargoOutcomeKind.Success)
         {
@@ -172,6 +182,16 @@ public sealed class ConfirmPaymentForParcelCommandHandler
             reason,
             outcome.ErrorMessage);
 
+        await _parcelRepository.TrySetPendingOperatorActionAsync(
+            snapshot.ParcelId,
+            reason == "TRIP_CARGO_CAPACITY_EXCEEDED"
+                ? PendingActionType.CAPACITY_EXCEEDED
+                : PendingActionType.RESERVE_FAILED,
+            outcome.ErrorMessage ?? reason,
+            null,
+            _clock.UtcNow,
+            cancellationToken);
+
         await ParcelOutboxEvents.EnqueueAsync(
             _outbox,
             ParcelOutboxEvents.PendingOperatorAction,
@@ -186,9 +206,11 @@ public sealed class ConfirmPaymentForParcelCommandHandler
             cancellationToken);
     }
 
-    private async Task<decimal> GetCargoWeightAsync(Guid parcelId, CancellationToken cancellationToken)
+    private async Task<(decimal WeightKg, decimal VolumeM3)> GetCargoAsync(Guid parcelId, CancellationToken cancellationToken)
     {
         var parcel = await _parcelRepository.GetByIdAsync(parcelId, cancellationToken);
-        return parcel?.ActualWeightKg ?? parcel?.EstimatedWeightKg ?? 0m;
+        return (
+            parcel?.ActualWeightKg ?? parcel?.EstimatedWeightKg ?? 0m,
+            parcel?.ActualVolumeM3 ?? parcel?.EstimatedVolumeM3 ?? 0m);
     }
 }

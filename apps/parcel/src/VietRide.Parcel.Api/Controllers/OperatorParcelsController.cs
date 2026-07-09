@@ -6,6 +6,7 @@ using VietRide.Parcel.Api.Controllers.Requests;
 using VietRide.Parcel.Api.Filters;
 using VietRide.Parcel.Application.Features.Parcels.ManualCancel;
 using VietRide.Parcel.Application.Features.Parcels.ManualConfirmDelivery;
+using VietRide.Parcel.Application.Features.Parcels.OperatorActions;
 using VietRide.Parcel.Application.Features.Parcels.OperationalRecovery;
 using VietRide.Parcel.Application.Features.Parcels.Reports;
 using VietRide.Parcel.Application.Features.Parcels.Review;
@@ -153,6 +154,59 @@ public sealed class OperatorParcelsController : ControllerBase
 
         var result = await _mediator.Send(
             new ManualCancelParcelCommand(parcelId, operatorId, request.Reason, request.RefundChoice),
+            cancellationToken);
+
+        return Ok(result);
+    }
+
+    [HttpPost("{parcelId:guid}/confirm-refund")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<OperationalParcelResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<OperationalParcelResponse>> ConfirmRefundAsync(
+        Guid parcelId,
+        [FromBody] ConfirmRefundRequest request,
+        CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        var userId = CurrentUserClaims.GetUserId(User);
+
+        var result = await _mediator.Send(
+            new ConfirmRefundCommand(parcelId, operatorId, userId, request.Reason),
+            cancellationToken);
+
+        return Ok(result);
+    }
+
+    [HttpPost("{parcelId:guid}/override-capacity")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<OperationalParcelResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<OperationalParcelResponse>> OverrideCapacityAsync(
+        Guid parcelId,
+        [FromBody] OverrideCapacityRequest request,
+        CancellationToken cancellationToken)
+    {
+        var role = CurrentUserClaims.GetRole(User);
+        if (!string.Equals(role, "OPERATOR_ADMIN", StringComparison.OrdinalIgnoreCase)
+            && !CurrentUserClaims.HasPermission(User, "CAN_OVERRIDE_CAPACITY"))
+        {
+            throw new ForbiddenException("FORBIDDEN", "Capacity override permission is required.");
+        }
+
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        var userId = CurrentUserClaims.GetUserId(User);
+
+        var result = await _mediator.Send(
+            new OverrideCapacityCommand(parcelId, operatorId, userId, request.Reason),
             cancellationToken);
 
         return Ok(result);
