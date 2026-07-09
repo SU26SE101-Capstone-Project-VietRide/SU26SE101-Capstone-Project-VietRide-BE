@@ -15,6 +15,9 @@ public sealed class CreateVoucherCommandValidator : AbstractValidator<CreateVouc
     private static readonly HashSet<string> ValidFundingTypes =
         [.. Enum.GetNames<VoucherFundingType>()];
 
+    private static readonly HashSet<string> ValidServices =
+        new(StringComparer.OrdinalIgnoreCase) { "BOOKING", "PARCEL" };
+
     public CreateVoucherCommandValidator()
     {
         RuleFor(x => x.CreatedByUserId)
@@ -66,6 +69,16 @@ public sealed class CreateVoucherCommandValidator : AbstractValidator<CreateVouc
         RuleFor(x => x.ValidUntil)
             .GreaterThan(x => x.ValidFrom)
             .WithMessage("validUntil must be after validFrom.");
+
+        RuleFor(x => x.ApplicableServices)
+            .NotEmpty()
+            .When(x => x.ApplicableServices is not null)
+            .WithMessage("applicableServices must contain at least one service when supplied.");
+
+        RuleForEach(x => x.ApplicableServices)
+            .Must(s => !string.IsNullOrWhiteSpace(s) && ValidServices.Contains(s.Trim()))
+            .When(x => x.ApplicableServices is not null)
+            .WithMessage("applicableServices must contain only BOOKING or PARCEL.");
 
         // Q3 RESOLVED: OPERATOR_FUNDED requires a non-null, non-empty applicableOperatorIds list.
         RuleFor(x => x.ApplicableOperatorIds)

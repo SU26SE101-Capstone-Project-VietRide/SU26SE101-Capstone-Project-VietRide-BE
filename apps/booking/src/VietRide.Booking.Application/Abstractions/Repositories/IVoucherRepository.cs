@@ -23,6 +23,18 @@ public interface IVoucherRepository : IRepository<Voucher, Guid>
     Task<Voucher?> FindByCodeAsync(string code, CancellationToken ct = default);
 
     /// <summary>
+    /// Returns a non-soft-deleted platform voucher (owner_operator_id IS NULL) by id.
+    /// Operator-owned vouchers are intentionally hidden from admin platform endpoints.
+    /// </summary>
+    Task<Voucher?> FindPlatformByIdAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns a platform voucher by id while bypassing the soft-delete query filter.
+    /// Used by admin DELETE to implement behavior-idempotent soft-delete.
+    /// </summary>
+    Task<Voucher?> FindPlatformByIdIgnoringSoftDeleteAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
     /// Returns a paged list of vouchers with explicit owner scope and optional filters.
     /// Respects HasQueryFilter (soft-deleted vouchers excluded).
     /// </summary>

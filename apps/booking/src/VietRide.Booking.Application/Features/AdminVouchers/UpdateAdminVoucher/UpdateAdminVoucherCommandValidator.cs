@@ -1,51 +1,37 @@
 using FluentValidation;
-using VietRide.Booking.Domain.Enums;
 
-namespace VietRide.Booking.Application.Features.OperatorVouchers.CreateOperatorVoucher;
+namespace VietRide.Booking.Application.Features.AdminVouchers.UpdateAdminVoucher;
 
 /// <summary>
-/// Input-shape validation for <see cref="CreateOperatorVoucherCommand"/>.
-/// Note: VOUCHER_FORBIDDEN_FUNDING (fundingType != OPERATOR_FUNDED) is a business-rule check
-/// handled in the handler rather than here because it results in a 422, not a field validation error.
+/// Input-shape validation for <see cref="UpdateAdminVoucherCommand"/>.
 /// </summary>
-public sealed class CreateOperatorVoucherCommandValidator : AbstractValidator<CreateOperatorVoucherCommand>
+public sealed class UpdateAdminVoucherCommandValidator : AbstractValidator<UpdateAdminVoucherCommand>
 {
-    private static readonly HashSet<string> ValidTypes =
-        [.. Enum.GetNames<VoucherType>()];
-
     private static readonly HashSet<string> ValidServices =
         new(StringComparer.OrdinalIgnoreCase) { "BOOKING", "PARCEL" };
 
-    public CreateOperatorVoucherCommandValidator()
-    {
-        RuleFor(x => x.OwnerOperatorId)
-            .NotEmpty();
+    private static readonly HashSet<string> ValidPaymentMethods =
+        new(StringComparer.OrdinalIgnoreCase) { "WALLET", "VNPAY" };
 
-        RuleFor(x => x.CreatedByUserId)
+    public UpdateAdminVoucherCommandValidator()
+    {
+        RuleFor(x => x.VoucherId)
             .NotEmpty();
 
         RuleFor(x => x.Name)
             .NotEmpty()
-            .MaximumLength(120);
-
-        // code is optional (null = auto-generate); if supplied must be non-whitespace ≤50 chars.
-        RuleFor(x => x.Code)
-            .MaximumLength(50)
-            .When(x => x.Code is not null)
-            .WithMessage("code must not exceed 50 characters.");
-
-        RuleFor(x => x.Type)
-            .NotEmpty()
-            .Must(t => ValidTypes.Contains(t, StringComparer.OrdinalIgnoreCase))
-            .WithMessage($"type must be one of: {string.Join(", ", ValidTypes)}.");
+            .MaximumLength(120)
+            .When(x => x.Name is not null);
 
         RuleFor(x => x.Value)
             .GreaterThan(0)
-            .WithMessage("value must be greater than 0.");
+            .WithMessage("value must be greater than 0.")
+            .When(x => x.Value.HasValue);
 
         RuleFor(x => x.MinOrderAmount)
             .GreaterThanOrEqualTo(0)
-            .WithMessage("minOrderAmount cannot be negative.");
+            .WithMessage("minOrderAmount cannot be negative.")
+            .When(x => x.MinOrderAmount.HasValue);
 
         RuleFor(x => x.MaxDiscountAmount)
             .GreaterThan(0)
@@ -63,8 +49,9 @@ public sealed class CreateOperatorVoucherCommandValidator : AbstractValidator<Cr
             .WithMessage("perUserLimit must be greater than 0 when supplied.");
 
         RuleFor(x => x.ValidUntil)
-            .GreaterThan(x => x.ValidFrom)
-            .WithMessage("validUntil must be after validFrom.");
+            .GreaterThan(x => x.ValidFrom!.Value)
+            .WithMessage("validUntil must be after validFrom.")
+            .When(x => x.ValidFrom.HasValue && x.ValidUntil.HasValue);
 
         RuleFor(x => x.ApplicableServices)
             .NotEmpty()
@@ -75,5 +62,10 @@ public sealed class CreateOperatorVoucherCommandValidator : AbstractValidator<Cr
             .Must(s => !string.IsNullOrWhiteSpace(s) && ValidServices.Contains(s.Trim()))
             .When(x => x.ApplicableServices is not null)
             .WithMessage("applicableServices must contain only BOOKING or PARCEL.");
+
+        RuleForEach(x => x.ApplicablePaymentMethods)
+            .Must(s => !string.IsNullOrWhiteSpace(s) && ValidPaymentMethods.Contains(s.Trim()))
+            .When(x => x.ApplicablePaymentMethods is not null)
+            .WithMessage("applicablePaymentMethods must contain only WALLET or VNPAY.");
     }
 }

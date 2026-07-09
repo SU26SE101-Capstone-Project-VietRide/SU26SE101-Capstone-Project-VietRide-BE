@@ -74,6 +74,7 @@ public sealed class OperatorVouchersController : ControllerBase
             PerUserLimit: request.PerUserLimit,
             ValidFrom: request.ValidFrom,
             ValidUntil: request.ValidUntil,
+            ApplicableServices: request.ApplicableServices,
             ApplicableRouteIds: request.ApplicableRouteIds,
             FundingType: request.FundingType,
             OwnerOperatorId: callerOperatorId,
