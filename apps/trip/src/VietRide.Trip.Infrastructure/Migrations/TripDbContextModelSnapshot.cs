@@ -181,6 +181,10 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("estimated_duration_minutes");
 
+                    b.Property<string>("PathPolyline")
+                        .HasColumnType("text")
+                        .HasColumnName("path_polyline");
+
                     b.Property<bool>("IsActive")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
@@ -448,6 +452,10 @@ namespace VietRide.Trip.Infrastructure.Migrations
                     b.Property<int?>("EstimatedDurationMinutes")
                         .HasColumnType("integer")
                         .HasColumnName("estimated_duration_minutes");
+
+                    b.Property<string>("PathPolyline")
+                        .HasColumnType("text")
+                        .HasColumnName("path_polyline");
 
                     b.Property<bool>("IsActive")
                         .ValueGeneratedOnAdd()

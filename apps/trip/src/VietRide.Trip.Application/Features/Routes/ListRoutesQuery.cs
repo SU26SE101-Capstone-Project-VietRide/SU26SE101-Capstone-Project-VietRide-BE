@@ -7,4 +7,4 @@ public sealed record ListRoutesQuery(
     Guid OperatorId,
     int? Page,
     int? PageSize,
-    string? Search) : IRequest<PagedResult<RouteDto>>;
+    string? Search) : IRequest<PagedResult<RouteListItemDto>>;

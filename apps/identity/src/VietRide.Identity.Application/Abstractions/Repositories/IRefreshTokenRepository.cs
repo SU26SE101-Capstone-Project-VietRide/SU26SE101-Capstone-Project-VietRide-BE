@@ -21,4 +21,10 @@ public interface IRefreshTokenRepository : IRepository<RefreshToken, Guid>
     /// The timestamp is resolved internally via <see cref="VietRide.Shared.Kernel.Abstractions.IClock"/>.
     /// </summary>
     Task RevokeFamilyAsync(Guid familyId, RefreshTokenRevokeReason reason, CancellationToken ct = default);
+
+    /// <summary>
+    /// Revokes every active refresh token owned by <paramref name="userId"/>.
+    /// Used after password reset so all existing sessions must authenticate again.
+    /// </summary>
+    Task RevokeActiveByUserAsync(Guid userId, RefreshTokenRevokeReason reason, CancellationToken ct = default);
 }

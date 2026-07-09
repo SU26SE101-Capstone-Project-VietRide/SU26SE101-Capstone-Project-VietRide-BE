@@ -67,6 +67,11 @@ internal sealed class RouteConfiguration : IEntityTypeConfiguration<Route>
             .HasColumnName("estimated_duration_minutes")
             .IsRequired(false);
 
+        builder.Property(x => x.PathPolyline)
+            .HasColumnName("path_polyline")
+            .HasColumnType("text")
+            .IsRequired(false);
+
         builder.Property(x => x.IsActive)
             .HasColumnName("is_active")
             .HasDefaultValue(true)

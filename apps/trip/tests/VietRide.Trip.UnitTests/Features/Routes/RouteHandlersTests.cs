@@ -170,12 +170,12 @@ public sealed class RouteHandlersTests
     [Fact]
     public async Task ListRoutesValidator_RejectsInvalidPagination()
     {
-        var behavior = new ValidationBehavior<ListRoutesQuery, PagedResult<RouteDto>>([new ListRoutesValidator()]);
+        var behavior = new ValidationBehavior<ListRoutesQuery, PagedResult<RouteListItemDto>>([new ListRoutesValidator()]);
         var query = new ListRoutesQuery(OperatorId, 0, 0, null);
 
         var act = () => behavior.Handle(
             query,
-            () => Task.FromResult(PagedResult<RouteDto>.Create([], 1, 20, 0)),
+            () => Task.FromResult(PagedResult<RouteListItemDto>.Create([], 1, 20, 0)),
             CancellationToken.None);
 
         var exception = await act.Should().ThrowAsync<ValidationException>();
@@ -343,7 +343,7 @@ public sealed class RouteHandlersTests
     public async Task OperatorRoutesController_UsesExpectedRolesAndDispatchesThroughMediator()
     {
         var routeId = Guid.NewGuid();
-        var route = new RouteDto(routeId, OperatorId, "Da Nang to Hue", Guid.NewGuid(), Guid.NewGuid(), null, 250000, 100m, 180, true, default, default);
+        var route = new RouteDto(routeId, OperatorId, "Da Nang to Hue", Guid.NewGuid(), Guid.NewGuid(), null, 250000, 100m, 180, null, true, default, default);
         var mediator = new CapturingMediator(route);
         var controller = CreateController(mediator);
 
@@ -355,6 +355,29 @@ public sealed class RouteHandlersTests
         typeof(OperatorRoutesController).GetMethod(nameof(OperatorRoutesController.GetByIdAsync))!
             .GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be("OPERATOR_STAFF,OPERATOR_ADMIN");
         typeof(OperatorRoutesController).GetMethod(nameof(OperatorRoutesController.PostAsync))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be("OPERATOR_ADMIN");
+    }
+
+    [Fact]
+    public async Task OperatorRoutesController_PutGeometry_UsesWriteRoleAndDispatchesCommand()
+    {
+        var routeId = Guid.NewGuid();
+        const string pathPolyline = "_p~iF~ps|U_ulLnnqC_mqNvxq`@";
+        var route = new RouteDto(routeId, OperatorId, "Da Nang to Hue", Guid.NewGuid(), Guid.NewGuid(), null, 250000, 100m, 180, pathPolyline, true, default, default);
+        var mediator = new CapturingMediator(route);
+        var controller = CreateController(mediator);
+
+        var response = await controller.PutGeometryAsync(
+            routeId,
+            new SetRouteGeometryRequest(pathPolyline),
+            CancellationToken.None);
+
+        response.Result.Should().BeOfType<OkObjectResult>();
+        var command = mediator.LastRequest.Should().BeOfType<SetRouteGeometryCommand>().Subject;
+        command.OperatorId.Should().Be(OperatorId);
+        command.RouteId.Should().Be(routeId);
+        command.PathPolyline.Should().Be(pathPolyline);
+        typeof(OperatorRoutesController).GetMethod(nameof(OperatorRoutesController.PutGeometryAsync))!
             .GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be("OPERATOR_ADMIN");
     }
 

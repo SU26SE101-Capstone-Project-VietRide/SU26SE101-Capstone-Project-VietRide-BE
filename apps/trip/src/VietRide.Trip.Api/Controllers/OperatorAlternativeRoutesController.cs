@@ -52,6 +52,22 @@ public sealed class OperatorAlternativeRoutesController : ControllerBase
             cancellationToken));
     }
 
+    [HttpPut("{id:guid}/geometry")]
+    [Authorize(Roles = OperatorWriteRoles)]
+    [ProducesResponseType(typeof(ApiResponse<AlternativeRouteDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<AlternativeRouteDto>> PutGeometryAsync(
+        Guid id,
+        [FromBody] SetRouteGeometryRequest request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await mediator.Send(
+            new SetAlternativeRouteGeometryCommand(GetRequiredOperatorId(), id, request.PathPolyline),
+            cancellationToken));
+    }
+
     [HttpDelete("{id:guid}")]
     [Authorize(Roles = OperatorWriteRoles)]
     [ProducesResponseType(typeof(ApiResponse<IReadOnlyDictionary<string, bool>>), StatusCodes.Status200OK)]

@@ -116,6 +116,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IConnectionMultiplexer>(_ =>
             ConnectionMultiplexer.Connect(redisOptions));
         services.AddSingleton<IOtpRateLimiter, RedisOtpRateLimiter>();
+        services.AddSingleton<IPasswordResetRateLimiter, RedisPasswordResetRateLimiter>();
 
         return services;
     }

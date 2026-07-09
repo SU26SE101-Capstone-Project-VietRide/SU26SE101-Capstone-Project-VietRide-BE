@@ -65,6 +65,8 @@ public sealed class AddRouteStopHandler : IRequestHandler<AddRouteStopCommand, R
             request.AllowDropoff);
 
         await routeStopRepository.AddAsync(routeStop, cancellationToken);
+        route.SetPathGeometry(null);
+        routeRepository.Update(route);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return RouteStopMapper.ToDto(routeStop);

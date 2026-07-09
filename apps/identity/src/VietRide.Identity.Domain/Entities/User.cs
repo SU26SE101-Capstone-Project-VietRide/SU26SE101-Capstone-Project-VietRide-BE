@@ -236,6 +236,24 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
     }
 
     /// <summary>
+    /// Replaces the local password for an active account after a successful password-reset OTP.
+    /// </summary>
+    public void ResetPassword(string passwordHash)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(passwordHash);
+
+        if (Status != UserStatus.ACTIVE)
+        {
+            throw new InvalidUserStatusTransitionException(
+                Status.ToString(),
+                UserStatus.ACTIVE.ToString());
+        }
+
+        PasswordHash = passwordHash;
+        ResetFailedLogins();
+    }
+
+    /// <summary>
     /// Completes a Google-created profile by setting the already-normalized phone once.
     /// Existing phone changes must use the dedicated profile-update flow.
     /// </summary>

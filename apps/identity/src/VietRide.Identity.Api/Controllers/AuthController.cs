@@ -2,12 +2,14 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Identity.Api.Controllers.Requests;
+using VietRide.Identity.Application.Features.Auth.ForgotPassword;
 using VietRide.Identity.Application.Features.Auth.GoogleLogin;
 using VietRide.Identity.Application.Features.Auth.Login;
 using VietRide.Identity.Application.Features.Auth.Logout;
 using VietRide.Identity.Application.Features.Auth.Refresh;
 using VietRide.Identity.Application.Features.Auth.Register;
 using VietRide.Identity.Application.Features.Auth.ResendVerificationEmail;
+using VietRide.Identity.Application.Features.Auth.ResetPassword;
 using VietRide.Identity.Application.Features.Auth.SetInitialPassword;
 using VietRide.Identity.Application.Features.Auth.VerifyEmail;
 using VietRide.Shared.Kernel.Primitives;
@@ -97,6 +99,46 @@ public sealed class AuthController : ControllerBase
     {
         var result = await _sender.Send(
             new ResendVerificationEmailCommand(request.Email, request.Purpose),
+            ct);
+
+        return Ok(result);
+    }
+
+    /// <summary>Request a password-reset OTP email.</summary>
+    /// <remarks>
+    /// Always returns generic success for non-eligible emails to avoid account enumeration.
+    /// OTP rate limit exceeded â†’ 429 AUTH_OTP_RATE_LIMIT_EXCEEDED.
+    /// </remarks>
+    [HttpPost("forgot-password")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiResponse<ForgotPasswordResponseDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status429TooManyRequests)]
+    public async Task<IActionResult> ForgotPassword(
+        [FromBody] ForgotPasswordRequest request,
+        CancellationToken ct)
+    {
+        var result = await _sender.Send(new ForgotPasswordCommand(request.Email), ct);
+        return Ok(result);
+    }
+
+    /// <summary>Reset a password using a password-reset OTP.</summary>
+    /// <remarks>
+    /// Wrong code â†’ 400 AUTH_OTP_INVALID.
+    /// Expired code â†’ 400 AUTH_OTP_EXPIRED.
+    /// Existing refresh tokens are revoked on success.
+    /// </remarks>
+    [HttpPost("reset-password")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiResponse<ResetPasswordResponseDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ResetPassword(
+        [FromBody] ResetPasswordRequest request,
+        CancellationToken ct)
+    {
+        var result = await _sender.Send(
+            new ResetPasswordCommand(request.Email, request.Code, request.NewPassword),
             ct);
 
         return Ok(result);

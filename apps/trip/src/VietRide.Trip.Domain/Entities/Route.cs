@@ -18,6 +18,7 @@ public sealed class Route : BaseEntity<Guid>, ISoftDeletable, IActivatable
     public Money BaseFare { get; private set; }
     public decimal? TotalDistanceKm { get; private set; }
     public int? EstimatedDurationMinutes { get; private set; }
+    public string? PathPolyline { get; private set; }
     public bool IsActive { get; private set; } = true;
     public DateTimeOffset? DeletedAt { get; private set; }
 
@@ -88,6 +89,8 @@ public sealed class Route : BaseEntity<Guid>, ISoftDeletable, IActivatable
         ValidateOptionalGuid(returnRouteId, nameof(returnRouteId));
         ReturnRouteId = returnRouteId;
     }
+
+    public void SetPathGeometry(string? encodedPolyline) => PathPolyline = encodedPolyline;
 
     public void Activate() => IsActive = true;
 

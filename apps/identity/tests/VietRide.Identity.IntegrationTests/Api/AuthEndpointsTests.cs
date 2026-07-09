@@ -17,12 +17,14 @@ using Microsoft.IdentityModel.Tokens;
 using Npgsql;
 using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
+using VietRide.Identity.Application.Features.Auth.ForgotPassword;
 using VietRide.Identity.Application.Features.Auth.GoogleLogin;
 using VietRide.Identity.Application.Features.Auth.Login;
 using VietRide.Identity.Application.Features.Auth.Logout;
 using VietRide.Identity.Application.Features.Auth.Refresh;
 using VietRide.Identity.Application.Features.Auth.Register;
 using VietRide.Identity.Application.Features.Auth.ResendVerificationEmail;
+using VietRide.Identity.Application.Features.Auth.ResetPassword;
 using VietRide.Identity.Application.Features.Auth.SetInitialPassword;
 using VietRide.Identity.Application.Features.Auth.VerifyEmail;
 using VietRide.Identity.Domain.Entities;
@@ -149,6 +151,46 @@ public sealed class AuthEndpointsTests :
         data.GetProperty("email").GetString().Should().Be("user@example.com");
         data.GetProperty("status").GetString().Should().Be("PENDING_EMAIL_VERIFICATION");
         data.GetProperty("otpTtlMinutes").GetInt32().Should().Be(5);
+    }
+
+    [Fact]
+    public async Task PostForgotPassword_HappyPath_Returns200Envelope()
+    {
+        using var client = CreateClientWithSender(new HappyPathAuthSender());
+
+        var response = await client.PostAsJsonAsync("/v1/auth/forgot-password", new
+        {
+            email = "user@example.com",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        AssertSuccessEnvelope(doc, 200);
+        var data = doc.RootElement.GetProperty("data");
+        data.GetProperty("email").GetString().Should().Be("user@example.com");
+        data.GetProperty("otpTtlMinutes").GetInt32().Should().Be(5);
+    }
+
+    [Fact]
+    public async Task PostResetPassword_HappyPath_Returns200Envelope()
+    {
+        using var client = CreateClientWithSender(new HappyPathAuthSender());
+
+        var response = await client.PostAsJsonAsync("/v1/auth/reset-password", new
+        {
+            email = "user@example.com",
+            code = "123456",
+            newPassword = "NewPassword123",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        AssertSuccessEnvelope(doc, 200);
+        var data = doc.RootElement.GetProperty("data");
+        data.GetProperty("userId").GetGuid().Should().Be(HappyPathAuthSender.UserId);
+        data.GetProperty("status").GetString().Should().Be("ACTIVE");
     }
 
     [Fact]
@@ -446,6 +488,87 @@ public sealed class AuthEndpointsTests :
         var finalDb = finalScope.ServiceProvider.GetRequiredService<IdentityDbContext>();
         var verifiedUser = await finalDb.Users.SingleAsync(u => u.Id == user.Id);
         verifiedUser.Status.Should().Be(UserStatus.ACTIVE);
+    }
+
+    [Theory]
+    [InlineData(UserRole.PASSENGER)]
+    [InlineData(UserRole.DRIVER)]
+    [InlineData(UserRole.ASSISTANT)]
+    public async Task ForgotResetPassword_ActiveUser_UsesRealHandlersDbAndAllowsLoginWithNewPassword(UserRole role)
+    {
+        await _dbFactory.ResetAsync();
+        var email = UniqueEmail($"password-reset-{role.ToString().ToLowerInvariant()}");
+        const string OldPassword = "OldPassword123!";
+        const string NewPassword = "NewPassword123!";
+        await _dbFactory.SeedActivePasswordUserAsync(email, role, OldPassword);
+        using var client = _dbFactory.CreateClient();
+
+        var oldLoginResponse = await client.PostAsJsonAsync("/v1/auth/login", new
+        {
+            email,
+            password = OldPassword,
+        });
+        oldLoginResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var oldLoginDoc = JsonDocument.Parse(await oldLoginResponse.Content.ReadAsStringAsync());
+        var oldRefreshToken = oldLoginDoc.RootElement.GetProperty("data").GetProperty("refreshToken").GetString();
+        oldRefreshToken.Should().NotBeNullOrWhiteSpace();
+
+        var forgotResponse = await client.PostAsJsonAsync("/v1/auth/forgot-password", new
+        {
+            email,
+        });
+        forgotResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var resetCode = await _dbFactory.GetPasswordResetCodeAsync(email);
+
+        var resetResponse = await client.PostAsJsonAsync("/v1/auth/reset-password", new
+        {
+            email,
+            code = resetCode,
+            newPassword = NewPassword,
+        });
+        resetResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var oldPasswordLoginResponse = await client.PostAsJsonAsync("/v1/auth/login", new
+        {
+            email,
+            password = OldPassword,
+        });
+        oldPasswordLoginResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+        var newPasswordLoginResponse = await client.PostAsJsonAsync("/v1/auth/login", new
+        {
+            email,
+            password = NewPassword,
+        });
+        newPasswordLoginResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var newLoginDoc = JsonDocument.Parse(await newPasswordLoginResponse.Content.ReadAsStringAsync());
+        AssertSuccessEnvelope(newLoginDoc, 200);
+        newLoginDoc.RootElement.GetProperty("data").GetProperty("user").GetProperty("role").GetString()
+            .Should().Be(role.ToString());
+
+        var refreshOldTokenResponse = await client.PostAsJsonAsync("/v1/auth/refresh", new
+        {
+            refreshToken = oldRefreshToken,
+        });
+        refreshOldTokenResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task ForgotPassword_UnknownEmail_ReturnsGenericSuccessWithoutPasswordResetOtp()
+    {
+        await _dbFactory.ResetAsync();
+        using var client = _dbFactory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/v1/auth/forgot-password", new
+        {
+            email = "missing@example.com",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        AssertSuccessEnvelope(doc, 200);
+        var passwordResetTokenCount = await _dbFactory.CountPasswordResetTokensAsync();
+        passwordResetTokenCount.Should().Be(0);
     }
 
     [Fact]
@@ -901,6 +1024,7 @@ public sealed class AuthEndpointsTests :
                 services.RemoveAll<VietRideDbContextBase>();
                 services.RemoveAll<IEmailService>();
                 services.RemoveAll<ILoginLockoutCounter>();
+                services.RemoveAll<IPasswordResetRateLimiter>();
 
                 services.AddSingleton(_ =>
                 {
@@ -923,6 +1047,7 @@ public sealed class AuthEndpointsTests :
                 services.AddScoped<VietRideDbContextBase>(sp => sp.GetRequiredService<IdentityDbContext>());
                 services.AddSingleton<IEmailService>(EmailService);
                 services.AddSingleton<ILoginLockoutCounter, NoOpLoginLockoutCounter>();
+                services.AddSingleton<IPasswordResetRateLimiter, NoOpPasswordResetRateLimiter>();
             });
         }
 
@@ -967,6 +1092,39 @@ public sealed class AuthEndpointsTests :
                 .Where(token => token.UserId == userId && token.Purpose == EmailVerificationPurpose.SET_INITIAL_PASSWORD)
                 .Select(token => token.Code)
                 .SingleAsync();
+        }
+
+        public async Task SeedActivePasswordUserAsync(string email, UserRole role, string password)
+        {
+            await using var scope = Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
+            var passwordHash = passwordHasher.Hash(password);
+            var user = CreateActivePasswordUser(email, role, passwordHash, db);
+            await db.Users.AddAsync(user);
+            await db.SaveChangesAsync();
+        }
+
+        public async Task<string> GetPasswordResetCodeAsync(string email)
+        {
+            await using var scope = Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            return await (
+                from token in db.EmailVerificationTokens
+                join user in db.Users on token.UserId equals user.Id
+                where user.Email == email.ToLowerInvariant()
+                      && token.Purpose == EmailVerificationPurpose.PASSWORD_RESET
+                      && token.UsedAt == null
+                select token.Code)
+                .SingleAsync();
+        }
+
+        public async Task<int> CountPasswordResetTokensAsync()
+        {
+            await using var scope = Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            return await db.EmailVerificationTokens
+                .CountAsync(token => token.Purpose == EmailVerificationPurpose.PASSWORD_RESET);
         }
 
         public override async ValueTask DisposeAsync()
@@ -1076,6 +1234,54 @@ public sealed class AuthEndpointsTests :
 
             throw new InvalidOperationException($"Property {propertyName} was not found on {entity.GetType().Name}.");
         }
+
+        private static User CreateActivePasswordUser(
+            string email,
+            UserRole role,
+            string passwordHash,
+            IdentityDbContext db)
+        {
+            if (role == UserRole.PASSENGER)
+            {
+                var passenger = User.CreatePassenger(
+                    email,
+                    VietRide.Shared.Kernel.ValueObjects.PhoneNumber.Normalize($"09{Random.Shared.Next(10000000, 99999999)}"),
+                    passwordHash,
+                    "Password Reset Passenger");
+                passenger.VerifyEmail();
+                return passenger;
+            }
+
+            var operatorEntity = Operator.CreateApproved(
+                $"Reset Operator {Guid.NewGuid():N}",
+                $"BRN-{Guid.NewGuid():N}"[..20],
+                $"TAX-{Guid.NewGuid():N}"[..20],
+                UniqueEmail("reset-operator-contact"),
+                "+84901234567",
+                SystemAdminId,
+                DateTimeOffset.UtcNow);
+            db.Operators.Add(operatorEntity);
+
+            var user = role switch
+            {
+                UserRole.OPERATOR_ADMIN => User.CreateOperatorAdminPendingPassword(
+                    email,
+                    VietRide.Shared.Kernel.ValueObjects.PhoneNumber.Normalize($"09{Random.Shared.Next(10000000, 99999999)}"),
+                    "Password Reset Operator Admin",
+                    operatorEntity.Id),
+                UserRole.DRIVER or UserRole.ASSISTANT or UserRole.OPERATOR_STAFF => User.CreateOperatorScopedPendingPassword(
+                    email,
+                    VietRide.Shared.Kernel.ValueObjects.PhoneNumber.Normalize($"09{Random.Shared.Next(10000000, 99999999)}"),
+                    "Password Reset Operator User",
+                    role,
+                    operatorEntity.Id),
+                UserRole.SYSTEM_ADMIN => User.CreateAdminPendingPassword(email, "Password Reset System Admin"),
+                _ => throw new InvalidOperationException($"Unsupported role {role}."),
+            };
+
+            user.SetInitialPassword(passwordHash);
+            return user;
+        }
     }
 
     private sealed class NoOpLoginLockoutCounter : ILoginLockoutCounter
@@ -1085,6 +1291,12 @@ public sealed class AuthEndpointsTests :
 
         public Task ResetAsync(Guid userId, CancellationToken ct = default)
             => Task.CompletedTask;
+    }
+
+    private sealed class NoOpPasswordResetRateLimiter : IPasswordResetRateLimiter
+    {
+        public Task<bool> TryIncrementAsync(string email, CancellationToken ct = default)
+            => Task.FromResult(true);
     }
 
     public sealed class CapturingEmailService : IEmailService
@@ -1139,6 +1351,8 @@ internal sealed class HappyPathAuthSender : ISender
                 command.Email,
                 "PENDING_EMAIL_VERIFICATION",
                 5),
+            ForgotPasswordCommand command => new ForgotPasswordResponseDto(command.Email, 5),
+            ResetPasswordCommand => new ResetPasswordResponseDto(UserId, "ACTIVE"),
             VerifyEmailCommand => new VerifyEmailResponseDto(UserId, "ACTIVE"),
             SetInitialPasswordCommand => new SetInitialPasswordResponseDto(UserId, "ACTIVE"),
             LoginCommand command => CreateTokenBundle(command.Email, "access-token", "refresh-token"),

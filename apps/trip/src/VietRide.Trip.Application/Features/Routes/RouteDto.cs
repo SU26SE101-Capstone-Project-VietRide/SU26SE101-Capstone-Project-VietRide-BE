@@ -10,6 +10,7 @@ public sealed record RouteDto(
     long BaseFare,
     decimal? TotalDistanceKm,
     int? EstimatedDurationMinutes,
+    string? PathPolyline,
     bool IsActive,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);

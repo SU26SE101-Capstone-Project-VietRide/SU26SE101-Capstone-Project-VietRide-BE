@@ -5,7 +5,7 @@ using VietRide.Trip.Application.Abstractions.Repositories;
 
 namespace VietRide.Trip.Application.Features.AlternativeRoutes;
 
-public sealed class ListAlternativeRoutesHandler : IRequestHandler<ListAlternativeRoutesQuery, PagedResult<AlternativeRouteDto>>
+public sealed class ListAlternativeRoutesHandler : IRequestHandler<ListAlternativeRoutesQuery, PagedResult<AlternativeRouteListItemDto>>
 {
     private const int DefaultPage = 1;
     private const int DefaultPageSize = 20;
@@ -22,7 +22,7 @@ public sealed class ListAlternativeRoutesHandler : IRequestHandler<ListAlternati
         this.routeRepository = routeRepository;
     }
 
-    public async Task<PagedResult<AlternativeRouteDto>> Handle(ListAlternativeRoutesQuery request, CancellationToken cancellationToken)
+    public async Task<PagedResult<AlternativeRouteListItemDto>> Handle(ListAlternativeRoutesQuery request, CancellationToken cancellationToken)
     {
         var route = await routeRepository.GetOwnedByIdAsync(request.OperatorId, request.RouteId, cancellationToken);
         if (route is null)
@@ -44,13 +44,13 @@ public sealed class ListAlternativeRoutesHandler : IRequestHandler<ListAlternati
             .Take(pageSize)
             .ToList();
 
-        var items = new List<AlternativeRouteDto>(alternativeRoutes.Count);
+        var items = new List<AlternativeRouteListItemDto>(alternativeRoutes.Count);
         foreach (var alternativeRoute in alternativeRoutes)
         {
             var stops = await alternativeRouteRepository.ListStopsAsync(alternativeRoute.Id, cancellationToken);
-            items.Add(AlternativeRouteMapper.ToDto(alternativeRoute, stops));
+            items.Add(AlternativeRouteMapper.ToListItemDto(alternativeRoute, stops));
         }
 
-        return PagedResult<AlternativeRouteDto>.Create(items, page, pageSize, totalItems);
+        return PagedResult<AlternativeRouteListItemDto>.Create(items, page, pageSize, totalItems);
     }
 }

@@ -26,6 +26,7 @@ public sealed class RouteStopHandlersTests
     public async Task AddRouteStop_AddsRouteStop_WhenRouteAndStopBelongToOperator()
     {
         var route = CreateRoute(OperatorId);
+        route.SetPathGeometry("??BB");
         var stop = CreateStop(OperatorId);
         var routeStopRepository = new FakeRouteStopRepository([]);
         var handler = CreateAddHandler(new FakeRouteRepository([route]), routeStopRepository, new FakeStopRepository([stop]));
@@ -38,6 +39,7 @@ public sealed class RouteStopHandlersTests
         result.AllowPickup.Should().BeTrue();
         result.AllowDropoff.Should().BeFalse();
         routeStopRepository.Entities.Should().ContainSingle();
+        route.PathPolyline.Should().BeNull();
     }
 
     [Fact]
@@ -120,6 +122,7 @@ public sealed class RouteStopHandlersTests
     public async Task RemoveRouteStop_HardRemovesJunctionRow()
     {
         var route = CreateRoute(OperatorId);
+        route.SetPathGeometry("??BB");
         var stop = CreateStop(OperatorId);
         var routeStop = RouteStop.Create(route.Id, stop.Id, 1, 20, null, true, true);
         var routeStopRepository = new FakeRouteStopRepository([routeStop]);
@@ -128,6 +131,7 @@ public sealed class RouteStopHandlersTests
         await handler.Handle(new RemoveRouteStopCommand(OperatorId, route.Id, stop.Id), CancellationToken.None);
 
         routeStopRepository.Entities.Should().BeEmpty();
+        route.PathPolyline.Should().BeNull();
     }
 
     [Fact]
