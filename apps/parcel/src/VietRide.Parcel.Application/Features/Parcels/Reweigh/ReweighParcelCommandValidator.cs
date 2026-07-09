@@ -8,6 +8,9 @@ public sealed class ReweighParcelCommandValidator : AbstractValidator<ReweighPar
     {
         RuleFor(x => x.ParcelId).NotEmpty();
         RuleFor(x => x.OperatorId).NotEmpty();
+        RuleFor(x => x.ActualLengthCm).GreaterThan(0);
+        RuleFor(x => x.ActualWidthCm).GreaterThan(0);
+        RuleFor(x => x.ActualHeightCm).GreaterThan(0);
         RuleFor(x => x.ActualWeightKg).GreaterThan(0);
         RuleFor(x => x.ActualSizeCategory).NotEmpty();
         RuleFor(x => x.PaymentMethod).Must(m => m is "WALLET" or "VNPAY")

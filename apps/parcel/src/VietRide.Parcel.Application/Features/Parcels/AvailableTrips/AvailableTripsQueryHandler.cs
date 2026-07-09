@@ -14,15 +14,18 @@ public sealed class AvailableTripsQueryHandler
     private readonly ITripServiceClient _tripClient;
     private readonly IIdentityServiceClient _identityClient;
     private readonly IParcelRouteFareRepository _fareRepository;
+    private readonly IParcelPricingPolicyRepository? _policyRepository;
 
     public AvailableTripsQueryHandler(
         ITripServiceClient tripClient,
         IIdentityServiceClient identityClient,
-        IParcelRouteFareRepository fareRepository)
+        IParcelRouteFareRepository fareRepository,
+        IParcelPricingPolicyRepository? policyRepository = null)
     {
         _tripClient = tripClient;
         _identityClient = identityClient;
         _fareRepository = fareRepository;
+        _policyRepository = policyRepository;
     }
 
     public async Task<PagedResult<AvailableTripResponse>> Handle(
@@ -39,15 +42,41 @@ public sealed class AvailableTripsQueryHandler
                 "INVALID_SIZE_CATEGORY",
                 $"'{request.SizeCategory}' is not a valid ParcelSizeCategory.");
 
-        var searchOutcome = await _tripClient.SearchAvailableParcelTripsAsync(
-            request.OriginStationId,
-            request.DestinationStationId,
-            request.DepartureDate,
+        var now = DateTimeOffset.UtcNow;
+        var dimFactor = _policyRepository is null
+            ? ParcelCargoCalculator.DefaultDimWeightFactor
+            : await _policyRepository.GetSystemDecimalAsync(
+                "DIM_WEIGHT_FACTOR",
+                ParcelCargoCalculator.DefaultDimWeightFactor,
+                now,
+                cancellationToken);
+        var estimate = ParcelCargoCalculator.Calculate(
+            request.LengthCm,
+            request.WidthCm,
+            request.HeightCm,
             request.EstimatedWeightKg,
-            sizeCategory,
-            request.Page,
-            request.PageSize,
-            cancellationToken);
+            dimFactor);
+
+        var searchOutcome = _policyRepository is null
+            ? await _tripClient.SearchAvailableParcelTripsAsync(
+                request.OriginStationId,
+                request.DestinationStationId,
+                request.DepartureDate,
+                estimate.WeightKg,
+                sizeCategory,
+                request.Page,
+                request.PageSize,
+                cancellationToken)
+            : await _tripClient.SearchAvailableParcelTripsAsync(
+                request.OriginStationId,
+                request.DestinationStationId,
+                request.DepartureDate,
+                estimate.WeightKg,
+                estimate.VolumeM3,
+                sizeCategory,
+                request.Page,
+                request.PageSize,
+                cancellationToken);
 
         if (searchOutcome.Kind == ParcelTripSearchOutcomeKind.TransportError)
         {
@@ -83,13 +112,39 @@ public sealed class AvailableTripsQueryHandler
                 }
             }
 
+            var totalPrice = _policyRepository is null
+                ? fare.PriceVnd
+                : ParcelCargoCalculator.CalculateTotalPrice(
+                    estimate.ChargeableWeightKg,
+                    fare.PricePerChargeableKgVnd.Amount > 0 ? fare.PricePerChargeableKgVnd : fare.PriceVnd,
+                    fare.MinimumPriceVnd);
+            var defaultDepositPercent = _policyRepository is null
+                ? ParcelCargoCalculator.DefaultDepositPercent
+                : await _policyRepository.GetSystemDecimalAsync(
+                    "DEFAULT_DEPOSIT_PERCENT",
+                    ParcelCargoCalculator.DefaultDepositPercent,
+                    now,
+                    cancellationToken);
+            var depositPercent = _policyRepository is null
+                ? defaultDepositPercent
+                : await _policyRepository.GetDepositPercentAsync(
+                    trip.OperatorId,
+                    trip.RouteId,
+                    defaultDepositPercent,
+                    now,
+                    cancellationToken);
+            var depositAmount = ParcelCargoCalculator.CalculatePercent(totalPrice, depositPercent);
+
             responseItems.Add(new AvailableTripResponse(
                 trip.TripId,
                 trip.RouteId,
                 operatorName,
                 trip.DepartureDateTime,
-                trip.AvailableCargoWeightKg,
-                fare.PriceVnd.Amount));
+                totalPrice.Amount,
+                depositAmount.Amount)
+            {
+                AvailableCargoWeightKg = trip.AvailableCargoWeightKg,
+            });
         }
 
         return PagedResult<AvailableTripResponse>.Create(

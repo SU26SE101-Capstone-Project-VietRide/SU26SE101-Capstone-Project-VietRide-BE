@@ -23,20 +23,37 @@ public sealed class Parcel : BaseEntity<Guid>
     public string? Description { get; private set; }
     public string? PhotoUrl { get; private set; }
     public ParcelSizeCategory SizeCategory { get; private set; }
+    public decimal EstimatedLengthCm { get; private set; }
+    public decimal EstimatedWidthCm { get; private set; }
+    public decimal EstimatedHeightCm { get; private set; }
     public decimal EstimatedWeightKg { get; private set; }
+    public decimal EstimatedVolumeM3 { get; private set; }
+    public decimal EstimatedDimWeightKg { get; private set; }
+    public decimal EstimatedChargeableWeightKg { get; private set; }
+    public decimal? ActualLengthCm { get; private set; }
+    public decimal? ActualWidthCm { get; private set; }
+    public decimal? ActualHeightCm { get; private set; }
     public decimal? ActualWeightKg { get; private set; }
+    public decimal? ActualVolumeM3 { get; private set; }
+    public decimal? ActualDimWeightKg { get; private set; }
+    public decimal? ActualChargeableWeightKg { get; private set; }
     public ParcelDeliveryMethod DeliveryMethod { get; private set; }
 
+    public Money TotalPrice { get; private set; }
+    public decimal DepositPercent { get; private set; }
     public Money DepositAmount { get; private set; }
     public Money OriginalDepositAmount { get; private set; }
     public Money DiscountAmount { get; private set; }
     public string? VoucherCode { get; private set; }
     public Guid? VoucherUsageId { get; private set; }
     public Money AdditionalAmount { get; private set; }
+    public Money RefundAmount { get; private set; }
     public Guid? AdditionalPaymentId { get; private set; }
     public DateTimeOffset? AdditionalPaymentDeadline { get; private set; }
 
     public ParcelStatus Status { get; private set; }
+    public PendingActionType? PendingActionType { get; private set; }
+    public string? PendingActionReason { get; private set; }
     public string? RejectionReason { get; private set; }
     public string? CancellationReason { get; private set; }
 
@@ -96,6 +113,65 @@ public sealed class Parcel : BaseEntity<Guid>
         Money? discountAmount = null,
         string? voucherCode = null,
         Guid? voucherUsageId = null)
+        => CreatePendingPayment(
+            parcelCode,
+            senderUserId,
+            recipientUserId,
+            recipientName,
+            recipientPhone,
+            recipientEmail,
+            operatorId,
+            tripId,
+            dropoffStopId,
+            bookingId,
+            description,
+            photoUrl,
+            sizeCategory,
+            estimatedLengthCm: 1m,
+            estimatedWidthCm: 1m,
+            estimatedHeightCm: 1m,
+            estimatedWeightKg,
+            estimatedVolumeM3: 0.0001m,
+            estimatedDimWeightKg: 0.01m,
+            estimatedChargeableWeightKg: estimatedWeightKg,
+            deliveryMethod,
+            totalPrice: depositAmount,
+            depositPercent: 100m,
+            depositAmount,
+            originalDepositAmount,
+            discountAmount,
+            voucherCode,
+            voucherUsageId);
+
+    public static Parcel CreatePendingPayment(
+        string parcelCode,
+        Guid senderUserId,
+        Guid? recipientUserId,
+        string recipientName,
+        PhoneNumber recipientPhone,
+        string? recipientEmail,
+        Guid operatorId,
+        Guid tripId,
+        Guid? dropoffStopId,
+        Guid? bookingId,
+        string? description,
+        string? photoUrl,
+        ParcelSizeCategory sizeCategory,
+        decimal estimatedLengthCm,
+        decimal estimatedWidthCm,
+        decimal estimatedHeightCm,
+        decimal estimatedWeightKg,
+        decimal estimatedVolumeM3,
+        decimal estimatedDimWeightKg,
+        decimal estimatedChargeableWeightKg,
+        ParcelDeliveryMethod deliveryMethod,
+        Money totalPrice,
+        decimal depositPercent,
+        Money depositAmount,
+        Money? originalDepositAmount = null,
+        Money? discountAmount = null,
+        string? voucherCode = null,
+        Guid? voucherUsageId = null)
     {
         return new Parcel
         {
@@ -113,14 +189,23 @@ public sealed class Parcel : BaseEntity<Guid>
             Description = description,
             PhotoUrl = photoUrl,
             SizeCategory = sizeCategory,
+            EstimatedLengthCm = estimatedLengthCm,
+            EstimatedWidthCm = estimatedWidthCm,
+            EstimatedHeightCm = estimatedHeightCm,
             EstimatedWeightKg = estimatedWeightKg,
+            EstimatedVolumeM3 = estimatedVolumeM3,
+            EstimatedDimWeightKg = estimatedDimWeightKg,
+            EstimatedChargeableWeightKg = estimatedChargeableWeightKg,
             DeliveryMethod = deliveryMethod,
+            TotalPrice = totalPrice,
+            DepositPercent = depositPercent,
             DepositAmount = depositAmount,
             OriginalDepositAmount = originalDepositAmount ?? depositAmount,
             DiscountAmount = discountAmount ?? Money.Zero,
             VoucherCode = voucherCode,
             VoucherUsageId = voucherUsageId,
             AdditionalAmount = Money.Zero,
+            RefundAmount = Money.Zero,
             Status = ParcelStatus.PENDING_PAYMENT,
             ReviewDecision = ParcelReviewDecision.PENDING,
         };
@@ -147,6 +232,65 @@ public sealed class Parcel : BaseEntity<Guid>
         Money? discountAmount = null,
         string? voucherCode = null,
         Guid? voucherUsageId = null)
+        => CreatePendingOperatorReview(
+            parcelCode,
+            senderUserId,
+            recipientUserId,
+            recipientName,
+            recipientPhone,
+            recipientEmail,
+            operatorId,
+            tripId,
+            dropoffStopId,
+            bookingId,
+            description,
+            photoUrl,
+            sizeCategory,
+            estimatedLengthCm: 1m,
+            estimatedWidthCm: 1m,
+            estimatedHeightCm: 1m,
+            estimatedWeightKg,
+            estimatedVolumeM3: 0.0001m,
+            estimatedDimWeightKg: 0.01m,
+            estimatedChargeableWeightKg: estimatedWeightKg,
+            deliveryMethod,
+            totalPrice: depositAmount,
+            depositPercent: 100m,
+            depositAmount,
+            originalDepositAmount,
+            discountAmount,
+            voucherCode,
+            voucherUsageId);
+
+    public static Parcel CreatePendingOperatorReview(
+        string parcelCode,
+        Guid senderUserId,
+        Guid? recipientUserId,
+        string recipientName,
+        PhoneNumber recipientPhone,
+        string? recipientEmail,
+        Guid operatorId,
+        Guid tripId,
+        Guid? dropoffStopId,
+        Guid? bookingId,
+        string? description,
+        string? photoUrl,
+        ParcelSizeCategory sizeCategory,
+        decimal estimatedLengthCm,
+        decimal estimatedWidthCm,
+        decimal estimatedHeightCm,
+        decimal estimatedWeightKg,
+        decimal estimatedVolumeM3,
+        decimal estimatedDimWeightKg,
+        decimal estimatedChargeableWeightKg,
+        ParcelDeliveryMethod deliveryMethod,
+        Money totalPrice,
+        decimal depositPercent,
+        Money depositAmount,
+        Money? originalDepositAmount = null,
+        Money? discountAmount = null,
+        string? voucherCode = null,
+        Guid? voucherUsageId = null)
     {
         return new Parcel
         {
@@ -164,14 +308,23 @@ public sealed class Parcel : BaseEntity<Guid>
             Description = description,
             PhotoUrl = photoUrl,
             SizeCategory = sizeCategory,
+            EstimatedLengthCm = estimatedLengthCm,
+            EstimatedWidthCm = estimatedWidthCm,
+            EstimatedHeightCm = estimatedHeightCm,
             EstimatedWeightKg = estimatedWeightKg,
+            EstimatedVolumeM3 = estimatedVolumeM3,
+            EstimatedDimWeightKg = estimatedDimWeightKg,
+            EstimatedChargeableWeightKg = estimatedChargeableWeightKg,
             DeliveryMethod = deliveryMethod,
+            TotalPrice = totalPrice,
+            DepositPercent = depositPercent,
             DepositAmount = depositAmount,
             OriginalDepositAmount = originalDepositAmount ?? depositAmount,
             DiscountAmount = discountAmount ?? Money.Zero,
             VoucherCode = voucherCode,
             VoucherUsageId = voucherUsageId,
             AdditionalAmount = Money.Zero,
+            RefundAmount = Money.Zero,
             Status = ParcelStatus.PENDING_OPERATOR_REVIEW,
             ReviewDecision = ParcelReviewDecision.PENDING,
         };

@@ -31,9 +31,12 @@ public sealed class Trip : BaseEntity<Guid>
     public bool HasSubstitution { get; private set; }
     public Money BaseFare { get; private set; }
     public decimal? MaxCargoWeightKg { get; private set; }
+    public decimal? MaxCargoVolumeM3 { get; private set; }
     public decimal EstimatedPassengerLuggageKg { get; private set; }
     public decimal ReservedParcelWeightKg { get; private set; }
+    public decimal ReservedParcelVolumeM3 { get; private set; }
     public decimal TotalLoadedWeightKg { get; private set; }
+    public decimal TotalLoadedVolumeM3 { get; private set; }
     public IReadOnlyCollection<TripSeat> Seats => seats.AsReadOnly();
 
     private Trip() { }
@@ -52,6 +55,37 @@ public sealed class Trip : BaseEntity<Guid>
         decimal? maxCargoWeightKg,
         decimal estimatedPassengerLuggageKg,
         bool hasSubstitution = false)
+        => Create(
+            operatorId,
+            routeId,
+            vehicleId,
+            driverUserId,
+            assistantUserId,
+            driverScheduleId,
+            departureDateTime,
+            estimatedArrivalTime,
+            source,
+            baseFare,
+            maxCargoWeightKg,
+            maxCargoVolumeM3: null,
+            estimatedPassengerLuggageKg,
+            hasSubstitution);
+
+    public static Trip Create(
+        Guid operatorId,
+        Guid routeId,
+        Guid vehicleId,
+        Guid driverUserId,
+        Guid? assistantUserId,
+        Guid? driverScheduleId,
+        DateTimeOffset departureDateTime,
+        DateTimeOffset estimatedArrivalTime,
+        TripSource source,
+        Money baseFare,
+        decimal? maxCargoWeightKg,
+        decimal? maxCargoVolumeM3,
+        decimal estimatedPassengerLuggageKg,
+        bool hasSubstitution = false)
     {
         ValidateGuid(operatorId, nameof(operatorId));
         ValidateGuid(routeId, nameof(routeId));
@@ -61,6 +95,7 @@ public sealed class Trip : BaseEntity<Guid>
         ValidateOptionalGuid(driverScheduleId, nameof(driverScheduleId));
         ValidateArrivalAfterDeparture(departureDateTime, estimatedArrivalTime);
         ValidateOptionalNonNegative(maxCargoWeightKg, nameof(maxCargoWeightKg));
+        ValidateOptionalNonNegative(maxCargoVolumeM3, nameof(maxCargoVolumeM3));
         ValidateNonNegative(estimatedPassengerLuggageKg, nameof(estimatedPassengerLuggageKg));
 
         return new Trip
@@ -79,9 +114,12 @@ public sealed class Trip : BaseEntity<Guid>
             HasSubstitution = hasSubstitution,
             BaseFare = baseFare,
             MaxCargoWeightKg = maxCargoWeightKg,
+            MaxCargoVolumeM3 = maxCargoVolumeM3,
             EstimatedPassengerLuggageKg = estimatedPassengerLuggageKg,
             ReservedParcelWeightKg = 0m,
+            ReservedParcelVolumeM3 = 0m,
             TotalLoadedWeightKg = 0m,
+            TotalLoadedVolumeM3 = 0m,
         };
     }
 
@@ -142,13 +180,21 @@ public sealed class Trip : BaseEntity<Guid>
         HasSubstitution = hasSubstitution;
     }
 
-    public void UpdateCargoCounters(decimal reservedParcelWeightKg, decimal totalLoadedWeightKg)
+    public void UpdateCargoCounters(
+        decimal reservedParcelWeightKg,
+        decimal reservedParcelVolumeM3,
+        decimal totalLoadedWeightKg,
+        decimal totalLoadedVolumeM3)
     {
         ValidateNonNegative(reservedParcelWeightKg, nameof(reservedParcelWeightKg));
+        ValidateNonNegative(reservedParcelVolumeM3, nameof(reservedParcelVolumeM3));
         ValidateNonNegative(totalLoadedWeightKg, nameof(totalLoadedWeightKg));
+        ValidateNonNegative(totalLoadedVolumeM3, nameof(totalLoadedVolumeM3));
 
         ReservedParcelWeightKg = reservedParcelWeightKg;
+        ReservedParcelVolumeM3 = reservedParcelVolumeM3;
         TotalLoadedWeightKg = totalLoadedWeightKg;
+        TotalLoadedVolumeM3 = totalLoadedVolumeM3;
     }
 
     public bool IsBookable() => Status == TripStatus.SCHEDULED;

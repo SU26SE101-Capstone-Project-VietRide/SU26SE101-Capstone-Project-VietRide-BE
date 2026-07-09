@@ -324,7 +324,7 @@ CREATE TABLE vehicles (
     seat_layout_json JSONB NOT NULL,
     total_seats INT NOT NULL,
     max_cargo_weight_kg DECIMAL(8,2) NULL,
-    max_cargo_volume_m3 DECIMAL(8,2) NULL,
+    max_cargo_volume_m3 DECIMAL(10,4) NULL,
     status vehicle_status NOT NULL DEFAULT 'ACTIVE',
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     deleted_at TIMESTAMPTZ NULL,
@@ -332,7 +332,9 @@ CREATE TABLE vehicles (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_vehicles_total_seats_positive CHECK (total_seats > 0),
     CONSTRAINT chk_vehicles_cargo_weight_non_negative
-        CHECK (max_cargo_weight_kg IS NULL OR max_cargo_weight_kg >= 0)
+        CHECK (max_cargo_weight_kg IS NULL OR max_cargo_weight_kg >= 0),
+    CONSTRAINT chk_vehicles_cargo_volume_non_negative
+        CHECK (max_cargo_volume_m3 IS NULL OR max_cargo_volume_m3 >= 0)
 );
 
 CREATE UNIQUE INDEX uq_vehicles_license_plate
@@ -407,14 +409,17 @@ CREATE TABLE trips (
     -- Pricing + cargo snapshot (immutable after Trip created)
     base_fare BIGINT NOT NULL,
     max_cargo_weight_kg DECIMAL(8,2) NULL,
+    max_cargo_volume_m3 DECIMAL(10,4) NULL,
     estimated_passenger_luggage_kg DECIMAL(8,2) NOT NULL DEFAULT 0,
     reserved_parcel_weight_kg DECIMAL(8,2) NOT NULL DEFAULT 0,
+    reserved_parcel_volume_m3 DECIMAL(10,4) NOT NULL DEFAULT 0,
     total_loaded_weight_kg DECIMAL(8,2) NOT NULL DEFAULT 0,
+    total_loaded_volume_m3 DECIMAL(10,4) NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_trips_base_fare_non_negative CHECK (base_fare >= 0),
     CONSTRAINT chk_trips_cargo_counters_non_negative
-        CHECK (reserved_parcel_weight_kg >= 0 AND total_loaded_weight_kg >= 0)
+        CHECK (reserved_parcel_weight_kg >= 0 AND reserved_parcel_volume_m3 >= 0 AND total_loaded_weight_kg >= 0 AND total_loaded_volume_m3 >= 0)
 );
 
 CREATE UNIQUE INDEX uq_trips_driver_departure
@@ -444,12 +449,18 @@ CREATE TABLE trip_cargo_parcels (
     trip_id UUID NOT NULL REFERENCES trips (id) ON DELETE CASCADE,
     parcel_id UUID NOT NULL, -- logical FK to Parcel service
     weight_kg DECIMAL(8,2) NOT NULL,
+    volume_m3 DECIMAL(10,4) NOT NULL,
+    actual_weight_kg DECIMAL(8,2) NULL,
+    actual_volume_m3 DECIMAL(10,4) NULL,
     state VARCHAR(20) NOT NULL,
     loaded_at TIMESTAMPTZ NULL,
     released_at TIMESTAMPTZ NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_trip_cargo_parcels_weight_positive CHECK (weight_kg > 0),
+    CONSTRAINT chk_trip_cargo_parcels_volume_positive CHECK (volume_m3 > 0),
+    CONSTRAINT chk_trip_cargo_parcels_actual_weight_positive CHECK (actual_weight_kg IS NULL OR actual_weight_kg > 0),
+    CONSTRAINT chk_trip_cargo_parcels_actual_volume_positive CHECK (actual_volume_m3 IS NULL OR actual_volume_m3 > 0),
     CONSTRAINT chk_trip_cargo_parcels_state CHECK (state IN ('RESERVED', 'LOADED', 'RELEASED'))
 );
 

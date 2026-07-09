@@ -28,6 +28,7 @@ describe('DocumentsService', () => {
       create: jest.fn(),
       createApproved: jest.fn(),
       findById: jest.fn(),
+      list: jest.fn(),
       approve: jest.fn(),
     } as unknown as jest.Mocked<DocumentsRepository>;
     storageProvider = {
@@ -93,6 +94,46 @@ describe('DocumentsService', () => {
           language: 'vi',
         },
         makeFile('faq.txt', 'text/plain'),
+        PASSENGER_USER,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('lists documents for SYSTEM_ADMIN with pagination metadata', async () => {
+    repository.list.mockResolvedValue({
+      items: [makeDocument({ status: 'APPROVED' })],
+      totalItems: 1,
+    });
+
+    const result = await service.list(
+      {
+        page: 1,
+        pageSize: 20,
+        sortBy: 'createdAt',
+        sortDir: 'desc',
+        status: 'APPROVED',
+      },
+      ADMIN_USER,
+    );
+
+    expect(repository.list).toHaveBeenCalledWith(
+      expect.objectContaining({ page: 1, pageSize: 20, status: 'APPROVED' }),
+    );
+    expect(result.items).toHaveLength(1);
+    expect(result.totalItems).toBe(1);
+    expect(result.totalPages).toBe(1);
+    expect(result.hasNextPage).toBe(false);
+  });
+
+  it('rejects non-admin document list', async () => {
+    await expect(
+      service.list(
+        {
+          page: 1,
+          pageSize: 20,
+          sortBy: 'createdAt',
+          sortDir: 'desc',
+        },
         PASSENGER_USER,
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);

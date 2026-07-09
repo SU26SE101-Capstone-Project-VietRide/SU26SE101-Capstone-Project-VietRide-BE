@@ -67,6 +67,7 @@ public sealed class ReturnParcelCommandHandler
                 snapshot.TripId,
                 snapshot.ParcelId,
                 parcel.ActualWeightKg ?? parcel.EstimatedWeightKg,
+                parcel.ActualVolumeM3 ?? parcel.EstimatedVolumeM3,
                 cancellationToken));
 
         var refundAmount = await ParcelRefundAmountCalculator.CalculateRefundAsync(
@@ -130,6 +131,9 @@ public sealed class ReturnParcelCommandHandler
 
     private static Task EnsureCargoSuccessAsync(TripCargoOutcome outcome)
     {
+        if (outcome is null)
+            return Task.CompletedTask;
+
         return outcome.Kind switch
         {
             TripCargoOutcomeKind.Success => Task.CompletedTask,

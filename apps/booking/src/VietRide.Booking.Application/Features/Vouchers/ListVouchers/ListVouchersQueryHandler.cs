@@ -6,7 +6,7 @@ using VietRide.Shared.Kernel.Primitives;
 namespace VietRide.Booking.Application.Features.Vouchers.ListVouchers;
 
 /// <summary>
-/// Handles GET /v1/admin/vouchers — returns paged voucher list for admin oversight (Q7).
+/// Handles voucher list queries for platform-admin and operator-owned views.
 /// Returns only non-soft-deleted vouchers (VoucherConfiguration HasQueryFilter applied at repo layer).
 /// </summary>
 public sealed class ListVouchersQueryHandler
@@ -30,6 +30,7 @@ public sealed class ListVouchersQueryHandler
 
         var (items, total) = await _vouchers.ListAsync(
             ownerOperatorId: request.OwnerOperatorId,
+            platformOnly: request.PlatformOnly,
             fundingType: fundingType,
             isActive: request.IsActive,
             page: request.Options.Page,
@@ -45,6 +46,15 @@ public sealed class ListVouchersQueryHandler
                 Name: v.Name,
                 Type: v.Type.ToString(),
                 Value: v.Value,
+                MinOrderAmount: v.MinOrderAmount.Amount,
+                MaxDiscountAmount: v.MaxDiscountAmount?.Amount,
+                TotalUsageLimit: v.TotalUsageLimit,
+                PerUserLimit: v.PerUserLimit,
+                NewUserOnly: v.NewUserOnly,
+                ApplicableServices: v.ApplicableServices,
+                ApplicablePaymentMethods: v.ApplicablePaymentMethods,
+                ApplicableOperatorIds: v.ApplicableOperatorIds,
+                ApplicableRouteIds: v.ApplicableRouteIds,
                 FundingType: v.FundingType.ToString(),
                 OwnerOperatorId: v.OwnerOperatorId,
                 IsActive: v.IsActive,

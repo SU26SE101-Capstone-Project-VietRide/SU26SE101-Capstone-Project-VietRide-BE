@@ -63,6 +63,48 @@ internal sealed class ParcelRepository : IParcelRepository
         return parcel is null ? null : BuildSnapshot(parcel);
     }
 
+    public async Task<bool> TrySetPendingOperatorActionAsync(
+        Guid parcelId,
+        PendingActionType actionType,
+        string reason,
+        Money? refundAmount,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        var affected = await _db.Parcels
+            .Where(p => p.Id == parcelId
+                && p.Status != ParcelStatus.CANCELLED
+                && p.Status != ParcelStatus.REJECTED
+                && p.Status != ParcelStatus.EXPIRED
+                && p.Status != ParcelStatus.RETURNED
+                && p.Status != ParcelStatus.DELIVERY_CONFIRMED)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(p => p.Status, ParcelStatus.PENDING_OPERATOR_ACTION)
+                .SetProperty(p => p.PendingActionType, actionType)
+                .SetProperty(p => p.PendingActionReason, reason)
+                .SetProperty(p => p.RefundAmount, refundAmount ?? Money.Zero)
+                .SetProperty(p => p.UpdatedAt, now), ct);
+        return affected > 0;
+    }
+
+    public async Task<ParcelPaymentTransitionSnapshot?> TryResolvePendingOperatorActionAsync(
+        Guid parcelId,
+        PendingActionType expectedActionType,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        var affected = await _db.Parcels
+            .Where(p => p.Id == parcelId
+                && p.Status == ParcelStatus.PENDING_OPERATOR_ACTION
+                && p.PendingActionType == expectedActionType)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(p => p.Status, ParcelStatus.PENDING)
+                .SetProperty(p => p.PendingActionType, (PendingActionType?)null)
+                .SetProperty(p => p.PendingActionReason, (string?)null)
+                .SetProperty(p => p.UpdatedAt, now), ct);
+        return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
+    }
+
     public async Task<ParcelPaymentTransitionSnapshot?> TryMarkDepositFailedAsync(
         Guid parcelId, DateTimeOffset now, CancellationToken ct)
     {
@@ -179,27 +221,64 @@ internal sealed class ParcelRepository : IParcelRepository
     // ---- Reweigh transitions (PENDING) ----
 
     public async Task<ParcelPaymentTransitionSnapshot?> TryReweighNoFeeAsync(
-        Guid parcelId, decimal actualWeightKg, ParcelSizeCategory actualSizeCategory, DateTimeOffset now, CancellationToken ct)
+        Guid parcelId,
+        decimal actualLengthCm,
+        decimal actualWidthCm,
+        decimal actualHeightCm,
+        decimal actualWeightKg,
+        decimal actualVolumeM3,
+        decimal actualDimWeightKg,
+        decimal actualChargeableWeightKg,
+        ParcelSizeCategory actualSizeCategory,
+        Money totalPrice,
+        DateTimeOffset now,
+        CancellationToken ct)
     {
         var affected = await _db.Parcels
             .Where(p => p.Id == parcelId && p.Status == ParcelStatus.PENDING)
             .ExecuteUpdateAsync(setters => setters
+                .SetProperty(p => p.ActualLengthCm, actualLengthCm)
+                .SetProperty(p => p.ActualWidthCm, actualWidthCm)
+                .SetProperty(p => p.ActualHeightCm, actualHeightCm)
                 .SetProperty(p => p.ActualWeightKg, actualWeightKg)
+                .SetProperty(p => p.ActualVolumeM3, actualVolumeM3)
+                .SetProperty(p => p.ActualDimWeightKg, actualDimWeightKg)
+                .SetProperty(p => p.ActualChargeableWeightKg, actualChargeableWeightKg)
                 .SetProperty(p => p.SizeCategory, actualSizeCategory)
+                .SetProperty(p => p.TotalPrice, totalPrice)
                 .SetProperty(p => p.UpdatedAt, now), ct);
         return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
     }
 
     public async Task<ParcelPaymentTransitionSnapshot?> TryReweighWithFeeAsync(
-        Guid parcelId, decimal actualWeightKg, ParcelSizeCategory actualSizeCategory,
-        Money additionalAmount, DateTimeOffset deadline, DateTimeOffset now, CancellationToken ct)
+        Guid parcelId,
+        decimal actualLengthCm,
+        decimal actualWidthCm,
+        decimal actualHeightCm,
+        decimal actualWeightKg,
+        decimal actualVolumeM3,
+        decimal actualDimWeightKg,
+        decimal actualChargeableWeightKg,
+        ParcelSizeCategory actualSizeCategory,
+        Money totalPrice,
+        Money additionalAmount,
+        DateTimeOffset deadline,
+        DateTimeOffset now,
+        CancellationToken ct)
     {
         var affected = await _db.Parcels
             .Where(p => p.Id == parcelId && p.Status == ParcelStatus.PENDING)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(p => p.Status, ParcelStatus.PENDING_ADDITIONAL_PAYMENT)
+                .SetProperty(p => p.ActualLengthCm, actualLengthCm)
+                .SetProperty(p => p.ActualWidthCm, actualWidthCm)
+                .SetProperty(p => p.ActualHeightCm, actualHeightCm)
                 .SetProperty(p => p.ActualWeightKg, actualWeightKg)
+                .SetProperty(p => p.ActualVolumeM3, actualVolumeM3)
+                .SetProperty(p => p.ActualDimWeightKg, actualDimWeightKg)
+                .SetProperty(p => p.ActualChargeableWeightKg, actualChargeableWeightKg)
                 .SetProperty(p => p.SizeCategory, actualSizeCategory)
+                .SetProperty(p => p.TotalPrice, totalPrice)
                 .SetProperty(p => p.AdditionalAmount, additionalAmount)
                 .SetProperty(p => p.AdditionalPaymentDeadline, deadline)
                 .SetProperty(p => p.UpdatedAt, now), ct);

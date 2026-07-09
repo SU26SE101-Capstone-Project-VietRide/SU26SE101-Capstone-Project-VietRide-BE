@@ -21,6 +21,8 @@ public sealed class ParcelDbContext : VietRideDbContextBase
     public DbSet<ParcelEntity> Parcels => Set<ParcelEntity>();
     public DbSet<ParcelRouteFare> ParcelRouteFares => Set<ParcelRouteFare>();
     public DbSet<ParcelStats> ParcelStats => Set<ParcelStats>();
+    public DbSet<SystemConfig> SystemConfigs => Set<SystemConfig>();
+    public DbSet<OperatorDepositPolicy> OperatorDepositPolicies => Set<OperatorDepositPolicy>();
 
     public static void ConfigurePostgresTypes(NpgsqlDataSourceBuilder dataSourceBuilder)
     {

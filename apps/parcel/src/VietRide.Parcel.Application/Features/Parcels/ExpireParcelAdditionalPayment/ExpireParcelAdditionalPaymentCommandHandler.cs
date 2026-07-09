@@ -14,6 +14,7 @@ public sealed class ExpireParcelAdditionalPaymentCommandHandler
 {
     private readonly IParcelRepository _parcelRepository;
     private readonly IIdentityServiceClient _identityClient;
+    private readonly ITripServiceClient? _tripClient;
     private readonly IClock _clock;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IIntegrationEventOutbox _outbox;
@@ -23,6 +24,7 @@ public sealed class ExpireParcelAdditionalPaymentCommandHandler
     public ExpireParcelAdditionalPaymentCommandHandler(
         IParcelRepository parcelRepository,
         IIdentityServiceClient identityClient,
+        ITripServiceClient tripClient,
         IClock clock,
         IUnitOfWork unitOfWork,
         IIntegrationEventOutbox outbox,
@@ -31,11 +33,32 @@ public sealed class ExpireParcelAdditionalPaymentCommandHandler
     {
         _parcelRepository = parcelRepository;
         _identityClient = identityClient;
+        _tripClient = tripClient;
         _clock = clock;
         _unitOfWork = unitOfWork;
         _outbox = outbox;
         _statsRepository = statsRepository;
         _logger = logger;
+    }
+
+    public ExpireParcelAdditionalPaymentCommandHandler(
+        IParcelRepository parcelRepository,
+        IIdentityServiceClient identityClient,
+        IClock clock,
+        IUnitOfWork unitOfWork,
+        IIntegrationEventOutbox outbox,
+        ILogger<ExpireParcelAdditionalPaymentCommandHandler> logger,
+        IParcelStatsRepository statsRepository)
+        : this(
+            parcelRepository,
+            identityClient,
+            tripClient: null!,
+            clock,
+            unitOfWork,
+            outbox,
+            logger,
+            statsRepository)
+    {
     }
 
     public async Task<int> Handle(
@@ -61,6 +84,14 @@ public sealed class ExpireParcelAdditionalPaymentCommandHandler
         var rejectedCount = 0;
         foreach (var parcelId in candidateIds)
         {
+            var parcel = _tripClient is null
+                ? null
+                : await _parcelRepository.GetByIdAsync(parcelId, cancellationToken);
+            if (_tripClient is not null && parcel is null)
+            {
+                continue;
+            }
+
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
             try
             {
@@ -104,6 +135,23 @@ public sealed class ExpireParcelAdditionalPaymentCommandHandler
 
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
                 await _unitOfWork.CommitAsync(cancellationToken);
+
+                var releaseOutcome = _tripClient is null || parcel is null
+                    ? new TripCargoOutcome(TripCargoOutcomeKind.Success, null)
+                    : await _tripClient.ReleaseCargoAsync(
+                        parcel.TripId,
+                        parcel.Id,
+                        parcel.ActualWeightKg ?? parcel.EstimatedWeightKg,
+                        parcel.ActualVolumeM3 ?? parcel.EstimatedVolumeM3,
+                        cancellationToken);
+                if (releaseOutcome.Kind != TripCargoOutcomeKind.Success)
+                {
+                    _logger.LogWarning(
+                        "Failed to release cargo for expired additional payment parcel {ParcelId}: {Reason}",
+                        parcelId,
+                        releaseOutcome.ErrorMessage);
+                }
+
                 rejectedCount++;
             }
             catch

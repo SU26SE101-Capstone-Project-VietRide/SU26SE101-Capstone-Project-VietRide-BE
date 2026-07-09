@@ -22,6 +22,7 @@ public sealed class CreateParcelCommandHandler
     private readonly IPaymentServiceClient _paymentClient;
     private readonly IParcelRepository _parcelRepository;
     private readonly IParcelRouteFareRepository _fareRepository;
+    private readonly IParcelPricingPolicyRepository? _policyRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IParcelStatsRepository _statsRepository;
@@ -34,6 +35,7 @@ public sealed class CreateParcelCommandHandler
         IPaymentServiceClient paymentClient,
         IParcelRepository parcelRepository,
         IParcelRouteFareRepository fareRepository,
+        IParcelPricingPolicyRepository? policyRepository,
         IUnitOfWork unitOfWork,
         IIntegrationEventOutbox outbox,
         IParcelStatsRepository statsRepository,
@@ -45,10 +47,37 @@ public sealed class CreateParcelCommandHandler
         _paymentClient = paymentClient;
         _parcelRepository = parcelRepository;
         _fareRepository = fareRepository;
+        _policyRepository = policyRepository;
         _unitOfWork = unitOfWork;
         _outbox = outbox;
         _statsRepository = statsRepository;
         _logger = logger;
+    }
+
+    public CreateParcelCommandHandler(
+        IIdentityServiceClient identityClient,
+        IBookingServiceClient bookingClient,
+        ITripServiceClient tripClient,
+        IPaymentServiceClient paymentClient,
+        IParcelRepository parcelRepository,
+        IParcelRouteFareRepository fareRepository,
+        IUnitOfWork unitOfWork,
+        IIntegrationEventOutbox outbox,
+        IParcelStatsRepository statsRepository,
+        ILogger<CreateParcelCommandHandler> logger)
+        : this(
+            identityClient,
+            bookingClient,
+            tripClient,
+            paymentClient,
+            parcelRepository,
+            fareRepository,
+            policyRepository: null,
+            unitOfWork,
+            outbox,
+            statsRepository,
+            logger)
+    {
     }
 
     public async Task<CreateParcelResponse> Handle(
@@ -165,50 +194,79 @@ public sealed class CreateParcelCommandHandler
 
         var recipientPhone = PhoneNumber.Normalize(command.RecipientPhone);
 
-        Money priceVnd;
-        var originalDepositAmount = Money.Zero;
+        var now = DateTimeOffset.UtcNow;
+        var dimFactor = _policyRepository is null
+            ? ParcelCargoCalculator.DefaultDimWeightFactor
+            : await _policyRepository.GetSystemDecimalAsync(
+                "DIM_WEIGHT_FACTOR",
+                ParcelCargoCalculator.DefaultDimWeightFactor,
+                now,
+                cancellationToken);
+        var cargoEstimate = ParcelCargoCalculator.Calculate(
+            command.LengthCm,
+            command.WidthCm,
+            command.HeightCm,
+            command.EstimatedWeightKg,
+            dimFactor);
+
+        var fare = await _fareRepository.FindByCompositeAsync(trip.RouteId, sizeCategory, cancellationToken);
+        if (fare is null && (_policyRepository is not null || sizeCategory != ParcelSizeCategory.EXTRA_LARGE))
+            throw new CodedValidationException(
+                "FARE_NOT_CONFIGURED",
+                $"No fare configured for route '{trip.RouteId}' and size category '{command.SizeCategory}'.");
+
+        var totalPrice = fare is null
+            ? Money.Zero
+            : _policyRepository is null
+                ? fare.PriceVnd
+                : ParcelCargoCalculator.CalculateTotalPrice(
+                    cargoEstimate.ChargeableWeightKg,
+                    fare.PricePerChargeableKgVnd.Amount > 0 ? fare.PricePerChargeableKgVnd : fare.PriceVnd,
+                    fare.MinimumPriceVnd);
+        var defaultDepositPercent = _policyRepository is null
+            ? 100m
+            : await _policyRepository.GetSystemDecimalAsync(
+                "DEFAULT_DEPOSIT_PERCENT",
+                ParcelCargoCalculator.DefaultDepositPercent,
+                now,
+                cancellationToken);
+        var depositPercent = _policyRepository is null
+            ? defaultDepositPercent
+            : await _policyRepository.GetDepositPercentAsync(
+                trip.OperatorId,
+                trip.RouteId,
+                defaultDepositPercent,
+                now,
+                cancellationToken);
+        var priceVnd = ParcelCargoCalculator.CalculatePercent(totalPrice, depositPercent);
+        var originalDepositAmount = priceVnd;
         var discountAmount = Money.Zero;
         Guid? validatedVoucherId = null;
-        if (sizeCategory == ParcelSizeCategory.EXTRA_LARGE)
+
+        if (sizeCategory != ParcelSizeCategory.EXTRA_LARGE && !string.IsNullOrWhiteSpace(command.VoucherCode))
         {
-            priceVnd = Money.FromRaw(0);
-            originalDepositAmount = priceVnd;
-        }
-        else
-        {
-            var fare = await _fareRepository.FindByCompositeAsync(trip.RouteId, sizeCategory, cancellationToken);
-            if (fare is null)
+            var voucherOutcome = await _bookingClient.ValidateVoucherAsync(
+                command.VoucherCode,
+                trip.OperatorId,
+                trip.RouteId,
+                command.SenderUserId,
+                originalDepositAmount.Amount,
+                command.PaymentMethod,
+                cancellationToken);
+
+            if (voucherOutcome.Kind == VoucherValidationOutcomeKind.TransportError)
+                throw new ParcelDependencyUnavailableException(
+                    "BOOKING_SERVICE_UNAVAILABLE",
+                    voucherOutcome.ErrorMessage ?? "Booking service unavailable.");
+
+            if (voucherOutcome.Kind == VoucherValidationOutcomeKind.Invalid || !voucherOutcome.VoucherId.HasValue)
                 throw new CodedValidationException(
-                    "FARE_NOT_CONFIGURED",
-                    $"No fare configured for route '{trip.RouteId}' and size category '{command.SizeCategory}'.");
-            priceVnd = fare.PriceVnd;
-            originalDepositAmount = priceVnd;
+                    "VOUCHER_NOT_APPLICABLE",
+                    voucherOutcome.ErrorMessage ?? "Voucher is not applicable to this parcel.");
 
-            if (!string.IsNullOrWhiteSpace(command.VoucherCode))
-            {
-                var voucherOutcome = await _bookingClient.ValidateVoucherAsync(
-                    command.VoucherCode,
-                    trip.OperatorId,
-                    trip.RouteId,
-                    command.SenderUserId,
-                    originalDepositAmount.Amount,
-                    command.PaymentMethod,
-                    cancellationToken);
-
-                if (voucherOutcome.Kind == VoucherValidationOutcomeKind.TransportError)
-                    throw new ParcelDependencyUnavailableException(
-                        "BOOKING_SERVICE_UNAVAILABLE",
-                        voucherOutcome.ErrorMessage ?? "Booking service unavailable.");
-
-                if (voucherOutcome.Kind == VoucherValidationOutcomeKind.Invalid || !voucherOutcome.VoucherId.HasValue)
-                    throw new CodedValidationException(
-                        "VOUCHER_NOT_APPLICABLE",
-                        voucherOutcome.ErrorMessage ?? "Voucher is not applicable to this parcel.");
-
-                validatedVoucherId = voucherOutcome.VoucherId.Value;
-                discountAmount = Money.FromRaw(voucherOutcome.DiscountAmount);
-                priceVnd = originalDepositAmount - discountAmount;
-            }
+            validatedVoucherId = voucherOutcome.VoucherId.Value;
+            discountAmount = Money.FromRaw(voucherOutcome.DiscountAmount);
+            priceVnd = originalDepositAmount - discountAmount;
         }
 
         var parcel = sizeCategory == ParcelSizeCategory.EXTRA_LARGE
@@ -226,8 +284,16 @@ public sealed class CreateParcelCommandHandler
                 finalDescription,
                 command.PhotoUrl,
                 sizeCategory,
-                command.EstimatedWeightKg,
+                cargoEstimate.LengthCm,
+                cargoEstimate.WidthCm,
+                cargoEstimate.HeightCm,
+                cargoEstimate.WeightKg,
+                cargoEstimate.VolumeM3,
+                cargoEstimate.DimWeightKg,
+                cargoEstimate.ChargeableWeightKg,
                 deliveryMethod,
+                totalPrice,
+                depositPercent,
                 priceVnd,
                 originalDepositAmount,
                 discountAmount,
@@ -247,8 +313,16 @@ public sealed class CreateParcelCommandHandler
                 finalDescription,
                 command.PhotoUrl,
                 sizeCategory,
-                command.EstimatedWeightKg,
+                cargoEstimate.LengthCm,
+                cargoEstimate.WidthCm,
+                cargoEstimate.HeightCm,
+                cargoEstimate.WeightKg,
+                cargoEstimate.VolumeM3,
+                cargoEstimate.DimWeightKg,
+                cargoEstimate.ChargeableWeightKg,
                 deliveryMethod,
+                totalPrice,
+                depositPercent,
                 priceVnd,
                 originalDepositAmount,
                 discountAmount,

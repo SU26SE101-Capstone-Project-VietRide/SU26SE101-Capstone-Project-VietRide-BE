@@ -7,6 +7,7 @@ using VietRide.Booking.Application.Features.OperatorVouchers.CreateOperatorVouch
 using VietRide.Booking.Application.Features.OperatorVouchers.DeleteOperatorVoucher;
 using VietRide.Booking.Application.Features.OperatorVouchers.SetOperatorVoucherActive;
 using VietRide.Booking.Application.Features.OperatorVouchers.UpdateOperatorVoucher;
+using VietRide.Booking.Application.Features.Vouchers.ListVouchers;
 using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Booking.Api.Controllers;
@@ -15,6 +16,7 @@ namespace VietRide.Booking.Api.Controllers;
 /// Operator self-service voucher CRUD endpoints (OPERATOR_ADMIN only):
 /// <list type="bullet">
 ///   <item>POST /v1/operator/vouchers — create an operator-owned OPERATOR_FUNDED voucher.</item>
+///   <item>GET /v1/operator/vouchers — list vouchers owned by the caller operator.</item>
 ///   <item>PATCH /v1/operator/vouchers/{id} — partial update (freeze-on-first-use, Q6).</item>
 ///   <item>DELETE /v1/operator/vouchers/{id} — soft-delete (sets deleted_at, ADR 0003).</item>
 ///   <item>POST /v1/operator/vouchers/{id}/activate — flip IsActive = true.</item>
@@ -30,6 +32,9 @@ public sealed class OperatorVouchersController : ControllerBase
 {
     private const string OperatorAdminRole = "OPERATOR_ADMIN";
     private const string IdempotencyKeyHeader = "Idempotency-Key";
+
+    private static readonly HashSet<string> ValidSortDirs =
+        new(StringComparer.OrdinalIgnoreCase) { "asc", "desc" };
 
     private readonly ISender _sender;
 
@@ -77,6 +82,44 @@ public sealed class OperatorVouchersController : ControllerBase
         var result = await _sender.Send(command, ct);
 
         return StatusCode(StatusCodes.Status201Created, result);
+    }
+
+    /// <summary>List vouchers owned by the caller operator.</summary>
+    /// <remarks>
+    /// Auth: OPERATOR_ADMIN (RS256 user token via JWKS).
+    /// ownerOperatorId is always taken from the JWT operatorId claim and never from query string.
+    /// Optional filters: isActive. sortBy whitelist is validated by Application.
+    /// </remarks>
+    [HttpGet]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<VoucherListItem>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ListVouchers(
+        [FromQuery] ListOperatorVouchersRequest request,
+        CancellationToken ct)
+    {
+        if (!ValidSortDirs.Contains(request.SortDir))
+            throw new VietRide.Shared.Application.Exceptions.CodedValidationException(
+                "INVALID_SORT_DIRECTION",
+                "sortDir must be 'asc' or 'desc'.");
+
+        var (_, callerOperatorId) = GetCallerIds();
+
+        var query = new ListVouchersQuery(
+            OwnerOperatorId: callerOperatorId,
+            PlatformOnly: false,
+            FundingType: null,
+            IsActive: request.IsActive,
+            Options: new QueryOptions
+            {
+                Page = request.Page,
+                PageSize = request.PageSize,
+                SortBy = request.SortBy,
+                SortDir = request.SortDir,
+            });
+
+        var result = await _sender.Send(query, ct);
+
+        return Ok(result);
     }
 
     /// <summary>Partial update of operator-owned voucher fields (freeze-on-first-use, Q6).</summary>

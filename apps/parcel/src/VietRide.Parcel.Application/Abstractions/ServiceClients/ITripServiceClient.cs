@@ -18,6 +18,17 @@ public interface ITripServiceClient
         Guid destinationStationId,
         DateOnly departureDate,
         decimal estimatedWeightKg,
+        decimal estimatedVolumeM3,
+        ParcelSizeCategory sizeCategory,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default);
+
+    Task<ParcelTripSearchOutcome> SearchAvailableParcelTripsAsync(
+        Guid originStationId,
+        Guid destinationStationId,
+        DateOnly departureDate,
+        decimal estimatedWeightKg,
         ParcelSizeCategory sizeCategory,
         int page,
         int pageSize,
@@ -27,12 +38,52 @@ public interface ITripServiceClient
         Guid tripId,
         Guid parcelId,
         decimal weightKg,
+        decimal volumeM3,
+        CancellationToken cancellationToken = default);
+
+    Task<TripCargoOutcome> ReserveCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        CancellationToken cancellationToken = default);
+
+    Task<TripCargoOutcome> ReserveCargoWithOverrideAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        decimal volumeM3,
+        CancellationToken cancellationToken = default);
+
+    Task<TripCargoOutcome> GetCargoCapacityAsync(
+        Guid tripId,
+        CancellationToken cancellationToken = default);
+
+    Task<TripCargoOutcome> RemeasureCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        decimal volumeM3,
+        bool allowCapacityOverflow = false,
         CancellationToken cancellationToken = default);
 
     Task<TripCargoOutcome> LoadCargoAsync(
         Guid tripId,
         Guid parcelId,
         decimal weightKg,
+        decimal volumeM3,
+        CancellationToken cancellationToken = default);
+
+    Task<TripCargoOutcome> LoadCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        CancellationToken cancellationToken = default);
+
+    Task<TripCargoOutcome> ReleaseCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        decimal volumeM3,
         CancellationToken cancellationToken = default);
 
     Task<TripCargoOutcome> ReleaseCargoAsync(

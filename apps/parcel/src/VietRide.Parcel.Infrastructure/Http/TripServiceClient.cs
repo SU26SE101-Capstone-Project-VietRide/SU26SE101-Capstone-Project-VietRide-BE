@@ -101,6 +101,7 @@ public sealed class TripServiceClient : ITripServiceClient
         Guid destinationStationId,
         DateOnly departureDate,
         decimal estimatedWeightKg,
+        decimal estimatedVolumeM3,
         ParcelSizeCategory sizeCategory,
         int page,
         int pageSize,
@@ -109,7 +110,8 @@ public sealed class TripServiceClient : ITripServiceClient
         try
         {
             var weightFormatted = estimatedWeightKg.ToString(CultureInfo.InvariantCulture);
-            var query = $"/internal/v1/trips/parcel-availability?originStationId={originStationId:D}&destinationStationId={destinationStationId:D}&departureDate={departureDate:yyyy-MM-dd}&estimatedWeightKg={weightFormatted}&sizeCategory={sizeCategory}&page={page}&pageSize={pageSize}";
+            var volumeFormatted = estimatedVolumeM3.ToString(CultureInfo.InvariantCulture);
+            var query = $"/internal/v1/trips/parcel-availability?originStationId={originStationId:D}&destinationStationId={destinationStationId:D}&departureDate={departureDate:yyyy-MM-dd}&estimatedWeightKg={weightFormatted}&estimatedVolumeM3={volumeFormatted}&sizeCategory={sizeCategory}&page={page}&pageSize={pageSize}";
             using var response = await _httpClient
                 .GetAsync(query, cancellationToken)
                 .ConfigureAwait(false);
@@ -133,6 +135,7 @@ public sealed class TripServiceClient : ITripServiceClient
                             item.OperatorName,
                             item.DepartureDateTime,
                             item.AvailableCargoWeightKg,
+                            item.AvailableCargoVolumeM3,
                             0))
                         .ToList();
 
@@ -166,32 +169,130 @@ public sealed class TripServiceClient : ITripServiceClient
         }
     }
 
+    public Task<ParcelTripSearchOutcome> SearchAvailableParcelTripsAsync(
+        Guid originStationId,
+        Guid destinationStationId,
+        DateOnly departureDate,
+        decimal estimatedWeightKg,
+        ParcelSizeCategory sizeCategory,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+        => SearchAvailableParcelTripsAsync(
+            originStationId,
+            destinationStationId,
+            departureDate,
+            estimatedWeightKg,
+            estimatedVolumeM3: 0.0001m,
+            sizeCategory,
+            page,
+            pageSize,
+            cancellationToken);
+
+    public Task<TripCargoOutcome> ReserveCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        decimal volumeM3,
+        CancellationToken cancellationToken = default)
+        => SendCargoMutationAsync("reserve", tripId, parcelId, weightKg, volumeM3, allowCapacityOverflow: false, cancellationToken);
+
     public Task<TripCargoOutcome> ReserveCargoAsync(
         Guid tripId,
         Guid parcelId,
         decimal weightKg,
         CancellationToken cancellationToken = default)
-        => SendCargoMutationAsync("reserve", tripId, parcelId, weightKg, cancellationToken);
+        => ReserveCargoAsync(tripId, parcelId, weightKg, volumeM3: 0.0001m, cancellationToken);
+
+    public Task<TripCargoOutcome> ReserveCargoWithOverrideAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        decimal volumeM3,
+        CancellationToken cancellationToken = default)
+        => SendCargoMutationAsync("reserve", tripId, parcelId, weightKg, volumeM3, allowCapacityOverflow: true, cancellationToken);
+
+    public async Task<TripCargoOutcome> GetCargoCapacityAsync(
+        Guid tripId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var response = await _httpClient
+                .GetAsync($"/internal/v1/trips/{tripId:D}/cargo/capacity", cancellationToken)
+                .ConfigureAwait(false);
+
+            return response.StatusCode switch
+            {
+                HttpStatusCode.OK => new TripCargoOutcome(
+                    TripCargoOutcomeKind.Success,
+                    null,
+                    await response.Content
+                        .ReadFromJsonAsync<TripCargoCapacitySnapshot>(JsonOptions, cancellationToken)
+                        .ConfigureAwait(false)),
+                HttpStatusCode.NotFound => new TripCargoOutcome(TripCargoOutcomeKind.TripNotFound, null),
+                _ => new TripCargoOutcome(TripCargoOutcomeKind.TransportError,
+                    $"Trip cargo capacity endpoint returned status {(int)response.StatusCode}."),
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "TripServiceClient.GetCargoCapacityAsync({TripId}) failed.", tripId);
+            return new TripCargoOutcome(TripCargoOutcomeKind.TransportError,
+                $"Trip service transport failure: {ex.Message}");
+        }
+    }
+
+    public Task<TripCargoOutcome> RemeasureCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        decimal volumeM3,
+        bool allowCapacityOverflow = false,
+        CancellationToken cancellationToken = default)
+        => SendCargoMutationAsync("remeasure", tripId, parcelId, weightKg, volumeM3, allowCapacityOverflow, cancellationToken);
+
+    public Task<TripCargoOutcome> LoadCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        decimal volumeM3,
+        CancellationToken cancellationToken = default)
+        => SendCargoMutationAsync("load", tripId, parcelId, weightKg, volumeM3, allowCapacityOverflow: false, cancellationToken);
 
     public Task<TripCargoOutcome> LoadCargoAsync(
         Guid tripId,
         Guid parcelId,
         decimal weightKg,
         CancellationToken cancellationToken = default)
-        => SendCargoMutationAsync("load", tripId, parcelId, weightKg, cancellationToken);
+        => LoadCargoAsync(tripId, parcelId, weightKg, volumeM3: 0.0001m, cancellationToken);
+
+    public Task<TripCargoOutcome> ReleaseCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        decimal volumeM3,
+        CancellationToken cancellationToken = default)
+        => SendCargoMutationAsync("release", tripId, parcelId, weightKg, volumeM3, allowCapacityOverflow: true, cancellationToken);
 
     public Task<TripCargoOutcome> ReleaseCargoAsync(
         Guid tripId,
         Guid parcelId,
         decimal weightKg,
         CancellationToken cancellationToken = default)
-        => SendCargoMutationAsync("release", tripId, parcelId, weightKg, cancellationToken);
+        => ReleaseCargoAsync(tripId, parcelId, weightKg, volumeM3: 0.0001m, cancellationToken);
 
     private async Task<TripCargoOutcome> SendCargoMutationAsync(
         string action,
         Guid tripId,
         Guid parcelId,
         decimal weightKg,
+        decimal volumeM3,
+        bool allowCapacityOverflow,
         CancellationToken cancellationToken)
     {
         try
@@ -204,6 +305,8 @@ public sealed class TripServiceClient : ITripServiceClient
                 {
                     parcelId,
                     weightKg,
+                    volumeM3,
+                    allowCapacityOverflow,
                     idempotencyKey = $"parcel:cargo:{action}:{parcelId:D}",
                 }, options: JsonOptions),
             };
@@ -212,7 +315,12 @@ public sealed class TripServiceClient : ITripServiceClient
             using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
             return response.StatusCode switch
             {
-                HttpStatusCode.OK => new TripCargoOutcome(TripCargoOutcomeKind.Success, null),
+                HttpStatusCode.OK => new TripCargoOutcome(
+                    TripCargoOutcomeKind.Success,
+                    null,
+                    await response.Content
+                        .ReadFromJsonAsync<TripCargoCapacitySnapshot>(JsonOptions, cancellationToken)
+                        .ConfigureAwait(false)),
                 HttpStatusCode.NotFound => new TripCargoOutcome(TripCargoOutcomeKind.TripNotFound, null),
                 HttpStatusCode.Conflict => new TripCargoOutcome(TripCargoOutcomeKind.CapacityExceeded, "Trip cargo capacity would be exceeded."),
                 _ => new TripCargoOutcome(TripCargoOutcomeKind.TransportError,

@@ -31,6 +31,7 @@ describe('DocumentsController (e2e)', () => {
       create: jest.fn(),
       createApproved: jest.fn(),
       findById: jest.fn(),
+      list: jest.fn(),
       approve: jest.fn(),
     } as unknown as jest.Mocked<DocumentsRepository>;
     storageProvider = {
@@ -81,7 +82,38 @@ describe('DocumentsController (e2e)', () => {
         approvedAt: new Date('2026-06-13T00:00:00.000Z'),
       }),
     );
+    repository.list.mockResolvedValue({
+      items: [
+        makeDocument({
+          status: 'APPROVED',
+          approvedByUserId: ADMIN_USER_ID,
+          approvedAt: new Date('2026-06-13T00:00:00.000Z'),
+        }),
+      ],
+      totalItems: 1,
+    });
     storageProvider.createSignedReadUrl.mockResolvedValue('https://preview.example/faq.txt');
+  });
+
+  it('GET /v1/rag/documents returns paginated documents for SYSTEM_ADMIN', async () => {
+    const response = await fetch(`${baseUrl}/v1/rag/documents?page=1&pageSize=20&status=APPROVED`, {
+      headers: { 'X-Internal-Auth': await signInternalJwt(ADMIN_USER_ID, 'SYSTEM_ADMIN') },
+    });
+    const body = (await response.json()) as { items?: Array<{ id: string; status: string }>; totalItems?: number };
+
+    expect(response.status).toBe(200);
+    expect(body.items).toHaveLength(1);
+    expect(body.items?.[0]?.id).toBe(DOCUMENT_ID);
+    expect(body.items?.[0]?.status).toBe('APPROVED');
+    expect(body.totalItems).toBe(1);
+  });
+
+  it('GET /v1/rag/documents returns 403 for non-admin caller', async () => {
+    const response = await fetch(`${baseUrl}/v1/rag/documents`, {
+      headers: { 'X-Internal-Auth': await signInternalJwt(PASSENGER_USER_ID, 'PASSENGER') },
+    });
+
+    expect(response.status).toBe(403);
   });
 
   it('POST /v1/rag/documents auto-approves SYSTEM_ADMIN TXT upload', async () => {

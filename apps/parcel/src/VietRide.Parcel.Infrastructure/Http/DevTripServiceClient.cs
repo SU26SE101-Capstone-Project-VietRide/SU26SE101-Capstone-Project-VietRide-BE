@@ -69,6 +69,7 @@ public sealed class DevTripServiceClient : ITripServiceClient
         Guid destinationStationId,
         DateOnly departureDate,
         decimal estimatedWeightKg,
+        decimal estimatedVolumeM3,
         ParcelSizeCategory sizeCategory,
         int page,
         int pageSize,
@@ -89,6 +90,7 @@ public sealed class DevTripServiceClient : ITripServiceClient
                 OperatorName: "Dev Operator",
                 DepartureDateTime: now.AddHours(4),
                 AvailableCargoWeightKg: 50m,
+                AvailableCargoVolumeM3: 3m,
                 PriceVnd: 100_000),
             new(
                 TripId: Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2"),
@@ -97,6 +99,7 @@ public sealed class DevTripServiceClient : ITripServiceClient
                 OperatorName: "Dev Operator",
                 DepartureDateTime: now.AddHours(8),
                 AvailableCargoWeightKg: 30m,
+                AvailableCargoVolumeM3: 2m,
                 PriceVnd: 120_000),
         };
 
@@ -109,13 +112,96 @@ public sealed class DevTripServiceClient : ITripServiceClient
             null));
     }
 
+    public Task<ParcelTripSearchOutcome> SearchAvailableParcelTripsAsync(
+        Guid originStationId,
+        Guid destinationStationId,
+        DateOnly departureDate,
+        decimal estimatedWeightKg,
+        ParcelSizeCategory sizeCategory,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+        => SearchAvailableParcelTripsAsync(
+            originStationId,
+            destinationStationId,
+            departureDate,
+            estimatedWeightKg,
+            estimatedVolumeM3: 0.0001m,
+            sizeCategory,
+            page,
+            pageSize,
+            cancellationToken);
+
+    public Task<TripCargoOutcome> ReserveCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        decimal volumeM3,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Using dev Trip stub for ReserveCargoAsync({TripId}, {ParcelId}).", tripId, parcelId);
+        return Task.FromResult(new TripCargoOutcome(TripCargoOutcomeKind.Success, null));
+    }
+
     public Task<TripCargoOutcome> ReserveCargoAsync(
         Guid tripId,
         Guid parcelId,
         decimal weightKg,
         CancellationToken cancellationToken = default)
+        => ReserveCargoAsync(tripId, parcelId, weightKg, volumeM3: 0.0001m, cancellationToken);
+
+    public Task<TripCargoOutcome> ReserveCargoWithOverrideAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        decimal volumeM3,
+        CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Using dev Trip stub for ReserveCargoAsync({TripId}, {ParcelId}).", tripId, parcelId);
+        _logger.LogInformation("Using dev Trip stub for ReserveCargoWithOverrideAsync({TripId}, {ParcelId}).", tripId, parcelId);
+        return Task.FromResult(new TripCargoOutcome(TripCargoOutcomeKind.Success, null));
+    }
+
+    public Task<TripCargoOutcome> GetCargoCapacityAsync(
+        Guid tripId,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Using dev Trip stub for GetCargoCapacityAsync({TripId}).", tripId);
+        return Task.FromResult(new TripCargoOutcome(
+            TripCargoOutcomeKind.Success,
+            null,
+            new TripCargoCapacitySnapshot(
+                tripId,
+                ReservedWeightKg: 0m,
+                ReservedVolumeM3: 0m,
+                LoadedWeightKg: 0m,
+                LoadedVolumeM3: 0m,
+                MaxCargoWeightKg: 100m,
+                MaxCargoVolumeM3: 5m,
+                AvailableWeightKg: 100m,
+                AvailableVolumeM3: 5m,
+                PercentFull: 0m)));
+    }
+
+    public Task<TripCargoOutcome> RemeasureCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        decimal volumeM3,
+        bool allowCapacityOverflow = false,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Using dev Trip stub for RemeasureCargoAsync({TripId}, {ParcelId}).", tripId, parcelId);
+        return Task.FromResult(new TripCargoOutcome(TripCargoOutcomeKind.Success, null));
+    }
+
+    public Task<TripCargoOutcome> LoadCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        decimal volumeM3,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Using dev Trip stub for LoadCargoAsync({TripId}, {ParcelId}).", tripId, parcelId);
         return Task.FromResult(new TripCargoOutcome(TripCargoOutcomeKind.Success, null));
     }
 
@@ -124,8 +210,16 @@ public sealed class DevTripServiceClient : ITripServiceClient
         Guid parcelId,
         decimal weightKg,
         CancellationToken cancellationToken = default)
+        => LoadCargoAsync(tripId, parcelId, weightKg, volumeM3: 0.0001m, cancellationToken);
+
+    public Task<TripCargoOutcome> ReleaseCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        decimal volumeM3,
+        CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Using dev Trip stub for LoadCargoAsync({TripId}, {ParcelId}).", tripId, parcelId);
+        _logger.LogInformation("Using dev Trip stub for ReleaseCargoAsync({TripId}, {ParcelId}).", tripId, parcelId);
         return Task.FromResult(new TripCargoOutcome(TripCargoOutcomeKind.Success, null));
     }
 
@@ -134,8 +228,5 @@ public sealed class DevTripServiceClient : ITripServiceClient
         Guid parcelId,
         decimal weightKg,
         CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation("Using dev Trip stub for ReleaseCargoAsync({TripId}, {ParcelId}).", tripId, parcelId);
-        return Task.FromResult(new TripCargoOutcome(TripCargoOutcomeKind.Success, null));
-    }
+        => ReleaseCargoAsync(tripId, parcelId, weightKg, volumeM3: 0.0001m, cancellationToken);
 }

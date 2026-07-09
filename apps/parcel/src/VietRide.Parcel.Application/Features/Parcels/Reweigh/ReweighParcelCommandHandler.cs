@@ -16,6 +16,7 @@ public sealed class ReweighParcelCommandHandler
 
     private readonly IParcelRepository _parcelRepository;
     private readonly IParcelRouteFareRepository _fareRepository;
+    private readonly IParcelPricingPolicyRepository _policyRepository;
     private readonly ITripServiceClient _tripClient;
     private readonly IIdentityServiceClient _identityClient;
     private readonly IPaymentServiceClient _paymentClient;
@@ -24,6 +25,7 @@ public sealed class ReweighParcelCommandHandler
     public ReweighParcelCommandHandler(
         IParcelRepository parcelRepository,
         IParcelRouteFareRepository fareRepository,
+        IParcelPricingPolicyRepository policyRepository,
         ITripServiceClient tripClient,
         IIdentityServiceClient identityClient,
         IPaymentServiceClient paymentClient,
@@ -31,6 +33,7 @@ public sealed class ReweighParcelCommandHandler
     {
         _parcelRepository = parcelRepository;
         _fareRepository = fareRepository;
+        _policyRepository = policyRepository;
         _tripClient = tripClient;
         _identityClient = identityClient;
         _paymentClient = paymentClient;
@@ -76,25 +79,135 @@ public sealed class ReweighParcelCommandHandler
         var routeId = tripOutcome.Snapshot!.RouteId;
         var departureDateTime = tripOutcome.Snapshot.DepartureDateTime;
 
-        // Look up fare for the actual size category
+        var now = DateTimeOffset.UtcNow;
+        var dimFactor = await _policyRepository.GetSystemDecimalAsync(
+            "DIM_WEIGHT_FACTOR",
+            ParcelCargoCalculator.DefaultDimWeightFactor,
+            now,
+            cancellationToken);
+        var tolerancePercent = await _policyRepository.GetSystemDecimalAsync(
+            "REWEIGH_TOLERANCE_PERCENT",
+            ParcelCargoCalculator.DefaultReweighTolerancePercent,
+            now,
+            cancellationToken);
+        var autoOverflowPercent = await _policyRepository.GetSystemDecimalAsync(
+            "AUTO_APPROVE_OVERFLOW_PERCENT",
+            ParcelCargoCalculator.DefaultAutoApproveOverflowPercent,
+            now,
+            cancellationToken);
+        var actualCargo = ParcelCargoCalculator.Calculate(
+            command.ActualLengthCm,
+            command.ActualWidthCm,
+            command.ActualHeightCm,
+            command.ActualWeightKg,
+            dimFactor);
+
+        var capacityBefore = await _tripClient.GetCargoCapacityAsync(parcel.TripId, cancellationToken);
+        if (capacityBefore.Kind != TripCargoOutcomeKind.Success || capacityBefore.Capacity is null)
+            throw new ParcelDependencyUnavailableException(
+                "TRIP_SERVICE_UNAVAILABLE",
+                capacityBefore.ErrorMessage ?? "Trip cargo capacity is unavailable.");
+
+        var capacityOutcome = await _tripClient.RemeasureCargoAsync(
+            parcel.TripId,
+            parcel.Id,
+            actualCargo.WeightKg,
+            actualCargo.VolumeM3,
+            allowCapacityOverflow: false,
+            cancellationToken);
+        if (capacityOutcome.Kind == TripCargoOutcomeKind.CapacityExceeded
+            && IsAutoOverflowAllowed(capacityBefore.Capacity, parcel, actualCargo, autoOverflowPercent))
+        {
+            capacityOutcome = await _tripClient.RemeasureCargoAsync(
+                parcel.TripId,
+                parcel.Id,
+                actualCargo.WeightKg,
+                actualCargo.VolumeM3,
+                allowCapacityOverflow: true,
+                cancellationToken);
+        }
+
+        if (capacityOutcome.Kind != TripCargoOutcomeKind.Success)
+        {
+            await _parcelRepository.TrySetPendingOperatorActionAsync(
+                parcel.Id,
+                PendingActionType.CAPACITY_EXCEEDED,
+                capacityOutcome.ErrorMessage ?? "Actual parcel cargo exceeds trip capacity.",
+                null,
+                now,
+                cancellationToken);
+
+            return new ReweighParcelResponse(
+                parcel.Id,
+                parcel.ParcelCode,
+                ParcelStatus.PENDING_OPERATOR_ACTION.ToString(),
+                actualCargo.ChargeableWeightKg,
+                parcel.TotalPrice.Amount,
+                0,
+                0,
+                null);
+        }
+
         var fare = await _fareRepository.FindByCompositeAsync(routeId, actualSize, cancellationToken);
         if (fare is null)
             throw new CodedValidationException(
                 "FARE_NOT_CONFIGURED",
                 $"No fare configured for route '{routeId}' and size category '{command.ActualSizeCategory}'.");
 
-        var now = DateTimeOffset.UtcNow;
-        var additionalRaw = Math.Max(0, fare.PriceVnd.Amount - parcel.DepositAmount.Amount);
+        var actualTotalPrice = ParcelCargoCalculator.CalculateTotalPrice(
+            actualCargo.ChargeableWeightKg,
+            fare.PricePerChargeableKgVnd.Amount > 0 ? fare.PricePerChargeableKgVnd : fare.PriceVnd,
+            fare.MinimumPriceVnd);
+        var paidAmount = parcel.DepositAmount + parcel.AdditionalAmount;
+        var additionalRaw = Math.Max(0, actualTotalPrice.Amount - paidAmount.Amount);
         var additionalAmount = Money.FromRaw(additionalRaw);
+        var refundRaw = Math.Max(0, paidAmount.Amount - actualTotalPrice.Amount);
+        var refundAmount = Money.FromRaw(refundRaw);
+        var outsideTolerance = ParcelCargoCalculator.IsOutsideTolerance(
+            parcel.EstimatedChargeableWeightKg,
+            actualCargo.ChargeableWeightKg,
+            tolerancePercent);
 
-        if (additionalRaw == 0)
+        if (refundAmount.Amount > 0 && outsideTolerance)
+        {
+            await _parcelRepository.TrySetPendingOperatorActionAsync(
+                parcel.Id,
+                PendingActionType.REFUND_CONFIRMATION,
+                "Actual chargeable weight is lower than estimated and requires refund confirmation.",
+                refundAmount,
+                now,
+                cancellationToken);
+
+            return new ReweighParcelResponse(
+                parcel.Id,
+                parcel.ParcelCode,
+                ParcelStatus.PENDING_OPERATOR_ACTION.ToString(),
+                actualCargo.ChargeableWeightKg,
+                actualTotalPrice.Amount,
+                0,
+                refundAmount.Amount,
+                null);
+        }
+
+        if (additionalRaw == 0 || !outsideTolerance)
         {
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
             ParcelPaymentTransitionSnapshot snapshot;
             try
             {
                 snapshot = await _parcelRepository.TryReweighNoFeeAsync(
-                    command.ParcelId, command.ActualWeightKg, actualSize, now, cancellationToken)
+                    command.ParcelId,
+                    actualCargo.LengthCm,
+                    actualCargo.WidthCm,
+                    actualCargo.HeightCm,
+                    actualCargo.WeightKg,
+                    actualCargo.VolumeM3,
+                    actualCargo.DimWeightKg,
+                    actualCargo.ChargeableWeightKg,
+                    actualSize,
+                    actualTotalPrice,
+                    now,
+                    cancellationToken)
                     ?? throw new CodedConflictException(
                         "RACE_LOST", "Parcel status changed during reweigh.");
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -107,7 +220,14 @@ public sealed class ReweighParcelCommandHandler
             }
 
             return new ReweighParcelResponse(
-                command.ParcelId, snapshot.ParcelCode, ParcelStatus.PENDING.ToString(), 0, null);
+                command.ParcelId,
+                snapshot.ParcelCode,
+                ParcelStatus.PENDING.ToString(),
+                actualCargo.ChargeableWeightKg,
+                actualTotalPrice.Amount,
+                0,
+                0,
+                null);
         }
         else
         {
@@ -122,8 +242,20 @@ public sealed class ReweighParcelCommandHandler
             try
             {
                 snapshot = await _parcelRepository.TryReweighWithFeeAsync(
-                    command.ParcelId, command.ActualWeightKg, actualSize,
-                    additionalAmount, deadline, now, cancellationToken)
+                    command.ParcelId,
+                    actualCargo.LengthCm,
+                    actualCargo.WidthCm,
+                    actualCargo.HeightCm,
+                    actualCargo.WeightKg,
+                    actualCargo.VolumeM3,
+                    actualCargo.DimWeightKg,
+                    actualCargo.ChargeableWeightKg,
+                    actualSize,
+                    actualTotalPrice,
+                    additionalAmount,
+                    deadline,
+                    now,
+                    cancellationToken)
                     ?? throw new CodedConflictException(
                         "RACE_LOST", "Parcel status changed during reweigh.");
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -170,11 +302,54 @@ public sealed class ReweighParcelCommandHandler
             return new ReweighParcelResponse(
                 command.ParcelId, snapshot.ParcelCode,
                 ParcelStatus.PENDING_ADDITIONAL_PAYMENT.ToString(),
+                actualCargo.ChargeableWeightKg,
+                actualTotalPrice.Amount,
                 additionalAmount.Amount,
+                0,
                 outcome.Result?.PaymentRedirectUrl);
         }
     }
 
     private static DateTimeOffset Min(DateTimeOffset left, DateTimeOffset right)
         => left <= right ? left : right;
+
+    private static bool IsAutoOverflowAllowed(
+        TripCargoCapacitySnapshot capacity,
+        Domain.Entities.Parcel parcel,
+        ParcelCargoEstimate actualCargo,
+        decimal thresholdPercent)
+    {
+        var weightOverflowPercent = CalculateOverflowPercent(
+            capacity.ReservedWeightKg,
+            parcel.ActualWeightKg ?? parcel.EstimatedWeightKg,
+            capacity.LoadedWeightKg,
+            capacity.MaxCargoWeightKg,
+            actualCargo.WeightKg);
+
+        var volumeOverflowPercent = CalculateOverflowPercent(
+            capacity.ReservedVolumeM3,
+            parcel.ActualVolumeM3 ?? parcel.EstimatedVolumeM3,
+            capacity.LoadedVolumeM3,
+            capacity.MaxCargoVolumeM3,
+            actualCargo.VolumeM3);
+
+        return weightOverflowPercent <= thresholdPercent
+            && volumeOverflowPercent <= thresholdPercent;
+    }
+
+    private static decimal CalculateOverflowPercent(
+        decimal reservedAxis,
+        decimal estimatedAxisOfThisParcel,
+        decimal loadedAxis,
+        decimal maxAxis,
+        decimal actualAxis)
+    {
+        if (maxAxis <= 0m)
+            return 100m;
+
+        var reservedByOthers = Math.Max(0m, reservedAxis - estimatedAxisOfThisParcel);
+        var poolForThisParcel = maxAxis - reservedByOthers - loadedAxis;
+        var overflow = Math.Max(0m, actualAxis - poolForThisParcel);
+        return overflow / maxAxis * 100m;
+    }
 }
