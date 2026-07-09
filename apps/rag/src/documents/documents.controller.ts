@@ -1,9 +1,11 @@
 import {
   Body,
   Controller,
+  Get,
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   Put,
   Req,
   UploadedFile,
@@ -17,6 +19,7 @@ import {
   ApiConsumes,
   ApiOperation,
   ApiParam,
+  ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -24,6 +27,7 @@ import { ZodValidationPipe } from '@vietride/nest-common';
 import { InternalJwtAuthGuard } from '../auth/internal-jwt-auth.guard';
 import type { RequestWithRagInternalUser } from '../auth/rag-internal-user.types';
 import { CreateDocumentDto, CreateDocumentSchema } from './dto/create-document.dto';
+import { ListDocumentsQueryDto, ListDocumentsQuerySchema } from './dto/list-documents.dto';
 import {
   RAG_DOCUMENT_FILE_FIELD,
   RAG_DOCUMENT_UPLOAD_HARD_CAP_BYTES,
@@ -32,6 +36,7 @@ import { DocumentsService } from './documents.service';
 import type { KnowledgeDocumentResponse, UploadedDocumentFile } from './documents.types';
 import {
   errorEnvelopeSchema,
+  pagedDataSchema,
   successEnvelopeSchema,
 } from '../swagger/api-response.schemas';
 
@@ -41,6 +46,31 @@ import {
 @Controller('v1/rag/documents')
 export class DocumentsController {
   constructor(private readonly documentsService: DocumentsService) {}
+
+  @Get()
+  @ApiOperation({ summary: 'List RAG knowledge documents for admin audit' })
+  @ApiQuery({ name: 'page', required: false, type: Number, minimum: 1 })
+  @ApiQuery({ name: 'pageSize', required: false, type: Number, minimum: 1, maximum: 100 })
+  @ApiQuery({ name: 'sortBy', required: false, enum: ['createdAt', 'updatedAt', 'title', 'status', 'ingestStatus'] })
+  @ApiQuery({ name: 'sortDir', required: false, enum: ['asc', 'desc'] })
+  @ApiQuery({ name: 'status', required: false, enum: ['PENDING_REVIEW', 'APPROVED', 'REJECTED', 'ARCHIVED'] })
+  @ApiQuery({ name: 'ingestStatus', required: false, enum: ['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED'] })
+  @ApiQuery({ name: 'accessLevel', required: false, enum: ['PUBLIC', 'OPERATOR', 'ADMIN'] })
+  @ApiQuery({ name: 'category', required: false, enum: ['CUSTOMER_SUPPORT', 'OPERATOR_POLICY', 'PLATFORM_ADMIN'] })
+  @ApiQuery({ name: 'documentType', required: false, enum: ['FAQ', 'POLICY', 'SOP', 'GUIDE', 'TERMS'] })
+  @ApiQuery({ name: 'operatorId', required: false, type: String, format: 'uuid' })
+  @ApiQuery({ name: 'q', required: false, type: String, description: 'Search title, file name, or description' })
+  @ApiResponse({ status: 200, description: 'Paginated document list', schema: successEnvelopeSchema(200, pagedDataSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid query', schema: errorEnvelopeSchema(400, 'VALIDATION_FAILED', 'Invalid query', { fields: true }) })
+  @ApiResponse({ status: 401, description: 'Missing or invalid access token', schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Missing or invalid access token') })
+  @ApiResponse({ status: 403, description: 'SYSTEM_ADMIN role is required', schema: errorEnvelopeSchema(403, 'INSUFFICIENT_ROLE', 'SYSTEM_ADMIN role is required') })
+  @ApiResponse({ status: 500, description: 'Unexpected error', schema: errorEnvelopeSchema(500, 'INTERNAL_ERROR', 'Unexpected error') })
+  async list(
+    @Query(new ZodValidationPipe(ListDocumentsQuerySchema)) query: ListDocumentsQueryDto,
+    @Req() req: RequestWithRagInternalUser,
+  ) {
+    return this.documentsService.list(query, req.user);
+  }
 
   @Post()
   @UseInterceptors(

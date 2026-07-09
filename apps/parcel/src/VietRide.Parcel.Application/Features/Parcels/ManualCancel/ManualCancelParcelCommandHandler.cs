@@ -88,6 +88,7 @@ public sealed class ManualCancelParcelCommandHandler
                     parcel.TripId,
                     parcel.Id,
                     parcel.ActualWeightKg ?? parcel.EstimatedWeightKg,
+                    parcel.ActualVolumeM3 ?? parcel.EstimatedVolumeM3,
                     cancellationToken));
         }
 
@@ -168,6 +169,9 @@ public sealed class ManualCancelParcelCommandHandler
 
     private static Task EnsureCargoSuccessAsync(TripCargoOutcome outcome)
     {
+        if (outcome is null)
+            return Task.CompletedTask;
+
         return outcome.Kind switch
         {
             TripCargoOutcomeKind.Success => Task.CompletedTask,

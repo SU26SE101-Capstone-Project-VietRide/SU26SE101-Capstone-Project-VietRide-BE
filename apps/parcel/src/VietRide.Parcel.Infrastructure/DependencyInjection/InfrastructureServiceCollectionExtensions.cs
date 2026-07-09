@@ -73,6 +73,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IParcelRepository, ParcelRepository>();
         services.AddScoped<IParcelRouteFareRepository, ParcelRouteFareRepository>();
         services.AddScoped<IParcelStatsRepository, ParcelStatsRepository>();
+        services.AddScoped<IParcelPricingPolicyRepository, ParcelPricingPolicyRepository>();
         services.AddScoped<IParcelReportCache, RedisParcelReportCache>();
 
         if (registerConsumers)

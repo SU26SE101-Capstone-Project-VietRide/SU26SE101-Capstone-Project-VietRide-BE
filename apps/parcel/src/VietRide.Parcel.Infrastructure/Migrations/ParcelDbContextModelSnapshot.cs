@@ -28,6 +28,64 @@ namespace VietRide.Parcel.Infrastructure.Migrations
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_parcel", "parcel_status", new[] { "PENDING_OPERATOR_REVIEW", "PENDING_PAYMENT", "PENDING", "PENDING_ADDITIONAL_PAYMENT", "LOADED", "IN_TRANSIT", "PENDING_TRANSFER_CONFIRM", "TRANSFER_ESCALATED", "UNLOADED", "DELIVERED_PENDING_CONFIRM", "DELIVERY_CONFIRMED", "DELIVERY_REJECTED", "RETURN_INITIATED", "RETURNED", "PENDING_OPERATOR_ACTION", "CANCELLED", "REJECTED", "EXPIRED" });
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("VietRide.Parcel.Domain.Entities.OperatorDepositPolicy", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<decimal>("DepositPercent")
+                        .HasColumnType("decimal(5,2)")
+                        .HasColumnName("deposit_percent");
+
+                    b.Property<DateTimeOffset>("EffectiveFrom")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("effective_from");
+
+                    b.Property<DateTimeOffset?>("EffectiveTo")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("effective_to");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<Guid>("OperatorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("operator_id");
+
+                    b.Property<Guid?>("RouteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("route_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("Id")
+                        .HasName("pk_operator_deposit_policies");
+
+                    b.HasIndex("OperatorId", "RouteId", "IsActive", "EffectiveFrom")
+                        .HasDatabaseName("idx_operator_deposit_policies_lookup");
+
+                    b.ToTable("operator_deposit_policies", "vietride_parcel", t =>
+                        {
+                            t.HasCheckConstraint("chk_operator_deposit_policies_percent", "deposit_percent > 0 AND deposit_percent <= 100");
+                        });
+                });
+
             modelBuilder.Entity("VietRide.Parcel.Domain.Entities.Parcel", b =>
                 {
                     b.Property<Guid>("Id")
@@ -36,9 +94,33 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasColumnName("id")
                         .HasDefaultValueSql("gen_random_uuid()");
 
+                    b.Property<decimal?>("ActualChargeableWeightKg")
+                        .HasColumnType("decimal(8,2)")
+                        .HasColumnName("actual_chargeable_weight_kg");
+
+                    b.Property<decimal?>("ActualDimWeightKg")
+                        .HasColumnType("decimal(8,2)")
+                        .HasColumnName("actual_dim_weight_kg");
+
+                    b.Property<decimal?>("ActualHeightCm")
+                        .HasColumnType("decimal(8,2)")
+                        .HasColumnName("actual_height_cm");
+
+                    b.Property<decimal?>("ActualLengthCm")
+                        .HasColumnType("decimal(8,2)")
+                        .HasColumnName("actual_length_cm");
+
+                    b.Property<decimal?>("ActualVolumeM3")
+                        .HasColumnType("decimal(10,4)")
+                        .HasColumnName("actual_volume_m3");
+
                     b.Property<decimal?>("ActualWeightKg")
                         .HasColumnType("decimal(8,2)")
                         .HasColumnName("actual_weight_kg");
+
+                    b.Property<decimal?>("ActualWidthCm")
+                        .HasColumnType("decimal(8,2)")
+                        .HasColumnName("actual_width_cm");
 
                     b.Property<long>("AdditionalAmount")
                         .ValueGeneratedOnAdd()
@@ -111,6 +193,12 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("deposit_amount");
 
+                    b.Property<decimal>("DepositPercent")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(5,2)")
+                        .HasDefaultValue(100m)
+                        .HasColumnName("deposit_percent");
+
                     b.Property<string>("Description")
                         .HasColumnType("text")
                         .HasColumnName("description");
@@ -125,9 +213,45 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("dropoff_stop_id");
 
+                    b.Property<decimal>("EstimatedChargeableWeightKg")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(8,2)")
+                        .HasDefaultValue(0.01m)
+                        .HasColumnName("estimated_chargeable_weight_kg");
+
+                    b.Property<decimal>("EstimatedDimWeightKg")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(8,2)")
+                        .HasDefaultValue(0.01m)
+                        .HasColumnName("estimated_dim_weight_kg");
+
+                    b.Property<decimal>("EstimatedHeightCm")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(8,2)")
+                        .HasDefaultValue(1m)
+                        .HasColumnName("estimated_height_cm");
+
+                    b.Property<decimal>("EstimatedLengthCm")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(8,2)")
+                        .HasDefaultValue(1m)
+                        .HasColumnName("estimated_length_cm");
+
+                    b.Property<decimal>("EstimatedVolumeM3")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(10,4)")
+                        .HasDefaultValue(0.0001m)
+                        .HasColumnName("estimated_volume_m3");
+
                     b.Property<decimal>("EstimatedWeightKg")
                         .HasColumnType("decimal(8,2)")
                         .HasColumnName("estimated_weight_kg");
+
+                    b.Property<decimal>("EstimatedWidthCm")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(8,2)")
+                        .HasDefaultValue(1m)
+                        .HasColumnName("estimated_width_cm");
 
                     b.Property<DateTimeOffset?>("LastReminderAt")
                         .HasColumnType("timestamp with time zone")
@@ -155,6 +279,15 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasColumnType("character varying(30)")
                         .HasColumnName("parcel_code");
 
+                    b.Property<string>("PendingActionReason")
+                        .HasColumnType("text")
+                        .HasColumnName("pending_action_reason");
+
+                    b.Property<string>("PendingActionType")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("pending_action_type");
+
                     b.Property<string>("PhotoUrl")
                         .HasColumnType("text")
                         .HasColumnName("photo_url");
@@ -179,6 +312,12 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                     b.Property<Guid?>("RecipientUserId")
                         .HasColumnType("uuid")
                         .HasColumnName("recipient_user_id");
+
+                    b.Property<long>("RefundAmount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("refund_amount")
+                        .HasDefaultValueSql("0");
 
                     b.Property<DateTimeOffset?>("RejectedAt")
                         .HasColumnType("timestamp with time zone")
@@ -223,6 +362,12 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                     b.Property<int>("Status")
                         .HasColumnType("vietride_parcel.parcel_status")
                         .HasColumnName("status");
+
+                    b.Property<long>("TotalPrice")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("total_price_vnd")
+                        .HasDefaultValueSql("0");
 
                     b.Property<DateTimeOffset?>("TransferConfirmedAt")
                         .HasColumnType("timestamp with time zone")
@@ -332,9 +477,15 @@ namespace VietRide.Parcel.Infrastructure.Migrations
 
                     b.ToTable("parcels", "vietride_parcel", t =>
                         {
+                            t.HasCheckConstraint("chk_parcels_actual_dimensions_positive", "(actual_length_cm IS NULL AND actual_width_cm IS NULL AND actual_height_cm IS NULL) OR (actual_length_cm > 0 AND actual_width_cm > 0 AND actual_height_cm > 0)");
+
                             t.HasCheckConstraint("chk_parcels_actual_weight_positive", "actual_weight_kg IS NULL OR actual_weight_kg > 0");
 
                             t.HasCheckConstraint("chk_parcels_amounts_non_negative", "deposit_amount >= 0 AND additional_amount >= 0");
+
+                            t.HasCheckConstraint("chk_parcels_dimensions_positive", "estimated_length_cm > 0 AND estimated_width_cm > 0 AND estimated_height_cm > 0");
+
+                            t.HasCheckConstraint("chk_parcels_volume_positive", "estimated_volume_m3 > 0");
 
                             t.HasCheckConstraint("chk_parcels_weight_positive", "estimated_weight_kg > 0");
                         });
@@ -366,9 +517,21 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("effective_until");
 
+                    b.Property<long>("MinimumPriceVnd")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("minimum_price_vnd")
+                        .HasDefaultValueSql("0");
+
                     b.Property<Guid>("OperatorId")
                         .HasColumnType("uuid")
                         .HasColumnName("operator_id");
+
+                    b.Property<long>("PricePerChargeableKgVnd")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("price_per_chargeable_kg_vnd")
+                        .HasDefaultValueSql("0");
 
                     b.Property<long>("PriceVnd")
                         .HasColumnType("bigint")
@@ -391,6 +554,8 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                             t.HasCheckConstraint("chk_parcel_route_fares_effective_order", "effective_until IS NULL OR effective_until > effective_from");
 
                             t.HasCheckConstraint("chk_parcel_route_fares_price_non_negative", "price_vnd >= 0");
+
+                            t.HasCheckConstraint("chk_parcel_route_fares_weight_price_non_negative", "price_per_chargeable_kg_vnd >= 0 AND minimum_price_vnd >= 0");
                         });
                 });
 
@@ -470,6 +635,70 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasDatabaseName("uq_parcel_stats_operator_date");
 
                     b.ToTable("parcel_stats", "vietride_parcel");
+                });
+
+            modelBuilder.Entity("VietRide.Parcel.Domain.Entities.SystemConfig", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<decimal>("DecimalValue")
+                        .HasColumnType("decimal(12,4)")
+                        .HasColumnName("decimal_value");
+
+                    b.Property<DateTimeOffset>("EffectiveFrom")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("effective_from");
+
+                    b.Property<DateTimeOffset?>("EffectiveTo")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("effective_to");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("key");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id")
+                        .HasName("pk_system_configs");
+
+                    b.HasIndex("Key", "Version")
+                        .IsUnique()
+                        .HasDatabaseName("uq_system_configs_key_version");
+
+                    b.HasIndex("Key", "IsActive", "EffectiveFrom")
+                        .HasDatabaseName("idx_system_configs_lookup");
+
+                    b.ToTable("system_configs", "vietride_parcel", t =>
+                        {
+                            t.HasCheckConstraint("chk_system_configs_version_positive", "version > 0");
+                        });
                 });
 
             modelBuilder.Entity("VietRide.Shared.Persistence.Outbox.OutboxEvent", b =>

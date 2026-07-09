@@ -13,7 +13,7 @@ namespace VietRide.Booking.Api.Controllers;
 /// Admin voucher endpoints (SYSTEM_ADMIN only):
 /// <list type="bullet">
 ///   <item>POST /v1/admin/vouchers — create platform voucher + optional OPERATOR_FUNDED consent fan-out.</item>
-///   <item>GET /v1/admin/vouchers — oversight list of all vouchers with optional filters (Q7).</item>
+///   <item>GET /v1/admin/vouchers — platform voucher list.</item>
 /// </list>
 /// All responses wrapped in <see cref="ApiResponse{T}"/> by ApiResponseResultFilter (ADR 0004).
 /// All errors wrapped by ApiResponseExceptionFilter.
@@ -84,11 +84,11 @@ public sealed class AdminVouchersController : ControllerBase
         return StatusCode(StatusCodes.Status201Created, result);
     }
 
-    /// <summary>Admin oversight list of all vouchers (Q7).</summary>
+    /// <summary>Admin list of platform-owned vouchers.</summary>
     /// <remarks>
     /// Auth: SYSTEM_ADMIN (RS256 user token via JWKS).
     /// Read-only — no Idempotency-Key required.
-    /// Optional filters: ownerOperatorId, fundingType (VIETRIDE_FUNDED | OPERATOR_FUNDED), isActive.
+    /// Optional filters: fundingType (VIETRIDE_FUNDED | OPERATOR_FUNDED), isActive.
     /// sortBy whitelist: createdAt (default), validFrom, validUntil, code, name, isActive.
     /// Non-whitelisted sortBy → 422 INVALID_SORT_FIELD.
     /// Returns only non-soft-deleted vouchers.
@@ -110,7 +110,8 @@ public sealed class AdminVouchersController : ControllerBase
 
         // fundingType string → parsed in the query/handler; null stays null (no filter).
         var query = new ListVouchersQuery(
-            OwnerOperatorId: request.OwnerOperatorId,
+            OwnerOperatorId: null,
+            PlatformOnly: true,
             FundingType: request.FundingType,
             IsActive: request.IsActive,
             Options: new QueryOptions

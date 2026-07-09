@@ -7,6 +7,9 @@ namespace VietRide.Parcel.Application.Features.Parcels.Reweigh;
 public sealed record ReweighParcelCommand(
     Guid ParcelId,
     Guid OperatorId,
+    decimal ActualLengthCm,
+    decimal ActualWidthCm,
+    decimal ActualHeightCm,
     decimal ActualWeightKg,
     string ActualSizeCategory,
     string PaymentMethod) : IRequest<ReweighParcelResponse>;

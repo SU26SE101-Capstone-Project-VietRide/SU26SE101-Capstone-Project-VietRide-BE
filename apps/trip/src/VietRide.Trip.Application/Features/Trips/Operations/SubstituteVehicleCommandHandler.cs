@@ -69,6 +69,7 @@ public sealed class SubstituteVehicleCommandHandler : IRequestHandler<Substitute
                 TripSource.VEHICLE_SUBSTITUTION,
                 oldTrip.BaseFare,
                 oldTrip.MaxCargoWeightKg,
+                oldTrip.MaxCargoVolumeM3,
                 oldTrip.EstimatedPassengerLuggageKg,
                 hasSubstitution: false);
             newTrip.MarkBoarding(now);

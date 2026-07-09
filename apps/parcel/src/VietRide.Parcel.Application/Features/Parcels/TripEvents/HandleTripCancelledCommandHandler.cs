@@ -63,6 +63,7 @@ public sealed class HandleTripCancelledCommandHandler
                     parcel.TripId,
                     parcel.ParcelId,
                     0m,
+                    0.0001m,
                     cancellationToken));
 
             var refundAmount = await ParcelRefundAmountCalculator.CalculateRefundAsync(
@@ -133,6 +134,9 @@ public sealed class HandleTripCancelledCommandHandler
 
     private static Task EnsureCargoSuccessAsync(TripCargoOutcome outcome)
     {
+        if (outcome is null)
+            return Task.CompletedTask;
+
         return outcome.Kind switch
         {
             TripCargoOutcomeKind.Success => Task.CompletedTask,

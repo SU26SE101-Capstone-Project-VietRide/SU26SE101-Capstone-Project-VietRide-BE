@@ -25,4 +25,12 @@ internal static class CurrentUserClaims
         var operatorId = user.FindFirstValue("operatorId");
         return Guid.TryParse(operatorId, out var parsed) ? parsed : null;
     }
+
+    public static bool HasPermission(ClaimsPrincipal user, string permission)
+    {
+        return user.Claims.Any(claim =>
+            (claim.Type == "permission" || claim.Type == "permissions")
+            && claim.Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Any(value => string.Equals(value, permission, StringComparison.OrdinalIgnoreCase)));
+    }
 }

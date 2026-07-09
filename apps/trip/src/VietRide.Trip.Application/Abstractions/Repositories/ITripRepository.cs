@@ -11,6 +11,18 @@ public interface ITripRepository : IRepository<Domain.Entities.Trip, Guid>
         Guid tripId,
         Guid parcelId,
         decimal weightKg,
+        decimal volumeM3,
+        bool allowCapacityOverflow,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("Cargo counters are not supported by this repository implementation.");
+
+    Task<TripCargoMutationResult?> RemeasureReservedCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        decimal volumeM3,
+        bool allowCapacityOverflow,
         DateTimeOffset now,
         CancellationToken cancellationToken)
         => throw new NotSupportedException("Cargo counters are not supported by this repository implementation.");
@@ -19,6 +31,8 @@ public interface ITripRepository : IRepository<Domain.Entities.Trip, Guid>
         Guid tripId,
         Guid parcelId,
         decimal weightKg,
+        decimal volumeM3,
+        bool allowCapacityOverflow,
         DateTimeOffset now,
         CancellationToken cancellationToken)
         => throw new NotSupportedException("Cargo counters are not supported by this repository implementation.");

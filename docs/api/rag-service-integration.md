@@ -40,6 +40,7 @@ FE/mobile không nhập `X-Internal-Auth` trong Swagger và không hardcode inte
 | `POST` | `/v1/rag/chat` | Chat với RAG knowledge base bằng SSE streaming. | `PASSENGER`, `DRIVER`, `ASSISTANT`, `OPERATOR_STAFF`, `OPERATOR_ADMIN`, `SYSTEM_ADMIN`. |
 | `POST` | `/v1/rag/messages/:messageId/feedback` | Tạo/cập nhật feedback cho assistant message. | Caller phải là owner của message/conversation. |
 | `GET` | `/v1/rag/feedback` | Admin audit danh sách feedback. | `SYSTEM_ADMIN`. |
+| `GET` | `/v1/rag/documents` | Admin audit danh sách knowledge document. | `SYSTEM_ADMIN`. |
 | `POST` | `/v1/rag/documents` | Upload knowledge document, auto-approve và request ingest. | `SYSTEM_ADMIN`. |
 | `PUT` | `/v1/rag/documents/:documentId/approve` | Approve pending knowledge document để ingest. | `SYSTEM_ADMIN`. |
 | `GET` | `/v1/admin/rag-config` | List runtime config keys. | `SYSTEM_ADMIN`. |
@@ -170,6 +171,37 @@ curl -X GET "https://api.example.com/v1/rag/feedback?page=1&pageSize=20&sortBy=c
 ```
 
 - **Lỗi thường gặp**: `VALIDATION_FAILED`, `INSUFFICIENT_ROLE`, `RAG_ADMIN_REQUIRED`.
+
+### GET `/v1/rag/documents`
+
+- **Dùng để**: `SYSTEM_ADMIN` xem danh sách knowledge document cho màn audit/quản trị RAG.
+- **Header**:
+
+```http
+Authorization: Bearer <system_admin_access_token>
+```
+
+- **Query params**:
+  - `page`: optional, default `1`.
+  - `pageSize`: optional, default `20`, max `100`.
+  - `sortBy`: optional, `createdAt`, `updatedAt`, `title`, `status`, hoặc `ingestStatus`, default `createdAt`.
+  - `sortDir`: optional, `asc` hoặc `desc`, default `desc`.
+  - `status`: optional, `PENDING_REVIEW`, `APPROVED`, `REJECTED`, hoặc `ARCHIVED`.
+  - `ingestStatus`: optional, `PENDING`, `PROCESSING`, `COMPLETED`, hoặc `FAILED`.
+  - `accessLevel`: optional, `PUBLIC`, `OPERATOR`, hoặc `ADMIN`.
+  - `category`: optional, `CUSTOMER_SUPPORT`, `OPERATOR_POLICY`, hoặc `PLATFORM_ADMIN`.
+  - `documentType`: optional, `FAQ`, `POLICY`, `SOP`, `GUIDE`, hoặc `TERMS`.
+  - `operatorId`: optional, UUID.
+  - `q`: optional, tìm trong `title`, `fileName`, `description`.
+
+- **Ví dụ**:
+
+```bash
+curl -X GET "https://api.example.com/v1/rag/documents?page=1&pageSize=20&status=APPROVED" \
+  -H "Authorization: Bearer <system_admin_access_token>"
+```
+
+- **Lỗi thường gặp**: `VALIDATION_FAILED`, `INSUFFICIENT_ROLE`.
 
 ### POST `/v1/rag/documents`
 

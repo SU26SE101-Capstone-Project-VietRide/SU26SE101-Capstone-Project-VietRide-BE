@@ -27,7 +27,9 @@ import {
 } from './documents.constants';
 import { DocumentsRepository } from './documents.repository';
 import {
+  KnowledgeDocumentPage,
   KnowledgeDocumentResponse,
+  ListKnowledgeDocumentsInput,
   toKnowledgeDocumentResponse,
   UploadedDocumentFile,
 } from './documents.types';
@@ -111,6 +113,25 @@ export class DocumentsService {
     });
     logger.info({ documentId }, 'RAG document approved');
     return toKnowledgeDocumentResponse(approved);
+  }
+
+  async list(
+    query: ListKnowledgeDocumentsInput,
+    user: RagInternalUser | undefined,
+  ): Promise<KnowledgeDocumentPage> {
+    this.assertSystemAdmin(user);
+    const { items, totalItems } = await this.documentsRepository.list(query);
+    const totalPages = Math.ceil(totalItems / query.pageSize);
+
+    return {
+      items: items.map((document) => toKnowledgeDocumentResponse(document)),
+      page: query.page,
+      pageSize: query.pageSize,
+      totalItems,
+      totalPages,
+      hasNextPage: query.page < totalPages,
+      hasPreviousPage: query.page > 1,
+    };
   }
 
   private assertSystemAdmin(user: RagInternalUser | undefined): asserts user is RagInternalUser {

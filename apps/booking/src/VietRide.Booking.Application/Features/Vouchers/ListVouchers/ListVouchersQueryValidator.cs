@@ -4,7 +4,7 @@ using VietRide.Booking.Domain.Enums;
 namespace VietRide.Booking.Application.Features.Vouchers.ListVouchers;
 
 /// <summary>
-/// Validates sortBy whitelist and optional fundingType for GET /v1/admin/vouchers (BSOT §5.8).
+/// Validates sortBy whitelist and optional fundingType for voucher list endpoints (BSOT §5.8).
 /// Non-whitelisted sortBy → 422 INVALID_SORT_FIELD.
 /// </summary>
 public sealed class ListVouchersQueryValidator : AbstractValidator<ListVouchersQuery>

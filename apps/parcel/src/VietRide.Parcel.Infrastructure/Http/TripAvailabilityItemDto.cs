@@ -9,4 +9,5 @@ public sealed record TripAvailabilityItemDto(
     Guid OperatorId,
     string OperatorName,
     DateTimeOffset DepartureDateTime,
-    decimal AvailableCargoWeightKg);
+    decimal AvailableCargoWeightKg,
+    decimal AvailableCargoVolumeM3);

@@ -10,4 +10,17 @@ public enum TripCargoOutcomeKind
 
 public sealed record TripCargoOutcome(
     TripCargoOutcomeKind Kind,
-    string? ErrorMessage);
+    string? ErrorMessage,
+    TripCargoCapacitySnapshot? Capacity = null);
+
+public sealed record TripCargoCapacitySnapshot(
+    Guid TripId,
+    decimal ReservedWeightKg,
+    decimal ReservedVolumeM3,
+    decimal LoadedWeightKg,
+    decimal LoadedVolumeM3,
+    decimal MaxCargoWeightKg,
+    decimal MaxCargoVolumeM3,
+    decimal AvailableWeightKg,
+    decimal AvailableVolumeM3,
+    decimal PercentFull);

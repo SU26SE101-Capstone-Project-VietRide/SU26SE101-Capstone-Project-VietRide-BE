@@ -14,6 +14,7 @@ internal sealed class ParcelRouteFareConfiguration : IEntityTypeConfiguration<Pa
         builder.ToTable("parcel_route_fares", table =>
         {
             table.HasCheckConstraint("chk_parcel_route_fares_price_non_negative", "price_vnd >= 0");
+            table.HasCheckConstraint("chk_parcel_route_fares_weight_price_non_negative", "price_per_chargeable_kg_vnd >= 0 AND minimum_price_vnd >= 0");
             table.HasCheckConstraint("chk_parcel_route_fares_effective_order", "effective_until IS NULL OR effective_until > effective_from");
         });
 
@@ -38,6 +39,18 @@ internal sealed class ParcelRouteFareConfiguration : IEntityTypeConfiguration<Pa
             .HasColumnName("price_vnd")
             .HasColumnType("bigint")
             .HasConversion(m => m.Amount, amount => Money.FromRaw(amount))
+            .IsRequired();
+        builder.Property(x => x.PricePerChargeableKgVnd)
+            .HasColumnName("price_per_chargeable_kg_vnd")
+            .HasColumnType("bigint")
+            .HasConversion(m => m.Amount, amount => Money.FromRaw(amount))
+            .HasDefaultValueSql("0")
+            .IsRequired();
+        builder.Property(x => x.MinimumPriceVnd)
+            .HasColumnName("minimum_price_vnd")
+            .HasColumnType("bigint")
+            .HasConversion(m => m.Amount, amount => Money.FromRaw(amount))
+            .HasDefaultValueSql("0")
             .IsRequired();
 
         builder.Property(x => x.EffectiveFrom)

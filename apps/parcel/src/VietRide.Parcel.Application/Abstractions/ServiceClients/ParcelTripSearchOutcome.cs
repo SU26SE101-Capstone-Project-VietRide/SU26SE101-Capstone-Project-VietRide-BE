@@ -17,4 +17,5 @@ public sealed record ParcelTripDto(
     string OperatorName,
     DateTimeOffset DepartureDateTime,
     decimal AvailableCargoWeightKg,
-    long PriceVnd);
+    decimal AvailableCargoVolumeM3,
+    long PriceVnd = 0);

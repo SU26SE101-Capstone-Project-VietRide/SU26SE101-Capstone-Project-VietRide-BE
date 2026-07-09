@@ -8,6 +8,7 @@ public sealed record SearchParcelAvailableTripsQuery(
     Guid DestinationStationId,
     DateOnly DepartureDate,
     decimal EstimatedWeightKg,
+    decimal EstimatedVolumeM3,
     string SizeCategory,
     int Page,
     int PageSize) : IRequest<PagedResult<ParcelTripAvailabilityItemDto>>;

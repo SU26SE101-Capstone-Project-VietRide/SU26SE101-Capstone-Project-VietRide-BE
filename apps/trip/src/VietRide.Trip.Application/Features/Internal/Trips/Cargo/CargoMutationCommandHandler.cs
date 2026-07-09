@@ -35,9 +35,11 @@ public sealed class CargoMutationCommandHandler : IRequestHandler<CargoMutationC
             result = request.Action switch
             {
                 "reserve" => await tripRepository.ReserveCargoAsync(
-                    request.TripId, request.ParcelId, request.WeightKg, now, cancellationToken),
+                    request.TripId, request.ParcelId, request.WeightKg, request.VolumeM3, request.AllowCapacityOverflow, now, cancellationToken),
+                "remeasure" => await tripRepository.RemeasureReservedCargoAsync(
+                    request.TripId, request.ParcelId, request.WeightKg, request.VolumeM3, request.AllowCapacityOverflow, now, cancellationToken),
                 "load" => await tripRepository.LoadCargoAsync(
-                    request.TripId, request.ParcelId, request.WeightKg, now, cancellationToken),
+                    request.TripId, request.ParcelId, request.WeightKg, request.VolumeM3, request.AllowCapacityOverflow, now, cancellationToken),
                 "release" => await tripRepository.ReleaseCargoAsync(
                     request.TripId, request.ParcelId, now, cancellationToken),
                 _ => throw new CodedValidationException("INVALID_CARGO_ACTION", "Cargo action is invalid."),
@@ -75,8 +77,13 @@ public sealed class CargoMutationCommandHandler : IRequestHandler<CargoMutationC
         return new CargoCapacityDto(
             result.TripId,
             result.ReservedWeightKg,
+            result.ReservedVolumeM3,
             result.LoadedWeightKg,
+            result.LoadedVolumeM3,
             result.MaxCargoWeightKg,
+            result.MaxCargoVolumeM3,
+            Math.Max(0m, result.MaxCargoWeightKg - result.ReservedWeightKg - result.LoadedWeightKg),
+            Math.Max(0m, result.MaxCargoVolumeM3 - result.ReservedVolumeM3 - result.LoadedVolumeM3),
             result.PercentFull);
     }
 
