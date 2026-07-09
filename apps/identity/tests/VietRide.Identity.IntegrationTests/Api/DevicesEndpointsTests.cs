@@ -395,6 +395,7 @@ public sealed class DevicesEndpointsTests : IClassFixture<AuthWebApplicationFact
             if (_dataSource is not null)
             {
                 await _dataSource.DisposeAsync();
+                _dataSource = null;
             }
 
             await DropDatabaseAsync();
@@ -434,7 +435,7 @@ public sealed class DevicesEndpointsTests : IClassFixture<AuthWebApplicationFact
             await terminateCommand.ExecuteNonQueryAsync();
 
             await using var dropCommand = connection.CreateCommand();
-            dropCommand.CommandText = $"DROP DATABASE IF EXISTS \"{_databaseName}\"";
+            dropCommand.CommandText = $"DROP DATABASE IF EXISTS \"{_databaseName}\" WITH (FORCE)";
             await dropCommand.ExecuteNonQueryAsync();
         }
 
