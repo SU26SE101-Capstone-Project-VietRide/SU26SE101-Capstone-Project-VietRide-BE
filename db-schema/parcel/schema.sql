@@ -68,20 +68,37 @@ CREATE TABLE parcels (
     description TEXT NULL,
     photo_url TEXT NULL,
     size_category parcel_size_category NOT NULL,
+    estimated_length_cm DECIMAL(8,2) NOT NULL DEFAULT 1,
+    estimated_width_cm DECIMAL(8,2) NOT NULL DEFAULT 1,
+    estimated_height_cm DECIMAL(8,2) NOT NULL DEFAULT 1,
     estimated_weight_kg DECIMAL(8,2) NOT NULL,
+    estimated_volume_m3 DECIMAL(10,4) NOT NULL DEFAULT 0.0001,
+    estimated_dim_weight_kg DECIMAL(8,2) NOT NULL DEFAULT 0.01,
+    estimated_chargeable_weight_kg DECIMAL(8,2) NOT NULL DEFAULT 0.01,
+    actual_length_cm DECIMAL(8,2) NULL,
+    actual_width_cm DECIMAL(8,2) NULL,
+    actual_height_cm DECIMAL(8,2) NULL,
     actual_weight_kg DECIMAL(8,2) NULL,    -- set by staff after re-weigh
+    actual_volume_m3 DECIMAL(10,4) NULL,
+    actual_dim_weight_kg DECIMAL(8,2) NULL,
+    actual_chargeable_weight_kg DECIMAL(8,2) NULL,
     delivery_method parcel_delivery_method NOT NULL DEFAULT 'TERMINAL_PICKUP',
     -- pricing
+    total_price_vnd BIGINT NOT NULL DEFAULT 0,
+    deposit_percent DECIMAL(5,2) NOT NULL DEFAULT 100,
     deposit_amount BIGINT NOT NULL,
     original_deposit_amount BIGINT NOT NULL DEFAULT 0,
     discount_amount BIGINT NOT NULL DEFAULT 0,
     voucher_code VARCHAR(50) NULL,
     voucher_usage_id UUID NULL,
     additional_amount BIGINT NOT NULL DEFAULT 0,
+    refund_amount BIGINT NOT NULL DEFAULT 0,
     additional_payment_id UUID NULL,    -- logical FK payment.payments
     additional_payment_deadline TIMESTAMPTZ NULL,
     -- status
     status parcel_status NOT NULL,
+    pending_action_type VARCHAR(40) NULL,
+    pending_action_reason TEXT NULL,
     rejection_reason TEXT NULL,
     cancellation_reason TEXT NULL,
     -- EXTRA_LARGE review
@@ -115,7 +132,13 @@ CREATE TABLE parcels (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_parcels_amounts_non_negative
-        CHECK (deposit_amount >= 0 AND original_deposit_amount >= 0 AND discount_amount >= 0 AND additional_amount >= 0),
+        CHECK (total_price_vnd >= 0 AND deposit_amount >= 0 AND original_deposit_amount >= 0 AND discount_amount >= 0 AND additional_amount >= 0 AND refund_amount >= 0),
+    CONSTRAINT chk_parcels_dimensions_positive
+        CHECK (estimated_length_cm > 0 AND estimated_width_cm > 0 AND estimated_height_cm > 0),
+    CONSTRAINT chk_parcels_actual_dimensions_positive
+        CHECK ((actual_length_cm IS NULL AND actual_width_cm IS NULL AND actual_height_cm IS NULL) OR (actual_length_cm > 0 AND actual_width_cm > 0 AND actual_height_cm > 0)),
+    CONSTRAINT chk_parcels_volume_positive
+        CHECK (estimated_volume_m3 > 0),
     CONSTRAINT chk_parcels_weight_positive
         CHECK (estimated_weight_kg > 0),
     CONSTRAINT chk_parcels_actual_weight_positive
@@ -176,12 +199,16 @@ CREATE TABLE parcel_route_fares (
     size_category parcel_size_category NOT NULL,
     operator_id UUID NOT NULL,    -- logical FK (denormalized for tenant filter)
     price_vnd BIGINT NOT NULL,
+    price_per_chargeable_kg_vnd BIGINT NOT NULL DEFAULT 0,
+    minimum_price_vnd BIGINT NOT NULL DEFAULT 0,
     effective_from TIMESTAMPTZ NOT NULL DEFAULT now(),
     effective_until TIMESTAMPTZ NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (route_id, size_category),
     CONSTRAINT chk_parcel_route_fares_price_non_negative CHECK (price_vnd >= 0),
+    CONSTRAINT chk_parcel_route_fares_weight_price_non_negative
+        CHECK (price_per_chargeable_kg_vnd >= 0 AND minimum_price_vnd >= 0),
     CONSTRAINT chk_parcel_route_fares_effective_order
         CHECK (effective_until IS NULL OR effective_until > effective_from)
 );
@@ -190,6 +217,42 @@ CREATE INDEX idx_parcel_route_fares_operator_id ON parcel_route_fares (operator_
 
 COMMENT ON COLUMN parcel_route_fares.operator_id IS
     'Denormalized from Route.operator_id for tenant filter without cross-service join.';
+
+-- -----------------------------------------------------------------------------
+-- system_configs / operator_deposit_policies (Parcel logistics policy)
+-- -----------------------------------------------------------------------------
+CREATE TABLE system_configs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    key VARCHAR(100) NOT NULL,
+    decimal_value DECIMAL(12,4) NOT NULL,
+    version INT NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    effective_from TIMESTAMPTZ NOT NULL,
+    effective_to TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_system_configs_version_positive CHECK (version > 0)
+);
+
+CREATE UNIQUE INDEX uq_system_configs_key_version ON system_configs (key, version);
+CREATE INDEX idx_system_configs_lookup ON system_configs (key, is_active, effective_from);
+
+CREATE TABLE operator_deposit_policies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    operator_id UUID NOT NULL,
+    route_id UUID NULL,
+    deposit_percent DECIMAL(5,2) NOT NULL,
+    effective_from TIMESTAMPTZ NOT NULL,
+    effective_to TIMESTAMPTZ NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_operator_deposit_policies_percent
+        CHECK (deposit_percent > 0 AND deposit_percent <= 100)
+);
+
+CREATE INDEX idx_operator_deposit_policies_lookup
+    ON operator_deposit_policies (operator_id, route_id, is_active, effective_from);
 
 -- -----------------------------------------------------------------------------
 -- parcel_stats (counter table per operator per day)
