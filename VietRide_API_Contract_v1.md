@@ -271,6 +271,9 @@ Response `200`:
 }
 ```
 
+Passenger accounts may receive the same `200` response while `user.status = "PENDING_EMAIL_VERIFICATION"`.
+The mobile FE treats that as a restricted session and prompts email OTP verification from Profile.
+
 Error `401` — invalid credentials:
 ```json
 {
@@ -281,7 +284,7 @@ Error `401` — invalid credentials:
 }
 ```
 
-Error `403` — unverified email:
+Error `403` — unverified email for non-passenger accounts:
 ```json
 {
   "success": false,

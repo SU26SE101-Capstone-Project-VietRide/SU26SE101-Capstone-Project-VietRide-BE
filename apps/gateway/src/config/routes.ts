@@ -42,6 +42,7 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     // Identity
     { prefix: '/v1/auth/register', target: env.IDENTITY_BASE_URL, authRequired: 'none' },
     { prefix: '/v1/auth/verify-email', target: env.IDENTITY_BASE_URL, authRequired: 'none' },
+    { prefix: '/v1/auth/resend-verification-email', target: env.IDENTITY_BASE_URL, authRequired: 'none' },
     { prefix: '/v1/auth/forgot-password', target: env.IDENTITY_BASE_URL, authRequired: 'none' },
     { prefix: '/v1/auth/reset-password', target: env.IDENTITY_BASE_URL, authRequired: 'none' },
     {

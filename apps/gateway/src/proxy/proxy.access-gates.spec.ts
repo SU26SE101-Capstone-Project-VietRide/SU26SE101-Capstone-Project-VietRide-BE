@@ -121,7 +121,7 @@ describe('AppModule UserJwtMiddleware public paths', () => {
     }
   });
 
-  it('excludes set-initial-password from UserJwtMiddleware while keeping resend protected', () => {
+  it('excludes public auth endpoints from UserJwtMiddleware', () => {
     jest.isolateModules(() => {
       const { AppModule } = jest.requireActual(
         '../app/app.module',
@@ -137,6 +137,18 @@ describe('AppModule UserJwtMiddleware public paths', () => {
       const publicPaths = exclude.mock.calls[0] as Array<{ path: string; method: RequestMethod }>;
       expect(publicPaths).toContainEqual({
         path: 'v1/auth/set-initial-password',
+        method: RequestMethod.POST,
+      });
+      expect(publicPaths).toContainEqual({
+        path: 'v1/auth/resend-verification-email',
+        method: RequestMethod.POST,
+      });
+      expect(publicPaths).toContainEqual({
+        path: 'v1/auth/forgot-password',
+        method: RequestMethod.POST,
+      });
+      expect(publicPaths).toContainEqual({
+        path: 'v1/auth/reset-password',
         method: RequestMethod.POST,
       });
       expect(publicPaths).not.toContainEqual(
@@ -839,19 +851,24 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
-  it('lets public refresh pass without a phone gate', async () => {
+  it.each([
+    ['/v1/auth/refresh', 'req-refresh'],
+    ['/v1/auth/resend-verification-email', 'req-resend-verification'],
+    ['/v1/auth/forgot-password', 'req-forgot-password'],
+    ['/v1/auth/reset-password', 'req-reset-password'],
+  ] as const)('lets public auth endpoint %s pass anonymously', async (path, requestId) => {
     const upstreamHandler = arrangeProxyPass();
     const signer = {
       sign: jest.fn().mockResolvedValue('internal-token'),
     } as unknown as InternalJwtSigner;
     const handler = createProxyHandler(env, signer);
-    const req = makeRequest('/v1/auth/refresh', { 'x-request-id': 'req-refresh' });
+    const req = makeRequest(path, { 'x-request-id': requestId });
     const res = makeResponse();
     const next = jest.fn() as NextFunction;
 
     await handler(req, res, next);
 
-    expect(signer.sign).toHaveBeenCalledWith({ sub: 'anonymous', reqId: 'req-refresh' });
+    expect(signer.sign).toHaveBeenCalledWith({ sub: 'anonymous', reqId: requestId });
     expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
     expect(res.status).not.toHaveBeenCalled();
   });

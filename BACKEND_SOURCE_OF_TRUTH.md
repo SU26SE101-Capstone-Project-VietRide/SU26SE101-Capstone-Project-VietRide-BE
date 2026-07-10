@@ -1325,7 +1325,7 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | | `AUTH_TOKEN_EXPIRED` | 401 | Access token expired |
 | | `AUTH_TOKEN_INVALID` | 401 | Signature/format invalid |
 | | `AUTH_GOOGLE_TOKEN_INVALID` | 401 | Google ID token signature/expiry/audience invalid |
-| | `AUTH_EMAIL_NOT_VERIFIED` | 403 | User.status = PENDING_EMAIL_VERIFICATION |
+| | `AUTH_EMAIL_NOT_VERIFIED` | 403 | Non-passenger User.status = PENDING_EMAIL_VERIFICATION |
 | | `AUTH_ACCOUNT_LOCKED` | 403 | User.status = LOCKED |
 | | `AUTH_OTP_INVALID` | 400 | OTP code sai |
 | | `AUTH_OTP_EXPIRED` | 400 | OTP TTL 5 phút hết |
@@ -1635,6 +1635,7 @@ PENDING | APPROVED | REJECTED | SUSPENDED
 - Min 8 ký tự, ≥1 chữ + ≥1 số.
 - Hash bcrypt cost 12.
 - Password change require verify mật khẩu cũ.
+- Login allows `PASSENGER` users in `PENDING_EMAIL_VERIFICATION` to receive a normal token bundle for the mobile restricted session; FE gates features via `data.user.status`. Non-passenger `PENDING_EMAIL_VERIFICATION` users still fail with `AUTH_EMAIL_NOT_VERIFIED`.
 - Password reset for any `ACTIVE` user role uses a `PASSWORD_RESET` email OTP. `forgot-password` returns generic success for unknown/non-eligible emails; `reset-password` marks the OTP used, hashes the new password, and revokes active refresh tokens with reason `PASSWORD_RESET`.
 - **Account lockout:** 5 lần sai trong 15 phút → `User.status = LOCKED`. Chỉ System Admin mở khóa. Login thành công reset counter.
 - Track `failedLoginAttempts` + `lastFailedLoginAt` trên User entity.
@@ -2707,6 +2708,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.24.0** | 2026-07-10 | BE lead (Vu) | **MINOR** - Allow `PASSENGER` accounts in `PENDING_EMAIL_VERIFICATION` to login and receive a normal `TokenBundleDto` for the mobile restricted session; FE gates features using `data.user.status`. Non-passenger pending-email users still fail with `AUTH_EMAIL_NOT_VERIFIED`. Gateway explicitly exposes `POST /v1/auth/resend-verification-email` as public alongside the existing public forgot/reset password endpoints. No DDL, dependency, migration, or event-key change. |
 | **1.23.0** | 2026-07-09 | BE lead (Vu) | **MINOR** - Add public Identity password reset for all `ACTIVE` user roles. `POST /v1/auth/forgot-password` issues a generic response and sends a `PASSWORD_RESET` OTP only for eligible accounts; `POST /v1/auth/reset-password` consumes the OTP, hashes the new password, and revokes active refresh tokens with `PASSWORD_RESET`. No DDL, dependency, or event-key change; reuses `email_verification_tokens`, `identity.otp.requested`, and Redis `identity:pwd_reset_rate:{email}`. |
 | **1.22.0** | 2026-07-09 | BE lead (Vu) | **MINOR** - Add operator-managed Google precision-5 path geometry for Route and AlternativeRoute. Register two `PUT .../geometry` endpoints, nullable `path_polyline` storage, validation/error codes, safe invalidation after route-shape edits, and Trip internal route-geometry preference with TripStop fallback. No new event, dependency, Gateway prefix, or Idempotency-Key requirement. |
 | **1.21.1** | 2026-07-09 | BE lead (Vũ) | **PATCH** — Voucher list ownership split. `GET /v1/admin/vouchers` is no longer an all-voucher/operator-oversight list: it returns platform vouchers only (`owner_operator_id IS NULL`) and ignores/does not expose `ownerOperatorId` as a client filter; it keeps `fundingType`, `isActive`, paging and sort filters. Add `GET /v1/operator/vouchers` under the existing Booking/Gateway operator-voucher prefix for `OPERATOR_ADMIN`; Booking takes `operatorId` from the JWT claim and returns only `owner_operator_id = caller.operatorId`, with `isActive`, paging and sort filters. Both management list endpoints return voucher applicability config (`minOrderAmount`, `maxDiscountAmount`, limits, `newUserOnly`, `applicableServices`, `applicablePaymentMethods`, `applicableOperatorIds`, `applicableRouteIds`) so FE can distinguish `BOOKING` vs `PARCEL` vouchers. Admin-created `OPERATOR_FUNDED` vouchers remain platform-owned (`owner_operator_id IS NULL`) and continue the consent fan-out semantics. No DB schema or Gateway route-table change. |

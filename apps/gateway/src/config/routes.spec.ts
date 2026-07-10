@@ -167,6 +167,7 @@ describe('buildRouteTable', () => {
     const publicPrefixes = [
       '/v1/auth/register',
       '/v1/auth/verify-email',
+      '/v1/auth/resend-verification-email',
       '/v1/auth/forgot-password',
       '/v1/auth/reset-password',
       '/v1/auth/set-initial-password',
@@ -203,6 +204,14 @@ describe('buildRouteTable', () => {
       expect(route?.target).toBe(env.IDENTITY_BASE_URL);
       expect(route?.authRequired).toBe('none');
     });
+  });
+
+  it('matches resend verification email to its dedicated public auth route', () => {
+    const route = matchRoute(routes, '/v1/auth/resend-verification-email');
+
+    expect(route?.prefix).toBe('/v1/auth/resend-verification-email');
+    expect(route?.target).toBe(env.IDENTITY_BASE_URL);
+    expect(route?.authRequired).toBe('none');
   });
 
   it('logout and other non-public auth paths require user auth', () => {
