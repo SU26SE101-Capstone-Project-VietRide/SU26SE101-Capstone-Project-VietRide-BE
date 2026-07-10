@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Identity.Application.Features.Devices.GetActiveDeviceTokens;
 using VietRide.Identity.Application.Features.InternalUsers.GetInternalUser;
+using VietRide.Identity.Application.Features.InternalUsers.GetInternalUserByPhone;
 using VietRide.Shared.Web.Authentication;
 
 namespace VietRide.Identity.Api.Controllers;
@@ -31,6 +32,19 @@ public sealed class InternalUsersController : ControllerBase
             return UnprocessableEntity();
 
         return Ok(await _mediator.Send(new GetInternalUsersQuery(ids.Distinct().ToArray()), cancellationToken));
+    }
+
+    [HttpGet("by-phone")]
+    [ProducesResponseType(typeof(GetInternalUserByPhoneResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<GetInternalUserByPhoneResponseDto>> GetUserByPhone(
+        [FromQuery] string phone,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(new GetInternalUserByPhoneQuery(phone), cancellationToken);
+        return Ok(result);
     }
 
     [HttpGet("{userId:guid}")]

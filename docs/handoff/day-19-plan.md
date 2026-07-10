@@ -155,7 +155,7 @@ Default serial in the shared working tree; no task is declared parallel-safe. Ta
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
 | 19.0 | ✅ done | APPROVE | 2026-07-11 | Docs-only verification passed after 1 patch round; contract baseline frozen and committed with this tracker update |
-| 19.0a | ⬜ todo | — | — | Depends on 19.0 |
+| 19.0a | ⚠️ done-with-carryover | APPROVE | 2026-07-11 | Approved after 2 patch rounds; task tests/build/format pass, while 3 pre-existing Identity registration/OTP integration tests still return 500 outside this task scope |
 | 19.0c | ⬜ todo | — | — | Depends on 19.0 + 19.0a; dispatch after 19.0a |
 | 19.1 | ⬜ todo | — | — | Depends on 19.0a + 19.0c; dispatch after 19.0c |
 | 19.2 | ⬜ todo | — | — | Depends on 19.1 + 19.0c; dispatch after 19.1 |

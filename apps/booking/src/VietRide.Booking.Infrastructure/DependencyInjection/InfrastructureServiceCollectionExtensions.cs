@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Polly;
 using StackExchange.Redis;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
@@ -73,6 +74,21 @@ public static class InfrastructureServiceCollectionExtensions
                 .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
                 .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
         }
+
+        services
+            .AddHttpClient<IIdentityUserServiceClient, IdentityUserServiceClient>(client =>
+            {
+                var baseUrl = ResolveIdentityBaseUrl(configuration);
+                client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
+                client.Timeout = TimeSpan.FromSeconds(5);
+                client.DefaultRequestHeaders.Accept.Clear();
+                client.DefaultRequestHeaders.Accept.Add(
+                    new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+            })
+            .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
+            .AddHttpMessageHandler<InternalJwtDelegatingHandler>()
+            .AddPolicyHandler(CreateIdentityUserRetryPolicy())
+            .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
 
         // Identity operator lookup client (Task 17.0).
         if (UseIdentityDevStub(configuration))
@@ -186,6 +202,34 @@ public static class InfrastructureServiceCollectionExtensions
 
         return services;
     }
+
+    /// <summary>
+    /// Creates the Identity phone-lookup retry policy. Unlike the shared legacy policy,
+    /// this deliberately excludes HTTP 408 and every other 4xx response.
+    /// </summary>
+    public static IAsyncPolicy<HttpResponseMessage> CreateIdentityUserRetryPolicy(
+        int retryCount = HttpResiliencePolicies.DefaultRetryCount,
+        Func<int, TimeSpan>? delayProvider = null)
+    {
+        delayProvider ??= GetIdentityUserRetryDelay;
+
+        return Policy<HttpResponseMessage>
+            .Handle<HttpRequestException>()
+            .OrResult(response => (int)response.StatusCode >= 500)
+            .WaitAndRetryAsync(retryCount, delayProvider);
+    }
+
+    public static TimeSpan GetIdentityUserRetryDelay(int attempt)
+        => attempt switch
+        {
+            1 => TimeSpan.FromMilliseconds(200),
+            2 => TimeSpan.FromMilliseconds(500),
+            3 => TimeSpan.FromSeconds(1),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(attempt),
+                attempt,
+                "Identity user retry attempts must be between 1 and 3."),
+        };
 
     private static string ResolveTripBaseUrl(IConfiguration configuration)
     {
