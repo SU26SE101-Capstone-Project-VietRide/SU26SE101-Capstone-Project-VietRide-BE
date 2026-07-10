@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.22.0
+> **Phiên bản:** 1.24.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-06-22
+> **Cập nhật lần cuối:** 2026-07-11
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1425,7 +1425,7 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | **Generic** | `RESOURCE_NOT_FOUND` | 404 | Fallback |
 | | `FORBIDDEN` | 403 | RBAC reject |
 | | `RATE_LIMITED` | 429 | Vượt rate limit |
-| | `UPSTREAM_UNAVAILABLE` | 502 | Gateway không kết nối được downstream service |
+| | `UPSTREAM_UNAVAILABLE` | 502 | Downstream/inter-service dependency unavailable or returned an unusable/unexpected response (including Gateway connection failure) |
 | | `INTERNAL_ERROR` | 500 | Unhandled exception (Sentry capture) |
 
 ### 5.10 Data access pattern (Repository + optional Service)
@@ -1685,6 +1685,7 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | Method + Path | Caller | Mục đích |
 |---|---|---|
 | `GET /internal/v1/users/{userId}` | All services | Internal-JWT-only raw user lookup `{ id, role, operatorId, status }` for HTTP validate logical FK. Errors use ADR 0004 envelope. Trip DriverSchedule create/activation uses it to require `driverUserId` role `DRIVER` under caller operator and nullable `assistantUserId` role `ASSISTANT` under caller operator; missing user, wrong role/operator, or upstream logical-FK validation failure maps to `422 VALIDATION_ERROR` at Trip write boundary. |
+| `GET /internal/v1/users/by-phone?phone={normalizedE164}` | Booking | Internal-JWT-only exact non-deleted-user phone lookup for the operator booking-monitor filter. Caller URI-escapes a prevalidated canonical E.164 value; raw success is exactly `{ userId }`, no PII. No match is ADR 0004 `404 RESOURCE_NOT_FOUND`. Booking maps only that exact response to an empty result; all other failures map to `502 UPSTREAM_UNAVAILABLE`. |
 | `GET /internal/v1/users/by-email?email=` | Parcel | Lookup recipient user khi tạo parcel |
 | `GET /internal/v1/users/{userId}/device-tokens` | Notification | Lấy FCM tokens active để push |
 | `GET /internal/v1/operators/{operatorId}` | All services | Lookup operator info for logical FK validation (raw success DTO) |
@@ -1861,6 +1862,8 @@ After retry_count >= 10: alert Sentry, leave FAILED for manual handle
 - Mỗi call kèm header `X-Internal-Auth` + `X-Request-Id` propagated.
 - **NestJS:** Axios typed client, same Polly equivalent qua `axios-retry` + circuit breaker `opossum`.
 
+**Day-19 Identity phone lookup boundary (Booking):** Booking validates and normalizes the public phone with `PhoneNumber.Normalize` before sending a URI-escaped canonical E.164 value. Retry remains limited to transient 5xx/network failures; 4xx is never retried. Only an Identity HTTP 404 whose ADR 0004 body has `error.code = RESOURCE_NOT_FOUND` is the expected no-match result. Caller-request cancellation propagates unchanged. Identity 401/403, every other or malformed 4xx response, 5xx after policy handling, timeout, circuit-open, transport, and response-deserialization failures are dependency failures and must become FE-facing HTTP 502 `UPSTREAM_UNAVAILABLE`; they must not be reported as caller authorization failures or empty results.
+
 ---
 
 ## 8. Status Machines
@@ -1889,6 +1892,37 @@ PENDING_PAYMENT ─┬─→ CONFIRMED ─┬─→ COMPLETED
 - `CANCELLED → REFUNDED`: Booking Service consume `payment.wallet.credited`.
 - `DISRUPTED`: Booking Service consume `trip.trip.disrupted { hasSubstitution: false }`.
 - `cancellationReason` enum: `USER_INITIATED | OPERATOR_CANCELLED_TRIP | OPERATOR_DISRUPTED_IN_PROGRESS | SCHEDULE_CHANGED | ROUTE_CHANGED_REFUSED | VEHICLE_SUBSTITUTION_DOWNGRADE | VEHICLE_SUBSTITUTION_NO_SEAT | STOP_DISABLED_REFUSED`.
+
+#### Authoritative Booking status timeline (Day 19)
+
+The operator booking-monitor timeline is sourced only from the append-only `booking_status_history` read model. This supersedes the Day-19 timeline wording “events from Outbox audit”: Outbox delivery time is not a domain-status occurrence time, and lifecycle timestamp columns must not be used to fabricate history.
+
+| Column | PostgreSQL type | Null | Constraint / meaning |
+|---|---|---|---|
+| `id` | `uuid` | no | Primary key. |
+| `booking_id` | `uuid` | no | Local FK to `bookings(id)` with `ON DELETE RESTRICT`. |
+| `status` | `booking_status` | no | Status reached by the successful creation/transition. |
+| `occurred_at` | `timestamptz` | no | Application-captured occurrence time. |
+| `reason_code` | `varchar(100)` | yes | Canonical machine-readable domain reason only. |
+| `actor_user_id` | `uuid` | yes | Logical FK to Identity User; deliberately no cross-database FK. |
+| `source` | `varchar(100)` | no | Required application-controlled source constant. |
+
+The required read index and deterministic timeline order are `(booking_id, occurred_at, id)` and `occurred_at ASC, id ASC`. History has insert/read surfaces only: no update/delete repository/API, no integration event, and no historical backfill for pre-migration bookings. Booking remains non-deletable; `ON DELETE RESTRICT` is nevertheless mandatory protection.
+
+Current writers and population rules are frozen as follows:
+
+| Source constant | Recorded status | Actor | Reason |
+|---|---|---|---|
+| `CREATE_BOOKING` | `PENDING_PAYMENT` | authenticated passenger user id | null |
+| `CREATE_ROUND_TRIP_BOOKING` | `PENDING_PAYMENT` for each created leg | authenticated passenger user id | null |
+| `CONFIRM_ON_PAYMENT` | `CONFIRMED` | null | null |
+| `EXPIRE_ON_PAYMENT` | `EXPIRED` | null | null |
+| `CANCEL_BOOKING` | `CANCELLED` | authenticated passenger user id | exact existing `BookingCancellationReason` enum name |
+| `MARK_REFUNDED` | `REFUNDED` | null | null |
+
+Each writer captures `IClock.UtcNow` exactly once and reuses that value for the Booking creation/transition timestamp work and its history row; it never uses database-read time or Outbox publish time. A creation appends `PENDING_PAYMENT`, and every guarded successful transition appends exactly one row in the same local database transaction. A guarded no-op/replay appends no row. If the transaction rolls back, both state and history roll back atomically.
+
+Future status writers require SOT review and an explicitly approved `source` constant before implementation. Authenticated-human transitions record the caller user id; automated/system/event-driven transitions record null. `reason_code`, when applicable, must be an existing canonical domain reason code rather than free text.
 
 ### 8.2 TripStatus
 
@@ -2707,6 +2741,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.24.0** | 2026-07-11 | BE lead (Vu) | **MINOR** - Freeze the Day-19 tenant-scoped operator booking-monitor contract. Register the exact Identity raw phone-to-user lookup and exhaustive Booking error/retry boundary; broaden existing `UPSTREAM_UNAVAILABLE` to generic downstream/inter-service unavailability without adding an error code; replace the proposed Outbox-audit timeline with authoritative append-only `booking_status_history`, including schema, six current source constants, actor/reason rules, atomic writer/no-op semantics, no backfill/event, and deterministic ordering. |
 | **1.23.0** | 2026-07-09 | BE lead (Vu) | **MINOR** - Add public Identity password reset for all `ACTIVE` user roles. `POST /v1/auth/forgot-password` issues a generic response and sends a `PASSWORD_RESET` OTP only for eligible accounts; `POST /v1/auth/reset-password` consumes the OTP, hashes the new password, and revokes active refresh tokens with `PASSWORD_RESET`. No DDL, dependency, or event-key change; reuses `email_verification_tokens`, `identity.otp.requested`, and Redis `identity:pwd_reset_rate:{email}`. |
 | **1.22.0** | 2026-07-09 | BE lead (Vu) | **MINOR** - Add operator-managed Google precision-5 path geometry for Route and AlternativeRoute. Register two `PUT .../geometry` endpoints, nullable `path_polyline` storage, validation/error codes, safe invalidation after route-shape edits, and Trip internal route-geometry preference with TripStop fallback. No new event, dependency, Gateway prefix, or Idempotency-Key requirement. |
 | **1.21.1** | 2026-07-09 | BE lead (Vũ) | **PATCH** — Voucher list ownership split. `GET /v1/admin/vouchers` is no longer an all-voucher/operator-oversight list: it returns platform vouchers only (`owner_operator_id IS NULL`) and ignores/does not expose `ownerOperatorId` as a client filter; it keeps `fundingType`, `isActive`, paging and sort filters. Add `GET /v1/operator/vouchers` under the existing Booking/Gateway operator-voucher prefix for `OPERATOR_ADMIN`; Booking takes `operatorId` from the JWT claim and returns only `owner_operator_id = caller.operatorId`, with `isActive`, paging and sort filters. Both management list endpoints return voucher applicability config (`minOrderAmount`, `maxDiscountAmount`, limits, `newUserOnly`, `applicableServices`, `applicablePaymentMethods`, `applicableOperatorIds`, `applicableRouteIds`) so FE can distinguish `BOOKING` vs `PARCEL` vouchers. Admin-created `OPERATOR_FUNDED` vouchers remain platform-owned (`owner_operator_id IS NULL`) and continue the consent fan-out semantics. No DB schema or Gateway route-table change. |

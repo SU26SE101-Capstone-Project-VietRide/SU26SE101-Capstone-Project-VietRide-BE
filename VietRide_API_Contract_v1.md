@@ -837,6 +837,129 @@ Error `409` — duplicate email:
 
 ## Booking Service
 
+### GET `/v1/operator/bookings`
+
+Auth: `OPERATOR_ADMIN` or `OPERATOR_STAFF`. The tenant key is the non-null `operatorId` claim from the authenticated JWT; the endpoint never accepts an operator id from the client. Idempotency: not required (read-only).
+
+Query parameters:
+
+| Parameter | Type | Default | Validation and semantics |
+|---|---|---|---|
+| `status` | string? | null | One `booking_status` value or a comma-separated list. Empty entries or unknown values return `422 VALIDATION_ERROR`. |
+| `tripId` | UUID? | null | Exact trip id; malformed UUID returns `422 VALIDATION_ERROR`. |
+| `date` | `YYYY-MM-DD`? | null | Calendar day in `Asia/Ho_Chi_Minh`. Convert local midnight and the next local midnight to the UTC half-open interval `[fromUtc, toUtc)` and filter `trip_snapshot_departure`. Invalid dates return `422 VALIDATION_ERROR`. |
+| `passengerPhone` | string? | null | Trim outer whitespace, then apply `PhoneNumber.Normalize`: accept only local `0xxxxxxxxx`/`0xxxxxxxxxx` or canonical `+84xxxxxxxxx`/`+84xxxxxxxxxx`; canonicalize local input to E.164. Internal spaces, hyphens, parentheses, or other separators are invalid and are not stripped. |
+| `bookingCode` | string? | null | Trimmed, non-empty, maximum 30 characters, exact case-insensitive match. |
+| `page` | integer | `1` | Must be `>= 1`. |
+| `pageSize` | integer | `20` | Must be `>= 1`; values above 100 are clamped to 100. |
+| `sortBy` | string | `createdAt` | Allow-list: `createdAt`, `departureAt`, `bookingCode`, `status`, `totalAmount`; otherwise `400 INVALID_SORT_FIELD`. |
+| `sortDir` | string | `desc` | `asc` or `desc`; otherwise `422 VALIDATION_ERROR`. |
+
+`search`, `searchIn`, `operatorId`, and `includeDeleted` are not supported. Every SQL query path first constrains `bookings.operator_id = :claimOperatorId`, before filters and pagination. Sort always adds `id` as the deterministic tie-breaker in the same direction as `sortDir`.
+
+When `passengerPhone` is present, Booking validates and normalizes it before URI-escaping the canonical E.164 value and calling `GET /internal/v1/users/by-phone`. Only Identity's `404 RESOURCE_NOT_FOUND` means no matching user and produces a normal empty page.
+
+Response `200`: ADR 0004 success envelope whose `data` is the seven-field `PagedResult<OperatorBookingListItemDto>`.
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [{
+      "id": "uuid",
+      "bookingCode": "VR-20260618-ABCDEFGH",
+      "tripId": "uuid",
+      "status": "CONFIRMED",
+      "trip": {
+        "routeName": "Sai Gon - Da Lat",
+        "originName": "Sai Gon",
+        "destinationName": "Da Lat",
+        "departureAt": "2026-06-18T08:00:00+07:00"
+      },
+      "seatCount": 2,
+      "totalAmount": 500000,
+      "createdAt": "2026-06-17T12:00:00Z"
+    }],
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 1,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-18T01:00:00Z" }
+}
+```
+
+Trip snapshot strings and `departureAt` are nullable for legacy rows. Money is VND backed by BIGINT, to-the-dong. An unknown normalized phone or a page beyond the last page returns HTTP 200 with `items: []` in the same seven-field shape; the requested `page`, effective `pageSize`, counts, and flags are returned normally.
+
+Errors use the ADR 0004 envelope:
+
+- `403 FORBIDDEN`: role is not allowed or the authenticated operator claim is absent.
+- `400 INVALID_SORT_FIELD`: `sortBy` is outside the allow-list.
+- `422 VALIDATION_ERROR`: any other invalid filter or paging value.
+- `502 UPSTREAM_UNAVAILABLE`: the Identity lookup failed in any way other than its exact `404 RESOURCE_NOT_FOUND` no-match response.
+
+### GET `/v1/operator/bookings/{id}`
+
+Auth: `OPERATOR_ADMIN` or `OPERATOR_STAFF`. The tenant key comes only from the authenticated JWT `operatorId` claim. Idempotency: not required (read-only). `id` must be a UUID; malformed input returns `422 VALIDATION_ERROR`.
+
+Response `200`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "id": "uuid",
+    "bookingCode": "VR-20260618-ABCDEFGH",
+    "buyerUserId": "uuid",
+    "tripId": "uuid",
+    "status": "CANCELLED",
+    "trip": {
+      "routeName": "Sai Gon - Da Lat",
+      "originName": "Sai Gon",
+      "destinationName": "Da Lat",
+      "departureAt": "2026-06-18T08:00:00+07:00"
+    },
+    "seatCount": 1,
+    "baseFare": 600000,
+    "discountAmount": 100000,
+    "totalAmount": 500000,
+    "pickupStationId": "uuid",
+    "pickupStopId": null,
+    "dropoffStationId": "uuid",
+    "dropoffStopId": null,
+    "bookingGroupId": null,
+    "tripDirection": null,
+    "cancellationReason": "USER_INITIATED",
+    "createdAt": "2026-06-17T12:00:00Z",
+    "seats": [{
+      "passengerRecordId": "uuid",
+      "ticketId": "uuid",
+      "ticketCode": "VT-20260618-ABCDEFGH",
+      "seatNumber": "A01",
+      "ticketStatus": "CANCELLED",
+      "boardingStatus": "PENDING"
+    }],
+    "statusTimeline": [
+      { "status": "PENDING_PAYMENT", "occurredAt": "2026-06-17T12:00:00Z", "reasonCode": null },
+      { "status": "CANCELLED", "occurredAt": "2026-06-17T12:05:00Z", "reasonCode": "USER_INITIATED" }
+    ]
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-18T01:00:00Z" }
+}
+```
+
+The detail contains the list fields plus exactly the additional buyer, amount, pickup/dropoff, round-trip, cancellation, seat, and timeline fields shown above. Nullable database fields remain nullable. It never returns buyer/passenger phone, email, display name, ID number, timeline `actorUserId`, or timeline `source`. Timeline rows are real `booking_status_history` records ordered by `occurred_at ASC, id ASC`; no lifecycle-timestamp or Outbox reconstruction is permitted.
+
+Errors use the ADR 0004 envelope:
+
+- `403 FORBIDDEN`: the booking id exists but belongs to another operator, or caller role/operator context is invalid.
+- `404 BOOKING_NOT_FOUND`: the booking id does not exist.
+- `422 VALIDATION_ERROR`: malformed booking `id` UUID in the detail route parameter.
+
 ### POST `/v1/bookings`
 
 Auth: `PASSENGER`. Idempotency: required.
@@ -2903,6 +3026,20 @@ Response `200`:
 `operatorId` is nullable for non-operator-scoped users; Trip DriverSchedule validation requires it to match the caller operator for `DRIVER` and `ASSISTANT` users.
 
 Error `404` — `RESOURCE_NOT_FOUND`.
+
+### GET `/internal/v1/users/by-phone?phone={normalizedE164}`
+
+Auth: Internal JWT via `X-Internal-Auth`. Caller: Booking Service. Never exposed through Gateway. The query value must be URI-escaped by the caller and already be canonical Vietnamese E.164 (`^\+84[0-9]{9,10}$`). Identity performs an exact lookup against a non-soft-deleted `users.phone` and returns no PII.
+
+Response `200` is a raw DTO without an `ApiResponse` wrapper:
+
+```json
+{ "userId": "uuid" }
+```
+
+No match returns HTTP 404 using the standardized internal ADR 0004 error envelope with `error.code = RESOURCE_NOT_FOUND`. Other Identity errors also use the standard error envelope.
+
+Booking maps only the exact Identity 404 `RESOURCE_NOT_FOUND` response to no user and an HTTP-200 empty operator-booking page. Caller-request cancellation propagates unchanged. Identity 401/403, any other 4xx (including a 404 with another or malformed code), 5xx, timeout, circuit-open, transport, or response-deserialization failure becomes the existing FE-facing `502 UPSTREAM_UNAVAILABLE` ADR 0004 error. Retry only transient 5xx/network failures under BSOT §7.6, never 4xx. No phone snapshot or PII duplication is authorized in Booking.
 
 ### GET `/internal/v1/operators/{operatorId}`
 

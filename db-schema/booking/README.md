@@ -17,6 +17,7 @@ Quản lý **booking lifecycle, multi-passenger per booking, seat reference, vou
 | `Ticket` | Per-seat proof of travel / QR identity. | `ticketCode` UNIQUE, `passengerId` UNIQUE, `seatNumber`, `status`, fare/discount/paid snapshot, lifecycle timestamps |
 | `Booking` | Vé của 1 buyer cho 1 trip. | `bookingCode` UNIQUE, 4 pickup/dropoff FK (exclusive), `totalAmount` immutable snapshot, 4 trip snapshot fields, `bookingGroupId`/`tripDirection` round-trip, `cancellationReason` enum, `refundOverride` |
 | `Passenger` | Sub-entity của Booking (1–5/booking). Operational-only. | `seatNumber`, `boardingStatus`, `boardedAt`, `boardedAtStopId` |
+| `BookingStatusHistory` | Authoritative append-only Booking lifecycle timeline for operator monitoring. | `bookingId`, `status`, `occurredAt`, nullable `reasonCode`/`actorUserId`, required `source` |
 | `BookingPendingAction` | Pending action passenger cần phản hồi. | `reason` enum, `severity` enum (MEDIUM/MAJOR), `deadline`, `metadata` JSONB; **partial unique 1 active per booking** |
 | `BookingTransfer` | Track Vehicle Substitution per Passenger. | `originalTripId`, `newTripId`, `originalSeatNumber`, `newSeatNumber` nullable, `note` |
 | `BookingStats` | Counter table (event-driven UPSERT). | `(operatorId, statDate, tripId)` unique; tổng booking/cancel/no_show/revenue/refunded |
@@ -48,6 +49,35 @@ Quản lý **booking lifecycle, multi-passenger per booking, seat reference, vou
 - **`operator_voucher_consents` UNIQUE `(operator_id, voucher_id)`** — 1 operator có 1 consent record per voucher (status có thể chuyển PENDING→ACCEPTED→REJECTED, không tạo record mới).
 - **`outbox_events.status` partial index** — chỉ index PENDING/PUBLISHING/FAILED (không index PUBLISHED — > 99% rows sau lifetime).
 
+### Booking status history (Day 19 authoritative timeline)
+
+`booking_status_history` is the only authoritative source for the operator booking-detail timeline. It replaces the earlier proposal to derive the timeline from “Outbox audit” and forbids reconstruction from Booking lifecycle timestamp columns.
+
+| Column | Type | Null | Rule |
+|---|---|---|---|
+| `id` | `UUID` | no | PK. |
+| `booking_id` | `UUID` | no | Local FK `REFERENCES bookings(id) ON DELETE RESTRICT`. |
+| `status` | `booking_status` | no | Status reached by the successful creation/transition. |
+| `occurred_at` | `TIMESTAMPTZ` | no | One application-captured `IClock.UtcNow`; never DB-read or Outbox-publish time. |
+| `reason_code` | `VARCHAR(100)` | yes | Existing canonical machine-readable domain reason only; never free text. |
+| `actor_user_id` | `UUID` | yes | Logical FK to `identity.users.id`; no cross-database DB FK. |
+| `source` | `VARCHAR(100)` | no | Required application-controlled constant. |
+
+The six current `source` values and their population matrix are exact:
+
+| Source | Status | Actor | Reason |
+|---|---|---|---|
+| `CREATE_BOOKING` | `PENDING_PAYMENT` | authenticated passenger user id | NULL |
+| `CREATE_ROUND_TRIP_BOOKING` | `PENDING_PAYMENT` per leg | authenticated passenger user id | NULL |
+| `CONFIRM_ON_PAYMENT` | `CONFIRMED` | NULL | NULL |
+| `EXPIRE_ON_PAYMENT` | `EXPIRED` | NULL | NULL |
+| `CANCEL_BOOKING` | `CANCELLED` | authenticated passenger user id | exact existing `BookingCancellationReason` enum name |
+| `MARK_REFUNDED` | `REFUNDED` | NULL | NULL |
+
+Each selected writer captures `IClock.UtcNow` once and reuses it for the creation/transition work and history row. Creation appends `PENDING_PAYMENT`; each guarded successful transition appends exactly one history row in the same local transaction. A guarded no-op or replay appends nothing. Transaction rollback removes both state change and history insert.
+
+The persistence surface is insert/read only; no update/delete API or repository operation is allowed. Booking remains non-deletable, with `ON DELETE RESTRICT` as defense in depth. Existing bookings receive no fabricated backfill. History emits no integration event. Future writers require reviewed SOT approval for a new source constant; authenticated-human writers store caller id, automated/system/event-driven writers store NULL, and reason codes must come from canonical domain enums/codes.
+
 ## Index Strategy
 
 | Index | Columns | Type | Purpose |
@@ -58,6 +88,7 @@ Quản lý **booking lifecycle, multi-passenger per booking, seat reference, vou
 | `idx_bookings_operator_id_status` | `(operator_id, status)` | B-tree | Operator dashboard |
 | `idx_bookings_booking_group_id` | `booking_group_id` partial | B-tree | Round-trip group lookup |
 | `idx_bookings_status_created_at` | `(status, created_at)` partial | B-tree | Hangfire VNPay timeout scan |
+| `idx_booking_status_history_booking_occurred_id` | `(booking_id, occurred_at, id)` | B-tree | Stable timeline read ordered by `occurred_at ASC, id ASC` |
 | `uq_passengers_booking_seat` | `(booking_id, seat_number)` | unique | Avoid duplicate seat |
 | `idx_passengers_boarding_status` | `(booking_id, boarding_status)` | B-tree | NO_SHOW detection job |
 | `uq_booking_pending_actions_active_per_booking` | `(booking_id)` partial | unique | "1 active per booking" rule |
@@ -77,6 +108,7 @@ Quản lý **booking lifecycle, multi-passenger per booking, seat reference, vou
 | Column | References | Enforcement |
 |---|---|---|
 | `Booking.passengerUserId`, `Voucher.createdByUserId`, `OperatorVoucherConsent.respondedByUserId`, `VoucherUsage.userId`, `BookingTransfer.transferredByUserId` | `identity.User.id` | app-layer validate (Internal JWT carry userId) |
+| `BookingStatusHistory.actorUserId` | `identity.User.id` | nullable logical FK only; authenticated-human actor or NULL for automated transitions |
 | `Booking.operatorId`, `OperatorVoucherConsent.operatorId`, `BookingStats.operatorId` | `identity.Operator.id` | app-layer + tenant filter |
 | `Booking.tripId`, `BookingTransfer.originalTripId/newTripId`, `BookingStats.tripId` | `trip.Trip.id` | app-layer validate via HTTP `GET /internal/v1/trips/{id}` |
 | `Booking.pickupStationId/dropoffStationId` | `trip.Station.id` | app-layer |
@@ -89,6 +121,7 @@ Quản lý **booking lifecycle, multi-passenger per booking, seat reference, vou
 - **Tool:** EF Core Migrations.
 - **Bootstrap order:** Sau Identity Service (logical FK validate target).
 - **Snapshot field maintenance:** `trip_snapshot_*` được set tại CREATE Booking, KHÔNG cập nhật khi Trip edit (snapshot rule).
+- **Booking status history:** add through an EF Core migration in Task 19.0c; do not backfill pre-existing bookings. The migration must create the local `ON DELETE RESTRICT` FK and `(booking_id, occurred_at, id)` index. No DDL is added by this architecture-baseline task.
 - **`booking_pending_actions.metadata` JSONB schema** linh hoạt theo reason — không enforce schema ở DB, validate ở handler.
 
 ## Open Questions
