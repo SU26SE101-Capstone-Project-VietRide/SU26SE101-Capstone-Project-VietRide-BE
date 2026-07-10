@@ -77,6 +77,9 @@ public sealed class UpdateVehicleHandler : IRequestHandler<UpdateVehicleCommand,
                 request.HasMaxCargoWeightKg ? request.MaxCargoWeightKg : vehicle.MaxCargoWeightKg,
                 request.HasMaxCargoVolumeM3 ? request.MaxCargoVolumeM3 : vehicle.MaxCargoVolumeM3);
 
+        if (request.HasImageUrls)
+            vehicle.UpdateImageUrls(request.ImageUrls);
+
         if (request.Status.HasValue)
         {
             vehicle.ChangeStatus((VehicleStatus)request.Status.Value);

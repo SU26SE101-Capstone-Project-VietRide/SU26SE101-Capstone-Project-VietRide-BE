@@ -86,6 +86,20 @@ public sealed class IdentityInternalClient : IIdentityInternalClient
         }
     }
 
+    public async Task<IReadOnlyDictionary<Guid, IdentityUserProfile>> GetUsersAsync(
+        IReadOnlyCollection<Guid> userIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (userIds.Count == 0)
+            return new Dictionary<Guid, IdentityUserProfile>();
+
+        var query = string.Join("&", userIds.Distinct().Take(100).Select(id => $"ids={id:D}"));
+        using var response = await _httpClient.GetAsync($"/internal/v1/users?{query}", cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        var payload = await response.Content.ReadFromJsonAsync<List<JsonElement>>(JsonOptions, cancellationToken).ConfigureAwait(false) ?? [];
+        return payload.Select(ParseUserProfile).Where(profile => profile is not null).Cast<IdentityUserProfile>().ToDictionary(profile => profile.Id);
+    }
+
     public async Task<IdentityOperatorLookupResult> GetOperatorAsync(
         Guid operatorId,
         CancellationToken cancellationToken = default)
@@ -166,6 +180,8 @@ public sealed class IdentityInternalClient : IIdentityInternalClient
         }
 
         var id = GetGuidProperty(payload, "id");
+        var displayName = GetStringProperty(payload, "displayName");
+        var avatarUrl = GetStringProperty(payload, "avatarUrl");
         var role = GetStringProperty(payload, "role");
         var operatorId = GetGuidProperty(payload, "operatorId");
         var status = GetStringProperty(payload, "status");
@@ -174,7 +190,18 @@ public sealed class IdentityInternalClient : IIdentityInternalClient
             return IdentityUserLookupResult.ValidationFailure("Identity user payload is missing id, role, or status.");
         }
 
-        return IdentityUserLookupResult.Success(id.Value, role, operatorId, status);
+        return IdentityUserLookupResult.Success(id.Value, displayName, avatarUrl, role, operatorId, status);
+    }
+
+    private static IdentityUserProfile? ParseUserProfile(JsonElement payload)
+    {
+        var id = GetGuidProperty(payload, "id");
+        var displayName = GetStringProperty(payload, "displayName");
+        var role = GetStringProperty(payload, "role");
+        var status = GetStringProperty(payload, "status");
+        return id is null || string.IsNullOrWhiteSpace(displayName) || role is null || status is null
+            ? null
+            : new IdentityUserProfile(id.Value, displayName, GetStringProperty(payload, "avatarUrl"), role, GetGuidProperty(payload, "operatorId"), status);
     }
 
     private static async Task<IdentityOperatorLookupResult> ReadOperatorAsync(

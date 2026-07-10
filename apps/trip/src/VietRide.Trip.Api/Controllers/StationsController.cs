@@ -17,6 +17,13 @@ public sealed class StationsController : ControllerBase
         this.mediator = mediator;
     }
 
+    [HttpGet("{id:guid}")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiResponse<StationDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<StationDto>> GetByIdAsync(Guid id, CancellationToken cancellationToken)
+        => Ok(await mediator.Send(new GetStationQuery(id), cancellationToken));
+
     [HttpGet("search")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<StationSearchResult>>), StatusCodes.Status200OK)]

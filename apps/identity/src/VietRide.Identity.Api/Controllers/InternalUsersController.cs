@@ -19,6 +19,20 @@ public sealed class InternalUsersController : ControllerBase
         _mediator = mediator;
     }
 
+    [HttpGet]
+    [ProducesResponseType(typeof(IReadOnlyList<GetInternalUserResponseDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<IReadOnlyList<GetInternalUserResponseDto>>> GetUsers(
+        [FromQuery] Guid[] ids,
+        CancellationToken cancellationToken)
+    {
+        if (ids.Length is 0 or > 100)
+            return UnprocessableEntity();
+
+        return Ok(await _mediator.Send(new GetInternalUsersQuery(ids.Distinct().ToArray()), cancellationToken));
+    }
+
     [HttpGet("{userId:guid}")]
     [ProducesResponseType(typeof(GetInternalUserResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]

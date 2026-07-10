@@ -16,6 +16,11 @@ public interface IIdentityInternalClient
         Guid userId,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyDictionary<Guid, IdentityUserProfile>> GetUsersAsync(
+        IReadOnlyCollection<Guid> userIds,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyDictionary<Guid, IdentityUserProfile>>(new Dictionary<Guid, IdentityUserProfile>());
+
     Task<IdentityOperatorLookupResult> GetOperatorAsync(
         Guid operatorId,
         CancellationToken cancellationToken = default) =>
@@ -52,20 +57,27 @@ public sealed record IdentityUserLookupResult(
     string? ErrorCode,
     string? Message,
     Guid? Id,
+    string? DisplayName,
+    string? AvatarUrl,
     string? Role,
     Guid? OperatorId,
     string? Status)
 {
-    public static IdentityUserLookupResult Success(Guid id, string role, Guid? operatorId, string status)
+    public static IdentityUserLookupResult Success(Guid id, string? displayName, string? avatarUrl, string role, Guid? operatorId, string status)
     {
-        return new IdentityUserLookupResult(true, null, null, null, id, role, operatorId, status);
+        return new IdentityUserLookupResult(true, null, null, null, id, displayName, avatarUrl, role, operatorId, status);
     }
+
+    public static IdentityUserLookupResult Success(Guid id, string role, Guid? operatorId, string status)
+        => Success(id, null, null, role, operatorId, status);
 
     public static IdentityUserLookupResult ValidationFailure(string message) => new(
         false,
         422,
         "VALIDATION_ERROR",
         message,
+        null,
+        null,
         null,
         null,
         null,
@@ -79,8 +91,12 @@ public sealed record IdentityUserLookupResult(
         null,
         null,
         null,
+        null,
+        null,
         null);
 }
+
+public sealed record IdentityUserProfile(Guid Id, string DisplayName, string? AvatarUrl, string Role, Guid? OperatorId, string Status);
 
 public sealed record IdentityOperatorLookupResult(
     bool Found,

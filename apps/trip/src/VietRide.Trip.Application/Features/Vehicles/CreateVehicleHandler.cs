@@ -52,7 +52,8 @@ public sealed class CreateVehicleHandler : IRequestHandler<CreateVehicleCommand,
             JsonSerializer.SerializeToElement(request.SeatLayoutJson),
             request.TotalSeats,
             request.MaxCargoWeightKg,
-            request.MaxCargoVolumeM3);
+            request.MaxCargoVolumeM3,
+            request.ImageUrls);
 
         if (!await vehicleRepository.TryAddAsync(vehicle, cancellationToken))
             throw DuplicateLicensePlate();

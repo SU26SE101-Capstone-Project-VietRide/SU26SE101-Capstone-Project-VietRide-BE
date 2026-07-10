@@ -7,6 +7,7 @@ public sealed class UpdateVehicleRequest
     private SeatLayoutDto? seatLayoutJson;
     private decimal? maxCargoWeightKg;
     private decimal? maxCargoVolumeM3;
+    private IReadOnlyCollection<string>? imageUrls;
 
     public Guid? VehicleTypeId { get; init; }
 
@@ -49,6 +50,14 @@ public sealed class UpdateVehicleRequest
     }
 
     public bool HasMaxCargoVolumeM3 { get; private init; }
+
+    public IReadOnlyCollection<string>? ImageUrls
+    {
+        get => imageUrls;
+        init { imageUrls = value; HasImageUrls = true; }
+    }
+
+    public bool HasImageUrls { get; private init; }
 
     public VehicleStatusDto? Status { get; init; }
 
