@@ -247,11 +247,47 @@ public sealed class LoginCommandHandlerTests
     }
 
     [Fact]
-    public async Task Handle_UnverifiedEmail_Throws403()
+    public async Task Handle_PendingPassengerEmailWithValidCredentials_ReturnsTokenBundle()
     {
-        var (handler, users, _, _, _, _, _) = CreateHandler();
-        // User in PENDING_EMAIL_VERIFICATION status (not verified yet).
+        var hasher = Substitute.For<IPasswordHasher>();
+        var (handler, users, _, _, _, _, lockoutCounter) = CreateHandler(hasher: hasher);
+        hasher.Verify("correct_password", "hash").Returns(true);
         var user = User.CreatePassenger("user@example.com", TestPhone, "hash", "User");
+
+        users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>()).Returns(user);
+
+        var result = await handler.Handle(new LoginCommand("user@example.com", "correct_password"), CancellationToken.None);
+
+        result.AccessToken.Should().Be("jwt.access.token");
+        result.RefreshToken.Should().Be("rawtoken123");
+        result.User.Status.Should().Be(UserStatus.PENDING_EMAIL_VERIFICATION.ToString());
+        await lockoutCounter.Received(1).ResetAsync(user.Id, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_PendingPassengerEmailWithWrongPassword_Throws401()
+    {
+        var (handler, users, _, _, _, failedLoginPersister, lockoutCounter) = CreateHandler();
+        var user = User.CreatePassenger("user@example.com", TestPhone, "hash", "User");
+        users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>()).Returns(user);
+
+        var act = () => handler.Handle(new LoginCommand("user@example.com", "wrong_password"), CancellationToken.None);
+
+        await act.Should().ThrowAsync<UnauthorizedException>()
+            .Where(e => e.ErrorCode == "AUTH_INVALID_CREDENTIALS");
+
+        await lockoutCounter.Received(1).IncrementAsync(user.Id, Arg.Any<CancellationToken>());
+        await failedLoginPersister.Received(1).PersistAsync(user.Id, 1, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_PendingNonPassengerEmail_Throws403()
+    {
+        var (handler, users, _, _, _, _, lockoutCounter) = CreateHandler();
+        var user = MakeOperatorUser(UserRole.OPERATOR_ADMIN, Guid.NewGuid());
+        typeof(User)
+            .GetProperty(nameof(User.Status))!
+            .SetValue(user, UserStatus.PENDING_EMAIL_VERIFICATION);
 
         users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>()).Returns(user);
 
@@ -259,6 +295,8 @@ public sealed class LoginCommandHandlerTests
 
         await act.Should().ThrowAsync<ForbiddenException>()
             .Where(e => e.ErrorCode == "AUTH_EMAIL_NOT_VERIFIED");
+
+        await lockoutCounter.DidNotReceive().IncrementAsync(user.Id, Arg.Any<CancellationToken>());
     }
 
     [Fact]

@@ -237,6 +237,40 @@ public sealed class AuthEndpointsTests :
     }
 
     [Fact]
+    public async Task PassengerRegisterThenLoginBeforeVerify_UsesRealHandlersDbAndReturnsPendingStatusTokens()
+    {
+        await _dbFactory.ResetAsync();
+        var email = UniqueEmail("passenger-pending-login");
+        const string Password = "Password123!";
+        using var client = _dbFactory.CreateClient();
+
+        var registerResponse = await client.PostAsJsonAsync("/v1/auth/register", new
+        {
+            email,
+            password = Password,
+            displayName = "Pending Passenger",
+            phone = $"09{Random.Shared.Next(10000000, 99999999)}",
+        });
+
+        registerResponse.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var loginResponse = await client.PostAsJsonAsync("/v1/auth/login", new
+        {
+            email,
+            password = Password,
+        });
+
+        loginResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var loginDoc = JsonDocument.Parse(await loginResponse.Content.ReadAsStringAsync());
+        AssertSuccessEnvelope(loginDoc, 200);
+        var data = loginDoc.RootElement.GetProperty("data");
+        data.GetProperty("accessToken").GetString().Should().NotBeNullOrWhiteSpace();
+        data.GetProperty("refreshToken").GetString().Should().NotBeNullOrWhiteSpace();
+        data.GetProperty("user").GetProperty("email").GetString().Should().Be(email);
+        data.GetProperty("user").GetProperty("status").GetString().Should().Be("PENDING_EMAIL_VERIFICATION");
+    }
+
+    [Fact]
     public async Task PostLogin_NonApprovedOperator_Returns403ForbiddenEnvelopeWithoutTokens()
     {
         using var client = CreateClientWithSender(new NonApprovedOperatorLoginAuthSender());

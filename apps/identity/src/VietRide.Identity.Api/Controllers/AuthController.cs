@@ -166,7 +166,7 @@ public sealed class AuthController : ControllerBase
     /// <summary>Authenticate with email and password. Returns access + refresh tokens.</summary>
     /// <remarks>
     /// Bad credentials → 401 AUTH_INVALID_CREDENTIALS.
-    /// Unverified email → 403 AUTH_EMAIL_NOT_VERIFIED.
+    /// Non-passenger unverified email → 403 AUTH_EMAIL_NOT_VERIFIED.
     /// Locked account → 403 AUTH_ACCOUNT_LOCKED.
     /// </remarks>
     [HttpPost("login")]
