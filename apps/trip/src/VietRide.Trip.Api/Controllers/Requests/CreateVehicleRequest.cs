@@ -8,4 +8,5 @@ public sealed record CreateVehicleRequest(
     SeatLayoutDto? SeatLayoutJson,
     int TotalSeats,
     decimal? MaxCargoWeightKg,
-    decimal? MaxCargoVolumeM3);
+    decimal? MaxCargoVolumeM3,
+    IReadOnlyCollection<string>? ImageUrls = null);

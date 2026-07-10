@@ -24,6 +24,7 @@ public sealed class Vehicle : BaseEntity<Guid>, ISoftDeletable, IActivatable
     public int TotalSeats { get; private set; }
     public decimal? MaxCargoWeightKg { get; private set; }
     public decimal? MaxCargoVolumeM3 { get; private set; }
+    public IReadOnlyCollection<string>? ImageUrls { get; private set; }
     public VehicleStatus Status { get; private set; } = VehicleStatus.ACTIVE;
     public bool IsActive { get; private set; } = true;
     public DateTimeOffset? DeletedAt { get; private set; }
@@ -37,7 +38,8 @@ public sealed class Vehicle : BaseEntity<Guid>, ISoftDeletable, IActivatable
         JsonElement seatLayoutJson,
         int totalSeats,
         decimal? maxCargoWeightKg,
-        decimal? maxCargoVolumeM3)
+        decimal? maxCargoVolumeM3,
+        IReadOnlyCollection<string>? imageUrls = null)
     {
         ValidateGuid(operatorId, nameof(operatorId));
         ValidateGuid(vehicleTypeId, nameof(vehicleTypeId));
@@ -57,6 +59,7 @@ public sealed class Vehicle : BaseEntity<Guid>, ISoftDeletable, IActivatable
             TotalSeats = totalSeats,
             MaxCargoWeightKg = maxCargoWeightKg,
             MaxCargoVolumeM3 = maxCargoVolumeM3,
+            ImageUrls = imageUrls?.Select(url => url.Trim()).ToArray(),
             Status = VehicleStatus.ACTIVE,
             IsActive = true,
         };
@@ -91,6 +94,9 @@ public sealed class Vehicle : BaseEntity<Guid>, ISoftDeletable, IActivatable
         MaxCargoWeightKg = maxCargoWeightKg;
         MaxCargoVolumeM3 = maxCargoVolumeM3;
     }
+
+    public void UpdateImageUrls(IReadOnlyCollection<string>? imageUrls)
+        => ImageUrls = imageUrls?.Select(url => url.Trim()).ToArray();
 
     public void ChangeStatus(VehicleStatus status) => Status = status;
 

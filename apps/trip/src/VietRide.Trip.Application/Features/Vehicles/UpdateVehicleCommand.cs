@@ -15,5 +15,7 @@ public sealed record UpdateVehicleCommand(
     decimal? MaxCargoVolumeM3,
     bool HasMaxCargoVolumeM3,
     VehicleStatusDto? Status,
-    bool? IsActive)
+    bool? IsActive,
+    IReadOnlyCollection<string>? ImageUrls = null,
+    bool HasImageUrls = false)
     : IRequest<VehicleDto>;

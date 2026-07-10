@@ -40,7 +40,8 @@ public sealed class OperatorVehiclesController : ControllerBase
                 request.SeatLayoutJson,
                 request.TotalSeats,
                 request.MaxCargoWeightKg,
-                request.MaxCargoVolumeM3),
+                request.MaxCargoVolumeM3,
+                request.ImageUrls),
             cancellationToken);
 
         return StatusCode(StatusCodes.Status201Created, response);
@@ -108,7 +109,9 @@ public sealed class OperatorVehiclesController : ControllerBase
                 request.MaxCargoVolumeM3,
                 request.HasMaxCargoVolumeM3,
                 request.Status,
-                request.IsActive),
+                request.IsActive,
+                request.ImageUrls,
+                request.HasImageUrls),
             cancellationToken));
     }
 

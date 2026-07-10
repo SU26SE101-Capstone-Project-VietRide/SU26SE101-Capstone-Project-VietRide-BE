@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using VietRide.Trip.Domain.Entities;
 
@@ -49,6 +50,17 @@ internal sealed class VehicleConfiguration : IEntityTypeConfiguration<Vehicle>
         builder.Property(vehicle => vehicle.MaxCargoVolumeM3)
             .HasColumnName("max_cargo_volume_m3")
             .HasColumnType("decimal(8,2)");
+
+        builder.Property(vehicle => vehicle.ImageUrls)
+            .HasColumnName("image_urls")
+            .HasColumnType("jsonb")
+            .HasConversion(
+                value => System.Text.Json.JsonSerializer.Serialize(value, (System.Text.Json.JsonSerializerOptions?)null),
+                value => System.Text.Json.JsonSerializer.Deserialize<string[]>(value, (System.Text.Json.JsonSerializerOptions?)null))
+            .Metadata.SetValueComparer(new ValueComparer<IReadOnlyCollection<string>?>(
+                (left, right) => left == null ? right == null : right != null && left.SequenceEqual(right),
+                value => value == null ? 0 : value.Aggregate(0, (hash, item) => HashCode.Combine(hash, item.GetHashCode(StringComparison.Ordinal))),
+                value => value == null ? null : value.ToArray()));
 
         builder.Property(vehicle => vehicle.Status)
             .HasColumnName("status")

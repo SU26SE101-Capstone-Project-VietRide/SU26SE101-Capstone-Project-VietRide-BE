@@ -13,5 +13,10 @@ public sealed class UpdateVehicleValidator : AbstractValidator<UpdateVehicleComm
         RuleFor(command => command.TotalSeats).GreaterThan(0).When(command => command.TotalSeats.HasValue);
         RuleFor(command => command.MaxCargoWeightKg).GreaterThanOrEqualTo(0).When(command => command.MaxCargoWeightKg.HasValue);
         RuleFor(command => command.MaxCargoVolumeM3).GreaterThanOrEqualTo(0).When(command => command.MaxCargoVolumeM3.HasValue);
+        RuleFor(command => command.ImageUrls).Must(BeValidImageUrls).When(command => command.HasImageUrls && command.ImageUrls is not null);
     }
+
+    private static bool BeValidImageUrls(IReadOnlyCollection<string>? urls) => urls is null || urls.Count <= 5
+        && urls.All(url => Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps)
+        && urls.Distinct(StringComparer.OrdinalIgnoreCase).Count() == urls.Count;
 }

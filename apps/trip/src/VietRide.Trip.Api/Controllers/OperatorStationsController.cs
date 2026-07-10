@@ -22,6 +22,16 @@ public sealed class OperatorStationsController : ControllerBase
         this.mediator = mediator;
     }
 
+    [HttpGet]
+    [Authorize(Roles = OperatorRoles)]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<OperatorStationDto>>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<PagedResult<OperatorStationDto>>> GetAsync([FromQuery] int? page, [FromQuery] int? pageSize, [FromQuery] string? search, CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required to manage operator stations.");
+        return Ok(await mediator.Send(new ListOperatorStationsQuery(operatorId, page, pageSize, search), cancellationToken));
+    }
+
     [HttpPost]
     [Authorize(Roles = OperatorRoles)]
     [ProducesResponseType(typeof(ApiResponse<CreateOrLinkOperatorStationResponse>), StatusCodes.Status200OK)]

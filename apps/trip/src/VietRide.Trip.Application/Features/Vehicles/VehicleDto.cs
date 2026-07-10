@@ -9,6 +9,7 @@ public sealed record VehicleDto(
     int TotalSeats,
     decimal? MaxCargoWeightKg,
     decimal? MaxCargoVolumeM3,
+    IReadOnlyCollection<string>? ImageUrls,
     VehicleStatusDto Status,
     bool IsActive,
     DateTimeOffset CreatedAt,

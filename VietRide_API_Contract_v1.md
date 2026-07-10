@@ -3994,6 +3994,18 @@ Response `200`: `DriverScheduleDto` in the ADR 0004 success envelope.
 
 On success, activation may only transition `isActive=false` to `isActive=true`; Trip generation is enqueued only after the activation commit succeeds.
 
+### GET `/v1/operator/driver-schedules`
+
+Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `routeId?`, `driverUserId?`, `isActive?`. Response is a paged schedule list. Each item retains the existing schedule IDs and fields, and adds `route` (including `originStation`/`destinationStation`), nullable `vehicle` (including `imageUrls`), and nullable `driver`/`assistant` summaries `{ id, displayName, avatarUrl, role, operatorId, status }`.
+
+### Read-model additions
+
+- `GET /v1/stations/{id}` is public and returns the full active `StationDto`; missing/inactive returns `404 STATION_NOT_FOUND`.
+- `GET /v1/operator/stations` is paged/searchable for operator staff/admin and returns mapping fields plus the full canonical `station` object.
+- Route list/detail responses include full `originStation` and `destinationStation` while preserving the original station ID fields.
+- `VehicleDto` has nullable `imageUrls`. Create/PATCH accept at most five unique absolute HTTPS URLs; PATCH `[]` clears the list.
+- Internal `GET /internal/v1/users?ids=<guid>&ids=<guid>` accepts 1–100 IDs and returns user summaries with `displayName` and `avatarUrl` for service-to-service schedule enrichment.
+
 ### Day-9/Day-11 error examples
 
 Seat-layout count failure:

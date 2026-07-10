@@ -325,6 +325,7 @@ CREATE TABLE vehicles (
     total_seats INT NOT NULL,
     max_cargo_weight_kg DECIMAL(8,2) NULL,
     max_cargo_volume_m3 DECIMAL(10,4) NULL,
+    image_urls JSONB NULL,
     status vehicle_status NOT NULL DEFAULT 'ACTIVE',
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     deleted_at TIMESTAMPTZ NULL,

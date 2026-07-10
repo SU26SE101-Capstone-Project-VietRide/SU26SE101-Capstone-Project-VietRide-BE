@@ -20,6 +20,8 @@ public sealed class GetInternalUserQueryHandler : IRequestHandler<GetInternalUse
 
         return new GetInternalUserResponseDto(
             user.Id,
+            user.DisplayName,
+            user.AvatarUrl,
             user.Role.ToString(),
             user.OperatorId,
             user.Status.ToString());

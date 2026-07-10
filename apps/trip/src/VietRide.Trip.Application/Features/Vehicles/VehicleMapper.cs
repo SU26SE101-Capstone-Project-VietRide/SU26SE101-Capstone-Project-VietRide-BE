@@ -16,6 +16,7 @@ public static class VehicleMapper
             vehicle.TotalSeats,
             vehicle.MaxCargoWeightKg,
             vehicle.MaxCargoVolumeM3,
+            vehicle.ImageUrls,
             (VehicleStatusDto)vehicle.Status,
             vehicle.IsActive,
             vehicle.CreatedAt,
