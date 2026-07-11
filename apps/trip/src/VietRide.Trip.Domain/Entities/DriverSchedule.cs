@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.Primitives;
 
@@ -62,6 +62,14 @@ public sealed class DriverSchedule : BaseEntity<Guid>, IActivatable
     {
         ValidateOptionalGuid(vehicleId, nameof(vehicleId));
         VehicleId = vehicleId;
+    }
+
+    public void ChangeCrew(Guid driverUserId, Guid? assistantUserId)
+    {
+        ValidateGuid(driverUserId, nameof(driverUserId));
+        ValidateOptionalGuid(assistantUserId, nameof(assistantUserId));
+        DriverUserId = driverUserId;
+        AssistantUserId = assistantUserId;
     }
 
     public void Activate() => IsActive = true;

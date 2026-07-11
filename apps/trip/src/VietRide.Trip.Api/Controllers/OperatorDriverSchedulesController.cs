@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Trip.Api.Controllers.Requests;
+using VietRide.Trip.Api.Filters;
 using VietRide.Trip.Application.Features.DriverSchedules;
 
 namespace VietRide.Trip.Api.Controllers;
@@ -81,5 +82,25 @@ public sealed class OperatorDriverSchedulesController : ControllerBase
             cancellationToken);
 
         return Ok(result);
+    }
+
+    [HttpPatch("{id:guid}/crew")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<DriverScheduleDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<DriverScheduleDto>> UpdateCrew(
+        Guid id,
+        [FromBody] UpdateDriverScheduleCrewRequest request,
+        CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required to manage driver schedules.");
+
+        return Ok(await sender.Send(
+            new UpdateDriverScheduleCrewCommand(operatorId, id, request.DriverUserId, request.AssistantUserId),
+            cancellationToken));
     }
 }

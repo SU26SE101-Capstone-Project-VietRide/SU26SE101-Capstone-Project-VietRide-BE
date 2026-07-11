@@ -1,4 +1,4 @@
-using VietRide.Shared.Kernel.Primitives;
+﻿using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Trip.Domain.Entities;
@@ -178,6 +178,14 @@ public sealed class Trip : BaseEntity<Guid>
     public void MarkSubstitution(bool hasSubstitution)
     {
         HasSubstitution = hasSubstitution;
+    }
+
+    public void ChangeCrew(Guid driverUserId, Guid? assistantUserId)
+    {
+        ValidateGuid(driverUserId, nameof(driverUserId));
+        ValidateOptionalGuid(assistantUserId, nameof(assistantUserId));
+        DriverUserId = driverUserId;
+        AssistantUserId = assistantUserId;
     }
 
     public void UpdateCargoCounters(
