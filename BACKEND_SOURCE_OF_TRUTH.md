@@ -1,6 +1,6 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.24.0
+> **Phiên bản:** 1.24.1
 > **Trạng thái:** ACTIVE — sealed for capstone v1
 > **Cập nhật lần cuối:** 2026-07-11
 > **Capstone:** SU26SE101 — SU26
@@ -1226,7 +1226,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
   "error": {
     "code": "AUTH_OTP_INVALID",               // §5.9 registry code (UPPER_SNAKE_CASE)
     "message": "Mã xác thực không đúng.",     // FE có thể dùng hoặc map từ code
-    "fields": [                               // chỉ với validation errors (422 + 400 model-binding)
+    "fields": [                               // chỉ với validation errors (422)
       { "field": "code", "message": "..." }
     ]
   },
@@ -1235,7 +1235,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 ```
 
 - `error.code` là **canonical UPPER_SNAKE_CASE** từ §5.9 registry — FE map UI message từ key này (thay thế `errorCode` của RFC 7807 cũ).
-- `error.fields[]` thay thế RFC 7807 `errors[]` — chỉ xuất hiện với validation errors (422) và model-binding failures (400).
+- `error.fields[]` thay thế RFC 7807 `errors[]` — chỉ xuất hiện với validation errors (422), bao gồm FluentValidation và model-binding failures (malformed JSON, missing non-nullable body field, type mismatch).
 - `error.message` có thể là tiếng Việt user-facing; FE thường thay bằng UI string từ `error.code`.
 - **KHÔNG dùng** `application/problem+json`, `type` URL, `title`, `instance`, `detail` (RFC 7807 fields) — đã loại bỏ.
 - **KHÔNG return** `200 OK` với `success: false` — HTTP status line luôn phản ánh lỗi thật (ADR 0004 Rule 2).
@@ -2741,6 +2741,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.24.1** | 2026-07-11 | BE lead (Vu) | **PATCH** - Day-19 shared validation-policy correction: model-binding failures (malformed JSON, missing non-nullable body field, type mismatch) now return the ADR 0004 `ApiResponse` error envelope with `422 VALIDATION_ERROR`, matching FluentValidation failures; they are no longer documented as HTTP 400. |
 | **1.24.0** | 2026-07-11 | BE lead (Vu) | **MINOR** - Freeze the Day-19 tenant-scoped operator booking-monitor contract. Register the exact Identity raw phone-to-user lookup and exhaustive Booking error/retry boundary; broaden existing `UPSTREAM_UNAVAILABLE` to generic downstream/inter-service unavailability without adding an error code; replace the proposed Outbox-audit timeline with authoritative append-only `booking_status_history`, including schema, six current source constants, actor/reason rules, atomic writer/no-op semantics, no backfill/event, and deterministic ordering. |
 | **1.23.0** | 2026-07-09 | BE lead (Vu) | **MINOR** - Add public Identity password reset for all `ACTIVE` user roles. `POST /v1/auth/forgot-password` issues a generic response and sends a `PASSWORD_RESET` OTP only for eligible accounts; `POST /v1/auth/reset-password` consumes the OTP, hashes the new password, and revokes active refresh tokens with `PASSWORD_RESET`. No DDL, dependency, or event-key change; reuses `email_verification_tokens`, `identity.otp.requested`, and Redis `identity:pwd_reset_rate:{email}`. |
 | **1.22.0** | 2026-07-09 | BE lead (Vu) | **MINOR** - Add operator-managed Google precision-5 path geometry for Route and AlternativeRoute. Register two `PUT .../geometry` endpoints, nullable `path_polyline` storage, validation/error codes, safe invalidation after route-shape edits, and Trip internal route-geometry preference with TripStop fallback. No new event, dependency, Gateway prefix, or Idempotency-Key requirement. |

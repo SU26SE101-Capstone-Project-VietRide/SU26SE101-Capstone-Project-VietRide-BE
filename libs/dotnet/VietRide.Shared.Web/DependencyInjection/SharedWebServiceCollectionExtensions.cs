@@ -64,8 +64,8 @@ public static class SharedWebServiceCollectionExtensions
                     Fields = fields.Count > 0 ? fields : null,
                 };
 
-                var envelope = ApiResponse.Failure(400, error, ApiMeta.Create(traceId));
-                return new ObjectResult(envelope) { StatusCode = 400 };
+                var envelope = ApiResponse.Failure(422, error, ApiMeta.Create(traceId));
+                return new ObjectResult(envelope) { StatusCode = 422 };
             };
         });
 
