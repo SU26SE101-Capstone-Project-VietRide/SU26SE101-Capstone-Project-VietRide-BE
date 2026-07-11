@@ -4,6 +4,12 @@ namespace VietRide.Parcel.Application.Abstractions.ServiceClients;
 
 public interface ITripServiceClient
 {
+    Task<TripCrewAuthorizationOutcome> AuthorizeAssistantForTripAsync(
+        Guid tripId,
+        Guid userId,
+        Guid operatorId,
+        CancellationToken cancellationToken = default);
+
     Task<TripSnapshotOutcome> GetTripParcelSnapshotAsync(
         Guid tripId,
         CancellationToken cancellationToken = default);

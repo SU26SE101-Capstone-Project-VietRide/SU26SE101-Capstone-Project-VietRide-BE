@@ -1955,6 +1955,49 @@ Decision note: invalid, expired, and revoked delivery tokens return 400 with
 `PARCEL_DELIVERY_TOKEN_REVOKED`. BSOT `401` and timeline `410` are known drift
 items to reconcile.
 
+### GET `/v1/assistant/trips/{tripId}/parcels`
+
+Auth: `ASSISTANT`. Read-only; Idempotency-Key is not required.
+
+The caller must be the Assistant currently assigned to `tripId`. Results include all
+non-deleted parcels whose current `tripId` and `operatorId` match the authorized trip
+crew context. Query: `page` (default `1`) and `pageSize` (default `20`, maximum `100`).
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [
+      {
+        "parcelId": "uuid",
+        "parcelCode": "VR-PCL-20260518-P7K3D9Q2",
+        "status": "LOADED",
+        "recipientName": "Nguyen Van A",
+        "recipientPhone": "0900000000",
+        "dropoffStopId": "uuid",
+        "sizeCategory": "MEDIUM",
+        "estimatedWeightKg": 12.5,
+        "description": "Gói hàng nhỏ"
+      }
+    ],
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 1,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Errors: `401 UNAUTHORIZED` without a valid access token; `403 FORBIDDEN` when the
+caller is not the assigned Assistant, has no operator scope, or the trip is unavailable;
+`422 VALIDATION_FAILED` for invalid pagination; `503 TRIP_SERVICE_UNAVAILABLE` when
+assignment verification cannot reach Trip service.
+
 ### POST `/v1/assistant/parcels/{parcelId}/reweigh`
 
 Auth: `ASSISTANT`. Idempotency: required.

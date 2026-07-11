@@ -112,6 +112,10 @@ public sealed class ParcelEndpointTests : IClassFixture<VietRideWebApplicationFa
             new { });
         assistantUnload.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
 
+        var assistantTripParcels = await anonymous.GetAsync(
+            "/v1/assistant/trips/11111111-1111-1111-1111-111111111111/parcels");
+        assistantTripParcels.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
         var internalMarkLoaded = await anonymous.PostAsJsonAsync(
             "/internal/v1/parcels/11111111-1111-1111-1111-111111111111/mark-loaded",
             new { tripId = NewId, parcelCode = "VRP-001" });
@@ -170,6 +174,28 @@ public sealed class ParcelEndpointTests : IClassFixture<VietRideWebApplicationFa
         var response = await passenger.PostAsJsonAsync(
             "/v1/assistant/parcels/11111111-1111-1111-1111-111111111111/unload",
             new { });
+
+        await AssertForbiddenEnvelope(response);
+    }
+
+    [Fact]
+    public async Task AssistantTripParcels_RejectsPassengerRole()
+    {
+        using var passenger = CreateAuthenticatedClient("PASSENGER");
+
+        var response = await passenger.GetAsync(
+            "/v1/assistant/trips/11111111-1111-1111-1111-111111111111/parcels");
+
+        await AssertForbiddenEnvelope(response);
+    }
+
+    [Fact]
+    public async Task AssistantTripParcels_RejectsAssistantWithoutOperatorScope()
+    {
+        using var assistant = CreateAuthenticatedClient("ASSISTANT");
+
+        var response = await assistant.GetAsync(
+            "/v1/assistant/trips/11111111-1111-1111-1111-111111111111/parcels?page=1&pageSize=20");
 
         await AssertForbiddenEnvelope(response);
     }

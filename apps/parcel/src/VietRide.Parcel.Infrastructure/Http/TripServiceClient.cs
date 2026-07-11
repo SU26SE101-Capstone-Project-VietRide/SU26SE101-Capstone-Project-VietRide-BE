@@ -22,6 +22,55 @@ public sealed class TripServiceClient : ITripServiceClient
         _logger = logger;
     }
 
+    public async Task<TripCrewAuthorizationOutcome> AuthorizeAssistantForTripAsync(
+        Guid tripId,
+        Guid userId,
+        Guid operatorId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var path = $"/internal/v1/trips/{tripId:D}/tracking-authorization?userId={userId:D}&role=ASSISTANT&operatorId={operatorId:D}";
+            using var response = await _httpClient.GetAsync(path, cancellationToken).ConfigureAwait(false);
+
+            if (response.StatusCode == HttpStatusCode.NotFound)
+                return new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.TripNotFound);
+
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                return new TripCrewAuthorizationOutcome(
+                    TripCrewAuthorizationOutcomeKind.TransportError,
+                    $"Trip service returned status {(int)response.StatusCode}.");
+            }
+
+            var envelope = await response.Content
+                .ReadFromJsonAsync<ApiResponse<TripTrackingAuthorizationResponse>>(JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (envelope?.Data is null)
+            {
+                return new TripCrewAuthorizationOutcome(
+                    TripCrewAuthorizationOutcomeKind.TransportError,
+                    "Trip service returned an invalid authorization response.");
+            }
+
+            return envelope.Data.Allowed && envelope.Data.Scope == "ASSISTANT"
+                ? new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Authorized)
+                : new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Denied);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "TripServiceClient.AuthorizeAssistantForTripAsync({TripId}) failed.", tripId);
+            return new TripCrewAuthorizationOutcome(
+                TripCrewAuthorizationOutcomeKind.TransportError,
+                $"Trip service transport failure: {ex.Message}");
+        }
+    }
+
     public async Task<TripSnapshotOutcome> GetTripParcelSnapshotAsync(
         Guid tripId,
         CancellationToken cancellationToken = default)
