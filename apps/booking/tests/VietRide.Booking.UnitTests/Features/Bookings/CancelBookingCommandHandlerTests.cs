@@ -5,6 +5,7 @@ using NSubstitute;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Features.Bookings.CancelBooking;
+using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Booking.Domain.ValueObjects;
 using VietRide.Shared.Application.Exceptions;
@@ -26,6 +27,7 @@ public sealed class CancelBookingCommandHandlerTests
     private static readonly DateTimeOffset Now = new(2026, 6, 17, 8, 0, 0, TimeSpan.Zero);
 
     private readonly IBookingRepository _bookings = Substitute.For<IBookingRepository>();
+    private readonly IBookingStatusHistoryRepository _statusHistory = Substitute.For<IBookingStatusHistoryRepository>();
     private readonly ITripServiceClient _tripClient = Substitute.For<ITripServiceClient>();
     private readonly IOperatorServiceClient _operatorClient = Substitute.For<IOperatorServiceClient>();
     private readonly IIntegrationEventOutbox _outbox = Substitute.For<IIntegrationEventOutbox>();
@@ -37,7 +39,8 @@ public sealed class CancelBookingCommandHandlerTests
         _operatorClient,
         _outbox,
         _clock,
-        NullLogger<CancelBookingCommandHandler>.Instance);
+        NullLogger<CancelBookingCommandHandler>.Instance,
+        _statusHistory);
 
     [Fact]
     public void Validator_OperatorCancelledReason_ReturnsValidationError()
@@ -80,6 +83,15 @@ public sealed class CancelBookingCommandHandlerTests
             "booking.booking.cancelled",
             Arg.Any<string>(),
             Arg.Any<CancellationToken>());
+        await _statusHistory.Received(1).AddAsync(
+            Arg.Is<BookingStatusHistory>(history => history.BookingId == booking.Id
+                && history.Status == BookingStatus.CANCELLED
+                && history.OccurredAt == Now
+                && history.Source == "CANCEL_BOOKING"
+                && history.ActorUserId == PassengerUserId
+                && history.ReasonCode == "USER_INITIATED"),
+            Arg.Any<CancellationToken>());
+        _ = _clock.Received(1).UtcNow;
 
         capturedPayloads.Should().ContainSingle();
         using var doc = JsonDocument.Parse(capturedPayloads[0]);
@@ -222,6 +234,14 @@ public sealed class CancelBookingCommandHandlerTests
             TripId,
             SeatLockToken,
             Arg.Any<IReadOnlyList<string>>(),
+            Arg.Any<CancellationToken>());
+        await _statusHistory.Received(1).AddAsync(
+            Arg.Is<BookingStatusHistory>(history => history.BookingId == booking.Id
+                && history.Status == BookingStatus.CANCELLED
+                && history.OccurredAt == Now
+                && history.Source == "CANCEL_BOOKING"
+                && history.ActorUserId == PassengerUserId
+                && history.ReasonCode == "USER_INITIATED"),
             Arg.Any<CancellationToken>());
     }
 

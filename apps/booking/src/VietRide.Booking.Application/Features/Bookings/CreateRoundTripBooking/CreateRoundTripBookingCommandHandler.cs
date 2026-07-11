@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
+using VietRide.Booking.Domain.Constants;
 using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Booking.Domain.ValueObjects;
@@ -39,6 +40,7 @@ public sealed class CreateRoundTripBookingCommandHandler
     private const int SeatLockTtlSeconds = 10 * 60;
 
     private readonly IBookingRepository _bookings;
+    private readonly IBookingStatusHistoryRepository _statusHistory;
     private readonly ITripServiceClient _tripClient;
     private readonly IPaymentServiceClient _paymentClient;
     private readonly IBookingService _bookingService;
@@ -57,9 +59,11 @@ public sealed class CreateRoundTripBookingCommandHandler
         IVoucherRepository voucherRepository,
         IIntegrationEventOutbox outbox,
         IClock clock,
-        ILogger<CreateRoundTripBookingCommandHandler> logger)
+        ILogger<CreateRoundTripBookingCommandHandler> logger,
+        IBookingStatusHistoryRepository statusHistory)
     {
         _bookings = bookings;
+        _statusHistory = statusHistory;
         _tripClient = tripClient;
         _paymentClient = paymentClient;
         _bookingService = bookingService;
@@ -267,7 +271,8 @@ public sealed class CreateRoundTripBookingCommandHandler
                 outboundPerSeatFare,
                 bookingGroupId,
                 TripDirection.OUTBOUND,
-                outboundLockToken);
+                outboundLockToken,
+                now);
 
             returnBooking = CreatePendingBooking(
                 request.PassengerUserId,
@@ -279,10 +284,27 @@ public sealed class CreateRoundTripBookingCommandHandler
                 returnPerSeatFare,
                 bookingGroupId,
                 TripDirection.RETURN,
-                returnLockToken);
+                returnLockToken,
+                now);
 
             await _bookings.AddAsync(outboundBooking, cancellationToken);
             await _bookings.AddAsync(returnBooking, cancellationToken);
+            await _statusHistory.AddAsync(
+                BookingStatusHistory.Create(
+                    outboundBooking.Id,
+                    BookingStatus.PENDING_PAYMENT,
+                    now,
+                    BookingStatusHistorySource.CreateRoundTripBooking,
+                    request.PassengerUserId),
+                cancellationToken);
+            await _statusHistory.AddAsync(
+                BookingStatusHistory.Create(
+                    returnBooking.Id,
+                    BookingStatus.PENDING_PAYMENT,
+                    now,
+                    BookingStatusHistorySource.CreateRoundTripBooking,
+                    request.PassengerUserId),
+                cancellationToken);
 
             // Record VoucherUsage rows (same DbContext UoW) now that booking IDs are known.
             // Each row carries its own booking_id + the shared booking_group_id.
@@ -346,6 +368,7 @@ public sealed class CreateRoundTripBookingCommandHandler
             outboundLockToken,
             outboundSeatNumbers,
             outboundVoucherUsageId,
+            now,
             cancellationToken);
 
         await BookConfirmAndPublishAsync(
@@ -354,6 +377,7 @@ public sealed class CreateRoundTripBookingCommandHandler
             returnLockToken,
             returnSeatNumbers,
             returnVoucherUsageId,
+            now,
             cancellationToken);
 
         _logger.LogInformation(
@@ -450,10 +474,11 @@ public sealed class CreateRoundTripBookingCommandHandler
         Money perSeatFare,
         Guid bookingGroupId,
         TripDirection tripDirection,
-        Guid seatLockToken)
+        Guid seatLockToken,
+        DateTimeOffset now)
     {
         var booking = BookingEntity.CreatePendingPayment(
-            bookingCode: BookingCode.Generate(_clock.UtcNow),
+            bookingCode: BookingCode.Generate(now),
             passengerUserId: passengerUserId,
             tripId: leg.TripId,
             operatorId: trip.OperatorId,
@@ -472,7 +497,7 @@ public sealed class CreateRoundTripBookingCommandHandler
             tripDirection: tripDirection,
             seatLockToken: seatLockToken);
 
-        var ticketAllocations = BuildTicketAllocations(leg.Seats, perSeatFare, discountAmount, _clock.UtcNow);
+        var ticketAllocations = BuildTicketAllocations(leg.Seats, perSeatFare, discountAmount, now);
         foreach (var allocation in ticketAllocations)
         {
             booking.AddTicketedPassenger(
@@ -606,6 +631,7 @@ public sealed class CreateRoundTripBookingCommandHandler
         Guid seatLockToken,
         IReadOnlyList<string> seatNumbers,
         Guid? voucherUsageId,
+        DateTimeOffset now,
         CancellationToken cancellationToken)
     {
         var passengerAssignments = booking.Passengers
@@ -627,7 +653,15 @@ public sealed class CreateRoundTripBookingCommandHandler
                 "Seat lock expired before booking could be confirmed.");
         }
 
-        booking.Confirm(_clock.UtcNow);
+        booking.Confirm(now);
+        await _statusHistory.AddAsync(
+            BookingStatusHistory.Create(
+                booking.Id,
+                BookingStatus.CONFIRMED,
+                now,
+                BookingStatusHistorySource.CreateRoundTripBooking,
+                booking.PassengerUserId),
+            cancellationToken);
 
         // voucherUsageId propagated in event payload (BSOT:1741 optional field).
         var confirmedEvent = new
