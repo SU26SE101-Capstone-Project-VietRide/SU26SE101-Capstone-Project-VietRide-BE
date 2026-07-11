@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
+using VietRide.Booking.Application.Features.OperatorBookings.GetOperatorBookingDetail;
 using VietRide.Booking.Application.Features.OperatorBookings.ListOperatorBookings;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Booking.Domain.ValueObjects;
@@ -53,6 +54,62 @@ internal sealed class BookingRepository : IBookingRepository
     // -----------------------------------------------------------------------
 
     /// <inheritdoc/>
+    public async Task<OperatorBookingDetailDto?> GetOperatorBookingDetailAsync(
+        Guid bookingId, Guid operatorId, CancellationToken ct = default)
+    {
+        var booking = await _db.Bookings.AsNoTracking()
+            .Where(row => row.Id == bookingId && row.OperatorId == operatorId)
+            .Select(row => new
+            {
+                row.Id,
+                BookingCode = row.BookingCode.Value,
+                BuyerUserId = row.PassengerUserId,
+                row.TripId,
+                Status = row.Status.ToString(),
+                row.TripSnapshotRouteName,
+                row.TripSnapshotOriginName,
+                row.TripSnapshotDestName,
+                row.TripSnapshotDeparture,
+                SeatCount = row.Passengers.Count,
+                BaseFare = row.BaseFare.Amount,
+                DiscountAmount = row.DiscountAmount.Amount,
+                TotalAmount = row.TotalAmount.Amount,
+                row.PickupStationId,
+                row.PickupStopId,
+                row.DropoffStationId,
+                row.DropoffStopId,
+                row.BookingGroupId,
+                TripDirection = row.TripDirection == null ? null : row.TripDirection.ToString(),
+                CancellationReason = row.CancellationReason == null ? null : row.CancellationReason.ToString(),
+                row.CreatedAt,
+            }).SingleOrDefaultAsync(ct);
+        if (booking is null)
+            return null;
+
+        var seats = await (from passenger in _db.Passengers.AsNoTracking()
+                           join ticket in _db.Tickets.AsNoTracking() on passenger.Id equals ticket.PassengerId
+                           where passenger.BookingId == bookingId
+                           orderby passenger.SeatNumber, passenger.Id
+                           select new OperatorBookingSeatDto(passenger.Id, ticket.Id, ticket.TicketCode.Value,
+                               passenger.SeatNumber, ticket.Status.ToString(), passenger.BoardingStatus.ToString()))
+            .ToListAsync(ct);
+        var timeline = await _db.BookingStatusHistories.AsNoTracking()
+            .Where(history => history.BookingId == bookingId)
+            .OrderBy(history => history.OccurredAt).ThenBy(history => history.Id)
+            .Select(history => new OperatorBookingStatusTimelineDto(history.Status.ToString(), history.OccurredAt, history.ReasonCode))
+            .ToListAsync(ct);
+
+        return new OperatorBookingDetailDto(booking.Id, booking.BookingCode, booking.BuyerUserId, booking.TripId,
+            booking.Status, new OperatorBookingTripDto(booking.TripSnapshotRouteName, booking.TripSnapshotOriginName,
+                booking.TripSnapshotDestName, booking.TripSnapshotDeparture), booking.SeatCount, booking.BaseFare,
+            booking.DiscountAmount, booking.TotalAmount, booking.PickupStationId, booking.PickupStopId,
+            booking.DropoffStationId, booking.DropoffStopId, booking.BookingGroupId, booking.TripDirection,
+            booking.CancellationReason, booking.CreatedAt, seats, timeline);
+    }
+
+    public Task<bool> BookingExistsAsync(Guid bookingId, CancellationToken ct = default)
+        => _db.Bookings.AsNoTracking().AnyAsync(row => row.Id == bookingId, ct);
+
     public async Task<OperatorBookingListPage> ListOperatorBookingsAsync(
         OperatorBookingListCriteria criteria,
         CancellationToken ct = default)
