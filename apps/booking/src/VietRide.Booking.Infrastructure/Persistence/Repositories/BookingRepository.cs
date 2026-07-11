@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
+using VietRide.Booking.Application.Features.OperatorBookings.ListOperatorBookings;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Booking.Domain.ValueObjects;
 using VietRide.Shared.Application.Repositories;
@@ -52,6 +53,80 @@ internal sealed class BookingRepository : IBookingRepository
     // -----------------------------------------------------------------------
 
     /// <inheritdoc/>
+    public async Task<OperatorBookingListPage> ListOperatorBookingsAsync(
+        OperatorBookingListCriteria criteria,
+        CancellationToken ct = default)
+    {
+        IQueryable<BookingEntity> query = string.IsNullOrEmpty(criteria.BookingCode)
+            ? _db.Bookings.Where(booking => booking.OperatorId == criteria.OperatorId)
+            : _db.Bookings.FromSqlInterpolated($@"
+                SELECT *
+                FROM vietride_booking.bookings
+                WHERE operator_id = {criteria.OperatorId}
+                  AND UPPER(booking_code) = UPPER({criteria.BookingCode})");
+        query = query.AsNoTracking();
+
+        if (criteria.Statuses is { Count: > 0 })
+            query = query.Where(booking => criteria.Statuses.Contains(booking.Status));
+        if (criteria.TripId.HasValue)
+            query = query.Where(booking => booking.TripId == criteria.TripId.Value);
+        if (criteria.DepartureFrom.HasValue)
+            query = query.Where(booking => booking.TripSnapshotDeparture >= criteria.DepartureFrom.Value);
+        if (criteria.DepartureTo.HasValue)
+            query = query.Where(booking => booking.TripSnapshotDeparture < criteria.DepartureTo.Value);
+        if (criteria.PassengerUserId.HasValue)
+            query = query.Where(booking => booking.PassengerUserId == criteria.PassengerUserId.Value);
+        var totalItems = await query.LongCountAsync(ct);
+
+        var offset = ((long)criteria.Page - 1) * criteria.PageSize;
+        if (offset >= totalItems)
+            return new OperatorBookingListPage([], totalItems);
+
+        // IQueryable.Skip accepts only an int. Do the paging arithmetic in long first and
+        // narrow only after the count proves this is a real, representable page offset.
+        if (offset > int.MaxValue)
+            throw new InvalidOperationException("The requested page offset exceeds the EF paging limit.");
+        var safeOffset = (int)offset;
+        query = ApplyOrdering(query, criteria.SortBy, criteria.SortDescending);
+        var items = await query
+            .Skip(safeOffset)
+            .Take(criteria.PageSize)
+            .Select(booking => new OperatorBookingListItem(
+                booking.Id,
+                booking.BookingCode.Value,
+                booking.TripId,
+                booking.Status.ToString(),
+                new OperatorBookingTripDto(
+                    booking.TripSnapshotRouteName,
+                    booking.TripSnapshotOriginName,
+                    booking.TripSnapshotDestName,
+                    booking.TripSnapshotDeparture),
+                booking.Passengers.Count,
+                booking.TotalAmount.Amount,
+                booking.CreatedAt))
+            .ToListAsync(ct);
+
+        return new OperatorBookingListPage(items, totalItems);
+    }
+
+    private static IQueryable<BookingEntity> ApplyOrdering(
+        IQueryable<BookingEntity> query,
+        string sortBy,
+        bool descending)
+        => (sortBy, descending) switch
+        {
+            ("departureAt", false) => query.OrderBy(x => x.TripSnapshotDeparture).ThenBy(x => x.Id),
+            ("departureAt", true) => query.OrderByDescending(x => x.TripSnapshotDeparture).ThenByDescending(x => x.Id),
+            ("bookingCode", false) => query.OrderBy(x => x.BookingCode).ThenBy(x => x.Id),
+            ("bookingCode", true) => query.OrderByDescending(x => x.BookingCode).ThenByDescending(x => x.Id),
+            ("status", false) => query.OrderBy(x => x.Status).ThenBy(x => x.Id),
+            ("status", true) => query.OrderByDescending(x => x.Status).ThenByDescending(x => x.Id),
+            ("totalAmount", false) => query.OrderBy(x => x.TotalAmount).ThenBy(x => x.Id),
+            ("totalAmount", true) => query.OrderByDescending(x => x.TotalAmount).ThenByDescending(x => x.Id),
+            ("createdAt", false) => query.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id),
+            _ => query.OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id),
+        };
+
     public async Task<BookingEntity?> FindByBookingCodeAsync(
         string bookingCode,
         CancellationToken ct = default)

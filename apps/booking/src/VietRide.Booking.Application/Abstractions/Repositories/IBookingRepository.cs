@@ -1,3 +1,4 @@
+using VietRide.Booking.Application.Features.OperatorBookings.ListOperatorBookings;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Repositories;
 using BookingEntity = VietRide.Booking.Domain.Entities.Booking;
@@ -10,6 +11,11 @@ namespace VietRide.Booking.Application.Abstractions.Repositories;
 /// </summary>
 public interface IBookingRepository : IRepository<BookingEntity, Guid>
 {
+    Task<OperatorBookingListPage> ListOperatorBookingsAsync(
+        OperatorBookingListCriteria criteria,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Operator booking listing is not implemented by this repository.");
+
     /// <summary>
     /// Finds a booking by its booking code string (unique index).
     /// </summary>
