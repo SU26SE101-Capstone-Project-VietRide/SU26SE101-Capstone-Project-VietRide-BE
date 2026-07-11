@@ -4,6 +4,6 @@ import type { FcmPushPayload, FcmPushProvider, FcmPushResult } from './fcm-push.
 @Injectable()
 export class FakeFcmPushProvider implements FcmPushProvider {
   async send(payload: FcmPushPayload): Promise<FcmPushResult> {
-    return { messageId: `fake-fcm:${payload.token}` };
+    return { messageId: `fake-fcm:${payload.token}`, dryRun: false };
   }
 }

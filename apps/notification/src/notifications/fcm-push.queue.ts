@@ -24,6 +24,10 @@ export class FcmPushQueue implements OnModuleDestroy {
       defaultJobOptions: {
         attempts: FCM_PUSH_ATTEMPTS,
         removeOnComplete: true,
+        backoff: {
+          type: 'custom',
+          delay: 0,
+        },
         removeOnFail: false,
       },
     });

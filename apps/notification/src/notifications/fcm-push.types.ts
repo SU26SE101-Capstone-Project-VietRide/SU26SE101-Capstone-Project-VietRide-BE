@@ -19,6 +19,7 @@ export interface FcmPushPayload {
 
 export interface FcmPushResult {
   messageId?: string;
+  dryRun?: boolean;
   invalidToken?: boolean;
 }
 
@@ -27,5 +28,6 @@ export interface FcmPushProvider {
 }
 
 export interface DeviceTokenProvider {
+  deactivateDeviceToken(userId: string, fcmToken: string): Promise<void>;
   listActiveDeviceTokens(userId: string): Promise<DeviceTokenSnapshot[]>;
 }

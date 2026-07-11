@@ -74,4 +74,26 @@ export class IdentityDeviceTokenProvider implements DeviceTokenProvider {
       .setExpirationTime(`${this.env.INTERNAL_JWT_TTL_SEC}s`)
       .sign(secret);
   }
+
+  async deactivateDeviceToken(userId: string, fcmToken: string): Promise<void> {
+    const url = new URL(
+      `/internal/v1/users/${userId}/device-tokens/deactivate`,
+      this.env.IDENTITY_INTERNAL_BASE_URL,
+    );
+    const token = await this.signInternalJwt();
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        [INTERNAL_AUTH_HEADER]: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ fcmToken }),
+      signal: AbortSignal.timeout(5_000),
+    });
+
+    if (!response.ok && response.status !== 404) {
+      this.logger.warn({ userId, statusCode: response.status }, 'Identity device-token deactivation failed');
+      throw new Error(`IDENTITY_DEVICE_TOKEN_DEACTIVATION_FAILED_${response.status}`);
+    }
+  }
 }

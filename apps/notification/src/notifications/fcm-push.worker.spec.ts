@@ -31,6 +31,7 @@ describe('FcmPushWorker', () => {
 
   beforeEach(() => {
     repository = {
+      markDeliveryValidated: jest.fn(),
       findById: jest.fn(),
       listDeliveriesByNotificationId: jest.fn(),
       createDelivery: jest.fn(),
@@ -40,6 +41,7 @@ describe('FcmPushWorker', () => {
     } as unknown as jest.Mocked<NotificationsRepository>;
     deviceTokenProvider = {
       listActiveDeviceTokens: jest.fn(),
+      deactivateDeviceToken: jest.fn(),
     };
     fcmPushProvider = {
       send: jest.fn(),
@@ -48,12 +50,13 @@ describe('FcmPushWorker', () => {
       get: jest.fn(),
       set: jest.fn(),
     } as unknown as jest.Mocked<RedisService>;
+    deviceTokenProvider.listActiveDeviceTokens.mockResolvedValue([]);
     worker = new FcmPushWorker(createEnv(), deviceTokenProvider, fcmPushProvider, repository, redis);
   });
 
   it('creates delivery audit rows and marks successful sends as SENT', async () => {
     repository.findById.mockResolvedValue(createNotification());
-    repository.listDeliveriesByNotificationId.mockResolvedValue([]);
+    repository.listDeliveriesByNotificationId.mockResolvedValue([createDelivery()]);
     repository.createDelivery.mockResolvedValue(createDelivery());
     deviceTokenProvider.listActiveDeviceTokens.mockResolvedValue([
       { fcmToken: FCM_TOKEN, platform: DevicePlatform.ANDROID },
@@ -73,11 +76,12 @@ describe('FcmPushWorker', () => {
       body: 'Ve cua ban da duoc xac nhan.',
       data: expect.objectContaining({
         notificationId: NOTIFICATION_ID,
-        type: NotificationType.BOOKING_CONFIRMED,
+        type: 'NOTIFICATION',
+        notificationType: NotificationType.BOOKING_CONFIRMED,
         bookingId: 'VR123',
       }),
     });
-    expect(repository.markDeliverySent).toHaveBeenCalledWith(DELIVERY_ID);
+    expect(repository.markDeliverySent).toHaveBeenCalledWith(DELIVERY_ID, 'firebase-message-id');
   });
 
   it('blacklists invalid tokens and marks delivery as FAILED', async () => {
@@ -92,6 +96,7 @@ describe('FcmPushWorker', () => {
       '1',
       FCM_TOKEN_BLACKLIST_TTL_SECONDS,
     );
+    expect(deviceTokenProvider.deactivateDeviceToken).toHaveBeenCalledWith(USER_ID, FCM_TOKEN);
     expect(repository.markDeliveryFailed).toHaveBeenCalledWith(DELIVERY_ID, 1, 'FCM_TOKEN_INVALID');
   });
 
@@ -114,7 +119,7 @@ describe('FcmPushWorker', () => {
     repository.listDeliveriesByNotificationId.mockResolvedValue([createDelivery()]);
     fcmPushProvider.send.mockRejectedValue(new Error('firebase exhausted'));
 
-    await expect(worker.process(createJob(FCM_PUSH_ATTEMPTS - 1))).resolves.toBeUndefined();
+    await expect(worker.process(createJob(FCM_PUSH_ATTEMPTS - 1))).rejects.toThrow('FCM_PUSH_RETRYABLE_FAILURE');
 
     expect(repository.markDeliveryFailed).toHaveBeenCalledWith(
       DELIVERY_ID,
@@ -157,6 +162,7 @@ function createDelivery(): NotificationDelivery {
     status: NotificationDeliveryStatus.PENDING,
     retryCount: 0,
     lastError: null,
+    providerMessageId: null,
     sentAt: null,
     createdAt: new Date('2026-06-01T10:00:00.000Z'),
     updatedAt: new Date('2026-06-01T10:00:00.000Z'),
@@ -180,7 +186,13 @@ function createEnv(): Env {
     RABBITMQ_EXCHANGE: 'vietride.events',
     DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/vietride_notification',
     LOG_LEVEL: 'info',
+    TRIP_INTERNAL_BASE_URL: 'http://trip.test',
     IDENTITY_INTERNAL_BASE_URL: 'http://identity.test',
+    FCM_PROJECT_ID: undefined,
+    FCM_CLIENT_EMAIL: undefined,
+    FCM_PRIVATE_KEY: undefined,
+    FCM_DRY_RUN: false,
+    FCM_DRY_RUN_TOPIC: 'vietride-e2e-validation',
     SENDGRID_API_KEY: undefined,
     SENDGRID_FROM_EMAIL: undefined,
     SENDGRID_FROM_NAME: 'VietRide',

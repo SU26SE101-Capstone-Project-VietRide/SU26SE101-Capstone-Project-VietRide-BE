@@ -52,6 +52,9 @@ enum NotificationType {
   OPERATOR_APPROVED
   OPERATOR_SUSPENDED
 
+  TRIP_ASSIGNED
+  TRIP_ASSIGNMENT_REMOVED
+  OPERATOR_ANNOUNCEMENT
   @@map("notification_type")
   @@schema("vietride_notification")
 }
@@ -62,6 +65,7 @@ enum NotificationDeliveryStatus {
   FAILED
   RETRYING
 
+  VALIDATED
   @@map("notification_delivery_status")
   @@schema("vietride_notification")
 }
@@ -124,6 +128,7 @@ model NotificationDelivery {
   retryCount     Int                        @default(0) @map("retry_count")
   lastError      String?                    @map("last_error")
   sentAt         DateTime?                  @map("sent_at") @db.Timestamptz(6)
+  providerMessageId String?                @map("provider_message_id") @db.VarChar(255)
   createdAt      DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime                   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   notification   Notification               @relation(fields: [notificationId], references: [id], onDelete: Cascade)
@@ -131,6 +136,7 @@ model NotificationDelivery {
   @@index([notificationId], map: "idx_notification_deliveries_notification_id")
   @@index([status, createdAt], map: "idx_notification_deliveries_status_created_at")
   @@map("notification_deliveries")
+  @@unique([notificationId, fcmToken], map: "notification_deliveries_notification_id_fcm_token_key")
   @@schema("vietride_notification")
 }
 

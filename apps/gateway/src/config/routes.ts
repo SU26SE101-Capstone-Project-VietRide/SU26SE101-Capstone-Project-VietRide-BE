@@ -310,6 +310,13 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
 
     // NestJS services
     {
+      prefix: '/v1/operator/notifications',
+      target: env.NOTIFICATION_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+      forwardUserAuthorization: true,
+    },
+    {
       prefix: '/v1/notifications',
       target: env.NOTIFICATION_BASE_URL,
       authRequired: 'user',

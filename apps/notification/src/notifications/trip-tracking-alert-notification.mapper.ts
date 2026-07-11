@@ -4,6 +4,8 @@ import type { CreateNotificationDto } from './dto/create-notification.dto';
 import {
   TRACKING_GPS_APPROACHING_STOP_ROUTING_KEY,
   TRACKING_GPS_OFF_ROUTE_ROUTING_KEY,
+  TRIP_ASSIGNED_ROUTING_KEY,
+  TRIP_CREW_CHANGED_ROUTING_KEY,
   TRIP_BOARDING_STARTED_ROUTING_KEY,
   TRIP_CANCELLED_ROUTING_KEY,
   TRIP_DELAYED_ROUTING_KEY,
@@ -42,6 +44,26 @@ const BaseTripAlertPayloadSchema = z
     }
   });
 
+const TripAssignedPayloadSchema = z.object({
+  tripId: z.string().uuid(),
+  operatorId: z.string().uuid(),
+  driverUserId: z.string().uuid(),
+  assistantUserId: z.string().uuid().nullable().optional(),
+  routeName: z.string().trim().min(1),
+  vehiclePlateNumber: z.string().trim().min(1),
+  departureDateTime: z.string().datetime({ offset: true }),
+});
+const TripCrewChangedPayloadSchema = z.object({
+  tripId: z.string().uuid(),
+  operatorId: z.string().uuid(),
+  oldDriverUserId: z.string().uuid(),
+  oldAssistantUserId: z.string().uuid().nullable().optional(),
+  driverUserId: z.string().uuid(),
+  assistantUserId: z.string().uuid().nullable().optional(),
+  routeName: z.string().trim().min(1),
+  vehiclePlateNumber: z.string().trim().min(1).nullable().optional(),
+  departureDateTime: z.string().datetime({ offset: true }),
+});
 const BoardingStartedPayloadSchema = BaseTripAlertPayloadSchema.and(
   z.object({ boardingStartedAt: z.string().datetime().optional() }),
 );
@@ -118,12 +140,16 @@ const StopDisabledPayloadSchema = z
     }
   });
 
+type TripAssignedPayload = z.infer<typeof TripAssignedPayloadSchema>;
+type TripCrewChangedPayload = z.infer<typeof TripCrewChangedPayloadSchema>;
 type RecipientPayload = z.infer<typeof RecipientPayloadSchema>;
 type BaseTripAlertPayload = z.infer<typeof BaseTripAlertPayloadSchema>;
 type ApproachingStopPayload = z.infer<typeof ApproachingStopPayloadSchema>;
 type StopDisabledPayload = z.infer<typeof StopDisabledPayloadSchema>;
 
 export type TripTrackingAlertRoutingKey =
+  | typeof TRIP_ASSIGNED_ROUTING_KEY
+  | typeof TRIP_CREW_CHANGED_ROUTING_KEY
   | typeof TRIP_BOARDING_STARTED_ROUTING_KEY
   | typeof TRIP_ROUTE_CHANGED_ROUTING_KEY
   | typeof TRIP_SCHEDULE_CHANGED_ROUTING_KEY
@@ -139,6 +165,10 @@ export function mapTripTrackingAlertToNotifications(
   payload: unknown,
 ): CreateNotificationDto[] {
   switch (routingKey) {
+    case TRIP_ASSIGNED_ROUTING_KEY:
+      return mapTripAssigned(TripAssignedPayloadSchema.parse(payload));
+    case TRIP_CREW_CHANGED_ROUTING_KEY:
+      return mapTripCrewChanged(TripCrewChangedPayloadSchema.parse(payload));
     case TRIP_BOARDING_STARTED_ROUTING_KEY:
       return fanOut(BoardingStartedPayloadSchema.parse(payload), mapBoardingStarted);
     case TRIP_ROUTE_CHANGED_ROUTING_KEY:
@@ -160,6 +190,64 @@ export function mapTripTrackingAlertToNotifications(
   }
 }
 
+function mapTripAssigned(payload: TripAssignedPayload): CreateNotificationDto[] {
+  return [payload.driverUserId, payload.assistantUserId]
+    .filter((userId): userId is string => Boolean(userId))
+    .map((userId) => ({
+      userId,
+      type: NotificationType.TRIP_ASSIGNED,
+      title: 'Ph?n c?ng chuy?n m?i',
+      body: `B?n ???c ph?n c?ng chuy?n ${payload.routeName} (${payload.vehiclePlateNumber}).`,
+      data: {
+        tripId: payload.tripId,
+        operatorId: payload.operatorId,
+        routeName: payload.routeName,
+        vehiclePlateNumber: payload.vehiclePlateNumber,
+        departureDateTime: payload.departureDateTime,
+      },
+    }));
+}
+
+function mapTripCrewChanged(payload: TripCrewChangedPayload): CreateNotificationDto[] {
+  const previousCrew = new Set(
+    [payload.oldDriverUserId, payload.oldAssistantUserId].filter(
+      (userId): userId is string => Boolean(userId),
+    ),
+  );
+  const newCrew = new Set(
+    [payload.driverUserId, payload.assistantUserId].filter(
+      (userId): userId is string => Boolean(userId),
+    ),
+  );
+  const commonData = {
+    tripId: payload.tripId,
+    operatorId: payload.operatorId,
+    routeName: payload.routeName,
+    vehiclePlateNumber: payload.vehiclePlateNumber ?? null,
+    departureDateTime: payload.departureDateTime,
+  };
+
+  const assigned = [...newCrew]
+    .filter((userId) => !previousCrew.has(userId))
+    .map((userId) => ({
+      userId,
+      type: NotificationType.TRIP_ASSIGNED,
+      title: 'Phân công chuyến mới',
+      body: `Bạn được phân công chuyến ${payload.routeName}${payload.vehiclePlateNumber ? ` (${payload.vehiclePlateNumber})` : ''}.`,
+      data: commonData,
+    }));
+  const removed = [...previousCrew]
+    .filter((userId) => !newCrew.has(userId))
+    .map((userId) => ({
+      userId,
+      type: NotificationType.TRIP_ASSIGNMENT_REMOVED,
+      title: 'Điều chỉnh phân công chuyến',
+      body: `Bạn không còn được phân công chuyến ${payload.routeName}.`,
+      data: commonData,
+    }));
+
+  return [...assigned, ...removed];
+}
 function mapBoardingStarted(userId: string, payload: z.infer<typeof BoardingStartedPayloadSchema>): CreateNotificationDto {
   return {
     userId,

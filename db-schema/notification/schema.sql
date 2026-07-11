@@ -59,11 +59,14 @@ CREATE TYPE notification_type AS ENUM (
     'PAYOUT_PROCESSED',
     'PAYOUT_FAILED',
     'OPERATOR_APPROVED',
-    'OPERATOR_SUSPENDED'
+    'OPERATOR_SUSPENDED',
+    'TRIP_ASSIGNED',
+    'TRIP_ASSIGNMENT_REMOVED',
+    'OPERATOR_ANNOUNCEMENT'
 );
 
 CREATE TYPE notification_delivery_status AS ENUM (
-    'PENDING', 'SENT', 'FAILED', 'RETRYING'
+    'PENDING', 'SENT', 'FAILED', 'RETRYING', 'VALIDATED'
 );
 
 CREATE TYPE email_template_key AS ENUM (
@@ -119,6 +122,7 @@ CREATE TABLE notification_deliveries (
     status notification_delivery_status NOT NULL DEFAULT 'PENDING',
     retry_count INT NOT NULL DEFAULT 0,
     last_error TEXT NULL,
+    provider_message_id VARCHAR(255) NULL,
     sent_at TIMESTAMPTZ NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -128,6 +132,8 @@ CREATE INDEX idx_notification_deliveries_notification_id
     ON notification_deliveries (notification_id);
 CREATE INDEX idx_notification_deliveries_status_created_at
     ON notification_deliveries (status, created_at);
+CREATE UNIQUE INDEX notification_deliveries_notification_id_fcm_token_key
+    ON notification_deliveries (notification_id, fcm_token);
 
 -- -----------------------------------------------------------------------------
 -- email_deliveries (transactional email attempt audit)

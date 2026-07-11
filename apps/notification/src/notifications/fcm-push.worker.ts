@@ -21,6 +21,7 @@ import type {
   DeviceTokenSnapshot,
   FcmPushJobData,
   FcmPushProvider,
+  FcmPushResult,
 } from './fcm-push.types';
 import { NotificationsRepository } from './notifications.repository';
 import { normalizeSafeError } from './safe-error';
@@ -79,51 +80,52 @@ export class FcmPushWorker implements OnModuleInit, OnModuleDestroy {
     for (const delivery of deliveries) {
       if (
         delivery.status === NotificationDeliveryStatus.SENT ||
-        delivery.status === NotificationDeliveryStatus.FAILED
+        delivery.status === NotificationDeliveryStatus.FAILED ||
+        delivery.status === NotificationDeliveryStatus.VALIDATED
       ) {
         continue;
       }
 
       const result = await this.sendDelivery(notification, delivery.fcmToken);
-      if (result === 'sent') {
-        await this.notificationsRepository.markDeliverySent(delivery.id);
+      if (typeof result !== 'string' && !result.invalidToken) {
+        if (result.dryRun) {
+          await this.notificationsRepository.markDeliveryValidated(delivery.id, result.messageId ?? null);
+        } else {
+          await this.notificationsRepository.markDeliverySent(delivery.id, result.messageId ?? null);
+        }
         continue;
       }
 
-      if (result === 'invalid-token') {
+      if (typeof result !== 'string' && result.invalidToken) {
         await this.blacklistToken(delivery.fcmToken);
+        await this.deviceTokenProvider.deactivateDeviceToken(job.data.userId, delivery.fcmToken);
         await this.notificationsRepository.markDeliveryFailed(delivery.id, currentAttempt, 'FCM_TOKEN_INVALID');
         continue;
       }
 
       hasRetryableFailure = true;
+      const errorMessage = typeof result === 'string' ? result : 'FCM_PUSH_UNKNOWN_FAILURE';
       if (currentAttempt >= FCM_PUSH_ATTEMPTS) {
-        await this.notificationsRepository.markDeliveryFailed(delivery.id, currentAttempt, result);
+        await this.notificationsRepository.markDeliveryFailed(delivery.id, currentAttempt, errorMessage);
       } else {
-        await this.notificationsRepository.markDeliveryRetrying(delivery.id, currentAttempt, result);
+        await this.notificationsRepository.markDeliveryRetrying(delivery.id, currentAttempt, errorMessage);
       }
     }
 
-    if (hasRetryableFailure && currentAttempt < FCM_PUSH_ATTEMPTS) {
+    if (hasRetryableFailure) {
       throw new Error('FCM_PUSH_RETRYABLE_FAILURE');
     }
   }
 
   private async resolveDeliverySnapshot(notificationId: string, userId: string) {
-    const existingDeliveries = await this.notificationsRepository.listDeliveriesByNotificationId(notificationId);
-    if (existingDeliveries.length > 0) {
-      return existingDeliveries;
-    }
-
     const deviceTokens = await this.deviceTokenProvider.listActiveDeviceTokens(userId);
     const deliverableTokens = await this.filterBlacklistedTokens(deviceTokens);
-    const deliveries = [];
 
     for (const deviceToken of deliverableTokens) {
-      deliveries.push(await this.notificationsRepository.createDelivery(notificationId, deviceToken));
+      await this.notificationsRepository.createDelivery(notificationId, deviceToken);
     }
 
-    return deliveries;
+    return this.notificationsRepository.listDeliveriesByNotificationId(notificationId);
   }
 
   private async filterBlacklistedTokens(deviceTokens: DeviceTokenSnapshot[]): Promise<DeviceTokenSnapshot[]> {
@@ -138,19 +140,14 @@ export class FcmPushWorker implements OnModuleInit, OnModuleDestroy {
     return deliverableTokens;
   }
 
-  private async sendDelivery(
-    notification: Notification,
-    token: string,
-  ): Promise<'sent' | 'invalid-token' | string> {
+  private async sendDelivery(notification: Notification, token: string): Promise<FcmPushResult | string> {
     try {
-      const result = await this.fcmPushProvider.send({
+      return await this.fcmPushProvider.send({
         token,
         title: notification.title,
         body: notification.body,
         data: this.toFcmData(notification),
       });
-
-      return result.invalidToken ? 'invalid-token' : 'sent';
     } catch (error) {
       return this.normalizeError(error);
     }
@@ -163,17 +160,32 @@ export class FcmPushWorker implements OnModuleInit, OnModuleDestroy {
   private toFcmData(notification: Notification): Record<string, string> {
     const data: Record<string, string> = {
       notificationId: notification.id,
-      type: notification.type,
+      type: this.toGenericFcmType(notification.type),
+      notificationType: notification.type,
     };
 
     if (notification.data && typeof notification.data === 'object' && !Array.isArray(notification.data)) {
       for (const [key, value] of Object.entries(notification.data)) {
-        if (value === null || value === undefined) continue;
+        if (value === null || value === undefined || ['notificationId', 'type', 'notificationType'].includes(key)) continue;
         data[key] = typeof value === 'string' ? value : JSON.stringify(value);
       }
     }
 
     return data;
+  }
+
+  private toGenericFcmType(type: Notification['type']): string {
+    if (type === 'TRIP_ASSIGNED') return 'TRIP_ASSIGNED';
+    if (
+      type.startsWith('TRIP_') ||
+      type === 'STOP_DISABLED' ||
+      type === 'VEHICLE_SUBSTITUTED' ||
+      type === 'VEHICLE_SWAPPED'
+    ) {
+      return 'TRIP_UPDATE';
+    }
+    if (type.startsWith('PARCEL_')) return 'PARCEL_UPDATE';
+    return 'NOTIFICATION';
   }
 
   private normalizeError(error: unknown): string {
