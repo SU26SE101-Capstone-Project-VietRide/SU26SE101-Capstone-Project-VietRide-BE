@@ -4,6 +4,8 @@ import {
   TRACKING_GPS_APPROACHING_STOP_ROUTING_KEY,
   TRACKING_GPS_OFF_ROUTE_ROUTING_KEY,
   TRIP_DELAYED_ROUTING_KEY,
+  TRIP_ASSIGNED_ROUTING_KEY,
+  TRIP_CREW_CHANGED_ROUTING_KEY,
   TRIP_INCIDENT_REPORTED_ROUTING_KEY,
   TRIP_STOP_DISABLED_ROUTING_KEY,
 } from './trip-tracking-alert-events.constants';
@@ -16,6 +18,42 @@ const STOP_ID = '44444444-4444-4444-8444-444444444444';
 const INCIDENT_ID = '55555555-5555-4555-8555-555555555555';
 
 describe('mapTripTrackingAlertToNotifications', () => {
+  it('maps a trip assignment to the driver and assistant', () => {
+    const notifications = mapTripTrackingAlertToNotifications(TRIP_ASSIGNED_ROUTING_KEY, {
+      tripId: TRIP_ID,
+      operatorId: '77777777-7777-4777-8777-777777777777',
+      driverUserId: USER_ID,
+      assistantUserId: SECOND_USER_ID,
+      routeName: 'Sai Gon - Da Lat',
+      vehiclePlateNumber: '51B-123.45',
+      departureDateTime: '2026-07-12T01:00:00+00:00',
+    });
+
+    expect(notifications).toEqual([
+      expect.objectContaining({ userId: USER_ID, type: NotificationType.TRIP_ASSIGNED }),
+      expect.objectContaining({ userId: SECOND_USER_ID, type: NotificationType.TRIP_ASSIGNED }),
+    ]);
+  });
+
+  it('maps changed crew to assignments and assignment removals only', () => {
+    const notifications = mapTripTrackingAlertToNotifications(TRIP_CREW_CHANGED_ROUTING_KEY, {
+      tripId: TRIP_ID,
+      operatorId: '77777777-7777-4777-8777-777777777777',
+      oldDriverUserId: USER_ID,
+      oldAssistantUserId: SECOND_USER_ID,
+      driverUserId: SECOND_USER_ID,
+      assistantUserId: '88888888-8888-4888-8888-888888888888',
+      routeName: 'Sai Gon - Da Lat',
+      vehiclePlateNumber: '51B-123.45',
+      departureDateTime: '2026-07-12T01:00:00+00:00',
+    });
+
+    expect(notifications).toEqual([
+      expect.objectContaining({ userId: '88888888-8888-4888-8888-888888888888', type: NotificationType.TRIP_ASSIGNED }),
+      expect.objectContaining({ userId: USER_ID, type: NotificationType.TRIP_ASSIGNMENT_REMOVED }),
+    ]);
+  });
+
   it('maps approaching stop wave 1 title and body', () => {
     expect(
       mapTripTrackingAlertToNotifications(TRACKING_GPS_APPROACHING_STOP_ROUTING_KEY, {

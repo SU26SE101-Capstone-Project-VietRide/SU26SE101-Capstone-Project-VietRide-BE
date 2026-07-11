@@ -64,6 +64,14 @@ public sealed class DriverSchedule : BaseEntity<Guid>, IActivatable
         VehicleId = vehicleId;
     }
 
+    public void ChangeCrew(Guid driverUserId, Guid? assistantUserId)
+    {
+        ValidateGuid(driverUserId, nameof(driverUserId));
+        ValidateOptionalGuid(assistantUserId, nameof(assistantUserId));
+        DriverUserId = driverUserId;
+        AssistantUserId = assistantUserId;
+    }
+
     public void Activate() => IsActive = true;
 
     public void Deactivate() => IsActive = false;

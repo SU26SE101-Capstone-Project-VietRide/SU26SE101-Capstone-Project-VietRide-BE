@@ -1,4 +1,5 @@
 using MediatR;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.Repositories;
@@ -19,6 +20,7 @@ public sealed class GenerateTripsForScheduleHandler : IRequestHandler<GenerateTr
     private readonly ITripStopRepository tripStopRepository;
     private readonly IUnitOfWork unitOfWork;
     private readonly IVehicleRepository vehicleRepository;
+    private readonly IIntegrationEventOutbox outbox;
 
     public GenerateTripsForScheduleHandler(
         IClock clock,
@@ -32,7 +34,8 @@ public sealed class GenerateTripsForScheduleHandler : IRequestHandler<GenerateTr
         ITripStopRepository tripStopRepository,
         ITripStopFareRepository tripStopFareRepository,
         ITripGenerationSkipLogRepository skipLogRepository,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IIntegrationEventOutbox outbox)
     {
         this.clock = clock;
         this.driverScheduleRepository = driverScheduleRepository;
@@ -46,6 +49,7 @@ public sealed class GenerateTripsForScheduleHandler : IRequestHandler<GenerateTr
         this.tripStopFareRepository = tripStopFareRepository;
         this.skipLogRepository = skipLogRepository;
         this.unitOfWork = unitOfWork;
+        this.outbox = outbox;
     }
 
     public async Task<GenerateTripsForScheduleResult> Handle(
@@ -63,7 +67,8 @@ public sealed class GenerateTripsForScheduleHandler : IRequestHandler<GenerateTr
             tripSeatRepository,
             tripStopRepository,
             tripStopFareRepository,
-            skipLogRepository);
+            skipLogRepository,
+            outbox);
 
         var result = await generationService.GenerateAsync(request.DriverScheduleId, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);

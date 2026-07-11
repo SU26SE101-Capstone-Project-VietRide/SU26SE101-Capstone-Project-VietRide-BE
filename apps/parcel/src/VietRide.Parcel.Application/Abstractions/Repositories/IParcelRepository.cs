@@ -206,6 +206,12 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     Task<PagedResult<ParcelEntity>> ListReceivedByUserIdAsync(
         Guid userId, int page, int pageSize, CancellationToken ct);
 
+    /// <summary>
+    /// Paginated list of non-deleted parcels for an operator's trip.
+    /// </summary>
+    Task<PagedResult<ParcelEntity>> ListByTripAndOperatorAsync(
+        Guid tripId, Guid operatorId, int page, int pageSize, CancellationToken ct);
+
     // ---- Phase 7: Delivery Token ----
 
     /// <summary>

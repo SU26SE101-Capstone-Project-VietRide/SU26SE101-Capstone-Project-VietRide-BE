@@ -84,7 +84,7 @@ public sealed class MarkParcelLoadedCommandHandler
         await ParcelOutboxEvents.EnqueueAsync(
             _outbox,
             ParcelOutboxEvents.Loaded,
-            new { parcelId = snapshot.ParcelId, tripId = snapshot.TripId, actualWeightKg = parcel.ActualWeightKg ?? parcel.EstimatedWeightKg },
+            new { parcelId = snapshot.ParcelId, tripId = snapshot.TripId, actualWeightKg = parcel.ActualWeightKg ?? parcel.EstimatedWeightKg, userIds = new[] { parcel.SenderUserId }.Concat(parcel.RecipientUserId.HasValue ? new[] { parcel.RecipientUserId.Value } : Array.Empty<Guid>()).Distinct().ToArray() },
             cancellationToken);
 
         await _statsRepository.UpsertIncrementAsync(

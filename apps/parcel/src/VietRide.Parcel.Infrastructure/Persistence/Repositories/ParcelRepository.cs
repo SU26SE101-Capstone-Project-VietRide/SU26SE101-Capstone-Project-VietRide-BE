@@ -824,6 +824,22 @@ internal sealed class ParcelRepository : IParcelRepository
         return PagedResult<ParcelEntity>.Create(items, page, pageSize, total);
     }
 
+    public async Task<PagedResult<ParcelEntity>> ListByTripAndOperatorAsync(
+        Guid tripId, Guid operatorId, int page, int pageSize, CancellationToken ct)
+    {
+        var query = _db.Parcels
+            .Where(p => p.TripId == tripId && p.OperatorId == operatorId)
+            .OrderByDescending(p => p.CreatedAt);
+
+        var total = await query.CountAsync(ct);
+        var items = await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(ct);
+
+        return PagedResult<ParcelEntity>.Create(items, page, pageSize, total);
+    }
+
     // ---- Phase 7: Delivery Token ----
 
     public async Task<ParcelEntity?> FindByDeliveryTokenAsync(Guid token, CancellationToken ct)

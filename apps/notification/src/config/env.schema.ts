@@ -13,9 +13,12 @@ export const envSchema = baseEnvSchema.merge(
     USER_JWT_PUBLIC_KEY: z.string().optional(),
     IDENTITY_INTERNAL_BASE_URL: z.string().url().default('http://identity:5001'),
     FCM_PROJECT_ID: z.string().optional(),
+    TRIP_INTERNAL_BASE_URL: z.string().url().default('http://trip:5002'),
     FCM_CLIENT_EMAIL: z.string().email().optional(),
     FCM_PRIVATE_KEY: z.string().optional(),
     SENDGRID_API_KEY: z.string().optional(),
+    FCM_DRY_RUN: z.coerce.boolean().default(false),
+    FCM_DRY_RUN_TOPIC: z.string().trim().min(1).default('vietride-e2e-validation'),
     SENDGRID_FROM_EMAIL: z.string().email().optional(),
     SENDGRID_FROM_NAME: z.string().default('VietRide'),
     NOTIFICATION_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
@@ -37,6 +40,21 @@ export const envSchema = baseEnvSchema.merge(
       code: z.ZodIssueCode.custom,
       path: ['SENDGRID_FROM_EMAIL'],
       message: 'SENDGRID_FROM_EMAIL is required in production',
+    });
+  }
+  if (!env.FCM_PROJECT_ID || !env.FCM_CLIENT_EMAIL || !env.FCM_PRIVATE_KEY) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['FCM_PROJECT_ID'],
+      message: 'FCM_PROJECT_ID, FCM_CLIENT_EMAIL and FCM_PRIVATE_KEY are required in production',
+    });
+  }
+
+  if (env.FCM_DRY_RUN) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['FCM_DRY_RUN'],
+      message: 'FCM_DRY_RUN must be false in production',
     });
   }
 });

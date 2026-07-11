@@ -342,9 +342,10 @@ services:
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-vietride.events}
       # Optional — push (FCM) + email (SendGrid). Left unset, the service stays healthy
       # but those deliveries are skipped. Add the keys to /opt/vietride/.env to enable.
-      FCM_PROJECT_ID: ${FCM_PROJECT_ID:-}
-      FCM_CLIENT_EMAIL: ${FCM_CLIENT_EMAIL:-}
-      FCM_PRIVATE_KEY: ${FCM_PRIVATE_KEY:-}
+      FCM_PROJECT_ID: ${FCM_PROJECT_ID:?FCM_PROJECT_ID is required in production}
+      FCM_CLIENT_EMAIL: ${FCM_CLIENT_EMAIL:?FCM_CLIENT_EMAIL is required in production}
+      FCM_PRIVATE_KEY: ${FCM_PRIVATE_KEY:?FCM_PRIVATE_KEY is required in production}
+      FCM_DRY_RUN: "false"
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:?SENDGRID_API_KEY is required in production}
       SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL:?SENDGRID_FROM_EMAIL is required in production}
       SENDGRID_FROM_NAME: ${SENDGRID_FROM_NAME:-VietRide}

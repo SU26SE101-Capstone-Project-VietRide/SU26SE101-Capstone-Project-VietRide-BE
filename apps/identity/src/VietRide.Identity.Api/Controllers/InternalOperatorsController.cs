@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using VietRide.Identity.Api.Controllers.Requests;
 using VietRide.Identity.Application.Features.Internal.Operators.GetInternalOperator;
 using VietRide.Identity.Application.Features.Internal.Operators.GetInternalOperatorSubscription;
+using VietRide.Identity.Application.Features.Internal.Operators.GetOperatorCrewUserIds;
 using VietRide.Identity.Application.Features.Internal.Operators.GetOperatorRecipientUsers;
 using VietRide.Identity.Application.Features.Internal.Operators.IncrementOperatorUsage;
 using VietRide.Shared.Kernel.Primitives;
@@ -61,6 +62,16 @@ public sealed class InternalOperatorsController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("{operatorId:guid}/crew-user-ids")]
+    [ProducesResponseType(typeof(IReadOnlyList<Guid>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<IReadOnlyList<Guid>>> GetCrewUserIdsAsync(
+        Guid operatorId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(new GetOperatorCrewUserIdsQuery(operatorId), cancellationToken);
+        return Ok(result);
+    }
     [HttpPost("{operatorId:guid}/usage/increment")]
     [ProducesResponseType(typeof(InternalOperatorSubscriptionDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]

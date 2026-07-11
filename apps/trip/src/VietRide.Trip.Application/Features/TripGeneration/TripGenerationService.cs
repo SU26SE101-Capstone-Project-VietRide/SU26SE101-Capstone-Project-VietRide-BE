@@ -1,5 +1,6 @@
 using System.Text.Json;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Features.Vehicles;
@@ -11,6 +12,8 @@ public sealed class TripGenerationService
 {
     private const int GenerationWindowDays = 14;
 
+    private const string TripAssignedEventType = "trip.trip.assigned";
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly IClock clock;
     private readonly IDriverScheduleRepository driverScheduleRepository;
     private readonly IRouteRepository routeRepository;
@@ -22,6 +25,7 @@ public sealed class TripGenerationService
     private readonly ITripStopFareRepository tripStopFareRepository;
     private readonly ITripStopRepository tripStopRepository;
     private readonly IVehicleRepository vehicleRepository;
+    private readonly IIntegrationEventOutbox? outbox;
 
     public TripGenerationService(
         IClock clock,
@@ -34,7 +38,8 @@ public sealed class TripGenerationService
         ITripSeatRepository tripSeatRepository,
         ITripStopRepository tripStopRepository,
         ITripStopFareRepository tripStopFareRepository,
-        ITripGenerationSkipLogRepository skipLogRepository)
+        ITripGenerationSkipLogRepository skipLogRepository,
+        IIntegrationEventOutbox? outbox = null)
     {
         this.clock = clock;
         this.driverScheduleRepository = driverScheduleRepository;
@@ -47,6 +52,7 @@ public sealed class TripGenerationService
         this.tripStopRepository = tripStopRepository;
         this.tripStopFareRepository = tripStopFareRepository;
         this.skipLogRepository = skipLogRepository;
+        this.outbox = outbox;
     }
 
     public async Task<GenerateTripsForScheduleResult> GenerateAsync(
@@ -152,6 +158,22 @@ public sealed class TripGenerationService
                 await AddSeatsAsync(trip.Id, vehicle, cancellationToken);
                 await AddStopsAsync(trip.Id, departureDateTime, routeStops, cancellationToken);
                 await AddStopFaresAsync(trip.Id, fareTemplates, cancellationToken);
+                if (outbox is not null)
+                {
+                    await outbox.EnqueueAsync(
+                        TripAssignedEventType,
+                        JsonSerializer.Serialize(new
+                        {
+                            tripId = trip.Id,
+                            operatorId = trip.OperatorId,
+                            driverUserId = trip.DriverUserId,
+                            assistantUserId = trip.AssistantUserId,
+                            routeName = route.Name,
+                            vehiclePlateNumber = vehicle.LicensePlate,
+                            departureDateTime = trip.DepartureDateTime,
+                        }, JsonOptions),
+                        cancellationToken);
+                }
                 generatedCount++;
             }
         }

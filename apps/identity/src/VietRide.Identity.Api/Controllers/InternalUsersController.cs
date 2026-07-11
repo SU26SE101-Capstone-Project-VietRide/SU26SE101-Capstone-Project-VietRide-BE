@@ -1,7 +1,9 @@
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using VietRide.Identity.Api.Controllers.Requests;
 using VietRide.Identity.Application.Features.Devices.GetActiveDeviceTokens;
+using VietRide.Identity.Application.Features.Devices.RemoveDeviceToken;
 using VietRide.Identity.Application.Features.InternalUsers.GetInternalUser;
 using VietRide.Shared.Web.Authentication;
 
@@ -46,6 +48,17 @@ public sealed class InternalUsersController : ControllerBase
         return Ok(result);
     }
 
+    [HttpPost("{userId:guid}/device-tokens/deactivate")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> DeactivateDeviceToken(
+        Guid userId,
+        [FromBody] RemoveDeviceTokenRequest request,
+        CancellationToken cancellationToken)
+    {
+        await _mediator.Send(new RemoveDeviceTokenCommand(userId, request.FcmToken), cancellationToken);
+        return NoContent();
+    }
     [HttpGet("{userId:guid}/device-tokens")]
     [ProducesResponseType(typeof(IReadOnlyList<GetActiveDeviceTokensResponseDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]

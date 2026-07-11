@@ -100,6 +100,28 @@ public class TripServiceClientInternalClientTests
     }
 
     [Fact]
+    public async Task AuthorizeAssistantForTripAsync_UsesInternalAuthorizationEndpoint()
+    {
+        var userId = Guid.NewGuid();
+        var operatorId = Guid.NewGuid();
+        var body = JsonSerializer.Serialize(new
+        {
+            success = true,
+            statusCode = 200,
+            data = new { allowed = true, scope = "ASSISTANT", error = (string?)null },
+        }, JsonOptions);
+        var client = BuildClient(HttpStatusCode.OK, body);
+
+        var result = await client.AuthorizeAssistantForTripAsync(TripId, userId, operatorId);
+
+        result.Kind.Should().Be(TripCrewAuthorizationOutcomeKind.Authorized);
+        _handler.LastRequest!.RequestUri!.AbsolutePath.Should().Be($"/internal/v1/trips/{TripId:D}/tracking-authorization");
+        _handler.LastRequest.RequestUri.Query.Should().Contain($"userId={userId:D}");
+        _handler.LastRequest.RequestUri.Query.Should().Contain("role=ASSISTANT");
+        _handler.LastRequest.RequestUri.Query.Should().Contain($"operatorId={operatorId:D}");
+    }
+
+    [Fact]
     public async Task SearchAvailableParcelTripsAsync_Sends_Request_With_InvariantCulture()
     {
         var body = JsonSerializer.Serialize(new

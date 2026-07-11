@@ -359,7 +359,7 @@ public sealed class CreateParcelCommandHandler
             await ParcelOutboxEvents.EnqueueAsync(
                 _outbox,
                 ParcelOutboxEvents.Created,
-                new { parcelId = parcel.Id, tripId = parcel.TripId, senderUserId = parcel.SenderUserId, recipientUserId = parcel.RecipientUserId },
+                new { parcelId = parcel.Id, tripId = parcel.TripId, senderUserId = parcel.SenderUserId, recipientUserId = parcel.RecipientUserId, userIds = new[] { parcel.SenderUserId }.Concat(parcel.RecipientUserId.HasValue ? new[] { parcel.RecipientUserId.Value } : Array.Empty<Guid>()).Distinct().ToArray() },
                 cancellationToken);
 
             if (sizeCategory == ParcelSizeCategory.EXTRA_LARGE)

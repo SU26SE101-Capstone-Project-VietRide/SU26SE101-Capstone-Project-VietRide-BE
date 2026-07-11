@@ -1955,6 +1955,49 @@ Decision note: invalid, expired, and revoked delivery tokens return 400 with
 `PARCEL_DELIVERY_TOKEN_REVOKED`. BSOT `401` and timeline `410` are known drift
 items to reconcile.
 
+### GET `/v1/assistant/trips/{tripId}/parcels`
+
+Auth: `ASSISTANT`. Read-only; Idempotency-Key is not required.
+
+The caller must be the Assistant currently assigned to `tripId`. Results include all
+non-deleted parcels whose current `tripId` and `operatorId` match the authorized trip
+crew context. Query: `page` (default `1`) and `pageSize` (default `20`, maximum `100`).
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [
+      {
+        "parcelId": "uuid",
+        "parcelCode": "VR-PCL-20260518-P7K3D9Q2",
+        "status": "LOADED",
+        "recipientName": "Nguyen Van A",
+        "recipientPhone": "0900000000",
+        "dropoffStopId": "uuid",
+        "sizeCategory": "MEDIUM",
+        "estimatedWeightKg": 12.5,
+        "description": "Gói hàng nhỏ"
+      }
+    ],
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 1,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+}
+```
+
+Errors: `401 UNAUTHORIZED` without a valid access token; `403 FORBIDDEN` when the
+caller is not the assigned Assistant, has no operator scope, or the trip is unavailable;
+`422 VALIDATION_FAILED` for invalid pagination; `503 TRIP_SERVICE_UNAVAILABLE` when
+assignment verification cannot reach Trip service.
+
 ### POST `/v1/assistant/parcels/{parcelId}/reweigh`
 
 Auth: `ASSISTANT`. Idempotency: required.
@@ -2318,6 +2361,29 @@ Response `200`: paged notifications.
 Auth: owner.
 
 Response `204`.
+
+### POST `/v1/operator/notifications`
+
+Auth: `OPERATOR_ADMIN` or `OPERATOR_STAFF`. Idempotency-Key: required.
+
+Creates an in-app announcement and queues an FCM delivery for active `DRIVER` and `ASSISTANT`
+recipients. `scope=TRIP` resolves the current crew snapshot for the specified trip and verifies
+that the trip belongs to the caller operator. `scope=OPERATOR` resolves all active crew under
+the caller operator.
+
+```json
+{
+  "scope": "TRIP",
+  "tripId": "uuid",
+  "title": "Thông báo điều hành",
+  "body": "Xe xuất bến sớm hơn 15 phút."
+}
+```
+
+`tripId` is required only for `scope=TRIP`; it is forbidden for `scope=OPERATOR`. `title` is
+1–120 characters and `body` is 1–500 characters. Response `202` contains
+`{ announcementId, recipientCount }`. Retrying the same actor and Idempotency-Key returns the
+original response for 24 hours.
 
 ## Tracking Service Socket.IO
 
@@ -3997,6 +4063,26 @@ Response `200`: `DriverScheduleDto` in the ADR 0004 success envelope.
 
 On success, activation may only transition `isActive=false` to `isActive=true`; Trip generation is enqueued only after the activation commit succeeds.
 
+### PATCH `/v1/operator/driver-schedules/{id}/crew`
+
+Auth: `OPERATOR_ADMIN`. Idempotency-Key: required.
+
+```json
+{
+  "driverUserId": "uuid",
+  "assistantUserId": "uuid"
+}
+```
+
+Changes only the recurring crew assignment and the crew snapshot of linked trips in
+`SCHEDULED` or `BOARDING`. `IN_PROGRESS`, completed, cancelled, disrupted, and historical trips
+are never changed. The driver/assistant validation and active-schedule driver-conflict rules are
+the same as `POST /v1/operator/driver-schedules`. Response `200`: `DriverScheduleDto`.
+
+For every changed future trip, Trip publishes `trip.trip.crew_changed`; Notification sends a
+`TRIP_ASSIGNED` notification to newly assigned crew and `TRIP_ASSIGNMENT_REMOVED` to removed
+crew. Unchanged crew members receive no notification.
+
 ### GET `/v1/operator/driver-schedules`
 
 Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `routeId?`, `driverUserId?`, `isActive?`. Response is a paged schedule list. Each item retains the existing schedule IDs and fields, and adds `route` (including `originStation`/`destinationStation`), nullable `vehicle` (including `imageUrls`), and nullable `driver`/`assistant` summaries `{ id, displayName, avatarUrl, role, operatorId, status }`.
@@ -4220,6 +4306,28 @@ Error responses use the ADR 0004 envelope:
 - `422 VALIDATION_ERROR`: the route parameter or booking-code format is invalid.
 
 ## Integration Event Contracts
+
+### `trip.trip.assigned` and `trip.trip.crew_changed`
+
+Producer: Trip. Consumer: Notification. Exchange: `vietride.events`.
+
+`trip.trip.assigned` payload:
+
+```json
+{
+  "tripId": "uuid",
+  "operatorId": "uuid",
+  "driverUserId": "uuid",
+  "assistantUserId": "uuid|null",
+  "routeName": "Sài Gòn - Đà Lạt",
+  "vehiclePlateNumber": "51B-123.45",
+  "departureDateTime": "2026-07-12T01:00:00+00:00"
+}
+```
+
+`trip.trip.crew_changed` uses the same trip snapshot fields and additionally includes
+`oldDriverUserId` and nullable `oldAssistantUserId`. Notification treats routing key plus broker
+message ID as its idempotency identity.
 
 ### `trip.stop.departed_with_pending`
 

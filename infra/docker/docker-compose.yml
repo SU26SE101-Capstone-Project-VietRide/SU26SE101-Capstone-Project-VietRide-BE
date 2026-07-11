@@ -173,6 +173,11 @@ services:
       REDIS_URL: 'redis:6379,abortConnect=false'
       Identity__BaseUrl: http://identity:5001
       IDENTITY_SERVICE_BASE_URL: http://identity:5001
+      RabbitMq__HostName: rabbitmq
+      RabbitMq__Port: '5672'
+      RabbitMq__UserName: ${RABBITMQ_USER:-vietride}
+      RabbitMq__Password: ${RABBITMQ_PASSWORD:-vietride_dev}
+      RabbitMq__ExchangeName: ${RABBITMQ_EXCHANGE:-vietride.events}
     ports:
       - '${TRIP_PORT:-5002}:5002'
     healthcheck:
@@ -371,14 +376,21 @@ services:
       dockerfile: apps/notification/Dockerfile
     container_name: vietride_notification
     environment:
-      NODE_ENV: ${NODE_ENV:-production}
+      # Local compose is development by default; docker-compose.prod.yml is the production boundary.
+      NODE_ENV: ${NODE_ENV:-development}
       PORT: 3002
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      TRIP_INTERNAL_BASE_URL: http://trip:5002
       # SendGrid delivery (apps/notification). Without these the email-send worker
       # degrades to SENDGRID_NOT_CONFIGURED and marks deliveries FAILED.
       SENDGRID_API_KEY: ${SENDGRID_API_KEY}
       SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL:-noreply@vietride.app}
       SENDGRID_FROM_NAME: ${SENDGRID_FROM_NAME:-VietRide}
+      FCM_PROJECT_ID: ${FCM_PROJECT_ID:-}
+      FCM_CLIENT_EMAIL: ${FCM_CLIENT_EMAIL:-}
+      FCM_PRIVATE_KEY: ${FCM_PRIVATE_KEY:-}
+      FCM_DRY_RUN: ${FCM_DRY_RUN:-false}
+      FCM_DRY_RUN_TOPIC: ${FCM_DRY_RUN_TOPIC:-vietride-e2e-validation}
       DATABASE_URL: 'postgresql://${POSTGRES_USER:-vietride}:${POSTGRES_PASSWORD:-vietride_dev}@postgres:5432/${NOTIFICATION_DB:-vietride_notification}'
       NOTIFICATION_DATABASE_URL: 'postgresql://${POSTGRES_USER:-vietride}:${POSTGRES_PASSWORD:-vietride_dev}@postgres:5432/${NOTIFICATION_DB:-vietride_notification}'
       REDIS_HOST: redis
