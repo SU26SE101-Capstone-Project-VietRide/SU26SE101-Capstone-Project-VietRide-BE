@@ -1,10 +1,10 @@
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using VietRide.Identity.Api.Controllers.Requests;
 using VietRide.Identity.Application.Features.Devices.GetActiveDeviceTokens;
 using VietRide.Identity.Application.Features.Devices.RemoveDeviceToken;
 using VietRide.Identity.Application.Features.InternalUsers.GetInternalUser;
-using VietRide.Identity.Api.Controllers.Requests;
 using VietRide.Shared.Web.Authentication;
 
 namespace VietRide.Identity.Api.Controllers;

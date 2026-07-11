@@ -1,4 +1,4 @@
-﻿using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Trip.Domain.Entities;

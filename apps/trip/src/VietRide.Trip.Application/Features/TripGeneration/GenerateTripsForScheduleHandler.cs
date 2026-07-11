@@ -1,6 +1,6 @@
 using MediatR;
-using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Application.Outbox;
+using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.Repositories;
 

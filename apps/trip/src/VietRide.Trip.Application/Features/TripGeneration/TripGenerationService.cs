@@ -1,6 +1,6 @@
 using System.Text.Json;
-using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Features.Vehicles;
