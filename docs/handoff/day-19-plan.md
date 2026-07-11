@@ -160,7 +160,7 @@ Default serial in the shared working tree; no task is declared parallel-safe. Ta
 | 19.1 | ✅ done | APPROVE | 2026-07-11 | Approved after 3 patch rounds; 307 unit + 46 integration tests pass with tenant/injection/overflow SQL coverage |
 | 19.2 | ✅ done | APPROVE | 2026-07-11 | Approved without patch round; 312 unit + 47 integration tests pass with tenant/403/404/timeline coverage |
 | 19.3 | ✅ done | APPROVE | 2026-07-11 | Approved after 2 patch rounds; controller/Gateway RBAC and malformed-id 422 verified, with shared policy + BSOT/ADR sync under human-approved expanded scope |
-| 19.4 | ⬜ todo | — | — | Depends on 19.3 |
+| 19.4 | ✅ done | APPROVE | 2026-07-11 | Approved after 3 patch rounds; real Gateway Newman 14 requests/16 assertions pass and forced-failure cleanup verified; E2E discovered ICT Linux fallback corrected under human-approved scope |
 
 Legend: ⬜ todo · 🔄 in progress · ✅ done (reviewer APPROVED + human `/verify`) · ⚠️ done-with-carryover · ❌ blocked
 

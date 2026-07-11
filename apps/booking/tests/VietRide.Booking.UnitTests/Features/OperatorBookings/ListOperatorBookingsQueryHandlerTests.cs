@@ -61,6 +61,23 @@ public sealed class ListOperatorBookingsQueryHandlerTests
     }
 
     [Fact]
+    public async Task Handle_DateFilter_UsesFixedIctMidnightIntervalRegardlessOfHostTimeZone()
+    {
+        _repository.ListOperatorBookingsAsync(Arg.Any<OperatorBookingListCriteria>(), Arg.Any<CancellationToken>())
+            .Returns(new OperatorBookingListPage([], 0));
+        var sut = new ListOperatorBookingsQueryHandler(_repository, _identity);
+
+        await sut.Handle(new ListOperatorBookingsQuery(
+            Guid.NewGuid(), null, null, new DateOnly(2026, 1, 15), null, null), default);
+
+        await _repository.Received(1).ListOperatorBookingsAsync(
+            Arg.Is<OperatorBookingListCriteria>(criteria =>
+                criteria.DepartureFrom == new DateTimeOffset(2026, 1, 14, 17, 0, 0, TimeSpan.Zero)
+                && criteria.DepartureTo == new DateTimeOffset(2026, 1, 15, 17, 0, 0, TimeSpan.Zero)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Handle_UnknownPhone_ReturnsExactEmptySevenFieldPageWithoutRepositoryCall()
     {
         _identity.GetUserIdByPhoneAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())

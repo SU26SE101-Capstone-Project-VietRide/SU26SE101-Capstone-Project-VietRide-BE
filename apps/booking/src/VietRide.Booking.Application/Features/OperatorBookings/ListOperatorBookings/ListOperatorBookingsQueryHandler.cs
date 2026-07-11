@@ -77,7 +77,21 @@ public sealed class ListOperatorBookingsQueryHandler
 
     private static TimeZoneInfo ResolveIctTimeZone()
     {
-        try { return TimeZoneInfo.FindSystemTimeZoneById("Asia/Ho_Chi_Minh"); }
-        catch (TimeZoneNotFoundException) { return TimeZoneInfo.FindSystemTimeZoneById("SE Asia Standard Time"); }
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById("Asia/Ho_Chi_Minh");
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById("SE Asia Standard Time");
+            }
+            catch (TimeZoneNotFoundException)
+            {
+                return TimeZoneInfo.CreateCustomTimeZone(
+                    "Asia/Ho_Chi_Minh", TimeSpan.FromHours(7), "ICT", "ICT");
+            }
+        }
     }
 }
