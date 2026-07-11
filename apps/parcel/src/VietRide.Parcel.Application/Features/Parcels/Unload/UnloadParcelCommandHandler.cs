@@ -103,7 +103,7 @@ public sealed class UnloadParcelCommandHandler
             await ParcelOutboxEvents.EnqueueAsync(
                 _outbox,
                 ParcelOutboxEvents.Unloaded,
-                new { parcelId = snapshot.ParcelId, tripId = snapshot.TripId },
+                new { parcelId = snapshot.ParcelId, tripId = snapshot.TripId, userIds = new[] { parcel.SenderUserId }.Concat(parcel.RecipientUserId.HasValue ? new[] { parcel.RecipientUserId.Value } : Array.Empty<Guid>()).Distinct().ToArray() },
                 cancellationToken);
             await ParcelOutboxEvents.EnqueueAsync(
                 _outbox,
