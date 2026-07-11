@@ -1765,6 +1765,8 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `booking.voucher.consent_accepted` | Booking | Notification | `{ voucherId, operatorId }` |
 | `booking.voucher.consent_rejected` | Booking | Notification | `{ voucherId, operatorId, reason? }` |
 | `trip.trip.boarding_started` | Trip | Notification | `{ tripId, boardingStartedAt }` |
+| `trip.trip.assigned` | Trip | Notification | `{ tripId, operatorId, driverUserId, assistantUserId?, routeName, vehiclePlateNumber, departureDateTime }` |
+| `trip.trip.crew_changed` | Trip | Notification | `{ tripId, operatorId, oldDriverUserId, oldAssistantUserId?, driverUserId, assistantUserId?, routeName, vehiclePlateNumber?, departureDateTime }` |
 | `trip.trip.started` | Trip | Parcel (block new parcel), Tracking | `{ tripId, actualDepartureTime }` |
 | `trip.trip.completed` | Trip | Booking, Parcel, Payment (settlement eligibility) | `{ tripId, completedAt, hasSubstitution }` |
 | `trip.trip.disrupted` | Trip | Booking, Parcel, Payment | `{ tripId, hasSubstitution, reason }` |
