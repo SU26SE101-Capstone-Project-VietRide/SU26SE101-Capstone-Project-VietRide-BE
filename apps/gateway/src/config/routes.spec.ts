@@ -105,6 +105,11 @@ describe('buildRouteTable', () => {
     const cases = [
       ['/v1/driver/me/schedule', '/v1/driver', env.TRIP_BASE_URL],
       [
+        '/v1/driver/trips/11111111-1111-1111-1111-111111111111/route',
+        '/v1/driver',
+        env.TRIP_BASE_URL,
+      ],
+      [
         '/v1/bookings/trips/11111111-1111-1111-1111-111111111111/manifest',
         '/v1/bookings/trips',
         env.BOOKING_BASE_URL,
@@ -138,6 +143,41 @@ describe('buildRouteTable', () => {
     expect(route?.target).toBe(env.BOOKING_BASE_URL);
     expect(route?.authRequired).toBe('user');
     expect(route?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
+  });
+
+  it('routes operator booking list and detail to Booking with the exact operator role union', () => {
+    const listRoute = matchRoute(routes, '/v1/operator/bookings');
+    const detailRoute = matchRoute(
+      routes,
+      '/v1/operator/bookings/11111111-1111-4111-8111-111111111111',
+    );
+
+    [listRoute, detailRoute].forEach((route) => {
+      expect(route?.prefix).toBe('/v1/operator/bookings');
+      expect(route?.target).toBe(env.BOOKING_BASE_URL);
+      expect(route?.authRequired).toBe('user');
+      expect(route?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
+      expect(route?.requiredRoles).not.toContain('PASSENGER');
+      expect(route?.requiredRoles).not.toContain('DRIVER');
+      expect(route?.requiredRoles).not.toContain('SYSTEM_ADMIN');
+    });
+  });
+
+  it('keeps operator booking routes distinct from neighboring Trip and Booking prefixes', () => {
+    const cases = [
+      ['/v1/operator/bookings', '/v1/operator/bookings', env.BOOKING_BASE_URL],
+      ['/v1/operator/trips', '/v1/operator/trips', env.TRIP_BASE_URL],
+      ['/v1/operator/booking-stats', '/v1/operator/booking-stats', env.BOOKING_BASE_URL],
+      ['/v1/bookings', '/v1/bookings', env.BOOKING_BASE_URL],
+      ['/v1/bookings/trips/11111111-1111-4111-8111-111111111111/manifest', '/v1/bookings/trips', env.BOOKING_BASE_URL],
+    ] as const;
+
+    cases.forEach(([path, prefix, target]) => {
+      const route = matchRoute(routes, path);
+
+      expect(route?.prefix).toBe(prefix);
+      expect(route?.target).toBe(target);
+    });
   });
 
   it('matches cross-service admin routes to the correct upstream services', () => {

@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
+using VietRide.Booking.Application.Features.OperatorBookings.GetOperatorBookingDetail;
+using VietRide.Booking.Application.Features.OperatorBookings.ListOperatorBookings;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Booking.Domain.ValueObjects;
 using VietRide.Shared.Application.Repositories;
@@ -52,6 +54,136 @@ internal sealed class BookingRepository : IBookingRepository
     // -----------------------------------------------------------------------
 
     /// <inheritdoc/>
+    public async Task<OperatorBookingDetailDto?> GetOperatorBookingDetailAsync(
+        Guid bookingId, Guid operatorId, CancellationToken ct = default)
+    {
+        var booking = await _db.Bookings.AsNoTracking()
+            .Where(row => row.Id == bookingId && row.OperatorId == operatorId)
+            .Select(row => new
+            {
+                row.Id,
+                BookingCode = row.BookingCode.Value,
+                BuyerUserId = row.PassengerUserId,
+                row.TripId,
+                Status = row.Status.ToString(),
+                row.TripSnapshotRouteName,
+                row.TripSnapshotOriginName,
+                row.TripSnapshotDestName,
+                row.TripSnapshotDeparture,
+                SeatCount = row.Passengers.Count,
+                BaseFare = row.BaseFare.Amount,
+                DiscountAmount = row.DiscountAmount.Amount,
+                TotalAmount = row.TotalAmount.Amount,
+                row.PickupStationId,
+                row.PickupStopId,
+                row.DropoffStationId,
+                row.DropoffStopId,
+                row.BookingGroupId,
+                TripDirection = row.TripDirection == null ? null : row.TripDirection.ToString(),
+                CancellationReason = row.CancellationReason == null ? null : row.CancellationReason.ToString(),
+                row.CreatedAt,
+            }).SingleOrDefaultAsync(ct);
+        if (booking is null)
+            return null;
+
+        var seats = await (from passenger in _db.Passengers.AsNoTracking()
+                           join ticket in _db.Tickets.AsNoTracking() on passenger.Id equals ticket.PassengerId
+                           where passenger.BookingId == bookingId
+                           orderby passenger.SeatNumber, passenger.Id
+                           select new OperatorBookingSeatDto(passenger.Id, ticket.Id, ticket.TicketCode.Value,
+                               passenger.SeatNumber, ticket.Status.ToString(), passenger.BoardingStatus.ToString()))
+            .ToListAsync(ct);
+        var timeline = await _db.BookingStatusHistories.AsNoTracking()
+            .Where(history => history.BookingId == bookingId)
+            .OrderBy(history => history.OccurredAt).ThenBy(history => history.Id)
+            .Select(history => new OperatorBookingStatusTimelineDto(history.Status.ToString(), history.OccurredAt, history.ReasonCode))
+            .ToListAsync(ct);
+
+        return new OperatorBookingDetailDto(booking.Id, booking.BookingCode, booking.BuyerUserId, booking.TripId,
+            booking.Status, new OperatorBookingTripDto(booking.TripSnapshotRouteName, booking.TripSnapshotOriginName,
+                booking.TripSnapshotDestName, booking.TripSnapshotDeparture), booking.SeatCount, booking.BaseFare,
+            booking.DiscountAmount, booking.TotalAmount, booking.PickupStationId, booking.PickupStopId,
+            booking.DropoffStationId, booking.DropoffStopId, booking.BookingGroupId, booking.TripDirection,
+            booking.CancellationReason, booking.CreatedAt, seats, timeline);
+    }
+
+    public Task<bool> BookingExistsAsync(Guid bookingId, CancellationToken ct = default)
+        => _db.Bookings.AsNoTracking().AnyAsync(row => row.Id == bookingId, ct);
+
+    public async Task<OperatorBookingListPage> ListOperatorBookingsAsync(
+        OperatorBookingListCriteria criteria,
+        CancellationToken ct = default)
+    {
+        IQueryable<BookingEntity> query = string.IsNullOrEmpty(criteria.BookingCode)
+            ? _db.Bookings.Where(booking => booking.OperatorId == criteria.OperatorId)
+            : _db.Bookings.FromSqlInterpolated($@"
+                SELECT *
+                FROM vietride_booking.bookings
+                WHERE operator_id = {criteria.OperatorId}
+                  AND UPPER(booking_code) = UPPER({criteria.BookingCode})");
+        query = query.AsNoTracking();
+
+        if (criteria.Statuses is { Count: > 0 })
+            query = query.Where(booking => criteria.Statuses.Contains(booking.Status));
+        if (criteria.TripId.HasValue)
+            query = query.Where(booking => booking.TripId == criteria.TripId.Value);
+        if (criteria.DepartureFrom.HasValue)
+            query = query.Where(booking => booking.TripSnapshotDeparture >= criteria.DepartureFrom.Value);
+        if (criteria.DepartureTo.HasValue)
+            query = query.Where(booking => booking.TripSnapshotDeparture < criteria.DepartureTo.Value);
+        if (criteria.PassengerUserId.HasValue)
+            query = query.Where(booking => booking.PassengerUserId == criteria.PassengerUserId.Value);
+        var totalItems = await query.LongCountAsync(ct);
+
+        var offset = ((long)criteria.Page - 1) * criteria.PageSize;
+        if (offset >= totalItems)
+            return new OperatorBookingListPage([], totalItems);
+
+        // IQueryable.Skip accepts only an int. Do the paging arithmetic in long first and
+        // narrow only after the count proves this is a real, representable page offset.
+        if (offset > int.MaxValue)
+            throw new InvalidOperationException("The requested page offset exceeds the EF paging limit.");
+        var safeOffset = (int)offset;
+        query = ApplyOrdering(query, criteria.SortBy, criteria.SortDescending);
+        var items = await query
+            .Skip(safeOffset)
+            .Take(criteria.PageSize)
+            .Select(booking => new OperatorBookingListItem(
+                booking.Id,
+                booking.BookingCode.Value,
+                booking.TripId,
+                booking.Status.ToString(),
+                new OperatorBookingTripDto(
+                    booking.TripSnapshotRouteName,
+                    booking.TripSnapshotOriginName,
+                    booking.TripSnapshotDestName,
+                    booking.TripSnapshotDeparture),
+                booking.Passengers.Count,
+                booking.TotalAmount.Amount,
+                booking.CreatedAt))
+            .ToListAsync(ct);
+
+        return new OperatorBookingListPage(items, totalItems);
+    }
+
+    private static IQueryable<BookingEntity> ApplyOrdering(
+        IQueryable<BookingEntity> query,
+        string sortBy,
+        bool descending)
+        => (sortBy, descending) switch
+        {
+            ("departureAt", false) => query.OrderBy(x => x.TripSnapshotDeparture).ThenBy(x => x.Id),
+            ("departureAt", true) => query.OrderByDescending(x => x.TripSnapshotDeparture).ThenByDescending(x => x.Id),
+            ("bookingCode", false) => query.OrderBy(x => x.BookingCode).ThenBy(x => x.Id),
+            ("bookingCode", true) => query.OrderByDescending(x => x.BookingCode).ThenByDescending(x => x.Id),
+            ("status", false) => query.OrderBy(x => x.Status).ThenBy(x => x.Id),
+            ("status", true) => query.OrderByDescending(x => x.Status).ThenByDescending(x => x.Id),
+            ("totalAmount", false) => query.OrderBy(x => x.TotalAmount).ThenBy(x => x.Id),
+            ("totalAmount", true) => query.OrderByDescending(x => x.TotalAmount).ThenByDescending(x => x.Id),
+            ("createdAt", false) => query.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id),
+            _ => query.OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id),
+        };
+
     public async Task<BookingEntity?> FindByBookingCodeAsync(
         string bookingCode,
         CancellationToken ct = default)

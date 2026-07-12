@@ -2,6 +2,9 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.Services;
+using VietRide.Booking.Domain.Constants;
+using VietRide.Booking.Domain.Entities;
+using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Booking.Application.Features.Bookings.ExpireBookingOnPayment;
@@ -12,6 +15,7 @@ public sealed class ExpireBookingOnPaymentCommandHandler
     private const string BookingReferenceType = "BOOKING";
 
     private readonly IBookingRepository _bookings;
+    private readonly IBookingStatusHistoryRepository _statusHistory;
     private readonly IBookingService _bookingService;
     private readonly IClock _clock;
     private readonly ILogger<ExpireBookingOnPaymentCommandHandler> _logger;
@@ -20,9 +24,11 @@ public sealed class ExpireBookingOnPaymentCommandHandler
         IBookingRepository bookings,
         IBookingService bookingService,
         IClock clock,
-        ILogger<ExpireBookingOnPaymentCommandHandler> logger)
+        ILogger<ExpireBookingOnPaymentCommandHandler> logger,
+        IBookingStatusHistoryRepository statusHistory)
     {
         _bookings = bookings;
+        _statusHistory = statusHistory;
         _bookingService = bookingService;
         _clock = clock;
         _logger = logger;
@@ -47,9 +53,10 @@ public sealed class ExpireBookingOnPaymentCommandHandler
             return false;
         }
 
+        var now = _clock.UtcNow;
         var transitioned = await _bookings.TryExpirePendingPaymentAsync(
             request.ReferenceId,
-            _clock.UtcNow,
+            now,
             cancellationToken);
         if (!transitioned)
         {
@@ -59,6 +66,14 @@ public sealed class ExpireBookingOnPaymentCommandHandler
                 request.ReferenceId);
             return false;
         }
+
+        await _statusHistory.AddAsync(
+            BookingStatusHistory.Create(
+                request.ReferenceId,
+                BookingStatus.EXPIRED,
+                now,
+                BookingStatusHistorySource.ExpireOnPayment),
+            cancellationToken);
 
         var seatNumbers = snapshot.PassengerSeatAssignments
             .Select(p => p.SeatNumber)

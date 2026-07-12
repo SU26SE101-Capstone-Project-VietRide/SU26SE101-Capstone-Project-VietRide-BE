@@ -4,7 +4,9 @@ using Microsoft.Extensions.Logging;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
+using VietRide.Booking.Domain.Constants;
 using VietRide.Booking.Domain.Entities;
+using VietRide.Booking.Domain.Enums;
 using VietRide.Booking.Domain.ValueObjects;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
@@ -41,6 +43,7 @@ public sealed class CreateBookingCommandHandler
     private const int SeatLockTtlSeconds = 10 * 60; // SEAT_LOCK_TTL_MINUTES=10 (BSOT §10 line 2360)
 
     private readonly IBookingRepository _bookings;
+    private readonly IBookingStatusHistoryRepository _statusHistory;
     private readonly ITripServiceClient _tripClient;
     private readonly IPaymentServiceClient _paymentClient;
     private readonly IBookingService _bookingService;
@@ -57,9 +60,11 @@ public sealed class CreateBookingCommandHandler
         IVoucherService voucherService,
         IIntegrationEventOutbox outbox,
         IClock clock,
-        ILogger<CreateBookingCommandHandler> logger)
+        ILogger<CreateBookingCommandHandler> logger,
+        IBookingStatusHistoryRepository statusHistory)
     {
         _bookings = bookings;
+        _statusHistory = statusHistory;
         _tripClient = tripClient;
         _paymentClient = paymentClient;
         _bookingService = bookingService;
@@ -214,6 +219,14 @@ public sealed class CreateBookingCommandHandler
             }
 
             await _bookings.AddAsync(booking, cancellationToken);
+            await _statusHistory.AddAsync(
+                BookingStatusHistory.Create(
+                    booking.Id,
+                    BookingStatus.PENDING_PAYMENT,
+                    now,
+                    BookingStatusHistorySource.CreateBooking,
+                    request.PassengerUserId),
+                cancellationToken);
 
             // Record VoucherUsage row (same DbContext UoW) now that booking.Id is known.
             if (validatedVoucherId.HasValue)
@@ -328,6 +341,14 @@ public sealed class CreateBookingCommandHandler
         }
 
         booking.Confirm(now);
+        await _statusHistory.AddAsync(
+            BookingStatusHistory.Create(
+                booking.Id,
+                BookingStatus.CONFIRMED,
+                now,
+                BookingStatusHistorySource.CreateBooking,
+                request.PassengerUserId),
+            cancellationToken);
 
         // Enqueue booking.booking.confirmed (same tx — outbox committed by TransactionBehavior).
         // voucherUsageId propagated in event payload (BSOT:1741 optional field, replaces hardcoded null).

@@ -307,27 +307,27 @@ public sealed class ParcelEndpointTests : IClassFixture<VietRideWebApplicationFa
     // ── Missing/Invalid input → 400 model binding error envelope ────
 
     [Fact]
-    public async Task AvailableTrips_MissingQueryParams_Returns400_WithValidationEnvelope()
+    public async Task AvailableTrips_MissingQueryParams_Returns422_WithValidationEnvelope()
     {
         using var client = CreateAuthenticatedClient("PASSENGER");
 
         var response = await client.GetAsync("/v1/parcels/available-trips");
 
-        await AssertValidationEnvelope(response, HttpStatusCode.BadRequest);
+        await AssertValidationEnvelope(response, HttpStatusCode.UnprocessableEntity);
         var body = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(body);
         doc.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("VALIDATION_ERROR");
     }
 
     [Fact]
-    public async Task AvailableTrips_InvalidDate_Returns400_WithValidationEnvelope()
+    public async Task AvailableTrips_InvalidDate_Returns422_WithValidationEnvelope()
     {
         using var client = CreateAuthenticatedClient("PASSENGER");
 
         var response = await client.GetAsync(
             "/v1/parcels/available-trips?originStationId=11111111-1111-1111-1111-111111111111&destinationStationId=22222222-2222-2222-2222-222222222222&departureDate=not-a-date&estimatedWeightKg=5&sizeCategory=MEDIUM");
 
-        await AssertValidationEnvelope(response, HttpStatusCode.BadRequest);
+        await AssertValidationEnvelope(response, HttpStatusCode.UnprocessableEntity);
     }
 
     // ── Fare list: auth passes, DB fails → 503 not 403/401 ──────────

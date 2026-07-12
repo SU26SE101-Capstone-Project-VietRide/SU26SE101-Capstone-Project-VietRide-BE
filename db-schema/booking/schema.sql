@@ -126,6 +126,20 @@ CREATE INDEX idx_bookings_status_created_at ON bookings (status, created_at)
     WHERE status IN ('PENDING_PAYMENT', 'CONFIRMED');
 CREATE INDEX idx_bookings_trip_snapshot_departure ON bookings (trip_snapshot_departure DESC);
 
+-- Append-only authoritative Booking lifecycle timeline. Application code permits INSERT/read only.
+CREATE TABLE booking_status_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    booking_id UUID NOT NULL REFERENCES bookings (id) ON DELETE RESTRICT,
+    status booking_status NOT NULL,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    reason_code VARCHAR(100) NULL,
+    actor_user_id UUID NULL, -- logical FK to identity.users; intentionally no DB FK
+    source VARCHAR(100) NOT NULL
+);
+
+CREATE INDEX idx_booking_status_history_booking_occurred_id
+    ON booking_status_history (booking_id, occurred_at, id);
+
 COMMENT ON COLUMN bookings.booking_code IS
     'Format VR-yyyyMMdd-XXXXXXXX (8 chars base32 uppercase). Booking/order code for history and backward compatibility; ticket QR uses tickets.ticket_code.';
 COMMENT ON COLUMN bookings.total_amount IS

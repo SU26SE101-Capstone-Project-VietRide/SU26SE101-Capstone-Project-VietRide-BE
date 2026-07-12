@@ -7,6 +7,8 @@ using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Application.Features.Bookings.CreateBooking;
+using VietRide.Booking.Domain.Entities;
+using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
@@ -52,6 +54,7 @@ public class CreateBookingCommandHandlerTests
         ExpiresAt: DateTimeOffset.UtcNow.AddMinutes(10));
 
     private readonly IBookingRepository _bookings = Substitute.For<IBookingRepository>();
+    private readonly IBookingStatusHistoryRepository _statusHistory = Substitute.For<IBookingStatusHistoryRepository>();
     private readonly ITripServiceClient _tripClient = Substitute.For<ITripServiceClient>();
     private readonly IPaymentServiceClient _paymentClient = Substitute.For<IPaymentServiceClient>();
     private readonly IBookingService _bookingService = Substitute.For<IBookingService>();
@@ -61,7 +64,7 @@ public class CreateBookingCommandHandlerTests
 
     private CreateBookingCommandHandler BuildSut() => new(
         _bookings, _tripClient, _paymentClient, _bookingService, _voucherService, _outbox, _clock,
-        NullLogger<CreateBookingCommandHandler>.Instance);
+        NullLogger<CreateBookingCommandHandler>.Instance, _statusHistory);
 
     private static CreateBookingCommand BuildCommand(
         int seatCount = 1,
@@ -88,7 +91,8 @@ public class CreateBookingCommandHandlerTests
     public async Task Handle_WalletPayment_HappyPath_ReturnsConfirmedBooking()
     {
         // Arrange
-        _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        var now = new DateTimeOffset(2026, 7, 11, 1, 2, 3, TimeSpan.Zero);
+        _clock.UtcNow.Returns(now);
         _tripClient.GetTripSnapshotAsync(TripId, default).ReturnsForAnyArgs(ValidTrip);
         _tripClient.LockSeatsAsync(default, default!, default, default!, default, default)
             .ReturnsForAnyArgs(new LockSeatsOutcome.Success(LockData));
@@ -115,6 +119,16 @@ public class CreateBookingCommandHandlerTests
             .AddAsync(
                 Arg.Is<BookingEntity>(booking => booking.SeatLockToken == SeatLockToken),
                 Arg.Any<CancellationToken>());
+
+        await _statusHistory.Received(2).AddAsync(
+            Arg.Is<BookingStatusHistory>(history => history.BookingId == result.BookingId
+                && (history.Status == BookingStatus.PENDING_PAYMENT || history.Status == BookingStatus.CONFIRMED)
+                && history.OccurredAt == now
+                && history.Source == "CREATE_BOOKING"
+                && history.ActorUserId == PassengerUserId
+                && history.ReasonCode == null),
+            Arg.Any<CancellationToken>());
+        _ = _clock.Received(1).UtcNow;
 
         // Confirm outbox was enqueued exactly once
         await _outbox.Received(1)
@@ -226,7 +240,8 @@ public class CreateBookingCommandHandlerTests
             voucherService,
             outbox,
             clock,
-            NullLogger<CreateBookingCommandHandler>.Instance);
+            NullLogger<CreateBookingCommandHandler>.Instance,
+            Substitute.For<IBookingStatusHistoryRepository>());
         var command = BuildCommand(seatCount: 1, paymentMethod: "WALLET");
 
         // Act: two passenger attempts race for the same trip/seat.

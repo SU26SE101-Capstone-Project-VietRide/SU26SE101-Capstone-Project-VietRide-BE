@@ -78,6 +78,46 @@ public sealed class InternalUsersEndpointsTests
     }
 
     [Fact]
+    public async Task GetUserByPhone_WithInternalJwt_ReturnsRawUserId()
+    {
+        var user = User.CreateOperatorScopedPendingPassword(
+            "phone@example.com", PhoneNumber.Parse("+84901234567"), "Phone User", UserRole.DRIVER, Guid.NewGuid());
+        await using var app = await CreateAppAsync([], [user]);
+        using var client = app.GetTestClient();
+        client.DefaultRequestHeaders.Add(InternalJwtAuthenticationExtensions.HeaderName, $"Bearer {CreateInternalJwt()}");
+
+        var response = await client.GetAsync("/internal/v1/users/by-phone?phone=%2B84901234567");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.False(doc.RootElement.TryGetProperty("success", out _));
+        Assert.Equal(user.Id, doc.RootElement.GetProperty("userId").GetGuid());
+        Assert.Single(doc.RootElement.EnumerateObject());
+    }
+
+    [Fact]
+    public async Task GetUserByPhone_NoMatch_ReturnsResourceNotFoundEnvelope()
+    {
+        await using var app = await CreateAppAsync([]);
+        using var client = app.GetTestClient();
+        client.DefaultRequestHeaders.Add(InternalJwtAuthenticationExtensions.HeaderName, $"Bearer {CreateInternalJwt()}");
+
+        var response = await client.GetAsync("/internal/v1/users/by-phone?phone=%2B84901234567");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("RESOURCE_NOT_FOUND", doc.RootElement.GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task GetUserByPhone_WithoutInternalJwt_ReturnsUnauthorized()
+    {
+        await using var app = await CreateAppAsync([]);
+        var response = await app.GetTestClient().GetAsync("/internal/v1/users/by-phone?phone=%2B84901234567");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
     public async Task GetDeviceTokens_WithoutInternalJwt_ReturnsUnauthorizedEnvelope()
     {
         await using var app = await CreateAppAsync(Array.Empty<DeviceRow>());
@@ -101,7 +141,11 @@ public sealed class InternalUsersEndpointsTests
         builder.WebHost.UseTestServer();
 
         builder.Services
-            .AddControllers(options => options.Filters.Add<ApiResponseResultFilter>())
+            .AddControllers(options =>
+            {
+                options.Filters.Add<ApiResponseExceptionFilter>();
+                options.Filters.Add<ApiResponseResultFilter>();
+            })
             .AddApplicationPart(typeof(InternalUsersController).Assembly);
         builder.Services.AddAuthentication(InternalJwtAuthenticationExtensions.Scheme)
             .AddInternalJwt(InternalJwtSecret);
@@ -158,6 +202,12 @@ public sealed class InternalUsersEndpointsTests
             {
                 var userId = (Guid)args![0]!;
                 return Task.FromResult(_users.FirstOrDefault(user => user.Id == userId));
+            }
+
+            if (targetMethod?.Name == "GetByPhoneAsync")
+            {
+                var phone = (string)args![0]!;
+                return Task.FromResult(_users.FirstOrDefault(user => user.Phone?.Value == phone));
             }
 
             if (targetMethod?.ReturnType == typeof(IQueryable<User>))

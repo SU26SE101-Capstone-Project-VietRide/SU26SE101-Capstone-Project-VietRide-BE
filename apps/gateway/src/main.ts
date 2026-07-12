@@ -25,6 +25,9 @@ async function bootstrap(): Promise<void> {
   const swaggerOptions = {
     explorer: true,
     swaggerOptions: {
+      // All downstream specs share the UserAccessToken scheme. Keep the entered
+      // bearer token while Swagger UI switches between service definitions.
+      persistAuthorization: true,
       urls: [
         { name: 'Identity Service', url: '/api-specs/identity' },
         { name: 'Trip Service', url: '/api-specs/trip' },
