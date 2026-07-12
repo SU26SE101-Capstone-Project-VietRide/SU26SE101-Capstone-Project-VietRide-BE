@@ -1,0 +1,46 @@
+name: day37-e2e
+
+# This overlay only changes Docker object names and host ports. It is used with
+# the main compose file so the Day 37 harness has an isolated network and data.
+services:
+  postgres:
+    container_name: day37-e2e-postgres
+    ports:
+      - "55437:5432"
+  redis:
+    container_name: day37-e2e-redis
+    ports:
+      - "56379:6379"
+  rabbitmq:
+    container_name: day37-e2e-rabbitmq
+    ports:
+      - "55672:5672"
+      - "55673:15672"
+  identity:
+    container_name: day37-e2e-identity
+    ports:
+      - "55001:5001"
+  trip:
+    container_name: day37-e2e-trip
+    ports:
+      - "55002:5002"
+  booking:
+    container_name: day37-e2e-booking
+    ports:
+      - "55003:5003"
+  payment:
+    container_name: day37-e2e-payment
+    ports:
+      - "55004:5004"
+  parcel:
+    container_name: day37-e2e-parcel
+    ports:
+      - "55005:5005"
+  gateway:
+    container_name: day37-e2e-gateway
+    ports:
+      - "55300:3000"
+
+networks:
+  default:
+    name: day37-e2e-net
