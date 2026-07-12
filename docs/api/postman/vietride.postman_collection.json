@@ -4865,6 +4865,219 @@
           }
         },
         {
+          "name": "1a. Driver gets assigned trip route geometry",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Driver route geometry uses the frozen schema', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.data).to.include.all.keys('tripId', 'routeId', 'pathPolyline', 'originStation', 'destinationStation', 'stops');",
+                  "  pm.expect(body.data.pathPolyline).to.equal(null);",
+                  "  pm.expect(body.data.originStation).to.include.all.keys('stationId', 'name', 'latitude', 'longitude');",
+                  "  pm.expect(body.data.destinationStation).to.include.all.keys('stationId', 'name', 'latitude', 'longitude');",
+                  "  pm.expect(body.data.stops).to.be.an('array');",
+                  "  pm.expect(JSON.stringify(body.data)).not.to.match(/phone|email|operatorName/i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driverAccessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/driver/trips/{{day18TripId}}/route",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "driver", "trips", "{{day18TripId}}", "route"]
+            },
+            "description": "Assigned Driver reads the main Route polyline and ordered fallback waypoints through Gateway."
+          }
+        },
+        {
+          "name": "1b. Assistant gets assigned trip route geometry",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Assigned Assistant can read route geometry', function () { pm.response.to.have.status(200); pm.expect(body.data.tripId).to.equal(pm.environment.get('day18TripId')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{assistantAccessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/driver/trips/{{day18TripId}}/route",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "driver", "trips", "{{day18TripId}}", "route"]
+            }
+          }
+        },
+        {
+          "name": "1c. Driver gets assigned encoded route polyline unchanged",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Encoded precision-5 polyline and ordered stops are returned unchanged', function () { pm.response.to.have.status(200); pm.expect(body.data.tripId).to.equal(pm.environment.get('day18OtherTripId')); pm.expect(body.data.pathPolyline).to.equal(atob(pm.environment.get('day18EncodedPolylineBase64'))); pm.expect(body.data.stops.length).to.be.above(0); const orders = body.data.stops.map(x => x.orderIndex); pm.expect(orders).to.eql([...orders].sort((a, b) => a - b)); pm.expect(body.data.stops[0]).to.include.all.keys('stopId', 'name', 'latitude', 'longitude', 'orderIndex', 'estimatedArrivalTime', 'allowPickup', 'allowDropoff'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driverAccessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/driver/trips/{{day18OtherTripId}}/route",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "driver", "trips", "{{day18OtherTripId}}", "route"]
+            }
+          }
+        },
+        {
+          "name": "1d. Unassigned DRIVER cannot access trip route geometry",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Trip rejects a different DRIVER assignment', function () { pm.response.to.have.status(403); pm.expect(body.error.code).to.equal('FORBIDDEN'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{unassignedDriverAccessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/driver/trips/{{day18TripId}}/route",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "driver", "trips", "{{day18TripId}}", "route"]
+            }
+          }
+        },
+        {
+          "name": "1e. Unknown trip route is not found",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Unknown trip is 404 TRIP_NOT_FOUND', function () { pm.response.to.have.status(404); pm.expect(body.error.code).to.equal('TRIP_NOT_FOUND'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driverAccessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/driver/trips/18181818-1818-4181-8181-181818189999/route",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "driver", "trips", "18181818-1818-4181-8181-181818189999", "route"]
+            }
+          }
+        },
+        {
+          "name": "1f. Malformed trip id is validation error",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Malformed tripId is 422 VALIDATION_ERROR', function () { pm.response.to.have.status(422); pm.expect(body.error.code).to.equal('VALIDATION_ERROR'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driverAccessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/driver/trips/not-a-guid/route",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "driver", "trips", "not-a-guid", "route"]
+            }
+          }
+        },
+        {
+          "name": "1g. PASSENGER cannot access trip route geometry",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Gateway rejects PASSENGER before Trip', function () { pm.response.to.have.status(403); pm.expect(body.error.code).to.equal('FORBIDDEN'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passengerAccessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/driver/trips/{{day18TripId}}/route",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "driver", "trips", "{{day18TripId}}", "route"]
+            }
+          }
+        },
+        {
           "name": "2. PASSENGER cannot access driver schedule",
           "event": [
             {

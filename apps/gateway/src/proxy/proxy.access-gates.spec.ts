@@ -300,6 +300,61 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
     },
   );
 
+  it.each(['DRIVER', 'ASSISTANT'] as const)(
+    'proxies %s GET assigned trip route geometry to Trip',
+    async (role) => {
+      const upstreamHandler = arrangeProxyPass();
+      const signer = {
+        sign: jest.fn().mockResolvedValue('internal-token'),
+      } as unknown as InternalJwtSigner;
+      const handler = createProxyHandler(env, signer);
+      const authorization = await makeAuthorizationHeader({ sub: `${role.toLowerCase()}-1`, role });
+      const path = '/v1/driver/trips/11111111-1111-1111-1111-111111111111/route';
+      const req = makeRequest(
+        path,
+        { authorization, 'x-request-id': `req-driver-route-${role.toLowerCase()}` },
+        'GET',
+      );
+      const res = makeResponse();
+      const next = jest.fn() as NextFunction;
+
+      await handler(req, res, next);
+
+      expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+        expect.objectContaining({ target: env.TRIP_BASE_URL }),
+      );
+      expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
+      expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+      expect(res.status).not.toHaveBeenCalled();
+    },
+  );
+
+  it('returns 403 FORBIDDEN without proxying PASSENGER assigned trip route request', async () => {
+    const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({ sub: 'passenger-1', role: 'PASSENGER' });
+    const req = makeRequest(
+      '/v1/driver/trips/11111111-1111-1111-1111-111111111111/route',
+      { authorization, 'x-request-id': 'req-driver-route-passenger' },
+      'GET',
+    );
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 403,
+      error: { code: 'FORBIDDEN' },
+      meta: { traceId: 'req-driver-route-passenger' },
+    });
+    expect(signer.sign).not.toHaveBeenCalled();
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['POST', '/v1/operator/stations'],
     ['GET', '/v1/operator/stops'],

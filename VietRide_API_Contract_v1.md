@@ -4220,6 +4220,58 @@ Response `200`: `GetMyDriverScheduleResult` in the ADR 0004 success envelope.
 Trips are ordered by `departureDateTime`, then by `tripId`. Date filtering converts the inclusive
 ICT date range to UTC boundaries before querying. No Trip state is mutated.
 
+### GET `/v1/driver/trips/{tripId}/route`
+
+Auth: `DRIVER` or `ASSISTANT`. The authenticated JWT `sub` must equal the Trip's
+`driverUserId` or `assistantUserId`; the caller cannot supply a user or operator identifier.
+
+Response `200` uses the ADR 0004 success envelope:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "tripId": "uuid",
+    "routeId": "uuid",
+    "pathPolyline": "encoded-google-polyline-precision-5-or-null",
+    "originStation": {
+      "stationId": "uuid",
+      "name": "Bến xe Miền Đông",
+      "latitude": 10.801,
+      "longitude": 106.714
+    },
+    "destinationStation": {
+      "stationId": "uuid",
+      "name": "Bến xe Đà Lạt",
+      "latitude": null,
+      "longitude": null
+    },
+    "stops": [
+      {
+        "stopId": "uuid",
+        "name": "Ngã tư Dầu Giây",
+        "latitude": 10.947,
+        "longitude": 107.221,
+        "orderIndex": 1,
+        "estimatedArrivalTime": "2026-07-12T03:30:00Z",
+        "allowPickup": true,
+        "allowDropoff": true
+      }
+    ]
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-12T01:00:00Z" }
+}
+```
+
+`pathPolyline` is the Route's nullable Google encoded polyline (precision-5) and is returned
+without decode/re-encode. `stops` uses the immutable TripStop sequence and is ordered by
+`orderIndex ASC`; Station coordinates remain nullable. When `pathPolyline` is null, clients may
+draw the available coordinates in origin → stops → destination order. The response contains no
+PII or operator-management metadata. Unknown Trip/Route returns `404 TRIP_NOT_FOUND`; an existing
+Trip not assigned to the caller returns `403 FORBIDDEN`; malformed `tripId` returns
+`422 VALIDATION_ERROR`.
+
 ### GET `/v1/bookings/trips/{tripId}/manifest`
 
 Auth: `DRIVER` or `ASSISTANT`. The authenticated JWT `sub` must equal the Trip snapshot's

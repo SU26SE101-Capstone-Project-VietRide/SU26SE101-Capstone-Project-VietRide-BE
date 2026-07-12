@@ -102,6 +102,11 @@ describe('buildRouteTable', () => {
     const cases = [
       ['/v1/driver/me/schedule', '/v1/driver', env.TRIP_BASE_URL],
       [
+        '/v1/driver/trips/11111111-1111-1111-1111-111111111111/route',
+        '/v1/driver',
+        env.TRIP_BASE_URL,
+      ],
+      [
         '/v1/bookings/trips/11111111-1111-1111-1111-111111111111/manifest',
         '/v1/bookings/trips',
         env.BOOKING_BASE_URL,

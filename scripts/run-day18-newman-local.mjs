@@ -8,6 +8,8 @@ import { SignJWT, importPKCS8 } from 'jose';
 const root = process.cwd();
 const baseUrl = process.env.GATEWAY_BASE_URL || 'http://localhost:3000';
 const driverId = '18181818-1818-4181-8181-181818181801';
+const assistantId = '18181818-1818-4181-8181-181818181803';
+const unassignedDriverId = '18181818-1818-4181-8181-181818181804';
 const passengerUserId = '18181818-1818-4181-8181-181818181802';
 const tripId = '18181818-1818-4181-8181-181818181811';
 const otherTripId = '18181818-1818-4181-8181-181818181812';
@@ -32,18 +34,39 @@ const template = psql(
 );
 if (!template) throw new Error('Day-18 E2E needs one existing local Trip route/vehicle fixture.');
 const [operatorId, routeId, vehicleId] = template.split('|');
+const encodedPolylineTemplate = psql(
+  'vietride_trip',
+  `SELECT id || '|' || path_polyline
+   FROM vietride_trip.routes
+   WHERE path_polyline IS NOT NULL AND path_polyline <> ''
+   ORDER BY created_at LIMIT 1`,
+);
+if (!encodedPolylineTemplate)
+  throw new Error('Day-18 E2E needs one existing Route with an encoded polyline fixture.');
+const encodedPolylineSeparator = encodedPolylineTemplate.indexOf('|');
+const encodedPolylineRouteId = encodedPolylineTemplate.slice(0, encodedPolylineSeparator);
+const encodedPolyline = encodedPolylineTemplate.slice(encodedPolylineSeparator + 1);
+const encodedPolylineBase64 = Buffer.from(encodedPolyline, 'utf8').toString('base64');
 
 psql(
   'vietride_trip',
   `DELETE FROM vietride_trip.trips WHERE id IN ('${tripId}', '${otherTripId}');
    INSERT INTO vietride_trip.trips
-     (id, operator_id, route_id, vehicle_id, driver_user_id, departure_date_time,
+     (id, operator_id, route_id, vehicle_id, driver_user_id, assistant_user_id, departure_date_time,
       estimated_arrival_time, status, source, base_fare)
    VALUES
-     ('${tripId}', '${operatorId}', '${routeId}', '${vehicleId}', '${driverId}',
+     ('${tripId}', '${operatorId}', '${routeId}', '${vehicleId}', '${driverId}', '${assistantId}',
       now() + interval '1 day', now() + interval '1 day 4 hours', 'BOARDING', 'MANUAL', 200000),
-     ('${otherTripId}', '${operatorId}', '${routeId}', '${vehicleId}', '${driverId}',
-      now() + interval '2 days', now() + interval '2 days 4 hours', 'BOARDING', 'MANUAL', 200000);`,
+     ('${otherTripId}', '${operatorId}', '${encodedPolylineRouteId}', '${vehicleId}', '${driverId}', '${assistantId}',
+      now() + interval '2 days', now() + interval '2 days 4 hours', 'BOARDING', 'MANUAL', 200000);
+   INSERT INTO vietride_trip.trip_stops
+     (trip_id, stop_id, order_index, estimated_arrival_time, status, allow_pickup,
+      allow_dropoff, distance_from_origin_km)
+   SELECT '${otherTripId}', stop_id, order_index,
+     now() + interval '2 days' + estimated_duration_from_origin_minutes * interval '1 minute',
+     'PENDING', allow_pickup, allow_dropoff, distance_from_origin_km
+   FROM vietride_trip.route_stops
+   WHERE route_id = '${encodedPolylineRouteId}';`,
 );
 psql(
   'vietride_booking',
@@ -84,6 +107,8 @@ async function token(sub, role) {
 }
 
 const driverToken = await token(driverId, 'DRIVER');
+const assistantToken = await token(assistantId, 'ASSISTANT');
+const unassignedDriverToken = await token(unassignedDriverId, 'DRIVER');
 const passengerToken = await token(passengerUserId, 'PASSENGER');
 const run = spawnSync(
   'npx',
@@ -95,9 +120,12 @@ const run = spawnSync(
       : 'Driver - Day 18 schedule + manifest + boarding flow',
     '--env-var', `baseUrl=${baseUrl}`,
     '--env-var', `driverAccessToken=${driverToken}`,
+    '--env-var', `assistantAccessToken=${assistantToken}`,
+    '--env-var', `unassignedDriverAccessToken=${unassignedDriverToken}`,
     '--env-var', `passengerAccessToken=${passengerToken}`,
     '--env-var', `day18TripId=${tripId}`,
     '--env-var', `day18OtherTripId=${otherTripId}`,
+    '--env-var', `day18EncodedPolylineBase64=${encodedPolylineBase64}`,
     '--env-var', `day18PassengerRecordId=${passengerRecordId}`,
     '--env-var', `day18BookingCode=${bookingCode}`,
     '--env-var', `day18TicketCode=${ticketCode}`,

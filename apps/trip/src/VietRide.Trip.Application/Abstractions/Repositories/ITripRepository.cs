@@ -1,4 +1,5 @@
 using VietRide.Shared.Application.Repositories;
+using VietRide.Trip.Application.Features.DriverTrips.GetAssignedTripRoute;
 using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Application.Abstractions.Repositories;
@@ -6,6 +7,9 @@ namespace VietRide.Trip.Application.Abstractions.Repositories;
 public interface ITripRepository : IRepository<Domain.Entities.Trip, Guid>
 {
     Task<Domain.Entities.Trip?> GetWithSeatsAsync(Guid tripId, CancellationToken cancellationToken);
+
+    Task<DriverTripRouteDto?> GetDriverTripRouteAsync(Guid tripId, CancellationToken cancellationToken)
+        => throw new NotSupportedException("Driver trip route reads are not supported by this repository implementation.");
 
     Task<TripCargoMutationResult?> ReserveCargoAsync(
         Guid tripId,

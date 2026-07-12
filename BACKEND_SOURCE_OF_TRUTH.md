@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.24.1
+> **Phiên bản:** 1.25.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-07-11
+> **Cập nhật lần cuối:** 2026-07-12
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1656,6 +1656,14 @@ public Task<IActionResult> CreateVehicle(...) { ... }
 
 Custom `OperatorTenantFilter` injected → filter query theo `operatorId` claim.
 
+Driver/Assistant trip reads use assignment scope rather than operator scope. In particular,
+`GET /v1/driver/trips/{tripId}/route` accepts `DRIVER`/`ASSISTANT` only and returns Route geometry
+only when JWT `sub` equals the Trip's `driver_user_id` or `assistant_user_id`; an existing
+unassigned Trip returns `403 FORBIDDEN`. The response exposes nullable precision-5
+`pathPolyline`, origin/destination Station coordinates, and ordered TripStop coordinates, with no
+PII or operator-management metadata. The existing `/v1/driver` Gateway prefix already owns this
+route; the operator Route endpoint remains role-isolated.
+
 **NestJS:**
 
 ```ts
@@ -2741,6 +2749,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.25.0** | 2026-07-12 | BE lead (Vu) | **MINOR** - Add the assignment-scoped Driver/Assistant Route geometry read `GET /v1/driver/trips/{tripId}/route`. The endpoint returns the main Route's nullable Google precision-5 `pathPolyline`, origin/destination Station coordinates, and ordered TripStop coordinates only when JWT `sub` is assigned as the Trip driver or assistant. Reuses existing `TRIP_NOT_FOUND`, `FORBIDDEN`, `VALIDATION_ERROR`, `/v1/driver` Gateway role gate, and existing schema; no migration, dependency, event, or operator-route permission change. |
 | **1.24.1** | 2026-07-11 | BE lead (Vu) | **PATCH** - Day-19 shared validation-policy correction: model-binding failures (malformed JSON, missing non-nullable body field, type mismatch) now return the ADR 0004 `ApiResponse` error envelope with `422 VALIDATION_ERROR`, matching FluentValidation failures; they are no longer documented as HTTP 400. |
 | **1.24.0** | 2026-07-11 | BE lead (Vu) | **MINOR** - Freeze the Day-19 tenant-scoped operator booking-monitor contract. Register the exact Identity raw phone-to-user lookup and exhaustive Booking error/retry boundary; broaden existing `UPSTREAM_UNAVAILABLE` to generic downstream/inter-service unavailability without adding an error code; replace the proposed Outbox-audit timeline with authoritative append-only `booking_status_history`, including schema, six current source constants, actor/reason rules, atomic writer/no-op semantics, no backfill/event, and deterministic ordering. |
 | **1.23.0** | 2026-07-09 | BE lead (Vu) | **MINOR** - Add public Identity password reset for all `ACTIVE` user roles. `POST /v1/auth/forgot-password` issues a generic response and sends a `PASSWORD_RESET` OTP only for eligible accounts; `POST /v1/auth/reset-password` consumes the OTP, hashes the new password, and revokes active refresh tokens with `PASSWORD_RESET`. No DDL, dependency, or event-key change; reuses `email_verification_tokens`, `identity.otp.requested`, and Redis `identity:pwd_reset_rate:{email}`. |
