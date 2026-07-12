@@ -19,7 +19,7 @@ public sealed class StationRepositorySearchTests
             "BuildSearchActiveByNameQuery",
             BindingFlags.Instance | BindingFlags.NonPublic)!;
 
-        var query = (IQueryable<Station>)buildQuery.Invoke(repository, ["Mien Tay", null, null])!;
+        var query = (IQueryable<Station>)buildQuery.Invoke(repository, ["Mien Tay", null, null, null])!;
 
         var sql = query.ToQueryString();
         sql.Should().Contain("unaccent(name) ILIKE unaccent('%' || @p0 || '%')");
@@ -49,7 +49,7 @@ public sealed class StationRepositorySearchTests
             dbContext.Stations.Add(station);
             await dbContext.SaveChangesAsync();
 
-            var results = await repository.SearchActiveByNameAsync("Mien Tay", null, null, CancellationToken.None);
+            var results = await repository.SearchActiveByNameAsync("Mien Tay", null, null, null, CancellationToken.None);
 
             results.Should().ContainSingle(x => x.Id == station.Id);
             results.Single(x => x.Id == station.Id).Name.Should().Be("Bến xe Miền Tây");

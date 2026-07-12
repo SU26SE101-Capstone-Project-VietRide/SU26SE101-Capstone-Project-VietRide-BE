@@ -509,7 +509,7 @@ public sealed class RouteHandlersTests
 
         public void Remove(Station entity) => stations.Remove(entity);
 
-        public Task<IReadOnlyList<Station>> SearchActiveByNameAsync(string q, string? city, string? province, CancellationToken cancellationToken)
+        public Task<IReadOnlyList<Station>> SearchActiveByNameAsync(string? q, string? city, string? province, Guid? locationId, CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<Station>>(stations);
 
         public void Update(Station entity) { }

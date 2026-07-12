@@ -341,11 +341,25 @@ public sealed class TripHandlerProjectionTests
             : base(stations, station => station.Id) { }
 
         public Task<IReadOnlyList<Station>> SearchActiveByNameAsync(
-            string q,
+            string? q,
             string? city,
             string? province,
-            CancellationToken cancellationToken) =>
-            Task.FromResult((IReadOnlyList<Station>)Query().Where(station => station.Name.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList());
+            Guid? locationId,
+            CancellationToken cancellationToken)
+        {
+            var stations = Query();
+            if (!string.IsNullOrWhiteSpace(q))
+            {
+                stations = stations.Where(station => station.Name.Contains(q, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (locationId.HasValue)
+            {
+                stations = stations.Where(station => station.LocationId == locationId.Value);
+            }
+
+            return Task.FromResult((IReadOnlyList<Station>)stations.ToList());
+        }
     }
 
     private sealed class InMemoryTripSeatRepository : InMemoryRepository<TripSeat, Guid>, ITripSeatRepository
