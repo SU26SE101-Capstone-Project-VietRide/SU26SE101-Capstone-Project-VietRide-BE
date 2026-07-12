@@ -1691,7 +1691,10 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `GET /internal/v1/operators/{operatorId}` | All services | Lookup operator info for logical FK validation (raw success DTO) |
 | `GET /internal/v1/operators/{operatorId}/subscription` | Booking, Trip, Parcel | Raw current subscription + plan limits/module flags + usage counters |
 | `POST /internal/v1/operators/{operatorId}/usage/increment` | Trip, Booking, Parcel | Body `{resource, delta}` where resource is `VEHICLES|DRIVERS|ASSISTANTS|OPERATOR_USERS|ROUTES|TRIPS_THIS_MONTH`; atomically increment usage counter without concurrent overshoot |
-| `GET /internal/v1/subscription-plans` | Admin Web (qua Gateway) | List gói SaaS |
+| `POST /internal/v1/operators/{operatorId}/quota-allocations` | Trip | Claim durable idempotent quota allocation by `{ resource, resourceId, periodKey? }`; no distributed transaction |
+| `POST /internal/v1/operators/{operatorId}/quota-allocations/{allocationId}/release` | Trip | Idempotently release an allocation after local persistence fails or its resource is soft-deleted |
+| `POST /internal/v1/payments/subscription` | Identity | Create/replay a VNPay subscription payment from a server-side upgrade snapshot |
+| `POST /internal/v1/payments/{paymentId}/expire-subscription` | Identity | Idempotently expire a pending subscription payment during the Identity-owned auto-revert job |
 
 #### Trip-Route-Vehicle Service
 
@@ -1779,14 +1782,18 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `trip.incident.reported` | Trip | Notification | `{ incidentId, tripId, category, reporterUserId }` |
 | `tracking.gps.off_route` | Tracking | Notification | `{ tripId, durationSeconds }` |
 | `tracking.gps.approaching_stop` | Tracking | Notification | `{ tripId, stopId, bookingIds, wave, etaMinutes }` |
-| `payment.payment.succeeded` | Payment | Booking, Parcel, Identity (subscription activate) | `{ paymentId, referenceType, referenceId, amount }` |
+| `payment.payment.succeeded` | Payment | Booking, Parcel | `{ paymentId, referenceType, referenceId, amount }` |
 | `payment.payment.failed` | Payment | Booking, Parcel | `{ paymentId, referenceType, referenceId, reason }` |
 | `payment.payment.expired` | Payment | Booking, Parcel | `{ paymentId, referenceType, referenceId }` |
 | `payment.wallet.credited` | Payment | Booking (mark REFUNDED), Parcel (mark REFUNDED), Notification | `{ userId, amount, referenceType, referenceId }` |
 | `payment.wallet.debited` | Payment | Notification | `{ userId, amount, referenceType, referenceId }` |
-| `payment.subscription.payment_pending_warn` | Payment | Notification | `{ operatorId, dueDate }` |
-| `payment.subscription.payment_auto_reverted` | Payment | Identity, Notification | `{ operatorId, previousPlanId }` |
-| `payment.subscription.payment_succeeded` | Payment | Identity (activate subscription) | `{ operatorId, planId, period }` |
+| `payment.subscription.payment_succeeded` | Payment | Identity | `{ eventId, paymentId, upgradeAttemptId, subscriptionId, operatorId, planId, billingPeriod, periodFrom, periodTo, amount, occurredAt }` |
+| `identity.subscription.usage_warning` | Identity | Notification | `{ subscriptionId, operatorId, resource, usage, limit, periodKey, occurredAt }` |
+| `identity.subscription.trial_expiring` | Identity | Notification | `{ subscriptionId, operatorId, expiresAt, daysRemaining, occurredAt }` |
+| `identity.subscription.expired` | Identity | Notification | `{ subscriptionId, operatorId, expiredAt, occurredAt }` |
+| `identity.subscription.payment_pending_warn` | Identity | Notification | `{ subscriptionId, operatorId, paymentId, dueAt, occurredAt }` |
+| `identity.subscription.payment_auto_reverted` | Identity | Notification | `{ subscriptionId, operatorId, previousPlanId, restoredPlanId, occurredAt }` |
+| `subscription.limit.trip_skipped` | Trip | Notification | `{ operatorId, driverScheduleId, skippedDate, periodKey, occurredAt }` |
 | `payment.invoice.issued` | Payment | Notification | `{ invoiceId, operatorId, amount, pdfUrl }` |
 | `payment.trip_settlement.completed` | Payment | Notification (operator) | `{ tripId, operatorId, netAmount }` |
 | `parcel.parcel.created` | Parcel | Notification, Trip (cargo counter reserve) | `{ parcelId, tripId, senderUserId, recipientUserId? }` |
@@ -2239,6 +2246,12 @@ KHÔNG dùng Prometheus/Grafana/Jaeger/Loki cho v1 (xem technical_context 3.5).
 |---|---|---|---|
 | `OtpCleanupJob` | Recurring | Daily 03:00 ICT | DELETE EmailVerificationToken expired > 7 ngày (optional cleanup) |
 | `StaleFcmTokenCleanupJob` | Recurring | Weekly Sun 04:00 ICT | UPDATE UserDevice SET isActive=false WHERE lastActiveAt < now - 90 days |
+| `SubscriptionTrialExpireCheckJob` | Recurring | Daily 00:30 ICT | Identity sets overdue ACTIVE subscriptions to EXPIRED; read access remains available |
+| `SubscriptionTrialExpiringWarnJob` | Recurring | Daily 09:00 ICT | Identity sends one T-3 expiry warning per subscription |
+| `SubscriptionPaymentPendingWarnJob` | Recurring | Hourly | Identity warns when a subscription upgrade attempt has been pending for 24 hours |
+| `SubscriptionAutoRevertJob` | Recurring | Daily 02:00 ICT | Identity expires the pending Payment via internal API, then restores previous plan or Starter after seven days |
+| `SubscriptionTripUsageProjectionJob` | Recurring | Day 1, 00:01 ICT | Refreshes current-month trip usage projection; source of truth is departure-month allocation |
+| `SubscriptionQuotaAllocationReconciliationJob` | Recurring | Daily 03:30 ICT | Releases only verified orphan durable quota allocations; never uses a distributed transaction |
 
 #### Trip-Route-Vehicle
 
@@ -2276,10 +2289,6 @@ KHÔNG dùng Prometheus/Grafana/Jaeger/Loki cho v1 (xem technical_context 3.5).
 | `TopUpExpiredJob` | Scheduled (per TopUpRequest) | PENDING + 15 phút | UPDATE status = EXPIRED |
 | `TripSettlementEligibilityFlagJob` | Recurring | Daily 02:00 ICT | Set OperatorTripSettlement.status = ELIGIBLE WHERE eligibleAt <= now |
 | `TripSettlementWeeklyAutoSettleJob` | Recurring | Weekly Mon 09:00 ICT | Debit PlatformWallet + credit OperatorWallet cho mọi settlement ELIGIBLE |
-| `SubscriptionTrialExpireCheckJob` | Recurring | Daily 00:30 ICT | Check trial expire |
-| `SubscriptionTrialExpiringWarnJob` | Recurring | Daily 09:00 ICT | T-3 days warn |
-| `SubscriptionPaymentPendingWarnJob` | Recurring | Hourly | PENDING_PAYMENT 24h warn |
-| `SubscriptionAutoRevertJob` | Recurring | Daily 02:00 ICT | PENDING_PAYMENT 7d → auto-revert previous plan |
 | `InvoicePdfRetryJob` | Triggered (retry) | Post-payment-success event | Generate PDF, retry max 5 nếu fail |
 | `RefundFailureRetryJob` | Recurring | Every 10 phút | Retry refund từ RefundFailureLog, max 5 lần |
 

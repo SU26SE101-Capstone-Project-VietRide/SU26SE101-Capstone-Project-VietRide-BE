@@ -438,6 +438,7 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
     ['/v1/admin/operator-users', env.IDENTITY_BASE_URL],
     ['/v1/admin/operator-users?role=OPERATOR_ADMIN', env.IDENTITY_BASE_URL],
     ['/v1/admin/users', env.IDENTITY_BASE_URL],
+    ['/v1/admin/subscription-plans', env.IDENTITY_BASE_URL],
     ['/v1/admin/booking-stats/aggregate', env.BOOKING_BASE_URL],
     ['/v1/admin/platform-wallet', env.PAYMENT_BASE_URL],
     [

@@ -2556,6 +2556,83 @@ Error codes:
 
 ## Operator/Admin Management
 
+### GET `/v1/operator/subscription`
+
+Auth: `OPERATOR_ADMIN`. The operator scope is derived from the access token; no `operatorId` input is accepted.
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "subscriptionId": "uuid",
+    "status": "ACTIVE",
+    "billingPeriod": "MONTHLY",
+    "startedAt": "2026-07-14T10:00:00Z",
+    "expiresAt": "2026-08-14T10:00:00Z",
+    "plan": { "planId": "uuid", "name": "Pro", "price": 500000, "limits": {}, "modules": {} },
+    "usage": {},
+    "pendingUpgrade": null
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-14T10:00:00Z" }
+}
+```
+
+`PENDING_PAYMENT` and `EXPIRED` are valid readable states. Errors: `403 FORBIDDEN`, `404 RESOURCE_NOT_FOUND`.
+
+### GET `/v1/operator/subscription-plans`
+
+Auth: `OPERATOR_ADMIN`. Returns active plans only. Response uses the ADR 0004 envelope with `items`; each item has `planId`, `name`, `description`, `pricePerMonth`, `pricePerYear`, `limits`, and `modules`.
+
+### POST `/v1/operator/subscription/upgrade`
+
+Auth: `OPERATOR_ADMIN`. Idempotency-Key: required. Day 37 supports VNPay only; `WALLET` is introduced after OperatorWallet is delivered in Day 38.
+
+Request:
+```json
+{
+  "planId": "uuid",
+  "billingPeriod": "MONTHLY",
+  "returnUrl": "https://app.vietride.vn/operator/subscription/result"
+}
+```
+
+`billingPeriod` is `MONTHLY` or `YEARLY`. Identity snapshots the selected active plan's server-side price; the client never supplies an amount.
+
+Response `202`:
+```json
+{
+  "success": true,
+  "statusCode": 202,
+  "data": {
+    "subscriptionId": "uuid",
+    "upgradeAttemptId": "uuid",
+    "status": "PENDING_PAYMENT",
+    "paymentId": "uuid",
+    "amount": 500000,
+    "billingPeriod": "MONTHLY",
+    "paymentRedirectUrl": "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?...",
+    "dueAt": "2026-07-21T10:00:00Z"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-14T10:00:00Z" }
+}
+```
+
+Errors: `403 FORBIDDEN`; `404 RESOURCE_NOT_FOUND`; `409 SUBSCRIPTION_PAYMENT_PENDING`; `422 VALIDATION_ERROR`; `422 IDEMPOTENCY_KEY_MISMATCH`.
+
+### GET `/v1/admin/subscription-plans`
+
+Auth: `SYSTEM_ADMIN`. Query: `page?`, `pageSize?`, `includeInactive?`. Returns a paged ADR 0004 envelope.
+
+### POST `/v1/admin/subscription-plans`
+
+Auth: `SYSTEM_ADMIN`. Idempotency-Key: required. Request defines `name`, `description?`, monthly/yearly BIGINT VND prices, all resource limits, and `enableParcel`, `enableShuttle`, `enableRag`. Response `201` returns the created plan. Prices are non-negative multiples of 1,000 VND.
+
+### PATCH `/v1/admin/subscription-plans/{planId}`
+
+Auth: `SYSTEM_ADMIN`. Idempotency-Key: required. Supports mutable plan presentation, prices, limits, module flags, and `isActive`. It never deletes a plan. Response `200` returns the updated plan.
+
 ### POST `/v1/operators/register`
 
 Auth: public. Idempotency-Key: not required by BSOT §5.6.
@@ -3060,6 +3137,29 @@ Errors:
 - `402 SUBSCRIPTION_EXPIRED` — operator subscription has expired.
 - `422 SUBSCRIPTION_LIMIT_EXCEEDED` — `current + delta` would exceed the matching plan limit.
 - `422 VALIDATION_ERROR` — invalid resource or delta.
+
+### POST `/internal/v1/operators/{operatorId}/quota-allocations`
+
+Auth: Internal JWT. Idempotency-Key: required. Caller: Trip service.
+
+Request:
+```json
+{
+  "resource": "VEHICLES",
+  "resourceId": "uuid",
+  "periodKey": null
+}
+```
+
+`periodKey` is required as `yyyy-MM` only for `TRIPS_THIS_MONTH`. The allocation is durable and unique for `(operatorId, resource, resourceId)`; a retry returns the existing allocation. It counts against the limit immediately, preventing concurrent overshoot. There is no distributed transaction with the caller service.
+
+Response `201`: `{ "allocationId": "uuid", "resource": "VEHICLES", "resourceId": "uuid", "periodKey": null }`.
+
+Errors: `402 SUBSCRIPTION_EXPIRED`; `409 SUBSCRIPTION_PAYMENT_PENDING`; `422 SUBSCRIPTION_LIMIT_EXCEEDED`; `422 IDEMPOTENCY_KEY_MISMATCH`; `422 VALIDATION_ERROR`.
+
+### POST `/internal/v1/operators/{operatorId}/quota-allocations/{allocationId}/release`
+
+Auth: Internal JWT. Idempotency-Key: required. Caller: Trip service after its local persistence fails or after a resource is soft-deleted. Releasing an already released allocation is a `200` idempotent no-op. A scheduled Identity reconciliation may release only allocations whose resource is verified absent through the owning service's internal lookup.
 
 ### GET `/v1/stations/search`
 

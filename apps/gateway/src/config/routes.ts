@@ -94,6 +94,18 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['OPERATOR_ADMIN'],
     },
     {
+      prefix: '/v1/operator/subscription',
+      target: env.IDENTITY_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    },
+    {
+      prefix: '/v1/admin/subscription-plans',
+      target: env.IDENTITY_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
       prefix: '/v1/admin/booking-stats',
       target: env.BOOKING_BASE_URL,
       authRequired: 'user',
@@ -267,6 +279,7 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       publicSubpaths: [
         { method: 'POST', path: '/v1/payments/vnpay-ipn' },
         { method: 'POST', path: '/v1/payments/vnpay-topup-ipn' },
+        { method: 'POST', path: '/v1/payments/subscription-vnpay-ipn' },
       ],
     },
     { prefix: '/v1/wallet', target: env.PAYMENT_BASE_URL, authRequired: 'user' },
