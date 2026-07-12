@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.Mvc;
 using VietRide.Payment.Api.Controllers.Requests;
 using VietRide.Payment.Application.Features.Internal.Payments.BatchChargePayment;
 using VietRide.Payment.Application.Features.Internal.Payments.ChargePayment;
+using VietRide.Payment.Application.Features.Internal.Payments.CreateSubscriptionPayment;
+using VietRide.Payment.Application.Features.Internal.Payments.ExpireSubscriptionPayment;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Authentication;
@@ -57,6 +59,37 @@ public sealed class InternalPaymentsController : ControllerBase
             .ConfigureAwait(false);
 
         return Ok(ApiResponse<ChargePaymentResult>.Ok(result, ApiMeta.Create(GetTraceId())));
+    }
+
+    [HttpPost("subscription")]
+    [ProducesResponseType(typeof(ApiResponse<CreateSubscriptionPaymentResult>), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ApiResponse<CreateSubscriptionPaymentResult>>> CreateSubscriptionAsync(
+        [FromBody] CreateSubscriptionPaymentRequest request,
+        CancellationToken cancellationToken)
+    {
+        var idempotencyKey = GetRequiredIdempotencyKey();
+        var clientIpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
+        var result = await _mediator.Send(request.ToCommand(idempotencyKey, clientIpAddress), cancellationToken)
+            .ConfigureAwait(false);
+
+        return StatusCode(
+            StatusCodes.Status201Created,
+            ApiResponse<CreateSubscriptionPaymentResult>.SuccessResponse(
+                StatusCodes.Status201Created,
+                result,
+                ApiMeta.Create(GetTraceId())));
+    }
+
+    [HttpPost("{paymentId:guid}/expire-subscription")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> ExpireSubscriptionAsync(Guid paymentId, CancellationToken cancellationToken)
+    {
+        _ = GetRequiredIdempotencyKey();
+        await _mediator.Send(new ExpireSubscriptionPaymentCommand(paymentId), cancellationToken).ConfigureAwait(false);
+        return NoContent();
     }
 
     private string GetRequiredIdempotencyKey()

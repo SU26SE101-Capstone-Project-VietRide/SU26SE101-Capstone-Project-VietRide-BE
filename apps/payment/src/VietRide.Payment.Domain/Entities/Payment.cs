@@ -139,6 +139,42 @@ public sealed class Payment : BaseEntity<Guid>
         => CreatePendingRedirectVnPay(PaymentReferenceType.BOOKING, referenceId, userId, amount,
             vnPayTxnRef, idempotencyKey, paymentRedirectUrl);
 
+    public static Payment CreatePendingRedirectVnPaySubscription(
+        Guid upgradeAttemptId,
+        Guid operatorId,
+        Money amount,
+        string vnPayTxnRef,
+        string idempotencyKey,
+        string paymentRedirectUrl)
+    {
+        if (upgradeAttemptId == Guid.Empty)
+            throw new ArgumentException("Upgrade attempt id is required.", nameof(upgradeAttemptId));
+        if (operatorId == Guid.Empty)
+            throw new ArgumentException("Operator id is required.", nameof(operatorId));
+        if (amount.Amount <= 0)
+            throw new ArgumentOutOfRangeException(nameof(amount), "Payment amount must be positive.");
+        if (string.IsNullOrWhiteSpace(vnPayTxnRef))
+            throw new ArgumentException("VNPay transaction reference is required.", nameof(vnPayTxnRef));
+        if (string.IsNullOrWhiteSpace(idempotencyKey))
+            throw new ArgumentException("Idempotency key is required.", nameof(idempotencyKey));
+        if (string.IsNullOrWhiteSpace(paymentRedirectUrl))
+            throw new ArgumentException("Payment redirect URL is required.", nameof(paymentRedirectUrl));
+
+        return new Payment
+        {
+            Id = Guid.NewGuid(),
+            ReferenceType = PaymentReferenceType.SUBSCRIPTION,
+            ReferenceId = upgradeAttemptId,
+            OperatorId = operatorId,
+            Amount = amount,
+            Method = PaymentMethod.VNPAY,
+            Status = PaymentStatus.PENDING_REDIRECT,
+            VnPayTxnRef = vnPayTxnRef,
+            IdempotencyKey = idempotencyKey,
+            PaymentRedirectUrl = paymentRedirectUrl,
+        };
+    }
+
     public void MarkSucceeded(string? vnPayResponseCode, DateTimeOffset succeededAt)
     {
         Status = PaymentStatus.SUCCEEDED;
