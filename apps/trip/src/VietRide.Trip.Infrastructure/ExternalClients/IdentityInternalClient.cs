@@ -8,7 +8,7 @@ namespace VietRide.Trip.Infrastructure.ExternalClients;
 /// <summary>
 /// Identity internal client used by Trip logical-FK validation.
 /// </summary>
-public sealed class IdentityInternalClient : IIdentityInternalClient
+public sealed class IdentityInternalClient : IIdentityInternalClient, ISubscriptionQuotaClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -50,6 +50,66 @@ public sealed class IdentityInternalClient : IIdentityInternalClient
         {
             return OperatorWriteEligibilityValidation.ValidationFailure(
                 "Identity validation failed due to transport or circuit-breaker failure.");
+        }
+    }
+
+    public async Task<OperatorWriteEligibilityValidation> ValidateOperatorSubscriptionCanWriteAsync(
+        Guid operatorId,
+        bool requireShuttleModule,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var response = await _httpClient.GetAsync(
+                $"/internal/v1/operators/{operatorId:D}/subscription",
+                cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return new OperatorWriteEligibilityValidation(
+                    false, 404, "RESOURCE_NOT_FOUND", "Operator subscription was not found.");
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return new OperatorWriteEligibilityValidation(
+                    false, (int)response.StatusCode, "UPSTREAM_UNAVAILABLE", "Identity subscription lookup failed.");
+            }
+
+            var payload = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+            var status = GetStringProperty(payload, "status");
+            if (string.Equals(status, "EXPIRED", StringComparison.Ordinal))
+            {
+                return new OperatorWriteEligibilityValidation(
+                    false, 402, "SUBSCRIPTION_EXPIRED", "Operator subscription has expired.");
+            }
+
+            if (string.Equals(status, "PENDING_PAYMENT", StringComparison.Ordinal))
+            {
+                return new OperatorWriteEligibilityValidation(
+                    false, 409, "SUBSCRIPTION_PAYMENT_PENDING", "Operator subscription payment is pending.");
+            }
+
+            var enableShuttle = payload.TryGetProperty("plan", out var plan)
+                && plan.TryGetProperty("modules", out var modules)
+                && modules.TryGetProperty("enableShuttle", out var value)
+                && value.ValueKind == JsonValueKind.True;
+            if (requireShuttleModule && !enableShuttle)
+            {
+                return new OperatorWriteEligibilityValidation(
+                    false, 403, "SUBSCRIPTION_MODULE_DISABLED", "Shuttle module is disabled for the operator subscription.");
+            }
+
+            return OperatorWriteEligibilityValidation.Allowed();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return new OperatorWriteEligibilityValidation(
+                false, 503, "UPSTREAM_UNAVAILABLE", "Identity subscription lookup transport failure.");
         }
     }
 
@@ -131,6 +191,47 @@ public sealed class IdentityInternalClient : IIdentityInternalClient
             return IdentityOperatorLookupResult.ValidationFailure(
                 "Identity operator lookup failed due to transport or circuit-breaker failure.");
         }
+    }
+
+    public async Task<QuotaAllocationResult> ClaimQuotaAllocationAsync(
+        Guid operatorId,
+        string resource,
+        Guid resourceId,
+        string? periodKey,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"/internal/v1/operators/{operatorId:D}/quota-allocations")
+            {
+                Content = JsonContent.Create(new { resource, resourceId, periodKey }),
+            };
+            request.Headers.TryAddWithoutValidation("Idempotency-Key", $"trip-quota:{operatorId:N}:{resource}:{resourceId:N}");
+            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return QuotaAllocationResult.Rejected(
+                    (int)response.StatusCode,
+                    response.StatusCode == HttpStatusCode.UnprocessableEntity ? "SUBSCRIPTION_LIMIT_EXCEEDED" : "UPSTREAM_UNAVAILABLE",
+                    "Identity rejected quota allocation.");
+            }
+
+            var payload = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions, cancellationToken).ConfigureAwait(false);
+            var allocationId = GetGuidProperty(payload, "allocationId");
+            return allocationId.HasValue
+                ? QuotaAllocationResult.Allowed(allocationId.Value)
+                : QuotaAllocationResult.Rejected(502, "UPSTREAM_INVALID_RESPONSE", "Identity quota response is missing allocationId.");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception) { return QuotaAllocationResult.Rejected(503, "UPSTREAM_UNAVAILABLE", "Identity quota allocation transport failure."); }
+    }
+
+    public async Task ReleaseQuotaAllocationAsync(Guid operatorId, Guid allocationId, CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/internal/v1/operators/{operatorId:D}/quota-allocations/{allocationId:D}/release");
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", $"trip-quota-release:{allocationId:N}");
+        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
     }
 
     private static async Task<OperatorWriteEligibilityValidation> ReadEligibilityAsync(

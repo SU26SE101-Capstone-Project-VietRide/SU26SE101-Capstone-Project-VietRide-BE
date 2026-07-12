@@ -30,6 +30,11 @@ public sealed class CreateVehicleHandler : IRequestHandler<CreateVehicleCommand,
             identityInternalClient,
             request.OperatorId,
             cancellationToken);
+        await StopWriteEligibilityGuard.ValidateOperatorSubscriptionCanWriteAsync(
+            identityInternalClient,
+            request.OperatorId,
+            requireShuttleModule: true,
+            cancellationToken);
 
         var vehicleType = await vehicleTypeRepository.GetActiveByIdAsync(
             request.VehicleTypeId,
@@ -55,8 +60,26 @@ public sealed class CreateVehicleHandler : IRequestHandler<CreateVehicleCommand,
             request.MaxCargoVolumeM3,
             request.ImageUrls);
 
+        var quotaClient = identityInternalClient as ISubscriptionQuotaClient;
+        var quota = quotaClient is null ? null : await quotaClient.ClaimQuotaAllocationAsync(
+            request.OperatorId,
+            "VEHICLES",
+            vehicle.Id,
+            periodKey: null,
+            cancellationToken);
+        if (quota is not null && !quota.IsAllowed)
+        {
+            throw new CodedValidationException(
+                quota.ErrorCode ?? "SUBSCRIPTION_LIMIT_EXCEEDED",
+                quota.Message ?? "Subscription vehicle limit exceeded.");
+        }
+
         if (!await vehicleRepository.TryAddAsync(vehicle, cancellationToken))
+        {
+            if (quota?.AllocationId.HasValue == true && quota.AllocationId.Value != Guid.Empty)
+                await quotaClient!.ReleaseQuotaAllocationAsync(request.OperatorId, quota.AllocationId.Value, cancellationToken);
             throw DuplicateLicensePlate();
+        }
 
         return VehicleMapper.ToDto(vehicle);
     }

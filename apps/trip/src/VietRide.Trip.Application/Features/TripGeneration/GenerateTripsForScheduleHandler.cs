@@ -2,6 +2,7 @@ using MediatR;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
 
 namespace VietRide.Trip.Application.Features.TripGeneration;
@@ -21,6 +22,7 @@ public sealed class GenerateTripsForScheduleHandler : IRequestHandler<GenerateTr
     private readonly IUnitOfWork unitOfWork;
     private readonly IVehicleRepository vehicleRepository;
     private readonly IIntegrationEventOutbox outbox;
+    private readonly ISubscriptionQuotaClient? quotaClient;
 
     public GenerateTripsForScheduleHandler(
         IClock clock,
@@ -35,7 +37,8 @@ public sealed class GenerateTripsForScheduleHandler : IRequestHandler<GenerateTr
         ITripStopFareRepository tripStopFareRepository,
         ITripGenerationSkipLogRepository skipLogRepository,
         IUnitOfWork unitOfWork,
-        IIntegrationEventOutbox outbox)
+        IIntegrationEventOutbox outbox,
+        ISubscriptionQuotaClient? quotaClient = null)
     {
         this.clock = clock;
         this.driverScheduleRepository = driverScheduleRepository;
@@ -50,6 +53,7 @@ public sealed class GenerateTripsForScheduleHandler : IRequestHandler<GenerateTr
         this.skipLogRepository = skipLogRepository;
         this.unitOfWork = unitOfWork;
         this.outbox = outbox;
+        this.quotaClient = quotaClient;
     }
 
     public async Task<GenerateTripsForScheduleResult> Handle(
@@ -68,10 +72,19 @@ public sealed class GenerateTripsForScheduleHandler : IRequestHandler<GenerateTr
             tripStopRepository,
             tripStopFareRepository,
             skipLogRepository,
-            outbox);
+            outbox,
+            quotaClient);
 
-        var result = await generationService.GenerateAsync(request.DriverScheduleId, cancellationToken);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
-        return result;
+        try
+        {
+            var result = await generationService.GenerateAsync(request.DriverScheduleId, cancellationToken);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+            return result;
+        }
+        catch
+        {
+            await generationService.ReleasePersistedQuotaAllocationsAsync(cancellationToken);
+            throw;
+        }
     }
 }

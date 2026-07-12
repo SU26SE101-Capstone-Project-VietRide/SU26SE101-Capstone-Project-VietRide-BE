@@ -88,6 +88,8 @@ public static class InfrastructureServiceCollectionExtensions
             .AddHttpMessageHandler<InternalJwtDelegatingHandler>()
             .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
             .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
+        services.AddScoped<ISubscriptionQuotaClient>(serviceProvider =>
+            (ISubscriptionQuotaClient)serviceProvider.GetRequiredService<IIdentityInternalClient>());
 
         return services;
     }

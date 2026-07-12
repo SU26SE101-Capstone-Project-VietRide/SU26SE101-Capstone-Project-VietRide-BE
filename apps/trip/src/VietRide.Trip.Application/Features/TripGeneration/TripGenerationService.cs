@@ -2,6 +2,7 @@ using System.Text.Json;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Features.Vehicles;
 using VietRide.Trip.Domain.Entities;
@@ -13,6 +14,7 @@ public sealed class TripGenerationService
     private const int GenerationWindowDays = 14;
 
     private const string TripAssignedEventType = "trip.trip.assigned";
+    private const string SubscriptionLimitTripSkippedEventType = "subscription.limit.trip_skipped";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly IClock clock;
     private readonly IDriverScheduleRepository driverScheduleRepository;
@@ -26,6 +28,8 @@ public sealed class TripGenerationService
     private readonly ITripStopRepository tripStopRepository;
     private readonly IVehicleRepository vehicleRepository;
     private readonly IIntegrationEventOutbox? outbox;
+    private readonly ISubscriptionQuotaClient? quotaClient;
+    private readonly List<(Guid OperatorId, Guid AllocationId)> persistedQuotaAllocations = [];
 
     public TripGenerationService(
         IClock clock,
@@ -39,7 +43,8 @@ public sealed class TripGenerationService
         ITripStopRepository tripStopRepository,
         ITripStopFareRepository tripStopFareRepository,
         ITripGenerationSkipLogRepository skipLogRepository,
-        IIntegrationEventOutbox? outbox = null)
+        IIntegrationEventOutbox? outbox = null,
+        ISubscriptionQuotaClient? quotaClient = null)
     {
         this.clock = clock;
         this.driverScheduleRepository = driverScheduleRepository;
@@ -53,6 +58,7 @@ public sealed class TripGenerationService
         this.tripStopFareRepository = tripStopFareRepository;
         this.skipLogRepository = skipLogRepository;
         this.outbox = outbox;
+        this.quotaClient = quotaClient;
     }
 
     public async Task<GenerateTripsForScheduleResult> GenerateAsync(
@@ -152,33 +158,97 @@ public sealed class TripGenerationService
                     vehicle.MaxCargoVolumeM3,
                     0m);
 
-                await tripRepository.AddAsync(trip, cancellationToken);
-                existingDriverDepartures.Add((schedule.DriverUserId, departureDateTime));
-                existingVehicleDepartures.Add((vehicle.Id, departureDateTime));
-                await AddSeatsAsync(trip.Id, vehicle, cancellationToken);
-                await AddStopsAsync(trip.Id, departureDateTime, routeStops, cancellationToken);
-                await AddStopFaresAsync(trip.Id, fareTemplates, cancellationToken);
-                if (outbox is not null)
+                Guid? quotaAllocationId = null;
+                if (quotaClient is not null)
                 {
-                    await outbox.EnqueueAsync(
-                        TripAssignedEventType,
-                        JsonSerializer.Serialize(new
-                        {
-                            tripId = trip.Id,
-                            operatorId = trip.OperatorId,
-                            driverUserId = trip.DriverUserId,
-                            assistantUserId = trip.AssistantUserId,
-                            routeName = route.Name,
-                            vehiclePlateNumber = vehicle.LicensePlate,
-                            departureDateTime = trip.DepartureDateTime,
-                        }, JsonOptions),
+                    var quota = await quotaClient.ClaimQuotaAllocationAsync(
+                        schedule.OperatorId,
+                        "TRIPS_THIS_MONTH",
+                        trip.Id,
+                        $"{serviceDate:yyyy-MM}",
                         cancellationToken);
+                    if (!quota.IsAllowed)
+                    {
+                        if (string.Equals(quota.ErrorCode, "SUBSCRIPTION_LIMIT_EXCEEDED", StringComparison.Ordinal))
+                        {
+                            skippedCount += await LogSubscriptionLimitSkipAsync(
+                                schedule,
+                                serviceDate,
+                                quota.Message ?? "Subscription monthly trip limit exceeded.",
+                                cancellationToken);
+                            continue;
+                        }
+
+                        throw new CodedValidationException(
+                            quota.ErrorCode ?? "SUBSCRIPTION_QUOTA_UNAVAILABLE",
+                            quota.Message ?? "Unable to allocate subscription trip quota.");
+                    }
+
+                    quotaAllocationId = quota.AllocationId;
+                }
+
+                try
+                {
+                    await tripRepository.AddAsync(trip, cancellationToken);
+                    existingDriverDepartures.Add((schedule.DriverUserId, departureDateTime));
+                    existingVehicleDepartures.Add((vehicle.Id, departureDateTime));
+                    await AddSeatsAsync(trip.Id, vehicle, cancellationToken);
+                    await AddStopsAsync(trip.Id, departureDateTime, routeStops, cancellationToken);
+                    await AddStopFaresAsync(trip.Id, fareTemplates, cancellationToken);
+                    if (outbox is not null)
+                    {
+                        await outbox.EnqueueAsync(
+                            TripAssignedEventType,
+                            JsonSerializer.Serialize(new
+                            {
+                                tripId = trip.Id,
+                                operatorId = trip.OperatorId,
+                                driverUserId = trip.DriverUserId,
+                                assistantUserId = trip.AssistantUserId,
+                                routeName = route.Name,
+                                vehiclePlateNumber = vehicle.LicensePlate,
+                                departureDateTime = trip.DepartureDateTime,
+                            }, JsonOptions),
+                            cancellationToken);
+                    }
+                    if (quotaAllocationId.HasValue && quotaAllocationId.Value != Guid.Empty)
+                    {
+                        persistedQuotaAllocations.Add((schedule.OperatorId, quotaAllocationId.Value));
+                    }
+                }
+                catch
+                {
+                    await ReleaseQuotaAllocationAsync(schedule.OperatorId, quotaAllocationId, cancellationToken);
+                    throw;
                 }
                 generatedCount++;
             }
         }
 
         return new GenerateTripsForScheduleResult(generatedCount, skippedCount);
+    }
+
+    public async Task ReleasePersistedQuotaAllocationsAsync(CancellationToken cancellationToken)
+    {
+        foreach (var allocation in persistedQuotaAllocations)
+        {
+            await ReleaseQuotaAllocationAsync(allocation.OperatorId, allocation.AllocationId, cancellationToken);
+        }
+
+        persistedQuotaAllocations.Clear();
+    }
+
+    private async Task ReleaseQuotaAllocationAsync(
+        Guid operatorId,
+        Guid? allocationId,
+        CancellationToken cancellationToken)
+    {
+        if (quotaClient is null || !allocationId.HasValue || allocationId.Value == Guid.Empty)
+        {
+            return;
+        }
+
+        await quotaClient.ReleaseQuotaAllocationAsync(operatorId, allocationId.Value, cancellationToken);
     }
 
     private IReadOnlyList<DriverSchedule> GetSchedules(Guid? driverScheduleId)
@@ -225,6 +295,36 @@ public sealed class TripGenerationService
                 message),
             cancellationToken);
         return 1;
+    }
+
+    private async Task<int> LogSubscriptionLimitSkipAsync(
+        DriverSchedule schedule,
+        DateOnly skippedDate,
+        string message,
+        CancellationToken cancellationToken)
+    {
+        var skippedCount = await LogSkipAsync(
+            schedule,
+            skippedDate,
+            TripGenerationSkipReason.SUBSCRIPTION_LIMIT_EXCEEDED,
+            message,
+            cancellationToken);
+        if (outbox is not null)
+        {
+            await outbox.EnqueueAsync(
+                SubscriptionLimitTripSkippedEventType,
+                JsonSerializer.Serialize(new
+                {
+                    operatorId = schedule.OperatorId,
+                    driverScheduleId = schedule.Id,
+                    skippedDate,
+                    reason = TripGenerationSkipReason.SUBSCRIPTION_LIMIT_EXCEEDED.ToString(),
+                    message,
+                }, JsonOptions),
+                cancellationToken);
+        }
+
+        return skippedCount;
     }
 
     private static int? ResolveEstimatedTripDuration(
