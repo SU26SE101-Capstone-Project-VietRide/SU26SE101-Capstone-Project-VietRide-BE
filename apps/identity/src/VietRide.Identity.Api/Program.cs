@@ -1,9 +1,11 @@
 using DotNetEnv;
+using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 using VietRide.Identity.Application.Features.Auth.Register;
 using VietRide.Identity.Infrastructure;
 using VietRide.Identity.Infrastructure.DependencyInjection;
+using VietRide.Identity.Infrastructure.Jobs;
 using VietRide.Identity.Infrastructure.Seed;
 using VietRide.Shared.Application.DependencyInjection;
 using VietRide.Shared.Messaging.DependencyInjection;
@@ -42,6 +44,14 @@ builder.Services.AddVietRideMediatRBehaviors(
 
 // Infrastructure: repositories, security services, email stub, Redis OTP rate-limiter.
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddVietRideIdempotency("identity");
+
+var registerRecurringJobs = !builder.Environment.IsEnvironment("Testing");
+if (registerRecurringJobs)
+{
+    builder.Services.AddIdentityHangfire(builder.Configuration);
+    builder.Services.AddHangfireServer();
+}
 
 // RabbitMQ publisher + Outbox background drainer (publishes integration events).
 builder.Services.AddVietRideMessaging(builder.Configuration);
@@ -63,8 +73,36 @@ app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseVietRideSwagger();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseVietRideIdempotency();
 app.MapVietRideHealth(ServiceName);
 app.MapControllers();
+
+if (registerRecurringJobs)
+{
+    using var scope = app.Services.CreateScope();
+    var recurringJobs = scope.ServiceProvider.GetRequiredService<IRecurringJobManager>();
+    var ict = TimeZoneInfo.FindSystemTimeZoneById("SE Asia Standard Time");
+    recurringJobs.AddOrUpdate<SubscriptionLifecycleJob>(
+        SubscriptionLifecycleJob.ExpiryJobId,
+        job => job.ExpireActiveAsync(CancellationToken.None),
+        "30 0 * * *",
+        new RecurringJobOptions { TimeZone = ict });
+    recurringJobs.AddOrUpdate<SubscriptionLifecycleJob>(
+        SubscriptionLifecycleJob.WarningJobId,
+        job => job.SendWarningsAsync(CancellationToken.None),
+        "0 * * * *",
+        new RecurringJobOptions { TimeZone = ict });
+    recurringJobs.AddOrUpdate<SubscriptionLifecycleJob>(
+        SubscriptionLifecycleJob.RevertJobId,
+        job => job.AutoRevertAsync(CancellationToken.None),
+        "0 2 * * *",
+        new RecurringJobOptions { TimeZone = ict });
+    recurringJobs.AddOrUpdate<SubscriptionLifecycleJob>(
+        SubscriptionLifecycleJob.MonthlyResetJobId,
+        job => job.ResetMonthlyTripUsageAsync(CancellationToken.None),
+        "1 0 1 * *",
+        new RecurringJobOptions { TimeZone = ict });
+}
 
 app.Run();
 

@@ -12,6 +12,7 @@ public sealed class OperatorSubscription : BaseEntity<Guid>
     public DateTimeOffset? StartedAt { get; private set; }
     public DateTimeOffset? ExpiresAt { get; private set; }
     public SubscriptionPaymentMethod? PaymentMethod { get; private set; }
+    public SubscriptionBillingPeriod? BillingPeriod { get; private set; }
     public int CurrentVehicles { get; private set; }
     public int CurrentDrivers { get; private set; }
     public int CurrentAssistants { get; private set; }
@@ -77,12 +78,58 @@ public sealed class OperatorSubscription : BaseEntity<Guid>
 
     public void MoveToPendingPayment(Guid newPlanId, SubscriptionPaymentMethod paymentMethod)
     {
+        if (Status == SubscriptionStatus.PENDING_PAYMENT)
+        {
+            throw new InvalidOperationException("A subscription payment is already pending.");
+        }
+
+        if (Status is not (SubscriptionStatus.ACTIVE or SubscriptionStatus.EXPIRED))
+        {
+            throw new InvalidOperationException("Only active or expired subscriptions can start an upgrade.");
+        }
+
         PreviousActivePlanId = Status == SubscriptionStatus.ACTIVE ? PlanId : PreviousActivePlanId;
         PlanId = newPlanId;
         Status = SubscriptionStatus.PENDING_PAYMENT;
         PaymentMethod = paymentMethod;
-        StartedAt = null;
-        ExpiresAt = null;
+    }
+
+    public void RevertPendingPayment(Guid restoredPlanId, DateTimeOffset revertedAt)
+    {
+        if (Status != SubscriptionStatus.PENDING_PAYMENT)
+        {
+            throw new InvalidOperationException("Only pending-payment subscriptions can be reverted.");
+        }
+
+        PlanId = restoredPlanId;
+        PreviousActivePlanId = null;
+        Status = SubscriptionStatus.ACTIVE;
+        PaymentMethod = null;
+        BillingPeriod = null;
+        StartedAt ??= revertedAt;
+        ExpiresAt ??= revertedAt.AddDays(30);
+    }
+
+    public void ActivatePaid(
+        Guid planId,
+        SubscriptionBillingPeriod billingPeriod,
+        DateTimeOffset startedAt)
+    {
+        if (Status is not (SubscriptionStatus.PENDING_PAYMENT or SubscriptionStatus.EXPIRED))
+        {
+            throw new InvalidOperationException("Only pending-payment or expired subscriptions can activate a paid plan.");
+        }
+
+        PlanId = planId;
+        BillingPeriod = billingPeriod;
+        PaymentMethod = SubscriptionPaymentMethod.VNPAY;
+        Status = SubscriptionStatus.ACTIVE;
+        StartedAt = startedAt;
+        ExpiresAt = billingPeriod == SubscriptionBillingPeriod.MONTHLY
+            ? startedAt.AddMonths(1)
+            : startedAt.AddYears(1);
+        PreviousActivePlanId = null;
+        WarnSentAt = null;
     }
 
     public void MarkExpired(DateTimeOffset expiredAt)
@@ -139,5 +186,11 @@ public sealed class OperatorSubscription : BaseEntity<Guid>
     {
         CurrentTripsThisMonth = 0;
         LastResetAt = resetAt;
+    }
+
+    public void MarkTrialExpiryWarningSent(DateTimeOffset sentAt)
+    {
+        if (!TrialExpiringWarnSentAt.HasValue)
+            TrialExpiringWarnSentAt = sentAt;
     }
 }
