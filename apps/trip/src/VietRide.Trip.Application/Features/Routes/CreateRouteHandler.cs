@@ -37,6 +37,11 @@ public sealed class CreateRouteHandler : IRequestHandler<CreateRouteCommand, Rou
             identityInternalClient,
             request.OperatorId,
             cancellationToken);
+        await StopWriteEligibilityGuard.ValidateOperatorSubscriptionCanWriteAsync(
+            identityInternalClient,
+            request.OperatorId,
+            requireShuttleModule: true,
+            cancellationToken);
 
         await ValidateStationExistsAsync(request.OriginStationId, cancellationToken);
         await ValidateStationExistsAsync(request.DestinationStationId, cancellationToken);
@@ -59,8 +64,27 @@ public sealed class CreateRouteHandler : IRequestHandler<CreateRouteCommand, Rou
             route.Deactivate();
         }
 
-        await routeRepository.AddAsync(route, cancellationToken);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
+        var quotaClient = identityInternalClient as ISubscriptionQuotaClient;
+        var quota = quotaClient is null ? null : await quotaClient.ClaimQuotaAllocationAsync(
+            request.OperatorId,
+            "ROUTES",
+            route.Id,
+            periodKey: null,
+            cancellationToken);
+        if (quota is not null && !quota.IsAllowed)
+            throw new CodedValidationException(quota.ErrorCode ?? "SUBSCRIPTION_LIMIT_EXCEEDED", quota.Message ?? "Subscription route limit exceeded.");
+
+        try
+        {
+            await routeRepository.AddAsync(route, cancellationToken);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            if (quota?.AllocationId.HasValue == true && quota.AllocationId.Value != Guid.Empty)
+                await quotaClient!.ReleaseQuotaAllocationAsync(request.OperatorId, quota.AllocationId.Value, cancellationToken);
+            throw;
+        }
 
         return RouteMapper.ToDto(route);
     }

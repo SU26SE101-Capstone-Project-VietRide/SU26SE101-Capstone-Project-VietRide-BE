@@ -53,6 +53,11 @@ internal sealed class OperatorSubscriptionConfiguration : IEntityTypeConfigurati
             .HasColumnType("subscription_payment_method")
             .IsRequired(false);
 
+        builder.Property(s => s.BillingPeriod)
+            .HasColumnName("billing_period")
+            .HasColumnType("subscription_billing_period")
+            .IsRequired(false);
+
         builder.Property(s => s.CurrentVehicles)
             .HasColumnName("current_vehicles")
             .HasDefaultValue(0)
