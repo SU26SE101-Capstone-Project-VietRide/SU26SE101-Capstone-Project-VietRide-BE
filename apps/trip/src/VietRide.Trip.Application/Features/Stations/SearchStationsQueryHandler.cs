@@ -15,9 +15,10 @@ public sealed class SearchStationsQueryHandler : IRequestHandler<SearchStationsQ
     public async Task<IReadOnlyList<StationSearchResult>> Handle(SearchStationsQuery request, CancellationToken cancellationToken)
     {
         var stations = await stationRepository.SearchActiveByNameAsync(
-            request.Q!,
+            request.Q,
             request.City,
             request.Province,
+            request.LocationId,
             cancellationToken);
 
         return stations.Select(StationMapper.ToSearchResult).ToList();

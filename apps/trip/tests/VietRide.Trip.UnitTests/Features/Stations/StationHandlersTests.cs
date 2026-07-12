@@ -32,13 +32,33 @@ public sealed class StationHandlersTests
         ]);
         var handler = new SearchStationsQueryHandler(repository);
 
-        var result = await handler.Handle(new SearchStationsQuery("Mien Tay", "Ho Chi Minh City", "Ho Chi Minh"), CancellationToken.None);
+        var result = await handler.Handle(new SearchStationsQuery("Mien Tay", "Ho Chi Minh City", "Ho Chi Minh", null), CancellationToken.None);
 
         result.Should().ContainSingle();
         result[0].Name.Should().Be("Bến xe Miền Tây");
         repository.LastQuery.Should().Be("Mien Tay");
         repository.LastCity.Should().Be("Ho Chi Minh City");
         repository.LastProvince.Should().Be("Ho Chi Minh");
+        repository.LastLocationId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SearchStations_FiltersByLocationId_WhenQueryIsMissing()
+    {
+        var locationId = Guid.NewGuid();
+        var otherLocationId = Guid.NewGuid();
+        var repository = new SpyStationRepository([
+            Station.Create("Báº¿n xe Miá»n TÃ¢y", "ben-xe-mien-tay", "Ho Chi Minh City", "Ho Chi Minh", locationId: locationId),
+            Station.Create("Báº¿n xe Gia LÃ¢m", "ben-xe-gia-lam", "Ha Noi", "Ha Noi", locationId: otherLocationId)
+        ]);
+        var handler = new SearchStationsQueryHandler(repository);
+
+        var result = await handler.Handle(new SearchStationsQuery(null, null, null, locationId), CancellationToken.None);
+
+        result.Should().ContainSingle();
+        result[0].LocationId.Should().Be(locationId);
+        repository.LastQuery.Should().BeNull();
+        repository.LastLocationId.Should().Be(locationId);
     }
 
     [Fact]
@@ -99,18 +119,52 @@ public sealed class StationHandlersTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public async Task SearchStations_ThrowsValidationException_WhenQueryIsMissingBlankOrInvalid(string? q)
+    public async Task SearchStations_ThrowsValidationException_WhenNoSearchCriteriaIsProvided(string? q)
     {
         var behavior = new ValidationBehavior<SearchStationsQuery, IReadOnlyList<StationSearchResult>>(
             [new SearchStationsQueryValidator()]);
 
         var act = () => behavior.Handle(
-            new SearchStationsQuery(q, null, null),
+            new SearchStationsQuery(q, null, null, null),
             () => Task.FromResult<IReadOnlyList<StationSearchResult>>([]),
             CancellationToken.None);
 
         var exception = await act.Should().ThrowAsync<ValidationException>();
-        exception.Which.Errors.Should().Contain(error => error.Field == nameof(SearchStationsQuery.Q));
+        exception.Which.Errors.Should().Contain(error => error.Field == "SearchCriteria");
+    }
+
+    [Fact]
+    public async Task SearchStations_AllowsMissingQuery_WhenLocationIdIsProvided()
+    {
+        var locationId = Guid.NewGuid();
+        var behavior = new ValidationBehavior<SearchStationsQuery, IReadOnlyList<StationSearchResult>>(
+            [new SearchStationsQueryValidator()]);
+
+        var result = await behavior.Handle(
+            new SearchStationsQuery(null, null, null, locationId),
+            () => Task.FromResult<IReadOnlyList<StationSearchResult>>([]),
+            CancellationToken.None);
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SearchStations_AllowsMissingQuery_WhenCityOrProvinceIsProvided()
+    {
+        var behavior = new ValidationBehavior<SearchStationsQuery, IReadOnlyList<StationSearchResult>>(
+            [new SearchStationsQueryValidator()]);
+
+        var byCity = await behavior.Handle(
+            new SearchStationsQuery(null, "Ho Chi Minh City", null, null),
+            () => Task.FromResult<IReadOnlyList<StationSearchResult>>([]),
+            CancellationToken.None);
+        var byProvince = await behavior.Handle(
+            new SearchStationsQuery(null, null, "Ho Chi Minh", null),
+            () => Task.FromResult<IReadOnlyList<StationSearchResult>>([]),
+            CancellationToken.None);
+
+        byCity.Should().BeEmpty();
+        byProvince.Should().BeEmpty();
     }
 
     [Fact]
@@ -500,15 +554,21 @@ public sealed class StationHandlersTests
         public IQueryable<Station> QueryNoTracking() => Entities.AsQueryable();
 
         public virtual Task<IReadOnlyList<Station>> SearchActiveByNameAsync(
-            string q,
+            string? q,
             string? city,
             string? province,
+            Guid? locationId,
             CancellationToken cancellationToken)
         {
-            var keyword = NormalizeSearchTerm(q);
             var stations = Entities
                 .Where(station => station.IsActive && station.DeletedAt == null)
-                .Where(station => NormalizeSearchTerm(station.Name).Contains(keyword));
+                .AsEnumerable();
+
+            if (!string.IsNullOrWhiteSpace(q))
+            {
+                var keyword = NormalizeSearchTerm(q);
+                stations = stations.Where(station => NormalizeSearchTerm(station.Name).Contains(keyword));
+            }
 
             if (!string.IsNullOrWhiteSpace(city))
             {
@@ -520,6 +580,11 @@ public sealed class StationHandlersTests
             {
                 var provinceFilter = province.Trim();
                 stations = stations.Where(station => station.Province == provinceFilter);
+            }
+
+            if (locationId.HasValue)
+            {
+                stations = stations.Where(station => station.LocationId == locationId.Value);
             }
 
             return Task.FromResult<IReadOnlyList<Station>>(stations.ToList());
@@ -560,17 +625,21 @@ public sealed class StationHandlersTests
 
         public string? LastProvince { get; private set; }
 
+        public Guid? LastLocationId { get; private set; }
+
         public override Task<IReadOnlyList<Station>> SearchActiveByNameAsync(
-            string q,
+            string? q,
             string? city,
             string? province,
+            Guid? locationId,
             CancellationToken cancellationToken)
         {
             LastQuery = q;
             LastCity = city;
             LastProvince = province;
+            LastLocationId = locationId;
 
-            return base.SearchActiveByNameAsync(q, city, province, cancellationToken);
+            return base.SearchActiveByNameAsync(q, city, province, locationId, cancellationToken);
         }
     }
 

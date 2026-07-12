@@ -610,7 +610,7 @@ public sealed class AlternativeRouteHandlersTests
         public Task<Station?> GetByIdAsync(Guid id, CancellationToken ct)
             => Task.FromResult(stations.FirstOrDefault(station => station.Id == id));
 
-        public Task<IReadOnlyList<Station>> SearchActiveByNameAsync(string q, string? city, string? province, CancellationToken cancellationToken)
+        public Task<IReadOnlyList<Station>> SearchActiveByNameAsync(string? q, string? city, string? province, Guid? locationId, CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<Station>>(stations);
 
         public IQueryable<Station> Query() => stations.AsQueryable();

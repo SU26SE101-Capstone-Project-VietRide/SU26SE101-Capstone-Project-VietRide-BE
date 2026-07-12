@@ -35,23 +35,34 @@ internal sealed class StationRepository : IStationRepository
         => _dbContext.Stations.AsNoTracking();
 
     public async Task<IReadOnlyList<Station>> SearchActiveByNameAsync(
-        string q,
+        string? q,
         string? city,
         string? province,
+        Guid? locationId,
         CancellationToken cancellationToken)
-        => await BuildSearchActiveByNameQuery(q, city, province).ToListAsync(cancellationToken);
+        => await BuildSearchActiveByNameQuery(q, city, province, locationId).ToListAsync(cancellationToken);
 
-    private IQueryable<Station> BuildSearchActiveByNameQuery(string q, string? city, string? province)
+    private IQueryable<Station> BuildSearchActiveByNameQuery(string? q, string? city, string? province, Guid? locationId)
     {
-        var search = _dbContext.Stations
-            .FromSqlInterpolated($"""
-                SELECT *
-                FROM vietride_trip.stations
-                WHERE deleted_at IS NULL
-                  AND is_active = TRUE
-                  AND unaccent(name) ILIKE unaccent('%' || {q.Trim()} || '%')
-                """)
-            .AsNoTracking();
+        var search = !string.IsNullOrWhiteSpace(q)
+            ? _dbContext.Stations
+                .FromSqlInterpolated($"""
+                    SELECT *
+                    FROM vietride_trip.stations
+                    WHERE deleted_at IS NULL
+                      AND is_active = TRUE
+                      AND unaccent(name) ILIKE unaccent('%' || {q.Trim()} || '%')
+                    """)
+                .AsNoTracking()
+            : _dbContext.Stations
+                .AsNoTracking()
+                .Where(station => station.IsActive);
+
+        if (locationId.HasValue)
+        {
+            var locationFilter = locationId.Value;
+            search = search.Where(station => station.LocationId == locationFilter);
+        }
 
         if (!string.IsNullOrWhiteSpace(city))
         {

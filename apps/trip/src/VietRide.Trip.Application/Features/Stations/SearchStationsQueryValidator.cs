@@ -6,8 +6,20 @@ public sealed class SearchStationsQueryValidator : AbstractValidator<SearchStati
 {
     public SearchStationsQueryValidator()
     {
-        RuleFor(query => query.Q)
-            .NotEmpty()
-            .WithMessage("Search query is required.");
+        RuleFor(query => query)
+            .Must(HasSearchCriteria)
+            .WithName("SearchCriteria")
+            .WithMessage("Provide q, city, province, or locationId.");
+
+        RuleFor(query => query.LocationId)
+            .NotEqual(Guid.Empty)
+            .WithMessage("Location id must not be empty.")
+            .When(query => query.LocationId.HasValue);
     }
+
+    private static bool HasSearchCriteria(SearchStationsQuery query)
+        => !string.IsNullOrWhiteSpace(query.Q)
+            || !string.IsNullOrWhiteSpace(query.City)
+            || !string.IsNullOrWhiteSpace(query.Province)
+            || query.LocationId.HasValue;
 }
