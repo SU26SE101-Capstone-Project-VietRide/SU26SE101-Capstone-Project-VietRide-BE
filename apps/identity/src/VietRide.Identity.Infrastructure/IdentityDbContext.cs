@@ -34,6 +34,8 @@ public sealed class IdentityDbContext : VietRideDbContextBase
         builder.MapEnum<OperatorRegistrationStatus>("operator_registration_status", PostgresEnumNameTranslator);
         builder.MapEnum<SubscriptionStatus>("subscription_status", PostgresEnumNameTranslator);
         builder.MapEnum<SubscriptionPaymentMethod>("subscription_payment_method", PostgresEnumNameTranslator);
+        builder.MapEnum<SubscriptionBillingPeriod>("subscription_billing_period", PostgresEnumNameTranslator);
+        builder.MapEnum<SubscriptionUpgradeAttemptStatus>("subscription_upgrade_attempt_status", PostgresEnumNameTranslator);
         builder.MapEnum<OutboxEventStatus>("outbox_event_status", PostgresEnumNameTranslator);
     }
 
@@ -42,6 +44,8 @@ public sealed class IdentityDbContext : VietRideDbContextBase
     public DbSet<Operator> Operators => Set<Operator>();
     public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
     public DbSet<OperatorSubscription> OperatorSubscriptions => Set<OperatorSubscription>();
+    public DbSet<SubscriptionUpgradeAttempt> SubscriptionUpgradeAttempts => Set<SubscriptionUpgradeAttempt>();
+    public DbSet<SubscriptionQuotaAllocation> SubscriptionQuotaAllocations => Set<SubscriptionQuotaAllocation>();
 
     public DbSet<User> Users => Set<User>();
     public DbSet<OAuthIdentity> OAuthIdentities => Set<OAuthIdentity>();
@@ -62,6 +66,8 @@ public sealed class IdentityDbContext : VietRideDbContextBase
         modelBuilder.HasPostgresEnum("operator_registration_status", Enum.GetNames<OperatorRegistrationStatus>());
         modelBuilder.HasPostgresEnum("subscription_status", Enum.GetNames<SubscriptionStatus>());
         modelBuilder.HasPostgresEnum("subscription_payment_method", Enum.GetNames<SubscriptionPaymentMethod>());
+        modelBuilder.HasPostgresEnum("subscription_billing_period", Enum.GetNames<SubscriptionBillingPeriod>());
+        modelBuilder.HasPostgresEnum("subscription_upgrade_attempt_status", Enum.GetNames<SubscriptionUpgradeAttemptStatus>());
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

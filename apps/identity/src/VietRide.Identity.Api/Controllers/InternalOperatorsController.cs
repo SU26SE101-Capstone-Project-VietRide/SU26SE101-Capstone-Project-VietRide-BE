@@ -4,8 +4,10 @@ using Microsoft.AspNetCore.Mvc;
 using VietRide.Identity.Api.Controllers.Requests;
 using VietRide.Identity.Application.Features.Internal.Operators.GetInternalOperator;
 using VietRide.Identity.Application.Features.Internal.Operators.GetInternalOperatorSubscription;
+using VietRide.Identity.Application.Features.Internal.Operators.GetOperatorCrewUserIds;
 using VietRide.Identity.Application.Features.Internal.Operators.GetOperatorRecipientUsers;
 using VietRide.Identity.Application.Features.Internal.Operators.IncrementOperatorUsage;
+using VietRide.Identity.Application.Features.Internal.Operators.QuotaAllocations;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Authentication;
 
@@ -61,6 +63,16 @@ public sealed class InternalOperatorsController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("{operatorId:guid}/crew-user-ids")]
+    [ProducesResponseType(typeof(IReadOnlyList<Guid>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<IReadOnlyList<Guid>>> GetCrewUserIdsAsync(
+        Guid operatorId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(new GetOperatorCrewUserIdsQuery(operatorId), cancellationToken);
+        return Ok(result);
+    }
     [HttpPost("{operatorId:guid}/usage/increment")]
     [ProducesResponseType(typeof(InternalOperatorSubscriptionDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
@@ -78,5 +90,16 @@ public sealed class InternalOperatorsController : ControllerBase
             cancellationToken);
 
         return Ok(result);
+    }
+
+    [HttpPost("{operatorId:guid}/quota-allocations")]
+    public async Task<ActionResult<QuotaAllocationDto>> ClaimQuotaAsync(Guid operatorId, [FromBody] QuotaAllocationRequest request, CancellationToken cancellationToken)
+        => StatusCode(StatusCodes.Status201Created, await _mediator.Send(new ClaimQuotaAllocationCommand(operatorId, request.Resource, request.ResourceId, request.PeriodKey), cancellationToken));
+
+    [HttpPost("{operatorId:guid}/quota-allocations/{allocationId:guid}/release")]
+    public async Task<IActionResult> ReleaseQuotaAsync(Guid operatorId, Guid allocationId, CancellationToken cancellationToken)
+    {
+        await _mediator.Send(new ReleaseQuotaAllocationCommand(operatorId, allocationId), cancellationToken);
+        return Ok();
     }
 }

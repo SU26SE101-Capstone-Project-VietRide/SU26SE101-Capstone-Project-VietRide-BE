@@ -47,6 +47,27 @@ export class IdentityOperatorRecipientProvider implements OperatorRecipientProvi
     return OperatorRecipientResponseSchema.parse(await response.json());
   }
 
+  async resolveOperatorCrewUserIds(operatorId: string): Promise<string[]> {
+    const url = new URL(
+      `/internal/v1/operators/${operatorId}/crew-user-ids`,
+      this.env.IDENTITY_INTERNAL_BASE_URL,
+    );
+    const response = await fetch(url, {
+      headers: { [INTERNAL_AUTH_HEADER]: `Bearer ${await this.signInternalJwt()}` },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (response.status === 401) {
+      throw new UnauthorizedException({
+        errorCode: 'IDENTITY_INTERNAL_AUTH_FAILED',
+        detail: 'Identity rejected notification internal auth token',
+      });
+    }
+    if (!response.ok) {
+      this.logger.warn({ operatorId, statusCode: response.status }, 'Identity operator crew lookup failed');
+      throw new Error(`IDENTITY_OPERATOR_CREW_LOOKUP_FAILED_${response.status}`);
+    }
+    return OperatorRecipientResponseSchema.parse(await response.json());
+  }
   private async signInternalJwt(): Promise<string> {
     if (!this.env.INTERNAL_JWT_SECRET) {
       throw new Error('INTERNAL_JWT_SECRET_REQUIRED_FOR_OPERATOR_RECIPIENT_LOOKUP');

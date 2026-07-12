@@ -1,6 +1,6 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.25.0
+> **Phiên bản:** 1.26.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
 > **Cập nhật lần cuối:** 2026-07-12
 > **Capstone:** SU26SE101 — SU26
@@ -1325,7 +1325,7 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | | `AUTH_TOKEN_EXPIRED` | 401 | Access token expired |
 | | `AUTH_TOKEN_INVALID` | 401 | Signature/format invalid |
 | | `AUTH_GOOGLE_TOKEN_INVALID` | 401 | Google ID token signature/expiry/audience invalid |
-| | `AUTH_EMAIL_NOT_VERIFIED` | 403 | User.status = PENDING_EMAIL_VERIFICATION |
+| | `AUTH_EMAIL_NOT_VERIFIED` | 403 | Non-passenger User.status = PENDING_EMAIL_VERIFICATION |
 | | `AUTH_ACCOUNT_LOCKED` | 403 | User.status = LOCKED |
 | | `AUTH_OTP_INVALID` | 400 | OTP code sai |
 | | `AUTH_OTP_EXPIRED` | 400 | OTP TTL 5 phút hết |
@@ -1635,6 +1635,7 @@ PENDING | APPROVED | REJECTED | SUSPENDED
 - Min 8 ký tự, ≥1 chữ + ≥1 số.
 - Hash bcrypt cost 12.
 - Password change require verify mật khẩu cũ.
+- Login allows `PASSENGER` users in `PENDING_EMAIL_VERIFICATION` to receive a normal token bundle for the mobile restricted session; FE gates features via `data.user.status`. Non-passenger `PENDING_EMAIL_VERIFICATION` users still fail with `AUTH_EMAIL_NOT_VERIFIED`.
 - Password reset for any `ACTIVE` user role uses a `PASSWORD_RESET` email OTP. `forgot-password` returns generic success for unknown/non-eligible emails; `reset-password` marks the OTP used, hashes the new password, and revokes active refresh tokens with reason `PASSWORD_RESET`.
 - **Account lockout:** 5 lần sai trong 15 phút → `User.status = LOCKED`. Chỉ System Admin mở khóa. Login thành công reset counter.
 - Track `failedLoginAttempts` + `lastFailedLoginAt` trên User entity.
@@ -1699,7 +1700,10 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `GET /internal/v1/operators/{operatorId}` | All services | Lookup operator info for logical FK validation (raw success DTO) |
 | `GET /internal/v1/operators/{operatorId}/subscription` | Booking, Trip, Parcel | Raw current subscription + plan limits/module flags + usage counters |
 | `POST /internal/v1/operators/{operatorId}/usage/increment` | Trip, Booking, Parcel | Body `{resource, delta}` where resource is `VEHICLES|DRIVERS|ASSISTANTS|OPERATOR_USERS|ROUTES|TRIPS_THIS_MONTH`; atomically increment usage counter without concurrent overshoot |
-| `GET /internal/v1/subscription-plans` | Admin Web (qua Gateway) | List gói SaaS |
+| `POST /internal/v1/operators/{operatorId}/quota-allocations` | Trip | Claim durable idempotent quota allocation by `{ resource, resourceId, periodKey? }`; no distributed transaction |
+| `POST /internal/v1/operators/{operatorId}/quota-allocations/{allocationId}/release` | Trip | Idempotently release an allocation after local persistence fails or its resource is soft-deleted |
+| `POST /internal/v1/payments/subscription` | Identity | Create/replay a VNPay subscription payment from a server-side upgrade snapshot |
+| `POST /internal/v1/payments/{paymentId}/expire-subscription` | Identity | Idempotently expire a pending subscription payment during the Identity-owned auto-revert job |
 
 #### Trip-Route-Vehicle Service
 
@@ -1773,6 +1777,8 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `booking.voucher.consent_accepted` | Booking | Notification | `{ voucherId, operatorId }` |
 | `booking.voucher.consent_rejected` | Booking | Notification | `{ voucherId, operatorId, reason? }` |
 | `trip.trip.boarding_started` | Trip | Notification | `{ tripId, boardingStartedAt }` |
+| `trip.trip.assigned` | Trip | Notification | `{ tripId, operatorId, driverUserId, assistantUserId?, routeName, vehiclePlateNumber, departureDateTime }` |
+| `trip.trip.crew_changed` | Trip | Notification | `{ tripId, operatorId, oldDriverUserId, oldAssistantUserId?, driverUserId, assistantUserId?, routeName, vehiclePlateNumber?, departureDateTime }` |
 | `trip.trip.started` | Trip | Parcel (block new parcel), Tracking | `{ tripId, actualDepartureTime }` |
 | `trip.trip.completed` | Trip | Booking, Parcel, Payment (settlement eligibility) | `{ tripId, completedAt, hasSubstitution }` |
 | `trip.trip.disrupted` | Trip | Booking, Parcel, Payment | `{ tripId, hasSubstitution, reason }` |
@@ -1785,14 +1791,18 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `trip.incident.reported` | Trip | Notification | `{ incidentId, tripId, category, reporterUserId }` |
 | `tracking.gps.off_route` | Tracking | Notification | `{ tripId, durationSeconds }` |
 | `tracking.gps.approaching_stop` | Tracking | Notification | `{ tripId, stopId, bookingIds, wave, etaMinutes }` |
-| `payment.payment.succeeded` | Payment | Booking, Parcel, Identity (subscription activate) | `{ paymentId, referenceType, referenceId, amount }` |
+| `payment.payment.succeeded` | Payment | Booking, Parcel | `{ paymentId, referenceType, referenceId, amount }` |
 | `payment.payment.failed` | Payment | Booking, Parcel | `{ paymentId, referenceType, referenceId, reason }` |
 | `payment.payment.expired` | Payment | Booking, Parcel | `{ paymentId, referenceType, referenceId }` |
 | `payment.wallet.credited` | Payment | Booking (mark REFUNDED), Parcel (mark REFUNDED), Notification | `{ userId, amount, referenceType, referenceId }` |
 | `payment.wallet.debited` | Payment | Notification | `{ userId, amount, referenceType, referenceId }` |
-| `payment.subscription.payment_pending_warn` | Payment | Notification | `{ operatorId, dueDate }` |
-| `payment.subscription.payment_auto_reverted` | Payment | Identity, Notification | `{ operatorId, previousPlanId }` |
-| `payment.subscription.payment_succeeded` | Payment | Identity (activate subscription) | `{ operatorId, planId, period }` |
+| `payment.subscription.payment_succeeded` | Payment | Identity | `{ eventId, paymentId, upgradeAttemptId, subscriptionId, operatorId, planId, billingPeriod, periodFrom, periodTo, amount, occurredAt }` |
+| `identity.subscription.usage_warning` | Identity | Notification | `{ subscriptionId, operatorId, resource, usage, limit, periodKey, occurredAt }` |
+| `identity.subscription.trial_expiring` | Identity | Notification | `{ subscriptionId, operatorId, expiresAt, daysRemaining, occurredAt }` |
+| `identity.subscription.expired` | Identity | Notification | `{ subscriptionId, operatorId, expiredAt, occurredAt }` |
+| `identity.subscription.payment_pending_warn` | Identity | Notification | `{ subscriptionId, operatorId, paymentId, dueAt, occurredAt }` |
+| `identity.subscription.payment_auto_reverted` | Identity | Notification | `{ subscriptionId, operatorId, previousPlanId, restoredPlanId, occurredAt }` |
+| `subscription.limit.trip_skipped` | Trip | Notification | `{ operatorId, driverScheduleId, skippedDate, periodKey, occurredAt }` |
 | `payment.invoice.issued` | Payment | Notification | `{ invoiceId, operatorId, amount, pdfUrl }` |
 | `payment.trip_settlement.completed` | Payment | Notification (operator) | `{ tripId, operatorId, netAmount }` |
 | `parcel.parcel.created` | Parcel | Notification, Trip (cargo counter reserve) | `{ parcelId, tripId, senderUserId, recipientUserId? }` |
@@ -2278,6 +2288,12 @@ KHÔNG dùng Prometheus/Grafana/Jaeger/Loki cho v1 (xem technical_context 3.5).
 |---|---|---|---|
 | `OtpCleanupJob` | Recurring | Daily 03:00 ICT | DELETE EmailVerificationToken expired > 7 ngày (optional cleanup) |
 | `StaleFcmTokenCleanupJob` | Recurring | Weekly Sun 04:00 ICT | UPDATE UserDevice SET isActive=false WHERE lastActiveAt < now - 90 days |
+| `SubscriptionTrialExpireCheckJob` | Recurring | Daily 00:30 ICT | Identity sets overdue ACTIVE subscriptions to EXPIRED; read access remains available |
+| `SubscriptionTrialExpiringWarnJob` | Recurring | Daily 09:00 ICT | Identity sends one T-3 expiry warning per subscription |
+| `SubscriptionPaymentPendingWarnJob` | Recurring | Hourly | Identity warns when a subscription upgrade attempt has been pending for 24 hours |
+| `SubscriptionAutoRevertJob` | Recurring | Daily 02:00 ICT | Identity expires the pending Payment via internal API, then restores previous plan or Starter after seven days |
+| `SubscriptionTripUsageProjectionJob` | Recurring | Day 1, 00:01 ICT | Refreshes current-month trip usage projection; source of truth is departure-month allocation |
+| `SubscriptionQuotaAllocationReconciliationJob` | Recurring | Daily 03:30 ICT | Releases only verified orphan durable quota allocations; never uses a distributed transaction |
 
 #### Trip-Route-Vehicle
 
@@ -2315,10 +2331,6 @@ KHÔNG dùng Prometheus/Grafana/Jaeger/Loki cho v1 (xem technical_context 3.5).
 | `TopUpExpiredJob` | Scheduled (per TopUpRequest) | PENDING + 15 phút | UPDATE status = EXPIRED |
 | `TripSettlementEligibilityFlagJob` | Recurring | Daily 02:00 ICT | Set OperatorTripSettlement.status = ELIGIBLE WHERE eligibleAt <= now |
 | `TripSettlementWeeklyAutoSettleJob` | Recurring | Weekly Mon 09:00 ICT | Debit PlatformWallet + credit OperatorWallet cho mọi settlement ELIGIBLE |
-| `SubscriptionTrialExpireCheckJob` | Recurring | Daily 00:30 ICT | Check trial expire |
-| `SubscriptionTrialExpiringWarnJob` | Recurring | Daily 09:00 ICT | T-3 days warn |
-| `SubscriptionPaymentPendingWarnJob` | Recurring | Hourly | PENDING_PAYMENT 24h warn |
-| `SubscriptionAutoRevertJob` | Recurring | Daily 02:00 ICT | PENDING_PAYMENT 7d → auto-revert previous plan |
 | `InvoicePdfRetryJob` | Triggered (retry) | Post-payment-success event | Generate PDF, retry max 5 nếu fail |
 | `RefundFailureRetryJob` | Recurring | Every 10 phút | Retry refund từ RefundFailureLog, max 5 lần |
 
@@ -2749,9 +2761,10 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
-| **1.25.0** | 2026-07-12 | BE lead (Vu) | **MINOR** - Add the assignment-scoped Driver/Assistant Route geometry read `GET /v1/driver/trips/{tripId}/route`. The endpoint returns the main Route's nullable Google precision-5 `pathPolyline`, origin/destination Station coordinates, and ordered TripStop coordinates only when JWT `sub` is assigned as the Trip driver or assistant. Reuses existing `TRIP_NOT_FOUND`, `FORBIDDEN`, `VALIDATION_ERROR`, `/v1/driver` Gateway role gate, and existing schema; no migration, dependency, event, or operator-route permission change. |
-| **1.24.1** | 2026-07-11 | BE lead (Vu) | **PATCH** - Day-19 shared validation-policy correction: model-binding failures (malformed JSON, missing non-nullable body field, type mismatch) now return the ADR 0004 `ApiResponse` error envelope with `422 VALIDATION_ERROR`, matching FluentValidation failures; they are no longer documented as HTTP 400. |
-| **1.24.0** | 2026-07-11 | BE lead (Vu) | **MINOR** - Freeze the Day-19 tenant-scoped operator booking-monitor contract. Register the exact Identity raw phone-to-user lookup and exhaustive Booking error/retry boundary; broaden existing `UPSTREAM_UNAVAILABLE` to generic downstream/inter-service unavailability without adding an error code; replace the proposed Outbox-audit timeline with authoritative append-only `booking_status_history`, including schema, six current source constants, actor/reason rules, atomic writer/no-op semantics, no backfill/event, and deterministic ordering. |
+| **1.26.0** | 2026-07-12 | BE lead (Vu) | **MINOR** - Add the assignment-scoped Driver/Assistant Route geometry read `GET /v1/driver/trips/{tripId}/route`. The endpoint returns the main Route's nullable Google precision-5 `pathPolyline`, origin/destination Station coordinates, and ordered TripStop coordinates only when JWT `sub` is assigned as the Trip driver or assistant. Reuses existing `TRIP_NOT_FOUND`, `FORBIDDEN`, `VALIDATION_ERROR`, `/v1/driver` Gateway role gate, and existing schema; no migration, dependency, event, or operator-route permission change. |
+| **1.25.1** | 2026-07-11 | BE lead (Vu) | **PATCH** - Day-19 shared validation-policy correction: model-binding failures (malformed JSON, missing non-nullable body field, type mismatch) now return the ADR 0004 `ApiResponse` error envelope with `422 VALIDATION_ERROR`, matching FluentValidation failures; they are no longer documented as HTTP 400. |
+| **1.25.0** | 2026-07-11 | BE lead (Vu) | **MINOR** - Freeze the Day-19 tenant-scoped operator booking-monitor contract. Register the exact Identity raw phone-to-user lookup and exhaustive Booking error/retry boundary; broaden existing `UPSTREAM_UNAVAILABLE` to generic downstream/inter-service unavailability without adding an error code; replace the proposed Outbox-audit timeline with authoritative append-only `booking_status_history`, including schema, six current source constants, actor/reason rules, atomic writer/no-op semantics, no backfill/event, and deterministic ordering. |
+| **1.24.0** | 2026-07-10 | BE lead (Vu) | **MINOR** - Allow `PASSENGER` accounts in `PENDING_EMAIL_VERIFICATION` to login and receive a normal `TokenBundleDto` for the mobile restricted session; FE gates features using `data.user.status`. Non-passenger pending-email users still fail with `AUTH_EMAIL_NOT_VERIFIED`. Gateway explicitly exposes `POST /v1/auth/resend-verification-email` as public alongside the existing public forgot/reset password endpoints. No DDL, dependency, migration, or event-key change. |
 | **1.23.0** | 2026-07-09 | BE lead (Vu) | **MINOR** - Add public Identity password reset for all `ACTIVE` user roles. `POST /v1/auth/forgot-password` issues a generic response and sends a `PASSWORD_RESET` OTP only for eligible accounts; `POST /v1/auth/reset-password` consumes the OTP, hashes the new password, and revokes active refresh tokens with `PASSWORD_RESET`. No DDL, dependency, or event-key change; reuses `email_verification_tokens`, `identity.otp.requested`, and Redis `identity:pwd_reset_rate:{email}`. |
 | **1.22.0** | 2026-07-09 | BE lead (Vu) | **MINOR** - Add operator-managed Google precision-5 path geometry for Route and AlternativeRoute. Register two `PUT .../geometry` endpoints, nullable `path_polyline` storage, validation/error codes, safe invalidation after route-shape edits, and Trip internal route-geometry preference with TripStop fallback. No new event, dependency, Gateway prefix, or Idempotency-Key requirement. |
 | **1.21.1** | 2026-07-09 | BE lead (Vũ) | **PATCH** — Voucher list ownership split. `GET /v1/admin/vouchers` is no longer an all-voucher/operator-oversight list: it returns platform vouchers only (`owner_operator_id IS NULL`) and ignores/does not expose `ownerOperatorId` as a client filter; it keeps `fundingType`, `isActive`, paging and sort filters. Add `GET /v1/operator/vouchers` under the existing Booking/Gateway operator-voucher prefix for `OPERATOR_ADMIN`; Booking takes `operatorId` from the JWT claim and returns only `owner_operator_id = caller.operatorId`, with `isActive`, paging and sort filters. Both management list endpoints return voucher applicability config (`minOrderAmount`, `maxDiscountAmount`, limits, `newUserOnly`, `applicableServices`, `applicablePaymentMethods`, `applicableOperatorIds`, `applicableRouteIds`) so FE can distinguish `BOOKING` vs `PARCEL` vouchers. Admin-created `OPERATOR_FUNDED` vouchers remain platform-owned (`owner_operator_id IS NULL`) and continue the consent fan-out semantics. No DB schema or Gateway route-table change. |

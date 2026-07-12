@@ -6,6 +6,7 @@ using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
+using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Features.TripGeneration;
 using VietRide.Trip.Application.Features.Vehicles;
@@ -200,6 +201,27 @@ public sealed class TripGenerationServiceTests
     }
 
     [Fact]
+    public async Task GenerateAsync_SubscriptionLimit_LogsScheduleSkipWithoutPersistingTripSnapshots()
+    {
+        var quotaClient = new RejectingQuotaClient();
+        var fixture = TripGenerationFixture.Create(routeDurationMinutes: 180, quotaClient: quotaClient);
+
+        var result = await fixture.Service.GenerateAsync(fixture.Schedule.Id, CancellationToken.None);
+
+        result.GeneratedCount.Should().Be(0);
+        result.SkippedCount.Should().Be(4);
+        fixture.Trips.Items.Should().BeEmpty();
+        fixture.TripSeats.Items.Should().BeEmpty();
+        fixture.TripStops.Items.Should().BeEmpty();
+        fixture.TripStopFares.Items.Should().BeEmpty();
+        fixture.SkipLogs.Items.Should().OnlyContain(log =>
+            log.DriverScheduleId == fixture.Schedule.Id
+            && log.Reason == TripGenerationSkipReason.SUBSCRIPTION_LIMIT_EXCEEDED);
+        quotaClient.Claims.Should().HaveCount(4);
+        quotaClient.Claims.Should().OnlyContain(claim => claim.Resource == "TRIPS_THIS_MONTH" && claim.PeriodKey == "2026-06");
+    }
+
+    [Fact]
     public void TripGenerationJobMethods_RunOnTripQueue()
     {
         var scheduleMethod = typeof(TripGenerationJob)
@@ -271,7 +293,8 @@ public sealed class TripGenerationServiceTests
             IReadOnlyCollection<int>? dayOfWeek = null,
             TimeOnly? departureTime = null,
             DateOnly? validFrom = null,
-            DateOnly? validUntil = null)
+            DateOnly? validUntil = null,
+            ISubscriptionQuotaClient? quotaClient = null)
         {
             var operatorId = Guid.NewGuid();
             var route = Route.Create(
@@ -351,7 +374,8 @@ public sealed class TripGenerationServiceTests
                 tripSeats,
                 tripStops,
                 tripStopFares,
-                skipLogs);
+                skipLogs,
+                quotaClient: quotaClient);
 
             return new TripGenerationFixture(service, schedule, schedules, trips, tripSeats, tripStops, tripStopFares, skipLogs);
         }
@@ -567,5 +591,27 @@ public sealed class TripGenerationServiceTests
             : base(items, log => log.Id)
         {
         }
+    }
+
+    private sealed class RejectingQuotaClient : ISubscriptionQuotaClient
+    {
+        public List<(Guid OperatorId, string Resource, Guid ResourceId, string? PeriodKey)> Claims { get; } = [];
+
+        public Task<QuotaAllocationResult> ClaimQuotaAllocationAsync(
+            Guid operatorId,
+            string resource,
+            Guid resourceId,
+            string? periodKey,
+            CancellationToken cancellationToken = default)
+        {
+            Claims.Add((operatorId, resource, resourceId, periodKey));
+            return Task.FromResult(QuotaAllocationResult.Rejected(
+                422,
+                "SUBSCRIPTION_LIMIT_EXCEEDED",
+                "Subscription monthly trip limit exceeded."));
+        }
+
+        public Task ReleaseQuotaAllocationAsync(Guid operatorId, Guid allocationId, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 }

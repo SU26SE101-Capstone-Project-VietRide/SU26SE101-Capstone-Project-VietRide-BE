@@ -130,6 +130,79 @@ public sealed class IdentityServiceClient : IIdentityServiceClient
         }
     }
 
+    public async Task<SubscriptionWriteEligibilityOutcome> GetSubscriptionWriteEligibilityAsync(
+        Guid operatorId,
+        bool requireParcelModule,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var response = await _httpClient
+                .GetAsync($"/internal/v1/operators/{operatorId:D}/subscription", cancellationToken)
+                .ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return SubscriptionWriteEligibilityOutcome.Rejected(
+                    404,
+                    "RESOURCE_NOT_FOUND",
+                    "Operator subscription was not found.");
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return SubscriptionWriteEligibilityOutcome.Rejected(
+                    (int)response.StatusCode,
+                    "UPSTREAM_UNAVAILABLE",
+                    $"Identity subscription lookup returned status {(int)response.StatusCode}.");
+            }
+
+            var json = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+            var status = GetStringProperty(json, "status");
+            if (string.Equals(status, "EXPIRED", StringComparison.Ordinal))
+            {
+                return SubscriptionWriteEligibilityOutcome.Rejected(
+                    402,
+                    "SUBSCRIPTION_EXPIRED",
+                    "Operator subscription has expired.");
+            }
+
+            if (string.Equals(status, "PENDING_PAYMENT", StringComparison.Ordinal))
+            {
+                return SubscriptionWriteEligibilityOutcome.Rejected(
+                    409,
+                    "SUBSCRIPTION_PAYMENT_PENDING",
+                    "Operator subscription payment is pending.");
+            }
+
+            var parcelEnabled = json.TryGetProperty("plan", out var plan)
+                && plan.TryGetProperty("modules", out var modules)
+                && modules.TryGetProperty("enableParcel", out var enabled)
+                && enabled.ValueKind is JsonValueKind.True;
+            if (requireParcelModule && !parcelEnabled)
+            {
+                return SubscriptionWriteEligibilityOutcome.Rejected(
+                    403,
+                    "SUBSCRIPTION_MODULE_DISABLED",
+                    "Parcel module is disabled for the operator subscription.");
+            }
+
+            return SubscriptionWriteEligibilityOutcome.Allowed();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Identity subscription lookup failed for operator {OperatorId}.", operatorId);
+            return SubscriptionWriteEligibilityOutcome.Rejected(
+                503,
+                "UPSTREAM_UNAVAILABLE",
+                "Identity subscription lookup transport failure.");
+        }
+    }
+
     private static string? GetStringProperty(JsonElement json, string propertyName)
     {
         return json.TryGetProperty(propertyName, out var prop) && prop.ValueKind == JsonValueKind.String

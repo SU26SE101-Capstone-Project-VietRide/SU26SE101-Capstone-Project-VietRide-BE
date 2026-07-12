@@ -92,6 +92,19 @@ jobs:
               docker compose -f docker-compose.prod.yml --env-file .env logs --no-color --tail=200 booking
               exit 1
             fi
+
+            # Reload nginx so an updated bind-mounted nginx.prod.conf takes effect.
+            # `up -d` does NOT recreate nginx when only the mounted file's CONTENT changed
+            # (compose recreates on service-definition changes, not file-content changes),
+            # so nginx would otherwise keep serving the old config from memory. Test first;
+            # only reload if valid, else recreate the container to pick up the new config.
+            if docker compose -f docker-compose.prod.yml --env-file .env exec -T nginx nginx -t; then
+              docker compose -f docker-compose.prod.yml --env-file .env exec -T nginx nginx -s reload
+            else
+              echo "::warning::nginx config test failed — recreating nginx container"
+              docker compose -f docker-compose.prod.yml --env-file .env up -d --force-recreate nginx
+            fi
+
             docker image prune -f
 
       # Same retry rationale as the scp step — the script is idempotent
@@ -126,6 +139,19 @@ jobs:
               docker compose -f docker-compose.prod.yml --env-file .env logs --no-color --tail=200 booking
               exit 1
             fi
+
+            # Reload nginx so an updated bind-mounted nginx.prod.conf takes effect.
+            # `up -d` does NOT recreate nginx when only the mounted file's CONTENT changed
+            # (compose recreates on service-definition changes, not file-content changes),
+            # so nginx would otherwise keep serving the old config from memory. Test first;
+            # only reload if valid, else recreate the container to pick up the new config.
+            if docker compose -f docker-compose.prod.yml --env-file .env exec -T nginx nginx -t; then
+              docker compose -f docker-compose.prod.yml --env-file .env exec -T nginx nginx -s reload
+            else
+              echo "::warning::nginx config test failed — recreating nginx container"
+              docker compose -f docker-compose.prod.yml --env-file .env up -d --force-recreate nginx
+            fi
+
             docker image prune -f
 
       - name: Health check via public domain

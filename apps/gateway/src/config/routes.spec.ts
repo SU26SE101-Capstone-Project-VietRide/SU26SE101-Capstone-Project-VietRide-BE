@@ -20,7 +20,9 @@ describe('buildRouteTable', () => {
         r.prefix.startsWith('/v1/users') ||
         r.prefix.startsWith('/v1/operator/profile') ||
         r.prefix.startsWith('/v1/operator/users') ||
-        r.prefix.startsWith('/v1/admin/operator-users'),
+        r.prefix.startsWith('/v1/operator/subscription') ||
+        r.prefix.startsWith('/v1/admin/operator-users') ||
+        r.prefix.startsWith('/v1/admin/subscription-plans'),
     );
     expect(identityRoutes.length).toBeGreaterThan(0);
     identityRoutes.forEach((r) => expect(r.target).toBe(env.IDENTITY_BASE_URL));
@@ -40,6 +42,7 @@ describe('buildRouteTable', () => {
       ['/v1/admin/operators', env.IDENTITY_BASE_URL],
       ['/v1/admin/operator-users', env.IDENTITY_BASE_URL],
       ['/v1/admin/users', env.IDENTITY_BASE_URL],
+      ['/v1/admin/subscription-plans', env.IDENTITY_BASE_URL],
       ['/v1/admin/locations', env.TRIP_BASE_URL],
       ['/v1/admin/booking-stats', env.BOOKING_BASE_URL],
       ['/v1/admin/vouchers', env.BOOKING_BASE_URL],
@@ -183,6 +186,7 @@ describe('buildRouteTable', () => {
       ['/v1/admin/operators/11111111-1111-1111-1111-111111111111/approve', env.IDENTITY_BASE_URL],
       ['/v1/admin/operator-users', env.IDENTITY_BASE_URL],
       ['/v1/admin/users', env.IDENTITY_BASE_URL],
+      ['/v1/admin/subscription-plans', env.IDENTITY_BASE_URL],
       ['/v1/admin/locations', env.TRIP_BASE_URL],
       ['/v1/admin/booking-stats/aggregate', env.BOOKING_BASE_URL],
       ['/v1/admin/vouchers', env.BOOKING_BASE_URL],
@@ -207,6 +211,7 @@ describe('buildRouteTable', () => {
     const publicPrefixes = [
       '/v1/auth/register',
       '/v1/auth/verify-email',
+      '/v1/auth/resend-verification-email',
       '/v1/auth/forgot-password',
       '/v1/auth/reset-password',
       '/v1/auth/set-initial-password',
@@ -243,6 +248,14 @@ describe('buildRouteTable', () => {
       expect(route?.target).toBe(env.IDENTITY_BASE_URL);
       expect(route?.authRequired).toBe('none');
     });
+  });
+
+  it('matches resend verification email to its dedicated public auth route', () => {
+    const route = matchRoute(routes, '/v1/auth/resend-verification-email');
+
+    expect(route?.prefix).toBe('/v1/auth/resend-verification-email');
+    expect(route?.target).toBe(env.IDENTITY_BASE_URL);
+    expect(route?.authRequired).toBe('none');
   });
 
   it('logout and other non-public auth paths require user auth', () => {
@@ -427,13 +440,19 @@ describe('buildRouteTable', () => {
   it('keeps existing Identity operator routes distinct from Trip operator routes', () => {
     const profileRoute = matchRoute(routes, '/v1/operator/profile');
     const usersRoute = matchRoute(routes, '/v1/operator/users');
+    const subscriptionRoute = matchRoute(routes, '/v1/operator/subscription');
     const adminOperatorUsersRoute = matchRoute(routes, '/v1/admin/operator-users');
+    const adminSubscriptionPlansRoute = matchRoute(routes, '/v1/admin/subscription-plans');
     const operatorStationsRoute = matchRoute(routes, '/v1/operator/stations');
     const operatorStopsRoute = matchRoute(routes, '/v1/operator/stops');
 
     expect(profileRoute?.target).toBe(env.IDENTITY_BASE_URL);
     expect(usersRoute?.target).toBe(env.IDENTITY_BASE_URL);
+    expect(subscriptionRoute?.target).toBe(env.IDENTITY_BASE_URL);
+    expect(subscriptionRoute?.requiredRoles).toEqual(['OPERATOR_ADMIN']);
     expect(adminOperatorUsersRoute?.target).toBe(env.IDENTITY_BASE_URL);
+    expect(adminSubscriptionPlansRoute?.target).toBe(env.IDENTITY_BASE_URL);
+    expect(adminSubscriptionPlansRoute?.requiredRoles).toEqual(['SYSTEM_ADMIN']);
     expect(operatorStationsRoute?.target).toBe(env.TRIP_BASE_URL);
     expect(operatorStopsRoute?.target).toBe(env.TRIP_BASE_URL);
     expect(routes.find((r) => r.prefix === '/v1/operator')).toBeUndefined();

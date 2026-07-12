@@ -13,6 +13,16 @@ public sealed class DevTripServiceClient : ITripServiceClient
         _logger = logger;
     }
 
+    public Task<TripCrewAuthorizationOutcome> AuthorizeAssistantForTripAsync(
+        Guid tripId,
+        Guid userId,
+        Guid operatorId,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Using dev Trip stub for AuthorizeAssistantForTripAsync({TripId}, {UserId}).", tripId, userId);
+        return Task.FromResult(new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Authorized));
+    }
+
     public Task<TripSnapshotOutcome> GetTripParcelSnapshotAsync(
         Guid tripId,
         CancellationToken cancellationToken = default)

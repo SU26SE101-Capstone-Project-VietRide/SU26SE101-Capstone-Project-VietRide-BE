@@ -21,16 +21,18 @@ export class FirebaseFcmPushProvider implements FcmPushProvider {
 
   async send(payload: FcmPushPayload): Promise<FcmPushResult> {
     try {
-      const messageId = await getMessaging(this.app).send({
-        token: payload.token,
+      const message = {
+        ...(this.env.FCM_DRY_RUN ? { topic: this.env.FCM_DRY_RUN_TOPIC } : { token: payload.token }),
         notification: {
           title: payload.title,
           body: payload.body,
         },
         data: payload.data,
-      });
+        android: { priority: 'high' as const },
+      };
+      const messageId = await getMessaging(this.app).send(message, this.env.FCM_DRY_RUN);
 
-      return { messageId };
+      return { messageId, dryRun: this.env.FCM_DRY_RUN };
     } catch (error) {
       if (this.isInvalidTokenError(error)) {
         return { invalidToken: true };

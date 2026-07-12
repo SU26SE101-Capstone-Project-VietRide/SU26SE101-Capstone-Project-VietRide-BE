@@ -1,5 +1,8 @@
+using Hangfire;
+using Hangfire.PostgreSql;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using StackExchange.Redis;
 using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
@@ -7,12 +10,15 @@ using VietRide.Identity.Application.Abstractions.Http;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Infrastructure.ExternalClients;
 using VietRide.Identity.Infrastructure.Http;
+using VietRide.Identity.Infrastructure.Jobs;
+using VietRide.Identity.Infrastructure.Messaging;
 using VietRide.Identity.Infrastructure.Persistence.Repositories;
 using VietRide.Identity.Infrastructure.Security;
 using VietRide.Identity.Infrastructure.Seed;
 using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Http.Resilience;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Messaging.DependencyInjection;
 
 namespace VietRide.Identity.Infrastructure.DependencyInjection;
 
@@ -22,6 +28,27 @@ namespace VietRide.Identity.Infrastructure.DependencyInjection;
 /// </summary>
 public static class InfrastructureServiceCollectionExtensions
 {
+    public const string HangfireSchemaName = "hangfire";
+
+    public static IServiceCollection AddIdentityHangfire(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        var connectionString = configuration.GetConnectionString("Default")
+            ?? throw new InvalidOperationException("ConnectionStrings:Default is not configured.");
+
+        services.AddHangfire(config => config
+            .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+            .UseSimpleAssemblyNameTypeSerializer()
+            .UseRecommendedSerializerSettings()
+            .UsePostgreSqlStorage(connectionString, new PostgreSqlStorageOptions
+            {
+                SchemaName = HangfireSchemaName,
+                PrepareSchemaIfNecessary = true,
+            }));
+        return services;
+    }
+
     /// <summary>
     /// Adds Identity Infrastructure services (repositories + security + email stub) to
     /// the DI container.  Call after <c>AddVietRideDbContext&lt;IdentityDbContext&gt;</c>
@@ -29,7 +56,8 @@ public static class InfrastructureServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services,
-        Microsoft.Extensions.Configuration.IConfiguration configuration)
+        Microsoft.Extensions.Configuration.IConfiguration configuration,
+        bool registerEventConsumer = true)
     {
         // ------------------------------------------------------------------
         // Configuration
@@ -75,6 +103,19 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IOperatorRepository, OperatorRepository>();
         services.AddScoped<IOperatorSubscriptionRepository, OperatorSubscriptionRepository>();
         services.AddScoped<ISubscriptionPlanRepository, SubscriptionPlanRepository>();
+        services.AddScoped<ISubscriptionUpgradeAttemptRepository, SubscriptionUpgradeAttemptRepository>();
+        services.AddScoped<ISubscriptionQuotaAllocationRepository, SubscriptionQuotaAllocationRepository>();
+
+        AddSubscriptionPaymentClient(services, configuration);
+        services.AddScoped<SubscriptionLifecycleJob>();
+        if (registerEventConsumer)
+        {
+            services.AddVietRideEventConsumer<SubscriptionPaymentSucceededIntegrationEvent, SubscriptionPaymentSucceededIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "identity.subscription-payment-succeeded";
+                options.BindingKeys = ["payment.subscription.payment_succeeded"];
+            });
+        }
 
         // ------------------------------------------------------------------
         // Startup seeders
@@ -150,10 +191,10 @@ public static class InfrastructureServiceCollectionExtensions
 
         // Internal JWT signer + delegating handlers shared with the other
         // .NET services (do not hand-roll a second signer per BSOT §5.3).
-        services.AddSingleton<IInternalJwtTokenProvider, InternalJwtTokenFactory>();
+        services.TryAddSingleton<IInternalJwtTokenProvider, InternalJwtTokenFactory>();
         services.AddHttpContextAccessor();
-        services.AddTransient<InternalJwtDelegatingHandler>();
-        services.AddTransient<CorrelationIdDelegatingHandler>();
+        services.TryAddTransient<InternalJwtDelegatingHandler>();
+        services.TryAddTransient<CorrelationIdDelegatingHandler>();
 
         services
             .AddHttpClient<INotificationEmailClient, NotificationEmailClient>(client =>
@@ -183,5 +224,28 @@ public static class InfrastructureServiceCollectionExtensions
         return configuration["EMAIL_SERVICE_BASE_URL"]
             ?? Environment.GetEnvironmentVariable("EMAIL_SERVICE_BASE_URL")
             ?? "http://notification:3002";
+    }
+
+    private static void AddSubscriptionPaymentClient(
+        IServiceCollection services,
+        IConfiguration configuration)
+    {
+        services.TryAddSingleton<IInternalJwtTokenProvider, InternalJwtTokenFactory>();
+        services.AddHttpContextAccessor();
+        services.TryAddTransient<InternalJwtDelegatingHandler>();
+        services.TryAddTransient<CorrelationIdDelegatingHandler>();
+
+        services.AddHttpClient<ISubscriptionPaymentClient, SubscriptionPaymentClient>(client =>
+            {
+                var baseUrl = configuration["PAYMENT_SERVICE_BASE_URL"]
+                    ?? Environment.GetEnvironmentVariable("PAYMENT_SERVICE_BASE_URL")
+                    ?? "http://payment:8080";
+                client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
+                client.Timeout = TimeSpan.FromSeconds(30);
+            })
+            .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
+            .AddHttpMessageHandler<InternalJwtDelegatingHandler>()
+            .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
+            .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
     }
 }

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Parcel.Api.Controllers.Requests;
 using VietRide.Parcel.Api.Filters;
+using VietRide.Parcel.Application.Features.Parcels.AssistantTripParcels;
 using VietRide.Parcel.Application.Features.Parcels.ManualConfirmDelivery;
 using VietRide.Parcel.Application.Features.Parcels.MarkLoaded;
 using VietRide.Parcel.Application.Features.Parcels.Reweigh;
@@ -22,6 +23,29 @@ public sealed class AssistantParcelsController : ControllerBase
     public AssistantParcelsController(IMediator mediator)
     {
         _mediator = mediator;
+    }
+
+    [HttpGet("~/v1/assistant/trips/{tripId:guid}/parcels")]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<AssistantTripParcelResponse>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<PagedResult<AssistantTripParcelResponse>>> GetByTripAsync(
+        Guid tripId,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var userId = CurrentUserClaims.GetUserId(User);
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+
+        var result = await _mediator.Send(
+            new GetAssistantTripParcelsQuery(tripId, userId, operatorId, page, pageSize),
+            cancellationToken);
+
+        return Ok(result);
     }
 
     [HttpPost("{parcelId:guid}/reweigh")]

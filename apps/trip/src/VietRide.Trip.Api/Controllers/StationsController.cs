@@ -32,8 +32,9 @@ public sealed class StationsController : ControllerBase
         [FromQuery(Name = "q")] string? q,
         [FromQuery] string? city,
         [FromQuery] string? province,
+        [FromQuery] Guid? locationId,
         CancellationToken cancellationToken)
     {
-        return Ok(await mediator.Send(new SearchStationsQuery(q, city, province), cancellationToken));
+        return Ok(await mediator.Send(new SearchStationsQuery(q, city, province, locationId), cancellationToken));
     }
 }

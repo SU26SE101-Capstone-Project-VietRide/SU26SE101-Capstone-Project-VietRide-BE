@@ -39,6 +39,8 @@ const MoneyAmountSchema = z.union([z.number().int().nonnegative(), z.string().re
 const RecipientPayloadSchema = z.object({
   userId: z.string().uuid().optional(),
   userIds: z.array(z.string().uuid()).optional(),
+  senderUserId: z.string().uuid().optional(),
+  recipientUserId: z.string().uuid().optional(),
   recipientUserIds: z.array(z.string().uuid()).optional(),
   operatorId: z.string().uuid().optional(),
 });
@@ -585,6 +587,8 @@ async function collectRecipientUserIds(
     payload.userId,
     ...(payload.userIds ?? []),
     ...(payload.recipientUserIds ?? []),
+    ...(payload.senderUserId ? [payload.senderUserId] : []),
+    ...(payload.recipientUserId ? [payload.recipientUserId] : []),
   ].filter(isString);
   if (directUserIds.length > 0) {
     return [...new Set(directUserIds)];

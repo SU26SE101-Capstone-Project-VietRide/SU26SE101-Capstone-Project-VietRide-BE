@@ -1441,7 +1441,7 @@ Response: { keys: [{ kty, alg, use, kid, n, e }] }  // JWK Set format (RFC 7517)
 PENDING_EMAIL_VERIFICATION | ACTIVE | LOCKED | DELETED
 ```
 
-- `PENDING_EMAIL_VERIFICATION`: user đăng ký bằng email/password nhưng chưa verify OTP. Không được login lấy access token; chỉ được request/verify OTP. Sau verify thành công → `ACTIVE`.
+- `PENDING_EMAIL_VERIFICATION`: user đăng ký bằng email/password nhưng chưa verify OTP. `PASSENGER` được login lấy access token cho mobile restricted session; FE khóa chức năng dựa trên `data.user.status`. Non-passenger pending email không được login và chỉ được request/verify OTP. Sau verify thành công → `ACTIVE`.
 - `ACTIVE`: account dùng bình thường. Google OAuth account tạo mới vào thẳng `ACTIVE` vì Google đã verify email ownership.
 - `LOCKED`: bị khóa do password lockout hoặc System Admin khóa thủ công. Không login, không refresh token, không request password reset.
 - `DELETED`: soft delete/anonymized account. Terminal cho v1; không login/reactivate trong app flow bình thường.
@@ -4715,9 +4715,9 @@ Mỗi service chỉ được phép read/write key bắt đầu bằng prefix ser
 
 **Password reset flow:**
 
-`POST /v1/auth/forgot-password { email }` — public, luôn trả 200 (chống email enumeration). Chỉ gửi link nếu `User.status = ACTIVE` và `passwordHash NOT NULL` (Google-only account không có password, bỏ qua). INSERT `EmailVerificationToken { purpose=PASSWORD_RESET, code=UUID v4, expiresAt=now+15m }`. Rate limit: Redis `pwd_reset_rate:{email}` max 3/giờ.
+`POST /v1/auth/forgot-password { email }` — public, luôn trả 200 (chống email enumeration). Chỉ gửi OTP nếu `User.status = ACTIVE` và `passwordHash NOT NULL` (Google-only account không có password, bỏ qua). INSERT `EmailVerificationToken { purpose=PASSWORD_RESET, code=6-digit OTP, expiresAt=now+5m }`. Rate limit: Redis `identity:pwd_reset_rate:{email}` max 3/giờ.
 
-`POST /v1/auth/reset-password { token, newPassword }` — public. Lookup token hợp lệ (không expired, chưa dùng, failedAttempts < 5). Trong transaction: update passwordHash, mark token used, revoke tất cả RefreshToken của user (`revokedReason=PASSWORD_RESET`). Password reset **không unlock** LOCKED account — chỉ Admin unlock.
+`POST /v1/auth/reset-password { email, code, newPassword }` — public. Lookup `PASSWORD_RESET` OTP hợp lệ (không expired, chưa dùng, failedAttempts < 5) cho email. Trong transaction: update passwordHash, mark token used, revoke tất cả RefreshToken của user (`revokedReason=PASSWORD_RESET`). Password reset **không unlock** LOCKED account — chỉ Admin unlock.
 
 **Google OAuth + Email/password linking:**
 
@@ -4726,7 +4726,7 @@ Mỗi service chỉ được phép read/write key bắt đầu bằng prefix ser
 - OAuthIdentity chưa có, email đã tồn tại → auto-link tạo OAuthIdentity, login với account cũ, push in-app banner thông báo 1 lần.
 - OAuthIdentity chưa có, email chưa tồn tại → tạo User mới `status=ACTIVE` (Google đã verify email, không cần OTP).
 
-Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → gửi OTP → verify → `status=ACTIVE`. Chỉ ACTIVE mới login được.
+Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → gửi OTP → verify → `status=ACTIVE`. Passenger mobile có thể login trước verify trong restricted session; các non-passenger account chỉ login sau khi thành `ACTIVE`.
 
 ### Entity Requirements per Service
 

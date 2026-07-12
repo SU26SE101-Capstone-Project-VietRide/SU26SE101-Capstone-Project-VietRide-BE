@@ -133,22 +133,48 @@ export class NotificationsRepository {
     notificationId: string,
     deviceToken: DeviceTokenSnapshot,
   ): Promise<NotificationDelivery> {
-    return this.prisma.notificationDelivery.create({
-      data: {
+    return this.prisma.notificationDelivery.upsert({
+      where: {
+        notificationId_fcmToken: {
+          notificationId,
+          fcmToken: deviceToken.fcmToken,
+        },
+      },
+      create: {
         notificationId,
         fcmToken: deviceToken.fcmToken,
         platform: deviceToken.platform,
       },
+      update: {},
     });
   }
 
-  async markDeliverySent(deliveryId: string): Promise<NotificationDelivery> {
+  async markDeliverySent(
+    deliveryId: string,
+    providerMessageId: string | null,
+  ): Promise<NotificationDelivery> {
     return this.prisma.notificationDelivery.update({
       where: { id: deliveryId },
       data: {
         status: NotificationDeliveryStatus.SENT,
         sentAt: new Date(),
         lastError: null,
+        providerMessageId,
+      },
+    });
+  }
+
+  async markDeliveryValidated(
+    deliveryId: string,
+    providerMessageId: string | null,
+  ): Promise<NotificationDelivery> {
+    return this.prisma.notificationDelivery.update({
+      where: { id: deliveryId },
+      data: {
+        status: NotificationDeliveryStatus.VALIDATED,
+        sentAt: new Date(),
+        lastError: null,
+        providerMessageId,
       },
     });
   }

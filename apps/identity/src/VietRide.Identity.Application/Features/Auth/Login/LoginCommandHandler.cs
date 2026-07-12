@@ -55,8 +55,8 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
         if (user?.Status == UserStatus.LOCKED)
             throw new ForbiddenException("AUTH_ACCOUNT_LOCKED", "Account is locked. Please contact support.");
 
-        // 2. Check if email is not yet verified (403).
-        if (user?.Status == UserStatus.PENDING_EMAIL_VERIFICATION)
+        // 2. Passenger mobile may enter the app before email verification; FE restricts features via user.status.
+        if (user?.Status == UserStatus.PENDING_EMAIL_VERIFICATION && user.Role != UserRole.PASSENGER)
             throw new ForbiddenException("AUTH_EMAIL_NOT_VERIFIED", "Email address has not been verified.");
 
         // 3. Check if the operator has not set an initial password yet (403).

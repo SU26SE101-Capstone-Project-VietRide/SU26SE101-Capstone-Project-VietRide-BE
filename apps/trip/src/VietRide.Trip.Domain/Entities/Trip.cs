@@ -180,6 +180,14 @@ public sealed class Trip : BaseEntity<Guid>
         HasSubstitution = hasSubstitution;
     }
 
+    public void ChangeCrew(Guid driverUserId, Guid? assistantUserId)
+    {
+        ValidateGuid(driverUserId, nameof(driverUserId));
+        ValidateOptionalGuid(assistantUserId, nameof(assistantUserId));
+        DriverUserId = driverUserId;
+        AssistantUserId = assistantUserId;
+    }
+
     public void UpdateCargoCounters(
         decimal reservedParcelWeightKg,
         decimal reservedParcelVolumeM3,

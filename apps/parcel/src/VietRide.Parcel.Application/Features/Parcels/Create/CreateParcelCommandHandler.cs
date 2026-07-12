@@ -160,6 +160,18 @@ public sealed class CreateParcelCommandHandler
                 "TRIP_NOT_ACCEPTING_PARCEL",
                 $"Trip '{command.TripId}' is in status '{trip.Status}' and is not accepting parcels.");
 
+        var subscriptionEligibility = await _identityClient.GetSubscriptionWriteEligibilityAsync(
+            trip.OperatorId,
+            requireParcelModule: true,
+            cancellationToken) ?? SubscriptionWriteEligibilityOutcome.Allowed();
+        if (!subscriptionEligibility.IsAllowed)
+        {
+            throw new SubscriptionWriteBlockedException(
+                subscriptionEligibility.FailureStatusCode ?? 503,
+                subscriptionEligibility.ErrorCode ?? "UPSTREAM_UNAVAILABLE",
+                subscriptionEligibility.ErrorMessage ?? "Operator subscription cannot create parcels.");
+        }
+
         if (command.DropoffStopId.HasValue)
         {
             var dropoffStop = trip.Stops.FirstOrDefault(stop => stop.StopId == command.DropoffStopId.Value);
@@ -359,7 +371,7 @@ public sealed class CreateParcelCommandHandler
             await ParcelOutboxEvents.EnqueueAsync(
                 _outbox,
                 ParcelOutboxEvents.Created,
-                new { parcelId = parcel.Id, tripId = parcel.TripId, senderUserId = parcel.SenderUserId, recipientUserId = parcel.RecipientUserId },
+                new { parcelId = parcel.Id, tripId = parcel.TripId, senderUserId = parcel.SenderUserId, recipientUserId = parcel.RecipientUserId, userIds = new[] { parcel.SenderUserId }.Concat(parcel.RecipientUserId.HasValue ? new[] { parcel.RecipientUserId.Value } : Array.Empty<Guid>()).Distinct().ToArray() },
                 cancellationToken);
 
             if (sizeCategory == ParcelSizeCategory.EXTRA_LARGE)

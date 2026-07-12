@@ -1,3 +1,5 @@
+export const TRIP_ASSIGNED_ROUTING_KEY = 'trip.trip.assigned';
+export const TRIP_CREW_CHANGED_ROUTING_KEY = 'trip.trip.crew_changed';
 export const TRIP_BOARDING_STARTED_ROUTING_KEY = 'trip.trip.boarding_started';
 export const TRIP_ROUTE_CHANGED_ROUTING_KEY = 'trip.trip.route_changed';
 export const TRIP_SCHEDULE_CHANGED_ROUTING_KEY = 'trip.trip.schedule_changed';
@@ -9,6 +11,8 @@ export const TRACKING_GPS_OFF_ROUTE_ROUTING_KEY = 'tracking.gps.off_route';
 export const TRACKING_GPS_APPROACHING_STOP_ROUTING_KEY = 'tracking.gps.approaching_stop';
 
 export const TRIP_TRACKING_ALERT_QUEUE_BINDINGS = [
+  { queue: 'notification:trip-assigned', routingKey: TRIP_ASSIGNED_ROUTING_KEY },
+  { queue: 'notification:trip-crew-changed', routingKey: TRIP_CREW_CHANGED_ROUTING_KEY },
   {
     queue: 'notification:trip-boarding-started',
     routingKey: TRIP_BOARDING_STARTED_ROUTING_KEY,

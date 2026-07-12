@@ -73,6 +73,12 @@ CREATE TYPE subscription_status AS ENUM (
 
 CREATE TYPE subscription_payment_method AS ENUM ('VNPAY');
 
+CREATE TYPE subscription_billing_period AS ENUM ('MONTHLY', 'YEARLY');
+
+CREATE TYPE subscription_upgrade_attempt_status AS ENUM (
+    'INITIATED', 'PAYMENT_PENDING', 'SUCCEEDED', 'EXPIRED', 'FAILED'
+);
+
 -- =============================================================================
 -- TABLES
 -- =============================================================================
@@ -339,6 +345,7 @@ CREATE TABLE operator_subscriptions (
     started_at TIMESTAMPTZ NULL,
     expires_at TIMESTAMPTZ NULL,
     payment_method subscription_payment_method NULL,
+    billing_period subscription_billing_period NULL,
     -- Usage counters (current period)
     current_vehicles INT NOT NULL DEFAULT 0,
     current_drivers INT NOT NULL DEFAULT 0,
@@ -366,6 +373,49 @@ COMMENT ON COLUMN operator_subscriptions.previous_active_plan_id IS
 COMMENT ON COLUMN operator_subscriptions.current_trips_this_month IS
     'Reset to 0 monthly by Hangfire (day 1, 00:01). Skipped for Trip.source = VEHICLE_SUBSTITUTION.';
 
+-- -----------------------------------------------------------------------------
+-- subscription_upgrade_attempts (Day 37 payment saga; Payment ID is logical)
+-- -----------------------------------------------------------------------------
+CREATE TABLE subscription_upgrade_attempts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    subscription_id UUID NOT NULL REFERENCES operator_subscriptions (id) ON DELETE RESTRICT,
+    operator_id UUID NOT NULL REFERENCES operators (id) ON DELETE RESTRICT,
+    target_plan_id UUID NOT NULL REFERENCES subscription_plans (id) ON DELETE RESTRICT,
+    billing_period subscription_billing_period NOT NULL,
+    amount BIGINT NOT NULL CHECK (amount >= 0),
+    status subscription_upgrade_attempt_status NOT NULL,
+    payment_id UUID NULL,
+    idempotency_key VARCHAR(100) NOT NULL,
+    due_at TIMESTAMPTZ NOT NULL,
+    warn_sent_at TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_subscription_upgrade_attempts_idempotency_key UNIQUE (idempotency_key)
+);
+
+CREATE UNIQUE INDEX uq_subscription_upgrade_attempts_payment_id
+    ON subscription_upgrade_attempts (payment_id) WHERE payment_id IS NOT NULL;
+CREATE INDEX idx_subscription_upgrade_attempts_status_due_at
+    ON subscription_upgrade_attempts (status, due_at);
+
+-- -----------------------------------------------------------------------------
+-- subscription_quota_allocations (durable cross-service quota reservation)
+-- -----------------------------------------------------------------------------
+CREATE TABLE subscription_quota_allocations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    operator_id UUID NOT NULL,
+    subscription_id UUID NOT NULL REFERENCES operator_subscriptions (id) ON DELETE RESTRICT,
+    resource VARCHAR(32) NOT NULL,
+    resource_id UUID NOT NULL,
+    period_key VARCHAR(7) NULL,
+    released_at TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_subscription_quota_allocations_resource UNIQUE (operator_id, resource, resource_id)
+);
+CREATE INDEX idx_subscription_quota_allocations_subscription_resource
+    ON subscription_quota_allocations (subscription_id, resource, released_at);
+
 -- =============================================================================
 -- TRIGGERS — auto-update updated_at on UPDATE
 -- =============================================================================
@@ -391,6 +441,10 @@ CREATE TRIGGER trg_user_devices_updated_at BEFORE UPDATE ON user_devices
 CREATE TRIGGER trg_subscription_plans_updated_at BEFORE UPDATE ON subscription_plans
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 CREATE TRIGGER trg_operator_subscriptions_updated_at BEFORE UPDATE ON operator_subscriptions
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+CREATE TRIGGER trg_subscription_upgrade_attempts_updated_at BEFORE UPDATE ON subscription_upgrade_attempts
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+CREATE TRIGGER trg_subscription_quota_allocations_updated_at BEFORE UPDATE ON subscription_quota_allocations
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 
 -- =============================================================================

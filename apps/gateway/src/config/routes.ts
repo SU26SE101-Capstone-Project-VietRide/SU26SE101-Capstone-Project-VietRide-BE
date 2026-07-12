@@ -42,6 +42,7 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     // Identity
     { prefix: '/v1/auth/register', target: env.IDENTITY_BASE_URL, authRequired: 'none' },
     { prefix: '/v1/auth/verify-email', target: env.IDENTITY_BASE_URL, authRequired: 'none' },
+    { prefix: '/v1/auth/resend-verification-email', target: env.IDENTITY_BASE_URL, authRequired: 'none' },
     { prefix: '/v1/auth/forgot-password', target: env.IDENTITY_BASE_URL, authRequired: 'none' },
     { prefix: '/v1/auth/reset-password', target: env.IDENTITY_BASE_URL, authRequired: 'none' },
     {
@@ -91,6 +92,18 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       target: env.IDENTITY_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['OPERATOR_ADMIN'],
+    },
+    {
+      prefix: '/v1/operator/subscription',
+      target: env.IDENTITY_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    },
+    {
+      prefix: '/v1/admin/subscription-plans',
+      target: env.IDENTITY_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
     },
     {
       prefix: '/v1/admin/booking-stats',
@@ -272,6 +285,7 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       publicSubpaths: [
         { method: 'POST', path: '/v1/payments/vnpay-ipn' },
         { method: 'POST', path: '/v1/payments/vnpay-topup-ipn' },
+        { method: 'POST', path: '/v1/payments/subscription-vnpay-ipn' },
       ],
     },
     { prefix: '/v1/wallet', target: env.PAYMENT_BASE_URL, authRequired: 'user' },
@@ -314,6 +328,13 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     },
 
     // NestJS services
+    {
+      prefix: '/v1/operator/notifications',
+      target: env.NOTIFICATION_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+      forwardUserAuthorization: true,
+    },
     {
       prefix: '/v1/notifications',
       target: env.NOTIFICATION_BASE_URL,
