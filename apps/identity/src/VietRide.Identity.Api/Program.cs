@@ -43,10 +43,11 @@ builder.Services.AddVietRideMediatRBehaviors(
     handlerAssemblies: [typeof(RegisterCommand).Assembly]);
 
 // Infrastructure: repositories, security services, email stub, Redis OTP rate-limiter.
-builder.Services.AddInfrastructure(builder.Configuration);
+var isTesting = builder.Environment.IsEnvironment("Testing");
+builder.Services.AddInfrastructure(builder.Configuration, registerEventConsumer: !isTesting);
 builder.Services.AddVietRideIdempotency("identity");
 
-var registerRecurringJobs = !builder.Environment.IsEnvironment("Testing");
+var registerRecurringJobs = !isTesting;
 if (registerRecurringJobs)
 {
     builder.Services.AddIdentityHangfire(builder.Configuration);
@@ -54,7 +55,12 @@ if (registerRecurringJobs)
 }
 
 // RabbitMQ publisher + Outbox background drainer (publishes integration events).
-builder.Services.AddVietRideMessaging(builder.Configuration);
+// WebApplicationFactory fixtures frequently use placeholder or short-lived databases;
+// starting the polling worker there keeps connections alive after fixture teardown.
+if (!isTesting)
+{
+    builder.Services.AddVietRideMessaging(builder.Configuration);
+}
 
 var app = builder.Build();
 

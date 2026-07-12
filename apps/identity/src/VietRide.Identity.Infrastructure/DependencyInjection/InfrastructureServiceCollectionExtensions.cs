@@ -56,7 +56,8 @@ public static class InfrastructureServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services,
-        Microsoft.Extensions.Configuration.IConfiguration configuration)
+        Microsoft.Extensions.Configuration.IConfiguration configuration,
+        bool registerEventConsumer = true)
     {
         // ------------------------------------------------------------------
         // Configuration
@@ -107,11 +108,14 @@ public static class InfrastructureServiceCollectionExtensions
 
         AddSubscriptionPaymentClient(services, configuration);
         services.AddScoped<SubscriptionLifecycleJob>();
-        services.AddVietRideEventConsumer<SubscriptionPaymentSucceededIntegrationEvent, SubscriptionPaymentSucceededIntegrationEventHandler>(options =>
+        if (registerEventConsumer)
         {
-            options.QueueName = "identity.subscription-payment-succeeded";
-            options.BindingKeys = ["payment.subscription.payment_succeeded"];
-        });
+            services.AddVietRideEventConsumer<SubscriptionPaymentSucceededIntegrationEvent, SubscriptionPaymentSucceededIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "identity.subscription-payment-succeeded";
+                options.BindingKeys = ["payment.subscription.payment_succeeded"];
+            });
+        }
 
         // ------------------------------------------------------------------
         // Startup seeders
