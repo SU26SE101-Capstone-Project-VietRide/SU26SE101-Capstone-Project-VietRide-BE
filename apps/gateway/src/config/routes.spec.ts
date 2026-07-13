@@ -384,6 +384,24 @@ describe('buildRouteTable', () => {
     });
   });
 
+  it('routes Day 36 shuttle reads and dispatch mutations to Trip with distinct operator roles', () => {
+    const requestsRoute = matchRoute(routes, '/v1/operator/shuttle-requests');
+    const dispatchRoute = matchRoute(routes, '/v1/operator/shuttle-trips');
+
+    expect(requestsRoute).toMatchObject({
+      prefix: '/v1/operator/shuttle-requests',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    });
+    expect(dispatchRoute).toMatchObject({
+      prefix: '/v1/operator/shuttle-trips',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    });
+  });
+
   it('matches operator vehicles using the dedicated prefix without changing generic vehicles', () => {
     const operatorRoute = matchRoute(
       routes,
