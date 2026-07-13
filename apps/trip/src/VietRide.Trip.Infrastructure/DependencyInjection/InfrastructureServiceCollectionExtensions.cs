@@ -52,21 +52,18 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ITripGenerationJobScheduler, HangfireTripGenerationJobScheduler>();
         services.AddScoped<IShuttleDispatchService, ShuttleDispatchService>();
         services.AddScoped<ShuttleDispatchSafetyJob>();
-        services.AddVietRideEventConsumer<BookingShuttleConfirmedIntegrationEvent, BookingShuttleConfirmedIntegrationEventHandler>(options =>
+        if (AreBackgroundWorkersEnabled(configuration))
         {
-            options.QueueName = "trip.booking-shuttle-confirmed";
-            options.BindingKeys = [BookingShuttleConfirmedIntegrationEvent.EventType];
-        });
-        services.AddVietRideEventConsumer<BookingShuttleCancelledIntegrationEvent, BookingShuttleCancelledIntegrationEventHandler>(options =>
-        {
-            options.QueueName = "trip.booking-shuttle-cancelled";
-            options.BindingKeys = [BookingShuttleCancelledIntegrationEvent.EventType];
-        });
-
-        var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
-            ?? Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
-        if (!string.Equals(environment, "Testing", StringComparison.OrdinalIgnoreCase))
-        {
+            services.AddVietRideEventConsumer<BookingShuttleConfirmedIntegrationEvent, BookingShuttleConfirmedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "trip.booking-shuttle-confirmed";
+                options.BindingKeys = [BookingShuttleConfirmedIntegrationEvent.EventType];
+            });
+            services.AddVietRideEventConsumer<BookingShuttleCancelledIntegrationEvent, BookingShuttleCancelledIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "trip.booking-shuttle-cancelled";
+                options.BindingKeys = [BookingShuttleCancelledIntegrationEvent.EventType];
+            });
             services.AddHostedService<TripGenerationRecurringJobRegistrationHostedService>();
             services.AddHostedService<ShuttleDispatchSafetyJobRegistrationHostedService>();
         }
@@ -124,5 +121,8 @@ public static class InfrastructureServiceCollectionExtensions
 
         return baseUrl;
     }
+
+    private static bool AreBackgroundWorkersEnabled(IConfiguration configuration) =>
+        configuration.GetValue<bool?>("Trip:BackgroundWorkers:Enabled") ?? true;
 
 }

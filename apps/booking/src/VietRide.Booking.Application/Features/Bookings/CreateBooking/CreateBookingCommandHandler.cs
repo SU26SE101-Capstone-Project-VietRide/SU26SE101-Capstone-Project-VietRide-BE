@@ -107,7 +107,8 @@ public sealed class CreateBookingCommandHandler
                 $"Trip '{request.TripId}' is not in SCHEDULED status.");
         }
 
-        ValidateShuttleRequest(request, trip, _clock.UtcNow);
+        var now = _clock.UtcNow;
+        ValidateShuttleRequest(request, trip, now);
 
         // -----------------------------------------------------------------------
         // 3. Lock seats (all-or-nothing)
@@ -154,7 +155,6 @@ public sealed class CreateBookingCommandHandler
         //    Voucher errors (VOUCHER_NOT_FOUND / _EXPIRED / _NOT_APPLICABLE etc.) propagate
         //    before any booking row exists; seats are locked but a cleanup job handles orphaned locks.
         // -----------------------------------------------------------------------
-        var now = _clock.UtcNow;
         var seatCount = request.Seats.Count;
         var perSeatFare = Money.FromRaw(trip.BaseFare);
         var baseFare = Money.FromRaw(perSeatFare.Amount * seatCount);
