@@ -88,7 +88,8 @@ public class CreateRoundTripBookingCommandHandlerTests
 
     private static CreateRoundTripBookingCommand BuildCommand(
         string paymentMethod = "WALLET",
-        string? voucherCode = null) => new(
+        string? voucherCode = null,
+        bool withShuttle = false) => new(
         PassengerUserId,
         "round-trip-idempotency-key",
         new CreateRoundTripBookingCommand.RoundTripBookingLegCommand(
@@ -97,14 +98,16 @@ public class CreateRoundTripBookingCommandHandlerTests
             null,
             null,
             null,
-            [new CreateRoundTripBookingCommand.RoundTripSeatRequest("A01", "Nguyen Van A", "0900000000", "012345678901")]),
+            [new CreateRoundTripBookingCommand.RoundTripSeatRequest("A01", "Nguyen Van A", "0900000000", "012345678901")],
+            withShuttle ? new CreateRoundTripBookingCommand.RoundTripShuttlePickupCommand("12 Nguyen Hue", 10.7731m, 106.7032m) : null),
         new CreateRoundTripBookingCommand.RoundTripBookingLegCommand(
             ReturnTripId,
             StationId,
             null,
             null,
             null,
-            [new CreateRoundTripBookingCommand.RoundTripSeatRequest("A01", "Nguyen Van A", "0900000000", "012345678901")]),
+            [new CreateRoundTripBookingCommand.RoundTripSeatRequest("A01", "Nguyen Van A", "0900000000", "012345678901")],
+            withShuttle ? new CreateRoundTripBookingCommand.RoundTripShuttlePickupCommand("45 Le Loi", 10.7750m, 106.7010m) : null),
         voucherCode,
         paymentMethod);
 
@@ -175,6 +178,41 @@ public class CreateRoundTripBookingCommandHandlerTests
         await _outbox.Received(2).EnqueueAsync(
             Arg.Is("booking.booking.confirmed"),
             Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_WalletPayment_WithShuttleOnBothLegs_PersistsTwoActiveIntents()
+    {
+        _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        var supportedOutbound = OutboundTrip with
+        {
+            OriginStation = new TripStationSnapshot(StationId, "Ha Noi", true, 21.0285m, 105.8542m, true),
+        };
+        var supportedReturn = ReturnTrip with
+        {
+            OriginStation = new TripStationSnapshot(StationId, "Da Nang", true, 16.0544m, 108.2022m, true),
+        };
+        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<CancellationToken>()).Returns(supportedOutbound);
+        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<CancellationToken>()).Returns(supportedReturn);
+        _tripClient.LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default)
+            .ReturnsForAnyArgs(new LockRoundTripSeatsOutcome.Success(OutboundLockData, ReturnLockData));
+        _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<BookingEntity>());
+        _paymentClient.BatchChargeAsync(default, default!, default!, default!, default)
+            .ReturnsForAnyArgs(call => CreateSuccessfulBatchCharge(call.Arg<IReadOnlyList<BatchChargeItem>>()));
+        _tripClient.BookSeatsAsync(default, default, default, default!, default)
+            .ReturnsForAnyArgs(true);
+
+        await BuildSut().Handle(BuildCommand(withShuttle: true), CancellationToken.None);
+
+        await _bookings.Received(2).AddAsync(
+            Arg.Is<BookingEntity>(booking => booking.ShuttleIntent != null && booking.ShuttleIntent.IsActive),
+            Arg.Any<CancellationToken>());
+        await _outbox.Received(2).EnqueueAsync(
+            "booking.booking.confirmed",
+            Arg.Is<string>(payload => payload.Contains("\"shuttlePickup\"", StringComparison.Ordinal)
+                && payload.Contains("\"tickets\"", StringComparison.Ordinal)),
             Arg.Any<CancellationToken>());
     }
 

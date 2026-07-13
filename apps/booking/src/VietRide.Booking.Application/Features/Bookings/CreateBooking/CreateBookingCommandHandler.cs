@@ -102,6 +102,8 @@ public sealed class CreateBookingCommandHandler
                 $"Trip '{request.TripId}' is not in SCHEDULED status.");
         }
 
+        ValidateShuttleRequest(request, trip, _clock.UtcNow);
+
         // -----------------------------------------------------------------------
         // 3. Lock seats (all-or-nothing)
         // -----------------------------------------------------------------------
@@ -211,6 +213,15 @@ public sealed class CreateBookingCommandHandler
                     allocation.FareAmount,
                     allocation.DiscountAmount,
                     allocation.PaidAmount);
+            }
+
+
+            if (request.ShuttlePickup is not null)
+            {
+                booking.RequestShuttle(
+                    request.ShuttlePickup.Address,
+                    request.ShuttlePickup.Latitude,
+                    request.ShuttlePickup.Longitude);
             }
 
             await _bookings.AddAsync(booking, cancellationToken);
@@ -338,8 +349,19 @@ public sealed class CreateBookingCommandHandler
             totalAmount = booking.TotalAmount.Amount,
             userId = booking.PassengerUserId,
             voucherUsageId,
+            tickets = booking.Tickets.Select(ticket => new
+            {
+                ticketId = ticket.Id,
+                passengerUserId = booking.PassengerUserId,
+            }).ToArray(),
             ticketCodes = booking.Tickets.Select(ticket => ticket.TicketCode.Value).ToArray(),
             ticketCount = booking.Tickets.Count,
+            shuttlePickup = booking.ShuttleIntent is null ? null : new
+            {
+                address = booking.ShuttleIntent.PickupAddress,
+                latitude = booking.ShuttleIntent.PickupLatitude,
+                longitude = booking.ShuttleIntent.PickupLongitude,
+            },
         };
 
         await _outbox.EnqueueAsync(
@@ -424,6 +446,41 @@ public sealed class CreateBookingCommandHandler
                     perSeatFare - discount);
             })
             .ToArray();
+    }
+
+    private static void ValidateShuttleRequest(
+        CreateBookingCommand request,
+        TripSnapshot trip,
+        DateTimeOffset now)
+    {
+        if (request.ShuttlePickup is null)
+        {
+            return;
+        }
+
+        if (request.PickupStopId.HasValue || request.PickupStationId != trip.OriginStation.Id)
+        {
+            throw new CodedValidationException(
+                "SHUTTLE_STATION_NOT_SUPPORTED",
+                "Shuttle is available only for pickup at the trip origin Station.");
+        }
+
+        if (!trip.OriginStation.IsActive
+            || !trip.OriginStation.SupportsShuttle
+            || !trip.OriginStation.Latitude.HasValue
+            || !trip.OriginStation.Longitude.HasValue)
+        {
+            throw new CodedValidationException(
+                "SHUTTLE_STATION_NOT_SUPPORTED",
+                "The trip origin Station does not support shuttle service.");
+        }
+
+        if (now >= trip.DepartureDateTime.AddMinutes(-30))
+        {
+            throw new ConflictException(
+                "SHUTTLE_REQUEST_CUTOFF_PASSED",
+                "The shuttle request cutoff has passed.");
+        }
     }
 
     private static IReadOnlyList<CreateBookingTicketResult> ToTicketResults(BookingEntity booking)

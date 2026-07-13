@@ -27,7 +27,13 @@ public sealed record TripSnapshot(
     Guid? AssistantUserId = null);
 
 /// <summary>Station snapshot embedded in <see cref="TripSnapshot"/>.</summary>
-public sealed record TripStationSnapshot(Guid Id, string Name);
+public sealed record TripStationSnapshot(
+    Guid Id,
+    string Name,
+    bool SupportsShuttle = false,
+    decimal? Latitude = null,
+    decimal? Longitude = null,
+    bool IsActive = true);
 
 /// <summary>Stop snapshot embedded in <see cref="TripSnapshot"/>.</summary>
 public sealed record TripStopSnapshot(

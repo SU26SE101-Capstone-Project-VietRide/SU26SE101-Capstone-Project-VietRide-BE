@@ -82,7 +82,9 @@ internal sealed class BookingRepository : IBookingRepository
     public async Task<BookingEntity?> FindByIdAsync(
         Guid bookingId,
         CancellationToken ct = default)
-        => await _db.Bookings.FirstOrDefaultAsync(b => b.Id == bookingId, ct);
+        => await _db.Bookings
+            .Include(b => b.ShuttleIntent)
+            .FirstOrDefaultAsync(b => b.Id == bookingId, ct);
 
     /// <inheritdoc/>
     public async Task<BookingEntity?> FindByIdWithPassengersAsync(
@@ -91,6 +93,7 @@ internal sealed class BookingRepository : IBookingRepository
         => await _db.Bookings
             .Include(b => b.Passengers)
             .Include(b => b.Tickets)
+            .Include(b => b.ShuttleIntent)
             .FirstOrDefaultAsync(b => b.Id == bookingId, ct);
 
     /// <inheritdoc/>
@@ -135,6 +138,21 @@ internal sealed class BookingRepository : IBookingRepository
             .Select(t => t.TicketCode.Value)
             .ToArrayAsync(ct);
 
+        var ticketIds = await _db.Tickets
+            .AsNoTracking()
+            .Where(t => t.BookingId == bookingId)
+            .OrderBy(t => t.SeatNumber)
+            .Select(t => t.Id)
+            .ToArrayAsync(ct);
+        var shuttleIntent = await _db.BookingShuttleIntents
+            .AsNoTracking()
+            .Where(intent => intent.BookingId == bookingId && intent.IsActive)
+            .Select(intent => new BookingShuttleIntentSnapshot(
+                intent.PickupAddress,
+                intent.PickupLatitude,
+                intent.PickupLongitude))
+            .SingleOrDefaultAsync(ct);
+
         return new BookingPaymentTransitionSnapshot(
             booking.Id,
             booking.PassengerUserId,
@@ -143,7 +161,9 @@ internal sealed class BookingRepository : IBookingRepository
             booking.TotalAmount,
             voucherUsageId,
             passengerSeatAssignments,
-            ticketCodes);
+            ticketCodes,
+            ticketIds,
+            shuttleIntent);
     }
 
     /// <inheritdoc/>
@@ -218,6 +238,13 @@ internal sealed class BookingRepository : IBookingRepository
 
         if (updated == 1)
         {
+            await _db.BookingShuttleIntents
+                .Where(intent => intent.BookingId == bookingId && intent.IsActive)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(intent => intent.IsActive, false)
+                    .SetProperty(intent => intent.CancelledAt, cancelledAt)
+                    .SetProperty(intent => intent.UpdatedAt, cancelledAt), ct);
+
             await _db.Tickets
                 .Where(t => t.BookingId == bookingId
                     && (t.Status == TicketStatus.PENDING_PAYMENT || t.Status == TicketStatus.ISSUED))

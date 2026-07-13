@@ -115,8 +115,19 @@ public sealed class ConfirmBookingOnPaymentCommandHandler
             totalAmount = snapshot.TotalAmount,
             userId = snapshot.PassengerUserId,
             voucherUsageId = snapshot.VoucherUsageId,
+            tickets = (snapshot.TicketIds ?? []).Select(ticketId => new
+            {
+                ticketId,
+                passengerUserId = snapshot.PassengerUserId,
+            }).ToArray(),
             ticketCodes = snapshot.TicketCodes,
             ticketCount = snapshot.TicketCodes.Count,
+            shuttlePickup = snapshot.ShuttleIntent is null ? null : new
+            {
+                address = snapshot.ShuttleIntent.Address,
+                latitude = snapshot.ShuttleIntent.Latitude,
+                longitude = snapshot.ShuttleIntent.Longitude,
+            },
         };
 
         await _outbox.EnqueueAsync(

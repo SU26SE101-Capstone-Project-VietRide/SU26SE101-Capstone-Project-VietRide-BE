@@ -66,7 +66,8 @@ public class CreateBookingCommandHandlerTests
     private static CreateBookingCommand BuildCommand(
         int seatCount = 1,
         string paymentMethod = "WALLET",
-        string? voucherCode = null) =>
+        string? voucherCode = null,
+        ShuttlePickupCommand? shuttlePickup = null) =>
         new(
             PassengerUserId: PassengerUserId,
             TripId: TripId,
@@ -78,7 +79,8 @@ public class CreateBookingCommandHandlerTests
                 .Select(i => new SeatRequest($"A{i:D2}", "Nguyen Van A", "0900000000", "012345678901"))
                 .ToList(),
             VoucherCode: voucherCode,
-            PaymentMethod: paymentMethod);
+            PaymentMethod: paymentMethod,
+            ShuttlePickup: shuttlePickup);
 
     // -----------------------------------------------------------------------
     // Happy path — WALLET → CONFIRMED
@@ -129,6 +131,39 @@ public class CreateBookingCommandHandlerTests
             SeatLockToken,
             Arg.Any<Guid>(),
             Arg.Any<IReadOnlyList<PassengerSeatAssignment>>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_WalletPayment_WithSupportedShuttlePickup_PersistsActiveIntent()
+    {
+        _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        var supportedTrip = ValidTrip with
+        {
+            OriginStation = new TripStationSnapshot(StationId, "Ha Noi", true, 21.0285m, 105.8542m, true),
+        };
+        _tripClient.GetTripSnapshotAsync(TripId, default).ReturnsForAnyArgs(supportedTrip);
+        _tripClient.LockSeatsAsync(default, default!, default, default!, default, default)
+            .ReturnsForAnyArgs(new LockSeatsOutcome.Success(LockData));
+        _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<BookingEntity>());
+        _paymentClient.ChargeAsync(default!, default, default, default, default!, default!, default)
+            .ReturnsForAnyArgs(new ChargeOutcome.Success(new ChargeResult(PaymentId, "SUCCEEDED", null)));
+        _tripClient.BookSeatsAsync(default, default, default, default!, default)
+            .ReturnsForAnyArgs(true);
+
+        await BuildSut().Handle(BuildCommand(
+            shuttlePickup: new ShuttlePickupCommand("12 Nguyen Hue", 10.7731m, 106.7032m)), CancellationToken.None);
+
+        await _bookings.Received(1).AddAsync(
+            Arg.Is<BookingEntity>(booking => booking.ShuttleIntent != null
+                && booking.ShuttleIntent.IsActive
+                && booking.ShuttleIntent.PickupAddress == "12 Nguyen Hue"),
+            Arg.Any<CancellationToken>());
+        await _outbox.Received(1).EnqueueAsync(
+            "booking.booking.confirmed",
+            Arg.Is<string>(payload => payload.Contains("\"shuttlePickup\"", StringComparison.Ordinal)
+                && payload.Contains("\"tickets\"", StringComparison.Ordinal)),
             Arg.Any<CancellationToken>());
     }
 

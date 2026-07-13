@@ -79,6 +79,9 @@ public sealed class CreateRoundTripBookingCommandHandler
 
         var outboundTrip = await GetScheduledTripAsync(request.Outbound.TripId, cancellationToken);
         var returnTrip = await GetScheduledTripAsync(request.Return.TripId, cancellationToken);
+        var now = _clock.UtcNow;
+        ValidateShuttleRequest(request.Outbound, outboundTrip, now);
+        ValidateShuttleRequest(request.Return, returnTrip, now);
 
         if (outboundTrip.ReturnRouteId is null)
         {
@@ -125,7 +128,6 @@ public sealed class CreateRoundTripBookingCommandHandler
         };
 
         var bookingGroupId = Guid.NewGuid();
-        var now = _clock.UtcNow;
         var outboundPerSeatFare = Money.FromRaw(outboundTrip.BaseFare);
         var returnPerSeatFare = Money.FromRaw(returnTrip.BaseFare);
         var outboundBaseFare = Money.FromRaw(outboundPerSeatFare.Amount * outboundSeatNumbers.Count);
@@ -440,6 +442,44 @@ public sealed class CreateRoundTripBookingCommandHandler
         return trip;
     }
 
+    private static void ValidateShuttleRequest(
+        CreateRoundTripBookingCommand.RoundTripBookingLegCommand leg,
+        TripSnapshot trip,
+        DateTimeOffset now)
+    {
+        if (leg.ShuttlePickup is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(leg.ShuttlePickup.Address)
+            || leg.ShuttlePickup.Latitude is < -90m or > 90m
+            || leg.ShuttlePickup.Longitude is < -180m or > 180m)
+        {
+            throw new CodedValidationException(
+                "VALIDATION_ERROR",
+                "Shuttle pickup address and coordinates are invalid.");
+        }
+
+        if (leg.PickupStopId.HasValue || leg.PickupStationId != trip.OriginStation.Id
+            || !trip.OriginStation.IsActive
+            || !trip.OriginStation.SupportsShuttle
+            || !trip.OriginStation.Latitude.HasValue
+            || !trip.OriginStation.Longitude.HasValue)
+        {
+            throw new CodedValidationException(
+                "SHUTTLE_STATION_NOT_SUPPORTED",
+                "Shuttle is available only at a supported origin Station.");
+        }
+
+        if (now >= trip.DepartureDateTime.AddMinutes(-30))
+        {
+            throw new ConflictException(
+                "SHUTTLE_REQUEST_CUTOFF_PASSED",
+                "The shuttle request cutoff has passed.");
+        }
+    }
+
     private BookingEntity CreatePendingBooking(
         Guid passengerUserId,
         CreateRoundTripBookingCommand.RoundTripBookingLegCommand leg,
@@ -481,6 +521,14 @@ public sealed class CreateRoundTripBookingCommandHandler
                 allocation.FareAmount,
                 allocation.DiscountAmount,
                 allocation.PaidAmount);
+        }
+
+        if (leg.ShuttlePickup is not null)
+        {
+            booking.RequestShuttle(
+                leg.ShuttlePickup.Address,
+                leg.ShuttlePickup.Latitude,
+                leg.ShuttlePickup.Longitude);
         }
 
         return booking;
@@ -637,8 +685,19 @@ public sealed class CreateRoundTripBookingCommandHandler
             totalAmount = booking.TotalAmount.Amount,
             userId = booking.PassengerUserId,
             voucherUsageId,
+            tickets = booking.Tickets.Select(ticket => new
+            {
+                ticketId = ticket.Id,
+                passengerUserId = booking.PassengerUserId,
+            }).ToArray(),
             ticketCodes = booking.Tickets.Select(ticket => ticket.TicketCode.Value).ToArray(),
             ticketCount = booking.Tickets.Count,
+            shuttlePickup = booking.ShuttleIntent is null ? null : new
+            {
+                address = booking.ShuttleIntent.PickupAddress,
+                latitude = booking.ShuttleIntent.PickupLatitude,
+                longitude = booking.ShuttleIntent.PickupLongitude,
+            },
         };
 
         await _outbox.EnqueueAsync(
