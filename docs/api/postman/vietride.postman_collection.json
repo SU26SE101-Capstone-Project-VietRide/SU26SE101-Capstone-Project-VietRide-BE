@@ -5791,6 +5791,87 @@
           }
         }
       ]
+    },
+    {
+      "name": "Booking - Day 12 seat lock flow",
+      "description": "Gateway assertions paired with the documented Day-11 internal lock seam. The harness supplies only ephemeral fixture values.",
+      "item": [
+        {
+          "name": "1. Held seat rejects competing passenger",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json();",
+            "pm.test('Competing lock uses ADR-0004 error envelope', () => { pm.response.to.have.status(409); pm.expect(body.success).to.eql(false); pm.expect(body.statusCode).to.eql(409); pm.expect(body.error.code).to.eql('BOOKING_SEAT_UNAVAILABLE'); pm.expect(body.meta.traceId).to.be.a('string'); });"
+          ] }}],
+          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day12CompetingPassengerToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day12CompetingIdempotencyKey}}" }], "url": "{{baseUrl}}/v1/bookings", "body": { "mode": "raw", "raw": "{\n  \"tripId\": \"{{day12TripId}}\",\n  \"pickup\": { \"stationId\": \"{{day12PickupStationId}}\" },\n  \"dropoff\": { \"stationId\": \"{{day12DropoffStationId}}\" },\n  \"seats\": [{ \"seatNumber\": \"A07\", \"passenger\": { \"fullName\": \"Competing passenger\", \"phoneNumber\": \"0900000012\", \"idNumber\": \"012345678912\" } }],\n  \"paymentMethod\": \"WALLET\"\n}" } }
+        },
+        {
+          "name": "2. TTL-released seats book as a single held set",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json();",
+            "pm.test('Released held seats confirm together', () => { pm.response.to.have.status(201); pm.expect(body.success).to.eql(true); pm.expect(body.statusCode).to.eql(201); pm.expect(body.data.status).to.eql('CONFIRMED'); pm.expect(body.data.tickets).to.have.length(5); pm.expect(body.data.tickets.every(ticket => ticket.status === 'ISSUED')).to.eql(true); pm.expect(body.meta.traceId).to.be.a('string'); });"
+          ] }}],
+          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day12ReleasedIdempotencyKey}}" }], "url": "{{baseUrl}}/v1/bookings", "body": { "mode": "raw", "raw": "{\n  \"tripId\": \"{{day12TripId}}\",\n  \"pickup\": { \"stationId\": \"{{day12PickupStationId}}\" },\n  \"dropoff\": { \"stationId\": \"{{day12DropoffStationId}}\" },\n  \"seats\": {{day12FiveReleasedSeats}},\n  \"paymentMethod\": \"WALLET\"\n}" } }
+        }
+      ]
+    },
+    {
+      "name": "Payment - Day 16 booking payment + refund flow",
+      "description": "Gateway-only booking-payment checks. Request 4 validates the immediate documented poll shape; run-day16-newman-local.mjs then owns the bounded 20-attempt/500ms eventual-confirmation poll to CONFIRMED. The runner supplies deterministic local fixture tokens and ids; no merchant secret is committed.",
+      "item": [
+        {
+          "name": "1. Wallet booking payment is confirmed",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json(); pm.test('Wallet confirmation uses ADR-0004', () => { pm.response.to.have.status(201); pm.expect(body.success).to.eql(true); pm.expect(body.data.status).to.eql('CONFIRMED'); pm.expect(body.data.paymentRedirectUrl).to.eql(null); });",
+            "pm.environment.set('day16WalletBookingId', body.data.bookingId);"
+          ] }}],
+          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day16WalletIdempotencyKey}}" }], "url": "{{baseUrl}}/v1/bookings", "body": { "mode": "raw", "raw": "{\n  \"tripId\": \"{{day16WalletTripId}}\",\n  \"pickup\": { \"stationId\": \"{{day16PickupStationId}}\" },\n  \"seats\": {{day16WalletSeats}},\n  \"paymentMethod\": \"WALLET\"\n}" } }
+        },
+        {
+          "name": "1b. Wallet balance after booking debit",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json(); pm.test('Wallet debit baseline follows ADR-0004', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.balance).to.be.a('number'); pm.expect(body.data.currency).to.eql('VND'); });",
+            "pm.environment.set('day16WalletBalanceAfterDebit', String(body.data.balance));"
+          ] }}],
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }], "url": "{{baseUrl}}/v1/wallet" }
+        },
+        {
+          "name": "2. VNPay booking returns a redirect then confirms through signed IPN",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json(); pm.test('VNPay booking is pending with redirect', () => { pm.response.to.have.status(201); pm.expect(body.success).to.eql(true); pm.expect(body.data.status).to.eql('PENDING_PAYMENT'); pm.expect(body.data.paymentRedirectUrl).to.be.a('string').and.not.empty; });",
+            "pm.environment.set('day16VnPayBookingId', body.data.bookingId);",
+            "const match = body.data.paymentRedirectUrl.match(/[?&]vnp_TxnRef=([^&]+)/); const amount = body.data.paymentRedirectUrl.match(/[?&]vnp_Amount=([^&]+)/); pm.expect(match, 'VNPay redirect must include transaction reference').to.exist; pm.expect(amount, 'VNPay redirect must include amount').to.exist; pm.environment.set('day16VnPayTxnRef', decodeURIComponent(match[1])); pm.environment.set('day16VnPayAmountRaw', decodeURIComponent(amount[1]));"
+          ] }}],
+          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day16VnPayIdempotencyKey}}" }], "url": "{{baseUrl}}/v1/bookings", "body": { "mode": "raw", "raw": "{\n  \"tripId\": \"{{day16VnPayTripId}}\",\n  \"pickup\": { \"stationId\": \"{{day16PickupStationId}}\" },\n  \"seats\": {{day16VnPaySeats}},\n  \"paymentMethod\": \"VNPAY\"\n}" } }
+        },
+        {
+          "name": "3. Signed VNPay IPN confirms the pending booking",
+          "event": [
+            { "listen": "prerequest", "script": { "type": "text/javascript", "exec": [
+              "const params = { vnp_Amount: String(pm.variables.get('day16VnPayAmountRaw')), vnp_ResponseCode: '00', vnp_TransactionStatus: '00', vnp_TxnRef: String(pm.variables.get('day16VnPayTxnRef')) };",
+              "const query = Object.keys(params).sort().map(key => encodeURIComponent(key) + '=' + encodeURIComponent(params[key])).join('&'); pm.variables.set('day16VnPaySecureHash', CryptoJS.HmacSHA512(query, String(pm.variables.get('day16VnPayHashSecret'))).toString(CryptoJS.enc.Hex));"
+            ] }},
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "const body = pm.response.json(); pm.test('Booking VNPay IPN accepts a valid signature', () => { pm.response.to.have.status(200); pm.expect(body.RspCode).to.eql('00'); });"
+            ] }}
+          ],
+          "request": { "method": "POST", "url": "{{baseUrl}}/v1/payments/vnpay-ipn?vnp_Amount={{day16VnPayAmountRaw}}&vnp_ResponseCode=00&vnp_TransactionStatus=00&vnp_TxnRef={{day16VnPayTxnRef}}&vnp_SecureHash={{day16VnPaySecureHash}}" }
+        },
+        {
+          "name": "4. Poll validates the immediate VNPay booking status shape after IPN",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json(); pm.test('VNPay booking immediate poll has the documented status shape', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(Object.keys(body.data).sort()).to.eql(['bookingId', 'status']); pm.expect(body.data.bookingId).to.eql(pm.environment.get('day16VnPayBookingId')); pm.expect(['PENDING_PAYMENT', 'CONFIRMED']).to.include(body.data.status); });"
+          ] }}],
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }], "url": "{{baseUrl}}/v1/bookings/{{day16VnPayBookingId}}" }
+        },
+        {
+          "name": "5. Cancellation returns the event-driven refund to Wallet",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json(); pm.test('Cancellation response follows the booking-cancel contract', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.status).to.eql('CANCELLED'); pm.expect(body.data.refundMethod).to.eql('WALLET'); pm.expect(body.data.refundAmount).to.be.a('number'); pm.expect(body.meta.traceId).to.be.a('string'); });",
+            "pm.environment.set('day16WalletBookingId', body.data.bookingId); pm.environment.set('day16WalletRefundAmount', String(body.data.refundAmount)); pm.environment.set('day16WalletRefundMethod', body.data.refundMethod);"
+          ] }}],
+          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day16CancelIdempotencyKey}}" }], "url": "{{baseUrl}}/v1/bookings/{{day16WalletBookingId}}/cancel", "body": { "mode": "raw", "raw": "{\n  \"reason\": \"USER_INITIATED\"\n}" } }
+        }
+      ]
     }
   ]
 }

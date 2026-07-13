@@ -45,7 +45,7 @@ No new REST, event-routing-key, database, error-code, or Gateway-route contract 
 | implement agent | worker |
 | review agent | reviewer |
 | skill | (none) |
-| owned files (write set) | `scripts/run-full-e2e-local.mjs`; new `scripts/run-day20-sprint3-e2e-local.mjs`; `docs/api/postman/vietride.postman_collection.json`; `docs/api/postman/vietride.local.postman_environment.json`; `docs/api/postman/README.md`; `package.json` (one version-less script entry only); test-only fixture/harness files under `scripts/` needed by the new runner |
+| owned files (write set) | `scripts/run-full-e2e-local.mjs`; new `scripts/run-day20-sprint3-e2e-local.mjs`; `scripts/run-day11-newman-local.js`; `scripts/run-day13-newman-local.js`; `scripts/run-day14-voucher-e2e.mjs`; `scripts/run-day15-newman-local.mjs`; `scripts/run-day17-newman-local.mjs`; `scripts/run-day18-newman-local.mjs`; `docs/api/postman/vietride.postman_collection.json`; `docs/api/postman/vietride.local.postman_environment.json`; `docs/api/postman/README.md`; `package.json` (one version-less script entry only); test-only fixture/harness files under `scripts/` needed by the new runner. **Human-approved scope expansion (2026-07-13):** mandatory existing stage runners may be changed only where concrete verification evidence shows cleanup/forced-failure compliance is required by this task's acceptance. |
 | forbidden scope | `.env`, `.env.example`, actual VNPay merchant credentials/hash secrets, committed JWTs, production `apps/**/src/**` code, DB migrations/schema, Gateway route changes, contract/BSOT/ADR edits, package/dependency changes, git operations, and mutation of pre-existing local records |
 | depends on | 20.0; approved Day-11–19 implementations; Task 20.2 only after this runner produces reproducible failure evidence. |
 | invariant flags | LF JS/JSON/MD; all external-facing requests use Gateway routes and ADR-0004 envelopes except the documented VNPay IPN response shape; passenger flow uses the Day-15 VNPay sandbox/IPN mechanism, never a bank credential or Return URL as source of truth; booking cancellation requires `Idempotency-Key` and must observe event-driven refund completion before asserting wallet/state; monitor uses an `OPERATOR_ADMIN`/`OPERATOR_STAFF` token whose `operatorId` is the fixture tenant and proves a cross-tenant denial; runner must preserve real-seam/dev-stub mode per the frozen 20.0 matrix and restore any temporary mode; cleanup must run after both Newman assertion and process failures. |
@@ -99,7 +99,7 @@ No tasks are parallel-safe by default: Tasks 20.0–20.2 share the collection, e
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
 | 20.0 | ✅ done | APPROVE | 2026-07-13 | Matrix/runner boundary frozen; D12/D16 gates intentionally fail until Task 20.1; verification passed. |
-| 20.1 | ⬜ todo | — | — | — |
+| 20.1 | ✅ done | APPROVE | 2026-07-13 | Real-seam D11–D19 matrix, Gateway passenger journey, forced-failure cleanup, and final 14/14 full run verified; Task 20.2 contract repair committed separately. |
 | 20.2 | ⬜ todo | — | — | — |
 | 20.3 | ⬜ todo | — | — | Blocked by Q1. |
 

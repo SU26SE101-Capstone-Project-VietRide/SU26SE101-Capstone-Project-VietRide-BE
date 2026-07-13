@@ -96,7 +96,7 @@ function resetPostgresConnections() {
 
 const sprint3Stages = [
   { id: 'D11', script: 'scripts/run-day11-newman-local.js', mode: 'real' },
-  { id: 'D12', script: 'scripts/run-day12-newman-local.mjs', mode: 'stub' },
+  { id: 'D12', script: 'scripts/run-day12-newman-local.mjs', mode: 'real' },
   { id: 'D13', script: 'scripts/run-day13-newman-local.js', mode: 'stub' },
   { id: 'D14', script: 'scripts/run-day14-voucher-e2e.mjs', mode: 'stub' },
   { id: 'D15', script: 'scripts/run-day15-newman-local.mjs', mode: 'stub' },
@@ -120,11 +120,10 @@ if (missingRequiredStages.length > 0) {
   process.exitCode = 1;
 } else {
   run('stack-preflight', 'docker', [...compose, 'up', '-d']);
-  for (const day of ['6', '7', '8', '9']) {
-    run(`D${day}`, process.execPath, [path.join(root, `scripts/run-day${day}-newman-local.js`)]);
-  }
   const day11 = sprint3Stages.find((stage) => stage.id === 'D11');
+  const day12 = sprint3Stages.find((stage) => stage.id === 'D12');
   run(day11.id, process.execPath, [path.join(root, day11.script)]);
+  run(day12.id, process.execPath, [path.join(root, day12.script)]);
 
   composeUp('stub');
   for (const stage of sprint3Stages.filter(({ mode }) => mode === 'stub')) {
@@ -134,7 +133,7 @@ if (missingRequiredStages.length > 0) {
 
   composeUp('real');
   for (const stage of sprint3Stages.filter(
-    (stage) => stage.mode === 'real' && stage.id !== 'D11',
+    (stage) => stage.mode === 'real' && stage.id !== 'D11' && stage.id !== 'D12',
   )) {
     run(stage.id, process.execPath, [path.join(root, stage.script)]);
   }
