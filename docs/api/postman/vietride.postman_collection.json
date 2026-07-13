@@ -5115,6 +5115,87 @@
           }
         }
       ]
+    },
+    {
+      "name": "Day 36 - Shuttle Backend",
+      "item": [
+        {
+          "name": "Create booking with shuttle pickup",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "day36-booking-{{$guid}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"tripId\": \"{{day36MainTripId}}\",\n  \"pickup\": { \"stationId\": \"{{day36OriginStationId}}\" },\n  \"dropoff\": { \"stationId\": \"{{day36DestinationStationId}}\" },\n  \"shuttlePickup\": { \"address\": \"123 Nguyễn Huệ, Quận 1\", \"latitude\": 10.7731, \"longitude\": 106.7032 },\n  \"seats\": [{ \"seatNumber\": \"D01\", \"passenger\": { \"fullName\": \"Day 36 Passenger\", \"phoneNumber\": \"+84910000036\", \"idNumber\": \"D36001\" } }],\n  \"paymentMethod\": \"WALLET\"\n}" },
+            "url": "{{baseUrl}}/v1/bookings"
+          }
+        },
+        {
+          "name": "Reject unsupported shuttle station",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "day36-invalid-{{$guid}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"tripId\": \"{{day36MainTripId}}\",\n  \"pickup\": { \"stationId\": \"{{day36UnsupportedStationId}}\" },\n  \"shuttlePickup\": { \"address\": \"Unsupported\", \"latitude\": 10.7, \"longitude\": 106.7 },\n  \"seats\": [],\n  \"paymentMethod\": \"WALLET\"\n}" },
+            "url": "{{baseUrl}}/v1/bookings"
+          }
+        },
+        {
+          "name": "List grouped pending shuttle requests",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/operator/shuttle-requests?page=1&pageSize=20"
+          }
+        },
+        {
+          "name": "Create subset ShuttleTrip",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "day36-dispatch-1" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"mainTripId\": \"{{day36MainTripId}}\",\n  \"driverUserId\": \"{{day36DriverId}}\",\n  \"vehicleId\": \"{{day36ShuttleVehicleId}}\",\n  \"scheduledDepartureTime\": \"{{day36ShuttleDeparture}}\",\n  \"scheduledEndTime\": \"{{day36ShuttleEnd}}\",\n  \"orderedBookingIds\": [\"{{day36BookingId}}\"]\n}" },
+            "url": "{{baseUrl}}/v1/operator/shuttle-trips"
+          }
+        },
+        {
+          "name": "Replay subset dispatch idempotently",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "day36-dispatch-1" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"mainTripId\": \"{{day36MainTripId}}\",\n  \"driverUserId\": \"{{day36DriverId}}\",\n  \"vehicleId\": \"{{day36ShuttleVehicleId}}\",\n  \"scheduledDepartureTime\": \"{{day36ShuttleDeparture}}\",\n  \"scheduledEndTime\": \"{{day36ShuttleEnd}}\",\n  \"orderedBookingIds\": [\"{{day36BookingId}}\"]\n}" },
+            "url": "{{baseUrl}}/v1/operator/shuttle-trips"
+          }
+        },
+        {
+          "name": "Get shuttle latest GPS",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/tracking/shuttle-trips/{{day36ShuttleTripId}}/latest"
+          }
+        },
+        {
+          "name": "Get shuttle ETA",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/tracking/shuttle-trips/{{day36ShuttleTripId}}/eta"
+          }
+        }
+      ]
     }
   ]
 }
