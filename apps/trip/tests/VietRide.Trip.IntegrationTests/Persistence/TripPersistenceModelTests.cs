@@ -72,6 +72,35 @@ public sealed class TripPersistenceModelTests
         stop.GetCheckConstraints().Should().Contain(x => x.Name == "chk_stops_no_self_replacement");
     }
 
+    [Fact]
+    public void Model_MapsShuttleTables_WithCanonicalConstraintsAndIndexes()
+    {
+        using var dbContext = CreateDbContext();
+        var model = dbContext.GetService<IDesignTimeModel>().Model;
+
+        var shuttleTrip = model.FindEntityType(typeof(ShuttleTrip))
+            ?? throw new InvalidOperationException("ShuttleTrip model missing.");
+        var passenger = model.FindEntityType(typeof(ShuttlePassenger))
+            ?? throw new InvalidOperationException("ShuttlePassenger model missing.");
+        var alert = model.FindEntityType(typeof(ShuttleDispatchAlert))
+            ?? throw new InvalidOperationException("ShuttleDispatchAlert model missing.");
+
+        shuttleTrip.GetTableName().Should().Be("shuttle_trips");
+        shuttleTrip.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "idx_shuttle_trips_driver_schedule");
+        shuttleTrip.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "idx_shuttle_trips_vehicle_schedule");
+        shuttleTrip.GetCheckConstraints().Should().Contain(x => x.Name == "chk_shuttle_trips_schedule");
+
+        passenger.GetTableName().Should().Be("shuttle_passengers");
+        passenger.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "uq_shuttle_passengers_booking_ticket" && x.IsUnique);
+        passenger.GetForeignKeys().Should().Contain(x => x.PrincipalEntityType.ClrType == typeof(ShuttleTrip)
+            && x.DeleteBehavior == DeleteBehavior.SetNull);
+        passenger.GetCheckConstraints().Should().Contain(x => x.Name == "chk_shuttle_passengers_status");
+
+        alert.GetTableName().Should().Be("shuttle_dispatch_alerts");
+        alert.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "uq_shuttle_dispatch_alerts_trip_type" && x.IsUnique);
+        alert.FindProperty(nameof(ShuttleDispatchAlert.UpdatedAt)).Should().BeNull();
+    }
+
     private static TripDbContext CreateDbContext()
     {
         var connectionString = ResolveConnectionString("vietride_trip_model_tests");

@@ -70,6 +70,7 @@ public sealed record IdentityUserLookupResult(
     Guid? OperatorId,
     string? Status)
 {
+    public string? Phone { get; init; }
     public static IdentityUserLookupResult Success(Guid id, string? displayName, string? avatarUrl, string role, Guid? operatorId, string status)
     {
         return new IdentityUserLookupResult(true, null, null, null, id, displayName, avatarUrl, role, operatorId, status);
