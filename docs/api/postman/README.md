@@ -135,12 +135,16 @@ same driver or assistant; otherwise the wrong-trip cases stop at authorization w
 of reaching the intended `422 BOOKING_NOT_FOR_THIS_TRIP`. The committed environment contains
 placeholders only; never commit real JWTs or fixture secrets.
 
-To execute every self-contained local day harness in dependency order, use
-`npm run postman:full:local`. It starts the application profile, runs Days 6/7/8/9/11 against real
-service integrations, temporarily enables the documented Booking development stubs for Days
-13/14/15/17, restores real integrations, and finishes with Day 18 plus its persisted boarding-state
-check. The command exits non-zero if any stage fails. Google OAuth is not included because it
-requires a real external Google ID token.
+To execute the authoritative local E2E matrix in dependency order, use
+`npm run postman:full:local`. The required Sprint 3 stages are D11 through D19; their exact
+folder/harness, seam mode, assertions, fixture ownership, and exclusion policy live in
+[`docs/handoff/day-20-e2e-matrix.md`](../../handoff/day-20-e2e-matrix.md). It starts the application
+profile, runs real seams where documented, temporarily enables the documented Booking development
+stubs where required, then restores real integrations. The command exits non-zero if any required
+stage is missing, fails, or is skipped without a recorded human-approved exclusion. D12 and D16
+are currently deliberate missing-stage gates pending their Task-20.1 harnesses; do not substitute
+another path for either stage. Google OAuth is outside the Sprint-3 matrix and still requires a
+real external Google ID token.
 
 ## Notes
 
