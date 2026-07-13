@@ -79,5 +79,12 @@ public sealed class CreateBookingCommandValidator : AbstractValidator<CreateBook
             .NotEmpty()
             .Must(m => ValidPaymentMethods.Contains(m, StringComparer.OrdinalIgnoreCase))
             .WithMessage($"paymentMethod must be one of: {string.Join(", ", ValidPaymentMethods)}.");
+
+        When(x => x.ShuttlePickup is not null, () =>
+        {
+            RuleFor(x => x.ShuttlePickup!.Address).NotEmpty().MaximumLength(500);
+            RuleFor(x => x.ShuttlePickup!.Latitude).InclusiveBetween(-90m, 90m);
+            RuleFor(x => x.ShuttlePickup!.Longitude).InclusiveBetween(-180m, 180m);
+        });
     }
 }

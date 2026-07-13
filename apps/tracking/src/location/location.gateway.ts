@@ -8,10 +8,7 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import type { Server, Socket } from 'socket.io';
-import {
-  TRACKING_AUTHORIZATION_ADAPTER,
-  TRACKING_JWT_VERIFIER,
-} from '../app/tokens';
+import { TRACKING_AUTHORIZATION_ADAPTER, TRACKING_JWT_VERIFIER } from '../app/tokens';
 import { ApproachingAlertService } from '../approaching-alert/approaching-alert.service';
 import type { TrackingUser } from '../auth/tracking-user.types';
 import type { UserJwtVerifier } from '../auth/user-jwt.verifier';
@@ -19,10 +16,10 @@ import type { TrackingAuthorizationAdapter } from '../authorization/tracking-aut
 import { EtaService } from '../eta/eta.service';
 import { OffRouteService } from '../off-route/off-route.service';
 import { TripDelayService } from '../trip-delay/trip-delay.service';
-import {
-  TRACKING_SOCKET_PATH,
-  trackingTripRoom,
-} from './location.constants';
+import { shuttleRoom } from '../shuttle/shuttle.constants';
+import { JoinShuttleTrackingSchema, ShuttleGpsUpdateSchema } from '../shuttle/shuttle.dto';
+import { ShuttleService } from '../shuttle/shuttle.service';
+import { TRACKING_SOCKET_PATH, trackingTripRoom } from './location.constants';
 import { JoinTripTrackingSchema } from './dto/join-trip-tracking.dto';
 import { UpdateLocationSchema } from './dto/update-location.dto';
 import { LocationService } from './location.service';
@@ -66,6 +63,7 @@ export class LocationGateway implements OnGatewayInit {
     private readonly approachingAlertService: ApproachingAlertService,
     private readonly offRouteService: OffRouteService,
     private readonly tripDelayService: TripDelayService,
+    private readonly shuttleService: ShuttleService,
   ) {}
 
   afterInit(server: Server): void {
@@ -85,6 +83,55 @@ export class LocationGateway implements OnGatewayInit {
     });
   }
 
+  @SubscribeMessage('joinShuttleTracking')
+  async joinShuttleTracking(
+    @ConnectedSocket() socket: TrackingSocket,
+    @MessageBody() payload: unknown,
+  ): Promise<JoinTripTrackingAck> {
+    const parsed = JoinShuttleTrackingSchema.safeParse(payload);
+    if (!parsed.success) return { success: false, error: 'VALIDATION_ERROR' };
+    const user = socket.data.user;
+    if (!user) return { success: false, error: 'UNAUTHORIZED' };
+    try {
+      const context = await this.shuttleService.getContext(user, parsed.data.shuttleTripId);
+      if (!context.allowed || !context.scope) return { success: false, error: 'ACCESS_DENIED' };
+      const room = shuttleRoom(parsed.data.shuttleTripId);
+      await socket.join(room);
+      return {
+        success: true,
+        tripId: parsed.data.shuttleTripId,
+        room,
+        scope: context.scope,
+      };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+
+  @SubscribeMessage('shuttle:gps:update')
+  async updateShuttleLocation(
+    @ConnectedSocket() socket: TrackingSocket,
+    @MessageBody() payload: unknown,
+  ): Promise<GpsUpdateAck> {
+    const parsed = ShuttleGpsUpdateSchema.safeParse(payload);
+    if (!parsed.success) return { success: false, error: 'VALIDATION_ERROR' };
+    const user = socket.data.user;
+    if (!user || user.role !== 'DRIVER') return { success: false, error: 'ACCESS_DENIED' };
+    try {
+      const context = await this.shuttleService.getContext(user, parsed.data.shuttleTripId);
+      if (!context.allowed || context.scope !== 'DRIVER')
+        return { success: false, error: 'ACCESS_DENIED' };
+      const result = await this.shuttleService.recordLocation(parsed.data, context);
+      const room = shuttleRoom(parsed.data.shuttleTripId);
+      this.server.to(room).emit('shuttle:gps:update', result.gps);
+      if (result.eta) this.server.to(room).emit('shuttle:eta:update', result.eta);
+      return { success: true };
+    } catch (error) {
+      this.logger.error(`Failed shuttle GPS update: ${(error as Error).message}`);
+      return { success: false, error: 'TRACKING_UNAVAILABLE' };
+    }
+  }
+
   @SubscribeMessage('joinTripTracking')
   async joinTripTracking(
     @ConnectedSocket() socket: TrackingSocket,
@@ -100,7 +147,10 @@ export class LocationGateway implements OnGatewayInit {
       return { success: false, error: 'UNAUTHORIZED' };
     }
 
-    const authorization = await this.authorizationAdapter.authorizeTripTracking(user, parsed.data.tripId);
+    const authorization = await this.authorizationAdapter.authorizeTripTracking(
+      user,
+      parsed.data.tripId,
+    );
     if (!authorization.allowed || !authorization.scope) {
       return { success: false, error: authorization.error ?? 'ACCESS_DENIED' };
     }
@@ -134,8 +184,14 @@ export class LocationGateway implements OnGatewayInit {
       return { success: false, error: 'ACCESS_DENIED' };
     }
 
-    const authorization = await this.authorizationAdapter.authorizeTripTracking(user, parsed.data.tripId);
-    if (!authorization.allowed || (authorization.scope !== 'DRIVER' && authorization.scope !== 'ASSISTANT')) {
+    const authorization = await this.authorizationAdapter.authorizeTripTracking(
+      user,
+      parsed.data.tripId,
+    );
+    if (
+      !authorization.allowed ||
+      (authorization.scope !== 'DRIVER' && authorization.scope !== 'ASSISTANT')
+    ) {
       return { success: false, error: authorization.error ?? 'ACCESS_DENIED' };
     }
 
@@ -143,19 +199,25 @@ export class LocationGateway implements OnGatewayInit {
     try {
       event = await this.locationService.recordLocation(parsed.data);
     } catch (error) {
-      this.logger.error(`Failed to record gps:update for trip ${parsed.data.tripId}: ${(error as Error).message}`);
+      this.logger.error(
+        `Failed to record gps:update for trip ${parsed.data.tripId}: ${(error as Error).message}`,
+      );
       return { success: false, error: 'TRACKING_UNAVAILABLE' };
     }
 
     this.server.to(trackingTripRoom(parsed.data.tripId)).emit('gps:update', event);
     void this.runDetection(event).catch((error) => {
-      this.logger.error(`Tracking detection chain failed for trip ${event.tripId}: ${(error as Error).message}`);
+      this.logger.error(
+        `Tracking detection chain failed for trip ${event.tripId}: ${(error as Error).message}`,
+      );
     });
     this.logger.debug(`Broadcasted gps:update for trip ${parsed.data.tripId}`);
     return { success: true };
   }
 
-  private async runDetection(event: Awaited<ReturnType<LocationService['recordLocation']>>): Promise<void> {
+  private async runDetection(
+    event: Awaited<ReturnType<LocationService['recordLocation']>>,
+  ): Promise<void> {
     await this.offRouteService.handleGpsUpdate(event);
     const etaUpdate = await this.etaService.handleGpsUpdate(event);
     if (etaUpdate) {

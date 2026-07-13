@@ -3405,85 +3405,57 @@
         },
         {
           "name": "20. Clear Route path geometry",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "const body = pm.response.json();",
-                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
-                  "pm.test('Route geometry is null', function () { pm.expect(body.data).to.have.property('pathPolyline', null); });"
-                ],
-                "type": "text/javascript"
-              }
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "const body = pm.response.json();",
+                "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                "pm.test('Route geometry is null', function () { pm.expect(body.data).to.have.property('pathPolyline', null); });"
+              ],
+              "type": "text/javascript"
             }
-          ],
+          }],
           "request": {
             "method": "PUT",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{operatorAdminAccessToken}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/routes/{{day8RouteId}}/geometry",
               "host": ["{{baseUrl}}"],
               "path": ["v1", "operator", "routes", "{{day8RouteId}}", "geometry"]
             },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"pathPolyline\": null\n}"
-            },
+            "body": { "mode": "raw", "raw": "{\n  \"pathPolyline\": null\n}" },
             "description": "Clears Route Google precision-5 path geometry. Non-null geometry is validated against stops and stations."
           }
         },
         {
           "name": "21. Clear AlternativeRoute path geometry",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "const body = pm.response.json();",
-                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
-                  "pm.test('AlternativeRoute geometry is null', function () { pm.expect(body.data).to.have.property('pathPolyline', null); });"
-                ],
-                "type": "text/javascript"
-              }
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "const body = pm.response.json();",
+                "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                "pm.test('AlternativeRoute geometry is null', function () { pm.expect(body.data).to.have.property('pathPolyline', null); });"
+              ],
+              "type": "text/javascript"
             }
-          ],
+          }],
           "request": {
             "method": "PUT",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{operatorAdminAccessToken}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/alternative-routes/{{day8AlternativeRouteId2}}/geometry",
               "host": ["{{baseUrl}}"],
-              "path": [
-                "v1",
-                "operator",
-                "alternative-routes",
-                "{{day8AlternativeRouteId2}}",
-                "geometry"
-              ]
+              "path": ["v1", "operator", "alternative-routes", "{{day8AlternativeRouteId2}}", "geometry"]
             },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"pathPolyline\": null\n}"
-            },
+            "body": { "mode": "raw", "raw": "{\n  \"pathPolyline\": null\n}" },
             "description": "Clears AlternativeRoute Google precision-5 path geometry."
           }
         }
@@ -4758,22 +4730,13 @@
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{passengerAccessToken}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Idempotency-Key",
-                "value": "{{$guid}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"reason\": \"USER_INITIATED\"\n}"
+          "raw": "{\n  \"reason\": \"USER_INITIATED\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/v1/bookings/{{day17BookingId}}/cancel",
@@ -4806,10 +4769,7 @@
           "request": {
             "method": "GET",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{operatorAdminAccessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/booking-stats",
@@ -4850,231 +4810,13 @@
           ],
           "request": {
             "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{driverAccessToken}}"
-              }
-            ],
+            "header": [{ "key": "Authorization", "value": "Bearer {{driverAccessToken}}" }],
             "url": {
               "raw": "{{baseUrl}}/v1/driver/me/schedule",
               "host": ["{{baseUrl}}"],
               "path": ["v1", "driver", "me", "schedule"]
             },
             "description": "Driver schedule through Gateway. Omitting both from/to exercises the inclusive ICT today..today+14 default."
-          }
-        },
-        {
-          "name": "1a. Driver gets assigned trip route geometry",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const body = pm.response.json();",
-                  "pm.test('Driver route geometry uses the frozen schema', function () {",
-                  "  pm.response.to.have.status(200);",
-                  "  pm.expect(body.success).to.equal(true);",
-                  "  pm.expect(body.data).to.include.all.keys('tripId', 'routeId', 'pathPolyline', 'originStation', 'destinationStation', 'stops');",
-                  "  pm.expect(body.data.pathPolyline).to.equal(null);",
-                  "  pm.expect(body.data.originStation).to.include.all.keys('stationId', 'name', 'latitude', 'longitude');",
-                  "  pm.expect(body.data.destinationStation).to.include.all.keys('stationId', 'name', 'latitude', 'longitude');",
-                  "  pm.expect(body.data.stops).to.be.an('array');",
-                  "  pm.expect(JSON.stringify(body.data)).not.to.match(/phone|email|operatorName/i);",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{driverAccessToken}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/driver/trips/{{day18TripId}}/route",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "driver", "trips", "{{day18TripId}}", "route"]
-            },
-            "description": "Assigned Driver reads the main Route polyline and ordered fallback waypoints through Gateway."
-          }
-        },
-        {
-          "name": "1b. Assistant gets assigned trip route geometry",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const body = pm.response.json();",
-                  "pm.test('Assigned Assistant can read route geometry', function () { pm.response.to.have.status(200); pm.expect(body.data.tripId).to.equal(pm.environment.get('day18TripId')); });"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{assistantAccessToken}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/driver/trips/{{day18TripId}}/route",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "driver", "trips", "{{day18TripId}}", "route"]
-            }
-          }
-        },
-        {
-          "name": "1c. Driver gets assigned encoded route polyline unchanged",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const body = pm.response.json();",
-                  "pm.test('Encoded precision-5 polyline and ordered stops are returned unchanged', function () { pm.response.to.have.status(200); pm.expect(body.data.tripId).to.equal(pm.environment.get('day18OtherTripId')); pm.expect(body.data.pathPolyline).to.equal(atob(pm.environment.get('day18EncodedPolylineBase64'))); pm.expect(body.data.stops.length).to.be.above(0); const orders = body.data.stops.map(x => x.orderIndex); pm.expect(orders).to.eql([...orders].sort((a, b) => a - b)); pm.expect(body.data.stops[0]).to.include.all.keys('stopId', 'name', 'latitude', 'longitude', 'orderIndex', 'estimatedArrivalTime', 'allowPickup', 'allowDropoff'); });"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{driverAccessToken}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/driver/trips/{{day18OtherTripId}}/route",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "driver", "trips", "{{day18OtherTripId}}", "route"]
-            }
-          }
-        },
-        {
-          "name": "1d. Unassigned DRIVER cannot access trip route geometry",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const body = pm.response.json();",
-                  "pm.test('Trip rejects a different DRIVER assignment', function () { pm.response.to.have.status(403); pm.expect(body.error.code).to.equal('FORBIDDEN'); });"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{unassignedDriverAccessToken}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/driver/trips/{{day18TripId}}/route",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "driver", "trips", "{{day18TripId}}", "route"]
-            }
-          }
-        },
-        {
-          "name": "1e. Unknown trip route is not found",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const body = pm.response.json();",
-                  "pm.test('Unknown trip is 404 TRIP_NOT_FOUND', function () { pm.response.to.have.status(404); pm.expect(body.error.code).to.equal('TRIP_NOT_FOUND'); });"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{driverAccessToken}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/driver/trips/18181818-1818-4181-8181-181818189999/route",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "driver", "trips", "18181818-1818-4181-8181-181818189999", "route"]
-            }
-          }
-        },
-        {
-          "name": "1f. Malformed trip id is validation error",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const body = pm.response.json();",
-                  "pm.test('Malformed tripId is 422 VALIDATION_ERROR', function () { pm.response.to.have.status(422); pm.expect(body.error.code).to.equal('VALIDATION_ERROR'); });"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{driverAccessToken}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/driver/trips/not-a-guid/route",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "driver", "trips", "not-a-guid", "route"]
-            }
-          }
-        },
-        {
-          "name": "1g. PASSENGER cannot access trip route geometry",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const body = pm.response.json();",
-                  "pm.test('Gateway rejects PASSENGER before Trip', function () { pm.response.to.have.status(403); pm.expect(body.error.code).to.equal('FORBIDDEN'); });"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{passengerAccessToken}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/driver/trips/{{day18TripId}}/route",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "driver", "trips", "{{day18TripId}}", "route"]
-            }
           }
         },
         {
@@ -5097,12 +4839,7 @@
           ],
           "request": {
             "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{passengerAccessToken}}"
-              }
-            ],
+            "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }],
             "url": {
               "raw": "{{baseUrl}}/v1/driver/me/schedule",
               "host": ["{{baseUrl}}"],
@@ -5128,12 +4865,7 @@
           ],
           "request": {
             "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{passengerAccessToken}}"
-              }
-            ],
+            "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }],
             "url": {
               "raw": "{{baseUrl}}/v1/assistant/role-gate-check",
               "host": ["{{baseUrl}}"],
@@ -5168,12 +4900,7 @@
           ],
           "request": {
             "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{driverAccessToken}}"
-              }
-            ],
+            "header": [{ "key": "Authorization", "value": "Bearer {{driverAccessToken}}" }],
             "url": {
               "raw": "{{baseUrl}}/v1/bookings/trips/{{day18TripId}}/manifest",
               "host": ["{{baseUrl}}"],
@@ -5203,27 +4930,13 @@
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{driverAccessToken}}"
-              },
-              {
-                "key": "Idempotency-Key",
-                "value": "{{$guid}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{driverAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/bookings/trips/{{day18TripId}}/boarding/passenger/{{day18PassengerRecordId}}",
               "host": ["{{baseUrl}}"],
-              "path": [
-                "v1",
-                "bookings",
-                "trips",
-                "{{day18TripId}}",
-                "boarding",
-                "passenger",
-                "{{day18PassengerRecordId}}"
-              ]
+              "path": ["v1", "bookings", "trips", "{{day18TripId}}", "boarding", "passenger", "{{day18PassengerRecordId}}"]
             }
           }
         },
@@ -5244,12 +4957,7 @@
           ],
           "request": {
             "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{passengerAccessToken}}"
-              }
-            ],
+            "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }],
             "url": {
               "raw": "{{baseUrl}}/v1/bookings/trips/{{day18TripId}}/manifest",
               "host": ["{{baseUrl}}"],
@@ -5276,27 +4984,13 @@
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{driverAccessToken}}"
-              },
-              {
-                "key": "Idempotency-Key",
-                "value": "{{$guid}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{driverAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/bookings/trips/{{day18TripId}}/boarding/passenger/{{day18PassengerRecordId}}",
               "host": ["{{baseUrl}}"],
-              "path": [
-                "v1",
-                "bookings",
-                "trips",
-                "{{day18TripId}}",
-                "boarding",
-                "passenger",
-                "{{day18PassengerRecordId}}"
-              ]
+              "path": ["v1", "bookings", "trips", "{{day18TripId}}", "boarding", "passenger", "{{day18PassengerRecordId}}"]
             }
           }
         },
@@ -5318,27 +5012,13 @@
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{driverAccessToken}}"
-              },
-              {
-                "key": "Idempotency-Key",
-                "value": "{{$guid}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{driverAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" }
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/bookings/trips/{{day18OtherTripId}}/boarding/passenger/{{day18PassengerRecordId}}",
               "host": ["{{baseUrl}}"],
-              "path": [
-                "v1",
-                "bookings",
-                "trips",
-                "{{day18OtherTripId}}",
-                "boarding",
-                "passenger",
-                "{{day18PassengerRecordId}}"
-              ]
+              "path": ["v1", "bookings", "trips", "{{day18OtherTripId}}", "boarding", "passenger", "{{day18PassengerRecordId}}"]
             }
           }
         },
@@ -5365,19 +5045,10 @@
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{driverAccessToken}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
+              { "key": "Authorization", "value": "Bearer {{driverAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
             ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"ticketCode\": \"{{day18TicketCode}}\"\n}"
-            },
+            "body": { "mode": "raw", "raw": "{\n  \"ticketCode\": \"{{day18TicketCode}}\"\n}" },
             "url": {
               "raw": "{{baseUrl}}/v1/bookings/trips/{{day18TripId}}/boarding/qr-scan",
               "host": ["{{baseUrl}}"],
@@ -5403,19 +5074,10 @@
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{driverAccessToken}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
+              { "key": "Authorization", "value": "Bearer {{driverAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
             ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"ticketCode\": \"{{day18TicketCode}}\"\n}"
-            },
+            "body": { "mode": "raw", "raw": "{\n  \"ticketCode\": \"{{day18TicketCode}}\"\n}" },
             "url": {
               "raw": "{{baseUrl}}/v1/bookings/trips/{{day18OtherTripId}}/boarding/qr-scan",
               "host": ["{{baseUrl}}"],
@@ -5441,24 +5103,96 @@
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{driverAccessToken}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
+              { "key": "Authorization", "value": "Bearer {{driverAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
             ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"ticketCode\": \"VT-20260101-ABCDEFGH\"\n}"
-            },
+            "body": { "mode": "raw", "raw": "{\n  \"ticketCode\": \"VT-20260101-ABCDEFGH\"\n}" },
             "url": {
               "raw": "{{baseUrl}}/v1/bookings/trips/{{day18TripId}}/boarding/qr-scan",
               "host": ["{{baseUrl}}"],
               "path": ["v1", "bookings", "trips", "{{day18TripId}}", "boarding", "qr-scan"]
             }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Day 36 - Shuttle Backend",
+      "item": [
+        {
+          "name": "Create booking with shuttle pickup",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "day36-booking-{{$guid}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"tripId\": \"{{day36MainTripId}}\",\n  \"pickup\": { \"stationId\": \"{{day36OriginStationId}}\" },\n  \"dropoff\": { \"stationId\": \"{{day36DestinationStationId}}\" },\n  \"shuttlePickup\": { \"address\": \"123 Nguyễn Huệ, Quận 1\", \"latitude\": 10.7731, \"longitude\": 106.7032 },\n  \"seats\": [{ \"seatNumber\": \"D01\", \"passenger\": { \"fullName\": \"Day 36 Passenger\", \"phoneNumber\": \"+84910000036\", \"idNumber\": \"D36001\" } }],\n  \"paymentMethod\": \"WALLET\"\n}" },
+            "url": "{{baseUrl}}/v1/bookings"
+          }
+        },
+        {
+          "name": "Reject unsupported shuttle station",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "day36-invalid-{{$guid}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"tripId\": \"{{day36MainTripId}}\",\n  \"pickup\": { \"stationId\": \"{{day36UnsupportedStationId}}\" },\n  \"shuttlePickup\": { \"address\": \"Unsupported\", \"latitude\": 10.7, \"longitude\": 106.7 },\n  \"seats\": [],\n  \"paymentMethod\": \"WALLET\"\n}" },
+            "url": "{{baseUrl}}/v1/bookings"
+          }
+        },
+        {
+          "name": "List grouped pending shuttle requests",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/operator/shuttle-requests?page=1&pageSize=20"
+          }
+        },
+        {
+          "name": "Create subset ShuttleTrip",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "day36-dispatch-1" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"mainTripId\": \"{{day36MainTripId}}\",\n  \"driverUserId\": \"{{day36DriverId}}\",\n  \"vehicleId\": \"{{day36ShuttleVehicleId}}\",\n  \"scheduledDepartureTime\": \"{{day36ShuttleDeparture}}\",\n  \"scheduledEndTime\": \"{{day36ShuttleEnd}}\",\n  \"orderedBookingIds\": [\"{{day36BookingId}}\"]\n}" },
+            "url": "{{baseUrl}}/v1/operator/shuttle-trips"
+          }
+        },
+        {
+          "name": "Replay subset dispatch idempotently",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "day36-dispatch-1" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"mainTripId\": \"{{day36MainTripId}}\",\n  \"driverUserId\": \"{{day36DriverId}}\",\n  \"vehicleId\": \"{{day36ShuttleVehicleId}}\",\n  \"scheduledDepartureTime\": \"{{day36ShuttleDeparture}}\",\n  \"scheduledEndTime\": \"{{day36ShuttleEnd}}\",\n  \"orderedBookingIds\": [\"{{day36BookingId}}\"]\n}" },
+            "url": "{{baseUrl}}/v1/operator/shuttle-trips"
+          }
+        },
+        {
+          "name": "Get shuttle latest GPS",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/tracking/shuttle-trips/{{day36ShuttleTripId}}/latest"
+          }
+        },
+        {
+          "name": "Get shuttle ETA",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/tracking/shuttle-trips/{{day36ShuttleTripId}}/eta"
           }
         }
       ]

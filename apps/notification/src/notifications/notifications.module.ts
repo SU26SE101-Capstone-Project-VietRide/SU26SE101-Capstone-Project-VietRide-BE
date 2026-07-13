@@ -33,6 +33,7 @@ import { ParcelSubscriptionOperatorEventsConsumer } from './parcel-subscription-
 import { SendGridEmailProvider } from './sendgrid-email.provider';
 import { TripTrackingAlertEventsConsumer } from './trip-tracking-alert-events.consumer';
 import { TripAnnouncementRecipientProvider } from './trip-announcement-recipient.provider';
+import { ShuttleEventsConsumer } from './shuttle-events.consumer';
 
 @Module({
   controllers: [NotificationsController, OperatorNotificationsController, InternalEmailsController],
@@ -52,6 +53,7 @@ import { TripAnnouncementRecipientProvider } from './trip-announcement-recipient
     CoreEventsConsumer,
     TripTrackingAlertEventsConsumer,
     ParcelSubscriptionOperatorEventsConsumer,
+    ShuttleEventsConsumer,
     UserJwtAuthGuard,
     InternalJwtAuthGuard,
     { provide: NOTIFICATION_JWT_VERIFIER, useClass: JoseNotificationUserJwtVerifier },

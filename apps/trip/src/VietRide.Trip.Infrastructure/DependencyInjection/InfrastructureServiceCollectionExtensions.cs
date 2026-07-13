@@ -4,6 +4,7 @@ using StackExchange.Redis;
 using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Http.Resilience;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Messaging.DependencyInjection;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Jobs;
 using VietRide.Trip.Application.Abstractions.Repositories;
@@ -11,9 +12,11 @@ using VietRide.Trip.Application.Abstractions.SeatLock;
 using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Infrastructure.ExternalClients;
 using VietRide.Trip.Infrastructure.Jobs;
+using VietRide.Trip.Infrastructure.Messaging;
 using VietRide.Trip.Infrastructure.Persistence.Repositories;
 using VietRide.Trip.Infrastructure.SeatLock;
 using VietRide.Trip.Infrastructure.SeatLocks;
+using VietRide.Trip.Infrastructure.Services;
 
 namespace VietRide.Trip.Infrastructure.DependencyInjection;
 
@@ -47,12 +50,22 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ITripStopFareRepository, TripStopFareRepository>();
         services.AddScoped<ITripGenerationSkipLogRepository, TripGenerationSkipLogRepository>();
         services.AddScoped<ITripGenerationJobScheduler, HangfireTripGenerationJobScheduler>();
-
-        var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
-            ?? Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
-        if (!string.Equals(environment, "Testing", StringComparison.OrdinalIgnoreCase))
+        services.AddScoped<IShuttleDispatchService, ShuttleDispatchService>();
+        services.AddScoped<ShuttleDispatchSafetyJob>();
+        if (AreBackgroundWorkersEnabled(configuration))
         {
+            services.AddVietRideEventConsumer<BookingShuttleConfirmedIntegrationEvent, BookingShuttleConfirmedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "trip.booking-shuttle-confirmed";
+                options.BindingKeys = [BookingShuttleConfirmedIntegrationEvent.EventType];
+            });
+            services.AddVietRideEventConsumer<BookingShuttleCancelledIntegrationEvent, BookingShuttleCancelledIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "trip.booking-shuttle-cancelled";
+                options.BindingKeys = [BookingShuttleCancelledIntegrationEvent.EventType];
+            });
             services.AddHostedService<TripGenerationRecurringJobRegistrationHostedService>();
+            services.AddHostedService<ShuttleDispatchSafetyJobRegistrationHostedService>();
         }
 
         var redisUrl = configuration["REDIS_URL"]
@@ -108,5 +121,8 @@ public static class InfrastructureServiceCollectionExtensions
 
         return baseUrl;
     }
+
+    private static bool AreBackgroundWorkersEnabled(IConfiguration configuration) =>
+        configuration.GetValue<bool?>("Trip:BackgroundWorkers:Enabled") ?? true;
 
 }

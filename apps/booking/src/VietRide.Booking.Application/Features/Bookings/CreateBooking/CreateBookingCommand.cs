@@ -21,7 +21,10 @@ public sealed record CreateBookingCommand(
 
     IReadOnlyList<SeatRequest> Seats,
     string? VoucherCode,
-    string PaymentMethod) : IRequest<CreateBookingResult>;
+    string PaymentMethod,
+    ShuttlePickupCommand? ShuttlePickup = null) : IRequest<CreateBookingResult>;
+
+public sealed record ShuttlePickupCommand(string Address, decimal Latitude, decimal Longitude);
 
 /// <summary>
 /// Per-seat booking request. PII (fullName, phoneNumber, idNumber) is validated

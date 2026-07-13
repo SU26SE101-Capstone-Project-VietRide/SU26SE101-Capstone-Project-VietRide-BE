@@ -67,6 +67,12 @@ public sealed class TripDbContext : VietRideDbContextBase
 
     public DbSet<TripGenerationSkipLog> TripGenerationSkipLogs => Set<TripGenerationSkipLog>();
 
+    public DbSet<ShuttleTrip> ShuttleTrips => Set<ShuttleTrip>();
+
+    public DbSet<ShuttlePassenger> ShuttlePassengers => Set<ShuttlePassenger>();
+
+    public DbSet<ShuttleDispatchAlert> ShuttleDispatchAlerts => Set<ShuttleDispatchAlert>();
+
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
         configurationBuilder.Conventions.Remove(typeof(ForeignKeyIndexConvention));

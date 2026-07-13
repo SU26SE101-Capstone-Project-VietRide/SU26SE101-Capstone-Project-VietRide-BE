@@ -56,6 +56,14 @@ public sealed class EditPickupCommandHandler : IRequestHandler<EditPickupCommand
                 "Only confirmed bookings may be edited before cutoff.");
         }
 
+
+        if (booking.ShuttleIntent?.IsActive == true)
+        {
+            throw new ConflictException(
+                "SHUTTLE_PICKUP_LOCKED",
+                "Pickup cannot be edited while a shuttle intent is active.");
+        }
+
         var trip = await _tripClient.GetTripSnapshotAsync(booking.TripId, cancellationToken);
         if (trip is null)
         {

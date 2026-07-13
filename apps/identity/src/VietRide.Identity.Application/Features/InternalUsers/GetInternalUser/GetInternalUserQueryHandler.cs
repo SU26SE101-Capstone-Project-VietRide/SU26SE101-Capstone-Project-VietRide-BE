@@ -24,6 +24,7 @@ public sealed class GetInternalUserQueryHandler : IRequestHandler<GetInternalUse
             user.AvatarUrl,
             user.Role.ToString(),
             user.OperatorId,
-            user.Status.ToString());
+            user.Status.ToString(),
+            user.Phone?.Value);
     }
 }

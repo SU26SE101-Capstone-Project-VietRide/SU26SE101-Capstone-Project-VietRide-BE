@@ -70,7 +70,13 @@ public sealed class BookingsController : ControllerBase
                     s.Passenger.IdNumber))
                 .ToList(),
             VoucherCode: request.VoucherCode,
-            PaymentMethod: request.PaymentMethod);
+            PaymentMethod: request.PaymentMethod,
+            ShuttlePickup: request.ShuttlePickup is null
+                ? null
+                : new ShuttlePickupCommand(
+                    request.ShuttlePickup.Address,
+                    request.ShuttlePickup.Latitude,
+                    request.ShuttlePickup.Longitude));
 
         var result = await _sender.Send(command, ct);
 
@@ -230,7 +236,13 @@ public sealed class BookingsController : ControllerBase
                     s.Passenger.FullName,
                     s.Passenger.PhoneNumber,
                     s.Passenger.IdNumber))
-                .ToList());
+                .ToList(),
+            ShuttlePickup: leg.ShuttlePickup is null
+                ? null
+                : new CreateRoundTripBookingCommand.RoundTripShuttlePickupCommand(
+                    leg.ShuttlePickup.Address,
+                    leg.ShuttlePickup.Latitude,
+                    leg.ShuttlePickup.Longitude));
 
     private string GetRequiredIdempotencyKey()
     {

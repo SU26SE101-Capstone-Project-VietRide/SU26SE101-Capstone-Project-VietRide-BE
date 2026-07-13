@@ -30,6 +30,7 @@ namespace VietRide.Trip.Infrastructure.Migrations
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "trip_source", new[] { "MANUAL", "AUTO_FROM_SCHEDULE", "VEHICLE_SUBSTITUTION" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "trip_status", new[] { "SCHEDULED", "BOARDING", "IN_PROGRESS", "COMPLETED", "CANCELLED", "DISRUPTED" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "trip_stop_status", new[] { "PENDING", "ARRIVED", "SKIPPED" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vehicle_status", new[] { "ACTIVE", "MAINTENANCE", "OFF_DUTY", "RETIRED" });
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("VietRide.Shared.Persistence.Outbox.OutboxEvent", b =>
@@ -629,6 +630,269 @@ namespace VietRide.Trip.Infrastructure.Migrations
                             t.HasCheckConstraint("chk_route_stop_fare_templates_effective_order", "effective_until IS NULL OR effective_until > effective_from");
 
                             t.HasCheckConstraint("chk_route_stop_fare_templates_fare_non_negative", "fare_from_this_stop >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.ShuttleDispatchAlert", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("AlertType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("alert_type");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid>("MainTripId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("main_trip_id");
+
+                    b.Property<Guid>("OperatorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("operator_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_shuttle_dispatch_alerts");
+
+                    b.HasIndex("MainTripId", "AlertType")
+                        .IsUnique()
+                        .HasDatabaseName("uq_shuttle_dispatch_alerts_trip_type");
+
+                    b.HasIndex("OperatorId", "CreatedAt")
+                        .IsDescending(false, true)
+                        .HasDatabaseName("idx_shuttle_dispatch_alerts_operator_created");
+
+                    b.ToTable("shuttle_dispatch_alerts", "vietride_trip", t =>
+                        {
+                            t.HasCheckConstraint("chk_shuttle_dispatch_alerts_type", "alert_type IN ('WARNING_120', 'WARNING_60', 'AUTO_CUTOFF')");
+                        });
+                });
+
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.ShuttlePassenger", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid?>("BookingId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("booking_id");
+
+                    b.Property<string>("CancelReason")
+                        .HasColumnType("text")
+                        .HasColumnName("cancel_reason");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<DateTimeOffset?>("DeliveredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("delivered_at");
+
+                    b.Property<string>("Direction")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("direction");
+
+                    b.Property<Guid>("MainTripId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("main_trip_id");
+
+                    b.Property<Guid?>("PassengerUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("passenger_user_id");
+
+                    b.Property<string>("PickupAddress")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("pickup_address");
+
+                    b.Property<decimal>("PickupLat")
+                        .HasColumnType("decimal(10,7)")
+                        .HasColumnName("pickup_lat");
+
+                    b.Property<decimal>("PickupLng")
+                        .HasColumnType("decimal(10,7)")
+                        .HasColumnName("pickup_lng");
+
+                    b.Property<int?>("PickupOrder")
+                        .HasColumnType("integer")
+                        .HasColumnName("pickup_order");
+
+                    b.Property<DateTimeOffset?>("PickedUpAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("picked_up_at");
+
+                    b.Property<DateTimeOffset?>("ScheduledPickupTime")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("scheduled_pickup_time");
+
+                    b.Property<Guid?>("ShuttleTripId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("shuttle_trip_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("status")
+                        .HasDefaultValue("PENDING_ASSIGNMENT");
+
+                    b.Property<Guid?>("TicketId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("ticket_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("Id")
+                        .HasName("pk_shuttle_passengers");
+
+                    b.HasIndex("BookingId")
+                        .HasDatabaseName("idx_shuttle_passengers_booking")
+                        .HasFilter("booking_id IS NOT NULL");
+
+                    b.HasIndex("ShuttleTripId")
+                        .HasDatabaseName("idx_shuttle_passengers_shuttle_trip")
+                        .HasFilter("shuttle_trip_id IS NOT NULL");
+
+                    b.HasIndex("BookingId", "TicketId")
+                        .IsUnique()
+                        .HasDatabaseName("uq_shuttle_passengers_booking_ticket")
+                        .HasFilter("booking_id IS NOT NULL AND ticket_id IS NOT NULL");
+
+                    b.HasIndex("MainTripId", "Status")
+                        .HasDatabaseName("idx_shuttle_passengers_main_trip_status");
+
+                    b.ToTable("shuttle_passengers", "vietride_trip", t =>
+                        {
+                            t.HasCheckConstraint("chk_shuttle_passengers_direction", "direction IN ('INBOUND_TO_STATION', 'OUTBOUND_FROM_STATION')");
+
+                            t.HasCheckConstraint("chk_shuttle_passengers_status", "status IN ('PENDING_ASSIGNMENT', 'PENDING', 'PICKED_UP', 'DELIVERED', 'NO_SHOW', 'CANCELLED')");
+                        });
+                });
+
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.ShuttleTrip", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTimeOffset?>("ActualDepartureTime")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("actual_departure_time");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("Direction")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("direction");
+
+                    b.Property<Guid>("DriverUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("driver_user_id");
+
+                    b.Property<Guid>("MainTripId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("main_trip_id");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("text")
+                        .HasColumnName("notes");
+
+                    b.Property<Guid>("OperatorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("operator_id");
+
+                    b.Property<DateTimeOffset>("ScheduledDepartureTime")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("scheduled_departure_time");
+
+                    b.Property<DateTimeOffset>("ScheduledEndTime")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("scheduled_end_time");
+
+                    b.Property<Guid>("StationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("station_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status")
+                        .HasDefaultValue("SCHEDULED");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid>("VehicleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("vehicle_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_shuttle_trips");
+
+                    b.HasIndex("MainTripId")
+                        .HasDatabaseName("idx_shuttle_trips_main_trip");
+
+                    b.HasIndex("DriverUserId", "ScheduledDepartureTime", "ScheduledEndTime")
+                        .HasDatabaseName("idx_shuttle_trips_driver_schedule")
+                        .HasFilter("status IN ('SCHEDULED', 'IN_PROGRESS')");
+
+                    b.HasIndex("OperatorId", "Status")
+                        .HasDatabaseName("idx_shuttle_trips_operator_status");
+
+                    b.HasIndex("StationId", "Direction")
+                        .HasDatabaseName("idx_shuttle_trips_station_direction");
+
+                    b.HasIndex("VehicleId", "ScheduledDepartureTime", "ScheduledEndTime")
+                        .HasDatabaseName("idx_shuttle_trips_vehicle_schedule")
+                        .HasFilter("status IN ('SCHEDULED', 'IN_PROGRESS')");
+
+                    b.ToTable("shuttle_trips", "vietride_trip", t =>
+                        {
+                            t.HasCheckConstraint("chk_shuttle_trips_direction", "direction IN ('INBOUND_TO_STATION', 'OUTBOUND_FROM_STATION')");
+
+                            t.HasCheckConstraint("chk_shuttle_trips_schedule", "scheduled_end_time > scheduled_departure_time");
+
+                            t.HasCheckConstraint("chk_shuttle_trips_status", "status IN ('SCHEDULED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED')");
                         });
                 });
 
@@ -1364,6 +1628,10 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("license_plate");
 
+                    b.Property<string>("ImageUrls")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("image_urls");
+
                     b.Property<decimal?>("MaxCargoVolumeM3")
                         .HasColumnType("decimal(8,2)")
                         .HasColumnName("max_cargo_volume_m3");
@@ -1598,6 +1866,50 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .WithMany()
                         .HasForeignKey("LocationId")
                         .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.ShuttleDispatchAlert", b =>
+                {
+                    b.HasOne("VietRide.Trip.Domain.Entities.Trip", null)
+                        .WithMany()
+                        .HasForeignKey("MainTripId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.ShuttlePassenger", b =>
+                {
+                    b.HasOne("VietRide.Trip.Domain.Entities.Trip", null)
+                        .WithMany()
+                        .HasForeignKey("MainTripId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("VietRide.Trip.Domain.Entities.ShuttleTrip", null)
+                        .WithMany()
+                        .HasForeignKey("ShuttleTripId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.ShuttleTrip", b =>
+                {
+                    b.HasOne("VietRide.Trip.Domain.Entities.Trip", null)
+                        .WithMany()
+                        .HasForeignKey("MainTripId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("VietRide.Trip.Domain.Entities.Station", null)
+                        .WithMany()
+                        .HasForeignKey("StationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("VietRide.Trip.Domain.Entities.Vehicle", null)
+                        .WithMany()
+                        .HasForeignKey("VehicleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("VietRide.Trip.Domain.Entities.Stop", b =>

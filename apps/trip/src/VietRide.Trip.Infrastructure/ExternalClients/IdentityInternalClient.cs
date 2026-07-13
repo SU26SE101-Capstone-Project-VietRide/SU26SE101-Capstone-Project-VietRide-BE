@@ -291,7 +291,10 @@ public sealed class IdentityInternalClient : IIdentityInternalClient, ISubscript
             return IdentityUserLookupResult.ValidationFailure("Identity user payload is missing id, role, or status.");
         }
 
-        return IdentityUserLookupResult.Success(id.Value, displayName, avatarUrl, role, operatorId, status);
+        return IdentityUserLookupResult.Success(id.Value, displayName, avatarUrl, role, operatorId, status) with
+        {
+            Phone = GetStringProperty(payload, "phone") ?? GetStringProperty(payload, "phoneNumber"),
+        };
     }
 
     private static IdentityUserProfile? ParseUserProfile(JsonElement payload)

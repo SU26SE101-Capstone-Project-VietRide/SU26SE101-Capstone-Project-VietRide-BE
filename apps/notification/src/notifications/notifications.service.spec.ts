@@ -36,7 +36,12 @@ describe('NotificationsService', () => {
     emailSendQueue = {
       enqueue: jest.fn(),
     } as unknown as jest.Mocked<EmailSendQueue>;
-    service = new NotificationsService(repository, fcmPushQueue, emailSendQueue, new EmailTemplateRenderer());
+    service = new NotificationsService(
+      repository,
+      fcmPushQueue,
+      emailSendQueue,
+      new EmailTemplateRenderer(),
+    );
   });
 
   it('creates a normalized notification DTO', async () => {
@@ -81,6 +86,23 @@ describe('NotificationsService', () => {
     });
   });
 
+  it('does not enqueue a duplicate push when the dedupe key resolves an existing notification', async () => {
+    repository.create.mockResolvedValue({
+      notification: createNotification({ type: NotificationType.SHUTTLE_ASSIGNED }),
+      created: false,
+    });
+
+    await service.createNotification({
+      userId: OWNER_USER_ID,
+      type: NotificationType.SHUTTLE_ASSIGNED,
+      title: 'Shuttle assigned',
+      body: 'Driver is on the way.',
+      dedupeKey: 'trip.shuttle.assigned:booking-id',
+    });
+
+    expect(fcmPushQueue.enqueue).not.toHaveBeenCalled();
+  });
+
   it('returns a paged notification history DTO', async () => {
     const query: ListNotificationsQueryDto = {
       unreadOnly: false,
@@ -114,7 +136,9 @@ describe('NotificationsService', () => {
 
   it('marks an owned unread notification as read', async () => {
     repository.findOwnedById.mockResolvedValue(createNotification({ readAt: null }));
-    repository.markRead.mockResolvedValue(createNotification({ readAt: new Date('2026-06-01T10:01:00.000Z') }));
+    repository.markRead.mockResolvedValue(
+      createNotification({ readAt: new Date('2026-06-01T10:01:00.000Z') }),
+    );
 
     await expect(service.markRead(NOTIFICATION_ID, OWNER_USER_ID)).resolves.toBeUndefined();
 
@@ -122,7 +146,9 @@ describe('NotificationsService', () => {
   });
 
   it('does not update an already read notification', async () => {
-    repository.findOwnedById.mockResolvedValue(createNotification({ readAt: new Date('2026-06-01T10:01:00.000Z') }));
+    repository.findOwnedById.mockResolvedValue(
+      createNotification({ readAt: new Date('2026-06-01T10:01:00.000Z') }),
+    );
 
     await service.markRead(NOTIFICATION_ID, OWNER_USER_ID);
 
@@ -132,7 +158,9 @@ describe('NotificationsService', () => {
   it('throws NOTIFICATION_NOT_FOUND when notification is not owned by user', async () => {
     repository.findOwnedById.mockResolvedValue(null);
 
-    await expect(service.markRead(NOTIFICATION_ID, OWNER_USER_ID)).rejects.toThrow(NotFoundException);
+    await expect(service.markRead(NOTIFICATION_ID, OWNER_USER_ID)).rejects.toThrow(
+      NotFoundException,
+    );
   });
 
   it('creates sanitized email delivery audit and enqueues sensitive template data for SendGrid', async () => {

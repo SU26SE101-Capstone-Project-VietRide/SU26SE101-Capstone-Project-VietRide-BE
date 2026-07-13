@@ -25,6 +25,7 @@ public sealed class BookingDbContext : VietRideDbContextBase
     public DbSet<OperatorVoucherConsent> OperatorVoucherConsents => Set<OperatorVoucherConsent>();
     public DbSet<BookingStats> BookingStats => Set<BookingStats>();
     public DbSet<BookingStatsProcessedEvent> BookingStatsProcessedEvents => Set<BookingStatsProcessedEvent>();
+    public DbSet<BookingShuttleIntent> BookingShuttleIntents => Set<BookingShuttleIntent>();
     public DbSet<BookingStatusHistory> BookingStatusHistories => Set<BookingStatusHistory>();
 
     public BookingDbContext(DbContextOptions<BookingDbContext> options, IClock clock)
