@@ -3,6 +3,8 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
+using VietRide.Booking.Domain.Constants;
+using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Booking.Domain.Services;
 using VietRide.Shared.Application.Exceptions;
@@ -24,6 +26,7 @@ public sealed class CancelBookingCommandHandler : IRequestHandler<CancelBookingC
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly IBookingRepository _bookings;
+    private readonly IBookingStatusHistoryRepository _statusHistory;
     private readonly ITripServiceClient _tripClient;
     private readonly IOperatorServiceClient _operatorClient;
     private readonly IIntegrationEventOutbox _outbox;
@@ -36,9 +39,11 @@ public sealed class CancelBookingCommandHandler : IRequestHandler<CancelBookingC
         IOperatorServiceClient operatorClient,
         IIntegrationEventOutbox outbox,
         IClock clock,
-        ILogger<CancelBookingCommandHandler> logger)
+        ILogger<CancelBookingCommandHandler> logger,
+        IBookingStatusHistoryRepository statusHistory)
     {
         _bookings = bookings;
+        _statusHistory = statusHistory;
         _tripClient = tripClient;
         _operatorClient = operatorClient;
         _outbox = outbox;
@@ -114,6 +119,16 @@ public sealed class CancelBookingCommandHandler : IRequestHandler<CancelBookingC
                 "BOOKING_NOT_CANCELLABLE",
                 "Only CONFIRMED or PENDING_PAYMENT bookings may be cancelled.");
         }
+
+        await _statusHistory.AddAsync(
+            BookingStatusHistory.Create(
+                booking.Id,
+                BookingStatus.CANCELLED,
+                now,
+                BookingStatusHistorySource.CancelBooking,
+                request.PassengerUserId,
+                reason.ToString()),
+            cancellationToken);
 
         if (booking.SeatLockToken.HasValue)
         {

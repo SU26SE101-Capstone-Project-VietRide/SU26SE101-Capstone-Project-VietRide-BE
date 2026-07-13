@@ -31,6 +31,7 @@ internal sealed class UserRepository : IUserRepository
         // ConvertToProviderExpression (constant on the RHS is evaluated at plan time).
         PhoneNumber? phone = PhoneNumber.Parse(e164Phone);
         return await _db.Users
+            .AsNoTracking()
             .FirstOrDefaultAsync(u => u.Phone == phone, ct);
     }
 

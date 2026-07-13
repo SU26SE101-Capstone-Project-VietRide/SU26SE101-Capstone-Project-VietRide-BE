@@ -5196,6 +5196,335 @@
           }
         }
       ]
+    },
+    {
+      "name": "Booking - Day 19 operator booking reads",
+      "item": [
+        {
+          "name": "1. OPERATOR_ADMIN lists own tenant with ADR 0004 page schema",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 ADR 0004 page', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.statusCode).to.eql(200); pm.expect(body.meta.traceId).to.be.a('string'); pm.expect(Object.keys(body.data).sort()).to.eql(['hasNextPage','hasPreviousPage','items','page','pageSize','totalItems','totalPages']); });",
+                  "pm.test('List item schema matches the frozen Day-19 projection', () => { const itemKeys = ['bookingCode','createdAt','id','seatCount','status','totalAmount','trip','tripId']; const tripKeys = ['departureAt','destinationName','originName','routeName']; const nullableString = value => pm.expect(value === null || typeof value === 'string').to.eql(true); body.data.items.forEach(item => { pm.expect(Object.keys(item).sort()).to.eql(itemKeys); pm.expect(item.id).to.be.a('string'); pm.expect(item.bookingCode).to.be.a('string'); pm.expect(item.tripId).to.be.a('string'); pm.expect(item.status).to.be.a('string'); pm.expect(item.seatCount).to.be.a('number'); pm.expect(item.totalAmount).to.be.a('number'); pm.expect(item.createdAt).to.be.a('string'); pm.expect(Object.keys(item.trip).sort()).to.eql(tripKeys); nullableString(item.trip.routeName); nullableString(item.trip.originName); nullableString(item.trip.destinationName); nullableString(item.trip.departureAt); }); });",
+                  "pm.test('Own booking only', () => { const itemIds = body.data.items.map(x => x.id); pm.expect(itemIds).to.include(pm.environment.get('day19AdminBookingId')); pm.expect(itemIds).not.to.include(pm.environment.get('day19StaffBookingId')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings"
+          }
+        },
+        {
+          "name": "2. Gateway health is 200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('Gateway health is 200', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/health"
+          }
+        },
+        {
+          "name": "3. Booking health through Gateway is 200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('Booking health is 200', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/v1/booking/health"
+          }
+        },
+        {
+          "name": "4. OPERATOR_STAFF lists own tenant",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Staff own tenant only', () => { pm.response.to.have.status(200); pm.expect(body.data.items.length).to.eql(1); pm.expect(body.data.items[0].id).to.eql(pm.environment.get('day19StaffBookingId')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19OperatorStaffToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings"
+          }
+        },
+        {
+          "name": "5. Denied role cannot list operator bookings",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Denied role is 403 FORBIDDEN', () => { pm.response.to.have.status(403); pm.expect(body.error.code).to.eql('FORBIDDEN'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19DeniedToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings"
+          }
+        },
+        {
+          "name": "6. List filters status trip date and booking code",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('All list filters select fixture', () => { pm.response.to.have.status(200); pm.expect(body.data.items.length).to.eql(1); pm.expect(body.data.items[0].bookingCode).to.eql(pm.environment.get('day19BookingCode')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings?status=CANCELLED&tripId=19191919-1919-4191-8191-191919191961&date=2026-07-12&bookingCode={{day19BookingCode}}"
+          }
+        },
+        {
+          "name": "7. Passenger phone canonical filter finds own booking",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Phone filter is normalized', () => { pm.response.to.have.status(200); pm.expect(body.data.items[0].id).to.eql(pm.environment.get('day19AdminBookingId')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings?passengerPhone={{day19PassengerPhone}}"
+          }
+        },
+        {
+          "name": "8. Unknown phone is empty page",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Unknown phone is 200 empty page', () => { pm.response.to.have.status(200); pm.expect(body.data.items).to.eql([]); pm.expect(body.data).to.have.property('totalItems'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings?passengerPhone=0912345678"
+          }
+        },
+        {
+          "name": "9. Phone SQL injection payload is validation error",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Injection is rejected safely', () => { pm.response.to.have.status(422); pm.expect(body.error.code).to.eql('VALIDATION_ERROR'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings?passengerPhone=0919191911%27%20OR%201%3D1--"
+          }
+        },
+        {
+          "name": "10. Past last page is empty",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Past last page returns empty page', () => { pm.response.to.have.status(200); pm.expect(body.data.items).to.eql([]); pm.expect(body.data.page).to.eql(99); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings?page=99"
+          }
+        },
+        {
+          "name": "11. Own booking detail projects ordered timeline",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Own detail matches the complete frozen Day-19 schema and chronological id tie-breaker', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.statusCode).to.eql(200); pm.expect(body.meta.traceId).to.be.a('string'); const detail = body.data; const detailKeys = ['baseFare','bookingCode','bookingGroupId','buyerUserId','cancellationReason','createdAt','discountAmount','dropoffStationId','dropoffStopId','id','pickupStationId','pickupStopId','seatCount','seats','status','statusTimeline','totalAmount','trip','tripDirection','tripId']; const tripKeys = ['departureAt','destinationName','originName','routeName']; const seatKeys = ['boardingStatus','passengerRecordId','seatNumber','ticketCode','ticketId','ticketStatus']; const timelineKeys = ['occurredAt','reasonCode','status']; const nullableString = value => pm.expect(value === null || typeof value === 'string').to.eql(true); const nullableId = value => pm.expect(value === null || typeof value === 'string').to.eql(true); pm.expect(Object.keys(detail).sort()).to.eql(detailKeys); pm.expect(detail.id).to.eql(pm.environment.get('day19AdminBookingId')); pm.expect(detail.bookingCode).to.be.a('string'); pm.expect(detail.buyerUserId).to.be.a('string'); pm.expect(detail.tripId).to.be.a('string'); pm.expect(detail.status).to.be.a('string'); pm.expect(detail.seatCount).to.be.a('number'); pm.expect(detail.baseFare).to.be.a('number'); pm.expect(detail.discountAmount).to.be.a('number'); pm.expect(detail.totalAmount).to.be.a('number'); pm.expect(detail.createdAt).to.be.a('string'); pm.expect(Object.keys(detail.trip).sort()).to.eql(tripKeys); nullableString(detail.trip.routeName); nullableString(detail.trip.originName); nullableString(detail.trip.destinationName); nullableString(detail.trip.departureAt); nullableId(detail.pickupStationId); nullableId(detail.pickupStopId); nullableId(detail.dropoffStationId); nullableId(detail.dropoffStopId); nullableId(detail.bookingGroupId); nullableString(detail.tripDirection); nullableString(detail.cancellationReason); pm.expect(detail.seats).to.be.an('array'); detail.seats.forEach(seat => { pm.expect(Object.keys(seat).sort()).to.eql(seatKeys); pm.expect(seat.passengerRecordId).to.be.a('string'); pm.expect(seat.ticketId).to.be.a('string'); pm.expect(seat.ticketCode).to.be.a('string'); pm.expect(seat.seatNumber).to.be.a('string'); pm.expect(seat.ticketStatus).to.be.a('string'); pm.expect(seat.boardingStatus).to.be.a('string'); }); const timeline = detail.statusTimeline; pm.expect(timeline).to.be.an('array'); timeline.forEach(entry => { pm.expect(Object.keys(entry).sort()).to.eql(timelineKeys); pm.expect(entry.status).to.be.a('string'); pm.expect(entry.occurredAt).to.be.a('string'); nullableString(entry.reasonCode); pm.expect(entry).not.to.have.property('actorUserId'); pm.expect(entry).not.to.have.property('source'); }); pm.expect(timeline.map(x => x.status)).to.eql(['PENDING_PAYMENT','CONFIRMED','CANCELLED']); pm.expect(timeline[1].occurredAt).to.eql(timeline[2].occurredAt); pm.expect(timeline[1].reasonCode).to.eql(null); pm.expect(timeline[2].reasonCode).to.eql('USER_INITIATED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings/{{day19AdminBookingId}}"
+          }
+        },
+        {
+          "name": "12. OPERATOR_STAFF reads its own booking detail",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Staff own detail is 200 and tenant-scoped', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.id).to.eql(pm.environment.get('day19StaffBookingId')); pm.expect(body.data.bookingCode).to.eql('VR-20260711-DAY19A02'); pm.expect(body.data.status).to.eql('CONFIRMED'); pm.expect(body.data.statusTimeline).to.be.an('array'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19OperatorStaffToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings/{{day19StaffBookingId}}"
+          }
+        },
+        {
+          "name": "13. Unknown booking detail is 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Unknown detail is 404 BOOKING_NOT_FOUND', () => { pm.response.to.have.status(404); pm.expect(body.error.code).to.eql('BOOKING_NOT_FOUND'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings/19191919-1919-4191-8191-191919199999"
+          }
+        },
+        {
+          "name": "14. Cross-operator detail is forbidden",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Cross operator is 403 FORBIDDEN', () => { pm.response.to.have.status(403); pm.expect(body.error.code).to.eql('FORBIDDEN'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings/{{day19StaffBookingId}}"
+          }
+        }
+      ]
     }
   ]
 }

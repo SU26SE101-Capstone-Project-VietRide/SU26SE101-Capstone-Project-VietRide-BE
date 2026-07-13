@@ -74,6 +74,7 @@ public class CreateRoundTripBookingCommandHandlerTests
         ExpiresAt: DateTimeOffset.UtcNow.AddMinutes(10));
 
     private readonly IBookingRepository _bookings = Substitute.For<IBookingRepository>();
+    private readonly IBookingStatusHistoryRepository _statusHistory = Substitute.For<IBookingStatusHistoryRepository>();
     private readonly ITripServiceClient _tripClient = Substitute.For<ITripServiceClient>();
     private readonly IPaymentServiceClient _paymentClient = Substitute.For<IPaymentServiceClient>();
     private readonly IBookingService _bookingService = Substitute.For<IBookingService>();
@@ -84,7 +85,7 @@ public class CreateRoundTripBookingCommandHandlerTests
 
     private CreateRoundTripBookingCommandHandler BuildSut() => new(
         _bookings, _tripClient, _paymentClient, _bookingService, _voucherService, _voucherRepository, _outbox, _clock,
-        NullLogger<CreateRoundTripBookingCommandHandler>.Instance);
+        NullLogger<CreateRoundTripBookingCommandHandler>.Instance, _statusHistory);
 
     private static CreateRoundTripBookingCommand BuildCommand(
         string paymentMethod = "WALLET",
@@ -114,7 +115,8 @@ public class CreateRoundTripBookingCommandHandlerTests
     [Fact]
     public async Task Handle_WalletPayment_HappyPath_BatchesChargeOnce_AndConfirmsBothLegs()
     {
-        _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        var now = new DateTimeOffset(2026, 7, 11, 2, 3, 4, TimeSpan.Zero);
+        _clock.UtcNow.Returns(now);
         _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<CancellationToken>()).Returns(OutboundTrip);
         _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<CancellationToken>()).Returns(ReturnTrip);
         _tripClient.LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default)
@@ -179,6 +181,17 @@ public class CreateRoundTripBookingCommandHandlerTests
             Arg.Is("booking.booking.confirmed"),
             Arg.Any<string>(),
             Arg.Any<CancellationToken>());
+
+        await _statusHistory.Received(4).AddAsync(
+            Arg.Is<BookingStatusHistory>(history =>
+                (history.BookingId == result.Outbound.BookingId || history.BookingId == result.Return.BookingId)
+                && (history.Status == BookingStatus.PENDING_PAYMENT || history.Status == BookingStatus.CONFIRMED)
+                && history.OccurredAt == now
+                && history.Source == "CREATE_ROUND_TRIP_BOOKING"
+                && history.ActorUserId == PassengerUserId
+                && history.ReasonCode == null),
+            Arg.Any<CancellationToken>());
+        _ = _clock.Received(1).UtcNow;
     }
 
     [Fact]

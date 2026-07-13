@@ -7,6 +7,8 @@ using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Application.Features.Bookings.ConfirmBookingOnPayment;
 using VietRide.Booking.Application.Features.Bookings.ExpireBookingOnPayment;
 using VietRide.Booking.Application.Features.Bookings.MarkBookingRefunded;
+using VietRide.Booking.Domain.Entities;
+using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 
@@ -23,6 +25,7 @@ public sealed class PaymentEventHandlersTests
     private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-06-24T10:00:00Z");
 
     private readonly IBookingRepository _bookings = Substitute.For<IBookingRepository>();
+    private readonly IBookingStatusHistoryRepository _statusHistory = Substitute.For<IBookingStatusHistoryRepository>();
     private readonly ITripServiceClient _tripClient = Substitute.For<ITripServiceClient>();
     private readonly IBookingService _bookingService = Substitute.For<IBookingService>();
     private readonly IIntegrationEventOutbox _outbox = Substitute.For<IIntegrationEventOutbox>();
@@ -62,13 +65,23 @@ public sealed class PaymentEventHandlersTests
             _tripClient,
             _outbox,
             _clock,
-            NullLogger<ConfirmBookingOnPaymentCommandHandler>.Instance);
+            NullLogger<ConfirmBookingOnPaymentCommandHandler>.Instance,
+            _statusHistory);
 
         var transitioned = await handler.Handle(
             new ConfirmBookingOnPaymentCommand(PaymentId, "BOOKING", BookingId, 200_000),
             CancellationToken.None);
 
         transitioned.Should().BeTrue();
+        await _statusHistory.Received(1).AddAsync(
+            Arg.Is<BookingStatusHistory>(history => history.BookingId == BookingId
+                && history.Status == BookingStatus.CONFIRMED
+                && history.OccurredAt == Now
+                && history.Source == "CONFIRM_ON_PAYMENT"
+                && history.ActorUserId == null
+                && history.ReasonCode == null),
+            Arg.Any<CancellationToken>());
+        _ = _clock.Received(1).UtcNow;
         await _outbox.Received(1)
             .EnqueueAsync(
                 "booking.booking.confirmed",
@@ -87,13 +100,15 @@ public sealed class PaymentEventHandlersTests
             _tripClient,
             _outbox,
             _clock,
-            NullLogger<ConfirmBookingOnPaymentCommandHandler>.Instance);
+            NullLogger<ConfirmBookingOnPaymentCommandHandler>.Instance,
+            _statusHistory);
 
         var transitioned = await handler.Handle(
             new ConfirmBookingOnPaymentCommand(PaymentId, "BOOKING", BookingId, 200_000),
             CancellationToken.None);
 
         transitioned.Should().BeFalse();
+        await _statusHistory.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
         await _tripClient.DidNotReceiveWithAnyArgs()
             .BookSeatsAsync(default, default, default, default!, default);
         await _outbox.DidNotReceiveWithAnyArgs()
@@ -112,13 +127,23 @@ public sealed class PaymentEventHandlersTests
             _bookings,
             _bookingService,
             _clock,
-            NullLogger<ExpireBookingOnPaymentCommandHandler>.Instance);
+            NullLogger<ExpireBookingOnPaymentCommandHandler>.Instance,
+            _statusHistory);
 
         var transitioned = await handler.Handle(
             new ExpireBookingOnPaymentCommand(PaymentId, "BOOKING", BookingId),
             CancellationToken.None);
 
         transitioned.Should().BeTrue();
+        await _statusHistory.Received(1).AddAsync(
+            Arg.Is<BookingStatusHistory>(history => history.BookingId == BookingId
+                && history.Status == BookingStatus.EXPIRED
+                && history.OccurredAt == Now
+                && history.Source == "EXPIRE_ON_PAYMENT"
+                && history.ActorUserId == null
+                && history.ReasonCode == null),
+            Arg.Any<CancellationToken>());
+        _ = _clock.Received(1).UtcNow;
         await _bookings.Received(1)
             .TryExpirePendingPaymentAsync(BookingId, Now, Arg.Any<CancellationToken>());
         await _tripClient.DidNotReceiveWithAnyArgs()
@@ -141,13 +166,15 @@ public sealed class PaymentEventHandlersTests
             _bookings,
             _bookingService,
             _clock,
-            NullLogger<ExpireBookingOnPaymentCommandHandler>.Instance);
+            NullLogger<ExpireBookingOnPaymentCommandHandler>.Instance,
+            _statusHistory);
 
         var transitioned = await handler.Handle(
             new ExpireBookingOnPaymentCommand(PaymentId, "BOOKING", BookingId),
             CancellationToken.None);
 
         transitioned.Should().BeFalse();
+        await _statusHistory.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
         await _bookings.DidNotReceiveWithAnyArgs()
             .TryExpirePendingPaymentAsync(default, default, default);
         await _tripClient.DidNotReceiveWithAnyArgs()
@@ -168,13 +195,15 @@ public sealed class PaymentEventHandlersTests
             _bookings,
             _bookingService,
             _clock,
-            NullLogger<ExpireBookingOnPaymentCommandHandler>.Instance);
+            NullLogger<ExpireBookingOnPaymentCommandHandler>.Instance,
+            _statusHistory);
 
         var transitioned = await handler.Handle(
             new ExpireBookingOnPaymentCommand(PaymentId, "BOOKING", BookingId),
             CancellationToken.None);
 
         transitioned.Should().BeFalse();
+        await _statusHistory.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
         await _bookingService.DidNotReceiveWithAnyArgs()
             .ReleaseSeatsAsync(default, default, default!, default);
     }
@@ -189,13 +218,23 @@ public sealed class PaymentEventHandlersTests
             _bookings,
             _outbox,
             _clock,
-            NullLogger<MarkBookingRefundedCommandHandler>.Instance);
+            NullLogger<MarkBookingRefundedCommandHandler>.Instance,
+            _statusHistory);
 
         var transitioned = await handler.Handle(
             new MarkBookingRefundedCommand(PassengerUserId, 200_000, "BOOKING_REFUND", BookingId),
             CancellationToken.None);
 
         transitioned.Should().BeTrue();
+        await _statusHistory.Received(1).AddAsync(
+            Arg.Is<BookingStatusHistory>(history => history.BookingId == BookingId
+                && history.Status == BookingStatus.REFUNDED
+                && history.OccurredAt == Now
+                && history.Source == "MARK_REFUNDED"
+                && history.ActorUserId == null
+                && history.ReasonCode == null),
+            Arg.Any<CancellationToken>());
+        _ = _clock.Received(1).UtcNow;
         await _outbox.Received(1)
             .EnqueueAsync(
                 "booking.booking.refunded",
@@ -213,13 +252,15 @@ public sealed class PaymentEventHandlersTests
             _bookings,
             _outbox,
             _clock,
-            NullLogger<MarkBookingRefundedCommandHandler>.Instance);
+            NullLogger<MarkBookingRefundedCommandHandler>.Instance,
+            _statusHistory);
 
         var transitioned = await handler.Handle(
             new MarkBookingRefundedCommand(PassengerUserId, 200_000, "BOOKING_REFUND", BookingId),
             CancellationToken.None);
 
         transitioned.Should().BeFalse();
+        await _statusHistory.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
         await _outbox.DidNotReceiveWithAnyArgs()
             .EnqueueAsync(default!, default!, default);
     }

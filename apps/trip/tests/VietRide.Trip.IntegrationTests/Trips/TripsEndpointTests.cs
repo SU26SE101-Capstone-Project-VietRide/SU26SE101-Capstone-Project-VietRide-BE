@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Trip.Application.Features.DriverTrips.GetAssignedTripRoute;
 using VietRide.Trip.Application.Features.Trips.GetTripDetail;
 using VietRide.Trip.Application.Features.Trips.GetTripSeatMap;
 using VietRide.Trip.Application.Features.Trips.SearchTrips;
@@ -172,6 +173,76 @@ public sealed class TripsEndpointTests
         await AssertErrorEnvelopeAsync(response, "TRIP_NOT_FOUND");
     }
 
+    [Theory]
+    [InlineData("DRIVER")]
+    [InlineData("ASSISTANT")]
+    public async Task DriverTripRoute_AssignedRole_ReturnsEnvelopeAndDispatchesCaller(string role)
+    {
+        var tripId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var result = new DriverTripRouteDto(
+            tripId,
+            Guid.NewGuid(),
+            "_p~iF~ps|U_ulLnnqC_mqNvxq`@",
+            new DriverTripRouteStationDto(Guid.NewGuid(), "Origin", 10.7, 106.7),
+            new DriverTripRouteStationDto(Guid.NewGuid(), "Destination", null, null),
+            [new DriverTripRouteStopDto(Guid.NewGuid(), "Stop", 10.8, 106.8, 1, DateTimeOffset.UtcNow, true, true)]);
+        var mediator = new StubMediator(_ => result);
+        using var factory = new TripsEndpointWebApplicationFactory(mediator);
+        using var client = factory.CreateClient();
+
+        var response = await client.SendAsync(CreateAuthorizedRequest(
+            HttpMethod.Get,
+            $"/v1/driver/trips/{tripId}/route",
+            role,
+            userId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        AssertSuccessEnvelope(document, 200);
+        var data = document.RootElement.GetProperty("data");
+        data.GetProperty("tripId").GetGuid().Should().Be(tripId);
+        data.GetProperty("pathPolyline").GetString().Should().Be(result.PathPolyline);
+        data.GetProperty("stops").GetArrayLength().Should().Be(1);
+        mediator.LastRequest.Should().BeOfType<GetAssignedTripRouteQuery>()
+            .Which.Should().BeEquivalentTo(new GetAssignedTripRouteQuery(tripId, userId));
+    }
+
+    [Fact]
+    public async Task DriverTripRoute_PassengerRole_Returns403WithoutDispatching()
+    {
+        var mediator = new StubMediator(_ => throw new InvalidOperationException("Must not dispatch."));
+        using var factory = new TripsEndpointWebApplicationFactory(mediator);
+        using var client = factory.CreateClient();
+
+        var response = await client.SendAsync(CreateAuthorizedRequest(
+            HttpMethod.Get,
+            $"/v1/driver/trips/{Guid.NewGuid()}/route",
+            "PASSENGER",
+            Guid.NewGuid()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        mediator.LastRequest.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task DriverTripRoute_MalformedTripId_Returns422ValidationEnvelope()
+    {
+        var mediator = new StubMediator(_ => throw new InvalidOperationException("Must not dispatch."));
+        using var factory = new TripsEndpointWebApplicationFactory(mediator);
+        using var client = factory.CreateClient();
+
+        var response = await client.SendAsync(CreateAuthorizedRequest(
+            HttpMethod.Get,
+            "/v1/driver/trips/not-a-uuid/route",
+            "DRIVER",
+            Guid.NewGuid()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        await AssertErrorEnvelopeAsync(response, "VALIDATION_ERROR");
+        mediator.LastRequest.Should().BeNull();
+    }
+
     private static TripDetailDto CreateDetail(Guid tripId)
     {
         var stopId = Guid.NewGuid();
@@ -192,14 +263,18 @@ public sealed class TripsEndpointTests
             new TripFareBreakdownDto(400000, [new TripFareStopDto(stopId, 350000)]));
     }
 
-    private static HttpRequestMessage CreateAuthorizedRequest(HttpMethod method, string path)
+    private static HttpRequestMessage CreateAuthorizedRequest(
+        HttpMethod method,
+        string path,
+        string role = "PASSENGER",
+        Guid? subject = null)
     {
         var request = new HttpRequestMessage(method, path);
-        request.Headers.TryAddWithoutValidation("X-Internal-Auth", $"Bearer {CreateInternalJwt()}");
+        request.Headers.TryAddWithoutValidation("X-Internal-Auth", $"Bearer {CreateInternalJwt(role, subject)}");
         return request;
     }
 
-    private static string CreateInternalJwt()
+    private static string CreateInternalJwt(string role, Guid? subject)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(TestSecret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -207,8 +282,8 @@ public sealed class TripsEndpointTests
             issuer: "vietride-gateway",
             audience: "vietride-internal",
             claims: [
-                new Claim("sub", Guid.NewGuid().ToString()),
-                new Claim(ClaimTypes.Role, "PASSENGER")],
+                new Claim("sub", (subject ?? Guid.NewGuid()).ToString()),
+                new Claim(ClaimTypes.Role, role)],
             expires: DateTime.UtcNow.AddMinutes(2),
             signingCredentials: credentials);
 

@@ -2,6 +2,8 @@ using System.Text.Json;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using VietRide.Booking.Application.Abstractions.Repositories;
+using VietRide.Booking.Domain.Constants;
+using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
@@ -17,6 +19,7 @@ public sealed class MarkBookingRefundedCommandHandler
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly IBookingRepository _bookings;
+    private readonly IBookingStatusHistoryRepository _statusHistory;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IClock _clock;
     private readonly ILogger<MarkBookingRefundedCommandHandler> _logger;
@@ -25,9 +28,11 @@ public sealed class MarkBookingRefundedCommandHandler
         IBookingRepository bookings,
         IIntegrationEventOutbox outbox,
         IClock clock,
-        ILogger<MarkBookingRefundedCommandHandler> logger)
+        ILogger<MarkBookingRefundedCommandHandler> logger,
+        IBookingStatusHistoryRepository statusHistory)
     {
         _bookings = bookings;
+        _statusHistory = statusHistory;
         _outbox = outbox;
         _clock = clock;
         _logger = logger;
@@ -53,9 +58,10 @@ public sealed class MarkBookingRefundedCommandHandler
             })
             .FirstOrDefault();
 
+        var now = _clock.UtcNow;
         var transitioned = await _bookings.TryMarkCancelledRefundedAsync(
             request.ReferenceId,
-            _clock.UtcNow,
+            now,
             cancellationToken);
         if (!transitioned)
         {
@@ -64,6 +70,14 @@ public sealed class MarkBookingRefundedCommandHandler
                 request.ReferenceId);
             return false;
         }
+
+        await _statusHistory.AddAsync(
+            BookingStatusHistory.Create(
+                request.ReferenceId,
+                BookingStatus.REFUNDED,
+                now,
+                BookingStatusHistorySource.MarkRefunded),
+            cancellationToken);
 
         var refundedEvent = new
         {

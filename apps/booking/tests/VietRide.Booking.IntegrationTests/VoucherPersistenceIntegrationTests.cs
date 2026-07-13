@@ -1,3 +1,4 @@
+using System.Data.Common;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
@@ -198,6 +199,8 @@ public sealed class VoucherPersistenceIntegrationTests
         private bool _databaseCreated;
         private bool _initialized;
 
+        public SqlCaptureInterceptor SqlCapture { get; } = new();
+
         public DbBackedVoucherFactory()
         {
             _databaseName = new NpgsqlConnectionStringBuilder(_connectionString).Database!;
@@ -231,12 +234,52 @@ public sealed class VoucherPersistenceIntegrationTests
                 {
                     options
                         .UseNpgsql(sp.GetRequiredService<NpgsqlDataSource>())
+                        .AddInterceptors(SqlCapture)
                         .ConfigureWarnings(w => w.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning));
                 });
 
                 services.AddScoped<VietRideDbContextBase>(
                     sp => sp.GetRequiredService<BookingDbContext>());
             });
+        }
+
+        public sealed class SqlCaptureInterceptor : DbCommandInterceptor
+        {
+            private readonly object _gate = new();
+            private readonly List<string> _commands = [];
+
+            public IReadOnlyList<string> Commands
+            {
+                get
+                {
+                    lock (_gate)
+                    {
+                        return [.. _commands];
+                    }
+                }
+            }
+
+            public void Clear()
+            {
+                lock (_gate)
+                {
+                    _commands.Clear();
+                }
+            }
+
+            public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+                DbCommand command,
+                CommandEventData eventData,
+                InterceptionResult<DbDataReader> result,
+                CancellationToken cancellationToken = default)
+            {
+                lock (_gate)
+                {
+                    _commands.Add(command.CommandText);
+                }
+
+                return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+            }
         }
 
         /// <summary>

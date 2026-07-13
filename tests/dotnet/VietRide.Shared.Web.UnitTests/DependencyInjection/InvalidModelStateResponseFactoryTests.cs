@@ -64,7 +64,7 @@ public sealed class InvalidModelStateResponseFactoryTests
     // ------------------------------------------------------------------
 
     [Fact]
-    public void Factory_Returns_400_ObjectResult_With_ValidationError_Code()
+    public void Factory_Returns_422_ObjectResult_With_ValidationError_Code()
     {
         var options = BuildOptions();
         var ctx = BuildInvalidModelStateContext("email", "The email field is required.");
@@ -72,11 +72,11 @@ public sealed class InvalidModelStateResponseFactoryTests
         var result = options.InvalidModelStateResponseFactory!(ctx);
 
         var objectResult = result.Should().BeOfType<ObjectResult>().Subject;
-        objectResult.StatusCode.Should().Be(400);
+        objectResult.StatusCode.Should().Be(422);
 
         var envelope = objectResult.Value.Should().BeOfType<ApiResponse>().Subject;
         envelope.Success.Should().BeFalse();
-        envelope.StatusCode.Should().Be(400);
+        envelope.StatusCode.Should().Be(422);
         envelope.Error.Code.Should().Be("VALIDATION_ERROR");
     }
 
