@@ -135,16 +135,26 @@ same driver or assistant; otherwise the wrong-trip cases stop at authorization w
 of reaching the intended `422 BOOKING_NOT_FOR_THIS_TRIP`. The committed environment contains
 placeholders only; never commit real JWTs or fixture secrets.
 
-To execute the authoritative local E2E matrix in dependency order, use
-`npm run postman:full:local`. The required Sprint 3 stages are D11 through D19; their exact
+To execute the authoritative local E2E matrix in dependency order, use this exact command from the
+repository root:
+
+```powershell
+npm run postman:full:local
+```
+
+The required Sprint 3 stages are D11 through D19; their exact
 folder/harness, seam mode, assertions, fixture ownership, and exclusion policy live in
 [`docs/handoff/day-20-e2e-matrix.md`](../../handoff/day-20-e2e-matrix.md). It starts the application
 profile, runs real seams where documented, temporarily enables the documented Booking development
 stubs where required, then restores real integrations. The command exits non-zero if any required
-stage is missing, fails, or is skipped without a recorded human-approved exclusion. D12 and D16
-are currently deliberate missing-stage gates pending their Task-20.1 harnesses; do not substitute
-another path for either stage. Google OAuth is outside the Sprint-3 matrix and still requires a
-real external Google ID token.
+stage is missing, fails, or is skipped without a recorded human-approved exclusion. It creates and
+cleans its own local fixtures, so an external reviewer does not need hidden fixture IDs, JWTs, or
+pre-populated Postman environment values. Google OAuth is outside the Sprint-3 matrix and still
+requires a real external Google ID token.
+
+For the reviewer-facing Sprint-3 sequence and the VNPay execution boundary, see
+[`docs/handoff/sprint-3-demo-script.md`](../../handoff/sprint-3-demo-script.md). The VNPay coverage
+uses a signed local IPN simulation; it is not a real bank or merchant-sandbox transaction.
 
 ## Notes
 

@@ -75,9 +75,9 @@ No new REST, event-routing-key, database, error-code, or Gateway-route contract 
 | implement agent | worker |
 | review agent | reviewer |
 | skill | (none) |
-| owned files (write set) | **Blocked pending Open question Q1:** no existing Sprint-3 deck/template/destination is discoverable. After the human confirms a repository destination and format, only that confirmed deck file plus `docs/api/postman/README.md` and `docs/handoff/day-20-e2e-matrix.md` may be edited. |
+| owned files (write set) | `docs/handoff/sprint-3-demo-script.md`; `docs/api/postman/README.md`; `docs/handoff/day-20-e2e-matrix.md`. **Human resolution (2026-07-13):** the demo deck is a Markdown script at `docs/handoff/sprint-3-demo-script.md`; no `.pptx` is authorized. |
 | forbidden scope | `.env`, secrets, service code, scripts other than documentation corrections, migrations/schema, contracts/routes, package/dependency changes, git operations, and creating a presentation artifact at an invented path or in an invented format. |
-| depends on | Q1 resolved; 20.1 green; 20.2 complete or explicitly human-approved carry-over. |
+| depends on | Q1 resolved (Markdown destination confirmed 2026-07-13); 20.1 green; 20.2 complete or explicitly human-approved carry-over. |
 | invariant flags | deck/demo must not embed secrets, JWTs, customer/production data, or a claim unsupported by the final E2E evidence; it must distinguish VNPay sandbox/IPN test simulation from a real bank transaction; documentation uses LF; no product contract is changed. |
 | acceptance | the human-confirmed deck location contains a review-ready deck covering: objective, local prerequisites, passenger register/login, VNPay sandbox top-up/IPN, trip search, booking/payment, cancellation/refund, tenant-scoped operator monitor, exact runnable command, expected evidence, and known exclusions/carry-over; an external reviewer follows the README and green command without hidden fixture state. |
 | source citations | `BE_TIMELINE_VU.md` Day 20 DoD/review/demo bullets; `docs/handoff/sprint-2-demo-script.md` (only a script precedent, not an authorized Sprint-3 deck template); Task 20.0 matrix; Task 20.1 final redacted runner evidence. |
@@ -101,7 +101,7 @@ No tasks are parallel-safe by default: Tasks 20.0–20.2 share the collection, e
 | 20.0 | ✅ done | APPROVE | 2026-07-13 | Matrix/runner boundary frozen; D12/D16 gates intentionally fail until Task 20.1; verification passed. |
 | 20.1 | ✅ done | APPROVE | 2026-07-13 | Real-seam D11–D19 matrix, Gateway passenger journey, forced-failure cleanup, and final 14/14 full run verified; Task 20.2 contract repair committed separately. |
 | 20.2 | ✅ done | APPROVE | 2026-07-13 | Evidence-led harness closure, canonical Booking status poll, D12/D18 prerequisite repairs, and focused Booking verification passed. |
-| 20.3 | ⬜ todo | — | — | Blocked by Q1. |
+| 20.3 | ✅ done | APPROVE | 2026-07-13 | Markdown demo script, README/matrix handoff, and final external-review evidence completed. |
 
 Legend: ⬜ todo · 🔄 in progress · ✅ done (reviewer APPROVED + human `/verify`) · ⚠️ done-with-carryover · ❌ blocked
 
