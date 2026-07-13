@@ -26,6 +26,33 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function cleanupCrossDayFixtures() {
+  psql('vietride_booking', `
+    delete from vietride_booking.tickets where booking_id in
+      (select id from vietride_booking.bookings where passenger_user_id='${passengerUserId}');
+    delete from vietride_booking.passengers where booking_id in
+      (select id from vietride_booking.bookings where passenger_user_id='${passengerUserId}');
+    delete from vietride_booking.booking_status_history where booking_id in
+      (select id from vietride_booking.bookings where passenger_user_id='${passengerUserId}');
+    delete from vietride_booking.bookings where passenger_user_id='${passengerUserId}';`);
+  psql('vietride_payment', `delete from vietride_payment.wallets where user_id='${passengerUserId}';`);
+  const remaining = psql(
+    'vietride_booking',
+    `select count(*) from vietride_booking.bookings where passenger_user_id='${passengerUserId}';`,
+  );
+  assert(remaining === '0', `Cross-day booking cleanup left ${remaining} booking fixture rows.`);
+}
+
+process.on('exit', () => {
+  try {
+    cleanupCrossDayFixtures();
+    console.log('PASS | D18 cross-day fixture cleanup | booking children, booking, and wallet removed');
+  } catch (error) {
+    console.error(`FAIL | D18 cross-day fixture cleanup | ${error.message}`);
+    process.exitCode ||= 1;
+  }
+});
+
 async function waitForGeneratedTrip(scheduleId) {
   for (let attempt = 0; attempt < 45; attempt += 1) {
     const row = psql('vietride_trip', `
@@ -79,11 +106,15 @@ const seatNumber = psql('vietride_trip', `
   order by seat_number limit 1;`);
 assert(seatNumber, `Generated Trip ${tripId} has no AVAILABLE seat.`);
 
-psql('vietride_booking', `delete from vietride_booking.bookings where passenger_user_id='${passengerUserId}';`);
+cleanupCrossDayFixtures();
 psql('vietride_payment', `
   insert into vietride_payment.wallets (user_id, balance, currency)
   values ('${passengerUserId}', 1000000, 'VND')
   on conflict (user_id) do update set balance=1000000, currency='VND', updated_at=now();`);
+
+if (process.env.DAY18_CROSSDAY_FORCE_FAILURE === 'true') {
+  throw new Error('Forced D18 cross-day failure requested');
+}
 
 const settings = JSON.parse(fs.readFileSync(
   path.join(root, 'apps/identity/src/VietRide.Identity.Api/appsettings.Development.json'), 'utf8'));

@@ -840,6 +840,32 @@ Error `409` — duplicate email:
 
 ## Booking Service
 
+### GET `/v1/bookings/{bookingId}`
+
+Auth: the booking owner (`PASSENGER`) or an authorized `OPERATOR_ADMIN`/`OPERATOR_STAFF` whose authenticated `operatorId` claim matches the booking tenant. Idempotency is not required (read-only). This is the Booking-owned poll resource for payment confirmation; it does not synchronously query Payment Service and deliberately exposes no payment fields. Operator detail remains the separate `GET /v1/operator/bookings/{id}` resource.
+
+Response `200`: ADR 0004 success envelope whose `data` contains exactly:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "bookingId": "uuid",
+    "status": "PENDING_PAYMENT"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-13T01:00:00Z" }
+}
+```
+
+`status` is the canonical Booking lifecycle value, so the client polls until the payment event transitions `PENDING_PAYMENT` to `CONFIRMED`.
+
+Errors use the ADR 0004 envelope:
+
+- `401 UNAUTHORIZED`: caller has no valid user JWT.
+- `404 BOOKING_NOT_FOUND`: booking does not exist or does not belong to the authenticated passenger; ownership is intentionally not disclosed.
+- `403 FORBIDDEN`: an operator caller is not authorized for the booking tenant or does not have a valid `operatorId` claim.
+
 ### GET `/v1/operator/bookings`
 
 Auth: `OPERATOR_ADMIN` or `OPERATOR_STAFF`. The tenant key is the non-null `operatorId` claim from the authenticated JWT; the endpoint never accepts an operator id from the client. Idempotency: not required (read-only).
@@ -1096,12 +1122,6 @@ Response `200`:
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
-
-### GET `/v1/bookings/{bookingId}`
-
-Auth: booking owner or authorized operator.
-
-Response `200`: booking detail with passengers, pickup/dropoff, payment summary, pendingActions.
 
 ### GET `/internal/v1/bookings/{bookingId}`
 

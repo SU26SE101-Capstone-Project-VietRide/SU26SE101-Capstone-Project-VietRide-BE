@@ -100,7 +100,7 @@ No tasks are parallel-safe by default: Tasks 20.0–20.2 share the collection, e
 |---|---|---|---|---|
 | 20.0 | ✅ done | APPROVE | 2026-07-13 | Matrix/runner boundary frozen; D12/D16 gates intentionally fail until Task 20.1; verification passed. |
 | 20.1 | ✅ done | APPROVE | 2026-07-13 | Real-seam D11–D19 matrix, Gateway passenger journey, forced-failure cleanup, and final 14/14 full run verified; Task 20.2 contract repair committed separately. |
-| 20.2 | ⬜ todo | — | — | — |
+| 20.2 | ✅ done | APPROVE | 2026-07-13 | Evidence-led harness closure, canonical Booking status poll, D12/D18 prerequisite repairs, and focused Booking verification passed. |
 | 20.3 | ⬜ todo | — | — | Blocked by Q1. |
 
 Legend: ⬜ todo · 🔄 in progress · ✅ done (reviewer APPROVED + human `/verify`) · ⚠️ done-with-carryover · ❌ blocked
