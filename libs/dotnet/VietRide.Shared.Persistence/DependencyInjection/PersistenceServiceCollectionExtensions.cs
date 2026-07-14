@@ -18,7 +18,8 @@ public static class PersistenceServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration configuration,
         string connectionStringName = "Default",
-        Action<NpgsqlDataSourceBuilder>? configureDataSource = null)
+        Action<NpgsqlDataSourceBuilder>? configureDataSource = null,
+        Action<DbContextOptionsBuilder>? configureDbContext = null)
         where TContext : VietRideDbContextBase
     {
         var connectionString = configuration.GetConnectionString(connectionStringName)
@@ -44,6 +45,7 @@ public static class PersistenceServiceCollectionExtensions
                     npgsql.MigrationsHistoryTable("__ef_migrations_history", schemaName);
                 }
             });
+            configureDbContext?.Invoke(options);
         });
 
         // Expose the concrete context as VietRideDbContextBase for shared services (e.g. OutboxStore).

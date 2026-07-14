@@ -36,12 +36,11 @@ builder.Services.AddVietRideSharedWeb(builder.Configuration, ServiceName);
 // or env IDENTITY__CONNECTIONSTRINGS__DEFAULT.
 builder.Services.AddVietRideDbContext<IdentityDbContext>(
     builder.Configuration,
-    configureDataSource: IdentityDbContext.ConfigurePostgresEnums);
-if (isTesting)
-{
-    builder.Services.AddDbContext<IdentityDbContext>(options => options.ConfigureWarnings(warnings =>
-        warnings.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning)));
-}
+    configureDataSource: IdentityDbContext.ConfigurePostgresEnums,
+    configureDbContext: isTesting
+        ? options => options.ConfigureWarnings(warnings => warnings.Ignore(
+            Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning))
+        : null);
 
 // MediatR v11 pipeline behaviors (Logging → Validation → Transaction)
 // + FluentValidation validators discovered from the Application assembly.
