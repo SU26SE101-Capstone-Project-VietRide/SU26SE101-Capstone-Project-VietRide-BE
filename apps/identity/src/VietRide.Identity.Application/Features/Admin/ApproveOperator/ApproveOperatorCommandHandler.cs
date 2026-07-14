@@ -17,19 +17,22 @@ public sealed class ApproveOperatorCommandHandler : IRequestHandler<ApproveOpera
     private readonly IActivityLogRepository _activityLogs;
     private readonly IClock _clock;
     private readonly IIntegrationEventOutbox _outbox;
+    private readonly IOperatorWalletBackfillMarkerRepository _walletBackfillMarkers;
 
     public ApproveOperatorCommandHandler(
         IOperatorRepository operators,
         IOperatorSubscriptionRepository operatorSubscriptions,
         IActivityLogRepository activityLogs,
         IClock clock,
-        IIntegrationEventOutbox outbox)
+        IIntegrationEventOutbox outbox,
+        IOperatorWalletBackfillMarkerRepository walletBackfillMarkers)
     {
         _operators = operators;
         _operatorSubscriptions = operatorSubscriptions;
         _activityLogs = activityLogs;
         _clock = clock;
         _outbox = outbox;
+        _walletBackfillMarkers = walletBackfillMarkers;
     }
 
     public async Task<ApproveOperatorResponseDto> Handle(
@@ -63,7 +66,16 @@ public sealed class ApproveOperatorCommandHandler : IRequestHandler<ApproveOpera
 
         // Enqueue the integration event inside the same transaction the
         // TransactionBehavior commits (BSOT §7.3).
-        var integrationEvent = new OperatorApprovedIntegrationEvent(operatorEntity.Id, approvedAt);
+        var marker = await _walletBackfillMarkers.FindByOperatorIdAsync(
+            operatorEntity.Id,
+            cancellationToken);
+        if (marker is null)
+        {
+            marker = OperatorWalletBackfillMarker.Create(operatorEntity.Id, Guid.NewGuid());
+            await _walletBackfillMarkers.AddAsync(marker, cancellationToken);
+        }
+
+        var integrationEvent = new OperatorApprovedIntegrationEvent(marker.EventId, operatorEntity.Id, approvedAt);
         await _outbox.EnqueueAsync(
             OperatorApprovedIntegrationEvent.EventType,
             JsonSerializer.Serialize(integrationEvent),

@@ -5,6 +5,7 @@ using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Features.Trips.Operations;
 using VietRide.Trip.Domain.Constants;
 using VietRide.Trip.Domain.Entities;
 
@@ -72,14 +73,14 @@ public sealed class CompleteTripCommandHandler : IRequestHandler<CompleteTripCom
                     now),
                 cancellationToken);
 
+            var integrationEvent = new TripCompletedIntegrationEvent(
+                trip.Id,
+                trip.OperatorId,
+                now,
+                trip.HasSubstitution);
             await outbox.EnqueueAsync(
                 EventType,
-                JsonSerializer.Serialize(new
-                {
-                    tripId = trip.Id,
-                    completedAt = now,
-                    trip.HasSubstitution,
-                }, JsonOptions),
+                JsonSerializer.Serialize(integrationEvent, JsonOptions),
                 cancellationToken);
 
             await unitOfWork.SaveChangesAsync(cancellationToken);

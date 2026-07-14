@@ -163,6 +163,7 @@ public sealed class CreateBookingCommandHandler
 
         Money discountAmount = Money.Zero;
         Guid? validatedVoucherId = null;
+        VoucherFundingType? voucherFundingType = null;
 
         if (!string.IsNullOrWhiteSpace(request.VoucherCode))
         {
@@ -177,6 +178,7 @@ public sealed class CreateBookingCommandHandler
 
             discountAmount = validation.Discount;
             validatedVoucherId = validation.VoucherId;
+            voucherFundingType = validation.FundingType;
         }
 
         var totalAmount = baseFare - discountAmount;
@@ -282,6 +284,7 @@ public sealed class CreateBookingCommandHandler
                 amount: totalAmount.Amount,
                 method: request.PaymentMethod,
                 idempotencyKey: chargeIdempotencyKey,
+                context: CreatePaymentContext(booking, baseFare.Amount, discountAmount.Amount, voucherFundingType),
                 cancellationToken: cancellationToken);
         }
         catch (Exception ex)
@@ -409,6 +412,23 @@ public sealed class CreateBookingCommandHandler
             PaymentRedirectUrl: paymentRedirectUrl,
             Tickets: ToTicketResults(booking));
     }
+
+    private static PaymentContextSnapshot CreatePaymentContext(
+        BookingEntity booking,
+        long grossAmount,
+        long discountAmount,
+        VoucherFundingType? fundingType)
+        => new(1,
+        [
+            new PaymentAllocationSnapshot(
+                booking.Id,
+                "BOOKING",
+                booking.OperatorId,
+                booking.TripId,
+                grossAmount,
+                fundingType == VoucherFundingType.VIETRIDE_FUNDED ? discountAmount : 0,
+                fundingType == VoucherFundingType.OPERATOR_FUNDED ? discountAmount : 0),
+        ]);
 
     // -----------------------------------------------------------------------
     // Helpers

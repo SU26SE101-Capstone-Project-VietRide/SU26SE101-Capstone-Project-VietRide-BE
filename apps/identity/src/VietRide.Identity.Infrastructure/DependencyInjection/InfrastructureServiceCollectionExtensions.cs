@@ -101,6 +101,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IActivityLogRepository, ActivityLogRepository>();
         services.AddScoped<IOAuthIdentityRepository, OAuthIdentityRepository>();
         services.AddScoped<IOperatorRepository, OperatorRepository>();
+        services.AddScoped<IOperatorWalletBackfillMarkerRepository, OperatorWalletBackfillMarkerRepository>();
         services.AddScoped<IOperatorSubscriptionRepository, OperatorSubscriptionRepository>();
         services.AddScoped<ISubscriptionPlanRepository, SubscriptionPlanRepository>();
         services.AddScoped<ISubscriptionUpgradeAttemptRepository, SubscriptionUpgradeAttemptRepository>();

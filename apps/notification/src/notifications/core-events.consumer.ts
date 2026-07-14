@@ -1,19 +1,19 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
 import type { ConsumeMessage } from 'amqplib';
-import pino from 'pino';
 import { ZodError } from 'zod';
-import { mapCoreEventToNotification, type CoreEventRoutingKey } from './core-event-notification.mapper';
 import {
-  CORE_EVENT_QUEUE_BINDINGS,
-  RABBITMQ_PREFETCH_ONE,
-} from './core-events.constants';
+  mapCoreEventToNotification,
+  type CoreEventRoutingKey,
+} from './core-event-notification.mapper';
+import { CORE_EVENT_QUEUE_BINDINGS, RABBITMQ_PREFETCH_ONE } from './core-events.constants';
 import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
+import { createNotificationLogger } from './notification-logger';
 
 @Injectable()
 export class CoreEventsConsumer implements OnModuleInit {
-  private readonly logger = pino({ name: CoreEventsConsumer.name });
+  private readonly logger = createNotificationLogger(CoreEventsConsumer.name);
 
   constructor(
     private readonly consumer: RabbitMqConsumer,
@@ -28,13 +28,22 @@ export class CoreEventsConsumer implements OnModuleInit {
           binding.queue,
           binding.routingKey,
           (payload, raw) => this.handle(binding.routingKey, payload, raw),
-          { prefetch: RABBITMQ_PREFETCH_ONE, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
+          {
+            prefetch: RABBITMQ_PREFETCH_ONE,
+            deadLetter: true,
+            maxRetries: 5,
+            retryDelayMs: 10_000,
+          },
         ),
       ),
     );
   }
 
-  async handle(routingKey: CoreEventRoutingKey, payload: unknown, raw: ConsumeMessage): Promise<void> {
+  async handle(
+    routingKey: CoreEventRoutingKey,
+    payload: unknown,
+    raw: ConsumeMessage,
+  ): Promise<void> {
     const messageId = raw.properties.messageId ?? raw.properties.correlationId;
     if (!messageId) {
       throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
@@ -42,7 +51,10 @@ export class CoreEventsConsumer implements OnModuleInit {
 
     const processingState = await this.idempotency.begin(routingKey, messageId);
     if (processingState === 'duplicate') {
-      this.logger.info({ routingKey, messageId, processingState }, 'Skipping already handled message');
+      this.logger.info(
+        { routingKey, messageId, processingState },
+        'Skipping already handled message',
+      );
       return;
     }
     if (processingState === 'locked') {
@@ -53,13 +65,24 @@ export class CoreEventsConsumer implements OnModuleInit {
       const notification = mapCoreEventToNotification(routingKey, payload);
       await this.notificationsService.createNotification({
         ...notification,
-        dedupeKey: buildNotificationDedupeKey(routingKey, messageId, notification.userId, notification.type),
+        dedupeKey: buildNotificationDedupeKey(
+          routingKey,
+          messageId,
+          notification.userId,
+          notification.type,
+        ),
       });
       await this.idempotency.markProcessed(routingKey, messageId);
-      this.logger.info({ routingKey, messageId, userId: notification.userId }, 'Processed core notification event');
+      this.logger.info(
+        { routingKey, messageId, userId: notification.userId },
+        'Processed core notification event',
+      );
     } catch (error) {
       if (error instanceof ZodError) {
-        this.logger.warn({ routingKey, messageId, issues: error.issues }, 'Dropping malformed notification event');
+        this.logger.warn(
+          { routingKey, messageId, issues: error.issues },
+          'Dropping malformed notification event',
+        );
         await this.idempotency.markProcessed(routingKey, messageId);
         return;
       }

@@ -53,14 +53,13 @@ public class VietRideWebApplicationFactory : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        Environment.SetEnvironmentVariable("INTERNAL_JWT_SECRET", "test-secret-at-least-32-chars-long-xxxxx");
         builder.UseSetting("INTERNAL_JWT_SECRET", "test-secret-at-least-32-chars-long-xxxxx");
         builder.UseSetting("Trip:BackgroundWorkers:Enabled", "false");
-        builder.UseSetting("ConnectionStrings:Default", ResolveConnectionString("test"));
+        builder.UseSetting("ConnectionStrings:Default", ResolveConnectionString("postgres"));
         builder.UseEnvironment("Testing");
     }
 
-    private static string ResolveConnectionString(string databaseName)
+    internal static string ResolveConnectionString(string databaseName)
     {
         const string defaultConnectionString = "Host=localhost;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
 

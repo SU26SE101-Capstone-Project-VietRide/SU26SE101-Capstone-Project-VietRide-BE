@@ -1,12 +1,12 @@
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
 import type { ConsumeMessage } from 'amqplib';
-import pino from 'pino';
 import { z, ZodError } from 'zod';
 import { NotificationType } from '../generated/notification-prisma-client';
 import { RABBITMQ_PREFETCH_ONE } from './core-events.constants';
 import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
+import { createNotificationLogger } from './notification-logger';
 import { OPERATOR_RECIPIENT_PROVIDER } from './parcel-subscription-operator-events.constants';
 import type { OperatorRecipientProvider } from './operator-recipient.provider';
 
@@ -50,7 +50,7 @@ const bindings = [
 
 @Injectable()
 export class ShuttleEventsConsumer implements OnModuleInit {
-  private readonly logger = pino({ name: ShuttleEventsConsumer.name });
+  private readonly logger = createNotificationLogger(ShuttleEventsConsumer.name);
 
   constructor(
     private readonly consumer: RabbitMqConsumer,

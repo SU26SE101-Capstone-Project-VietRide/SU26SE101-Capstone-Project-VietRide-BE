@@ -49,7 +49,10 @@ describe('mapTripTrackingAlertToNotifications', () => {
     });
 
     expect(notifications).toEqual([
-      expect.objectContaining({ userId: '88888888-8888-4888-8888-888888888888', type: NotificationType.TRIP_ASSIGNED }),
+      expect.objectContaining({
+        userId: '88888888-8888-4888-8888-888888888888',
+        type: NotificationType.TRIP_ASSIGNED,
+      }),
       expect.objectContaining({ userId: USER_ID, type: NotificationType.TRIP_ASSIGNMENT_REMOVED }),
     ]);
   });

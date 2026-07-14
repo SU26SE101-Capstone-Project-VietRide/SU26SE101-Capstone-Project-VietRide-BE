@@ -1,10 +1,7 @@
 import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
 import type { ConsumeMessage } from 'amqplib';
 import { NotificationType } from '../generated/notification-prisma-client';
-import {
-  BOOKING_CONFIRMED_ROUTING_KEY,
-  CORE_EVENT_QUEUE_BINDINGS,
-} from './core-events.constants';
+import { BOOKING_CONFIRMED_ROUTING_KEY, CORE_EVENT_QUEUE_BINDINGS } from './core-events.constants';
 import { CoreEventsConsumer } from './core-events.consumer';
 import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
@@ -80,7 +77,10 @@ describe('CoreEventsConsumer', () => {
         dedupeKey: `${BOOKING_CONFIRMED_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:${NotificationType.BOOKING_CONFIRMED}`,
       }),
     );
-    expect(idempotency.markProcessed).toHaveBeenCalledWith(BOOKING_CONFIRMED_ROUTING_KEY, MESSAGE_ID);
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      BOOKING_CONFIRMED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
   });
 
   it('skips duplicate message id', async () => {
@@ -112,7 +112,10 @@ describe('CoreEventsConsumer', () => {
       ),
     ).resolves.toBeUndefined();
     expect(notificationsService.createNotification).not.toHaveBeenCalled();
-    expect(idempotency.markProcessed).toHaveBeenCalledWith(BOOKING_CONFIRMED_ROUTING_KEY, MESSAGE_ID);
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      BOOKING_CONFIRMED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
   });
 
   it('releases processing lock and rethrows transient failures', async () => {
@@ -135,14 +138,16 @@ describe('CoreEventsConsumer', () => {
   });
 
   it('rejects messages without id before idempotency check', async () => {
-    await expect(consumer.handle(
-      BOOKING_CONFIRMED_ROUTING_KEY,
-      {
-        userId: USER_ID,
-        bookingId: BOOKING_ID,
-      },
-      createMessage(undefined),
-    )).rejects.toThrow('MISSING_MESSAGE_ID');
+    await expect(
+      consumer.handle(
+        BOOKING_CONFIRMED_ROUTING_KEY,
+        {
+          userId: USER_ID,
+          bookingId: BOOKING_ID,
+        },
+        createMessage(undefined),
+      ),
+    ).rejects.toThrow('MISSING_MESSAGE_ID');
 
     expect(idempotency.begin).not.toHaveBeenCalled();
     expect(notificationsService.createNotification).not.toHaveBeenCalled();

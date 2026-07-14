@@ -276,7 +276,8 @@ public sealed class ReweighParcelCommandHandler
                 additionalAmount.Amount,
                 command.PaymentMethod,
                 idempotencyKey,
-                cancellationToken);
+                cancellationToken,
+                CreatePaymentContext(parcel, additionalAmount.Amount));
 
             if (outcome.Kind == ChargeOutcomeKind.InsufficientFunds)
             {
@@ -309,6 +310,21 @@ public sealed class ReweighParcelCommandHandler
                 outcome.Result?.PaymentRedirectUrl);
         }
     }
+
+    private static PaymentContextSnapshot CreatePaymentContext(
+        VietRide.Parcel.Domain.Entities.Parcel parcel,
+        long amount)
+        => new(1,
+        [
+            new PaymentAllocationSnapshot(
+                parcel.Id,
+                "PARCEL_ADDITIONAL",
+                parcel.OperatorId,
+                parcel.TripId,
+                amount,
+                0,
+                0),
+        ]);
 
     private static DateTimeOffset Min(DateTimeOffset left, DateTimeOffset right)
         => left <= right ? left : right;

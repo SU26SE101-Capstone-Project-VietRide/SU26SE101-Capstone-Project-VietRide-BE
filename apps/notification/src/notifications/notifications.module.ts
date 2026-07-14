@@ -17,6 +17,7 @@ import { EmailTemplateRenderer } from './email-template.renderer';
 import { FcmPushQueue } from './fcm-push.queue';
 import { FcmPushWorker } from './fcm-push.worker';
 import { FakeFcmPushProvider } from './fake-fcm-push.provider';
+import { FakeEmailProvider } from './fake-email.provider';
 import { FirebaseFcmPushProvider } from './firebase-fcm-push.provider';
 import { IdentityDeviceTokenProvider } from './identity-device-token.provider';
 import { IdentityOperatorRecipientProvider } from './identity-operator-recipient.provider';
@@ -71,7 +72,14 @@ import { ShuttleEventsConsumer } from './shuttle-events.consumer';
           : new FirebaseFcmPushProvider(env);
       },
     },
-    { provide: EMAIL_PROVIDER, useClass: SendGridEmailProvider },
+    {
+      provide: EMAIL_PROVIDER,
+      inject: [ENV_TOKEN],
+      useFactory: (env: Env) =>
+        env.NODE_ENV !== 'production' && !env.SENDGRID_API_KEY
+          ? new FakeEmailProvider()
+          : new SendGridEmailProvider(env),
+    },
   ],
   exports: [NotificationsService, MessageIdempotencyService, OPERATOR_RECIPIENT_PROVIDER],
 })

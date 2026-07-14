@@ -15,6 +15,7 @@ public sealed class BatchChargePaymentCommandValidator : AbstractValidator<Batch
             item.RuleFor(x => x.ReferenceType).Equal("BOOKING").WithMessage("Batch WALLET charge supports BOOKING references only.");
             item.RuleFor(x => x.ReferenceId).NotEmpty();
             item.RuleFor(x => x.Amount).GreaterThan(0);
+            item.RuleFor(x => x.Context).NotNull().WithErrorCode("PAYMENT_CONTEXT_INVALID");
         });
     }
 }

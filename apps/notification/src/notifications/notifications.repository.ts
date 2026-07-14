@@ -23,6 +23,7 @@ export interface PagedNotificationsRow {
 
 export interface CreateEmailDeliveryRow {
   notificationId?: string | null;
+  dedupeKey?: string;
   toEmail: string;
   templateKey: EmailTemplateKey;
   subject: string;
@@ -68,7 +69,10 @@ export class NotificationsRepository {
     }
   }
 
-  async listForUser(userId: string, query: ListNotificationsQueryDto): Promise<PagedNotificationsRow> {
+  async listForUser(
+    userId: string,
+    query: ListNotificationsQueryDto,
+  ): Promise<PagedNotificationsRow> {
     const where: Prisma.NotificationWhereInput = {
       userId,
       ...(query.unreadOnly ? { readAt: null } : {}),
@@ -209,22 +213,50 @@ export class NotificationsRepository {
     });
   }
 
-  async createEmailDelivery(dto: CreateEmailDeliveryRow): Promise<EmailDelivery> {
-    return this.prisma.emailDelivery.create({
-      data: {
-        notificationId: dto.notificationId ?? null,
-        toEmail: dto.toEmail,
-        templateKey: dto.templateKey,
-        subject: dto.subject,
-        sanitizedData: dto.sanitizedData as Prisma.InputJsonValue,
-      },
-    });
+  async createEmailDelivery(
+    dto: CreateEmailDeliveryRow,
+  ): Promise<{ delivery: EmailDelivery; created: boolean }> {
+    try {
+      const delivery = await this.prisma.emailDelivery.create({
+        data: {
+          notificationId: dto.notificationId ?? null,
+          dedupeKey: dto.dedupeKey ?? null,
+          toEmail: dto.toEmail,
+          templateKey: dto.templateKey,
+          subject: dto.subject,
+          sanitizedData: dto.sanitizedData as Prisma.InputJsonValue,
+        },
+      });
+      return { delivery, created: true };
+    } catch (error) {
+      if (!dto.dedupeKey || !isUniqueConstraintError(error)) {
+        throw error;
+      }
+      const delivery = await this.prisma.emailDelivery.findUnique({
+        where: { dedupeKey: dto.dedupeKey },
+      });
+      if (!delivery) {
+        throw error;
+      }
+      return { delivery, created: false };
+    }
   }
 
   async findEmailDeliveryById(emailDeliveryId: string): Promise<EmailDelivery | null> {
     return this.prisma.emailDelivery.findUnique({
       where: { id: emailDeliveryId },
     });
+  }
+
+  async markEmailDeliverySending(emailDeliveryId: string): Promise<boolean> {
+    const result = await this.prisma.emailDelivery.updateMany({
+      where: {
+        id: emailDeliveryId,
+        status: { in: [EmailDeliveryStatus.PENDING, EmailDeliveryStatus.RETRYING] },
+      },
+      data: { status: EmailDeliveryStatus.SENDING },
+    });
+    return result.count === 1;
   }
 
   async markEmailDeliverySent(
@@ -275,7 +307,6 @@ export class NotificationsRepository {
 
 function isUniqueConstraintError(error: unknown): boolean {
   return (
-    error instanceof NotificationPrisma.PrismaClientKnownRequestError &&
-    error.code === 'P2002'
+    error instanceof NotificationPrisma.PrismaClientKnownRequestError && error.code === 'P2002'
   );
 }

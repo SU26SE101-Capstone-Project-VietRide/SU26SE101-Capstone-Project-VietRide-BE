@@ -25,6 +25,7 @@ public sealed class GetInternalUserQueryHandler : IRequestHandler<GetInternalUse
             user.Role.ToString(),
             user.OperatorId,
             user.Status.ToString(),
-            user.Phone?.Value);
+            user.Phone?.Value,
+            user.Email);
     }
 }

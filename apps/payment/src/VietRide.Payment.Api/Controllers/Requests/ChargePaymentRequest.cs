@@ -1,4 +1,5 @@
 using VietRide.Payment.Application.Features.Internal.Payments.ChargePayment;
+using VietRide.Payment.Application.Models;
 
 namespace VietRide.Payment.Api.Controllers.Requests;
 
@@ -7,7 +8,8 @@ public sealed record ChargePaymentRequest(
     Guid ReferenceId,
     Guid UserId,
     long Amount,
-    string Method)
+    string Method,
+    PaymentContextV1? Context)
 {
     public ChargePaymentCommand ToCommand(string? idempotencyKey, string clientIpAddress)
         => new(
@@ -16,6 +18,7 @@ public sealed record ChargePaymentRequest(
             UserId,
             Amount,
             Method,
+            Context,
             idempotencyKey,
             clientIpAddress);
 }

@@ -6,6 +6,7 @@ using VietRide.Identity.Application.Features.Subscriptions;
 using VietRide.Identity.Application.Features.Subscriptions.GetOperatorSubscription;
 using VietRide.Identity.Application.Features.Subscriptions.ListSubscriptionPlans;
 using VietRide.Identity.Application.Features.Subscriptions.UpgradeSubscription;
+using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 
@@ -39,7 +40,9 @@ public sealed class OperatorSubscriptionController : ControllerBase
         => Ok(await _sender.Send(new ListSubscriptionPlansQuery(false), cancellationToken));
 
     [HttpPost("upgrade")]
+    [ProducesResponseType(typeof(ApiResponse<SubscriptionUpgradeResponseDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<SubscriptionUpgradeResponseDto>), StatusCodes.Status202Accepted)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status402PaymentRequired)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<SubscriptionUpgradeResponseDto>> UpgradeAsync(
@@ -51,17 +54,28 @@ public sealed class OperatorSubscriptionController : ControllerBase
         var key = GetRequiredIdempotencyKey();
         var clientIpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
         var result = await _sender.Send(
-            new UpgradeSubscriptionCommand(operatorId, request.PlanId, request.BillingPeriod, key, clientIpAddress),
+            new UpgradeSubscriptionCommand(
+                operatorId,
+                request.PlanId,
+                request.BillingPeriod,
+                request.PaymentMethod,
+                request.ReturnUrl,
+                key,
+                clientIpAddress),
             cancellationToken);
 
-        return StatusCode(StatusCodes.Status202Accepted, result);
+        return StatusCode(
+            result.Status == SubscriptionStatus.ACTIVE.ToString()
+                ? StatusCodes.Status200OK
+                : StatusCodes.Status202Accepted,
+            result);
     }
 
     private string GetRequiredIdempotencyKey()
     {
         var value = Request.Headers.TryGetValue(IdempotencyKeyHeader, out var values) ? values.ToString() : string.Empty;
         if (string.IsNullOrWhiteSpace(value))
-            throw new CodedValidationException("VALIDATION_ERROR", "Idempotency-Key header is required.");
+            throw new CodedValidationException("IDEMPOTENCY_KEY_REQUIRED", "Idempotency-Key header is required.");
 
         return value;
     }

@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Features.Trips.Operations;
 using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Infrastructure.Jobs;
@@ -55,11 +56,14 @@ public sealed class AutoCompletedFallbackJob
         }
 
         trip.CompleteAutomatically(now);
+        var integrationEvent = new TripCompletedIntegrationEvent(
+            trip.Id,
+            trip.OperatorId,
+            now,
+            trip.HasSubstitution);
         await outbox.EnqueueAsync(
             EventType,
-            JsonSerializer.Serialize(
-                new { tripId = trip.Id, completedAt = now, trip.HasSubstitution },
-                JsonOptions),
+            JsonSerializer.Serialize(integrationEvent, JsonOptions),
             cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);

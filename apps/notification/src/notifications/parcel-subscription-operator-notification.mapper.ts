@@ -34,7 +34,13 @@ import {
   TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY,
 } from './parcel-subscription-operator-events.constants';
 
-const MoneyAmountSchema = z.union([z.number().int().nonnegative(), z.string().regex(/^\d+$/)]).optional();
+const MoneyAmountSchema = z
+  .union([z.number().int().nonnegative(), z.string().regex(/^\d+$/)])
+  .optional();
+const RequiredMoneyAmountSchema = z.union([
+  z.number().int().nonnegative(),
+  z.string().regex(/^\d+$/),
+]);
 
 const RecipientPayloadSchema = z.object({
   userId: z.string().uuid().optional(),
@@ -113,6 +119,26 @@ const SubscriptionPaymentAutoRevertedPayloadSchema = BaseOperatorPayloadSchema.a
   }),
 );
 
+export const InvoiceIssuedPayloadSchema = z.object({
+  invoiceId: z.string().uuid(),
+  invoiceNumber: z.string().trim().min(1),
+  operatorId: z.string().uuid(),
+  amount: RequiredMoneyAmountSchema,
+  invoiceWebUrl: z.string().url(),
+  downloadApiUrl: z.string().url(),
+});
+
+export type InvoiceIssuedPayload = z.infer<typeof InvoiceIssuedPayloadSchema>;
+
+const TripSettlementCompletedPayloadSchema = z.object({
+  settlementId: z.string().uuid(),
+  tripId: z.string().uuid(),
+  operatorId: z.string().uuid(),
+  netAmount: RequiredMoneyAmountSchema,
+  settlementMethod: z.string().trim().min(1),
+  settledAt: z.string().datetime({ offset: true }),
+});
+
 export type ParcelSubscriptionOperatorRoutingKey =
   | typeof BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY
   | typeof BOOKING_VOUCHER_CONSENT_REJECTED_ROUTING_KEY
@@ -168,25 +194,65 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
         mapVoucherConsentRejected,
       );
     case PARCEL_CREATED_ROUTING_KEY:
-      return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelCreated);
+      return fanOut(
+        BaseParcelPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapParcelCreated,
+      );
     case PARCEL_LOADED_ROUTING_KEY:
-      return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelLoaded);
+      return fanOut(
+        BaseParcelPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapParcelLoaded,
+      );
     case PARCEL_UNLOADED_ROUTING_KEY:
-      return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelUnloaded);
+      return fanOut(
+        BaseParcelPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapParcelUnloaded,
+      );
     case PARCEL_DELIVERED_PENDING_CONFIRM_ROUTING_KEY:
-      return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelPendingConfirm);
+      return fanOut(
+        BaseParcelPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapParcelPendingConfirm,
+      );
     case PARCEL_DELIVERY_CONFIRMED_ROUTING_KEY:
-      return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelDeliveryConfirmed);
+      return fanOut(
+        BaseParcelPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapParcelDeliveryConfirmed,
+      );
     case PARCEL_DELIVERY_REJECTED_ROUTING_KEY:
-      return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelDeliveryRejected);
+      return fanOut(
+        BaseParcelPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapParcelDeliveryRejected,
+      );
     case PARCEL_CANCELLED_ROUTING_KEY:
-      return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelCancelled);
+      return fanOut(
+        BaseParcelPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapParcelCancelled,
+      );
     case PARCEL_REJECTED_ROUTING_KEY:
-      return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelRejected);
+      return fanOut(
+        BaseParcelPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapParcelRejected,
+      );
     case PARCEL_RETURNED_ROUTING_KEY:
-      return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelReturned);
+      return fanOut(
+        BaseParcelPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapParcelReturned,
+      );
     case PARCEL_AUTO_REJECTED_ROUTING_KEY:
-      return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelAutoRejected);
+      return fanOut(
+        BaseParcelPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapParcelAutoRejected,
+      );
     case PARCEL_REVIEW_REQUESTED_ROUTING_KEY:
       return fanOut(
         ParcelReviewRequestedPayloadSchema.parse(payload),
@@ -200,25 +266,65 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
         mapParcelTransferInitiated,
       );
     case PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY:
-      return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelTransferConfirmed);
+      return fanOut(
+        BaseParcelPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapParcelTransferConfirmed,
+      );
     case PARCEL_TRANSFER_ESCALATED_ROUTING_KEY:
-      return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelTransferEscalated);
+      return fanOut(
+        BaseParcelPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapParcelTransferEscalated,
+      );
     case PARCEL_RETURN_INITIATED_ROUTING_KEY:
-      return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelReturnInitiated);
+      return fanOut(
+        BaseParcelPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapParcelReturnInitiated,
+      );
     case PARCEL_PENDING_OPERATOR_ACTION_ROUTING_KEY:
-      return fanOut(BaseParcelPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapParcelPendingOperatorAction);
+      return fanOut(
+        BaseParcelPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapParcelPendingOperatorAction,
+      );
     case TRIP_STOP_ARRIVED_ROUTING_KEY:
-      return fanOut(BaseOperatorPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapTripStopArrived);
+      return fanOut(
+        BaseOperatorPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapTripStopArrived,
+      );
     case TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY:
-      return fanOut(BaseOperatorPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapTripVehicleSubstituted);
+      return fanOut(
+        BaseOperatorPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapTripVehicleSubstituted,
+      );
     case SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY:
-      return fanOut(SubscriptionLimitPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapSubscriptionLimit);
+      return fanOut(
+        SubscriptionLimitPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapSubscriptionLimit,
+      );
     case SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY:
-      return fanOut(BaseOperatorPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapSubscriptionTrial);
+      return fanOut(
+        BaseOperatorPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapSubscriptionTrial,
+      );
     case SUBSCRIPTION_EXPIRED_ROUTING_KEY:
-      return fanOut(BaseOperatorPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapSubscriptionExpired);
+      return fanOut(
+        BaseOperatorPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapSubscriptionExpired,
+      );
     case SUBSCRIPTION_APPROVED_ROUTING_KEY:
-      return fanOut(BaseOperatorPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapSubscriptionApproved);
+      return fanOut(
+        BaseOperatorPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapSubscriptionApproved,
+      );
     case SUBSCRIPTION_PAYMENT_PENDING_WARN_ROUTING_KEY:
       return fanOut(
         SubscriptionPaymentPendingWarnPayloadSchema.parse(payload),
@@ -232,13 +338,29 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
         mapSubscriptionPaymentAutoReverted,
       );
     case INVOICE_ISSUED_ROUTING_KEY:
-      return fanOut(BaseOperatorPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapInvoiceIssued);
+      return fanOut(
+        InvoiceIssuedPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapInvoiceIssued,
+      );
     case TRIP_SETTLEMENT_COMPLETED_ROUTING_KEY:
-      return fanOut(BaseOperatorPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapTripSettlementCompleted);
+      return fanOut(
+        TripSettlementCompletedPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapTripSettlementCompleted,
+      );
     case PAYOUT_PROCESSED_ROUTING_KEY:
-      return fanOut(BaseOperatorPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapPayoutProcessed);
+      return fanOut(
+        BaseOperatorPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapPayoutProcessed,
+      );
     case PAYOUT_FAILED_ROUTING_KEY:
-      return fanOut(BaseOperatorPayloadSchema.parse(payload), resolveOperatorRecipientUserIds, mapPayoutFailed);
+      return fanOut(
+        BaseOperatorPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapPayoutFailed,
+      );
   }
 }
 
@@ -361,7 +483,9 @@ function mapParcelReturned(userId: string, payload: ParcelPayload): CreateNotifi
 }
 
 function mapParcelAutoRejected(userId: string, payload: ParcelPayload): CreateNotificationDto {
-  const refundText = payload.refundAmount ? ` So tien hoan: ${formatMoney(payload.refundAmount)} VND.` : '';
+  const refundText = payload.refundAmount
+    ? ` So tien hoan: ${formatMoney(payload.refundAmount)} VND.`
+    : '';
 
   return {
     ...buildParcelNotification(
@@ -431,7 +555,10 @@ function mapParcelReturnInitiated(userId: string, payload: ParcelPayload): Creat
   );
 }
 
-function mapParcelPendingOperatorAction(userId: string, payload: ParcelPayload): CreateNotificationDto {
+function mapParcelPendingOperatorAction(
+  userId: string,
+  payload: ParcelPayload,
+): CreateNotificationDto {
   return buildParcelNotification(
     userId,
     payload,
@@ -451,7 +578,10 @@ function mapTripStopArrived(userId: string, payload: OperatorPayload): CreateNot
   };
 }
 
-function mapTripVehicleSubstituted(userId: string, payload: OperatorPayload): CreateNotificationDto {
+function mapTripVehicleSubstituted(
+  userId: string,
+  payload: OperatorPayload,
+): CreateNotificationDto {
   return {
     userId,
     type: NotificationType.VEHICLE_SUBSTITUTED,
@@ -530,22 +660,34 @@ function mapSubscriptionPaymentAutoReverted(
   };
 }
 
-function mapInvoiceIssued(userId: string, payload: OperatorPayload): CreateNotificationDto {
+function mapInvoiceIssued(
+  userId: string,
+  payload: z.infer<typeof InvoiceIssuedPayloadSchema>,
+): CreateNotificationDto {
   return {
     userId,
-    type: NotificationType.SUBSCRIPTION_APPROVED,
+    type: NotificationType.INVOICE_ISSUED,
     title: 'Hoa don moi da duoc phat hanh',
-    body: `Hoa don ${payload.invoiceNumber ?? payload.invoiceId ?? 'moi'} cua ${formatOperatorLabel(payload)} da san sang.`,
-    data: buildNotificationData(payload),
+    body: `Hoa don ${payload.invoiceNumber} da san sang.`,
+    data: {
+      invoiceId: payload.invoiceId,
+      invoiceNumber: payload.invoiceNumber,
+      operatorId: payload.operatorId,
+      amount: payload.amount,
+      invoiceWebUrl: payload.invoiceWebUrl,
+    },
   };
 }
 
-function mapTripSettlementCompleted(userId: string, payload: OperatorPayload): CreateNotificationDto {
+function mapTripSettlementCompleted(
+  userId: string,
+  payload: z.infer<typeof TripSettlementCompletedPayloadSchema>,
+): CreateNotificationDto {
   return {
     userId,
     type: NotificationType.WALLET_CREDITED,
     title: 'Da tat toan doanh thu chuyen',
-    body: `Da tat toan ${formatMoney(payload.amount)} VND${payload.tripId ? ` tu chuyen ${payload.tripId}` : ''} vao vi nha xe.`,
+    body: `Da tat toan ${formatMoney(payload.netAmount)} VND tu chuyen ${payload.tripId} vao vi nha xe.`,
     data: buildNotificationData(payload),
   };
 }
@@ -635,7 +777,9 @@ function formatMoney(amount: z.infer<typeof MoneyAmountSchema>): string {
   return amount === undefined ? '0' : amount.toString();
 }
 
-function buildNotificationData(payload: RecipientPayload & Record<string, unknown>): Record<string, unknown> {
+function buildNotificationData(
+  payload: RecipientPayload & Record<string, unknown>,
+): Record<string, unknown> {
   const { userId, userIds, recipientUserIds, ...data } = payload;
 
   return {

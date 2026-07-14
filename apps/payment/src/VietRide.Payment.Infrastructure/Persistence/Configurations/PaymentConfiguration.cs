@@ -82,6 +82,17 @@ internal sealed class PaymentConfiguration : IEntityTypeConfiguration<PaymentEnt
         builder.Property(x => x.ExpiredAt).HasColumnName("expired_at").IsRequired(false);
         builder.Property(x => x.RefundedAt).HasColumnName("refunded_at").IsRequired(false);
 
+        builder.Property(x => x.Context)
+            .HasColumnName("context")
+            .HasColumnType("jsonb")
+            .HasDefaultValueSql("'{}'::jsonb")
+            .IsRequired();
+
+        builder.Property(x => x.ContextReconciliationRequired)
+            .HasColumnName("context_reconciliation_required")
+            .HasDefaultValue(false)
+            .IsRequired();
+
         builder.Property(x => x.CreatedAt)
             .HasColumnName("created_at")
             .HasDefaultValueSql("now()")
@@ -120,5 +131,9 @@ internal sealed class PaymentConfiguration : IEntityTypeConfiguration<PaymentEnt
         builder.HasIndex(x => new { x.Status, x.CreatedAt })
             .HasDatabaseName("idx_payments_status_created_at")
             .HasFilter($"status IN ('PENDING_REDIRECT'::{PaymentDbContext.SchemaName}.payment_status)");
+
+        builder.HasIndex(x => new { x.ContextReconciliationRequired, x.Status })
+            .HasDatabaseName("idx_payments_context_reconciliation")
+            .HasFilter("context_reconciliation_required = TRUE");
     }
 }

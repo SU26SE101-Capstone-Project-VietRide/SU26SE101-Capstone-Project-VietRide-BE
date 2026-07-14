@@ -22,6 +22,7 @@ describe('EmailSendWorker', () => {
   beforeEach(() => {
     repository = {
       findEmailDeliveryById: jest.fn(),
+      markEmailDeliverySending: jest.fn().mockResolvedValue(true),
       markEmailDeliverySent: jest.fn(),
       markEmailDeliveryRetrying: jest.fn(),
       markEmailDeliveryFailed: jest.fn(),
@@ -91,6 +92,20 @@ describe('EmailSendWorker', () => {
 
     expect(emailProvider.send).not.toHaveBeenCalled();
   });
+
+  it('does not call the provider again when send succeeded but SENT persistence was uncertain', async () => {
+    repository.findEmailDeliveryById
+      .mockResolvedValueOnce(createEmailDelivery())
+      .mockResolvedValueOnce(createEmailDelivery({ status: EmailDeliveryStatus.SENDING }));
+    repository.markEmailDeliverySent.mockRejectedValueOnce(new Error('database unavailable'));
+    emailProvider.send.mockResolvedValue({ messageId: 'accepted-message-id' });
+
+    await expect(worker.process(createJob(0))).rejects.toThrow('EMAIL_SEND_STATUS_UNCERTAIN');
+    await expect(worker.process(createJob(1))).resolves.toBeUndefined();
+
+    expect(emailProvider.send).toHaveBeenCalledTimes(1);
+    expect(repository.markEmailDeliveryRetrying).not.toHaveBeenCalled();
+  });
 });
 
 function createJob(attemptsMade: number): Job<EmailSendJobData> {
@@ -113,6 +128,7 @@ function createEmailDelivery(overrides: Partial<EmailDelivery> = {}): EmailDeliv
   return {
     id: EMAIL_DELIVERY_ID,
     notificationId: null,
+    dedupeKey: null,
     toEmail: RECIPIENT_EMAIL,
     templateKey: EmailTemplateKey.AUTH_OTP,
     subject: 'Ma xac thuc VietRide',

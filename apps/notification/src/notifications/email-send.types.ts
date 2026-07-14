@@ -23,6 +23,7 @@ export interface RenderedEmail {
 }
 
 export interface EmailProviderPayload extends RenderedEmail {
+  deliveryId: string;
   toEmail: string;
 }
 

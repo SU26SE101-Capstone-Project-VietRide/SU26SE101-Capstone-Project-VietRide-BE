@@ -158,6 +158,8 @@ public sealed class CreateRoundTripBookingCommandHandler
         var returnDiscount = Money.Zero;
         Guid? outboundValidatedVoucherId = null;
         Guid? returnValidatedVoucherId = null;
+        VoucherFundingType? outboundVoucherFundingType = null;
+        VoucherFundingType? returnVoucherFundingType = null;
 
         if (!string.IsNullOrWhiteSpace(request.VoucherCode))
         {
@@ -174,6 +176,7 @@ public sealed class CreateRoundTripBookingCommandHandler
                     ct: cancellationToken);
                 outboundDiscount = outboundValidation.Discount;
                 outboundValidatedVoucherId = outboundValidation.VoucherId;
+                outboundVoucherFundingType = outboundValidation.FundingType;
             }
             catch (CodedValidationException ex) when (ex.ErrorCode == "VOUCHER_MIN_ORDER_NOT_MET")
             {
@@ -196,6 +199,7 @@ public sealed class CreateRoundTripBookingCommandHandler
                     ct: cancellationToken);
                 returnDiscount = returnValidation.Discount;
                 returnValidatedVoucherId = returnValidation.VoucherId;
+                returnVoucherFundingType = returnValidation.FundingType;
             }
             catch (CodedValidationException ex) when (ex.ErrorCode == "VOUCHER_MIN_ORDER_NOT_MET")
             {
@@ -360,6 +364,8 @@ public sealed class CreateRoundTripBookingCommandHandler
             returnSeatNumbers,
             outboundVoucherUsageId,
             returnVoucherUsageId,
+            outboundVoucherFundingType,
+            returnVoucherFundingType,
             cancellationToken);
 
         if (string.Equals(request.PaymentMethod, "VNPAY", StringComparison.OrdinalIgnoreCase))
@@ -576,6 +582,8 @@ public sealed class CreateRoundTripBookingCommandHandler
         IReadOnlyList<string> returnSeatNumbers,
         Guid? outboundVoucherUsageId,
         Guid? returnVoucherUsageId,
+        VoucherFundingType? outboundVoucherFundingType,
+        VoucherFundingType? returnVoucherFundingType,
         CancellationToken cancellationToken)
     {
         try
@@ -587,8 +595,16 @@ public sealed class CreateRoundTripBookingCommandHandler
                     method: request.PaymentMethod,
                     items:
                     [
-                        new BatchChargeItem("BOOKING", outboundBooking.Id, outboundBooking.TotalAmount.Amount),
-                        new BatchChargeItem("BOOKING", returnBooking.Id, returnBooking.TotalAmount.Amount),
+                        new BatchChargeItem(
+                            "BOOKING",
+                            outboundBooking.Id,
+                            outboundBooking.TotalAmount.Amount,
+                            CreateLegPaymentContext(outboundBooking, outboundVoucherFundingType)),
+                        new BatchChargeItem(
+                            "BOOKING",
+                            returnBooking.Id,
+                            returnBooking.TotalAmount.Amount,
+                            CreateLegPaymentContext(returnBooking, returnVoucherFundingType)),
                     ],
                     idempotencyKey: $"charge-round-trip-{request.IdempotencyKey}",
                     cancellationToken: cancellationToken);
@@ -614,6 +630,11 @@ public sealed class CreateRoundTripBookingCommandHandler
                 amount: grandTotal.Amount,
                 method: request.PaymentMethod,
                 idempotencyKey: $"charge-round-trip-{request.IdempotencyKey}",
+                context: CreateGroupPaymentContext(
+                    outboundBooking,
+                    returnBooking,
+                    outboundVoucherFundingType,
+                    returnVoucherFundingType),
                 cancellationToken: cancellationToken);
 
             switch (chargeOutcome)
@@ -651,6 +672,34 @@ public sealed class CreateRoundTripBookingCommandHandler
             throw;
         }
     }
+
+    private static PaymentContextSnapshot CreateLegPaymentContext(
+        BookingEntity booking,
+        VoucherFundingType? fundingType)
+        => new(1, [CreateAllocation(booking, fundingType)]);
+
+    private static PaymentContextSnapshot CreateGroupPaymentContext(
+        BookingEntity outboundBooking,
+        BookingEntity returnBooking,
+        VoucherFundingType? outboundFundingType,
+        VoucherFundingType? returnFundingType)
+        => new(1,
+        [
+            CreateAllocation(outboundBooking, outboundFundingType),
+            CreateAllocation(returnBooking, returnFundingType),
+        ]);
+
+    private static PaymentAllocationSnapshot CreateAllocation(
+        BookingEntity booking,
+        VoucherFundingType? fundingType)
+        => new(
+            booking.Id,
+            "BOOKING",
+            booking.OperatorId,
+            booking.TripId,
+            checked(booking.TotalAmount.Amount + booking.DiscountAmount.Amount),
+            fundingType == VoucherFundingType.VIETRIDE_FUNDED ? booking.DiscountAmount.Amount : 0,
+            fundingType == VoucherFundingType.OPERATOR_FUNDED ? booking.DiscountAmount.Amount : 0);
 
     private static void EnsureWalletBatchSucceeded(
         BatchChargeOutcome.Success success,

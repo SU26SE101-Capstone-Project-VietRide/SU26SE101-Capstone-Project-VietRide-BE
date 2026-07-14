@@ -759,8 +759,22 @@ public sealed class TripLifecycleEndpointTests
         using var document = JsonDocument.Parse(payload);
         var root = document.RootElement;
         root.EnumerateObject().Select(item => item.Name).Should().BeEquivalentTo(
-            ["tripId", "completedAt", "hasSubstitution"]);
+            [
+                "eventId",
+                "occurredAt",
+                "eventType",
+                "tripId",
+                "operatorId",
+                "terminalAt",
+                "completedAt",
+                "hasSubstitution"
+            ]);
+        root.GetProperty("eventId").GetGuid().Should().NotBeEmpty();
+        root.GetProperty("occurredAt").GetDateTime().Should().NotBe(default);
+        root.GetProperty("eventType").GetString().Should().Be("trip.trip.completed");
         root.GetProperty("tripId").GetGuid().Should().Be(tripId);
+        root.GetProperty("operatorId").GetGuid().Should().NotBeEmpty();
+        root.GetProperty("terminalAt").GetDateTimeOffset().Should().Be(now);
         root.GetProperty("completedAt").GetDateTimeOffset().Should().Be(now);
         root.GetProperty("hasSubstitution").GetBoolean().Should().BeFalse();
     }

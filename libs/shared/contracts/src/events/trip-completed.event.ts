@@ -4,12 +4,18 @@ export const TripCompletedEventSchema = z.object({
   eventId: z.string().uuid(),
   occurredAt: z.string().datetime({ offset: true }),
   tripId: z.string().uuid(),
-  fareVnd: z.number().int().nonnegative(),
-  driverId: z.string().uuid(),
-  passengerId: z.string().uuid(),
+  operatorId: z.string().uuid(),
+  terminalAt: z.string().datetime({ offset: true }),
+  hasSubstitution: z.boolean(),
 });
 
 export type TripCompletedEvent = z.infer<typeof TripCompletedEventSchema>;
 
 // <service>.<aggregate>.<verb_past> per BACKEND_SOURCE_OF_TRUTH §7.3.
 export const TRIP_COMPLETED_ROUTING_KEY = 'trip.trip.completed';
+
+export const TripDisruptedEventSchema = TripCompletedEventSchema.extend({
+  reason: z.string().trim().min(1).optional(),
+});
+export type TripDisruptedEvent = z.infer<typeof TripDisruptedEventSchema>;
+export const TRIP_DISRUPTED_ROUTING_KEY = 'trip.trip.disrupted';

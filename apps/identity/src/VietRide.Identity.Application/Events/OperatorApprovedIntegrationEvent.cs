@@ -7,6 +7,7 @@ namespace VietRide.Identity.Application.Events;
 /// Serializes to camelCase keys: { operatorId, approvedAt }.
 /// </summary>
 public sealed record OperatorApprovedIntegrationEvent(
+    [property: JsonPropertyName("eventId")] Guid EventId,
     [property: JsonPropertyName("operatorId")] Guid OperatorId,
     [property: JsonPropertyName("approvedAt")] DateTimeOffset ApprovedAt)
 {

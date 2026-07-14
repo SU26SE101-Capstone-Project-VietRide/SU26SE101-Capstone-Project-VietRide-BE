@@ -2418,7 +2418,21 @@ Request:
   "referenceId": "uuid",
   "userId": "uuid",
   "amount": 350000,
-  "method": "WALLET"
+  "method": "WALLET",
+  "context": {
+    "version": 1,
+    "allocations": [
+      {
+        "referenceId": "uuid",
+        "referenceType": "BOOKING",
+        "operatorId": "uuid",
+        "tripId": "uuid",
+        "grossAmount": 400000,
+        "voucherVietRideFundedAmount": 50000,
+        "voucherOperatorFundedAmount": 0
+      }
+    ]
+  }
 }
 ```
 
@@ -2446,8 +2460,18 @@ Request:
   "userId": "uuid",
   "method": "WALLET",
   "items": [
-    { "referenceType": "BOOKING", "referenceId": "uuid", "amount": 350000 },
-    { "referenceType": "BOOKING", "referenceId": "uuid", "amount": 350000 }
+    {
+      "referenceType": "BOOKING",
+      "referenceId": "uuid",
+      "amount": 350000,
+      "context": { "version": 1, "allocations": [{ "referenceId": "uuid", "referenceType": "BOOKING", "operatorId": "uuid", "tripId": "uuid", "grossAmount": 350000, "voucherVietRideFundedAmount": 0, "voucherOperatorFundedAmount": 0 }] }
+    },
+    {
+      "referenceType": "BOOKING",
+      "referenceId": "uuid",
+      "amount": 350000,
+      "context": { "version": 1, "allocations": [{ "referenceId": "uuid", "referenceType": "BOOKING", "operatorId": "uuid", "tripId": "uuid", "grossAmount": 350000, "voucherVietRideFundedAmount": 0, "voucherOperatorFundedAmount": 0 }] }
+    }
   ]
 }
 ```
@@ -2468,6 +2492,23 @@ Rules:
 - On success, Payment service creates one `SUCCEEDED` Payment row per item (`payments.reference_type=BOOKING`, `payments.reference_id=<bookingId>`) and one WALLET debit ledger entry per item (`wallet_transactions.reference_type=BOOKING_PAYMENT`, `wallet_transactions.reference_id=<bookingId>`), all committed in one Payment DB transaction; total wallet balance decrease equals the sum of item amounts.
 - Batch idempotency is endpoint-level via `payment:idem:{key}` replay plus duplicate `(referenceType, referenceId)` guard; do not write the same header idempotency key into every `payments.idempotency_key` row because the unique index is per row.
 - `BOOKING_GROUP` is not accepted on this WALLET batch endpoint; it remains VNPay-only for round-trip combined redirects.
+- `context` is required for every new charge and is built from the Booking/Parcel-owned server snapshot, never from a public client payload. For each allocation, paid economics are `grossAmount - voucherVietRideFundedAmount - voucherOperatorFundedAmount`; their sum must equal the Payment amount.
+- A single `BOOKING`, `PARCEL`, or `PARCEL_ADDITIONAL` payment has exactly one matching allocation. A VNPay `BOOKING_GROUP` payment has at least two `BOOKING` allocations and may span different operator/trip pairs.
+- Payment persists the canonical JSON context before any money mutation and never overwrites a non-empty context.
+
+### GET `/internal/v1/bookings/payment-context/{referenceType}/{referenceId}`
+
+Auth: Internal JWT. Caller: Payment Day-38 legacy context backfill. `referenceType` is `BOOKING` or `BOOKING_GROUP`.
+
+### GET `/internal/v1/parcels/payment-context/{referenceType}/{referenceId}`
+
+Auth: Internal JWT. Caller: Payment Day-38 legacy context backfill. `referenceType` is `PARCEL` or `PARCEL_ADDITIONAL`.
+
+Both owner endpoints return `{ version, canBackfill, quarantineReason, allocations }`. They return only trusted historical snapshots. If voucher funding or the historical amount cannot be proven, `canBackfill=false`, `allocations=[]`, and a stable `quarantineReason` is returned; the caller must not fabricate an allocation.
+
+### GET `/internal/v1/payments/context-readiness`
+
+Auth: Internal JWT. Returns `{ readyForPhaseB, pendingRedirectWithoutContext, succeededWithoutContext, quarantined }`. Phase B is ready only when no legacy pending VNPay callback lacks context and every succeeded historical row is either hydrated or explicitly quarantined.
 
 ### POST `/internal/v1/wallet/refund`
 
@@ -2737,18 +2778,19 @@ Auth: `OPERATOR_ADMIN`. Returns active plans only. Response uses the ADR 0004 en
 
 ### POST `/v1/operator/subscription/upgrade`
 
-Auth: `OPERATOR_ADMIN`. Idempotency-Key: required. Day 37 supports VNPay only; `WALLET` is introduced after OperatorWallet is delivered in Day 38.
+Auth: `OPERATOR_ADMIN`. `Idempotency-Key`: required. Day 38 supports `VNPAY` and `WALLET`; Identity always snapshots the active plan, billing period and buyer data server-side before calling Payment.
 
 Request:
 ```json
 {
   "planId": "uuid",
   "billingPeriod": "MONTHLY",
+  "paymentMethod": "VNPAY",
   "returnUrl": "https://app.vietride.vn/operator/subscription/result"
 }
 ```
 
-`billingPeriod` is `MONTHLY` or `YEARLY`. Identity snapshots the selected active plan's server-side price; the client never supplies an amount.
+`billingPeriod` is `MONTHLY` or `YEARLY`. `paymentMethod` is `VNPAY` or `WALLET`. `returnUrl` is required only for `VNPAY` and must be omitted for `WALLET`. The client never supplies amount, operator identity, subscription period or buyer snapshot.
 
 Response `202`:
 ```json
@@ -2770,6 +2812,142 @@ Response `202`:
 ```
 
 Errors: `403 FORBIDDEN`; `404 RESOURCE_NOT_FOUND`; `409 SUBSCRIPTION_PAYMENT_PENDING`; `422 VALIDATION_ERROR`; `422 IDEMPOTENCY_KEY_MISMATCH`.
+
+For `paymentMethod=WALLET`, a successful atomic OperatorWallet charge returns `200`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "subscriptionId": "uuid",
+    "upgradeAttemptId": "uuid",
+    "status": "ACTIVE",
+    "paymentId": "uuid",
+    "amount": 500000,
+    "billingPeriod": "MONTHLY",
+    "invoiceStatus": "PENDING"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T10:00:00Z" }
+}
+```
+
+Additional errors: `402 WALLET_INSUFFICIENT_BALANCE`; `422 IDEMPOTENCY_KEY_REQUIRED`. Replaying the same key and request returns the original response. Reusing the key with a different payload returns `422 IDEMPOTENCY_KEY_MISMATCH`.
+
+## Invoice, OperatorWallet and Settlement — Day 38
+
+All list endpoints return the ADR 0004 paged envelope with `items`, `page`, `pageSize`, `totalItems`, `totalPages`, `hasNextPage`, and `hasPreviousPage`. `pageSize` is `1..100`; `sortDir` is `asc|desc`; unsupported `sortBy` returns `400 INVALID_SORT_FIELD`. Operator scope always comes from trusted JWT claims and is never accepted from query/body.
+
+### GET `/v1/operator/invoices`
+
+Auth: `OPERATOR_ADMIN`. Query: `page?`, `pageSize?`, `status?`, `from?`, `to?`, `sortBy?` (`issuedAt|createdAt|amount|invoiceNumber`), `sortDir?`.
+
+Item shape:
+
+```json
+{
+  "invoiceId": "uuid",
+  "invoiceNumber": "VR-INV-202607-000001",
+  "paymentId": "uuid",
+  "status": "ISSUED",
+  "amount": 500000,
+  "billingPeriod": "MONTHLY",
+  "periodFrom": "2026-07-15T00:00:00Z",
+  "periodTo": "2026-08-15T00:00:00Z",
+  "pdfGenerationStatus": "COMPLETED",
+  "createdAt": "2026-07-15T10:00:00Z",
+  "issuedAt": "2026-07-15T10:01:00Z"
+}
+```
+
+### GET `/v1/operator/invoices/{invoiceId}`
+
+Auth: `OPERATOR_ADMIN`. Returns the item above plus `planName`, `buyerSnapshot`, `invoiceWebUrl`, and `downloadApiUrl`. A missing or foreign-tenant invoice returns `404 INVOICE_NOT_FOUND` without existence disclosure.
+
+### GET `/v1/operator/invoices/{invoiceId}/download`
+
+Auth: `OPERATOR_ADMIN`. Rate limit: 10 requests/minute per `(userId, invoiceId)`. The only success wire shape is `200 ApiResponse`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "downloadUrl": "https://storage.googleapis.com/...signed...",
+    "expiresAt": "2026-07-15T11:00:00Z"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T10:00:00Z" }
+}
+```
+
+The signed URL is generated after authorization, expires within 60 minutes and is never persisted, logged or emitted. Errors: `404 INVOICE_NOT_FOUND`; `500 INVOICE_PDF_GENERATION_FAILED`; `429 RATE_LIMIT_EXCEEDED`.
+
+### POST `/v1/admin/invoices/{invoiceId}/retry`
+
+Auth: `SYSTEM_ADMIN`. `Idempotency-Key`: required. Body is empty. A retryable `FAILED` invoice with attempts `<5` is CAS-transitioned to `PENDING` and enqueued; the request itself does not increment attempts.
+
+Response `202` data: `{ "invoiceId": "uuid", "pdfGenerationStatus": "PENDING", "attemptsUsed": 2 }`.
+
+Errors: `404 INVOICE_NOT_FOUND`; `409 INVOICE_RETRY_ALREADY_PENDING`; `409 INVOICE_RETRY_NOT_ALLOWED`; `422 IDEMPOTENCY_KEY_REQUIRED`; `422 IDEMPOTENCY_KEY_MISMATCH`. Same-key replay returns the original `202`; different keys racing for the same invoice yield one `202` and one `409 INVOICE_RETRY_ALREADY_PENDING`.
+
+### GET `/v1/operator/wallet`
+
+Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`.
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "operatorId": "uuid",
+    "balance": 1250000,
+    "pendingHoldAmount": 300000,
+    "eligibleAmount": 450000,
+    "updatedAt": "2026-07-15T10:00:00Z"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T10:00:00Z" }
+}
+```
+
+### GET `/v1/operator/wallet/transactions`
+
+Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `type?`, `referenceType?`, `from?`, `to?`, `sortBy?` (`createdAt|amount`), `sortDir?`. Items contain `transactionId`, `type`, `amount`, `balanceBefore`, `balanceAfter`, `referenceType`, `referenceId`, `note`, `createdAt`.
+
+### GET `/v1/operator/trip-settlements`
+
+Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `status?`, `tripId?`, `from?`, `to?`, `sortBy?` (`createdAt|eligibleAt|settledAt|netAmount`), `sortDir?`. Items contain `settlementId`, `tripId`, `status`, `eligibleAt`, `netAmount`, `settlementMethod`, `settledAt`, `createdAt`.
+
+### GET `/v1/operator/ledger`
+
+Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `tripId?`, `entryType?`, `referenceType?`, `from?`, `to?`, `sortBy?` (`createdAt|amount`), `sortDir?`. Items contain `ledgerEntryId`, `tripId`, `entryType`, signed `amount`, `referenceType`, `referenceId`, `createdAt`. Internal source-event identifiers and sensitive notes are not returned.
+
+### GET `/v1/admin/trip-settlements`
+
+Auth: `SYSTEM_ADMIN`. Query: operator filters plus `operatorId?`, `stuckOnly?`, `severity?`. A stuck row is unresolved `ELIGIBLE` with `activeFailureCode != null`; `HIGH` means failure count `>=3` **or** stuck age `>21 days`.
+
+### POST `/v1/admin/trip-settlements/{settlementId}/settle`
+
+Auth: `SYSTEM_ADMIN`. `Idempotency-Key`: required. Body is empty. Only `PENDING_HOLD|ELIGIBLE` can settle. Response `200` data contains `settlementId`, `tripId`, `operatorId`, `netAmount`, `status`, `settlementMethod: "ADMIN_MANUAL"`, `settledAt`.
+
+Errors: `404 TRIP_SETTLEMENT_NOT_FOUND`; `409 TRIP_SETTLEMENT_ALREADY_SETTLED`; `500 PLATFORM_WALLET_INSUFFICIENT_BALANCE`; idempotency errors. Same-key replay returns the original result; a different manual key losing a concurrent manual/weekly race returns `409 TRIP_SETTLEMENT_ALREADY_SETTLED`.
+
+### GET `/v1/admin/platform-wallet`
+
+Auth: `SYSTEM_ADMIN`. Returns `{ platformWalletId, balance, updatedAt }`.
+
+### GET `/v1/admin/platform-wallet/transactions`
+
+Auth: `SYSTEM_ADMIN`. Paged query supports `type?`, `referenceType?`, `from?`, `to?`, `sortBy=createdAt|amount`, `sortDir?`. Items contain transaction identity, direction, positive amount, balance snapshots, reference, note and created time.
+
+### POST `/v1/admin/platform-wallet/adjust`
+
+Auth: `SYSTEM_ADMIN`. `Idempotency-Key`: required.
+
+Request: `{ "type": "CREDIT", "amount": 100000, "note": "Reconciliation correction" }`. `amount` is positive BIGINT VND; `note` is required. Response `200` returns the transaction and new balance. Concurrent DEBIT cannot make balance negative. Errors: `500 PLATFORM_WALLET_INSUFFICIENT_BALANCE`; validation/idempotency errors.
+
+### POST `/v1/admin/operators/{operatorId}/wallet/adjust`
+
+Auth: `SYSTEM_ADMIN`. `Idempotency-Key`: required. Request and response follow platform adjustment but target one OperatorWallet. A DEBIT that would make balance negative returns `402 WALLET_INSUFFICIENT_BALANCE`; unknown operator/wallet returns `404 RESOURCE_NOT_FOUND`.
 
 ### GET `/v1/admin/subscription-plans`
 

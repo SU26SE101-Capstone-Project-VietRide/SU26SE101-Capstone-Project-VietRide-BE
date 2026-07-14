@@ -38,6 +38,7 @@ CREATE TYPE wallet_transaction_ref AS ENUM (
 );
 
 CREATE TYPE invoice_status AS ENUM ('DRAFT', 'ISSUED', 'CANCELLED');
+CREATE TYPE invoice_pdf_generation_status AS ENUM ('PENDING', 'PROCESSING', 'FAILED', 'COMPLETED');
 
 -- Platform clearing/holding wallet — singleton internal pool
 CREATE TYPE platform_wallet_transaction_type AS ENUM ('CREDIT', 'DEBIT');
@@ -69,7 +70,8 @@ CREATE TYPE operator_wallet_transaction_type AS ENUM ('CREDIT', 'DEBIT');
 
 CREATE TYPE operator_wallet_transaction_ref AS ENUM (
     'TRIP_SETTLEMENT',
-    'ADJUSTMENT'
+    'ADJUSTMENT',
+    'SUBSCRIPTION_PAYMENT'
     -- v2 will add 'WITHDRAWAL' for bank transfer out
 );
 
@@ -112,6 +114,8 @@ CREATE TABLE payments (
     failed_at TIMESTAMPTZ NULL,
     expired_at TIMESTAMPTZ NULL,
     refunded_at TIMESTAMPTZ NULL,
+    context JSONB NOT NULL DEFAULT '{}'::jsonb,
+    context_reconciliation_required BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_payments_amount_non_negative CHECK (amount >= 0)
@@ -128,6 +132,8 @@ CREATE INDEX idx_payments_operator_id_created_at ON payments (operator_id, creat
     WHERE operator_id IS NOT NULL;
 CREATE INDEX idx_payments_status_created_at ON payments (status, created_at)
     WHERE status IN ('PENDING_REDIRECT');
+CREATE INDEX idx_payments_context_reconciliation ON payments (context_reconciliation_required, status)
+    WHERE context_reconciliation_required = TRUE;
 
 COMMENT ON COLUMN payments.vnpay_txn_ref IS
     'VNPay vnp_TxnRef — unique per VNPay transaction. NULL for WALLET method.';
@@ -229,19 +235,37 @@ CREATE TABLE invoices (
     status invoice_status NOT NULL DEFAULT 'DRAFT',
     issued_at TIMESTAMPTZ NULL,
     pdf_url TEXT NULL,
-    e_invoice_provider_ref VARCHAR(255) NULL,
+    storage_object_path TEXT NULL,
+    pdf_generation_status invoice_pdf_generation_status NOT NULL DEFAULT 'PENDING',
+    pdf_generation_attempts INT NOT NULL DEFAULT 0,
+    pdf_generation_started_at TIMESTAMPTZ NULL,
+    pdf_generation_next_retry_at TIMESTAMPTZ NULL,
+    pdf_generation_last_error TEXT NULL,
     metadata JSONB NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_invoices_amount_non_negative CHECK (amount >= 0),
-    CONSTRAINT chk_invoices_period_order CHECK (period_to > period_from)
+    CONSTRAINT chk_invoices_period_order CHECK (period_to > period_from),
+    CONSTRAINT chk_invoices_pdf_attempts CHECK (pdf_generation_attempts >= 0 AND pdf_generation_attempts <= 5),
+    CONSTRAINT chk_invoices_issued_consistency CHECK (
+        status <> 'ISSUED'
+        OR (issued_at IS NOT NULL AND pdf_url IS NOT NULL AND storage_object_path IS NOT NULL
+            AND pdf_generation_status = 'COMPLETED')
+    )
 );
 
 CREATE UNIQUE INDEX uq_invoices_invoice_number ON invoices (invoice_number);
 CREATE INDEX idx_invoices_operator_id_created_at ON invoices (operator_id, created_at DESC);
 CREATE INDEX idx_invoices_status ON invoices (status);
--- Invoice ↔ Payment is 1:1; supports lookup "is this Payment already invoiced?".
-CREATE INDEX idx_invoices_payment_id ON invoices (payment_id);
+CREATE UNIQUE INDEX uq_invoices_payment_id ON invoices (payment_id);
+CREATE INDEX idx_invoices_pdf_retry ON invoices (pdf_generation_status, pdf_generation_next_retry_at)
+    WHERE pdf_generation_status IN ('PENDING', 'FAILED', 'PROCESSING');
+
+CREATE TABLE invoice_number_counters (
+    period_key CHAR(6) PRIMARY KEY,
+    last_value BIGINT NOT NULL,
+    CONSTRAINT chk_invoice_number_counters_range CHECK (last_value >= 0 AND last_value <= 999999)
+);
 
 -- -----------------------------------------------------------------------------
 -- platform_wallets (VIETRIDE singleton clearing/holding pool)
@@ -288,6 +312,9 @@ CREATE INDEX idx_platform_wallet_transactions_created_at
 CREATE INDEX idx_platform_wallet_transactions_reference
     ON platform_wallet_transactions (reference_type, reference_id)
     WHERE reference_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_platform_wallet_transactions_subscription
+    ON platform_wallet_transactions (type, reference_type, reference_id)
+    WHERE reference_type = 'SUBSCRIPTION_PAYMENT';
 
 COMMENT ON TABLE platform_wallet_transactions IS
     'Immutable ledger for PlatformWallet. INSERT atomic with UPDATE platform_wallets via optimistic lock.';
@@ -311,7 +338,7 @@ CREATE TABLE operator_wallets (
 COMMENT ON TABLE operator_wallets IS
     'Internal v1 wallet for operators. Replaces former operator_balances aggregate.';
 COMMENT ON COLUMN operator_wallets.balance IS
-    'BIGINT VND, NEVER negative. v1 credit only from TripSettlement; debit only from admin ADJUSTMENT. v2 adds WITHDRAWAL.';
+    'BIGINT VND, NEVER negative. Credit from TripSettlement/admin; debit from subscription/admin. v2 adds WITHDRAWAL.';
 COMMENT ON COLUMN operator_wallets.row_version IS
     'Optimistic concurrency token. Use row_version check pattern on UPDATE.';
 
@@ -326,7 +353,7 @@ CREATE TABLE operator_wallet_transactions (
     balance_before BIGINT NOT NULL,
     balance_after BIGINT NOT NULL,
     reference_type operator_wallet_transaction_ref NOT NULL,
-    reference_id UUID NULL,         -- tripSettlementId (TRIP_SETTLEMENT) OR adjustment uuid (ADJUSTMENT)
+    reference_id UUID NULL,         -- tripSettlementId, paymentId (SUBSCRIPTION_PAYMENT), or adjustment id
     note TEXT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_operator_wallet_transactions_amount_positive CHECK (amount > 0),
@@ -339,6 +366,9 @@ CREATE INDEX idx_operator_wallet_transactions_operator_id_created_at
 CREATE INDEX idx_operator_wallet_transactions_reference
     ON operator_wallet_transactions (reference_type, reference_id)
     WHERE reference_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_operator_wallet_transactions_subscription
+    ON operator_wallet_transactions (operator_id, type, reference_type, reference_id)
+    WHERE reference_type = 'SUBSCRIPTION_PAYMENT';
 
 COMMENT ON TABLE operator_wallet_transactions IS
     'Immutable wallet ledger for OperatorWallet. INSERT atomic with UPDATE operator_wallets via optimistic lock.';
@@ -354,8 +384,16 @@ CREATE TABLE operator_ledger_entries (
     amount BIGINT NOT NULL,                    -- signed: positive=credit, negative=debit, 0=audit-only
     reference_type operator_ledger_reference_type NOT NULL,
     reference_id UUID NOT NULL,
+    source_event_id UUID NOT NULL,
     note TEXT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_operator_ledger_entries_amount_direction CHECK (
+        (entry_type IN ('BOOKING_REFUND', 'PARCEL_REFUND') AND amount < 0)
+        OR (entry_type = 'VOUCHER_OPERATOR_FUNDED_AUDIT' AND amount = 0)
+        OR entry_type = 'ADJUSTMENT'
+        OR (entry_type NOT IN ('BOOKING_REFUND', 'PARCEL_REFUND', 'VOUCHER_OPERATOR_FUNDED_AUDIT', 'ADJUSTMENT') AND amount > 0)
+    ),
+    CONSTRAINT chk_operator_ledger_entries_trip_required CHECK (entry_type = 'ADJUSTMENT' OR trip_id IS NOT NULL)
 );
 
 CREATE INDEX idx_operator_ledger_entries_operator_id_created_at
@@ -367,6 +405,8 @@ CREATE INDEX idx_operator_ledger_entries_reference
     ON operator_ledger_entries (reference_type, reference_id);
 CREATE INDEX idx_operator_ledger_entries_entry_type
     ON operator_ledger_entries (operator_id, entry_type);
+CREATE UNIQUE INDEX uq_operator_ledger_entries_source
+    ON operator_ledger_entries (source_event_id, entry_type, reference_id);
 
 COMMENT ON TABLE operator_ledger_entries IS
     'Audit-only log per-booking/per-parcel event. NOT the wallet balance source — see operator_wallets + operator_trip_settlements.';
@@ -393,6 +433,10 @@ CREATE TABLE operator_trip_settlements (
     settled_at TIMESTAMPTZ NULL,
     settled_by_user_id UUID NULL,                  -- SYSTEM_ADMIN if ADMIN_MANUAL; NULL if AUTO_WEEKLY
     wallet_transaction_id UUID NULL REFERENCES operator_wallet_transactions (id) ON DELETE SET NULL,
+    settlement_failure_count INT NOT NULL DEFAULT 0,
+    last_settlement_failure_at TIMESTAMPTZ NULL,
+    active_failure_code VARCHAR(100) NULL,
+    failure_resolved_at TIMESTAMPTZ NULL,
     row_version INT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -405,7 +449,11 @@ CREATE TABLE operator_trip_settlements (
             OR
             (status IN ('SETTLED', 'CANCELLED')
              AND settled_at IS NOT NULL AND settlement_method IS NOT NULL)
-        )
+        ),
+    CONSTRAINT chk_operator_trip_settlements_failure_consistency CHECK (
+        active_failure_code IS NULL
+        OR (status = 'ELIGIBLE' AND settlement_failure_count > 0 AND last_settlement_failure_at IS NOT NULL)
+    )
 );
 
 CREATE UNIQUE INDEX uq_operator_trip_settlements_operator_trip
@@ -421,6 +469,9 @@ CREATE INDEX idx_operator_trip_settlements_wallet_transaction_id
     ON operator_trip_settlements (wallet_transaction_id) WHERE wallet_transaction_id IS NOT NULL;
 CREATE INDEX idx_operator_trip_settlements_settled_by_user_id
     ON operator_trip_settlements (settled_by_user_id) WHERE settled_by_user_id IS NOT NULL;
+CREATE INDEX idx_operator_trip_settlements_stuck
+    ON operator_trip_settlements (status, active_failure_code, last_settlement_failure_at)
+    WHERE status = 'ELIGIBLE' AND active_failure_code IS NOT NULL;
 
 COMMENT ON TABLE operator_trip_settlements IS
     'Per-Trip settlement marker. 1 record per Trip per Operator. Drives 7-day hold + Monday auto-settle + admin manual.';
@@ -464,6 +515,20 @@ CREATE INDEX idx_refund_failure_logs_resolved_by_user_id
 CREATE INDEX idx_refund_failure_logs_reference
     ON refund_failure_logs (reference_type, reference_id)
     WHERE reference_type IS NOT NULL AND reference_id IS NOT NULL;
+
+-- -----------------------------------------------------------------------------
+-- processed_integration_events (durable consumer idempotency)
+-- -----------------------------------------------------------------------------
+CREATE TABLE processed_integration_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    consumer VARCHAR(150) NOT NULL,
+    event_id UUID NOT NULL,
+    processed_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX uq_processed_integration_events_consumer_event
+    ON processed_integration_events (consumer, event_id);
 
 -- -----------------------------------------------------------------------------
 -- outbox_events

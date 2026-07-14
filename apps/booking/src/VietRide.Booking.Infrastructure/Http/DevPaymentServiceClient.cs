@@ -59,7 +59,8 @@ public sealed class DevPaymentServiceClient : IPaymentServiceClient
         long amount,
         string method,
         string idempotencyKey,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        PaymentContextSnapshot? context = null)
     {
         if (string.Equals(method, "WALLET", StringComparison.OrdinalIgnoreCase))
         {

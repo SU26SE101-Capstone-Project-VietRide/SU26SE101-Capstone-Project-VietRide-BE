@@ -19,6 +19,7 @@ describe('EmailSendWorker pipeline (e2e)', () => {
   it('renders an invoice notice and sends it through provider abstraction', async () => {
     const repository = {
       findEmailDeliveryById: jest.fn(async () => createEmailDelivery()),
+      markEmailDeliverySending: jest.fn(async () => true),
       markEmailDeliverySent: jest.fn(),
     };
     const emailProvider: jest.Mocked<EmailProvider> = {
@@ -76,6 +77,7 @@ function createEmailDelivery(): EmailDelivery {
   return {
     id: EMAIL_DELIVERY_ID,
     notificationId: null,
+    dedupeKey: null,
     toEmail: RECIPIENT_EMAIL,
     templateKey: EmailTemplateKey.INVOICE_NOTICE,
     subject: 'Hoa don VietRide VR-INV-202606-000001',

@@ -27,6 +27,7 @@ export const IdentityUserCreatedEventSchema = z.object({
 export type IdentityUserCreatedEvent = z.infer<typeof IdentityUserCreatedEventSchema>;
 
 export const IdentityOperatorApprovedEventSchema = z.object({
+  eventId: z.string().uuid(),
   operatorId: z.string().uuid(),
   approvedAt: z.string().datetime({ offset: true }),
 });

@@ -11,7 +11,9 @@ public sealed class CreateSubscriptionPaymentCommandValidator : AbstractValidato
         RuleFor(command => command.OperatorId).NotEmpty();
         RuleFor(command => command.PlanId).NotEmpty();
         RuleFor(command => command.BillingPeriod).Must(period => period is "MONTHLY" or "YEARLY");
+        RuleFor(command => command.PaymentMethod).Must(method => method is "WALLET" or "VNPAY");
         RuleFor(command => command.Amount).GreaterThan(0).Must(amount => amount % 1000 == 0);
+        RuleFor(command => command.Context).NotNull();
         RuleFor(command => command.IdempotencyKey).NotEmpty().MaximumLength(100);
         RuleFor(command => command.ClientIpAddress).NotEmpty().MaximumLength(64);
     }

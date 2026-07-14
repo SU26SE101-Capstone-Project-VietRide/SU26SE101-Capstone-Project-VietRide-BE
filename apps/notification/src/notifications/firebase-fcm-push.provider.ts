@@ -1,5 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { applicationDefault, cert, getApps, initializeApp, type App, type AppOptions } from 'firebase-admin/app';
+import {
+  applicationDefault,
+  cert,
+  getApps,
+  initializeApp,
+  type App,
+  type AppOptions,
+} from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import { ENV_TOKEN } from '../app/tokens';
 import type { Env } from '../config/env.schema';
@@ -22,7 +29,9 @@ export class FirebaseFcmPushProvider implements FcmPushProvider {
   async send(payload: FcmPushPayload): Promise<FcmPushResult> {
     try {
       const message = {
-        ...(this.env.FCM_DRY_RUN ? { topic: this.env.FCM_DRY_RUN_TOPIC } : { token: payload.token }),
+        ...(this.env.FCM_DRY_RUN
+          ? { topic: this.env.FCM_DRY_RUN_TOPIC }
+          : { token: payload.token }),
         notification: {
           title: payload.title,
           body: payload.body,

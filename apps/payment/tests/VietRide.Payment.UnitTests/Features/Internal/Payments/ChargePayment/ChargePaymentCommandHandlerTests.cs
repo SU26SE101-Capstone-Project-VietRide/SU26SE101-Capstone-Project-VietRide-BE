@@ -2,7 +2,9 @@ using System.Text.Json;
 using FluentAssertions;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Payment.Application.Abstractions.Repositories;
+using VietRide.Payment.Application.Abstractions.Services;
 using VietRide.Payment.Application.Features.Internal.Payments.ChargePayment;
+using VietRide.Payment.Application.Models;
 using VietRide.Payment.Domain.Entities;
 using VietRide.Payment.Domain.Enums;
 using VietRide.Payment.Domain.Exceptions;
@@ -190,6 +192,7 @@ public sealed class ChargePaymentCommandHandlerTests
             platformWallets,
             vnPay ?? new FakeVnPayClient("https://sandbox.vnpayment.vn/paymentv2/vpcpay.html"),
             outbox ?? new FakeIntegrationEventOutbox(),
+            new NoOpRevenueLedgerWriter(),
             new FrozenClock(Now));
 
     private static ChargePaymentCommand CreateCommand(
@@ -198,7 +201,25 @@ public sealed class ChargePaymentCommandHandlerTests
         string method,
         long amount,
         string idempotencyKey = "idem-key")
-        => new("BOOKING", bookingId, userId, amount, method, idempotencyKey, "203.0.113.10");
+        => new(
+            "BOOKING",
+            bookingId,
+            userId,
+            amount,
+            method,
+            new PaymentContextV1(1,
+            [
+                new PaymentAllocationV1(
+                    bookingId,
+                    "BOOKING",
+                    Guid.NewGuid(),
+                    Guid.NewGuid(),
+                    amount,
+                    0,
+                    0),
+            ]),
+            idempotencyKey,
+            "203.0.113.10");
 
     private sealed class FakePaymentRepository : IPaymentRepository
     {
@@ -432,5 +453,14 @@ public sealed class ChargePaymentCommandHandlerTests
         }
 
         public DateTimeOffset UtcNow { get; }
+    }
+
+    private sealed class NoOpRevenueLedgerWriter : IRevenueLedgerWriter
+    {
+        public Task RecordPaymentSucceededAsync(
+            Guid sourceEventId,
+            PaymentContextV1 context,
+            CancellationToken cancellationToken)
+            => Task.CompletedTask;
     }
 }

@@ -79,6 +79,16 @@ public sealed class SubscriptionUpgradeAttempt : BaseEntity<Guid>
         Status = SubscriptionUpgradeAttemptStatus.EXPIRED;
     }
 
+    public void MarkFailed()
+    {
+        if (Status == SubscriptionUpgradeAttemptStatus.FAILED)
+            return;
+        if (Status is not (SubscriptionUpgradeAttemptStatus.INITIATED or SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING))
+            throw new InvalidOperationException("Only an active upgrade attempt can fail.");
+
+        Status = SubscriptionUpgradeAttemptStatus.FAILED;
+    }
+
     public void MarkWarningSent(DateTimeOffset sentAt)
     {
         if (WarnSentAt.HasValue)

@@ -16,11 +16,11 @@ public sealed record WalletCreditedConsumerEvent(
 {
     public const string EventType = WalletCreditedIntegrationEvent.EventTypeValue;
 
-    [JsonIgnore]
-    public Guid EventId => ReferenceId;
+    [JsonPropertyName("eventId")]
+    public Guid EventId { get; init; } = Guid.NewGuid();
 
-    [JsonIgnore]
-    public DateTime OccurredAt => DateTime.UtcNow;
+    [JsonPropertyName("occurredAt")]
+    public DateTime OccurredAt { get; init; } = DateTime.UtcNow;
 
     [JsonIgnore]
     string IIntegrationEvent.EventType => EventType;

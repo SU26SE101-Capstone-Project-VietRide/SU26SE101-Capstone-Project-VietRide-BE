@@ -9,7 +9,8 @@ public interface IPaymentServiceClient
         long amount,
         string method,
         string idempotencyKey,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        PaymentContextSnapshot? context = null);
 
     Task<RefundOutcome> RefundParcelPaymentAsync(
         Guid userId,
@@ -19,3 +20,16 @@ public interface IPaymentServiceClient
         string idempotencyKey,
         CancellationToken cancellationToken = default);
 }
+
+public sealed record PaymentContextSnapshot(
+    int Version,
+    IReadOnlyList<PaymentAllocationSnapshot> Allocations);
+
+public sealed record PaymentAllocationSnapshot(
+    Guid ReferenceId,
+    string ReferenceType,
+    Guid OperatorId,
+    Guid TripId,
+    long GrossAmount,
+    long VoucherVietRideFundedAmount,
+    long VoucherOperatorFundedAmount);

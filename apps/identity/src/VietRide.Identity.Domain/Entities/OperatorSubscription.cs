@@ -113,7 +113,9 @@ public sealed class OperatorSubscription : BaseEntity<Guid>
     public void ActivatePaid(
         Guid planId,
         SubscriptionBillingPeriod billingPeriod,
-        DateTimeOffset startedAt)
+        SubscriptionPaymentMethod paymentMethod,
+        DateTimeOffset periodFrom,
+        DateTimeOffset periodTo)
     {
         if (Status is not (SubscriptionStatus.PENDING_PAYMENT or SubscriptionStatus.EXPIRED))
         {
@@ -122,12 +124,10 @@ public sealed class OperatorSubscription : BaseEntity<Guid>
 
         PlanId = planId;
         BillingPeriod = billingPeriod;
-        PaymentMethod = SubscriptionPaymentMethod.VNPAY;
+        PaymentMethod = paymentMethod;
         Status = SubscriptionStatus.ACTIVE;
-        StartedAt = startedAt;
-        ExpiresAt = billingPeriod == SubscriptionBillingPeriod.MONTHLY
-            ? startedAt.AddMonths(1)
-            : startedAt.AddYears(1);
+        StartedAt = periodFrom;
+        ExpiresAt = periodTo;
         PreviousActivePlanId = null;
         WarnSentAt = null;
     }

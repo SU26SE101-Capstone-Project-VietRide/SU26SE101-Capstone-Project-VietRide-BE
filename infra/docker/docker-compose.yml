@@ -251,6 +251,16 @@ services:
       VNPAY_RETURN_URL: ${VNPAY_RETURN_URL:-https://app.vietride.online/payments/return}
       VNPAY_IPN_URL: ${VNPAY_IPN_URL:-https://api.vietride.online/v1/payments/vnpay-ipn}
       VNPAY_PAYMENT_TIMEOUT_MINUTES: ${VNPAY_PAYMENT_TIMEOUT_MINUTES:-10}
+      BOOKING_SERVICE_BASE_URL: http://booking:5003
+      PARCEL_SERVICE_BASE_URL: http://parcel:5005
+      Booking__BaseUrl: http://booking:5003
+      Parcel__BaseUrl: http://parcel:5005
+      InvoiceStorage__Bucket: ${INVOICE_STORAGE_BUCKET:-}
+      InvoiceStorage__StableBaseUrl: ${INVOICE_STORAGE_STABLE_BASE_URL:-http://gateway:3000}
+      OperatorWeb__InvoiceDetailBaseUrl: ${OPERATOR_WEB_INVOICE_DETAIL_BASE_URL:-http://localhost:5173/operator/invoices}
+      # ADC path may point to a read-only file mounted by a developer-specific compose override.
+      # Production uses workload identity or an external secret mount; no credential is in this file.
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
     ports:
       - '${PAYMENT_PORT:-5004}:5004'
     healthcheck:

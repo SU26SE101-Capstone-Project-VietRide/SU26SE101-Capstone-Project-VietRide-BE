@@ -3,7 +3,9 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Payment.Application.Abstractions.Repositories;
+using VietRide.Payment.Application.Abstractions.Services;
 using VietRide.Payment.Application.Events;
+using VietRide.Payment.Application.Models;
 using VietRide.Payment.Domain.Enums;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
@@ -28,12 +30,14 @@ public sealed class ConfirmBookingPaymentCommandHandler
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IClock _clock;
     private readonly ILogger<ConfirmBookingPaymentCommandHandler> _logger;
+    private readonly IRevenueLedgerWriter _revenueLedger;
 
     public ConfirmBookingPaymentCommandHandler(
         IVnPayClient vnPayClient,
         IPaymentRepository payments,
         IPlatformWalletRepository platformWallets,
         IIntegrationEventOutbox outbox,
+        IRevenueLedgerWriter revenueLedger,
         IClock clock,
         ILogger<ConfirmBookingPaymentCommandHandler> logger)
     {
@@ -41,6 +45,7 @@ public sealed class ConfirmBookingPaymentCommandHandler
         _payments = payments;
         _platformWallets = platformWallets;
         _outbox = outbox;
+        _revenueLedger = revenueLedger;
         _clock = clock;
         _logger = logger;
     }
@@ -145,7 +150,18 @@ public sealed class ConfirmBookingPaymentCommandHandler
                     cancellationToken)
                 .ConfigureAwait(false);
 
-            await EnqueuePaymentSucceededAsync(payment, cancellationToken).ConfigureAwait(false);
+            if (PaymentContextCodec.IsMissing(payment.Context))
+            {
+                payment.MarkContextReconciliationRequired();
+                _payments.Update(payment);
+                _logger.LogWarning(
+                    "Confirmed legacy VNPay payment {PaymentId} without trusted context; settlement event is quarantined for reconciliation.",
+                    payment.Id);
+            }
+            else
+            {
+                await EnqueuePaymentSucceededAsync(payment, cancellationToken).ConfigureAwait(false);
+            }
 
             _logger.LogInformation(
                 "Confirmed VNPay payment {PaymentId} for reference {ReferenceType}/{ReferenceId} and credited platform hold {Amount} VND.",
@@ -201,11 +217,18 @@ public sealed class ConfirmBookingPaymentCommandHandler
         VietRide.Payment.Domain.Entities.Payment payment,
         CancellationToken cancellationToken)
     {
+        var context = PaymentContextCodec.DeserializeTrusted(payment.Context);
         var evt = new PaymentSucceededIntegrationEvent(
             payment.Id,
             payment.ReferenceType,
             payment.ReferenceId,
-            payment.Amount.Amount);
+            payment.Amount.Amount,
+            payment.Method,
+            context);
+        await _revenueLedger.RecordPaymentSucceededAsync(
+            evt.EventId,
+            context,
+            cancellationToken).ConfigureAwait(false);
         var payload = JsonSerializer.Serialize(evt, JsonOptions);
         await _outbox.EnqueueAsync(evt.EventType, payload, cancellationToken).ConfigureAwait(false);
     }

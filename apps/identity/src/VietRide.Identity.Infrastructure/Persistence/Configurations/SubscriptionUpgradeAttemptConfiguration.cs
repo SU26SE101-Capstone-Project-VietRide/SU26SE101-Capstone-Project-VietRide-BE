@@ -29,6 +29,10 @@ internal sealed class SubscriptionUpgradeAttemptConfiguration : IEntityTypeConfi
         builder.HasIndex(attempt => attempt.IdempotencyKey).HasDatabaseName("uq_subscription_upgrade_attempts_idempotency_key").IsUnique();
         builder.HasIndex(attempt => new { attempt.Status, attempt.DueAt }).HasDatabaseName("idx_subscription_upgrade_attempts_status_due_at");
         builder.HasIndex(attempt => attempt.PaymentId).HasDatabaseName("uq_subscription_upgrade_attempts_payment_id").IsUnique().HasFilter("payment_id IS NOT NULL");
+        builder.HasIndex(attempt => attempt.SubscriptionId)
+            .HasDatabaseName("uq_subscription_upgrade_attempts_active_subscription")
+            .IsUnique()
+            .HasFilter("status IN ('INITIATED', 'PAYMENT_PENDING')");
         builder.HasOne<OperatorSubscription>().WithMany().HasForeignKey(attempt => attempt.SubscriptionId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_subscription_upgrade_attempts_subscription_id");
         builder.HasOne<Operator>().WithMany().HasForeignKey(attempt => attempt.OperatorId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_subscription_upgrade_attempts_operator_id");
         builder.HasOne<SubscriptionPlan>().WithMany().HasForeignKey(attempt => attempt.TargetPlanId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_subscription_upgrade_attempts_target_plan_id");

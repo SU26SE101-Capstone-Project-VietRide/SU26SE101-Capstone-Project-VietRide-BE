@@ -22,5 +22,6 @@ public sealed class ChargePaymentCommandValidator : AbstractValidator<ChargePaym
             .WithMessage("method must be WALLET or VNPAY.");
         RuleFor(x => x.IdempotencyKey).NotEmpty();
         RuleFor(x => x.ClientIpAddress).NotEmpty();
+        RuleFor(x => x.Context).NotNull().WithErrorCode("PAYMENT_CONTEXT_INVALID");
     }
 }
