@@ -179,7 +179,7 @@ Deliver the Trip lifecycle from `SCHEDULED` through `BOARDING`, `IN_PROGRESS`, a
 | 21.3 | ✅ done | APPROVE | 2026-07-14 | Three reviewer patch rounds; HTTP idempotency, row-lock races, rollback, audit/Outbox, and no-body verification green. |
 | 21.4 | ✅ done | APPROVE | 2026-07-14 | One reviewer patch round; fake-clock boundaries, wrong-status no-ops, schedules, and manual/job race verification green. |
 | 21.5 | ✅ done | APPROVE | 2026-07-14 | One reviewer patch round; frozen payload propagation, guarded update, migration-backed trigger timestamp/duplicate/rollback coverage, and full Parcel verification green. |
-| 21.6 | ⬜ todo | — | — | — |
+| 21.6 | ✅ done | APPROVE | 2026-07-14 | Two patch rounds (review constant + orchestrator full-suite registry regression); guarded completion/history atomicity and full Booking verification green. |
 | 21.7 | ⬜ todo | — | — | — |
 
 Legend: ⬜ todo · 🔄 in progress · ✅ done (reviewer APPROVED + human `/verify`) · ⚠️ done-with-carryover · ❌ blocked

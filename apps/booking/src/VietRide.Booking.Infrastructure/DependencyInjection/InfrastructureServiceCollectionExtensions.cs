@@ -184,6 +184,11 @@ public static class InfrastructureServiceCollectionExtensions
                 options.QueueName = "booking.booking-refunded-stats";
                 options.BindingKeys = [BookingRefundedIntegrationEvent.EventType];
             });
+            services.AddVietRideEventConsumer<TripCompletedIntegrationEvent, TripCompletedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "booking.trip-completed";
+                options.BindingKeys = [TripCompletedIntegrationEvent.EventType];
+            });
         }
 
         // Payment inter-service client (real debit lands Day 15/16).

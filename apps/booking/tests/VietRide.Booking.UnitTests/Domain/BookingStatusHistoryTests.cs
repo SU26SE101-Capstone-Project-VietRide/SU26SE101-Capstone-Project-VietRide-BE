@@ -32,7 +32,7 @@ public sealed class BookingStatusHistoryTests
     }
 
     [Fact]
-    public void FrozenSources_AreExactlyTheReviewedSix()
+    public void FrozenSources_AreExactlyTheReviewedSeven()
         => typeof(BookingStatusHistorySource).GetFields()
             .Select(field => field.GetRawConstantValue())
             .Should().BeEquivalentTo(new object?[]
@@ -43,6 +43,7 @@ public sealed class BookingStatusHistoryTests
                 "EXPIRE_ON_PAYMENT",
                 "CANCEL_BOOKING",
                 "MARK_REFUNDED",
+                "COMPLETE_ON_TRIP_COMPLETED",
             });
 
     [Fact]
