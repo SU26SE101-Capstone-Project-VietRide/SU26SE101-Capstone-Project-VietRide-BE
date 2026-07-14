@@ -54,6 +54,7 @@ public static class HangfireServiceCollectionExtensions
             options.WorkerCount = workerCount;
         });
         services.AddHostedService<ExpiredSeatLockReleaseJobRegistrationHostedService>();
+        services.AddHostedService<AutoCompletedFallbackJobRegistrationHostedService>();
 
         return services;
     }

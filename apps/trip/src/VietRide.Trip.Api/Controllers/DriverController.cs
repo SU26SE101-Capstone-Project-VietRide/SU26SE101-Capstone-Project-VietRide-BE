@@ -2,8 +2,10 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Trip.Api.Filters;
 using VietRide.Trip.Application.Features.DriverSchedules.GetMyDriverSchedule;
 using VietRide.Trip.Application.Features.DriverTrips.GetAssignedTripRoute;
+using VietRide.Trip.Application.Features.Trips.Operations;
 
 namespace VietRide.Trip.Api.Controllers;
 
@@ -48,6 +50,23 @@ public sealed class DriverController : ControllerBase
         var userId = CurrentUserClaims.GetUserId(User);
         return Ok(await mediator.Send(
             new GetAssignedTripRouteQuery(tripId, userId),
+            cancellationToken));
+    }
+
+    [HttpPost("trips/{tripId:guid}/complete")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<CompleteTripResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<CompleteTripResponse>> CompleteTripAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        var actorUserId = CurrentUserClaims.GetUserId(User);
+        return Ok(await mediator.Send(
+            new CompleteTripCommand(tripId, actorUserId),
             cancellationToken));
     }
 }

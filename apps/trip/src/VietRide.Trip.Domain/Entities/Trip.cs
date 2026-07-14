@@ -149,6 +149,14 @@ public sealed class Trip : BaseEntity<Guid>
         Status = TripStatus.COMPLETED;
     }
 
+    public void CompleteAutomatically(DateTimeOffset completedAt)
+    {
+        EnsureStatus(TripStatus.IN_PROGRESS, nameof(CompleteAutomatically));
+        CompletedAt = completedAt;
+        CompletedByUserId = null;
+        Status = TripStatus.COMPLETED;
+    }
+
     public void Cancel(DateTimeOffset cancelledAt, Guid cancelledByUserId, string? reason)
     {
         if (Status is TripStatus.COMPLETED or TripStatus.CANCELLED)

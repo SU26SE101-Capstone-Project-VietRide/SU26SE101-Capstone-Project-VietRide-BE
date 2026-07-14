@@ -586,10 +586,11 @@ public sealed class InternalTripsEndpointTests
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            Environment.SetEnvironmentVariable("INTERNAL_JWT_SECRET", InternalTripsWebApplicationFactory.TestSecret);
             builder.UseSetting("INTERNAL_JWT_SECRET", InternalTripsWebApplicationFactory.TestSecret);
             builder.UseSetting("Trip:BackgroundWorkers:Enabled", "false");
-            builder.UseSetting("ConnectionStrings:Default", "Host=localhost;Port=5432;Database=test;Username=vietride;Password=vietride_dev");
+            builder.UseSetting(
+                "ConnectionStrings:Default",
+                global::VietRide.Trip.IntegrationTests.VietRideWebApplicationFactory.ResolveConnectionString("postgres"));
             builder.UseEnvironment("Testing");
             builder.ConfigureTestServices(services =>
             {

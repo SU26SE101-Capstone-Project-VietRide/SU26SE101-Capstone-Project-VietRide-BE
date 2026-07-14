@@ -13,8 +13,6 @@ namespace VietRide.Trip.Application.Features.Trips.Operations;
 public sealed class DisruptNoSubstitutionCommandHandler : IRequestHandler<DisruptNoSubstitutionCommand, DisruptNoSubstitutionResponse>
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private const string EventType = "trip.trip.disrupted";
-
     private readonly ITripRepository tripRepository;
     private readonly ITripStopRepository tripStopRepository;
     private readonly IIntegrationEventOutbox outbox;
@@ -37,32 +35,33 @@ public sealed class DisruptNoSubstitutionCommandHandler : IRequestHandler<Disrup
 
     public async Task<DisruptNoSubstitutionResponse> Handle(DisruptNoSubstitutionCommand request, CancellationToken cancellationToken)
     {
-        var trip = await tripRepository.GetByIdAsync(request.TripId, cancellationToken)
-            ?? throw new CodedNotFoundException("TRIP_NOT_FOUND", "Trip was not found.");
-        if (trip.OperatorId != request.OperatorId)
-        {
-            throw new ForbiddenException("FORBIDDEN", "Trip does not belong to this operator.");
-        }
-
-        var traveledRatio = await CalculateTraveledRatioAsync(trip.Id, cancellationToken);
-        var now = clock.UtcNow;
-
         await unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {
+            var trip = await tripRepository.GetForUpdateAsync(request.TripId, cancellationToken)
+                ?? throw new CodedNotFoundException("TRIP_NOT_FOUND", "Trip was not found.");
+            if (trip.OperatorId != request.OperatorId)
+            {
+                throw new ForbiddenException("FORBIDDEN", "Trip does not belong to this operator.");
+            }
+
+            if (trip.Status is TripStatus.COMPLETED or TripStatus.CANCELLED or TripStatus.DISRUPTED)
+            {
+                throw new ConflictException("TRIP_ALREADY_TERMINAL", "Trip is already terminal.");
+            }
+
+            var traveledRatio = await CalculateTraveledRatioAsync(trip.Id, cancellationToken);
+            var now = clock.UtcNow;
             trip.Disrupt(now, request.Reason);
             trip.MarkSubstitution(false);
+            var evt = new TripDisruptedIntegrationEvent(
+                trip.Id,
+                trip.OperatorId,
+                now,
+                hasSubstitution: false);
             await outbox.EnqueueAsync(
-                EventType,
-                JsonSerializer.Serialize(new
-                {
-                    tripId = trip.Id,
-                    operatorId = request.OperatorId,
-                    hasSubstitution = false,
-                    traveledRatio,
-                    reason = request.Reason,
-                    occurredAt = now,
-                }, JsonOptions),
+                evt.EventType,
+                JsonSerializer.Serialize(evt, JsonOptions),
                 cancellationToken);
             await unitOfWork.SaveChangesAsync(cancellationToken);
             await unitOfWork.CommitAsync(cancellationToken);
