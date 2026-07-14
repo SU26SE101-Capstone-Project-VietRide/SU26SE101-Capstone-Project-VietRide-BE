@@ -6,6 +6,21 @@ namespace VietRide.Trip.Application.Abstractions.Repositories;
 
 public interface ITripRepository : IRepository<Domain.Entities.Trip, Guid>
 {
+    Task<IReadOnlyList<Guid>> ListScheduledForAutoBoardingAsync(
+        DateTimeOffset latestDeparture,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("Lifecycle candidate scans are not supported by this repository implementation.");
+
+    Task<IReadOnlyList<Guid>> ListBoardingForAutoStartAsync(
+        DateTimeOffset departureBefore,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("Lifecycle candidate scans are not supported by this repository implementation.");
+
+    Task<IReadOnlyList<Guid>> ListInProgressForAutoCompletionAsync(
+        DateTimeOffset arrivalBefore,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("Lifecycle candidate scans are not supported by this repository implementation.");
+
     Task<Domain.Entities.Trip?> AcquireForLifecycleTransitionAsync(
         Guid tripId,
         CancellationToken cancellationToken)

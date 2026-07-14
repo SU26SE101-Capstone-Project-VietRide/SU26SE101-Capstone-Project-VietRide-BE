@@ -53,6 +53,9 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ITripGenerationJobScheduler, HangfireTripGenerationJobScheduler>();
         services.AddScoped<IShuttleDispatchService, ShuttleDispatchService>();
         services.AddScoped<ShuttleDispatchSafetyJob>();
+        services.AddScoped<AutoBoardingJob>();
+        services.AddScoped<AutoStartFallbackJob>();
+        services.AddScoped<AutoCompletedFallbackJob>();
         if (AreBackgroundWorkersEnabled(configuration))
         {
             services.AddVietRideEventConsumer<BookingShuttleConfirmedIntegrationEvent, BookingShuttleConfirmedIntegrationEventHandler>(options =>
@@ -67,6 +70,7 @@ public static class InfrastructureServiceCollectionExtensions
             });
             services.AddHostedService<TripGenerationRecurringJobRegistrationHostedService>();
             services.AddHostedService<ShuttleDispatchSafetyJobRegistrationHostedService>();
+            services.AddHostedService<TripLifecycleJobRegistrationHostedService>();
         }
 
         var redisUrl = configuration["REDIS_URL"]
