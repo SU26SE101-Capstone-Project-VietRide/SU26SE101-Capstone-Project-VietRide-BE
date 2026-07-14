@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using VietRide.Identity.Domain.Enums;
@@ -14,9 +15,11 @@ using VietRide.Shared.Persistence.Outbox;
 namespace VietRide.Identity.Infrastructure.Migrations
 {
     [DbContext(typeof(IdentityDbContext))]
-    partial class IdentityDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260714035451_AddWalletSubscriptionPaymentMethod")]
+    partial class AddWalletSubscriptionPaymentMethod
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -897,9 +900,7 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasFilter("payment_id IS NOT NULL");
 
                     b.HasIndex("SubscriptionId")
-                        .IsUnique()
-                        .HasDatabaseName("uq_subscription_upgrade_attempts_active_subscription")
-                        .HasFilter("status IN ('INITIATED', 'PAYMENT_PENDING')");
+                        .HasDatabaseName("ix_subscription_upgrade_attempts_subscription_id");
 
                     b.HasIndex("TargetPlanId")
                         .HasDatabaseName("ix_subscription_upgrade_attempts_target_plan_id");

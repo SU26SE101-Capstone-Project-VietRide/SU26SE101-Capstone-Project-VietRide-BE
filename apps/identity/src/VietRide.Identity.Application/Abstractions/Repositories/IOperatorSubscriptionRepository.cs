@@ -10,6 +10,16 @@ public interface IOperatorSubscriptionRepository : IRepository<OperatorSubscript
         Guid operatorId,
         CancellationToken cancellationToken = default);
 
+    Task<OperatorSubscription?> GetCurrentByOperatorIdForUpdateAsync(
+        Guid operatorId,
+        CancellationToken cancellationToken = default)
+        => GetCurrentByOperatorIdAsync(operatorId, cancellationToken);
+
+    Task<OperatorSubscription?> GetByIdForUpdateAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+        => GetByIdAsync(id, cancellationToken);
+
     Task<(OperatorSubscription Subscription, SubscriptionPlan Plan)?> GetCurrentWithPlanByOperatorIdAsync(
         Guid operatorId,
         CancellationToken cancellationToken = default)

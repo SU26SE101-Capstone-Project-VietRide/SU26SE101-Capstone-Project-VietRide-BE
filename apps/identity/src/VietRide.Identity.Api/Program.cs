@@ -51,7 +51,10 @@ var registerRecurringJobs = !isTesting;
 if (registerRecurringJobs)
 {
     builder.Services.AddIdentityHangfire(builder.Configuration);
-    builder.Services.AddHangfireServer();
+    builder.Services.AddHangfireServer(options =>
+    {
+        options.WorkerCount = builder.Configuration.GetValue("Hangfire:WorkerCount", 2);
+    });
 }
 
 // RabbitMQ publisher + Outbox background drainer (publishes integration events).
@@ -108,6 +111,11 @@ if (registerRecurringJobs)
         job => job.ResetMonthlyTripUsageAsync(CancellationToken.None),
         "1 0 1 * *",
         new RecurringJobOptions { TimeZone = ict });
+    recurringJobs.AddOrUpdate<OperatorWalletBackfillJob>(
+        OperatorWalletBackfillJob.RecurringJobId,
+        job => job.RunAsync(CancellationToken.None),
+        Cron.Minutely(),
+        new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
 }
 
 app.Run();

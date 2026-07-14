@@ -42,6 +42,7 @@ public sealed class IdentityDbContext : VietRideDbContextBase
     // --- DbSets ---
 
     public DbSet<Operator> Operators => Set<Operator>();
+    public DbSet<OperatorWalletBackfillMarker> OperatorWalletBackfillMarkers => Set<OperatorWalletBackfillMarker>();
     public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
     public DbSet<OperatorSubscription> OperatorSubscriptions => Set<OperatorSubscription>();
     public DbSet<SubscriptionUpgradeAttempt> SubscriptionUpgradeAttempts => Set<SubscriptionUpgradeAttempt>();

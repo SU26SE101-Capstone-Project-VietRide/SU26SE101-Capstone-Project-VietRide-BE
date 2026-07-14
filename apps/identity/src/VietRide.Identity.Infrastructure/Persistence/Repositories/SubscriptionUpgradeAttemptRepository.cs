@@ -40,6 +40,19 @@ public sealed class SubscriptionUpgradeAttemptRepository : ISubscriptionUpgradeA
             .OrderByDescending(attempt => attempt.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
 
+    public Task<SubscriptionUpgradeAttempt?> GetActiveBySubscriptionIdAsync(Guid subscriptionId, CancellationToken cancellationToken = default)
+        => _dbContext.SubscriptionUpgradeAttempts
+            .Where(attempt => attempt.SubscriptionId == subscriptionId
+                && (attempt.Status == SubscriptionUpgradeAttemptStatus.INITIATED
+                    || attempt.Status == SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING))
+            .OrderByDescending(attempt => attempt.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+    public Task<SubscriptionUpgradeAttempt?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default)
+        => _dbContext.SubscriptionUpgradeAttempts
+            .FromSqlInterpolated($"SELECT * FROM vietride_identity.subscription_upgrade_attempts WHERE id = {id} FOR UPDATE")
+            .FirstOrDefaultAsync(cancellationToken);
+
     public async Task<IReadOnlyList<SubscriptionUpgradeAttempt>> ListDueAsync(SubscriptionUpgradeAttemptStatus status, DateTimeOffset dueBefore, CancellationToken cancellationToken = default)
         => await _dbContext.SubscriptionUpgradeAttempts
             .Where(attempt => attempt.Status == status && attempt.DueAt <= dueBefore)

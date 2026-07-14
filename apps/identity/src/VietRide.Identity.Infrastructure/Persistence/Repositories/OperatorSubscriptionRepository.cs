@@ -48,6 +48,24 @@ public sealed class OperatorSubscriptionRepository : IOperatorSubscriptionReposi
             .FirstOrDefaultAsync(cancellationToken);
     }
 
+    public Task<OperatorSubscription?> GetCurrentByOperatorIdForUpdateAsync(
+        Guid operatorId,
+        CancellationToken cancellationToken = default)
+    {
+        return _dbContext.OperatorSubscriptions
+            .FromSqlInterpolated($"SELECT * FROM vietride_identity.operator_subscriptions WHERE operator_id = {operatorId} AND status <> 'CANCELLED' ORDER BY COALESCE(started_at, last_reset_at) DESC LIMIT 1 FOR UPDATE")
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    public Task<OperatorSubscription?> GetByIdForUpdateAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        return _dbContext.OperatorSubscriptions
+            .FromSqlInterpolated($"SELECT * FROM vietride_identity.operator_subscriptions WHERE id = {id} FOR UPDATE")
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     public async Task<(OperatorSubscription Subscription, SubscriptionPlan Plan)?> GetCurrentWithPlanByOperatorIdAsync(
         Guid operatorId,
         CancellationToken cancellationToken = default)

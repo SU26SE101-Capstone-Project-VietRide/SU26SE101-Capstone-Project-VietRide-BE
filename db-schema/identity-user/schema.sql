@@ -71,7 +71,7 @@ CREATE TYPE subscription_status AS ENUM (
     'PENDING_APPROVAL', 'ACTIVE', 'EXPIRED', 'CANCELLED', 'PENDING_PAYMENT'
 );
 
-CREATE TYPE subscription_payment_method AS ENUM ('VNPAY');
+CREATE TYPE subscription_payment_method AS ENUM ('VNPAY', 'WALLET');
 
 CREATE TYPE subscription_billing_period AS ENUM ('MONTHLY', 'YEARLY');
 
@@ -395,6 +395,9 @@ CREATE TABLE subscription_upgrade_attempts (
 
 CREATE UNIQUE INDEX uq_subscription_upgrade_attempts_payment_id
     ON subscription_upgrade_attempts (payment_id) WHERE payment_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_subscription_upgrade_attempts_active_subscription
+    ON subscription_upgrade_attempts (subscription_id)
+    WHERE status IN ('INITIATED', 'PAYMENT_PENDING');
 CREATE INDEX idx_subscription_upgrade_attempts_status_due_at
     ON subscription_upgrade_attempts (status, due_at);
 
@@ -415,6 +418,14 @@ CREATE TABLE subscription_quota_allocations (
 );
 CREATE INDEX idx_subscription_quota_allocations_subscription_resource
     ON subscription_quota_allocations (subscription_id, resource, released_at);
+
+-- Durable marker for replay-safe OperatorWallet bootstrap events.
+CREATE TABLE operator_wallet_backfill_markers (
+    operator_id UUID PRIMARY KEY,
+    event_id UUID NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- =============================================================================
 -- TRIGGERS — auto-update updated_at on UPDATE
@@ -445,6 +456,8 @@ CREATE TRIGGER trg_operator_subscriptions_updated_at BEFORE UPDATE ON operator_s
 CREATE TRIGGER trg_subscription_upgrade_attempts_updated_at BEFORE UPDATE ON subscription_upgrade_attempts
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 CREATE TRIGGER trg_subscription_quota_allocations_updated_at BEFORE UPDATE ON subscription_quota_allocations
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+CREATE TRIGGER trg_operator_wallet_backfill_markers_updated_at BEFORE UPDATE ON operator_wallet_backfill_markers
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 
 -- =============================================================================

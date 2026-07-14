@@ -137,11 +137,12 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
         outboxEvent.EventType.Should().Be("identity.operator.approved");
         outboxEvent.Status.Should().Be(OutboxEventStatus.PENDING);
         using var approvedPayload = JsonDocument.Parse(outboxEvent.Payload);
+        approvedPayload.RootElement.GetProperty("eventId").GetGuid().Should().NotBeEmpty();
         approvedPayload.RootElement.GetProperty("operatorId").GetGuid().Should().Be(operatorId);
         // Postgres timestamptz truncates to microseconds; the payload carries full .NET ticks.
         approvedPayload.RootElement.GetProperty("approvedAt").GetDateTimeOffset()
             .Should().BeCloseTo(operatorEntity.ApprovedAt!.Value, TimeSpan.FromMilliseconds(1));
-        approvedPayload.RootElement.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(["operatorId", "approvedAt"]);
+        approvedPayload.RootElement.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(["eventId", "operatorId", "approvedAt"]);
     }
 
     [Fact]

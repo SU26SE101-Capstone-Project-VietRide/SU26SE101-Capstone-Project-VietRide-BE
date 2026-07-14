@@ -54,5 +54,6 @@ public sealed record SubscriptionUpgradeResponseDto(
     Guid PaymentId,
     long Amount,
     string BillingPeriod,
-    string PaymentRedirectUrl,
-    DateTimeOffset DueAt);
+    string? PaymentRedirectUrl,
+    DateTimeOffset? DueAt,
+    string? InvoiceStatus);

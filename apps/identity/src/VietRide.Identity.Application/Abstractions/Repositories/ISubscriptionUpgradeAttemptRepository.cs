@@ -14,6 +14,16 @@ public interface ISubscriptionUpgradeAttemptRepository : IRepository<Subscriptio
         Guid subscriptionId,
         CancellationToken cancellationToken = default);
 
+    Task<SubscriptionUpgradeAttempt?> GetActiveBySubscriptionIdAsync(
+        Guid subscriptionId,
+        CancellationToken cancellationToken = default)
+        => GetPendingBySubscriptionIdAsync(subscriptionId, cancellationToken);
+
+    Task<SubscriptionUpgradeAttempt?> GetByIdForUpdateAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+        => GetByIdAsync(id, cancellationToken);
+
     Task<IReadOnlyList<SubscriptionUpgradeAttempt>> ListDueAsync(
         SubscriptionUpgradeAttemptStatus status,
         DateTimeOffset dueBefore,

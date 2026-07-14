@@ -20,7 +20,8 @@ public sealed class GetInternalUsersQueryHandler(IUserRepository userRepository)
                 user.Role.ToString(),
                 user.OperatorId,
                 user.Status.ToString(),
-                user.Phone?.Value))
+                user.Phone?.Value,
+                user.Email))
             .ToList();
 
         return Task.FromResult<IReadOnlyList<GetInternalUserResponseDto>>(users);
