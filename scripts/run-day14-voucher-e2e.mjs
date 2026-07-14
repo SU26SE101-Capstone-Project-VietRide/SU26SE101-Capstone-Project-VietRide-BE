@@ -12,6 +12,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { SignJWT, importPKCS8 } from 'jose';
 
 const ROOT = process.cwd();
@@ -60,16 +61,100 @@ async function call(method, p, tok, body, idem) {
   } catch {
     /* no body */
   }
-  return { status: res.status, json };
+  const result = { status: res.status, json };
+  if (method === 'POST' && (p === '/v1/admin/vouchers' || p === '/v1/operator/vouchers') && json?.data?.id)
+    voucherIds.add(json.data.id);
+  if (method === 'POST' && p === '/v1/bookings' && json?.data?.id) bookingIds.add(json.data.id);
+  return result;
 }
 
 const past = new Date(Date.now() - 86_400_000).toISOString();
 const future = new Date(Date.now() + 30 * 86_400_000).toISOString();
 const results = [];
+const voucherIds = new Set();
+const bookingIds = new Set();
 const log = (label, ok, detail) => {
   results.push(ok);
   console.log(`${ok ? 'PASS' : 'FAIL'} | ${label} | ${detail}`);
 };
+
+function psql(sql) {
+  return execFileSync(
+    'docker',
+    ['exec', 'vietride_postgres', 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'vietride', '-d', 'vietride_booking', '-Atc', sql],
+    { encoding: 'utf8' },
+  ).trim();
+}
+
+const sqlIds = (ids) => [...ids].map((id) => `'${id}'`).join(', ');
+
+function cleanup() {
+  if (bookingIds.size) {
+    const ids = sqlIds(bookingIds);
+    psql(`DELETE FROM vietride_booking.tickets WHERE booking_id IN (${ids});
+DELETE FROM vietride_booking.passengers WHERE booking_id IN (${ids});
+DELETE FROM vietride_booking.booking_status_history WHERE booking_id IN (${ids});
+DELETE FROM vietride_booking.bookings WHERE id IN (${ids});`);
+  }
+  if (voucherIds.size) {
+    const ids = sqlIds(voucherIds);
+    psql(`DELETE FROM vietride_booking.operator_voucher_consents WHERE voucher_id IN (${ids});
+DELETE FROM vietride_booking.voucher_usages WHERE voucher_id IN (${ids});
+DELETE FROM vietride_booking.vouchers WHERE id IN (${ids});`);
+  }
+}
+
+function assertClean() {
+  if (bookingIds.size) {
+    const count = psql(`SELECT count(*) FROM vietride_booking.bookings WHERE id IN (${sqlIds(bookingIds)});`);
+    if (count !== '0') throw new Error(`Day-14 fixture cleanup failed: bookings=${count}`);
+  }
+  if (voucherIds.size) {
+    const count = psql(`SELECT count(*) FROM vietride_booking.vouchers WHERE id IN (${sqlIds(voucherIds)});`);
+    if (count !== '0') throw new Error(`Day-14 fixture cleanup failed: vouchers=${count}`);
+  }
+}
+
+function readBookingMode() {
+  const output = execFileSync(
+    'docker',
+    ['inspect', '--format', '{{range .Config.Env}}{{println .}}{{end}}', 'vietride_booking'],
+    { encoding: 'utf8' },
+  );
+  return output.split(/\r?\n/).some((value) => value === 'BOOKING_TRIP_USE_DEV_STUB=true') ? 'stub' : 'real';
+}
+
+function composeBookingMode(mode) {
+  const stub = mode === 'stub' ? 'true' : 'false';
+  const result = spawnSync('docker', [
+    'compose', '--env-file', '.env', '-f', 'infra/docker/docker-compose.yml', '--profile', 'app',
+    'up', '-d', '--force-recreate', 'booking', 'gateway',
+  ], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      BOOKING_TRIP_USE_DEV_STUB: stub,
+      BOOKING_PAYMENT_USE_DEV_STUB: stub,
+      BOOKING_IDENTITY_USE_DEV_STUB: stub,
+    },
+    stdio: 'inherit',
+  });
+  if (result.error || result.status !== 0)
+    throw new Error(`Day-14 could not start Booking/Gateway in ${mode} mode.`);
+}
+
+async function waitForGateway() {
+  for (let attempt = 1; attempt <= 30; attempt += 1) {
+    try {
+      const response = await fetch(`${BASE}/health`);
+      if (response.ok) return;
+    } catch {
+      // Gateway is still accepting the recreated container's socket.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  throw new Error('Day-14 Gateway did not become healthy after Booking stub-mode recreation.');
+}
 
 const adminVoucher = (over = {}) => ({
   name: 'E2E Voucher',
@@ -105,6 +190,12 @@ const booking = (seat, voucherCode) => {
 const admin = await token({ sub: guid(), role: 'SYSTEM_ADMIN' });
 const operatorAdmin = await token({ sub: guid(), role: 'OPERATOR_ADMIN', operatorId: OP_ID });
 
+let runError;
+let previousBookingMode;
+try {
+  previousBookingMode = readBookingMode();
+  composeBookingMode('stub');
+  await waitForGateway();
 // 1. Admin create VIETRIDE_FUNDED voucher
 let r = await call('POST', '/v1/admin/vouchers', admin, adminVoucher(), true);
 const code1 = r.json?.data?.code;
@@ -306,6 +397,28 @@ log(
   `status=${r.status} error=${r.json?.error?.code}`,
 );
 
+if (process.env.DAY14_FORCE_NEWMAN_FAILURE === 'true')
+  throw new Error('Forced Day-14 Newman failure requested');
 const passed = results.filter(Boolean).length;
 console.log(`\n=== Day-14 voucher E2E: ${passed}/${results.length} passed ===`);
-process.exitCode = passed === results.length ? 0 : 1;
+if (passed !== results.length) throw new Error(`Day-14 voucher E2E failed: ${passed}/${results.length} passed`);
+} catch (error) {
+  runError = error;
+} finally {
+  try {
+    cleanup();
+    assertClean();
+    console.log('PASS | D14 fixture cleanup | temporary vouchers and bookings removed');
+  } catch (cleanupError) {
+    if (!runError) runError = cleanupError;
+    else console.error(`FAIL | D14 fixture cleanup | ${cleanupError.message}`);
+  }
+  try {
+    if (previousBookingMode && previousBookingMode !== 'stub') composeBookingMode(previousBookingMode);
+    if (previousBookingMode) console.log(`PASS | D14 mode restore | ${previousBookingMode}`);
+  } catch (restoreError) {
+    if (!runError) runError = restoreError;
+    else console.error(`FAIL | D14 mode restore | ${restoreError.message}`);
+  }
+}
+if (runError) throw runError;

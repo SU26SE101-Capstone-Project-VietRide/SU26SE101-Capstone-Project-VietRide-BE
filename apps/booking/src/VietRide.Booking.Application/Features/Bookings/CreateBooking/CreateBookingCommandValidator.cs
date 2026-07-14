@@ -2,13 +2,7 @@ using FluentValidation;
 
 namespace VietRide.Booking.Application.Features.Bookings.CreateBooking;
 
-/// <summary>
-/// Input-shape and field validation for <see cref="CreateBookingCommand"/>.
-/// <para>
-/// PII fields (FullName, PhoneNumber, IdNumber) are validated non-empty here
-/// but are NOT persisted — dropped after this check per schema.sql line 149.
-/// </para>
-/// </summary>
+/// <summary>Input-shape and field validation for <see cref="CreateBookingCommand"/>.</summary>
 public sealed class CreateBookingCommandValidator : AbstractValidator<CreateBookingCommand>
 {
     private static readonly string[] ValidPaymentMethods = ["WALLET", "VNPAY"];
@@ -55,22 +49,15 @@ public sealed class CreateBookingCommandValidator : AbstractValidator<CreateBook
             .WithErrorCode("BOOKING_MAX_SEATS_EXCEEDED")
             .WithMessage("A booking cannot exceed 5 seats.");
 
-        // Per-seat PII validation
+        RuleFor(x => x.Seats)
+            .Must(HaveDistinctSeatNumbers)
+            .When(x => x.Seats is { Count: > 0 })
+            .WithName("seats")
+            .WithMessage("Seat numbers must be unique.");
+
         RuleForEach(x => x.Seats).ChildRules(seat =>
         {
             seat.RuleFor(s => s.SeatNumber)
-                .NotEmpty()
-                .MaximumLength(10);
-
-            seat.RuleFor(s => s.FullName)
-                .NotEmpty()
-                .MaximumLength(100);
-
-            seat.RuleFor(s => s.PhoneNumber)
-                .NotEmpty()
-                .MaximumLength(20);
-
-            seat.RuleFor(s => s.IdNumber)
                 .NotEmpty()
                 .MaximumLength(20);
         });
@@ -87,4 +74,7 @@ public sealed class CreateBookingCommandValidator : AbstractValidator<CreateBook
             RuleFor(x => x.ShuttlePickup!.Longitude).InclusiveBetween(-180m, 180m);
         });
     }
+
+    private static bool HaveDistinctSeatNumbers(IReadOnlyList<SeatRequest> seats)
+        => seats.Select(seat => seat.SeatNumber.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Count() == seats.Count;
 }

@@ -126,6 +126,12 @@ public sealed class DevTripServiceClient : ITripServiceClient
         return Task.FromResult(true);
     }
 
+    public Task<bool> BookRoundTripSeatsAsync(
+        RoundTripBookSeatsLeg outbound,
+        RoundTripBookSeatsLeg @return,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(true);
+
     public Task ReleaseSeatsAsync(
         Guid tripId,
         Guid seatLockToken,

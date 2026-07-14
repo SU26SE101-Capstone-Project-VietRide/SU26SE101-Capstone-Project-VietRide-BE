@@ -9,8 +9,10 @@ using VietRide.Booking.Application.Features.Bookings.ExpireBookingOnPayment;
 using VietRide.Booking.Application.Features.Bookings.MarkBookingRefunded;
 using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
+using VietRide.Booking.Domain.ValueObjects;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Booking.UnitTests.Features.Bookings;
 
@@ -22,6 +24,9 @@ public sealed class PaymentEventHandlersTests
     private static readonly Guid TripId = Guid.Parse("44444444-4444-4444-4444-444444444444");
     private static readonly Guid SeatLockToken = Guid.Parse("55555555-5555-5555-5555-555555555555");
     private static readonly Guid PassengerId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+    private static readonly Guid BookingGroupId = Guid.Parse("88888888-8888-8888-8888-888888888888");
+    private static readonly Guid SecondTripId = Guid.Parse("99999999-9999-9999-9999-999999999999");
+    private static readonly Guid SecondSeatLockToken = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-06-24T10:00:00Z");
 
     private readonly IBookingRepository _bookings = Substitute.For<IBookingRepository>();
@@ -116,6 +121,65 @@ public sealed class PaymentEventHandlersTests
     }
 
     [Fact]
+    public async Task ConfirmBookingOnPayment_WhenBookingGroup_BatchBooksAndConfirmsBothWithoutRelocking()
+    {
+        var firstBooking = CreateBookingProjection(BookingGroupId, 200_000);
+        var secondBooking = CreateBookingProjection(BookingGroupId, 300_000);
+        var firstSnapshot = CreateSnapshot(bookingId: firstBooking.Id);
+        var secondSnapshot = CreateSnapshot(
+            secondBooking.Id,
+            SecondTripId,
+            SecondSeatLockToken,
+            300_000,
+            "B01");
+        _bookings.QueryNoTracking().Returns(new[]
+        {
+            firstBooking,
+            secondBooking,
+        }.AsQueryable());
+        _bookings.GetPendingPaymentTransitionSnapshotAsync(firstBooking.Id, Arg.Any<CancellationToken>())
+            .Returns(firstSnapshot);
+        _bookings.GetPendingPaymentTransitionSnapshotAsync(secondBooking.Id, Arg.Any<CancellationToken>())
+            .Returns(secondSnapshot);
+        _tripClient.BookRoundTripSeatsAsync(
+                Arg.Any<RoundTripBookSeatsLeg>(),
+                Arg.Any<RoundTripBookSeatsLeg>(),
+                Arg.Any<CancellationToken>())
+            .Returns(true);
+        _bookings.TryConfirmPendingPaymentAsync(firstBooking.Id, Now, Arg.Any<CancellationToken>()).Returns(true);
+        _bookings.TryConfirmPendingPaymentAsync(secondBooking.Id, Now, Arg.Any<CancellationToken>()).Returns(true);
+
+        var handler = new ConfirmBookingOnPaymentCommandHandler(
+            _bookings,
+            _tripClient,
+            _outbox,
+            _clock,
+            NullLogger<ConfirmBookingOnPaymentCommandHandler>.Instance,
+            _statusHistory);
+
+        var transitioned = await handler.Handle(
+            new ConfirmBookingOnPaymentCommand(PaymentId, "BOOKING_GROUP", BookingGroupId, 500_000),
+            CancellationToken.None);
+
+        transitioned.Should().BeTrue();
+        await _tripClient.Received(1).BookRoundTripSeatsAsync(
+            Arg.Any<RoundTripBookSeatsLeg>(),
+            Arg.Any<RoundTripBookSeatsLeg>(),
+            Arg.Any<CancellationToken>());
+        await _tripClient.DidNotReceiveWithAnyArgs()
+            .LockSeatsAsync(default, default!, default, default!, default, default);
+        await _tripClient.DidNotReceiveWithAnyArgs()
+            .BookSeatsAsync(default, default, default, default!, default);
+        await _statusHistory.Received(2).AddAsync(
+            Arg.Is<BookingStatusHistory>(history => history.Status == BookingStatus.CONFIRMED),
+            Arg.Any<CancellationToken>());
+        await _outbox.Received(2).EnqueueAsync(
+            "booking.booking.confirmed",
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task ExpireBookingOnPayment_WhenPending_ExpiresAndReleasesPersistedSeatLockOnce()
     {
         _bookings.GetPendingPaymentTransitionSnapshotAsync(BookingId, Arg.Any<CancellationToken>())
@@ -128,7 +192,8 @@ public sealed class PaymentEventHandlersTests
             _bookingService,
             _clock,
             NullLogger<ExpireBookingOnPaymentCommandHandler>.Instance,
-            _statusHistory);
+            _statusHistory,
+            Substitute.For<IVoucherService>());
 
         var transitioned = await handler.Handle(
             new ExpireBookingOnPaymentCommand(PaymentId, "BOOKING", BookingId),
@@ -167,7 +232,8 @@ public sealed class PaymentEventHandlersTests
             _bookingService,
             _clock,
             NullLogger<ExpireBookingOnPaymentCommandHandler>.Instance,
-            _statusHistory);
+            _statusHistory,
+            Substitute.For<IVoucherService>());
 
         var transitioned = await handler.Handle(
             new ExpireBookingOnPaymentCommand(PaymentId, "BOOKING", BookingId),
@@ -196,7 +262,8 @@ public sealed class PaymentEventHandlersTests
             _bookingService,
             _clock,
             NullLogger<ExpireBookingOnPaymentCommandHandler>.Instance,
-            _statusHistory);
+            _statusHistory,
+            Substitute.For<IVoucherService>());
 
         var transitioned = await handler.Handle(
             new ExpireBookingOnPaymentCommand(PaymentId, "BOOKING", BookingId),
@@ -265,14 +332,37 @@ public sealed class PaymentEventHandlersTests
             .EnqueueAsync(default!, default!, default);
     }
 
-    private static BookingPaymentTransitionSnapshot CreateSnapshot()
-        => new(
-            BookingId,
+    private static VietRide.Booking.Domain.Entities.Booking CreateBookingProjection(
+        Guid bookingGroupId,
+        long amount)
+        => VietRide.Booking.Domain.Entities.Booking.CreatePendingPayment(
+            BookingCode.Generate(Now),
             PassengerUserId,
             TripId,
-            SeatLockToken,
-            200_000,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            null,
+            null,
+            null,
+            Money.FromRaw(amount),
+            Money.Zero,
+            Money.FromRaw(amount),
+            bookingGroupId: bookingGroupId,
+            seatLockToken: SeatLockToken);
+
+    private static BookingPaymentTransitionSnapshot CreateSnapshot(
+        Guid? bookingId = null,
+        Guid? tripId = null,
+        Guid? seatLockToken = null,
+        long totalAmount = 200_000,
+        string seatNumber = "A01")
+        => new(
+            bookingId ?? BookingId,
+            PassengerUserId,
+            tripId ?? TripId,
+            seatLockToken ?? SeatLockToken,
+            totalAmount,
             VoucherUsageId: null,
-            [new PassengerSeatAssignment(PassengerId, "A01")],
+            [new PassengerSeatAssignment(PassengerId, seatNumber)],
             ["VT-20260630-ABCDEFGH"]);
 }

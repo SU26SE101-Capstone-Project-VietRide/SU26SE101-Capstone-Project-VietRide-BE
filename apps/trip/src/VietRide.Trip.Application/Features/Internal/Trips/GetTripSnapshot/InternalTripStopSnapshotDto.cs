@@ -9,4 +9,5 @@ public sealed record InternalTripStopSnapshotDto(
     double? DistanceFromOriginKm,
     long? FareFromThisStop,
     string Status,
-    DateTimeOffset? ActualArrivalTime);
+    DateTimeOffset? ActualArrivalTime,
+    bool IsActive = true);

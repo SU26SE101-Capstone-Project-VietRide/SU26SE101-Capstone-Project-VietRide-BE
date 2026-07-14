@@ -27,26 +27,42 @@ function psql(database, sql) {
   ).trim();
 }
 
-const template = psql(
+function cleanup() {
+  psql('vietride_booking', `DELETE FROM vietride_booking.tickets WHERE booking_id = '${bookingId}'; DELETE FROM vietride_booking.passengers WHERE booking_id = '${bookingId}'; DELETE FROM vietride_booking.bookings WHERE id = '${bookingId}';`);
+  psql('vietride_trip', `DELETE FROM vietride_trip.trips WHERE id IN ('${tripId}', '${otherTripId}');`);
+}
+
+function assertClean() {
+  const bookingRows = psql('vietride_booking', `SELECT count(*) FROM vietride_booking.bookings WHERE id = '${bookingId}';`);
+  const tripRows = psql('vietride_trip', `SELECT count(*) FROM vietride_trip.trips WHERE id IN ('${tripId}', '${otherTripId}');`);
+  if (bookingRows !== '0' || tripRows !== '0') throw new Error(`Day-18 fixture cleanup failed: bookings=${bookingRows}, trips=${tripRows}`);
+}
+
+let runError;
+try {
+  const template = psql(
   'vietride_trip',
-  `SELECT operator_id || '|' || route_id || '|' || vehicle_id
-   FROM vietride_trip.trips ORDER BY created_at LIMIT 1`,
-);
-if (!template) throw new Error('Day-18 E2E needs one existing local Trip route/vehicle fixture.');
-const [operatorId, routeId, vehicleId] = template.split('|');
-const encodedPolylineTemplate = psql(
+  `SELECT t.operator_id || '|' || t.route_id || '|' || t.vehicle_id
+   FROM vietride_trip.trips t
+   JOIN vietride_trip.routes r ON r.id = t.route_id
+   WHERE r.path_polyline IS NULL OR r.path_polyline = ''
+   ORDER BY t.created_at LIMIT 1`,
+  );
+  if (!template) throw new Error('Day-18 E2E needs one existing local Trip route/vehicle fixture without path geometry.');
+  const [operatorId, routeId, vehicleId] = template.split('|');
+  const encodedPolylineTemplate = psql(
   'vietride_trip',
   `SELECT id || '|' || path_polyline
    FROM vietride_trip.routes
    WHERE path_polyline IS NOT NULL AND path_polyline <> ''
    ORDER BY created_at LIMIT 1`,
-);
-if (!encodedPolylineTemplate)
-  throw new Error('Day-18 E2E needs one existing Route with an encoded polyline fixture.');
-const encodedPolylineSeparator = encodedPolylineTemplate.indexOf('|');
-const encodedPolylineRouteId = encodedPolylineTemplate.slice(0, encodedPolylineSeparator);
-const encodedPolyline = encodedPolylineTemplate.slice(encodedPolylineSeparator + 1);
-const encodedPolylineBase64 = Buffer.from(encodedPolyline, 'utf8').toString('base64');
+  );
+  if (!encodedPolylineTemplate)
+    throw new Error('Day-18 E2E needs one existing Route with an encoded polyline fixture.');
+  const encodedPolylineSeparator = encodedPolylineTemplate.indexOf('|');
+  const encodedPolylineRouteId = encodedPolylineTemplate.slice(0, encodedPolylineSeparator);
+  const encodedPolyline = encodedPolylineTemplate.slice(encodedPolylineSeparator + 1);
+  const encodedPolylineBase64 = Buffer.from(encodedPolyline, 'utf8').toString('base64');
 
 psql(
   'vietride_trip',
@@ -110,31 +126,37 @@ const driverToken = await token(driverId, 'DRIVER');
 const assistantToken = await token(assistantId, 'ASSISTANT');
 const unassignedDriverToken = await token(unassignedDriverId, 'DRIVER');
 const passengerToken = await token(passengerUserId, 'PASSENGER');
-const run = spawnSync(
-  'npx',
-  [
-    '--yes', 'newman', 'run', 'docs/api/postman/vietride.postman_collection.json',
-    '-e', 'docs/api/postman/vietride.local.postman_environment.json',
-    '--folder', process.platform === 'win32'
-      ? '"Driver - Day 18 schedule + manifest + boarding flow"'
-      : 'Driver - Day 18 schedule + manifest + boarding flow',
-    '--env-var', `baseUrl=${baseUrl}`,
-    '--env-var', `driverAccessToken=${driverToken}`,
-    '--env-var', `assistantAccessToken=${assistantToken}`,
-    '--env-var', `unassignedDriverAccessToken=${unassignedDriverToken}`,
-    '--env-var', `passengerAccessToken=${passengerToken}`,
-    '--env-var', `day18TripId=${tripId}`,
-    '--env-var', `day18OtherTripId=${otherTripId}`,
-    '--env-var', `day18EncodedPolylineBase64=${encodedPolylineBase64}`,
-    '--env-var', `day18PassengerRecordId=${passengerRecordId}`,
-    '--env-var', `day18BookingCode=${bookingCode}`,
-    '--env-var', `day18TicketCode=${ticketCode}`,
-    '--reporters', 'cli',
-  ],
-  { cwd: root, shell: process.platform === 'win32', stdio: 'inherit' },
-);
+const newmanArgs = [
+  '--yes', 'newman', 'run', 'docs/api/postman/vietride.postman_collection.json',
+  '-e', 'docs/api/postman/vietride.local.postman_environment.json',
+  '--folder', 'Driver - Day 18 schedule + manifest + boarding flow',
+  '--env-var', `baseUrl=${baseUrl}`,
+  '--env-var', `driverAccessToken=${driverToken}`,
+  '--env-var', `assistantAccessToken=${assistantToken}`,
+  '--env-var', `unassignedDriverAccessToken=${unassignedDriverToken}`,
+  '--env-var', `passengerAccessToken=${passengerToken}`,
+  '--env-var', `day18TripId=${tripId}`,
+  '--env-var', `day18OtherTripId=${otherTripId}`,
+  '--env-var', `day18EncodedPolylineBase64=${encodedPolylineBase64}`,
+  '--env-var', `day18PassengerRecordId=${passengerRecordId}`,
+  '--env-var', `day18BookingCode=${bookingCode}`,
+  '--env-var', `day18TicketCode=${ticketCode}`,
+  '--reporters', 'cli',
+];
+const run = process.env.DAY18_FORCE_NEWMAN_FAILURE === 'true'
+  ? { status: 1 }
+  : (() => {
+    const useNpxCli = process.platform === 'win32';
+    const npxCli = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npx-cli.js');
+    return spawnSync(useNpxCli ? process.execPath : 'npx', useNpxCli ? [npxCli, ...newmanArgs] : newmanArgs, {
+      cwd: root,
+      // Passing the argument array directly preserves generated bearer tokens.
+      shell: false,
+      stdio: 'inherit',
+    });
+  })();
 if (run.error) throw run.error;
-if (run.status !== 0) process.exit(run.status ?? 1);
+if (run.status !== 0) throw new Error(`Newman failed with status ${run.status ?? 1}`);
 
 const state = psql(
   'vietride_booking',
@@ -144,11 +166,13 @@ const state = psql(
 if (state !== 'BOARDED|true') throw new Error(`Day-18 DB side-effect check failed: ${state}`);
 console.log('PASS | Day-18 DB side effect | boardingStatus=BOARDED boardedAt=set');
 
-// Leave deterministic shared fixtures clean so older day harnesses can safely
-// recreate their route/vehicle rows after this cumulative regression flow.
-psql('vietride_booking', `DELETE FROM vietride_booking.bookings WHERE id = '${bookingId}';`);
-psql(
-  'vietride_trip',
-  `DELETE FROM vietride_trip.trips WHERE id IN ('${tripId}', '${otherTripId}');`,
-);
-console.log('PASS | Day-18 fixture cleanup | temporary booking and trips removed');
+} catch (error) {
+  runError = error;
+} finally {
+  // Leave deterministic shared fixtures clean so older day harnesses can safely
+  // recreate their route/vehicle rows after this cumulative regression flow.
+  cleanup();
+  assertClean();
+  console.log('PASS | D18 fixture cleanup | temporary booking and trips removed');
+}
+if (runError) throw runError;

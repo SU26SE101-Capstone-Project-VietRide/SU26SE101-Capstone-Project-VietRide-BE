@@ -62,6 +62,8 @@ const seed = {
   standardVehicleTypeId: '00000000-0000-0000-0000-000000000101',
   driverScheduleId: '80000000-0000-0000-0000-000000000011',
   legacyTripId: '81000000-0000-0000-0000-000000000011',
+  subscriptionPlanId: '11000000-0000-0000-0000-000000000011',
+  subscriptionId: '12000000-0000-0000-0000-000000000011',
 };
 
 const runId = crypto.randomUUID();
@@ -185,6 +187,42 @@ on conflict (id) do update set
   status = excluded.status,
   operator_id = excluded.operator_id,
   deleted_at = null,
+  updated_at = now();
+
+insert into ${identitySchema}.subscription_plans (
+  id, name, description, price_per_month, price_per_year, max_vehicles, max_drivers,
+  max_assistants, max_operator_users, max_routes, max_trips_per_month, is_active
+)
+values (
+  '${seed.subscriptionPlanId}', 'Day 11 deterministic local plan', 'Harness-only quota fixture',
+  0, 0, 100, 100, 100, 100, 100, 100, true
+)
+on conflict (id) do update set
+  name = excluded.name,
+  description = excluded.description,
+  max_vehicles = excluded.max_vehicles,
+  max_drivers = excluded.max_drivers,
+  max_assistants = excluded.max_assistants,
+  max_operator_users = excluded.max_operator_users,
+  max_routes = excluded.max_routes,
+  max_trips_per_month = excluded.max_trips_per_month,
+  is_active = true,
+  updated_at = now();
+
+insert into ${identitySchema}.operator_subscriptions (
+  id, operator_id, plan_id, status, started_at, expires_at
+)
+values (
+  '${seed.subscriptionId}', '${seed.operatorId}', '${seed.subscriptionPlanId}',
+  'ACTIVE'::subscription_status, now() - interval '1 day', now() + interval '30 days'
+)
+on conflict (operator_id) do update set
+  id = excluded.id,
+  plan_id = excluded.plan_id,
+  status = excluded.status,
+  started_at = excluded.started_at,
+  expires_at = excluded.expires_at,
+  current_trips_this_month = 0,
   updated_at = now();
 
 commit;
@@ -333,8 +371,8 @@ insert into ${tripSchema}.vehicles (
 )
 values (
   '${seed.vehicleId}', '${seed.operatorId}', '${seed.standardVehicleTypeId}', 'DAY11-LOCAL-01',
-  '{"Version":1,"VehicleTypeCode":"STANDARD_BUS","TotalSeats":2,"Rows":1,"Cols":2,"Decks":1,"Aisles":[{"AfterCol":1}],"Seats":[{"SeatNumber":"A01","Row":1,"Col":1,"Deck":1,"Type":"STANDARD","IsWindow":true,"IsAisle":false,"Disabled":false},{"SeatNumber":"A02","Row":1,"Col":2,"Deck":1,"Type":"STANDARD","IsWindow":false,"IsAisle":true,"Disabled":false}]}'::jsonb,
-  2, 100.00, 1.50, 'ACTIVE', true, null
+  '{"Version":1,"VehicleTypeCode":"STANDARD_BUS","TotalSeats":6,"Rows":3,"Cols":2,"Decks":1,"Aisles":[{"AfterCol":1}],"Seats":[{"SeatNumber":"A01","Row":1,"Col":1,"Deck":1,"Type":"STANDARD","IsWindow":true,"IsAisle":false,"Disabled":false},{"SeatNumber":"A02","Row":1,"Col":2,"Deck":1,"Type":"STANDARD","IsWindow":false,"IsAisle":true,"Disabled":false},{"SeatNumber":"A03","Row":2,"Col":1,"Deck":1,"Type":"STANDARD","IsWindow":true,"IsAisle":false,"Disabled":false},{"SeatNumber":"A04","Row":2,"Col":2,"Deck":1,"Type":"STANDARD","IsWindow":false,"IsAisle":true,"Disabled":false},{"SeatNumber":"A05","Row":3,"Col":1,"Deck":1,"Type":"STANDARD","IsWindow":true,"IsAisle":false,"Disabled":false},{"SeatNumber":"A06","Row":3,"Col":2,"Deck":1,"Type":"STANDARD","IsWindow":false,"IsAisle":true,"Disabled":false}]}'::jsonb,
+  6, 100.00, 1.50, 'ACTIVE', true, null
 )
 on conflict (id) do update set
   operator_id = excluded.operator_id,
@@ -373,6 +411,37 @@ on conflict (id) do update set
 
 commit;
 `,
+  );
+}
+
+function cleanupFixtures() {
+  runSql(
+    process.env.TRIP_DB || 'vietride_trip',
+    `begin;
+delete from ${tripSchema}.trip_stop_fares where trip_id in (select id from ${tripSchema}.trips where driver_schedule_id = '${seed.driverScheduleId}');
+delete from ${tripSchema}.trip_stops where trip_id in (select id from ${tripSchema}.trips where driver_schedule_id = '${seed.driverScheduleId}');
+delete from ${tripSchema}.trip_seats where trip_id in (select id from ${tripSchema}.trips where driver_schedule_id = '${seed.driverScheduleId}');
+delete from ${tripSchema}.trips where driver_schedule_id = '${seed.driverScheduleId}';
+delete from ${tripSchema}.trip_generation_skip_logs where driver_schedule_id = '${seed.driverScheduleId}';
+delete from ${tripSchema}.driver_schedules where id = '${seed.driverScheduleId}';
+delete from ${tripSchema}.vehicles where id = '${seed.vehicleId}';
+delete from ${tripSchema}.route_stop_fare_templates where route_id = '${seed.routeId}';
+delete from ${tripSchema}.route_stops where route_id = '${seed.routeId}';
+delete from ${tripSchema}.routes where id = '${seed.routeId}';
+delete from ${tripSchema}.operator_stations where operator_id = '${seed.operatorId}';
+delete from ${tripSchema}.stops where id = '${seed.stopId}';
+delete from ${tripSchema}.stations where id in ('${seed.originStationId}', '${seed.destinationStationId}');
+commit;`,
+  );
+  runSql(
+    process.env.IDENTITY_DB || 'vietride_identity',
+    `begin;
+delete from ${identitySchema}.subscription_quota_allocations where operator_id = '${seed.operatorId}';
+delete from ${identitySchema}.operator_subscriptions where operator_id = '${seed.operatorId}';
+delete from ${identitySchema}.users where id in ('${seed.operatorAdminUserId}', '${seed.driverUserId}', '${seed.assistantUserId}', '${seed.passengerUserId}');
+delete from ${identitySchema}.operators where id = '${seed.operatorId}';
+delete from ${identitySchema}.subscription_plans where id = '${seed.subscriptionPlanId}';
+commit;`,
   );
 }
 
@@ -444,6 +513,67 @@ async function fetchJson(url, options = {}) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+function ensureCurrentRealSeamImages() {
+  const compose = [
+    'compose',
+    '--env-file',
+    '.env',
+    '-f',
+    'infra/docker/docker-compose.yml',
+    '--profile',
+    'app',
+  ];
+  const build = childProcess.spawnSync('docker', [...compose, 'build', 'identity', 'trip'], {
+    cwd: repoRoot,
+    stdio: 'inherit',
+  });
+  if (build.error || build.status !== 0)
+    throw new Error('Could not build current Identity and Trip images for the Day-11 real seam.');
+
+  const up = childProcess.spawnSync(
+    'docker',
+    [...compose, 'up', '-d', '--force-recreate', 'identity', 'trip'],
+    { cwd: repoRoot, stdio: 'inherit' },
+  );
+  if (up.error || up.status !== 0)
+    throw new Error('Could not recreate current Identity and Trip containers for the Day-11 real seam.');
+}
+
+async function waitForContainerHealthy(containerName) {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const probe = childProcess.spawnSync(
+      'docker',
+      ['inspect', '--format', '{{.State.Health.Status}}', containerName],
+      { cwd: repoRoot, encoding: 'utf8' },
+    );
+    if (probe.status === 0 && probe.stdout.trim() === 'healthy') return;
+    await sleep(1000);
+  }
+  throw new Error(`Day-11 real-seam container did not become healthy: ${containerName}`);
+}
+
+async function verifyIdentityQuotaAllocationRoute() {
+  const identityBaseUrl =
+    process.env.DAY11_IDENTITY_SERVICE_BASE_URL || process.env.IDENTITY_SERVICE_BASE_URL || 'http://localhost:5001';
+  const { response, text } = await fetchJson(
+    `${identityBaseUrl.replace(/\/$/, '')}/internal/v1/operators/${seed.operatorId}/quota-allocations`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    },
+  );
+
+  // An unauthenticated request must match the protected route and return 401.
+  // This catches a stale Identity image that lacks the endpoint without mutating a quota.
+  if (response.status !== 401) {
+    throw new Error(
+      `Day-11 quota-allocation route preflight expected protected 401, got ${response.status}: ${text}`,
+    );
+  }
+  console.log('PASS | D11 Identity quota route | protected internal quota-allocation endpoint is current');
 }
 
 async function activateDriverScheduleThroughGateway(operatorAdminAccessToken) {
@@ -717,6 +847,20 @@ async function runInternalSeamFlow(generatedTripId) {
 }
 
 async function main() {
+  if (process.env.DAY11_CLEANUP_ONLY === 'true') {
+    cleanupFixtures();
+    console.log('PASS | D11 fixture cleanup | deterministic Identity and Trip fixtures removed');
+    return;
+  }
+
+  const retainFixtures = process.env.DAY11_RETAIN_FIXTURES === 'true';
+  let runError;
+  try {
+  ensureCurrentRealSeamImages();
+  await waitForContainerHealthy('vietride_identity');
+  await waitForContainerHealthy('vietride_trip');
+  await verifyIdentityQuotaAllocationRoute();
+  cleanupFixtures();
   seedIdentity();
   seedTripConfig();
 
@@ -744,6 +888,8 @@ async function main() {
   console.log(
     'Day-11 local Newman harness seeded deterministic prerequisite Identity/Trip config data.',
   );
+  if (process.env.DAY11_FORCE_NEWMAN_FAILURE === 'true')
+    throw new Error('Forced Day-11 Newman failure requested');
   const exitCode = await runNewman({
     operatorAdminAccessToken,
     passengerAccessToken,
@@ -754,11 +900,22 @@ async function main() {
     day11DepartureDate,
   });
 
-  if (exitCode === 0) {
+  if (exitCode === 0 && process.env.DAY11_SKIP_INTERNAL_SEAM !== 'true') {
     await runInternalSeamFlow(generatedTrip.tripId);
   }
 
-  process.exitCode = exitCode;
+  if (exitCode !== 0) throw new Error(`Newman failed with status ${exitCode}`);
+  } catch (error) {
+    runError = error;
+  } finally {
+    if (retainFixtures) {
+      console.log('PASS | D11 fixture provision | cleanup ownership transferred to the calling harness');
+    } else {
+      cleanupFixtures();
+      console.log('PASS | D11 fixture cleanup | deterministic Identity and Trip fixtures removed');
+    }
+  }
+  if (runError) throw runError;
 }
 
 main().catch((error) => {

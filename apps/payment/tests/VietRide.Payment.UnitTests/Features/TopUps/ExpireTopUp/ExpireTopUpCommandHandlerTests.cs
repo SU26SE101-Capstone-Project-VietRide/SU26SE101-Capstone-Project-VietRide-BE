@@ -27,13 +27,13 @@ public sealed class ExpireTopUpCommandHandlerTests
         result.ExpiredCount.Should().Be(1);
         stalePending.Status.Should().Be(TopUpRequestStatus.EXPIRED);
         stalePending.ExpiredAt.Should().Be(Now);
-        repository.LastExpiresBefore.Should().Be(Now.AddMinutes(-15));
+        repository.LastExpiresBefore.Should().Be(Now.AddMinutes(-10));
     }
 
     [Fact]
     public async Task Handle_WhenPendingTopUpIsExactly15MinutesOld_LeavesItPending()
     {
-        var exactlyAtBoundary = CreateTopUp(createdAt: Now.AddMinutes(-15));
+        var exactlyAtBoundary = CreateTopUp(createdAt: Now.AddMinutes(-10));
         var repository = new FakeTopUpRequestRepository(exactlyAtBoundary);
         var handler = CreateHandler(repository);
 

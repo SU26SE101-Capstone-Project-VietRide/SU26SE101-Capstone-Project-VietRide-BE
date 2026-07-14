@@ -79,7 +79,7 @@ public class CreateBookingCommandHandlerTests
             DropoffStationId: null,
             DropoffStopId: null,
             Seats: Enumerable.Range(1, seatCount)
-                .Select(i => new SeatRequest($"A{i:D2}", "Nguyen Van A", "0900000000", "012345678901"))
+                .Select(i => new SeatRequest($"A{i:D2}"))
                 .ToList(),
             VoucherCode: voucherCode,
             PaymentMethod: paymentMethod,
@@ -201,6 +201,21 @@ public class CreateBookingCommandHandlerTests
         result.Errors.Should().ContainSingle(e =>
             e.ErrorCode == "BOOKING_MAX_SEATS_EXCEEDED"
             && (e.ErrorMessage.Contains("5 seats") || e.ErrorMessage.Contains("cannot exceed")));
+    }
+
+    [Fact]
+    public void Validator_DuplicateSeatsAfterTrimAndCaseFold_ReturnsValidationFailure()
+    {
+        var command = BuildCommand() with
+        {
+            Seats = [new SeatRequest(" A01 "), new SeatRequest("a01")],
+        };
+
+        var result = new CreateBookingCommandValidator().Validate(command);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(error =>
+            string.Equals(error.PropertyName, "seats", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -356,8 +371,8 @@ public class CreateBookingCommandHandlerTests
         var handler = BuildSut();
         var act = () => handler.Handle(BuildCommand(), CancellationToken.None);
 
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*Payment transport error*");
+        await act.Should().ThrowAsync<VietRide.Booking.Application.Exceptions.BookingPaymentException>()
+            .Where(e => e.StatusCode == 502 && e.ErrorCode == "PAYMENT_VNPAY_ERROR");
 
         // Compensation: release-seats must have been called
         await _bookingService.Received(1)

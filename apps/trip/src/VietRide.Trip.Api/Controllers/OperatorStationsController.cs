@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Trip.Api.Controllers.Requests;
+using VietRide.Trip.Api.Filters;
 using VietRide.Trip.Application.Features.Stations;
 
 namespace VietRide.Trip.Api.Controllers;
@@ -14,6 +15,7 @@ namespace VietRide.Trip.Api.Controllers;
 public sealed class OperatorStationsController : ControllerBase
 {
     private const string OperatorRoles = "OPERATOR_STAFF,OPERATOR_ADMIN";
+    private const string OperatorWriteRole = "OPERATOR_ADMIN";
 
     private readonly IMediator mediator;
 
@@ -76,6 +78,35 @@ public sealed class OperatorStationsController : ControllerBase
 
         return request.StationId.HasValue ? Ok(response) : StatusCode(StatusCodes.Status201Created, response);
     }
+
+    [HttpPatch("{stationId:guid}")]
+    [RequireIdempotencyKey]
+    [Authorize(Roles = OperatorWriteRole)]
+    [ProducesResponseType(typeof(ApiResponse<OperatorStationDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<OperatorStationDto>> PatchAsync(
+        Guid stationId,
+        [FromBody] UpdateOperatorStationRequest request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await mediator.Send(new UpdateOperatorStationCommand(
+            GetRequiredOperatorId(), stationId, request.DisplayNameOverride, request.CounterLocation,
+            request.ContactPhone, request.Instructions), cancellationToken));
+    }
+
+    [HttpDelete("{stationId:guid}")]
+    [RequireIdempotencyKey]
+    [Authorize(Roles = OperatorWriteRole)]
+    [ProducesResponseType(typeof(ApiResponse<OperatorStationDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<OperatorStationDto>> DeleteAsync(Guid stationId, CancellationToken cancellationToken)
+    {
+        return Ok(await mediator.Send(new DeactivateOperatorStationCommand(GetRequiredOperatorId(), stationId), cancellationToken));
+    }
+
+    private Guid GetRequiredOperatorId()
+        => CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required to manage operator stations.");
 
     private static string? Serialize(JsonElement? value)
         => value is null || value.Value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null

@@ -279,7 +279,7 @@ public sealed class StopHandlersTests
     }
 
     [Fact]
-    public void OperatorStopsController_UsesExpectedRolesAndDoesNotExposeDeleteEndpoint()
+    public void OperatorStopsController_UsesExpectedRolesAndExposesAdminDeleteEndpoint()
     {
         typeof(OperatorStopsController).GetMethod(nameof(OperatorStopsController.PostAsync))!
             .GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be("OPERATOR_ADMIN");
@@ -290,9 +290,8 @@ public sealed class StopHandlersTests
         typeof(OperatorStopsController).GetMethod(nameof(OperatorStopsController.GetByIdAsync))!
             .GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be("OPERATOR_STAFF,OPERATOR_ADMIN");
 
-        typeof(OperatorStopsController).GetMethods()
-            .SelectMany(method => method.GetCustomAttributes<HttpDeleteAttribute>())
-            .Should().BeEmpty();
+        typeof(OperatorStopsController).GetMethod(nameof(OperatorStopsController.DeleteAsync))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be("OPERATOR_ADMIN");
     }
 
     private static CreateStopCommand CreateCommand(

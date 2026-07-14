@@ -840,6 +840,32 @@ Error `409` — duplicate email:
 
 ## Booking Service
 
+### GET `/v1/bookings/{bookingId}`
+
+Auth: the booking owner (`PASSENGER`) or an authorized `OPERATOR_ADMIN`/`OPERATOR_STAFF` whose authenticated `operatorId` claim matches the booking tenant. Idempotency is not required (read-only). This is the Booking-owned poll resource for payment confirmation; it does not synchronously query Payment Service and deliberately exposes no payment fields. Operator detail remains the separate `GET /v1/operator/bookings/{id}` resource.
+
+Response `200`: ADR 0004 success envelope whose `data` contains exactly:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "bookingId": "uuid",
+    "status": "PENDING_PAYMENT"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-13T01:00:00Z" }
+}
+```
+
+`status` is the canonical Booking lifecycle value, so the client polls until the payment event transitions `PENDING_PAYMENT` to `CONFIRMED`.
+
+Errors use the ADR 0004 envelope:
+
+- `401 UNAUTHORIZED`: caller has no valid user JWT.
+- `404 BOOKING_NOT_FOUND`: booking does not exist or does not belong to the authenticated passenger; ownership is intentionally not disclosed.
+- `403 FORBIDDEN`: an operator caller is not authorized for the booking tenant or does not have a valid `operatorId` claim.
+
 ### GET `/v1/operator/bookings`
 
 Auth: `OPERATOR_ADMIN` or `OPERATOR_STAFF`. The tenant key is the non-null `operatorId` claim from the authenticated JWT; the endpoint never accepts an operator id from the client. Idempotency: not required (read-only).
@@ -973,16 +999,7 @@ Request:
   "tripId": "uuid",
   "pickup": { "stationId": "uuid" },
   "dropoff": { "stationId": "uuid" },
-  "seats": [
-    {
-      "seatNumber": "A01",
-      "passenger": {
-        "fullName": "Nguyen Van A",
-        "phoneNumber": "0900000000",
-        "idNumber": "012345678901"
-      }
-    }
-  ],
+  "seats": [{ "seatNumber": "A01" }],
   "voucherCode": "SUMMER26",
   "paymentMethod": "WALLET"
 }
@@ -999,6 +1016,7 @@ Response `201`:
     "status": "CONFIRMED",
     "totalAmount": 350000,
     "discountAmount": 50000,
+    "paymentId": "uuid | null",
     "paymentRedirectUrl": null,
     "tickets": [
       {
@@ -1027,13 +1045,13 @@ Request:
     "tripId": "uuid",
     "pickup": { "stationId": "uuid" },
     "dropoff": { "stationId": "uuid" },
-    "seats": [{ "seatNumber": "A01", "passenger": { "fullName": "Nguyen Van A", "phoneNumber": "0900000000" } }]
+    "seats": [{ "seatNumber": "A01" }]
   },
   "return": {
     "tripId": "uuid",
     "pickup": { "stationId": "uuid" },
     "dropoff": { "stationId": "uuid" },
-    "seats": [{ "seatNumber": "A01", "passenger": { "fullName": "Nguyen Van A", "phoneNumber": "0900000000" } }]
+    "seats": [{ "seatNumber": "A01" }]
   },
   "voucherCode": "SUMMER26",
   "paymentMethod": "VNPAY"
@@ -1050,6 +1068,8 @@ Response `201`:
     "outbound": { "bookingId": "uuid", "bookingCode": "VR-20260518-ABCD1234", "totalAmount": 350000, "discountAmount": 50000, "tickets": [{ "ticketId": "uuid", "ticketCode": "VT-20260518-ABCDEFGH", "seatNumber": "A01", "status": "PENDING_PAYMENT", "fareAmount": 400000, "discountAmount": 50000, "paidAmount": 350000 }] },
     "return": { "bookingId": "uuid", "bookingCode": "VR-20260519-EFGH5678", "totalAmount": 350000, "discountAmount": 50000, "tickets": [{ "ticketId": "uuid", "ticketCode": "VT-20260519-HGFEDCBA", "seatNumber": "A01", "status": "PENDING_PAYMENT", "fareAmount": 400000, "discountAmount": 50000, "paidAmount": 350000 }] },
     "grandTotal": 700000,
+    "paymentId": "uuid",
+    "status": "PENDING_PAYMENT",
     "paymentRedirectUrl": "https://vnpay.vn/..."
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
@@ -1096,12 +1116,6 @@ Response `200`:
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
-
-### GET `/v1/bookings/{bookingId}`
-
-Auth: booking owner or authorized operator.
-
-Response `200`: booking detail with passengers, pickup/dropoff, payment summary, pendingActions.
 
 ### GET `/internal/v1/bookings/{bookingId}`
 
@@ -1607,6 +1621,11 @@ Auth: protected.
 
 Response `200`: trip detail with route, stations, stops, seat summary, fare summary.
 
+Each stop includes `stopId`, `name`, `address`, `latitude`, `longitude`, `isActive`,
+`orderIndex`, `allowPickup`, `allowDropoff`, `estimatedArrivalTime`,
+`distanceFromOriginKm`, nullable `fareFromThisStop`, and `effectiveFare`.
+`effectiveFare = fareFromThisStop ?? baseFare`; this is pickup-point pricing, not segment fare.
+
 ### GET `/v1/trips/{tripId}/seat-map`
 
 Auth: protected.
@@ -1650,6 +1669,7 @@ Response `200` (raw):
   "stops": [
     {
       "stopId": "uuid",
+      "isActive": true,
       "orderIndex": 1,
       "allowPickup": true,
       "allowDropoff": false,
@@ -1683,6 +1703,13 @@ Notes:
 Auth: Internal JWT. Idempotency: required (replay with same `Idempotency-Key` returns the
 same `seatLockToken`). **All-or-nothing** — if any requested seat is not `AVAILABLE`, no seat
 is locked.
+
+Round-trip confirmation uses `POST /internal/v1/trips/round-trip/book-seats` with outbound
+and return legs (`tripId`, `seatLockToken`, `bookingId`, `passengerSeatAssignments`). Trip
+validates ownership of both locks before changing either leg and persists both legs atomically.
+
+Trip obtains the Stop-disable warning count through
+`GET /internal/v1/bookings/active-by-stop/{stopId}/count?operatorId=` (Internal JWT).
 
 Request:
 ```json
@@ -3456,6 +3483,11 @@ Response `201`:
 }
 ```
 
+`PATCH /v1/operator/stations/{stationId}` updates only `displayNameOverride`,
+`counterLocation`, `contactPhone`, and `instructions`. `DELETE` on the same path deactivates
+only the OperatorStation mapping. Both mutations require `Idempotency-Key`; linking an inactive
+mapping again reactivates it.
+
 ### POST `/v1/operator/stops`
 
 Auth: `OPERATOR_ADMIN`.
@@ -3469,7 +3501,9 @@ Identity validation failures (404, 5xx, transport, circuit-breaker) map to `422 
 
 Day 7 does not accept or mutate `shared_suggestion` / `sharedSuggestion`; that write path is deferred.
 
-DELETE / disable-with-replacement is deferred to Day 24.
+`DELETE /v1/operator/stops/{id}?replacedByStopId=` disables the Stop without deleting
+historical RouteStop/TripStop rows. Replacement is optional and must be active, same-operator,
+non-self, and cycle-free. Response warning code is `STOP_DISABLED_BOOKING_AFFECTED`.
 
 Coordinates validate latitude in [-90, 90] and longitude in [-180, 180].
 
@@ -3511,7 +3545,7 @@ Response `200`: canonical Stop DTO.
 
 Auth: `OPERATOR_ADMIN`.
 
-Idempotency-Key: not required by BSOT §5.6.
+Idempotency-Key: required for PATCH and DELETE Stop mutations.
 
 Write requires caller operator to be `APPROVED` and active.
 
@@ -3524,6 +3558,13 @@ Coordinates validate latitude in [-90, 90] and longitude in [-180, 180]; invalid
 Request: partial Stop update.
 
 Response `200`: updated Stop DTO.
+
+### Admin Station and Stop management
+
+`SYSTEM_ADMIN` manages canonical stations through `GET/PATCH/DELETE /v1/admin/stations`
+and operator-owned stops through `GET/PATCH/DELETE /v1/admin/stops` (list supports
+`operatorId?`). Station delete is soft-delete and deactivates OperatorStation mappings.
+Stop delete follows the same replacement and historical-preservation rules above.
 
 ### GET `/internal/v1/stations/{id}`
 

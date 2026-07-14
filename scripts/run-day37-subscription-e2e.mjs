@@ -144,7 +144,8 @@ function signVnPay(parameters) {
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
     .join('&');
-  return createHmac('sha512', process.env.VNPAY_HASH_SECRET || 'sandbox-hash-secret-for-local-dev-only')
+  if (!process.env.VNPAY_HASH_SECRET) throw new Error('VNPAY_HASH_SECRET is required for the VNPay E2E harness.');
+  return createHmac('sha512', process.env.VNPAY_HASH_SECRET)
     .update(canonical)
     .digest('hex');
 }

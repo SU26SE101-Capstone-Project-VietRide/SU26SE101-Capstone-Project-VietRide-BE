@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
+using VietRide.Booking.Application.Exceptions;
 using VietRide.Booking.Domain.Constants;
 using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
@@ -83,6 +84,8 @@ public sealed class CreateRoundTripBookingCommandHandler
 
         var outboundTrip = await GetScheduledTripAsync(request.Outbound.TripId, cancellationToken);
         var returnTrip = await GetScheduledTripAsync(request.Return.TripId, cancellationToken);
+        ValidateStopSelections(outboundTrip, request.Outbound.PickupStopId, request.Outbound.DropoffStopId);
+        ValidateStopSelections(returnTrip, request.Return.PickupStopId, request.Return.DropoffStopId);
         var now = _clock.UtcNow;
         ValidateShuttleRequest(request.Outbound, outboundTrip, now);
         ValidateShuttleRequest(request.Return, returnTrip, now);
@@ -101,8 +104,8 @@ public sealed class CreateRoundTripBookingCommandHandler
                 "Return trip departure must be after outbound trip arrival.");
         }
 
-        var outboundSeatNumbers = request.Outbound.Seats.Select(s => s.SeatNumber).ToList();
-        var returnSeatNumbers = request.Return.Seats.Select(s => s.SeatNumber).ToList();
+        var outboundSeatNumbers = request.Outbound.Seats.Select(s => s.SeatNumber.Trim()).ToList();
+        var returnSeatNumbers = request.Return.Seats.Select(s => s.SeatNumber.Trim()).ToList();
 
         var roundTripLockOutcome = await _tripClient.LockRoundTripSeatsAsync(
             request.Outbound.TripId,
@@ -345,7 +348,7 @@ public sealed class CreateRoundTripBookingCommandHandler
         }
 
         var grandTotal = outboundBooking.TotalAmount + returnBooking.TotalAmount;
-        var paymentRedirectUrl = await ChargeAsync(
+        var payment = await ChargeAsync(
             request,
             bookingGroupId,
             outboundBooking,
@@ -361,7 +364,8 @@ public sealed class CreateRoundTripBookingCommandHandler
 
         if (string.Equals(request.PaymentMethod, "VNPAY", StringComparison.OrdinalIgnoreCase))
         {
-            return BuildResult(bookingGroupId, outboundBooking, returnBooking, grandTotal.Amount, paymentRedirectUrl);
+            return BuildResult(bookingGroupId, outboundBooking, returnBooking, grandTotal.Amount,
+                payment.PaymentId, "PENDING_PAYMENT", payment.RedirectUrl);
         }
 
         await BookConfirmAndPublishAsync(
@@ -388,7 +392,8 @@ public sealed class CreateRoundTripBookingCommandHandler
             outboundBooking.Id,
             returnBooking.Id);
 
-        return BuildResult(bookingGroupId, outboundBooking, returnBooking, grandTotal.Amount, paymentRedirectUrl);
+        return BuildResult(bookingGroupId, outboundBooking, returnBooking, grandTotal.Amount,
+            null, "CONFIRMED", null);
     }
 
     // -----------------------------------------------------------------------
@@ -559,7 +564,7 @@ public sealed class CreateRoundTripBookingCommandHandler
         return booking;
     }
 
-    private async Task<string?> ChargeAsync(
+    private async Task<PaymentChargeInfo> ChargeAsync(
         CreateRoundTripBookingCommand request,
         Guid bookingGroupId,
         BookingEntity outboundBooking,
@@ -592,15 +597,11 @@ public sealed class CreateRoundTripBookingCommandHandler
                 {
                     case BatchChargeOutcome.Success success:
                         EnsureWalletBatchSucceeded(success, outboundBooking.Id, returnBooking.Id);
-                        return null;
+                        return new PaymentChargeInfo(null, null);
                     case BatchChargeOutcome.InsufficientFunds insufficientFunds:
-                        await CompensateSeatsAndVouchersAsync(
-                            request, outboundLockToken, outboundSeatNumbers, returnLockToken, returnSeatNumbers,
-                            outboundBooking.Id, returnBooking.Id, outboundVoucherUsageId, returnVoucherUsageId,
-                            cancellationToken);
-                        throw new ConflictException("PAYMENT_INSUFFICIENT_WALLET", insufficientFunds.Message);
+                        throw new BookingPaymentException(402, "PAYMENT_INSUFFICIENT_WALLET", insufficientFunds.Message);
                     case BatchChargeOutcome.TransportError transportError:
-                        throw new InvalidOperationException($"Payment transport error: {transportError.Message}");
+                        throw new BookingPaymentException(502, "PAYMENT_VNPAY_ERROR", transportError.Message);
                     default:
                         throw new InvalidOperationException("Payment batch charge failed: Unknown payment error.");
                 }
@@ -618,16 +619,12 @@ public sealed class CreateRoundTripBookingCommandHandler
             switch (chargeOutcome)
             {
                 case ChargeOutcome.Success success:
-                    return success.Data.PaymentRedirectUrl;
+                    return new PaymentChargeInfo(success.Data.PaymentId, success.Data.PaymentRedirectUrl);
                 case ChargeOutcome.InsufficientFunds insufficientFunds:
                     // S1 fix: compensate voucher usages before re-throwing (mirrors WALLET path).
-                    await CompensateSeatsAndVouchersAsync(
-                        request, outboundLockToken, outboundSeatNumbers, returnLockToken, returnSeatNumbers,
-                        outboundBooking.Id, returnBooking.Id, outboundVoucherUsageId, returnVoucherUsageId,
-                        cancellationToken);
-                    throw new ConflictException("PAYMENT_INSUFFICIENT_WALLET", insufficientFunds.Message);
+                    throw new BookingPaymentException(402, "PAYMENT_INSUFFICIENT_WALLET", insufficientFunds.Message);
                 case ChargeOutcome.TransportError transportError:
-                    throw new InvalidOperationException($"Payment transport error: {transportError.Message}");
+                    throw new BookingPaymentException(502, "PAYMENT_VNPAY_ERROR", transportError.Message);
                 default:
                     throw new InvalidOperationException("Payment charge failed: Unknown payment error.");
             }
@@ -826,6 +823,8 @@ public sealed class CreateRoundTripBookingCommandHandler
         BookingEntity outboundBooking,
         BookingEntity returnBooking,
         long grandTotal,
+        Guid? paymentId,
+        string status,
         string? paymentRedirectUrl)
         => new(
             bookingGroupId,
@@ -842,7 +841,11 @@ public sealed class CreateRoundTripBookingCommandHandler
                 returnBooking.DiscountAmount.Amount,
                 ToTicketResults(returnBooking)),
             grandTotal,
+            paymentId,
+            status,
             paymentRedirectUrl);
+
+    private sealed record PaymentChargeInfo(Guid? PaymentId, string? RedirectUrl);
 
     private static IReadOnlyList<TicketAllocation> BuildTicketAllocations(
         IReadOnlyList<CreateRoundTripBookingCommand.RoundTripSeatRequest> seats,
@@ -851,7 +854,7 @@ public sealed class CreateRoundTripBookingCommandHandler
         DateTimeOffset now)
     {
         var orderedSeats = seats
-            .Select(seat => seat.SeatNumber)
+            .Select(seat => seat.SeatNumber.Trim())
             .Order(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
@@ -871,6 +874,36 @@ public sealed class CreateRoundTripBookingCommandHandler
                     perSeatFare - discount);
             })
             .ToArray();
+    }
+
+    private static void ValidateStopSelections(TripSnapshot trip, Guid? pickupStopId, Guid? dropoffStopId)
+    {
+        var pickup = pickupStopId.HasValue
+            ? trip.Stops.FirstOrDefault(stop => stop.StopId == pickupStopId.Value && stop.IsActive)
+            : null;
+        var dropoff = dropoffStopId.HasValue
+            ? trip.Stops.FirstOrDefault(stop => stop.StopId == dropoffStopId.Value && stop.IsActive)
+            : null;
+
+        if (pickupStopId.HasValue && pickup is null || dropoffStopId.HasValue && dropoff is null)
+        {
+            throw new CodedValidationException("STOP_NOT_FOUND", "Selected stop was not found or is inactive.");
+        }
+
+        if (pickup is not null && !pickup.AllowPickup)
+        {
+            throw new CodedValidationException("STOP_NOT_PICKUP_ALLOWED", "The selected stop does not allow pickup.");
+        }
+
+        if (dropoff is not null && !dropoff.AllowDropoff)
+        {
+            throw new CodedValidationException("STOP_NOT_DROPOFF_ALLOWED", "The selected stop does not allow dropoff.");
+        }
+
+        if (pickup is not null && dropoff is not null && dropoff.OrderIndex <= pickup.OrderIndex)
+        {
+            throw new CodedValidationException("STOP_NOT_DROPOFF_ALLOWED", "Dropoff stop must be after pickup stop.");
+        }
     }
 
     private static IReadOnlyList<CreateRoundTripBookingResult.RoundTripTicketResult> ToTicketResults(

@@ -6,6 +6,7 @@ import { NotificationsService } from './notifications.service';
 import {
   TRACKING_GPS_OFF_ROUTE_ROUTING_KEY,
   TRIP_DELAYED_ROUTING_KEY,
+  TRIP_STOP_DISABLED_ROUTING_KEY,
   TRIP_TRACKING_ALERT_QUEUE_BINDINGS,
 } from './trip-tracking-alert-events.constants';
 import { TripTrackingAlertEventsConsumer } from './trip-tracking-alert-events.consumer';
@@ -47,6 +48,13 @@ describe('TripTrackingAlertEventsConsumer', () => {
         { prefetch: 1, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
       );
     }
+
+    expect(rabbitConsumer.subscribe).toHaveBeenCalledWith(
+      'notification:booking-stop-disabled-affected',
+      TRIP_STOP_DISABLED_ROUTING_KEY,
+      expect.any(Function),
+      { prefetch: 1, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
+    );
   });
 
   it('creates delayed notification for a new valid message', async () => {

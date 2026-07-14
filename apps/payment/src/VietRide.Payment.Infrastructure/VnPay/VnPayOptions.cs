@@ -6,8 +6,9 @@ public sealed class VnPayOptions
 
     public string TmnCode { get; set; } = string.Empty;
     public string HashSecret { get; set; } = string.Empty;
-    public string BaseUrl { get; set; } = "https://sandbox.vnpayment.vn";
-    public string ReturnUrl { get; set; } = "https://app.vietride.app/payments/return";
-    public string? IpnUrl { get; set; }
+    public string BaseUrl { get; set; } = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
+    public string ReturnUrl { get; set; } = "https://app.vietride.online/payments/return";
+    public string? IpnUrl { get; set; } = "https://api.vietride.online/v1/payments/vnpay-ipn";
+    public int PaymentTimeoutMinutes { get; set; } = 10;
     public long MinimumTopUpAmount { get; set; } = 10_000;
 }
