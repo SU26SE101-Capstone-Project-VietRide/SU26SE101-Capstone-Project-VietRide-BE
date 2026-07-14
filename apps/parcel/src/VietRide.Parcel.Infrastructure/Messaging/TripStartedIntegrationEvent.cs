@@ -9,6 +9,8 @@ public sealed record TripStartedIntegrationEvent : IIntegrationEvent
 
     public Guid TripId { get; init; }
 
+    public DateTimeOffset ActualDepartureTime { get; init; }
+
     [JsonIgnore]
     public Guid EventId => TripId;
 
