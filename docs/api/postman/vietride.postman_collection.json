@@ -340,6 +340,34 @@
     {
       "key": "day18BookingCode",
       "value": "<day18-booking-code>"
+    },
+    {
+      "key": "day38OperatorAdminToken",
+      "value": ""
+    },
+    {
+      "key": "day38OperatorStaffToken",
+      "value": ""
+    },
+    {
+      "key": "day38SystemAdminToken",
+      "value": ""
+    },
+    {
+      "key": "day38OperatorId",
+      "value": ""
+    },
+    {
+      "key": "day38InvoiceId",
+      "value": ""
+    },
+    {
+      "key": "day38FailedInvoiceId",
+      "value": ""
+    },
+    {
+      "key": "day38SettlementId",
+      "value": ""
     }
   ],
   "item": [
@@ -3405,17 +3433,19 @@
         },
         {
           "name": "20. Clear Route path geometry",
-          "event": [{
-            "listen": "test",
-            "script": {
-              "exec": [
-                "const body = pm.response.json();",
-                "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
-                "pm.test('Route geometry is null', function () { pm.expect(body.data).to.have.property('pathPolyline', null); });"
-              ],
-              "type": "text/javascript"
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Route geometry is null', function () { pm.expect(body.data).to.have.property('pathPolyline', null); });"
+                ],
+                "type": "text/javascript"
+              }
             }
-          }],
+          ],
           "request": {
             "method": "PUT",
             "header": [
@@ -3433,17 +3463,19 @@
         },
         {
           "name": "21. Clear AlternativeRoute path geometry",
-          "event": [{
-            "listen": "test",
-            "script": {
-              "exec": [
-                "const body = pm.response.json();",
-                "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
-                "pm.test('AlternativeRoute geometry is null', function () { pm.expect(body.data).to.have.property('pathPolyline', null); });"
-              ],
-              "type": "text/javascript"
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('AlternativeRoute geometry is null', function () { pm.expect(body.data).to.have.property('pathPolyline', null); });"
+                ],
+                "type": "text/javascript"
+              }
             }
-          }],
+          ],
           "request": {
             "method": "PUT",
             "header": [
@@ -3453,7 +3485,13 @@
             "url": {
               "raw": "{{baseUrl}}/v1/operator/alternative-routes/{{day8AlternativeRouteId2}}/geometry",
               "host": ["{{baseUrl}}"],
-              "path": ["v1", "operator", "alternative-routes", "{{day8AlternativeRouteId2}}", "geometry"]
+              "path": [
+                "v1",
+                "operator",
+                "alternative-routes",
+                "{{day8AlternativeRouteId2}}",
+                "geometry"
+              ]
             },
             "body": { "mode": "raw", "raw": "{\n  \"pathPolyline\": null\n}" },
             "description": "Clears AlternativeRoute Google precision-5 path geometry."
@@ -4736,7 +4774,7 @@
             ],
             "body": {
               "mode": "raw",
-          "raw": "{\n  \"reason\": \"USER_INITIATED\"\n}"
+              "raw": "{\n  \"reason\": \"USER_INITIATED\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/v1/bookings/{{day17BookingId}}/cancel",
@@ -4768,9 +4806,7 @@
           ],
           "request": {
             "method": "GET",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }
-            ],
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/booking-stats",
               "host": ["{{baseUrl}}"],
@@ -4936,7 +4972,15 @@
             "url": {
               "raw": "{{baseUrl}}/v1/bookings/trips/{{day18TripId}}/boarding/passenger/{{day18PassengerRecordId}}",
               "host": ["{{baseUrl}}"],
-              "path": ["v1", "bookings", "trips", "{{day18TripId}}", "boarding", "passenger", "{{day18PassengerRecordId}}"]
+              "path": [
+                "v1",
+                "bookings",
+                "trips",
+                "{{day18TripId}}",
+                "boarding",
+                "passenger",
+                "{{day18PassengerRecordId}}"
+              ]
             }
           }
         },
@@ -4990,7 +5034,15 @@
             "url": {
               "raw": "{{baseUrl}}/v1/bookings/trips/{{day18TripId}}/boarding/passenger/{{day18PassengerRecordId}}",
               "host": ["{{baseUrl}}"],
-              "path": ["v1", "bookings", "trips", "{{day18TripId}}", "boarding", "passenger", "{{day18PassengerRecordId}}"]
+              "path": [
+                "v1",
+                "bookings",
+                "trips",
+                "{{day18TripId}}",
+                "boarding",
+                "passenger",
+                "{{day18PassengerRecordId}}"
+              ]
             }
           }
         },
@@ -5018,7 +5070,15 @@
             "url": {
               "raw": "{{baseUrl}}/v1/bookings/trips/{{day18OtherTripId}}/boarding/passenger/{{day18PassengerRecordId}}",
               "host": ["{{baseUrl}}"],
-              "path": ["v1", "bookings", "trips", "{{day18OtherTripId}}", "boarding", "passenger", "{{day18PassengerRecordId}}"]
+              "path": [
+                "v1",
+                "bookings",
+                "trips",
+                "{{day18OtherTripId}}",
+                "boarding",
+                "passenger",
+                "{{day18PassengerRecordId}}"
+              ]
             }
           }
         },
@@ -5128,7 +5188,10 @@
               { "key": "Idempotency-Key", "value": "day36-booking-{{$guid}}" },
               { "key": "Content-Type", "value": "application/json" }
             ],
-            "body": { "mode": "raw", "raw": "{\n  \"tripId\": \"{{day36MainTripId}}\",\n  \"pickup\": { \"stationId\": \"{{day36OriginStationId}}\" },\n  \"dropoff\": { \"stationId\": \"{{day36DestinationStationId}}\" },\n  \"shuttlePickup\": { \"address\": \"123 Nguyễn Huệ, Quận 1\", \"latitude\": 10.7731, \"longitude\": 106.7032 },\n  \"seats\": [{ \"seatNumber\": \"D01\", \"passenger\": { \"fullName\": \"Day 36 Passenger\", \"phoneNumber\": \"+84910000036\", \"idNumber\": \"D36001\" } }],\n  \"paymentMethod\": \"WALLET\"\n}" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tripId\": \"{{day36MainTripId}}\",\n  \"pickup\": { \"stationId\": \"{{day36OriginStationId}}\" },\n  \"dropoff\": { \"stationId\": \"{{day36DestinationStationId}}\" },\n  \"shuttlePickup\": { \"address\": \"123 Nguyễn Huệ, Quận 1\", \"latitude\": 10.7731, \"longitude\": 106.7032 },\n  \"seats\": [{ \"seatNumber\": \"D01\", \"passenger\": { \"fullName\": \"Day 36 Passenger\", \"phoneNumber\": \"+84910000036\", \"idNumber\": \"D36001\" } }],\n  \"paymentMethod\": \"WALLET\"\n}"
+            },
             "url": "{{baseUrl}}/v1/bookings"
           }
         },
@@ -5141,7 +5204,10 @@
               { "key": "Idempotency-Key", "value": "day36-invalid-{{$guid}}" },
               { "key": "Content-Type", "value": "application/json" }
             ],
-            "body": { "mode": "raw", "raw": "{\n  \"tripId\": \"{{day36MainTripId}}\",\n  \"pickup\": { \"stationId\": \"{{day36UnsupportedStationId}}\" },\n  \"shuttlePickup\": { \"address\": \"Unsupported\", \"latitude\": 10.7, \"longitude\": 106.7 },\n  \"seats\": [],\n  \"paymentMethod\": \"WALLET\"\n}" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tripId\": \"{{day36MainTripId}}\",\n  \"pickup\": { \"stationId\": \"{{day36UnsupportedStationId}}\" },\n  \"shuttlePickup\": { \"address\": \"Unsupported\", \"latitude\": 10.7, \"longitude\": 106.7 },\n  \"seats\": [],\n  \"paymentMethod\": \"WALLET\"\n}"
+            },
             "url": "{{baseUrl}}/v1/bookings"
           }
         },
@@ -5162,7 +5228,10 @@
               { "key": "Idempotency-Key", "value": "day36-dispatch-1" },
               { "key": "Content-Type", "value": "application/json" }
             ],
-            "body": { "mode": "raw", "raw": "{\n  \"mainTripId\": \"{{day36MainTripId}}\",\n  \"driverUserId\": \"{{day36DriverId}}\",\n  \"vehicleId\": \"{{day36ShuttleVehicleId}}\",\n  \"scheduledDepartureTime\": \"{{day36ShuttleDeparture}}\",\n  \"scheduledEndTime\": \"{{day36ShuttleEnd}}\",\n  \"orderedBookingIds\": [\"{{day36BookingId}}\"]\n}" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mainTripId\": \"{{day36MainTripId}}\",\n  \"driverUserId\": \"{{day36DriverId}}\",\n  \"vehicleId\": \"{{day36ShuttleVehicleId}}\",\n  \"scheduledDepartureTime\": \"{{day36ShuttleDeparture}}\",\n  \"scheduledEndTime\": \"{{day36ShuttleEnd}}\",\n  \"orderedBookingIds\": [\"{{day36BookingId}}\"]\n}"
+            },
             "url": "{{baseUrl}}/v1/operator/shuttle-trips"
           }
         },
@@ -5175,7 +5244,10 @@
               { "key": "Idempotency-Key", "value": "day36-dispatch-1" },
               { "key": "Content-Type", "value": "application/json" }
             ],
-            "body": { "mode": "raw", "raw": "{\n  \"mainTripId\": \"{{day36MainTripId}}\",\n  \"driverUserId\": \"{{day36DriverId}}\",\n  \"vehicleId\": \"{{day36ShuttleVehicleId}}\",\n  \"scheduledDepartureTime\": \"{{day36ShuttleDeparture}}\",\n  \"scheduledEndTime\": \"{{day36ShuttleEnd}}\",\n  \"orderedBookingIds\": [\"{{day36BookingId}}\"]\n}" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mainTripId\": \"{{day36MainTripId}}\",\n  \"driverUserId\": \"{{day36DriverId}}\",\n  \"vehicleId\": \"{{day36ShuttleVehicleId}}\",\n  \"scheduledDepartureTime\": \"{{day36ShuttleDeparture}}\",\n  \"scheduledEndTime\": \"{{day36ShuttleEnd}}\",\n  \"orderedBookingIds\": [\"{{day36BookingId}}\"]\n}"
+            },
             "url": "{{baseUrl}}/v1/operator/shuttle-trips"
           }
         },
@@ -5522,6 +5594,433 @@
               }
             ],
             "url": "{{baseUrl}}/v1/operator/bookings/{{day19StaffBookingId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Day 38 - Invoice, Wallet & Settlement",
+      "item": [
+        {
+          "name": "01. Operator wallet",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('wallet response', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day38OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/wallet"
+          }
+        },
+        {
+          "name": "02. Operator wallet transactions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('wallet transactions', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day38OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/wallet/transactions?page=1&pageSize=20&sortBy=createdAt&sortDir=desc"
+          }
+        },
+        {
+          "name": "03. Operator trip settlements",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('operator settlements', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day38OperatorStaffToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/trip-settlements?page=1&pageSize=20"
+          }
+        },
+        {
+          "name": "04. Operator ledger",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('operator ledger', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day38OperatorStaffToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/ledger?page=1&pageSize=20"
+          }
+        },
+        {
+          "name": "05. Operator invoices",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('invoice list', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day38OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/invoices?page=1&pageSize=20"
+          }
+        },
+        {
+          "name": "06. Operator invoice detail",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('invoice detail', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day38OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/invoices/{{day38InvoiceId}}"
+          }
+        },
+        {
+          "name": "07. Operator invoice signed download",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('signed download', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day38OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/invoices/{{day38InvoiceId}}/download"
+          }
+        },
+        {
+          "name": "08. Admin stuck settlements",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('stuck settlements', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day38SystemAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/admin/trip-settlements?stuckOnly=true&severity=HIGH&page=1&pageSize=20"
+          }
+        },
+        {
+          "name": "09. Admin manual settle",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('manual settlement', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day38SystemAdminToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/admin/trip-settlements/{{day38SettlementId}}/settle"
+          }
+        },
+        {
+          "name": "10. Platform wallet",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('platform wallet', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day38SystemAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/admin/platform-wallet"
+          }
+        },
+        {
+          "name": "11. Platform transactions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('platform transactions', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day38SystemAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/admin/platform-wallet/transactions?page=1&pageSize=20"
+          }
+        },
+        {
+          "name": "12. Credit platform wallet",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('platform adjustment', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day38SystemAdminToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"type\":\"CREDIT\",\"amount\":100000,\"note\":\"Day 38 Postman reconciliation\"}"
+            },
+            "url": "{{baseUrl}}/v1/admin/platform-wallet/adjust"
+          }
+        },
+        {
+          "name": "13. Credit operator wallet",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('day38OperatorAdjustmentKey')) pm.collectionVariables.set('day38OperatorAdjustmentKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('operator adjustment', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); });",
+                  "pm.collectionVariables.set('day38OperatorAdjustmentTransactionId', body.data.transactionId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day38SystemAdminToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day38OperatorAdjustmentKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"type\":\"CREDIT\",\"amount\":100000,\"note\":\"Day 38 Postman reconciliation\"}"
+            },
+            "url": "{{baseUrl}}/v1/admin/operators/{{day38OperatorId}}/wallet/adjust"
+          }
+        },
+        {
+          "name": "14. Replay operator wallet adjustment",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('same-key replay returns original transaction', () => { pm.response.to.have.status(200); pm.expect(body.data.transactionId).to.eql(pm.collectionVariables.get('day38OperatorAdjustmentTransactionId')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day38SystemAdminToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day38OperatorAdjustmentKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"type\":\"CREDIT\",\"amount\":100000,\"note\":\"Day 38 Postman reconciliation\"}"
+            },
+            "url": "{{baseUrl}}/v1/admin/operators/{{day38OperatorId}}/wallet/adjust"
+          }
+        },
+        {
+          "name": "15. Retry failed invoice",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('invoice retry', () => { pm.response.to.have.status(202); pm.expect(body.success).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day38SystemAdminToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/admin/invoices/{{day38FailedInvoiceId}}/retry"
           }
         }
       ]

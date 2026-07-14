@@ -15,6 +15,8 @@ export interface PublicSubpath {
 export interface ProxyRoute {
   /** URL prefix matched against incoming request. */
   prefix: string;
+  /** Optional exact family matcher for a route that shares a prefix with another service. */
+  pathPattern?: RegExp;
   /** Downstream service base URL. */
   target: string;
   /** Auth mode. 'mixed' = explicit publicSubpaths are anonymous, all other subpaths require user JWT. */
@@ -66,6 +68,13 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       target: env.IDENTITY_BASE_URL,
       authRequired: 'mixed',
       publicSubpaths: [{ method: 'POST', path: '/v1/operators/register' }],
+    },
+    {
+      prefix: '/v1/admin/operators/{operatorId}/wallet/adjust',
+      pathPattern: /^\/v1\/admin\/operators\/[0-9a-fA-F-]{36}\/wallet\/adjust$/,
+      target: env.PAYMENT_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
     },
     {
       prefix: '/v1/admin/operators',
@@ -132,6 +141,36 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       target: env.PAYMENT_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
+      prefix: '/v1/admin/invoices',
+      target: env.PAYMENT_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
+      prefix: '/v1/operator/invoices',
+      target: env.PAYMENT_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    },
+    {
+      prefix: '/v1/operator/wallet',
+      target: env.PAYMENT_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
+    {
+      prefix: '/v1/operator/trip-settlements',
+      target: env.PAYMENT_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
+    {
+      prefix: '/v1/operator/ledger',
+      target: env.PAYMENT_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
     },
     { prefix: '/v1/.well-known', target: env.IDENTITY_BASE_URL, authRequired: 'none' },
     // Day 2 placeholder health passthrough â€” each downstream service has /health.
@@ -440,6 +479,10 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
 export function matchRoute(table: ProxyRoute[], path: string): ProxyRoute | undefined {
   // Longest prefix wins so /v1/identity/health beats /v1/auth.
   return table
-    .filter((r) => path === r.prefix || path.startsWith(r.prefix + '/'))
+    .filter((r) =>
+      r.pathPattern
+        ? r.pathPattern.test(path)
+        : path === r.prefix || path.startsWith(r.prefix + '/'),
+    )
     .sort((a, b) => b.prefix.length - a.prefix.length)[0];
 }
