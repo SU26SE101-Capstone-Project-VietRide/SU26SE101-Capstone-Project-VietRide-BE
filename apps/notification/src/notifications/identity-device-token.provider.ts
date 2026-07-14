@@ -1,6 +1,5 @@
 import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { SignJWT } from 'jose';
-import pino from 'pino';
 import { z } from 'zod';
 import { ENV_TOKEN } from '../app/tokens';
 import type { Env } from '../config/env.schema';
@@ -11,6 +10,7 @@ import {
   INTERNAL_JWT_ISSUER,
 } from './fcm-push.constants';
 import type { DeviceTokenProvider, DeviceTokenSnapshot } from './fcm-push.types';
+import { createNotificationLogger } from './notification-logger';
 
 const DeviceTokenResponseSchema = z.array(
   z.object({
@@ -23,12 +23,15 @@ const INTERNAL_JWT_CLOCK_SKEW_SECONDS = 5;
 
 @Injectable()
 export class IdentityDeviceTokenProvider implements DeviceTokenProvider {
-  private readonly logger = pino({ name: IdentityDeviceTokenProvider.name });
+  private readonly logger = createNotificationLogger(IdentityDeviceTokenProvider.name);
 
   constructor(@Inject(ENV_TOKEN) private readonly env: Env) {}
 
   async listActiveDeviceTokens(userId: string): Promise<DeviceTokenSnapshot[]> {
-    const url = new URL(`/internal/v1/users/${userId}/device-tokens`, this.env.IDENTITY_INTERNAL_BASE_URL);
+    const url = new URL(
+      `/internal/v1/users/${userId}/device-tokens`,
+      this.env.IDENTITY_INTERNAL_BASE_URL,
+    );
     const token = await this.signInternalJwt();
     const response = await fetch(url, {
       headers: {
@@ -44,7 +47,10 @@ export class IdentityDeviceTokenProvider implements DeviceTokenProvider {
     }
 
     if (!response.ok) {
-      this.logger.warn({ userId, statusCode: response.status }, 'Identity device-token lookup failed');
+      this.logger.warn(
+        { userId, statusCode: response.status },
+        'Identity device-token lookup failed',
+      );
       throw new Error(`IDENTITY_DEVICE_TOKEN_LOOKUP_FAILED_${response.status}`);
     }
 
@@ -92,7 +98,10 @@ export class IdentityDeviceTokenProvider implements DeviceTokenProvider {
     });
 
     if (!response.ok && response.status !== 404) {
-      this.logger.warn({ userId, statusCode: response.status }, 'Identity device-token deactivation failed');
+      this.logger.warn(
+        { userId, statusCode: response.status },
+        'Identity device-token deactivation failed',
+      );
       throw new Error(`IDENTITY_DEVICE_TOKEN_DEACTIVATION_FAILED_${response.status}`);
     }
   }

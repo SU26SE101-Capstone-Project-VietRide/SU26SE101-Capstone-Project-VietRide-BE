@@ -2,10 +2,12 @@ import { Inject, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { RedisService } from '@vietride/nest-redis';
 import { Job, Worker } from 'bullmq';
 import IORedis from 'ioredis';
-import pino from 'pino';
 import { DEVICE_TOKEN_PROVIDER, ENV_TOKEN, FCM_PUSH_PROVIDER } from '../app/tokens';
 import type { Env } from '../config/env.schema';
-import { NotificationDeliveryStatus, type Notification } from '../generated/notification-prisma-client';
+import {
+  NotificationDeliveryStatus,
+  type Notification,
+} from '../generated/notification-prisma-client';
 import {
   BULLMQ_QUEUE_PREFIX,
   FCM_PUSH_ATTEMPTS,
@@ -24,11 +26,12 @@ import type {
   FcmPushResult,
 } from './fcm-push.types';
 import { NotificationsRepository } from './notifications.repository';
+import { createNotificationLogger } from './notification-logger';
 import { normalizeSafeError } from './safe-error';
 
 @Injectable()
 export class FcmPushWorker implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = pino({ name: FcmPushWorker.name });
+  private readonly logger = createNotificationLogger(FcmPushWorker.name);
   private connection: IORedis | null = null;
   private worker: Worker<FcmPushJobData> | null = null;
 
@@ -42,19 +45,14 @@ export class FcmPushWorker implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit(): void {
     this.connection = new IORedis(this.env.REDIS_URL, { maxRetriesPerRequest: null });
-    this.worker = new Worker<FcmPushJobData>(
-      FCM_PUSH_QUEUE_NAME,
-      (job) => this.process(job),
-      {
-        connection: this.connection,
-        prefix: BULLMQ_QUEUE_PREFIX,
-        settings: {
-          backoffStrategy: (attemptsMade) =>
-            FCM_PUSH_BACKOFF_DELAYS_MS[attemptsMade - 1] ??
-            LAST_FCM_PUSH_BACKOFF_DELAY_MS,
-        },
+    this.worker = new Worker<FcmPushJobData>(FCM_PUSH_QUEUE_NAME, (job) => this.process(job), {
+      connection: this.connection,
+      prefix: BULLMQ_QUEUE_PREFIX,
+      settings: {
+        backoffStrategy: (attemptsMade) =>
+          FCM_PUSH_BACKOFF_DELAYS_MS[attemptsMade - 1] ?? LAST_FCM_PUSH_BACKOFF_DELAY_MS,
       },
-    );
+    });
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -69,7 +67,10 @@ export class FcmPushWorker implements OnModuleInit, OnModuleDestroy {
   async process(job: Job<FcmPushJobData>): Promise<void> {
     const notification = await this.notificationsRepository.findById(job.data.notificationId);
     if (!notification) {
-      this.logger.warn({ notificationId: job.data.notificationId }, 'Skipping FCM push for missing notification');
+      this.logger.warn(
+        { notificationId: job.data.notificationId },
+        'Skipping FCM push for missing notification',
+      );
       return;
     }
 
@@ -89,9 +90,15 @@ export class FcmPushWorker implements OnModuleInit, OnModuleDestroy {
       const result = await this.sendDelivery(notification, delivery.fcmToken);
       if (typeof result !== 'string' && !result.invalidToken) {
         if (result.dryRun) {
-          await this.notificationsRepository.markDeliveryValidated(delivery.id, result.messageId ?? null);
+          await this.notificationsRepository.markDeliveryValidated(
+            delivery.id,
+            result.messageId ?? null,
+          );
         } else {
-          await this.notificationsRepository.markDeliverySent(delivery.id, result.messageId ?? null);
+          await this.notificationsRepository.markDeliverySent(
+            delivery.id,
+            result.messageId ?? null,
+          );
         }
         continue;
       }
@@ -99,16 +106,28 @@ export class FcmPushWorker implements OnModuleInit, OnModuleDestroy {
       if (typeof result !== 'string' && result.invalidToken) {
         await this.blacklistToken(delivery.fcmToken);
         await this.deviceTokenProvider.deactivateDeviceToken(job.data.userId, delivery.fcmToken);
-        await this.notificationsRepository.markDeliveryFailed(delivery.id, currentAttempt, 'FCM_TOKEN_INVALID');
+        await this.notificationsRepository.markDeliveryFailed(
+          delivery.id,
+          currentAttempt,
+          'FCM_TOKEN_INVALID',
+        );
         continue;
       }
 
       hasRetryableFailure = true;
       const errorMessage = typeof result === 'string' ? result : 'FCM_PUSH_UNKNOWN_FAILURE';
       if (currentAttempt >= FCM_PUSH_ATTEMPTS) {
-        await this.notificationsRepository.markDeliveryFailed(delivery.id, currentAttempt, errorMessage);
+        await this.notificationsRepository.markDeliveryFailed(
+          delivery.id,
+          currentAttempt,
+          errorMessage,
+        );
       } else {
-        await this.notificationsRepository.markDeliveryRetrying(delivery.id, currentAttempt, errorMessage);
+        await this.notificationsRepository.markDeliveryRetrying(
+          delivery.id,
+          currentAttempt,
+          errorMessage,
+        );
       }
     }
 
@@ -128,10 +147,14 @@ export class FcmPushWorker implements OnModuleInit, OnModuleDestroy {
     return this.notificationsRepository.listDeliveriesByNotificationId(notificationId);
   }
 
-  private async filterBlacklistedTokens(deviceTokens: DeviceTokenSnapshot[]): Promise<DeviceTokenSnapshot[]> {
+  private async filterBlacklistedTokens(
+    deviceTokens: DeviceTokenSnapshot[],
+  ): Promise<DeviceTokenSnapshot[]> {
     const deliverableTokens = [];
     for (const deviceToken of deviceTokens) {
-      const isBlacklisted = await this.redis.get(`${FCM_TOKEN_BLACKLIST_PREFIX}${deviceToken.fcmToken}`);
+      const isBlacklisted = await this.redis.get(
+        `${FCM_TOKEN_BLACKLIST_PREFIX}${deviceToken.fcmToken}`,
+      );
       if (!isBlacklisted) {
         deliverableTokens.push(deviceToken);
       }
@@ -140,7 +163,10 @@ export class FcmPushWorker implements OnModuleInit, OnModuleDestroy {
     return deliverableTokens;
   }
 
-  private async sendDelivery(notification: Notification, token: string): Promise<FcmPushResult | string> {
+  private async sendDelivery(
+    notification: Notification,
+    token: string,
+  ): Promise<FcmPushResult | string> {
     try {
       return await this.fcmPushProvider.send({
         token,
@@ -154,7 +180,11 @@ export class FcmPushWorker implements OnModuleInit, OnModuleDestroy {
   }
 
   private async blacklistToken(token: string): Promise<void> {
-    await this.redis.set(`${FCM_TOKEN_BLACKLIST_PREFIX}${token}`, '1', FCM_TOKEN_BLACKLIST_TTL_SECONDS);
+    await this.redis.set(
+      `${FCM_TOKEN_BLACKLIST_PREFIX}${token}`,
+      '1',
+      FCM_TOKEN_BLACKLIST_TTL_SECONDS,
+    );
   }
 
   private toFcmData(notification: Notification): Record<string, string> {
@@ -164,9 +194,18 @@ export class FcmPushWorker implements OnModuleInit, OnModuleDestroy {
       notificationType: notification.type,
     };
 
-    if (notification.data && typeof notification.data === 'object' && !Array.isArray(notification.data)) {
+    if (
+      notification.data &&
+      typeof notification.data === 'object' &&
+      !Array.isArray(notification.data)
+    ) {
       for (const [key, value] of Object.entries(notification.data)) {
-        if (value === null || value === undefined || ['notificationId', 'type', 'notificationType'].includes(key)) continue;
+        if (
+          value === null ||
+          value === undefined ||
+          ['notificationId', 'type', 'notificationType'].includes(key)
+        )
+          continue;
         data[key] = typeof value === 'string' ? value : JSON.stringify(value);
       }
     }

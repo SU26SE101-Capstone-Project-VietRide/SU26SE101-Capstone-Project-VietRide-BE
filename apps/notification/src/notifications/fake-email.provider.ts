@@ -4,6 +4,6 @@ import type { EmailProvider, EmailProviderPayload, EmailProviderResult } from '.
 @Injectable()
 export class FakeEmailProvider implements EmailProvider {
   async send(payload: EmailProviderPayload): Promise<EmailProviderResult> {
-    return { messageId: `fake-email:${payload.toEmail}` };
+    return { messageId: `fake-email:${payload.deliveryId}` };
   }
 }

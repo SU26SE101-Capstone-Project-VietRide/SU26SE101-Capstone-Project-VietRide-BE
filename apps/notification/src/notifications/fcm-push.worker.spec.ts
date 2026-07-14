@@ -51,7 +51,13 @@ describe('FcmPushWorker', () => {
       set: jest.fn(),
     } as unknown as jest.Mocked<RedisService>;
     deviceTokenProvider.listActiveDeviceTokens.mockResolvedValue([]);
-    worker = new FcmPushWorker(createEnv(), deviceTokenProvider, fcmPushProvider, repository, redis);
+    worker = new FcmPushWorker(
+      createEnv(),
+      deviceTokenProvider,
+      fcmPushProvider,
+      repository,
+      redis,
+    );
   });
 
   it('creates delivery audit rows and marks successful sends as SENT', async () => {
@@ -119,7 +125,9 @@ describe('FcmPushWorker', () => {
     repository.listDeliveriesByNotificationId.mockResolvedValue([createDelivery()]);
     fcmPushProvider.send.mockRejectedValue(new Error('firebase exhausted'));
 
-    await expect(worker.process(createJob(FCM_PUSH_ATTEMPTS - 1))).rejects.toThrow('FCM_PUSH_RETRYABLE_FAILURE');
+    await expect(worker.process(createJob(FCM_PUSH_ATTEMPTS - 1))).rejects.toThrow(
+      'FCM_PUSH_RETRYABLE_FAILURE',
+    );
 
     expect(repository.markDeliveryFailed).toHaveBeenCalledWith(
       DELIVERY_ID,

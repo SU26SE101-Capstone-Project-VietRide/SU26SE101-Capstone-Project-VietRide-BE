@@ -210,13 +210,13 @@ function mapTripAssigned(payload: TripAssignedPayload): CreateNotificationDto[] 
 
 function mapTripCrewChanged(payload: TripCrewChangedPayload): CreateNotificationDto[] {
   const previousCrew = new Set(
-    [payload.oldDriverUserId, payload.oldAssistantUserId].filter(
-      (userId): userId is string => Boolean(userId),
+    [payload.oldDriverUserId, payload.oldAssistantUserId].filter((userId): userId is string =>
+      Boolean(userId),
     ),
   );
   const newCrew = new Set(
-    [payload.driverUserId, payload.assistantUserId].filter(
-      (userId): userId is string => Boolean(userId),
+    [payload.driverUserId, payload.assistantUserId].filter((userId): userId is string =>
+      Boolean(userId),
     ),
   );
   const commonData = {
@@ -248,7 +248,10 @@ function mapTripCrewChanged(payload: TripCrewChangedPayload): CreateNotification
 
   return [...assigned, ...removed];
 }
-function mapBoardingStarted(userId: string, payload: z.infer<typeof BoardingStartedPayloadSchema>): CreateNotificationDto {
+function mapBoardingStarted(
+  userId: string,
+  payload: z.infer<typeof BoardingStartedPayloadSchema>,
+): CreateNotificationDto {
   return {
     userId,
     type: NotificationType.TRIP_BOARDING_REMINDER,
@@ -258,7 +261,10 @@ function mapBoardingStarted(userId: string, payload: z.infer<typeof BoardingStar
   };
 }
 
-function mapRouteChanged(userId: string, payload: z.infer<typeof RouteChangedPayloadSchema>): CreateNotificationDto {
+function mapRouteChanged(
+  userId: string,
+  payload: z.infer<typeof RouteChangedPayloadSchema>,
+): CreateNotificationDto {
   return {
     userId,
     type: NotificationType.TRIP_ROUTE_CHANGED,
@@ -268,7 +274,10 @@ function mapRouteChanged(userId: string, payload: z.infer<typeof RouteChangedPay
   };
 }
 
-function mapScheduleChanged(userId: string, payload: z.infer<typeof ScheduleChangedPayloadSchema>): CreateNotificationDto {
+function mapScheduleChanged(
+  userId: string,
+  payload: z.infer<typeof ScheduleChangedPayloadSchema>,
+): CreateNotificationDto {
   return {
     userId,
     type: NotificationType.TRIP_SCHEDULE_CHANGED,
@@ -278,7 +287,10 @@ function mapScheduleChanged(userId: string, payload: z.infer<typeof ScheduleChan
   };
 }
 
-function mapTripCancelled(userId: string, payload: z.infer<typeof TripCancelledPayloadSchema>): CreateNotificationDto {
+function mapTripCancelled(
+  userId: string,
+  payload: z.infer<typeof TripCancelledPayloadSchema>,
+): CreateNotificationDto {
   const reason = payload.cancelReason ?? payload.reason;
 
   return {
@@ -290,7 +302,10 @@ function mapTripCancelled(userId: string, payload: z.infer<typeof TripCancelledP
   };
 }
 
-function mapTripDelayed(userId: string, payload: z.infer<typeof TripDelayedPayloadSchema>): CreateNotificationDto {
+function mapTripDelayed(
+  userId: string,
+  payload: z.infer<typeof TripDelayedPayloadSchema>,
+): CreateNotificationDto {
   const delayText = payload.delayMinutes ? ` Du kien tre ${payload.delayMinutes} phut.` : '';
 
   return {
@@ -302,7 +317,10 @@ function mapTripDelayed(userId: string, payload: z.infer<typeof TripDelayedPaylo
   };
 }
 
-function mapIncidentReported(userId: string, payload: z.infer<typeof IncidentReportedPayloadSchema>): CreateNotificationDto {
+function mapIncidentReported(
+  userId: string,
+  payload: z.infer<typeof IncidentReportedPayloadSchema>,
+): CreateNotificationDto {
   return {
     userId,
     type: NotificationType.INCIDENT_REPORTED,
@@ -312,7 +330,10 @@ function mapIncidentReported(userId: string, payload: z.infer<typeof IncidentRep
   };
 }
 
-function mapOffRoute(userId: string, payload: z.infer<typeof OffRoutePayloadSchema>): CreateNotificationDto {
+function mapOffRoute(
+  userId: string,
+  payload: z.infer<typeof OffRoutePayloadSchema>,
+): CreateNotificationDto {
   return {
     userId,
     type: NotificationType.OFF_ROUTE_ALERT,
@@ -322,7 +343,10 @@ function mapOffRoute(userId: string, payload: z.infer<typeof OffRoutePayloadSche
   };
 }
 
-function mapApproachingStop(userId: string, payload: ApproachingStopPayload): CreateNotificationDto {
+function mapApproachingStop(
+  userId: string,
+  payload: ApproachingStopPayload,
+): CreateNotificationDto {
   const stopLabel = payload.stopName ?? 'diem don';
   const etaMinutes =
     payload.etaMinutes ??
@@ -365,7 +389,13 @@ function fanOut<TPayload extends RecipientPayload>(
 }
 
 function collectRecipientUserIds(payload: RecipientPayload): string[] {
-  return [...new Set([payload.userId, ...(payload.userIds ?? []), ...(payload.recipientUserIds ?? [])].filter(isString))];
+  return [
+    ...new Set(
+      [payload.userId, ...(payload.userIds ?? []), ...(payload.recipientUserIds ?? [])].filter(
+        isString,
+      ),
+    ),
+  ];
 }
 
 function isString(value: string | undefined): value is string {

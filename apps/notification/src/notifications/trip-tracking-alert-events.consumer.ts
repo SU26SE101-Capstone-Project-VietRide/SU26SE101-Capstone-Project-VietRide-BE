@@ -1,16 +1,12 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
 import type { ConsumeMessage } from 'amqplib';
-import pino from 'pino';
 import { ZodError } from 'zod';
-import {
-  RABBITMQ_PREFETCH_ONE,
-} from './core-events.constants';
+import { RABBITMQ_PREFETCH_ONE } from './core-events.constants';
 import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
-import {
-  TRIP_TRACKING_ALERT_QUEUE_BINDINGS,
-} from './trip-tracking-alert-events.constants';
+import { createNotificationLogger } from './notification-logger';
+import { TRIP_TRACKING_ALERT_QUEUE_BINDINGS } from './trip-tracking-alert-events.constants';
 import {
   mapTripTrackingAlertToNotifications,
   type TripTrackingAlertRoutingKey,
@@ -18,7 +14,7 @@ import {
 
 @Injectable()
 export class TripTrackingAlertEventsConsumer implements OnModuleInit {
-  private readonly logger = pino({ name: TripTrackingAlertEventsConsumer.name });
+  private readonly logger = createNotificationLogger(TripTrackingAlertEventsConsumer.name);
 
   constructor(
     private readonly consumer: RabbitMqConsumer,
@@ -33,13 +29,22 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
           binding.queue,
           binding.routingKey,
           (payload, raw) => this.handle(binding.routingKey, payload, raw),
-          { prefetch: RABBITMQ_PREFETCH_ONE, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
+          {
+            prefetch: RABBITMQ_PREFETCH_ONE,
+            deadLetter: true,
+            maxRetries: 5,
+            retryDelayMs: 10_000,
+          },
         ),
       ),
     );
   }
 
-  async handle(routingKey: TripTrackingAlertRoutingKey, payload: unknown, raw: ConsumeMessage): Promise<void> {
+  async handle(
+    routingKey: TripTrackingAlertRoutingKey,
+    payload: unknown,
+    raw: ConsumeMessage,
+  ): Promise<void> {
     const messageId = raw.properties.messageId ?? raw.properties.correlationId;
     if (!messageId) {
       throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
@@ -47,7 +52,10 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
 
     const processingState = await this.idempotency.begin(routingKey, messageId);
     if (processingState === 'duplicate') {
-      this.logger.info({ routingKey, messageId, processingState }, 'Skipping already handled alert message');
+      this.logger.info(
+        { routingKey, messageId, processingState },
+        'Skipping already handled alert message',
+      );
       return;
     }
     if (processingState === 'locked') {
@@ -76,7 +84,10 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
       );
     } catch (error) {
       if (error instanceof ZodError) {
-        this.logger.warn({ routingKey, messageId, issues: error.issues }, 'Dropping malformed alert notification event');
+        this.logger.warn(
+          { routingKey, messageId, issues: error.issues },
+          'Dropping malformed alert notification event',
+        );
         await this.idempotency.markProcessed(routingKey, messageId);
         return;
       }

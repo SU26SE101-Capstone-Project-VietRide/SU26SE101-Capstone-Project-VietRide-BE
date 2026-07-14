@@ -55,6 +55,7 @@ CREATE TYPE notification_type AS ENUM (
     'SUBSCRIPTION_APPROVED',
     'SUBSCRIPTION_PAYMENT_PENDING_WARN',
     'SUBSCRIPTION_PAYMENT_AUTO_REVERTED',
+    'INVOICE_ISSUED',
     'DRIVER_SCHEDULE_EDITED',
     'PAYOUT_PROCESSED',
     'PAYOUT_FAILED',
@@ -81,7 +82,7 @@ CREATE TYPE email_template_key AS ENUM (
 );
 
 CREATE TYPE email_delivery_status AS ENUM (
-    'PENDING', 'SENT', 'FAILED', 'RETRYING'
+    'PENDING', 'SENDING', 'SENT', 'FAILED', 'RETRYING'
 );
 
 CREATE TYPE device_platform AS ENUM ('IOS', 'ANDROID', 'WEB');
@@ -144,6 +145,7 @@ CREATE UNIQUE INDEX notification_deliveries_notification_id_fcm_token_key
 CREATE TABLE email_deliveries (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     notification_id UUID NULL REFERENCES notifications (id) ON DELETE SET NULL,
+    dedupe_key VARCHAR(200) NULL,
     to_email VARCHAR(320) NOT NULL,
     template_key email_template_key NOT NULL,
     subject VARCHAR(255) NOT NULL,
@@ -163,6 +165,8 @@ CREATE INDEX idx_email_deliveries_status_created_at
     ON email_deliveries (status, created_at);
 CREATE INDEX idx_email_deliveries_to_email_created_at
     ON email_deliveries (to_email, created_at DESC);
+CREATE UNIQUE INDEX email_deliveries_dedupe_key_key
+    ON email_deliveries (dedupe_key);
 
 -- =============================================================================
 -- TRIGGERS

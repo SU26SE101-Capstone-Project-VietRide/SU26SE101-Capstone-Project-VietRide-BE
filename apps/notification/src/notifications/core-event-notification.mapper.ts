@@ -9,7 +9,9 @@ import {
   WALLET_DEBITED_ROUTING_KEY,
 } from './core-events.constants';
 
-const MoneyAmountSchema = z.union([z.number().int().nonnegative(), z.string().regex(/^\d+$/)]).optional();
+const MoneyAmountSchema = z
+  .union([z.number().int().nonnegative(), z.string().regex(/^\d+$/)])
+  .optional();
 
 const BookingEventPayloadSchema = z.object({
   userId: z.string().uuid(),
@@ -41,7 +43,10 @@ export type CoreEventRoutingKey =
   | typeof WALLET_CREDITED_ROUTING_KEY
   | typeof WALLET_DEBITED_ROUTING_KEY;
 
-export function mapCoreEventToNotification(routingKey: CoreEventRoutingKey, payload: unknown): CreateNotificationDto {
+export function mapCoreEventToNotification(
+  routingKey: CoreEventRoutingKey,
+  payload: unknown,
+): CreateNotificationDto {
   switch (routingKey) {
     case BOOKING_CONFIRMED_ROUTING_KEY:
       return mapBookingConfirmed(BookingEventPayloadSchema.parse(payload));
@@ -56,7 +61,9 @@ export function mapCoreEventToNotification(routingKey: CoreEventRoutingKey, payl
   }
 }
 
-function mapBookingConfirmed(payload: z.infer<typeof BookingEventPayloadSchema>): CreateNotificationDto {
+function mapBookingConfirmed(
+  payload: z.infer<typeof BookingEventPayloadSchema>,
+): CreateNotificationDto {
   return {
     userId: payload.userId,
     type: NotificationType.BOOKING_CONFIRMED,
@@ -66,7 +73,9 @@ function mapBookingConfirmed(payload: z.infer<typeof BookingEventPayloadSchema>)
   };
 }
 
-function mapBookingCancelled(payload: z.infer<typeof BookingEventPayloadSchema>): CreateNotificationDto {
+function mapBookingCancelled(
+  payload: z.infer<typeof BookingEventPayloadSchema>,
+): CreateNotificationDto {
   return {
     userId: payload.userId,
     type: NotificationType.BOOKING_CANCELLED,
@@ -76,8 +85,12 @@ function mapBookingCancelled(payload: z.infer<typeof BookingEventPayloadSchema>)
   };
 }
 
-function mapBookingRefunded(payload: z.infer<typeof BookingEventPayloadSchema>): CreateNotificationDto {
-  const refundText = payload.refundAmount ? ` So tien hoan: ${formatMoney(payload.refundAmount)} VND.` : '';
+function mapBookingRefunded(
+  payload: z.infer<typeof BookingEventPayloadSchema>,
+): CreateNotificationDto {
+  const refundText = payload.refundAmount
+    ? ` So tien hoan: ${formatMoney(payload.refundAmount)} VND.`
+    : '';
 
   return {
     userId: payload.userId,
@@ -88,7 +101,9 @@ function mapBookingRefunded(payload: z.infer<typeof BookingEventPayloadSchema>):
   };
 }
 
-function mapWalletCredited(payload: z.infer<typeof WalletEventPayloadSchema>): CreateNotificationDto {
+function mapWalletCredited(
+  payload: z.infer<typeof WalletEventPayloadSchema>,
+): CreateNotificationDto {
   return {
     userId: payload.userId,
     type: NotificationType.WALLET_CREDITED,
@@ -98,7 +113,9 @@ function mapWalletCredited(payload: z.infer<typeof WalletEventPayloadSchema>): C
   };
 }
 
-function mapWalletDebited(payload: z.infer<typeof WalletEventPayloadSchema>): CreateNotificationDto {
+function mapWalletDebited(
+  payload: z.infer<typeof WalletEventPayloadSchema>,
+): CreateNotificationDto {
   return {
     userId: payload.userId,
     type: NotificationType.WALLET_DEBITED,
@@ -120,7 +137,9 @@ function formatMoney(amount: z.infer<typeof MoneyAmountSchema>): string {
   return amount.toString();
 }
 
-function buildBookingData(payload: z.infer<typeof BookingEventPayloadSchema>): Record<string, unknown> {
+function buildBookingData(
+  payload: z.infer<typeof BookingEventPayloadSchema>,
+): Record<string, unknown> {
   return {
     bookingId: payload.bookingId,
     tripId: payload.tripId ?? null,
@@ -133,7 +152,9 @@ function buildBookingData(payload: z.infer<typeof BookingEventPayloadSchema>): R
   };
 }
 
-function buildWalletData(payload: z.infer<typeof WalletEventPayloadSchema>): Record<string, unknown> {
+function buildWalletData(
+  payload: z.infer<typeof WalletEventPayloadSchema>,
+): Record<string, unknown> {
   return {
     walletTransactionId: payload.walletTransactionId ?? payload.transactionId ?? null,
     referenceId: payload.referenceId ?? null,

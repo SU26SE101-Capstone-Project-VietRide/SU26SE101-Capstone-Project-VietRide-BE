@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, Injectable, UnprocessableEntityException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { RedisService } from '@vietride/nest-redis';
 import { NotificationType } from '../generated/notification-prisma-client';
 import type { CreateOperatorAnnouncementDto } from './dto/create-operator-announcement.dto';
@@ -27,7 +32,10 @@ export class OperatorAnnouncementService {
     dto: CreateOperatorAnnouncementDto,
   ): Promise<OperatorAnnouncementResult> {
     if (!idempotencyKey?.trim()) {
-      throw new BadRequestException({ errorCode: 'IDEMPOTENCY_KEY_REQUIRED', detail: 'Idempotency-Key header is required' });
+      throw new BadRequestException({
+        errorCode: 'IDEMPOTENCY_KEY_REQUIRED',
+        detail: 'Idempotency-Key header is required',
+      });
     }
     const responseKey = `notification:operator-announcement:${actorUserId}:${idempotencyKey.trim()}`;
     const existing = await this.redis.get(responseKey);
@@ -44,9 +52,10 @@ export class OperatorAnnouncementService {
     }
 
     try {
-      const recipients = dto.scope === 'TRIP'
-        ? await this.tripRecipients.resolveTripCrewUserIds(dto.tripId!, operatorId)
-        : await this.identityRecipients.resolveOperatorCrewUserIds(operatorId);
+      const recipients =
+        dto.scope === 'TRIP'
+          ? await this.tripRecipients.resolveTripCrewUserIds(dto.tripId!, operatorId)
+          : await this.identityRecipients.resolveOperatorCrewUserIds(operatorId);
       const uniqueRecipients = [...new Set(recipients)];
       if (uniqueRecipients.length === 0) {
         throw new UnprocessableEntityException({
@@ -55,15 +64,22 @@ export class OperatorAnnouncementService {
         });
       }
 
-      const notifications = await Promise.all(uniqueRecipients.map((userId) => this.notificationsService.createNotification({
-        userId,
-        type: NotificationType.OPERATOR_ANNOUNCEMENT,
-        title: dto.title,
-        body: dto.body,
-        data: { scope: dto.scope, operatorId, ...(dto.tripId ? { tripId: dto.tripId } : {}) },
-        dedupeKey: `operator-announcement:${actorUserId}:${idempotencyKey.trim()}:${userId}`,
-      })));
-      const result = { announcementId: notifications[0]!.id, recipientCount: uniqueRecipients.length };
+      const notifications = await Promise.all(
+        uniqueRecipients.map((userId) =>
+          this.notificationsService.createNotification({
+            userId,
+            type: NotificationType.OPERATOR_ANNOUNCEMENT,
+            title: dto.title,
+            body: dto.body,
+            data: { scope: dto.scope, operatorId, ...(dto.tripId ? { tripId: dto.tripId } : {}) },
+            dedupeKey: `operator-announcement:${actorUserId}:${idempotencyKey.trim()}:${userId}`,
+          }),
+        ),
+      );
+      const result = {
+        announcementId: notifications[0]!.id,
+        recipientCount: uniqueRecipients.length,
+      };
       await this.redis.set(responseKey, JSON.stringify(result), 86_400);
       return result;
     } finally {
@@ -71,7 +87,9 @@ export class OperatorAnnouncementService {
     }
   }
 
-  private async waitForCompletedResponse(responseKey: string): Promise<OperatorAnnouncementResult | null> {
+  private async waitForCompletedResponse(
+    responseKey: string,
+  ): Promise<OperatorAnnouncementResult | null> {
     for (let attempt = 0; attempt < 20; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 100));
       const response = await this.redis.get(responseKey);

@@ -16,6 +16,7 @@ import { IdentityEventsConsumer } from './identity-events.consumer';
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const OPERATOR_ID = '22222222-2222-4222-8222-222222222222';
 const MESSAGE_ID = 'identity-message-1';
+const EVENT_ID = '33333333-3333-4333-8333-333333333333';
 
 describe('IdentityEventsConsumer', () => {
   let handlers: Record<string, RabbitMqHandler>;
@@ -107,6 +108,7 @@ describe('IdentityEventsConsumer', () => {
 
     await consumer.handleOperatorApproved(
       {
+        eventId: EVENT_ID,
         operatorId: OPERATOR_ID,
         approvedAt: '2026-06-10T08:30:00+07:00',
       },
@@ -181,6 +183,7 @@ describe('IdentityEventsConsumer', () => {
     await expect(
       consumer.handleOperatorApproved(
         {
+          eventId: EVENT_ID,
           operatorId: OPERATOR_ID,
           approvedAt: '2026-06-10T08:30:00+07:00',
         },
@@ -205,6 +208,7 @@ describe('IdentityEventsConsumer', () => {
     await expect(
       consumer.handleOperatorApproved(
         {
+          eventId: EVENT_ID,
           operatorId: OPERATOR_ID,
           approvedAt: '2026-06-10T08:30:00+07:00',
         },
@@ -237,6 +241,7 @@ describe('IdentityEventsConsumer', () => {
     await expect(
       consumer.handleOperatorApproved(
         {
+          eventId: EVENT_ID,
           operatorId: OPERATOR_ID,
           approvedAt: '2026-06-10T08:30:00+07:00',
         },

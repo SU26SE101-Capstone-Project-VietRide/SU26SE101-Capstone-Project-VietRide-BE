@@ -206,7 +206,7 @@ describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
     ]);
   });
 
-  it('maps invoice issued with existing subscription notification type', async () => {
+  it('maps invoice issued with a dedicated type and only the web deep-link', async () => {
     await expect(
       mapParcelSubscriptionOperatorEventToNotifications(
         INVOICE_ISSUED_ROUTING_KEY,
@@ -215,16 +215,36 @@ describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
           operatorId: OPERATOR_ID,
           invoiceId: INVOICE_ID,
           invoiceNumber: 'VR-INV-202606-000001',
+          amount: '1200000',
+          invoiceWebUrl: `https://operator.vietride.vn/invoices/${INVOICE_ID}`,
+          downloadApiUrl: `https://api.vietride.vn/v1/operator/invoices/${INVOICE_ID}/download`,
         },
-        resolveNoOperatorRecipients,
+        async () => [USER_ID],
       ),
     ).resolves.toEqual([
       expect.objectContaining({
         userId: USER_ID,
-        type: NotificationType.SUBSCRIPTION_APPROVED,
+        type: NotificationType.INVOICE_ISSUED,
         title: 'Hoa don moi da duoc phat hanh',
+        data: expect.objectContaining({
+          invoiceWebUrl: `https://operator.vietride.vn/invoices/${INVOICE_ID}`,
+        }),
       }),
     ]);
+    const [notification] = await mapParcelSubscriptionOperatorEventToNotifications(
+      INVOICE_ISSUED_ROUTING_KEY,
+      {
+        userId: USER_ID,
+        operatorId: OPERATOR_ID,
+        invoiceId: INVOICE_ID,
+        invoiceNumber: 'VR-INV-202606-000001',
+        amount: '1200000',
+        invoiceWebUrl: `https://operator.vietride.vn/invoices/${INVOICE_ID}`,
+        downloadApiUrl: `https://api.vietride.vn/v1/operator/invoices/${INVOICE_ID}/download`,
+      },
+      async () => [USER_ID],
+    );
+    expect(notification?.data).not.toHaveProperty('downloadApiUrl');
   });
 
   it('maps trip settlement completed to wallet credited notification', async () => {
@@ -236,9 +256,11 @@ describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
           operatorId: OPERATOR_ID,
           settlementId: SETTLEMENT_ID,
           tripId: TRIP_ID,
-          amount: '2500000',
+          netAmount: '2500000',
+          settlementMethod: 'AUTO_WEEKLY',
+          settledAt: '2026-07-14T02:00:00+00:00',
         },
-        resolveNoOperatorRecipients,
+        async () => [USER_ID],
       ),
     ).resolves.toEqual([
       expect.objectContaining({

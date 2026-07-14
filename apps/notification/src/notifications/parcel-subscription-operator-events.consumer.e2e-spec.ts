@@ -19,7 +19,10 @@ describe('ParcelSubscriptionOperatorEventsConsumer registration (e2e)', () => {
       providers: [
         ParcelSubscriptionOperatorEventsConsumer,
         { provide: RabbitMqConsumer, useValue: { subscribe } },
-        { provide: MessageIdempotencyService, useValue: { begin: jest.fn(), markProcessed: jest.fn(), release: jest.fn() } },
+        {
+          provide: MessageIdempotencyService,
+          useValue: { begin: jest.fn(), markProcessed: jest.fn(), release: jest.fn() },
+        },
         { provide: NotificationsService, useValue: { createNotification: jest.fn() } },
         { provide: OPERATOR_RECIPIENT_PROVIDER, useValue: operatorRecipientProvider },
       ],

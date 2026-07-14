@@ -1,12 +1,13 @@
 import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
 import type { ConsumeMessage } from 'amqplib';
-import { NotificationType } from '../generated/notification-prisma-client';
+import { EmailTemplateKey, NotificationType } from '../generated/notification-prisma-client';
 import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
 import type { OperatorRecipientProvider } from './operator-recipient.provider';
 import {
   OPERATOR_RECIPIENT_PROVIDER,
   BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY,
+  INVOICE_ISSUED_ROUTING_KEY,
   PARCEL_LOADED_ROUTING_KEY,
   PARCEL_SUBSCRIPTION_OPERATOR_QUEUE_BINDINGS,
   SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY,
@@ -18,6 +19,8 @@ const OPERATOR_ID = '33333333-3333-4333-8333-333333333333';
 const PARCEL_ID = '44444444-4444-4444-8444-444444444444';
 const VOUCHER_ID = '55555555-5555-4555-8555-555555555555';
 const MESSAGE_ID = 'phase-6-message-1';
+const INVOICE_ID = '66666666-6666-4666-8666-666666666666';
+const RECIPIENT_EMAIL = 'operator-admin@vietride.local';
 
 describe('ParcelSubscriptionOperatorEventsConsumer', () => {
   let rabbitConsumer: jest.Mocked<RabbitMqConsumer>;
@@ -37,9 +40,11 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
     } as unknown as jest.Mocked<MessageIdempotencyService>;
     notificationsService = {
       createNotification: jest.fn(),
+      enqueueEmail: jest.fn(),
     } as unknown as jest.Mocked<NotificationsService>;
     operatorRecipientProvider = {
       resolveOperatorRecipientUserIds: jest.fn(),
+      resolveOperatorRecipientEmails: jest.fn(),
     };
     consumer = new ParcelSubscriptionOperatorEventsConsumer(
       rabbitConsumer,
@@ -52,7 +57,9 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
   it('subscribes all phase 6 routing keys', async () => {
     await consumer.onModuleInit();
 
-    expect(rabbitConsumer.subscribe).toHaveBeenCalledTimes(PARCEL_SUBSCRIPTION_OPERATOR_QUEUE_BINDINGS.length);
+    expect(rabbitConsumer.subscribe).toHaveBeenCalledTimes(
+      PARCEL_SUBSCRIPTION_OPERATOR_QUEUE_BINDINGS.length,
+    );
     for (const binding of PARCEL_SUBSCRIPTION_OPERATOR_QUEUE_BINDINGS) {
       expect(rabbitConsumer.subscribe).toHaveBeenCalledWith(
         binding.queue,
@@ -65,7 +72,9 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
 
   it('creates parcel notification for a new valid message', async () => {
     idempotency.begin.mockResolvedValue('acquired');
-    notificationsService.createNotification.mockResolvedValue(createNotification(NotificationType.PARCEL_LOADED));
+    notificationsService.createNotification.mockResolvedValue(
+      createNotification(NotificationType.PARCEL_LOADED),
+    );
 
     await consumer.handle(
       PARCEL_LOADED_ROUTING_KEY,
@@ -103,7 +112,9 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
       createMessage(MESSAGE_ID),
     );
 
-    expect(operatorRecipientProvider.resolveOperatorRecipientUserIds).toHaveBeenCalledWith(OPERATOR_ID);
+    expect(operatorRecipientProvider.resolveOperatorRecipientUserIds).toHaveBeenCalledWith(
+      OPERATOR_ID,
+    );
     expect(notificationsService.createNotification).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: USER_ID,
@@ -163,6 +174,89 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
     expect(idempotency.release).not.toHaveBeenCalled();
   });
 
+  it('creates dedicated invoice in-app/push data and one deduplicated email using invoiceWebUrl', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([USER_ID]);
+    (operatorRecipientProvider.resolveOperatorRecipientEmails as jest.Mock).mockResolvedValue([
+      { userId: USER_ID, email: RECIPIENT_EMAIL },
+    ]);
+    notificationsService.createNotification.mockResolvedValue(
+      createNotification(NotificationType.INVOICE_ISSUED),
+    );
+    notificationsService.enqueueEmail.mockResolvedValue({
+      id: '77777777-7777-4777-8777-777777777777',
+      toEmail: RECIPIENT_EMAIL,
+      templateKey: EmailTemplateKey.INVOICE_NOTICE,
+      status: 'PENDING',
+      createdAt: '2026-07-14T00:00:00.000Z',
+    });
+
+    const invoiceWebUrl = `https://operator.vietride.vn/invoices/${INVOICE_ID}`;
+    const downloadApiUrl = `https://api.vietride.vn/v1/operator/invoices/${INVOICE_ID}/download`;
+    await consumer.handle(
+      INVOICE_ISSUED_ROUTING_KEY,
+      {
+        invoiceId: INVOICE_ID,
+        invoiceNumber: 'VR-INV-202607-000001',
+        operatorId: OPERATOR_ID,
+        amount: '1200000',
+        invoiceWebUrl,
+        downloadApiUrl,
+      },
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.INVOICE_ISSUED,
+        data: expect.objectContaining({ invoiceWebUrl }),
+      }),
+    );
+    expect(notificationsService.createNotification.mock.calls[0]?.[0].data).not.toHaveProperty(
+      'downloadApiUrl',
+    );
+    expect(notificationsService.enqueueEmail).toHaveBeenCalledWith({
+      notificationId: '99999999-9999-4999-8999-999999999999',
+      dedupeKey: `${INVOICE_ISSUED_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:email`,
+      toEmail: RECIPIENT_EMAIL,
+      templateKey: EmailTemplateKey.INVOICE_NOTICE,
+      templateData: {
+        invoiceNumber: 'VR-INV-202607-000001',
+        amountVnd: '1200000',
+        invoiceUrl: invoiceWebUrl,
+      },
+    });
+    expect(operatorRecipientProvider.resolveOperatorRecipientEmails).toHaveBeenCalledWith(
+      OPERATOR_ID,
+      [USER_ID],
+    );
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(INVOICE_ISSUED_ROUTING_KEY, MESSAGE_ID);
+  });
+
+  it('drops an invoice recipient that is no longer an active admin in the same tenant', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([USER_ID]);
+    (operatorRecipientProvider.resolveOperatorRecipientEmails as jest.Mock).mockResolvedValue([]);
+
+    await consumer.handle(
+      INVOICE_ISSUED_ROUTING_KEY,
+      {
+        invoiceId: INVOICE_ID,
+        invoiceNumber: 'VR-INV-202607-000001',
+        operatorId: OPERATOR_ID,
+        amount: '1200000',
+        invoiceWebUrl: `https://operator.vietride.vn/invoices/${INVOICE_ID}`,
+        downloadApiUrl: `https://api.vietride.vn/v1/operator/invoices/${INVOICE_ID}/download`,
+      },
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(notificationsService.createNotification).not.toHaveBeenCalled();
+    expect(notificationsService.enqueueEmail).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(INVOICE_ISSUED_ROUTING_KEY, MESSAGE_ID);
+  });
+
   it('skips duplicate message id', async () => {
     idempotency.begin.mockResolvedValue('duplicate');
 
@@ -175,6 +269,28 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
       createMessage(MESSAGE_ID),
     );
 
+    expect(notificationsService.createNotification).not.toHaveBeenCalled();
+  });
+
+  it('uses canonical payload eventId across transport republish', async () => {
+    const eventId = '88888888-8888-4888-8888-888888888888';
+    idempotency.begin.mockResolvedValue('duplicate');
+
+    await consumer.handle(
+      INVOICE_ISSUED_ROUTING_KEY,
+      {
+        eventId,
+        invoiceId: INVOICE_ID,
+        invoiceNumber: 'VR-INV-202607-000001',
+        operatorId: OPERATOR_ID,
+        amount: '1200000',
+        invoiceWebUrl: `https://operator.vietride.vn/invoices/${INVOICE_ID}`,
+        downloadApiUrl: `https://api.vietride.vn/v1/operator/invoices/${INVOICE_ID}/download`,
+      },
+      createMessage('different-outbox-row-id'),
+    );
+
+    expect(idempotency.begin).toHaveBeenCalledWith(INVOICE_ISSUED_ROUTING_KEY, eventId);
     expect(notificationsService.createNotification).not.toHaveBeenCalled();
   });
 
@@ -195,18 +311,36 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
     expect(idempotency.markProcessed).toHaveBeenCalledWith(PARCEL_LOADED_ROUTING_KEY, MESSAGE_ID);
   });
 
-  it('rejects messages without id before idempotency check', async () => {
-    await expect(consumer.handle(
-      PARCEL_LOADED_ROUTING_KEY,
-      {
-        userId: USER_ID,
-        parcelId: PARCEL_ID,
-      },
-      createMessage(undefined),
-    )).rejects.toThrow('MISSING_MESSAGE_ID');
+  it('drops messages without id before idempotency check without poisoning the queue', async () => {
+    await expect(
+      consumer.handle(
+        PARCEL_LOADED_ROUTING_KEY,
+        {
+          userId: USER_ID,
+          parcelId: PARCEL_ID,
+        },
+        createMessage(undefined),
+      ),
+    ).resolves.toBeUndefined();
 
     expect(idempotency.begin).not.toHaveBeenCalled();
     expect(notificationsService.createNotification).not.toHaveBeenCalled();
+  });
+
+  it('releases the processing lock and rethrows transient side-effect failures', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    notificationsService.createNotification.mockRejectedValue(new Error('DATABASE_UNAVAILABLE'));
+
+    await expect(
+      consumer.handle(
+        PARCEL_LOADED_ROUTING_KEY,
+        { userId: USER_ID, parcelId: PARCEL_ID },
+        createMessage(MESSAGE_ID),
+      ),
+    ).rejects.toThrow('DATABASE_UNAVAILABLE');
+
+    expect(idempotency.release).toHaveBeenCalledWith(PARCEL_LOADED_ROUTING_KEY, MESSAGE_ID);
+    expect(idempotency.markProcessed).not.toHaveBeenCalled();
   });
 });
 

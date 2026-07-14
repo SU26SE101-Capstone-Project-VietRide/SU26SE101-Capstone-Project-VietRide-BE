@@ -94,7 +94,8 @@ export class EmailTemplateRenderer {
     const amountVnd = this.optionalString(data, 'amountVnd');
     const invoiceUrl = this.optionalString(data, 'invoiceUrl');
     const subject = `Hoa don VietRide ${invoiceNumber}`;
-    const lines = [`Hoa don ${invoiceNumber} da san sang.`];
+    const firstLine = `Hoa don ${invoiceNumber} da san sang.`;
+    const lines = [firstLine];
     if (amountVnd) {
       lines.push(`So tien: ${amountVnd} VND.`);
     }
@@ -105,10 +106,13 @@ export class EmailTemplateRenderer {
     return {
       subject,
       text: lines.join('\n'),
-      html: this.paragraphs(
-        subject,
-        lines.map((line) => this.escapeHtml(line)),
-      ),
+      html: this.paragraphs(subject, [
+        this.escapeHtml(firstLine),
+        ...(amountVnd ? [this.escapeHtml(`So tien: ${amountVnd} VND.`)] : []),
+        ...(invoiceUrl
+          ? [`<a href="${this.escapeHtml(invoiceUrl)}">Xem chi tiet hoa don</a>`]
+          : []),
+      ]),
     };
   }
 

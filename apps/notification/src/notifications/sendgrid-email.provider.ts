@@ -25,6 +25,7 @@ export class SendGridEmailProvider implements EmailProvider {
       subject: payload.subject,
       text: payload.text,
       html: payload.html,
+      customArgs: { vietride_delivery_id: payload.deliveryId },
     });
 
     const messageId = this.extractMessageId(response.headers);

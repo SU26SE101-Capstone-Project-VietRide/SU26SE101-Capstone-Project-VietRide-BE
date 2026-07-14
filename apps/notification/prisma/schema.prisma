@@ -46,6 +46,7 @@ enum NotificationType {
   SUBSCRIPTION_APPROVED
   SUBSCRIPTION_PAYMENT_PENDING_WARN
   SUBSCRIPTION_PAYMENT_AUTO_REVERTED
+  INVOICE_ISSUED
   DRIVER_SCHEDULE_EDITED
   PAYOUT_PROCESSED
   PAYOUT_FAILED
@@ -88,6 +89,7 @@ enum EmailTemplateKey {
 
 enum EmailDeliveryStatus {
   PENDING
+  SENDING
   SENT
   FAILED
   RETRYING
@@ -148,6 +150,7 @@ model NotificationDelivery {
 model EmailDelivery {
   id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   notificationId    String?             @map("notification_id") @db.Uuid
+  dedupeKey          String?             @unique @map("dedupe_key") @db.VarChar(200)
   toEmail           String              @map("to_email") @db.VarChar(320)
   templateKey       EmailTemplateKey    @map("template_key")
   subject           String              @db.VarChar(255)

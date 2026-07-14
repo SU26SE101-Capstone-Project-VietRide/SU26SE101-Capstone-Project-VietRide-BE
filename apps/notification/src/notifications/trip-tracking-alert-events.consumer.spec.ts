@@ -32,13 +32,19 @@ describe('TripTrackingAlertEventsConsumer', () => {
     notificationsService = {
       createNotification: jest.fn(),
     } as unknown as jest.Mocked<NotificationsService>;
-    consumer = new TripTrackingAlertEventsConsumer(rabbitConsumer, idempotency, notificationsService);
+    consumer = new TripTrackingAlertEventsConsumer(
+      rabbitConsumer,
+      idempotency,
+      notificationsService,
+    );
   });
 
   it('subscribes all phase 5 routing keys', async () => {
     await consumer.onModuleInit();
 
-    expect(rabbitConsumer.subscribe).toHaveBeenCalledTimes(TRIP_TRACKING_ALERT_QUEUE_BINDINGS.length);
+    expect(rabbitConsumer.subscribe).toHaveBeenCalledTimes(
+      TRIP_TRACKING_ALERT_QUEUE_BINDINGS.length,
+    );
     for (const binding of TRIP_TRACKING_ALERT_QUEUE_BINDINGS) {
       expect(rabbitConsumer.subscribe).toHaveBeenCalledWith(
         binding.queue,

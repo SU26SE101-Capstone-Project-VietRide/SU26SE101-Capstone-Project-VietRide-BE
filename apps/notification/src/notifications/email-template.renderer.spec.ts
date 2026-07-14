@@ -67,4 +67,20 @@ describe('EmailTemplateRenderer', () => {
       expect(result.text).toContain('token=legacy');
     });
   });
+
+  describe('INVOICE_NOTICE', () => {
+    it('uses the Operator Web URL as the only email href', () => {
+      const invoiceWebUrl =
+        'https://operator.vietride.vn/invoices/77777777-7777-4777-8777-777777777777';
+      const result = renderer.render(EmailTemplateKey.INVOICE_NOTICE, {
+        invoiceNumber: 'VR-INV-202607-000001',
+        amountVnd: '1200000',
+        invoiceUrl: invoiceWebUrl,
+      });
+
+      expect(result.html).toContain(`href="${invoiceWebUrl}"`);
+      expect(result.text).toContain(invoiceWebUrl);
+      expect(result.html).not.toContain('/download');
+    });
+  });
 });
