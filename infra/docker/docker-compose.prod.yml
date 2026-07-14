@@ -5,7 +5,8 @@
 # This file is copied to /opt/vietride/ on the server by the deploy workflow.
 # A gitignored .env (real secrets) must live next to it at /opt/vietride/.env.
 #
-# Required .env keys (beyond .env.example): IMAGE_PREFIX, IMAGE_TAG, APP_DOMAIN, ACME_EMAIL.
+# Required .env keys (beyond .env.example): IMAGE_PREFIX, IMAGE_TAG, APP_DOMAIN, ACME_EMAIL,
+# INVOICE_STORAGE_BUCKET and OPERATOR_WEB_INVOICE_DETAIL_BASE_URL.
 #   IMAGE_PREFIX  e.g. ghcr.io/su26se101-capstone-project-vietride/vietride
 #   IMAGE_TAG     e.g. v1.0.0  (the version tag you pushed)
 #
@@ -203,6 +204,12 @@ services:
       VNPAY_HASH_SECRET: ${VNPAY_HASH_SECRET}
       VNPAY_PAYMENT_URL: ${VNPAY_PAYMENT_URL}
       VNPAY_RETURN_URL: ${VNPAY_RETURN_URL}
+      InvoiceStorage__Bucket: ${INVOICE_STORAGE_BUCKET:?INVOICE_STORAGE_BUCKET is required in production}
+      InvoiceStorage__StableBaseUrl: ${INVOICE_STORAGE_STABLE_BASE_URL:?INVOICE_STORAGE_STABLE_BASE_URL is required in production}
+      OperatorWeb__InvoiceDetailBaseUrl: ${OPERATOR_WEB_INVOICE_DETAIL_BASE_URL:?OPERATOR_WEB_INVOICE_DETAIL_BASE_URL is required in production}
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase/service-account.json
+    volumes:
+      - /opt/vietride/secrets/firebase-service-account.json:/run/secrets/firebase/service-account.json:ro
     healthcheck:
       test:
         ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5004/health || exit 1']

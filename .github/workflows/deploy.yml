@@ -79,6 +79,18 @@ jobs:
               echo "::error::/opt/vietride/infra/docker/.env not found — create it once (see DEPLOY.md)"; exit 1
             fi
 
+            FIREBASE_CREDENTIAL=/opt/vietride/secrets/firebase-service-account.json
+            if [ ! -r "$FIREBASE_CREDENTIAL" ]; then
+              echo "::error::$FIREBASE_CREDENTIAL is missing or unreadable"; exit 1
+            fi
+            for key in INVOICE_STORAGE_BUCKET INVOICE_STORAGE_STABLE_BASE_URL OPERATOR_WEB_INVOICE_DETAIL_BASE_URL; do
+              if ! grep -Eq "^${key}=.+" .env; then
+                echo "::error::$key is missing or empty in /opt/vietride/infra/docker/.env"; exit 1
+              fi
+            done
+
+            docker compose -f docker-compose.prod.yml --env-file .env config --quiet
+
             # Pin the tag chosen in this run (overrides IMAGE_TAG in .env for this deploy).
             export IMAGE_TAG="${{ inputs.tag }}"
 
@@ -90,7 +102,13 @@ jobs:
               echo "::error::Production stack failed to become healthy"
               docker compose -f docker-compose.prod.yml --env-file .env ps
               docker compose -f docker-compose.prod.yml --env-file .env logs --no-color --tail=200 booking
+              docker compose -f docker-compose.prod.yml --env-file .env logs --no-color --tail=200 payment
               exit 1
+            fi
+
+            if ! docker compose -f docker-compose.prod.yml --env-file .env exec -T payment \
+              sh -c 'test -r /run/secrets/firebase/service-account.json'; then
+              echo "::error::Payment cannot read the mounted Firebase credential"; exit 1
             fi
 
             # Reload nginx so an updated bind-mounted nginx.prod.conf takes effect.
@@ -126,6 +144,18 @@ jobs:
               echo "::error::/opt/vietride/infra/docker/.env not found — create it once (see DEPLOY.md)"; exit 1
             fi
 
+            FIREBASE_CREDENTIAL=/opt/vietride/secrets/firebase-service-account.json
+            if [ ! -r "$FIREBASE_CREDENTIAL" ]; then
+              echo "::error::$FIREBASE_CREDENTIAL is missing or unreadable"; exit 1
+            fi
+            for key in INVOICE_STORAGE_BUCKET INVOICE_STORAGE_STABLE_BASE_URL OPERATOR_WEB_INVOICE_DETAIL_BASE_URL; do
+              if ! grep -Eq "^${key}=.+" .env; then
+                echo "::error::$key is missing or empty in /opt/vietride/infra/docker/.env"; exit 1
+              fi
+            done
+
+            docker compose -f docker-compose.prod.yml --env-file .env config --quiet
+
             # Pin the tag chosen in this run (overrides IMAGE_TAG in .env for this deploy).
             export IMAGE_TAG="${{ inputs.tag }}"
 
@@ -137,7 +167,13 @@ jobs:
               echo "::error::Production stack failed to become healthy"
               docker compose -f docker-compose.prod.yml --env-file .env ps
               docker compose -f docker-compose.prod.yml --env-file .env logs --no-color --tail=200 booking
+              docker compose -f docker-compose.prod.yml --env-file .env logs --no-color --tail=200 payment
               exit 1
+            fi
+
+            if ! docker compose -f docker-compose.prod.yml --env-file .env exec -T payment \
+              sh -c 'test -r /run/secrets/firebase/service-account.json'; then
+              echo "::error::Payment cannot read the mounted Firebase credential"; exit 1
             fi
 
             # Reload nginx so an updated bind-mounted nginx.prod.conf takes effect.
