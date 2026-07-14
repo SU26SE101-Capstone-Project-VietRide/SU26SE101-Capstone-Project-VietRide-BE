@@ -180,7 +180,7 @@ Deliver the Trip lifecycle from `SCHEDULED` through `BOARDING`, `IN_PROGRESS`, a
 | 21.4 | ✅ done | APPROVE | 2026-07-14 | One reviewer patch round; fake-clock boundaries, wrong-status no-ops, schedules, and manual/job race verification green. |
 | 21.5 | ✅ done | APPROVE | 2026-07-14 | One reviewer patch round; frozen payload propagation, guarded update, migration-backed trigger timestamp/duplicate/rollback coverage, and full Parcel verification green. |
 | 21.6 | ✅ done | APPROVE | 2026-07-14 | Two patch rounds (review constant + orchestrator full-suite registry regression); guarded completion/history atomicity and full Booking verification green. |
-| 21.7 | ⬜ todo | — | — | — |
+| 21.7 | ✅ done | APPROVE | 2026-07-14 | One reviewer patch round; standalone success/failure cleanup, smoke/JWT/Rabbit, deterministic fixtures, duplicate ack/drain, and fresh build-format-test matrix green. Legacy D15/D16 and intermittent D18-crossday failures recorded as out-of-scope carry-over; D21 passed last. |
 
 Legend: ⬜ todo · 🔄 in progress · ✅ done (reviewer APPROVED + human `/verify`) · ⚠️ done-with-carryover · ❌ blocked
 

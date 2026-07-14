@@ -138,6 +138,7 @@ if (missingRequiredStages.length > 0) {
     run(stage.id, process.execPath, [path.join(root, stage.script)]);
   }
   run('D18-crossday', process.execPath, [path.join(root, 'scripts/run-day18-crossday-local.mjs')]);
+  run('D21', process.execPath, [path.join(root, 'scripts/run-day21-trip-lifecycle-local.mjs')]);
 
   console.log('\n=== FULL LOCAL E2E SUMMARY ===');
   for (const result of results) console.log(`${result.ok ? 'PASS' : 'FAIL'} | ${result.label}`);
