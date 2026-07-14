@@ -13,6 +13,7 @@ public sealed class TripCompletedIntegrationEvent(
     public Guid TripId { get; } = tripId;
     public Guid OperatorId { get; } = operatorId;
     public DateTimeOffset TerminalAt { get; } = terminalAt;
+    public DateTimeOffset CompletedAt => TerminalAt;
     public bool HasSubstitution { get; } = hasSubstitution;
 }
 

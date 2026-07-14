@@ -20,7 +20,7 @@ internal sealed class AutoCompletedFallbackJobRegistrationHostedService : IHoste
         _jobs.AddOrUpdate(
             JobId,
             Job.FromExpression<AutoCompletedFallbackJob>(job =>
-                job.RunAsync(CancellationToken.None)),
+                job.ScanAsync(CancellationToken.None)),
             Cron.Minutely(),
             new RecurringJobOptions { QueueName = "trip", TimeZone = TimeZoneInfo.Utc });
 #pragma warning restore CS0618

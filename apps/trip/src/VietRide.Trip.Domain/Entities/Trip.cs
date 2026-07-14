@@ -123,37 +123,36 @@ public sealed class Trip : BaseEntity<Guid>
         };
     }
 
-    public void MarkBoarding(DateTimeOffset actualDepartureTime)
+    public void MarkBoarding(DateTimeOffset boardingAt)
     {
         EnsureStatus(TripStatus.SCHEDULED, nameof(MarkBoarding));
-        ActualDepartureTime = actualDepartureTime;
+        _ = boardingAt;
         Status = TripStatus.BOARDING;
     }
 
-    public void MarkInProgress()
+    public void Start(DateTimeOffset actualDepartureTime)
     {
-        EnsureStatus(TripStatus.BOARDING, nameof(MarkInProgress));
+        EnsureStatus(TripStatus.BOARDING, nameof(Start));
+        ActualDepartureTime = actualDepartureTime;
         Status = TripStatus.IN_PROGRESS;
     }
 
-    public void Complete(DateTimeOffset completedAt, Guid completedByUserId)
+    public void CompleteManually(DateTimeOffset completedAt, Guid completedByUserId)
     {
-        if (Status is not (TripStatus.BOARDING or TripStatus.IN_PROGRESS))
-        {
-            throw new InvalidOperationException("Only boarding or in-progress trips can be completed.");
-        }
-
         ValidateGuid(completedByUserId, nameof(completedByUserId));
-        CompletedAt = completedAt;
-        CompletedByUserId = completedByUserId;
-        Status = TripStatus.COMPLETED;
+        CompleteCore(completedAt, completedByUserId);
     }
 
     public void CompleteAutomatically(DateTimeOffset completedAt)
     {
-        EnsureStatus(TripStatus.IN_PROGRESS, nameof(CompleteAutomatically));
+        CompleteCore(completedAt, completedByUserId: null);
+    }
+
+    private void CompleteCore(DateTimeOffset completedAt, Guid? completedByUserId)
+    {
+        EnsureStatus(TripStatus.IN_PROGRESS, "completion");
         CompletedAt = completedAt;
-        CompletedByUserId = null;
+        CompletedByUserId = completedByUserId;
         Status = TripStatus.COMPLETED;
     }
 

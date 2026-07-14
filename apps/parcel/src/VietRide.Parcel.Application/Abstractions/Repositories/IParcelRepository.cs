@@ -160,7 +160,10 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     /// <summary>
     /// Bulk: LOADED -> IN_TRANSIT for all parcels on a trip (trip.started).
     /// </summary>
-    Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkSetInTransitByTripIdAsync(Guid tripId, DateTimeOffset now, CancellationToken ct);
+    Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkSetInTransitByTripIdAsync(
+        Guid tripId,
+        DateTimeOffset actualDepartureTime,
+        CancellationToken ct);
 
     /// <summary>
     /// Bulk: LOADED/IN_TRANSIT -> PENDING_OPERATOR_ACTION for all unresolved parcels on a trip (trip.completed).

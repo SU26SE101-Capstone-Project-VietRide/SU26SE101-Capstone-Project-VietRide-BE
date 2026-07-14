@@ -61,7 +61,7 @@ public sealed class CompleteTripCommandHandler
         if (request.IsAutomatic)
             trip.CompleteAutomatically(now);
         else
-            trip.Complete(now, request.ActorUserId!.Value);
+            trip.CompleteManually(now, request.ActorUserId!.Value);
 
         var evt = new TripCompletedIntegrationEvent(
             trip.Id,

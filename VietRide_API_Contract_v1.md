@@ -4713,26 +4713,90 @@ PII or operator-management metadata. Unknown Trip/Route returns `404 TRIP_NOT_FO
 Trip not assigned to the caller returns `403 FORBIDDEN`; malformed `tripId` returns
 `422 VALIDATION_ERROR`.
 
-### POST `/v1/driver/trips/{tripId}/complete`
+## Day 21 — Trip lifecycle automation
 
-Auth: `DRIVER` or `ASSISTANT`. `Idempotency-Key`: required. Body is empty. The authenticated JWT `sub` must be the Trip's assigned driver or assistant and the Trip must be `IN_PROGRESS`.
+Both lifecycle mutations have no request body. They require an `Idempotency-Key` header whose
+value is a UUID v4. The idempotency fingerprint is exactly the HTTP method, normalized request
+route/path parameters including `tripId`, authenticated `sub`, and canonical empty-body marker;
+the authenticated role is not a fingerprint component. Request authentication and
+`tripId`/header/body validation may run before a new key is reserved; those validation failures
+are not cached and create no idempotency record. A valid new key is reserved atomically as pending
+before the command executes. Trip assignment authorization runs downstream in the handler, and
+middleware finalizes its response for replay. A retry with the same key and same fingerprint
+returns the original HTTP status and exact ADR 0004 response body after the first request
+completes, returns `409 IDEMPOTENCY_REQUEST_PENDING` while it is executing, and returns
+`422 IDEMPOTENCY_KEY_MISMATCH` if any fingerprint component differs. Clients reuse the same key
+only to retry the same logical mutation and use a new UUID-v4 key for a new attempt. Missing or
+malformed keys, malformed `tripId`, or any request body return `422 VALIDATION_ERROR` without
+changing Trip state.
 
-Response `200`:
+### POST `/v1/driver/trips/{tripId}/start`
+
+Auth: `DRIVER` only. The authenticated JWT `sub` must equal the Trip's `driverUserId`; an existing
+Trip assigned to another user returns `403 FORBIDDEN`. The request has no body and requires the
+idempotency semantics above.
+
+Precondition: Trip status is `BOARDING`. A successful transition sets status to `IN_PROGRESS`,
+captures `actualDepartureTime`, and publishes `trip.trip.started` through the Trip Outbox in the
+same Trip-local transaction. Any other current status returns `409 TRIP_INVALID_TRANSITION`.
+
+Response `200` uses the ADR 0004 success envelope. Every data field is required and non-null:
 
 ```json
 {
   "success": true,
   "statusCode": 200,
   "data": {
-    "tripId": "uuid",
-    "status": "COMPLETED",
-    "completedAt": "2026-07-15T10:00:00Z"
+    "tripId": "2f0cc13f-2207-4b62-9e0f-82f67f5a5bc2",
+    "status": "IN_PROGRESS",
+    "actualDepartureTime": "2026-06-22T01:30:00Z"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-22T01:30:00Z" }
 }
 ```
 
-The terminal transition, audit (`completedByUserId`, actor role, action `TRIP_COMPLETED_MANUAL`) and `trip.trip.completed` Outbox row commit atomically. The ETA+30-minute fallback job uses the same terminal service. Same-key replay returns the original response; a different key after any terminal winner returns `409 TRIP_ALREADY_TERMINAL`. Unassigned callers return `403 FORBIDDEN`; unknown Trip returns `404 TRIP_NOT_FOUND`; malformed id returns `422 VALIDATION_ERROR`.
+Data schema: `{ tripId: string(uuid), status: "IN_PROGRESS", actualDepartureTime: string(date-time) }`.
+
+Errors: `401 AUTH_TOKEN_INVALID`; `403 FORBIDDEN`; `404 TRIP_NOT_FOUND`;
+`409 TRIP_INVALID_TRANSITION`; `409 IDEMPOTENCY_REQUEST_PENDING`;
+`422 IDEMPOTENCY_KEY_MISMATCH`; `422 VALIDATION_ERROR`.
+
+### POST `/v1/driver/trips/{tripId}/complete`
+
+Auth: `DRIVER` or `ASSISTANT`. For `DRIVER`, authenticated JWT `sub` must equal
+`trip.driverUserId`; for `ASSISTANT`, it must equal `trip.assistantUserId`. Any role/assignment
+mismatch returns `403 FORBIDDEN`. The request has no body and requires the idempotency semantics
+above.
+
+Precondition: Trip status is `IN_PROGRESS`. A successful transition sets status to `COMPLETED`,
+captures `completedAt` and `completedByUserId` from the caller, appends the
+`TRIP_COMPLETED_MANUAL` Trip audit row with metadata `{tripId,role}`, and publishes
+`trip.trip.completed` through the Trip Outbox atomically in one Trip-local transaction. It does
+not read or write Identity and emits no audit integration event. Any other current status returns
+`409 TRIP_INVALID_TRANSITION`.
+
+Response `200` uses the ADR 0004 success envelope. Every data field is required and non-null for
+this manual endpoint:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "tripId": "2f0cc13f-2207-4b62-9e0f-82f67f5a5bc2",
+    "status": "COMPLETED",
+    "completedAt": "2026-06-22T05:30:00Z",
+    "completedByUserId": "7226afd8-c107-413f-8235-c39e75f7a71f"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-22T05:30:00Z" }
+}
+```
+
+Data schema: `{ tripId: string(uuid), status: "COMPLETED", completedAt: string(date-time), completedByUserId: string(uuid) }`.
+
+Errors: `401 AUTH_TOKEN_INVALID`; `403 FORBIDDEN`; `404 TRIP_NOT_FOUND`;
+`409 TRIP_INVALID_TRANSITION`; `409 IDEMPOTENCY_REQUEST_PENDING`;
+`422 IDEMPOTENCY_KEY_MISMATCH`; `422 VALIDATION_ERROR`.
 
 ### GET `/v1/bookings/trips/{tripId}/manifest`
 

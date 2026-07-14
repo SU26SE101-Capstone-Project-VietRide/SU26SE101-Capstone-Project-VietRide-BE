@@ -1,5 +1,11 @@
 using System.Reflection;
+using System.Text.Json;
 using FluentAssertions;
+using MediatR;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
@@ -15,11 +21,15 @@ using VietRide.Parcel.Application.Features.Parcels.TripEvents;
 using VietRide.Parcel.Application.Features.Parcels.UndoRejectDelivery;
 using VietRide.Parcel.Application.Features.Parcels.Unload;
 using VietRide.Parcel.Domain.Enums;
+using VietRide.Parcel.Infrastructure.DependencyInjection;
+using VietRide.Parcel.Infrastructure.Messaging;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
+using VietRide.Shared.Messaging.Abstractions;
+using VietRide.Shared.Messaging.RabbitMq;
 using ParcelEntity = VietRide.Parcel.Domain.Entities.Parcel;
 
 namespace VietRide.Parcel.UnitTests.Features;
@@ -414,19 +424,96 @@ public sealed class Phase67ParcelTests
             Arg.Any<CancellationToken>());
     }
     [Fact]
-    public async Task TripStartedCommand_IsIdempotentBulkLoadedToInTransit()
+    public void TripStartedEvent_DeserializesFrozenPayload()
     {
+        const string payload = """
+            {
+              "tripId": "11111111-1111-1111-1111-111111111111",
+              "actualDepartureTime": "2026-07-14T08:15:30+07:00"
+            }
+            """;
+
+        var integrationEvent = JsonSerializer.Deserialize<TripStartedIntegrationEvent>(
+            payload,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        integrationEvent.Should().NotBeNull();
+        integrationEvent!.TripId.Should().Be(Guid.Parse("11111111-1111-1111-1111-111111111111"));
+        integrationEvent.ActualDepartureTime.Should().Be(
+            DateTimeOffset.Parse("2026-07-14T08:15:30+07:00"));
+        TripStartedIntegrationEvent.EventType.Should().Be("trip.trip.started");
+    }
+
+    [Fact]
+    public async Task TripStartedCommand_UsesEventTimestampAndIsIdempotent()
+    {
+        var actualDepartureTime = new DateTimeOffset(2026, 7, 14, 8, 15, 30, TimeSpan.FromHours(7));
         var repo = Substitute.For<IParcelRepository>();
-        repo.TryBulkSetInTransitByTripIdAsync(TripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns([
-                EventSnapshot(ParcelStatus.IN_TRANSIT),
-                EventSnapshot(ParcelStatus.IN_TRANSIT),
-            ]);
+        var deliveryCount = 0;
+        repo.TryBulkSetInTransitByTripIdAsync(TripId, actualDepartureTime, Arg.Any<CancellationToken>())
+            .Returns(_ => deliveryCount++ == 0
+                ? [
+                    EventSnapshot(ParcelStatus.IN_TRANSIT),
+                    EventSnapshot(ParcelStatus.IN_TRANSIT),
+                ]
+                : []);
 
-        var result = await new HandleTripStartedCommandHandler(repo)
-            .Handle(new HandleTripStartedCommand(TripId), default);
+        var handler = new HandleTripStartedCommandHandler(repo);
+        var command = new HandleTripStartedCommand(TripId, actualDepartureTime);
+        var firstResult = await handler.Handle(command, default);
+        var duplicateResult = await handler.Handle(command, default);
 
-        result.Should().Be(2);
+        firstResult.Should().Be(2);
+        duplicateResult.Should().Be(0);
+        await repo.Received(2).TryBulkSetInTransitByTripIdAsync(
+            TripId,
+            actualDepartureTime,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public void TripStartedConsumer_RegistersOneStableQueueAndBinding()
+    {
+        var services = CreateParcelInfrastructureServices();
+        using var provider = services.BuildServiceProvider();
+
+        var consumerCount = services.Count(descriptor =>
+            descriptor.ServiceType == typeof(IHostedService)
+            && descriptor.ImplementationType == typeof(RabbitMqConsumerBackgroundService<TripStartedIntegrationEvent>));
+        var options = provider
+            .GetRequiredService<IOptions<RabbitMqConsumerOptions<TripStartedIntegrationEvent>>>()
+            .Value.Value;
+
+        consumerCount.Should().Be(1);
+        options.QueueName.Should().Be("parcel.trip-started");
+        options.BindingKeys.Should().Equal(TripStartedIntegrationEvent.EventType);
+    }
+
+    [Fact]
+    public async Task TripStartedConsumerHandler_ForwardsFrozenPayloadToCommand()
+    {
+        var services = CreateParcelInfrastructureServices();
+        var mediator = Substitute.For<IMediator>();
+        services.AddSingleton(mediator);
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var handler = scope.ServiceProvider
+            .GetRequiredService<IIntegrationEventHandler<TripStartedIntegrationEvent>>();
+        var actualDepartureTime = new DateTimeOffset(2026, 7, 14, 8, 15, 30, TimeSpan.FromHours(7));
+
+        await handler.HandleAsync(
+            new TripStartedIntegrationEvent
+            {
+                TripId = TripId,
+                ActualDepartureTime = actualDepartureTime,
+            },
+            CancellationToken.None);
+
+        await mediator.Received(1).Send(
+            Arg.Is<HandleTripStartedCommand>(command =>
+                command.TripId == TripId
+                && command.ActualDepartureTime == actualDepartureTime),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -536,4 +623,24 @@ public sealed class Phase67ParcelTests
 
     private static IParcelStatsRepository Stats()
         => Substitute.For<IParcelStatsRepository>();
+
+    private static ServiceCollection CreateParcelInfrastructureServices()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Trip:UseDevStub"] = "true",
+                ["Payment:UseDevStub"] = "true",
+                ["Booking:UseDevStub"] = "true",
+                ["Identity:UseDevStub"] = "true",
+            })
+            .Build();
+        var environment = Substitute.For<IHostEnvironment>();
+        environment.EnvironmentName.Returns(Environments.Development);
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddOptions();
+        services.AddInfrastructure(configuration, environment);
+        return services;
+    }
 }

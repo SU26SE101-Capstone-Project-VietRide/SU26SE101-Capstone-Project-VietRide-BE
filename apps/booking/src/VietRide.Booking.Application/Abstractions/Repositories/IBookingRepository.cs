@@ -90,5 +90,16 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
         DateTimeOffset refundedAt,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// Atomically changes only CONFIRMED/PARTIAL_NO_SHOW bookings for the trip to COMPLETED.
+    /// Returns the ids actually changed by this delivery so callers can append one history row
+    /// per successful transition without duplicating history on replay.
+    /// </summary>
+    Task<IReadOnlyList<Guid>> TryCompleteEligibleByTripIdAsync(
+        Guid tripId,
+        DateTimeOffset completedAt,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Trip completion is not implemented by this repository.");
+
     Task<bool> HasConfirmedBookingAsync(Guid passengerUserId, CancellationToken ct = default);
 }

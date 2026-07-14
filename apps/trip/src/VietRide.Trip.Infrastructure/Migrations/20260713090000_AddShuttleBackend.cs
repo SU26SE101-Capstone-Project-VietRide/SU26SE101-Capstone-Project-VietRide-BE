@@ -1,11 +1,8 @@
-using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace VietRide.Trip.Infrastructure.Migrations;
 
-[DbContext(typeof(TripDbContext))]
-[Migration("20260713090000_AddShuttleBackend")]
-public sealed class AddShuttleBackend : Migration
+public sealed partial class AddShuttleBackend : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {

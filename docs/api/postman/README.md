@@ -135,6 +135,35 @@ same driver or assistant; otherwise the wrong-trip cases stop at authorization w
 of reaching the intended `422 BOOKING_NOT_FOR_THIS_TRIP`. The committed environment contains
 placeholders only; never commit real JWTs or fixture secrets.
 
+## Day 21 trip lifecycle
+
+Run the deterministic Day-21 lifecycle verification against a healthy local stack from the
+repository root:
+
+```powershell
+npm run postman:day21:local
+```
+
+The helper creates unique origin/destination Stations, Route, VehicleType, Vehicle, an isolated
+`BOARDING` Trip assigned to a driver and assistant, four Booking fixtures (`CONFIRMED`,
+`PARTIAL_NO_SHOW`, `NO_SHOW`, and `CANCELLED`), and one `LOADED` Parcel. It never borrows
+pre-existing fixtures. It generates short-lived JWTs and UUID-v4 idempotency keys at runtime,
+sends every public lifecycle action through Gateway `:3000`, and never prints credentials.
+Bounded database polling is used only to verify transactional Outbox rows and eventual
+Parcel/Booking consumer effects. The runner also publishes one duplicate `trip.trip.completed`
+delivery and waits for acknowledgement plus drain on every bound queue before proving consumer
+idempotency. In `finally` it removes and verifies its full database fixture graph and every exact
+Redis `trip:idem:<uuid>` record it generated. Any assertion or cleanup failure exits non-zero.
+
+The collection folder `Driver - Day 21 trip lifecycle` is an importable manual view of the two
+public no-body endpoints. Manual execution requires a disposable already-`BOARDING` fixture plus
+runtime values for `day21TripId`, `day21DriverAccessToken`, `day21AssistantAccessToken`, and fresh
+UUID-v4 start/complete idempotency keys. The committed environment contains placeholders only; the
+authoritative reproducible path is the helper command above. Deterministic in-flight pending
+behavior is covered by Task 21.1's controlled middleware integration test, and job timing
+boundaries are covered by Task 21.4's fake-clock integration tests; this live runner does not use
+timing races, clock overrides, or job-control backdoors.
+
 To execute the authoritative local E2E matrix in dependency order, use this exact command from the
 repository root:
 
@@ -142,11 +171,11 @@ repository root:
 npm run postman:full:local
 ```
 
-The required Sprint 3 stages are D11 through D19; their exact
+The required cumulative stages are Sprint-3 D11 through D19 followed by Day 21; their exact
 folder/harness, seam mode, assertions, fixture ownership, and exclusion policy live in
 [`docs/handoff/day-20-e2e-matrix.md`](../../handoff/day-20-e2e-matrix.md). It starts the application
 profile, runs real seams where documented, temporarily enables the documented Booking development
-stubs where required, then restores real integrations. The command exits non-zero if any required
+stubs where required, restores real integrations, and runs Day 21 last. The command exits non-zero if any required
 stage is missing, fails, or is skipped without a recorded human-approved exclusion. It creates and
 cleans its own local fixtures, so an external reviewer does not need hidden fixture IDs, JWTs, or
 pre-populated Postman environment values. Google OAuth is outside the Sprint-3 matrix and still

@@ -1,7 +1,7 @@
-using MediatR;
+using System.Text.Json;
+using Hangfire;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
-using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Features.Trips.Operations;
@@ -11,54 +11,61 @@ namespace VietRide.Trip.Infrastructure.Jobs;
 
 public sealed class AutoCompletedFallbackJob
 {
-    private readonly ITripRepository _trips;
-    private readonly ISender _sender;
-    private readonly IClock _clock;
-    private readonly ILogger<AutoCompletedFallbackJob> _logger;
+    private const string EventType = "trip.trip.completed";
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private readonly TripDbContext dbContext;
+    private readonly ITripRepository tripRepository;
+    private readonly IIntegrationEventOutbox outbox;
+    private readonly IClock clock;
 
     public AutoCompletedFallbackJob(
-        ITripRepository trips,
-        ISender sender,
-        IClock clock,
-        ILogger<AutoCompletedFallbackJob> logger)
+        TripDbContext dbContext,
+        ITripRepository tripRepository,
+        IIntegrationEventOutbox outbox,
+        IClock clock)
     {
-        _trips = trips;
-        _sender = sender;
-        _clock = clock;
-        _logger = logger;
+        this.dbContext = dbContext;
+        this.tripRepository = tripRepository;
+        this.outbox = outbox;
+        this.clock = clock;
     }
 
-    public async Task RunAsync(CancellationToken cancellationToken)
+    [Queue("trip")]
+    [DisableConcurrentExecution(900)]
+    public async Task ScanAsync(CancellationToken cancellationToken = default)
     {
-        var cutoff = _clock.UtcNow.AddMinutes(-30);
-        var candidateIds = await _trips.QueryNoTracking()
-            .Where(trip => trip.Status == TripStatus.IN_PROGRESS
-                && trip.EstimatedArrivalTime <= cutoff)
-            .OrderBy(trip => trip.EstimatedArrivalTime)
-            .Select(trip => trip.Id)
-            .Take(500)
-            .ToArrayAsync(cancellationToken);
-
-        foreach (var tripId in candidateIds)
+        var now = clock.UtcNow;
+        var tripIds = await tripRepository.ListInProgressForAutoCompletionAsync(
+            now.AddMinutes(-30), cancellationToken);
+        foreach (var tripId in tripIds)
         {
-            try
-            {
-                await _sender.Send(
-                    new CompleteTripCommand(tripId, ActorUserId: null, IsAutomatic: true),
-                    cancellationToken);
-            }
-            catch (ConflictException)
-            {
-                _logger.LogDebug(
-                    "Auto-completion skipped trip {TripId}; another terminal transition won the race.",
-                    tripId);
-            }
-            catch (CodedNotFoundException)
-            {
-                _logger.LogDebug(
-                    "Auto-completion skipped deleted trip {TripId}.",
-                    tripId);
-            }
+            await ProcessAsync(tripId, now, cancellationToken);
         }
+    }
+
+    private async Task ProcessAsync(Guid tripId, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        var trip = await tripRepository.AcquireForLifecycleTransitionAsync(tripId, cancellationToken);
+        if (trip is null
+            || trip.Status != TripStatus.IN_PROGRESS
+            || trip.EstimatedArrivalTime >= now.AddMinutes(-30))
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return;
+        }
+
+        trip.CompleteAutomatically(now);
+        var integrationEvent = new TripCompletedIntegrationEvent(
+            trip.Id,
+            trip.OperatorId,
+            now,
+            trip.HasSubstitution);
+        await outbox.EnqueueAsync(
+            EventType,
+            JsonSerializer.Serialize(integrationEvent, JsonOptions),
+            cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 }

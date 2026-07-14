@@ -2,10 +2,11 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Kernel.Primitives;
-using VietRide.Trip.Api.Filters;
+using VietRide.Shared.Web.Idempotency;
 using VietRide.Trip.Application.Features.DriverSchedules.GetMyDriverSchedule;
+using VietRide.Trip.Application.Features.DriverTrips.CompleteTrip;
 using VietRide.Trip.Application.Features.DriverTrips.GetAssignedTripRoute;
-using VietRide.Trip.Application.Features.Trips.Operations;
+using VietRide.Trip.Application.Features.DriverTrips.StartTrip;
 
 namespace VietRide.Trip.Api.Controllers;
 
@@ -53,20 +54,39 @@ public sealed class DriverController : ControllerBase
             cancellationToken));
     }
 
-    [HttpPost("trips/{tripId:guid}/complete")]
-    [RequireIdempotencyKey]
+    [HttpPost("trips/{tripId}/start")]
+    [Authorize(Roles = "DRIVER")]
+    [RequireIdempotency(AllowRequestBody = false)]
+    [ProducesResponseType(typeof(ApiResponse<StartTripResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<StartTripResponse>> StartTripAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        var userId = CurrentUserClaims.GetUserId(User);
+        return Ok(await mediator.Send(new StartTripCommand(tripId, userId), cancellationToken));
+    }
+
+    [HttpPost("trips/{tripId}/complete")]
+    [RequireIdempotency(AllowRequestBody = false)]
     [ProducesResponseType(typeof(ApiResponse<CompleteTripResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<CompleteTripResponse>> CompleteTripAsync(
         Guid tripId,
         CancellationToken cancellationToken)
     {
-        var actorUserId = CurrentUserClaims.GetUserId(User);
+        var userId = CurrentUserClaims.GetUserId(User);
+        var role = User.IsInRole("DRIVER") ? "DRIVER" : "ASSISTANT";
         return Ok(await mediator.Send(
-            new CompleteTripCommand(tripId, actorUserId),
+            new CompleteTripCommand(tripId, userId, role),
             cancellationToken));
     }
 }

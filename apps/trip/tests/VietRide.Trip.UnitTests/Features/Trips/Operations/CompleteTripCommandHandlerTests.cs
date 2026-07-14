@@ -95,7 +95,7 @@ public sealed class CompleteTripCommandHandlerTests
             1_000m,
             100m);
         trip.MarkBoarding(Now.AddHours(-3));
-        trip.MarkInProgress();
+        trip.Start(Now.AddHours(-3));
         return trip;
     }
 

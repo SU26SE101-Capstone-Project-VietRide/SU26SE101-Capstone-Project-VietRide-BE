@@ -17,6 +17,59 @@ internal sealed class TripRepository : ITripRepository
     public Task<Domain.Entities.Trip?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         _dbContext.Trips.FindAsync(new object[] { id }, cancellationToken).AsTask();
 
+    public async Task<IReadOnlyList<Guid>> ListScheduledForAutoBoardingAsync(
+        DateTimeOffset latestDeparture,
+        CancellationToken cancellationToken) =>
+        await _dbContext.Trips
+            .AsNoTracking()
+            .Where(trip => trip.Status == TripStatus.SCHEDULED
+                && trip.DepartureDateTime <= latestDeparture)
+            .Select(trip => trip.Id)
+            .ToArrayAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<Guid>> ListBoardingForAutoStartAsync(
+        DateTimeOffset departureBefore,
+        CancellationToken cancellationToken) =>
+        await _dbContext.Trips
+            .AsNoTracking()
+            .Where(trip => trip.Status == TripStatus.BOARDING
+                && trip.DepartureDateTime < departureBefore)
+            .Select(trip => trip.Id)
+            .ToArrayAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<Guid>> ListInProgressForAutoCompletionAsync(
+        DateTimeOffset arrivalBefore,
+        CancellationToken cancellationToken) =>
+        await _dbContext.Trips
+            .AsNoTracking()
+            .Where(trip => trip.Status == TripStatus.IN_PROGRESS
+                && trip.EstimatedArrivalTime < arrivalBefore)
+            .Select(trip => trip.Id)
+            .ToArrayAsync(cancellationToken);
+
+    public async Task<Domain.Entities.Trip?> AcquireForLifecycleTransitionAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        if (_dbContext.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException("A caller-owned transaction is required for lifecycle acquisition.");
+        }
+
+        await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT 1 FROM vietride_trip.trips WHERE id = {tripId} FOR UPDATE",
+            cancellationToken);
+
+        var trip = await _dbContext.Trips
+            .SingleOrDefaultAsync(trip => trip.Id == tripId, cancellationToken);
+        if (trip is not null)
+        {
+            await _dbContext.Entry(trip).ReloadAsync(cancellationToken);
+        }
+
+        return trip;
+    }
+
     public async Task<Domain.Entities.Trip> AddAsync(Domain.Entities.Trip entity, CancellationToken cancellationToken = default)
     {
         await _dbContext.Trips.AddAsync(entity, cancellationToken);

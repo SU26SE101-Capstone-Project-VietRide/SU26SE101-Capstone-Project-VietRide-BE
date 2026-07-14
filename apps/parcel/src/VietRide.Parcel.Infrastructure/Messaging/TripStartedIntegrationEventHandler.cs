@@ -18,6 +18,10 @@ internal sealed class TripStartedIntegrationEventHandler
         TripStartedIntegrationEvent integrationEvent,
         CancellationToken cancellationToken)
     {
-        await _mediator.Send(new HandleTripStartedCommand(integrationEvent.TripId), cancellationToken);
+        await _mediator.Send(
+            new HandleTripStartedCommand(
+                integrationEvent.TripId,
+                integrationEvent.ActualDepartureTime),
+            cancellationToken);
     }
 }
