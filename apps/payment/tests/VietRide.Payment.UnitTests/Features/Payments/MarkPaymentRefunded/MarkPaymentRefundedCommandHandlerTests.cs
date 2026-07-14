@@ -3,8 +3,10 @@ using Microsoft.Extensions.Logging.Abstractions;
 using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Application.Events;
 using VietRide.Payment.Application.Features.Payments.MarkPaymentRefunded;
+using VietRide.Payment.Application.Models;
 using VietRide.Payment.Domain.Entities;
 using VietRide.Payment.Domain.Enums;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 using PaymentEntity = VietRide.Payment.Domain.Entities.Payment;
@@ -24,7 +26,7 @@ public sealed class MarkPaymentRefundedCommandHandlerTests
     {
         var referenceId = Guid.NewGuid();
         var payments = new FakePaymentRepository(transitionResult: true);
-        var handler = new MarkPaymentRefundedCommandHandler(payments, new FixedClock(Now), NullLogger<MarkPaymentRefundedCommandHandler>.Instance);
+        var handler = CreateHandler(payments);
 
         await handler.HandleAsync(
             new WalletCreditedConsumerEvent(Guid.NewGuid(), 175_000, referenceType, referenceId),
@@ -40,7 +42,7 @@ public sealed class MarkPaymentRefundedCommandHandlerTests
     public async Task HandleAsync_WhenNotRefundCredit_DoesNothing()
     {
         var payments = new FakePaymentRepository(transitionResult: true);
-        var handler = new MarkPaymentRefundedCommandHandler(payments, new FixedClock(Now), NullLogger<MarkPaymentRefundedCommandHandler>.Instance);
+        var handler = CreateHandler(payments);
 
         await handler.HandleAsync(
             new WalletCreditedConsumerEvent(Guid.NewGuid(), 100_000, "TOP_UP", Guid.NewGuid()),
@@ -53,7 +55,7 @@ public sealed class MarkPaymentRefundedCommandHandlerTests
     public async Task HandleAsync_WhenAlreadyRefunded_IsIdempotentNoOp()
     {
         var payments = new FakePaymentRepository(transitionResult: false);
-        var handler = new MarkPaymentRefundedCommandHandler(payments, new FixedClock(Now), NullLogger<MarkPaymentRefundedCommandHandler>.Instance);
+        var handler = CreateHandler(payments);
 
         // transitionResult: false simulates a re-delivery where the row is already REFUNDED — must not throw.
         var act = async () => await handler.HandleAsync(
@@ -68,6 +70,13 @@ public sealed class MarkPaymentRefundedCommandHandlerTests
     {
         public DateTimeOffset UtcNow { get; } = now;
     }
+
+    private static MarkPaymentRefundedCommandHandler CreateHandler(FakePaymentRepository payments)
+        => new(
+            payments,
+            new FixedClock(Now),
+            new FakeIntegrationEventOutbox(),
+            NullLogger<MarkPaymentRefundedCommandHandler>.Instance);
 
     private sealed class FakePaymentRepository(bool transitionResult) : IPaymentRepository
     {
@@ -90,10 +99,40 @@ public sealed class MarkPaymentRefundedCommandHandlerTests
         public IQueryable<PaymentEntity> Query() => throw new NotSupportedException();
         public IQueryable<PaymentEntity> QueryNoTracking() => throw new NotSupportedException();
         public Task<PaymentEntity?> FindByIdempotencyKeyAsync(string idempotencyKey, CancellationToken cancellationToken) => throw new NotSupportedException();
-        public Task<PaymentEntity?> FindByReferenceAsync(PaymentReferenceType referenceType, Guid referenceId, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<PaymentEntity?> FindByReferenceAsync(PaymentReferenceType referenceType, Guid referenceId, CancellationToken cancellationToken)
+        {
+            var payment = PaymentEntity.CreateSucceededWalletCharge(
+                referenceType,
+                referenceId,
+                Guid.NewGuid(),
+                Money.FromRaw(175_000),
+                Now.AddDays(-1));
+            payment.AttachContext(PaymentContextCodec.ValidateAndSerialize(
+                new PaymentContextV1(1,
+                [
+                    new PaymentAllocationV1(
+                        referenceId,
+                        referenceType.ToString(),
+                        Guid.NewGuid(),
+                        Guid.NewGuid(),
+                        175_000,
+                        0,
+                        0),
+                ]),
+                referenceType.ToString(),
+                referenceId,
+                175_000));
+            return Task.FromResult<PaymentEntity?>(payment);
+        }
         public Task AcquirePaymentReferenceLockAsync(PaymentReferenceType referenceType, Guid referenceId, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<WalletTransaction> DebitWalletBookingPaymentAsync(Guid userId, Guid bookingId, Money amount, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<WalletTransaction> DebitWalletPaymentAsync(Guid userId, Guid referenceId, Money amount, WalletTransactionRef walletRef, CancellationToken ct) => throw new NotSupportedException();
         public Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectOlderThanAsync(DateTimeOffset expiresBefore, DateTimeOffset expiredAt, CancellationToken cancellationToken) => throw new NotSupportedException();
+    }
+
+    private sealed class FakeIntegrationEventOutbox : IIntegrationEventOutbox
+    {
+        public Task EnqueueAsync(string eventType, string payloadJson, CancellationToken ct = default)
+            => Task.CompletedTask;
     }
 }

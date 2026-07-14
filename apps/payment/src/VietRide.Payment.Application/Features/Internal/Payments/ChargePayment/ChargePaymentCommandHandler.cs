@@ -2,7 +2,9 @@ using System.Text.Json;
 using MediatR;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Payment.Application.Abstractions.Repositories;
+using VietRide.Payment.Application.Abstractions.Services;
 using VietRide.Payment.Application.Events;
+using VietRide.Payment.Application.Models;
 using VietRide.Payment.Domain.Entities;
 using VietRide.Payment.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
@@ -23,18 +25,21 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
     private readonly IVnPayClient _vnPayClient;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IClock _clock;
+    private readonly IRevenueLedgerWriter _revenueLedger;
 
     public ChargePaymentCommandHandler(
         IPaymentRepository payments,
         IPlatformWalletRepository platformWallets,
         IVnPayClient vnPayClient,
         IIntegrationEventOutbox outbox,
+        IRevenueLedgerWriter revenueLedger,
         IClock clock)
     {
         _payments = payments;
         _platformWallets = platformWallets;
         _vnPayClient = vnPayClient;
         _outbox = outbox;
+        _revenueLedger = revenueLedger;
         _clock = clock;
     }
 
@@ -44,7 +49,19 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
     {
         var referenceType = ParseReferenceType(request.ReferenceType);
         var method = ParseMethod(request.Method);
+        if (referenceType == PaymentReferenceType.BOOKING_GROUP && method != PaymentMethod.VNPAY)
+        {
+            throw new CodedValidationException(
+                "VALIDATION_ERROR",
+                "BOOKING_GROUP is supported by VNPAY only.");
+        }
+
         var amount = Money.FromRaw(request.Amount);
+        var contextJson = PaymentContextCodec.ValidateAndSerialize(
+            request.Context,
+            request.ReferenceType,
+            request.ReferenceId,
+            request.Amount);
 
         var replay = await _payments.FindByIdempotencyKeyAsync(request.IdempotencyKey!, cancellationToken)
             .ConfigureAwait(false);
@@ -64,13 +81,14 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
         }
 
         return method == PaymentMethod.WALLET
-            ? await ChargeWalletAsync(request, amount, cancellationToken).ConfigureAwait(false)
-            : await CreateVnPayPendingRedirectAsync(request, amount, cancellationToken).ConfigureAwait(false);
+            ? await ChargeWalletAsync(request, amount, contextJson, cancellationToken).ConfigureAwait(false)
+            : await CreateVnPayPendingRedirectAsync(request, amount, contextJson, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<ChargePaymentResult> ChargeWalletAsync(
         ChargePaymentCommand request,
         Money amount,
+        string contextJson,
         CancellationToken cancellationToken)
     {
         var referenceType = ParseReferenceType(request.ReferenceType);
@@ -83,6 +101,7 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
             userId: request.UserId,
             idempotencyKey: request.IdempotencyKey);
         payment.MarkSucceeded(null, now);
+        payment.AttachContext(contextJson);
 
         var (walletRef, platformRef) = MapChargeRefs(referenceType);
         await _payments.DebitWalletPaymentAsync(
@@ -100,7 +119,7 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
                 cancellationToken)
             .ConfigureAwait(false);
         await _payments.AddAsync(payment, cancellationToken).ConfigureAwait(false);
-        await EnqueuePaymentSucceededAsync(payment, cancellationToken).ConfigureAwait(false);
+        await RecordRevenueAndEnqueuePaymentSucceededAsync(payment, cancellationToken).ConfigureAwait(false);
 
         return ToResult(payment);
     }
@@ -108,6 +127,7 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
     private async Task<ChargePaymentResult> CreateVnPayPendingRedirectAsync(
         ChargePaymentCommand request,
         Money amount,
+        string contextJson,
         CancellationToken cancellationToken)
     {
         var referenceType = ParseReferenceType(request.ReferenceType);
@@ -129,6 +149,7 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
             vnPayTxnRef,
             request.IdempotencyKey!,
             redirectUrl);
+        payment.AttachContext(contextJson);
 
         await _payments.AddAsync(payment, cancellationToken).ConfigureAwait(false);
 
@@ -144,13 +165,22 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
             _ => throw new CodedValidationException("VALIDATION_ERROR", $"Unexpected reference type {referenceType}."),
         };
 
-    private async Task EnqueuePaymentSucceededAsync(PaymentEntity payment, CancellationToken cancellationToken)
+    private async Task RecordRevenueAndEnqueuePaymentSucceededAsync(
+        PaymentEntity payment,
+        CancellationToken cancellationToken)
     {
+        var context = PaymentContextCodec.DeserializeTrusted(payment.Context);
         var evt = new PaymentSucceededIntegrationEvent(
             payment.Id,
             payment.ReferenceType,
             payment.ReferenceId,
-            payment.Amount.Amount);
+            payment.Amount.Amount,
+            payment.Method,
+            context);
+        await _revenueLedger.RecordPaymentSucceededAsync(
+            evt.EventId,
+            context,
+            cancellationToken).ConfigureAwait(false);
         var payload = JsonSerializer.Serialize(evt, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         await _outbox.EnqueueAsync(evt.EventType, payload, cancellationToken).ConfigureAwait(false);
     }
@@ -161,11 +191,12 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
     private static PaymentReferenceType ParseReferenceType(string value)
         => Enum.TryParse<PaymentReferenceType>(value, ignoreCase: false, out var referenceType)
             && referenceType is PaymentReferenceType.BOOKING
+                or PaymentReferenceType.BOOKING_GROUP
                 or PaymentReferenceType.PARCEL
                 or PaymentReferenceType.PARCEL_ADDITIONAL
             ? referenceType
             : throw new CodedValidationException("VALIDATION_ERROR",
-                "Charge supports BOOKING, PARCEL, or PARCEL_ADDITIONAL references only.");
+                "Charge supports BOOKING, BOOKING_GROUP, PARCEL, or PARCEL_ADDITIONAL references only.");
 
     private static PaymentMethod ParseMethod(string value)
         => Enum.TryParse<PaymentMethod>(value, ignoreCase: false, out var method)

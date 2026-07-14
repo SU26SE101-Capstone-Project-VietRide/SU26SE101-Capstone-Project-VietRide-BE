@@ -7,6 +7,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Payment.Application.Abstractions.Repositories;
+using VietRide.Payment.Application.Abstractions.Services;
+using VietRide.Payment.Application.Models;
 using VietRide.Payment.Domain.Entities;
 using VietRide.Payment.Domain.Enums;
 using VietRide.Shared.Application.Outbox;
@@ -69,6 +71,21 @@ public sealed class ConfirmBookingPaymentIpnIntegrationTests
                 TxnRef,
                 "idem-key",
                 "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html");
+            Payment.AttachContext(PaymentContextCodec.ValidateAndSerialize(
+                new PaymentContextV1(1,
+                [
+                    new PaymentAllocationV1(
+                        BookingId,
+                        "BOOKING",
+                        Guid.NewGuid(),
+                        Guid.NewGuid(),
+                        250_000,
+                        0,
+                        0),
+                ]),
+                "BOOKING",
+                BookingId,
+                250_000));
             Payments = new FakePaymentRepository(Payment);
             PlatformWallets = new FakePlatformWalletRepository(Money.FromRaw(1_000_000));
             VnPay = new FakeVnPayClient();
@@ -96,13 +113,24 @@ public sealed class ConfirmBookingPaymentIpnIntegrationTests
                 services.RemoveAll<IPaymentRepository>();
                 services.RemoveAll<IPlatformWalletRepository>();
                 services.RemoveAll<IIntegrationEventOutbox>();
+                services.RemoveAll<IRevenueLedgerWriter>();
                 services.RemoveAll<IUnitOfWork>();
                 services.AddSingleton<IVnPayClient>(VnPay);
                 services.AddSingleton<IPaymentRepository>(Payments);
                 services.AddSingleton<IPlatformWalletRepository>(PlatformWallets);
                 services.AddSingleton<IIntegrationEventOutbox>(Outbox);
+                services.AddSingleton<IRevenueLedgerWriter, NoOpRevenueLedgerWriter>();
             });
         }
+    }
+
+    private sealed class NoOpRevenueLedgerWriter : IRevenueLedgerWriter
+    {
+        public Task RecordPaymentSucceededAsync(
+            Guid sourceEventId,
+            PaymentContextV1 context,
+            CancellationToken cancellationToken)
+            => Task.CompletedTask;
     }
 
     private sealed class FakeVnPayClient : IVnPayClient

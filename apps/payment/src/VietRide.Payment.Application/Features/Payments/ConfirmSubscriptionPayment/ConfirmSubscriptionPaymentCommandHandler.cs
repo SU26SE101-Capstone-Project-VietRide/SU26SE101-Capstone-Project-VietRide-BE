@@ -4,6 +4,7 @@ using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Application.Events;
 using VietRide.Payment.Application.Features.Payments.ConfirmBookingPayment;
+using VietRide.Payment.Application.Models;
 using VietRide.Payment.Domain.Enums;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
@@ -14,6 +15,7 @@ public sealed class ConfirmSubscriptionPaymentCommandHandler
     : IRequestHandler<ConfirmSubscriptionPaymentCommand, ConfirmBookingPaymentResult>
 {
     private const string SuccessCode = "00";
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly IVnPayClient _vnPayClient;
     private readonly IPaymentRepository _payments;
     private readonly IPlatformWalletRepository _platformWallets;
@@ -68,20 +70,25 @@ public sealed class ConfirmSubscriptionPaymentCommandHandler
             return ConfirmSuccess();
         }
 
+        var context = SubscriptionPaymentContextCodec.DeserializeTrusted(payment.Context);
+
         payment.MarkSucceeded(responseCode, _clock.UtcNow);
         _payments.Update(payment);
         await _platformWallets.CreditAsync(
             payment.Amount,
             PlatformWalletTransactionRef.SUBSCRIPTION_PAYMENT,
-            payment.ReferenceId,
+            payment.Id,
             "Subscription VNPay payment",
             cancellationToken).ConfigureAwait(false);
         var evt = new SubscriptionPaymentSucceededIntegrationEvent(
             payment.Id,
             payment.ReferenceId,
             payment.OperatorId ?? Guid.Empty,
-            payment.Amount.Amount);
-        await _outbox.EnqueueAsync(evt.EventType, JsonSerializer.Serialize(evt), cancellationToken).ConfigureAwait(false);
+            context.OperatorSubscriptionId,
+            payment.Amount.Amount,
+            payment.Method.ToString(),
+            context);
+        await _outbox.EnqueueAsync(evt.EventType, JsonSerializer.Serialize(evt, JsonOptions), cancellationToken).ConfigureAwait(false);
         return ConfirmSuccess();
     }
 

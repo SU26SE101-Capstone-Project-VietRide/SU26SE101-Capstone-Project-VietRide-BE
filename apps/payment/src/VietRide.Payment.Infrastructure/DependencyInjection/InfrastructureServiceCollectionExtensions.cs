@@ -1,3 +1,5 @@
+using Google.Apis.Auth.OAuth2;
+using Google.Cloud.Storage.V1;
 using Hangfire;
 using Hangfire.PostgreSql;
 using Microsoft.Extensions.Configuration;
@@ -6,11 +8,21 @@ using StackExchange.Redis;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Payment.Application.Abstractions.Refunds;
 using VietRide.Payment.Application.Abstractions.Repositories;
+using VietRide.Payment.Application.Abstractions.Services;
 using VietRide.Payment.Application.Events;
 using VietRide.Payment.Application.Features.Internal.Wallets.RefundToWallet;
+using VietRide.Payment.Application.Features.Invoices;
+using VietRide.Payment.Application.Features.Management;
+using VietRide.Payment.Application.Features.OperatorWallets.BootstrapOperatorWallet;
 using VietRide.Payment.Application.Features.Payments.MarkPaymentRefunded;
+using VietRide.Payment.Application.Features.Settlements.HandleTripTerminal;
+using VietRide.Payment.Application.Features.Settlements.SettleTrip;
 using VietRide.Payment.Application.Features.Wallets.BootstrapWallet;
+using VietRide.Payment.Application.Services;
 using VietRide.Payment.Infrastructure.Http;
+using VietRide.Payment.Infrastructure.Invoices;
+using VietRide.Payment.Infrastructure.Jobs;
+using VietRide.Payment.Infrastructure.Management;
 using VietRide.Payment.Infrastructure.Messaging;
 using VietRide.Payment.Infrastructure.Persistence.Repositories;
 using VietRide.Payment.Infrastructure.Refunds;
@@ -71,6 +83,31 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ITopUpRequestRepository, TopUpRequestRepository>();
         services.AddScoped<IPlatformWalletRepository, PlatformWalletRepository>();
         services.AddScoped<IRefundFailureLogRepository, RefundFailureLogRepository>();
+        services.AddScoped<IInvoiceRepository, InvoiceRepository>();
+        services.AddScoped<IInvoiceNumberCounterRepository, InvoiceNumberCounterRepository>();
+        services.AddScoped<IInvoiceLifecycleService, InvoiceLifecycleService>();
+        services.AddScoped<IInvoiceJobScheduler, InvoiceJobScheduler>();
+        services.AddScoped<IFinancialManagementService, FinancialManagementService>();
+        services.AddScoped<IInvoicePdfGenerator, PdfSharpInvoicePdfGenerator>();
+        var invoiceStorageProvider = configuration[$"{InvoiceStorageOptions.SectionName}:Provider"];
+        if (string.Equals(invoiceStorageProvider, "E2E_LOCAL", StringComparison.OrdinalIgnoreCase))
+        {
+            services.AddScoped<IInvoiceStorage, E2eLocalInvoiceStorage>();
+        }
+        else
+        {
+            services.AddScoped<IInvoiceStorage, GoogleCloudInvoiceStorage>();
+            services.AddSingleton(_ => GoogleCredential.GetApplicationDefault());
+            services.AddSingleton(sp => StorageClient.Create(sp.GetRequiredService<GoogleCredential>()));
+        }
+        services.AddScoped<IOperatorWalletRepository, OperatorWalletRepository>();
+        services.AddScoped<IOperatorWalletTransactionRepository, OperatorWalletTransactionRepository>();
+        services.AddScoped<IOperatorLedgerEntryRepository, OperatorLedgerEntryRepository>();
+        services.AddScoped<IOperatorTripSettlementRepository, OperatorTripSettlementRepository>();
+        services.AddScoped<IProcessedIntegrationEventRepository, ProcessedIntegrationEventRepository>();
+        services.AddScoped<IRevenueLedgerWriter, RevenueLedgerWriter>();
+        services.AddScoped<TripTerminalSettlementService>();
+        services.AddScoped<TripSettlementService>();
         services.AddScoped<IRefundRetryExecutor, WalletRefundRetryExecutor>();
         services.Configure<VnPayOptions>(options =>
         {
@@ -87,6 +124,10 @@ public static class InfrastructureServiceCollectionExtensions
             }
         });
         services.AddScoped<IVnPayClient, VnPayClient>();
+        services.Configure<InvoicePdfOptions>(configuration.GetSection(InvoicePdfOptions.SectionName));
+        services.Configure<InvoiceStorageOptions>(configuration.GetSection(InvoiceStorageOptions.SectionName));
+        services.Configure<OperatorWebOptions>(configuration.GetSection(OperatorWebOptions.SectionName));
+        services.Configure<InvoiceBackfillOptions>(configuration.GetSection(InvoiceBackfillOptions.SectionName));
 
         if (registerConsumers)
         {
@@ -115,6 +156,28 @@ public static class InfrastructureServiceCollectionExtensions
                 options.QueueName = "payment.parcel-refund-initiated";
                 options.BindingKeys = [ParcelRefundInitiatedIntegrationEvent.EventTypeValue];
             });
+
+            services.AddVietRideEventConsumer<OperatorApprovedConsumerEvent, BootstrapOperatorWalletEventHandler>(options =>
+            {
+                options.QueueName = "payment.operator-wallet-bootstrap";
+                options.BindingKeys = [OperatorApprovedConsumerEvent.EventTypeValue];
+            });
+            services.AddVietRideEventConsumer<TripCompletedConsumerEvent, TripCompletedSettlementEventHandler>(options =>
+            {
+                options.QueueName = "payment.trip-completed-settlement";
+                options.BindingKeys = [TripCompletedConsumerEvent.EventTypeValue];
+            });
+            services.AddVietRideEventConsumer<TripDisruptedConsumerEvent, TripDisruptedSettlementEventHandler>(options =>
+            {
+                options.QueueName = "payment.trip-disrupted-settlement";
+                options.BindingKeys = [TripDisruptedConsumerEvent.EventTypeValue];
+            });
+            services.AddVietRideEventConsumer<SubscriptionPaymentSucceededInvoiceEvent, SubscriptionPaymentSucceededInvoiceHandler>(options =>
+            {
+                options.QueueName = "payment.subscription-invoice";
+                options.BindingKeys = [SubscriptionPaymentSucceededInvoiceEvent.EventTypeValue];
+            });
+            services.AddHostedService<InvoiceJobsRegistrationHostedService>();
         }
 
         // Redis — required by IdempotencyMiddleware (wired in Program.cs via AddVietRideIdempotency).
@@ -133,6 +196,38 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddTransient<InternalJwtDelegatingHandler>();
         services.AddTransient<CorrelationIdDelegatingHandler>();
 
+        services.Configure<Day38PaymentContextBackfillOptions>(
+            configuration.GetSection(Day38PaymentContextBackfillOptions.SectionName));
+        services.Configure<Day38RevenueLedgerBackfillOptions>(
+            configuration.GetSection(Day38RevenueLedgerBackfillOptions.SectionName));
+
+        RegisterPaymentContextOwnerClient(
+            services,
+            Day38PaymentContextBackfillJob.BookingHttpClientName,
+            configuration["Booking:BaseUrl"]
+                ?? configuration["BOOKING_SERVICE_BASE_URL"]
+                ?? "http://booking:8080");
+        RegisterPaymentContextOwnerClient(
+            services,
+            Day38PaymentContextBackfillJob.ParcelHttpClientName,
+            configuration["Parcel:BaseUrl"]
+                ?? configuration["PARCEL_SERVICE_BASE_URL"]
+                ?? "http://parcel:8080");
+
         return services;
+    }
+
+    private static void RegisterPaymentContextOwnerClient(
+        IServiceCollection services,
+        string name,
+        string baseUrl)
+    {
+        services.AddHttpClient(name, client =>
+            {
+                client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
+                client.Timeout = TimeSpan.FromSeconds(15);
+            })
+            .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
+            .AddHttpMessageHandler<InternalJwtDelegatingHandler>();
     }
 }

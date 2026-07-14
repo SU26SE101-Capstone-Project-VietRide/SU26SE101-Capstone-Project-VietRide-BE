@@ -31,6 +31,7 @@
 
     <!-- JWT / Identity -->
     <PackageVersion Include="Google.Apis.Auth" Version="1.74.0" />
+    <PackageVersion Include="Google.Cloud.Storage.V1" Version="4.13.0" />
     <PackageVersion Include="Microsoft.IdentityModel.Tokens" Version="7.7.1" />
     <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="7.7.1" />
 
@@ -81,6 +82,9 @@
 
     <!-- Redis client — OTP rate-limit per BSOT §6.9 -->
     <PackageVersion Include="StackExchange.Redis" Version="2.8.24" />
+
+    <!-- Invoice PDF generation (MIT) -->
+    <PackageVersion Include="PDFsharp-MigraDoc" Version="6.2.3" />
 
     <!-- Test stack -->
     <PackageVersion Include="FluentAssertions" Version="6.12.2" />

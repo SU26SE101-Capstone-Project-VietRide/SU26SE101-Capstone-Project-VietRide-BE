@@ -3,4 +3,5 @@ namespace VietRide.Payment.Application.Features.Internal.Payments.CreateSubscrip
 public sealed record CreateSubscriptionPaymentResult(
     Guid PaymentId,
     string Status,
-    string PaymentRedirectUrl);
+    string? PaymentRedirectUrl,
+    string? InvoiceStatus);

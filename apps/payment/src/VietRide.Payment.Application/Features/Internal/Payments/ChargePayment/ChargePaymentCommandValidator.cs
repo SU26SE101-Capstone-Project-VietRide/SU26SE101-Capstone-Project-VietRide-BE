@@ -7,8 +7,8 @@ public sealed class ChargePaymentCommandValidator : AbstractValidator<ChargePaym
     public ChargePaymentCommandValidator()
     {
         RuleFor(x => x.ReferenceType)
-            .Must(rt => rt is "BOOKING" or "PARCEL" or "PARCEL_ADDITIONAL")
-            .WithMessage("Charge supports BOOKING, PARCEL, or PARCEL_ADDITIONAL references only.");
+            .Must(rt => rt is "BOOKING" or "BOOKING_GROUP" or "PARCEL" or "PARCEL_ADDITIONAL")
+            .WithMessage("Charge supports BOOKING, BOOKING_GROUP, PARCEL, or PARCEL_ADDITIONAL references only.");
         RuleFor(x => x.ReferenceId).NotEmpty();
         RuleFor(x => x.UserId).NotEmpty();
         RuleFor(x => x.Amount).GreaterThan(0);
@@ -17,5 +17,6 @@ public sealed class ChargePaymentCommandValidator : AbstractValidator<ChargePaym
             .WithMessage("method must be WALLET or VNPAY.");
         RuleFor(x => x.IdempotencyKey).NotEmpty();
         RuleFor(x => x.ClientIpAddress).NotEmpty();
+        RuleFor(x => x.Context).NotNull().WithErrorCode("PAYMENT_CONTEXT_INVALID");
     }
 }

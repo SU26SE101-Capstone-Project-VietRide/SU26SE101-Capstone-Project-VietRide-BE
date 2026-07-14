@@ -1,8 +1,10 @@
 using System.Text.Json;
 using FluentAssertions;
 using VietRide.Payment.Application.Abstractions.Repositories;
+using VietRide.Payment.Application.Abstractions.Services;
 using VietRide.Payment.Application.Exceptions;
 using VietRide.Payment.Application.Features.Internal.Wallets.RefundToWallet;
+using VietRide.Payment.Application.Models;
 using VietRide.Payment.Domain.Entities;
 using VietRide.Payment.Domain.Enums;
 using VietRide.Shared.Application.Outbox;
@@ -20,7 +22,7 @@ public sealed class RefundToWalletCommandHandlerTests
         var wallets = new FakeWalletRepository(userId, Money.FromRaw(1_000_000));
         var platformWallets = new FakePlatformWalletRepository(Money.FromRaw(500_000));
         var outbox = new FakeIntegrationEventOutbox();
-        var handler = new RefundToWalletCommandHandler(wallets, platformWallets, outbox);
+        var handler = CreateHandler(wallets, platformWallets, outbox, bookingId, PaymentReferenceType.BOOKING);
 
         var result = await handler.Handle(CreateCommand(userId, bookingId), CancellationToken.None);
 
@@ -54,7 +56,7 @@ public sealed class RefundToWalletCommandHandlerTests
         var wallets = new FakeWalletRepository(userId, Money.FromRaw(1_000_000));
         var platformWallets = new FakePlatformWalletRepository(Money.FromRaw(500_000));
         var outbox = new FakeIntegrationEventOutbox();
-        var handler = new RefundToWalletCommandHandler(wallets, platformWallets, outbox);
+        var handler = CreateHandler(wallets, platformWallets, outbox, parcelId, PaymentReferenceType.PARCEL);
 
         var result = await handler.Handle(
             CreateCommand(userId, parcelId, referenceType: "PARCEL_REFUND"),
@@ -85,7 +87,7 @@ public sealed class RefundToWalletCommandHandlerTests
         var wallets = new FakeWalletRepository(userId, Money.FromRaw(1_000_000));
         var platformWallets = new FakePlatformWalletRepository(Money.FromRaw(500_000));
         var outbox = new FakeIntegrationEventOutbox();
-        var handler = new RefundToWalletCommandHandler(wallets, platformWallets, outbox);
+        var handler = CreateHandler(wallets, platformWallets, outbox, bookingId, PaymentReferenceType.BOOKING);
         var first = await handler.Handle(CreateCommand(userId, bookingId), CancellationToken.None);
 
         var second = await handler.Handle(CreateCommand(userId, bookingId, idempotencyKey: "different-key"), CancellationToken.None);
@@ -106,7 +108,7 @@ public sealed class RefundToWalletCommandHandlerTests
         var wallets = new FakeWalletRepository(userId, Money.FromRaw(1_000_000));
         var platformWallets = new FakePlatformWalletRepository(Money.FromRaw(100_000));
         var outbox = new FakeIntegrationEventOutbox();
-        var handler = new RefundToWalletCommandHandler(wallets, platformWallets, outbox);
+        var handler = CreateHandler(wallets, platformWallets, outbox, bookingId, PaymentReferenceType.BOOKING);
 
         var act = async () => await handler.Handle(CreateCommand(userId, bookingId), CancellationToken.None);
 
@@ -125,6 +127,19 @@ public sealed class RefundToWalletCommandHandlerTests
         string idempotencyKey = "idem-key",
         string referenceType = "BOOKING_REFUND")
         => new(userId, 175_000, referenceType, bookingId, idempotencyKey);
+
+    private static RefundToWalletCommandHandler CreateHandler(
+        IWalletRepository wallets,
+        IPlatformWalletRepository platformWallets,
+        IIntegrationEventOutbox outbox,
+        Guid referenceId,
+        PaymentReferenceType referenceType)
+        => new(
+            wallets,
+            platformWallets,
+            outbox,
+            new FakePaymentRepository(referenceId, referenceType),
+            new NoOpRevenueLedgerWriter());
 
     private sealed class FakeWalletRepository : IWalletRepository
     {
@@ -282,5 +297,68 @@ public sealed class RefundToWalletCommandHandlerTests
             Events.Add((eventType, payloadJson));
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class FakePaymentRepository : IPaymentRepository
+    {
+        private readonly VietRide.Payment.Domain.Entities.Payment _payment;
+
+        public FakePaymentRepository(Guid referenceId, PaymentReferenceType referenceType)
+        {
+            _payment = VietRide.Payment.Domain.Entities.Payment.CreateSucceededWalletCharge(
+                referenceType,
+                referenceId,
+                Guid.NewGuid(),
+                Money.FromRaw(175_000),
+                DateTimeOffset.UtcNow.AddDays(-1));
+            _payment.AttachContext(PaymentContextCodec.ValidateAndSerialize(
+                new PaymentContextV1(1,
+                [
+                    new PaymentAllocationV1(
+                        referenceId,
+                        referenceType.ToString(),
+                        Guid.NewGuid(),
+                        Guid.NewGuid(),
+                        175_000,
+                        0,
+                        0),
+                ]),
+                referenceType.ToString(),
+                referenceId,
+                175_000));
+        }
+
+        public Task<VietRide.Payment.Domain.Entities.Payment?> FindByReferenceAsync(
+            PaymentReferenceType referenceType,
+            Guid referenceId,
+            CancellationToken cancellationToken)
+            => Task.FromResult<VietRide.Payment.Domain.Entities.Payment?>(
+                _payment.ReferenceType == referenceType && _payment.ReferenceId == referenceId
+                    ? _payment
+                    : null);
+
+        public IQueryable<VietRide.Payment.Domain.Entities.Payment> Query()
+            => new[] { _payment }.AsQueryable();
+
+        public IQueryable<VietRide.Payment.Domain.Entities.Payment> QueryNoTracking() => Query();
+        public Task<VietRide.Payment.Domain.Entities.Payment?> GetByIdAsync(Guid id, CancellationToken ct) => throw new NotSupportedException();
+        public Task<VietRide.Payment.Domain.Entities.Payment> AddAsync(VietRide.Payment.Domain.Entities.Payment entity, CancellationToken ct) => throw new NotSupportedException();
+        public void Update(VietRide.Payment.Domain.Entities.Payment entity) => throw new NotSupportedException();
+        public void Remove(VietRide.Payment.Domain.Entities.Payment entity) => throw new NotSupportedException();
+        public Task<VietRide.Payment.Domain.Entities.Payment?> FindByIdempotencyKeyAsync(string idempotencyKey, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task AcquirePaymentReferenceLockAsync(PaymentReferenceType referenceType, Guid referenceId, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<WalletTransaction> DebitWalletBookingPaymentAsync(Guid userId, Guid bookingId, Money amount, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<WalletTransaction> DebitWalletPaymentAsync(Guid userId, Guid referenceId, Money amount, WalletTransactionRef walletRef, CancellationToken ct) => throw new NotSupportedException();
+        public Task<IReadOnlyList<VietRide.Payment.Domain.Entities.Payment>> ExpirePendingRedirectOlderThanAsync(DateTimeOffset expiresBefore, DateTimeOffset expiredAt, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<bool> TryMarkRefundedByReferenceAsync(PaymentReferenceType referenceType, Guid referenceId, DateTimeOffset refundedAt, CancellationToken cancellationToken) => throw new NotSupportedException();
+    }
+
+    private sealed class NoOpRevenueLedgerWriter : IRevenueLedgerWriter
+    {
+        public Task RecordPaymentSucceededAsync(
+            Guid sourceEventId,
+            PaymentContextV1 context,
+            CancellationToken cancellationToken)
+            => Task.CompletedTask;
     }
 }

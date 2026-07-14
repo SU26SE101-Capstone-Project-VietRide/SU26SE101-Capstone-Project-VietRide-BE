@@ -6,6 +6,7 @@ using VietRide.Payment.Application.Features.Internal.Payments.BatchChargePayment
 using VietRide.Payment.Application.Features.Internal.Payments.ChargePayment;
 using VietRide.Payment.Application.Features.Internal.Payments.CreateSubscriptionPayment;
 using VietRide.Payment.Application.Features.Internal.Payments.ExpireSubscriptionPayment;
+using VietRide.Payment.Application.Features.Internal.Payments.GetPaymentContextReadiness;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Authentication;
@@ -118,5 +119,16 @@ public sealed class InternalPaymentsController : ControllerBase
         return Request.Headers.TryGetValue(RequestLoggingMiddleware.RequestIdHeader, out var values)
             ? values.ToString()
             : string.Empty;
+    }
+
+    [HttpGet("context-readiness")]
+    [ProducesResponseType(typeof(PaymentContextReadinessResult), StatusCodes.Status200OK)]
+    public async Task<ActionResult<PaymentContextReadinessResult>> GetContextReadinessAsync(
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(
+            new GetPaymentContextReadinessQuery(),
+            cancellationToken);
+        return Ok(result);
     }
 }

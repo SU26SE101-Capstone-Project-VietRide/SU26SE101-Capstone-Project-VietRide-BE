@@ -3,7 +3,9 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Payment.Application.Abstractions.Repositories;
+using VietRide.Payment.Application.Abstractions.Services;
 using VietRide.Payment.Application.Features.Payments.ConfirmBookingPayment;
+using VietRide.Payment.Application.Models;
 using VietRide.Payment.Domain.Entities;
 using VietRide.Payment.Domain.Enums;
 using VietRide.Shared.Application.Outbox;
@@ -124,6 +126,7 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
             payments,
             platformWallets,
             outbox,
+            new NoOpRevenueLedgerWriter(),
             new FrozenClock(Now),
             NullLogger<ConfirmBookingPaymentCommandHandler>.Instance);
 
@@ -142,13 +145,63 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
         });
 
     private static PaymentEntity CreatePendingPayment(Guid userId, Guid bookingId, string txnRef, long amount)
-        => PaymentEntity.CreatePendingRedirectVnPayBooking(
+    {
+        var payment = PaymentEntity.CreatePendingRedirectVnPayBooking(
             bookingId,
             userId,
             Money.FromRaw(amount),
             txnRef,
             $"idem-{txnRef}",
             "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html");
+        payment.AttachContext(PaymentContextCodec.ValidateAndSerialize(
+            new PaymentContextV1(1,
+            [
+                new PaymentAllocationV1(
+                    bookingId,
+                    "BOOKING",
+                    Guid.NewGuid(),
+                    Guid.NewGuid(),
+                    amount,
+                    0,
+                    0),
+            ]),
+            "BOOKING",
+            bookingId,
+            amount));
+        return payment;
+    }
+
+    [Fact]
+    public async Task Handle_WhenLegacyPendingPaymentHasNoContext_SettlesAndMarksReconciliationWithoutSuccessEvent()
+    {
+        var userId = Guid.NewGuid();
+        var bookingId = Guid.NewGuid();
+        var payment = PaymentEntity.CreatePendingRedirectVnPayBooking(
+            bookingId,
+            userId,
+            Money.FromRaw(250_000),
+            "legacy-txn",
+            "legacy-idempotency-key",
+            "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html");
+        var payments = new FakePaymentRepository(payment);
+        var platformWallets = new FakePlatformWalletRepository(Money.FromRaw(1_000_000));
+        var outbox = new FakeIntegrationEventOutbox();
+        var handler = CreateHandler(
+            new FakeVnPayClient(isSignatureValid: true),
+            payments,
+            platformWallets,
+            outbox);
+
+        var result = await handler.Handle(
+            CreateCommand("legacy-txn", "00", "25000000"),
+            CancellationToken.None);
+
+        result.RspCode.Should().Be("00");
+        payment.Status.Should().Be(PaymentStatus.SUCCEEDED);
+        payment.ContextReconciliationRequired.Should().BeTrue();
+        platformWallets.Transactions.Should().ContainSingle();
+        outbox.Events.Should().BeEmpty();
+    }
 
     private sealed class FakeVnPayClient : IVnPayClient
     {
@@ -335,6 +388,15 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
             Events.Add((eventType, payloadJson));
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class NoOpRevenueLedgerWriter : IRevenueLedgerWriter
+    {
+        public Task RecordPaymentSucceededAsync(
+            Guid sourceEventId,
+            PaymentContextV1 context,
+            CancellationToken cancellationToken)
+            => Task.CompletedTask;
     }
 
     private sealed class FrozenClock : IClock
