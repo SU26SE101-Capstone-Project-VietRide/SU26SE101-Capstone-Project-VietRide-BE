@@ -73,7 +73,8 @@ public sealed class IdempotencyMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        var requiresIdempotency = context.GetEndpoint()?.Metadata.GetMetadata<RequireIdempotencyAttribute>() is not null;
+        var idempotencyMetadata = context.GetEndpoint()?.Metadata.GetMetadata<RequireIdempotencyAttribute>();
+        var requiresIdempotency = idempotencyMetadata is not null;
         if (!requiresIdempotency
             && !HttpMethods.IsPost(context.Request.Method)
             && !HttpMethods.IsPatch(context.Request.Method))
@@ -111,6 +112,17 @@ public sealed class IdempotencyMiddleware
         if (!requiresIdempotency)
         {
             await InvokeLegacyAsync(context, key);
+            return;
+        }
+
+        if (!idempotencyMetadata!.AllowRequestBody
+            && await HasNonEmptyRequestBodyAsync(context.Request, context.RequestAborted))
+        {
+            await WriteErrorAsync(
+                context,
+                StatusCodes.Status422UnprocessableEntity,
+                "VALIDATION_ERROR",
+                "The request body must be empty.");
             return;
         }
 
@@ -152,6 +164,24 @@ public sealed class IdempotencyMiddleware
             reservationPayload,
             reservationToken,
             fingerprint);
+    }
+
+    private static async Task<bool> HasNonEmptyRequestBodyAsync(
+        HttpRequest request,
+        CancellationToken cancellationToken)
+    {
+        request.EnableBuffering();
+        var originalPosition = request.Body.Position;
+        var probe = new byte[1];
+
+        try
+        {
+            return await request.Body.ReadAsync(probe.AsMemory(), cancellationToken) > 0;
+        }
+        finally
+        {
+            request.Body.Position = originalPosition;
+        }
     }
 
     private async Task InvokeLegacyAsync(HttpContext context, string key)

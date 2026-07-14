@@ -6,6 +6,11 @@ namespace VietRide.Trip.Application.Abstractions.Repositories;
 
 public interface ITripRepository : IRepository<Domain.Entities.Trip, Guid>
 {
+    Task<Domain.Entities.Trip?> AcquireForLifecycleTransitionAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("Lifecycle transitions are not supported by this repository implementation.");
+
     Task<Domain.Entities.Trip?> GetWithSeatsAsync(Guid tripId, CancellationToken cancellationToken);
 
     Task<DriverTripRouteDto?> GetDriverTripRouteAsync(Guid tripId, CancellationToken cancellationToken)

@@ -80,6 +80,42 @@ public sealed class SharedIdempotencyMiddlewareIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task NoBodyEndpoint_NonEmptyBodyIsRejectedBeforeReservationAndSameKeyCanExecuteEmptyBody()
+    {
+        var key = NewKey();
+        var redisKey = (RedisKey)$"{_prefix}:idem:{key}";
+        var invoked = 0;
+        RequestDelegate next = async context =>
+        {
+            invoked++;
+            Assert.Equal(0, context.Request.Body.Position);
+            await context.Response.WriteAsync("executed");
+        };
+
+        var rejected = await InvokeAsync(
+            key,
+            next,
+            RequestShape.Default,
+            allowRequestBody: false);
+
+        Assert.Equal(StatusCodes.Status422UnprocessableEntity, rejected.StatusCode);
+        Assert.Equal("VALIDATION_ERROR", ReadErrorCode(rejected.Body));
+        Assert.Equal(0, invoked);
+        Assert.False(await _redis.GetDatabase().KeyExistsAsync(redisKey));
+
+        var valid = await InvokeAsync(
+            key,
+            next,
+            RequestShape.Default with { Body = string.Empty },
+            allowRequestBody: false);
+
+        Assert.Equal(StatusCodes.Status200OK, valid.StatusCode);
+        Assert.Equal("executed", valid.Body);
+        Assert.Equal(1, invoked);
+        Assert.True(await _redis.GetDatabase().KeyExistsAsync(redisKey));
+    }
+
+    [Fact]
     public async Task FirstRequest_ReservesExecutesAndCompletedRetryReplaysExactResponse()
     {
         var key = NewKey();
@@ -549,7 +585,8 @@ public sealed class SharedIdempotencyMiddlewareIntegrationTests : IAsyncLifetime
         string? key,
         RequestDelegate next,
         RequestShape? shape = null,
-        bool optedIn = true)
+        bool optedIn = true,
+        bool allowRequestBody = true)
     {
         shape ??= RequestShape.Default;
         var context = new DefaultHttpContext();
@@ -563,7 +600,10 @@ public sealed class SharedIdempotencyMiddlewareIntegrationTests : IAsyncLifetime
             new ClaimsIdentity(new[] { new Claim(shape.SubjectClaimType, shape.Subject) }, "test"));
 
         var metadata = optedIn
-            ? new EndpointMetadataCollection(new RequireIdempotencyAttribute())
+            ? new EndpointMetadataCollection(new RequireIdempotencyAttribute
+            {
+                AllowRequestBody = allowRequestBody,
+            })
             : EndpointMetadataCollection.Empty;
         context.SetEndpoint(new RouteEndpoint(
             _ => Task.CompletedTask,

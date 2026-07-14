@@ -176,7 +176,7 @@ Deliver the Trip lifecycle from `SCHEDULED` through `BOARDING`, `IN_PROGRESS`, a
 | 21.0 | ✅ done | APPROVE | 2026-07-14 | Human-approved plan clarifications; one reviewer patch round; docs verification green. |
 | 21.1 | ✅ done | APPROVE | 2026-07-14 | Five reviewer patch rounds; Redis/legacy/service regressions and six-solution build/format verification green. |
 | 21.2 | ✅ done | APPROVE | 2026-07-14 | Human-approved metadata-chain scope repair; EF-generated migration, no model drift, and DB apply/rollback/reapply verification green. |
-| 21.3 | ⬜ todo | — | — | — |
+| 21.3 | ✅ done | APPROVE | 2026-07-14 | Three reviewer patch rounds; HTTP idempotency, row-lock races, rollback, audit/Outbox, and no-body verification green. |
 | 21.4 | ⬜ todo | — | — | — |
 | 21.5 | ⬜ todo | — | — | Existing Parcel consumer must be audited against frozen payload/timestamp. |
 | 21.6 | ⬜ todo | — | — | — |
