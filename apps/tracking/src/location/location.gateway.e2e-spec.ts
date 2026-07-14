@@ -3,20 +3,21 @@ import { Test } from '@nestjs/testing';
 import { RedisService } from '@vietride/nest-redis';
 import { exportSPKI, generateKeyPair, SignJWT, type KeyLike } from 'jose';
 import { io, type Socket } from 'socket.io-client';
-import {
-  ENV_TOKEN,
-  TRACKING_AUTHORIZATION_ADAPTER,
-  TRACKING_JWT_VERIFIER,
-} from '../app/tokens';
+import { ENV_TOKEN, TRACKING_AUTHORIZATION_ADAPTER, TRACKING_JWT_VERIFIER } from '../app/tokens';
 import { ApproachingAlertService } from '../approaching-alert/approaching-alert.service';
 import { JoseUserJwtVerifier } from '../auth/user-jwt.verifier';
 import { MvpTrackingAuthorizationAdapter } from '../authorization/tracking-authorization.adapter';
 import type { Env } from '../config/env.schema';
 import { EtaService, type EtaUpdateEvent } from '../eta/eta.service';
 import { OffRouteService } from '../off-route/off-route.service';
+import { ShuttleService } from '../shuttle/shuttle.service';
 import { TripDelayService, type TripDelayEtaUpdate } from '../trip-delay/trip-delay.service';
 import { LocationGateway } from './location.gateway';
-import { TRACKING_SOCKET_PATH, trackingGpsBufferKey, trackingLatestKey } from './location.constants';
+import {
+  TRACKING_SOCKET_PATH,
+  trackingGpsBufferKey,
+  trackingLatestKey,
+} from './location.constants';
 import { LocationService } from './location.service';
 
 const TEST_TRIP_ID = '11111111-1111-4111-8111-111111111111';
@@ -43,7 +44,9 @@ interface GpsUpdateAck {
 }
 
 interface RedisMultiMock {
-  set: jest.MockedFunction<(key: string, value: string, mode: string, ttl: number) => RedisMultiMock>;
+  set: jest.MockedFunction<
+    (key: string, value: string, mode: string, ttl: number) => RedisMultiMock
+  >;
   rpush: jest.MockedFunction<(key: string, value: string) => RedisMultiMock>;
   sadd: jest.MockedFunction<(key: string, value: string) => RedisMultiMock>;
   exec: jest.MockedFunction<() => Promise<Array<[Error | null, unknown]> | null>>;
@@ -58,7 +61,9 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
   let etaHandleGpsUpdate: jest.MockedFunction<(event: unknown) => Promise<EtaUpdateEvent | null>>;
   let approachingHandleEtaUpdate: jest.MockedFunction<(event: EtaUpdateEvent) => Promise<number>>;
   let offRouteHandleGpsUpdate: jest.MockedFunction<(event: unknown) => Promise<unknown>>;
-  let tripDelayHandleEtaUpdate: jest.MockedFunction<(event: EtaUpdateEvent) => Promise<TripDelayEtaUpdate>>;
+  let tripDelayHandleEtaUpdate: jest.MockedFunction<
+    (event: EtaUpdateEvent) => Promise<TripDelayEtaUpdate>
+  >;
 
   beforeAll(async () => {
     const generated = await generateKeyPair('RS256');
@@ -123,6 +128,13 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
         {
           provide: TripDelayService,
           useValue: { handleEtaUpdate: tripDelayHandleEtaUpdate },
+        },
+        {
+          provide: ShuttleService,
+          useValue: {
+            getContext: jest.fn(),
+            recordLocation: jest.fn(),
+          },
         },
       ],
     }).compile();
@@ -207,13 +219,20 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       'EX',
       expect.any(Number),
     );
-    expect(redisMulti.rpush).toHaveBeenCalledWith(trackingGpsBufferKey(TEST_TRIP_ID), expect.any(String));
+    expect(redisMulti.rpush).toHaveBeenCalledWith(
+      trackingGpsBufferKey(TEST_TRIP_ID),
+      expect.any(String),
+    );
     expect(redisMulti.sadd).toHaveBeenCalledWith('tracking:active_trips', TEST_TRIP_ID);
     expect(redisMulti.exec).toHaveBeenCalledTimes(1);
     await waitForCondition(() => offRouteHandleGpsUpdate.mock.calls.length > 0);
     await waitForCondition(() => etaHandleGpsUpdate.mock.calls.length > 0);
-    expect(offRouteHandleGpsUpdate).toHaveBeenCalledWith(expect.objectContaining({ tripId: TEST_TRIP_ID }));
-    expect(etaHandleGpsUpdate).toHaveBeenCalledWith(expect.objectContaining({ tripId: TEST_TRIP_ID }));
+    expect(offRouteHandleGpsUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ tripId: TEST_TRIP_ID }),
+    );
+    expect(etaHandleGpsUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ tripId: TEST_TRIP_ID }),
+    );
     expect(approachingHandleEtaUpdate).not.toHaveBeenCalled();
     socket.disconnect();
   });

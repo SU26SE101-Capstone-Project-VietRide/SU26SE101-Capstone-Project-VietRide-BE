@@ -36,16 +36,6 @@ CREATE TYPE trip_generation_skip_reason AS ENUM (
     'SUBSCRIPTION_LIMIT_EXCEEDED', 'VEHICLE_CONFLICT', 'DRIVER_CONFLICT', 'OTHER'
 );
 
-CREATE TYPE shuttle_direction AS ENUM ('INBOUND_TO_STATION', 'OUTBOUND_FROM_STATION');
-
-CREATE TYPE shuttle_trip_status AS ENUM (
-    'SCHEDULED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'
-);
-
-CREATE TYPE shuttle_passenger_status AS ENUM (
-    'PENDING_ASSIGNMENT', 'PENDING', 'PICKED_UP', 'DELIVERED', 'NO_SHOW', 'CANCELLED'
-);
-
 CREATE TYPE incident_category AS ENUM (
     'TRAFFIC_JAM', 'VEHICLE_BREAKDOWN', 'ACCIDENT', 'WEATHER', 'OTHER'
 );
@@ -551,21 +541,31 @@ CREATE TABLE shuttle_trips (
     operator_id UUID NOT NULL,
     main_trip_id UUID NOT NULL REFERENCES trips (id) ON DELETE RESTRICT,
     station_id UUID NOT NULL REFERENCES stations (id) ON DELETE RESTRICT,
-    direction shuttle_direction NOT NULL,
+    direction VARCHAR(30) NOT NULL,
     driver_user_id UUID NOT NULL,
     vehicle_id UUID NOT NULL REFERENCES vehicles (id) ON DELETE RESTRICT,
-    status shuttle_trip_status NOT NULL DEFAULT 'SCHEDULED',
+    status VARCHAR(20) NOT NULL DEFAULT 'SCHEDULED',
     scheduled_departure_time TIMESTAMPTZ NOT NULL,
+    scheduled_end_time TIMESTAMPTZ NOT NULL,
     actual_departure_time TIMESTAMPTZ NULL,
     completed_at TIMESTAMPTZ NULL,
     notes TEXT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_shuttle_trips_schedule CHECK (scheduled_end_time > scheduled_departure_time),
+    CONSTRAINT chk_shuttle_trips_direction CHECK (direction IN ('INBOUND_TO_STATION', 'OUTBOUND_FROM_STATION')),
+    CONSTRAINT chk_shuttle_trips_status CHECK (status IN ('SCHEDULED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'))
 );
 
 CREATE INDEX idx_shuttle_trips_main_trip ON shuttle_trips (main_trip_id);
 CREATE INDEX idx_shuttle_trips_operator_status ON shuttle_trips (operator_id, status);
 CREATE INDEX idx_shuttle_trips_station_direction ON shuttle_trips (station_id, direction);
+CREATE INDEX idx_shuttle_trips_driver_schedule
+    ON shuttle_trips (driver_user_id, scheduled_departure_time, scheduled_end_time)
+    WHERE status IN ('SCHEDULED', 'IN_PROGRESS');
+CREATE INDEX idx_shuttle_trips_vehicle_schedule
+    ON shuttle_trips (vehicle_id, scheduled_departure_time, scheduled_end_time)
+    WHERE status IN ('SCHEDULED', 'IN_PROGRESS');
 
 -- -----------------------------------------------------------------------------
 -- shuttle_passengers (manifest)
@@ -575,23 +575,47 @@ CREATE TABLE shuttle_passengers (
     shuttle_trip_id UUID NULL REFERENCES shuttle_trips (id) ON DELETE SET NULL,
     main_trip_id UUID NOT NULL REFERENCES trips (id) ON DELETE RESTRICT,
     booking_id UUID NULL,    -- logical FK → booking.bookings
-    direction shuttle_direction NOT NULL,
+    ticket_id UUID NULL,
+    passenger_user_id UUID NULL,
+    direction VARCHAR(30) NOT NULL,
     pickup_address TEXT NOT NULL,
     pickup_lat DECIMAL(10,7) NOT NULL,
     pickup_lng DECIMAL(10,7) NOT NULL,
     scheduled_pickup_time TIMESTAMPTZ NULL,
-    status shuttle_passenger_status NOT NULL DEFAULT 'PENDING_ASSIGNMENT',
+    pickup_order INT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'PENDING_ASSIGNMENT',
     picked_up_at TIMESTAMPTZ NULL,
     delivered_at TIMESTAMPTZ NULL,
     cancel_reason TEXT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_shuttle_passengers_direction CHECK (direction IN ('INBOUND_TO_STATION', 'OUTBOUND_FROM_STATION')),
+    CONSTRAINT chk_shuttle_passengers_status CHECK (status IN ('PENDING_ASSIGNMENT', 'PENDING', 'PICKED_UP', 'DELIVERED', 'NO_SHOW', 'CANCELLED'))
 );
 
 CREATE INDEX idx_shuttle_passengers_shuttle_trip ON shuttle_passengers (shuttle_trip_id)
     WHERE shuttle_trip_id IS NOT NULL;
 CREATE INDEX idx_shuttle_passengers_main_trip_status ON shuttle_passengers (main_trip_id, status);
 CREATE INDEX idx_shuttle_passengers_booking ON shuttle_passengers (booking_id) WHERE booking_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_shuttle_passengers_booking_ticket
+    ON shuttle_passengers (booking_id, ticket_id)
+    WHERE booking_id IS NOT NULL AND ticket_id IS NOT NULL;
+
+-- -----------------------------------------------------------------------------
+-- shuttle_dispatch_alerts (warning/cutoff idempotency markers)
+-- -----------------------------------------------------------------------------
+CREATE TABLE shuttle_dispatch_alerts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    main_trip_id UUID NOT NULL REFERENCES trips (id) ON DELETE RESTRICT,
+    operator_id UUID NOT NULL,
+    alert_type VARCHAR(20) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_shuttle_dispatch_alerts_trip_type UNIQUE (main_trip_id, alert_type),
+    CONSTRAINT chk_shuttle_dispatch_alerts_type CHECK (alert_type IN ('WARNING_120', 'WARNING_60', 'AUTO_CUTOFF'))
+);
+
+CREATE INDEX idx_shuttle_dispatch_alerts_operator_created
+    ON shuttle_dispatch_alerts (operator_id, created_at DESC);
 
 COMMENT ON COLUMN shuttle_passengers.shuttle_trip_id IS
     'NULL when passenger registered but Operator has not created ShuttleTrip yet (status=PENDING_ASSIGNMENT).';

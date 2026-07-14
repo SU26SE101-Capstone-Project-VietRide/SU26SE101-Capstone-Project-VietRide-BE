@@ -1,6 +1,6 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.27.0
+> **Phiên bản:** 1.28.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
 > **Cập nhật lần cuối:** 2026-07-14
 > **Capstone:** SU26SE101 — SU26
@@ -1348,6 +1348,15 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | | `BOOKING_NOT_FOR_THIS_TRIP` | 422 | QR scan booking hoặc boarding-tick passenger khác trip |
 | | `BOOKING_PASSENGER_ALREADY_BOARDED` | 409 | Tick lại passenger đã BOARDED |
 | | `BOOKING_ROUND_TRIP_INVALID` | 422 | Return trip không hợp lệ |
+| **Shuttle** | `SHUTTLE_STATION_NOT_SUPPORTED` | 422 | Shuttle intent không dùng origin Station hỗ trợ shuttle hoặc Station thiếu tọa độ |
+| | `SHUTTLE_REQUEST_CUTOFF_PASSED` | 409 | Tạo shuttle intent/dispatch tại hoặc sau hard cutoff T-30 |
+| | `SHUTTLE_PICKUP_LOCKED` | 409 | Edit pickup khi Booking còn shuttle intent active |
+| | `SHUTTLE_REQUEST_SET_CHANGED` | 409 | Booking subset đã đổi trạng thái trong lúc operator dispatch |
+| | `SHUTTLE_CAPACITY_EXCEEDED` | 409 | Tổng ticket của subset vượt sức chứa vehicle |
+| | `SHUTTLE_DRIVER_CONFLICT` | 409 | Driver overlap main Trip hoặc ShuttleTrip khác |
+| | `SHUTTLE_VEHICLE_CONFLICT` | 409 | Vehicle overlap main Trip hoặc ShuttleTrip khác |
+| | `DRIVER_NOT_FOUND` | 404 | Driver không active, không cùng operator hoặc thiếu snapshot liên hệ bắt buộc |
+| | `SHUTTLE_TRIP_NOT_FOUND` | 404 | ShuttleTrip không tồn tại |
 | **Voucher** | `VOUCHER_NOT_FOUND` | 404 | |
 | | `VOUCHER_EXPIRED` | 422 | validUntil < now |
 | | `VOUCHER_NOT_APPLICABLE` | 422 | Operator chưa consent (OPERATOR_FUNDED), hoặc route không match |
@@ -1696,7 +1705,7 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 
 | Method + Path | Caller | Mục đích |
 |---|---|---|
-| `GET /internal/v1/users/{userId}` | All services | Internal-JWT-only raw user lookup `{ id, role, operatorId, status }` for HTTP validate logical FK. Errors use ADR 0004 envelope. Trip DriverSchedule create/activation uses it to require `driverUserId` role `DRIVER` under caller operator and nullable `assistantUserId` role `ASSISTANT` under caller operator; missing user, wrong role/operator, or upstream logical-FK validation failure maps to `422 VALIDATION_ERROR` at Trip write boundary. |
+| `GET /internal/v1/users/{userId}` | All services | Internal-JWT-only raw user lookup `{ id, displayName, avatarUrl, role, operatorId, status, phone }` for HTTP validate logical FK. Errors use ADR 0004 envelope. Trip DriverSchedule create/activation validates role/operator; Shuttle dispatch còn yêu cầu driver active có display name/phone và snapshot hai field này vào assignment event. |
 | `GET /internal/v1/users/by-phone?phone={normalizedE164}` | Booking | Internal-JWT-only exact non-deleted-user phone lookup for the operator booking-monitor filter. Caller URI-escapes a prevalidated canonical E.164 value; raw success is exactly `{ userId }`, no PII. No match is ADR 0004 `404 RESOURCE_NOT_FOUND`. Booking maps only that exact response to an empty result; all other failures map to `502 UPSTREAM_UNAVAILABLE`. |
 | `GET /internal/v1/users/by-email?email=` | Parcel | Lookup recipient user khi tạo parcel |
 | `GET /internal/v1/users/{userId}/device-tokens` | Notification | Lấy FCM tokens active để push |
@@ -1774,7 +1783,7 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `identity.user.deleted` | Identity | Booking, Payment | `{ userId }` (soft delete cascade) |
 | `identity.operator.approved` | Identity | Payment (init OperatorWallet) | `{ operatorId, approvedAt }` |
 | `identity.operator.suspended` | Identity | Trip, Booking | `{ operatorId, suspendedAt }` |
-| `booking.booking.confirmed` | Booking | Notification, Payment (settle hold), Booking (BookingStats counter) | `{ bookingId, tripId, totalAmount, userId, voucherUsageId?, bookingCode?, ticketCodes?, ticketCount? }` |
+| `booking.booking.confirmed` | Booking | Notification, Payment (settle hold), Booking (BookingStats counter), Trip (shuttle fan-out) | `{ bookingId, tripId, totalAmount, userId, voucherUsageId?, bookingCode?, tickets?: [{ ticketId, passengerUserId? }], ticketCodes?, ticketCount?, shuttlePickup?: { address, latitude, longitude } }` |
 | `booking.booking.cancelled` | Booking | Notification, Trip (release seats), Payment (refund), Booking (BookingStats counter) | `{ bookingId, userId, refundAmount, refundOverride, cancellationReason, bookingCode?, ticketCodes?, ticketCount? }` |
 | `booking.booking.refunded` | Booking | Notification, Booking (BookingStats counter) | `{ bookingId, userId, amount, bookingCode?, ticketCodes?, ticketCount? }` |
 | `booking.voucher.consent_accepted` | Booking | Notification | `{ voucherId, operatorId }` |
@@ -1793,6 +1802,9 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `trip.stop.departed_with_pending` | Trip | Notification (Driver App boarding warning) | `{ eventId: Guid, occurredAt: DateTime (UTC), eventType: "trip.stop.departed_with_pending", tripId: Guid, stopId: Guid, stopName: string, pendingPassengerCount: int (> 0), driverUserId: Guid, assistantUserId: Guid?, departedAt: DateTimeOffset (UTC ISO-8601) }` |
 | `trip.trip.delayed` | Trip (Tracking publishes via Trip outbox proxy hoặc Tracking outbox) | Notification | `{ tripId, delayMinutes, etaNew }` |
 | `trip.incident.reported` | Trip | Notification | `{ incidentId, tripId, category, reporterUserId }` |
+| `trip.shuttle.assigned` | Trip | Notification | `{ shuttleTripId, mainTripId, bookingId, passengerUserId, ticketIds, pickupOrder, scheduledDepartureTime, scheduledEndTime, driver: { userId, displayName, phone }, vehicle: { id, licensePlate } }` |
+| `trip.shuttle.warning_issued` | Trip | Notification | `{ mainTripId, operatorId, alertType: WARNING_120|WARNING_60, pendingBookingCount, pendingPassengerCount, hardCutoffAt }` |
+| `trip.shuttle.unfulfilled` | Trip | Notification | `{ mainTripId, bookingId, passengerUserId, stationId, reason: AUTO_UNFULFILLED_CUTOFF }` |
 | `tracking.gps.off_route` | Tracking | Notification | `{ tripId, durationSeconds }` |
 | `tracking.gps.approaching_stop` | Tracking | Notification | `{ tripId, stopId, bookingIds, wave, etaMinutes }` |
 | `payment.payment.succeeded` | Payment | Booking, Parcel | `{ paymentId, referenceType, referenceId, amount }` |
@@ -2766,7 +2778,8 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
-| **1.27.0** | 2026-07-14 | BE lead (Vu) | **MINOR** - Add operator/admin Station and Stop update-disable APIs, Stop-disable Trip Outbox to Booking pending-action and enriched Notification flow, enriched Trip detail Stop projection, PII-free booking seat requests, VNPay GET IPN and ready-to-fill sandbox configuration, 10-minute payment timeout, and VNPay `BOOKING_GROUP` confirmation/expiration support. |
+| **1.28.0** | 2026-07-14 | BE lead (Vu) | **MINOR** - Add operator/admin Station and Stop update-disable APIs, Stop-disable Trip Outbox to Booking pending-action and enriched Notification flow, enriched Trip detail Stop projection, PII-free booking seat requests, VNPay GET IPN and ready-to-fill sandbox configuration, 10-minute payment timeout, and VNPay `BOOKING_GROUP` confirmation/expiration support. |
+| **1.27.0** | 2026-07-13 | Senior Backend Architect | **MINOR** - Day 36 Shuttle Backend v1: đăng ký REST/event/error contracts, Booking shuttle intent và cutoff T-30, operator subset dispatch, warning T-120/T-60, auto-cutoff, notification và Tracking Phase 11. Thêm ba bảng shuttle Trip, một bảng intent Booking, ba notification types và real-stack E2E acceptance. |
 | **1.26.0** | 2026-07-12 | BE lead (Vu) | **MINOR** - Add the assignment-scoped Driver/Assistant Route geometry read `GET /v1/driver/trips/{tripId}/route`. The endpoint returns the main Route's nullable Google precision-5 `pathPolyline`, origin/destination Station coordinates, and ordered TripStop coordinates only when JWT `sub` is assigned as the Trip driver or assistant. Reuses existing `TRIP_NOT_FOUND`, `FORBIDDEN`, `VALIDATION_ERROR`, `/v1/driver` Gateway role gate, and existing schema; no migration, dependency, event, or operator-route permission change. |
 | **1.25.1** | 2026-07-11 | BE lead (Vu) | **PATCH** - Day-19 shared validation-policy correction: model-binding failures (malformed JSON, missing non-nullable body field, type mismatch) now return the ADR 0004 `ApiResponse` error envelope with `422 VALIDATION_ERROR`, matching FluentValidation failures; they are no longer documented as HTTP 400. |
 | **1.25.0** | 2026-07-11 | BE lead (Vu) | **MINOR** - Freeze the Day-19 tenant-scoped operator booking-monitor contract. Register the exact Identity raw phone-to-user lookup and exhaustive Booking error/retry boundary; broaden existing `UPSTREAM_UNAVAILABLE` to generic downstream/inter-service unavailability without adding an error code; replace the proposed Outbox-audit timeline with authoritative append-only `booking_status_history`, including schema, six current source constants, actor/reason rules, atomic writer/no-op semantics, no backfill/event, and deterministic ordering. |

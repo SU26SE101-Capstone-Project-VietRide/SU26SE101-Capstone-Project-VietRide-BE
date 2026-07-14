@@ -17,6 +17,7 @@ public sealed class Booking : BaseEntity<Guid>
     private readonly List<Passenger> _passengers = [];
     private readonly List<Ticket> _tickets = [];
     private readonly List<BookingPendingAction> _pendingActions = [];
+    private BookingShuttleIntent? _shuttleIntent;
 
     public BookingCode BookingCode { get; private set; }
 
@@ -62,6 +63,7 @@ public sealed class Booking : BaseEntity<Guid>
     public IReadOnlyList<Passenger> Passengers => _passengers.AsReadOnly();
     public IReadOnlyList<Ticket> Tickets => _tickets.AsReadOnly();
     public IReadOnlyList<BookingPendingAction> PendingActions => _pendingActions.AsReadOnly();
+    public BookingShuttleIntent? ShuttleIntent => _shuttleIntent;
 
     private Booking() { }
 
@@ -165,6 +167,21 @@ public sealed class Booking : BaseEntity<Guid>
         return ticket;
     }
 
+    public void RequestShuttle(string address, decimal latitude, decimal longitude)
+    {
+        if (_shuttleIntent is not null)
+        {
+            throw new InvalidOperationException("A shuttle intent already exists for this booking.");
+        }
+
+        if (!PickupStationId.HasValue || PickupStopId.HasValue)
+        {
+            throw new InvalidOperationException("Shuttle is available only for station pickup.");
+        }
+
+        _shuttleIntent = BookingShuttleIntent.Create(Id, address, latitude, longitude);
+    }
+
     /// <summary>
     /// Marks the booking as CONFIRMED (after successful payment).
     /// Only valid from PENDING_PAYMENT state.
@@ -219,6 +236,11 @@ public sealed class Booking : BaseEntity<Guid>
     public void ChangePickup(Guid? pickupStationId, Guid? pickupStopId)
     {
         EnsureConfirmedForEdit();
+
+        if (_shuttleIntent?.IsActive == true)
+        {
+            throw new InvalidOperationException("Pickup is locked while a shuttle intent is active.");
+        }
 
         if (CountProvided(pickupStationId, pickupStopId) != 1)
             throw new ArgumentException("Exactly one of pickupStationId or pickupStopId must be provided.");
@@ -275,6 +297,7 @@ public sealed class Booking : BaseEntity<Guid>
         CancellationReason = reason;
         CancelledAt = cancelledAt;
         RefundOverride = refundOverride;
+        _shuttleIntent?.Cancel(cancelledAt);
 
         foreach (var ticket in _tickets.Where(ticket =>
             ticket.Status is TicketStatus.PENDING_PAYMENT or TicketStatus.ISSUED))

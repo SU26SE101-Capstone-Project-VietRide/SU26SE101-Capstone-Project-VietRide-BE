@@ -277,6 +277,68 @@ namespace VietRide.Booking.Infrastructure.Migrations
                     b.ToTable("booking_pending_actions", "vietride_booking");
                 });
 
+            modelBuilder.Entity("VietRide.Booking.Domain.Entities.BookingShuttleIntent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid>("BookingId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("booking_id");
+
+                    b.Property<DateTimeOffset?>("CancelledAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("cancelled_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("PickupAddress")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("pickup_address");
+
+                    b.Property<decimal>("PickupLatitude")
+                        .HasColumnType("decimal(10,7)")
+                        .HasColumnName("pickup_latitude");
+
+                    b.Property<decimal>("PickupLongitude")
+                        .HasColumnType("decimal(10,7)")
+                        .HasColumnName("pickup_longitude");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("Id")
+                        .HasName("pk_booking_shuttle_intents");
+
+                    b.HasIndex("BookingId")
+                        .IsUnique()
+                        .HasDatabaseName("uq_booking_shuttle_intents_booking");
+
+                    b.ToTable("booking_shuttle_intents", "vietride_booking", t =>
+                        {
+                            t.HasCheckConstraint("chk_booking_shuttle_intents_latitude", "pickup_latitude BETWEEN -90 AND 90");
+
+                            t.HasCheckConstraint("chk_booking_shuttle_intents_longitude", "pickup_longitude BETWEEN -180 AND 180");
+                        });
+                });
+
             modelBuilder.Entity("VietRide.Booking.Domain.Entities.BookingStats", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1047,6 +1109,18 @@ namespace VietRide.Booking.Infrastructure.Migrations
                     b.Navigation("Booking");
                 });
 
+            modelBuilder.Entity("VietRide.Booking.Domain.Entities.BookingShuttleIntent", b =>
+                {
+                    b.HasOne("VietRide.Booking.Domain.Entities.Booking", "Booking")
+                        .WithOne("ShuttleIntent")
+                        .HasForeignKey("VietRide.Booking.Domain.Entities.BookingShuttleIntent", "BookingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_booking_shuttle_intents_bookings_booking_id");
+
+                    b.Navigation("Booking");
+                });
+
             modelBuilder.Entity("VietRide.Booking.Domain.Entities.BookingStatusHistory", b =>
                 {
                     b.HasOne("VietRide.Booking.Domain.Entities.Booking", null)
@@ -1148,6 +1222,8 @@ namespace VietRide.Booking.Infrastructure.Migrations
                     b.Navigation("Passengers");
 
                     b.Navigation("PendingActions");
+
+                    b.Navigation("ShuttleIntent");
 
                     b.Navigation("Tickets");
                 });

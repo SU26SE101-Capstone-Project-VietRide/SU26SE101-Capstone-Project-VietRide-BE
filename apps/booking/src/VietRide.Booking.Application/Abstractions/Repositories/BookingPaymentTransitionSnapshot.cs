@@ -10,4 +10,8 @@ public sealed record BookingPaymentTransitionSnapshot(
     long TotalAmount,
     Guid? VoucherUsageId,
     IReadOnlyList<PassengerSeatAssignment> PassengerSeatAssignments,
-    IReadOnlyList<string> TicketCodes);
+    IReadOnlyList<string> TicketCodes,
+    IReadOnlyList<Guid>? TicketIds = null,
+    BookingShuttleIntentSnapshot? ShuttleIntent = null);
+
+public sealed record BookingShuttleIntentSnapshot(string Address, decimal Latitude, decimal Longitude);

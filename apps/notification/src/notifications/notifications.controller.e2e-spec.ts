@@ -1,10 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
-import {
-  ApiResponseExceptionFilter,
-  ApiResponseInterceptor,
-} from '@vietride/nest-common';
+import { ApiResponseExceptionFilter, ApiResponseInterceptor } from '@vietride/nest-common';
 import { exportSPKI, generateKeyPair, SignJWT, type KeyLike } from 'jose';
 import { ENV_TOKEN, NOTIFICATION_JWT_VERIFIER } from '../app/tokens';
 import { JoseNotificationUserJwtVerifier } from '../auth/user-jwt.verifier';
@@ -56,7 +53,9 @@ describe('NotificationsController (e2e)', () => {
       }
       return null;
     });
-    update = jest.fn(async () => createNotification({ readAt: new Date('2026-06-01T10:01:00.000Z') }));
+    update = jest.fn(async () =>
+      createNotification({ readAt: new Date('2026-06-01T10:01:00.000Z') }),
+    );
 
     const moduleRef = await Test.createTestingModule({
       controllers: [NotificationsController],
@@ -85,7 +84,7 @@ describe('NotificationsController (e2e)', () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
-        await app.listen(0);
+    await app.listen(0);
     port = readListeningPort(app);
   });
 
@@ -118,10 +117,9 @@ describe('NotificationsController (e2e)', () => {
 
   it('returns owner notification history', async () => {
     const token = await signIdentityToken(OWNER_USER_ID);
-    const response = await getJson<ApiEnvelope<{ items: Array<{ id: string; readAt: string | null }> }>>(
-      '/v1/notifications?unreadOnly=true&page=1&pageSize=20&sortBy=createdAt&sortDir=desc',
-      token,
-    );
+    const response = await getJson<
+      ApiEnvelope<{ items: Array<{ id: string; readAt: string | null }> }>
+    >('/v1/notifications?unreadOnly=true&page=1&pageSize=20&sortBy=createdAt&sortDir=desc', token);
 
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
@@ -265,9 +263,12 @@ function createTestEnv(publicKeyPem: string): Env {
     LOG_LEVEL: 'info',
     USER_JWT_PUBLIC_KEY: publicKeyPem,
     IDENTITY_INTERNAL_BASE_URL: 'http://identity.test',
+    TRIP_INTERNAL_BASE_URL: 'http://trip.test',
     FCM_PROJECT_ID: undefined,
     FCM_CLIENT_EMAIL: undefined,
     FCM_PRIVATE_KEY: undefined,
+    FCM_DRY_RUN: false,
+    FCM_DRY_RUN_TOPIC: 'vietride-notification-e2e',
     SENDGRID_API_KEY: undefined,
     SENDGRID_FROM_EMAIL: undefined,
     SENDGRID_FROM_NAME: 'VietRide',

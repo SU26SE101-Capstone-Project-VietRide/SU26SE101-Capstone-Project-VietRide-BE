@@ -1,0 +1,50 @@
+name: day36-e2e
+
+services:
+  postgres:
+    container_name: day36-e2e-postgres
+    ports: ['55436:5432']
+  redis:
+    container_name: day36-e2e-redis
+    ports: ['56378:6379']
+  rabbitmq:
+    container_name: day36-e2e-rabbitmq
+    ports: ['55662:5672', '55663:15672']
+  identity:
+    container_name: day36-e2e-identity
+    ports: ['56001:5001']
+  trip:
+    container_name: day36-e2e-trip
+    environment:
+      Shuttle__ScanIntervalMinutes: '1'
+    ports: ['56002:5002']
+  booking:
+    container_name: day36-e2e-booking
+    ports: ['56003:5003']
+  payment:
+    container_name: day36-e2e-payment
+    ports: ['56004:5004']
+  parcel:
+    container_name: day36-e2e-parcel
+  tracking:
+    container_name: day36-e2e-tracking
+    environment:
+      TRACKING_GPS_FLUSH_ENABLED: 'false'
+      TRACKING_TRIP_DELAY_ENABLED: 'false'
+    ports: ['56011:3001']
+  notification:
+    container_name: day36-e2e-notification
+    environment:
+      NODE_ENV: 'development'
+      FCM_PROJECT_ID: ''
+      FCM_CLIENT_EMAIL: ''
+      FCM_PRIVATE_KEY: ''
+      FCM_DRY_RUN: 'false'
+    ports: ['56012:3002']
+  gateway:
+    container_name: day36-e2e-gateway
+    ports: ['56300:3000']
+
+networks:
+  default:
+    name: day36-e2e-net

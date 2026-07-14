@@ -586,10 +586,9 @@ public sealed class InternalTripsEndpointTests
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Testing");
-            Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", "Testing");
             Environment.SetEnvironmentVariable("INTERNAL_JWT_SECRET", InternalTripsWebApplicationFactory.TestSecret);
             builder.UseSetting("INTERNAL_JWT_SECRET", InternalTripsWebApplicationFactory.TestSecret);
+            builder.UseSetting("Trip:BackgroundWorkers:Enabled", "false");
             builder.UseSetting("ConnectionStrings:Default", "Host=localhost;Port=5432;Database=test;Username=vietride;Password=vietride_dev");
             builder.UseEnvironment("Testing");
             builder.ConfigureTestServices(services =>

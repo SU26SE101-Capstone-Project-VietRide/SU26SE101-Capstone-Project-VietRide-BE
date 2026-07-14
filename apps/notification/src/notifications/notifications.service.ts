@@ -4,10 +4,7 @@ import {
   CreateNotificationSchema,
   type CreateNotificationDto,
 } from './dto/create-notification.dto';
-import {
-  CreateEmailSendSchema,
-  type CreateEmailSendDto,
-} from './dto/create-email-send.dto';
+import { CreateEmailSendSchema, type CreateEmailSendDto } from './dto/create-email-send.dto';
 import type { ListNotificationsQueryDto } from './dto/list-notifications-query.dto';
 import { EmailSendQueue } from './email-send.queue';
 import { sanitizeEmailTemplateData } from './email-sensitive-data';
@@ -56,15 +53,20 @@ export class NotificationsService {
   async createNotification(dto: CreateNotificationDto): Promise<NotificationItemDto> {
     const result = await this.notificationsRepository.create(CreateNotificationSchema.parse(dto));
     const notification = result.notification;
-    await this.fcmPushQueue.enqueue({
-      notificationId: notification.id,
-      userId: notification.userId,
-    });
+    if (result.created) {
+      await this.fcmPushQueue.enqueue({
+        notificationId: notification.id,
+        userId: notification.userId,
+      });
+    }
 
     return this.toDto(notification);
   }
 
-  async listForUser(userId: string, query: ListNotificationsQueryDto): Promise<PagedNotificationsDto> {
+  async listForUser(
+    userId: string,
+    query: ListNotificationsQueryDto,
+  ): Promise<PagedNotificationsDto> {
     const result = await this.notificationsRepository.listForUser(userId, query);
     const totalPages = Math.ceil(result.totalItems / query.pageSize);
 

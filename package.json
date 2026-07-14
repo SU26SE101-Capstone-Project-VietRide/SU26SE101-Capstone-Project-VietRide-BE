@@ -28,6 +28,7 @@
     "postman:day19:local": "node scripts/run-day19-newman-local.mjs",
     "postman:day18:crossday": "node scripts/run-day18-crossday-local.mjs",
     "e2e:day37": "node scripts/run-day37-subscription-e2e.mjs",
+    "e2e:day36": "node scripts/run-day36-shuttle-e2e.mjs",
     "postman:full:local": "node scripts/run-full-e2e-local.mjs",
     "postman:day20:local": "node scripts/run-day20-sprint3-e2e-local.mjs",
     "lint:ts": "nx run-many -t lint --exclude=\"VietRide.*\"",

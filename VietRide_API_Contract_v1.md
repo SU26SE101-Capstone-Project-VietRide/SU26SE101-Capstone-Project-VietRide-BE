@@ -3190,13 +3190,16 @@ Response `200`:
 ```json
 {
   "id": "uuid",
+  "displayName": "Nguyen Van Tai",
+  "avatarUrl": null,
   "role": "DRIVER",
   "operatorId": "uuid",
-  "status": "ACTIVE"
+  "status": "ACTIVE",
+  "phone": "+84901234567"
 }
 ```
 
-`operatorId` is nullable for non-operator-scoped users; Trip DriverSchedule validation requires it to match the caller operator for `DRIVER` and `ASSISTANT` users.
+`operatorId`, `avatarUrl` và `phone` có thể null. Trip DriverSchedule validation yêu cầu `operatorId` khớp operator caller cho `DRIVER`/`ASSISTANT`; Shuttle dispatch còn yêu cầu driver active có `displayName` và `phone` để snapshot vào assignment event.
 
 Error `404` — `RESOURCE_NOT_FOUND`.
 
@@ -3324,6 +3327,36 @@ Errors: `402 SUBSCRIPTION_EXPIRED`; `409 SUBSCRIPTION_PAYMENT_PENDING`; `422 SUB
 ### POST `/internal/v1/operators/{operatorId}/quota-allocations/{allocationId}/release`
 
 Auth: Internal JWT. Idempotency-Key: required. Caller: Trip service after its local persistence fails or after a resource is soft-deleted. Releasing an already released allocation is a `200` idempotent no-op. A scheduled Identity reconciliation may release only allocations whose resource is verified absent through the owning service's internal lookup.
+
+### GET `/v1/operator/shuttle-requests`
+
+Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`. Tenant lấy từ JWT. Query phân trang theo main Trip.
+
+Response trả `mainTripId`, origin Station, `hardCutoffAt`, tổng pending, các nhóm Booking (`bookingId`, `passengerCount`, `pickupAddress`, `pickupLat`, `pickupLng`, `distanceToStationMeters`, `requestedAt`) và `suggestedBookingOrder`. Gợi ý dùng Haversine, xa nhất trước, hòa thì `requestedAt ASC`; operator có thể đổi thứ tự.
+
+### POST `/v1/operator/shuttle-trips`
+
+Auth: `OPERATOR_ADMIN`. `Idempotency-Key` bắt buộc.
+
+```json
+{
+  "mainTripId": "uuid",
+  "driverUserId": "uuid",
+  "vehicleId": "uuid",
+  "scheduledDepartureTime": "2026-07-13T01:00:00Z",
+  "scheduledEndTime": "2026-07-13T02:00:00Z",
+  "orderedBookingIds": ["uuid"],
+  "notes": "optional"
+}
+```
+
+Chọn một subset Booking không rỗng. Toàn bộ ticket của một Booking được gán nguyên tử, sức chứa tính theo tổng ticket. Direction và Station được suy ra từ main Trip. `scheduledEndTime` không được sau `departureDateTime - 30 phút`. Driver/vehicle phải active, cùng tenant và không overlap main Trip/ShuttleTrip. Response `201` trả ShuttleTrip cùng số passenger assigned/remaining. Replay cùng idempotency key trả cùng kết quả.
+
+Errors: `403 FORBIDDEN`; `404 TRIP_NOT_FOUND`; `404 VEHICLE_NOT_FOUND`; `404 DRIVER_NOT_FOUND`; `409 SHUTTLE_REQUEST_SET_CHANGED`; `409 SHUTTLE_CAPACITY_EXCEEDED`; `409 SHUTTLE_DRIVER_CONFLICT`; `409 SHUTTLE_VEHICLE_CONFLICT`; `409 SHUTTLE_REQUEST_CUTOFF_PASSED`; `422 VALIDATION_ERROR`.
+
+### Shuttle fields trong Booking
+
+`POST /v1/bookings` và mỗi leg của round-trip nhận optional `shuttlePickup: { address, latitude, longitude }`. Chỉ origin Station active có `supportsShuttle=true` và đủ tọa độ được nhận. Booking dùng `TripSnapshot.departureDateTime` để từ chối request tại/sau T-30 với `409 SHUTTLE_REQUEST_CUTOFF_PASSED`. Khi intent còn active, `edit-pickup` trả `409 SHUTTLE_PICKUP_LOCKED`.
 
 ### GET `/v1/stations/search`
 
