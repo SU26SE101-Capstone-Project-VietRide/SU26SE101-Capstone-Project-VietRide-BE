@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -127,7 +128,9 @@ public sealed class UserDeviceRepositoryTests : IClassFixture<UserDeviceReposito
 
             var services = new ServiceCollection();
             services.AddSingleton<IClock, SystemClock>();
-            services.AddDbContext<IdentityDbContext>(options => options.UseNpgsql(_dataSource));
+            services.AddDbContext<IdentityDbContext>(options => options
+                .UseNpgsql(_dataSource)
+                .ConfigureWarnings(warnings => warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning)));
             services.AddInfrastructure(BuildConfiguration());
             _provider = services.BuildServiceProvider(validateScopes: true);
 

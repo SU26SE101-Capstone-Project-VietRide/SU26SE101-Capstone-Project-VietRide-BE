@@ -20,6 +20,7 @@ const string ServiceName = "Identity";
 Env.NoClobber().TraversePath().Load();
 
 var builder = WebApplication.CreateBuilder(args);
+var isTesting = builder.Environment.IsEnvironment("Testing");
 
 // Structured logging — overridden via appsettings or env.
 builder.Host.UseSerilog((ctx, _, lc) => lc
@@ -36,6 +37,11 @@ builder.Services.AddVietRideSharedWeb(builder.Configuration, ServiceName);
 builder.Services.AddVietRideDbContext<IdentityDbContext>(
     builder.Configuration,
     configureDataSource: IdentityDbContext.ConfigurePostgresEnums);
+if (isTesting)
+{
+    builder.Services.AddDbContext<IdentityDbContext>(options => options.ConfigureWarnings(warnings =>
+        warnings.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning)));
+}
 
 // MediatR v11 pipeline behaviors (Logging → Validation → Transaction)
 // + FluentValidation validators discovered from the Application assembly.
@@ -43,7 +49,6 @@ builder.Services.AddVietRideMediatRBehaviors(
     handlerAssemblies: [typeof(RegisterCommand).Assembly]);
 
 // Infrastructure: repositories, security services, email stub, Redis OTP rate-limiter.
-var isTesting = builder.Environment.IsEnvironment("Testing");
 builder.Services.AddInfrastructure(builder.Configuration, registerEventConsumer: !isTesting);
 builder.Services.AddVietRideIdempotency("identity");
 
