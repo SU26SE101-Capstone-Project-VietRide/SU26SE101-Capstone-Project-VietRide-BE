@@ -29,6 +29,7 @@
     "postman:day18:crossday": "node scripts/run-day18-crossday-local.mjs",
     "e2e:day37": "node scripts/run-day37-subscription-e2e.mjs",
     "e2e:day36": "node scripts/run-day36-shuttle-e2e.mjs",
+    "e2e:day38": "node scripts/run-day38-invoice-settlement-e2e.mjs",
     "postman:full:local": "node scripts/run-full-e2e-local.mjs",
     "lint:ts": "nx run-many -t lint --exclude=\"VietRide.*\"",
     "test:ts": "nx run-many -t test --exclude=\"VietRide.*\" --ci --passWithNoTests",
