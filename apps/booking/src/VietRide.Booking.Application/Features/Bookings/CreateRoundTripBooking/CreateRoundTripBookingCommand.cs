@@ -42,14 +42,16 @@ public sealed record CreateRoundTripBookingCommand : IRequest<CreateRoundTripBoo
         Guid? PickupStopId,
         Guid? DropoffStationId,
         Guid? DropoffStopId,
-        IReadOnlyList<RoundTripSeatRequest> Seats);
+        IReadOnlyList<RoundTripSeatRequest> Seats,
+        RoundTripShuttlePickupCommand? ShuttlePickup = null);
+
+    public sealed record RoundTripShuttlePickupCommand(
+        string Address,
+        decimal Latitude,
+        decimal Longitude);
 
     /// <summary>
-    /// Per-seat booking request. PII is validated but NOT persisted.
+    /// Per-seat operational booking request. Passenger PII is intentionally not collected.
     /// </summary>
-    public sealed record RoundTripSeatRequest(
-        string SeatNumber,
-        string FullName,
-        string PhoneNumber,
-        string IdNumber);
+    public sealed record RoundTripSeatRequest(string SeatNumber);
 }

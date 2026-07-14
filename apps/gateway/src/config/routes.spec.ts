@@ -20,7 +20,9 @@ describe('buildRouteTable', () => {
         r.prefix.startsWith('/v1/users') ||
         r.prefix.startsWith('/v1/operator/profile') ||
         r.prefix.startsWith('/v1/operator/users') ||
-        r.prefix.startsWith('/v1/admin/operator-users'),
+        r.prefix.startsWith('/v1/operator/subscription') ||
+        r.prefix.startsWith('/v1/admin/operator-users') ||
+        r.prefix.startsWith('/v1/admin/subscription-plans'),
     );
     expect(identityRoutes.length).toBeGreaterThan(0);
     identityRoutes.forEach((r) => expect(r.target).toBe(env.IDENTITY_BASE_URL));
@@ -40,6 +42,7 @@ describe('buildRouteTable', () => {
       ['/v1/admin/operators', env.IDENTITY_BASE_URL],
       ['/v1/admin/operator-users', env.IDENTITY_BASE_URL],
       ['/v1/admin/users', env.IDENTITY_BASE_URL],
+      ['/v1/admin/subscription-plans', env.IDENTITY_BASE_URL],
       ['/v1/admin/locations', env.TRIP_BASE_URL],
       ['/v1/admin/booking-stats', env.BOOKING_BASE_URL],
       ['/v1/admin/vouchers', env.BOOKING_BASE_URL],
@@ -102,6 +105,11 @@ describe('buildRouteTable', () => {
     const cases = [
       ['/v1/driver/me/schedule', '/v1/driver', env.TRIP_BASE_URL],
       [
+        '/v1/driver/trips/11111111-1111-1111-1111-111111111111/route',
+        '/v1/driver',
+        env.TRIP_BASE_URL,
+      ],
+      [
         '/v1/bookings/trips/11111111-1111-1111-1111-111111111111/manifest',
         '/v1/bookings/trips',
         env.BOOKING_BASE_URL,
@@ -137,12 +145,48 @@ describe('buildRouteTable', () => {
     expect(route?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
   });
 
+  it('routes operator booking list and detail to Booking with the exact operator role union', () => {
+    const listRoute = matchRoute(routes, '/v1/operator/bookings');
+    const detailRoute = matchRoute(
+      routes,
+      '/v1/operator/bookings/11111111-1111-4111-8111-111111111111',
+    );
+
+    [listRoute, detailRoute].forEach((route) => {
+      expect(route?.prefix).toBe('/v1/operator/bookings');
+      expect(route?.target).toBe(env.BOOKING_BASE_URL);
+      expect(route?.authRequired).toBe('user');
+      expect(route?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
+      expect(route?.requiredRoles).not.toContain('PASSENGER');
+      expect(route?.requiredRoles).not.toContain('DRIVER');
+      expect(route?.requiredRoles).not.toContain('SYSTEM_ADMIN');
+    });
+  });
+
+  it('keeps operator booking routes distinct from neighboring Trip and Booking prefixes', () => {
+    const cases = [
+      ['/v1/operator/bookings', '/v1/operator/bookings', env.BOOKING_BASE_URL],
+      ['/v1/operator/trips', '/v1/operator/trips', env.TRIP_BASE_URL],
+      ['/v1/operator/booking-stats', '/v1/operator/booking-stats', env.BOOKING_BASE_URL],
+      ['/v1/bookings', '/v1/bookings', env.BOOKING_BASE_URL],
+      ['/v1/bookings/trips/11111111-1111-4111-8111-111111111111/manifest', '/v1/bookings/trips', env.BOOKING_BASE_URL],
+    ] as const;
+
+    cases.forEach(([path, prefix, target]) => {
+      const route = matchRoute(routes, path);
+
+      expect(route?.prefix).toBe(prefix);
+      expect(route?.target).toBe(target);
+    });
+  });
+
   it('matches cross-service admin routes to the correct upstream services', () => {
     const cases = [
       ['/v1/admin/operators', env.IDENTITY_BASE_URL],
       ['/v1/admin/operators/11111111-1111-1111-1111-111111111111/approve', env.IDENTITY_BASE_URL],
       ['/v1/admin/operator-users', env.IDENTITY_BASE_URL],
       ['/v1/admin/users', env.IDENTITY_BASE_URL],
+      ['/v1/admin/subscription-plans', env.IDENTITY_BASE_URL],
       ['/v1/admin/locations', env.TRIP_BASE_URL],
       ['/v1/admin/booking-stats/aggregate', env.BOOKING_BASE_URL],
       ['/v1/admin/vouchers', env.BOOKING_BASE_URL],
@@ -380,6 +424,24 @@ describe('buildRouteTable', () => {
     });
   });
 
+  it('routes Day 36 shuttle reads and dispatch mutations to Trip with distinct operator roles', () => {
+    const requestsRoute = matchRoute(routes, '/v1/operator/shuttle-requests');
+    const dispatchRoute = matchRoute(routes, '/v1/operator/shuttle-trips');
+
+    expect(requestsRoute).toMatchObject({
+      prefix: '/v1/operator/shuttle-requests',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    });
+    expect(dispatchRoute).toMatchObject({
+      prefix: '/v1/operator/shuttle-trips',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    });
+  });
+
   it('matches operator vehicles using the dedicated prefix without changing generic vehicles', () => {
     const operatorRoute = matchRoute(
       routes,
@@ -396,13 +458,19 @@ describe('buildRouteTable', () => {
   it('keeps existing Identity operator routes distinct from Trip operator routes', () => {
     const profileRoute = matchRoute(routes, '/v1/operator/profile');
     const usersRoute = matchRoute(routes, '/v1/operator/users');
+    const subscriptionRoute = matchRoute(routes, '/v1/operator/subscription');
     const adminOperatorUsersRoute = matchRoute(routes, '/v1/admin/operator-users');
+    const adminSubscriptionPlansRoute = matchRoute(routes, '/v1/admin/subscription-plans');
     const operatorStationsRoute = matchRoute(routes, '/v1/operator/stations');
     const operatorStopsRoute = matchRoute(routes, '/v1/operator/stops');
 
     expect(profileRoute?.target).toBe(env.IDENTITY_BASE_URL);
     expect(usersRoute?.target).toBe(env.IDENTITY_BASE_URL);
+    expect(subscriptionRoute?.target).toBe(env.IDENTITY_BASE_URL);
+    expect(subscriptionRoute?.requiredRoles).toEqual(['OPERATOR_ADMIN']);
     expect(adminOperatorUsersRoute?.target).toBe(env.IDENTITY_BASE_URL);
+    expect(adminSubscriptionPlansRoute?.target).toBe(env.IDENTITY_BASE_URL);
+    expect(adminSubscriptionPlansRoute?.requiredRoles).toEqual(['SYSTEM_ADMIN']);
     expect(operatorStationsRoute?.target).toBe(env.TRIP_BASE_URL);
     expect(operatorStopsRoute?.target).toBe(env.TRIP_BASE_URL);
     expect(routes.find((r) => r.prefix === '/v1/operator')).toBeUndefined();

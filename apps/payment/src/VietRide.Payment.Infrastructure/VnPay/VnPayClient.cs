@@ -5,6 +5,7 @@ using System.Text;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
+using VietRide.Payment.Application.Exceptions;
 using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Payment.Infrastructure.VnPay;
@@ -16,8 +17,6 @@ public sealed class VnPayClient : IVnPayClient
     private const string CurrencyCode = "VND";
     private const string Locale = "vn";
     private const string DefaultOrderType = "other";
-    private static readonly TimeSpan TopUpWindow = TimeSpan.FromMinutes(15);
-
     private static readonly TimeSpan IpnDedupeTtl = TimeSpan.FromHours(24);
 
     private readonly VnPayOptions _options;
@@ -61,6 +60,20 @@ public sealed class VnPayClient : IVnPayClient
             createdAt,
             $"VietRide booking payment {bookingId} for user {userId}");
 
+    public string CreateSubscriptionPaymentRedirectUrl(
+        Guid upgradeAttemptId,
+        Guid operatorId,
+        Money amount,
+        string vnPayTxnRef,
+        string clientIpAddress,
+        DateTimeOffset createdAt)
+        => BuildRedirectUrl(
+            amount,
+            vnPayTxnRef,
+            clientIpAddress,
+            createdAt,
+            $"VietRide subscription payment {upgradeAttemptId} for operator {operatorId}");
+
     private string BuildRedirectUrl(
         Money amount,
         string vnPayTxnRef,
@@ -84,7 +97,7 @@ public sealed class VnPayClient : IVnPayClient
             ["vnp_OrderType"] = DefaultOrderType,
             ["vnp_ReturnUrl"] = _options.ReturnUrl,
             ["vnp_TxnRef"] = vnPayTxnRef,
-            ["vnp_ExpireDate"] = FormatVnPayDate(createdAt.Add(TopUpWindow)),
+            ["vnp_ExpireDate"] = FormatVnPayDate(createdAt.AddMinutes(_options.PaymentTimeoutMinutes)),
         };
 
         var hashData = BuildQuery(parameters);
@@ -110,6 +123,10 @@ public sealed class VnPayClient : IVnPayClient
         var expected = Sign(query, _options.HashSecret);
         return string.Equals(expected, secureHash, StringComparison.OrdinalIgnoreCase);
     }
+
+    public bool IsExpectedMerchant(IReadOnlyDictionary<string, string> parameters)
+        => parameters.TryGetValue("vnp_TmnCode", out var tmnCode)
+            && string.Equals(tmnCode, _options.TmnCode, StringComparison.Ordinal);
 
     public async Task<bool> TryReserveIpnAsync(string vnPayTxnRef, CancellationToken cancellationToken)
     {
@@ -156,10 +173,10 @@ public sealed class VnPayClient : IVnPayClient
     private void EnsureSignatureOptions()
     {
         if (string.IsNullOrWhiteSpace(_options.TmnCode))
-            throw new InvalidOperationException("VNPay TMN code is not configured.");
+            throw new PaymentVnPayException("VNPay sandbox is not configured.");
 
         if (string.IsNullOrWhiteSpace(_options.HashSecret))
-            throw new InvalidOperationException("VNPay hash secret is not configured.");
+            throw new PaymentVnPayException("VNPay sandbox is not configured.");
     }
 
     private static Uri ResolvePaymentBaseUri(string configuredBaseUrl)

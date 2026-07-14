@@ -62,7 +62,7 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
         var replay = await handler.Handle(CreateCommand("txn-1", "00", "25000000"), CancellationToken.None);
 
         replay.StatusCode.Should().Be(200);
-        replay.RspCode.Should().Be("00");
+        replay.RspCode.Should().Be("02");
         platformWallets.Transactions.Should().ContainSingle();
         platformWallets.Balance.Should().Be(Money.FromRaw(1_250_000));
         outbox.Events.Should().ContainSingle(evt => evt.EventType == "payment.payment.succeeded");
@@ -83,7 +83,7 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
 
         var result = await handler.Handle(CreateCommand("txn-1", "00", "25000000"), CancellationToken.None);
 
-        result.StatusCode.Should().Be(401);
+        result.StatusCode.Should().Be(200);
         result.RspCode.Should().Be("97");
         result.Message.Should().Be("PAYMENT_SIGNATURE_INVALID");
         payment.Status.Should().Be(PaymentStatus.PENDING_REDIRECT);

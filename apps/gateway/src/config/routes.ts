@@ -42,7 +42,11 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     // Identity
     { prefix: '/v1/auth/register', target: env.IDENTITY_BASE_URL, authRequired: 'none' },
     { prefix: '/v1/auth/verify-email', target: env.IDENTITY_BASE_URL, authRequired: 'none' },
-    { prefix: '/v1/auth/resend-verification-email', target: env.IDENTITY_BASE_URL, authRequired: 'none' },
+    {
+      prefix: '/v1/auth/resend-verification-email',
+      target: env.IDENTITY_BASE_URL,
+      authRequired: 'none',
+    },
     { prefix: '/v1/auth/forgot-password', target: env.IDENTITY_BASE_URL, authRequired: 'none' },
     { prefix: '/v1/auth/reset-password', target: env.IDENTITY_BASE_URL, authRequired: 'none' },
     {
@@ -94,6 +98,24 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['OPERATOR_ADMIN'],
     },
     {
+      prefix: '/v1/operator/subscription',
+      target: env.IDENTITY_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    },
+    {
+      prefix: '/v1/operator/subscription-plans',
+      target: env.IDENTITY_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    },
+    {
+      prefix: '/v1/admin/subscription-plans',
+      target: env.IDENTITY_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
       prefix: '/v1/admin/booking-stats',
       target: env.BOOKING_BASE_URL,
       authRequired: 'user',
@@ -123,6 +145,18 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
 
     // Trip / Vehicle
     {
+      prefix: '/v1/operator/shuttle-requests',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
+    {
+      prefix: '/v1/operator/shuttle-trips',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    },
+    {
       prefix: '/v1/operator/trips',
       target: env.TRIP_BASE_URL,
       authRequired: 'user',
@@ -131,6 +165,18 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     { prefix: '/v1/locations', target: env.TRIP_BASE_URL, authRequired: 'none' },
     {
       prefix: '/v1/admin/locations',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
+      prefix: '/v1/admin/stations',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
+      prefix: '/v1/admin/stops',
       target: env.TRIP_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['SYSTEM_ADMIN'],
@@ -240,6 +286,12 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
     },
     {
+      prefix: '/v1/operator/bookings',
+      target: env.BOOKING_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
+    {
       prefix: '/v1/operator/vouchers',
       target: env.BOOKING_BASE_URL,
       authRequired: 'user',
@@ -265,8 +317,11 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       target: env.PAYMENT_BASE_URL,
       authRequired: 'mixed',
       publicSubpaths: [
+        { method: 'GET', path: '/v1/payments/vnpay-ipn' },
         { method: 'POST', path: '/v1/payments/vnpay-ipn' },
+        { method: 'GET', path: '/v1/payments/vnpay-topup-ipn' },
         { method: 'POST', path: '/v1/payments/vnpay-topup-ipn' },
+        { method: 'POST', path: '/v1/payments/subscription-vnpay-ipn' },
       ],
     },
     { prefix: '/v1/wallet', target: env.PAYMENT_BASE_URL, authRequired: 'user' },

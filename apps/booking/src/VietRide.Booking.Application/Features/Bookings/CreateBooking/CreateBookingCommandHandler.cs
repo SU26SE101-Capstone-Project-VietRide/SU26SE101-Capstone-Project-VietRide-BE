@@ -4,7 +4,10 @@ using Microsoft.Extensions.Logging;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
+using VietRide.Booking.Application.Exceptions;
+using VietRide.Booking.Domain.Constants;
 using VietRide.Booking.Domain.Entities;
+using VietRide.Booking.Domain.Enums;
 using VietRide.Booking.Domain.ValueObjects;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
@@ -41,6 +44,7 @@ public sealed class CreateBookingCommandHandler
     private const int SeatLockTtlSeconds = 10 * 60; // SEAT_LOCK_TTL_MINUTES=10 (BSOT §10 line 2360)
 
     private readonly IBookingRepository _bookings;
+    private readonly IBookingStatusHistoryRepository _statusHistory;
     private readonly ITripServiceClient _tripClient;
     private readonly IPaymentServiceClient _paymentClient;
     private readonly IBookingService _bookingService;
@@ -57,9 +61,11 @@ public sealed class CreateBookingCommandHandler
         IVoucherService voucherService,
         IIntegrationEventOutbox outbox,
         IClock clock,
-        ILogger<CreateBookingCommandHandler> logger)
+        ILogger<CreateBookingCommandHandler> logger,
+        IBookingStatusHistoryRepository statusHistory)
     {
         _bookings = bookings;
+        _statusHistory = statusHistory;
         _tripClient = tripClient;
         _paymentClient = paymentClient;
         _bookingService = bookingService;
@@ -102,10 +108,14 @@ public sealed class CreateBookingCommandHandler
                 $"Trip '{request.TripId}' is not in SCHEDULED status.");
         }
 
+        ValidateStopSelections(trip, request.PickupStopId, request.DropoffStopId);
+        var now = _clock.UtcNow;
+        ValidateShuttleRequest(request, trip, now);
+
         // -----------------------------------------------------------------------
         // 3. Lock seats (all-or-nothing)
         // -----------------------------------------------------------------------
-        var seatNumbers = request.Seats.Select(s => s.SeatNumber).ToList();
+        var seatNumbers = request.Seats.Select(s => s.SeatNumber.Trim()).ToList();
         var lockIdempotencyKey = $"lock-{request.PassengerUserId}-{request.TripId}-{string.Join(",", seatNumbers)}";
 
         var lockOutcome = await _tripClient.LockSeatsAsync(
@@ -147,7 +157,6 @@ public sealed class CreateBookingCommandHandler
         //    Voucher errors (VOUCHER_NOT_FOUND / _EXPIRED / _NOT_APPLICABLE etc.) propagate
         //    before any booking row exists; seats are locked but a cleanup job handles orphaned locks.
         // -----------------------------------------------------------------------
-        var now = _clock.UtcNow;
         var seatCount = request.Seats.Count;
         var perSeatFare = Money.FromRaw(trip.BaseFare);
         var baseFare = Money.FromRaw(perSeatFare.Amount * seatCount);
@@ -213,7 +222,24 @@ public sealed class CreateBookingCommandHandler
                     allocation.PaidAmount);
             }
 
+
+            if (request.ShuttlePickup is not null)
+            {
+                booking.RequestShuttle(
+                    request.ShuttlePickup.Address,
+                    request.ShuttlePickup.Latitude,
+                    request.ShuttlePickup.Longitude);
+            }
+
             await _bookings.AddAsync(booking, cancellationToken);
+            await _statusHistory.AddAsync(
+                BookingStatusHistory.Create(
+                    booking.Id,
+                    BookingStatus.PENDING_PAYMENT,
+                    now,
+                    BookingStatusHistorySource.CreateBooking,
+                    request.PassengerUserId),
+                cancellationToken);
 
             // Record VoucherUsage row (same DbContext UoW) now that booking.Id is known.
             if (validatedVoucherId.HasValue)
@@ -272,7 +298,7 @@ public sealed class CreateBookingCommandHandler
                 request.TripId, seatLockToken, seatNumbers, booking.Id, voucherUsageId, cancellationToken);
             // PAYMENT_INSUFFICIENT_WALLET (BSOT §5.9 registered code, 402).
             // ConflictException maps to 409; 402 mapping is deferred to Day 15/16 payment work.
-            throw new ConflictException("PAYMENT_INSUFFICIENT_WALLET", insuf.Message);
+            throw new BookingPaymentException(402, "PAYMENT_INSUFFICIENT_WALLET", insuf.Message);
         }
 
         if (chargeOutcome is ChargeOutcome.TransportError transportError)
@@ -281,7 +307,7 @@ public sealed class CreateBookingCommandHandler
                 request.TripId, seatLockToken, seatNumbers, booking.Id, voucherUsageId, cancellationToken);
             // TODO Day 15/16: map ChargeOutcome.TransportError to a registered BSOT §5.9
             // error code (e.g. PAYMENT_SERVICE_UNAVAILABLE) instead of surfacing 500 INTERNAL_ERROR.
-            throw new InvalidOperationException($"Payment transport error: {transportError.Message}");
+            throw new BookingPaymentException(502, "PAYMENT_VNPAY_ERROR", transportError.Message);
         }
 
         var chargeSuccess = (ChargeOutcome.Success)chargeOutcome;
@@ -298,6 +324,7 @@ public sealed class CreateBookingCommandHandler
                 Status: booking.Status.ToString(),
                 TotalAmount: booking.TotalAmount.Amount,
                 DiscountAmount: booking.DiscountAmount.Amount,
+                PaymentId: chargeSuccess.Data.PaymentId,
                 PaymentRedirectUrl: paymentRedirectUrl,
                 Tickets: ToTicketResults(booking));
         }
@@ -328,6 +355,14 @@ public sealed class CreateBookingCommandHandler
         }
 
         booking.Confirm(now);
+        await _statusHistory.AddAsync(
+            BookingStatusHistory.Create(
+                booking.Id,
+                BookingStatus.CONFIRMED,
+                now,
+                BookingStatusHistorySource.CreateBooking,
+                request.PassengerUserId),
+            cancellationToken);
 
         // Enqueue booking.booking.confirmed (same tx — outbox committed by TransactionBehavior).
         // voucherUsageId propagated in event payload (BSOT:1741 optional field, replaces hardcoded null).
@@ -338,8 +373,19 @@ public sealed class CreateBookingCommandHandler
             totalAmount = booking.TotalAmount.Amount,
             userId = booking.PassengerUserId,
             voucherUsageId,
+            tickets = booking.Tickets.Select(ticket => new
+            {
+                ticketId = ticket.Id,
+                passengerUserId = booking.PassengerUserId,
+            }).ToArray(),
             ticketCodes = booking.Tickets.Select(ticket => ticket.TicketCode.Value).ToArray(),
             ticketCount = booking.Tickets.Count,
+            shuttlePickup = booking.ShuttleIntent is null ? null : new
+            {
+                address = booking.ShuttleIntent.PickupAddress,
+                latitude = booking.ShuttleIntent.PickupLatitude,
+                longitude = booking.ShuttleIntent.PickupLongitude,
+            },
         };
 
         await _outbox.EnqueueAsync(
@@ -359,6 +405,7 @@ public sealed class CreateBookingCommandHandler
             Status: booking.Status.ToString(),
             TotalAmount: booking.TotalAmount.Amount,
             DiscountAmount: booking.DiscountAmount.Amount,
+            PaymentId: chargeSuccess.Data.PaymentId,
             PaymentRedirectUrl: paymentRedirectUrl,
             Tickets: ToTicketResults(booking));
     }
@@ -404,7 +451,7 @@ public sealed class CreateBookingCommandHandler
         DateTimeOffset now)
     {
         var orderedSeats = seats
-            .Select(seat => seat.SeatNumber)
+            .Select(seat => seat.SeatNumber.Trim())
             .Order(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
@@ -424,6 +471,75 @@ public sealed class CreateBookingCommandHandler
                     perSeatFare - discount);
             })
             .ToArray();
+    }
+
+    private static void ValidateStopSelections(TripSnapshot trip, Guid? pickupStopId, Guid? dropoffStopId)
+    {
+        var pickup = pickupStopId.HasValue
+            ? trip.Stops.FirstOrDefault(stop => stop.StopId == pickupStopId.Value && stop.IsActive)
+            : null;
+        if (pickupStopId.HasValue && pickup is null)
+        {
+            throw new CodedValidationException("STOP_NOT_FOUND", "Pickup stop was not found or is inactive.");
+        }
+
+        if (pickup is not null && !pickup.AllowPickup)
+        {
+            throw new CodedValidationException("STOP_NOT_PICKUP_ALLOWED", "The selected stop does not allow pickup.");
+        }
+
+        var dropoff = dropoffStopId.HasValue
+            ? trip.Stops.FirstOrDefault(stop => stop.StopId == dropoffStopId.Value && stop.IsActive)
+            : null;
+        if (dropoffStopId.HasValue && dropoff is null)
+        {
+            throw new CodedValidationException("STOP_NOT_FOUND", "Dropoff stop was not found or is inactive.");
+        }
+
+        if (dropoff is not null && !dropoff.AllowDropoff)
+        {
+            throw new CodedValidationException("STOP_NOT_DROPOFF_ALLOWED", "The selected stop does not allow dropoff.");
+        }
+
+        if (pickup is not null && dropoff is not null && dropoff.OrderIndex <= pickup.OrderIndex)
+        {
+            throw new CodedValidationException("STOP_NOT_DROPOFF_ALLOWED", "Dropoff stop must be after pickup stop.");
+        }
+    }
+
+    private static void ValidateShuttleRequest(
+        CreateBookingCommand request,
+        TripSnapshot trip,
+        DateTimeOffset now)
+    {
+        if (request.ShuttlePickup is null)
+        {
+            return;
+        }
+
+        if (request.PickupStopId.HasValue || request.PickupStationId != trip.OriginStation.Id)
+        {
+            throw new CodedValidationException(
+                "SHUTTLE_STATION_NOT_SUPPORTED",
+                "Shuttle is available only for pickup at the trip origin Station.");
+        }
+
+        if (!trip.OriginStation.IsActive
+            || !trip.OriginStation.SupportsShuttle
+            || !trip.OriginStation.Latitude.HasValue
+            || !trip.OriginStation.Longitude.HasValue)
+        {
+            throw new CodedValidationException(
+                "SHUTTLE_STATION_NOT_SUPPORTED",
+                "The trip origin Station does not support shuttle service.");
+        }
+
+        if (now >= trip.DepartureDateTime.AddMinutes(-30))
+        {
+            throw new ConflictException(
+                "SHUTTLE_REQUEST_CUTOFF_PASSED",
+                "The shuttle request cutoff has passed.");
+        }
     }
 
     private static IReadOnlyList<CreateBookingTicketResult> ToTicketResults(BookingEntity booking)

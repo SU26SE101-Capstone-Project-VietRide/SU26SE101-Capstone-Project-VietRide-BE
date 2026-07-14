@@ -420,6 +420,30 @@ npx nx run tracking:build
 
 ---
 
+## Phase 11 — Shuttle GPS Và ETA
+
+**Điều kiện:** Phase 10 đã đóng và toàn bộ gate lint/unit/E2E/build xanh.
+
+### Scope
+
+- Socket.IO: `joinShuttleTracking`, `shuttle:gps:update`, `shuttle:eta:update`.
+- Passenger có manifest `PENDING`, driver được assign hoặc operator cùng tenant mới được truy cập.
+- Lấy manifest/stops qua internal Trip API; không broadcast PII của Booking khác.
+- ETA đi theo `pickup_order`, bỏ nhóm đã hủy và dùng origin Station làm điểm cuối.
+- Recalculate sau 500 m hoặc khi ETA dưới 15 phút; dùng Haversine và GPS speed hiện có.
+- Redis riêng: `tracking:shuttle:latest:{id}` TTL 300 giây, `tracking:shuttle:gps_buffer:{id}` tối đa 1000/TTL 24 giờ, `tracking:shuttle:eta:{id}:{order}` TTL 60 giây và `tracking:shuttle:eta_state:{id}`.
+- Shuttle không được ghi `tracking:active_trips`, main `GpsTrail`, hoặc kích hoạt off-route/delay chain của main Trip.
+- Bổ sung REST latest/ETA fallback và test authorization, TTL, cancellation, tenant isolation.
+
+### Verify
+
+```bash
+npx nx run tracking:lint
+npx nx run tracking:test
+npx nx run tracking:test:e2e
+npx nx run tracking:build
+```
+
 ## Public Interfaces / Events Cần Hoàn Thành
 
 - Socket.IO:

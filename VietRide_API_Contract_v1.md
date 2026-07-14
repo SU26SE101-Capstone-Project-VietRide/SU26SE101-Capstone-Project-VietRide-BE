@@ -840,6 +840,155 @@ Error `409` — duplicate email:
 
 ## Booking Service
 
+### GET `/v1/bookings/{bookingId}`
+
+Auth: the booking owner (`PASSENGER`) or an authorized `OPERATOR_ADMIN`/`OPERATOR_STAFF` whose authenticated `operatorId` claim matches the booking tenant. Idempotency is not required (read-only). This is the Booking-owned poll resource for payment confirmation; it does not synchronously query Payment Service and deliberately exposes no payment fields. Operator detail remains the separate `GET /v1/operator/bookings/{id}` resource.
+
+Response `200`: ADR 0004 success envelope whose `data` contains exactly:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "bookingId": "uuid",
+    "status": "PENDING_PAYMENT"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-13T01:00:00Z" }
+}
+```
+
+`status` is the canonical Booking lifecycle value, so the client polls until the payment event transitions `PENDING_PAYMENT` to `CONFIRMED`.
+
+Errors use the ADR 0004 envelope:
+
+- `401 UNAUTHORIZED`: caller has no valid user JWT.
+- `404 BOOKING_NOT_FOUND`: booking does not exist or does not belong to the authenticated passenger; ownership is intentionally not disclosed.
+- `403 FORBIDDEN`: an operator caller is not authorized for the booking tenant or does not have a valid `operatorId` claim.
+
+### GET `/v1/operator/bookings`
+
+Auth: `OPERATOR_ADMIN` or `OPERATOR_STAFF`. The tenant key is the non-null `operatorId` claim from the authenticated JWT; the endpoint never accepts an operator id from the client. Idempotency: not required (read-only).
+
+Query parameters:
+
+| Parameter | Type | Default | Validation and semantics |
+|---|---|---|---|
+| `status` | string? | null | One `booking_status` value or a comma-separated list. Empty entries or unknown values return `422 VALIDATION_ERROR`. |
+| `tripId` | UUID? | null | Exact trip id; malformed UUID returns `422 VALIDATION_ERROR`. |
+| `date` | `YYYY-MM-DD`? | null | Calendar day in `Asia/Ho_Chi_Minh`. Convert local midnight and the next local midnight to the UTC half-open interval `[fromUtc, toUtc)` and filter `trip_snapshot_departure`. Invalid dates return `422 VALIDATION_ERROR`. |
+| `passengerPhone` | string? | null | Trim outer whitespace, then apply `PhoneNumber.Normalize`: accept only local `0xxxxxxxxx`/`0xxxxxxxxxx` or canonical `+84xxxxxxxxx`/`+84xxxxxxxxxx`; canonicalize local input to E.164. Internal spaces, hyphens, parentheses, or other separators are invalid and are not stripped. |
+| `bookingCode` | string? | null | Trimmed, non-empty, maximum 30 characters, exact case-insensitive match. |
+| `page` | integer | `1` | Must be `>= 1`. |
+| `pageSize` | integer | `20` | Must be `>= 1`; values above 100 are clamped to 100. |
+| `sortBy` | string | `createdAt` | Allow-list: `createdAt`, `departureAt`, `bookingCode`, `status`, `totalAmount`; otherwise `400 INVALID_SORT_FIELD`. |
+| `sortDir` | string | `desc` | `asc` or `desc`; otherwise `422 VALIDATION_ERROR`. |
+
+`search`, `searchIn`, `operatorId`, and `includeDeleted` are not supported. Every SQL query path first constrains `bookings.operator_id = :claimOperatorId`, before filters and pagination. Sort always adds `id` as the deterministic tie-breaker in the same direction as `sortDir`.
+
+When `passengerPhone` is present, Booking validates and normalizes it before URI-escaping the canonical E.164 value and calling `GET /internal/v1/users/by-phone`. Only Identity's `404 RESOURCE_NOT_FOUND` means no matching user and produces a normal empty page.
+
+Response `200`: ADR 0004 success envelope whose `data` is the seven-field `PagedResult<OperatorBookingListItemDto>`.
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [{
+      "id": "uuid",
+      "bookingCode": "VR-20260618-ABCDEFGH",
+      "tripId": "uuid",
+      "status": "CONFIRMED",
+      "trip": {
+        "routeName": "Sai Gon - Da Lat",
+        "originName": "Sai Gon",
+        "destinationName": "Da Lat",
+        "departureAt": "2026-06-18T08:00:00+07:00"
+      },
+      "seatCount": 2,
+      "totalAmount": 500000,
+      "createdAt": "2026-06-17T12:00:00Z"
+    }],
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 1,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-18T01:00:00Z" }
+}
+```
+
+Trip snapshot strings and `departureAt` are nullable for legacy rows. Money is VND backed by BIGINT, to-the-dong. An unknown normalized phone or a page beyond the last page returns HTTP 200 with `items: []` in the same seven-field shape; the requested `page`, effective `pageSize`, counts, and flags are returned normally.
+
+Errors use the ADR 0004 envelope:
+
+- `403 FORBIDDEN`: role is not allowed or the authenticated operator claim is absent.
+- `400 INVALID_SORT_FIELD`: `sortBy` is outside the allow-list.
+- `422 VALIDATION_ERROR`: any other invalid filter or paging value.
+- `502 UPSTREAM_UNAVAILABLE`: the Identity lookup failed in any way other than its exact `404 RESOURCE_NOT_FOUND` no-match response.
+
+### GET `/v1/operator/bookings/{id}`
+
+Auth: `OPERATOR_ADMIN` or `OPERATOR_STAFF`. The tenant key comes only from the authenticated JWT `operatorId` claim. Idempotency: not required (read-only). `id` must be a UUID; malformed input returns `422 VALIDATION_ERROR`.
+
+Response `200`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "id": "uuid",
+    "bookingCode": "VR-20260618-ABCDEFGH",
+    "buyerUserId": "uuid",
+    "tripId": "uuid",
+    "status": "CANCELLED",
+    "trip": {
+      "routeName": "Sai Gon - Da Lat",
+      "originName": "Sai Gon",
+      "destinationName": "Da Lat",
+      "departureAt": "2026-06-18T08:00:00+07:00"
+    },
+    "seatCount": 1,
+    "baseFare": 600000,
+    "discountAmount": 100000,
+    "totalAmount": 500000,
+    "pickupStationId": "uuid",
+    "pickupStopId": null,
+    "dropoffStationId": "uuid",
+    "dropoffStopId": null,
+    "bookingGroupId": null,
+    "tripDirection": null,
+    "cancellationReason": "USER_INITIATED",
+    "createdAt": "2026-06-17T12:00:00Z",
+    "seats": [{
+      "passengerRecordId": "uuid",
+      "ticketId": "uuid",
+      "ticketCode": "VT-20260618-ABCDEFGH",
+      "seatNumber": "A01",
+      "ticketStatus": "CANCELLED",
+      "boardingStatus": "PENDING"
+    }],
+    "statusTimeline": [
+      { "status": "PENDING_PAYMENT", "occurredAt": "2026-06-17T12:00:00Z", "reasonCode": null },
+      { "status": "CANCELLED", "occurredAt": "2026-06-17T12:05:00Z", "reasonCode": "USER_INITIATED" }
+    ]
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-18T01:00:00Z" }
+}
+```
+
+The detail contains the list fields plus exactly the additional buyer, amount, pickup/dropoff, round-trip, cancellation, seat, and timeline fields shown above. Nullable database fields remain nullable. It never returns buyer/passenger phone, email, display name, ID number, timeline `actorUserId`, or timeline `source`. Timeline rows are real `booking_status_history` records ordered by `occurred_at ASC, id ASC`; no lifecycle-timestamp or Outbox reconstruction is permitted.
+
+Errors use the ADR 0004 envelope:
+
+- `403 FORBIDDEN`: the booking id exists but belongs to another operator, or caller role/operator context is invalid.
+- `404 BOOKING_NOT_FOUND`: the booking id does not exist.
+- `422 VALIDATION_ERROR`: malformed booking `id` UUID in the detail route parameter.
+
 ### POST `/v1/bookings`
 
 Auth: `PASSENGER`. Idempotency: required.
@@ -850,16 +999,7 @@ Request:
   "tripId": "uuid",
   "pickup": { "stationId": "uuid" },
   "dropoff": { "stationId": "uuid" },
-  "seats": [
-    {
-      "seatNumber": "A01",
-      "passenger": {
-        "fullName": "Nguyen Van A",
-        "phoneNumber": "0900000000",
-        "idNumber": "012345678901"
-      }
-    }
-  ],
+  "seats": [{ "seatNumber": "A01" }],
   "voucherCode": "SUMMER26",
   "paymentMethod": "WALLET"
 }
@@ -876,6 +1016,7 @@ Response `201`:
     "status": "CONFIRMED",
     "totalAmount": 350000,
     "discountAmount": 50000,
+    "paymentId": "uuid | null",
     "paymentRedirectUrl": null,
     "tickets": [
       {
@@ -904,13 +1045,13 @@ Request:
     "tripId": "uuid",
     "pickup": { "stationId": "uuid" },
     "dropoff": { "stationId": "uuid" },
-    "seats": [{ "seatNumber": "A01", "passenger": { "fullName": "Nguyen Van A", "phoneNumber": "0900000000" } }]
+    "seats": [{ "seatNumber": "A01" }]
   },
   "return": {
     "tripId": "uuid",
     "pickup": { "stationId": "uuid" },
     "dropoff": { "stationId": "uuid" },
-    "seats": [{ "seatNumber": "A01", "passenger": { "fullName": "Nguyen Van A", "phoneNumber": "0900000000" } }]
+    "seats": [{ "seatNumber": "A01" }]
   },
   "voucherCode": "SUMMER26",
   "paymentMethod": "VNPAY"
@@ -927,6 +1068,8 @@ Response `201`:
     "outbound": { "bookingId": "uuid", "bookingCode": "VR-20260518-ABCD1234", "totalAmount": 350000, "discountAmount": 50000, "tickets": [{ "ticketId": "uuid", "ticketCode": "VT-20260518-ABCDEFGH", "seatNumber": "A01", "status": "PENDING_PAYMENT", "fareAmount": 400000, "discountAmount": 50000, "paidAmount": 350000 }] },
     "return": { "bookingId": "uuid", "bookingCode": "VR-20260519-EFGH5678", "totalAmount": 350000, "discountAmount": 50000, "tickets": [{ "ticketId": "uuid", "ticketCode": "VT-20260519-HGFEDCBA", "seatNumber": "A01", "status": "PENDING_PAYMENT", "fareAmount": 400000, "discountAmount": 50000, "paidAmount": 350000 }] },
     "grandTotal": 700000,
+    "paymentId": "uuid",
+    "status": "PENDING_PAYMENT",
     "paymentRedirectUrl": "https://vnpay.vn/..."
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
@@ -973,12 +1116,6 @@ Response `200`:
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
-
-### GET `/v1/bookings/{bookingId}`
-
-Auth: booking owner or authorized operator.
-
-Response `200`: booking detail with passengers, pickup/dropoff, payment summary, pendingActions.
 
 ### GET `/internal/v1/bookings/{bookingId}`
 
@@ -1484,6 +1621,11 @@ Auth: protected.
 
 Response `200`: trip detail with route, stations, stops, seat summary, fare summary.
 
+Each stop includes `stopId`, `name`, `address`, `latitude`, `longitude`, `isActive`,
+`orderIndex`, `allowPickup`, `allowDropoff`, `estimatedArrivalTime`,
+`distanceFromOriginKm`, nullable `fareFromThisStop`, and `effectiveFare`.
+`effectiveFare = fareFromThisStop ?? baseFare`; this is pickup-point pricing, not segment fare.
+
 ### GET `/v1/trips/{tripId}/seat-map`
 
 Auth: protected.
@@ -1527,6 +1669,7 @@ Response `200` (raw):
   "stops": [
     {
       "stopId": "uuid",
+      "isActive": true,
       "orderIndex": 1,
       "allowPickup": true,
       "allowDropoff": false,
@@ -1560,6 +1703,13 @@ Notes:
 Auth: Internal JWT. Idempotency: required (replay with same `Idempotency-Key` returns the
 same `seatLockToken`). **All-or-nothing** — if any requested seat is not `AVAILABLE`, no seat
 is locked.
+
+Round-trip confirmation uses `POST /internal/v1/trips/round-trip/book-seats` with outbound
+and return legs (`tripId`, `seatLockToken`, `bookingId`, `passengerSeatAssignments`). Trip
+validates ownership of both locks before changing either leg and persists both legs atomically.
+
+Trip obtains the Stop-disable warning count through
+`GET /internal/v1/bookings/active-by-stop/{stopId}/count?operatorId=` (Internal JWT).
 
 Request:
 ```json
@@ -2556,6 +2706,83 @@ Error codes:
 
 ## Operator/Admin Management
 
+### GET `/v1/operator/subscription`
+
+Auth: `OPERATOR_ADMIN`. The operator scope is derived from the access token; no `operatorId` input is accepted.
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "subscriptionId": "uuid",
+    "status": "ACTIVE",
+    "billingPeriod": "MONTHLY",
+    "startedAt": "2026-07-14T10:00:00Z",
+    "expiresAt": "2026-08-14T10:00:00Z",
+    "plan": { "planId": "uuid", "name": "Pro", "price": 500000, "limits": {}, "modules": {} },
+    "usage": {},
+    "pendingUpgrade": null
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-14T10:00:00Z" }
+}
+```
+
+`PENDING_PAYMENT` and `EXPIRED` are valid readable states. Errors: `403 FORBIDDEN`, `404 RESOURCE_NOT_FOUND`.
+
+### GET `/v1/operator/subscription-plans`
+
+Auth: `OPERATOR_ADMIN`. Returns active plans only. Response uses the ADR 0004 envelope with `items`; each item has `planId`, `name`, `description`, `pricePerMonth`, `pricePerYear`, `limits`, and `modules`.
+
+### POST `/v1/operator/subscription/upgrade`
+
+Auth: `OPERATOR_ADMIN`. Idempotency-Key: required. Day 37 supports VNPay only; `WALLET` is introduced after OperatorWallet is delivered in Day 38.
+
+Request:
+```json
+{
+  "planId": "uuid",
+  "billingPeriod": "MONTHLY",
+  "returnUrl": "https://app.vietride.vn/operator/subscription/result"
+}
+```
+
+`billingPeriod` is `MONTHLY` or `YEARLY`. Identity snapshots the selected active plan's server-side price; the client never supplies an amount.
+
+Response `202`:
+```json
+{
+  "success": true,
+  "statusCode": 202,
+  "data": {
+    "subscriptionId": "uuid",
+    "upgradeAttemptId": "uuid",
+    "status": "PENDING_PAYMENT",
+    "paymentId": "uuid",
+    "amount": 500000,
+    "billingPeriod": "MONTHLY",
+    "paymentRedirectUrl": "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?...",
+    "dueAt": "2026-07-21T10:00:00Z"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-14T10:00:00Z" }
+}
+```
+
+Errors: `403 FORBIDDEN`; `404 RESOURCE_NOT_FOUND`; `409 SUBSCRIPTION_PAYMENT_PENDING`; `422 VALIDATION_ERROR`; `422 IDEMPOTENCY_KEY_MISMATCH`.
+
+### GET `/v1/admin/subscription-plans`
+
+Auth: `SYSTEM_ADMIN`. Query: `page?`, `pageSize?`, `includeInactive?`. Returns a paged ADR 0004 envelope.
+
+### POST `/v1/admin/subscription-plans`
+
+Auth: `SYSTEM_ADMIN`. Idempotency-Key: required. Request defines `name`, `description?`, monthly/yearly BIGINT VND prices, all resource limits, and `enableParcel`, `enableShuttle`, `enableRag`. Response `201` returns the created plan. Prices are non-negative multiples of 1,000 VND.
+
+### PATCH `/v1/admin/subscription-plans/{planId}`
+
+Auth: `SYSTEM_ADMIN`. Idempotency-Key: required. Supports mutable plan presentation, prices, limits, module flags, and `isActive`. It never deletes a plan. Response `200` returns the updated plan.
+
 ### POST `/v1/operators/register`
 
 Auth: public. Idempotency-Key: not required by BSOT §5.6.
@@ -2963,15 +3190,32 @@ Response `200`:
 ```json
 {
   "id": "uuid",
+  "displayName": "Nguyen Van Tai",
+  "avatarUrl": null,
   "role": "DRIVER",
   "operatorId": "uuid",
-  "status": "ACTIVE"
+  "status": "ACTIVE",
+  "phone": "+84901234567"
 }
 ```
 
-`operatorId` is nullable for non-operator-scoped users; Trip DriverSchedule validation requires it to match the caller operator for `DRIVER` and `ASSISTANT` users.
+`operatorId`, `avatarUrl` và `phone` có thể null. Trip DriverSchedule validation yêu cầu `operatorId` khớp operator caller cho `DRIVER`/`ASSISTANT`; Shuttle dispatch còn yêu cầu driver active có `displayName` và `phone` để snapshot vào assignment event.
 
 Error `404` — `RESOURCE_NOT_FOUND`.
+
+### GET `/internal/v1/users/by-phone?phone={normalizedE164}`
+
+Auth: Internal JWT via `X-Internal-Auth`. Caller: Booking Service. Never exposed through Gateway. The query value must be URI-escaped by the caller and already be canonical Vietnamese E.164 (`^\+84[0-9]{9,10}$`). Identity performs an exact lookup against a non-soft-deleted `users.phone` and returns no PII.
+
+Response `200` is a raw DTO without an `ApiResponse` wrapper:
+
+```json
+{ "userId": "uuid" }
+```
+
+No match returns HTTP 404 using the standardized internal ADR 0004 error envelope with `error.code = RESOURCE_NOT_FOUND`. Other Identity errors also use the standard error envelope.
+
+Booking maps only the exact Identity 404 `RESOURCE_NOT_FOUND` response to no user and an HTTP-200 empty operator-booking page. Caller-request cancellation propagates unchanged. Identity 401/403, any other 4xx (including a 404 with another or malformed code), 5xx, timeout, circuit-open, transport, or response-deserialization failure becomes the existing FE-facing `502 UPSTREAM_UNAVAILABLE` ADR 0004 error. Retry only transient 5xx/network failures under BSOT §7.6, never 4xx. No phone snapshot or PII duplication is authorized in Booking.
 
 ### GET `/internal/v1/operators/{operatorId}`
 
@@ -3060,6 +3304,59 @@ Errors:
 - `402 SUBSCRIPTION_EXPIRED` — operator subscription has expired.
 - `422 SUBSCRIPTION_LIMIT_EXCEEDED` — `current + delta` would exceed the matching plan limit.
 - `422 VALIDATION_ERROR` — invalid resource or delta.
+
+### POST `/internal/v1/operators/{operatorId}/quota-allocations`
+
+Auth: Internal JWT. Idempotency-Key: required. Caller: Trip service.
+
+Request:
+```json
+{
+  "resource": "VEHICLES",
+  "resourceId": "uuid",
+  "periodKey": null
+}
+```
+
+`periodKey` is required as `yyyy-MM` only for `TRIPS_THIS_MONTH`. The allocation is durable and unique for `(operatorId, resource, resourceId)`; a retry returns the existing allocation. It counts against the limit immediately, preventing concurrent overshoot. There is no distributed transaction with the caller service.
+
+Response `201`: `{ "allocationId": "uuid", "resource": "VEHICLES", "resourceId": "uuid", "periodKey": null }`.
+
+Errors: `402 SUBSCRIPTION_EXPIRED`; `409 SUBSCRIPTION_PAYMENT_PENDING`; `422 SUBSCRIPTION_LIMIT_EXCEEDED`; `422 IDEMPOTENCY_KEY_MISMATCH`; `422 VALIDATION_ERROR`.
+
+### POST `/internal/v1/operators/{operatorId}/quota-allocations/{allocationId}/release`
+
+Auth: Internal JWT. Idempotency-Key: required. Caller: Trip service after its local persistence fails or after a resource is soft-deleted. Releasing an already released allocation is a `200` idempotent no-op. A scheduled Identity reconciliation may release only allocations whose resource is verified absent through the owning service's internal lookup.
+
+### GET `/v1/operator/shuttle-requests`
+
+Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`. Tenant lấy từ JWT. Query phân trang theo main Trip.
+
+Response trả `mainTripId`, origin Station, `hardCutoffAt`, tổng pending, các nhóm Booking (`bookingId`, `passengerCount`, `pickupAddress`, `pickupLat`, `pickupLng`, `distanceToStationMeters`, `requestedAt`) và `suggestedBookingOrder`. Gợi ý dùng Haversine, xa nhất trước, hòa thì `requestedAt ASC`; operator có thể đổi thứ tự.
+
+### POST `/v1/operator/shuttle-trips`
+
+Auth: `OPERATOR_ADMIN`. `Idempotency-Key` bắt buộc.
+
+```json
+{
+  "mainTripId": "uuid",
+  "driverUserId": "uuid",
+  "vehicleId": "uuid",
+  "scheduledDepartureTime": "2026-07-13T01:00:00Z",
+  "scheduledEndTime": "2026-07-13T02:00:00Z",
+  "orderedBookingIds": ["uuid"],
+  "notes": "optional"
+}
+```
+
+Chọn một subset Booking không rỗng. Toàn bộ ticket của một Booking được gán nguyên tử, sức chứa tính theo tổng ticket. Direction và Station được suy ra từ main Trip. `scheduledEndTime` không được sau `departureDateTime - 30 phút`. Driver/vehicle phải active, cùng tenant và không overlap main Trip/ShuttleTrip. Response `201` trả ShuttleTrip cùng số passenger assigned/remaining. Replay cùng idempotency key trả cùng kết quả.
+
+Errors: `403 FORBIDDEN`; `404 TRIP_NOT_FOUND`; `404 VEHICLE_NOT_FOUND`; `404 DRIVER_NOT_FOUND`; `409 SHUTTLE_REQUEST_SET_CHANGED`; `409 SHUTTLE_CAPACITY_EXCEEDED`; `409 SHUTTLE_DRIVER_CONFLICT`; `409 SHUTTLE_VEHICLE_CONFLICT`; `409 SHUTTLE_REQUEST_CUTOFF_PASSED`; `422 VALIDATION_ERROR`.
+
+### Shuttle fields trong Booking
+
+`POST /v1/bookings` và mỗi leg của round-trip nhận optional `shuttlePickup: { address, latitude, longitude }`. Chỉ origin Station active có `supportsShuttle=true` và đủ tọa độ được nhận. Booking dùng `TripSnapshot.departureDateTime` để từ chối request tại/sau T-30 với `409 SHUTTLE_REQUEST_CUTOFF_PASSED`. Khi intent còn active, `edit-pickup` trả `409 SHUTTLE_PICKUP_LOCKED`.
 
 ### GET `/v1/stations/search`
 
@@ -3186,6 +3483,11 @@ Response `201`:
 }
 ```
 
+`PATCH /v1/operator/stations/{stationId}` updates only `displayNameOverride`,
+`counterLocation`, `contactPhone`, and `instructions`. `DELETE` on the same path deactivates
+only the OperatorStation mapping. Both mutations require `Idempotency-Key`; linking an inactive
+mapping again reactivates it.
+
 ### POST `/v1/operator/stops`
 
 Auth: `OPERATOR_ADMIN`.
@@ -3199,7 +3501,9 @@ Identity validation failures (404, 5xx, transport, circuit-breaker) map to `422 
 
 Day 7 does not accept or mutate `shared_suggestion` / `sharedSuggestion`; that write path is deferred.
 
-DELETE / disable-with-replacement is deferred to Day 24.
+`DELETE /v1/operator/stops/{id}?replacedByStopId=` disables the Stop without deleting
+historical RouteStop/TripStop rows. Replacement is optional and must be active, same-operator,
+non-self, and cycle-free. Response warning code is `STOP_DISABLED_BOOKING_AFFECTED`.
 
 Coordinates validate latitude in [-90, 90] and longitude in [-180, 180].
 
@@ -3241,7 +3545,7 @@ Response `200`: canonical Stop DTO.
 
 Auth: `OPERATOR_ADMIN`.
 
-Idempotency-Key: not required by BSOT §5.6.
+Idempotency-Key: required for PATCH and DELETE Stop mutations.
 
 Write requires caller operator to be `APPROVED` and active.
 
@@ -3254,6 +3558,13 @@ Coordinates validate latitude in [-90, 90] and longitude in [-180, 180]; invalid
 Request: partial Stop update.
 
 Response `200`: updated Stop DTO.
+
+### Admin Station and Stop management
+
+`SYSTEM_ADMIN` manages canonical stations through `GET/PATCH/DELETE /v1/admin/stations`
+and operator-owned stops through `GET/PATCH/DELETE /v1/admin/stops` (list supports
+`operatorId?`). Station delete is soft-delete and deactivates OperatorStation mappings.
+Stop delete follows the same replacement and historical-preservation rules above.
 
 ### GET `/internal/v1/stations/{id}`
 
@@ -4171,6 +4482,143 @@ Response `200`: `GetMyDriverScheduleResult` in the ADR 0004 success envelope.
 
 Trips are ordered by `departureDateTime`, then by `tripId`. Date filtering converts the inclusive
 ICT date range to UTC boundaries before querying. No Trip state is mutated.
+
+### GET `/v1/driver/trips/{tripId}/route`
+
+Auth: `DRIVER` or `ASSISTANT`. The authenticated JWT `sub` must equal the Trip's
+`driverUserId` or `assistantUserId`; the caller cannot supply a user or operator identifier.
+
+Response `200` uses the ADR 0004 success envelope:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "tripId": "uuid",
+    "routeId": "uuid",
+    "pathPolyline": "encoded-google-polyline-precision-5-or-null",
+    "originStation": {
+      "stationId": "uuid",
+      "name": "Bến xe Miền Đông",
+      "latitude": 10.801,
+      "longitude": 106.714
+    },
+    "destinationStation": {
+      "stationId": "uuid",
+      "name": "Bến xe Đà Lạt",
+      "latitude": null,
+      "longitude": null
+    },
+    "stops": [
+      {
+        "stopId": "uuid",
+        "name": "Ngã tư Dầu Giây",
+        "latitude": 10.947,
+        "longitude": 107.221,
+        "orderIndex": 1,
+        "estimatedArrivalTime": "2026-07-12T03:30:00Z",
+        "allowPickup": true,
+        "allowDropoff": true
+      }
+    ]
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-12T01:00:00Z" }
+}
+```
+
+`pathPolyline` is the Route's nullable Google encoded polyline (precision-5) and is returned
+without decode/re-encode. `stops` uses the immutable TripStop sequence and is ordered by
+`orderIndex ASC`; Station coordinates remain nullable. When `pathPolyline` is null, clients may
+draw the available coordinates in origin → stops → destination order. The response contains no
+PII or operator-management metadata. Unknown Trip/Route returns `404 TRIP_NOT_FOUND`; an existing
+Trip not assigned to the caller returns `403 FORBIDDEN`; malformed `tripId` returns
+`422 VALIDATION_ERROR`.
+
+## Day 21 — Trip lifecycle automation
+
+Both lifecycle mutations have no request body. They require an `Idempotency-Key` header whose
+value is a UUID v4. The idempotency fingerprint is exactly the HTTP method, normalized request
+route/path parameters including `tripId`, authenticated `sub`, and canonical empty-body marker;
+the authenticated role is not a fingerprint component. Request authentication and
+`tripId`/header/body validation may run before a new key is reserved; those validation failures
+are not cached and create no idempotency record. A valid new key is reserved atomically as pending
+before the command executes. Trip assignment authorization runs downstream in the handler, and
+middleware finalizes its response for replay. A retry with the same key and same fingerprint
+returns the original HTTP status and exact ADR 0004 response body after the first request
+completes, returns `409 IDEMPOTENCY_REQUEST_PENDING` while it is executing, and returns
+`422 IDEMPOTENCY_KEY_MISMATCH` if any fingerprint component differs. Clients reuse the same key
+only to retry the same logical mutation and use a new UUID-v4 key for a new attempt. Missing or
+malformed keys, malformed `tripId`, or any request body return `422 VALIDATION_ERROR` without
+changing Trip state.
+
+### POST `/v1/driver/trips/{tripId}/start`
+
+Auth: `DRIVER` only. The authenticated JWT `sub` must equal the Trip's `driverUserId`; an existing
+Trip assigned to another user returns `403 FORBIDDEN`. The request has no body and requires the
+idempotency semantics above.
+
+Precondition: Trip status is `BOARDING`. A successful transition sets status to `IN_PROGRESS`,
+captures `actualDepartureTime`, and publishes `trip.trip.started` through the Trip Outbox in the
+same Trip-local transaction. Any other current status returns `409 TRIP_INVALID_TRANSITION`.
+
+Response `200` uses the ADR 0004 success envelope. Every data field is required and non-null:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "tripId": "2f0cc13f-2207-4b62-9e0f-82f67f5a5bc2",
+    "status": "IN_PROGRESS",
+    "actualDepartureTime": "2026-06-22T01:30:00Z"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-22T01:30:00Z" }
+}
+```
+
+Data schema: `{ tripId: string(uuid), status: "IN_PROGRESS", actualDepartureTime: string(date-time) }`.
+
+Errors: `401 AUTH_TOKEN_INVALID`; `403 FORBIDDEN`; `404 TRIP_NOT_FOUND`;
+`409 TRIP_INVALID_TRANSITION`; `409 IDEMPOTENCY_REQUEST_PENDING`;
+`422 IDEMPOTENCY_KEY_MISMATCH`; `422 VALIDATION_ERROR`.
+
+### POST `/v1/driver/trips/{tripId}/complete`
+
+Auth: `DRIVER` or `ASSISTANT`. For `DRIVER`, authenticated JWT `sub` must equal
+`trip.driverUserId`; for `ASSISTANT`, it must equal `trip.assistantUserId`. Any role/assignment
+mismatch returns `403 FORBIDDEN`. The request has no body and requires the idempotency semantics
+above.
+
+Precondition: Trip status is `IN_PROGRESS`. A successful transition sets status to `COMPLETED`,
+captures `completedAt` and `completedByUserId` from the caller, appends the
+`TRIP_COMPLETED_MANUAL` Trip audit row with metadata `{tripId,role}`, and publishes
+`trip.trip.completed` through the Trip Outbox atomically in one Trip-local transaction. It does
+not read or write Identity and emits no audit integration event. Any other current status returns
+`409 TRIP_INVALID_TRANSITION`.
+
+Response `200` uses the ADR 0004 success envelope. Every data field is required and non-null for
+this manual endpoint:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "tripId": "2f0cc13f-2207-4b62-9e0f-82f67f5a5bc2",
+    "status": "COMPLETED",
+    "completedAt": "2026-06-22T05:30:00Z",
+    "completedByUserId": "7226afd8-c107-413f-8235-c39e75f7a71f"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-22T05:30:00Z" }
+}
+```
+
+Data schema: `{ tripId: string(uuid), status: "COMPLETED", completedAt: string(date-time), completedByUserId: string(uuid) }`.
+
+Errors: `401 AUTH_TOKEN_INVALID`; `403 FORBIDDEN`; `404 TRIP_NOT_FOUND`;
+`409 TRIP_INVALID_TRANSITION`; `409 IDEMPOTENCY_REQUEST_PENDING`;
+`422 IDEMPOTENCY_KEY_MISMATCH`; `422 VALIDATION_ERROR`.
 
 ### GET `/v1/bookings/trips/{tripId}/manifest`
 

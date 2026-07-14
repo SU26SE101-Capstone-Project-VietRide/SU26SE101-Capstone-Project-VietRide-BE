@@ -1,3 +1,5 @@
+using VietRide.Booking.Application.Features.OperatorBookings.GetOperatorBookingDetail;
+using VietRide.Booking.Application.Features.OperatorBookings.ListOperatorBookings;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Repositories;
 using BookingEntity = VietRide.Booking.Domain.Entities.Booking;
@@ -10,6 +12,17 @@ namespace VietRide.Booking.Application.Abstractions.Repositories;
 /// </summary>
 public interface IBookingRepository : IRepository<BookingEntity, Guid>
 {
+    Task<OperatorBookingDetailDto?> GetOperatorBookingDetailAsync(Guid bookingId, Guid operatorId, CancellationToken ct = default)
+        => throw new NotSupportedException("Operator booking detail is not implemented by this repository.");
+
+    Task<bool> BookingExistsAsync(Guid bookingId, CancellationToken ct = default)
+        => throw new NotSupportedException("Booking existence lookup is not implemented by this repository.");
+
+    Task<OperatorBookingListPage> ListOperatorBookingsAsync(
+        OperatorBookingListCriteria criteria,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Operator booking listing is not implemented by this repository.");
+
     /// <summary>
     /// Finds a booking by its booking code string (unique index).
     /// </summary>
@@ -76,6 +89,17 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
         Guid bookingId,
         DateTimeOffset refundedAt,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Atomically changes only CONFIRMED/PARTIAL_NO_SHOW bookings for the trip to COMPLETED.
+    /// Returns the ids actually changed by this delivery so callers can append one history row
+    /// per successful transition without duplicating history on replay.
+    /// </summary>
+    Task<IReadOnlyList<Guid>> TryCompleteEligibleByTripIdAsync(
+        Guid tripId,
+        DateTimeOffset completedAt,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Trip completion is not implemented by this repository.");
 
     Task<bool> HasConfirmedBookingAsync(Guid passengerUserId, CancellationToken ct = default);
 }

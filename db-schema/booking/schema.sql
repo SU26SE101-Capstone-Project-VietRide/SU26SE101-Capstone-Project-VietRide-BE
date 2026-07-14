@@ -126,6 +126,20 @@ CREATE INDEX idx_bookings_status_created_at ON bookings (status, created_at)
     WHERE status IN ('PENDING_PAYMENT', 'CONFIRMED');
 CREATE INDEX idx_bookings_trip_snapshot_departure ON bookings (trip_snapshot_departure DESC);
 
+-- Append-only authoritative Booking lifecycle timeline. Application code permits INSERT/read only.
+CREATE TABLE booking_status_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    booking_id UUID NOT NULL REFERENCES bookings (id) ON DELETE RESTRICT,
+    status booking_status NOT NULL,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    reason_code VARCHAR(100) NULL,
+    actor_user_id UUID NULL, -- logical FK to identity.users; intentionally no DB FK
+    source VARCHAR(100) NOT NULL
+);
+
+CREATE INDEX idx_booking_status_history_booking_occurred_id
+    ON booking_status_history (booking_id, occurred_at, id);
+
 COMMENT ON COLUMN bookings.booking_code IS
     'Format VR-yyyyMMdd-XXXXXXXX (8 chars base32 uppercase). Booking/order code for history and backward compatibility; ticket QR uses tickets.ticket_code.';
 COMMENT ON COLUMN bookings.total_amount IS
@@ -415,6 +429,26 @@ CREATE INDEX idx_operator_voucher_consents_voucher_id
     ON operator_voucher_consents (voucher_id);
 
 -- -----------------------------------------------------------------------------
+-- booking_shuttle_intents
+-- -----------------------------------------------------------------------------
+CREATE TABLE booking_shuttle_intents (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    booking_id UUID NOT NULL REFERENCES bookings (id) ON DELETE CASCADE,
+    pickup_address TEXT NOT NULL,
+    pickup_latitude DECIMAL(10,7) NOT NULL,
+    pickup_longitude DECIMAL(10,7) NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    cancelled_at TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_booking_shuttle_intents_latitude CHECK (pickup_latitude BETWEEN -90 AND 90),
+    CONSTRAINT chk_booking_shuttle_intents_longitude CHECK (pickup_longitude BETWEEN -180 AND 180)
+);
+
+CREATE UNIQUE INDEX uq_booking_shuttle_intents_booking
+    ON booking_shuttle_intents (booking_id);
+
+-- -----------------------------------------------------------------------------
 -- outbox_events
 -- -----------------------------------------------------------------------------
 CREATE TABLE outbox_events (
@@ -453,6 +487,8 @@ CREATE TRIGGER trg_booking_stats_updated_at BEFORE UPDATE ON booking_stats
 CREATE TRIGGER trg_vouchers_updated_at BEFORE UPDATE ON vouchers
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 CREATE TRIGGER trg_operator_voucher_consents_updated_at BEFORE UPDATE ON operator_voucher_consents
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+CREATE TRIGGER trg_booking_shuttle_intents_updated_at BEFORE UPDATE ON booking_shuttle_intents
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 
 -- -----------------------------------------------------------------------------

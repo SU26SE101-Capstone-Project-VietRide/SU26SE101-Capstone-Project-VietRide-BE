@@ -10,12 +10,16 @@ public sealed record CreateRoundTripBookingResult
         RoundTripBookingResult outbound,
         RoundTripBookingResult @return,
         long grandTotal,
+        Guid? paymentId,
+        string status,
         string? paymentRedirectUrl)
     {
         BookingGroupId = bookingGroupId;
         Outbound = outbound;
         Return = @return;
         GrandTotal = grandTotal;
+        PaymentId = paymentId;
+        Status = status;
         PaymentRedirectUrl = paymentRedirectUrl;
     }
 
@@ -26,6 +30,10 @@ public sealed record CreateRoundTripBookingResult
     public RoundTripBookingResult Return { get; init; }
 
     public long GrandTotal { get; init; }
+
+    public Guid? PaymentId { get; init; }
+
+    public string Status { get; init; }
 
     public string? PaymentRedirectUrl { get; init; }
 

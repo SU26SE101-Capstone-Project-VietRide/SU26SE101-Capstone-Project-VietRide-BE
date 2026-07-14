@@ -43,7 +43,7 @@ public sealed class OperatorSubscriptionRepository : IOperatorSubscriptionReposi
     {
         return _dbContext.OperatorSubscriptions
             .Where(x => x.OperatorId == operatorId)
-            .Where(x => x.Status == SubscriptionStatus.PENDING_APPROVAL || x.Status == SubscriptionStatus.ACTIVE)
+            .Where(x => x.Status != SubscriptionStatus.CANCELLED)
             .OrderByDescending(x => x.StartedAt ?? x.LastResetAt)
             .FirstOrDefaultAsync(cancellationToken);
     }
@@ -138,6 +138,51 @@ public sealed class OperatorSubscriptionRepository : IOperatorSubscriptionReposi
         await _dbContext.ActivityLogs.AddAsync(activityLog, cancellationToken);
 
         return true;
+    }
+
+    public async Task<bool> TryDecrementUsageAsync(
+        Guid operatorId,
+        SubscriptionUsageResource resource,
+        CancellationToken cancellationToken = default)
+    {
+        var subscriptionId = await _dbContext.OperatorSubscriptions
+            .Where(subscription => subscription.OperatorId == operatorId)
+            .Select(subscription => subscription.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (subscriptionId == Guid.Empty)
+            return false;
+
+        var rows = resource switch
+        {
+            SubscriptionUsageResource.VEHICLES => await DecrementAsync(subscriptionId, nameof(OperatorSubscription.CurrentVehicles), cancellationToken),
+            SubscriptionUsageResource.DRIVERS => await DecrementAsync(subscriptionId, nameof(OperatorSubscription.CurrentDrivers), cancellationToken),
+            SubscriptionUsageResource.ASSISTANTS => await DecrementAsync(subscriptionId, nameof(OperatorSubscription.CurrentAssistants), cancellationToken),
+            SubscriptionUsageResource.OPERATOR_USERS => await DecrementAsync(subscriptionId, nameof(OperatorSubscription.CurrentOperatorUsers), cancellationToken),
+            SubscriptionUsageResource.ROUTES => await DecrementAsync(subscriptionId, nameof(OperatorSubscription.CurrentRoutes), cancellationToken),
+            SubscriptionUsageResource.TRIPS_THIS_MONTH => await DecrementAsync(subscriptionId, nameof(OperatorSubscription.CurrentTripsThisMonth), cancellationToken),
+            _ => 0,
+        };
+        return rows == 1;
+    }
+
+    private Task<int> DecrementAsync(Guid subscriptionId, string propertyName, CancellationToken cancellationToken)
+    {
+        return propertyName switch
+        {
+            nameof(OperatorSubscription.CurrentVehicles) => _dbContext.OperatorSubscriptions.Where(x => x.Id == subscriptionId && x.CurrentVehicles > 0)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.CurrentVehicles, x => x.CurrentVehicles - 1), cancellationToken),
+            nameof(OperatorSubscription.CurrentDrivers) => _dbContext.OperatorSubscriptions.Where(x => x.Id == subscriptionId && x.CurrentDrivers > 0)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.CurrentDrivers, x => x.CurrentDrivers - 1), cancellationToken),
+            nameof(OperatorSubscription.CurrentAssistants) => _dbContext.OperatorSubscriptions.Where(x => x.Id == subscriptionId && x.CurrentAssistants > 0)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.CurrentAssistants, x => x.CurrentAssistants - 1), cancellationToken),
+            nameof(OperatorSubscription.CurrentOperatorUsers) => _dbContext.OperatorSubscriptions.Where(x => x.Id == subscriptionId && x.CurrentOperatorUsers > 0)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.CurrentOperatorUsers, x => x.CurrentOperatorUsers - 1), cancellationToken),
+            nameof(OperatorSubscription.CurrentRoutes) => _dbContext.OperatorSubscriptions.Where(x => x.Id == subscriptionId && x.CurrentRoutes > 0)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.CurrentRoutes, x => x.CurrentRoutes - 1), cancellationToken),
+            nameof(OperatorSubscription.CurrentTripsThisMonth) => _dbContext.OperatorSubscriptions.Where(x => x.Id == subscriptionId && x.CurrentTripsThisMonth > 0)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.CurrentTripsThisMonth, x => x.CurrentTripsThisMonth - 1), cancellationToken),
+            _ => Task.FromResult(0),
+        };
     }
 
     private Task<int> IncrementVehicleCountAsync(Guid subscriptionId, int delta, CancellationToken cancellationToken)

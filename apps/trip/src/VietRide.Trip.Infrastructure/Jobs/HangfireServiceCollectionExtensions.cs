@@ -20,9 +20,7 @@ public static class HangfireServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
-            ?? Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
-        if (string.Equals(environment, "Testing", StringComparison.OrdinalIgnoreCase))
+        if (!AreBackgroundWorkersEnabled(configuration))
         {
             return services;
         }
@@ -59,4 +57,7 @@ public static class HangfireServiceCollectionExtensions
 
         return services;
     }
+
+    private static bool AreBackgroundWorkersEnabled(IConfiguration configuration) =>
+        configuration.GetValue<bool?>("Trip:BackgroundWorkers:Enabled") ?? true;
 }

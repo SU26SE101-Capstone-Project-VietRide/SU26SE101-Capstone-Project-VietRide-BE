@@ -9,4 +9,21 @@ public interface IIdentityServiceClient
     Task<OperatorLookupOutcome> GetOperatorInfoAsync(
         Guid operatorId,
         CancellationToken cancellationToken = default);
+
+    Task<SubscriptionWriteEligibilityOutcome> GetSubscriptionWriteEligibilityAsync(
+        Guid operatorId,
+        bool requireParcelModule,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(SubscriptionWriteEligibilityOutcome.Allowed());
+}
+
+public sealed record SubscriptionWriteEligibilityOutcome(
+    bool IsAllowed,
+    int? FailureStatusCode,
+    string? ErrorCode,
+    string? ErrorMessage)
+{
+    public static SubscriptionWriteEligibilityOutcome Allowed() => new(true, null, null, null);
+    public static SubscriptionWriteEligibilityOutcome Rejected(int statusCode, string errorCode, string message)
+        => new(false, statusCode, errorCode, message);
 }

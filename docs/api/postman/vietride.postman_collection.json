@@ -4122,9 +4122,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"tripId\": \"{{day12TripId}}\",\n  \"pickup\": {\n    \"stationId\": \"{{day12PickupStationId}}\"\n  },\n  \"seats\": [\n    {\n      \"seatNumber\": \"A01\",\n      \"passenger\": {\n        \"fullName\": \"Nguyen Van A\",\n        \"phoneNumber\": \"0900000001\",\n        \"idNumber\": \"012345678901\"\n      }\n    }\n  ],\n  \"paymentMethod\": \"WALLET\"\n}"
+              "raw": "{\n  \"tripId\": \"{{day12TripId}}\",\n  \"pickup\": {\n    \"stationId\": \"{{day12PickupStationId}}\"\n  },\n  \"seats\": [{ \"seatNumber\": \"A01\" }],\n  \"paymentMethod\": \"WALLET\"\n}"
             },
-            "description": "Day 12 — POST /v1/bookings (WALLET path). Auth: PASSENGER bearer token. Idempotency-Key required. Max 5 seats. Returns 201 CONFIRMED on WALLET success; 409 BOOKING_SEAT_UNAVAILABLE if seat is held; 422 BOOKING_MAX_SEATS_EXCEEDED if >5 seats. Passenger PII (fullName/phoneNumber/idNumber) is validated but not persisted per schema.sql line 149."
+            "description": "POST /v1/bookings (WALLET path). Auth: PASSENGER bearer token. Idempotency-Key required. Each seat contains only seatNumber; 1–5 unique seats, max 20 characters."
           }
         },
         {
@@ -4176,7 +4176,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"outbound\": {\n    \"tripId\": \"{{day12TripId}}\",\n    \"pickup\": {\n      \"stationId\": \"{{day12PickupStationId}}\"\n    },\n    \"dropoff\": {\n      \"stationId\": \"{{day12DropoffStationId}}\"\n    },\n    \"seats\": [\n      {\n        \"seatNumber\": \"A01\",\n        \"passenger\": {\n          \"fullName\": \"Nguyen Van A\",\n          \"phoneNumber\": \"0900000001\",\n          \"idNumber\": \"012345678901\"\n        }\n      }\n    ]\n  },\n  \"return\": {\n    \"tripId\": \"{{day12ReturnTripId}}\",\n    \"pickup\": {\n      \"stationId\": \"{{day12ReturnPickupStationId}}\"\n    },\n    \"dropoff\": {\n      \"stationId\": \"{{day12ReturnDropoffStationId}}\"\n    },\n    \"seats\": [\n      {\n        \"seatNumber\": \"A02\",\n        \"passenger\": {\n          \"fullName\": \"Nguyen Van A\",\n          \"phoneNumber\": \"0900000001\",\n          \"idNumber\": \"012345678901\"\n        }\n      }\n    ]\n  },\n  \"paymentMethod\": \"WALLET\"\n}"
+              "raw": "{\n  \"outbound\": {\n    \"tripId\": \"{{day12TripId}}\",\n    \"pickup\": { \"stationId\": \"{{day12PickupStationId}}\" },\n    \"dropoff\": { \"stationId\": \"{{day12DropoffStationId}}\" },\n    \"seats\": [{ \"seatNumber\": \"A01\" }]\n  },\n  \"return\": {\n    \"tripId\": \"{{day12ReturnTripId}}\",\n    \"pickup\": { \"stationId\": \"{{day12ReturnPickupStationId}}\" },\n    \"dropoff\": { \"stationId\": \"{{day12ReturnDropoffStationId}}\" },\n    \"seats\": [{ \"seatNumber\": \"A02\" }]\n  },\n  \"paymentMethod\": \"WALLET\"\n}"
             },
             "description": "PASSENGER-only round-trip booking request. Idempotency-Key required. Uses the booking sub-path under the existing /v1/bookings prefix."
           }
@@ -4324,7 +4324,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"tripId\": \"{{day12TripId}}\",\n  \"pickup\": {\n    \"stationId\": \"{{day12PickupStationId}}\"\n  },\n  \"seats\": [\n    { \"seatNumber\": \"A01\", \"passenger\": { \"fullName\": \"A\", \"phoneNumber\": \"0900000001\", \"idNumber\": \"012345678901\" } },\n    { \"seatNumber\": \"A02\", \"passenger\": { \"fullName\": \"B\", \"phoneNumber\": \"0900000002\", \"idNumber\": \"012345678902\" } },\n    { \"seatNumber\": \"A03\", \"passenger\": { \"fullName\": \"C\", \"phoneNumber\": \"0900000003\", \"idNumber\": \"012345678903\" } },\n    { \"seatNumber\": \"A04\", \"passenger\": { \"fullName\": \"D\", \"phoneNumber\": \"0900000004\", \"idNumber\": \"012345678904\" } },\n    { \"seatNumber\": \"A05\", \"passenger\": { \"fullName\": \"E\", \"phoneNumber\": \"0900000005\", \"idNumber\": \"012345678905\" } },\n    { \"seatNumber\": \"A06\", \"passenger\": { \"fullName\": \"F\", \"phoneNumber\": \"0900000006\", \"idNumber\": \"012345678906\" } }\n  ],\n  \"paymentMethod\": \"WALLET\"\n}"
+              "raw": "{\n  \"tripId\": \"{{day12TripId}}\",\n  \"pickup\": { \"stationId\": \"{{day12PickupStationId}}\" },\n  \"seats\": [\n    { \"seatNumber\": \"A01\" }, { \"seatNumber\": \"A02\" },\n    { \"seatNumber\": \"A03\" }, { \"seatNumber\": \"A04\" },\n    { \"seatNumber\": \"A05\" }, { \"seatNumber\": \"A06\" }\n  ],\n  \"paymentMethod\": \"WALLET\"\n}"
             },
             "description": "6 seats → 422 BOOKING_MAX_SEATS_EXCEEDED."
           }
@@ -5112,6 +5112,533 @@
               "host": ["{{baseUrl}}"],
               "path": ["v1", "bookings", "trips", "{{day18TripId}}", "boarding", "qr-scan"]
             }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Day 36 - Shuttle Backend",
+      "item": [
+        {
+          "name": "Create booking with shuttle pickup",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "day36-booking-{{$guid}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"tripId\": \"{{day36MainTripId}}\",\n  \"pickup\": { \"stationId\": \"{{day36OriginStationId}}\" },\n  \"dropoff\": { \"stationId\": \"{{day36DestinationStationId}}\" },\n  \"shuttlePickup\": { \"address\": \"123 Nguyễn Huệ, Quận 1\", \"latitude\": 10.7731, \"longitude\": 106.7032 },\n  \"seats\": [{ \"seatNumber\": \"D01\" }],\n  \"paymentMethod\": \"WALLET\"\n}" },
+            "url": "{{baseUrl}}/v1/bookings"
+          }
+        },
+        {
+          "name": "Reject unsupported shuttle station",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "day36-invalid-{{$guid}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"tripId\": \"{{day36MainTripId}}\",\n  \"pickup\": { \"stationId\": \"{{day36UnsupportedStationId}}\" },\n  \"shuttlePickup\": { \"address\": \"Unsupported\", \"latitude\": 10.7, \"longitude\": 106.7 },\n  \"seats\": [],\n  \"paymentMethod\": \"WALLET\"\n}" },
+            "url": "{{baseUrl}}/v1/bookings"
+          }
+        },
+        {
+          "name": "List grouped pending shuttle requests",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/operator/shuttle-requests?page=1&pageSize=20"
+          }
+        },
+        {
+          "name": "Create subset ShuttleTrip",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "day36-dispatch-1" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"mainTripId\": \"{{day36MainTripId}}\",\n  \"driverUserId\": \"{{day36DriverId}}\",\n  \"vehicleId\": \"{{day36ShuttleVehicleId}}\",\n  \"scheduledDepartureTime\": \"{{day36ShuttleDeparture}}\",\n  \"scheduledEndTime\": \"{{day36ShuttleEnd}}\",\n  \"orderedBookingIds\": [\"{{day36BookingId}}\"]\n}" },
+            "url": "{{baseUrl}}/v1/operator/shuttle-trips"
+          }
+        },
+        {
+          "name": "Replay subset dispatch idempotently",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "day36-dispatch-1" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"mainTripId\": \"{{day36MainTripId}}\",\n  \"driverUserId\": \"{{day36DriverId}}\",\n  \"vehicleId\": \"{{day36ShuttleVehicleId}}\",\n  \"scheduledDepartureTime\": \"{{day36ShuttleDeparture}}\",\n  \"scheduledEndTime\": \"{{day36ShuttleEnd}}\",\n  \"orderedBookingIds\": [\"{{day36BookingId}}\"]\n}" },
+            "url": "{{baseUrl}}/v1/operator/shuttle-trips"
+          }
+        },
+        {
+          "name": "Get shuttle latest GPS",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/tracking/shuttle-trips/{{day36ShuttleTripId}}/latest"
+          }
+        },
+        {
+          "name": "Get shuttle ETA",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/tracking/shuttle-trips/{{day36ShuttleTripId}}/eta"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Booking - Day 19 operator booking reads",
+      "item": [
+        {
+          "name": "1. OPERATOR_ADMIN lists own tenant with ADR 0004 page schema",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 ADR 0004 page', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.statusCode).to.eql(200); pm.expect(body.meta.traceId).to.be.a('string'); pm.expect(Object.keys(body.data).sort()).to.eql(['hasNextPage','hasPreviousPage','items','page','pageSize','totalItems','totalPages']); });",
+                  "pm.test('List item schema matches the frozen Day-19 projection', () => { const itemKeys = ['bookingCode','createdAt','id','seatCount','status','totalAmount','trip','tripId']; const tripKeys = ['departureAt','destinationName','originName','routeName']; const nullableString = value => pm.expect(value === null || typeof value === 'string').to.eql(true); body.data.items.forEach(item => { pm.expect(Object.keys(item).sort()).to.eql(itemKeys); pm.expect(item.id).to.be.a('string'); pm.expect(item.bookingCode).to.be.a('string'); pm.expect(item.tripId).to.be.a('string'); pm.expect(item.status).to.be.a('string'); pm.expect(item.seatCount).to.be.a('number'); pm.expect(item.totalAmount).to.be.a('number'); pm.expect(item.createdAt).to.be.a('string'); pm.expect(Object.keys(item.trip).sort()).to.eql(tripKeys); nullableString(item.trip.routeName); nullableString(item.trip.originName); nullableString(item.trip.destinationName); nullableString(item.trip.departureAt); }); });",
+                  "pm.test('Own booking only', () => { const itemIds = body.data.items.map(x => x.id); pm.expect(itemIds).to.include(pm.environment.get('day19AdminBookingId')); pm.expect(itemIds).not.to.include(pm.environment.get('day19StaffBookingId')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings"
+          }
+        },
+        {
+          "name": "2. Gateway health is 200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('Gateway health is 200', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/health"
+          }
+        },
+        {
+          "name": "3. Booking health through Gateway is 200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('Booking health is 200', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/v1/booking/health"
+          }
+        },
+        {
+          "name": "4. OPERATOR_STAFF lists own tenant",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Staff own tenant only', () => { pm.response.to.have.status(200); pm.expect(body.data.items.length).to.eql(1); pm.expect(body.data.items[0].id).to.eql(pm.environment.get('day19StaffBookingId')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19OperatorStaffToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings"
+          }
+        },
+        {
+          "name": "5. Denied role cannot list operator bookings",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Denied role is 403 FORBIDDEN', () => { pm.response.to.have.status(403); pm.expect(body.error.code).to.eql('FORBIDDEN'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19DeniedToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings"
+          }
+        },
+        {
+          "name": "6. List filters status trip date and booking code",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('All list filters select fixture', () => { pm.response.to.have.status(200); pm.expect(body.data.items.length).to.eql(1); pm.expect(body.data.items[0].bookingCode).to.eql(pm.environment.get('day19BookingCode')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings?status=CANCELLED&tripId=19191919-1919-4191-8191-191919191961&date=2026-07-12&bookingCode={{day19BookingCode}}"
+          }
+        },
+        {
+          "name": "7. Passenger phone canonical filter finds own booking",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Phone filter is normalized', () => { pm.response.to.have.status(200); pm.expect(body.data.items[0].id).to.eql(pm.environment.get('day19AdminBookingId')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings?passengerPhone={{day19PassengerPhone}}"
+          }
+        },
+        {
+          "name": "8. Unknown phone is empty page",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Unknown phone is 200 empty page', () => { pm.response.to.have.status(200); pm.expect(body.data.items).to.eql([]); pm.expect(body.data).to.have.property('totalItems'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings?passengerPhone=0912345678"
+          }
+        },
+        {
+          "name": "9. Phone SQL injection payload is validation error",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Injection is rejected safely', () => { pm.response.to.have.status(422); pm.expect(body.error.code).to.eql('VALIDATION_ERROR'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings?passengerPhone=0919191911%27%20OR%201%3D1--"
+          }
+        },
+        {
+          "name": "10. Past last page is empty",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Past last page returns empty page', () => { pm.response.to.have.status(200); pm.expect(body.data.items).to.eql([]); pm.expect(body.data.page).to.eql(99); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings?page=99"
+          }
+        },
+        {
+          "name": "11. Own booking detail projects ordered timeline",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Own detail matches the complete frozen Day-19 schema and chronological id tie-breaker', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.statusCode).to.eql(200); pm.expect(body.meta.traceId).to.be.a('string'); const detail = body.data; const detailKeys = ['baseFare','bookingCode','bookingGroupId','buyerUserId','cancellationReason','createdAt','discountAmount','dropoffStationId','dropoffStopId','id','pickupStationId','pickupStopId','seatCount','seats','status','statusTimeline','totalAmount','trip','tripDirection','tripId']; const tripKeys = ['departureAt','destinationName','originName','routeName']; const seatKeys = ['boardingStatus','passengerRecordId','seatNumber','ticketCode','ticketId','ticketStatus']; const timelineKeys = ['occurredAt','reasonCode','status']; const nullableString = value => pm.expect(value === null || typeof value === 'string').to.eql(true); const nullableId = value => pm.expect(value === null || typeof value === 'string').to.eql(true); pm.expect(Object.keys(detail).sort()).to.eql(detailKeys); pm.expect(detail.id).to.eql(pm.environment.get('day19AdminBookingId')); pm.expect(detail.bookingCode).to.be.a('string'); pm.expect(detail.buyerUserId).to.be.a('string'); pm.expect(detail.tripId).to.be.a('string'); pm.expect(detail.status).to.be.a('string'); pm.expect(detail.seatCount).to.be.a('number'); pm.expect(detail.baseFare).to.be.a('number'); pm.expect(detail.discountAmount).to.be.a('number'); pm.expect(detail.totalAmount).to.be.a('number'); pm.expect(detail.createdAt).to.be.a('string'); pm.expect(Object.keys(detail.trip).sort()).to.eql(tripKeys); nullableString(detail.trip.routeName); nullableString(detail.trip.originName); nullableString(detail.trip.destinationName); nullableString(detail.trip.departureAt); nullableId(detail.pickupStationId); nullableId(detail.pickupStopId); nullableId(detail.dropoffStationId); nullableId(detail.dropoffStopId); nullableId(detail.bookingGroupId); nullableString(detail.tripDirection); nullableString(detail.cancellationReason); pm.expect(detail.seats).to.be.an('array'); detail.seats.forEach(seat => { pm.expect(Object.keys(seat).sort()).to.eql(seatKeys); pm.expect(seat.passengerRecordId).to.be.a('string'); pm.expect(seat.ticketId).to.be.a('string'); pm.expect(seat.ticketCode).to.be.a('string'); pm.expect(seat.seatNumber).to.be.a('string'); pm.expect(seat.ticketStatus).to.be.a('string'); pm.expect(seat.boardingStatus).to.be.a('string'); }); const timeline = detail.statusTimeline; pm.expect(timeline).to.be.an('array'); timeline.forEach(entry => { pm.expect(Object.keys(entry).sort()).to.eql(timelineKeys); pm.expect(entry.status).to.be.a('string'); pm.expect(entry.occurredAt).to.be.a('string'); nullableString(entry.reasonCode); pm.expect(entry).not.to.have.property('actorUserId'); pm.expect(entry).not.to.have.property('source'); }); pm.expect(timeline.map(x => x.status)).to.eql(['PENDING_PAYMENT','CONFIRMED','CANCELLED']); pm.expect(timeline[1].occurredAt).to.eql(timeline[2].occurredAt); pm.expect(timeline[1].reasonCode).to.eql(null); pm.expect(timeline[2].reasonCode).to.eql('USER_INITIATED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings/{{day19AdminBookingId}}"
+          }
+        },
+        {
+          "name": "12. OPERATOR_STAFF reads its own booking detail",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Staff own detail is 200 and tenant-scoped', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.id).to.eql(pm.environment.get('day19StaffBookingId')); pm.expect(body.data.bookingCode).to.eql('VR-20260711-DAY19A02'); pm.expect(body.data.status).to.eql('CONFIRMED'); pm.expect(body.data.statusTimeline).to.be.an('array'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19OperatorStaffToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings/{{day19StaffBookingId}}"
+          }
+        },
+        {
+          "name": "13. Unknown booking detail is 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Unknown detail is 404 BOOKING_NOT_FOUND', () => { pm.response.to.have.status(404); pm.expect(body.error.code).to.eql('BOOKING_NOT_FOUND'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings/19191919-1919-4191-8191-191919199999"
+          }
+        },
+        {
+          "name": "14. Cross-operator detail is forbidden",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Cross operator is 403 FORBIDDEN', () => { pm.response.to.have.status(403); pm.expect(body.error.code).to.eql('FORBIDDEN'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day19OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/bookings/{{day19StaffBookingId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Booking - Day 12 seat lock flow",
+      "description": "Gateway assertions paired with the documented Day-11 internal lock seam. The harness supplies only ephemeral fixture values.",
+      "item": [
+        {
+          "name": "1. Held seat rejects competing passenger",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json();",
+            "pm.test('Competing lock uses ADR-0004 error envelope', () => { pm.response.to.have.status(409); pm.expect(body.success).to.eql(false); pm.expect(body.statusCode).to.eql(409); pm.expect(body.error.code).to.eql('BOOKING_SEAT_UNAVAILABLE'); pm.expect(body.meta.traceId).to.be.a('string'); });"
+          ] }}],
+          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day12CompetingPassengerToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day12CompetingIdempotencyKey}}" }], "url": "{{baseUrl}}/v1/bookings", "body": { "mode": "raw", "raw": "{\n  \"tripId\": \"{{day12TripId}}\",\n  \"pickup\": { \"stationId\": \"{{day12PickupStationId}}\" },\n  \"dropoff\": { \"stationId\": \"{{day12DropoffStationId}}\" },\n  \"seats\": [{ \"seatNumber\": \"A07\" }],\n  \"paymentMethod\": \"WALLET\"\n}" } }
+        },
+        {
+          "name": "2. TTL-released seats book as a single held set",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json();",
+            "pm.test('Released held seats confirm together', () => { pm.response.to.have.status(201); pm.expect(body.success).to.eql(true); pm.expect(body.statusCode).to.eql(201); pm.expect(body.data.status).to.eql('CONFIRMED'); pm.expect(body.data.tickets).to.have.length(5); pm.expect(body.data.tickets.every(ticket => ticket.status === 'ISSUED')).to.eql(true); pm.expect(body.meta.traceId).to.be.a('string'); });"
+          ] }}],
+          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day12ReleasedIdempotencyKey}}" }], "url": "{{baseUrl}}/v1/bookings", "body": { "mode": "raw", "raw": "{\n  \"tripId\": \"{{day12TripId}}\",\n  \"pickup\": { \"stationId\": \"{{day12PickupStationId}}\" },\n  \"dropoff\": { \"stationId\": \"{{day12DropoffStationId}}\" },\n  \"seats\": {{day12FiveReleasedSeats}},\n  \"paymentMethod\": \"WALLET\"\n}" } }
+        }
+      ]
+    },
+    {
+      "name": "Payment - Day 16 booking payment + refund flow",
+      "description": "Gateway-only booking-payment checks. Request 4 validates the immediate documented poll shape; run-day16-newman-local.mjs then owns the bounded 20-attempt/500ms eventual-confirmation poll to CONFIRMED. The runner supplies deterministic local fixture tokens and ids; no merchant secret is committed.",
+      "item": [
+        {
+          "name": "1. Wallet booking payment is confirmed",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json(); pm.test('Wallet confirmation uses ADR-0004', () => { pm.response.to.have.status(201); pm.expect(body.success).to.eql(true); pm.expect(body.data.status).to.eql('CONFIRMED'); pm.expect(body.data.paymentRedirectUrl).to.eql(null); });",
+            "pm.environment.set('day16WalletBookingId', body.data.bookingId);"
+          ] }}],
+          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day16WalletIdempotencyKey}}" }], "url": "{{baseUrl}}/v1/bookings", "body": { "mode": "raw", "raw": "{\n  \"tripId\": \"{{day16WalletTripId}}\",\n  \"pickup\": { \"stationId\": \"{{day16PickupStationId}}\" },\n  \"seats\": {{day16WalletSeats}},\n  \"paymentMethod\": \"WALLET\"\n}" } }
+        },
+        {
+          "name": "1b. Wallet balance after booking debit",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json(); pm.test('Wallet debit baseline follows ADR-0004', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.balance).to.be.a('number'); pm.expect(body.data.currency).to.eql('VND'); });",
+            "pm.environment.set('day16WalletBalanceAfterDebit', String(body.data.balance));"
+          ] }}],
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }], "url": "{{baseUrl}}/v1/wallet" }
+        },
+        {
+          "name": "2. VNPay booking returns a redirect then confirms through signed IPN",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json(); pm.test('VNPay booking is pending with redirect', () => { pm.response.to.have.status(201); pm.expect(body.success).to.eql(true); pm.expect(body.data.status).to.eql('PENDING_PAYMENT'); pm.expect(body.data.paymentRedirectUrl).to.be.a('string').and.not.empty; });",
+            "pm.environment.set('day16VnPayBookingId', body.data.bookingId);",
+            "const match = body.data.paymentRedirectUrl.match(/[?&]vnp_TxnRef=([^&]+)/); const amount = body.data.paymentRedirectUrl.match(/[?&]vnp_Amount=([^&]+)/); pm.expect(match, 'VNPay redirect must include transaction reference').to.exist; pm.expect(amount, 'VNPay redirect must include amount').to.exist; pm.environment.set('day16VnPayTxnRef', decodeURIComponent(match[1])); pm.environment.set('day16VnPayAmountRaw', decodeURIComponent(amount[1]));"
+          ] }}],
+          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day16VnPayIdempotencyKey}}" }], "url": "{{baseUrl}}/v1/bookings", "body": { "mode": "raw", "raw": "{\n  \"tripId\": \"{{day16VnPayTripId}}\",\n  \"pickup\": { \"stationId\": \"{{day16PickupStationId}}\" },\n  \"seats\": {{day16VnPaySeats}},\n  \"paymentMethod\": \"VNPAY\"\n}" } }
+        },
+        {
+          "name": "3. Signed VNPay IPN confirms the pending booking",
+          "event": [
+            { "listen": "prerequest", "script": { "type": "text/javascript", "exec": [
+              "const params = { vnp_Amount: String(pm.variables.get('day16VnPayAmountRaw')), vnp_ResponseCode: '00', vnp_TransactionStatus: '00', vnp_TxnRef: String(pm.variables.get('day16VnPayTxnRef')) };",
+              "const query = Object.keys(params).sort().map(key => encodeURIComponent(key) + '=' + encodeURIComponent(params[key])).join('&'); pm.variables.set('day16VnPaySecureHash', CryptoJS.HmacSHA512(query, String(pm.variables.get('day16VnPayHashSecret'))).toString(CryptoJS.enc.Hex));"
+            ] }},
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "const body = pm.response.json(); pm.test('Booking VNPay IPN accepts a valid signature', () => { pm.response.to.have.status(200); pm.expect(body.RspCode).to.eql('00'); });"
+            ] }}
+          ],
+          "request": { "method": "GET", "url": "{{baseUrl}}/v1/payments/vnpay-ipn?vnp_Amount={{day16VnPayAmountRaw}}&vnp_ResponseCode=00&vnp_TransactionStatus=00&vnp_TxnRef={{day16VnPayTxnRef}}&vnp_SecureHash={{day16VnPaySecureHash}}" }
+        },
+        {
+          "name": "4. Poll validates the immediate VNPay booking status shape after IPN",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json(); pm.test('VNPay booking immediate poll has the documented status shape', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(Object.keys(body.data).sort()).to.eql(['bookingId', 'status']); pm.expect(body.data.bookingId).to.eql(pm.environment.get('day16VnPayBookingId')); pm.expect(['PENDING_PAYMENT', 'CONFIRMED']).to.include(body.data.status); });"
+          ] }}],
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }], "url": "{{baseUrl}}/v1/bookings/{{day16VnPayBookingId}}" }
+        },
+        {
+          "name": "5. Cancellation returns the event-driven refund to Wallet",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json(); pm.test('Cancellation response follows the booking-cancel contract', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.status).to.eql('CANCELLED'); pm.expect(body.data.refundMethod).to.eql('WALLET'); pm.expect(body.data.refundAmount).to.be.a('number'); pm.expect(body.meta.traceId).to.be.a('string'); });",
+            "pm.environment.set('day16WalletBookingId', body.data.bookingId); pm.environment.set('day16WalletRefundAmount', String(body.data.refundAmount)); pm.environment.set('day16WalletRefundMethod', body.data.refundMethod);"
+          ] }}],
+          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day16CancelIdempotencyKey}}" }], "url": "{{baseUrl}}/v1/bookings/{{day16WalletBookingId}}/cancel", "body": { "mode": "raw", "raw": "{\n  \"reason\": \"USER_INITIATED\"\n}" } }
+        }
+      ]
+    },
+    {
+      "name": "Driver - Day 21 trip lifecycle",
+      "description": "Manual Gateway-only view of Day-21 no-body lifecycle endpoints. The authoritative deterministic run is npm run postman:day21:local, which owns isolated fixtures, runtime JWTs and UUID-v4 keys, consumer polling, duplicate delivery, and cleanup.",
+      "item": [
+        {
+          "name": "1. Assigned driver starts BOARDING trip",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json();",
+            "pm.test('Start uses ADR-0004 lifecycle response', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.tripId).to.eql(pm.environment.get('day21TripId')); pm.expect(body.data.status).to.eql('IN_PROGRESS'); pm.expect(body.data.actualDepartureTime).to.be.a('string'); });"
+          ] }}],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day21DriverAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day21StartIdempotencyKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/driver/trips/{{day21TripId}}/start"
+          }
+        },
+        {
+          "name": "2. Assigned assistant completes IN_PROGRESS trip",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json();",
+            "pm.test('Complete uses ADR-0004 lifecycle response', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.tripId).to.eql(pm.environment.get('day21TripId')); pm.expect(body.data.status).to.eql('COMPLETED'); pm.expect(body.data.completedAt).to.be.a('string'); pm.expect(body.data.completedByUserId).to.be.a('string'); });"
+          ] }}],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day21AssistantAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day21CompleteIdempotencyKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/driver/trips/{{day21TripId}}/complete"
           }
         }
       ]

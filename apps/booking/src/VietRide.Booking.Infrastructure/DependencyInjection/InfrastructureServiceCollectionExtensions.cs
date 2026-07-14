@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Polly;
 using StackExchange.Redis;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
@@ -74,6 +75,21 @@ public static class InfrastructureServiceCollectionExtensions
                 .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
         }
 
+        services
+            .AddHttpClient<IIdentityUserServiceClient, IdentityUserServiceClient>(client =>
+            {
+                var baseUrl = ResolveIdentityBaseUrl(configuration);
+                client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
+                client.Timeout = TimeSpan.FromSeconds(5);
+                client.DefaultRequestHeaders.Accept.Clear();
+                client.DefaultRequestHeaders.Accept.Add(
+                    new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+            })
+            .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
+            .AddHttpMessageHandler<InternalJwtDelegatingHandler>()
+            .AddPolicyHandler(CreateIdentityUserRetryPolicy())
+            .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
+
         // Identity operator lookup client (Task 17.0).
         if (UseIdentityDevStub(configuration))
         {
@@ -99,6 +115,8 @@ public static class InfrastructureServiceCollectionExtensions
 
         // Repositories (Task 12.3)
         services.AddScoped<IBookingRepository, BookingRepository>();
+        services.AddScoped<IBookingStatusHistoryRepository, BookingStatusHistoryRepository>();
+        services.AddScoped<IBookingPendingActionRepository, BookingPendingActionRepository>();
 
         // Repositories (Task 14.1)
         services.AddScoped<IVoucherRepository, VoucherRepository>();
@@ -131,10 +149,20 @@ public static class InfrastructureServiceCollectionExtensions
                 options.QueueName = "booking.payment-succeeded";
                 options.BindingKeys = [PaymentSucceededIntegrationEvent.EventType];
             });
+            services.AddVietRideEventConsumer<StopDisabledIntegrationEvent, StopDisabledIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "booking.stop-disabled";
+                options.BindingKeys = [StopDisabledIntegrationEvent.EventType];
+            });
             services.AddVietRideEventConsumer<PaymentExpiredIntegrationEvent, PaymentExpiredIntegrationEventHandler>(options =>
             {
                 options.QueueName = "booking.payment-expired";
                 options.BindingKeys = [PaymentExpiredIntegrationEvent.EventType];
+            });
+            services.AddVietRideEventConsumer<PaymentFailedIntegrationEvent, PaymentFailedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "booking.payment-failed";
+                options.BindingKeys = [PaymentFailedIntegrationEvent.EventType];
             });
             services.AddVietRideEventConsumer<WalletCreditedIntegrationEvent, WalletCreditedIntegrationEventHandler>(options =>
             {
@@ -155,6 +183,11 @@ public static class InfrastructureServiceCollectionExtensions
             {
                 options.QueueName = "booking.booking-refunded-stats";
                 options.BindingKeys = [BookingRefundedIntegrationEvent.EventType];
+            });
+            services.AddVietRideEventConsumer<TripCompletedIntegrationEvent, TripCompletedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "booking.trip-completed";
+                options.BindingKeys = [TripCompletedIntegrationEvent.EventType];
             });
         }
 
@@ -186,6 +219,34 @@ public static class InfrastructureServiceCollectionExtensions
 
         return services;
     }
+
+    /// <summary>
+    /// Creates the Identity phone-lookup retry policy. Unlike the shared legacy policy,
+    /// this deliberately excludes HTTP 408 and every other 4xx response.
+    /// </summary>
+    public static IAsyncPolicy<HttpResponseMessage> CreateIdentityUserRetryPolicy(
+        int retryCount = HttpResiliencePolicies.DefaultRetryCount,
+        Func<int, TimeSpan>? delayProvider = null)
+    {
+        delayProvider ??= GetIdentityUserRetryDelay;
+
+        return Policy<HttpResponseMessage>
+            .Handle<HttpRequestException>()
+            .OrResult(response => (int)response.StatusCode >= 500)
+            .WaitAndRetryAsync(retryCount, delayProvider);
+    }
+
+    public static TimeSpan GetIdentityUserRetryDelay(int attempt)
+        => attempt switch
+        {
+            1 => TimeSpan.FromMilliseconds(200),
+            2 => TimeSpan.FromMilliseconds(500),
+            3 => TimeSpan.FromSeconds(1),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(attempt),
+                attempt,
+                "Identity user retry attempts must be between 1 and 3."),
+        };
 
     private static string ResolveTripBaseUrl(IConfiguration configuration)
     {

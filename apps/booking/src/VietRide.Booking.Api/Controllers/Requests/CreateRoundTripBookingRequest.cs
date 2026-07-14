@@ -23,6 +23,7 @@ public sealed class CreateRoundTripBookingRequest
         public PickupRequest? Pickup { get; init; }
 
         public DropoffRequest? Dropoff { get; init; }
+        public ShuttlePickupRequest? ShuttlePickup { get; init; }
 
         public IReadOnlyList<SeatBookingRequest> Seats { get; init; } = [];
     }

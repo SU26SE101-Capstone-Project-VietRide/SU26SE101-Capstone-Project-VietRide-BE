@@ -7,6 +7,8 @@ using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Application.Features.Bookings.CreateBooking;
+using VietRide.Booking.Domain.Entities;
+using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
@@ -52,6 +54,7 @@ public class CreateBookingCommandHandlerTests
         ExpiresAt: DateTimeOffset.UtcNow.AddMinutes(10));
 
     private readonly IBookingRepository _bookings = Substitute.For<IBookingRepository>();
+    private readonly IBookingStatusHistoryRepository _statusHistory = Substitute.For<IBookingStatusHistoryRepository>();
     private readonly ITripServiceClient _tripClient = Substitute.For<ITripServiceClient>();
     private readonly IPaymentServiceClient _paymentClient = Substitute.For<IPaymentServiceClient>();
     private readonly IBookingService _bookingService = Substitute.For<IBookingService>();
@@ -61,12 +64,13 @@ public class CreateBookingCommandHandlerTests
 
     private CreateBookingCommandHandler BuildSut() => new(
         _bookings, _tripClient, _paymentClient, _bookingService, _voucherService, _outbox, _clock,
-        NullLogger<CreateBookingCommandHandler>.Instance);
+        NullLogger<CreateBookingCommandHandler>.Instance, _statusHistory);
 
     private static CreateBookingCommand BuildCommand(
         int seatCount = 1,
         string paymentMethod = "WALLET",
-        string? voucherCode = null) =>
+        string? voucherCode = null,
+        ShuttlePickupCommand? shuttlePickup = null) =>
         new(
             PassengerUserId: PassengerUserId,
             TripId: TripId,
@@ -75,10 +79,11 @@ public class CreateBookingCommandHandlerTests
             DropoffStationId: null,
             DropoffStopId: null,
             Seats: Enumerable.Range(1, seatCount)
-                .Select(i => new SeatRequest($"A{i:D2}", "Nguyen Van A", "0900000000", "012345678901"))
+                .Select(i => new SeatRequest($"A{i:D2}"))
                 .ToList(),
             VoucherCode: voucherCode,
-            PaymentMethod: paymentMethod);
+            PaymentMethod: paymentMethod,
+            ShuttlePickup: shuttlePickup);
 
     // -----------------------------------------------------------------------
     // Happy path — WALLET → CONFIRMED
@@ -88,7 +93,8 @@ public class CreateBookingCommandHandlerTests
     public async Task Handle_WalletPayment_HappyPath_ReturnsConfirmedBooking()
     {
         // Arrange
-        _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        var now = new DateTimeOffset(2026, 7, 11, 1, 2, 3, TimeSpan.Zero);
+        _clock.UtcNow.Returns(now);
         _tripClient.GetTripSnapshotAsync(TripId, default).ReturnsForAnyArgs(ValidTrip);
         _tripClient.LockSeatsAsync(default, default!, default, default!, default, default)
             .ReturnsForAnyArgs(new LockSeatsOutcome.Success(LockData));
@@ -116,6 +122,16 @@ public class CreateBookingCommandHandlerTests
                 Arg.Is<BookingEntity>(booking => booking.SeatLockToken == SeatLockToken),
                 Arg.Any<CancellationToken>());
 
+        await _statusHistory.Received(2).AddAsync(
+            Arg.Is<BookingStatusHistory>(history => history.BookingId == result.BookingId
+                && (history.Status == BookingStatus.PENDING_PAYMENT || history.Status == BookingStatus.CONFIRMED)
+                && history.OccurredAt == now
+                && history.Source == "CREATE_BOOKING"
+                && history.ActorUserId == PassengerUserId
+                && history.ReasonCode == null),
+            Arg.Any<CancellationToken>());
+        _ = _clock.Received(1).UtcNow;
+
         // Confirm outbox was enqueued exactly once
         await _outbox.Received(1)
             .EnqueueAsync(
@@ -129,6 +145,39 @@ public class CreateBookingCommandHandlerTests
             SeatLockToken,
             Arg.Any<Guid>(),
             Arg.Any<IReadOnlyList<PassengerSeatAssignment>>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_WalletPayment_WithSupportedShuttlePickup_PersistsActiveIntent()
+    {
+        _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        var supportedTrip = ValidTrip with
+        {
+            OriginStation = new TripStationSnapshot(StationId, "Ha Noi", true, 21.0285m, 105.8542m, true),
+        };
+        _tripClient.GetTripSnapshotAsync(TripId, default).ReturnsForAnyArgs(supportedTrip);
+        _tripClient.LockSeatsAsync(default, default!, default, default!, default, default)
+            .ReturnsForAnyArgs(new LockSeatsOutcome.Success(LockData));
+        _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<BookingEntity>());
+        _paymentClient.ChargeAsync(default!, default, default, default, default!, default!, default)
+            .ReturnsForAnyArgs(new ChargeOutcome.Success(new ChargeResult(PaymentId, "SUCCEEDED", null)));
+        _tripClient.BookSeatsAsync(default, default, default, default!, default)
+            .ReturnsForAnyArgs(true);
+
+        await BuildSut().Handle(BuildCommand(
+            shuttlePickup: new ShuttlePickupCommand("12 Nguyen Hue", 10.7731m, 106.7032m)), CancellationToken.None);
+
+        await _bookings.Received(1).AddAsync(
+            Arg.Is<BookingEntity>(booking => booking.ShuttleIntent != null
+                && booking.ShuttleIntent.IsActive
+                && booking.ShuttleIntent.PickupAddress == "12 Nguyen Hue"),
+            Arg.Any<CancellationToken>());
+        await _outbox.Received(1).EnqueueAsync(
+            "booking.booking.confirmed",
+            Arg.Is<string>(payload => payload.Contains("\"shuttlePickup\"", StringComparison.Ordinal)
+                && payload.Contains("\"tickets\"", StringComparison.Ordinal)),
             Arg.Any<CancellationToken>());
     }
 
@@ -152,6 +201,21 @@ public class CreateBookingCommandHandlerTests
         result.Errors.Should().ContainSingle(e =>
             e.ErrorCode == "BOOKING_MAX_SEATS_EXCEEDED"
             && (e.ErrorMessage.Contains("5 seats") || e.ErrorMessage.Contains("cannot exceed")));
+    }
+
+    [Fact]
+    public void Validator_DuplicateSeatsAfterTrimAndCaseFold_ReturnsValidationFailure()
+    {
+        var command = BuildCommand() with
+        {
+            Seats = [new SeatRequest(" A01 "), new SeatRequest("a01")],
+        };
+
+        var result = new CreateBookingCommandValidator().Validate(command);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(error =>
+            string.Equals(error.PropertyName, "seats", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -226,7 +290,8 @@ public class CreateBookingCommandHandlerTests
             voucherService,
             outbox,
             clock,
-            NullLogger<CreateBookingCommandHandler>.Instance);
+            NullLogger<CreateBookingCommandHandler>.Instance,
+            Substitute.For<IBookingStatusHistoryRepository>());
         var command = BuildCommand(seatCount: 1, paymentMethod: "WALLET");
 
         // Act: two passenger attempts race for the same trip/seat.
@@ -306,8 +371,8 @@ public class CreateBookingCommandHandlerTests
         var handler = BuildSut();
         var act = () => handler.Handle(BuildCommand(), CancellationToken.None);
 
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*Payment transport error*");
+        await act.Should().ThrowAsync<VietRide.Booking.Application.Exceptions.BookingPaymentException>()
+            .Where(e => e.StatusCode == 502 && e.ErrorCode == "PAYMENT_VNPAY_ERROR");
 
         // Compensation: release-seats must have been called
         await _bookingService.Received(1)

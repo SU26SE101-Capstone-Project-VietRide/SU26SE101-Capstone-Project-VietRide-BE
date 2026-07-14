@@ -21,14 +21,12 @@ public sealed record CreateBookingCommand(
 
     IReadOnlyList<SeatRequest> Seats,
     string? VoucherCode,
-    string PaymentMethod) : IRequest<CreateBookingResult>;
+    string PaymentMethod,
+    ShuttlePickupCommand? ShuttlePickup = null) : IRequest<CreateBookingResult>;
+
+public sealed record ShuttlePickupCommand(string Address, decimal Latitude, decimal Longitude);
 
 /// <summary>
-/// Per-seat booking request. PII (fullName, phoneNumber, idNumber) is validated
-/// but NOT persisted (schema.sql line 149 — passengers is operational-only).
+/// Per-seat operational booking request. Passenger PII is intentionally not collected.
 /// </summary>
-public sealed record SeatRequest(
-    string SeatNumber,
-    string FullName,
-    string PhoneNumber,
-    string IdNumber);
+public sealed record SeatRequest(string SeatNumber);

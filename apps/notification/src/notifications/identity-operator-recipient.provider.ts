@@ -13,6 +13,7 @@ import type { OperatorRecipientProvider } from './operator-recipient.provider';
 
 const OperatorRecipientResponseSchema = z.array(z.string().uuid());
 const INTERNAL_JWT_CLOCK_SKEW_SECONDS = 5;
+const IDENTITY_LOOKUP_TIMEOUT_MS = 5_000;
 
 @Injectable()
 export class IdentityOperatorRecipientProvider implements OperatorRecipientProvider {
@@ -30,6 +31,7 @@ export class IdentityOperatorRecipientProvider implements OperatorRecipientProvi
       headers: {
         [INTERNAL_AUTH_HEADER]: `Bearer ${token}`,
       },
+      signal: AbortSignal.timeout(IDENTITY_LOOKUP_TIMEOUT_MS),
     });
 
     if (response.status === 401) {
@@ -40,7 +42,10 @@ export class IdentityOperatorRecipientProvider implements OperatorRecipientProvi
     }
 
     if (!response.ok) {
-      this.logger.warn({ operatorId, statusCode: response.status }, 'Identity operator-recipient lookup failed');
+      this.logger.warn(
+        { operatorId, statusCode: response.status },
+        'Identity operator-recipient lookup failed',
+      );
       throw new Error(`IDENTITY_OPERATOR_RECIPIENT_LOOKUP_FAILED_${response.status}`);
     }
 
@@ -54,7 +59,7 @@ export class IdentityOperatorRecipientProvider implements OperatorRecipientProvi
     );
     const response = await fetch(url, {
       headers: { [INTERNAL_AUTH_HEADER]: `Bearer ${await this.signInternalJwt()}` },
-      signal: AbortSignal.timeout(5_000),
+      signal: AbortSignal.timeout(IDENTITY_LOOKUP_TIMEOUT_MS),
     });
     if (response.status === 401) {
       throw new UnauthorizedException({
@@ -63,7 +68,10 @@ export class IdentityOperatorRecipientProvider implements OperatorRecipientProvi
       });
     }
     if (!response.ok) {
-      this.logger.warn({ operatorId, statusCode: response.status }, 'Identity operator crew lookup failed');
+      this.logger.warn(
+        { operatorId, statusCode: response.status },
+        'Identity operator crew lookup failed',
+      );
       throw new Error(`IDENTITY_OPERATOR_CREW_LOOKUP_FAILED_${response.status}`);
     }
     return OperatorRecipientResponseSchema.parse(await response.json());

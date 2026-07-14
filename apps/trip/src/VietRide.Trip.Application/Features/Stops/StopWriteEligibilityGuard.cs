@@ -17,12 +17,53 @@ internal static class StopWriteEligibilityGuard
         }
 
         if (eligibility.FailureStatusCode == 403)
+            throw new ForbiddenException(
+                eligibility.ErrorCode ?? "FORBIDDEN",
+                eligibility.Message ?? "Operator is not allowed to write Trip stops.");
+
+        if (eligibility.FailureStatusCode == 402)
         {
-            throw new ForbiddenException("FORBIDDEN", eligibility.Message ?? "Operator is not allowed to write Trip stops.");
+            throw new TripSubscriptionWriteBlockedException(
+                eligibility.FailureStatusCode.Value,
+                eligibility.ErrorCode ?? "FORBIDDEN",
+                eligibility.Message ?? "Operator is not allowed to write Trip stops.");
         }
+
+        if (eligibility.FailureStatusCode == 409)
+            throw new CodedConflictException(
+                eligibility.ErrorCode ?? "CONFLICT",
+                eligibility.Message ?? "Operator write is blocked.");
 
         throw new ValidationException(
             eligibility.Message ?? "Operator logical FK validation failed.",
             [new ValidationError("operatorId", eligibility.Message ?? "Operator logical FK validation failed.")]);
+    }
+
+    public static async Task ValidateOperatorSubscriptionCanWriteAsync(
+        IIdentityInternalClient identityInternalClient,
+        Guid operatorId,
+        bool requireShuttleModule,
+        CancellationToken cancellationToken)
+    {
+        var eligibility = await identityInternalClient.ValidateOperatorSubscriptionCanWriteAsync(
+            operatorId,
+            requireShuttleModule,
+            cancellationToken) ?? OperatorWriteEligibilityValidation.Allowed();
+        if (eligibility.IsAllowed)
+            return;
+
+        if (eligibility.FailureStatusCode is 402 or 403)
+            throw new TripSubscriptionWriteBlockedException(
+                eligibility.FailureStatusCode.Value,
+                eligibility.ErrorCode ?? "FORBIDDEN",
+                eligibility.Message ?? "Operator subscription blocks this write.");
+        if (eligibility.FailureStatusCode == 409)
+            throw new CodedConflictException(
+                eligibility.ErrorCode ?? "CONFLICT",
+                eligibility.Message ?? "Operator subscription payment is pending.");
+
+        throw new ValidationException(
+            eligibility.Message ?? "Operator subscription validation failed.",
+            [new ValidationError("operatorId", eligibility.Message ?? "Operator subscription validation failed.")]);
     }
 }

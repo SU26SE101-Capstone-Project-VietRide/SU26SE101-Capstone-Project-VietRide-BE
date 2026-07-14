@@ -94,6 +94,46 @@ public sealed class SubscriptionPlan : BaseEntity<Guid>, IActivatable
 
     public void Deactivate() => IsActive = false;
 
+    public void Update(
+        string name,
+        string? description,
+        Money pricePerMonth,
+        Money pricePerYear,
+        int maxVehicles,
+        int maxDrivers,
+        int maxAssistants,
+        int maxOperatorUsers,
+        int maxRoutes,
+        int maxTripsPerMonth,
+        bool enableParcel,
+        bool enableShuttle,
+        bool enableRag,
+        bool isActive)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        EnsureNonNegative(maxVehicles, nameof(maxVehicles));
+        EnsureNonNegative(maxDrivers, nameof(maxDrivers));
+        EnsureNonNegative(maxAssistants, nameof(maxAssistants));
+        EnsureNonNegative(maxOperatorUsers, nameof(maxOperatorUsers));
+        EnsureNonNegative(maxRoutes, nameof(maxRoutes));
+        EnsureNonNegative(maxTripsPerMonth, nameof(maxTripsPerMonth));
+
+        Name = name.Trim();
+        Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim();
+        PricePerMonth = pricePerMonth;
+        PricePerYear = pricePerYear;
+        MaxVehicles = maxVehicles;
+        MaxDrivers = maxDrivers;
+        MaxAssistants = maxAssistants;
+        MaxOperatorUsers = maxOperatorUsers;
+        MaxRoutes = maxRoutes;
+        MaxTripsPerMonth = maxTripsPerMonth;
+        EnableParcel = enableParcel;
+        EnableShuttle = enableShuttle;
+        EnableRag = enableRag;
+        IsActive = isActive;
+    }
+
     private static void EnsureNonNegative(int value, string parameterName)
     {
         if (value < 0)

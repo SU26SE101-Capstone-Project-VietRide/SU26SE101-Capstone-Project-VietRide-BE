@@ -19,7 +19,7 @@ public sealed class HandleTripStartedCommandHandler
     {
         var updated = await _parcelRepository.TryBulkSetInTransitByTripIdAsync(
             command.TripId,
-            DateTimeOffset.UtcNow,
+            command.ActualDepartureTime,
             cancellationToken);
 
         return updated.Count;

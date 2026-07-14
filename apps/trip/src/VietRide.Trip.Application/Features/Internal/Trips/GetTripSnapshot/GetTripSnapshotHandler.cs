@@ -10,6 +10,7 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
 {
     private readonly IRouteRepository routeRepository;
     private readonly IStationRepository stationRepository;
+    private readonly IStopRepository stopRepository;
     private readonly ITripRepository tripRepository;
     private readonly ITripSeatRepository tripSeatRepository;
     private readonly ITripStopFareRepository tripStopFareRepository;
@@ -19,6 +20,7 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
         ITripRepository tripRepository,
         IRouteRepository routeRepository,
         IStationRepository stationRepository,
+        IStopRepository stopRepository,
         ITripSeatRepository tripSeatRepository,
         ITripStopRepository tripStopRepository,
         ITripStopFareRepository tripStopFareRepository)
@@ -26,6 +28,7 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
         this.tripRepository = tripRepository;
         this.routeRepository = routeRepository;
         this.stationRepository = stationRepository;
+        this.stopRepository = stopRepository;
         this.tripSeatRepository = tripSeatRepository;
         this.tripStopRepository = tripStopRepository;
         this.tripStopFareRepository = tripStopFareRepository;
@@ -42,10 +45,15 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
         var fares = tripStopFareRepository.QueryNoTracking()
             .Where(fare => fare.TripId == trip.Id)
             .ToDictionary(fare => fare.StopId, fare => fare.FareFromThisStop.Amount);
-        var stops = tripStopRepository.QueryNoTracking()
+        var tripStops = tripStopRepository.QueryNoTracking()
             .Where(stop => stop.TripId == trip.Id)
             .OrderBy(stop => stop.OrderIndex)
-            .ToArray()
+            .ToArray();
+        var stopIds = tripStops.Select(stop => stop.StopId).ToArray();
+        var activeStops = stopRepository.QueryNoTracking()
+            .Where(stop => stopIds.Contains(stop.Id))
+            .ToDictionary(stop => stop.Id, stop => stop.IsActive && stop.DeletedAt == null);
+        var stops = tripStops
             .Select(stop => new InternalTripStopSnapshotDto(
                 stop.StopId,
                 stop.OrderIndex,
@@ -55,7 +63,8 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
                 stop.DistanceFromOriginKm.HasValue ? (double)stop.DistanceFromOriginKm.Value : null,
                 fares.TryGetValue(stop.StopId, out var fare) ? fare : null,
                 stop.Status.ToString(),
-                stop.ActualArrivalTime))
+                stop.ActualArrivalTime,
+                activeStops.GetValueOrDefault(stop.StopId)))
             .ToArray();
         var seats = tripSeatRepository.QueryNoTracking().Where(seat => seat.TripId == trip.Id).ToArray();
 
@@ -68,8 +77,20 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
             trip.DepartureDateTime,
             trip.EstimatedArrivalTime,
             trip.BaseFare.Amount,
-            new InternalTripStationSnapshotDto(originStation.Id, originStation.Name),
-            new InternalTripStationSnapshotDto(destinationStation.Id, destinationStation.Name),
+            new InternalTripStationSnapshotDto(
+                originStation.Id,
+                originStation.Name,
+                originStation.SupportsShuttle,
+                originStation.Latitude,
+                originStation.Longitude,
+                originStation.IsActive),
+            new InternalTripStationSnapshotDto(
+                destinationStation.Id,
+                destinationStation.Name,
+                destinationStation.SupportsShuttle,
+                destinationStation.Latitude,
+                destinationStation.Longitude,
+                destinationStation.IsActive),
             stops,
             new InternalTripSeatSummaryDto(seats.Length, seats.Count(seat => seat.Status == TripSeatStatus.AVAILABLE)),
             route.ReturnRouteId,

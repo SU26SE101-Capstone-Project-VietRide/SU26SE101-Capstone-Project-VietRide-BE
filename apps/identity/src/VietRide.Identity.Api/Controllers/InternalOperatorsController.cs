@@ -7,6 +7,7 @@ using VietRide.Identity.Application.Features.Internal.Operators.GetInternalOpera
 using VietRide.Identity.Application.Features.Internal.Operators.GetOperatorCrewUserIds;
 using VietRide.Identity.Application.Features.Internal.Operators.GetOperatorRecipientUsers;
 using VietRide.Identity.Application.Features.Internal.Operators.IncrementOperatorUsage;
+using VietRide.Identity.Application.Features.Internal.Operators.QuotaAllocations;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Authentication;
 
@@ -89,5 +90,16 @@ public sealed class InternalOperatorsController : ControllerBase
             cancellationToken);
 
         return Ok(result);
+    }
+
+    [HttpPost("{operatorId:guid}/quota-allocations")]
+    public async Task<ActionResult<QuotaAllocationDto>> ClaimQuotaAsync(Guid operatorId, [FromBody] QuotaAllocationRequest request, CancellationToken cancellationToken)
+        => StatusCode(StatusCodes.Status201Created, await _mediator.Send(new ClaimQuotaAllocationCommand(operatorId, request.Resource, request.ResourceId, request.PeriodKey), cancellationToken));
+
+    [HttpPost("{operatorId:guid}/quota-allocations/{allocationId:guid}/release")]
+    public async Task<IActionResult> ReleaseQuotaAsync(Guid operatorId, Guid allocationId, CancellationToken cancellationToken)
+    {
+        await _mediator.Send(new ReleaseQuotaAllocationCommand(operatorId, allocationId), cancellationToken);
+        return Ok();
     }
 }

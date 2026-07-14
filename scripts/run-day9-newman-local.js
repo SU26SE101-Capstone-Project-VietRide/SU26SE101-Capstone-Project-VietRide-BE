@@ -29,6 +29,8 @@ const seed = {
   routeId: '50000000-0000-0000-0000-000000000009',
   crossOperatorVehicleId: '60000000-0000-0000-0000-000000000009',
   standardVehicleTypeId: '00000000-0000-0000-0000-000000000101',
+  subscriptionPlanId: '00000000-0000-0000-0000-000000000109',
+  subscriptionId: '90000000-0000-0000-0000-000000000009',
   unknownVehicleTypeId: '00000000-0000-0000-0000-000000009999',
   driverUserId: '70000000-0000-0000-0000-000000000009',
   assistantUserId: '70000000-0000-0000-0000-000000000019',
@@ -148,6 +150,45 @@ on conflict (id) do update set
   status = excluded.status,
   operator_id = excluded.operator_id,
   deleted_at = null,
+  updated_at = now();
+
+insert into ${identitySchema}.subscription_plans (
+  id, name, description, price_per_month, price_per_year, max_vehicles, max_drivers,
+  max_assistants, max_operator_users, max_routes, max_trips_per_month, enable_shuttle, is_active
+)
+values (
+  '${seed.subscriptionPlanId}', 'Day 9 deterministic local plan', 'Harness-only quota fixture',
+  0, 0, 100, 100, 100, 100, 100, 100, true, true
+)
+on conflict (id) do update set
+  name = excluded.name,
+  description = excluded.description,
+  max_vehicles = excluded.max_vehicles,
+  max_drivers = excluded.max_drivers,
+  max_assistants = excluded.max_assistants,
+  max_operator_users = excluded.max_operator_users,
+  max_routes = excluded.max_routes,
+  max_trips_per_month = excluded.max_trips_per_month,
+  enable_shuttle = true,
+  is_active = true,
+  updated_at = now();
+
+insert into ${identitySchema}.operator_subscriptions (
+  id, operator_id, plan_id, status, started_at, expires_at
+)
+values (
+  '${seed.subscriptionId}', '${seed.approvedOperatorId}', '${seed.subscriptionPlanId}',
+  'ACTIVE'::subscription_status, now() - interval '1 day', now() + interval '30 days'
+)
+on conflict (operator_id) do update set
+  id = excluded.id,
+  plan_id = excluded.plan_id,
+  status = excluded.status,
+  started_at = excluded.started_at,
+  expires_at = excluded.expires_at,
+  current_vehicles = 0,
+  current_routes = 0,
+  current_trips_this_month = 0,
   updated_at = now();
 
 commit;

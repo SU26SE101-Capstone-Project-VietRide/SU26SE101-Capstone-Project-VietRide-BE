@@ -12,6 +12,12 @@ public interface IIdentityInternalClient
         Guid operatorId,
         CancellationToken cancellationToken = default);
 
+    Task<OperatorWriteEligibilityValidation> ValidateOperatorSubscriptionCanWriteAsync(
+        Guid operatorId,
+        bool requireShuttleModule,
+        CancellationToken cancellationToken = default)
+        => ValidateOperatorCanWriteAsync(operatorId, cancellationToken);
+
     Task<IdentityUserLookupResult> GetUserAsync(
         Guid userId,
         CancellationToken cancellationToken = default);
@@ -25,6 +31,7 @@ public interface IIdentityInternalClient
         Guid operatorId,
         CancellationToken cancellationToken = default) =>
         Task.FromResult(IdentityOperatorLookupResult.ValidationFailure("Identity operator lookup is not implemented."));
+
 }
 
 /// <summary>
@@ -63,6 +70,7 @@ public sealed record IdentityUserLookupResult(
     Guid? OperatorId,
     string? Status)
 {
+    public string? Phone { get; init; }
     public static IdentityUserLookupResult Success(Guid id, string? displayName, string? avatarUrl, string role, Guid? operatorId, string status)
     {
         return new IdentityUserLookupResult(true, null, null, null, id, displayName, avatarUrl, role, operatorId, status);
@@ -126,4 +134,16 @@ public sealed record IdentityOperatorLookupResult(
         message,
         null,
         null);
+}
+
+public interface ISubscriptionQuotaClient
+{
+    Task<QuotaAllocationResult> ClaimQuotaAllocationAsync(Guid operatorId, string resource, Guid resourceId, string? periodKey, CancellationToken cancellationToken = default);
+    Task ReleaseQuotaAllocationAsync(Guid operatorId, Guid allocationId, CancellationToken cancellationToken = default);
+}
+
+public sealed record QuotaAllocationResult(bool IsAllowed, Guid? AllocationId, int? FailureStatusCode, string? ErrorCode, string? Message)
+{
+    public static QuotaAllocationResult Allowed(Guid allocationId) => new(true, allocationId, null, null, null);
+    public static QuotaAllocationResult Rejected(int statusCode, string errorCode, string message) => new(false, null, statusCode, errorCode, message);
 }

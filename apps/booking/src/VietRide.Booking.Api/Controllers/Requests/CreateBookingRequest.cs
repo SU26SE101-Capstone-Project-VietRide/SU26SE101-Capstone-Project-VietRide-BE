@@ -12,6 +12,7 @@ public sealed class CreateBookingRequest
 
     public PickupRequest? Pickup { get; init; }
     public DropoffRequest? Dropoff { get; init; }
+    public ShuttlePickupRequest? ShuttlePickup { get; init; }
 
     public IReadOnlyList<SeatBookingRequest> Seats { get; init; } = [];
 
@@ -20,6 +21,13 @@ public sealed class CreateBookingRequest
 
     /// <summary>WALLET or VNPAY.</summary>
     public string PaymentMethod { get; init; } = string.Empty;
+}
+
+public sealed class ShuttlePickupRequest
+{
+    public string Address { get; init; } = string.Empty;
+    public decimal Latitude { get; init; }
+    public decimal Longitude { get; init; }
 }
 
 /// <summary>
@@ -47,21 +55,9 @@ public sealed class DropoffRequest
 }
 
 /// <summary>
-/// Per-seat booking request. PII (fullName, phoneNumber, idNumber) is validated but
-/// NOT persisted (schema.sql line 149 — passengers is operational-only).
+/// Per-seat booking request. Passenger records are operational-only and contain no PII.
 /// </summary>
 public sealed class SeatBookingRequest
 {
     public string SeatNumber { get; init; } = string.Empty;
-    public PassengerPiiRequest Passenger { get; init; } = new();
-}
-
-/// <summary>
-/// Passenger PII — validated at application layer then discarded.
-/// </summary>
-public sealed class PassengerPiiRequest
-{
-    public string FullName { get; init; } = string.Empty;
-    public string PhoneNumber { get; init; } = string.Empty;
-    public string IdNumber { get; init; } = string.Empty;
 }

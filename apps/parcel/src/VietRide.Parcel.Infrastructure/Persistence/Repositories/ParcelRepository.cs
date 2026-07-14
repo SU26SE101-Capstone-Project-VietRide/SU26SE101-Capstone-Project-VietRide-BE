@@ -563,7 +563,10 @@ internal sealed class ParcelRepository : IParcelRepository
         return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
     }
 
-    public async Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkSetInTransitByTripIdAsync(Guid tripId, DateTimeOffset now, CancellationToken ct)
+    public async Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkSetInTransitByTripIdAsync(
+        Guid tripId,
+        DateTimeOffset actualDepartureTime,
+        CancellationToken ct)
     {
         return await ExecuteBulkReturningAsync(
             """
@@ -579,7 +582,7 @@ internal sealed class ParcelRepository : IParcelRepository
                 AddParameter(command, "target_status", ParcelStatus.IN_TRANSIT.ToString());
                 AddParameter(command, "source_status", ParcelStatus.LOADED.ToString());
                 AddParameter(command, "trip_id", tripId);
-                AddParameter(command, "now", now);
+                AddParameter(command, "now", actualDepartureTime.ToUniversalTime());
             },
             ct);
     }

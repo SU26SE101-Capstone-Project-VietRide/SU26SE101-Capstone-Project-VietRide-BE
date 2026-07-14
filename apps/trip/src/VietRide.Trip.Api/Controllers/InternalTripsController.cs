@@ -7,6 +7,7 @@ using VietRide.Shared.Web.Authentication;
 using VietRide.Shared.Web.Middleware;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Api.Filters;
+using VietRide.Trip.Application.Features.Internal.Trips.BookRoundTripSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.BookSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.Cargo;
 using VietRide.Trip.Application.Features.Internal.Trips.GetTripSnapshot;
@@ -142,6 +143,18 @@ public sealed class InternalTripsController : ControllerBase
         CancellationToken cancellationToken)
     {
         await mediator.Send(new ReleaseSeatsCommand(tripId, request.SeatLockToken, request.SeatNumbers), cancellationToken);
+        return NoContent();
+    }
+
+    [HttpPost("round-trip/book-seats")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> BookRoundTripSeatsAsync(
+        [FromBody] BookRoundTripSeatsRequest request, CancellationToken cancellationToken)
+    {
+        static BookRoundTripSeatsLeg Map(BookRoundTripSeatsLegRequest leg)
+            => new(leg.TripId, leg.SeatLockToken, leg.BookingId, leg.PassengerSeatAssignments);
+        await mediator.Send(new BookRoundTripSeatsCommand(Map(request.Outbound), Map(request.Return)), cancellationToken);
         return NoContent();
     }
 

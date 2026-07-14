@@ -22,7 +22,7 @@ describe('FcmPushWorker pipeline (e2e)', () => {
   it('resolves device tokens, creates delivery audit, and sends through provider abstraction', async () => {
     const repository = {
       findById: jest.fn(async () => createNotification()),
-      listDeliveriesByNotificationId: jest.fn(async () => []),
+      listDeliveriesByNotificationId: jest.fn(async () => [createDelivery()]),
       createDelivery: jest.fn(async () => createDelivery()),
       markDeliverySent: jest.fn(),
     };
@@ -60,7 +60,10 @@ describe('FcmPushWorker pipeline (e2e)', () => {
         title: 'Dat ve thanh cong',
       }),
     );
-    expect(repository.markDeliverySent).toHaveBeenCalledWith(DELIVERY_ID);
+    expect(repository.markDeliverySent).toHaveBeenCalledWith(
+      DELIVERY_ID,
+      'firebase-e2e-message-id',
+    );
 
     await moduleRef.close();
   });
@@ -100,6 +103,7 @@ function createDelivery(): NotificationDelivery {
     retryCount: 0,
     lastError: null,
     sentAt: null,
+    providerMessageId: null,
     createdAt: new Date('2026-06-01T10:00:00.000Z'),
     updatedAt: new Date('2026-06-01T10:00:00.000Z'),
   };
@@ -123,6 +127,9 @@ function createEnv(): Env {
     DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/vietride_notification',
     LOG_LEVEL: 'info',
     IDENTITY_INTERNAL_BASE_URL: 'http://identity.test',
+    TRIP_INTERNAL_BASE_URL: 'http://trip.test',
+    FCM_DRY_RUN: false,
+    FCM_DRY_RUN_TOPIC: 'vietride-notification-e2e',
     SENDGRID_API_KEY: undefined,
     SENDGRID_FROM_EMAIL: undefined,
     SENDGRID_FROM_NAME: 'VietRide',

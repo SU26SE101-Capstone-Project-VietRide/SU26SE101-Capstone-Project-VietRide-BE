@@ -4,6 +4,7 @@ using StackExchange.Redis;
 using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Http.Resilience;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Messaging.DependencyInjection;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Jobs;
 using VietRide.Trip.Application.Abstractions.Repositories;
@@ -11,9 +12,11 @@ using VietRide.Trip.Application.Abstractions.SeatLock;
 using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Infrastructure.ExternalClients;
 using VietRide.Trip.Infrastructure.Jobs;
+using VietRide.Trip.Infrastructure.Messaging;
 using VietRide.Trip.Infrastructure.Persistence.Repositories;
 using VietRide.Trip.Infrastructure.SeatLock;
 using VietRide.Trip.Infrastructure.SeatLocks;
+using VietRide.Trip.Infrastructure.Services;
 
 namespace VietRide.Trip.Infrastructure.DependencyInjection;
 
@@ -41,18 +44,33 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IVehicleRepository, VehicleRepository>();
         services.AddScoped<IDriverScheduleRepository, DriverScheduleRepository>();
         services.AddScoped<ITripRepository, TripRepository>();
+        services.AddScoped<ITripAuditLogRepository, TripAuditLogRepository>();
         services.AddScoped<IRoundTripSeatLockStore, RedisRoundTripSeatLockStore>();
         services.AddScoped<ITripSeatRepository, TripSeatRepository>();
         services.AddScoped<ITripStopRepository, TripStopRepository>();
         services.AddScoped<ITripStopFareRepository, TripStopFareRepository>();
         services.AddScoped<ITripGenerationSkipLogRepository, TripGenerationSkipLogRepository>();
         services.AddScoped<ITripGenerationJobScheduler, HangfireTripGenerationJobScheduler>();
-
-        var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
-            ?? Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
-        if (!string.Equals(environment, "Testing", StringComparison.OrdinalIgnoreCase))
+        services.AddScoped<IShuttleDispatchService, ShuttleDispatchService>();
+        services.AddScoped<ShuttleDispatchSafetyJob>();
+        services.AddScoped<AutoBoardingJob>();
+        services.AddScoped<AutoStartFallbackJob>();
+        services.AddScoped<AutoCompletedFallbackJob>();
+        if (AreBackgroundWorkersEnabled(configuration))
         {
+            services.AddVietRideEventConsumer<BookingShuttleConfirmedIntegrationEvent, BookingShuttleConfirmedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "trip.booking-shuttle-confirmed";
+                options.BindingKeys = [BookingShuttleConfirmedIntegrationEvent.EventType];
+            });
+            services.AddVietRideEventConsumer<BookingShuttleCancelledIntegrationEvent, BookingShuttleCancelledIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "trip.booking-shuttle-cancelled";
+                options.BindingKeys = [BookingShuttleCancelledIntegrationEvent.EventType];
+            });
             services.AddHostedService<TripGenerationRecurringJobRegistrationHostedService>();
+            services.AddHostedService<ShuttleDispatchSafetyJobRegistrationHostedService>();
+            services.AddHostedService<TripLifecycleJobRegistrationHostedService>();
         }
 
         var redisUrl = configuration["REDIS_URL"]
@@ -88,6 +106,15 @@ public static class InfrastructureServiceCollectionExtensions
             .AddHttpMessageHandler<InternalJwtDelegatingHandler>()
             .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
             .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
+        services.AddScoped<ISubscriptionQuotaClient>(serviceProvider =>
+            (ISubscriptionQuotaClient)serviceProvider.GetRequiredService<IIdentityInternalClient>());
+        services.AddHttpClient<IBookingImpactClient, BookingImpactClient>(client =>
+            {
+                client.BaseAddress = new Uri(configuration["BOOKING_BASE_URL"] ?? "http://booking:5003", UriKind.Absolute);
+                client.Timeout = TimeSpan.FromSeconds(5);
+            })
+            .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
+            .AddHttpMessageHandler<InternalJwtDelegatingHandler>();
 
         return services;
     }
@@ -106,5 +133,8 @@ public static class InfrastructureServiceCollectionExtensions
 
         return baseUrl;
     }
+
+    private static bool AreBackgroundWorkersEnabled(IConfiguration configuration) =>
+        configuration.GetValue<bool?>("Trip:BackgroundWorkers:Enabled") ?? true;
 
 }

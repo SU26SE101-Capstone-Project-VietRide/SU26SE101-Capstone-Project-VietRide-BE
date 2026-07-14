@@ -57,25 +57,22 @@ public sealed class CreateRoundTripBookingCommandValidator : AbstractValidator<C
                 .WithErrorCode("BOOKING_MAX_SEATS_EXCEEDED")
                 .WithMessage("A booking cannot exceed 5 seats.");
 
+            RuleFor(x => x.Seats)
+                .Must(HaveDistinctSeatNumbers)
+                .When(x => x.Seats is { Count: > 0 })
+                .WithName("seats")
+                .WithMessage("Seat numbers must be unique.");
+
             RuleForEach(x => x.Seats).ChildRules(seat =>
             {
                 seat.RuleFor(s => s.SeatNumber)
                     .NotEmpty()
-                    .MaximumLength(10);
-
-                seat.RuleFor(s => s.FullName)
-                    .NotEmpty()
-                    .MaximumLength(100);
-
-                seat.RuleFor(s => s.PhoneNumber)
-                    .NotEmpty()
-                    .MaximumLength(20);
-
-                seat.RuleFor(s => s.IdNumber)
-                    .NotEmpty()
                     .MaximumLength(20);
             });
         }
+
+        private static bool HaveDistinctSeatNumbers(IReadOnlyList<CreateRoundTripBookingCommand.RoundTripSeatRequest> seats)
+            => seats.Select(seat => seat.SeatNumber.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Count() == seats.Count;
 
         private static int CountProvided(Guid? first, Guid? second)
             => (first.HasValue ? 1 : 0) + (second.HasValue ? 1 : 0);

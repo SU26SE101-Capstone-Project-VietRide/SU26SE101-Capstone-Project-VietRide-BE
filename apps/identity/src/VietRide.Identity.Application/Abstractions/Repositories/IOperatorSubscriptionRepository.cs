@@ -22,6 +22,12 @@ public interface IOperatorSubscriptionRepository : IRepository<OperatorSubscript
         CancellationToken cancellationToken = default)
         => Task.FromResult<(OperatorSubscription Subscription, SubscriptionPlan Plan)?>(null);
 
+    Task<bool> TryDecrementUsageAsync(
+        Guid operatorId,
+        SubscriptionUsageResource resource,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(false);
+
     Task<bool> TryCreateOperatorUserWithinLimitAsync(
         Guid operatorId,
         User user,

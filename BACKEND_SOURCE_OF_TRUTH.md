@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.22.0
+> **Phiên bản:** 1.29.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-06-22
+> **Cập nhật lần cuối:** 2026-07-14
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -888,7 +888,7 @@ Request
 **Exceptions (viết controller tay, KHÔNG proxy):**
 
 - `GET /health`, `GET /ready` — Gateway tự handle (check downstream service reachable optional)
-- VNPay IPN callback (`POST /v1/payments/vnpay-ipn`, `/v1/payments/vnpay-topup-ipn`) — public, signature verify ở Payment Service, Gateway chỉ forward (KHÔNG sign Internal JWT vì call này external)
+- VNPay IPN callback (`GET` canonical, temporary `POST` compatibility on `/v1/payments/vnpay-ipn` and `/v1/payments/vnpay-topup-ipn`) — public, signature verify ở Payment Service, Gateway chỉ forward (KHÔNG sign Internal JWT vì call này external)
 
 #### 3.4.3 Folder layout
 
@@ -1226,7 +1226,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
   "error": {
     "code": "AUTH_OTP_INVALID",               // §5.9 registry code (UPPER_SNAKE_CASE)
     "message": "Mã xác thực không đúng.",     // FE có thể dùng hoặc map từ code
-    "fields": [                               // chỉ với validation errors (422 + 400 model-binding)
+    "fields": [                               // chỉ với validation errors (422)
       { "field": "code", "message": "..." }
     ]
   },
@@ -1235,7 +1235,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 ```
 
 - `error.code` là **canonical UPPER_SNAKE_CASE** từ §5.9 registry — FE map UI message từ key này (thay thế `errorCode` của RFC 7807 cũ).
-- `error.fields[]` thay thế RFC 7807 `errors[]` — chỉ xuất hiện với validation errors (422) và model-binding failures (400).
+- `error.fields[]` thay thế RFC 7807 `errors[]` — chỉ xuất hiện với validation errors (422), bao gồm FluentValidation và model-binding failures (malformed JSON, missing non-nullable body field, type mismatch).
 - `error.message` có thể là tiếng Việt user-facing; FE thường thay bằng UI string từ `error.code`.
 - **KHÔNG dùng** `application/problem+json`, `type` URL, `title`, `instance`, `detail` (RFC 7807 fields) — đã loại bỏ.
 - **KHÔNG return** `200 OK` với `success: false` — HTTP status line luôn phản ánh lỗi thật (ADR 0004 Rule 2).
@@ -1264,6 +1264,8 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | 13 | `POST /v1/operator/voucher-consents/{id}/reject` | Booking |
 | 14 | `POST /v1/admin/vouchers` | Booking |
 | 15 | `POST /v1/operator/vouchers` | Booking |
+| 16 | `POST /v1/driver/trips/{tripId}/start` | Trip |
+| 17 | `POST /v1/driver/trips/{tripId}/complete` | Trip |
 
 **Implementation:**
 
@@ -1273,6 +1275,17 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
   - **Same body hash** → return cached response (HTTP code + body identical).
   - **Different body hash** → HTTP 422 `IDEMPOTENCY_KEY_MISMATCH`.
 - Key format: UUID v4 do client generate. Reuse key 1 lần là acceptable; nếu retry phải dùng cùng key.
+
+**Day-21 Trip lifecycle no-body mutations:** fingerprint = HTTP method + normalized route/path
+parameters including `tripId` + authenticated `sub` + canonical empty-body marker. Authenticated
+role is not a fingerprint component. Authentication and UUID-v4 key/`tripId`/empty-body
+validation may run before key reservation; those validation failures are not cached. A valid new
+key is atomically reserved as pending before command execution. Trip assignment authorization
+runs downstream in the handler, and middleware finalizes its response for replay. Same key + same
+fingerprint replays the exact original HTTP status/body after completion, or returns
+`409 IDEMPOTENCY_REQUEST_PENDING` while pending. The same key with a different fingerprint
+returns `422 IDEMPOTENCY_KEY_MISMATCH`. Reuse a key only for the same logical request; a new
+logical attempt requires a new UUID-v4 key.
 
 ### 5.7 Pagination — `PagedResult<T>` + `QueryOptions` (ADR 0004)
 
@@ -1348,6 +1361,15 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | | `BOOKING_NOT_FOR_THIS_TRIP` | 422 | QR scan booking hoặc boarding-tick passenger khác trip |
 | | `BOOKING_PASSENGER_ALREADY_BOARDED` | 409 | Tick lại passenger đã BOARDED |
 | | `BOOKING_ROUND_TRIP_INVALID` | 422 | Return trip không hợp lệ |
+| **Shuttle** | `SHUTTLE_STATION_NOT_SUPPORTED` | 422 | Shuttle intent không dùng origin Station hỗ trợ shuttle hoặc Station thiếu tọa độ |
+| | `SHUTTLE_REQUEST_CUTOFF_PASSED` | 409 | Tạo shuttle intent/dispatch tại hoặc sau hard cutoff T-30 |
+| | `SHUTTLE_PICKUP_LOCKED` | 409 | Edit pickup khi Booking còn shuttle intent active |
+| | `SHUTTLE_REQUEST_SET_CHANGED` | 409 | Booking subset đã đổi trạng thái trong lúc operator dispatch |
+| | `SHUTTLE_CAPACITY_EXCEEDED` | 409 | Tổng ticket của subset vượt sức chứa vehicle |
+| | `SHUTTLE_DRIVER_CONFLICT` | 409 | Driver overlap main Trip hoặc ShuttleTrip khác |
+| | `SHUTTLE_VEHICLE_CONFLICT` | 409 | Vehicle overlap main Trip hoặc ShuttleTrip khác |
+| | `DRIVER_NOT_FOUND` | 404 | Driver không active, không cùng operator hoặc thiếu snapshot liên hệ bắt buộc |
+| | `SHUTTLE_TRIP_NOT_FOUND` | 404 | ShuttleTrip không tồn tại |
 | **Voucher** | `VOUCHER_NOT_FOUND` | 404 | |
 | | `VOUCHER_EXPIRED` | 422 | validUntil < now |
 | | `VOUCHER_NOT_APPLICABLE` | 422 | Operator chưa consent (OPERATOR_FUNDED), hoặc route không match |
@@ -1361,13 +1383,14 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | | `CONSENT_ALREADY_REJECTED` | 409 | consent đã REJECTED, không thể reject lại (reject precond PENDING\|ACCEPTED — v7:674-683) |
 | **Payment** | `PAYMENT_INSUFFICIENT_WALLET` | 402 | Wallet balance < amount |
 | | `PAYMENT_VNPAY_ERROR` | 502 | VNPay trả lỗi (không 00) |
-| | `PAYMENT_TIMEOUT` | 408 | VNPay không callback trong 15 phút |
+| | `PAYMENT_TIMEOUT` | 408 | VNPay không callback trong 10 phút |
 | | `PAYMENT_ALREADY_PROCESSED` | 409 | Payment đã SUCCEEDED, callback duplicate |
 | | `PAYMENT_SIGNATURE_INVALID` | 401 | VNPay HMAC verify fail |
 | **Wallet** | `WALLET_INSUFFICIENT_BALANCE` | 402 | OperatorWallet/PassengerWallet không đủ |
 | | `WALLET_TOP_UP_FAILED` | 502 | TopUp VNPay failed |
 | | `WALLET_TOP_UP_AMOUNT_TOO_LOW` | 422 | < 10,000 VND |
 | **Trip** | `TRIP_NOT_FOUND` | 404 | |
+| | `TRIP_INVALID_TRANSITION` | 409 | Day-21 start/complete lifecycle precondition fails; do not introduce or use `INVALID_TRIP_STATUS` |
 | | `VEHICLE_NOT_FOUND` | 404 | Vehicle không tồn tại, đã soft-delete, hoặc không thuộc operator caller |
 | | `VEHICLE_TYPE_NOT_FOUND` | 404 | VehicleType không tồn tại hoặc không active |
 | | `TRIP_NOT_EDITABLE` | 409 | Status ≠ SCHEDULED |
@@ -1384,6 +1407,9 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | | `PARCEL_ADDITIONAL_PAYMENT_REQUIRED` | 402 | Cân lại > ước lượng |
 | | `PARCEL_REVIEW_TIMEOUT` | 409 | EXTRA_LARGE auto-reject 24h |
 | **Stop / Route** | `STOP_NOT_FOUND` | 404 | Day-7 Trip Stop handlers use coded 404 path |
+| | `STOP_REPLACEMENT_INVALID` | 422 | Replacement Stop missing, inactive, cross-operator, or self-reference |
+| | `STOP_REPLACEMENT_CYCLE` | 422 | Replacement chain would create a cycle |
+| | `STOP_DISABLED_BOOKING_AFFECTED` | 200 warning | Stop disabled; response includes active booking count |
 | | `STOP_REPLACEMENT_CYCLE` | 422 | replacedByStopId tạo cycle |
 | | `STOP_REPLACEMENT_DIFFERENT_OPERATOR` | 403 | Stop thay thế khác operator |
 | | `STOP_DISABLED_BOOKING_AFFECTED` | 200 (warning) | Alert khi disable Stop có booking active |
@@ -1425,8 +1451,12 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | **Generic** | `RESOURCE_NOT_FOUND` | 404 | Fallback |
 | | `FORBIDDEN` | 403 | RBAC reject |
 | | `RATE_LIMITED` | 429 | Vượt rate limit |
-| | `UPSTREAM_UNAVAILABLE` | 502 | Gateway không kết nối được downstream service |
+| | `UPSTREAM_UNAVAILABLE` | 502 | Downstream/inter-service dependency unavailable or returned an unusable/unexpected response (including Gateway connection failure) |
 | | `INTERNAL_ERROR` | 500 | Unhandled exception (Sentry capture) |
+
+> Day-21 carry-over: the only current out-of-scope `INVALID_TRIP_STATUS` usage is
+> `ArriveTripStopCommandHandler.cs:49`; Day-21 lifecycle code must use
+> `TRIP_INVALID_TRANSITION` and must not copy that stale code.
 
 ### 5.10 Data access pattern (Repository + optional Service)
 
@@ -1657,6 +1687,14 @@ public Task<IActionResult> CreateVehicle(...) { ... }
 
 Custom `OperatorTenantFilter` injected → filter query theo `operatorId` claim.
 
+Driver/Assistant trip reads use assignment scope rather than operator scope. In particular,
+`GET /v1/driver/trips/{tripId}/route` accepts `DRIVER`/`ASSISTANT` only and returns Route geometry
+only when JWT `sub` equals the Trip's `driver_user_id` or `assistant_user_id`; an existing
+unassigned Trip returns `403 FORBIDDEN`. The response exposes nullable precision-5
+`pathPolyline`, origin/destination Station coordinates, and ordered TripStop coordinates, with no
+PII or operator-management metadata. The existing `/v1/driver` Gateway prefix already owns this
+route; the operator Route endpoint remains role-isolated.
+
 **NestJS:**
 
 ```ts
@@ -1685,13 +1723,17 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 
 | Method + Path | Caller | Mục đích |
 |---|---|---|
-| `GET /internal/v1/users/{userId}` | All services | Internal-JWT-only raw user lookup `{ id, role, operatorId, status }` for HTTP validate logical FK. Errors use ADR 0004 envelope. Trip DriverSchedule create/activation uses it to require `driverUserId` role `DRIVER` under caller operator and nullable `assistantUserId` role `ASSISTANT` under caller operator; missing user, wrong role/operator, or upstream logical-FK validation failure maps to `422 VALIDATION_ERROR` at Trip write boundary. |
+| `GET /internal/v1/users/{userId}` | All services | Internal-JWT-only raw user lookup `{ id, displayName, avatarUrl, role, operatorId, status, phone }` for HTTP validate logical FK. Errors use ADR 0004 envelope. Trip DriverSchedule create/activation validates role/operator; Shuttle dispatch còn yêu cầu driver active có display name/phone và snapshot hai field này vào assignment event. |
+| `GET /internal/v1/users/by-phone?phone={normalizedE164}` | Booking | Internal-JWT-only exact non-deleted-user phone lookup for the operator booking-monitor filter. Caller URI-escapes a prevalidated canonical E.164 value; raw success is exactly `{ userId }`, no PII. No match is ADR 0004 `404 RESOURCE_NOT_FOUND`. Booking maps only that exact response to an empty result; all other failures map to `502 UPSTREAM_UNAVAILABLE`. |
 | `GET /internal/v1/users/by-email?email=` | Parcel | Lookup recipient user khi tạo parcel |
 | `GET /internal/v1/users/{userId}/device-tokens` | Notification | Lấy FCM tokens active để push |
 | `GET /internal/v1/operators/{operatorId}` | All services | Lookup operator info for logical FK validation (raw success DTO) |
 | `GET /internal/v1/operators/{operatorId}/subscription` | Booking, Trip, Parcel | Raw current subscription + plan limits/module flags + usage counters |
 | `POST /internal/v1/operators/{operatorId}/usage/increment` | Trip, Booking, Parcel | Body `{resource, delta}` where resource is `VEHICLES|DRIVERS|ASSISTANTS|OPERATOR_USERS|ROUTES|TRIPS_THIS_MONTH`; atomically increment usage counter without concurrent overshoot |
-| `GET /internal/v1/subscription-plans` | Admin Web (qua Gateway) | List gói SaaS |
+| `POST /internal/v1/operators/{operatorId}/quota-allocations` | Trip | Claim durable idempotent quota allocation by `{ resource, resourceId, periodKey? }`; no distributed transaction |
+| `POST /internal/v1/operators/{operatorId}/quota-allocations/{allocationId}/release` | Trip | Idempotently release an allocation after local persistence fails or its resource is soft-deleted |
+| `POST /internal/v1/payments/subscription` | Identity | Create/replay a VNPay subscription payment from a server-side upgrade snapshot |
+| `POST /internal/v1/payments/{paymentId}/expire-subscription` | Identity | Idempotently expire a pending subscription payment during the Identity-owned auto-revert job |
 
 #### Trip-Route-Vehicle Service
 
@@ -1759,7 +1801,7 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `identity.user.deleted` | Identity | Booking, Payment | `{ userId }` (soft delete cascade) |
 | `identity.operator.approved` | Identity | Payment (init OperatorWallet) | `{ operatorId, approvedAt }` |
 | `identity.operator.suspended` | Identity | Trip, Booking | `{ operatorId, suspendedAt }` |
-| `booking.booking.confirmed` | Booking | Notification, Payment (settle hold), Booking (BookingStats counter) | `{ bookingId, tripId, totalAmount, userId, voucherUsageId?, bookingCode?, ticketCodes?, ticketCount? }` |
+| `booking.booking.confirmed` | Booking | Notification, Payment (settle hold), Booking (BookingStats counter), Trip (shuttle fan-out) | `{ bookingId, tripId, totalAmount, userId, voucherUsageId?, bookingCode?, tickets?: [{ ticketId, passengerUserId? }], ticketCodes?, ticketCount?, shuttlePickup?: { address, latitude, longitude } }` |
 | `booking.booking.cancelled` | Booking | Notification, Trip (release seats), Payment (refund), Booking (BookingStats counter) | `{ bookingId, userId, refundAmount, refundOverride, cancellationReason, bookingCode?, ticketCodes?, ticketCount? }` |
 | `booking.booking.refunded` | Booking | Notification, Booking (BookingStats counter) | `{ bookingId, userId, amount, bookingCode?, ticketCodes?, ticketCount? }` |
 | `booking.voucher.consent_accepted` | Booking | Notification | `{ voucherId, operatorId }` |
@@ -1773,20 +1815,28 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `trip.trip.cancelled` | Trip | Booking, Parcel, Payment | `{ tripId, cancelledAt, cancelReason }` |
 | `trip.trip.route_changed` | Trip | Booking (create BookingPendingAction), Notification | `{ tripId, alternativeRouteId, affectedBookingIds }` |
 | `trip.trip.schedule_changed` | Trip | Booking, Notification | `{ tripId, oldDeparture, newDeparture, severity }` |
-| `trip.stop.disabled` | Trip | Booking, Notification | `{ stopId, replacedByStopId? }` |
+| `trip.stop.disabled` | Trip | Booking | `{ stopId, operatorId, replacedByStopId?, occurredAt }` |
+| `booking.stop_disabled.affected` | Booking | Notification | `{ stopId, replacedByStopId?, recipientUserIds[], affectedBookingCount, occurredAt }` |
 | `trip.stop.departed_with_pending` | Trip | Notification (Driver App boarding warning) | `{ eventId: Guid, occurredAt: DateTime (UTC), eventType: "trip.stop.departed_with_pending", tripId: Guid, stopId: Guid, stopName: string, pendingPassengerCount: int (> 0), driverUserId: Guid, assistantUserId: Guid?, departedAt: DateTimeOffset (UTC ISO-8601) }` |
 | `trip.trip.delayed` | Trip (Tracking publishes via Trip outbox proxy hoặc Tracking outbox) | Notification | `{ tripId, delayMinutes, etaNew }` |
 | `trip.incident.reported` | Trip | Notification | `{ incidentId, tripId, category, reporterUserId }` |
+| `trip.shuttle.assigned` | Trip | Notification | `{ shuttleTripId, mainTripId, bookingId, passengerUserId, ticketIds, pickupOrder, scheduledDepartureTime, scheduledEndTime, driver: { userId, displayName, phone }, vehicle: { id, licensePlate } }` |
+| `trip.shuttle.warning_issued` | Trip | Notification | `{ mainTripId, operatorId, alertType: WARNING_120|WARNING_60, pendingBookingCount, pendingPassengerCount, hardCutoffAt }` |
+| `trip.shuttle.unfulfilled` | Trip | Notification | `{ mainTripId, bookingId, passengerUserId, stationId, reason: AUTO_UNFULFILLED_CUTOFF }` |
 | `tracking.gps.off_route` | Tracking | Notification | `{ tripId, durationSeconds }` |
 | `tracking.gps.approaching_stop` | Tracking | Notification | `{ tripId, stopId, bookingIds, wave, etaMinutes }` |
-| `payment.payment.succeeded` | Payment | Booking, Parcel, Identity (subscription activate) | `{ paymentId, referenceType, referenceId, amount }` |
+| `payment.payment.succeeded` | Payment | Booking, Parcel | `{ paymentId, referenceType, referenceId, amount }` |
 | `payment.payment.failed` | Payment | Booking, Parcel | `{ paymentId, referenceType, referenceId, reason }` |
 | `payment.payment.expired` | Payment | Booking, Parcel | `{ paymentId, referenceType, referenceId }` |
 | `payment.wallet.credited` | Payment | Booking (mark REFUNDED), Parcel (mark REFUNDED), Notification | `{ userId, amount, referenceType, referenceId }` |
 | `payment.wallet.debited` | Payment | Notification | `{ userId, amount, referenceType, referenceId }` |
-| `payment.subscription.payment_pending_warn` | Payment | Notification | `{ operatorId, dueDate }` |
-| `payment.subscription.payment_auto_reverted` | Payment | Identity, Notification | `{ operatorId, previousPlanId }` |
-| `payment.subscription.payment_succeeded` | Payment | Identity (activate subscription) | `{ operatorId, planId, period }` |
+| `payment.subscription.payment_succeeded` | Payment | Identity | `{ eventId, paymentId, upgradeAttemptId, subscriptionId, operatorId, planId, billingPeriod, periodFrom, periodTo, amount, occurredAt }` |
+| `identity.subscription.usage_warning` | Identity | Notification | `{ subscriptionId, operatorId, resource, usage, limit, periodKey, occurredAt }` |
+| `identity.subscription.trial_expiring` | Identity | Notification | `{ subscriptionId, operatorId, expiresAt, daysRemaining, occurredAt }` |
+| `identity.subscription.expired` | Identity | Notification | `{ subscriptionId, operatorId, expiredAt, occurredAt }` |
+| `identity.subscription.payment_pending_warn` | Identity | Notification | `{ subscriptionId, operatorId, paymentId, dueAt, occurredAt }` |
+| `identity.subscription.payment_auto_reverted` | Identity | Notification | `{ subscriptionId, operatorId, previousPlanId, restoredPlanId, occurredAt }` |
+| `subscription.limit.trip_skipped` | Trip | Notification | `{ operatorId, driverScheduleId, skippedDate, periodKey, occurredAt }` |
 | `payment.invoice.issued` | Payment | Notification | `{ invoiceId, operatorId, amount, pdfUrl }` |
 | `payment.trip_settlement.completed` | Payment | Notification (operator) | `{ tripId, operatorId, netAmount }` |
 | `parcel.parcel.created` | Parcel | Notification, Trip (cargo counter reserve) | `{ parcelId, tripId, senderUserId, recipientUserId? }` |
@@ -1850,7 +1900,7 @@ After retry_count >= 10: alert Sentry, leave FAILED for manual handle
 | Scenario | Compensation |
 |---|---|
 | Payment fail in checkout | HTTP `POST /internal/v1/trips/{id}/release-seats` (sync) |
-| VNPay timeout 15 phút | Hangfire job (Booking Service) → release seats + Booking → EXPIRED |
+| VNPay timeout 10 phút | Hangfire job (Booking Service) → release seats + Booking → EXPIRED |
 | Refund event consume fail | `RefundFailureLog` + Hangfire retry max 5 lần · alert Admin sau exhausted |
 | Wallet credit fail | Same as above (RefundFailureLog) |
 
@@ -1863,6 +1913,8 @@ After retry_count >= 10: alert Sentry, leave FAILED for manual handle
   - Timeout: 5s per request.
 - Mỗi call kèm header `X-Internal-Auth` + `X-Request-Id` propagated.
 - **NestJS:** Axios typed client, same Polly equivalent qua `axios-retry` + circuit breaker `opossum`.
+
+**Day-19 Identity phone lookup boundary (Booking):** Booking validates and normalizes the public phone with `PhoneNumber.Normalize` before sending a URI-escaped canonical E.164 value. Retry remains limited to transient 5xx/network failures; 4xx is never retried. Only an Identity HTTP 404 whose ADR 0004 body has `error.code = RESOURCE_NOT_FOUND` is the expected no-match result. Caller-request cancellation propagates unchanged. Identity 401/403, every other or malformed 4xx response, 5xx after policy handling, timeout, circuit-open, transport, and response-deserialization failures are dependency failures and must become FE-facing HTTP 502 `UPSTREAM_UNAVAILABLE`; they must not be reported as caller authorization failures or empty results.
 
 ---
 
@@ -1879,19 +1931,53 @@ PENDING_PAYMENT ─┬─→ CONFIRMED ─┬─→ COMPLETED
                  │              ├─→ CANCELLED ─→ REFUNDED   (operator hoặc user hủy)
                  │              └─→ DISRUPTED ─→ REFUNDED   (Trip DISRUPTED, no substitution)
                  │
-                 └─→ EXPIRED   (VNPay timeout 15 phút — không refund)
+                 └─→ EXPIRED   (VNPay timeout 10 phút — không refund)
 ```
 
 **Triggers:**
 
 - `CONFIRMED`: Payment Service publish `payment.payment.succeeded` → Booking Service consume.
-- `EXPIRED`: Hangfire (Booking) sau 15 phút PENDING_PAYMENT.
+- `EXPIRED`: Hangfire sau 10 phút PENDING_PAYMENT.
 - `COMPLETED`: Booking Service consume `trip.trip.completed`.
+- Day-21 history source for this consumer is `COMPLETE_ON_TRIP_COMPLETED`; it appends `COMPLETED`
+  with null actor/reason in the same Booking-local transaction as the guarded status transition.
 - `NO_SHOW`: Tất cả `Passenger.boardingStatus = NO_SHOW`.
 - `PARTIAL_NO_SHOW`: Hangfire job — có cả BOARDED + NO_SHOW trong cùng booking sau Trip.actualDepartureTime + 15 phút.
 - `CANCELLED → REFUNDED`: Booking Service consume `payment.wallet.credited`.
 - `DISRUPTED`: Booking Service consume `trip.trip.disrupted { hasSubstitution: false }`.
 - `cancellationReason` enum: `USER_INITIATED | OPERATOR_CANCELLED_TRIP | OPERATOR_DISRUPTED_IN_PROGRESS | SCHEDULE_CHANGED | ROUTE_CHANGED_REFUSED | VEHICLE_SUBSTITUTION_DOWNGRADE | VEHICLE_SUBSTITUTION_NO_SEAT | STOP_DISABLED_REFUSED`.
+
+#### Authoritative Booking status timeline (Day 19)
+
+The operator booking-monitor timeline is sourced only from the append-only `booking_status_history` read model. This supersedes the Day-19 timeline wording “events from Outbox audit”: Outbox delivery time is not a domain-status occurrence time, and lifecycle timestamp columns must not be used to fabricate history.
+
+| Column | PostgreSQL type | Null | Constraint / meaning |
+|---|---|---|---|
+| `id` | `uuid` | no | Primary key. |
+| `booking_id` | `uuid` | no | Local FK to `bookings(id)` with `ON DELETE RESTRICT`. |
+| `status` | `booking_status` | no | Status reached by the successful creation/transition. |
+| `occurred_at` | `timestamptz` | no | Application-captured occurrence time. |
+| `reason_code` | `varchar(100)` | yes | Canonical machine-readable domain reason only. |
+| `actor_user_id` | `uuid` | yes | Logical FK to Identity User; deliberately no cross-database FK. |
+| `source` | `varchar(100)` | no | Required application-controlled source constant. |
+
+The required read index and deterministic timeline order are `(booking_id, occurred_at, id)` and `occurred_at ASC, id ASC`. History has insert/read surfaces only: no update/delete repository/API, no integration event, and no historical backfill for pre-migration bookings. Booking remains non-deletable; `ON DELETE RESTRICT` is nevertheless mandatory protection.
+
+Current writers and population rules are frozen as follows:
+
+| Source constant | Recorded status | Actor | Reason | Occurrence / transaction / guarded no-op |
+|---|---|---|---|---|
+| `CREATE_BOOKING` | `PENDING_PAYMENT` | authenticated passenger user id | null | Per writer rules below. |
+| `CREATE_ROUND_TRIP_BOOKING` | `PENDING_PAYMENT` for each created leg | authenticated passenger user id | null | Per writer rules below. |
+| `CONFIRM_ON_PAYMENT` | `CONFIRMED` | null | null | Per writer rules below. |
+| `EXPIRE_ON_PAYMENT` | `EXPIRED` | null | null | Per writer rules below. |
+| `CANCEL_BOOKING` | `CANCELLED` | authenticated passenger user id | exact existing `BookingCancellationReason` enum name | Per writer rules below. |
+| `MARK_REFUNDED` | `REFUNDED` | null | null | Per writer rules below. |
+| `COMPLETE_ON_TRIP_COMPLETED` | `COMPLETED` | null | null | `occurredAt=event.completedAt`; same Booking-local transaction as the guarded status transition; guarded no-op/replay appends no row. |
+
+Each writer captures `IClock.UtcNow` exactly once and reuses that value for the Booking creation/transition timestamp work and its history row; it never uses database-read time or Outbox publish time. A creation appends `PENDING_PAYMENT`, and every guarded successful transition appends exactly one row in the same local database transaction. A guarded no-op/replay appends no row. If the transaction rolls back, both state and history roll back atomically.
+
+Future status writers require SOT review and an explicitly approved `source` constant before implementation. Authenticated-human transitions record the caller user id; automated/system/event-driven transitions record null. `reason_code`, when applicable, must be an existing canonical domain reason code rather than free text.
 
 ### 8.2 TripStatus
 
@@ -1905,13 +1991,41 @@ SCHEDULED ─┬─→ BOARDING ─→ IN_PROGRESS ─┬─→ COMPLETED
 **Triggers:**
 
 - `BOARDING`: Hangfire (Trip) 30 phút trước `departureDateTime`.
-- `IN_PROGRESS`: Driver bấm "Start trip" (hoặc auto khi GPS detect departure).
-- `COMPLETED`: Driver bấm "End trip" hoặc Hangfire fallback sau ETA + 30 phút.
+- `IN_PROGRESS`: PRIMARY là Driver được gán bấm "Start trip" khi `BOARDING`; SECONDARY là
+  Hangfire recurring scan mỗi 5 phút, chỉ auto-start khi `departureDateTime < now - 30 phút`.
+  GPS không phải PRIMARY trigger và chỉ bắt đầu tracking sau `trip.trip.started`.
+- `COMPLETED`: PRIMARY là Driver/Assistant được gán bấm "End trip" khi `IN_PROGRESS`; SECONDARY là
+  Hangfire recurring scan mỗi 15 phút, chỉ auto-complete khi
+  `estimatedArrivalTime < now - 30 phút`.
 - `DISRUPTED`: 2 case — phân biệt qua presence của `BookingTransfer`:
   - Case 1: Vehicle Substitution → Trip_old DISRUPTED, BookingTransfer created, KHÔNG refund.
   - Case 2: Operator hủy IN_PROGRESS bất khả kháng → Trip DISRUPTED, KHÔNG BookingTransfer, auto-refund proportional theo `distanceFromOriginKm`.
 - `Trip.source` enum: `MANUAL | AUTO_FROM_SCHEDULE | VEHICLE_SUBSTITUTION` (VEHICLE_SUBSTITUTION exempt subscription `maxTripsPerMonth` counter).
 - `DELAYED` là overlay flag (Redis), KHÔNG phải status riêng.
+
+#### Authoritative Trip manual-completion audit contract (Day 21)
+
+`trip_audit_logs` is append-only and Trip-owned. It has exactly these columns:
+
+| Column | PostgreSQL type | Null | Constraint / meaning |
+|---|---|---|---|
+| `id` | `uuid` | no | Primary key. |
+| `trip_id` | `uuid` | no | Local FK to `trips(id)` with `ON DELETE RESTRICT`. |
+| `actor_user_id` | `uuid` | yes | Logical Identity User reference; deliberately no database FK. |
+| `action` | `varchar(64)` | no | Application-controlled action constant. |
+| `metadata` | `jsonb` | yes | Action metadata. |
+| `occurred_at` | `timestamptz` | no | Application-captured occurrence time. |
+| `created_at` | `timestamptz` | no | `DEFAULT now()`. |
+
+Indexes are exactly `(trip_id, occurred_at DESC)`,
+`(actor_user_id, occurred_at DESC) WHERE actor_user_id IS NOT NULL`, and
+`(action, occurred_at DESC)`. The only Day-21 action is
+`TripAuditAction.TripCompletedManual = "TRIP_COMPLETED_MANUAL"`.
+
+Manual completion atomically persists the Trip `COMPLETED` state/timestamps, one audit row with
+the authenticated actor and metadata `{tripId,role}`, and the `trip.trip.completed` Outbox row in
+one Trip-local transaction. It performs no Identity read/write, creates no cross-database FK, and
+publishes no audit integration event.
 
 ### 8.3 ParcelStatus
 
@@ -2239,20 +2353,27 @@ KHÔNG dùng Prometheus/Grafana/Jaeger/Loki cho v1 (xem technical_context 3.5).
 |---|---|---|---|
 | `OtpCleanupJob` | Recurring | Daily 03:00 ICT | DELETE EmailVerificationToken expired > 7 ngày (optional cleanup) |
 | `StaleFcmTokenCleanupJob` | Recurring | Weekly Sun 04:00 ICT | UPDATE UserDevice SET isActive=false WHERE lastActiveAt < now - 90 days |
+| `SubscriptionTrialExpireCheckJob` | Recurring | Daily 00:30 ICT | Identity sets overdue ACTIVE subscriptions to EXPIRED; read access remains available |
+| `SubscriptionTrialExpiringWarnJob` | Recurring | Daily 09:00 ICT | Identity sends one T-3 expiry warning per subscription |
+| `SubscriptionPaymentPendingWarnJob` | Recurring | Hourly | Identity warns when a subscription upgrade attempt has been pending for 24 hours |
+| `SubscriptionAutoRevertJob` | Recurring | Daily 02:00 ICT | Identity expires the pending Payment via internal API, then restores previous plan or Starter after seven days |
+| `SubscriptionTripUsageProjectionJob` | Recurring | Day 1, 00:01 ICT | Refreshes current-month trip usage projection; source of truth is departure-month allocation |
+| `SubscriptionQuotaAllocationReconciliationJob` | Recurring | Daily 03:30 ICT | Releases only verified orphan durable quota allocations; never uses a distributed transaction |
 
 #### Trip-Route-Vehicle
 
 | Job | Type | Trigger | Notes |
 |---|---|---|---|
 | `GenerateTripsFromScheduleJob` | Recurring | Weekly Sun 23:00 ICT + immediate on DriverSchedule create/activate | Generate Trip 14 ngày kế tiếp. Idempotent (driverId + departureDateTime) |
-| `AutoBoardingJob` | Scheduled (per Trip) | Trip.departureDateTime - 30 phút | Set Trip.status = BOARDING; publish `trip.trip.boarding_started` |
-| `AutoCompletedFallbackJob` | Scheduled (per Trip) | Trip.estimatedArrivalTime + 30 phút | Nếu Trip vẫn IN_PROGRESS, force COMPLETED |
+| `AutoBoardingJob` | Recurring | Every 15 phút | Set SCHEDULED Trips to BOARDING only when `departureDateTime <= now + 30 phút`; publish `trip.trip.boarding_started` |
+| `AutoStartFallbackJob` | Recurring | Every 5 phút | Set BOARDING Trips to IN_PROGRESS only when `departureDateTime < now - 30 phút`; capture `actualDepartureTime`; publish `trip.trip.started` |
+| `AutoCompletedFallbackJob` | Recurring | Every 15 phút | Set IN_PROGRESS Trips to COMPLETED only when `estimatedArrivalTime < now - 30 phút`; publish `trip.trip.completed` |
 
 #### Booking
 
 | Job | Type | Trigger | Notes |
 |---|---|---|---|
-| `SeatReleaseTimeoutJob` | Scheduled (per Booking) | 15 phút sau PENDING_PAYMENT VNPay | Release seat + Booking → EXPIRED |
+| `SeatReleaseTimeoutJob` | Scheduled (per Booking) | 10 phút sau PENDING_PAYMENT VNPay | Release seat + Booking → EXPIRED |
 | `ScheduleChangeAutoAcceptJob` | Scheduled (per BookingPendingAction) | Action.deadline | Auto-accept SCHEDULE_CHANGE nếu user không phản hồi |
 | `PendingSeatAssignmentEscalationJob` | Recurring | Every 15 phút | T+2h re-alert; auto-cancel/refund 100% nếu unresolved tại `departure - 30 phút` |
 | `PartialNoShowDetectionJob` | Recurring | Every 5 phút | Detect mixed BOARDED + NO_SHOW → set Booking.status = PARTIAL_NO_SHOW |
@@ -2272,14 +2393,10 @@ KHÔNG dùng Prometheus/Grafana/Jaeger/Loki cho v1 (xem technical_context 3.5).
 
 | Job | Type | Trigger | Notes |
 |---|---|---|---|
-| `PaymentExpiredJob` | Scheduled (per Payment) | PENDING_REDIRECT + 15 phút | UPDATE status = EXPIRED |
-| `TopUpExpiredJob` | Scheduled (per TopUpRequest) | PENDING + 15 phút | UPDATE status = EXPIRED |
+| `PaymentExpiredJob` | Scheduled (per Payment) | PENDING_REDIRECT + 10 phút | UPDATE status = EXPIRED |
+| `TopUpExpiredJob` | Scheduled (per TopUpRequest) | PENDING + 10 phút | UPDATE status = EXPIRED |
 | `TripSettlementEligibilityFlagJob` | Recurring | Daily 02:00 ICT | Set OperatorTripSettlement.status = ELIGIBLE WHERE eligibleAt <= now |
 | `TripSettlementWeeklyAutoSettleJob` | Recurring | Weekly Mon 09:00 ICT | Debit PlatformWallet + credit OperatorWallet cho mọi settlement ELIGIBLE |
-| `SubscriptionTrialExpireCheckJob` | Recurring | Daily 00:30 ICT | Check trial expire |
-| `SubscriptionTrialExpiringWarnJob` | Recurring | Daily 09:00 ICT | T-3 days warn |
-| `SubscriptionPaymentPendingWarnJob` | Recurring | Hourly | PENDING_PAYMENT 24h warn |
-| `SubscriptionAutoRevertJob` | Recurring | Daily 02:00 ICT | PENDING_PAYMENT 7d → auto-revert previous plan |
 | `InvoicePdfRetryJob` | Triggered (retry) | Post-payment-success event | Generate PDF, retry max 5 nếu fail |
 | `RefundFailureRetryJob` | Recurring | Every 10 phút | Retry refund từ RefundFailureLog, max 5 lần |
 
@@ -2417,9 +2534,10 @@ PAYMENT_PORT=5004
 DB_CONNECTION=...vietride_payment...
 VNPAY_TMN_CODE=...
 VNPAY_HASH_SECRET=...
-VNPAY_BASE_URL=https://sandbox.vnpayment.vn
-VNPAY_RETURN_URL=https://app.vietride.app/payments/return
-VNPAY_IPN_URL=https://api.vietride.app/v1/payments/vnpay-ipn
+VNPAY_BASE_URL=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
+VNPAY_RETURN_URL=https://app.vietride.online/payments/return
+VNPAY_IPN_URL=https://api.vietride.online/v1/payments/vnpay-ipn
+VNPAY_PAYMENT_TIMEOUT_MINUTES=10
 SUBSCRIPTION_TRIAL_DAYS=30
 SETTLEMENT_HOLD_DAYS=7
 WALLET_TOP_UP_MIN_VND=10000
@@ -2710,6 +2828,12 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.29.0** | 2026-07-14 | BE lead (Vu) | **MINOR** - Freeze Day-21 Trip lifecycle contracts: no-body/idempotent Driver start and Driver/Assistant manual complete endpoints with exact ADR-0004 DTOs and assignment authorization; recurring 15/5/15-minute boarding/start/complete jobs with T-30/departure+30/ETA+30 thresholds and no GPS-primary trigger; retain `trip.trip.started`/`trip.trip.completed` payloads; register `TRIP_INVALID_TRANSITION`, Booking history source `COMPLETE_ON_TRIP_COMPLETED`, and append-only Trip-local manual-completion audit schema/action/atomicity. No implementation, dependency, Gateway, migration, or event-key change. |
+| **1.28.0** | 2026-07-14 | BE lead (Vu) | **MINOR** - Add operator/admin Station and Stop update-disable APIs, Stop-disable Trip Outbox to Booking pending-action and enriched Notification flow, enriched Trip detail Stop projection, PII-free booking seat requests, VNPay GET IPN and ready-to-fill sandbox configuration, 10-minute payment timeout, and VNPay `BOOKING_GROUP` confirmation/expiration support. |
+| **1.27.0** | 2026-07-13 | Senior Backend Architect | **MINOR** - Day 36 Shuttle Backend v1: đăng ký REST/event/error contracts, Booking shuttle intent và cutoff T-30, operator subset dispatch, warning T-120/T-60, auto-cutoff, notification và Tracking Phase 11. Thêm ba bảng shuttle Trip, một bảng intent Booking, ba notification types và real-stack E2E acceptance. |
+| **1.26.0** | 2026-07-12 | BE lead (Vu) | **MINOR** - Add the assignment-scoped Driver/Assistant Route geometry read `GET /v1/driver/trips/{tripId}/route`. The endpoint returns the main Route's nullable Google precision-5 `pathPolyline`, origin/destination Station coordinates, and ordered TripStop coordinates only when JWT `sub` is assigned as the Trip driver or assistant. Reuses existing `TRIP_NOT_FOUND`, `FORBIDDEN`, `VALIDATION_ERROR`, `/v1/driver` Gateway role gate, and existing schema; no migration, dependency, event, or operator-route permission change. |
+| **1.25.1** | 2026-07-11 | BE lead (Vu) | **PATCH** - Day-19 shared validation-policy correction: model-binding failures (malformed JSON, missing non-nullable body field, type mismatch) now return the ADR 0004 `ApiResponse` error envelope with `422 VALIDATION_ERROR`, matching FluentValidation failures; they are no longer documented as HTTP 400. |
+| **1.25.0** | 2026-07-11 | BE lead (Vu) | **MINOR** - Freeze the Day-19 tenant-scoped operator booking-monitor contract. Register the exact Identity raw phone-to-user lookup and exhaustive Booking error/retry boundary; broaden existing `UPSTREAM_UNAVAILABLE` to generic downstream/inter-service unavailability without adding an error code; replace the proposed Outbox-audit timeline with authoritative append-only `booking_status_history`, including schema, six current source constants, actor/reason rules, atomic writer/no-op semantics, no backfill/event, and deterministic ordering. |
 | **1.24.0** | 2026-07-10 | BE lead (Vu) | **MINOR** - Allow `PASSENGER` accounts in `PENDING_EMAIL_VERIFICATION` to login and receive a normal `TokenBundleDto` for the mobile restricted session; FE gates features using `data.user.status`. Non-passenger pending-email users still fail with `AUTH_EMAIL_NOT_VERIFIED`. Gateway explicitly exposes `POST /v1/auth/resend-verification-email` as public alongside the existing public forgot/reset password endpoints. No DDL, dependency, migration, or event-key change. |
 | **1.23.0** | 2026-07-09 | BE lead (Vu) | **MINOR** - Add public Identity password reset for all `ACTIVE` user roles. `POST /v1/auth/forgot-password` issues a generic response and sends a `PASSWORD_RESET` OTP only for eligible accounts; `POST /v1/auth/reset-password` consumes the OTP, hashes the new password, and revokes active refresh tokens with `PASSWORD_RESET`. No DDL, dependency, or event-key change; reuses `email_verification_tokens`, `identity.otp.requested`, and Redis `identity:pwd_reset_rate:{email}`. |
 | **1.22.0** | 2026-07-09 | BE lead (Vu) | **MINOR** - Add operator-managed Google precision-5 path geometry for Route and AlternativeRoute. Register two `PUT .../geometry` endpoints, nullable `path_polyline` storage, validation/error codes, safe invalidation after route-shape edits, and Trip internal route-geometry preference with TripStop fallback. No new event, dependency, Gateway prefix, or Idempotency-Key requirement. |

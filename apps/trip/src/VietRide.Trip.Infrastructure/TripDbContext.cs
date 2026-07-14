@@ -57,6 +57,8 @@ public sealed class TripDbContext : VietRideDbContextBase
 
     public DbSet<Domain.Entities.Trip> Trips => Set<Domain.Entities.Trip>();
 
+    public DbSet<TripAuditLog> TripAuditLogs => Set<TripAuditLog>();
+
     public DbSet<TripSeat> TripSeats => Set<TripSeat>();
 
     public DbSet<TripStop> TripStops => Set<TripStop>();
@@ -66,6 +68,12 @@ public sealed class TripDbContext : VietRideDbContextBase
     public DbSet<TripCargoParcel> TripCargoParcels => Set<TripCargoParcel>();
 
     public DbSet<TripGenerationSkipLog> TripGenerationSkipLogs => Set<TripGenerationSkipLog>();
+
+    public DbSet<ShuttleTrip> ShuttleTrips => Set<ShuttleTrip>();
+
+    public DbSet<ShuttlePassenger> ShuttlePassengers => Set<ShuttlePassenger>();
+
+    public DbSet<ShuttleDispatchAlert> ShuttleDispatchAlerts => Set<ShuttleDispatchAlert>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {

@@ -297,7 +297,12 @@ CREATE INDEX idx_outbox_events_status_created
 
 CREATE OR REPLACE FUNCTION trg_set_updated_at()
 RETURNS TRIGGER AS $$
-BEGIN NEW.updated_at = now(); RETURN NEW; END;
+BEGIN
+    IF NEW.updated_at IS NOT DISTINCT FROM OLD.updated_at THEN
+        NEW.updated_at = now();
+    END IF;
+    RETURN NEW;
+END;
 $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trg_parcels_updated_at BEFORE UPDATE ON parcels

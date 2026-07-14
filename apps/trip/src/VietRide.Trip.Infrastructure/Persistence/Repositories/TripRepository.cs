@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Features.DriverTrips.GetAssignedTripRoute;
 using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Infrastructure.Persistence.Repositories;
@@ -15,6 +16,59 @@ internal sealed class TripRepository : ITripRepository
 
     public Task<Domain.Entities.Trip?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         _dbContext.Trips.FindAsync(new object[] { id }, cancellationToken).AsTask();
+
+    public async Task<IReadOnlyList<Guid>> ListScheduledForAutoBoardingAsync(
+        DateTimeOffset latestDeparture,
+        CancellationToken cancellationToken) =>
+        await _dbContext.Trips
+            .AsNoTracking()
+            .Where(trip => trip.Status == TripStatus.SCHEDULED
+                && trip.DepartureDateTime <= latestDeparture)
+            .Select(trip => trip.Id)
+            .ToArrayAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<Guid>> ListBoardingForAutoStartAsync(
+        DateTimeOffset departureBefore,
+        CancellationToken cancellationToken) =>
+        await _dbContext.Trips
+            .AsNoTracking()
+            .Where(trip => trip.Status == TripStatus.BOARDING
+                && trip.DepartureDateTime < departureBefore)
+            .Select(trip => trip.Id)
+            .ToArrayAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<Guid>> ListInProgressForAutoCompletionAsync(
+        DateTimeOffset arrivalBefore,
+        CancellationToken cancellationToken) =>
+        await _dbContext.Trips
+            .AsNoTracking()
+            .Where(trip => trip.Status == TripStatus.IN_PROGRESS
+                && trip.EstimatedArrivalTime < arrivalBefore)
+            .Select(trip => trip.Id)
+            .ToArrayAsync(cancellationToken);
+
+    public async Task<Domain.Entities.Trip?> AcquireForLifecycleTransitionAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        if (_dbContext.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException("A caller-owned transaction is required for lifecycle acquisition.");
+        }
+
+        await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT 1 FROM vietride_trip.trips WHERE id = {tripId} FOR UPDATE",
+            cancellationToken);
+
+        var trip = await _dbContext.Trips
+            .SingleOrDefaultAsync(trip => trip.Id == tripId, cancellationToken);
+        if (trip is not null)
+        {
+            await _dbContext.Entry(trip).ReloadAsync(cancellationToken);
+        }
+
+        return trip;
+    }
 
     public async Task<Domain.Entities.Trip> AddAsync(Domain.Entities.Trip entity, CancellationToken cancellationToken = default)
     {
@@ -34,6 +88,94 @@ internal sealed class TripRepository : ITripRepository
         _dbContext.Trips
             .Include(trip => trip.Seats)
             .FirstOrDefaultAsync(trip => trip.Id == tripId, cancellationToken);
+
+    public async Task<DriverTripRouteDto?> GetDriverTripRouteAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        var routeProjection = await _dbContext.Trips
+            .AsNoTracking()
+            .Where(trip => trip.Id == tripId)
+            .Join(
+                _dbContext.Routes.AsNoTracking(),
+                trip => trip.RouteId,
+                route => route.Id,
+                (trip, route) => new
+                {
+                    TripId = trip.Id,
+                    RouteId = route.Id,
+                    route.PathPolyline,
+                    route.OriginStationId,
+                    route.DestinationStationId,
+                })
+            .SingleOrDefaultAsync(cancellationToken);
+        if (routeProjection is null)
+        {
+            return null;
+        }
+
+        var stationIds = new[]
+        {
+            routeProjection.OriginStationId,
+            routeProjection.DestinationStationId,
+        };
+        var stations = await _dbContext.Stations
+            .AsNoTracking()
+            .Where(station => stationIds.Contains(station.Id))
+            .ToDictionaryAsync(station => station.Id, cancellationToken);
+        if (!stations.TryGetValue(routeProjection.OriginStationId, out var origin)
+            || !stations.TryGetValue(routeProjection.DestinationStationId, out var destination))
+        {
+            return null;
+        }
+
+        var tripStops = await _dbContext.TripStops
+            .AsNoTracking()
+            .Where(tripStop => tripStop.TripId == tripId)
+            .OrderBy(tripStop => tripStop.OrderIndex)
+            .ThenBy(tripStop => tripStop.StopId)
+            .ToArrayAsync(cancellationToken);
+        var stopIds = tripStops.Select(tripStop => tripStop.StopId).ToArray();
+        var stopsById = await _dbContext.Stops
+            .AsNoTracking()
+            .Where(stop => stopIds.Contains(stop.Id))
+            .ToDictionaryAsync(stop => stop.Id, cancellationToken);
+        if (stopsById.Count != stopIds.Distinct().Count())
+        {
+            return null;
+        }
+
+        var stops = tripStops
+            .Select(tripStop =>
+            {
+                var stop = stopsById[tripStop.StopId];
+                return new DriverTripRouteStopDto(
+                    stop.Id,
+                    stop.Name,
+                    (double)stop.Latitude,
+                    (double)stop.Longitude,
+                    tripStop.OrderIndex,
+                    tripStop.EstimatedArrivalTime,
+                    tripStop.AllowPickup,
+                    tripStop.AllowDropoff);
+            })
+            .ToArray();
+
+        return new DriverTripRouteDto(
+            routeProjection.TripId,
+            routeProjection.RouteId,
+            routeProjection.PathPolyline,
+            ToStationDto(origin),
+            ToStationDto(destination),
+            stops);
+    }
+
+    private static DriverTripRouteStationDto ToStationDto(Station station) =>
+        new(
+            station.Id,
+            station.Name,
+            station.Latitude is { } latitude ? (double)latitude : null,
+            station.Longitude is { } longitude ? (double)longitude : null);
 
     public async Task<TripCargoMutationResult?> ReserveCargoAsync(
         Guid tripId,

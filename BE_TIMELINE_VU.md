@@ -373,9 +373,9 @@
 ### Day 37 — Tue 2026-07-14 — Subscription lifecycle ([SCV-118](https://hoangvutran088.atlassian.net/browse/SCV-118))
 - EF migration: SubscriptionPlan, OperatorSubscription tables (already partial from Sprint 2 — extend)
 - Resource limits (maxTrips, maxVehicles, maxUsers) + module flags (enableParcel, enableShuttle, enableRag)
-- OperatorSubscription state machine: TRIAL → ACTIVE → PENDING_PAYMENT → EXPIRED → CANCELLED
-- Subscription payment endpoint: `POST /operator/subscription/pay` Wallet/VNPay
-- Block operations exceeding limits with 429 + warn at 80%
+- OperatorSubscription state machine: `PENDING_APPROVAL → ACTIVE → PENDING_PAYMENT → EXPIRED → CANCELLED`; Starter trial is `ACTIVE`, not a separate `TRIAL` status
+- Subscription upgrade endpoint: `POST /v1/operator/subscription/upgrade` via VNPay; OperatorWallet payment is Day 38 scope
+- Block operations exceeding limits with `422 SUBSCRIPTION_LIMIT_EXCEEDED` + warn at 80%
 - **DoD**: operator subscription lifecycle works; over-limit blocked; warning sent at 80%
 - **Review**: subscription expires → operator can read but not create; module flag off → endpoint returns 403
 

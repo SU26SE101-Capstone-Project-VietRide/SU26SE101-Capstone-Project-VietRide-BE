@@ -8,6 +8,7 @@ using VietRide.Booking.Application.Features.Bookings.CreateBooking;
 using VietRide.Booking.Application.Features.Bookings.CreateRoundTripBooking;
 using VietRide.Booking.Application.Features.Bookings.EditDropoff;
 using VietRide.Booking.Application.Features.Bookings.EditPickup;
+using VietRide.Booking.Application.Features.Bookings.GetBookingStatus;
 using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Booking.Api.Controllers;
@@ -23,6 +24,7 @@ namespace VietRide.Booking.Api.Controllers;
 public sealed class BookingsController : ControllerBase
 {
     private const string PassengerRole = "PASSENGER";
+    private const string OperatorRoles = "OPERATOR_ADMIN,OPERATOR_STAFF";
     private const string IdempotencyKeyHeader = "Idempotency-Key";
 
     private readonly ISender _sender;
@@ -30,6 +32,34 @@ public sealed class BookingsController : ControllerBase
     public BookingsController(ISender sender)
     {
         _sender = sender;
+    }
+
+    /// <summary>Poll the minimal Booking-owned state after a payment callback.</summary>
+    /// <remarks>
+    /// Auth: booking owner or an operator authorized for the booking's tenant. This projection
+    /// deliberately excludes Payment-owned data. The detailed operator read remains at
+    /// GET /v1/operator/bookings/{id}.
+    /// </remarks>
+    [HttpGet("{bookingId:guid}")]
+    [Authorize(Roles = PassengerRole + "," + OperatorRoles)]
+    [ProducesResponseType(typeof(ApiResponse<GetBookingStatusResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<GetBookingStatusResult>> GetBookingStatus(
+        [FromRoute] Guid bookingId,
+        CancellationToken ct)
+    {
+        var passengerUserId = User.IsInRole(PassengerRole) ? GetPassengerUserId() : (Guid?)null;
+        var operatorId = IsOperator(User) && TryGetOperatorId(User, out var value) ? value : (Guid?)null;
+        if (passengerUserId is null && operatorId is null)
+        {
+            return Forbid();
+        }
+
+        var result = await _sender.Send(new GetBookingStatusQuery(bookingId, passengerUserId, operatorId), ct);
+
+        return Ok(result);
     }
 
     /// <summary>Create a new booking for 1-5 seats on a trip.</summary>
@@ -63,14 +93,16 @@ public sealed class BookingsController : ControllerBase
             DropoffStationId: request.Dropoff?.StationId,
             DropoffStopId: request.Dropoff?.StopId,
             Seats: request.Seats
-                .Select(s => new SeatRequest(
-                    s.SeatNumber,
-                    s.Passenger.FullName,
-                    s.Passenger.PhoneNumber,
-                    s.Passenger.IdNumber))
+                .Select(s => new SeatRequest(s.SeatNumber.Trim()))
                 .ToList(),
             VoucherCode: request.VoucherCode,
-            PaymentMethod: request.PaymentMethod);
+            PaymentMethod: request.PaymentMethod,
+            ShuttlePickup: request.ShuttlePickup is null
+                ? null
+                : new ShuttlePickupCommand(
+                    request.ShuttlePickup.Address,
+                    request.ShuttlePickup.Latitude,
+                    request.ShuttlePickup.Longitude));
 
         var result = await _sender.Send(command, ct);
 
@@ -225,12 +257,14 @@ public sealed class BookingsController : ControllerBase
             DropoffStationId: leg.Dropoff?.StationId,
             DropoffStopId: leg.Dropoff?.StopId,
             Seats: leg.Seats
-                .Select(s => new CreateRoundTripBookingCommand.RoundTripSeatRequest(
-                    s.SeatNumber,
-                    s.Passenger.FullName,
-                    s.Passenger.PhoneNumber,
-                    s.Passenger.IdNumber))
-                .ToList());
+                .Select(s => new CreateRoundTripBookingCommand.RoundTripSeatRequest(s.SeatNumber.Trim()))
+                .ToList(),
+            ShuttlePickup: leg.ShuttlePickup is null
+                ? null
+                : new CreateRoundTripBookingCommand.RoundTripShuttlePickupCommand(
+                    leg.ShuttlePickup.Address,
+                    leg.ShuttlePickup.Latitude,
+                    leg.ShuttlePickup.Longitude));
 
     private string GetRequiredIdempotencyKey()
     {
@@ -253,5 +287,16 @@ public sealed class BookingsController : ControllerBase
             throw new UnauthorizedAccessException("Authenticated caller sub claim is missing or invalid.");
 
         return userId;
+    }
+
+    private static bool IsOperator(ClaimsPrincipal user)
+        => user.IsInRole("OPERATOR_ADMIN") || user.IsInRole("OPERATOR_STAFF");
+
+    private static bool TryGetOperatorId(ClaimsPrincipal user, out Guid operatorId)
+    {
+        var value = user.FindFirstValue("operator_id")
+            ?? user.FindFirstValue("operatorId");
+
+        return Guid.TryParse(value, out operatorId) && operatorId != Guid.Empty;
     }
 }
