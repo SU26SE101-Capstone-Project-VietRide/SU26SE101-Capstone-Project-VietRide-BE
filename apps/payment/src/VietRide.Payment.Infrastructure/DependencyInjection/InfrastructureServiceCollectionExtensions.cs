@@ -117,12 +117,25 @@ public static class InfrastructureServiceCollectionExtensions
             options.BaseUrl = configuration["VNPAY_BASE_URL"] ?? options.BaseUrl;
             options.ReturnUrl = configuration["VNPAY_RETURN_URL"] ?? options.ReturnUrl;
             options.IpnUrl = configuration["VNPAY_IPN_URL"] ?? options.IpnUrl;
+            if (int.TryParse(configuration["VNPAY_PAYMENT_TIMEOUT_MINUTES"], out var timeoutMinutes))
+            {
+                options.PaymentTimeoutMinutes = timeoutMinutes;
+            }
 
             if (long.TryParse(configuration["WALLET_TOP_UP_MIN_VND"], out var minimumTopUpAmount))
             {
                 options.MinimumTopUpAmount = minimumTopUpAmount;
             }
         });
+        services.AddOptions<VnPayOptions>()
+            .Validate(options => options.PaymentTimeoutMinutes > 0, "VNPay payment timeout must be positive.")
+            .Validate(options => IsAbsoluteHttpsUrl(options.BaseUrl)
+                && IsAbsoluteHttpsUrl(options.ReturnUrl)
+                && IsAbsoluteHttpsUrl(options.IpnUrl), "VNPay URLs must be absolute HTTPS URLs.")
+            .Validate(options => !string.Equals(configuration["ASPNETCORE_ENVIRONMENT"], "Production", StringComparison.OrdinalIgnoreCase)
+                || (!string.IsNullOrWhiteSpace(options.TmnCode) && !string.IsNullOrWhiteSpace(options.HashSecret)),
+                "VNPay TMN code and hash secret are required in production.")
+            .ValidateOnStart();
         services.AddScoped<IVnPayClient, VnPayClient>();
         services.Configure<InvoicePdfOptions>(configuration.GetSection(InvoicePdfOptions.SectionName));
         services.Configure<InvoiceStorageOptions>(configuration.GetSection(InvoiceStorageOptions.SectionName));
@@ -230,4 +243,7 @@ public static class InfrastructureServiceCollectionExtensions
             .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
             .AddHttpMessageHandler<InternalJwtDelegatingHandler>();
     }
+
+    private static bool IsAbsoluteHttpsUrl(string? value)
+        => Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps;
 }

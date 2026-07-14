@@ -323,14 +323,7 @@ async function createBookings() {
     const accessToken = await token(ids.passengers[index], 'PASSENGER');
     const seats = Array.from({ length: sizes[index] }, () => {
       const seatNumber = `D${String(seat++).padStart(2, '0')}`;
-      return {
-        seatNumber,
-        passenger: {
-          fullName: `Passenger ${index + 1}`,
-          phoneNumber: '+84910036000',
-          idNumber: `D36${seatNumber}`,
-        },
-      };
+      return { seatNumber };
     });
     const response = await api(
       'POST',
@@ -446,7 +439,6 @@ async function verifyBookingValidation() {
     seats: [
       {
         seatNumber: 'D20',
-        passenger: { fullName: 'Negative', phoneNumber: '+84910036000', idNumber: 'NEG36' },
       },
     ],
     paymentMethod: 'WALLET',
@@ -577,11 +569,6 @@ async function createSingleBooking(tripId, passengerIndex, idempotencyKey) {
       seats: [
         {
           seatNumber: 'D01',
-          passenger: {
-            fullName: 'Safety Passenger',
-            phoneNumber: '+84910036000',
-            idNumber: `SAFE${tripId.slice(-3)}`,
-          },
         },
       ],
       paymentMethod: 'WALLET',

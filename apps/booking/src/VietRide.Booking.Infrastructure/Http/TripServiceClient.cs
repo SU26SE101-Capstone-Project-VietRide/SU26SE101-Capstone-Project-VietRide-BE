@@ -197,6 +197,25 @@ public sealed class TripServiceClient : ITripServiceClient
     }
 
     /// <inheritdoc/>
+    public async Task<bool> BookRoundTripSeatsAsync(
+        RoundTripBookSeatsLeg outbound,
+        RoundTripBookSeatsLeg @return,
+        CancellationToken cancellationToken = default)
+    {
+        var body = new BookRoundTripSeatsRequest(Map(outbound), Map(@return));
+        using var request = BuildJsonRequest(HttpMethod.Post, "/internal/v1/trips/round-trip/book-seats", body, null);
+        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.NoContent) return true;
+        if (response.StatusCode == HttpStatusCode.Conflict) return false;
+        response.EnsureSuccessStatusCode();
+        return true;
+
+        static BookRoundTripSeatsLegRequest Map(RoundTripBookSeatsLeg leg) => new(
+            leg.TripId, leg.SeatLockToken, leg.BookingId,
+            leg.PassengerSeatAssignments.Select(x => new BookSeatAssignmentDto(x.PassengerId, x.SeatNumber)).ToList());
+    }
+
+    /// <inheritdoc/>
     public async Task ReleaseSeatsAsync(
         Guid tripId,
         Guid seatLockToken,
@@ -412,6 +431,12 @@ public sealed class TripServiceClient : ITripServiceClient
     private sealed record BookSeatsRequest(
         Guid SeatLockToken,
         Guid BookingId,
+        IReadOnlyList<BookSeatAssignmentDto> PassengerSeatAssignments);
+
+    private sealed record BookRoundTripSeatsRequest(BookRoundTripSeatsLegRequest Outbound, BookRoundTripSeatsLegRequest Return);
+
+    private sealed record BookRoundTripSeatsLegRequest(
+        Guid TripId, Guid SeatLockToken, Guid BookingId,
         IReadOnlyList<BookSeatAssignmentDto> PassengerSeatAssignments);
 
     private sealed record BookSeatAssignmentDto(Guid PassengerId, string SeatNumber);

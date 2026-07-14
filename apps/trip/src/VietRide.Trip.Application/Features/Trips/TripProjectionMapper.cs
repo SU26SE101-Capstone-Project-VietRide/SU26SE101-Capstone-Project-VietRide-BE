@@ -41,18 +41,34 @@ internal static class TripProjectionMapper
         Station destinationStation,
         IReadOnlyCollection<TripSeat> seats,
         IReadOnlyCollection<TripStop> stops,
+        IReadOnlyDictionary<Guid, Stop> stopDetails,
         IReadOnlyDictionary<Guid, long> fares)
     {
         var stopDtos = stops
             .OrderBy(stop => stop.OrderIndex)
-            .Select(stop => new TripStopDto(
-                stop.StopId,
-                stop.OrderIndex,
-                stop.AllowPickup,
-                stop.AllowDropoff,
-                stop.EstimatedArrivalTime,
-                stop.DistanceFromOriginKm.HasValue ? (double)stop.DistanceFromOriginKm.Value : null,
-                fares.TryGetValue(stop.StopId, out var fare) ? fare : null))
+            .Select(stop =>
+            {
+                if (!stopDetails.TryGetValue(stop.StopId, out var details))
+                {
+                    throw new InvalidOperationException($"Trip stop '{stop.StopId}' has no canonical Stop row.");
+                }
+
+                var fareOverride = fares.TryGetValue(stop.StopId, out var fare) ? fare : (long?)null;
+                return new TripStopDto(
+                    stop.StopId,
+                    details.Name,
+                    details.Address,
+                    details.Latitude,
+                    details.Longitude,
+                    details.IsActive && details.DeletedAt is null,
+                    stop.OrderIndex,
+                    stop.AllowPickup,
+                    stop.AllowDropoff,
+                    stop.EstimatedArrivalTime,
+                    stop.DistanceFromOriginKm.HasValue ? (double)stop.DistanceFromOriginKm.Value : null,
+                    fareOverride,
+                    fareOverride ?? trip.BaseFare.Amount);
+            })
             .ToList();
 
         return new TripDetailDto(

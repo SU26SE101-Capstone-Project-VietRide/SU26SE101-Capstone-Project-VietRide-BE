@@ -20,6 +20,7 @@ public sealed class VnPayIpnController : ControllerBase
     /// <summary>
     /// Public VNPay wallet top-up IPN callback. Returns VNPay machine-to-machine JSON, not ApiResponse.
     /// </summary>
+    [HttpGet("vnpay-topup-ipn")]
     [HttpPost("vnpay-topup-ipn")]
     [ProducesResponseType(typeof(ConfirmTopUpResult), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ConfirmTopUpResult), StatusCodes.Status401Unauthorized)]
@@ -29,7 +30,7 @@ public sealed class VnPayIpnController : ControllerBase
         var result = await _sender.Send(new ConfirmTopUpCommand(parameters), ct);
 
         // VNPay expects this exact machine-to-machine JSON shape, so this endpoint intentionally bypasses ApiResponse.
-        return new JsonResult(result) { StatusCode = result.StatusCode };
+        return new JsonResult(result) { StatusCode = StatusCodes.Status200OK };
     }
 
     private async Task<IReadOnlyDictionary<string, string>> ReadVnPayParametersAsync(CancellationToken ct)

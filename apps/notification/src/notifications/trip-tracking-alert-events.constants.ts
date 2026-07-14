@@ -6,7 +6,7 @@ export const TRIP_SCHEDULE_CHANGED_ROUTING_KEY = 'trip.trip.schedule_changed';
 export const TRIP_CANCELLED_ROUTING_KEY = 'trip.trip.cancelled';
 export const TRIP_DELAYED_ROUTING_KEY = 'trip.trip.delayed';
 export const TRIP_INCIDENT_REPORTED_ROUTING_KEY = 'trip.incident.reported';
-export const TRIP_STOP_DISABLED_ROUTING_KEY = 'trip.stop.disabled';
+export const TRIP_STOP_DISABLED_ROUTING_KEY = 'booking.stop_disabled.affected';
 export const TRACKING_GPS_OFF_ROUTE_ROUTING_KEY = 'tracking.gps.off_route';
 export const TRACKING_GPS_APPROACHING_STOP_ROUTING_KEY = 'tracking.gps.approaching_stop';
 
@@ -38,7 +38,10 @@ export const TRIP_TRACKING_ALERT_QUEUE_BINDINGS = [
     routingKey: TRIP_INCIDENT_REPORTED_ROUTING_KEY,
   },
   {
-    queue: 'notification:trip-stop-disabled',
+    // Keep a new queue identity because the legacy queue used trip.stop.disabled
+    // as its dead-letter routing key. RabbitMQ rejects redeclaring that durable
+    // queue for the enriched booking.stop_disabled.affected event.
+    queue: 'notification:booking-stop-disabled-affected',
     routingKey: TRIP_STOP_DISABLED_ROUTING_KEY,
   },
   {

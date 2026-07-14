@@ -73,6 +73,18 @@ public sealed class CreateOrLinkOperatorStationHandler : IRequestHandler<CreateO
 
         if (existing is not null)
         {
+            if (!existing.IsActive)
+            {
+                existing.Activate();
+                existing.UpdateDetails(
+                    request.DisplayNameOverride,
+                    request.CounterLocation,
+                    request.OperatorStationContactPhone,
+                    request.Instructions);
+                operatorStationRepository.Update(existing);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+
             return CreateOrLinkOperatorStationResponse.Linked(existing.OperatorId, existing.StationId, existing.IsActive);
         }
 

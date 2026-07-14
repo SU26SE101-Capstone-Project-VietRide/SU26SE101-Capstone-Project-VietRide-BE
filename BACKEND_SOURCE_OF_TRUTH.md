@@ -2,7 +2,7 @@
 
 > **Phiên bản:** 1.28.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-07-13
+> **Cập nhật lần cuối:** 2026-07-14
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -888,7 +888,7 @@ Request
 **Exceptions (viết controller tay, KHÔNG proxy):**
 
 - `GET /health`, `GET /ready` — Gateway tự handle (check downstream service reachable optional)
-- VNPay IPN callback (`POST /v1/payments/vnpay-ipn`, `/v1/payments/vnpay-topup-ipn`) — public, signature verify ở Payment Service, Gateway chỉ forward (KHÔNG sign Internal JWT vì call này external)
+- VNPay IPN callback (`GET` canonical, temporary `POST` compatibility on `/v1/payments/vnpay-ipn` and `/v1/payments/vnpay-topup-ipn`) — public, signature verify ở Payment Service, Gateway chỉ forward (KHÔNG sign Internal JWT vì call này external)
 
 #### 3.4.3 Folder layout
 
@@ -1370,7 +1370,7 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | | `CONSENT_ALREADY_REJECTED` | 409 | consent đã REJECTED, không thể reject lại (reject precond PENDING\|ACCEPTED — v7:674-683) |
 | **Payment** | `PAYMENT_INSUFFICIENT_WALLET` | 402 | Wallet balance < amount |
 | | `PAYMENT_VNPAY_ERROR` | 502 | VNPay trả lỗi (không 00) |
-| | `PAYMENT_TIMEOUT` | 408 | VNPay không callback trong 15 phút |
+| | `PAYMENT_TIMEOUT` | 408 | VNPay không callback trong 10 phút |
 | | `PAYMENT_ALREADY_PROCESSED` | 409 | Payment đã SUCCEEDED, callback duplicate |
 | | `PAYMENT_SIGNATURE_INVALID` | 401 | VNPay HMAC verify fail |
 | **Wallet** | `WALLET_INSUFFICIENT_BALANCE` | 402 | OperatorWallet/PassengerWallet không đủ |
@@ -1394,6 +1394,9 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | | `PARCEL_ADDITIONAL_PAYMENT_REQUIRED` | 402 | Cân lại > ước lượng |
 | | `PARCEL_REVIEW_TIMEOUT` | 409 | EXTRA_LARGE auto-reject 24h |
 | **Stop / Route** | `STOP_NOT_FOUND` | 404 | Day-7 Trip Stop handlers use coded 404 path |
+| | `STOP_REPLACEMENT_INVALID` | 422 | Replacement Stop missing, inactive, cross-operator, or self-reference |
+| | `STOP_REPLACEMENT_CYCLE` | 422 | Replacement chain would create a cycle |
+| | `STOP_DISABLED_BOOKING_AFFECTED` | 200 warning | Stop disabled; response includes active booking count |
 | | `STOP_REPLACEMENT_CYCLE` | 422 | replacedByStopId tạo cycle |
 | | `STOP_REPLACEMENT_DIFFERENT_OPERATOR` | 403 | Stop thay thế khác operator |
 | | `STOP_DISABLED_BOOKING_AFFECTED` | 200 (warning) | Alert khi disable Stop có booking active |
@@ -1800,7 +1803,8 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `trip.trip.cancelled` | Trip | Booking, Parcel, Payment | `{ tripId, cancelledAt, cancelReason }` |
 | `trip.trip.route_changed` | Trip | Booking (create BookingPendingAction), Notification | `{ tripId, alternativeRouteId, affectedBookingIds }` |
 | `trip.trip.schedule_changed` | Trip | Booking, Notification | `{ tripId, oldDeparture, newDeparture, severity }` |
-| `trip.stop.disabled` | Trip | Booking, Notification | `{ stopId, replacedByStopId? }` |
+| `trip.stop.disabled` | Trip | Booking | `{ stopId, operatorId, replacedByStopId?, occurredAt }` |
+| `booking.stop_disabled.affected` | Booking | Notification | `{ stopId, replacedByStopId?, recipientUserIds[], affectedBookingCount, occurredAt }` |
 | `trip.stop.departed_with_pending` | Trip | Notification (Driver App boarding warning) | `{ eventId: Guid, occurredAt: DateTime (UTC), eventType: "trip.stop.departed_with_pending", tripId: Guid, stopId: Guid, stopName: string, pendingPassengerCount: int (> 0), driverUserId: Guid, assistantUserId: Guid?, departedAt: DateTimeOffset (UTC ISO-8601) }` |
 | `trip.trip.delayed` | Trip (Tracking publishes via Trip outbox proxy hoặc Tracking outbox) | Notification | `{ tripId, delayMinutes, etaNew }` |
 | `trip.incident.reported` | Trip | Notification | `{ incidentId, tripId, category, reporterUserId }` |
@@ -1885,7 +1889,7 @@ After retry_count >= 10: alert Sentry, leave FAILED for manual handle
 | Scenario | Compensation |
 |---|---|
 | Payment fail in checkout | HTTP `POST /internal/v1/trips/{id}/release-seats` (sync) |
-| VNPay timeout 15 phút | Hangfire job (Booking Service) → release seats + Booking → EXPIRED |
+| VNPay timeout 10 phút | Hangfire job (Booking Service) → release seats + Booking → EXPIRED |
 | Refund event consume fail | `RefundFailureLog` + Hangfire retry max 5 lần · alert Admin sau exhausted |
 | Wallet credit fail | Same as above (RefundFailureLog) |
 
@@ -1916,13 +1920,13 @@ PENDING_PAYMENT ─┬─→ CONFIRMED ─┬─→ COMPLETED
                  │              ├─→ CANCELLED ─→ REFUNDED   (operator hoặc user hủy)
                  │              └─→ DISRUPTED ─→ REFUNDED   (Trip DISRUPTED, no substitution)
                  │
-                 └─→ EXPIRED   (VNPay timeout 15 phút — không refund)
+                 └─→ EXPIRED   (VNPay timeout 10 phút — không refund)
 ```
 
 **Triggers:**
 
 - `CONFIRMED`: Payment Service publish `payment.payment.succeeded` → Booking Service consume.
-- `EXPIRED`: Hangfire (Booking) sau 15 phút PENDING_PAYMENT.
+- `EXPIRED`: Hangfire sau 10 phút PENDING_PAYMENT.
 - `COMPLETED`: Booking Service consume `trip.trip.completed`.
 - `NO_SHOW`: Tất cả `Passenger.boardingStatus = NO_SHOW`.
 - `PARTIAL_NO_SHOW`: Hangfire job — có cả BOARDED + NO_SHOW trong cùng booking sau Trip.actualDepartureTime + 15 phút.
@@ -2343,7 +2347,7 @@ KHÔNG dùng Prometheus/Grafana/Jaeger/Loki cho v1 (xem technical_context 3.5).
 
 | Job | Type | Trigger | Notes |
 |---|---|---|---|
-| `SeatReleaseTimeoutJob` | Scheduled (per Booking) | 15 phút sau PENDING_PAYMENT VNPay | Release seat + Booking → EXPIRED |
+| `SeatReleaseTimeoutJob` | Scheduled (per Booking) | 10 phút sau PENDING_PAYMENT VNPay | Release seat + Booking → EXPIRED |
 | `ScheduleChangeAutoAcceptJob` | Scheduled (per BookingPendingAction) | Action.deadline | Auto-accept SCHEDULE_CHANGE nếu user không phản hồi |
 | `PendingSeatAssignmentEscalationJob` | Recurring | Every 15 phút | T+2h re-alert; auto-cancel/refund 100% nếu unresolved tại `departure - 30 phút` |
 | `PartialNoShowDetectionJob` | Recurring | Every 5 phút | Detect mixed BOARDED + NO_SHOW → set Booking.status = PARTIAL_NO_SHOW |
@@ -2363,8 +2367,8 @@ KHÔNG dùng Prometheus/Grafana/Jaeger/Loki cho v1 (xem technical_context 3.5).
 
 | Job | Type | Trigger | Notes |
 |---|---|---|---|
-| `PaymentExpiredJob` | Scheduled (per Payment) | PENDING_REDIRECT + 15 phút | UPDATE status = EXPIRED |
-| `TopUpExpiredJob` | Scheduled (per TopUpRequest) | PENDING + 15 phút | UPDATE status = EXPIRED |
+| `PaymentExpiredJob` | Scheduled (per Payment) | PENDING_REDIRECT + 10 phút | UPDATE status = EXPIRED |
+| `TopUpExpiredJob` | Scheduled (per TopUpRequest) | PENDING + 10 phút | UPDATE status = EXPIRED |
 | `TripSettlementEligibilityFlagJob` | Recurring | Daily 02:00 ICT | Set OperatorTripSettlement.status = ELIGIBLE WHERE eligibleAt <= now |
 | `TripSettlementWeeklyAutoSettleJob` | Recurring | Weekly Mon 09:00 ICT | Debit PlatformWallet + credit OperatorWallet cho mọi settlement ELIGIBLE |
 | `InvoicePdfRetryJob` | Triggered (retry) | Post-payment-success event | Generate PDF, retry max 5 nếu fail |
@@ -2504,9 +2508,10 @@ PAYMENT_PORT=5004
 DB_CONNECTION=...vietride_payment...
 VNPAY_TMN_CODE=...
 VNPAY_HASH_SECRET=...
-VNPAY_BASE_URL=https://sandbox.vnpayment.vn
-VNPAY_RETURN_URL=https://app.vietride.app/payments/return
-VNPAY_IPN_URL=https://api.vietride.app/v1/payments/vnpay-ipn
+VNPAY_BASE_URL=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
+VNPAY_RETURN_URL=https://app.vietride.online/payments/return
+VNPAY_IPN_URL=https://api.vietride.online/v1/payments/vnpay-ipn
+VNPAY_PAYMENT_TIMEOUT_MINUTES=10
 SUBSCRIPTION_TRIAL_DAYS=30
 SETTLEMENT_HOLD_DAYS=7
 WALLET_TOP_UP_MIN_VND=10000
@@ -2797,7 +2802,8 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
-| **1.28.0** | 2026-07-13 | Senior Backend Architect | **MINOR** - Freeze Day 38 Revision 6 contracts: trusted Payment context and legacy phased backfill; Driver/Assistant Trip completion; OperatorWallet subscription debit; per-Trip settlement failure/recovery; Invoice number/PDF retry/download; operator/admin APIs; canonical Invoice/settlement/terminal event payloads and new error codes. No bank withdrawal, e-invoice provider or booking/parcel platform fee. |
+| **1.29.0** | 2026-07-14 | Senior Backend Architect | **MINOR** - Freeze Day 38 Revision 6 contracts: trusted Payment context and legacy phased backfill; Driver/Assistant Trip completion; OperatorWallet subscription debit; per-Trip settlement failure/recovery; Invoice number/PDF retry/download; operator/admin APIs; canonical Invoice/settlement/terminal event payloads and new error codes. No bank withdrawal, e-invoice provider or booking/parcel platform fee. |
+| **1.28.0** | 2026-07-14 | BE lead (Vu) | **MINOR** - Add operator/admin Station and Stop update-disable APIs, Stop-disable Trip Outbox to Booking pending-action and enriched Notification flow, enriched Trip detail Stop projection, PII-free booking seat requests, VNPay GET IPN and ready-to-fill sandbox configuration, 10-minute payment timeout, and VNPay `BOOKING_GROUP` confirmation/expiration support. |
 | **1.27.0** | 2026-07-13 | Senior Backend Architect | **MINOR** - Day 36 Shuttle Backend v1: đăng ký REST/event/error contracts, Booking shuttle intent và cutoff T-30, operator subset dispatch, warning T-120/T-60, auto-cutoff, notification và Tracking Phase 11. Thêm ba bảng shuttle Trip, một bảng intent Booking, ba notification types và real-stack E2E acceptance. |
 | **1.26.0** | 2026-07-12 | BE lead (Vu) | **MINOR** - Add the assignment-scoped Driver/Assistant Route geometry read `GET /v1/driver/trips/{tripId}/route`. The endpoint returns the main Route's nullable Google precision-5 `pathPolyline`, origin/destination Station coordinates, and ordered TripStop coordinates only when JWT `sub` is assigned as the Trip driver or assistant. Reuses existing `TRIP_NOT_FOUND`, `FORBIDDEN`, `VALIDATION_ERROR`, `/v1/driver` Gateway role gate, and existing schema; no migration, dependency, event, or operator-route permission change. |
 | **1.25.1** | 2026-07-11 | BE lead (Vu) | **PATCH** - Day-19 shared validation-policy correction: model-binding failures (malformed JSON, missing non-nullable body field, type mismatch) now return the ADR 0004 `ApiResponse` error envelope with `422 VALIDATION_ERROR`, matching FluentValidation failures; they are no longer documented as HTTP 400. |

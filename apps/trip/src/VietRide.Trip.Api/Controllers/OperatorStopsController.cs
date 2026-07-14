@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Trip.Api.Controllers.Requests;
+using VietRide.Trip.Api.Filters;
 using VietRide.Trip.Application.Features.Stops;
 
 namespace VietRide.Trip.Api.Controllers;
@@ -75,6 +76,7 @@ public sealed class OperatorStopsController : ControllerBase
     }
 
     [HttpPatch("{id:guid}")]
+    [RequireIdempotencyKey]
     [Authorize(Roles = OperatorWriteRoles)]
     [ProducesResponseType(typeof(ApiResponse<StopDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
@@ -97,6 +99,14 @@ public sealed class OperatorStopsController : ControllerBase
                 request.GooglePlaceId),
             cancellationToken));
     }
+
+    [HttpDelete("{id:guid}")]
+    [RequireIdempotencyKey]
+    [Authorize(Roles = OperatorWriteRoles)]
+    [ProducesResponseType(typeof(ApiResponse<DisableStopResponse>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<DisableStopResponse>> DeleteAsync(
+        Guid id, [FromQuery] Guid? replacedByStopId, CancellationToken cancellationToken)
+        => Ok(await mediator.Send(new DisableStopCommand(GetRequiredOperatorId(), id, replacedByStopId), cancellationToken));
 
     private Guid GetRequiredOperatorId()
         => CurrentUserClaims.GetOperatorId(User)

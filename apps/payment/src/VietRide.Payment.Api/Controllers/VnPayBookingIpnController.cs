@@ -20,6 +20,7 @@ public sealed class VnPayBookingIpnController : ControllerBase
     /// <summary>
     /// Public VNPay booking payment IPN callback. Returns VNPay machine-to-machine JSON, not ApiResponse.
     /// </summary>
+    [HttpGet("vnpay-ipn")]
     [HttpPost("vnpay-ipn")]
     [ProducesResponseType(typeof(ConfirmBookingPaymentResult), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ConfirmBookingPaymentResult), StatusCodes.Status401Unauthorized)]
@@ -28,7 +29,7 @@ public sealed class VnPayBookingIpnController : ControllerBase
         var parameters = await ReadVnPayParametersAsync(ct);
         var result = await _sender.Send(new ConfirmBookingPaymentCommand(parameters), ct);
 
-        return new JsonResult(result) { StatusCode = result.StatusCode };
+        return new JsonResult(result) { StatusCode = StatusCodes.Status200OK };
     }
 
     private async Task<IReadOnlyDictionary<string, string>> ReadVnPayParametersAsync(CancellationToken ct)

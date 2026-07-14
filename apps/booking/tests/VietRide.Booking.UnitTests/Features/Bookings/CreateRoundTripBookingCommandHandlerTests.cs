@@ -99,7 +99,7 @@ public class CreateRoundTripBookingCommandHandlerTests
             null,
             null,
             null,
-            [new CreateRoundTripBookingCommand.RoundTripSeatRequest("A01", "Nguyen Van A", "0900000000", "012345678901")],
+            [new CreateRoundTripBookingCommand.RoundTripSeatRequest("A01")],
             withShuttle ? new CreateRoundTripBookingCommand.RoundTripShuttlePickupCommand("12 Nguyen Hue", 10.7731m, 106.7032m) : null),
         new CreateRoundTripBookingCommand.RoundTripBookingLegCommand(
             ReturnTripId,
@@ -107,7 +107,7 @@ public class CreateRoundTripBookingCommandHandlerTests
             null,
             null,
             null,
-            [new CreateRoundTripBookingCommand.RoundTripSeatRequest("A01", "Nguyen Van A", "0900000000", "012345678901")],
+            [new CreateRoundTripBookingCommand.RoundTripSeatRequest("A01")],
             withShuttle ? new CreateRoundTripBookingCommand.RoundTripShuttlePickupCommand("45 Le Loi", 10.7750m, 106.7010m) : null),
         voucherCode,
         paymentMethod);
@@ -278,8 +278,8 @@ public class CreateRoundTripBookingCommandHandlerTests
 
         var act = () => BuildSut().Handle(BuildCommand(), CancellationToken.None);
 
-        await act.Should().ThrowAsync<ConflictException>()
-            .Where(e => e.ErrorCode == "PAYMENT_INSUFFICIENT_WALLET");
+        await act.Should().ThrowAsync<VietRide.Booking.Application.Exceptions.BookingPaymentException>()
+            .Where(e => e.StatusCode == 402 && e.ErrorCode == "PAYMENT_INSUFFICIENT_WALLET");
 
         await _bookingService.Received(1).ReleaseSeatsAsync(
             OutboundTripId,
@@ -660,8 +660,8 @@ public class CreateRoundTripBookingCommandHandlerTests
         var act = () => BuildSut().Handle(BuildCommand(paymentMethod: "VNPAY", voucherCode: "VCODE"), CancellationToken.None);
 
         // Act & Assert
-        await act.Should().ThrowAsync<ConflictException>()
-            .Where(e => e.ErrorCode == "PAYMENT_INSUFFICIENT_WALLET");
+        await act.Should().ThrowAsync<VietRide.Booking.Application.Exceptions.BookingPaymentException>()
+            .Where(e => e.StatusCode == 402 && e.ErrorCode == "PAYMENT_INSUFFICIENT_WALLET");
 
         // Seats released
         await _bookingService.Received(1).ReleaseSeatsAsync(

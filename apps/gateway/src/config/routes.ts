@@ -209,6 +209,18 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['SYSTEM_ADMIN'],
     },
     {
+      prefix: '/v1/admin/stations',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
+      prefix: '/v1/admin/stops',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
       prefix: '/v1/trips',
       target: env.TRIP_BASE_URL,
       authRequired: 'mixed',
@@ -344,7 +356,9 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       target: env.PAYMENT_BASE_URL,
       authRequired: 'mixed',
       publicSubpaths: [
+        { method: 'GET', path: '/v1/payments/vnpay-ipn' },
         { method: 'POST', path: '/v1/payments/vnpay-ipn' },
+        { method: 'GET', path: '/v1/payments/vnpay-topup-ipn' },
         { method: 'POST', path: '/v1/payments/vnpay-topup-ipn' },
         { method: 'POST', path: '/v1/payments/subscription-vnpay-ipn' },
       ],

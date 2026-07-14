@@ -32,6 +32,8 @@ public interface IVnPayClient
     bool VerifySignature(IReadOnlyDictionary<string, string> parameters)
         => throw new NotSupportedException("This VNPay client does not support signature verification.");
 
+    bool IsExpectedMerchant(IReadOnlyDictionary<string, string> parameters) => true;
+
     Task<bool> TryReserveIpnAsync(string vnPayTxnRef, CancellationToken cancellationToken)
         => throw new NotSupportedException("This VNPay client does not support IPN dedupe reservation.");
 

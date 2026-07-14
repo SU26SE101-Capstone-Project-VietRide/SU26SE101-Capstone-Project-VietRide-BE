@@ -144,6 +144,7 @@ services:
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_trip;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD}'
       IDENTITY_SERVICE_BASE_URL: http://identity:5001
+      BOOKING_BASE_URL: http://booking:5003
     healthcheck:
       test:
         ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5002/health || exit 1']
@@ -200,14 +201,16 @@ services:
       RabbitMq__UserName: ${RABBITMQ_USER:-vietride}
       RabbitMq__Password: ${RABBITMQ_PASSWORD}
       RabbitMq__ExchangeName: ${RABBITMQ_EXCHANGE:-vietride.events}
-      VNPAY_TMN_CODE: ${VNPAY_TMN_CODE}
-      VNPAY_HASH_SECRET: ${VNPAY_HASH_SECRET}
-      VNPAY_PAYMENT_URL: ${VNPAY_PAYMENT_URL}
+      VNPAY_TMN_CODE: ${VNPAY_TMN_CODE:?VNPAY_TMN_CODE is required}
+      VNPAY_HASH_SECRET: ${VNPAY_HASH_SECRET:?VNPAY_HASH_SECRET is required}
+      VNPAY_BASE_URL: ${VNPAY_BASE_URL:-https://sandbox.vnpayment.vn/paymentv2/vpcpay.html}
       VNPAY_RETURN_URL: ${VNPAY_RETURN_URL}
       InvoiceStorage__Bucket: ${INVOICE_STORAGE_BUCKET:?INVOICE_STORAGE_BUCKET is required in production}
       InvoiceStorage__StableBaseUrl: ${INVOICE_STORAGE_STABLE_BASE_URL:?INVOICE_STORAGE_STABLE_BASE_URL is required in production}
       OperatorWeb__InvoiceDetailBaseUrl: ${OPERATOR_WEB_INVOICE_DETAIL_BASE_URL:?OPERATOR_WEB_INVOICE_DETAIL_BASE_URL is required in production}
       GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase/service-account.json
+      VNPAY_IPN_URL: ${VNPAY_IPN_URL}
+      VNPAY_PAYMENT_TIMEOUT_MINUTES: ${VNPAY_PAYMENT_TIMEOUT_MINUTES:-10}
     volumes:
       - /opt/vietride/secrets/firebase-service-account.json:/run/secrets/firebase/service-account.json:ro
     healthcheck:

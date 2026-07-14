@@ -56,7 +56,12 @@ public sealed class ConfirmBookingPaymentCommandHandler
     {
         if (!_vnPayClient.VerifySignature(request.Parameters))
         {
-            return new ConfirmBookingPaymentResult("97", SignatureInvalidCode, 401);
+            return new ConfirmBookingPaymentResult("97", SignatureInvalidCode, 200);
+        }
+
+        if (!_vnPayClient.IsExpectedMerchant(request.Parameters))
+        {
+            return new ConfirmBookingPaymentResult("99", "INVALID_MERCHANT", 200);
         }
 
         if (!request.Parameters.TryGetValue(VnPayTxnRefKey, out var vnPayTxnRef)
@@ -70,7 +75,7 @@ public sealed class ConfirmBookingPaymentCommandHandler
         if (!reservationAcquired)
         {
             _logger.LogInformation("Skipping duplicate VNPay booking payment IPN for transaction {VnPayTxnRef}.", vnPayTxnRef);
-            return ConfirmSuccess();
+            return AlreadyProcessed();
         }
 
         var shouldReleaseReservation = true;
@@ -87,7 +92,7 @@ public sealed class ConfirmBookingPaymentCommandHandler
                     return OrderNotFound();
                 }
 
-                return ConfirmSuccess();
+                return AlreadyProcessed();
             }
 
             await _payments.AcquirePaymentReferenceLockAsync(
@@ -121,13 +126,13 @@ public sealed class ConfirmBookingPaymentCommandHandler
                     vnPayTxnRef);
                 await MarkFailedAsync(payment, responseCode, "AMOUNT_MISMATCH", cancellationToken)
                     .ConfigureAwait(false);
-                return ConfirmFailure();
+                return AmountInvalid();
             }
 
-            if (request.Parameters.TryGetValue(VnPayTransactionStatusKey, out var transactionStatus)
-                && !string.Equals(transactionStatus, SuccessCode, StringComparison.Ordinal))
+            if (!request.Parameters.TryGetValue(VnPayTransactionStatusKey, out var transactionStatus)
+                || !string.Equals(transactionStatus, SuccessCode, StringComparison.Ordinal))
             {
-                await MarkFailedAsync(payment, transactionStatus, transactionStatus, cancellationToken)
+                await MarkFailedAsync(payment, transactionStatus, transactionStatus ?? "MISSING_TRANSACTION_STATUS", cancellationToken)
                     .ConfigureAwait(false);
                 shouldReleaseReservation = false;
                 return ConfirmSuccess();
@@ -265,6 +270,12 @@ public sealed class ConfirmBookingPaymentCommandHandler
 
     private static ConfirmBookingPaymentResult ConfirmFailure()
         => new("99", "Confirm Failed", 200);
+
+    private static ConfirmBookingPaymentResult AlreadyProcessed()
+        => new("02", "Order Already Confirmed", 200);
+
+    private static ConfirmBookingPaymentResult AmountInvalid()
+        => new("04", "Invalid Amount", 200);
 
     private static ConfirmBookingPaymentResult OrderNotFound()
         => new("01", "Order Not Found", 200);

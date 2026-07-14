@@ -11,6 +11,7 @@ public sealed class GetTripDetailHandler : IRequestHandler<GetTripDetailQuery, T
 {
     private readonly IRouteRepository routeRepository;
     private readonly IStationRepository stationRepository;
+    private readonly IStopRepository stopRepository;
     private readonly ITripRepository tripRepository;
     private readonly ITripSeatRepository tripSeatRepository;
     private readonly ITripStopFareRepository tripStopFareRepository;
@@ -20,6 +21,7 @@ public sealed class GetTripDetailHandler : IRequestHandler<GetTripDetailQuery, T
         ITripRepository tripRepository,
         IRouteRepository routeRepository,
         IStationRepository stationRepository,
+        IStopRepository stopRepository,
         ITripSeatRepository tripSeatRepository,
         ITripStopRepository tripStopRepository,
         ITripStopFareRepository tripStopFareRepository)
@@ -27,6 +29,7 @@ public sealed class GetTripDetailHandler : IRequestHandler<GetTripDetailQuery, T
         this.tripRepository = tripRepository;
         this.routeRepository = routeRepository;
         this.stationRepository = stationRepository;
+        this.stopRepository = stopRepository;
         this.tripSeatRepository = tripSeatRepository;
         this.tripStopRepository = tripStopRepository;
         this.tripStopFareRepository = tripStopFareRepository;
@@ -46,6 +49,10 @@ public sealed class GetTripDetailHandler : IRequestHandler<GetTripDetailQuery, T
         var stops = tripStopRepository.QueryNoTracking()
             .Where(stop => stop.TripId == trip.Id)
             .ToArray();
+        var stopIds = stops.Select(stop => stop.StopId).ToArray();
+        var stopDetails = stopRepository.QueryNoTracking()
+            .Where(stop => stopIds.Contains(stop.Id))
+            .ToDictionary(stop => stop.Id);
         var fares = tripStopFareRepository.QueryNoTracking()
             .Where(fare => fare.TripId == trip.Id)
             .ToDictionary(fare => fare.StopId, fare => fare.FareFromThisStop.Amount);
@@ -57,6 +64,7 @@ public sealed class GetTripDetailHandler : IRequestHandler<GetTripDetailQuery, T
             destinationStation,
             seats,
             stops,
+            stopDetails,
             fares));
     }
 

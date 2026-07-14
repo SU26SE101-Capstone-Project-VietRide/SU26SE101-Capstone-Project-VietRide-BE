@@ -6,9 +6,14 @@ public sealed class ChargePaymentCommandValidator : AbstractValidator<ChargePaym
 {
     public ChargePaymentCommandValidator()
     {
-        RuleFor(x => x.ReferenceType)
-            .Must(rt => rt is "BOOKING" or "BOOKING_GROUP" or "PARCEL" or "PARCEL_ADDITIONAL")
-            .WithMessage("Charge supports BOOKING, BOOKING_GROUP, PARCEL, or PARCEL_ADDITIONAL references only.");
+        RuleFor(x => x)
+            .Must(command =>
+                command.ReferenceType is "BOOKING" or "PARCEL" or "PARCEL_ADDITIONAL"
+                || (command.ReferenceType == "BOOKING_GROUP" && command.Method == "VNPAY"))
+            .WithName(nameof(ChargePaymentCommand.ReferenceType))
+            .WithMessage(
+                "Charge supports BOOKING, PARCEL, or PARCEL_ADDITIONAL references; "
+                + "BOOKING_GROUP requires VNPAY.");
         RuleFor(x => x.ReferenceId).NotEmpty();
         RuleFor(x => x.UserId).NotEmpty();
         RuleFor(x => x.Amount).GreaterThan(0);
