@@ -174,7 +174,7 @@ Deliver the Trip lifecycle from `SCHEDULED` through `BOARDING`, `IN_PROGRESS`, a
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
 | 21.0 | ✅ done | APPROVE | 2026-07-14 | Human-approved plan clarifications; one reviewer patch round; docs verification green. |
-| 21.1 | ⬜ todo | — | — | Shared idempotency prerequisite. |
+| 21.1 | ✅ done | APPROVE | 2026-07-14 | Five reviewer patch rounds; Redis/legacy/service regressions and six-solution build/format verification green. |
 | 21.2 | ⬜ todo | — | — | Trip audit EF migration prerequisite. |
 | 21.3 | ⬜ todo | — | — | — |
 | 21.4 | ⬜ todo | — | — | — |
