@@ -44,6 +44,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IVehicleRepository, VehicleRepository>();
         services.AddScoped<IDriverScheduleRepository, DriverScheduleRepository>();
         services.AddScoped<ITripRepository, TripRepository>();
+        services.AddScoped<ITripAuditLogRepository, TripAuditLogRepository>();
         services.AddScoped<IRoundTripSeatLockStore, RedisRoundTripSeatLockStore>();
         services.AddScoped<ITripSeatRepository, TripSeatRepository>();
         services.AddScoped<ITripStopRepository, TripStopRepository>();

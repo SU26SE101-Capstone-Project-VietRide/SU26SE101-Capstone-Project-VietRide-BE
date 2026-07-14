@@ -57,6 +57,8 @@ public sealed class TripDbContext : VietRideDbContextBase
 
     public DbSet<Domain.Entities.Trip> Trips => Set<Domain.Entities.Trip>();
 
+    public DbSet<TripAuditLog> TripAuditLogs => Set<TripAuditLog>();
+
     public DbSet<TripSeat> TripSeats => Set<TripSeat>();
 
     public DbSet<TripStop> TripStops => Set<TripStop>();
