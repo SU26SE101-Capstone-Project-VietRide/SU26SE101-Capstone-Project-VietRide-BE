@@ -1,6 +1,6 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.27.0
+> **Phiên bản:** 1.28.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
 > **Cập nhật lần cuối:** 2026-07-13
 > **Capstone:** SU26SE101 — SU26
@@ -1380,6 +1380,7 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | | `VEHICLE_NOT_FOUND` | 404 | Vehicle không tồn tại, đã soft-delete, hoặc không thuộc operator caller |
 | | `VEHICLE_TYPE_NOT_FOUND` | 404 | VehicleType không tồn tại hoặc không active |
 | | `TRIP_NOT_EDITABLE` | 409 | Status ≠ SCHEDULED |
+| | `TRIP_ALREADY_TERMINAL` | 409 | Manual complete/fallback/disruption race already produced a terminal state |
 | | `TRIP_VEHICLE_CONFLICT` | 409 | Vehicle trùng giờ trên Trip khác |
 | | `TRIP_DRIVER_CONFLICT` | 409 | Driver trùng giờ |
 | | `TRIP_NOT_ACCEPTING_PARCEL` | 409 | Trip IN_PROGRESS — không nhận parcel mới |
@@ -1412,6 +1413,9 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | | `LOCATION_CODE_CONFLICT` | 409 | Admin Location code already exists |
 | **Invoice** | `INVOICE_NOT_FOUND` | 404 | |
 | | `INVOICE_PDF_GENERATION_FAILED` | 500 | Hangfire retry job |
+| | `INVOICE_NUMBER_EXHAUSTED` | 409 | Monthly six-digit counter exceeded 999999; Invoice transaction rolls back |
+| | `INVOICE_RETRY_ALREADY_PENDING` | 409 | Another retry/reconciliation worker already owns PENDING/PROCESSING |
+| | `INVOICE_RETRY_NOT_ALLOWED` | 409 | ISSUED/CANCELLED or all five attempts consumed |
 | **Operator** | `OPERATOR_DUPLICATE_REGISTRATION` | 409 | businessRegistrationNumber trùng |
 | | `OPERATOR_DUPLICATE_TAX_CODE` | 409 | taxCode trùng |
 | **Subscription** | `SUBSCRIPTION_LIMIT_EXCEEDED` | 422 | Vượt maxVehicles/maxRoutes/etc. |
@@ -1428,12 +1432,14 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | **RAG** | `RAG_DOCUMENT_NOT_APPROVED` | 403 | Status ≠ APPROVED |
 | | `RAG_ACCESS_DENIED_FOR_ROLE` | 403 | accessLevel không match role |
 | **Validation** | `VALIDATION_ERROR` | 422 | Field-level — kèm `errors` array |
+| | `IDEMPOTENCY_KEY_REQUIRED` | 422 | Mutation contract requires the header explicitly; middleware pass-through is not acceptance |
 | | `IDEMPOTENCY_KEY_MISMATCH` | 422 | Same key, different body |
 | | `IDEMPOTENCY_REQUEST_PENDING` | 409 | Same key is still being processed |
 | | `INVALID_SORT_FIELD` | 400 | sortBy value not in the per-aggregate whitelist |
 | **Generic** | `RESOURCE_NOT_FOUND` | 404 | Fallback |
 | | `FORBIDDEN` | 403 | RBAC reject |
 | | `RATE_LIMITED` | 429 | Vượt rate limit |
+| | `RATE_LIMIT_EXCEEDED` | 429 | Per-user/per-resource Day-38 invoice download limit |
 | | `UPSTREAM_UNAVAILABLE` | 502 | Downstream/inter-service dependency unavailable or returned an unusable/unexpected response (including Gateway connection failure) |
 | | `INTERNAL_ERROR` | 500 | Unhandled exception (Sentry capture) |
 
@@ -1778,7 +1784,7 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 |---|---|---|---|
 | `identity.user.created` | Identity | Payment (init Wallet UPSERT idempotent) | `{ userId, role, email, createdAt }` |
 | `identity.user.deleted` | Identity | Booking, Payment | `{ userId }` (soft delete cascade) |
-| `identity.operator.approved` | Identity | Payment (init OperatorWallet) | `{ operatorId, approvedAt }` |
+| `identity.operator.approved` | Identity | Payment (init OperatorWallet) | `{ eventId, operatorId, approvedAt }`; new approvals generate an eventId in the approval transaction; legacy backfill reuses the stable eventId persisted in `operator_wallet_backfill_markers` |
 | `identity.operator.suspended` | Identity | Trip, Booking | `{ operatorId, suspendedAt }` |
 | `booking.booking.confirmed` | Booking | Notification, Payment (settle hold), Booking (BookingStats counter), Trip (shuttle fan-out) | `{ bookingId, tripId, totalAmount, userId, voucherUsageId?, bookingCode?, tickets?: [{ ticketId, passengerUserId? }], ticketCodes?, ticketCount?, shuttlePickup?: { address, latitude, longitude } }` |
 | `booking.booking.cancelled` | Booking | Notification, Trip (release seats), Payment (refund), Booking (BookingStats counter) | `{ bookingId, userId, refundAmount, refundOverride, cancellationReason, bookingCode?, ticketCodes?, ticketCount? }` |
@@ -1789,8 +1795,8 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `trip.trip.assigned` | Trip | Notification | `{ tripId, operatorId, driverUserId, assistantUserId?, routeName, vehiclePlateNumber, departureDateTime }` |
 | `trip.trip.crew_changed` | Trip | Notification | `{ tripId, operatorId, oldDriverUserId, oldAssistantUserId?, driverUserId, assistantUserId?, routeName, vehiclePlateNumber?, departureDateTime }` |
 | `trip.trip.started` | Trip | Parcel (block new parcel), Tracking | `{ tripId, actualDepartureTime }` |
-| `trip.trip.completed` | Trip | Booking, Parcel, Payment (settlement eligibility) | `{ tripId, completedAt, hasSubstitution }` |
-| `trip.trip.disrupted` | Trip | Booking, Parcel, Payment | `{ tripId, hasSubstitution, reason }` |
+| `trip.trip.completed` | Trip | Booking, Parcel, Payment (settlement eligibility) | `{ eventId, occurredAt, tripId, operatorId, terminalAt, hasSubstitution }` |
+| `trip.trip.disrupted` | Trip | Booking, Parcel, Payment | `{ eventId, occurredAt, tripId, operatorId, terminalAt, hasSubstitution, reason? }`; `hasSubstitution` is audit-only for Payment settlement, not for other consumers |
 | `trip.trip.cancelled` | Trip | Booking, Parcel, Payment | `{ tripId, cancelledAt, cancelReason }` |
 | `trip.trip.route_changed` | Trip | Booking (create BookingPendingAction), Notification | `{ tripId, alternativeRouteId, affectedBookingIds }` |
 | `trip.trip.schedule_changed` | Trip | Booking, Notification | `{ tripId, oldDeparture, newDeparture, severity }` |
@@ -1803,20 +1809,21 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `trip.shuttle.unfulfilled` | Trip | Notification | `{ mainTripId, bookingId, passengerUserId, stationId, reason: AUTO_UNFULFILLED_CUTOFF }` |
 | `tracking.gps.off_route` | Tracking | Notification | `{ tripId, durationSeconds }` |
 | `tracking.gps.approaching_stop` | Tracking | Notification | `{ tripId, stopId, bookingIds, wave, etaMinutes }` |
-| `payment.payment.succeeded` | Payment | Booking, Parcel | `{ paymentId, referenceType, referenceId, amount }` |
+| `payment.payment.succeeded` | Payment | Booking, Parcel | `{ eventId, occurredAt, paymentId, referenceType, referenceId, amount, method, context }`; context is the immutable server snapshot and may contain multiple allocations |
+| `payment.payment.refunded` | Payment | Booking, Parcel | `{ eventId, occurredAt, paymentId, referenceType, referenceId, amount, context }` |
 | `payment.payment.failed` | Payment | Booking, Parcel | `{ paymentId, referenceType, referenceId, reason }` |
 | `payment.payment.expired` | Payment | Booking, Parcel | `{ paymentId, referenceType, referenceId }` |
 | `payment.wallet.credited` | Payment | Booking (mark REFUNDED), Parcel (mark REFUNDED), Notification | `{ userId, amount, referenceType, referenceId }` |
 | `payment.wallet.debited` | Payment | Notification | `{ userId, amount, referenceType, referenceId }` |
-| `payment.subscription.payment_succeeded` | Payment | Identity | `{ eventId, paymentId, upgradeAttemptId, subscriptionId, operatorId, planId, billingPeriod, periodFrom, periodTo, amount, occurredAt }` |
+| `payment.subscription.payment_succeeded` | Payment | Identity, Payment Invoice pipeline | `{ eventId, occurredAt, paymentId, upgradeAttemptId, operatorId, operatorSubscriptionId, amount, method, planName, billingPeriod, periodFrom, periodTo, buyerSnapshot }`; WALLET and VNPay use one schema |
 | `identity.subscription.usage_warning` | Identity | Notification | `{ subscriptionId, operatorId, resource, usage, limit, periodKey, occurredAt }` |
 | `identity.subscription.trial_expiring` | Identity | Notification | `{ subscriptionId, operatorId, expiresAt, daysRemaining, occurredAt }` |
 | `identity.subscription.expired` | Identity | Notification | `{ subscriptionId, operatorId, expiredAt, occurredAt }` |
 | `identity.subscription.payment_pending_warn` | Identity | Notification | `{ subscriptionId, operatorId, paymentId, dueAt, occurredAt }` |
 | `identity.subscription.payment_auto_reverted` | Identity | Notification | `{ subscriptionId, operatorId, previousPlanId, restoredPlanId, occurredAt }` |
 | `subscription.limit.trip_skipped` | Trip | Notification | `{ operatorId, driverScheduleId, skippedDate, periodKey, occurredAt }` |
-| `payment.invoice.issued` | Payment | Notification | `{ invoiceId, operatorId, amount, pdfUrl }` |
-| `payment.trip_settlement.completed` | Payment | Notification (operator) | `{ tripId, operatorId, netAmount }` |
+| `payment.invoice.issued` | Payment | Notification | `{ eventId, occurredAt, invoiceId, invoiceNumber, operatorId, amount, invoiceWebUrl, downloadApiUrl }`; neither URL is a Firebase signed URL |
+| `payment.trip_settlement.completed` | Payment | Notification (operator) | `{ eventId, occurredAt, settlementId, tripId, operatorId, netAmount, settlementMethod, settledAt }` |
 | `parcel.parcel.created` | Parcel | Notification, Trip (cargo counter reserve) | `{ parcelId, tripId, senderUserId, recipientUserId? }` |
 | `parcel.parcel.loaded` | Parcel | Notification, Trip (counter update) | `{ parcelId, tripId, actualWeightKg }` |
 | `parcel.parcel.unloaded` | Parcel | Notification | `{ parcelId, tripId }` |
@@ -2049,6 +2056,21 @@ PENDING_HOLD ─→ ELIGIBLE ─→ SETTLED
 - `PENDING_HOLD` set khi Trip terminal (COMPLETED/DISRUPTED).
 - `ELIGIBLE` set bởi Hangfire daily 02:00 khi `eligibleAt <= now` (= `tripTerminalAt + 7 days`).
 - `SETTLED` set bởi Hangfire Monday weekly 09:00 (auto) hoặc Admin manual (`POST /v1/admin/trip-settlements/{id}/settle`).
+- Cron canonical chạy UTC: eligibility `0 19 * * *` (=02:00 ICT), weekly `0 2 * * 1` (=09:00 ICT thứ Hai). Mỗi settlement dùng một local transaction, bounded batch và failure isolation; không gộp toàn batch vào một transaction.
+- Marker và settlement là cùng một row. Mọi transition dùng expected status + `row_version`; manual/weekly race chỉ có một winner. Weekly loser no-op, manual loser trả `TRIP_SETTLEMENT_ALREADY_SETTLED`.
+- `netAmount` luôn recompute từ immutable operator ledger tại settle time. Nếu `netAmount <= 0`, row chuyển `CANCELLED` và không tạo wallet movement/event.
+- Thiếu PlatformWallet balance rollback toàn bộ movement, giữ `ELIGIBLE`, tăng `settlement_failure_count`, set `last_settlement_failure_at`/`active_failure_code`, và retry mỗi tuần không giới hạn. HIGH khi count `>=3` **hoặc** stuck `>21 ngày`; Redis key `payment:settlement_insufficient:{settlementId}` throttle alert 24h.
+- Sau recovery thành công, giữ historical failure count/time, clear active error, set `failure_resolved_at`; row không còn thuộc stuck filter. Earned settlement không bị filter theo subscription hiện tại.
+
+### 8.9.1 Invoice PDF lifecycle (Day 38 freeze)
+
+`Invoice.status`: `DRAFT → ISSUED`; không ISSUED trước khi PDF upload thành công. `pdf_generation_status`: `PENDING → PROCESSING → COMPLETED|FAILED`.
+
+- Invoice unique theo `payment_id`; number dùng atomic monthly counter `VR-INV-yyyyMM-XXXXXX`, bắt đầu `000001`, giới hạn `999999`.
+- CAS claim `PENDING → PROCESSING` increment `pdf_generation_attempts` trước render. Tối đa năm total attempts. Failure attempts 1..4 set `FAILED` + `next_retry_at` theo `[1,5,15,30]` phút; attempt 5 terminal `FAILED`, `next_retry_at=NULL`.
+- Reconciliation mỗi 5 phút requeue due FAILED và recover PROCESSING stale >15 phút. Stale recovery đã tiêu attempt đang chạy và không increment lần hai.
+- Manual admin retry dùng Idempotency-Key; request chỉ CAS FAILED→PENDING/enqueue, không reset/increment attempts. Same key replay response gốc; different keys race chỉ một winner.
+- DB/event lưu protected VietRide `downloadApiUrl`, không signed URL. Authenticated download sinh signed Firebase URL mới TTL 60 phút, rate limit 10/phút/user/invoice. Notification/email dùng `invoiceWebUrl`, không link thẳng protected API hoặc signed URL.
 
 ### 8.10 BookingPendingAction lifecycle
 
@@ -2241,6 +2263,8 @@ Mọi key dùng pattern `<service>:<purpose>:<id>` để namespace per service. 
 | `booking:idem:{key}` | Booking | Idempotency-Key cache | 24h |
 | `payment:idem:{key}` | Payment | Idempotency-Key cache | 24h |
 | `payment:vnpay_ipn:{vnpTxnRef}` | Payment | Dedupe IPN callback | 24h |
+| `payment:invoice_download:{userId}:{invoiceId}` | Payment | Invoice signed-URL endpoint rate limit | 1p |
+| `payment:settlement_insufficient:{settlementId}` | Payment | Insufficient PlatformWallet alert dedupe | 24h |
 | `parcel:idem:{key}` | Parcel | Idempotency-Key cache | 24h |
 | `tracking:latest:{tripId}` | Tracking | Last known GPS position | 5p |
 | `tracking:gps_buffer:{tripId}` | Tracking | GPS trail buffer (list) | đến flush |
@@ -2773,6 +2797,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.28.0** | 2026-07-13 | Senior Backend Architect | **MINOR** - Freeze Day 38 Revision 6 contracts: trusted Payment context and legacy phased backfill; Driver/Assistant Trip completion; OperatorWallet subscription debit; per-Trip settlement failure/recovery; Invoice number/PDF retry/download; operator/admin APIs; canonical Invoice/settlement/terminal event payloads and new error codes. No bank withdrawal, e-invoice provider or booking/parcel platform fee. |
 | **1.27.0** | 2026-07-13 | Senior Backend Architect | **MINOR** - Day 36 Shuttle Backend v1: đăng ký REST/event/error contracts, Booking shuttle intent và cutoff T-30, operator subset dispatch, warning T-120/T-60, auto-cutoff, notification và Tracking Phase 11. Thêm ba bảng shuttle Trip, một bảng intent Booking, ba notification types và real-stack E2E acceptance. |
 | **1.26.0** | 2026-07-12 | BE lead (Vu) | **MINOR** - Add the assignment-scoped Driver/Assistant Route geometry read `GET /v1/driver/trips/{tripId}/route`. The endpoint returns the main Route's nullable Google precision-5 `pathPolyline`, origin/destination Station coordinates, and ordered TripStop coordinates only when JWT `sub` is assigned as the Trip driver or assistant. Reuses existing `TRIP_NOT_FOUND`, `FORBIDDEN`, `VALIDATION_ERROR`, `/v1/driver` Gateway role gate, and existing schema; no migration, dependency, event, or operator-route permission change. |
 | **1.25.1** | 2026-07-11 | BE lead (Vu) | **PATCH** - Day-19 shared validation-policy correction: model-binding failures (malformed JSON, missing non-nullable body field, type mismatch) now return the ADR 0004 `ApiResponse` error envelope with `422 VALIDATION_ERROR`, matching FluentValidation failures; they are no longer documented as HTTP 400. |

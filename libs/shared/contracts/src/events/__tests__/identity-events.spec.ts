@@ -13,7 +13,8 @@ import {
  * Wire-format contract tests for the Identity integration events.
  *
  * Fixtures mirror the bare JSON payloads Identity publishes to the
- * `vietride.events` topic exchange (no eventId/occurredAt envelope).
+ * `vietride.events` topic exchange. Operator approval carries its durable
+ * payload eventId because Payment uses it for wallet-bootstrap dedupe.
  */
 describe('Identity integration event contracts', () => {
   it('binds the published routing keys', () => {
@@ -45,6 +46,7 @@ describe('Identity integration event contracts', () => {
 
   it('accepts a well-formed identity.operator.approved payload', () => {
     const result = IdentityOperatorApprovedEventSchema.safeParse({
+      eventId: '33333333-3333-3333-3333-333333333333',
       operatorId: '22222222-2222-2222-2222-222222222222',
       approvedAt: '2026-06-10T08:30:00+07:00',
     });
