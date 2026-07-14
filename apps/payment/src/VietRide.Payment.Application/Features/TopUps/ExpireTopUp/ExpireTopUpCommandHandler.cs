@@ -7,7 +7,7 @@ namespace VietRide.Payment.Application.Features.TopUps.ExpireTopUp;
 
 public sealed class ExpireTopUpCommandHandler : IRequestHandler<ExpireTopUpCommand, ExpireTopUpResult>
 {
-    private static readonly TimeSpan TopUpTimeout = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan TopUpTimeout = TimeSpan.FromMinutes(10);
 
     private readonly ITopUpRequestRepository _topUpRequests;
     private readonly IClock _clock;

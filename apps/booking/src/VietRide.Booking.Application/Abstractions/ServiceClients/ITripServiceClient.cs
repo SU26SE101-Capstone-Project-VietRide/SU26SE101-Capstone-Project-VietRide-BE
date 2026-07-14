@@ -37,7 +37,8 @@ public sealed record TripStopSnapshot(
     bool AllowDropoff,
     DateTimeOffset EstimatedArrivalTime,
     double DistanceFromOriginKm,
-    long? FareFromThisStop);
+    long? FareFromThisStop,
+    bool IsActive = true);
 
 /// <summary>Seat availability summary embedded in <see cref="TripSnapshot"/>.</summary>
 public sealed record TripSeatSummary(int TotalSeats, int AvailableSeats);
@@ -180,6 +181,12 @@ public interface ITripServiceClient
         IReadOnlyList<PassengerSeatAssignment> passengerSeatAssignments,
         CancellationToken cancellationToken = default);
 
+    Task<bool> BookRoundTripSeatsAsync(
+        RoundTripBookSeatsLeg outbound,
+        RoundTripBookSeatsLeg @return,
+        CancellationToken cancellationToken = default)
+        => Task.FromException<bool>(new NotSupportedException("Round-trip seat confirmation is not supported."));
+
     /// <summary>
     /// POST /internal/v1/trips/{tripId}/release-seats — compensation (204 idempotent).
     /// Releasing an already-released or expired lock is a no-op.
@@ -193,3 +200,9 @@ public interface ITripServiceClient
 
 /// <summary>Seat assignment for a passenger in book-seats.</summary>
 public sealed record PassengerSeatAssignment(Guid PassengerId, string SeatNumber);
+
+public sealed record RoundTripBookSeatsLeg(
+    Guid TripId,
+    Guid SeatLockToken,
+    Guid BookingId,
+    IReadOnlyList<PassengerSeatAssignment> PassengerSeatAssignments);

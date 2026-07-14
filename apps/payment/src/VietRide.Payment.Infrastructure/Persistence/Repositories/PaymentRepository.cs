@@ -142,6 +142,7 @@ internal sealed class PaymentRepository : IPaymentRepository
                   AND method = 'VNPAY'::vietride_payment.payment_method
                   AND reference_type IN (
                       'BOOKING'::vietride_payment.payment_reference_type,
+                      'BOOKING_GROUP'::vietride_payment.payment_reference_type,
                       'PARCEL'::vietride_payment.payment_reference_type,
                       'PARCEL_ADDITIONAL'::vietride_payment.payment_reference_type)
                   AND created_at < {expiresBefore}

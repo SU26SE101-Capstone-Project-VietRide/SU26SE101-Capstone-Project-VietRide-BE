@@ -4150,9 +4150,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"tripId\": \"{{day12TripId}}\",\n  \"pickup\": {\n    \"stationId\": \"{{day12PickupStationId}}\"\n  },\n  \"seats\": [\n    {\n      \"seatNumber\": \"A01\",\n      \"passenger\": {\n        \"fullName\": \"Nguyen Van A\",\n        \"phoneNumber\": \"0900000001\",\n        \"idNumber\": \"012345678901\"\n      }\n    }\n  ],\n  \"paymentMethod\": \"WALLET\"\n}"
+              "raw": "{\n  \"tripId\": \"{{day12TripId}}\",\n  \"pickup\": {\n    \"stationId\": \"{{day12PickupStationId}}\"\n  },\n  \"seats\": [{ \"seatNumber\": \"A01\" }],\n  \"paymentMethod\": \"WALLET\"\n}"
             },
-            "description": "Day 12 — POST /v1/bookings (WALLET path). Auth: PASSENGER bearer token. Idempotency-Key required. Max 5 seats. Returns 201 CONFIRMED on WALLET success; 409 BOOKING_SEAT_UNAVAILABLE if seat is held; 422 BOOKING_MAX_SEATS_EXCEEDED if >5 seats. Passenger PII (fullName/phoneNumber/idNumber) is validated but not persisted per schema.sql line 149."
+            "description": "POST /v1/bookings (WALLET path). Auth: PASSENGER bearer token. Idempotency-Key required. Each seat contains only seatNumber; 1–5 unique seats, max 20 characters."
           }
         },
         {
@@ -4204,7 +4204,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"outbound\": {\n    \"tripId\": \"{{day12TripId}}\",\n    \"pickup\": {\n      \"stationId\": \"{{day12PickupStationId}}\"\n    },\n    \"dropoff\": {\n      \"stationId\": \"{{day12DropoffStationId}}\"\n    },\n    \"seats\": [\n      {\n        \"seatNumber\": \"A01\",\n        \"passenger\": {\n          \"fullName\": \"Nguyen Van A\",\n          \"phoneNumber\": \"0900000001\",\n          \"idNumber\": \"012345678901\"\n        }\n      }\n    ]\n  },\n  \"return\": {\n    \"tripId\": \"{{day12ReturnTripId}}\",\n    \"pickup\": {\n      \"stationId\": \"{{day12ReturnPickupStationId}}\"\n    },\n    \"dropoff\": {\n      \"stationId\": \"{{day12ReturnDropoffStationId}}\"\n    },\n    \"seats\": [\n      {\n        \"seatNumber\": \"A02\",\n        \"passenger\": {\n          \"fullName\": \"Nguyen Van A\",\n          \"phoneNumber\": \"0900000001\",\n          \"idNumber\": \"012345678901\"\n        }\n      }\n    ]\n  },\n  \"paymentMethod\": \"WALLET\"\n}"
+              "raw": "{\n  \"outbound\": {\n    \"tripId\": \"{{day12TripId}}\",\n    \"pickup\": { \"stationId\": \"{{day12PickupStationId}}\" },\n    \"dropoff\": { \"stationId\": \"{{day12DropoffStationId}}\" },\n    \"seats\": [{ \"seatNumber\": \"A01\" }]\n  },\n  \"return\": {\n    \"tripId\": \"{{day12ReturnTripId}}\",\n    \"pickup\": { \"stationId\": \"{{day12ReturnPickupStationId}}\" },\n    \"dropoff\": { \"stationId\": \"{{day12ReturnDropoffStationId}}\" },\n    \"seats\": [{ \"seatNumber\": \"A02\" }]\n  },\n  \"paymentMethod\": \"WALLET\"\n}"
             },
             "description": "PASSENGER-only round-trip booking request. Idempotency-Key required. Uses the booking sub-path under the existing /v1/bookings prefix."
           }
@@ -4352,7 +4352,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"tripId\": \"{{day12TripId}}\",\n  \"pickup\": {\n    \"stationId\": \"{{day12PickupStationId}}\"\n  },\n  \"seats\": [\n    { \"seatNumber\": \"A01\", \"passenger\": { \"fullName\": \"A\", \"phoneNumber\": \"0900000001\", \"idNumber\": \"012345678901\" } },\n    { \"seatNumber\": \"A02\", \"passenger\": { \"fullName\": \"B\", \"phoneNumber\": \"0900000002\", \"idNumber\": \"012345678902\" } },\n    { \"seatNumber\": \"A03\", \"passenger\": { \"fullName\": \"C\", \"phoneNumber\": \"0900000003\", \"idNumber\": \"012345678903\" } },\n    { \"seatNumber\": \"A04\", \"passenger\": { \"fullName\": \"D\", \"phoneNumber\": \"0900000004\", \"idNumber\": \"012345678904\" } },\n    { \"seatNumber\": \"A05\", \"passenger\": { \"fullName\": \"E\", \"phoneNumber\": \"0900000005\", \"idNumber\": \"012345678905\" } },\n    { \"seatNumber\": \"A06\", \"passenger\": { \"fullName\": \"F\", \"phoneNumber\": \"0900000006\", \"idNumber\": \"012345678906\" } }\n  ],\n  \"paymentMethod\": \"WALLET\"\n}"
+              "raw": "{\n  \"tripId\": \"{{day12TripId}}\",\n  \"pickup\": { \"stationId\": \"{{day12PickupStationId}}\" },\n  \"seats\": [\n    { \"seatNumber\": \"A01\" }, { \"seatNumber\": \"A02\" },\n    { \"seatNumber\": \"A03\" }, { \"seatNumber\": \"A04\" },\n    { \"seatNumber\": \"A05\" }, { \"seatNumber\": \"A06\" }\n  ],\n  \"paymentMethod\": \"WALLET\"\n}"
             },
             "description": "6 seats → 422 BOOKING_MAX_SEATS_EXCEEDED."
           }
@@ -5802,7 +5802,7 @@
             "const body = pm.response.json();",
             "pm.test('Competing lock uses ADR-0004 error envelope', () => { pm.response.to.have.status(409); pm.expect(body.success).to.eql(false); pm.expect(body.statusCode).to.eql(409); pm.expect(body.error.code).to.eql('BOOKING_SEAT_UNAVAILABLE'); pm.expect(body.meta.traceId).to.be.a('string'); });"
           ] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day12CompetingPassengerToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day12CompetingIdempotencyKey}}" }], "url": "{{baseUrl}}/v1/bookings", "body": { "mode": "raw", "raw": "{\n  \"tripId\": \"{{day12TripId}}\",\n  \"pickup\": { \"stationId\": \"{{day12PickupStationId}}\" },\n  \"dropoff\": { \"stationId\": \"{{day12DropoffStationId}}\" },\n  \"seats\": [{ \"seatNumber\": \"A07\", \"passenger\": { \"fullName\": \"Competing passenger\", \"phoneNumber\": \"0900000012\", \"idNumber\": \"012345678912\" } }],\n  \"paymentMethod\": \"WALLET\"\n}" } }
+          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day12CompetingPassengerToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day12CompetingIdempotencyKey}}" }], "url": "{{baseUrl}}/v1/bookings", "body": { "mode": "raw", "raw": "{\n  \"tripId\": \"{{day12TripId}}\",\n  \"pickup\": { \"stationId\": \"{{day12PickupStationId}}\" },\n  \"dropoff\": { \"stationId\": \"{{day12DropoffStationId}}\" },\n  \"seats\": [{ \"seatNumber\": \"A07\" }],\n  \"paymentMethod\": \"WALLET\"\n}" } }
         },
         {
           "name": "2. TTL-released seats book as a single held set",
@@ -5854,7 +5854,7 @@
               "const body = pm.response.json(); pm.test('Booking VNPay IPN accepts a valid signature', () => { pm.response.to.have.status(200); pm.expect(body.RspCode).to.eql('00'); });"
             ] }}
           ],
-          "request": { "method": "POST", "url": "{{baseUrl}}/v1/payments/vnpay-ipn?vnp_Amount={{day16VnPayAmountRaw}}&vnp_ResponseCode=00&vnp_TransactionStatus=00&vnp_TxnRef={{day16VnPayTxnRef}}&vnp_SecureHash={{day16VnPaySecureHash}}" }
+          "request": { "method": "GET", "url": "{{baseUrl}}/v1/payments/vnpay-ipn?vnp_Amount={{day16VnPayAmountRaw}}&vnp_ResponseCode=00&vnp_TransactionStatus=00&vnp_TxnRef={{day16VnPayTxnRef}}&vnp_SecureHash={{day16VnPaySecureHash}}" }
         },
         {
           "name": "4. Poll validates the immediate VNPay booking status shape after IPN",

@@ -116,6 +116,7 @@ public static class InfrastructureServiceCollectionExtensions
         // Repositories (Task 12.3)
         services.AddScoped<IBookingRepository, BookingRepository>();
         services.AddScoped<IBookingStatusHistoryRepository, BookingStatusHistoryRepository>();
+        services.AddScoped<IBookingPendingActionRepository, BookingPendingActionRepository>();
 
         // Repositories (Task 14.1)
         services.AddScoped<IVoucherRepository, VoucherRepository>();
@@ -148,10 +149,20 @@ public static class InfrastructureServiceCollectionExtensions
                 options.QueueName = "booking.payment-succeeded";
                 options.BindingKeys = [PaymentSucceededIntegrationEvent.EventType];
             });
+            services.AddVietRideEventConsumer<StopDisabledIntegrationEvent, StopDisabledIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "booking.stop-disabled";
+                options.BindingKeys = [StopDisabledIntegrationEvent.EventType];
+            });
             services.AddVietRideEventConsumer<PaymentExpiredIntegrationEvent, PaymentExpiredIntegrationEventHandler>(options =>
             {
                 options.QueueName = "booking.payment-expired";
                 options.BindingKeys = [PaymentExpiredIntegrationEvent.EventType];
+            });
+            services.AddVietRideEventConsumer<PaymentFailedIntegrationEvent, PaymentFailedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "booking.payment-failed";
+                options.BindingKeys = [PaymentFailedIntegrationEvent.EventType];
             });
             services.AddVietRideEventConsumer<WalletCreditedIntegrationEvent, WalletCreditedIntegrationEventHandler>(options =>
             {

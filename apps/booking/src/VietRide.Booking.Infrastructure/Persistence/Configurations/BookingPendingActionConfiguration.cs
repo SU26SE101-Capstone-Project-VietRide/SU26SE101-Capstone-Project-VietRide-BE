@@ -27,15 +27,11 @@ internal sealed class BookingPendingActionConfiguration : IEntityTypeConfigurati
         builder.Property(x => x.Reason)
             .HasColumnName("reason")
             .HasColumnType("booking_pending_action_reason")
-            .HasConversion(r => r.ToString(), s => Enum.Parse<BookingPendingActionReason>(s))
             .IsRequired();
 
         builder.Property(x => x.Severity)
             .HasColumnName("severity")
             .HasColumnType("booking_pending_action_severity")
-            .HasConversion(
-                s => s.HasValue ? s.Value.ToString() : null,
-                s => s != null ? Enum.Parse<BookingPendingActionSeverity>(s) : (BookingPendingActionSeverity?)null)
             .IsRequired(false);
 
         builder.Property(x => x.Deadline)
@@ -49,9 +45,6 @@ internal sealed class BookingPendingActionConfiguration : IEntityTypeConfigurati
         builder.Property(x => x.ResolvedAction)
             .HasColumnName("resolved_action")
             .HasColumnType("booking_pending_action_resolved")
-            .HasConversion(
-                r => r.HasValue ? r.Value.ToString() : null,
-                s => s != null ? Enum.Parse<BookingPendingActionResolved>(s) : (BookingPendingActionResolved?)null)
             .IsRequired(false);
 
         builder.Property(x => x.Metadata)

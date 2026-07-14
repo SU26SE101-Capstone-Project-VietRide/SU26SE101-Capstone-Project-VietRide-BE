@@ -93,11 +93,7 @@ public sealed class BookingsController : ControllerBase
             DropoffStationId: request.Dropoff?.StationId,
             DropoffStopId: request.Dropoff?.StopId,
             Seats: request.Seats
-                .Select(s => new SeatRequest(
-                    s.SeatNumber,
-                    s.Passenger.FullName,
-                    s.Passenger.PhoneNumber,
-                    s.Passenger.IdNumber))
+                .Select(s => new SeatRequest(s.SeatNumber.Trim()))
                 .ToList(),
             VoucherCode: request.VoucherCode,
             PaymentMethod: request.PaymentMethod);
@@ -255,11 +251,7 @@ public sealed class BookingsController : ControllerBase
             DropoffStationId: leg.Dropoff?.StationId,
             DropoffStopId: leg.Dropoff?.StopId,
             Seats: leg.Seats
-                .Select(s => new CreateRoundTripBookingCommand.RoundTripSeatRequest(
-                    s.SeatNumber,
-                    s.Passenger.FullName,
-                    s.Passenger.PhoneNumber,
-                    s.Passenger.IdNumber))
+                .Select(s => new CreateRoundTripBookingCommand.RoundTripSeatRequest(s.SeatNumber.Trim()))
                 .ToList());
 
     private string GetRequiredIdempotencyKey()

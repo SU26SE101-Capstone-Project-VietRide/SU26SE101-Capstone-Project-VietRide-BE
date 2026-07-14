@@ -87,6 +87,18 @@ public sealed class Stop : BaseEntity<Guid>, ISoftDeletable, IActivatable
         IsActive = false;
     }
 
+    public void SoftDelete(DateTimeOffset deletedAt, Guid? replacedByStopId)
+    {
+        ValidateOptionalGuid(replacedByStopId, nameof(replacedByStopId));
+        if (replacedByStopId == Id)
+        {
+            throw new ArgumentException("A stop cannot replace itself.", nameof(replacedByStopId));
+        }
+
+        ReplacedByStopId = replacedByStopId;
+        SoftDelete(deletedAt);
+    }
+
     private static string? NormalizeOptional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static void ValidateRequired(string value, string parameterName)

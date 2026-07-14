@@ -98,14 +98,14 @@ public class CreateRoundTripBookingCommandHandlerTests
             null,
             null,
             null,
-            [new CreateRoundTripBookingCommand.RoundTripSeatRequest("A01", "Nguyen Van A", "0900000000", "012345678901")]),
+            [new CreateRoundTripBookingCommand.RoundTripSeatRequest("A01")]),
         new CreateRoundTripBookingCommand.RoundTripBookingLegCommand(
             ReturnTripId,
             StationId,
             null,
             null,
             null,
-            [new CreateRoundTripBookingCommand.RoundTripSeatRequest("A01", "Nguyen Van A", "0900000000", "012345678901")]),
+            [new CreateRoundTripBookingCommand.RoundTripSeatRequest("A01")]),
         voucherCode,
         paymentMethod);
 
@@ -240,8 +240,8 @@ public class CreateRoundTripBookingCommandHandlerTests
 
         var act = () => BuildSut().Handle(BuildCommand(), CancellationToken.None);
 
-        await act.Should().ThrowAsync<ConflictException>()
-            .Where(e => e.ErrorCode == "PAYMENT_INSUFFICIENT_WALLET");
+        await act.Should().ThrowAsync<VietRide.Booking.Application.Exceptions.BookingPaymentException>()
+            .Where(e => e.StatusCode == 402 && e.ErrorCode == "PAYMENT_INSUFFICIENT_WALLET");
 
         await _bookingService.Received(1).ReleaseSeatsAsync(
             OutboundTripId,
@@ -622,8 +622,8 @@ public class CreateRoundTripBookingCommandHandlerTests
         var act = () => BuildSut().Handle(BuildCommand(paymentMethod: "VNPAY", voucherCode: "VCODE"), CancellationToken.None);
 
         // Act & Assert
-        await act.Should().ThrowAsync<ConflictException>()
-            .Where(e => e.ErrorCode == "PAYMENT_INSUFFICIENT_WALLET");
+        await act.Should().ThrowAsync<VietRide.Booking.Application.Exceptions.BookingPaymentException>()
+            .Where(e => e.StatusCode == 402 && e.ErrorCode == "PAYMENT_INSUFFICIENT_WALLET");
 
         // Seats released
         await _bookingService.Received(1).ReleaseSeatsAsync(

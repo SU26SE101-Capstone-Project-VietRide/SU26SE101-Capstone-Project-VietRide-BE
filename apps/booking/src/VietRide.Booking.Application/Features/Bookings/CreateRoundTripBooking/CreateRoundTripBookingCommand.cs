@@ -45,11 +45,7 @@ public sealed record CreateRoundTripBookingCommand : IRequest<CreateRoundTripBoo
         IReadOnlyList<RoundTripSeatRequest> Seats);
 
     /// <summary>
-    /// Per-seat booking request. PII is validated but NOT persisted.
+    /// Per-seat operational booking request. Passenger PII is intentionally not collected.
     /// </summary>
-    public sealed record RoundTripSeatRequest(
-        string SeatNumber,
-        string FullName,
-        string PhoneNumber,
-        string IdNumber);
+    public sealed record RoundTripSeatRequest(string SeatNumber);
 }

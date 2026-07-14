@@ -10,7 +10,7 @@ namespace VietRide.Payment.Application.Features.Payments.ExpirePayment;
 
 public sealed class ExpirePaymentCommandHandler : IRequestHandler<ExpirePaymentCommand, ExpirePaymentResult>
 {
-    private static readonly TimeSpan PaymentTimeout = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan PaymentTimeout = TimeSpan.FromMinutes(10);
 
     private readonly IPaymentRepository _payments;
     private readonly IIntegrationEventOutbox _outbox;

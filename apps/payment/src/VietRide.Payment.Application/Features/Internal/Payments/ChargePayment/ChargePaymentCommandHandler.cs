@@ -161,11 +161,12 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
     private static PaymentReferenceType ParseReferenceType(string value)
         => Enum.TryParse<PaymentReferenceType>(value, ignoreCase: false, out var referenceType)
             && referenceType is PaymentReferenceType.BOOKING
+                or PaymentReferenceType.BOOKING_GROUP
                 or PaymentReferenceType.PARCEL
                 or PaymentReferenceType.PARCEL_ADDITIONAL
             ? referenceType
             : throw new CodedValidationException("VALIDATION_ERROR",
-                "Charge supports BOOKING, PARCEL, or PARCEL_ADDITIONAL references only.");
+                "Charge supports BOOKING, BOOKING_GROUP, PARCEL, or PARCEL_ADDITIONAL references only.");
 
     private static PaymentMethod ParseMethod(string value)
         => Enum.TryParse<PaymentMethod>(value, ignoreCase: false, out var method)

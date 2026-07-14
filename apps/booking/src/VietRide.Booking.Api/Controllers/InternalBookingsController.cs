@@ -33,4 +33,13 @@ public sealed class InternalBookingsController : ControllerBase
 
         return Ok(result);
     }
+
+    [HttpGet("active-by-stop/{stopId:guid}/count")]
+    public async Task<ActionResult<object>> GetActiveCountByStopAsync(
+        Guid stopId, [FromQuery] Guid operatorId, CancellationToken cancellationToken)
+        => Ok(new
+        {
+            activeBookingCount = await _mediator.Send(
+            new GetActiveBookingCountByStopQuery(stopId, operatorId), cancellationToken)
+        });
 }

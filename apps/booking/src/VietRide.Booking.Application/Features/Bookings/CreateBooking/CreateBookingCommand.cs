@@ -24,11 +24,6 @@ public sealed record CreateBookingCommand(
     string PaymentMethod) : IRequest<CreateBookingResult>;
 
 /// <summary>
-/// Per-seat booking request. PII (fullName, phoneNumber, idNumber) is validated
-/// but NOT persisted (schema.sql line 149 — passengers is operational-only).
+/// Per-seat operational booking request. Passenger PII is intentionally not collected.
 /// </summary>
-public sealed record SeatRequest(
-    string SeatNumber,
-    string FullName,
-    string PhoneNumber,
-    string IdNumber);
+public sealed record SeatRequest(string SeatNumber);

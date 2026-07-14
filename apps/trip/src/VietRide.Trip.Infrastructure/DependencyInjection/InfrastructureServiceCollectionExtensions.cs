@@ -90,6 +90,13 @@ public static class InfrastructureServiceCollectionExtensions
             .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
         services.AddScoped<ISubscriptionQuotaClient>(serviceProvider =>
             (ISubscriptionQuotaClient)serviceProvider.GetRequiredService<IIdentityInternalClient>());
+        services.AddHttpClient<IBookingImpactClient, BookingImpactClient>(client =>
+            {
+                client.BaseAddress = new Uri(configuration["BOOKING_BASE_URL"] ?? "http://booking:5003", UriKind.Absolute);
+                client.Timeout = TimeSpan.FromSeconds(5);
+            })
+            .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
+            .AddHttpMessageHandler<InternalJwtDelegatingHandler>();
 
         return services;
     }

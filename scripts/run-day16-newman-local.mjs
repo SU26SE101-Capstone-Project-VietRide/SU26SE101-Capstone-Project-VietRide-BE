@@ -18,6 +18,12 @@ const executionEnvironmentPath = path.join(
 );
 let previousBookingMode;
 
+function requireVnPayHashSecret() {
+  const secret = process.env.VNPAY_HASH_SECRET;
+  if (!secret) throw new Error('VNPAY_HASH_SECRET is required for the VNPay E2E harness.');
+  return secret;
+}
+
 function run(label, command, args, env = process.env) {
   const useNpxCli = command === 'npx' && process.platform === 'win32';
   const npxCli = path.join(
@@ -467,7 +473,7 @@ try {
     '--env-var',
     `day16CancelIdempotencyKey=${crypto.randomUUID()}`,
     '--env-var',
-    `day16VnPayHashSecret=${process.env.VNPAY_HASH_SECRET || 'sandbox-hash-secret-for-local-dev-only'}`,
+    `day16VnPayHashSecret=${requireVnPayHashSecret()}`,
   ]);
   await pollBookingConfirmed(passengerAccessToken, readExportedValue('day16VnPayBookingId'));
   const walletBookingId = readExportedValue('day16WalletBookingId');

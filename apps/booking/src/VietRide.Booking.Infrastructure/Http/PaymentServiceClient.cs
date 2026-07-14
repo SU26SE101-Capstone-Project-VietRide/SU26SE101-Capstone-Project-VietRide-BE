@@ -76,16 +76,17 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
                 return new BatchChargeOutcome.Success(payments);
             }
 
-            if (response.StatusCode == HttpStatusCode.PaymentRequired
-                || response.StatusCode == HttpStatusCode.UnprocessableEntity
-                || response.StatusCode == HttpStatusCode.Conflict)
+            if (response.StatusCode == HttpStatusCode.PaymentRequired)
             {
                 return new BatchChargeOutcome.InsufficientFunds(
-                    $"Payment service rejected batch charge (status {(int)response.StatusCode}).");
+                    await ReadErrorMessageAsync(response, "Payment service rejected batch charge.", cancellationToken));
             }
 
             return new BatchChargeOutcome.TransportError(
-                $"Payment service returned unexpected status {(int)response.StatusCode}.");
+                await ReadErrorMessageAsync(
+                    response,
+                    $"Payment service returned unexpected status {(int)response.StatusCode}.",
+                    cancellationToken));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -137,17 +138,18 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
                 return new ChargeOutcome.Success(result);
             }
 
-            if (response.StatusCode == HttpStatusCode.PaymentRequired
-                || response.StatusCode == HttpStatusCode.UnprocessableEntity
-                || response.StatusCode == HttpStatusCode.Conflict)
+            if (response.StatusCode == HttpStatusCode.PaymentRequired)
             {
                 // Insufficient funds or business rule rejection
                 return new ChargeOutcome.InsufficientFunds(
-                    $"Payment service rejected charge (status {(int)response.StatusCode}).");
+                    await ReadErrorMessageAsync(response, "Payment service rejected charge.", cancellationToken));
             }
 
             return new ChargeOutcome.TransportError(
-                $"Payment service returned unexpected status {(int)response.StatusCode}.");
+                await ReadErrorMessageAsync(
+                    response,
+                    $"Payment service returned unexpected status {(int)response.StatusCode}.",
+                    cancellationToken));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -182,6 +184,31 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
             request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey);
 
         return request;
+    }
+
+    private static async Task<string> ReadErrorMessageAsync(
+        HttpResponseMessage response,
+        string fallback,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (document.RootElement.TryGetProperty("error", out var error)
+                && error.TryGetProperty("message", out var message)
+                && message.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(message.GetString()))
+            {
+                return message.GetString()!;
+            }
+        }
+        catch (JsonException)
+        {
+            // Preserve the stable fallback for non-JSON upstream responses.
+        }
+
+        return fallback;
     }
 
     // -----------------------------------------------------------------------

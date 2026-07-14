@@ -42,6 +42,15 @@ public sealed class BookingDbContext : VietRideDbContextBase
         modelBuilder.HasPostgresEnum(
             "passenger_boarding_status",
             Enum.GetNames<PassengerBoardingStatus>());
+        modelBuilder.HasPostgresEnum(
+            "booking_pending_action_reason",
+            Enum.GetNames<BookingPendingActionReason>());
+        modelBuilder.HasPostgresEnum(
+            "booking_pending_action_severity",
+            Enum.GetNames<BookingPendingActionSeverity>());
+        modelBuilder.HasPostgresEnum(
+            "booking_pending_action_resolved",
+            Enum.GetNames<BookingPendingActionResolved>());
         modelBuilder.HasPostgresEnum("public", "ticket_status", Enum.GetNames<TicketStatus>());
         modelBuilder.HasPostgresEnum("trip_direction", Enum.GetNames<TripDirection>());
         modelBuilder.HasPostgresEnum("voucher_type", Enum.GetNames<VoucherType>());
@@ -65,6 +74,15 @@ public sealed class BookingDbContext : VietRideDbContextBase
             new NpgsqlNullNameTranslator());
         dataSourceBuilder.MapEnum<PassengerBoardingStatus>(
             "passenger_boarding_status",
+            new NpgsqlNullNameTranslator());
+        dataSourceBuilder.MapEnum<BookingPendingActionReason>(
+            "booking_pending_action_reason",
+            new NpgsqlNullNameTranslator());
+        dataSourceBuilder.MapEnum<BookingPendingActionSeverity>(
+            "booking_pending_action_severity",
+            new NpgsqlNullNameTranslator());
+        dataSourceBuilder.MapEnum<BookingPendingActionResolved>(
+            "booking_pending_action_resolved",
             new NpgsqlNullNameTranslator());
         dataSourceBuilder.MapEnum<TicketStatus>("public.ticket_status", new NpgsqlNullNameTranslator());
         dataSourceBuilder.MapEnum<TripDirection>("trip_direction", new NpgsqlNullNameTranslator());

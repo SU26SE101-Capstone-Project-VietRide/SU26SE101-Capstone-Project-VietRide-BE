@@ -40,7 +40,8 @@ try {
     .setProtectedHeader({ alg: 'RS256', kid })
     .setIssuer('vietride-identity').setAudience('vietride-api').setSubject(passengerId)
     .setIssuedAt().setExpirationTime('15m').sign(key);
-  const secret = process.env.VNPAY_HASH_SECRET || 'sandbox-hash-secret-for-local-dev-only';
+  const secret = process.env.VNPAY_HASH_SECRET;
+  if (!secret) throw new Error('VNPAY_HASH_SECRET is required for the VNPay E2E harness.');
   const args = [
     '--yes', 'newman', 'run', 'docs/api/postman/vietride.postman_collection.json',
     '-e', 'docs/api/postman/vietride.local.postman_environment.json',
