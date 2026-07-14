@@ -1,0 +1,195 @@
+# Day 21 — Trip lifecycle automation
+
+- **Timeline ref**: `BE_TIMELINE_VU.md` → Day 21 — Trip lifecycle automation (Jira: SCV-98)
+- **Prior checklist**: `docs/handoff/day-20-checklist.md`
+- **Plan status**: ✅ APPROVED — human-approved for sequential batch execution on 2026-07-14
+
+## Objective
+
+Deliver the Trip lifecycle from `SCHEDULED` through `BOARDING`, `IN_PROGRESS`, and `COMPLETED`, with driver-controlled start/completion and deterministic Hangfire fallbacks. Publish the existing lifecycle event contracts transactionally through the Trip Outbox, then make Parcel move `LOADED → IN_TRANSIT` on `trip.trip.started` and Booking move only `CONFIRMED`/`PARTIAL_NO_SHOW → COMPLETED` on `trip.trip.completed`. Reconcile the API/BSOT gaps before implementation and verify the behavior with a fake clock plus a Gateway-level cross-service run. This unblocks Day 22 trip edits/pricing against a trustworthy lifecycle boundary.
+
+## Success criteria (DoD — binary, verifiable)
+
+- [ ] A `SCHEDULED` Trip becomes `BOARDING` when the fake clock reaches `departureDateTime - 30 minutes`, emits exactly one `trip.trip.boarding_started`, and repeated job scans are no-ops.
+- [ ] The assigned driver can start a `BOARDING` Trip through `POST /v1/driver/trips/{tripId}/start`; the Trip becomes `IN_PROGRESS`, records one clock value as `actualDepartureTime`, and emits exactly one `trip.trip.started`. GPS is not the primary trigger.
+- [ ] The technical-context secondary start fallback changes a still-`BOARDING` Trip to `IN_PROGRESS` only after `departureDateTime + 30 minutes`, with the same timestamp/event guarantees.
+- [ ] Only the assigned `DRIVER` can start; the assigned `DRIVER` or assigned `ASSISTANT` can complete with role-to-assignment correspondence. Unassigned/mismatched callers receive `403 FORBIDDEN`.
+- [ ] Manual start/complete return the approved HTTP 200 ADR-0004 DTOs and enforce UUID-v4 `Idempotency-Key` replay, mismatch, pending, validation, and post-transition semantics through the hardened shared middleware.
+- [ ] An assigned driver/assistant can complete an `IN_PROGRESS` Trip through `POST /v1/driver/trips/{tripId}/complete`; the Trip records `completedAt`/`completedByUserId`, appends one Trip-owned `TRIP_COMPLETED_MANUAL` audit row, and emits exactly one `trip.trip.completed` in the same transaction.
+- [ ] The completion fallback changes only still-`IN_PROGRESS` Trips after `estimatedArrivalTime + 30 minutes`; manual completion and fallback races produce one terminal transition and one event.
+- [ ] Parcel consumes `trip.trip.started` idempotently and changes every matching `LOADED` Parcel to `IN_TRANSIT`, while leaving other trips and statuses unchanged.
+- [ ] Booking consumes `trip.trip.completed` idempotently and changes only matching `CONFIRMED` and `PARTIAL_NO_SHOW` Bookings to `COMPLETED`; `NO_SHOW`, `CANCELLED`, `REFUNDED`, and unrelated bookings remain unchanged.
+- [ ] Every actual Booking transition to `COMPLETED` appends exactly one `BookingStatusHistory` row in the same transaction with `occurredAt=event.completedAt`, null actor, and the Task-21.0-approved source constant; duplicate/reordered events append no history.
+- [ ] Trip, Parcel, and Booking build/format/tests pass; focused fake-clock and duplicate-event tests pass; a Gateway-level lifecycle run proves the start event reaches Parcel and completion reaches Booking.
+
+## Contract changes
+
+- Add FE-facing `POST /v1/driver/trips/{tripId}/start` and `POST /v1/driver/trips/{tripId}/complete` to `VietRide_API_Contract_v1.md`. Both return HTTP 200 ADR-0004 envelopes: start data `{tripId,status,actualDepartureTime}` and complete data `{tripId,status,completedAt,completedByUserId}`. Both require UUID-v4 `Idempotency-Key`.
+- Register `TRIP_INVALID_TRANSITION` (HTTP 409) for illegal Trip lifecycle state transitions. Day-21 lifecycle writers use only this code. The sole current `INVALID_TRIP_STATUS` use at `apps/trip/src/VietRide.Trip.Application/Features/Trips/Operations/ArriveTripStopCommandHandler.cs:49` is outside all Day-21 implementation write sets and is a precise carry-over to that endpoint's next owning task; it must not be silently changed by Day 21.
+- Register the idempotency contract: same key/fingerprint replays the original response; changed fingerprint is `422 IDEMPOTENCY_KEY_MISMATCH`; in-flight duplicate is `409 IDEMPOTENCY_REQUEST_PENDING`; missing/malformed UUID-v4 key is `422 VALIDATION_ERROR`; a fresh key after state transition is `409 TRIP_INVALID_TRANSITION`. Fingerprints cover HTTP method, normalized route/path parameters, authenticated subject, and canonical body.
+- Reuse the already registered routing keys `trip.trip.boarding_started`, `trip.trip.started`, and `trip.trip.completed`; Task 21 must not create aliases. Payloads remain the BSOT §7.3 shapes: `{ tripId, boardingStartedAt }`, `{ tripId, actualDepartureTime }`, and `{ tripId, completedAt, hasSubstitution }`.
+- Correct BSOT §8.2/§10.1 to match higher-priority `technical_context_v7` §6.10: manual driver start is primary (not GPS); auto-boarding is a 15-minute recurring scan, delayed auto-start is a 5-minute recurring scan, and auto-completion is a 15-minute recurring scan. Bump the BSOT version and changelog in the same baseline task.
+- Register the `trip.trip.completed` Booking writer and approved `BookingStatusHistorySource.CompleteOnTripCompleted = "COMPLETE_ON_TRIP_COMPLETED"` in BSOT §8.1, including status `COMPLETED`, null actor/reason, and `occurredAt=event.completedAt`; include this addition in the same BSOT version/changelog entry.
+- Add Trip-owned append-only `trip_audit_logs` through Task 21.2's separately reviewed EF migration. Manual completion writes Trip state, `TRIP_COMPLETED_MANUAL` audit metadata `{tripId,role}`, and Outbox atomically; no Identity DB write/call and no audit integration event.
+- Existing Gateway prefix `/v1/driver` already routes to Trip and admits `DRIVER,ASSISTANT`; no new Gateway route is planned.
+
+## Tasks
+
+### Task 21.0 — Pre-reqs / architecture baseline: freeze lifecycle HTTP, job, event, and audit contracts
+
+| Field | Value |
+|---|---|
+| stack/owner | cross-cutting documentation/contract |
+| implement agent | worker |
+| review agent | reviewer |
+| skill | (none) |
+| owned files (write set) | `VietRide_API_Contract_v1.md`; `BACKEND_SOURCE_OF_TRUTH.md` |
+| forbidden scope | `.env`, secrets, all `apps/**` and `libs/**` production/test code, `db-schema/**`, migrations, Gateway source, package/dependency files, infra, unrelated SOT sections, git operations, and any file outside the declared write set |
+| depends on | PLAN-REVIEW approval; Q1–Q5 are resolved below. Tasks 21.1–21.7 depend on this task. |
+| invariant flags | LF Markdown; SOT hierarchy is enforced (`technical_context_v7` over BSOT); no GPS-primary trigger; exact thresholds are auto-board at T-30, auto-start only after departure+30, auto-complete at ETA+30; routing keys use `<svc>.<aggregate>.<verb_past>` and are not renamed; ADR-0004 envelopes; no unregistered error code; no dependency; no cross-DB audit write. |
+| acceptance | The API contract specifies both no-body endpoints and exact HTTP 200 ADR-0004 data DTOs. Start data is `{ tripId: string(uuid), status: "IN_PROGRESS", actualDepartureTime: string(date-time) }`, with all three fields required and non-null. Complete data is `{ tripId: string(uuid), status: "COMPLETED", completedAt: string(date-time), completedByUserId: string(uuid) }`, with all four fields required and non-null for the manual endpoint. Both endpoints require a UUID-v4 key, full fingerprint/replay/pending/mismatch/validation/new-key semantics, and exact authorization: start requires `role=DRIVER && sub=trip.driverUserId`; complete requires `DRIVER→driverUserId` or `ASSISTANT→assistantUserId`; mismatch is `403 FORBIDDEN`. BSOT §5.6/§5.9 registers the idempotency behavior and `TRIP_INVALID_TRANSITION` 409; Day-21 code must not use `INVALID_TRIP_STATUS`, whose only current out-of-scope usage is recorded as the `ArriveTripStopCommandHandler.cs:49` carry-over. BSOT §8.2 removes GPS-primary wording; §10.1 records the 15/5/15-minute recurring jobs; §7.3 retains exact lifecycle payloads. BSOT §8.1 registers `COMPLETE_ON_TRIP_COMPLETED`. The audit contract registers append-only `trip_audit_logs` with exactly: `id UUID PK`, `trip_id UUID NOT NULL` local FK to `trips(id) ON DELETE RESTRICT`, `actor_user_id UUID NULL` as a logical Identity reference with no DB FK, `action VARCHAR(64) NOT NULL`, `metadata JSONB NULL`, `occurred_at TIMESTAMPTZ NOT NULL`, and `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`; indexes are `(trip_id, occurred_at DESC)`, `(actor_user_id, occurred_at DESC) WHERE actor_user_id IS NOT NULL`, and `(action, occurred_at DESC)`. The only Day-21 action is `TripAuditAction.TripCompletedManual = "TRIP_COMPLETED_MANUAL"`; manual completion atomically writes Trip state, this audit row with actor and metadata `{tripId,role}`, and the completion Outbox row in one Trip-local transaction, with no audit event or Identity read/write. One BSOT version/changelog entry covers all changes; Markdown remains LF and no implementation file changes. |
+| source citations | `BE_TIMELINE_VU.md` Day 21 (lines 226–233); `SU26SE101_VIETRIDE_technical_context_v7.md` §6.2.1 (lines 2168–2203), §6.6 Parcel `LOADED → IN_TRANSIT` (lines 2920–2927), §6.10 Trip lifecycle triggers (lines 3648–3680); `BACKEND_SOURCE_OF_TRUTH.md` §§5.4–5.6, 5.9, 7.3, 8.1–8.2, 10.1; `VietRide_API_Contract_v1.md` driver section; ADR 0004; `db-schema/trip-route-vehicle/schema.sql` `trips`. |
+
+### Task 21.1 — Harden shared idempotency fingerprinting, reservation, and endpoint opt-in
+
+| Field | Value |
+|---|---|
+| stack/owner | dotnet / Shared.Web |
+| implement agent | dotnet-worker |
+| review agent | dotnet-reviewer |
+| skill | (none) |
+| owned files (write set) | `libs/dotnet/VietRide.Shared.Web/Middleware/IdempotencyMiddleware.cs`; `libs/dotnet/VietRide.Shared.Web/DependencyInjection/IdempotencyServiceCollectionExtensions.cs`; new `libs/dotnet/VietRide.Shared.Web/Idempotency/RequireIdempotencyAttribute.cs`; new `libs/dotnet/VietRide.Shared.Web/Idempotency/IdempotencyFingerprint.cs`; new `apps/trip/tests/VietRide.Trip.IntegrationTests/SharedIdempotencyMiddlewareIntegrationTests.cs` |
+| forbidden scope | `.env`, secrets, Trip/Booking/Parcel domain or endpoint code, the existing Trip-local `Filters/RequireIdempotencyKeyAttribute.cs` and its callers, Redis deployment/configuration, package/dependency files, API/BSOT/ADR docs, migrations/schema, git operations, and any file outside the declared write set |
+| depends on | 21.0. Parallel-safe with 21.2 by disjoint write sets, but default serial in the shared tree. |
+| invariant flags | C# CRLF; one shared implementation, no endpoint-local replay cache; opt-in marker metadata limits mandatory-key validation to explicitly annotated endpoints and must not change legacy endpoints; UUID v4 only; fingerprint = method + normalized route template/path parameters + authenticated `sub` + canonical body, never body-only; atomic Redis pending reservation precedes downstream execution; 24-hour completed-response TTL; ADR-0004 error envelopes/traceId; do not cache secrets or log keys/JWT/body; no new dependency; CPM/MediatR unaffected. |
+| acceptance | Middleware tests use an isolated real Redis namespace and a minimal test pipeline to prove: missing/malformed key on an opted-in endpoint → `422 VALIDATION_ERROR`; first UUID-v4 key reserves pending and executes once; concurrent same-fingerprint request while pending → `409 IDEMPOTENCY_REQUEST_PENDING`; completed same fingerprint replays byte-identical status/body without downstream invocation; same key with any changed method, normalized route/path parameter, authenticated subject, or canonical body → `422 IDEMPOTENCY_KEY_MISMATCH`; JSON property-order differences canonicalize to the same body component; an otherwise identical unannotated legacy endpoint preserves current missing-key/pass-through behavior. Run all existing idempotency-focused tests discovered in Identity, Trip, Booking, Payment, and Parcel plus the new shared-middleware integration suite; existing service endpoint tests remain the consumer regressions, while the controlled shared test is the explicit marker-off compatibility proof. Reservation cleanup/finalization behavior is deterministic under downstream failure and tests use unique keys/cleanup. Build and format verification is read-only outside this task's write set: `dotnet build` and `dotnet format --verify-no-changes` pass for `libs/dotnet/VietRide.Libs.sln` and all five service solutions `apps/{identity,trip,booking,payment,parcel}/VietRide.<Svc>.sln`; relevant existing service tests pass. A verification failure in consumer code is reported, not repaired under Task 21.1. |
+| source citations | Task-21.0 API contract and BSOT §§5.4–5.6, 5.9, 9.8; ADR 0004; current `IdempotencyMiddleware.cs` body-only/pass-through behavior; `AGENTS.md` no-new-dependency and CRLF/CPM invariants. |
+
+### Task 21.2 — Add Trip-owned append-only audit persistence and EF migration
+
+| Field | Value |
+|---|---|
+| stack/owner | dotnet / Trip persistence |
+| implement agent | dotnet-worker |
+| review agent | dotnet-reviewer |
+| skill | ef-migration |
+| owned files (write set) | new `apps/trip/src/VietRide.Trip.Domain/Entities/TripAuditLog.cs`; new `apps/trip/src/VietRide.Trip.Domain/Constants/TripAuditAction.cs`; new `apps/trip/src/VietRide.Trip.Application/Abstractions/Repositories/ITripAuditLogRepository.cs`; new `apps/trip/src/VietRide.Trip.Infrastructure/Persistence/Configurations/TripAuditLogConfiguration.cs`; new `apps/trip/src/VietRide.Trip.Infrastructure/Persistence/Repositories/TripAuditLogRepository.cs`; `apps/trip/src/VietRide.Trip.Infrastructure/TripDbContext.cs`; `apps/trip/src/VietRide.Trip.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs`; generated `apps/trip/src/VietRide.Trip.Infrastructure/Migrations/<timestamp>_AddTripAuditLogs.cs` and `.Designer.cs`; `apps/trip/src/VietRide.Trip.Infrastructure/Migrations/TripDbContextModelSnapshot.cs`; `db-schema/trip-route-vehicle/schema.sql`; `db-schema/trip-route-vehicle/README.md`; new `apps/trip/tests/VietRide.Trip.UnitTests/Domain/TripAuditLogTests.cs`; new `apps/trip/tests/VietRide.Trip.IntegrationTests/Persistence/TripAuditLogPersistenceTests.cs` |
+| forbidden scope | `.env`, secrets, lifecycle controllers/handlers/jobs, shared libs, other services/databases, Identity lookup/write, audit integration events, PostgreSQL enum creation, unrelated Trip tables/migrations, package/dependency changes, git operations, and any file outside the declared write set |
+| depends on | 21.0. Parallel-safe with 21.1 by disjoint write sets; Task 21.3 depends on this persistence. |
+| invariant flags | C# CRLF; SQL/README LF; `trip_audit_logs` is append-only in repository/API surface; `trip_id` local FK `ON DELETE RESTRICT`; `actor_user_id` logical Identity FK only with no DB FK; action is whitelisted application string, not PostgreSQL enum; only approved constant is `TripAuditAction.TripCompletedManual = "TRIP_COMPLETED_MANUAL"`; snake_case; reversible `Down()`; no dependency; per-service design-time factory; migration and canonical DDL stay synchronized. |
+| acceptance | EF model/migration/schema define exactly: `id UUID PK`, `trip_id UUID NOT NULL` FK to `trips(id) ON DELETE RESTRICT`, `actor_user_id UUID NULL`, `action VARCHAR(64) NOT NULL`, `metadata JSONB NULL`, `occurred_at TIMESTAMPTZ NOT NULL`, `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`; indexes `(trip_id, occurred_at DESC)`, `(actor_user_id, occurred_at DESC) WHERE actor_user_id IS NOT NULL`, `(action, occurred_at DESC)`. Domain construction rejects empty ids, unapproved action, malformed metadata, and the manual-completion action without an actor. Repository exposes insert/read only. Apply migration to a disposable Trip DB, verify columns/FK/indexes, roll back one migration and reapply. Trip build/format/tests pass and generated C# is CRLF. |
+| source citations | Human-approved Q4 decision recorded in this plan; `technical_context_v7` lines 2185–2192; BSOT Task-21.0 audit contract, §§3.2, 4.5, 9.6; `db-schema/trip-route-vehicle/schema.sql` `trips`; ADR 0003; existing Trip design-time EF factory/migration conventions. |
+
+### Task 21.3 — Implement guarded manual start/complete endpoints and transactional lifecycle events
+
+| Field | Value |
+|---|---|
+| stack/owner | dotnet / Trip |
+| implement agent | dotnet-worker |
+| review agent | dotnet-reviewer |
+| skill | add-endpoint + add-integration-event |
+| owned files (write set) | `apps/trip/src/VietRide.Trip.Domain/Entities/Trip.cs`; `apps/trip/src/VietRide.Trip.Application/Abstractions/Repositories/ITripRepository.cs`; `apps/trip/src/VietRide.Trip.Infrastructure/Persistence/Repositories/TripRepository.cs`; new `apps/trip/src/VietRide.Trip.Application/Features/DriverTrips/StartTrip/StartTripCommand.cs`, `StartTripCommandHandler.cs`, `StartTripResponse.cs`; new `apps/trip/src/VietRide.Trip.Application/Features/DriverTrips/CompleteTrip/CompleteTripCommand.cs`, `CompleteTripCommandHandler.cs`, `CompleteTripResponse.cs`; `apps/trip/src/VietRide.Trip.Api/Controllers/DriverController.cs`; `apps/trip/tests/VietRide.Trip.UnitTests/Domain/TripTests.cs`; new `apps/trip/tests/VietRide.Trip.UnitTests/Features/DriverTrips/StartTripCommandHandlerTests.cs`, `CompleteTripCommandHandlerTests.cs`; new `apps/trip/tests/VietRide.Trip.IntegrationTests/DriverTrips/TripLifecycleEndpointTests.cs` |
+| forbidden scope | `.env`, secrets, other services, `db-schema/**`/migrations, Gateway routes, shared idempotency files, the Trip-local `Filters/RequireIdempotencyKeyAttribute.cs`, unrelated Trip features including `ArriveTripStopCommandHandler.cs`, package/dependency changes, direct RabbitMQ publish, GPS/Tracking trigger work, git operations, and any file outside the declared write set |
+| depends on | 21.0, 21.1, and 21.2. Shared idempotency and audit migration must be reviewer-approved first. |
+| invariant flags | C# CRLF; Clean Architecture and controller → `MediatR.Send`; endpoints opt in to Task 21.1 shared idempotency metadata and contain no local cache/fingerprint logic; start authorization is exactly `role=DRIVER && sub=trip.DriverUserId`; complete authorization is role-corresponding `DRIVER→DriverUserId` or `ASSISTANT→AssistantUserId`; mismatch/unassigned is `403 FORBIDDEN`; `BOARDING → IN_PROGRESS → COMPLETED` only; illegal state is `409 TRIP_INVALID_TRANSITION`; manual/system completion expose `CompleteManually(DateTimeOffset, Guid)` and `CompleteAutomatically(DateTimeOffset)` over one private invariant, both only from `IN_PROGRESS`; `IClock.UtcNow` captured once. The repository freezes one no-migration lifecycle acquisition seam: inside the caller's local transaction it locks the target `trips` row with `SELECT ... FOR UPDATE` (or a semantically identical atomic status claim), reloads/re-checks the expected status after lock acquisition, and only then permits domain mutation; manual handlers and Task 21.4 jobs must reuse this seam. DB/status concurrency guards survive different-key requests and manual/job races; manual completion persists Trip + audit `{tripId,role}` + Outbox in the same lock-holding transaction; no Identity audit call/write/event; exact routing keys/payloads; MediatR v11/CPM/no dependency/no cross-DB FK. |
+| acceptance | Domain tests prove boarding does not set `ActualDepartureTime`, start requires `BOARDING`, manual completion requires non-empty actor, automatic completion records null actor, and both complete only from `IN_PROGRESS`. Repository integration tests prove the lifecycle acquisition starts/uses the caller transaction, issues row-level `FOR UPDATE` (or reviewed equivalent), and re-checks state after waiting; it creates no migration/schema change. Start returns HTTP 200 `{tripId,status:"IN_PROGRESS",actualDepartureTime}`; complete returns HTTP 200 `{tripId,status:"COMPLETED",completedAt,completedByUserId}` inside ADR-0004. Role/assignment matrix tests cover assigned driver start, assistant-start denial, assigned driver/assistant completion, and mismatches as 403. Fresh-key invalid state is `409 TRIP_INVALID_TRANSITION`; Day-21 files contain no `INVALID_TRIP_STATUS`. UUID-v4 replay/mismatch/pending/missing-malformed behavior is verified through shared middleware. Launch two authorized requests concurrently with two different UUID-v4 keys against the same eligible transition: exactly one winner returns 200 and writes one state transition/event (plus one audit for completion); after acquiring and re-checking the row, the loser returns `409 TRIP_INVALID_TRANSITION` and writes no state, Outbox, or audit side effect. Successful start atomically stores state and one started Outbox row. Manual complete atomically stores state, one `TripAuditLog` with action `TRIP_COMPLETED_MANUAL`, actor, metadata `{tripId,role}`, occurrence time, and one completion Outbox row; forced failures roll all three back. A manual/job race likewise produces one transition/event and at most the manual winner's audit. Task 21.4 calls both the frozen repository acquisition seam and `CompleteAutomatically`. Trip build/format/tests pass. |
+| source citations | `technical_context_v7` lines 2168–2203 and 3660–3680; `VietRide_API_Contract_v1.md` Task-21.0 driver lifecycle section; BSOT §§3.2, 5.3–5.6, 7.3, 8.2; ADR 0004; `db-schema/trip-route-vehicle/schema.sql` lines 377–425; existing `DriverController.cs`, Trip Outbox transaction precedent in `ArriveTripStopCommandHandler.cs`, and row-lock precedent in `TripRepository.cs` cargo mutations. |
+
+### Task 21.4 — Implement idempotent fake-clock Hangfire lifecycle scans
+
+| Field | Value |
+|---|---|
+| stack/owner | dotnet / Trip Infrastructure |
+| implement agent | dotnet-worker |
+| review agent | dotnet-reviewer |
+| skill | add-integration-event |
+| owned files (write set) | new `apps/trip/src/VietRide.Trip.Infrastructure/Jobs/AutoBoardingJob.cs`; new `apps/trip/src/VietRide.Trip.Infrastructure/Jobs/AutoStartFallbackJob.cs`; new `apps/trip/src/VietRide.Trip.Infrastructure/Jobs/AutoCompletedFallbackJob.cs`; new `apps/trip/src/VietRide.Trip.Infrastructure/Jobs/TripLifecycleJobRegistrationHostedService.cs`; `apps/trip/src/VietRide.Trip.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs`; `apps/trip/src/VietRide.Trip.Application/Abstractions/Repositories/ITripRepository.cs`; `apps/trip/src/VietRide.Trip.Infrastructure/Persistence/Repositories/TripRepository.cs`; new `apps/trip/tests/VietRide.Trip.UnitTests/Infrastructure/Jobs/TripLifecycleJobTests.cs`; new `apps/trip/tests/VietRide.Trip.IntegrationTests/Jobs/TripLifecycleJobIntegrationTests.cs` |
+| forbidden scope | `.env`, secrets, controllers/manual endpoints, Parcel/Booking/Tracking/Notification, schema/migrations, packages/dependencies, unrelated jobs, direct broker publish, system wall-clock calls in lifecycle logic, git operations, and any file outside the declared write set |
+| depends on | 21.3; Tasks 21.5 and 21.6 may start only after event payloads are stable. |
+| invariant flags | C# CRLF; Hangfire remains Trip-local PostgreSQL schema; recurring jobs use explicit UTC schedules and stable job IDs/`trip` queue; scan predicates identify candidates only; before mutation every job opens a local transaction and reuses Task 21.3's repository lifecycle acquisition/row-lock plus post-lock status re-check; `IClock` only; auto-board `SCHEDULED` with `departure <= now+30m`; auto-start `BOARDING` with `departure < now-30m`; auto-complete `IN_PROGRESS` with `estimatedArrival < now-30m` and calls `CompleteAutomatically`; one transaction/outbox row per winner; automatic completion writes no manual audit row; repeated scan and concurrent manual/job race are idempotent; no GPS dependency/new package; test-only time control, no production backdoor. |
+| acceptance | `TripLifecycleJobIntegrationTests.cs` owns the concrete time-control mechanism: instantiate each job directly with a test-local mutable/frozen `IClock`, real test `TripDbContext`/repository/Outbox, advance time, and invoke jobs directly; production DI remains `SystemClock`. Boundary tests prove each threshold. Auto-board, delayed start, and completion each acquire through the frozen repository seam, re-check status after lock, mutate, and emit exactly one corresponding event; automatic completion records null actor and no manual audit. Wrong statuses/second scans emit nothing. A real-database manual-completion/fallback race proves one lock winner, one `COMPLETED` state and event, with an audit only if manual wins; the losing job is a no-op and the losing manual request maps to `409 TRIP_INVALID_TRANSITION`. Registration tests assert 15/5/15-minute UTC schedules, stable IDs, and Trip queue. Trip build/format/tests pass. |
+| source citations | `technical_context_v7` lines 2182–2203 and 3648–3680; BSOT Task-21.0 §§7.3, 8.2, 10.1; `db-schema/trip-route-vehicle/schema.sql` indexes `idx_trips_status_departure` and lifecycle columns; existing Hangfire setup/registration files under `apps/trip/src/VietRide.Trip.Infrastructure/Jobs/`. |
+
+### Task 21.5 — Align the Parcel `trip.trip.started` consumer and prove `LOADED → IN_TRANSIT`
+
+| Field | Value |
+|---|---|
+| stack/owner | dotnet / Parcel |
+| implement agent | dotnet-worker |
+| review agent | dotnet-reviewer |
+| skill | (none) |
+| owned files (write set) | `apps/parcel/src/VietRide.Parcel.Infrastructure/Messaging/TripStartedIntegrationEvent.cs`; `apps/parcel/src/VietRide.Parcel.Infrastructure/Messaging/TripStartedIntegrationEventHandler.cs`; `apps/parcel/src/VietRide.Parcel.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs`; `apps/parcel/src/VietRide.Parcel.Application/Features/Parcels/TripEvents/HandleTripStartedCommand.cs`; `apps/parcel/src/VietRide.Parcel.Application/Features/Parcels/TripEvents/HandleTripStartedCommandHandler.cs`; `apps/parcel/src/VietRide.Parcel.Application/Abstractions/Repositories/IParcelRepository.cs`; `apps/parcel/src/VietRide.Parcel.Infrastructure/Persistence/Repositories/ParcelRepository.cs`; `apps/parcel/tests/VietRide.Parcel.UnitTests/Features/Phase67ParcelTests.cs`; new `apps/parcel/tests/VietRide.Parcel.IntegrationTests/Messaging/TripStartedIntegrationEventTests.cs` |
+| forbidden scope | `.env`, secrets, Trip/Booking/Payment/Tracking/Notification, Parcel statuses other than the event-driven `LOADED → IN_TRANSIT` path, schema/migrations, packages/dependencies, cargo-counter semantics, new event keys, git operations, and any file outside the declared write set |
+| depends on | 21.4 event payload frozen; parallel-safe with 21.6 only because write sets are disjoint, but default serial in the shared tree. |
+| invariant flags | C# CRLF; queue is durable/manual-ack through shared messaging; exact key `trip.trip.started`; consume `actualDepartureTime` from the event rather than `DateTimeOffset.UtcNow`; status-guarded set-based update; duplicate delivery no-op; no cross-service DB access/FK; consumer failures must not ack; no new dependency. |
+| acceptance | Contract deserialization accepts the exact BSOT payload. First delivery changes all and only parcels for `tripId` whose status is `LOADED` to `IN_TRANSIT` using event `actualDepartureTime`; `PENDING`, `PENDING_PAYMENT`, already-`IN_TRANSIT`, terminal, and other-trip rows remain unchanged. Duplicate delivery reports zero changes and preserves timestamps. Consumer registration binds exactly one stable Parcel queue to `trip.trip.started`; handler/repository and database integration tests pass, followed by Parcel build/format/full tests. |
+| source citations | `technical_context_v7` lines 2920–2927; BSOT §§7.3 and 8.3; `db-schema/parcel/schema.sql` Parcel status/index definitions; existing Parcel `TripStartedIntegrationEvent*` and repository implementation. |
+
+### Task 21.6 — Add the Booking `trip.trip.completed` consumer and guarded bulk completion
+
+| Field | Value |
+|---|---|
+| stack/owner | dotnet / Booking |
+| implement agent | dotnet-worker |
+| review agent | dotnet-reviewer |
+| skill | (none) |
+| owned files (write set) | new `apps/booking/src/VietRide.Booking.Infrastructure/Messaging/TripCompletedIntegrationEvent.cs`; new `apps/booking/src/VietRide.Booking.Infrastructure/Messaging/TripCompletedIntegrationEventHandler.cs`; `apps/booking/src/VietRide.Booking.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs`; new `apps/booking/src/VietRide.Booking.Application/Features/Bookings/TripEvents/HandleTripCompletedCommand.cs`, `HandleTripCompletedCommandHandler.cs`; `apps/booking/src/VietRide.Booking.Application/Abstractions/Repositories/IBookingRepository.cs`; `apps/booking/src/VietRide.Booking.Infrastructure/Persistence/Repositories/BookingRepository.cs`; `apps/booking/src/VietRide.Booking.Domain/Constants/BookingStatusHistorySource.cs`; `apps/booking/src/VietRide.Booking.Domain/Entities/BookingStatusHistory.cs`; `apps/booking/src/VietRide.Booking.Application/Abstractions/Repositories/IBookingStatusHistoryRepository.cs`; `apps/booking/src/VietRide.Booking.Infrastructure/Persistence/Repositories/BookingStatusHistoryRepository.cs`; new `apps/booking/tests/VietRide.Booking.UnitTests/Features/Bookings/TripEvents/HandleTripCompletedCommandHandlerTests.cs`; new `apps/booking/tests/VietRide.Booking.IntegrationTests/TripCompletedIntegrationEventTests.cs` |
+| forbidden scope | `.env`, secrets, Trip/Parcel/Payment/Tracking/Notification, booking payment/cancel/refund/no-show writers, schema/migrations, packages/dependencies, direct broker access, new event key/error code, git operations, and any file outside the declared write set |
+| depends on | 21.4 event payload frozen; parallel-safe with 21.5 only by disjoint write set, but default serial in the shared tree. |
+| invariant flags | C# CRLF; exact key `trip.trip.completed`; use event `completedAt`; update only `CONFIRMED` and `PARTIAL_NO_SHOW`; preserve `NO_SHOW`/`CANCELLED`/`REFUNDED` and all other statuses; use only `BookingStatusHistorySource.CompleteOnTripCompleted = "COMPLETE_ON_TRIP_COMPLETED"`; every actual transition writes exactly one `COMPLETED` history row in the same local transaction with `OccurredAt=event.CompletedAt`, `ActorUserId=null`, and `ReasonCode=null`; guarded duplicate/reordered delivery changes no booking and adds no history; booking state/history rollback atomically; Outbox consumer is at-least-once and ack-after-success; no cross-DB access/FK; no dependency. |
+| acceptance | Contract deserialization accepts `{tripId,completedAt,hasSubstitution}`. First delivery changes all matching `CONFIRMED`/`PARTIAL_NO_SHOW` rows to `COMPLETED` with the event timestamp and no unrelated field mutation, and appends exactly one `BookingStatusHistory(COMPLETED)` per changed booking using the approved source, null actor/reason, and `occurredAt=event.completedAt` in the same transaction. Other-trip and excluded-status rows are unchanged and receive no history. Duplicate or reordered delivery changes zero rows, does not alter timestamps, and appends no history. A forced failure after state mutation/history staging proves both roll back atomically. Consumer registration binds a stable Booking queue exactly once; focused handler and real-database integration tests pass, followed by Booking build/format/full tests. |
+| source citations | `technical_context_v7` §6.2.1 lines 2168–2200; BSOT §§7.3, 8.1; `db-schema/booking/schema.sql` `booking_status`, `bookings.trip_id`, and status indexes; existing Booking messaging registration/repository patterns. |
+
+### Task 21.7 — Verify the full lifecycle through Gateway, Outbox, and consumers
+
+| Field | Value |
+|---|---|
+| stack/owner | cross-cutting verification |
+| implement agent | worker |
+| review agent | reviewer |
+| skill | smoke-test |
+| owned files (write set) | new `scripts/run-day21-trip-lifecycle-local.mjs`; `package.json` (one version-less `postman:day21:local` script only); `docs/api/postman/vietride.postman_collection.json`; `docs/api/postman/vietride.local.postman_environment.json`; `docs/api/postman/README.md`; `scripts/run-full-e2e-local.mjs`; new `docs/handoff/day-21-lifecycle-evidence.md` |
+| forbidden scope | `.env`, secrets/tokens/real customer data, production service code, migrations/schema, contracts/BSOT/ADR, dependencies/package versions, infra changes, direct application-code cross-DB access, non-deterministic pre-existing fixtures, git operations, and any file outside the declared write set |
+| depends on | 21.5 and 21.6; local stack available. Not parallel-safe with any other E2E runner edit. |
+| invariant flags | LF JS/JSON/MD; all public actions through Gateway `:3000`; UUID-v4 idempotency keys generated per scenario and fingerprints vary subject/path deliberately; test JWTs generated at runtime and redacted; deterministic isolated fixtures; cleanup in `finally`; bounded consumer polling; direct DB reads only for harness fixtures/evidence; no clock override/job-control/backdoor—fallback boundaries belong exclusively to Task 21.4 integration tests; no committed secret. |
+| acceptance | `npm run postman:day21:local` creates an isolated already-`BOARDING` assigned Trip, Booking set, and LOADED Parcel; proves assistant/unassigned start denial, assigned driver HTTP-200 manual start, same-key replay, subject/path mismatch, malformed-key handling, started Outbox and Parcel `IN_TRANSIT`; then proves assigned assistant or driver HTTP-200 manual completion, Trip audit row, completed Outbox, Booking eligible statuses/history `COMPLETED`, excluded statuses unchanged, and replay/duplicate event adds no state/audit/history. A new key after each transition returns `409 TRIP_INVALID_TRANSITION`. Deterministic in-flight pending behavior remains proven by Task 21.1's controlled middleware integration test rather than a timing-sensitive live race. The runner does not invoke fake clock/jobs; Task 21.4 evidence covers boundaries. Runner failure is non-zero, secrets redacted, cleanup verified. Full E2E includes Day 21 after Day 20. Fresh Shared/Trip/Parcel/Booking build-format-test and smoke health matrix are recorded in `day-21-lifecycle-evidence.md`. |
+| source citations | `BE_TIMELINE_VU.md` Day 21 DoD/review; Task 21.0 API/BSOT baseline; `technical_context_v7` lines 2168–2203, 2920–2927, 3648–3680; BSOT §§5.3–5.5, 7.3, 8.1–8.3, 10.1; ADR 0004; `docs/handoff/day-20-checklist.md` regression entry-point note. |
+
+## Dispatch order
+
+1. PLAN-REVIEW this plan; Q1–Q5 are resolved. Task 21.0 freezes the approved API/BSOT/error/idempotency/audit/history contracts.
+2. Task 21.1 — harden shared idempotency. Then Task 21.2 — add Trip audit persistence/migration. Their write sets are disjoint and technically parallel-safe, but default serial in the shared tree; git worktrees are forbidden.
+3. Task 21.3 — manual lifecycle domain/HTTP/audit/Outbox transitions after both prerequisites are reviewer-approved.
+4. Task 21.4 — lifecycle jobs on Task 21.3's frozen domain transitions. Not parallel-safe with 21.3: both own `ITripRepository.cs`/`TripRepository.cs`, and 21.4 may only extend the already-reviewed acquisition seam after 21.3 lands; the sequential overlap is intentional.
+5. Task 21.5 → Task 21.6 by default. Parcel and Booking write sets are disjoint and technically parallel-safe, but default serial unless the human explicitly authorizes parallel agents.
+6. Task 21.7 — cross-service/Gateway verification after both consumers land; then `/audit-day 21`.
+
+## Progress tracker
+
+> Orchestrator bookkeeping — the main thread updates this table after each `/implement-task`
+> (Step 3) with the task's review verdict. **Informational only — NOT audit evidence.**
+> `/audit-day` MUST re-verify every task independently against the SOT; it must never treat a
+> ✅ here (or a worker self-report) as proof. A row is bookkeeping, not a passed audit.
+
+| Task | Status | Review verdict | Date | Notes |
+|---|---|---|---|---|
+| 21.0 | ✅ done | APPROVE | 2026-07-14 | Human-approved plan clarifications; one reviewer patch round; docs verification green. |
+| 21.1 | ⬜ todo | — | — | Shared idempotency prerequisite. |
+| 21.2 | ⬜ todo | — | — | Trip audit EF migration prerequisite. |
+| 21.3 | ⬜ todo | — | — | — |
+| 21.4 | ⬜ todo | — | — | — |
+| 21.5 | ⬜ todo | — | — | Existing Parcel consumer must be audited against frozen payload/timestamp. |
+| 21.6 | ⬜ todo | — | — | — |
+| 21.7 | ⬜ todo | — | — | — |
+
+Legend: ⬜ todo · 🔄 in progress · ✅ done (reviewer APPROVED + human `/verify`) · ⚠️ done-with-carryover · ❌ blocked
+
+## Open questions
+
+No unresolved architecture question blocks dispatch.
+
+- **Q1 — RESOLVED:** illegal lifecycle state uses `TRIP_INVALID_TRANSITION` (HTTP 409). The out-of-scope `INVALID_TRIP_STATUS` at `ArriveTripStopCommandHandler.cs:49` is an explicit carry-over to that endpoint's next owning task.
+- **Q2 — RESOLVED:** both endpoints return the exact HTTP 200 DTOs above and require UUID-v4 `Idempotency-Key`; shared middleware owns method/route/subject/body fingerprinting plus replay, mismatch, pending, validation, and fresh-key-after-transition behavior.
+- **Q3 — RESOLVED:** start is assigned DRIVER-only; complete is assigned DRIVER or assigned ASSISTANT with role-to-assignment correspondence; mismatch is `403 FORBIDDEN`.
+- **Q4 — RESOLVED:** Trip owns append-only `trip_audit_logs`; Task 21.2 creates the reviewed EF migration. Manual completion atomically writes Trip, audit, and Outbox; no Identity audit access and no audit event.
+- **Q5 — RESOLVED:** `BookingStatusHistorySource.CompleteOnTripCompleted = "COMPLETE_ON_TRIP_COMPLETED"`.
