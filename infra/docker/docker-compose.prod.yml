@@ -444,6 +444,50 @@ services:
       postgres:
         condition: service_healthy
 
+  # ── Docker socket proxy: read-only slice of the Docker API for dozzle ───────
+  # dozzle must NOT mount /var/run/docker.sock directly — that socket is root on the host
+  # even when mounted :ro (it can create a privileged container). This proxy re-exposes only
+  # the endpoints dozzle needs (list containers, stream logs, watch events) and hard-blocks
+  # every write: POST=0 means no create/exec/start/stop can reach the daemon. Not published
+  # to the host; only reachable on vietride_net.
+  dockerproxy:
+    image: tecnativa/docker-socket-proxy:0.3
+    container_name: vietride_dockerproxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1 # /containers/json + /containers/{id}/logs — what dozzle reads
+      INFO: 1
+      EVENTS: 1 # live container start/stop so the dozzle sidebar stays current
+      PING: 1
+      VERSION: 1
+      POST: 0 # blocks EVERY write verb — this is the line that makes the mount safe
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  # ── Dozzle: read-only web log viewer for the BE team ────────────────────────
+  # Lets BE read production logs WITHOUT an SSH account on the server. No shell, no restart
+  # button — dozzle can only tail/search logs of the containers the proxy lets it see.
+  #
+  # NOT published to the host. Reached only via Cloudflare Tunnel (logs.vietride.online),
+  # which MUST be locked behind Cloudflare Access (email allowlist) — see DEPLOY.md Part E.
+  # Without that Access policy the hostname is PUBLIC and production logs (which contain
+  # request payloads, emails, tokens) are readable by anyone who guesses the subdomain.
+  #
+  # DOZZLE_FILTER is the second half of the isolation: the Docker daemon also runs the
+  # server owner's unrelated personal containers, and without this filter dozzle would list
+  # them all. `name=vietride_` restricts it to this stack's containers (all are named
+  # vietride_*). Keep the filter in sync if container_name conventions ever change.
+  dozzle:
+    image: amir20/dozzle:v10.6
+    container_name: vietride_dozzle
+    restart: unless-stopped
+    environment:
+      DOZZLE_REMOTE_HOST: tcp://dockerproxy:2375
+      DOZZLE_FILTER: name=vietride_
+      DOZZLE_NO_ANALYTICS: 'true'
+    depends_on:
+      - dockerproxy
+
   # ── Cloudflare Tunnel: outbound-only link to the Cloudflare edge ────────────
   # The server DIALS OUT to Cloudflare — no inbound port forwarding needed (works
   # behind the provider NAT / the 24450–24460 restriction). Cloudflare serves 443
