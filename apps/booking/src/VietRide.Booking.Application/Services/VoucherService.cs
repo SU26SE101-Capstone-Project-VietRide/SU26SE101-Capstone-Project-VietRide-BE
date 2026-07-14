@@ -218,7 +218,10 @@ public sealed class VoucherService : IVoucherService
             operatorId,
             discount.Amount);
 
-        return new VoucherValidationResult(VoucherId: voucher.Id, Discount: discount);
+        return new VoucherValidationResult(
+            VoucherId: voucher.Id,
+            Discount: discount,
+            FundingType: voucher.FundingType);
     }
 
     /// <inheritdoc/>

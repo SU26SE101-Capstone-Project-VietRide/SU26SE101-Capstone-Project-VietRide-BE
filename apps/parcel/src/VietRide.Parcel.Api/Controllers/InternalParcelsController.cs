@@ -77,6 +77,23 @@ public sealed class InternalParcelsController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("payment-context/{referenceType}/{referenceId:guid}")]
+    [ProducesResponseType(typeof(ApiResponse<ParcelPaymentContextSnapshot>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ParcelPaymentContextSnapshot>> GetPaymentContextSnapshotAsync(
+        string referenceType,
+        Guid referenceId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(
+            new GetParcelPaymentContextQuery(referenceType, referenceId),
+            cancellationToken);
+
+        return Ok(result);
+    }
+
     [HttpGet("{parcelId:guid}/access-check")]
     [ProducesResponseType(typeof(ApiResponse<ParcelAccessCheckResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]

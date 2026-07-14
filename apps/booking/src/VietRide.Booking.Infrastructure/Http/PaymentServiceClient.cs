@@ -106,11 +106,12 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
         long amount,
         string method,
         string idempotencyKey,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        PaymentContextSnapshot? context = null)
     {
         try
         {
-            var body = new ChargeRequest(referenceType, referenceId, userId, amount, method);
+            var body = new ChargeRequest(referenceType, referenceId, userId, amount, method, context);
             using var request = BuildJsonRequest(
                 HttpMethod.Post,
                 "/internal/v1/payments/charge",
@@ -193,7 +194,8 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
         Guid ReferenceId,
         Guid UserId,
         long Amount,
-        string Method);
+        string Method,
+        PaymentContextSnapshot? Context);
 
     private sealed record BatchChargeRequest(
         Guid UserId,

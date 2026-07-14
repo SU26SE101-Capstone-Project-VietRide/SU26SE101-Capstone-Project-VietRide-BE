@@ -416,7 +416,8 @@ public sealed class CreateParcelCommandHandler
                 priceVnd.Amount,
                 command.PaymentMethod,
                 idempotencyKey,
-                cancellationToken);
+                cancellationToken,
+                CreatePaymentContext(parcel, "PARCEL", priceVnd.Amount));
 
             if (outcome.Kind == ChargeOutcomeKind.InsufficientFunds)
             {
@@ -451,6 +452,22 @@ public sealed class CreateParcelCommandHandler
             parcel.VoucherCode,
             paymentRedirectUrl);
     }
+
+    private static PaymentContextSnapshot CreatePaymentContext(
+        VietRide.Parcel.Domain.Entities.Parcel parcel,
+        string referenceType,
+        long amount)
+        => new(1,
+        [
+            new PaymentAllocationSnapshot(
+                parcel.Id,
+                referenceType,
+                parcel.OperatorId,
+                parcel.TripId,
+                amount,
+                0,
+                0),
+        ]);
 
     private async Task<string> GenerateParcelCodeAsync(CancellationToken cancellationToken)
     {

@@ -97,7 +97,8 @@ public sealed class ReviewParcelCommandHandler
                 depositAmount.Amount,
                 command.PaymentMethod,
                 idempotencyKey,
-                cancellationToken);
+                cancellationToken,
+                CreatePaymentContext(parcel, depositAmount.Amount));
 
             if (outcome.Kind == ChargeOutcomeKind.InsufficientFunds)
             {
@@ -170,4 +171,19 @@ public sealed class ReviewParcelCommandHandler
                 null, null);
         }
     }
+
+    private static PaymentContextSnapshot CreatePaymentContext(
+        VietRide.Parcel.Domain.Entities.Parcel parcel,
+        long amount)
+        => new(1,
+        [
+            new PaymentAllocationSnapshot(
+                parcel.Id,
+                "PARCEL",
+                parcel.OperatorId,
+                parcel.TripId,
+                amount,
+                0,
+                0),
+        ]);
 }
