@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
+using VietRide.Shared.Web.Idempotency;
 using VietRide.Shared.Web.Middleware;
 
 namespace VietRide.Shared.Web.DependencyInjection;
@@ -12,18 +13,17 @@ public sealed class IdempotencyOptions
 {
     /// <summary>
     /// Service-scoped Redis key prefix. Each real service sets its own (e.g. "booking", "payment")
-    /// when it wires the middleware in Sprint 3. Defaults to the placeholder "svc".
+    /// when it wires the middleware. Defaults to "svc" for controlled test pipelines.
     /// </summary>
     public string ServicePrefix { get; set; } = "svc";
 }
 
 /// <summary>
-/// OPT-IN registration helpers for <see cref="IdempotencyMiddleware"/>.
-///
-/// PLACEHOLDER for Sprint-3 reuse — intentionally NOT called by
-/// <c>AddVietRideSharedWeb</c> or any running service pipeline this day.
+/// Opt-in registration helpers for <see cref="IdempotencyMiddleware"/>.
 /// A service opts in via <c>services.AddVietRideIdempotency("booking")</c> and
-/// <c>app.UseVietRideIdempotency()</c>. It assumes an
+/// <c>app.UseVietRideIdempotency()</c>. Endpoints requiring mandatory UUID-v4 validation carry
+/// <see cref="RequireIdempotencyAttribute"/> metadata. Run the middleware after routing and
+/// authentication so endpoint metadata and the authenticated subject are available. It assumes an
 /// <see cref="StackExchange.Redis.IConnectionMultiplexer"/> is already registered.
 /// </summary>
 public static class IdempotencyServiceCollectionExtensions
@@ -40,7 +40,9 @@ public static class IdempotencyServiceCollectionExtensions
         return services;
     }
 
-    /// <summary>Adds <see cref="IdempotencyMiddleware"/> to the request pipeline (opt-in).</summary>
+    /// <summary>
+    /// Adds <see cref="IdempotencyMiddleware"/> to the request pipeline after routing and authentication.
+    /// </summary>
     public static IApplicationBuilder UseVietRideIdempotency(this IApplicationBuilder app)
         => app.UseMiddleware<IdempotencyMiddleware>();
 }

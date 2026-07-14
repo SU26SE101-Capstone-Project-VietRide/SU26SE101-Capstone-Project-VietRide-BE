@@ -26,6 +26,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 | `VehicleType` | Loại xe catalog. | `code` UNIQUE, `isSystemDefined` (block delete cho 3 platform seed) |
 | `Vehicle` | Xe operator. | `licensePlate` UNIQUE, `seatLayoutJson`, `maxCargoWeightKg`, `status` enum |
 | `Trip` | Chuyến cụ thể. | snapshot `baseFare`/`estimatedPassengerLuggageKg`/`maxCargoWeightKg`, 2 cargo counter, `source` enum, `hasSubstitution` |
+| `TripAuditLog` | Append-only audit do Trip service sở hữu. | local `tripId` FK; logical `actorUserId`; JSONB metadata |
 | `TripSeat` | Trạng thái từng ghế per trip. | composite UNIQUE `(tripId, seatNumber)`, `status` enum |
 | `TripStop` | Snapshot RouteStop khi generate. | composite PK, `estimatedArrivalTime` static, `actualArrivalTime` set bởi Assistant |
 | `TripStopFare` | Exception per trip per stop. | copy từ RouteStopFareTemplate active tại thời điểm generate |
@@ -49,6 +50,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 - **`Vehicle.licensePlate` partial unique** trên `deleted_at IS NULL` — cho phép tái dùng biển số sau khi xe RETIRED + soft delete.
 - **`Trip` 2 unique partial indexes** `(driver_user_id, departure_date_time)` và `(vehicle_id, departure_date_time)` với `status NOT IN ('CANCELLED')` — chống conflict assignment + idempotent generate (Hangfire chạy 2 lần không tạo duplicate, CANCELLED không block re-create).
 - **`Trip.source` enum** với value `VEHICLE_SUBSTITUTION` — Hangfire counter check skip cho value này (xem v6 Section 4.5 c.0).
+- **`TripAuditLog` append-only** — repository chỉ expose insert/read. `trip_id` là local FK `ON DELETE RESTRICT`; `actor_user_id` là logical Identity FK, không có DB constraint; `action` là application string whitelist, không tạo PostgreSQL enum.
 - **`Trip.estimated_passenger_luggage_kg`, `reserved_parcel_weight_kg`, `total_loaded_weight_kg` decimal(8,2)** — đủ precision cho cargo accounting (10kg.50). CHECK non-negative cho 2 counter.
 - **`TripStop.estimated_arrival_time` immutable sau khi generate** — DELAYED chỉ ở Redis (v6 quyết định KHÔNG thêm `Trip.isDelayed`).
 - **`TripStopFare` composite PK `(trip_id, stop_id)`** — chỉ tồn tại cho stop có exception (giống RouteStopFareTemplate).
@@ -76,6 +78,9 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 | `uq_trips_vehicle_departure` | `(vehicle_id, departure_date_time)` partial | unique | Vehicle conflict |
 | `idx_trips_route_departure` | `(route_id, departure_date_time)` | B-tree | Trip search by route + date |
 | `idx_trips_status_departure` | `(status, departure_date_time)` | B-tree | Hangfire BOARDING/COMPLETED scans |
+| `idx_trip_audit_logs_trip_occurred` | `(trip_id, occurred_at DESC)` | B-tree | Audit timeline per trip |
+| `idx_trip_audit_logs_actor_occurred` | `(actor_user_id, occurred_at DESC)` | partial B-tree | Audit timeline per actor |
+| `idx_trip_audit_logs_action_occurred` | `(action, occurred_at DESC)` | B-tree | Audit lookup per action |
 | `uq_trip_seats_trip_seat` | `(trip_id, seat_number)` | unique | Seat map per trip |
 | `idx_trip_seats_trip_status` | `(trip_id, status)` | B-tree | Available seats query |
 | `uq_trip_stops_trip_order` | `(trip_id, order_index)` | unique | Ordering integrity |
@@ -92,6 +97,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 |---|---|---|
 | `OperatorStation.operatorId`, `Stop.operatorId`, `Route.operatorId`, `Vehicle.operatorId`, `DriverSchedule.operatorId`, `Trip.operatorId`, `ShuttleTrip.operatorId`, `TripGenerationSkipLog.operatorId` | `identity.Operator.id` | app-layer (Internal JWT carry operatorId; ON DELETE RESTRICT enforced via Identity Service soft delete + service-level check) |
 | `DriverSchedule.driverUserId/assistantUserId`, `Trip.driverUserId/assistantUserId/cancelledByUserId/completedByUserId`, `ShuttleTrip.driverUserId`, `Incident.reportedByUserId/resolvedByUserId` | `identity.User.id` | app-layer validate via HTTP `GET /internal/v1/users/{id}` |
+| `TripAuditLog.actorUserId` | `identity.User.id` | authenticated actor; logical reference only, no DB FK |
 | `ShuttlePassenger.bookingId` | `booking.Booking.id` | app-layer |
 
 ## Migration Strategy

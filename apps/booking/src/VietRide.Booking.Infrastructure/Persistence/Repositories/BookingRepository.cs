@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Features.OperatorBookings.GetOperatorBookingDetail;
@@ -413,6 +414,58 @@ internal sealed class BookingRepository : IBookingRepository
         }
 
         return updated == 1;
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<Guid>> TryCompleteEligibleByTripIdAsync(
+        Guid tripId,
+        DateTimeOffset completedAt,
+        CancellationToken ct = default)
+    {
+        var connection = _db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync(ct);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            UPDATE vietride_booking.bookings
+            SET status = CAST(@target_status AS public.booking_status),
+                completed_at = @completed_at
+            WHERE trip_id = @trip_id
+              AND status IN (
+                  CAST(@confirmed_status AS public.booking_status),
+                  CAST(@partial_no_show_status AS public.booking_status))
+            RETURNING id;
+            """;
+        command.Transaction = _db.Database.CurrentTransaction?.GetDbTransaction();
+        AddParameter(command, "target_status", BookingStatus.COMPLETED.ToString());
+        AddParameter(command, "confirmed_status", BookingStatus.CONFIRMED.ToString());
+        AddParameter(command, "partial_no_show_status", BookingStatus.PARTIAL_NO_SHOW.ToString());
+        AddParameter(command, "trip_id", tripId);
+        AddParameter(command, "completed_at", completedAt.ToUniversalTime());
+
+        var transitionedBookingIds = new List<Guid>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            transitionedBookingIds.Add(reader.GetGuid(0));
+        }
+
+        return transitionedBookingIds;
+    }
+
+    private static void AddParameter(
+        System.Data.Common.DbCommand command,
+        string name,
+        object value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value;
+        command.Parameters.Add(parameter);
     }
 
     /// <inheritdoc/>

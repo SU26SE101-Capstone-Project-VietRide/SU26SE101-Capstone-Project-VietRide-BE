@@ -433,6 +433,27 @@ COMMENT ON COLUMN trips.source IS
     'VEHICLE_SUBSTITUTION: created by 6.12 flow, exempt from maxTripsPerMonth counter check.';
 
 -- -----------------------------------------------------------------------------
+-- trip_audit_logs (append-only)
+-- -----------------------------------------------------------------------------
+CREATE TABLE trip_audit_logs (
+    id UUID PRIMARY KEY,
+    trip_id UUID NOT NULL REFERENCES trips (id) ON DELETE RESTRICT,
+    actor_user_id UUID NULL, -- logical FK -> identity.users.id
+    action VARCHAR(64) NOT NULL,
+    metadata JSONB NULL,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_trip_audit_logs_trip_occurred
+    ON trip_audit_logs (trip_id, occurred_at DESC);
+CREATE INDEX idx_trip_audit_logs_actor_occurred
+    ON trip_audit_logs (actor_user_id, occurred_at DESC)
+    WHERE actor_user_id IS NOT NULL;
+CREATE INDEX idx_trip_audit_logs_action_occurred
+    ON trip_audit_logs (action, occurred_at DESC);
+
+-- -----------------------------------------------------------------------------
 -- trip_cargo_parcels (Parcel-owned items tracked by Trip cargo counter)
 -- -----------------------------------------------------------------------------
 CREATE TABLE trip_cargo_parcels (

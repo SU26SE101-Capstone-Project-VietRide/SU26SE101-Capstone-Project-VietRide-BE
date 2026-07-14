@@ -1,6 +1,6 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.28.0
+> **Phiên bản:** 1.29.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
 > **Cập nhật lần cuối:** 2026-07-14
 > **Capstone:** SU26SE101 — SU26
@@ -1264,6 +1264,8 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | 13 | `POST /v1/operator/voucher-consents/{id}/reject` | Booking |
 | 14 | `POST /v1/admin/vouchers` | Booking |
 | 15 | `POST /v1/operator/vouchers` | Booking |
+| 16 | `POST /v1/driver/trips/{tripId}/start` | Trip |
+| 17 | `POST /v1/driver/trips/{tripId}/complete` | Trip |
 
 **Implementation:**
 
@@ -1273,6 +1275,17 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
   - **Same body hash** → return cached response (HTTP code + body identical).
   - **Different body hash** → HTTP 422 `IDEMPOTENCY_KEY_MISMATCH`.
 - Key format: UUID v4 do client generate. Reuse key 1 lần là acceptable; nếu retry phải dùng cùng key.
+
+**Day-21 Trip lifecycle no-body mutations:** fingerprint = HTTP method + normalized route/path
+parameters including `tripId` + authenticated `sub` + canonical empty-body marker. Authenticated
+role is not a fingerprint component. Authentication and UUID-v4 key/`tripId`/empty-body
+validation may run before key reservation; those validation failures are not cached. A valid new
+key is atomically reserved as pending before command execution. Trip assignment authorization
+runs downstream in the handler, and middleware finalizes its response for replay. Same key + same
+fingerprint replays the exact original HTTP status/body after completion, or returns
+`409 IDEMPOTENCY_REQUEST_PENDING` while pending. The same key with a different fingerprint
+returns `422 IDEMPOTENCY_KEY_MISMATCH`. Reuse a key only for the same logical request; a new
+logical attempt requires a new UUID-v4 key.
 
 ### 5.7 Pagination — `PagedResult<T>` + `QueryOptions` (ADR 0004)
 
@@ -1377,6 +1390,7 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | | `WALLET_TOP_UP_FAILED` | 502 | TopUp VNPay failed |
 | | `WALLET_TOP_UP_AMOUNT_TOO_LOW` | 422 | < 10,000 VND |
 | **Trip** | `TRIP_NOT_FOUND` | 404 | |
+| | `TRIP_INVALID_TRANSITION` | 409 | Day-21 start/complete lifecycle precondition fails; do not introduce or use `INVALID_TRIP_STATUS` |
 | | `VEHICLE_NOT_FOUND` | 404 | Vehicle không tồn tại, đã soft-delete, hoặc không thuộc operator caller |
 | | `VEHICLE_TYPE_NOT_FOUND` | 404 | VehicleType không tồn tại hoặc không active |
 | | `TRIP_NOT_EDITABLE` | 409 | Status ≠ SCHEDULED |
@@ -1439,6 +1453,10 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | | `RATE_LIMITED` | 429 | Vượt rate limit |
 | | `UPSTREAM_UNAVAILABLE` | 502 | Downstream/inter-service dependency unavailable or returned an unusable/unexpected response (including Gateway connection failure) |
 | | `INTERNAL_ERROR` | 500 | Unhandled exception (Sentry capture) |
+
+> Day-21 carry-over: the only current out-of-scope `INVALID_TRIP_STATUS` usage is
+> `ArriveTripStopCommandHandler.cs:49`; Day-21 lifecycle code must use
+> `TRIP_INVALID_TRANSITION` and must not copy that stale code.
 
 ### 5.10 Data access pattern (Repository + optional Service)
 
@@ -1921,6 +1939,8 @@ PENDING_PAYMENT ─┬─→ CONFIRMED ─┬─→ COMPLETED
 - `CONFIRMED`: Payment Service publish `payment.payment.succeeded` → Booking Service consume.
 - `EXPIRED`: Hangfire sau 10 phút PENDING_PAYMENT.
 - `COMPLETED`: Booking Service consume `trip.trip.completed`.
+- Day-21 history source for this consumer is `COMPLETE_ON_TRIP_COMPLETED`; it appends `COMPLETED`
+  with null actor/reason in the same Booking-local transaction as the guarded status transition.
 - `NO_SHOW`: Tất cả `Passenger.boardingStatus = NO_SHOW`.
 - `PARTIAL_NO_SHOW`: Hangfire job — có cả BOARDED + NO_SHOW trong cùng booking sau Trip.actualDepartureTime + 15 phút.
 - `CANCELLED → REFUNDED`: Booking Service consume `payment.wallet.credited`.
@@ -1945,14 +1965,15 @@ The required read index and deterministic timeline order are `(booking_id, occur
 
 Current writers and population rules are frozen as follows:
 
-| Source constant | Recorded status | Actor | Reason |
-|---|---|---|---|
-| `CREATE_BOOKING` | `PENDING_PAYMENT` | authenticated passenger user id | null |
-| `CREATE_ROUND_TRIP_BOOKING` | `PENDING_PAYMENT` for each created leg | authenticated passenger user id | null |
-| `CONFIRM_ON_PAYMENT` | `CONFIRMED` | null | null |
-| `EXPIRE_ON_PAYMENT` | `EXPIRED` | null | null |
-| `CANCEL_BOOKING` | `CANCELLED` | authenticated passenger user id | exact existing `BookingCancellationReason` enum name |
-| `MARK_REFUNDED` | `REFUNDED` | null | null |
+| Source constant | Recorded status | Actor | Reason | Occurrence / transaction / guarded no-op |
+|---|---|---|---|---|
+| `CREATE_BOOKING` | `PENDING_PAYMENT` | authenticated passenger user id | null | Per writer rules below. |
+| `CREATE_ROUND_TRIP_BOOKING` | `PENDING_PAYMENT` for each created leg | authenticated passenger user id | null | Per writer rules below. |
+| `CONFIRM_ON_PAYMENT` | `CONFIRMED` | null | null | Per writer rules below. |
+| `EXPIRE_ON_PAYMENT` | `EXPIRED` | null | null | Per writer rules below. |
+| `CANCEL_BOOKING` | `CANCELLED` | authenticated passenger user id | exact existing `BookingCancellationReason` enum name | Per writer rules below. |
+| `MARK_REFUNDED` | `REFUNDED` | null | null | Per writer rules below. |
+| `COMPLETE_ON_TRIP_COMPLETED` | `COMPLETED` | null | null | `occurredAt=event.completedAt`; same Booking-local transaction as the guarded status transition; guarded no-op/replay appends no row. |
 
 Each writer captures `IClock.UtcNow` exactly once and reuses that value for the Booking creation/transition timestamp work and its history row; it never uses database-read time or Outbox publish time. A creation appends `PENDING_PAYMENT`, and every guarded successful transition appends exactly one row in the same local database transaction. A guarded no-op/replay appends no row. If the transaction rolls back, both state and history roll back atomically.
 
@@ -1970,13 +1991,41 @@ SCHEDULED ─┬─→ BOARDING ─→ IN_PROGRESS ─┬─→ COMPLETED
 **Triggers:**
 
 - `BOARDING`: Hangfire (Trip) 30 phút trước `departureDateTime`.
-- `IN_PROGRESS`: Driver bấm "Start trip" (hoặc auto khi GPS detect departure).
-- `COMPLETED`: Driver bấm "End trip" hoặc Hangfire fallback sau ETA + 30 phút.
+- `IN_PROGRESS`: PRIMARY là Driver được gán bấm "Start trip" khi `BOARDING`; SECONDARY là
+  Hangfire recurring scan mỗi 5 phút, chỉ auto-start khi `departureDateTime < now - 30 phút`.
+  GPS không phải PRIMARY trigger và chỉ bắt đầu tracking sau `trip.trip.started`.
+- `COMPLETED`: PRIMARY là Driver/Assistant được gán bấm "End trip" khi `IN_PROGRESS`; SECONDARY là
+  Hangfire recurring scan mỗi 15 phút, chỉ auto-complete khi
+  `estimatedArrivalTime < now - 30 phút`.
 - `DISRUPTED`: 2 case — phân biệt qua presence của `BookingTransfer`:
   - Case 1: Vehicle Substitution → Trip_old DISRUPTED, BookingTransfer created, KHÔNG refund.
   - Case 2: Operator hủy IN_PROGRESS bất khả kháng → Trip DISRUPTED, KHÔNG BookingTransfer, auto-refund proportional theo `distanceFromOriginKm`.
 - `Trip.source` enum: `MANUAL | AUTO_FROM_SCHEDULE | VEHICLE_SUBSTITUTION` (VEHICLE_SUBSTITUTION exempt subscription `maxTripsPerMonth` counter).
 - `DELAYED` là overlay flag (Redis), KHÔNG phải status riêng.
+
+#### Authoritative Trip manual-completion audit contract (Day 21)
+
+`trip_audit_logs` is append-only and Trip-owned. It has exactly these columns:
+
+| Column | PostgreSQL type | Null | Constraint / meaning |
+|---|---|---|---|
+| `id` | `uuid` | no | Primary key. |
+| `trip_id` | `uuid` | no | Local FK to `trips(id)` with `ON DELETE RESTRICT`. |
+| `actor_user_id` | `uuid` | yes | Logical Identity User reference; deliberately no database FK. |
+| `action` | `varchar(64)` | no | Application-controlled action constant. |
+| `metadata` | `jsonb` | yes | Action metadata. |
+| `occurred_at` | `timestamptz` | no | Application-captured occurrence time. |
+| `created_at` | `timestamptz` | no | `DEFAULT now()`. |
+
+Indexes are exactly `(trip_id, occurred_at DESC)`,
+`(actor_user_id, occurred_at DESC) WHERE actor_user_id IS NOT NULL`, and
+`(action, occurred_at DESC)`. The only Day-21 action is
+`TripAuditAction.TripCompletedManual = "TRIP_COMPLETED_MANUAL"`.
+
+Manual completion atomically persists the Trip `COMPLETED` state/timestamps, one audit row with
+the authenticated actor and metadata `{tripId,role}`, and the `trip.trip.completed` Outbox row in
+one Trip-local transaction. It performs no Identity read/write, creates no cross-database FK, and
+publishes no audit integration event.
 
 ### 8.3 ParcelStatus
 
@@ -2316,8 +2365,9 @@ KHÔNG dùng Prometheus/Grafana/Jaeger/Loki cho v1 (xem technical_context 3.5).
 | Job | Type | Trigger | Notes |
 |---|---|---|---|
 | `GenerateTripsFromScheduleJob` | Recurring | Weekly Sun 23:00 ICT + immediate on DriverSchedule create/activate | Generate Trip 14 ngày kế tiếp. Idempotent (driverId + departureDateTime) |
-| `AutoBoardingJob` | Scheduled (per Trip) | Trip.departureDateTime - 30 phút | Set Trip.status = BOARDING; publish `trip.trip.boarding_started` |
-| `AutoCompletedFallbackJob` | Scheduled (per Trip) | Trip.estimatedArrivalTime + 30 phút | Nếu Trip vẫn IN_PROGRESS, force COMPLETED |
+| `AutoBoardingJob` | Recurring | Every 15 phút | Set SCHEDULED Trips to BOARDING only when `departureDateTime <= now + 30 phút`; publish `trip.trip.boarding_started` |
+| `AutoStartFallbackJob` | Recurring | Every 5 phút | Set BOARDING Trips to IN_PROGRESS only when `departureDateTime < now - 30 phút`; capture `actualDepartureTime`; publish `trip.trip.started` |
+| `AutoCompletedFallbackJob` | Recurring | Every 15 phút | Set IN_PROGRESS Trips to COMPLETED only when `estimatedArrivalTime < now - 30 phút`; publish `trip.trip.completed` |
 
 #### Booking
 
@@ -2778,6 +2828,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.29.0** | 2026-07-14 | BE lead (Vu) | **MINOR** - Freeze Day-21 Trip lifecycle contracts: no-body/idempotent Driver start and Driver/Assistant manual complete endpoints with exact ADR-0004 DTOs and assignment authorization; recurring 15/5/15-minute boarding/start/complete jobs with T-30/departure+30/ETA+30 thresholds and no GPS-primary trigger; retain `trip.trip.started`/`trip.trip.completed` payloads; register `TRIP_INVALID_TRANSITION`, Booking history source `COMPLETE_ON_TRIP_COMPLETED`, and append-only Trip-local manual-completion audit schema/action/atomicity. No implementation, dependency, Gateway, migration, or event-key change. |
 | **1.28.0** | 2026-07-14 | BE lead (Vu) | **MINOR** - Add operator/admin Station and Stop update-disable APIs, Stop-disable Trip Outbox to Booking pending-action and enriched Notification flow, enriched Trip detail Stop projection, PII-free booking seat requests, VNPay GET IPN and ready-to-fill sandbox configuration, 10-minute payment timeout, and VNPay `BOOKING_GROUP` confirmation/expiration support. |
 | **1.27.0** | 2026-07-13 | Senior Backend Architect | **MINOR** - Day 36 Shuttle Backend v1: đăng ký REST/event/error contracts, Booking shuttle intent và cutoff T-30, operator subset dispatch, warning T-120/T-60, auto-cutoff, notification và Tracking Phase 11. Thêm ba bảng shuttle Trip, một bảng intent Booking, ba notification types và real-stack E2E acceptance. |
 | **1.26.0** | 2026-07-12 | BE lead (Vu) | **MINOR** - Add the assignment-scoped Driver/Assistant Route geometry read `GET /v1/driver/trips/{tripId}/route`. The endpoint returns the main Route's nullable Google precision-5 `pathPolyline`, origin/destination Station coordinates, and ordered TripStop coordinates only when JWT `sub` is assigned as the Trip driver or assistant. Reuses existing `TRIP_NOT_FOUND`, `FORBIDDEN`, `VALIDATION_ERROR`, `/v1/driver` Gateway role gate, and existing schema; no migration, dependency, event, or operator-route permission change. |

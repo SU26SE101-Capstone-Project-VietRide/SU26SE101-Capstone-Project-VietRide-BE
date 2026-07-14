@@ -5606,6 +5606,42 @@
           "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{passengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day16CancelIdempotencyKey}}" }], "url": "{{baseUrl}}/v1/bookings/{{day16WalletBookingId}}/cancel", "body": { "mode": "raw", "raw": "{\n  \"reason\": \"USER_INITIATED\"\n}" } }
         }
       ]
+    },
+    {
+      "name": "Driver - Day 21 trip lifecycle",
+      "description": "Manual Gateway-only view of Day-21 no-body lifecycle endpoints. The authoritative deterministic run is npm run postman:day21:local, which owns isolated fixtures, runtime JWTs and UUID-v4 keys, consumer polling, duplicate delivery, and cleanup.",
+      "item": [
+        {
+          "name": "1. Assigned driver starts BOARDING trip",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json();",
+            "pm.test('Start uses ADR-0004 lifecycle response', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.tripId).to.eql(pm.environment.get('day21TripId')); pm.expect(body.data.status).to.eql('IN_PROGRESS'); pm.expect(body.data.actualDepartureTime).to.be.a('string'); });"
+          ] }}],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day21DriverAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day21StartIdempotencyKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/driver/trips/{{day21TripId}}/start"
+          }
+        },
+        {
+          "name": "2. Assigned assistant completes IN_PROGRESS trip",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json();",
+            "pm.test('Complete uses ADR-0004 lifecycle response', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.tripId).to.eql(pm.environment.get('day21TripId')); pm.expect(body.data.status).to.eql('COMPLETED'); pm.expect(body.data.completedAt).to.be.a('string'); pm.expect(body.data.completedByUserId).to.be.a('string'); });"
+          ] }}],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day21AssistantAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day21CompleteIdempotencyKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/driver/trips/{{day21TripId}}/complete"
+          }
+        }
+      ]
     }
   ]
 }
