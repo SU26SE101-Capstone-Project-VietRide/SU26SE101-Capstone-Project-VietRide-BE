@@ -25,7 +25,8 @@ public sealed class TripStopFareSourcePersistenceTests
         source.GetColumnName().Should().Be("source");
         source.GetColumnType().Should().Be("vietride_trip.trip_stop_fare_source");
         source.IsNullable.Should().BeFalse();
-        source.GetDefaultValue().Should().BeNull();
+        source.FindAnnotation(RelationalAnnotationNames.DefaultValue).Should().BeNull();
+        source.GetDefaultValueSql().Should().BeNull();
         Enum.GetNames<TripStopFareSource>().Should().Equal("TEMPLATE_SNAPSHOT", "MANUAL_OVERRIDE");
     }
 
@@ -98,7 +99,7 @@ public sealed class TripStopFareSourcePersistenceTests
             INSERT INTO vietride_trip.vehicles
                 (id, operator_id, vehicle_type_id, license_plate, seat_layout_json, total_seats)
             VALUES
-                ({vehicleId}, {operatorId}, {vehicleTypeId}, {$"FS{vehicleId:N}"[..20]}, '{{}}'::jsonb, 20);
+                ({vehicleId}, {operatorId}, {vehicleTypeId}, {$"FS{vehicleId:N}"[..20]}, jsonb_build_object(), 20);
             INSERT INTO vietride_trip.trips
                 (id, operator_id, route_id, vehicle_id, driver_user_id, departure_date_time,
                  estimated_arrival_time, source, base_fare)

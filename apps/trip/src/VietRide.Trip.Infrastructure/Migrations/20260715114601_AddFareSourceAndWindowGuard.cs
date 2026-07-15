@@ -37,7 +37,7 @@ namespace VietRide.Trip.Infrastructure.Migrations
                 table: "trip_stop_fares",
                 type: "vietride_trip.trip_stop_fare_source",
                 nullable: false,
-                defaultValue: TripStopFareSource.TEMPLATE_SNAPSHOT);
+                defaultValueSql: "'TEMPLATE_SNAPSHOT'::vietride_trip.trip_stop_fare_source");
 
             migrationBuilder.Sql(
                 "ALTER TABLE vietride_trip.trip_stop_fares ALTER COLUMN source DROP DEFAULT;");
