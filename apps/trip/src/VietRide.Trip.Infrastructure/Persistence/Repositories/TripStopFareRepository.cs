@@ -45,4 +45,23 @@ internal sealed class TripStopFareRepository : ITripStopFareRepository
     {
         return dbContext.TripStopFares.AsNoTracking();
     }
+
+    public async Task<IReadOnlyList<TripStopFare>> ListByTripAsync(
+        Guid tripId,
+        TripStopFareSource? source,
+        CancellationToken cancellationToken)
+    {
+        var query = dbContext.TripStopFares
+            .AsNoTracking()
+            .Where(fare => fare.TripId == tripId);
+        if (source.HasValue)
+        {
+            query = query.Where(fare => fare.Source == source.Value);
+        }
+
+        return await query
+            .OrderBy(fare => fare.StopId)
+            .ThenBy(fare => fare.Id)
+            .ToListAsync(cancellationToken);
+    }
 }

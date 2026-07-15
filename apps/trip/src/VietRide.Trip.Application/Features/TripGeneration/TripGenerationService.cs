@@ -19,12 +19,10 @@ public sealed class TripGenerationService
     private readonly IClock clock;
     private readonly IDriverScheduleRepository driverScheduleRepository;
     private readonly IRouteRepository routeRepository;
-    private readonly IRouteStopFareTemplateRepository routeStopFareTemplateRepository;
     private readonly IRouteStopRepository routeStopRepository;
     private readonly ITripGenerationSkipLogRepository skipLogRepository;
     private readonly ITripRepository tripRepository;
     private readonly ITripSeatRepository tripSeatRepository;
-    private readonly ITripStopFareRepository tripStopFareRepository;
     private readonly ITripStopRepository tripStopRepository;
     private readonly IVehicleRepository vehicleRepository;
     private readonly IIntegrationEventOutbox? outbox;
@@ -50,12 +48,10 @@ public sealed class TripGenerationService
         this.driverScheduleRepository = driverScheduleRepository;
         this.routeRepository = routeRepository;
         this.routeStopRepository = routeStopRepository;
-        this.routeStopFareTemplateRepository = routeStopFareTemplateRepository;
         this.vehicleRepository = vehicleRepository;
         this.tripRepository = tripRepository;
         this.tripSeatRepository = tripSeatRepository;
         this.tripStopRepository = tripStopRepository;
-        this.tripStopFareRepository = tripStopFareRepository;
         this.skipLogRepository = skipLogRepository;
         this.outbox = outbox;
         this.quotaClient = quotaClient;
@@ -103,7 +99,6 @@ public sealed class TripGenerationService
                 .ToList();
             var scheduleDays = ParseScheduleDays(schedule.DayOfWeek);
             var serviceDates = MatchingServiceDates(schedule, scheduleDays).ToList();
-            var fareTemplates = CurrentFareTemplates(schedule.RouteId).ToList();
             var estimatedTripDurationMinutes = ResolveEstimatedTripDuration(route, routeStops);
             if (!estimatedTripDurationMinutes.HasValue)
             {
@@ -194,7 +189,6 @@ public sealed class TripGenerationService
                     existingVehicleDepartures.Add((vehicle.Id, departureDateTime));
                     await AddSeatsAsync(trip.Id, vehicle, cancellationToken);
                     await AddStopsAsync(trip.Id, departureDateTime, routeStops, cancellationToken);
-                    await AddStopFaresAsync(trip.Id, fareTemplates, cancellationToken);
                     if (outbox is not null)
                     {
                         await outbox.EnqueueAsync(
@@ -464,29 +458,6 @@ public sealed class TripGenerationService
                     routeStop.DistanceFromOriginKm),
                 cancellationToken);
         }
-    }
-
-    private async Task AddStopFaresAsync(
-        Guid tripId,
-        IReadOnlyList<RouteStopFareTemplate> fareTemplates,
-        CancellationToken cancellationToken)
-    {
-        foreach (var fareTemplate in fareTemplates)
-        {
-            await tripStopFareRepository.AddAsync(
-                TripStopFare.Create(tripId, fareTemplate.StopId, fareTemplate.FareFromThisStop),
-                cancellationToken);
-        }
-    }
-
-    private IEnumerable<RouteStopFareTemplate> CurrentFareTemplates(Guid routeId)
-    {
-        var now = clock.UtcNow;
-        return routeStopFareTemplateRepository.QueryNoTracking()
-            .Where(template => template.RouteId == routeId
-                && template.EffectiveFrom <= now
-                && (!template.EffectiveUntil.HasValue || template.EffectiveUntil.Value > now))
-            .ToList();
     }
 
     private static DateTimeOffset BuildDepartureDateTime(DateOnly date, TimeOnly time)

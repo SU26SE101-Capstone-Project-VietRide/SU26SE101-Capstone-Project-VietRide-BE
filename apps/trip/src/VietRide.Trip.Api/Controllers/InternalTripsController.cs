@@ -1,3 +1,4 @@
+using System.Globalization;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -25,6 +26,14 @@ namespace VietRide.Trip.Api.Controllers;
 [Route("internal/v1/trips")]
 public sealed class InternalTripsController : ControllerBase
 {
+    private static readonly string[] Rfc3339Formats =
+    [
+        "yyyy-MM-dd'T'HH:mm:ss'Z'",
+        "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'",
+        "yyyy-MM-dd'T'HH:mm:sszzz",
+        "yyyy-MM-dd'T'HH:mm:ss.FFFFFFFzzz",
+    ];
+
     private readonly IMediator mediator;
 
     public InternalTripsController(IMediator mediator)
@@ -36,9 +45,32 @@ public sealed class InternalTripsController : ControllerBase
     [ProducesResponseType(typeof(InternalTripSnapshotDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<InternalTripSnapshotDto>> GetAsync(Guid tripId, CancellationToken cancellationToken)
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<InternalTripSnapshotDto>> GetAsync(
+        Guid tripId,
+        [FromQuery] string? pricingAt,
+        CancellationToken cancellationToken)
     {
-        var result = await mediator.Send(new GetTripSnapshotQuery(tripId), cancellationToken);
+        DateTimeOffset? parsedPricingAt = null;
+        if (pricingAt is not null)
+        {
+            if (!DateTimeOffset.TryParseExact(
+                    pricingAt,
+                    Rfc3339Formats,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                    out var value))
+            {
+                throw new CodedValidationException(
+                    "VALIDATION_ERROR",
+                    "pricingAt must be a valid RFC 3339 timestamp.",
+                    [new ValidationError("pricingAt", "pricingAt must be a valid RFC 3339 timestamp.")]);
+            }
+
+            parsedPricingAt = value;
+        }
+
+        var result = await mediator.Send(new GetTripSnapshotQuery(tripId, parsedPricingAt), cancellationToken);
         return Ok(result);
     }
 

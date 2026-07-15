@@ -33,8 +33,7 @@ public sealed class TripGenerationServiceTests
         fixture.TripSeats.Items.Should().HaveCount(8);
         fixture.TripSeats.Items.Select(seat => seat.SeatNumber).Should().OnlyContain(seat => seat == "A1" || seat == "A3");
         fixture.TripStops.Items.Should().HaveCount(8);
-        fixture.TripStopFares.Items.Should().HaveCount(4);
-        fixture.TripStopFares.Items.Should().OnlyContain(fare => fare.FareFromThisStop.Amount == 180000);
+        fixture.TripStopFares.Items.Should().BeEmpty();
 
         var firstTrip = fixture.Trips.Items.OrderBy(trip => trip.DepartureDateTime).First();
         firstTrip.Source.Should().Be(TripSource.AUTO_FROM_SCHEDULE);

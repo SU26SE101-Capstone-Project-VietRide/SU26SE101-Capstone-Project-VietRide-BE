@@ -9,6 +9,7 @@ namespace VietRide.Trip.Application.Features.Internal.Trips.GetTripSnapshot;
 public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuery, InternalTripSnapshotDto>
 {
     private readonly IRouteRepository routeRepository;
+    private readonly IRouteStopFareTemplateRepository routeStopFareTemplateRepository;
     private readonly IStationRepository stationRepository;
     private readonly IStopRepository stopRepository;
     private readonly ITripRepository tripRepository;
@@ -19,6 +20,7 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
     public GetTripSnapshotHandler(
         ITripRepository tripRepository,
         IRouteRepository routeRepository,
+        IRouteStopFareTemplateRepository routeStopFareTemplateRepository,
         IStationRepository stationRepository,
         IStopRepository stopRepository,
         ITripSeatRepository tripSeatRepository,
@@ -27,6 +29,7 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
     {
         this.tripRepository = tripRepository;
         this.routeRepository = routeRepository;
+        this.routeStopFareTemplateRepository = routeStopFareTemplateRepository;
         this.stationRepository = stationRepository;
         this.stopRepository = stopRepository;
         this.tripSeatRepository = tripSeatRepository;
@@ -34,7 +37,7 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
         this.tripStopFareRepository = tripStopFareRepository;
     }
 
-    public Task<InternalTripSnapshotDto> Handle(GetTripSnapshotQuery request, CancellationToken cancellationToken)
+    public async Task<InternalTripSnapshotDto> Handle(GetTripSnapshotQuery request, CancellationToken cancellationToken)
     {
         var trip = tripRepository.QueryNoTracking().FirstOrDefault(trip => trip.Id == request.TripId)
             ?? throw new CodedNotFoundException("TRIP_NOT_FOUND", "Trip was not found.");
@@ -42,9 +45,7 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
             ?? throw new CodedNotFoundException("TRIP_NOT_FOUND", "Trip route snapshot was not found.");
         var originStation = GetStation(route.OriginStationId);
         var destinationStation = GetStation(route.DestinationStationId);
-        var fares = tripStopFareRepository.QueryNoTracking()
-            .Where(fare => fare.TripId == trip.Id)
-            .ToDictionary(fare => fare.StopId, fare => fare.FareFromThisStop.Amount);
+        var fares = await ResolveFaresAsync(trip, request.PricingAt, cancellationToken);
         var tripStops = tripStopRepository.QueryNoTracking()
             .Where(stop => stop.TripId == trip.Id)
             .OrderBy(stop => stop.OrderIndex)
@@ -61,7 +62,9 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
                 stop.AllowDropoff,
                 stop.EstimatedArrivalTime,
                 stop.DistanceFromOriginKm.HasValue ? (double)stop.DistanceFromOriginKm.Value : null,
-                fares.TryGetValue(stop.StopId, out var fare) ? fare : null,
+                fares.TryGetValue(stop.StopId, out var fare)
+                    ? fare
+                    : request.PricingAt.HasValue ? trip.BaseFare.Amount : null,
                 stop.Status.ToString(),
                 stop.ActualArrivalTime,
                 activeStops.GetValueOrDefault(stop.StopId)))
@@ -97,7 +100,39 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
             trip.DriverUserId,
             trip.AssistantUserId);
 
-        return Task.FromResult(dto);
+        return dto;
+    }
+
+    private async Task<IReadOnlyDictionary<Guid, long>> ResolveFaresAsync(
+        VietRide.Trip.Domain.Entities.Trip trip,
+        DateTimeOffset? pricingAt,
+        CancellationToken cancellationToken)
+    {
+        if (!pricingAt.HasValue)
+        {
+            var persistedFares = await tripStopFareRepository.ListByTripAsync(trip.Id, null, cancellationToken);
+            return persistedFares.ToDictionary(fare => fare.StopId, fare => fare.FareFromThisStop.Amount);
+        }
+
+        var suppliedInstant = pricingAt.Value.ToUniversalTime();
+        var manualOverrides = await tripStopFareRepository.ListByTripAsync(
+            trip.Id,
+            TripStopFareSource.MANUAL_OVERRIDE,
+            cancellationToken);
+        var activeTemplates = await routeStopFareTemplateRepository.ListActiveByRouteAsync(
+            trip.RouteId,
+            suppliedInstant,
+            cancellationToken);
+
+        var resolved = activeTemplates.ToDictionary(
+            template => template.StopId,
+            template => template.FareFromThisStop.Amount);
+        foreach (var manualOverride in manualOverrides)
+        {
+            resolved[manualOverride.StopId] = manualOverride.FareFromThisStop.Amount;
+        }
+
+        return resolved;
     }
 
     private Station GetStation(Guid stationId) =>
