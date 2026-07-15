@@ -15,8 +15,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
-using VietRide.Shared.Kernel.Abstractions;
+using Npgsql;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Web.Idempotency;
 using VietRide.Trip.Api.Controllers;
 using VietRide.Trip.Application.Abstractions.Repositories;
@@ -264,8 +265,10 @@ public sealed class EditTripEndpointTests
     private static TripDbContext CreateTripDbContext(string databaseName)
     {
         var connectionString = $"Host=localhost;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
+        var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
+        TripDbContext.ConfigurePostgresEnums(dataSourceBuilder);
         var options = new DbContextOptionsBuilder<TripDbContext>()
-            .UseNpgsql(connectionString, npgsql =>
+            .UseNpgsql(dataSourceBuilder.Build(), npgsql =>
                 npgsql.MigrationsHistoryTable("__ef_migrations_history", TripDbContext.SchemaName))
             .Options;
         return new TripDbContext(options, new SystemClock());

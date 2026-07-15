@@ -3,14 +3,14 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Idempotency;
+using VietRide.Shared.Web.Middleware;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Api.Filters;
 using VietRide.Trip.Application.Features.Internal.Trips.Cargo;
-using VietRide.Trip.Application.Features.Trips.Operations;
 using VietRide.Trip.Application.Features.Trips.EditTrip;
 using VietRide.Trip.Application.Features.Trips.GetTripDetail;
-using VietRide.Shared.Web.Idempotency;
-using VietRide.Shared.Web.Middleware;
+using VietRide.Trip.Application.Features.Trips.Operations;
 
 namespace VietRide.Trip.Api.Controllers;
 
