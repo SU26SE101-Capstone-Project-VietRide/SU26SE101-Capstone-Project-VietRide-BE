@@ -163,6 +163,9 @@ public sealed class TripVehicleSwapServiceIntegrationTests
             new NpgsqlNullNameTranslator());
         TripDbContext.ConfigurePostgresEnums(dataSourceBuilder);
         var options = new DbContextOptionsBuilder<TripDbContext>()
+            .EnableServiceProviderCaching(false)
+            .ConfigureWarnings(warnings => warnings.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning))
             .UseNpgsql(dataSourceBuilder.Build(), npgsql =>
                 npgsql.MigrationsHistoryTable("__ef_migrations_history", TripDbContext.SchemaName))
             .Options;
