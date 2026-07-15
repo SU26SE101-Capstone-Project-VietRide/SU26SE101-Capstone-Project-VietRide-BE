@@ -7,6 +7,7 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE EXTENSION IF NOT EXISTS "unaccent";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+CREATE EXTENSION IF NOT EXISTS "btree_gist";
 
 -- =============================================================================
 -- ENUMS
@@ -29,6 +30,10 @@ CREATE TYPE trip_seat_type AS ENUM (
 );
 
 CREATE TYPE trip_stop_status AS ENUM ('PENDING', 'ARRIVED', 'SKIPPED');
+
+CREATE TYPE trip_stop_fare_source AS ENUM (
+    'TEMPLATE_SNAPSHOT', 'MANUAL_OVERRIDE'
+);
 
 CREATE TYPE vehicle_status AS ENUM ('ACTIVE', 'MAINTENANCE', 'OFF_DUTY', 'RETIRED');
 
@@ -233,7 +238,13 @@ CREATE TABLE route_stop_fare_templates (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_route_stop_fare_templates_fare_non_negative CHECK (fare_from_this_stop >= 0),
     CONSTRAINT chk_route_stop_fare_templates_effective_order
-        CHECK (effective_until IS NULL OR effective_until > effective_from)
+        CHECK (effective_until IS NULL OR effective_until > effective_from),
+    CONSTRAINT ex_route_stop_fare_templates_no_overlap
+        EXCLUDE USING gist (
+            route_id WITH =,
+            stop_id WITH =,
+            tstzrange(effective_from, COALESCE(effective_until, 'infinity'::timestamptz), '[)') WITH &&
+        )
 );
 
 CREATE INDEX idx_route_stop_fare_templates_route_stop_effective
@@ -553,10 +564,14 @@ CREATE TABLE trip_stop_fares (
     trip_id UUID NOT NULL REFERENCES trips (id) ON DELETE CASCADE,
     stop_id UUID NOT NULL REFERENCES stops (id) ON DELETE RESTRICT,
     fare_from_this_stop BIGINT NOT NULL,
+    source trip_stop_fare_source NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (trip_id, stop_id),
     CONSTRAINT chk_trip_stop_fares_fare_non_negative CHECK (fare_from_this_stop >= 0)
 );
+
+COMMENT ON COLUMN trip_stop_fares.source IS
+    'TEMPLATE_SNAPSHOT is legacy-readable only; explicit per-Trip fare overrides use MANUAL_OVERRIDE.';
 
 -- -----------------------------------------------------------------------------
 -- trip_generation_skip_logs (Hangfire skip audit)

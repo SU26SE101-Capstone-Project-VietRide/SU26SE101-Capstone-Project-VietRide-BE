@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Trip.Application.Abstractions.Repositories;
@@ -40,6 +41,17 @@ public sealed class RouteStopFareTemplateRepositoryPersistenceTests
                 CancellationToken.None);
 
             overlaps.Should().BeTrue();
+
+            dbContext.RouteStopFareTemplates.Add(RouteStopFareTemplate.Create(
+                route.Id,
+                stop.Id,
+                Money.FromRaw(120000),
+                EffectiveFrom.AddDays(30),
+                EffectiveFrom.AddDays(40)));
+            var save = () => dbContext.SaveChangesAsync();
+            (await save.Should().ThrowAsync<DbUpdateException>())
+                .Which.InnerException.Should().BeOfType<PostgresException>()
+                .Which.SqlState.Should().Be(PostgresErrorCodes.ExclusionViolation);
         }
         finally
         {
@@ -74,6 +86,15 @@ public sealed class RouteStopFareTemplateRepositoryPersistenceTests
                 CancellationToken.None);
 
             overlaps.Should().BeFalse();
+
+            dbContext.RouteStopFareTemplates.Add(RouteStopFareTemplate.Create(
+                route.Id,
+                stop.Id,
+                Money.FromRaw(120000),
+                EffectiveFrom.AddDays(10),
+                EffectiveFrom.AddDays(20)));
+            await dbContext.SaveChangesAsync();
+            (await dbContext.RouteStopFareTemplates.CountAsync()).Should().Be(2);
         }
         finally
         {

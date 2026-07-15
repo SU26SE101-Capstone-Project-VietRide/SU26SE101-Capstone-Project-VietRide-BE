@@ -20,7 +20,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 | `Stop` | Điểm dừng dọc tuyến (operator-owned). | `googlePlaceId`, `sharedSuggestion`, `replacedByStopId` self-FK |
 | `Route` | Tuyến chính: origin/destination Station + `baseFare`. | `returnRouteId` self-FK, `totalDistanceKm` |
 | `RouteStop` | Junction Route↔Stop intermediate. | composite PK, `orderIndex`, `allowPickup`+`allowDropoff` (CHECK ≥1 true), `distanceFromOriginKm` |
-| `RouteStopFareTemplate` | **Exception only** override `baseFare` per stop với time window. | `effectiveFrom`/`effectiveUntil` |
+| `RouteStopFareTemplate` | **Exception only** override `baseFare` per stop với half-open time window. | `effectiveFrom`/`effectiveUntil`; DB exclusion guard chống overlap |
 | `AlternativeRoute` | Tuyến thay thế (max 2 per Route, enforced app). | Stop sequence riêng — KHÔNG reuse `RouteStop` |
 | `AlternativeRouteStop` | Junction AlternativeRoute↔Stop. | composite PK, `orderIndex` |
 | `VehicleType` | Loại xe catalog. | `code` UNIQUE, `isSystemDefined` (block delete cho 3 platform seed) |
@@ -29,7 +29,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 | `TripAuditLog` | Append-only audit do Trip service sở hữu. | local `tripId` FK; logical `actorUserId`; JSONB metadata |
 | `TripSeat` | Trạng thái từng ghế per trip. | composite UNIQUE `(tripId, seatNumber)`, `status` enum |
 | `TripStop` | Snapshot RouteStop khi generate. | composite PK, `estimatedArrivalTime` static, `actualArrivalTime` set bởi Assistant |
-| `TripStopFare` | Exception per trip per stop. | copy từ RouteStopFareTemplate active tại thời điểm generate |
+| `TripStopFare` | Exception per trip per stop. | `source=TEMPLATE_SNAPSHOT|MANUAL_OVERRIDE`; Day 22 chỉ tạo mới `MANUAL_OVERRIDE` |
 | `DriverSchedule` | Recurring assignment driver/assistant↔vehicle↔route. | `dayOfWeek` JSONB array, `departureTime` TIME, `validFrom`/`validUntil` |
 | `DriverScheduleAuditLog` | Append-only audit do Trip service sở hữu. | local `driverScheduleId` FK; logical `actorUserId`; JSONB metadata |
 | `TripGenerationSkipLog` | Audit khi Hangfire skip generate Trip. | `reason` enum, `driverScheduleId` NOT NULL |
@@ -47,14 +47,14 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 - **`Route` CHECK `origin_station_id <> destination_station_id`** — chống tuyến vô nghĩa.
 - **`RouteStop` PRIMARY KEY `(route_id, stop_id)`** với UNIQUE phụ `(route_id, order_index)` — 1 stop xuất hiện 1 lần per route + order_index unique trên cùng route.
 - **`RouteStop` CHECK `allow_pickup OR allow_dropoff`** — enforce v6 rule "ít nhất 1 phải true".
-- **`RouteStopFareTemplate` KHÔNG composite key** trên `(route_id, stop_id)` mà dùng surrogate UUID + `effectiveFrom`/`effectiveUntil` window — cho phép nhiều entry cùng stop với time windows khác nhau (future-dated pricing). Validation overlap chỗ effective windows enforced app-layer.
+- **`RouteStopFareTemplate` KHÔNG composite key** trên `(route_id, stop_id)` mà dùng surrogate UUID + half-open `[effectiveFrom,effectiveUntil)` window — cho phép nhiều entry cùng stop với time windows khác nhau (future-dated pricing). PostgreSQL `btree_gist` + `ex_route_stop_fare_templates_no_overlap` enforce không overlap ngay cả khi concurrent; boundary liền kề được phép và `effectiveUntil = NULL` là open-ended.
 - **`Vehicle.licensePlate` partial unique** trên `deleted_at IS NULL` — cho phép tái dùng biển số sau khi xe RETIRED + soft delete.
 - **`Trip` 2 unique partial indexes** `(driver_user_id, departure_date_time)` và `(vehicle_id, departure_date_time)` với `status NOT IN ('CANCELLED')` — chống conflict assignment + idempotent generate (Hangfire chạy 2 lần không tạo duplicate, CANCELLED không block re-create).
 - **`Trip.source` enum** với value `VEHICLE_SUBSTITUTION` — Hangfire counter check skip cho value này (xem v6 Section 4.5 c.0).
 - **`TripAuditLog` append-only** — repository chỉ expose insert/read. `trip_id` là local FK `ON DELETE RESTRICT`; `actor_user_id` là logical Identity FK, không có DB constraint; `action` là application string whitelist, không tạo PostgreSQL enum.
 - **`Trip.estimated_passenger_luggage_kg`, `reserved_parcel_weight_kg`, `total_loaded_weight_kg` decimal(8,2)** — đủ precision cho cargo accounting (10kg.50). CHECK non-negative cho 2 counter.
 - **`TripStop.estimated_arrival_time` immutable sau khi generate** — DELAYED chỉ ở Redis (v6 quyết định KHÔNG thêm `Trip.isDelayed`).
-- **`TripStopFare` composite PK `(trip_id, stop_id)`** — chỉ tồn tại cho stop có exception (giống RouteStopFareTemplate).
+- **`TripStopFare` composite PK `(trip_id, stop_id)`** — chỉ tồn tại cho stop có exception. `source` chỉ nhận `TEMPLATE_SNAPSHOT|MANUAL_OVERRIDE`; pre-Day-22 rows backfill `TEMPLATE_SNAPSHOT`, còn Day 22 không tạo snapshot mới và explicit per-Trip override dùng `MANUAL_OVERRIDE`.
 - **`DriverSchedule.day_of_week` JSONB** thay vì bit mask — đọc dễ, mở rộng nếu cần thêm flag per day.
 - **`ShuttlePassenger.shuttle_trip_id` nullable** — passenger có thể đăng ký shuttle trước khi operator tạo ShuttleTrip (`PENDING_ASSIGNMENT` status).
 - **`Incident.photo_urls` JSONB** thay vì junction table — max 3 URLs, đơn giản, không có query cần JOIN.

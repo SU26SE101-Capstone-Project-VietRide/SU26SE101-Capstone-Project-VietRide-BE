@@ -11,10 +11,15 @@ public sealed class TripStopFare : BaseEntity<Guid>
     public Guid TripId { get; private set; }
     public Guid StopId { get; private set; }
     public Money FareFromThisStop { get; private set; }
+    public TripStopFareSource Source { get; private set; }
 
     private TripStopFare() { }
 
-    public static TripStopFare Create(Guid tripId, Guid stopId, Money fareFromThisStop)
+    public static TripStopFare Create(
+        Guid tripId,
+        Guid stopId,
+        Money fareFromThisStop,
+        TripStopFareSource source = TripStopFareSource.TEMPLATE_SNAPSHOT)
     {
         ValidateGuid(tripId, nameof(tripId));
         ValidateGuid(stopId, nameof(stopId));
@@ -25,10 +30,15 @@ public sealed class TripStopFare : BaseEntity<Guid>
             TripId = tripId,
             StopId = stopId,
             FareFromThisStop = fareFromThisStop,
+            Source = source,
         };
     }
 
-    public void ChangeFare(Money fareFromThisStop) => FareFromThisStop = fareFromThisStop;
+    public void ChangeFare(Money fareFromThisStop, TripStopFareSource source)
+    {
+        FareFromThisStop = fareFromThisStop;
+        Source = source;
+    }
 
     private static void ValidateGuid(Guid value, string parameterName)
     {

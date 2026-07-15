@@ -27,6 +27,7 @@ public sealed class TripDbContext : VietRideDbContextBase
         builder.MapEnum<TripSeatStatus>("trip_seat_status", PostgresEnumNameTranslator);
         builder.MapEnum<TripSeatType>("trip_seat_type", PostgresEnumNameTranslator);
         builder.MapEnum<TripStopStatus>("trip_stop_status", PostgresEnumNameTranslator);
+        builder.MapEnum<TripStopFareSource>("trip_stop_fare_source", PostgresEnumNameTranslator);
         builder.MapEnum<TripGenerationSkipReason>("trip_generation_skip_reason", PostgresEnumNameTranslator);
         builder.MapEnum<VehicleStatus>("vehicle_status", PostgresEnumNameTranslator);
     }
@@ -86,11 +87,13 @@ public sealed class TripDbContext : VietRideDbContextBase
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema(SchemaName);
+        modelBuilder.HasPostgresExtension("btree_gist");
         modelBuilder.HasPostgresEnum("trip_status", new[] { "SCHEDULED", "BOARDING", "IN_PROGRESS", "COMPLETED", "CANCELLED", "DISRUPTED" });
         modelBuilder.HasPostgresEnum("trip_source", new[] { "MANUAL", "AUTO_FROM_SCHEDULE", "VEHICLE_SUBSTITUTION" });
         modelBuilder.HasPostgresEnum("trip_seat_status", new[] { "AVAILABLE", "HELD", "BOOKED", "UNAVAILABLE" });
         modelBuilder.HasPostgresEnum("trip_seat_type", new[] { "STANDARD", "SLEEPER_LOWER", "SLEEPER_UPPER", "VIP", "DRIVER_AREA" });
         modelBuilder.HasPostgresEnum("trip_stop_status", new[] { "PENDING", "ARRIVED", "SKIPPED" });
+        modelBuilder.HasPostgresEnum("trip_stop_fare_source", new[] { "TEMPLATE_SNAPSHOT", "MANUAL_OVERRIDE" });
         modelBuilder.HasPostgresEnum("trip_generation_skip_reason", new[] { "SUBSCRIPTION_LIMIT_EXCEEDED", "VEHICLE_CONFLICT", "DRIVER_CONFLICT", "OTHER" });
         modelBuilder.HasPostgresEnum("vehicle_status", new[] { "ACTIVE", "MAINTENANCE", "OFF_DUTY", "RETIRED" });
         base.OnModelCreating(modelBuilder);
