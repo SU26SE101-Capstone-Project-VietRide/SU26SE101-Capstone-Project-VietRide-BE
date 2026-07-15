@@ -277,7 +277,7 @@ Ship operator Trip editing and DriverSchedule cascade without repricing an exist
 | 22.3 | ⬜ todo | — | — | `btree_gist` explicitly approved |
 | 22.4 | 🔄 in progress | APPROVE | 2026-07-15 | Implementation/static review complete; consolidated verification deferred per human instruction |
 | 22.5 | ⬜ todo | — | — | — |
-| 22.6 | ⬜ todo | — | — | Four Booking event contracts confirmed, including separate MINOR informational fact |
+| 22.6 | 🔄 in progress | APPROVE | 2026-07-15 | Shared contracts/static review complete; consolidated verification deferred per human instruction |
 | 22.7 | ⬜ todo | — | — | Exact compatibility-only rank and `DRIVER_AREA` rule confirmed |
 | 22.8 | ⬜ todo | — | — | — |
 | 22.9 | ⬜ todo | — | — | Booking Hangfire branch approved with logical `pendingActionId` dedupe and physical-job tolerance |
