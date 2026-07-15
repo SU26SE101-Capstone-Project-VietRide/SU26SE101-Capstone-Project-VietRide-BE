@@ -372,6 +372,27 @@ COMMENT ON COLUMN driver_schedules.departure_time IS
     'TIME (no timezone). Stored as local ICT semantic.';
 
 -- -----------------------------------------------------------------------------
+-- driver_schedule_audit_logs (append-only)
+-- -----------------------------------------------------------------------------
+CREATE TABLE driver_schedule_audit_logs (
+    id UUID PRIMARY KEY,
+    driver_schedule_id UUID NOT NULL REFERENCES driver_schedules (id) ON DELETE RESTRICT,
+    actor_user_id UUID NULL, -- logical FK -> identity.users.id
+    action VARCHAR(64) NOT NULL,
+    metadata JSONB NULL,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_driver_schedule_audit_logs_schedule_occurred
+    ON driver_schedule_audit_logs (driver_schedule_id, occurred_at DESC);
+CREATE INDEX idx_driver_schedule_audit_logs_actor_occurred
+    ON driver_schedule_audit_logs (actor_user_id, occurred_at DESC)
+    WHERE actor_user_id IS NOT NULL;
+CREATE INDEX idx_driver_schedule_audit_logs_action_occurred
+    ON driver_schedule_audit_logs (action, occurred_at DESC);
+
+-- -----------------------------------------------------------------------------
 -- trips
 -- -----------------------------------------------------------------------------
 CREATE TABLE trips (
@@ -393,6 +414,7 @@ CREATE TABLE trips (
     cancelled_by_user_id UUID NULL,
     cancel_reason TEXT NULL,
     completed_by_user_id UUID NULL,
+    notes VARCHAR(2000) NULL,
     -- Status
     status trip_status NOT NULL DEFAULT 'SCHEDULED',
     source trip_source NOT NULL,

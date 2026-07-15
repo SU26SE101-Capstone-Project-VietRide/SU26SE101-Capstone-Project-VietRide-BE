@@ -55,6 +55,8 @@ public sealed class TripDbContext : VietRideDbContextBase
 
     public DbSet<DriverSchedule> DriverSchedules => Set<DriverSchedule>();
 
+    public DbSet<DriverScheduleAuditLog> DriverScheduleAuditLogs => Set<DriverScheduleAuditLog>();
+
     public DbSet<Domain.Entities.Trip> Trips => Set<Domain.Entities.Trip>();
 
     public DbSet<TripAuditLog> TripAuditLogs => Set<TripAuditLog>();

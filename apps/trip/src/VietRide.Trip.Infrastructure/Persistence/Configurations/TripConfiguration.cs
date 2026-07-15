@@ -40,6 +40,9 @@ internal sealed class TripConfiguration : IEntityTypeConfiguration<Domain.Entiti
         builder.Property(trip => trip.CancelledByUserId).HasColumnName("cancelled_by_user_id");
         builder.Property(trip => trip.CancelReason).HasColumnName("cancel_reason");
         builder.Property(trip => trip.CompletedByUserId).HasColumnName("completed_by_user_id");
+        builder.Property(trip => trip.Notes)
+            .HasColumnName("notes")
+            .HasMaxLength(2000);
         builder.Property(trip => trip.Status)
             .HasColumnName("status")
             .HasColumnType("vietride_trip.trip_status")

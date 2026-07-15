@@ -25,12 +25,13 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 | `AlternativeRouteStop` | Junction AlternativeRoute↔Stop. | composite PK, `orderIndex` |
 | `VehicleType` | Loại xe catalog. | `code` UNIQUE, `isSystemDefined` (block delete cho 3 platform seed) |
 | `Vehicle` | Xe operator. | `licensePlate` UNIQUE, `seatLayoutJson`, `maxCargoWeightKg`, `status` enum |
-| `Trip` | Chuyến cụ thể. | snapshot `baseFare`/`estimatedPassengerLuggageKg`/`maxCargoWeightKg`, 2 cargo counter, `source` enum, `hasSubstitution` |
+| `Trip` | Chuyến cụ thể. | snapshot `baseFare`/`estimatedPassengerLuggageKg`/`maxCargoWeightKg`, nullable trimmed `notes` (max 2000), 2 cargo counter, `source` enum, `hasSubstitution` |
 | `TripAuditLog` | Append-only audit do Trip service sở hữu. | local `tripId` FK; logical `actorUserId`; JSONB metadata |
 | `TripSeat` | Trạng thái từng ghế per trip. | composite UNIQUE `(tripId, seatNumber)`, `status` enum |
 | `TripStop` | Snapshot RouteStop khi generate. | composite PK, `estimatedArrivalTime` static, `actualArrivalTime` set bởi Assistant |
 | `TripStopFare` | Exception per trip per stop. | copy từ RouteStopFareTemplate active tại thời điểm generate |
 | `DriverSchedule` | Recurring assignment driver/assistant↔vehicle↔route. | `dayOfWeek` JSONB array, `departureTime` TIME, `validFrom`/`validUntil` |
+| `DriverScheduleAuditLog` | Append-only audit do Trip service sở hữu. | local `driverScheduleId` FK; logical `actorUserId`; JSONB metadata |
 | `TripGenerationSkipLog` | Audit khi Hangfire skip generate Trip. | `reason` enum, `driverScheduleId` NOT NULL |
 | `ShuttleTrip` | Xe trung chuyển gắn với main Trip. | `direction` (INBOUND/OUTBOUND), `mainTripId`, `stationId` |
 | `ShuttlePassenger` | Manifest entry shuttle. | `shuttleTripId` nullable (chờ assign), `pickupAddress`+lat/lng |
@@ -87,6 +88,9 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 | `idx_trip_stops_estimated_arrival` | `estimated_arrival_time` | partial | Approaching alert candidates |
 | `idx_driver_schedules_operator_active` | `(operator_id, is_active)` | B-tree | Generate Trip iteration |
 | `idx_driver_schedules_vehicle_active` | `(vehicle_id, is_active)` | partial | Vehicle conflict check |
+| `idx_driver_schedule_audit_logs_schedule_occurred` | `(driver_schedule_id, occurred_at DESC)` | B-tree | Audit timeline per driver schedule |
+| `idx_driver_schedule_audit_logs_actor_occurred` | `(actor_user_id, occurred_at DESC)` | partial B-tree | Driver schedule audit timeline per actor |
+| `idx_driver_schedule_audit_logs_action_occurred` | `(action, occurred_at DESC)` | B-tree | Driver schedule audit lookup per action |
 | `idx_trip_gen_skip_logs_operator_date` | `(operator_id, skipped_date DESC)` | B-tree | Dashboard "skipped this month" |
 | `idx_shuttle_passengers_main_trip_status` | `(main_trip_id, status)` | B-tree | "Shuttle requests pending" view |
 | `idx_outbox_events_status_created` | `(status, created_at)` partial | B-tree | Outbox worker polling |

@@ -26,6 +26,7 @@ public sealed class Trip : BaseEntity<Guid>
     public Guid? CancelledByUserId { get; private set; }
     public string? CancelReason { get; private set; }
     public Guid? CompletedByUserId { get; private set; }
+    public string? Notes { get; private set; }
     public TripStatus Status { get; private set; } = TripStatus.SCHEDULED;
     public TripSource Source { get; private set; }
     public bool HasSubstitution { get; private set; }
@@ -85,7 +86,8 @@ public sealed class Trip : BaseEntity<Guid>
         decimal? maxCargoWeightKg,
         decimal? maxCargoVolumeM3,
         decimal estimatedPassengerLuggageKg,
-        bool hasSubstitution = false)
+        bool hasSubstitution = false,
+        string? notes = null)
     {
         ValidateGuid(operatorId, nameof(operatorId));
         ValidateGuid(routeId, nameof(routeId));
@@ -120,7 +122,13 @@ public sealed class Trip : BaseEntity<Guid>
             ReservedParcelVolumeM3 = 0m,
             TotalLoadedWeightKg = 0m,
             TotalLoadedVolumeM3 = 0m,
+            Notes = NormalizeNotes(notes),
         };
+    }
+
+    public void UpdateNotes(string? notes)
+    {
+        Notes = NormalizeNotes(notes);
     }
 
     public void MarkBoarding(DateTimeOffset boardingAt)
@@ -291,6 +299,17 @@ public sealed class Trip : BaseEntity<Guid>
     {
         var normalized = value?.Trim();
         return string.IsNullOrEmpty(normalized) ? null : normalized;
+    }
+
+    private static string? NormalizeNotes(string? value)
+    {
+        var normalized = NormalizeOptionalText(value);
+        if (normalized?.Length > 2000)
+        {
+            throw new ArgumentException("Notes cannot exceed 2000 characters.", nameof(value));
+        }
+
+        return normalized;
     }
 
     private static string NormalizeSeatNumber(string seatNumber)

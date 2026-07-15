@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Trip.Domain.Entities;
 using VietRide.Trip.Infrastructure;
 
@@ -10,6 +11,31 @@ namespace VietRide.Trip.IntegrationTests.Persistence;
 
 public sealed class TripPersistenceModelTests
 {
+    [Fact]
+    public void Model_MapsNormalizedNullableTripNotes_WithCanonicalLength()
+    {
+        using var dbContext = CreateDbContext();
+        var tripEntity = dbContext.GetService<IDesignTimeModel>().Model.FindEntityType(typeof(VietRide.Trip.Domain.Entities.Trip))
+            ?? throw new InvalidOperationException("Trip model missing.");
+        var notes = tripEntity.FindProperty(nameof(VietRide.Trip.Domain.Entities.Trip.Notes))
+            ?? throw new InvalidOperationException("Trip notes property missing.");
+
+        notes.GetColumnName().Should().Be("notes");
+        notes.GetMaxLength().Should().Be(2000);
+        notes.IsNullable.Should().BeTrue();
+
+        var trip = CreateTrip("  Dispatch via Gate 3  ");
+        trip.Notes.Should().Be("Dispatch via Gate 3");
+
+        trip.UpdateNotes("   ");
+        trip.Notes.Should().BeNull();
+
+        trip.UpdateNotes(new string('x', 2000));
+        trip.Notes!.Length.Should().Be(2000);
+        var tooLong = () => trip.UpdateNotes(new string('x', 2001));
+        tooLong.Should().Throw<ArgumentException>();
+    }
+
     [Fact]
     public void Model_MapsStationOperatorStationAndStopTables_WithExpectedDeleteColumns()
     {
@@ -109,6 +135,27 @@ public sealed class TripPersistenceModelTests
             .Options;
 
         return new TripDbContext(options, new SystemClock());
+    }
+
+    private static VietRide.Trip.Domain.Entities.Trip CreateTrip(string? notes)
+    {
+        var departure = DateTimeOffset.UtcNow.AddDays(1);
+        return VietRide.Trip.Domain.Entities.Trip.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            null,
+            null,
+            departure,
+            departure.AddHours(4),
+            TripSource.MANUAL,
+            Money.FromRaw(100_000),
+            100m,
+            null,
+            0m,
+            false,
+            notes);
     }
 
     private static string ResolveConnectionString(string databaseName)
