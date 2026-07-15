@@ -89,6 +89,28 @@ internal sealed class TripRepository : ITripRepository
             .Include(trip => trip.Seats)
             .FirstOrDefaultAsync(trip => trip.Id == tripId, cancellationToken);
 
+    public async Task<Domain.Entities.Trip?> AcquireForVehicleSwapAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        EnsureCallerTransaction("vehicle-swap Trip acquisition");
+
+        var trip = await _dbContext.Trips
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_trip.trips
+                WHERE id = {tripId}
+                FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (trip is not null)
+        {
+            await _dbContext.Entry(trip).ReloadAsync(cancellationToken);
+        }
+
+        return trip;
+    }
+
     public async Task<DriverTripRouteDto?> GetDriverTripRouteAsync(
         Guid tripId,
         CancellationToken cancellationToken)
@@ -393,6 +415,14 @@ internal sealed class TripRepository : ITripRepository
         if (volumeM3 <= 0m)
         {
             throw new ArgumentOutOfRangeException(nameof(volumeM3), volumeM3, "Cargo volume must be positive.");
+        }
+    }
+
+    private void EnsureCallerTransaction(string operation)
+    {
+        if (_dbContext.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException($"A caller-owned transaction is required for {operation}.");
         }
     }
 

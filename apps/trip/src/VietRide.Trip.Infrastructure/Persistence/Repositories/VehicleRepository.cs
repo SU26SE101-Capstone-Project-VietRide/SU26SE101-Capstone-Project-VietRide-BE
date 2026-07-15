@@ -65,6 +65,60 @@ internal sealed class VehicleRepository : IVehicleRepository
             && vehicle.DeletedAt == null,
             cancellationToken);
 
+    public async Task<IReadOnlyList<Vehicle>> AcquireForVehicleSwapAsync(
+        Guid operatorId,
+        IReadOnlyCollection<Guid> vehicleIds,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(vehicleIds);
+        if (dbContext.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException("A caller-owned transaction is required for vehicle-swap vehicle acquisition.");
+        }
+
+        var orderedIds = vehicleIds
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .Order()
+            .ToArray();
+        if (orderedIds.Length == 0)
+        {
+            return [];
+        }
+
+        var vehicles = await dbContext.Vehicles
+            .FromSqlInterpolated($"""
+                SELECT
+                    id,
+                    operator_id,
+                    vehicle_type_id,
+                    license_plate,
+                    seat_layout_json,
+                    total_seats,
+                    max_cargo_weight_kg,
+                    max_cargo_volume_m3,
+                    image_urls,
+                    status,
+                    is_active,
+                    deleted_at,
+                    created_at,
+                    updated_at
+                FROM vietride_trip.vehicles
+                WHERE operator_id = {operatorId}
+                    AND id = ANY({orderedIds})
+                    AND deleted_at IS NULL
+                ORDER BY id
+                FOR SHARE
+                """)
+            .ToArrayAsync(cancellationToken);
+        foreach (var vehicle in vehicles)
+        {
+            await dbContext.Entry(vehicle).ReloadAsync(cancellationToken);
+        }
+
+        return vehicles;
+    }
+
     public async Task<PagedResult<Vehicle>> ListByOperatorAsync(
         Guid operatorId,
         int page,

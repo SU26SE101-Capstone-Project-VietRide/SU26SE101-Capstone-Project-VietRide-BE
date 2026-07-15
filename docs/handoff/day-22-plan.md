@@ -278,7 +278,7 @@ Ship operator Trip editing and DriverSchedule cascade without repricing an exist
 | 22.4 | 🔄 in progress | APPROVE | 2026-07-15 | Implementation/static review complete; consolidated verification deferred per human instruction |
 | 22.5 | 🔄 in progress | APPROVE | 2026-07-15 | Pricing implementation/static review complete; consolidated verification deferred per human instruction |
 | 22.6 | 🔄 in progress | APPROVE | 2026-07-15 | Shared contracts/static review complete; consolidated verification deferred per human instruction |
-| 22.7 | ⬜ todo | — | — | Exact compatibility-only rank and `DRIVER_AREA` rule confirmed |
+| 22.7 | 🔄 in progress | APPROVE | 2026-07-15 | Vehicle-swap service/static review complete; consolidated verification deferred per human instruction |
 | 22.8 | ⬜ todo | — | — | — |
 | 22.9 | ⬜ todo | — | — | Booking Hangfire branch approved with logical `pendingActionId` dedupe and physical-job tolerance |
 | 22.10 | ⬜ todo | — | — | — |

@@ -203,6 +203,18 @@ public sealed class Trip : BaseEntity<Guid>
         AssistantUserId = assistantUserId;
     }
 
+    public bool ChangeVehicle(Guid vehicleId)
+    {
+        ValidateGuid(vehicleId, nameof(vehicleId));
+        if (VehicleId == vehicleId)
+        {
+            return false;
+        }
+
+        VehicleId = vehicleId;
+        return true;
+    }
+
     public void UpdateCargoCounters(
         decimal reservedParcelWeightKg,
         decimal reservedParcelVolumeM3,

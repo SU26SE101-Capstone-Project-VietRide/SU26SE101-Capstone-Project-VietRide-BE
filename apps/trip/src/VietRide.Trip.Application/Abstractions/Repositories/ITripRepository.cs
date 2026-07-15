@@ -28,6 +28,11 @@ public interface ITripRepository : IRepository<Domain.Entities.Trip, Guid>
 
     Task<Domain.Entities.Trip?> GetWithSeatsAsync(Guid tripId, CancellationToken cancellationToken);
 
+    Task<Domain.Entities.Trip?> AcquireForVehicleSwapAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("Vehicle-swap locking is not supported by this repository implementation.");
+
     Task<DriverTripRouteDto?> GetDriverTripRouteAsync(Guid tripId, CancellationToken cancellationToken)
         => throw new NotSupportedException("Driver trip route reads are not supported by this repository implementation.");
 
