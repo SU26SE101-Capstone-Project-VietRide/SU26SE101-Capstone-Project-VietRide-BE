@@ -1,7 +1,7 @@
-using System.Text.Json;
 using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Domain.Entities;
