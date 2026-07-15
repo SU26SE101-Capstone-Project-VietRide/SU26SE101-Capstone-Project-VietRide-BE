@@ -1,5 +1,8 @@
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
+using Npgsql.NameTranslation;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Persistence.Outbox;
 using VietRide.Trip.Application.Abstractions.Repositories;
@@ -98,7 +101,7 @@ public sealed class TripVehicleSwapServiceIntegrationTests
                 auditRows[0].Metadata.Should().NotBeNull();
                 var metadata = auditRows[0].Metadata!.Value;
                 metadata.EnumerateObject().Select(property => property.Name)
-                    .Should().Equal("changedFields", "before", "after", "requestId");
+                    .Should().BeEquivalentTo("changedFields", "before", "after", "requestId");
                 metadata.GetProperty("changedFields").EnumerateArray().Select(item => item.GetString())
                     .Should().Equal("vehicleId");
                 var before = metadata.GetProperty("before");
@@ -109,7 +112,8 @@ public sealed class TripVehicleSwapServiceIntegrationTests
                 after.GetProperty("vehicleId").GetGuid().Should().Be(seed.NewVehicleId);
                 metadata.GetProperty("requestId").GetString().Should().Be("request-1");
                 outboxRows.Should().ContainSingle(item => item.EventType == "trip.trip.vehicle_swapped");
-                outboxRows[0].Payload.Should().Contain("\"assistantUserId\":null");
+                using var payload = JsonDocument.Parse(outboxRows[0].Payload);
+                payload.RootElement.GetProperty("assistantUserId").ValueKind.Should().Be(JsonValueKind.Null);
             }
             else
             {
@@ -153,8 +157,13 @@ public sealed class TripVehicleSwapServiceIntegrationTests
     private static TripDbContext CreateDbContext(string databaseName)
     {
         var connectionString = $"Host=localhost;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
+        var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
+        dataSourceBuilder.MapEnum<OutboxEventStatus>(
+            $"{TripDbContext.SchemaName}.outbox_event_status",
+            new NpgsqlNullNameTranslator());
+        TripDbContext.ConfigurePostgresEnums(dataSourceBuilder);
         var options = new DbContextOptionsBuilder<TripDbContext>()
-            .UseNpgsql(connectionString, npgsql =>
+            .UseNpgsql(dataSourceBuilder.Build(), npgsql =>
                 npgsql.MigrationsHistoryTable("__ef_migrations_history", TripDbContext.SchemaName))
             .Options;
         return new TripDbContext(options, new SystemClock());
