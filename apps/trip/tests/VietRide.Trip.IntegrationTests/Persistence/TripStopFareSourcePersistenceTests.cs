@@ -121,6 +121,9 @@ public sealed class TripStopFareSourcePersistenceTests
     internal static TripDbContext CreateDbContext(NpgsqlDataSource dataSource)
     {
         var options = new DbContextOptionsBuilder<TripDbContext>()
+            .EnableServiceProviderCaching(false)
+            .ConfigureWarnings(warnings => warnings.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning))
             .UseNpgsql(dataSource, npgsql =>
                 npgsql.MigrationsHistoryTable("__ef_migrations_history", TripDbContext.SchemaName))
             .Options;
@@ -131,6 +134,9 @@ public sealed class TripStopFareSourcePersistenceTests
     private static TripDbContext CreateDbContext(string databaseName)
     {
         var options = new DbContextOptionsBuilder<TripDbContext>()
+            .EnableServiceProviderCaching(false)
+            .ConfigureWarnings(warnings => warnings.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning))
             .UseNpgsql(CreateConnectionString(databaseName), npgsql =>
                 npgsql.MigrationsHistoryTable("__ef_migrations_history", TripDbContext.SchemaName))
             .Options;

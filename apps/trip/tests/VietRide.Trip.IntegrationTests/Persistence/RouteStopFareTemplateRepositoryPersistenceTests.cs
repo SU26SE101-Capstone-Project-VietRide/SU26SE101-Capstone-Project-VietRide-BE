@@ -130,6 +130,9 @@ public sealed class RouteStopFareTemplateRepositoryPersistenceTests
     private static TripDbContext CreateDbContext(string databaseName)
     {
         var options = new DbContextOptionsBuilder<TripDbContext>()
+            .EnableServiceProviderCaching(false)
+            .ConfigureWarnings(warnings => warnings.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning))
             .UseNpgsql(CreateConnectionString(databaseName))
             .Options;
 

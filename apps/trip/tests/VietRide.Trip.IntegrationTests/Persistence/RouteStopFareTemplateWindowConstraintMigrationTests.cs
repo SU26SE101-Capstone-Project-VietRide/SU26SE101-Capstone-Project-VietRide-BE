@@ -267,6 +267,9 @@ public sealed class RouteStopFareTemplateWindowConstraintMigrationTests
     private static TripDbContext CreateScriptDbContext()
     {
         var options = new DbContextOptionsBuilder<TripDbContext>()
+            .EnableServiceProviderCaching(false)
+            .ConfigureWarnings(warnings => warnings.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning))
             .UseNpgsql(
                 "Host=localhost;Port=5432;Database=unused;Username=vietride;Password=vietride_dev",
                 npgsql => npgsql.MigrationsHistoryTable("__ef_migrations_history", TripDbContext.SchemaName))
