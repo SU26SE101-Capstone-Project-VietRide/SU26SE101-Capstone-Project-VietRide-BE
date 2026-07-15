@@ -522,7 +522,7 @@ CREATE INDEX idx_trip_stops_estimated_arrival ON trip_stops (estimated_arrival_t
     WHERE status = 'PENDING';
 
 COMMENT ON COLUMN trip_stops.estimated_arrival_time IS
-    'Static baseline. NEVER updated after Trip generate. Dynamic ETA lives in Redis only.';
+    'Static planned baseline. An approved pre-departure Route edit or DriverSchedule ALL_PENDING cascade may recompute it; GPS/Tracking dynamic ETA never updates this column.';
 
 -- -----------------------------------------------------------------------------
 -- trip_stop_fares (exception override per trip per stop; from RouteStopFareTemplate)
