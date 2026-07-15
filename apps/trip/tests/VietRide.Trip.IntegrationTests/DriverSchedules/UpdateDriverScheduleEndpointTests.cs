@@ -208,6 +208,9 @@ public sealed class UpdateDriverScheduleEndpointTests
     {
         var connectionString = $"Host=localhost;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
         var options = new DbContextOptionsBuilder<TripDbContext>()
+            .EnableServiceProviderCaching(false)
+            .ConfigureWarnings(warnings => warnings.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning))
             .UseNpgsql(connectionString, npgsql =>
                 npgsql.MigrationsHistoryTable("__ef_migrations_history", TripDbContext.SchemaName))
             .Options;
