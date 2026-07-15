@@ -29,4 +29,43 @@ internal sealed class TripStopRepository : ITripStopRepository
     public IQueryable<TripStop> Query() => _dbContext.TripStops;
 
     public IQueryable<TripStop> QueryNoTracking() => _dbContext.TripStops.AsNoTracking();
+
+    public async Task<IReadOnlyList<TripStop>> AcquireByTripAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        EnsureCallerTransaction();
+        return await _dbContext.TripStops
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_trip.trip_stops
+                WHERE trip_id = {tripId}
+                ORDER BY order_index, stop_id
+                FOR UPDATE
+                """)
+            .ToArrayAsync(cancellationToken);
+    }
+
+    public void RemoveRange(IEnumerable<TripStop> stops) => _dbContext.TripStops.RemoveRange(stops);
+
+    public async Task DeleteByTripAsync(Guid tripId, CancellationToken cancellationToken)
+    {
+        EnsureCallerTransaction();
+        await _dbContext.TripStops
+            .Where(stop => stop.TripId == tripId)
+            .ExecuteDeleteAsync(cancellationToken);
+        foreach (var entry in _dbContext.ChangeTracker.Entries<TripStop>()
+                     .Where(entry => entry.Entity.TripId == tripId))
+        {
+            entry.State = EntityState.Detached;
+        }
+    }
+
+    private void EnsureCallerTransaction()
+    {
+        if (_dbContext.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException("A caller-owned transaction is required for Trip-stop acquisition.");
+        }
+    }
 }

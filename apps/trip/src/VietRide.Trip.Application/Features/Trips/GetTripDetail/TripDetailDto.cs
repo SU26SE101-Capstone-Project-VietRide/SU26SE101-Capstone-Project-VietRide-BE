@@ -14,4 +14,7 @@ public sealed record TripDetailDto(
     IReadOnlyList<TripStopDto> Stops,
     TripSeatSummaryDto SeatSummary,
     Guid? ReturnRouteId,
-    TripFareBreakdownDto FareBreakdown);
+    TripFareBreakdownDto FareBreakdown)
+{
+    public string? Notes { get; init; }
+}

@@ -64,4 +64,43 @@ internal sealed class TripStopFareRepository : ITripStopFareRepository
             .ThenBy(fare => fare.Id)
             .ToListAsync(cancellationToken);
     }
+
+    public async Task<IReadOnlyList<TripStopFare>> AcquireByTripAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException("A caller-owned transaction is required for Trip-stop-fare acquisition.");
+        }
+
+        return await dbContext.TripStopFares
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_trip.trip_stop_fares
+                WHERE trip_id = {tripId}
+                ORDER BY stop_id
+                FOR UPDATE
+                """)
+            .ToArrayAsync(cancellationToken);
+    }
+
+    public void RemoveRange(IEnumerable<TripStopFare> fares) => dbContext.TripStopFares.RemoveRange(fares);
+
+    public async Task DeleteByTripAsync(Guid tripId, CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException("A caller-owned transaction is required for Trip-stop-fare deletion.");
+        }
+
+        await dbContext.TripStopFares
+            .Where(fare => fare.TripId == tripId)
+            .ExecuteDeleteAsync(cancellationToken);
+        foreach (var entry in dbContext.ChangeTracker.Entries<TripStopFare>()
+                     .Where(entry => entry.Entity.TripId == tripId))
+        {
+            entry.State = EntityState.Detached;
+        }
+    }
 }

@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Features.DriverTrips.GetAssignedTripRoute;
@@ -109,6 +111,30 @@ internal sealed class TripRepository : ITripRepository
         }
 
         return trip;
+    }
+
+    public async Task<bool> HasVehicleConflictAsync(
+        Guid vehicleId,
+        DateTimeOffset departureDateTime,
+        Guid excludedTripId,
+        CancellationToken cancellationToken)
+    {
+        var normalizedDeparture = departureDateTime.ToUniversalTime();
+        if (_dbContext.Database.CurrentTransaction is not null)
+        {
+            var lockKey = CreateVehicleDepartureLockKey(vehicleId, normalizedDeparture);
+            await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock({lockKey})",
+                cancellationToken);
+        }
+
+        return await _dbContext.Trips.AnyAsync(
+            trip => trip.VehicleId == vehicleId
+                && trip.DepartureDateTime == normalizedDeparture
+                && trip.Id != excludedTripId
+                && trip.Status != TripStatus.CANCELLED
+                && trip.Status != TripStatus.COMPLETED,
+            cancellationToken);
     }
 
     public async Task<DriverTripRouteDto?> GetDriverTripRouteAsync(
@@ -424,6 +450,22 @@ internal sealed class TripRepository : ITripRepository
         {
             throw new InvalidOperationException($"A caller-owned transaction is required for {operation}.");
         }
+    }
+
+    private static long CreateVehicleDepartureLockKey(Guid vehicleId, DateTimeOffset departureDateTime)
+    {
+        Span<byte> input = stackalloc byte[24];
+        vehicleId.TryWriteBytes(input[..16]);
+
+        // PostgreSQL timestamptz is stored at microsecond precision. Hash the same normalized
+        // instant that participates in uq_trips_vehicle_departure so equivalent offsets and
+        // sub-microsecond .NET values cannot acquire different locks for the same database key.
+        var utcMicroseconds = departureDateTime.ToUniversalTime().Ticks / 10;
+        BinaryPrimitives.WriteInt64BigEndian(input[16..], utcMicroseconds);
+
+        Span<byte> hash = stackalloc byte[SHA256.HashSizeInBytes];
+        SHA256.HashData(input, hash);
+        return BinaryPrimitives.ReadInt64BigEndian(hash);
     }
 
     private static void EnsureCapacity(

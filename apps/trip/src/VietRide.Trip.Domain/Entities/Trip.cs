@@ -131,6 +131,31 @@ public sealed class Trip : BaseEntity<Guid>
         Notes = NormalizeNotes(notes);
     }
 
+    public bool ChangeBaseFare(Money baseFare)
+    {
+        if (BaseFare == baseFare)
+        {
+            return false;
+        }
+
+        BaseFare = baseFare;
+        return true;
+    }
+
+    public bool ChangeRoute(Guid routeId, DateTimeOffset estimatedArrivalTime)
+    {
+        ValidateGuid(routeId, nameof(routeId));
+        ValidateArrivalAfterDeparture(DepartureDateTime, estimatedArrivalTime);
+        if (RouteId == routeId)
+        {
+            return false;
+        }
+
+        RouteId = routeId;
+        EstimatedArrivalTime = estimatedArrivalTime;
+        return true;
+    }
+
     public void MarkBoarding(DateTimeOffset boardingAt)
     {
         EnsureStatus(TripStatus.SCHEDULED, nameof(MarkBoarding));

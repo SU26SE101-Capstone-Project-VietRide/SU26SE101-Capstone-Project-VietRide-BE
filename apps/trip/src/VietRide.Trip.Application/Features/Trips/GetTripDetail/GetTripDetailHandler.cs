@@ -65,7 +65,7 @@ public sealed class GetTripDetailHandler : IRequestHandler<GetTripDetailQuery, T
             seats,
             stops,
             stopDetails,
-            fares));
+            fares) with { Notes = trip.Notes });
     }
 
     private Station GetStation(Guid stationId) =>
