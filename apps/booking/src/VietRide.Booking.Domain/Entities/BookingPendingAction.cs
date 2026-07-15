@@ -53,4 +53,10 @@ public sealed class BookingPendingAction : BaseEntity<Guid>
         ResolvedAt = resolvedAt;
         ResolvedAction = resolvedAction;
     }
+
+    /// <summary>
+    /// Returns whether the response deadline is strictly in the past.
+    /// Equality is still eligible for a passenger response.
+    /// </summary>
+    public bool IsDeadlineExpired(DateTimeOffset now) => Deadline < now;
 }

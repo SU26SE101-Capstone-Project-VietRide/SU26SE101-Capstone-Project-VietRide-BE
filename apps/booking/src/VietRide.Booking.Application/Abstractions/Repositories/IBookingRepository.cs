@@ -13,6 +13,27 @@ namespace VietRide.Booking.Application.Abstractions.Repositories;
 /// </summary>
 public interface IBookingRepository : IRepository<BookingEntity, Guid>
 {
+    Task AcquireEventLockAsync(Guid sourceEventId, CancellationToken ct = default)
+        => throw new NotSupportedException("Booking event lock is not implemented by this repository.");
+
+    Task<IReadOnlyList<BookingEntity>> GetConfirmedByTripAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Schedule-change booking lookup is not implemented by this repository.");
+
+    Task<IReadOnlyList<BookingEntity>> GetCancellableByTripAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Trip-cancellation booking lookup is not implemented by this repository.");
+
+    Task<bool> HasOutboxEventAsync(
+        string eventType,
+        Guid eventId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Outbox idempotency lookup is not implemented by this repository.");
+
     Task<TripEditImpactDto> GetTripEditImpactAsync(
         Guid tripId,
         Guid operatorId,

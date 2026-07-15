@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using VietRide.Booking.Application.Abstractions.Repositories;
@@ -54,6 +55,49 @@ internal sealed class BookingRepository : IBookingRepository
     // -----------------------------------------------------------------------
     // IBookingRepository — aggregate-specific queries
     // -----------------------------------------------------------------------
+
+    public Task AcquireEventLockAsync(Guid sourceEventId, CancellationToken ct = default)
+        => _db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock(hashtextextended({sourceEventId.ToString("N")}, 0))",
+            ct);
+
+    public async Task<IReadOnlyList<BookingEntity>> GetConfirmedByTripAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => await _db.Bookings
+            .Where(booking => booking.TripId == tripId
+                && booking.OperatorId == operatorId
+                && booking.Status == BookingStatus.CONFIRMED)
+            .OrderBy(booking => booking.Id)
+            .ToListAsync(ct);
+
+    public async Task<IReadOnlyList<BookingEntity>> GetCancellableByTripAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => await _db.Bookings
+            .Include(booking => booking.Tickets)
+            .Include(booking => booking.ShuttleIntent)
+            .Where(booking => booking.TripId == tripId
+                && booking.OperatorId == operatorId
+                && (booking.Status == BookingStatus.PENDING_PAYMENT
+                    || booking.Status == BookingStatus.CONFIRMED))
+            .OrderBy(booking => booking.Id)
+            .ToListAsync(ct);
+
+    public Task<bool> HasOutboxEventAsync(
+        string eventType,
+        Guid eventId,
+        CancellationToken ct = default)
+    {
+        var fragment = JsonSerializer.Serialize(
+            new { eventId },
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        return _db.OutboxEvents.AnyAsync(
+            row => row.EventType == eventType && EF.Functions.JsonContains(row.Payload, fragment),
+            ct);
+    }
 
     /// <inheritdoc/>
     public async Task<TripEditImpactDto> GetTripEditImpactAsync(

@@ -159,6 +159,16 @@ public static class InfrastructureServiceCollectionExtensions
                 options.QueueName = "booking.trip-vehicle-swapped";
                 options.BindingKeys = [TripVehicleSwappedIntegrationEvent.EventTypeValue];
             });
+            services.AddVietRideEventConsumer<TripScheduleChangedIntegrationEvent, TripScheduleChangedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "booking.trip-schedule-changed";
+                options.BindingKeys = [TripScheduleChangedIntegrationEvent.EventTypeValue];
+            });
+            services.AddVietRideEventConsumer<TripCancelledIntegrationEvent, TripCancelledIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "booking.trip-cancelled";
+                options.BindingKeys = [TripCancelledIntegrationEvent.EventTypeValue];
+            });
             services.AddVietRideEventConsumer<PaymentExpiredIntegrationEvent, PaymentExpiredIntegrationEventHandler>(options =>
             {
                 options.QueueName = "booking.payment-expired";
