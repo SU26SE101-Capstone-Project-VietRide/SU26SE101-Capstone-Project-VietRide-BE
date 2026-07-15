@@ -1,6 +1,8 @@
 using System.Text.Json;
 using FluentAssertions;
 using MediatR;
+using Microsoft.Extensions.Logging.Abstractions;
+using VietRide.Shared.Application.Behaviors;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
@@ -21,6 +23,32 @@ namespace VietRide.Trip.UnitTests.Features.Trips.EditTrip;
 public sealed class EditTripCommandHandlerTests
 {
     private static readonly DateTimeOffset Now = new(2026, 7, 15, 1, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void Command_SkipsSharedTransactionBehavior()
+    {
+        typeof(EditTripCommand)
+            .Should()
+            .BeDecoratedWith<SkipTransactionAttribute>();
+    }
+
+    [Fact]
+    public async Task SharedTransactionBehavior_DoesNotOpenOuterTransactionForEditTrip()
+    {
+        var fixture = new Fixture();
+        var behavior = new TransactionBehavior<EditTripCommand, TripDetailDto>(
+            NullLogger<TransactionBehavior<EditTripCommand, TripDetailDto>>.Instance,
+            fixture.UnitOfWork);
+
+        var detail = await behavior.Handle(
+            fixture.Command(notes: "outside shared transaction"),
+            () => Task.FromResult(CreateDetail(fixture.Trip)),
+            default);
+
+        detail.TripId.Should().Be(fixture.Trip.Id);
+        fixture.UnitOfWork.ExecuteCount.Should().Be(0);
+        fixture.UnitOfWork.BeginCount.Should().Be(0);
+    }
 
     [Fact]
     public async Task CombinedRouteAndFareChange_RebuildsManualFareForSharedAndNewStops()
@@ -53,7 +81,7 @@ public sealed class EditTripCommandHandlerTests
             fare.Source == TripStopFareSource.MANUAL_OVERRIDE && fare.FareFromThisStop.Amount == 450_001);
         fixture.Audits.Items.Should().HaveCount(2);
         fixture.Outbox.Items.Should().ContainSingle(item => item.EventType == "trip.trip.route_changed");
-        fixture.UnitOfWork.SaveCount.Should().Be(1);
+        fixture.UnitOfWork.SaveCount.Should().Be(0);
         fixture.UnitOfWork.CommitCount.Should().Be(1);
     }
 
@@ -287,8 +315,14 @@ public sealed class EditTripCommandHandlerTests
         await fixture.Handler.Handle(fixture.Command(vehicleId: replacement.Id), default);
 
         fixture.Booking.CallCount.Should().Be(1);
-        fixture.Calls.Should().ContainInOrder("booking-preflight", "begin", "swap", "save", "commit");
+        fixture.Booking.ObservedActiveTransaction.Should().BeFalse();
+        fixture.Calls.Should().ContainInOrder("booking-preflight", "begin", "swap", "commit");
         fixture.Calls.Count(call => call == "booking-preflight").Should().Be(1);
+        fixture.UnitOfWork.BeginCount.Should().Be(1);
+        fixture.UnitOfWork.SaveCount.Should().Be(0);
+        fixture.UnitOfWork.CommitCount.Should().Be(1);
+        fixture.UnitOfWork.RollbackCount.Should().Be(0);
+        fixture.DetailObservedActiveTransaction.Should().BeFalse();
     }
 
     [Fact]
@@ -311,10 +345,16 @@ public sealed class EditTripCommandHandlerTests
     {
         var fixture = new Fixture();
 
-        await fixture.Handler.Handle(fixture.Command(baseFare: fixture.Trip.BaseFare.Amount), default);
+        var detail = await fixture.Handler.Handle(
+            fixture.Command(baseFare: fixture.Trip.BaseFare.Amount),
+            default);
 
+        detail.TripId.Should().Be(fixture.Trip.Id);
         fixture.Booking.CallCount.Should().Be(0);
         fixture.UnitOfWork.BeginCount.Should().Be(0);
+        fixture.UnitOfWork.SaveCount.Should().Be(0);
+        fixture.UnitOfWork.CommitCount.Should().Be(0);
+        fixture.DetailObservedActiveTransaction.Should().BeFalse();
         fixture.Audits.Items.Should().BeEmpty();
         fixture.Outbox.Items.Should().BeEmpty();
         fixture.Swap.StageCount.Should().Be(0);
@@ -404,10 +444,10 @@ public sealed class EditTripCommandHandlerTests
     }
 
     [Fact]
-    public async Task SaveFailure_RollsBackCombinedAuditAndOutboxStaging()
+    public async Task CommitFailure_RollsBackCombinedAuditAndOutboxStaging()
     {
         var fixture = new Fixture();
-        fixture.UnitOfWork.ThrowOnSave = true;
+        fixture.UnitOfWork.ThrowOnCommit = true;
         fixture.UnitOfWork.OnRollback = () =>
         {
             fixture.Audits.Items.Clear();
@@ -419,8 +459,8 @@ public sealed class EditTripCommandHandlerTests
             default);
 
         await action.Should().ThrowAsync<InvalidOperationException>();
-        fixture.UnitOfWork.SaveCount.Should().Be(1);
-        fixture.UnitOfWork.CommitCount.Should().Be(0);
+        fixture.UnitOfWork.SaveCount.Should().Be(0);
+        fixture.UnitOfWork.CommitCount.Should().Be(1);
         fixture.UnitOfWork.RollbackCount.Should().Be(1);
         fixture.Audits.Items.Should().BeEmpty();
         fixture.Outbox.Items.Should().BeEmpty();
@@ -514,6 +554,7 @@ public sealed class EditTripCommandHandlerTests
         public FakeUnitOfWork UnitOfWork { get; }
         public FakeSwapService Swap { get; }
         public List<string> Calls { get; } = [];
+        public bool DetailObservedActiveTransaction { get; private set; }
         public EditTripCommandHandler Handler { get; }
 
         public Fixture(TimeSpan? departureOffset = null)
@@ -538,8 +579,8 @@ public sealed class EditTripCommandHandlerTests
             Trips = new FakeTripRepository(Trip, Calls);
             Vehicles.Items.Add(oldVehicle);
             var routes = new FakeRouteRepository([oldRoute, NewRoute]);
-            Booking = new FakeBookingImpactClient(Trip.Id, Calls);
             UnitOfWork = new FakeUnitOfWork(Calls);
+            Booking = new FakeBookingImpactClient(Trip.Id, Calls, () => UnitOfWork.IsTransactionActive);
             Swap = new FakeSwapService(Calls);
             Handler = new EditTripCommandHandler(
                 Trips,
@@ -555,7 +596,9 @@ public sealed class EditTripCommandHandlerTests
                 Outbox,
                 UnitOfWork,
                 new FrozenClock(Now),
-                new DetailSender(() => CreateDetail(Trip)));
+                new DetailSender(
+                    () => CreateDetail(Trip),
+                    () => DetailObservedActiveTransaction = UnitOfWork.IsTransactionActive));
         }
 
         public EditTripCommand Command(long? baseFare = null, string? notes = null, Guid? vehicleId = null, Guid? routeId = null) =>
@@ -703,14 +746,19 @@ public sealed class EditTripCommandHandlerTests
         public IQueryable<Vehicle> QueryNoTracking() => Query();
     }
 
-    private sealed class FakeBookingImpactClient(Guid tripId, List<string> calls) : IBookingImpactClient
+    private sealed class FakeBookingImpactClient(
+        Guid tripId,
+        List<string> calls,
+        Func<bool> isTransactionActive) : IBookingImpactClient
     {
         public TripBookingImpactProjection Projection { get; set; } = new(tripId, 0, []);
         public int CallCount { get; private set; }
+        public bool? ObservedActiveTransaction { get; private set; }
         public Task<int> GetActiveBookingCountByStopAsync(Guid stopId, Guid operatorId, CancellationToken cancellationToken) => Task.FromResult(0);
         public Task<TripBookingImpactProjection> GetTripEditImpactAsync(Guid requestedTripId, Guid operatorId, CancellationToken cancellationToken)
         {
             CallCount++;
+            ObservedActiveTransaction = isTransactionActive();
             calls.Add("booking-preflight");
             return Task.FromResult(Projection);
         }
@@ -748,28 +796,66 @@ public sealed class EditTripCommandHandlerTests
         public int SaveCount { get; private set; }
         public int CommitCount { get; private set; }
         public int RollbackCount { get; private set; }
-        public bool ThrowOnSave { get; set; }
+        public int ExecuteCount { get; private set; }
+        public bool ThrowOnCommit { get; set; }
+        public bool IsTransactionActive { get; private set; }
         public Action? OnRollback { get; set; }
-        public Task BeginTransactionAsync(CancellationToken ct) { BeginCount++; calls.Add("begin"); return Task.CompletedTask; }
+        public Task BeginTransactionAsync(CancellationToken ct)
+        {
+            BeginCount++;
+            IsTransactionActive = true;
+            calls.Add("begin");
+            return Task.CompletedTask;
+        }
         public Task<int> SaveChangesAsync(CancellationToken ct)
         {
             SaveCount++;
             calls.Add("save");
-            return ThrowOnSave
-                ? Task.FromException<int>(new InvalidOperationException("Simulated save failure."))
-                : Task.FromResult(1);
+            return Task.FromResult(1);
         }
-        public Task CommitAsync(CancellationToken ct) { CommitCount++; calls.Add("commit"); return Task.CompletedTask; }
-        public Task RollbackAsync(CancellationToken ct) { RollbackCount++; calls.Add("rollback"); OnRollback?.Invoke(); return Task.CompletedTask; }
-        public async Task<T> ExecuteInTransactionAsync<T>(Func<Task<T>> operation, CancellationToken ct) => await operation();
+        public Task CommitAsync(CancellationToken ct)
+        {
+            CommitCount++;
+            calls.Add("commit");
+            if (ThrowOnCommit)
+            {
+                return Task.FromException(new InvalidOperationException("Simulated commit failure."));
+            }
+
+            IsTransactionActive = false;
+            return Task.CompletedTask;
+        }
+        public Task RollbackAsync(CancellationToken ct)
+        {
+            RollbackCount++;
+            IsTransactionActive = false;
+            calls.Add("rollback");
+            OnRollback?.Invoke();
+            return Task.CompletedTask;
+        }
+        public async Task<T> ExecuteInTransactionAsync<T>(Func<Task<T>> operation, CancellationToken ct)
+        {
+            ExecuteCount++;
+            return await operation();
+        }
     }
 
     private sealed class FrozenClock(DateTimeOffset value) : IClock { public DateTimeOffset UtcNow => value; }
 
-    private sealed class DetailSender(Func<TripDetailDto> detail) : ISender
+    private sealed class DetailSender(
+        Func<TripDetailDto> detail,
+        Action onSend) : ISender
     {
-        public Task<TResponse> Send<TResponse>(IRequest<TResponse> request, CancellationToken cancellationToken = default) => Task.FromResult((TResponse)(object)detail());
-        public Task<object?> Send(object request, CancellationToken cancellationToken = default) => Task.FromResult<object?>(detail());
+        public Task<TResponse> Send<TResponse>(IRequest<TResponse> request, CancellationToken cancellationToken = default)
+        {
+            onSend();
+            return Task.FromResult((TResponse)(object)detail());
+        }
+        public Task<object?> Send(object request, CancellationToken cancellationToken = default)
+        {
+            onSend();
+            return Task.FromResult<object?>(detail());
+        }
         public IAsyncEnumerable<TResponse> CreateStream<TResponse>(IStreamRequest<TResponse> request, CancellationToken cancellationToken = default) => Empty<TResponse>();
         public IAsyncEnumerable<object?> CreateStream(object request, CancellationToken cancellationToken = default) => Empty<object?>();
         private static async IAsyncEnumerable<T> Empty<T>() { await Task.CompletedTask; yield break; }

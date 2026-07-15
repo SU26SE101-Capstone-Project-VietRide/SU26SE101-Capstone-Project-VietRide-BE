@@ -260,7 +260,6 @@ public sealed class EditTripCommandHandler : IRequestHandler<EditTripCommand, Tr
                     now,
                     cancellationToken);
 
-                await unitOfWork.SaveChangesAsync(cancellationToken);
                 await unitOfWork.CommitAsync(cancellationToken);
             }
         }
