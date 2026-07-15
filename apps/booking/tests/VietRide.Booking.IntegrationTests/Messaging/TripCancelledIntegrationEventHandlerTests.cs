@@ -12,8 +12,8 @@ using VietRide.Booking.Infrastructure.Messaging;
 using VietRide.Shared.Messaging.Abstractions;
 using VietRide.Shared.Persistence.Outbox;
 using VietRide.Shared.Persistence.UnitOfWork;
-using BookingEntity = VietRide.Booking.Domain.Entities.Booking;
 using BookingCancelledEvent = VietRide.Booking.Application.Events.BookingCancelledIntegrationEvent;
+using BookingEntity = VietRide.Booking.Domain.Entities.Booking;
 
 namespace VietRide.Booking.IntegrationTests.Messaging;
 

@@ -5,6 +5,7 @@ using FluentAssertions;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Npgsql.NameTranslation;
 using NSubstitute;
 using VietRide.Booking.Application.Abstractions.Jobs;
 using VietRide.Booking.Application.Abstractions.Repositories;
@@ -326,6 +327,9 @@ internal static class Day22EventDatabase
     public static NpgsqlDataSource CreateDataSource(string connectionString)
     {
         var builder = new NpgsqlDataSourceBuilder(connectionString);
+        builder.MapEnum<OutboxEventStatus>(
+            $"{BookingDbContext.SchemaName}.outbox_event_status",
+            new NpgsqlNullNameTranslator());
         BookingDbContext.ConfigurePostgresTypes(builder);
         return builder.Build();
     }
