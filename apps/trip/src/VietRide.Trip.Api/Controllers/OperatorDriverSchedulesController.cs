@@ -6,6 +6,8 @@ using VietRide.Shared.Kernel.Primitives;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Api.Filters;
 using VietRide.Trip.Application.Features.DriverSchedules;
+using VietRide.Shared.Web.Idempotency;
+using VietRide.Shared.Web.Middleware;
 
 namespace VietRide.Trip.Api.Controllers;
 
@@ -85,7 +87,7 @@ public sealed class OperatorDriverSchedulesController : ControllerBase
     }
 
     [HttpPatch("{id:guid}/crew")]
-    [RequireIdempotencyKey]
+    [RequireIdempotency]
     [ProducesResponseType(typeof(ApiResponse<DriverScheduleDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
@@ -100,7 +102,60 @@ public sealed class OperatorDriverSchedulesController : ControllerBase
             ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required to manage driver schedules.");
 
         return Ok(await sender.Send(
-            new UpdateDriverScheduleCrewCommand(operatorId, id, request.DriverUserId, request.AssistantUserId),
+            new UpdateDriverScheduleCrewCommand(
+                operatorId,
+                id,
+                CurrentUserClaims.GetUserId(User),
+                GetRequestId(),
+                request.DriverUserId,
+                request.AssistantUserId),
             cancellationToken));
     }
+
+    [HttpPatch("{id:guid}")]
+    [RequireIdempotency]
+    [ProducesResponseType(typeof(ApiResponse<DriverScheduleDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<DriverScheduleDto>> Update(
+        Guid id,
+        [FromQuery] string? applyTo,
+        [FromBody] UpdateDriverScheduleRequest request,
+        CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required to manage driver schedules.");
+
+        return Ok(await sender.Send(
+            new UpdateDriverScheduleCommand(
+                operatorId,
+                id,
+                CurrentUserClaims.GetUserId(User),
+                GetRequestId(),
+                applyTo?.Trim().ToUpperInvariant() ?? string.Empty,
+                request.DepartureTimeSpecified,
+                request.DepartureTime,
+                request.DayOfWeekSpecified,
+                request.DayOfWeek,
+                request.DriverUserIdSpecified,
+                request.DriverUserId,
+                request.AssistantUserIdSpecified,
+                request.AssistantUserId,
+                request.VehicleIdSpecified,
+                request.VehicleId,
+                request.ValidUntilSpecified,
+                request.ValidUntil,
+                request.IsActiveSpecified,
+                request.IsActive),
+            cancellationToken));
+    }
+
+    private string GetRequestId() =>
+        HttpContext.Items.TryGetValue(RequestLoggingMiddleware.RequestIdHeader, out var value)
+        && value is string requestId
+        && !string.IsNullOrWhiteSpace(requestId)
+            ? requestId
+            : HttpContext.TraceIdentifier;
 }

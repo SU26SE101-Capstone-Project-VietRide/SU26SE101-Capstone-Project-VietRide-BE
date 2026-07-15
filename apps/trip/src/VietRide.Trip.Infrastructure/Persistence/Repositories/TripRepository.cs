@@ -91,6 +91,17 @@ internal sealed class TripRepository : ITripRepository
             .Include(trip => trip.Seats)
             .FirstOrDefaultAsync(trip => trip.Id == tripId, cancellationToken);
 
+    public async Task<IReadOnlyList<Domain.Entities.Trip>> ListPendingByDriverScheduleAsync(
+        Guid driverScheduleId,
+        CancellationToken cancellationToken) =>
+        await _dbContext.Trips
+            .AsNoTracking()
+            .Where(trip => trip.DriverScheduleId == driverScheduleId
+                && (trip.Status == TripStatus.SCHEDULED || trip.Status == TripStatus.BOARDING))
+            .OrderBy(trip => trip.DepartureDateTime)
+            .ThenBy(trip => trip.Id)
+            .ToArrayAsync(cancellationToken);
+
     public async Task<Domain.Entities.Trip?> AcquireForVehicleSwapAsync(
         Guid tripId,
         CancellationToken cancellationToken)

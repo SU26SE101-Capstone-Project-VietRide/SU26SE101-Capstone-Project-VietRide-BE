@@ -301,6 +301,39 @@ public sealed class SharedIdempotencyMiddlewareIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task QueryKeys_AreCanonicalizedButValuesAndAbsenceRemainFingerprintComponents()
+    {
+        var replayKey = NewKey();
+        var invoked = 0;
+        RequestDelegate next = context =>
+        {
+            invoked++;
+            return context.Response.WriteAsync("query-aware");
+        };
+        var firstShape = RequestShape.Default with { Query = "?applyTo=ALL_PENDING&z=1" };
+        var reordered = RequestShape.Default with { Query = "?z=1&applyTo=ALL_PENDING" };
+
+        var first = await InvokeAsync(replayKey, next, firstShape);
+        var replay = await InvokeAsync(replayKey, next, reordered);
+
+        Assert.Equal(first.BodyBytes, replay.BodyBytes);
+        Assert.Equal(1, invoked);
+
+        var mismatchKey = NewKey();
+        var mismatch = await InvokeAsync(
+            mismatchKey,
+            next,
+            firstShape);
+        Assert.Equal(StatusCodes.Status200OK, mismatch.StatusCode);
+        var changed = await InvokeAsync(
+            mismatchKey,
+            next,
+            firstShape with { Query = "?applyTo=FUTURE_ONLY&z=1" });
+        Assert.Equal(StatusCodes.Status422UnprocessableEntity, changed.StatusCode);
+        Assert.Equal("IDEMPOTENCY_KEY_MISMATCH", ReadErrorCode(changed.Body));
+    }
+
+    [Fact]
     public async Task UnannotatedEndpoint_WithoutKey_PreservesPassThroughBehavior()
     {
         var invoked = 0;
@@ -593,6 +626,7 @@ public sealed class SharedIdempotencyMiddlewareIntegrationTests : IAsyncLifetime
         context.Response.Body = new MemoryStream();
         context.Request.Method = shape.Method;
         context.Request.Path = shape.RouteTemplate.Replace("{id}", shape.RouteValue, StringComparison.Ordinal);
+        context.Request.QueryString = new QueryString(shape.Query);
         context.Request.RouteValues["id"] = shape.RouteValue;
         context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(shape.Body));
         context.Request.ContentType = "application/json";
@@ -655,6 +689,8 @@ public sealed class SharedIdempotencyMiddlewareIntegrationTests : IAsyncLifetime
         string Body)
     {
         public string SubjectClaimType { get; init; } = "sub";
+
+        public string Query { get; init; } = string.Empty;
 
         public static RequestShape Default { get; } = new(
             HttpMethods.Post,

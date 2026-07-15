@@ -17,6 +17,7 @@ internal static class IdempotencyFingerprint
             context.Request.Method.ToUpperInvariant(),
             NormalizeRoute(context),
             NormalizeRouteValues(context.Request.RouteValues),
+            NormalizeQuery(context.Request.Query),
             ResolveSubject(context.User),
             await CanonicalizeBodyAsync(context.Request));
 
@@ -61,6 +62,17 @@ internal static class IdempotencyFingerprint
             normalized[pair.Key.ToLowerInvariant()] = Guid.TryParse(value, out var id)
                 ? id.ToString("D")
                 : Uri.UnescapeDataString(value).Trim();
+        }
+
+        return normalized;
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> NormalizeQuery(IQueryCollection query)
+    {
+        var normalized = new SortedDictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        foreach (var pair in query)
+        {
+            normalized[pair.Key] = Array.AsReadOnly(pair.Value.Select(value => value ?? string.Empty).ToArray());
         }
 
         return normalized;
@@ -131,6 +143,7 @@ internal static class IdempotencyFingerprint
         string Method,
         string Route,
         IReadOnlyDictionary<string, string> RouteValues,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> Query,
         string Subject,
         string Body);
 }

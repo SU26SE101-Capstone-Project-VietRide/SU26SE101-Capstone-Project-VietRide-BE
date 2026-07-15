@@ -240,6 +240,19 @@ public sealed class Trip : BaseEntity<Guid>
         return true;
     }
 
+    public bool Reschedule(DateTimeOffset departureDateTime, DateTimeOffset estimatedArrivalTime)
+    {
+        ValidateArrivalAfterDeparture(departureDateTime, estimatedArrivalTime);
+        if (DepartureDateTime == departureDateTime && EstimatedArrivalTime == estimatedArrivalTime)
+        {
+            return false;
+        }
+
+        DepartureDateTime = departureDateTime;
+        EstimatedArrivalTime = estimatedArrivalTime;
+        return true;
+    }
+
     public void UpdateCargoCounters(
         decimal reservedParcelWeightKg,
         decimal reservedParcelVolumeM3,

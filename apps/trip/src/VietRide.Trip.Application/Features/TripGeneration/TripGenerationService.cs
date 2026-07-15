@@ -67,8 +67,20 @@ public sealed class TripGenerationService
         var existingDriverDepartures = PreloadExistingDriverDepartures();
         var existingVehicleDepartures = PreloadExistingVehicleDepartures();
 
-        foreach (var schedule in schedules)
+        foreach (var scheduleCandidate in schedules)
         {
+            var schedule = await driverScheduleRepository.AcquireOwnedForUpdateAsync(
+                scheduleCandidate.Id,
+                scheduleCandidate.OperatorId,
+                cancellationToken);
+            var today = DateOnly.FromDateTime(clock.UtcNow.UtcDateTime);
+            if (schedule is null
+                || !schedule.IsActive
+                || (schedule.ValidUntil.HasValue && schedule.ValidUntil.Value < today))
+            {
+                continue;
+            }
+
             var route = routeRepository.QueryNoTracking().FirstOrDefault(route => route.Id == schedule.RouteId);
             if (route is null || !route.IsActive || route.DeletedAt is not null)
             {
@@ -80,25 +92,33 @@ public sealed class TripGenerationService
                 continue;
             }
 
-            var vehicle = schedule.VehicleId.HasValue
-                ? vehicleRepository.QueryNoTracking().FirstOrDefault(vehicle => vehicle.Id == schedule.VehicleId.Value)
-                : null;
-            if (vehicle is null || !vehicle.IsActive || vehicle.DeletedAt is not null)
-            {
-                skippedCount += await LogSkipAsync(
-                    schedule,
-                    DateOnly.FromDateTime(clock.UtcNow.UtcDateTime),
-                    "Vehicle was missing, inactive, or deleted.",
-                    cancellationToken);
-                continue;
-            }
-
             var routeStops = routeStopRepository.QueryNoTracking()
                 .Where(routeStop => routeStop.RouteId == schedule.RouteId)
                 .OrderBy(routeStop => routeStop.OrderIndex)
                 .ToList();
             var scheduleDays = ParseScheduleDays(schedule.DayOfWeek);
             var serviceDates = MatchingServiceDates(schedule, scheduleDays).ToList();
+            var vehicle = schedule.VehicleId.HasValue
+                ? vehicleRepository.QueryNoTracking().FirstOrDefault(vehicle => vehicle.Id == schedule.VehicleId.Value)
+                : null;
+            if (vehicle is null || !vehicle.IsActive || vehicle.DeletedAt is not null)
+            {
+                var message = schedule.VehicleId.HasValue
+                    ? "Assigned vehicle was missing, inactive, or deleted."
+                    : "No vehicle is assigned to this DriverSchedule.";
+                foreach (var serviceDate in serviceDates)
+                {
+                    skippedCount += await LogSkipAsync(
+                        schedule,
+                        serviceDate,
+                        TripGenerationSkipReason.OTHER,
+                        message,
+                        cancellationToken);
+                }
+
+                continue;
+            }
+
             var estimatedTripDurationMinutes = ResolveEstimatedTripDuration(route, routeStops);
             if (!estimatedTripDurationMinutes.HasValue)
             {
@@ -431,7 +451,9 @@ public sealed class TripGenerationService
                 "Vehicle seat layout is required for trip generation.",
                 [new ValidationError("seatLayoutJson", "Seat layout could not be parsed.")]);
 
-        foreach (var seat in layout.Seats.Where(seat => !seat.Disabled))
+        foreach (var seat in layout.Seats.Where(seat =>
+                     !seat.Disabled
+                     && !string.Equals(seat.Type, nameof(TripSeatType.DRIVER_AREA), StringComparison.OrdinalIgnoreCase)))
         {
             await tripSeatRepository.AddAsync(
                 TripSeat.Create(tripId, seat.SeatNumber, MapSeatType(seat.Type)),
@@ -481,8 +503,15 @@ public sealed class TripGenerationService
 
     private static TripSeatType MapSeatType(string? seatType)
     {
-        return Enum.TryParse<TripSeatType>(seatType, ignoreCase: true, out var parsed)
-            ? parsed
-            : TripSeatType.STANDARD;
+        if (!Enum.TryParse<TripSeatType>(seatType, ignoreCase: true, out var parsed)
+            || !Enum.IsDefined(parsed)
+            || parsed == TripSeatType.DRIVER_AREA)
+        {
+            throw new ValidationException(
+                "Vehicle seat layout contains an invalid passenger seat type.",
+                [new ValidationError("seatLayoutJson.seats[].type", "Seat type must be a ranked passenger type.")]);
+        }
+
+        return parsed;
     }
 }

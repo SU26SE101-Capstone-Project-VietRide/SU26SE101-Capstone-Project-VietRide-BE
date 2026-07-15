@@ -281,7 +281,7 @@ Ship operator Trip editing and DriverSchedule cascade without repricing an exist
 | 22.7 | 🔄 in progress | APPROVE | 2026-07-15 | Vehicle-swap service/static review complete; consolidated verification deferred per human instruction |
 | 22.8 | 🔄 in progress | APPROVE | 2026-07-15 | Trip PATCH/static review + targeted tests complete; consolidated verification deferred per human instruction |
 | 22.9 | 🔄 in progress | APPROVE | 2026-07-15 | Booking pending-action/Hangfire implementation and 30 targeted tests green; consolidated verification deferred per human instruction |
-| 22.10 | ⬜ todo | — | — | — |
+| 22.10 | 🔄 in progress | APPROVE | 2026-07-15 | DriverSchedule PATCH/cascade implementation and concurrency review complete; consolidated verification deferred per human instruction |
 | 22.11 | ⬜ todo | — | — | — |
 | 22.12 | ⬜ todo | — | — | — |
 | 22.13 | ⬜ todo | — | — | — |

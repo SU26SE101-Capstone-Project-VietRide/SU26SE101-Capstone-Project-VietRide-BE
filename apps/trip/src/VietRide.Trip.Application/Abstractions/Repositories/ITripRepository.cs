@@ -28,6 +28,11 @@ public interface ITripRepository : IRepository<Domain.Entities.Trip, Guid>
 
     Task<Domain.Entities.Trip?> GetWithSeatsAsync(Guid tripId, CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<Domain.Entities.Trip>> ListPendingByDriverScheduleAsync(
+        Guid driverScheduleId,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("DriverSchedule Trip enumeration is not supported by this repository implementation.");
+
     Task<Domain.Entities.Trip?> AcquireForVehicleSwapAsync(
         Guid tripId,
         CancellationToken cancellationToken)
