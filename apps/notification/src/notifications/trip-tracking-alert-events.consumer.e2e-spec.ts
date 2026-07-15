@@ -20,6 +20,18 @@ describe('TripTrackingAlertEventsConsumer registration (e2e)', () => {
     await moduleRef.init();
 
     expect(subscribe).toHaveBeenCalledTimes(TRIP_TRACKING_ALERT_QUEUE_BINDINGS.length);
+    expect(subscribe).not.toHaveBeenCalledWith(
+      expect.any(String),
+      'trip.trip.schedule_changed',
+      expect.any(Function),
+      expect.any(Object),
+    );
+    expect(subscribe).not.toHaveBeenCalledWith(
+      expect.any(String),
+      'trip.trip.cancelled',
+      expect.any(Function),
+      expect.any(Object),
+    );
 
     await moduleRef.close();
   });
