@@ -45,6 +45,11 @@ public sealed class BookingPendingAction : BaseEntity<Guid>
 
     public void Resolve(BookingPendingActionResolved resolvedAction, DateTimeOffset resolvedAt)
     {
+        if (ResolvedAt.HasValue)
+        {
+            return;
+        }
+
         ResolvedAt = resolvedAt;
         ResolvedAction = resolvedAction;
     }
