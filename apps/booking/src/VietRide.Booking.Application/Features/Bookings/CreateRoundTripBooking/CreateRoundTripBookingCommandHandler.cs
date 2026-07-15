@@ -79,14 +79,15 @@ public sealed class CreateRoundTripBookingCommandHandler
         CreateRoundTripBookingCommand request,
         CancellationToken cancellationToken)
     {
+        var now = _clock.UtcNow;
+
         EnsureSeatCount(request.Outbound);
         EnsureSeatCount(request.Return);
 
-        var outboundTrip = await GetScheduledTripAsync(request.Outbound.TripId, cancellationToken);
-        var returnTrip = await GetScheduledTripAsync(request.Return.TripId, cancellationToken);
+        var outboundTrip = await GetScheduledTripAsync(request.Outbound.TripId, now, cancellationToken);
+        var returnTrip = await GetScheduledTripAsync(request.Return.TripId, now, cancellationToken);
         ValidateStopSelections(outboundTrip, request.Outbound.PickupStopId, request.Outbound.DropoffStopId);
         ValidateStopSelections(returnTrip, request.Return.PickupStopId, request.Return.DropoffStopId);
-        var now = _clock.UtcNow;
         ValidateShuttleRequest(request.Outbound, outboundTrip, now);
         ValidateShuttleRequest(request.Return, returnTrip, now);
 
@@ -453,9 +454,12 @@ public sealed class CreateRoundTripBookingCommandHandler
         }
     }
 
-    private async Task<TripSnapshot> GetScheduledTripAsync(Guid tripId, CancellationToken cancellationToken)
+    private async Task<TripSnapshot> GetScheduledTripAsync(
+        Guid tripId,
+        DateTimeOffset pricingAt,
+        CancellationToken cancellationToken)
     {
-        var trip = await _tripClient.GetTripSnapshotAsync(tripId, cancellationToken);
+        var trip = await _tripClient.GetTripSnapshotAsync(tripId, pricingAt, cancellationToken);
         if (trip is null)
         {
             throw new CodedNotFoundException("TRIP_NOT_FOUND", $"Trip '{tripId}' not found.");

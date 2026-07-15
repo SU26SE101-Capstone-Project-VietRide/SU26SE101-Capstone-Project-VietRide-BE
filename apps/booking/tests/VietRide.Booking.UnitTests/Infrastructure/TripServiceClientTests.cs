@@ -33,7 +33,8 @@ public class TripServiceClientTests
     public async Task GetTripSnapshotAsync_Returns_Snapshot_On_200()
     {
         var snapshot = BuildTripSnapshotJson();
-        var client = BuildClient(HttpStatusCode.OK, snapshot);
+        var handler = new FakeMessageHandler(HttpStatusCode.OK, snapshot);
+        var client = BuildClient(handler);
 
         var result = await client.GetTripSnapshotAsync(TripId);
 
@@ -43,6 +44,22 @@ public class TripServiceClientTests
         result.BaseFare.Should().Be(400_000);
         result.DriverUserId.Should().Be(DriverUserId);
         result.AssistantUserId.Should().Be(AssistantUserId);
+        handler.LastRequest!.RequestUri!.PathAndQuery.Should().Be($"/internal/v1/trips/{TripId:D}");
+    }
+
+    [Fact]
+    public async Task GetTripSnapshotAsync_WithPricingAt_SerializesSuppliedInstantAsUtcRoundTripQuery()
+    {
+        var handler = new FakeMessageHandler(HttpStatusCode.OK, BuildTripSnapshotJson());
+        var client = BuildClient(handler);
+        var pricingAt = new DateTimeOffset(2026, 7, 15, 14, 30, 45, 123, TimeSpan.FromHours(7));
+
+        var result = await client.GetTripSnapshotAsync(TripId, pricingAt, CancellationToken.None);
+
+        result.Should().NotBeNull();
+        var pathAndQuery = Uri.UnescapeDataString(handler.LastRequest!.RequestUri!.PathAndQuery);
+        pathAndQuery.Should().Be(
+            $"/internal/v1/trips/{TripId:D}?pricingAt={pricingAt.ToUniversalTime():O}");
     }
 
     [Fact]

@@ -54,11 +54,20 @@ public sealed class CancelBookingCommandHandlerTests
     }
 
     [Fact]
-    public async Task Handle_ConfirmedBooking_Cancels_ReleasesSeats_AndEnqueuesCancelledEvent()
+    public async Task Handle_ConfirmedBooking_UsesPersistedMoneyForRefundResultAndEvent()
     {
-        var booking = CreateBooking(BookingStatus.CONFIRMED, SeatLockToken);
+        const long persistedTotalAmount = 200_000;
+        const long currentTripBaseFare = 900_000;
+        var booking = CreateBooking(
+            BookingStatus.CONFIRMED,
+            SeatLockToken,
+            totalAmount: persistedTotalAmount);
         booking.AddPassenger("A01");
-        SetupBookingTripAndOperator(booking, CreateTripSnapshot("SCHEDULED", Now.AddHours(24)));
+        var currentTrip = CreateTripSnapshot("SCHEDULED", Now.AddHours(24)) with
+        {
+            BaseFare = currentTripBaseFare,
+        };
+        SetupBookingTripAndOperator(booking, currentTrip);
         var capturedPayloads = new List<string>();
         await _outbox.EnqueueAsync("booking.booking.cancelled", Arg.Do<string>(capturedPayloads.Add), Arg.Any<CancellationToken>());
 
@@ -68,6 +77,9 @@ public sealed class CancelBookingCommandHandlerTests
         result.Status.Should().Be("CANCELLED");
         result.RefundMethod.Should().Be("WALLET");
         result.RefundAmount.Should().Be(180_000);
+        currentTrip.BaseFare.Should().NotBe(booking.TotalAmount.Amount);
+        await _tripClient.DidNotReceiveWithAnyArgs()
+            .GetTripSnapshotAsync(default, default, default);
         await _tripClient.Received(1).ReleaseSeatsAsync(
             TripId,
             SeatLockToken,

@@ -95,7 +95,7 @@ public class CreateBookingCommandHandlerTests
         // Arrange
         var now = new DateTimeOffset(2026, 7, 11, 1, 2, 3, TimeSpan.Zero);
         _clock.UtcNow.Returns(now);
-        _tripClient.GetTripSnapshotAsync(TripId, default).ReturnsForAnyArgs(ValidTrip);
+        _tripClient.GetTripSnapshotAsync(TripId, default, default).ReturnsForAnyArgs(ValidTrip);
         _tripClient.LockSeatsAsync(default, default!, default, default!, default, default)
             .ReturnsForAnyArgs(new LockSeatsOutcome.Success(LockData));
         _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
@@ -131,6 +131,7 @@ public class CreateBookingCommandHandlerTests
                 && history.ReasonCode == null),
             Arg.Any<CancellationToken>());
         _ = _clock.Received(1).UtcNow;
+        await _tripClient.Received(1).GetTripSnapshotAsync(TripId, now, Arg.Any<CancellationToken>());
 
         // Confirm outbox was enqueued exactly once
         await _outbox.Received(1)
@@ -156,7 +157,7 @@ public class CreateBookingCommandHandlerTests
         {
             OriginStation = new TripStationSnapshot(StationId, "Ha Noi", true, 21.0285m, 105.8542m, true),
         };
-        _tripClient.GetTripSnapshotAsync(TripId, default).ReturnsForAnyArgs(supportedTrip);
+        _tripClient.GetTripSnapshotAsync(TripId, default, default).ReturnsForAnyArgs(supportedTrip);
         _tripClient.LockSeatsAsync(default, default!, default, default!, default, default)
             .ReturnsForAnyArgs(new LockSeatsOutcome.Success(LockData));
         _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
@@ -232,7 +233,7 @@ public class CreateBookingCommandHandlerTests
 
         // No downstream calls should have been made
         await _tripClient.DidNotReceiveWithAnyArgs()
-            .GetTripSnapshotAsync(default, default);
+            .GetTripSnapshotAsync(default, default, default);
         await _bookings.DidNotReceiveWithAnyArgs()
             .AddAsync(default!, default);
     }
@@ -245,7 +246,7 @@ public class CreateBookingCommandHandlerTests
     public async Task Handle_TripNotFound_ThrowsCodedNotFoundException()
     {
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
-        _tripClient.GetTripSnapshotAsync(TripId, default).ReturnsForAnyArgs((TripSnapshot?)null);
+        _tripClient.GetTripSnapshotAsync(TripId, default, default).ReturnsForAnyArgs((TripSnapshot?)null);
 
         var handler = BuildSut();
         var act = () => handler.Handle(BuildCommand(), CancellationToken.None);
@@ -317,7 +318,7 @@ public class CreateBookingCommandHandlerTests
     public async Task Handle_SeatUnavailable_ThrowsConflictException_AndNoBookingCreated()
     {
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
-        _tripClient.GetTripSnapshotAsync(TripId, default).ReturnsForAnyArgs(ValidTrip);
+        _tripClient.GetTripSnapshotAsync(TripId, default, default).ReturnsForAnyArgs(ValidTrip);
         _tripClient.LockSeatsAsync(default, default!, default, default!, default, default)
             .ReturnsForAnyArgs(new LockSeatsOutcome.SeatUnavailable(["A01"]));
 
@@ -340,7 +341,7 @@ public class CreateBookingCommandHandlerTests
     public async Task Handle_TripNotBookable_AtLock_ThrowsConflictException()
     {
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
-        _tripClient.GetTripSnapshotAsync(TripId, default).ReturnsForAnyArgs(ValidTrip);
+        _tripClient.GetTripSnapshotAsync(TripId, default, default).ReturnsForAnyArgs(ValidTrip);
         _tripClient.LockSeatsAsync(default, default!, default, default!, default, default)
             .ReturnsForAnyArgs(new LockSeatsOutcome.TripNotBookable("Trip closed."));
 
@@ -360,7 +361,7 @@ public class CreateBookingCommandHandlerTests
     public async Task Handle_PaymentTransportError_ReleasesSeats()
     {
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
-        _tripClient.GetTripSnapshotAsync(TripId, default).ReturnsForAnyArgs(ValidTrip);
+        _tripClient.GetTripSnapshotAsync(TripId, default, default).ReturnsForAnyArgs(ValidTrip);
         _tripClient.LockSeatsAsync(default, default!, default, default!, default, default)
             .ReturnsForAnyArgs(new LockSeatsOutcome.Success(LockData));
         _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
@@ -391,7 +392,7 @@ public class CreateBookingCommandHandlerTests
     public async Task Handle_BookSeatsLockExpired_ReleasesSeatsAndThrows()
     {
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
-        _tripClient.GetTripSnapshotAsync(TripId, default).ReturnsForAnyArgs(ValidTrip);
+        _tripClient.GetTripSnapshotAsync(TripId, default, default).ReturnsForAnyArgs(ValidTrip);
         _tripClient.LockSeatsAsync(default, default!, default, default!, default, default)
             .ReturnsForAnyArgs(new LockSeatsOutcome.Success(LockData));
         _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
@@ -423,7 +424,7 @@ public class CreateBookingCommandHandlerTests
     public async Task Handle_VNPayPayment_ReturnsPendingPaymentWithRedirectUrl()
     {
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
-        _tripClient.GetTripSnapshotAsync(TripId, default).ReturnsForAnyArgs(ValidTrip);
+        _tripClient.GetTripSnapshotAsync(TripId, default, default).ReturnsForAnyArgs(ValidTrip);
         _tripClient.LockSeatsAsync(default, default!, default, default!, default, default)
             .ReturnsForAnyArgs(new LockSeatsOutcome.Success(LockData));
         _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
@@ -462,7 +463,7 @@ public class CreateBookingCommandHandlerTests
         const long baseFare = 200_000;
 
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
-        _tripClient.GetTripSnapshotAsync(TripId, default).ReturnsForAnyArgs(ValidTrip);
+        _tripClient.GetTripSnapshotAsync(TripId, default, default).ReturnsForAnyArgs(ValidTrip);
         _tripClient.LockSeatsAsync(default, default!, default, default!, default, default)
             .ReturnsForAnyArgs(new LockSeatsOutcome.Success(LockData));
         _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
@@ -543,6 +544,12 @@ public class CreateBookingCommandHandlerTests
         public Task<TripSnapshot?> GetTripSnapshotAsync(
             Guid tripId,
             CancellationToken cancellationToken = default)
+            => Task.FromResult<TripSnapshot?>(_trip);
+
+        public Task<TripSnapshot?> GetTripSnapshotAsync(
+            Guid tripId,
+            DateTimeOffset pricingAt,
+            CancellationToken cancellationToken)
             => Task.FromResult<TripSnapshot?>(_trip);
 
         public Task<LockSeatsOutcome> LockSeatsAsync(
