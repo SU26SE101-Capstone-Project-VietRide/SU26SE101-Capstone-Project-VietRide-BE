@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
+using VietRide.Booking.Application.Features.Internal.Bookings;
 using VietRide.Booking.Application.Features.OperatorBookings.GetOperatorBookingDetail;
 using VietRide.Booking.Application.Features.OperatorBookings.ListOperatorBookings;
 using VietRide.Booking.Domain.Enums;
@@ -53,6 +54,68 @@ internal sealed class BookingRepository : IBookingRepository
     // -----------------------------------------------------------------------
     // IBookingRepository — aggregate-specific queries
     // -----------------------------------------------------------------------
+
+    /// <inheritdoc/>
+    public async Task<TripEditImpactDto> GetTripEditImpactAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct = default)
+    {
+        if (operatorId == Guid.Empty)
+        {
+            throw new ArgumentException("Operator id must be non-empty.", nameof(operatorId));
+        }
+
+        var activeBookings = await _db.Bookings
+            .AsNoTracking()
+            .Where(booking => booking.TripId == tripId && booking.OperatorId == operatorId)
+            .Where(booking => booking.Status == BookingStatus.PENDING_PAYMENT
+                || booking.Status == BookingStatus.CONFIRMED)
+            .OrderBy(booking => booking.Id)
+            .Select(booking => new
+            {
+                BookingId = booking.Id,
+                booking.Status,
+            })
+            .ToListAsync(ct);
+
+        if (activeBookings.Count == 0)
+        {
+            return new TripEditImpactDto(tripId, 0, []);
+        }
+
+        var bookingIds = activeBookings.Select(booking => booking.BookingId).ToArray();
+        var seatRows = await _db.Passengers
+            .AsNoTracking()
+            .Where(passenger => bookingIds.Contains(passenger.BookingId))
+            .OrderBy(passenger => passenger.BookingId)
+            .ThenBy(passenger => passenger.SeatNumber)
+            .Select(passenger => new
+            {
+                passenger.BookingId,
+                passenger.SeatNumber,
+            })
+            .ToListAsync(ct);
+
+        var seatsByBooking = seatRows
+            .GroupBy(row => row.BookingId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<string>)group
+                    .Select(row => row.SeatNumber)
+                    .Distinct(StringComparer.Ordinal)
+                    .Order(StringComparer.Ordinal)
+                    .ToArray());
+
+        var impacts = activeBookings
+            .Select(booking => new TripEditImpactDto.ActiveBooking(
+                booking.BookingId,
+                booking.Status.ToString(),
+                seatsByBooking.GetValueOrDefault(booking.BookingId, [])))
+            .ToArray();
+
+        return new TripEditImpactDto(tripId, impacts.Length, impacts);
+    }
 
     /// <inheritdoc/>
     public async Task<OperatorBookingDetailDto?> GetOperatorBookingDetailAsync(

@@ -272,7 +272,7 @@ Ship operator Trip editing and DriverSchedule cascade without repricing an exist
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
 | 22.0 | ✅ done | APPROVE | 2026-07-15 | Two implementation patch rounds; contract/schema-comment verification green |
-| 22.1 | ⬜ todo | — | — | Shared Booking endpoint + Trip impact client seam |
+| 22.1 | ✅ done | APPROVE | 2026-07-15 | Fresh retry after agent quota; full Booking/Trip build-format-test matrix green |
 | 22.2 | ⬜ todo | — | — | — |
 | 22.3 | ⬜ todo | — | — | `btree_gist` explicitly approved |
 | 22.4 | ⬜ todo | — | — | — |

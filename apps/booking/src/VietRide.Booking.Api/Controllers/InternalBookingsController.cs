@@ -34,6 +34,22 @@ public sealed class InternalBookingsController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("trips/{tripId:guid}/edit-impact")]
+    [ProducesResponseType(typeof(TripEditImpactDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<TripEditImpactDto>> GetTripEditImpactAsync(
+        Guid tripId,
+        [FromQuery] Guid? operatorId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(
+            new GetTripEditImpactQuery(tripId, operatorId ?? Guid.Empty),
+            cancellationToken);
+
+        return Ok(result);
+    }
+
     [HttpGet("active-by-stop/{stopId:guid}/count")]
     public async Task<ActionResult<object>> GetActiveCountByStopAsync(
         Guid stopId, [FromQuery] Guid operatorId, CancellationToken cancellationToken)
