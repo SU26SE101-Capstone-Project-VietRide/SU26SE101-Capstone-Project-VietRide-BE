@@ -127,7 +127,11 @@ public sealed class UserDeviceRepositoryTests : IClassFixture<UserDeviceReposito
 
             var services = new ServiceCollection();
             services.AddSingleton<IClock, SystemClock>();
-            services.AddDbContext<IdentityDbContext>(options => options.UseNpgsql(_dataSource));
+            services.AddDbContext<IdentityDbContext>(options => options
+                .EnableServiceProviderCaching(false)
+                .ConfigureWarnings(warnings => warnings.Ignore(
+                    Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning))
+                .UseNpgsql(_dataSource));
             services.AddInfrastructure(BuildConfiguration());
             _provider = services.BuildServiceProvider(validateScopes: true);
 

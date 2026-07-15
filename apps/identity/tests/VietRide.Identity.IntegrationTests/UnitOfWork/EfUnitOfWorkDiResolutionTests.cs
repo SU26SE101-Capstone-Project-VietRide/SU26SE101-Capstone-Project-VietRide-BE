@@ -1,6 +1,8 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Persistence.UnitOfWork;
@@ -91,6 +93,11 @@ public sealed class UnitOfWorkWebApplicationFactory : WebApplicationFactory<Prog
         builder.UseSetting("IdentityJwt:Kid", "test-kid");
         builder.UseSetting("IdentityJwt:PrivateKey", DevPrivateKeyPem);
         builder.UseEnvironment("Testing");
+        builder.ConfigureTestServices(services =>
+            services.AddDbContext<VietRide.Identity.Infrastructure.IdentityDbContext>(options => options
+                .EnableServiceProviderCaching(false)
+                .ConfigureWarnings(warnings => warnings.Ignore(
+                    Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning))));
         // NOTE: IUnitOfWork is NOT overridden here — the real EfUnitOfWork registration
         // from AddVietRideDbContext must be visible for the DI-resolution proof.
     }
