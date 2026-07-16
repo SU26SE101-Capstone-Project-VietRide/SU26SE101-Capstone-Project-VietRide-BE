@@ -204,7 +204,7 @@ public sealed class InvoiceEndpointsTests
                     services.AddSingleton<IMediator>(mediator);
                     services.AddSingleton<ISender>(mediator);
                     services.AddSingleton<IPublisher>(mediator);
-                    services.AddSingleton(FakeRedis());
+                    services.AddSingleton<IConnectionMultiplexer>(InMemoryIdempotencyRedis.Create());
                     services.AddAuthentication(options =>
                         {
                             options.DefaultAuthenticateScheme = TestAuthenticationHandler.SchemeName;
@@ -215,33 +215,6 @@ public sealed class InvoiceEndpointsTests
                             _ => { });
                 });
             });
-
-    private static IConnectionMultiplexer FakeRedis()
-    {
-        var cache = new Dictionary<string, RedisValue>(StringComparer.Ordinal);
-        var db = Substitute.For<IDatabase>();
-        db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>())
-            .Returns(call => cache.TryGetValue(call.ArgAt<RedisKey>(0).ToString(), out var value)
-                ? value
-                : RedisValue.Null);
-        db.StringSetAsync(
-                Arg.Any<RedisKey>(),
-                Arg.Any<RedisValue>(),
-                Arg.Any<TimeSpan?>(),
-                Arg.Any<When>(),
-                Arg.Any<CommandFlags>())
-            .Returns(call =>
-            {
-                var key = call.ArgAt<RedisKey>(0).ToString();
-                if (call.ArgAt<When>(3) == When.NotExists && cache.ContainsKey(key))
-                    return false;
-                cache[key] = call.ArgAt<RedisValue>(1);
-                return true;
-            });
-        var mux = Substitute.For<IConnectionMultiplexer>();
-        mux.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(db);
-        return mux;
-    }
 
     private sealed class TestAuthenticationHandler : AuthenticationHandler<AuthenticationSchemeOptions>
     {

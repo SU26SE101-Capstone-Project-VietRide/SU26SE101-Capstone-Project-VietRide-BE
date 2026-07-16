@@ -1,27 +1,27 @@
+using System.Buffers.Binary;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Routing;
 
 namespace VietRide.Shared.Web.Idempotency;
 
 internal static class IdempotencyFingerprint
 {
-    private const string EmptyBodyMarker = "<empty>";
-
     public static async Task<string> ComputeAsync(HttpContext context)
     {
-        var components = new FingerprintComponents(
-            context.Request.Method.ToUpperInvariant(),
-            NormalizeRoute(context),
-            NormalizeRouteValues(context.Request.RouteValues),
-            ResolveSubject(context.User),
-            await CanonicalizeBodyAsync(context.Request));
+        var request = context.Request;
+        var body = await ReadRawBodyAsync(request, context.RequestAborted);
+        var canonicalQuery = BuildCanonicalQuery(request.Query);
 
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(components);
-        return Convert.ToHexString(SHA256.HashData(bytes));
+        using var frame = new MemoryStream();
+        WriteFrame(frame, Encoding.UTF8.GetBytes(ResolveSubject(context.User)));
+        WriteFrame(frame, Encoding.UTF8.GetBytes(request.Method.ToUpperInvariant()));
+        WriteFrame(frame, Encoding.UTF8.GetBytes(string.Concat(request.PathBase.Value, request.Path.Value)));
+        WriteFrame(frame, canonicalQuery);
+        WriteFrame(frame, body);
+
+        return Convert.ToHexString(SHA256.HashData(frame.ToArray()));
     }
 
     public static string ResolveSubject(ClaimsPrincipal user)
@@ -36,101 +36,54 @@ internal static class IdempotencyFingerprint
         return string.IsNullOrWhiteSpace(subject) ? string.Empty : subject;
     }
 
-    private static string NormalizeRoute(HttpContext context)
-    {
-        var template = (context.GetEndpoint() as RouteEndpoint)?.RoutePattern.RawText;
-        var route = string.IsNullOrWhiteSpace(template)
-            ? context.Request.Path.Value ?? "/"
-            : template;
-
-        route = Uri.UnescapeDataString(route.Trim());
-        if (!route.StartsWith('/'))
-        {
-            route = $"/{route}";
-        }
-
-        return route.TrimEnd('/').ToLowerInvariant();
-    }
-
-    private static IReadOnlyDictionary<string, string> NormalizeRouteValues(RouteValueDictionary routeValues)
-    {
-        var normalized = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        foreach (var pair in routeValues)
-        {
-            var value = Convert.ToString(pair.Value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
-            normalized[pair.Key.ToLowerInvariant()] = Guid.TryParse(value, out var id)
-                ? id.ToString("D")
-                : Uri.UnescapeDataString(value).Trim();
-        }
-
-        return normalized;
-    }
-
-    private static async Task<string> CanonicalizeBodyAsync(HttpRequest request)
+    private static async Task<byte[]> ReadRawBodyAsync(
+        HttpRequest request,
+        CancellationToken cancellationToken)
     {
         request.EnableBuffering();
         request.Body.Position = 0;
 
         using var memory = new MemoryStream();
-        await request.Body.CopyToAsync(memory);
-        request.Body.Position = 0;
-
-        if (memory.Length == 0)
-        {
-            return EmptyBodyMarker;
-        }
-
-        var body = memory.ToArray();
         try
         {
-            using var document = JsonDocument.Parse(body);
-            using var canonical = new MemoryStream();
-            using (var writer = new Utf8JsonWriter(canonical))
-            {
-                WriteCanonical(writer, document.RootElement);
-            }
-
-            return Encoding.UTF8.GetString(canonical.ToArray());
+            await request.Body.CopyToAsync(memory, cancellationToken);
+            return memory.ToArray();
         }
-        catch (JsonException)
+        finally
         {
-            return $"<raw>:{Convert.ToHexString(SHA256.HashData(body))}";
+            request.Body.Position = 0;
         }
     }
 
-    private static void WriteCanonical(Utf8JsonWriter writer, JsonElement element)
+    private static byte[] BuildCanonicalQuery(IQueryCollection query)
     {
-        switch (element.ValueKind)
+        var pairs = query
+            .SelectMany(pair => pair.Value.Select(value => new KeyValuePair<string, string>(pair.Key, value ?? string.Empty)))
+            .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+            .ThenBy(pair => pair.Value, StringComparer.Ordinal)
+            .ToArray();
+
+        using var canonical = new MemoryStream();
+        WriteInt32(canonical, pairs.Length);
+        foreach (var pair in pairs)
         {
-            case JsonValueKind.Object:
-                writer.WriteStartObject();
-                foreach (var property in element.EnumerateObject().OrderBy(item => item.Name, StringComparer.Ordinal))
-                {
-                    writer.WritePropertyName(property.Name);
-                    WriteCanonical(writer, property.Value);
-                }
-
-                writer.WriteEndObject();
-                break;
-            case JsonValueKind.Array:
-                writer.WriteStartArray();
-                foreach (var item in element.EnumerateArray())
-                {
-                    WriteCanonical(writer, item);
-                }
-
-                writer.WriteEndArray();
-                break;
-            default:
-                element.WriteTo(writer);
-                break;
+            WriteFrame(canonical, Encoding.UTF8.GetBytes(pair.Key));
+            WriteFrame(canonical, Encoding.UTF8.GetBytes(pair.Value));
         }
+
+        return canonical.ToArray();
     }
 
-    private sealed record FingerprintComponents(
-        string Method,
-        string Route,
-        IReadOnlyDictionary<string, string> RouteValues,
-        string Subject,
-        string Body);
+    private static void WriteFrame(Stream stream, ReadOnlySpan<byte> value)
+    {
+        WriteInt32(stream, value.Length);
+        stream.Write(value);
+    }
+
+    private static void WriteInt32(Stream stream, int value)
+    {
+        Span<byte> length = stackalloc byte[sizeof(int)];
+        BinaryPrimitives.WriteInt32BigEndian(length, value);
+        stream.Write(length);
+    }
 }
