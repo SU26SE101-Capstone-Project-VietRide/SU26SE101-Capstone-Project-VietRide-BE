@@ -1,4 +1,5 @@
 using VietRide.Payment.Application.Features.Internal.Payments.CreateSubscriptionPayment;
+using VietRide.Payment.Application.Models;
 
 namespace VietRide.Payment.Api.Controllers.Requests;
 
@@ -8,8 +9,20 @@ public sealed record CreateSubscriptionPaymentRequest(
     Guid OperatorId,
     Guid PlanId,
     string BillingPeriod,
-    long Amount)
+    string PaymentMethod,
+    long Amount,
+    SubscriptionPaymentContextV1 Context)
 {
     public CreateSubscriptionPaymentCommand ToCommand(string idempotencyKey, string clientIpAddress)
-        => new(UpgradeAttemptId, SubscriptionId, OperatorId, PlanId, BillingPeriod, Amount, idempotencyKey, clientIpAddress);
+        => new(
+            UpgradeAttemptId,
+            SubscriptionId,
+            OperatorId,
+            PlanId,
+            BillingPeriod,
+            PaymentMethod,
+            Amount,
+            Context,
+            idempotencyKey,
+            clientIpAddress);
 }

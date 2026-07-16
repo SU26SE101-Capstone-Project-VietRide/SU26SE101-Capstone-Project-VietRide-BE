@@ -16,6 +16,19 @@ internal sealed class TripStopRepository : ITripStopRepository
     public Task<TripStop?> GetByIdAsync((Guid TripId, Guid StopId) id, CancellationToken cancellationToken = default) =>
         _dbContext.TripStops.FindAsync(new object[] { id.TripId, id.StopId }, cancellationToken).AsTask();
 
+    public async Task<TripStop?> GetForUpdateAsync(
+        Guid tripId,
+        Guid stopId,
+        CancellationToken cancellationToken)
+    {
+        await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT 1 FROM vietride_trip.trip_stops WHERE trip_id = {tripId} AND stop_id = {stopId} FOR UPDATE",
+            cancellationToken);
+        return await _dbContext.TripStops.FirstOrDefaultAsync(
+            stop => stop.TripId == tripId && stop.StopId == stopId,
+            cancellationToken);
+    }
+
     public async Task<TripStop> AddAsync(TripStop entity, CancellationToken cancellationToken = default)
     {
         await _dbContext.TripStops.AddAsync(entity, cancellationToken);

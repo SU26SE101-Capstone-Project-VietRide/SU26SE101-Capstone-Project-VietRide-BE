@@ -4,6 +4,7 @@ using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Identity.Application.Features.Subscriptions.UpgradeSubscription;
@@ -16,20 +17,26 @@ public sealed class UpgradeSubscriptionCommandHandler
     private readonly IOperatorSubscriptionRepository _subscriptions;
     private readonly ISubscriptionPlanRepository _plans;
     private readonly ISubscriptionUpgradeAttemptRepository _attempts;
+    private readonly IOperatorRepository _operators;
     private readonly ISubscriptionPaymentClient _payments;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly IClock _clock;
 
     public UpgradeSubscriptionCommandHandler(
         IOperatorSubscriptionRepository subscriptions,
         ISubscriptionPlanRepository plans,
         ISubscriptionUpgradeAttemptRepository attempts,
+        IOperatorRepository operators,
         ISubscriptionPaymentClient payments,
+        IUnitOfWork unitOfWork,
         IClock clock)
     {
         _subscriptions = subscriptions;
         _plans = plans;
         _attempts = attempts;
+        _operators = operators;
         _payments = payments;
+        _unitOfWork = unitOfWork;
         _clock = clock;
     }
 
@@ -37,89 +44,200 @@ public sealed class UpgradeSubscriptionCommandHandler
         UpgradeSubscriptionCommand request,
         CancellationToken cancellationToken)
     {
-        var replay = await _attempts.GetByIdempotencyKeyAsync(request.IdempotencyKey, cancellationToken);
-        if (replay is not null)
-        {
-            EnsureReplayMatches(replay, request);
-            if (!replay.PaymentId.HasValue)
-                throw new CodedConflictException("SUBSCRIPTION_PAYMENT_PENDING", "Subscription payment is still being initialized.");
-
-            var paymentReplay = await _payments.CreateAsync(
-                new SubscriptionPaymentCreationRequest(
-                    replay.Id,
-                    replay.SubscriptionId,
-                    replay.OperatorId,
-                    replay.TargetPlanId,
-                    replay.BillingPeriod.ToString(),
-                    replay.Amount.Amount,
-                    request.IdempotencyKey,
-                    request.ClientIpAddress),
-                cancellationToken);
-
-            return new SubscriptionUpgradeResponseDto(
-                replay.SubscriptionId,
-                replay.Id,
-                SubscriptionStatus.PENDING_PAYMENT.ToString(),
-                paymentReplay.PaymentId,
-                replay.Amount.Amount,
-                replay.BillingPeriod.ToString(),
-                paymentReplay.PaymentRedirectUrl,
-                replay.DueAt);
-        }
-
         var targetPlan = await _plans.GetByIdAsync(request.PlanId, cancellationToken)
             ?? throw new NotFoundException(nameof(SubscriptionPlan), request.PlanId);
         if (!targetPlan.IsActive)
             throw new CodedValidationException("SUBSCRIPTION_PLAN_INACTIVE", "The selected subscription plan is inactive.");
 
-        var subscription = await _subscriptions.GetCurrentByOperatorIdAsync(request.OperatorId, cancellationToken)
-            ?? throw new NotFoundException(nameof(OperatorSubscription), request.OperatorId);
-        if (subscription.Status == SubscriptionStatus.PENDING_PAYMENT)
-            throw new CodedConflictException("SUBSCRIPTION_PAYMENT_PENDING", "An upgrade payment is already pending.");
-
         var billingPeriod = SubscriptionMapper.ParseBillingPeriod(request.BillingPeriod);
+        var paymentMethod = Enum.Parse<SubscriptionPaymentMethod>(request.PaymentMethod, ignoreCase: false);
         var amount = billingPeriod == SubscriptionBillingPeriod.MONTHLY
             ? targetPlan.PricePerMonth
             : targetPlan.PricePerYear;
         if (amount.Amount <= 0)
-            throw new CodedValidationException("SUBSCRIPTION_PLAN_NOT_PAYABLE", "The selected plan has no payable VNPay price.");
+            throw new CodedValidationException("SUBSCRIPTION_PLAN_NOT_PAYABLE", "The selected plan has no payable price.");
 
-        var now = _clock.UtcNow;
-        subscription.MoveToPendingPayment(targetPlan.Id, SubscriptionPaymentMethod.VNPAY);
-        _subscriptions.Update(subscription);
-        var attempt = SubscriptionUpgradeAttempt.Create(
-            subscription.Id,
-            request.OperatorId,
-            targetPlan.Id,
+        var operatorTenant = await GetOperatorAsync(request.OperatorId, cancellationToken);
+        var attempt = await GetOrCreateAttemptAsync(
+            request,
             billingPeriod,
             amount,
-            request.IdempotencyKey,
-            now,
-            now.Add(PaymentWindow));
-        await _attempts.AddAsync(attempt, cancellationToken);
-
-        var payment = await _payments.CreateAsync(
-            new SubscriptionPaymentCreationRequest(
-                attempt.Id,
-                subscription.Id,
-                request.OperatorId,
-                targetPlan.Id,
-                billingPeriod.ToString(),
-                amount.Amount,
-                request.IdempotencyKey,
-                request.ClientIpAddress),
             cancellationToken);
-        attempt.BindPendingPayment(payment.PaymentId);
+        var snapshot = CreateSnapshot(
+            attempt.SubscriptionId,
+            targetPlan,
+            billingPeriod,
+            operatorTenant,
+            attempt.CreatedAt == default ? _clock.UtcNow : attempt.CreatedAt);
+
+        SubscriptionPaymentCreationResult payment;
+        try
+        {
+            payment = await _payments.CreateAsync(
+                new SubscriptionPaymentCreationRequest(
+                    attempt.Id,
+                    attempt.SubscriptionId,
+                    request.OperatorId,
+                    targetPlan.Id,
+                    billingPeriod.ToString(),
+                    request.PaymentMethod,
+                    amount.Amount,
+                    snapshot,
+                    request.IdempotencyKey,
+                    request.ClientIpAddress),
+                cancellationToken);
+        }
+        catch (Exception exception) when (exception is ICodedHttpException { StatusCode: >= 400 and < 500 })
+        {
+            await MarkAttemptFailedAsync(attempt.Id, cancellationToken);
+            throw;
+        }
+
+        if (payment.Status != "SUCCEEDED")
+        {
+            await MoveToPendingPaymentAsync(
+                attempt.SubscriptionId,
+                attempt.Id,
+                payment.PaymentId,
+                paymentMethod,
+                cancellationToken);
+        }
 
         return new SubscriptionUpgradeResponseDto(
-            subscription.Id,
+            attempt.SubscriptionId,
             attempt.Id,
-            subscription.Status.ToString(),
+            payment.Status == "SUCCEEDED" ? SubscriptionStatus.ACTIVE.ToString() : SubscriptionStatus.PENDING_PAYMENT.ToString(),
             payment.PaymentId,
             amount.Amount,
             billingPeriod.ToString(),
             payment.PaymentRedirectUrl,
-            attempt.DueAt);
+            payment.Status == "SUCCEEDED" ? null : attempt.DueAt,
+            payment.InvoiceStatus);
+    }
+
+    private async Task<SubscriptionUpgradeAttempt> GetOrCreateAttemptAsync(
+        UpgradeSubscriptionCommand request,
+        SubscriptionBillingPeriod billingPeriod,
+        VietRide.Shared.Kernel.ValueObjects.Money amount,
+        CancellationToken cancellationToken)
+    {
+        await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            var subscription = await _subscriptions.GetCurrentByOperatorIdForUpdateAsync(
+                request.OperatorId,
+                cancellationToken)
+                ?? throw new NotFoundException(nameof(OperatorSubscription), request.OperatorId);
+
+            var replay = await _attempts.GetByIdempotencyKeyAsync(request.IdempotencyKey, cancellationToken);
+            if (replay is not null)
+            {
+                EnsureReplayMatches(replay, request);
+                await _unitOfWork.CommitAsync(cancellationToken);
+                return replay;
+            }
+
+            var activeAttempt = await _attempts.GetActiveBySubscriptionIdAsync(subscription.Id, cancellationToken);
+            if (activeAttempt is not null || subscription.Status == SubscriptionStatus.PENDING_PAYMENT)
+            {
+                throw new CodedConflictException(
+                    "SUBSCRIPTION_PAYMENT_PENDING",
+                    "An upgrade payment is already pending.");
+            }
+
+            if (subscription.Status is not (SubscriptionStatus.ACTIVE or SubscriptionStatus.EXPIRED))
+            {
+                throw new CodedConflictException(
+                    "SUBSCRIPTION_NOT_UPGRADABLE",
+                    "Only active or expired subscriptions can start an upgrade.");
+            }
+
+            var now = _clock.UtcNow;
+            var attempt = SubscriptionUpgradeAttempt.Create(
+                subscription.Id,
+                request.OperatorId,
+                request.PlanId,
+                billingPeriod,
+                amount,
+                request.IdempotencyKey,
+                now,
+                now.Add(PaymentWindow));
+            await _attempts.AddAsync(attempt, cancellationToken);
+            await _unitOfWork.CommitAsync(cancellationToken);
+            return attempt;
+        }
+        catch
+        {
+            await _unitOfWork.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
+
+    private async Task MoveToPendingPaymentAsync(
+        Guid subscriptionId,
+        Guid attemptId,
+        Guid paymentId,
+        SubscriptionPaymentMethod paymentMethod,
+        CancellationToken cancellationToken)
+    {
+        await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            var subscription = await _subscriptions.GetByIdForUpdateAsync(subscriptionId, cancellationToken)
+                ?? throw new NotFoundException(nameof(OperatorSubscription), subscriptionId);
+            var attempt = await _attempts.GetByIdForUpdateAsync(attemptId, cancellationToken)
+                ?? throw new NotFoundException(nameof(SubscriptionUpgradeAttempt), attemptId);
+
+            if (attempt.Status == SubscriptionUpgradeAttemptStatus.SUCCEEDED)
+            {
+                await _unitOfWork.CommitAsync(cancellationToken);
+                return;
+            }
+
+            attempt.BindPendingPayment(paymentId);
+            if (subscription.Status is SubscriptionStatus.ACTIVE or SubscriptionStatus.EXPIRED)
+            {
+                subscription.MoveToPendingPayment(attempt.TargetPlanId, paymentMethod);
+            }
+            else if (subscription.Status != SubscriptionStatus.PENDING_PAYMENT
+                || subscription.PlanId != attempt.TargetPlanId
+                || subscription.PaymentMethod != paymentMethod)
+            {
+                throw new CodedConflictException(
+                    "SUBSCRIPTION_PAYMENT_STATE_CHANGED",
+                    "Subscription state changed while the payment was being initialized.");
+            }
+
+            _subscriptions.Update(subscription);
+            _attempts.Update(attempt);
+            await _unitOfWork.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await _unitOfWork.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
+
+    private async Task MarkAttemptFailedAsync(Guid attemptId, CancellationToken cancellationToken)
+    {
+        await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            var attempt = await _attempts.GetByIdForUpdateAsync(attemptId, cancellationToken);
+            if (attempt is not null)
+            {
+                attempt.MarkFailed();
+                _attempts.Update(attempt);
+            }
+
+            await _unitOfWork.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await _unitOfWork.RollbackAsync(cancellationToken);
+            throw;
+        }
     }
 
     private static void EnsureReplayMatches(SubscriptionUpgradeAttempt attempt, UpgradeSubscriptionCommand request)
@@ -128,9 +246,43 @@ public sealed class UpgradeSubscriptionCommandHandler
             || attempt.TargetPlanId != request.PlanId
             || !string.Equals(attempt.BillingPeriod.ToString(), request.BillingPeriod, StringComparison.Ordinal))
         {
-            throw new CodedConflictException(
+            throw new CodedValidationException(
                 "IDEMPOTENCY_KEY_MISMATCH",
                 "Idempotency-Key was already used with a different subscription upgrade request.");
         }
+    }
+
+    private async Task<Operator> GetOperatorAsync(Guid operatorId, CancellationToken cancellationToken)
+        => await _operators.GetByIdNoTrackingAsync(operatorId, cancellationToken)
+            ?? throw new NotFoundException(nameof(Operator), operatorId);
+
+    private static SubscriptionPaymentSnapshot CreateSnapshot(
+        Guid subscriptionId,
+        SubscriptionPlan plan,
+        SubscriptionBillingPeriod billingPeriod,
+        Operator operatorTenant,
+        DateTimeOffset periodFrom)
+    {
+        var periodTo = billingPeriod == SubscriptionBillingPeriod.MONTHLY
+            ? periodFrom.AddMonths(1)
+            : periodFrom.AddYears(1);
+        return new SubscriptionPaymentSnapshot(
+            1,
+            subscriptionId,
+            plan.Id,
+            plan.Name,
+            billingPeriod.ToString(),
+            periodFrom,
+            periodTo,
+            new SubscriptionBuyerSnapshot(
+                operatorTenant.Name,
+                operatorTenant.BusinessRegistrationNumber,
+                operatorTenant.TaxCode,
+                operatorTenant.ContactEmail,
+                operatorTenant.ContactPhone,
+                operatorTenant.AddressStreet,
+                operatorTenant.AddressWard,
+                operatorTenant.AddressDistrict,
+                operatorTenant.AddressProvince));
     }
 }

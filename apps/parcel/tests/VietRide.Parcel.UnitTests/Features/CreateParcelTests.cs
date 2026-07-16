@@ -493,7 +493,7 @@ public sealed class CreateParcelTests
         client.ChargeParcelPaymentAsync(
                 Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<Guid>(),
                 Arg.Any<long>(), Arg.Any<string>(), Arg.Any<string>(),
-                Arg.Any<CancellationToken>())
+                Arg.Any<CancellationToken>(), Arg.Any<PaymentContextSnapshot?>())
             .Returns(new ChargeOutcome(ChargeOutcomeKind.Success,
                 new ChargeResult(Guid.NewGuid(), "SUCCEEDED", null), null));
         return client;

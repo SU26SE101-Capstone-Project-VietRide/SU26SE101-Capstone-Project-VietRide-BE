@@ -43,17 +43,22 @@ public sealed class SubstituteVehicleCommandHandler : IRequestHandler<Substitute
 
     public async Task<SubstituteVehicleResponse> Handle(SubstituteVehicleCommand request, CancellationToken cancellationToken)
     {
-        var oldTrip = await tripRepository.GetByIdAsync(request.TripId, cancellationToken)
-            ?? throw new CodedNotFoundException("TRIP_NOT_FOUND", "Trip was not found.");
-        if (oldTrip.OperatorId != request.OperatorId)
-        {
-            throw new ForbiddenException("FORBIDDEN", "Trip does not belong to this operator.");
-        }
-
-        var now = clock.UtcNow;
         await unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {
+            var oldTrip = await tripRepository.GetForUpdateAsync(request.TripId, cancellationToken)
+                ?? throw new CodedNotFoundException("TRIP_NOT_FOUND", "Trip was not found.");
+            if (oldTrip.OperatorId != request.OperatorId)
+            {
+                throw new ForbiddenException("FORBIDDEN", "Trip does not belong to this operator.");
+            }
+
+            if (oldTrip.Status is TripStatus.COMPLETED or TripStatus.CANCELLED or TripStatus.DISRUPTED)
+            {
+                throw new ConflictException("TRIP_ALREADY_TERMINAL", "Trip is already terminal.");
+            }
+
+            var now = clock.UtcNow;
             oldTrip.Disrupt(now, request.Reason);
             oldTrip.MarkSubstitution(true);
 
@@ -86,6 +91,15 @@ public sealed class SubstituteVehicleCommandHandler : IRequestHandler<Substitute
                     reason = request.Reason,
                     occurredAt = now,
                 }, JsonOptions),
+                cancellationToken);
+            var terminalEvent = new TripDisruptedIntegrationEvent(
+                oldTrip.Id,
+                oldTrip.OperatorId,
+                now,
+                hasSubstitution: true);
+            await outbox.EnqueueAsync(
+                terminalEvent.EventType,
+                JsonSerializer.Serialize(terminalEvent, JsonOptions),
                 cancellationToken);
 
             await unitOfWork.SaveChangesAsync(cancellationToken);

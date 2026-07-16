@@ -42,7 +42,7 @@ public sealed class GetTripSnapshotRelationalTests
                 .Build();
             var services = new ServiceCollection();
             services.AddScoped(_ => Persistence.TripStopFareSourcePersistenceTests.CreateDbContext(dataSource));
-            services.AddInfrastructure(configuration);
+            services.AddInfrastructure(configuration, backgroundWorkersEnabled: false);
 
             await using var provider = services.BuildServiceProvider();
             await using var scope = provider.CreateAsyncScope();

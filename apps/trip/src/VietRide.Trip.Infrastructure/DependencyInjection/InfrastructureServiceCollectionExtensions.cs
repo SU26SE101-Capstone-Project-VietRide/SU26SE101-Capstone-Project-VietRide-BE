@@ -31,7 +31,8 @@ public static class InfrastructureServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        bool backgroundWorkersEnabled)
     {
         services.AddScoped<ILocationRepository, LocationRepository>();
         services.AddScoped<IStationRepository, StationRepository>();
@@ -53,13 +54,21 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ITripStopRepository, TripStopRepository>();
         services.AddScoped<ITripStopFareRepository, TripStopFareRepository>();
         services.AddScoped<ITripGenerationSkipLogRepository, TripGenerationSkipLogRepository>();
-        services.AddScoped<ITripGenerationJobScheduler, HangfireTripGenerationJobScheduler>();
+        services.AddScoped<IIncidentRepository, IncidentRepository>();
+        if (backgroundWorkersEnabled)
+        {
+            services.AddScoped<ITripGenerationJobScheduler, HangfireTripGenerationJobScheduler>();
+        }
+        else
+        {
+            services.AddScoped<ITripGenerationJobScheduler, DisabledTripGenerationJobScheduler>();
+        }
         services.AddScoped<IShuttleDispatchService, ShuttleDispatchService>();
         services.AddScoped<ShuttleDispatchSafetyJob>();
         services.AddScoped<AutoBoardingJob>();
         services.AddScoped<AutoStartFallbackJob>();
         services.AddScoped<AutoCompletedFallbackJob>();
-        if (AreBackgroundWorkersEnabled(configuration))
+        if (backgroundWorkersEnabled)
         {
             services.AddVietRideEventConsumer<BookingShuttleConfirmedIntegrationEvent, BookingShuttleConfirmedIntegrationEventHandler>(options =>
             {
@@ -88,7 +97,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<ISeatLockIdempotencyStore, RedisSeatLockIdempotencyStore>();
         services.AddScoped<IExpiredSeatLockReleaser, ExpiredSeatLockReleaser>();
 
-        services.AddTripHangfire(configuration);
+        services.AddTripHangfire(configuration, backgroundWorkersEnabled);
 
         services.AddSingleton<IInternalJwtTokenProvider, InternalJwtTokenFactory>();
         services.AddHttpContextAccessor();
@@ -136,8 +145,5 @@ public static class InfrastructureServiceCollectionExtensions
 
         return baseUrl;
     }
-
-    private static bool AreBackgroundWorkersEnabled(IConfiguration configuration) =>
-        configuration.GetValue<bool?>("Trip:BackgroundWorkers:Enabled") ?? true;
 
 }

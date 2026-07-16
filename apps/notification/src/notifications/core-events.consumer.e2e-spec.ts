@@ -12,11 +12,13 @@ describe('CoreEventsConsumer registration (e2e)', () => {
       providers: [
         CoreEventsConsumer,
         { provide: RabbitMqConsumer, useValue: { subscribe } },
-        { provide: MessageIdempotencyService, useValue: { begin: jest.fn(), markProcessed: jest.fn(), release: jest.fn() } },
+        {
+          provide: MessageIdempotencyService,
+          useValue: { begin: jest.fn(), markProcessed: jest.fn(), release: jest.fn() },
+        },
         { provide: NotificationsService, useValue: { createNotification: jest.fn() } },
       ],
-    })
-      .compile();
+    }).compile();
 
     await moduleRef.init();
 

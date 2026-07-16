@@ -13,4 +13,10 @@ public interface ITripStopRepository : IRepository<TripStop, (Guid TripId, Guid 
 
     Task DeleteByTripAsync(Guid tripId, CancellationToken cancellationToken)
         => throw new NotSupportedException("Trip-stop replacement is not supported by this repository implementation.");
+
+    Task<TripStop?> GetForUpdateAsync(
+        Guid tripId,
+        Guid stopId,
+        CancellationToken cancellationToken)
+        => GetByIdAsync((tripId, stopId), cancellationToken);
 }

@@ -42,7 +42,7 @@ public sealed class ReviewParcelTests
 
         var paymentClient = Substitute.For<IPaymentServiceClient>();
         paymentClient.ChargeParcelPaymentAsync("PARCEL", ParcelId, SenderUserId, 200_000,
-                "VNPAY", Arg.Any<string>(), Arg.Any<CancellationToken>())
+                "VNPAY", Arg.Any<string>(), Arg.Any<CancellationToken>(), Arg.Any<PaymentContextSnapshot?>())
             .Returns(new ChargeOutcome(ChargeOutcomeKind.Success,
                 new ChargeResult(Guid.NewGuid(), "SUCCEEDED", null), null));
 

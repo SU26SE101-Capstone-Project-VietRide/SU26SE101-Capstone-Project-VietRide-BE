@@ -100,4 +100,5 @@ public interface IVoucherService
 /// </summary>
 public sealed record VoucherValidationResult(
     Guid VoucherId,
-    Money Discount);
+    Money Discount,
+    VietRide.Booking.Domain.Enums.VoucherFundingType FundingType = VietRide.Booking.Domain.Enums.VoucherFundingType.VIETRIDE_FUNDED);

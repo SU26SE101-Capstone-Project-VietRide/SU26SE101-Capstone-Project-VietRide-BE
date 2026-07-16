@@ -217,8 +217,18 @@ public sealed class LifecycleOperatorCommandHandlerTests
             Clock.UtcNow.Returns(FixedNow);
             ActivityLogs.AddAsync(Arg.Any<ActivityLog>(), Arg.Any<CancellationToken>())
                 .Returns(call => Task.FromResult(call.Arg<ActivityLog>()));
+            WalletBackfillMarkers.AddAsync(
+                    Arg.Any<OperatorWalletBackfillMarker>(),
+                    Arg.Any<CancellationToken>())
+                .Returns(call => Task.FromResult(call.Arg<OperatorWalletBackfillMarker>()));
 
-            ApproveHandler = new ApproveOperatorCommandHandler(Operators, OperatorSubscriptions, ActivityLogs, Clock, Outbox);
+            ApproveHandler = new ApproveOperatorCommandHandler(
+                Operators,
+                OperatorSubscriptions,
+                ActivityLogs,
+                Clock,
+                Outbox,
+                WalletBackfillMarkers);
             RejectHandler = new RejectOperatorCommandHandler(Operators, OperatorSubscriptions, ActivityLogs, Clock);
             SuspendHandler = new SuspendOperatorCommandHandler(Operators, Clock, Outbox);
         }
@@ -226,6 +236,7 @@ public sealed class LifecycleOperatorCommandHandlerTests
         public IOperatorRepository Operators { get; } = Substitute.For<IOperatorRepository>();
         public IOperatorSubscriptionRepository OperatorSubscriptions { get; } = Substitute.For<IOperatorSubscriptionRepository>();
         public IActivityLogRepository ActivityLogs { get; } = Substitute.For<IActivityLogRepository>();
+        public IOperatorWalletBackfillMarkerRepository WalletBackfillMarkers { get; } = Substitute.For<IOperatorWalletBackfillMarkerRepository>();
         public IClock Clock { get; } = Substitute.For<IClock>();
         public IIntegrationEventOutbox Outbox { get; } = Substitute.For<IIntegrationEventOutbox>();
         public ApproveOperatorCommandHandler ApproveHandler { get; }

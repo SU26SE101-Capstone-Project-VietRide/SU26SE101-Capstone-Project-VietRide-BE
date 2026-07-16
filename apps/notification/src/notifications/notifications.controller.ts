@@ -51,7 +51,8 @@ export class NotificationsController {
   @ApiQuery({ name: 'sortDir', enum: ['asc', 'desc'], required: false })
   @ApiResponse({
     status: 200,
-    description: 'Notification history retrieved successfully. Runtime response is wrapped in ApiResponse<T>.',
+    description:
+      'Notification history retrieved successfully. Runtime response is wrapped in ApiResponse<T>.',
     schema: successEnvelopeSchema(200, pagedNotificationsSchema),
   })
   @ApiResponse({
@@ -61,7 +62,8 @@ export class NotificationsController {
   })
   @ApiResponse({
     status: 401,
-    description: 'Missing or invalid user access token. Runtime response is an ApiResponse error envelope.',
+    description:
+      'Missing or invalid user access token. Runtime response is an ApiResponse error envelope.',
     schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Unauthorized'),
   })
   @ApiResponse({
@@ -86,12 +88,14 @@ export class NotificationsController {
   })
   @ApiResponse({
     status: 400,
-    description: 'Invalid notification id or body. Runtime response is an ApiResponse error envelope.',
+    description:
+      'Invalid notification id or body. Runtime response is an ApiResponse error envelope.',
     schema: errorEnvelopeSchema(400, 'VALIDATION_FAILED', 'Validation failed', { fields: true }),
   })
   @ApiResponse({
     status: 401,
-    description: 'Missing or invalid user access token. Runtime response is an ApiResponse error envelope.',
+    description:
+      'Missing or invalid user access token. Runtime response is an ApiResponse error envelope.',
     schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Unauthorized'),
   })
   @ApiResponse({

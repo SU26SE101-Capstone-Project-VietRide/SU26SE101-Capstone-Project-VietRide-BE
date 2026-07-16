@@ -1,29 +1,34 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
 import type { ConsumeMessage } from 'amqplib';
-import pino from 'pino';
 import { ZodError } from 'zod';
-import {
-  RABBITMQ_PREFETCH_ONE,
-} from './core-events.constants';
+import { RABBITMQ_PREFETCH_ONE } from './core-events.constants';
 import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
+import { createNotificationLogger } from './notification-logger';
+import type { OperatorRecipientProvider } from './operator-recipient.provider';
+import { OPERATOR_RECIPIENT_PROVIDER } from './parcel-subscription-operator-events.constants';
 import {
+  TRIP_INCIDENT_REPORTED_ROUTING_KEY,
   TRIP_TRACKING_ALERT_QUEUE_BINDINGS,
 } from './trip-tracking-alert-events.constants';
 import {
+  IncidentReportedPayloadSchema,
+  mapIncidentReportedToNotifications,
   mapTripTrackingAlertToNotifications,
   type TripTrackingAlertRoutingKey,
 } from './trip-tracking-alert-notification.mapper';
 
 @Injectable()
 export class TripTrackingAlertEventsConsumer implements OnModuleInit {
-  private readonly logger = pino({ name: TripTrackingAlertEventsConsumer.name });
+  private readonly logger = createNotificationLogger(TripTrackingAlertEventsConsumer.name);
 
   constructor(
     private readonly consumer: RabbitMqConsumer,
     private readonly idempotency: MessageIdempotencyService,
     private readonly notificationsService: NotificationsService,
+    @Inject(OPERATOR_RECIPIENT_PROVIDER)
+    private readonly operatorRecipients: OperatorRecipientProvider,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -33,13 +38,27 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
           binding.queue,
           binding.routingKey,
           (payload, raw) => this.handle(binding.routingKey, payload, raw),
-          { prefetch: RABBITMQ_PREFETCH_ONE, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
+          {
+            prefetch: RABBITMQ_PREFETCH_ONE,
+            deadLetter: true,
+            maxRetries: 5,
+            retryDelayMs: 10_000,
+          },
         ),
       ),
     );
   }
 
-  async handle(routingKey: TripTrackingAlertRoutingKey, payload: unknown, raw: ConsumeMessage): Promise<void> {
+  async handle(
+    routingKey: TripTrackingAlertRoutingKey,
+    payload: unknown,
+    raw: ConsumeMessage,
+  ): Promise<void> {
+    if (routingKey === TRIP_INCIDENT_REPORTED_ROUTING_KEY) {
+      await this.handleIncidentReported(payload, raw);
+      return;
+    }
+
     const messageId = raw.properties.messageId ?? raw.properties.correlationId;
     if (!messageId) {
       throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
@@ -47,7 +66,10 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
 
     const processingState = await this.idempotency.begin(routingKey, messageId);
     if (processingState === 'duplicate') {
-      this.logger.info({ routingKey, messageId, processingState }, 'Skipping already handled alert message');
+      this.logger.info(
+        { routingKey, messageId, processingState },
+        'Skipping already handled alert message',
+      );
       return;
     }
     if (processingState === 'locked') {
@@ -76,12 +98,86 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
       );
     } catch (error) {
       if (error instanceof ZodError) {
-        this.logger.warn({ routingKey, messageId, issues: error.issues }, 'Dropping malformed alert notification event');
+        this.logger.warn(
+          { routingKey, messageId, issues: error.issues },
+          'Dropping malformed alert notification event',
+        );
         await this.idempotency.markProcessed(routingKey, messageId);
         return;
       }
 
       await this.idempotency.release(routingKey, messageId);
+      throw error;
+    }
+  }
+
+  private async handleIncidentReported(payload: unknown, raw: ConsumeMessage): Promise<void> {
+    const parsed = IncidentReportedPayloadSchema.safeParse(payload);
+    const brokerMessageId = raw.properties.messageId ?? raw.properties.correlationId;
+    const messageId = parsed.success ? (parsed.data.eventId ?? brokerMessageId) : brokerMessageId;
+    if (!messageId) {
+      throw new Error(`MISSING_MESSAGE_ID_${TRIP_INCIDENT_REPORTED_ROUTING_KEY}`);
+    }
+
+    const processingState = await this.idempotency.begin(
+      TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+      messageId,
+    );
+    if (processingState === 'duplicate') {
+      this.logger.info(
+        { routingKey: TRIP_INCIDENT_REPORTED_ROUTING_KEY, messageId, processingState },
+        'Skipping already handled incident notification message',
+      );
+      return;
+    }
+    if (processingState === 'locked') {
+      throw new Error(`MESSAGE_LOCKED_${TRIP_INCIDENT_REPORTED_ROUTING_KEY}_${messageId}`);
+    }
+
+    try {
+      if (!parsed.success) {
+        this.logger.warn(
+          {
+            routingKey: TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+            messageId,
+            issues: parsed.error.issues.map((issue) => ({ code: issue.code, path: issue.path })),
+          },
+          'Dropping malformed incident notification event',
+        );
+        await this.idempotency.markProcessed(TRIP_INCIDENT_REPORTED_ROUTING_KEY, messageId);
+        return;
+      }
+
+      const recipientUserIds = [
+        ...new Set(
+          await this.operatorRecipients.resolveOperatorRecipientUserIds(parsed.data.operatorId),
+        ),
+      ];
+      const notifications = mapIncidentReportedToNotifications(parsed.data, recipientUserIds);
+      await Promise.all(
+        notifications.map((notification) =>
+          this.notificationsService.createNotification({
+            ...notification,
+            dedupeKey: buildNotificationDedupeKey(
+              TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+              messageId,
+              notification.userId,
+              notification.type,
+            ),
+          }),
+        ),
+      );
+      await this.idempotency.markProcessed(TRIP_INCIDENT_REPORTED_ROUTING_KEY, messageId);
+      this.logger.info(
+        {
+          routingKey: TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+          messageId,
+          notificationCount: notifications.length,
+        },
+        'Processed incident notification event',
+      );
+    } catch (error) {
+      await this.idempotency.release(TRIP_INCIDENT_REPORTED_ROUTING_KEY, messageId);
       throw error;
     }
   }

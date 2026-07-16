@@ -1,8 +1,13 @@
 using FluentAssertions;
+using VietRide.Payment.Application.Abstractions.Repositories;
+using VietRide.Payment.Application.Abstractions.Services;
 using VietRide.Payment.Application.Features.Internal.Payments.BatchChargePayment;
+using VietRide.Payment.Application.Models;
 using VietRide.Payment.Domain.Entities;
+using VietRide.Payment.Domain.Enums;
 using VietRide.Payment.Domain.Exceptions;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 using PaymentEntity = VietRide.Payment.Domain.Entities.Payment;
@@ -32,6 +37,8 @@ public sealed class BatchChargePaymentCommandHandlerTests
         db.Payments.Should().HaveCount(2);
         db.Payments.Select(x => x.IdempotencyKey).Should().OnlyContain(x => x == null);
         db.WalletTransactions.Should().HaveCount(2);
+        db.PlatformWallets.Transactions.Should().HaveCount(2);
+        db.PlatformWallets.Balance.Amount.Should().Be(200_000);
         db.WalletTransactions.Select(x => x.ReferenceType.ToString()).Should().OnlyContain(x => x == "BOOKING_PAYMENT");
         db.Wallet!.Balance.Amount.Should().Be(50_000);
         db.SaveChangesCount.Should().Be(1);
@@ -117,7 +124,12 @@ public sealed class BatchChargePaymentCommandHandlerTests
     private static BatchChargePaymentCommandHandler CreateHandler(FakeDbContext db)
     {
         var clock = new FrozenClock(Now);
-        return new BatchChargePaymentCommandHandler(db, clock);
+        return new BatchChargePaymentCommandHandler(
+            db,
+            clock,
+            new FakeIntegrationEventOutbox(),
+            new NoOpRevenueLedgerWriter(),
+            db.PlatformWallets);
     }
 
     private static BatchChargePaymentCommand CreateCommand(
@@ -130,10 +142,27 @@ public sealed class BatchChargePaymentCommandHandlerTests
             userId,
             "WALLET",
             [
-                new BatchChargePaymentCommand.Item("BOOKING", outboundBookingId, outboundAmount),
-                new BatchChargePaymentCommand.Item("BOOKING", returnBookingId, returnAmount),
+                CreateItem(outboundBookingId, outboundAmount),
+                CreateItem(returnBookingId, returnAmount),
             ],
             "idem-key");
+
+    private static BatchChargePaymentCommand.Item CreateItem(Guid bookingId, long amount)
+        => new(
+            "BOOKING",
+            bookingId,
+            amount,
+            new PaymentContextV1(1,
+            [
+                new PaymentAllocationV1(
+                    bookingId,
+                    "BOOKING",
+                    Guid.NewGuid(),
+                    Guid.NewGuid(),
+                    amount,
+                    0,
+                    0),
+            ]));
 
     private sealed class FakeDbContext : IBatchChargePaymentDbContext
     {
@@ -146,6 +175,7 @@ public sealed class BatchChargePaymentCommandHandlerTests
         public Guid? ExistingReferenceId { get; init; }
         public List<PaymentEntity> Payments { get; } = [];
         public List<WalletTransaction> WalletTransactions { get; } = [];
+        public FakePlatformWalletRepository PlatformWallets { get; } = new();
         public int SaveChangesCount { get; private set; }
 
         public Task<Wallet?> FindWalletAsync(Guid userId, CancellationToken cancellationToken)
@@ -170,6 +200,55 @@ public sealed class BatchChargePaymentCommandHandlerTests
         }
     }
 
+    private sealed class FakePlatformWalletRepository : IPlatformWalletRepository
+    {
+        public Money Balance { get; private set; } = Money.Zero;
+        public List<PlatformWalletTransaction> Transactions { get; } = [];
+
+        public Task<PlatformWalletTransaction> CreditAsync(
+            Money amount,
+            PlatformWalletTransactionRef referenceType,
+            Guid? referenceId,
+            string? note,
+            CancellationToken cancellationToken)
+        {
+            var before = Balance;
+            Balance += amount;
+            var transaction = PlatformWalletTransaction.Create(
+                PlatformWalletTransactionType.CREDIT,
+                amount,
+                before,
+                Balance,
+                referenceType,
+                referenceId,
+                note);
+            Transactions.Add(transaction);
+            return Task.FromResult(transaction);
+        }
+
+        public Task<PlatformWalletTransaction> DebitAsync(
+            Money amount,
+            PlatformWalletTransactionRef referenceType,
+            Guid? referenceId,
+            string? note,
+            CancellationToken cancellationToken)
+            => throw new NotSupportedException();
+
+        public Task<PlatformWallet> GetSingletonAsync(CancellationToken cancellationToken)
+            => throw new NotSupportedException();
+
+        public Task<PlatformWallet?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<PlatformWallet> AddAsync(PlatformWallet entity, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public void Update(PlatformWallet entity) => throw new NotSupportedException();
+        public void Remove(PlatformWallet entity) => throw new NotSupportedException();
+        public IQueryable<PlatformWallet> Query() => throw new NotSupportedException();
+        public IQueryable<PlatformWallet> QueryNoTracking() => throw new NotSupportedException();
+    }
+
     private sealed class FrozenClock : IClock
     {
         public FrozenClock(DateTimeOffset utcNow)
@@ -178,5 +257,20 @@ public sealed class BatchChargePaymentCommandHandlerTests
         }
 
         public DateTimeOffset UtcNow { get; }
+    }
+
+    private sealed class FakeIntegrationEventOutbox : IIntegrationEventOutbox
+    {
+        public Task EnqueueAsync(string eventType, string payloadJson, CancellationToken ct = default)
+            => Task.CompletedTask;
+    }
+
+    private sealed class NoOpRevenueLedgerWriter : IRevenueLedgerWriter
+    {
+        public Task RecordPaymentSucceededAsync(
+            Guid sourceEventId,
+            PaymentContextV1 context,
+            CancellationToken cancellationToken)
+            => Task.CompletedTask;
     }
 }

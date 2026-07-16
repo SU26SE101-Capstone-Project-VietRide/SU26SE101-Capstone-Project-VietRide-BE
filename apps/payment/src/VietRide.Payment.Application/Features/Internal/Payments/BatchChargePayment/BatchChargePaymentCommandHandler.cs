@@ -1,7 +1,14 @@
+using System.Text.Json;
 using MediatR;
+using VietRide.Payment.Application.Abstractions.Repositories;
+using VietRide.Payment.Application.Abstractions.Services;
+using VietRide.Payment.Application.Events;
+using VietRide.Payment.Application.Models;
 using VietRide.Payment.Domain.Entities;
+using VietRide.Payment.Domain.Enums;
 using VietRide.Payment.Domain.Exceptions;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 using PaymentEntity = VietRide.Payment.Domain.Entities.Payment;
@@ -26,11 +33,22 @@ public sealed class BatchChargePaymentCommandHandler
 
     private readonly IBatchChargePaymentDbContext _db;
     private readonly IClock _clock;
+    private readonly IIntegrationEventOutbox _outbox;
+    private readonly IRevenueLedgerWriter _revenueLedger;
+    private readonly IPlatformWalletRepository _platformWallets;
 
-    public BatchChargePaymentCommandHandler(IBatchChargePaymentDbContext db, IClock clock)
+    public BatchChargePaymentCommandHandler(
+        IBatchChargePaymentDbContext db,
+        IClock clock,
+        IIntegrationEventOutbox outbox,
+        IRevenueLedgerWriter revenueLedger,
+        IPlatformWalletRepository platformWallets)
     {
         _db = db;
         _clock = clock;
+        _outbox = outbox;
+        _revenueLedger = revenueLedger;
+        _platformWallets = platformWallets;
     }
 
     public async Task<BatchChargePaymentResult> Handle(
@@ -38,6 +56,13 @@ public sealed class BatchChargePaymentCommandHandler
         CancellationToken cancellationToken)
     {
         GuardSupportedRequest(request);
+        var contexts = request.Items.ToDictionary(
+            item => item.ReferenceId,
+            item => PaymentContextCodec.ValidateAndSerialize(
+                item.Context,
+                item.ReferenceType,
+                item.ReferenceId,
+                item.Amount));
         await _db.AcquirePaymentReferenceLocksAsync(request.Items, cancellationToken).ConfigureAwait(false);
 
         var wallet = await _db.FindWalletAsync(request.UserId, cancellationToken).ConfigureAwait(false)
@@ -67,10 +92,18 @@ public sealed class BatchChargePaymentCommandHandler
             var amount = Money.FromRaw(item.Amount);
             var (before, after) = wallet.Debit(amount);
             var payment = PaymentEntity.CreateSucceededWalletBookingCharge(item.ReferenceId, request.UserId, amount, now);
+            payment.AttachContext(contexts[item.ReferenceId]);
             var transaction = WalletTransaction.CreateBookingPaymentDebit(request.UserId, item.ReferenceId, amount, before, after);
 
             _db.AddPayment(payment);
             _db.AddWalletTransaction(transaction);
+            await _platformWallets.CreditAsync(
+                amount,
+                PlatformWalletTransactionRef.BOOKING_PAYMENT_HOLD,
+                item.ReferenceId,
+                "BOOKING payment hold",
+                cancellationToken).ConfigureAwait(false);
+            await EnqueuePaymentSucceededAsync(payment, cancellationToken).ConfigureAwait(false);
 
             results.Add(new BatchChargePaymentResult.Item(
                 payment.Id,
@@ -82,6 +115,26 @@ public sealed class BatchChargePaymentCommandHandler
 
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         return new BatchChargePaymentResult(results);
+    }
+
+    private async Task EnqueuePaymentSucceededAsync(
+        PaymentEntity payment,
+        CancellationToken cancellationToken)
+    {
+        var context = PaymentContextCodec.DeserializeTrusted(payment.Context);
+        var evt = new PaymentSucceededIntegrationEvent(
+            payment.Id,
+            payment.ReferenceType,
+            payment.ReferenceId,
+            payment.Amount.Amount,
+            payment.Method,
+            context);
+        await _revenueLedger.RecordPaymentSucceededAsync(
+            evt.EventId,
+            context,
+            cancellationToken).ConfigureAwait(false);
+        var payload = JsonSerializer.Serialize(evt, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        await _outbox.EnqueueAsync(evt.EventType, payload, cancellationToken).ConfigureAwait(false);
     }
 
     private static void GuardSupportedRequest(BatchChargePaymentCommand request)

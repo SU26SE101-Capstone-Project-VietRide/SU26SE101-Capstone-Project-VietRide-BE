@@ -79,13 +79,17 @@ describe('MessageIdempotencyService', () => {
       'EX',
       RABBITMQ_IDEMPOTENCY_TTL_SECONDS,
     );
-    expect(redisMultiDel).toHaveBeenCalledWith(`notification:idem:processing:${ROUTING_KEY}:${MESSAGE_ID}`);
+    expect(redisMultiDel).toHaveBeenCalledWith(
+      `notification:idem:processing:${ROUTING_KEY}:${MESSAGE_ID}`,
+    );
     expect(redisMultiExec).toHaveBeenCalled();
   });
 
   it('releases processing lock for transient failures', async () => {
     await service.release(ROUTING_KEY, MESSAGE_ID);
 
-    expect(redisDel).toHaveBeenCalledWith(`notification:idem:processing:${ROUTING_KEY}:${MESSAGE_ID}`);
+    expect(redisDel).toHaveBeenCalledWith(
+      `notification:idem:processing:${ROUTING_KEY}:${MESSAGE_ID}`,
+    );
   });
 });

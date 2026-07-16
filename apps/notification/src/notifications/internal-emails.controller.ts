@@ -2,10 +2,7 @@ import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { ApiBody, ApiHeader, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ZodValidationPipe } from '@vietride/nest-common';
 import { InternalJwtAuthGuard } from '../auth/internal-jwt-auth.guard';
-import {
-  CreateEmailSendSchema,
-  type CreateEmailSendDto,
-} from './dto/create-email-send.dto';
+import { CreateEmailSendSchema, type CreateEmailSendDto } from './dto/create-email-send.dto';
 import {
   createEmailSendBodySchema,
   emailDeliverySchema,
@@ -24,7 +21,8 @@ export class InternalEmailsController {
   @HttpCode(202)
   @ApiOperation({
     summary: 'Enqueue an internal email delivery',
-    description: 'Internal services use this endpoint to enqueue SendGrid email delivery through notification.',
+    description:
+      'Internal services use this endpoint to enqueue SendGrid email delivery through notification.',
   })
   @ApiHeader({ name: 'X-Internal-Auth', required: true, description: 'Bearer internal JWT' })
   @ApiBody({

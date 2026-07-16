@@ -16,6 +16,14 @@
     <PackageReference Include="Hangfire.AspNetCore" />
     <PackageReference Include="Hangfire.PostgreSql" />
     <PackageReference Include="StackExchange.Redis" />
+    <PackageReference Include="Google.Cloud.Storage.V1" />
+    <PackageReference Include="PDFsharp-MigraDoc" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Invoices\Fonts\NotoSans-Regular.ttf" />
+    <EmbeddedResource Include="Invoices\Fonts\NotoSans-Bold.ttf" />
+    <None Include="Invoices\Fonts\OFL-1.1.txt" Pack="true" PackagePath="licenses\OFL-1.1.txt" />
   </ItemGroup>
 
   <PropertyGroup>

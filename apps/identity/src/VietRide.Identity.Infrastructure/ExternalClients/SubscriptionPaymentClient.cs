@@ -30,14 +30,24 @@ public sealed class SubscriptionPaymentClient : ISubscriptionPaymentClient
                 request.OperatorId,
                 request.PlanId,
                 request.BillingPeriod,
+                request.PaymentMethod,
                 request.Amount,
+                Context = request.Snapshot,
             }, options: JsonOptions),
         };
         message.Headers.TryAddWithoutValidation("Idempotency-Key", request.IdempotencyKey);
 
         using var response = await _httpClient.SendAsync(message, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
-            throw new HttpRequestException($"Payment subscription creation failed with status {(int)response.StatusCode}.");
+        {
+            var failure = await response.Content.ReadFromJsonAsync<ApiResponse>(
+                JsonOptions,
+                cancellationToken).ConfigureAwait(false);
+            throw new SubscriptionPaymentClientException(
+                (int)response.StatusCode,
+                failure?.Error.Code ?? "PAYMENT_SERVICE_ERROR",
+                failure?.Error.Message ?? "Payment subscription creation failed.");
+        }
 
         var envelope = await response.Content.ReadFromJsonAsync<ApiResponse<SubscriptionPaymentCreationResult>>(
             JsonOptions,

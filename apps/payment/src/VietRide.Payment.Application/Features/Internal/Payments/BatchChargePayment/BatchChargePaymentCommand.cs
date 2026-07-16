@@ -1,4 +1,5 @@
 using MediatR;
+using VietRide.Payment.Application.Models;
 
 namespace VietRide.Payment.Application.Features.Internal.Payments.BatchChargePayment;
 
@@ -11,5 +12,6 @@ public sealed record BatchChargePaymentCommand(
     public sealed record Item(
         string ReferenceType,
         Guid ReferenceId,
-        long Amount);
+        long Amount,
+        PaymentContextV1? Context = null);
 }

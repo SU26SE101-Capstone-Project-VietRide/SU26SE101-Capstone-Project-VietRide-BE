@@ -401,6 +401,7 @@ public sealed class DevicesEndpointsTests : IClassFixture<AuthWebApplicationFact
                 .ConfigureWarnings(warnings => warnings.Ignore(
                     Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning))
                 .UseNpgsql(_dataSource ?? throw new InvalidOperationException("Fixture is not initialized."))
+                .ConfigureWarnings(warnings => warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning))
                 .Options;
 
             return new IdentityDbContext(options, new SystemClock());

@@ -16,7 +16,21 @@ public sealed record ChargeResult(
 public sealed record BatchChargeItem(
     string ReferenceType,
     Guid ReferenceId,
-    long Amount);
+    long Amount,
+    PaymentContextSnapshot? Context = null);
+
+public sealed record PaymentContextSnapshot(
+    int Version,
+    IReadOnlyList<PaymentAllocationSnapshot> Allocations);
+
+public sealed record PaymentAllocationSnapshot(
+    Guid ReferenceId,
+    string ReferenceType,
+    Guid OperatorId,
+    Guid TripId,
+    long GrossAmount,
+    long VoucherVietRideFundedAmount,
+    long VoucherOperatorFundedAmount);
 
 public sealed record BatchChargePaymentResult(
     Guid PaymentId,
@@ -82,7 +96,8 @@ public interface IPaymentServiceClient
         long amount,
         string method,
         string idempotencyKey,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        PaymentContextSnapshot? context = null);
 
     Task<BatchChargeOutcome> BatchChargeAsync(
         Guid userId,

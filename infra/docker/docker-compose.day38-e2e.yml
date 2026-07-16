@@ -1,0 +1,99 @@
+name: day38-e2e
+
+# Isolated Day 38 acceptance overlay. It never reuses developer container names,
+# host ports, networks, or volumes from the default compose project.
+services:
+  postgres:
+    container_name: day38-e2e-postgres
+    ports:
+      - "55438:5432"
+
+  redis:
+    container_name: day38-e2e-redis
+    ports:
+      - "56380:6379"
+
+  rabbitmq:
+    container_name: day38-e2e-rabbitmq
+    ports:
+      - "55682:5672"
+      - "55683:15672"
+
+  identity:
+    container_name: day38-e2e-identity
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      EMAIL_PROVIDER: LOG
+    ports:
+      - "57001:5001"
+
+  trip:
+    container_name: day38-e2e-trip
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+    ports:
+      - "57002:5002"
+
+  booking:
+    container_name: day38-e2e-booking
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+    ports:
+      - "57003:5003"
+
+  payment:
+    container_name: day38-e2e-payment
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      InvoiceStorage__Provider: E2E_LOCAL
+      InvoiceStorage__Bucket: day38-e2e
+      InvoiceStorage__LocalRootPath: /tmp/day38-invoices
+      InvoiceStorage__StableBaseUrl: http://gateway:3000
+      InvoiceStorage__SignedUrlTtlMinutes: "60"
+      OperatorWeb__InvoiceDetailBaseUrl: http://operator.day38.test/invoices
+      Day38E2E__Enabled: "true"
+      InvoiceBackfill__Enabled: "true"
+      PaymentContextBackfill__Enabled: "true"
+      PaymentContextBackfill__DryRun: "false"
+      RevenueLedgerBackfill__Enabled: "true"
+      RevenueLedgerBackfill__LegacyCutoffUtc: "2020-01-01T00:00:00Z"
+    tmpfs:
+      - /tmp/day38-invoices
+    ports:
+      - "57004:5004"
+
+  parcel:
+    container_name: day38-e2e-parcel
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+    ports:
+      - "57005:5005"
+
+  notification:
+    container_name: day38-e2e-notification
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.notification.day38-e2e
+    environment:
+      NODE_ENV: development
+      SENDGRID_API_KEY: ""
+      FCM_PROJECT_ID: ""
+      FCM_CLIENT_EMAIL: ""
+      FCM_PRIVATE_KEY: ""
+      FCM_DRY_RUN: "false"
+    ports:
+      - "57012:3002"
+
+  gateway:
+    container_name: day38-e2e-gateway
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.gateway.day38-e2e
+    environment:
+      NODE_ENV: development
+    ports:
+      - "57300:3000"
+
+networks:
+  default:
+    name: day38-e2e-net

@@ -1,5 +1,6 @@
 using FluentAssertions;
 using VietRide.Payment.Application.Features.Internal.Payments.ChargePayment;
+using VietRide.Payment.Application.Models;
 
 namespace VietRide.Payment.UnitTests.Features.Internal.Payments.ChargePayment;
 
@@ -36,6 +37,26 @@ public sealed class ChargePaymentCommandValidatorTests
             Guid.NewGuid(),
             250_000,
             method,
+            new PaymentContextV1(
+                1,
+                [
+                    new PaymentAllocationV1(
+                        Guid.NewGuid(),
+                        "BOOKING",
+                        Guid.NewGuid(),
+                        Guid.NewGuid(),
+                        125_000,
+                        0,
+                        0),
+                    new PaymentAllocationV1(
+                        Guid.NewGuid(),
+                        "BOOKING",
+                        Guid.NewGuid(),
+                        Guid.NewGuid(),
+                        125_000,
+                        0,
+                        0)
+                ]),
             Guid.NewGuid().ToString("N"),
             "127.0.0.1");
 }

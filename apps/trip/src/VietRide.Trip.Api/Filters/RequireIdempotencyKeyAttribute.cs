@@ -14,7 +14,8 @@ public sealed class RequireIdempotencyKeyAttribute : Attribute, IActionFilter
             || values.Count == 0
             || values.All(string.IsNullOrWhiteSpace))
         {
-            throw new ValidationException(
+            throw new CodedValidationException(
+                "IDEMPOTENCY_KEY_REQUIRED",
                 "Idempotency-Key header is required.",
                 [new ValidationError(HeaderName, "Idempotency-Key header is required.")]);
         }

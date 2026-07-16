@@ -5148,6 +5148,110 @@ table, column, migration, `realertedAt`, custom poller, or package beyond approv
 Day 22 owns fact publication, Booking pending-action creation, and re-alert delivery. Day 23 owns
 passenger accept/reject and timeout/refund resolution; Day 22 does not implement those actions.
 
+### `parcel.parcel.unloaded`
+
+Producer: Parcel. Consumer: Notification. Exchange: `vietride.events`.
+
+```json
+{
+  "parcelId": "uuid",
+  "tripId": "uuid",
+  "userIds": ["sender-user-uuid", "recipient-user-uuid"]
+}
+```
+
+The Parcel-local transaction enqueues this event only for the winning
+`IN_TRANSIT -> UNLOADED` CAS. `userIds` is distinct and always includes the sender; it includes
+the recipient account when the Parcel has one. A replay or CAS loser emits no event.
+
+### `parcel.parcel.delivered_pending_confirm`
+
+Producer: Parcel. Consumer: Notification. Exchange: `vietride.events`.
+
+```json
+{
+  "parcelId": "uuid",
+  "parcelCode": "VR-PCL-20260518-P7K3D9Q2",
+  "operatorId": "uuid",
+  "tripId": "uuid",
+  "userId": "recipient-user-uuid",
+  "recipientUserIds": ["recipient-user-uuid"],
+  "deliveryToken": "uuid",
+  "expiresAt": "2026-07-17T08:05:00Z"
+}
+```
+
+The Parcel-local transaction enqueues this event only for the winning
+`UNLOADED -> DELIVERED_PENDING_CONFIRM` CAS. `userId` and `recipientUserIds` are omitted when no
+recipient account is linked. `deliveryToken` is generated only by deliver and expires after
+48 hours. A replay or CAS loser emits no event.
+
+### `trip.incident.reported`
+
+Producer: Trip. Consumer: Notification. Exchange: `vietride.events`. Optional fields bị omit khi
+không có giá trị; consumer chấp nhận cả omitted và `null` trong giai đoạn tương thích.
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-07-16T03:00:00Z",
+  "eventType": "trip.incident.reported",
+  "incidentId": "uuid",
+  "tripId": "uuid",
+  "operatorId": "uuid",
+  "reporterUserId": "uuid",
+  "category": "TRAFFIC_JAM",
+  "description": "Kẹt xe tại nút giao",
+  "photoUrls": ["https://storage.example/incident-1.jpg"],
+  "latitude": 10.7731,
+  "longitude": 106.7032,
+  "reportedAt": "2026-07-16T03:00:00Z"
+}
+```
+
+`occurredAt` và `reportedAt` dùng cùng instant từ `IClock`. Payload không chứa recipient IDs;
+Notification resolve active `OPERATOR_ADMIN` theo `operatorId`.
+
+### `trip.stop.arrived`
+
+Producer: Trip. Consumers: Parcel, Notification. Exchange: `vietride.events`.
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-07-16T06:00:00Z",
+  "eventType": "trip.stop.arrived",
+  "tripId": "uuid",
+  "stopId": "uuid",
+  "operatorId": "uuid",
+  "actorUserId": "uuid",
+  "actualArrivalTime": "2026-07-16T06:00:00Z"
+}
+```
+
+`eventId` là identity dedupe của consumer. `occurredAt` và `actualArrivalTime` dùng cùng instant từ
+`IClock`; payload không chứa ETA động và không thay đổi static `TripStop.estimatedArrivalTime`.
+
+### `trip.destination.arrived`
+
+Producer: Trip. Consumer: Parcel. Exchange: `vietride.events`.
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-07-16T06:00:00Z",
+  "eventType": "trip.destination.arrived",
+  "tripId": "uuid",
+  "destinationStationId": "uuid",
+  "operatorId": "uuid",
+  "actorUserId": "uuid",
+  "actualArrivalTime": "2026-07-16T06:00:00Z"
+}
+```
+
+Event chỉ được phát một lần cho mỗi Trip destination anchor. `destinationStationId` được derive từ
+Route; không tạo cross-database foreign key đến Identity cho `actorUserId`.
+
 ### `trip.trip.assigned` and `trip.trip.crew_changed`
 
 Producer: Trip. Consumer: Notification. Exchange: `vietride.events`.

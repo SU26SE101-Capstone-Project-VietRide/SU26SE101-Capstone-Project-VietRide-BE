@@ -25,13 +25,16 @@ builder.Services.AddVietRideSharedWeb(builder.Configuration, ServiceName);
 builder.Services.AddVietRideDbContext<TripDbContext>(
     builder.Configuration,
     configureDataSource: TripDbContext.ConfigurePostgresEnums);
-if (AreBackgroundWorkersEnabled(builder.Configuration))
+var backgroundWorkersEnabled = AreBackgroundWorkersEnabled(
+    builder.Configuration,
+    builder.Environment);
+if (backgroundWorkersEnabled)
 {
     builder.Services.AddVietRideMessaging(builder.Configuration);
 }
 builder.Services.AddVietRideMediatRBehaviors(
     handlerAssemblies: [typeof(ApplicationAssemblyMarker).Assembly]);
-builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddInfrastructure(builder.Configuration, backgroundWorkersEnabled);
 builder.Services.AddVietRideIdempotency("trip");
 var app = builder.Build();
 
@@ -57,8 +60,11 @@ static bool IsWebApplicationFactoryHost()
     => AppDomain.CurrentDomain.GetAssemblies()
         .Any(assembly => assembly.GetName().Name == "Microsoft.AspNetCore.Mvc.Testing");
 
-static bool AreBackgroundWorkersEnabled(IConfiguration configuration) =>
-    configuration.GetValue<bool?>("Trip:BackgroundWorkers:Enabled") ?? true;
+static bool AreBackgroundWorkersEnabled(
+    IConfiguration configuration,
+    IHostEnvironment environment) =>
+    !environment.IsEnvironment("Testing") &&
+    (configuration.GetValue<bool?>("Trip:BackgroundWorkers:Enabled") ?? true);
 
 // Expose Program for WebApplicationFactory<Program> in integration tests.
 public partial class Program;

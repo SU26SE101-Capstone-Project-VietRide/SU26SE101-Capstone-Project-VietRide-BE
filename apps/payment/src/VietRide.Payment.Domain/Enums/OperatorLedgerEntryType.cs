@@ -1,0 +1,12 @@
+namespace VietRide.Payment.Domain.Enums;
+
+public enum OperatorLedgerEntryType
+{
+    BOOKING_REVENUE,
+    PARCEL_REVENUE,
+    BOOKING_REFUND,
+    PARCEL_REFUND,
+    VOUCHER_VIETRIDE_FUNDED_CREDIT,
+    VOUCHER_OPERATOR_FUNDED_AUDIT,
+    ADJUSTMENT,
+}

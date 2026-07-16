@@ -3,6 +3,9 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using VietRide.Trip.Application.Abstractions.Jobs;
+using VietRide.Trip.Infrastructure.Jobs;
 
 namespace VietRide.Trip.IntegrationTests;
 
@@ -47,20 +50,28 @@ public class HealthEndpointTests : IClassFixture<VietRideWebApplicationFactory>
         doc.RootElement.GetProperty("statusCode").GetInt32().Should().Be((int)HttpStatusCode.OK);
         doc.RootElement.GetProperty("data").GetProperty("service").GetString().Should().Be("Trip");
     }
+
+    [Fact]
+    public void TestHost_DisablesBackgroundJobScheduler()
+    {
+        using var scope = _factory.Services.CreateScope();
+
+        scope.ServiceProvider.GetRequiredService<ITripGenerationJobScheduler>()
+            .Should().BeOfType<DisabledTripGenerationJobScheduler>();
+    }
 }
 
 public class VietRideWebApplicationFactory : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        Environment.SetEnvironmentVariable("INTERNAL_JWT_SECRET", "test-secret-at-least-32-chars-long-xxxxx");
         builder.UseSetting("INTERNAL_JWT_SECRET", "test-secret-at-least-32-chars-long-xxxxx");
         builder.UseSetting("Trip:BackgroundWorkers:Enabled", "false");
-        builder.UseSetting("ConnectionStrings:Default", ResolveConnectionString("test"));
+        builder.UseSetting("ConnectionStrings:Default", ResolveConnectionString("postgres"));
         builder.UseEnvironment("Testing");
     }
 
-    private static string ResolveConnectionString(string databaseName)
+    internal static string ResolveConnectionString(string databaseName)
     {
         const string defaultConnectionString = "Host=localhost;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
 

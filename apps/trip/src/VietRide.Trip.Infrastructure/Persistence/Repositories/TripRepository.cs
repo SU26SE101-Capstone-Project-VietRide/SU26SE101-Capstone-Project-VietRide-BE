@@ -148,6 +148,18 @@ internal sealed class TripRepository : ITripRepository
             cancellationToken);
     }
 
+    public async Task<Domain.Entities.Trip?> GetForUpdateAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT 1 FROM vietride_trip.trips WHERE id = {tripId} FOR UPDATE",
+            cancellationToken);
+        return await _dbContext.Trips.FirstOrDefaultAsync(
+            trip => trip.Id == tripId,
+            cancellationToken);
+    }
+
     public async Task<DriverTripRouteDto?> GetDriverTripRouteAsync(
         Guid tripId,
         CancellationToken cancellationToken)

@@ -85,7 +85,8 @@ public class CreateBookingIntegrationTests
                 Arg.Any<long>(),
                 Arg.Any<string>(),
                 Arg.Any<string>(),
-                Arg.Any<CancellationToken>())
+                Arg.Any<CancellationToken>(),
+                Arg.Any<PaymentContextSnapshot?>())
             .Returns(new ChargeOutcome.Success(
                 new ChargeResult(Guid.NewGuid(), "SUCCEEDED", null)));
         _factory.TripClient.BookSeatsAsync(
@@ -287,7 +288,8 @@ public class CreateBookingIntegrationTests
                 Arg.Any<long>(),
                 Arg.Any<string>(),
                 Arg.Any<string>(),
-                Arg.Any<CancellationToken>())
+                Arg.Any<CancellationToken>(),
+                Arg.Any<PaymentContextSnapshot?>())
             .Returns(new ChargeOutcome.Success(
                 new ChargeResult(Guid.NewGuid(), "SUCCEEDED", null)));
         // book-seats returns false (lock expired)
@@ -500,23 +502,7 @@ public class CreateBookingWebApplicationFactory : WebApplicationFactory<Program>
                 });
             services.AddSingleton(mockUow);
 
-            // Replace IConnectionMultiplexer with a stub so the IdempotencyMiddleware
-            // does not require a live Redis during integration tests.
-            var mockRedis = Substitute.For<IConnectionMultiplexer>();
-            var mockDb = Substitute.For<IDatabase>();
-            mockRedis.GetDatabase(Arg.Any<int>(), Arg.Any<object>()).Returns(mockDb);
-            // Idempotency: first call returns no cached entry (new key) so middleware proceeds.
-            mockDb.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>())
-                .Returns(RedisValue.Null);
-            mockDb.StringSetAsync(
-                    Arg.Any<RedisKey>(),
-                    Arg.Any<RedisValue>(),
-                    Arg.Any<TimeSpan?>(),
-                    Arg.Any<bool>(),
-                    Arg.Any<When>(),
-                    Arg.Any<CommandFlags>())
-                .Returns(true);
-            services.AddSingleton(mockRedis);
+            services.AddSingleton<IConnectionMultiplexer>(InMemoryIdempotencyRedis.Create());
         });
     }
 

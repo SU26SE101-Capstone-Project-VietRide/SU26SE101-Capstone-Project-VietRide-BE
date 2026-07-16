@@ -9,11 +9,19 @@ export const CreateOperatorAnnouncementSchema = z
   })
   .superRefine((value, ctx) => {
     if (value.scope === 'TRIP' && !value.tripId) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['tripId'], message: 'tripId is required for TRIP scope' });
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['tripId'],
+        message: 'tripId is required for TRIP scope',
+      });
     }
     if (value.scope === 'OPERATOR' && value.tripId) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['tripId'], message: 'tripId is only allowed for TRIP scope' });
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['tripId'],
+        message: 'tripId is only allowed for TRIP scope',
+      });
     }
   });
 
-export type CreateOperatorAnnouncementDto = z.infer<typeof CreateOperatorAnnouncementSchema>;
+export type CreateOperatorAnnouncementDto = z.infer<typeof CreateOperatorAnnouncementSchema>;

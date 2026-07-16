@@ -50,12 +50,29 @@ public sealed class InternalBookingsController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("payment-context/{referenceType}/{referenceId:guid}")]
+    [ProducesResponseType(typeof(ApiResponse<PaymentContextSnapshotDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<PaymentContextSnapshotDto>> GetPaymentContextSnapshotAsync(
+        string referenceType,
+        Guid referenceId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(
+            new GetPaymentContextSnapshotQuery(referenceType, referenceId),
+            cancellationToken);
+
+        return Ok(result);
+    }
+
     [HttpGet("active-by-stop/{stopId:guid}/count")]
     public async Task<ActionResult<object>> GetActiveCountByStopAsync(
         Guid stopId, [FromQuery] Guid operatorId, CancellationToken cancellationToken)
         => Ok(new
         {
             activeBookingCount = await _mediator.Send(
-            new GetActiveBookingCountByStopQuery(stopId, operatorId), cancellationToken)
+             new GetActiveBookingCountByStopQuery(stopId, operatorId), cancellationToken)
         });
 }

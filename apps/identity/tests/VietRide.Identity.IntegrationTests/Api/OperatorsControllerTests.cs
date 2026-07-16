@@ -571,7 +571,10 @@ public sealed class OperatorsControllerTests :
                 return;
             }
 
-            await CreateDatabaseAsync();
+            if (!_databaseCreated)
+            {
+                await CreateDatabaseAsync();
+            }
 
             await using var scope = Services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();

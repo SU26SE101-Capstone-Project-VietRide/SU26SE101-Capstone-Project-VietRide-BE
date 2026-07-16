@@ -418,6 +418,8 @@ CREATE TABLE trips (
     departure_date_time TIMESTAMPTZ NOT NULL,
     estimated_arrival_time TIMESTAMPTZ NOT NULL,
     actual_departure_time TIMESTAMPTZ NULL,
+    destination_arrived_at TIMESTAMPTZ NULL,
+    destination_arrived_by_user_id UUID NULL, -- logical FK -> identity.users.id
     completed_at TIMESTAMPTZ NULL,
     disrupted_at TIMESTAMPTZ NULL,
     disruption_reason TEXT NULL,
@@ -464,6 +466,10 @@ COMMENT ON COLUMN trips.has_substitution IS
     'Set true when Trip_old triggers Vehicle Substitution (6.12). Reporting field.';
 COMMENT ON COLUMN trips.source IS
     'VEHICLE_SUBSTITUTION: created by 6.12 flow, exempt from maxTripsPerMonth counter check.';
+COMMENT ON COLUMN trips.destination_arrived_at IS
+    'Explicit Driver/Assistant destination-terminal anchor. Independent from completed_at; never synthesized by auto-complete.';
+COMMENT ON COLUMN trips.destination_arrived_by_user_id IS
+    'Logical FK to identity.users.id for the assigned Driver/Assistant who recorded destination arrival.';
 
 -- -----------------------------------------------------------------------------
 -- trip_audit_logs (append-only)

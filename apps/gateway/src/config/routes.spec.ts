@@ -48,12 +48,13 @@ describe('buildRouteTable', () => {
       ['/v1/admin/vouchers', env.BOOKING_BASE_URL],
       ['/v1/admin/trip-settlements', env.PAYMENT_BASE_URL],
       ['/v1/admin/platform-wallet', env.PAYMENT_BASE_URL],
+      ['/v1/admin/invoices', env.PAYMENT_BASE_URL],
     ] as const;
 
     expect(routes.find((r) => r.prefix === '/v1/admin')).toBeUndefined();
 
     expectedAdminRoutes.forEach(([prefix, target]) => {
-      const adminRoute = routes.find((r) => r.prefix === prefix);
+      const adminRoute = routes.find((r) => r.prefix === prefix && !r.pathPattern);
       if (!adminRoute) {
         throw new Error(`Expected ${prefix} route to be registered`);
       }
@@ -61,6 +62,36 @@ describe('buildRouteTable', () => {
       expect(adminRoute.target).toBe(target);
       expect(adminRoute.authRequired).toBe('user');
       expect(adminRoute.requiredRoles).toEqual(['SYSTEM_ADMIN']);
+    });
+  });
+
+  it('routes Day 38 finance APIs and the dynamic operator adjustment to Payment', () => {
+    const expected = [
+      ['/v1/operator/wallet', ['OPERATOR_ADMIN', 'OPERATOR_STAFF']],
+      ['/v1/operator/wallet/transactions', ['OPERATOR_ADMIN', 'OPERATOR_STAFF']],
+      ['/v1/operator/trip-settlements', ['OPERATOR_ADMIN', 'OPERATOR_STAFF']],
+      ['/v1/operator/ledger', ['OPERATOR_ADMIN', 'OPERATOR_STAFF']],
+      ['/v1/operator/invoices', ['OPERATOR_ADMIN']],
+      ['/v1/operator/invoices/11111111-1111-1111-1111-111111111111/download', ['OPERATOR_ADMIN']],
+      ['/v1/admin/invoices/11111111-1111-1111-1111-111111111111/retry', ['SYSTEM_ADMIN']],
+      ['/v1/admin/operators/11111111-1111-1111-1111-111111111111/wallet/adjust', ['SYSTEM_ADMIN']],
+    ] as const;
+
+    expected.forEach(([path, roles]) => {
+      const route = matchRoute(routes, path);
+      expect(route?.target).toBe(env.PAYMENT_BASE_URL);
+      expect(route?.authRequired).toBe('user');
+      expect(route?.requiredRoles).toEqual(roles);
+    });
+
+    expect(matchRoute(routes, '/v1/admin/operators')).toMatchObject({
+      target: env.IDENTITY_BASE_URL,
+    });
+    expect(
+      matchRoute(routes, '/v1/driver/trips/11111111-1111-1111-1111-111111111111/complete'),
+    ).toMatchObject({
+      target: env.TRIP_BASE_URL,
+      requiredRoles: ['DRIVER', 'ASSISTANT'],
     });
   });
 
@@ -169,7 +200,11 @@ describe('buildRouteTable', () => {
       ['/v1/operator/trips', '/v1/operator/trips', env.TRIP_BASE_URL],
       ['/v1/operator/booking-stats', '/v1/operator/booking-stats', env.BOOKING_BASE_URL],
       ['/v1/bookings', '/v1/bookings', env.BOOKING_BASE_URL],
-      ['/v1/bookings/trips/11111111-1111-4111-8111-111111111111/manifest', '/v1/bookings/trips', env.BOOKING_BASE_URL],
+      [
+        '/v1/bookings/trips/11111111-1111-4111-8111-111111111111/manifest',
+        '/v1/bookings/trips',
+        env.BOOKING_BASE_URL,
+      ],
     ] as const;
 
     cases.forEach(([path, prefix, target]) => {

@@ -455,6 +455,19 @@ function uuidKey() {
   return key;
 }
 
+function idempotencyRedisKeys(key) {
+  const keyHash = crypto.createHash('sha256').update(key, 'utf8').digest('hex').toUpperCase();
+  return [
+    `trip:idem:${key}`,
+    `booking:idem:${key}`,
+    `idempotency:${key}`,
+    `trip:idem:v2:response:${keyHash}`,
+    `trip:idem:v2:processing:${keyHash}`,
+    `booking:idem:v2:response:${keyHash}`,
+    `booking:idem:v2:processing:${keyHash}`,
+  ];
+}
+
 function parseJson(text, label) {
   try {
     return text ? JSON.parse(text) : null;
@@ -692,10 +705,7 @@ function staticArtifactChecks() {
 
 function cleanupRedis() {
   if (idempotencyKeys.size === 0) return;
-  const redisKeys = [...idempotencyKeys].flatMap((key) => [
-    `trip:idem:${key}`,
-    `idempotency:${key}`,
-  ]);
+  const redisKeys = [...idempotencyKeys].flatMap(idempotencyRedisKeys);
   execFileSync('docker', ['exec', 'vietride_redis', 'redis-cli', 'DEL', ...redisKeys], {
     encoding: 'utf8',
   });
@@ -936,10 +946,7 @@ function assertClean() {
     `Day-22 cleanup left owned rows: ${labels.map((label, index) => `${label}=${remaining[index]}`).join(', ')}`,
   );
   if (idempotencyKeys.size > 0) {
-    const redisKeys = [...idempotencyKeys].flatMap((key) => [
-      `trip:idem:${key}`,
-      `idempotency:${key}`,
-    ]);
+    const redisKeys = [...idempotencyKeys].flatMap(idempotencyRedisKeys);
     const redisRemaining = Number(
       capture('docker', ['exec', 'vietride_redis', 'redis-cli', 'EXISTS', ...redisKeys]),
     );
@@ -1638,16 +1645,12 @@ async function liveGatewayChecks() {
     body: queryBody,
   });
   expect(repeated, 200, null, 'repeated query values accepted');
-  expect(
-    await request('PATCH', `${schedulePath}?applyTo=FUTURE_ONLY&tag=b&tag=a`, {
-      token: tokens.admin,
-      key: repeatedKey,
-      body: queryBody,
-    }),
-    422,
-    'IDEMPOTENCY_KEY_MISMATCH',
-    'repeated query value order is significant',
+  const reorderedRepeated = await request(
+    'PATCH',
+    `${schedulePath}?applyTo=FUTURE_ONLY&tag=b&tag=a`,
+    { token: tokens.admin, key: repeatedKey, body: queryBody },
   );
+  expectSameReplay(repeated, reorderedRepeated, 'idempotency v2 canonicalizes repeated values');
 
   const crewPathKey = uuidKey();
   const crewBody = { driverUserId: ids.driver, assistantUserId: ids.assistant };

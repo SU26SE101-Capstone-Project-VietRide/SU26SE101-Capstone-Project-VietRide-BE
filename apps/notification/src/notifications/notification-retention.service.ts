@@ -1,16 +1,13 @@
 import { Inject, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import pino from 'pino';
 import { ENV_TOKEN } from '../app/tokens';
 import type { Env } from '../config/env.schema';
-import {
-  MILLISECONDS_PER_DAY,
-  RETENTION_JOB_NAME,
-} from './notification-retention.constants';
+import { MILLISECONDS_PER_DAY, RETENTION_JOB_NAME } from './notification-retention.constants';
 import { NotificationsRepository } from './notifications.repository';
+import { createNotificationLogger } from './notification-logger';
 
 @Injectable()
 export class NotificationRetentionService implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = pino({ name: NotificationRetentionService.name });
+  private readonly logger = createNotificationLogger(NotificationRetentionService.name);
   private interval: NodeJS.Timeout | null = null;
 
   constructor(
@@ -36,7 +33,8 @@ export class NotificationRetentionService implements OnModuleInit, OnModuleDestr
 
   async runRetention(now: Date = new Date()): Promise<number> {
     const cutoff = this.calculateCutoff(now);
-    const deletedCount = await this.notificationsRepository.deleteNotificationsCreatedBefore(cutoff);
+    const deletedCount =
+      await this.notificationsRepository.deleteNotificationsCreatedBefore(cutoff);
     this.logger.info(
       {
         job: RETENTION_JOB_NAME,

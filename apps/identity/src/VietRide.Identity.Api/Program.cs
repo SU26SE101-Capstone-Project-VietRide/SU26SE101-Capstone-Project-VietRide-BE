@@ -20,6 +20,7 @@ const string ServiceName = "Identity";
 Env.NoClobber().TraversePath().Load();
 
 var builder = WebApplication.CreateBuilder(args);
+var isTesting = builder.Environment.IsEnvironment("Testing");
 
 // Structured logging — overridden via appsettings or env.
 builder.Host.UseSerilog((ctx, _, lc) => lc
@@ -35,7 +36,11 @@ builder.Services.AddVietRideSharedWeb(builder.Configuration, ServiceName);
 // or env IDENTITY__CONNECTIONSTRINGS__DEFAULT.
 builder.Services.AddVietRideDbContext<IdentityDbContext>(
     builder.Configuration,
-    configureDataSource: IdentityDbContext.ConfigurePostgresEnums);
+    configureDataSource: IdentityDbContext.ConfigurePostgresEnums,
+    configureDbContext: isTesting
+        ? options => options.ConfigureWarnings(warnings => warnings.Ignore(
+            Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning))
+        : null);
 
 // MediatR v11 pipeline behaviors (Logging → Validation → Transaction)
 // + FluentValidation validators discovered from the Application assembly.
@@ -43,7 +48,6 @@ builder.Services.AddVietRideMediatRBehaviors(
     handlerAssemblies: [typeof(RegisterCommand).Assembly]);
 
 // Infrastructure: repositories, security services, email stub, Redis OTP rate-limiter.
-var isTesting = builder.Environment.IsEnvironment("Testing");
 builder.Services.AddInfrastructure(builder.Configuration, registerEventConsumer: !isTesting);
 builder.Services.AddVietRideIdempotency("identity");
 
@@ -51,7 +55,10 @@ var registerRecurringJobs = !isTesting;
 if (registerRecurringJobs)
 {
     builder.Services.AddIdentityHangfire(builder.Configuration);
-    builder.Services.AddHangfireServer();
+    builder.Services.AddHangfireServer(options =>
+    {
+        options.WorkerCount = builder.Configuration.GetValue("Hangfire:WorkerCount", 2);
+    });
 }
 
 // RabbitMQ publisher + Outbox background drainer (publishes integration events).
@@ -108,6 +115,11 @@ if (registerRecurringJobs)
         job => job.ResetMonthlyTripUsageAsync(CancellationToken.None),
         "1 0 1 * *",
         new RecurringJobOptions { TimeZone = ict });
+    recurringJobs.AddOrUpdate<OperatorWalletBackfillJob>(
+        OperatorWalletBackfillJob.RecurringJobId,
+        job => job.RunAsync(CancellationToken.None),
+        Cron.Minutely(),
+        new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
 }
 
 app.Run();

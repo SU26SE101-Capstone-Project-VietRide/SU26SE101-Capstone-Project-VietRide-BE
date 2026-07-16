@@ -27,6 +27,13 @@ public sealed class PaymentDbContext : VietRideDbContextBase, IBatchChargePaymen
     public DbSet<PlatformWallet> PlatformWallets => Set<PlatformWallet>();
     public DbSet<PlatformWalletTransaction> PlatformWalletTransactions => Set<PlatformWalletTransaction>();
     public DbSet<RefundFailureLog> RefundFailureLogs => Set<RefundFailureLog>();
+    public DbSet<Invoice> Invoices => Set<Invoice>();
+    public DbSet<InvoiceNumberCounter> InvoiceNumberCounters => Set<InvoiceNumberCounter>();
+    public DbSet<OperatorWallet> OperatorWallets => Set<OperatorWallet>();
+    public DbSet<OperatorWalletTransaction> OperatorWalletTransactions => Set<OperatorWalletTransaction>();
+    public DbSet<OperatorLedgerEntry> OperatorLedgerEntries => Set<OperatorLedgerEntry>();
+    public DbSet<OperatorTripSettlement> OperatorTripSettlements => Set<OperatorTripSettlement>();
+    public DbSet<ProcessedIntegrationEvent> ProcessedIntegrationEvents => Set<ProcessedIntegrationEvent>();
 
     public static void ConfigurePostgresTypes(NpgsqlDataSourceBuilder dataSourceBuilder)
     {
@@ -39,6 +46,14 @@ public sealed class PaymentDbContext : VietRideDbContextBase, IBatchChargePaymen
         dataSourceBuilder.MapEnum<WalletTransactionRef>($"{SchemaName}.wallet_transaction_ref", translator);
         dataSourceBuilder.MapEnum<PlatformWalletTransactionType>($"{SchemaName}.platform_wallet_transaction_type", translator);
         dataSourceBuilder.MapEnum<PlatformWalletTransactionRef>($"{SchemaName}.platform_wallet_transaction_ref", translator);
+        dataSourceBuilder.MapEnum<InvoiceStatus>($"{SchemaName}.invoice_status", translator);
+        dataSourceBuilder.MapEnum<InvoicePdfGenerationStatus>($"{SchemaName}.invoice_pdf_generation_status", translator);
+        dataSourceBuilder.MapEnum<OperatorWalletTransactionType>($"{SchemaName}.operator_wallet_transaction_type", translator);
+        dataSourceBuilder.MapEnum<OperatorWalletTransactionRef>($"{SchemaName}.operator_wallet_transaction_ref", translator);
+        dataSourceBuilder.MapEnum<OperatorLedgerEntryType>($"{SchemaName}.operator_ledger_entry_type", translator);
+        dataSourceBuilder.MapEnum<OperatorLedgerReferenceType>($"{SchemaName}.operator_ledger_reference_type", translator);
+        dataSourceBuilder.MapEnum<OperatorTripSettlementStatus>($"{SchemaName}.operator_trip_settlement_status", translator);
+        dataSourceBuilder.MapEnum<OperatorTripSettlementMethod>($"{SchemaName}.operator_trip_settlement_method", translator);
     }
 
     public Task<Wallet?> FindWalletAsync(Guid userId, CancellationToken cancellationToken)
@@ -81,6 +96,14 @@ public sealed class PaymentDbContext : VietRideDbContextBase, IBatchChargePaymen
         modelBuilder.HasPostgresEnum(SchemaName, "wallet_transaction_ref", Enum.GetNames<WalletTransactionRef>());
         modelBuilder.HasPostgresEnum(SchemaName, "platform_wallet_transaction_type", Enum.GetNames<PlatformWalletTransactionType>());
         modelBuilder.HasPostgresEnum(SchemaName, "platform_wallet_transaction_ref", Enum.GetNames<PlatformWalletTransactionRef>());
+        modelBuilder.HasPostgresEnum(SchemaName, "invoice_status", Enum.GetNames<InvoiceStatus>());
+        modelBuilder.HasPostgresEnum(SchemaName, "invoice_pdf_generation_status", Enum.GetNames<InvoicePdfGenerationStatus>());
+        modelBuilder.HasPostgresEnum(SchemaName, "operator_wallet_transaction_type", Enum.GetNames<OperatorWalletTransactionType>());
+        modelBuilder.HasPostgresEnum(SchemaName, "operator_wallet_transaction_ref", Enum.GetNames<OperatorWalletTransactionRef>());
+        modelBuilder.HasPostgresEnum(SchemaName, "operator_ledger_entry_type", Enum.GetNames<OperatorLedgerEntryType>());
+        modelBuilder.HasPostgresEnum(SchemaName, "operator_ledger_reference_type", Enum.GetNames<OperatorLedgerReferenceType>());
+        modelBuilder.HasPostgresEnum(SchemaName, "operator_trip_settlement_status", Enum.GetNames<OperatorTripSettlementStatus>());
+        modelBuilder.HasPostgresEnum(SchemaName, "operator_trip_settlement_method", Enum.GetNames<OperatorTripSettlementMethod>());
 
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(PaymentDbContext).Assembly);
 

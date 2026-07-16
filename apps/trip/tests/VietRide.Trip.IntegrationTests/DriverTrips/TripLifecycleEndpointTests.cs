@@ -190,7 +190,7 @@ public sealed class TripLifecycleEndpointTests
                 $"/v1/driver/trips/{denied.Id}/start",
                 "DRIVER",
                 denied.DriverUserId));
-            await AssertErrorAsync(missing, HttpStatusCode.UnprocessableEntity, "VALIDATION_ERROR");
+            await AssertErrorAsync(missing, HttpStatusCode.UnprocessableEntity, "IDEMPOTENCY_KEY_REQUIRED");
 
             var malformed = await client.SendAsync(CreateRequest(
                 HttpMethod.Post,
@@ -385,7 +385,7 @@ public sealed class TripLifecycleEndpointTests
         var actorId = Guid.NewGuid();
 
         var missing = await client.SendAsync(CreateRequest(HttpMethod.Post, path, role, actorId));
-        await AssertErrorAsync(missing, HttpStatusCode.UnprocessableEntity, "VALIDATION_ERROR");
+        await AssertErrorAsync(missing, HttpStatusCode.UnprocessableEntity, "IDEMPOTENCY_KEY_REQUIRED");
 
         var malformed = await client.SendAsync(CreateRequest(
             HttpMethod.Post,
@@ -759,8 +759,22 @@ public sealed class TripLifecycleEndpointTests
         using var document = JsonDocument.Parse(payload);
         var root = document.RootElement;
         root.EnumerateObject().Select(item => item.Name).Should().BeEquivalentTo(
-            ["tripId", "completedAt", "hasSubstitution"]);
+            [
+                "eventId",
+                "occurredAt",
+                "eventType",
+                "tripId",
+                "operatorId",
+                "terminalAt",
+                "completedAt",
+                "hasSubstitution"
+            ]);
+        root.GetProperty("eventId").GetGuid().Should().NotBeEmpty();
+        root.GetProperty("occurredAt").GetDateTime().Should().NotBe(default);
+        root.GetProperty("eventType").GetString().Should().Be("trip.trip.completed");
         root.GetProperty("tripId").GetGuid().Should().Be(tripId);
+        root.GetProperty("operatorId").GetGuid().Should().NotBeEmpty();
+        root.GetProperty("terminalAt").GetDateTimeOffset().Should().Be(now);
         root.GetProperty("completedAt").GetDateTimeOffset().Should().Be(now);
         root.GetProperty("hasSubstitution").GetBoolean().Should().BeFalse();
     }
@@ -949,10 +963,11 @@ public sealed class TripLifecycleEndpointTests
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            Environment.SetEnvironmentVariable("INTERNAL_JWT_SECRET", TestSecret);
             builder.UseSetting("INTERNAL_JWT_SECRET", TestSecret);
             builder.UseSetting("Trip:BackgroundWorkers:Enabled", "false");
-            builder.UseSetting("ConnectionStrings:Default", "Host=localhost;Port=5432;Database=test;Username=vietride;Password=vietride_dev");
+            builder.UseSetting(
+                "ConnectionStrings:Default",
+                global::VietRide.Trip.IntegrationTests.VietRideWebApplicationFactory.ResolveConnectionString("postgres"));
             builder.UseSetting("REDIS_URL", "localhost:6379");
             builder.UseEnvironment("Testing");
             builder.ConfigureTestServices(services =>

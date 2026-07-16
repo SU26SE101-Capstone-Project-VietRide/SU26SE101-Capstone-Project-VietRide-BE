@@ -152,9 +152,15 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
         Guid parcelId, Guid tripId, string parcelCode, Guid? loadedByUserId, DateTimeOffset now, CancellationToken ct);
 
     /// <summary>
-    /// Atomic: IN_TRANSIT -> DELIVERED_PENDING_CONFIRM with token generation.
+    /// Atomic: IN_TRANSIT -> UNLOADED. Clears delivery-token fields.
     /// </summary>
-    Task<ParcelPaymentTransitionSnapshot?> TryUnloadToPendingConfirmAsync(
+    Task<ParcelPaymentTransitionSnapshot?> TryMarkUnloadedAsync(
+        Guid parcelId, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
+    /// Atomic: UNLOADED -> DELIVERED_PENDING_CONFIRM with token generation.
+    /// </summary>
+    Task<ParcelPaymentTransitionSnapshot?> TryMarkDeliveredPendingConfirmAsync(
         Guid parcelId, Guid deliveryToken, DateTimeOffset deliveryTokenExpiresAt, DateTimeOffset now, CancellationToken ct);
 
     /// <summary>

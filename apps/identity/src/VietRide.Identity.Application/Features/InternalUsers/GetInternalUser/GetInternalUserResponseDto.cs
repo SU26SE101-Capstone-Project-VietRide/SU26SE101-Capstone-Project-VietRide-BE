@@ -7,4 +7,5 @@ public sealed record GetInternalUserResponseDto(
     string Role,
     Guid? OperatorId,
     string Status,
-    string? Phone = null);
+    string? Phone = null,
+    string? Email = null);

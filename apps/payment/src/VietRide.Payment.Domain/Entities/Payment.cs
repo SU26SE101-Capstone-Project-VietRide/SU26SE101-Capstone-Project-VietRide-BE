@@ -1,3 +1,4 @@
+using System.Text.Json;
 using VietRide.Payment.Domain.Enums;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
@@ -23,6 +24,32 @@ public sealed class Payment : BaseEntity<Guid>
     public DateTimeOffset? FailedAt { get; private set; }
     public DateTimeOffset? ExpiredAt { get; private set; }
     public DateTimeOffset? RefundedAt { get; private set; }
+    public string Context { get; private set; } = "{}";
+    public bool ContextReconciliationRequired { get; private set; }
+
+    public void AttachContext(string context)
+    {
+        if (string.IsNullOrWhiteSpace(context))
+            throw new ArgumentException("Payment context is required.", nameof(context));
+
+        using var document = JsonDocument.Parse(context);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+            throw new ArgumentException("Payment context must be a JSON object.", nameof(context));
+
+        if (!string.Equals(Context, "{}", StringComparison.Ordinal))
+            throw new InvalidOperationException("Payment context is immutable once assigned.");
+
+        Context = document.RootElement.GetRawText();
+        ContextReconciliationRequired = false;
+    }
+
+    public void MarkContextReconciliationRequired()
+    {
+        if (!string.Equals(Context, "{}", StringComparison.Ordinal))
+            throw new InvalidOperationException("A payment with trusted context does not require reconciliation.");
+
+        ContextReconciliationRequired = true;
+    }
 
     public static Payment CreatePendingRedirect(
         PaymentReferenceType referenceType,

@@ -77,5 +77,10 @@ internal sealed class PlatformWalletTransactionConfiguration : IEntityTypeConfig
         builder.HasIndex(x => new { x.ReferenceType, x.ReferenceId })
             .HasDatabaseName("idx_platform_wallet_transactions_reference")
             .HasFilter("reference_id IS NOT NULL");
+
+        builder.HasIndex(x => new { x.Type, x.ReferenceType, x.ReferenceId })
+            .HasDatabaseName("uq_platform_wallet_transactions_subscription")
+            .HasFilter("reference_type = 'SUBSCRIPTION_PAYMENT'")
+            .IsUnique();
     }
 }

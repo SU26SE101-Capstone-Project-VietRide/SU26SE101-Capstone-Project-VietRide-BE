@@ -125,6 +125,7 @@ internal class InMemoryRedisConnectionMultiplexer : DispatchProxy
 
             return targetMethod.Name switch
             {
+                nameof(IDatabase.KeyExistsAsync) => Task.FromResult(store.ContainsKey(Key(args![0]!))),
                 nameof(IDatabase.StringGetAsync) => Task.FromResult(store.TryGetValue(Key(args![0]!), out var value) ? value : RedisValue.Null),
                 nameof(IDatabase.StringSetAsync) => Task.FromResult(Set(Key(args![0]!), (RedisValue)args![1]!, (When)args![3]!)),
                 _ => targetMethod.ReturnType == typeof(void)

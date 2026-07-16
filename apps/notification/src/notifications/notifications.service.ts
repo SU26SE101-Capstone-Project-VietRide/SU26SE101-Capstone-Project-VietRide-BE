@@ -1,5 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import type { Notification } from '../generated/notification-prisma-client';
+import {
+  EmailDeliveryStatus,
+  NotificationType,
+  type Notification,
+} from '../generated/notification-prisma-client';
 import {
   CreateNotificationSchema,
   type CreateNotificationDto,
@@ -53,7 +57,7 @@ export class NotificationsService {
   async createNotification(dto: CreateNotificationDto): Promise<NotificationItemDto> {
     const result = await this.notificationsRepository.create(CreateNotificationSchema.parse(dto));
     const notification = result.notification;
-    if (result.created) {
+    if (result.created || notification.type === NotificationType.INVOICE_ISSUED) {
       await this.fcmPushQueue.enqueue({
         notificationId: notification.id,
         userId: notification.userId,
@@ -101,20 +105,28 @@ export class NotificationsService {
       normalizedDto.templateKey,
       normalizedDto.templateData,
     );
-    const emailDelivery = await this.notificationsRepository.createEmailDelivery({
+    const result = await this.notificationsRepository.createEmailDelivery({
       notificationId: normalizedDto.notificationId ?? null,
+      ...(normalizedDto.dedupeKey ? { dedupeKey: normalizedDto.dedupeKey } : {}),
       toEmail: normalizedDto.toEmail,
       templateKey: normalizedDto.templateKey,
       subject: renderedEmail.subject,
       sanitizedData: sanitizeEmailTemplateData(normalizedDto.templateData),
     });
 
-    await this.emailSendQueue.enqueue({
-      emailDeliveryId: emailDelivery.id,
-      toEmail: normalizedDto.toEmail,
-      templateKey: normalizedDto.templateKey,
-      templateData: normalizedDto.templateData,
-    });
+    const emailDelivery = result.delivery;
+    if (
+      result.created ||
+      emailDelivery.status === EmailDeliveryStatus.PENDING ||
+      emailDelivery.status === EmailDeliveryStatus.RETRYING
+    ) {
+      await this.emailSendQueue.enqueue({
+        emailDeliveryId: emailDelivery.id,
+        toEmail: normalizedDto.toEmail,
+        templateKey: normalizedDto.templateKey,
+        templateData: normalizedDto.templateData,
+      });
+    }
 
     return {
       id: emailDelivery.id,

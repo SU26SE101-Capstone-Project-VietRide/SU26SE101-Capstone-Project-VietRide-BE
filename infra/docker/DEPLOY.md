@@ -152,6 +152,68 @@ images and restarts — no rebuild.
 
 ---
 
+## Part E — Log access for the BE team (dozzle, no SSH)
+
+Goal: BE can read production logs themselves — without an SSH account, and without seeing any
+other container on the server. Two pieces do this, and **both are required**:
+
+1. `dozzle` (read-only log UI) reaches Docker through `dockerproxy`, which allows only
+   list-containers / read-logs / watch-events and blocks every write (`POST=0`). Dozzle has no
+   shell and no restart button. `DOZZLE_FILTER=name=vietride_` limits it to this stack, so
+   unrelated containers on the same daemon stay invisible.
+2. **Cloudflare Access** in front of the hostname. Dozzle itself is unauthenticated.
+
+> ⚠️ Without the Access policy in step 2, `logs.vietride.online` is **public** and production
+> logs — request payloads, emails, tokens — are readable by anyone who guesses the subdomain.
+> Create the Access policy **before** adding the public hostname, not after.
+
+### 1. Create the Access application (do this FIRST)
+Zero Trust dashboard → Access → Applications → **Add an application** → *Self-hosted*:
+
+| Field | Value |
+| --- | --- |
+| Application domain | `logs` . `vietride.online` |
+| Policy name | `BE team` |
+| Action | **Allow** |
+| Include | **Emails** → the BE members' emails (or *Emails ending in* `@yourdomain`) |
+
+Login method: **One-time PIN** needs no identity provider — members get a code by email.
+
+### 2. Add the tunnel public hostname
+Networks → Tunnels → `vietride` → Public Hostnames → Add:
+
+| Subdomain | Domain | Service |
+| --- | --- | --- |
+| `logs` | `vietride.online` | `http://dozzle:8080` |
+
+Same pattern as `api` → `http://nginx:80` and `db` → `http://adminer:8080`: cloudflared resolves
+the service name on `vietride_net`. Dozzle listens on 8080 and is **not** published to the host.
+
+### 3. Deploy
+No new `.env` keys and no workflow change — the next **Deploy (production)** run copies the
+compose file and `up -d` creates `dozzle` + `dockerproxy`. To bring them up by hand:
+```bash
+cd /opt/vietride/infra/docker
+docker compose -f docker-compose.prod.yml --env-file .env up -d dockerproxy dozzle
+```
+
+### 4. Verify the lockdown
+```bash
+# From your laptop — must return a Cloudflare Access login page, never the dozzle UI:
+curl -sI https://logs.vietride.online | head -1     # expect 302 → cloudflareaccess.com
+
+# On the server — the proxy must refuse writes even though it can list containers:
+docker compose -f docker-compose.prod.yml exec dozzle wget -qO- http://dockerproxy:2375/containers/json | head -c 80
+docker compose -f docker-compose.prod.yml exec dozzle wget -qO- --post-data='' http://dockerproxy:2375/containers/prune   # expect 403 Forbidden
+```
+Then open the URL in a browser: you should hit the Access email prompt, and after logging in see
+only `vietride_*` containers.
+
+### Revoking access
+Remove the email from the Access policy — effective immediately, no server change, no redeploy.
+
+---
+
 ## Notes
 - `tracking`, `notification`, `rag` (NestJS) are **not deployed yet** — their images aren't built
   by `docker-build.yml`. When ready: add them to that workflow's matrix, uncomment their blocks in

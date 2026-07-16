@@ -45,6 +45,9 @@ public interface ITripRepository : IRepository<Domain.Entities.Trip, Guid>
         CancellationToken cancellationToken)
         => throw new NotSupportedException("Vehicle conflict checks are not supported by this repository implementation.");
 
+    Task<Domain.Entities.Trip?> GetForUpdateAsync(Guid tripId, CancellationToken cancellationToken)
+        => GetByIdAsync(tripId, cancellationToken);
+
     Task<DriverTripRouteDto?> GetDriverTripRouteAsync(Guid tripId, CancellationToken cancellationToken)
         => throw new NotSupportedException("Driver trip route reads are not supported by this repository implementation.");
 

@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Web.Middleware;
 using VietRide.Trip.Application.Features.DriverTrips.GetAssignedTripRoute;
 using VietRide.Trip.Application.Features.Trips.GetTripDetail;
 using VietRide.Trip.Application.Features.Trips.GetTripSeatMap;
@@ -243,6 +244,24 @@ public sealed class TripsEndpointTests
         mediator.LastRequest.Should().BeNull();
     }
 
+    [Fact]
+    public async Task CompleteTrip_MissingIdempotencyKey_Returns422WithoutDispatching()
+    {
+        var mediator = new StubMediator(_ => throw new InvalidOperationException("Must not dispatch."));
+        using var factory = new TripsEndpointWebApplicationFactory(mediator);
+        using var client = factory.CreateClient();
+
+        var response = await client.SendAsync(CreateAuthorizedRequest(
+            HttpMethod.Post,
+            $"/v1/driver/trips/{Guid.NewGuid()}/complete",
+            "DRIVER",
+            Guid.NewGuid()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        await AssertErrorEnvelopeAsync(response, IdempotencyMiddleware.RequiredErrorCode);
+        mediator.LastRequest.Should().BeNull();
+    }
+
     private static TripDetailDto CreateDetail(Guid tripId)
     {
         var stopId = Guid.NewGuid();
@@ -318,10 +337,11 @@ public sealed class TripsEndpointTests
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            Environment.SetEnvironmentVariable("INTERNAL_JWT_SECRET", TestSecret);
             builder.UseSetting("INTERNAL_JWT_SECRET", TestSecret);
             builder.UseSetting("Trip:BackgroundWorkers:Enabled", "false");
-            builder.UseSetting("ConnectionStrings:Default", "Host=localhost;Port=5432;Database=test;Username=vietride;Password=vietride_dev");
+            builder.UseSetting(
+                "ConnectionStrings:Default",
+                global::VietRide.Trip.IntegrationTests.VietRideWebApplicationFactory.ResolveConnectionString("postgres"));
             builder.UseEnvironment("Testing");
             builder.ConfigureTestServices(services =>
             {

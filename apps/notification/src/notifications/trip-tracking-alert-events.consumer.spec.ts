@@ -3,9 +3,11 @@ import type { ConsumeMessage } from 'amqplib';
 import { NotificationType } from '../generated/notification-prisma-client';
 import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
+import type { OperatorRecipientProvider } from './operator-recipient.provider';
 import {
   TRACKING_GPS_OFF_ROUTE_ROUTING_KEY,
   TRIP_DELAYED_ROUTING_KEY,
+  TRIP_INCIDENT_REPORTED_ROUTING_KEY,
   TRIP_STOP_DISABLED_ROUTING_KEY,
   TRIP_TRACKING_ALERT_QUEUE_BINDINGS,
   TRIP_VEHICLE_SWAPPED_ROUTING_KEY,
@@ -13,13 +15,19 @@ import {
 import { TripTrackingAlertEventsConsumer } from './trip-tracking-alert-events.consumer';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
+const SECOND_USER_ID = '22222222-2222-4222-8222-222222222222';
 const TRIP_ID = '33333333-3333-4333-8333-333333333333';
+const OPERATOR_ID = '44444444-4444-4444-8444-444444444444';
+const INCIDENT_ID = '55555555-5555-4555-8555-555555555555';
+const REPORTER_ID = '66666666-6666-4666-8666-666666666666';
+const EVENT_ID = '77777777-7777-4777-8777-777777777777';
 const MESSAGE_ID = 'trip-alert-message-1';
 
 describe('TripTrackingAlertEventsConsumer', () => {
   let rabbitConsumer: jest.Mocked<RabbitMqConsumer>;
   let idempotency: jest.Mocked<MessageIdempotencyService>;
   let notificationsService: jest.Mocked<NotificationsService>;
+  let operatorRecipients: jest.Mocked<OperatorRecipientProvider>;
   let consumer: TripTrackingAlertEventsConsumer;
 
   beforeEach(() => {
@@ -34,13 +42,23 @@ describe('TripTrackingAlertEventsConsumer', () => {
     notificationsService = {
       createNotification: jest.fn(),
     } as unknown as jest.Mocked<NotificationsService>;
-    consumer = new TripTrackingAlertEventsConsumer(rabbitConsumer, idempotency, notificationsService);
+    operatorRecipients = {
+      resolveOperatorRecipientUserIds: jest.fn(),
+    } as jest.Mocked<OperatorRecipientProvider>;
+    consumer = new TripTrackingAlertEventsConsumer(
+      rabbitConsumer,
+      idempotency,
+      notificationsService,
+      operatorRecipients,
+    );
   });
 
   it('subscribes all phase 5 routing keys', async () => {
     await consumer.onModuleInit();
 
-    expect(rabbitConsumer.subscribe).toHaveBeenCalledTimes(TRIP_TRACKING_ALERT_QUEUE_BINDINGS.length);
+    expect(rabbitConsumer.subscribe).toHaveBeenCalledTimes(
+      TRIP_TRACKING_ALERT_QUEUE_BINDINGS.length,
+    );
     for (const binding of TRIP_TRACKING_ALERT_QUEUE_BINDINGS) {
       expect(rabbitConsumer.subscribe).toHaveBeenCalledWith(
         binding.queue,
@@ -60,7 +78,7 @@ describe('TripTrackingAlertEventsConsumer', () => {
       queue: 'notification:trip-vehicle-swapped-crew',
       routingKey: TRIP_VEHICLE_SWAPPED_ROUTING_KEY,
     });
-    expect(TRIP_TRACKING_ALERT_QUEUE_BINDINGS).not.toEqual(
+    expect(TRIP_TRACKING_ALERT_QUEUE_BINDINGS).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ routingKey: 'trip.trip.schedule_changed' }),
         expect.objectContaining({ routingKey: 'trip.trip.cancelled' }),
@@ -148,6 +166,131 @@ describe('TripTrackingAlertEventsConsumer', () => {
     expect(notificationsService.createNotification).not.toHaveBeenCalled();
     expect(idempotency.markProcessed).toHaveBeenCalledWith(TRIP_DELAYED_ROUTING_KEY, MESSAGE_ID);
   });
+
+  it('resolves and deduplicates operator admins using payload event id', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipients.resolveOperatorRecipientUserIds.mockResolvedValue([
+      USER_ID,
+      USER_ID,
+      SECOND_USER_ID,
+    ]);
+    notificationsService.createNotification.mockResolvedValue({} as never);
+
+    await consumer.handle(
+      TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+      canonicalIncidentPayload(),
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(idempotency.begin).toHaveBeenCalledWith(TRIP_INCIDENT_REPORTED_ROUTING_KEY, EVENT_ID);
+    expect(operatorRecipients.resolveOperatorRecipientUserIds).toHaveBeenCalledWith(OPERATOR_ID);
+    expect(notificationsService.createNotification).toHaveBeenCalledTimes(2);
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.INCIDENT_REPORTED,
+        dedupeKey: `${TRIP_INCIDENT_REPORTED_ROUTING_KEY}:${EVENT_ID}:${USER_ID}:${NotificationType.INCIDENT_REPORTED}`,
+      }),
+    );
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+      EVENT_ID,
+    );
+  });
+
+  it('treats empty operator recipients as a successful no-op', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipients.resolveOperatorRecipientUserIds.mockResolvedValue([]);
+
+    await consumer.handle(
+      TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+      canonicalIncidentPayload(),
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(notificationsService.createNotification).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+      EVENT_ID,
+    );
+  });
+
+  it('falls back to broker message id for a legacy incident without event id', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipients.resolveOperatorRecipientUserIds.mockResolvedValue([]);
+
+    await consumer.handle(
+      TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+      canonicalIncidentPayload({ eventId: undefined }),
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(idempotency.begin).toHaveBeenCalledWith(
+      TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+  });
+
+  it('marks a malformed incident processed without calling Identity', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+
+    await expect(
+      consumer.handle(
+        TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+        { ...canonicalIncidentPayload(), operatorId: 'invalid' },
+        createMessage(MESSAGE_ID),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(operatorRecipients.resolveOperatorRecipientUserIds).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+  });
+
+  it('releases the incident lock when Identity resolution fails', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipients.resolveOperatorRecipientUserIds.mockRejectedValue(
+      new Error('IDENTITY_UNAVAILABLE'),
+    );
+
+    await expect(
+      consumer.handle(
+        TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+        canonicalIncidentPayload(),
+        createMessage(MESSAGE_ID),
+      ),
+    ).rejects.toThrow('IDENTITY_UNAVAILABLE');
+    expect(idempotency.release).toHaveBeenCalledWith(
+      TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+      EVENT_ID,
+    );
+    expect(idempotency.markProcessed).not.toHaveBeenCalled();
+  });
+
+  it('releases the incident lock when notification persistence fails', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipients.resolveOperatorRecipientUserIds.mockResolvedValue([USER_ID]);
+    notificationsService.createNotification.mockRejectedValue(new Error('DB_UNAVAILABLE'));
+
+    await expect(
+      consumer.handle(
+        TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+        canonicalIncidentPayload(),
+        createMessage(MESSAGE_ID),
+      ),
+    ).rejects.toThrow('DB_UNAVAILABLE');
+    expect(idempotency.release).toHaveBeenCalledWith(
+      TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+      EVENT_ID,
+    );
+    expect(idempotency.markProcessed).not.toHaveBeenCalled();
+  });
 });
 
 function createMessage(messageId: string | undefined): ConsumeMessage {
@@ -157,4 +300,19 @@ function createMessage(messageId: string | undefined): ConsumeMessage {
       correlationId: undefined,
     },
   } as ConsumeMessage;
+}
+
+function canonicalIncidentPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    eventId: EVENT_ID,
+    occurredAt: '2026-07-16T03:00:00Z',
+    eventType: TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+    incidentId: INCIDENT_ID,
+    tripId: TRIP_ID,
+    operatorId: OPERATOR_ID,
+    reporterUserId: REPORTER_ID,
+    category: 'TRAFFIC_JAM',
+    reportedAt: '2026-07-16T03:00:00Z',
+    ...overrides,
+  };
 }

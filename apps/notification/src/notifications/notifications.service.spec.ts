@@ -86,7 +86,7 @@ describe('NotificationsService', () => {
     });
   });
 
-  it('does not enqueue a duplicate push when the dedupe key resolves an existing notification', async () => {
+  it('does not enqueue a duplicate non-invoice push when the dedupe key resolves an existing notification', async () => {
     repository.create.mockResolvedValue({
       notification: createNotification({ type: NotificationType.SHUTTLE_ASSIGNED }),
       created: false,
@@ -101,6 +101,26 @@ describe('NotificationsService', () => {
     });
 
     expect(fcmPushQueue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('re-enqueues an existing invoice push so a failed first queue write can recover', async () => {
+    repository.create.mockResolvedValue({
+      notification: createNotification({ type: NotificationType.INVOICE_ISSUED }),
+      created: false,
+    });
+
+    await service.createNotification({
+      userId: OWNER_USER_ID,
+      type: NotificationType.INVOICE_ISSUED,
+      title: 'Invoice issued',
+      body: 'Invoice is ready.',
+      dedupeKey: 'payment.invoice.issued:event:user:INVOICE_ISSUED',
+    });
+
+    expect(fcmPushQueue.enqueue).toHaveBeenCalledWith({
+      notificationId: NOTIFICATION_ID,
+      userId: OWNER_USER_ID,
+    });
   });
 
   it('returns a paged notification history DTO', async () => {
@@ -164,7 +184,10 @@ describe('NotificationsService', () => {
   });
 
   it('creates sanitized email delivery audit and enqueues sensitive template data for SendGrid', async () => {
-    repository.createEmailDelivery.mockResolvedValue(createEmailDelivery());
+    repository.createEmailDelivery.mockResolvedValue({
+      delivery: createEmailDelivery(),
+      created: true,
+    });
 
     await expect(
       service.enqueueEmail({
@@ -206,6 +229,45 @@ describe('NotificationsService', () => {
       }),
     });
   });
+
+  it('re-enqueues a pending email delivery so a failed first queue write can recover', async () => {
+    repository.createEmailDelivery.mockResolvedValue({
+      delivery: createEmailDelivery(),
+      created: false,
+    });
+
+    await service.enqueueEmail({
+      dedupeKey: 'payment.invoice.issued:message:user:email',
+      toEmail: 'passenger@vietride.local',
+      templateKey: EmailTemplateKey.INVOICE_NOTICE,
+      templateData: {
+        invoiceNumber: 'VR-INV-202607-000001',
+        invoiceUrl: 'https://operator.vietride.vn/invoices/one',
+      },
+    });
+
+    expect(emailSendQueue.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        emailDeliveryId: '44444444-4444-4444-8444-444444444444',
+      }),
+    );
+  });
+
+  it('does not enqueue an already sent email delivery on event replay', async () => {
+    repository.createEmailDelivery.mockResolvedValue({
+      delivery: createEmailDelivery({ status: EmailDeliveryStatus.SENT }),
+      created: false,
+    });
+
+    await service.enqueueEmail({
+      dedupeKey: 'payment.invoice.issued:message:user:email',
+      toEmail: 'passenger@vietride.local',
+      templateKey: EmailTemplateKey.INVOICE_NOTICE,
+      templateData: { invoiceNumber: 'VR-INV-202607-000001' },
+    });
+
+    expect(emailSendQueue.enqueue).not.toHaveBeenCalled();
+  });
 });
 
 function createNotification(overrides: Partial<Notification>): Notification {
@@ -223,10 +285,11 @@ function createNotification(overrides: Partial<Notification>): Notification {
   };
 }
 
-function createEmailDelivery(): EmailDelivery {
+function createEmailDelivery(overrides: Partial<EmailDelivery> = {}): EmailDelivery {
   return {
     id: '44444444-4444-4444-8444-444444444444',
     notificationId: null,
+    dedupeKey: null,
     toEmail: 'passenger@vietride.local',
     templateKey: EmailTemplateKey.AUTH_OTP,
     subject: 'Ma xac thuc VietRide',
@@ -238,5 +301,6 @@ function createEmailDelivery(): EmailDelivery {
     sentAt: null,
     createdAt: new Date('2026-06-01T10:00:00.000Z'),
     updatedAt: new Date('2026-06-01T10:00:00.000Z'),
+    ...overrides,
   };
 }

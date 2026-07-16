@@ -1,7 +1,10 @@
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Application.Events;
+using VietRide.Payment.Application.Models;
 using VietRide.Payment.Domain.Enums;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Messaging.Abstractions;
 
@@ -19,15 +22,18 @@ public sealed class MarkPaymentRefundedCommandHandler : IIntegrationEventHandler
 
     private readonly IPaymentRepository _payments;
     private readonly IClock _clock;
+    private readonly IIntegrationEventOutbox _outbox;
     private readonly ILogger<MarkPaymentRefundedCommandHandler> _logger;
 
     public MarkPaymentRefundedCommandHandler(
         IPaymentRepository payments,
         IClock clock,
+        IIntegrationEventOutbox outbox,
         ILogger<MarkPaymentRefundedCommandHandler> logger)
     {
         _payments = payments;
         _clock = clock;
+        _outbox = outbox;
         _logger = logger;
     }
 
@@ -39,6 +45,11 @@ public sealed class MarkPaymentRefundedCommandHandler : IIntegrationEventHandler
             return;
         }
 
+        var payment = await _payments.FindByReferenceAsync(
+            referenceType,
+            request.ReferenceId,
+            cancellationToken).ConfigureAwait(false);
+
         var transitioned = await _payments.TryMarkRefundedByReferenceAsync(
             referenceType,
             request.ReferenceId,
@@ -47,6 +58,27 @@ public sealed class MarkPaymentRefundedCommandHandler : IIntegrationEventHandler
 
         if (transitioned)
         {
+            if (payment is not null && !PaymentContextCodec.IsMissing(payment.Context))
+            {
+                var evt = new PaymentRefundedIntegrationEvent(
+                    payment.Id,
+                    payment.ReferenceType,
+                    payment.ReferenceId,
+                    payment.Amount.Amount,
+                    PaymentContextCodec.DeserializeTrusted(payment.Context));
+                var payload = JsonSerializer.Serialize(
+                    evt,
+                    new JsonSerializerOptions(JsonSerializerDefaults.Web));
+                await _outbox.EnqueueAsync(evt.EventType, payload, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Refunded payment for {ReferenceType}/{ReferenceId} has no trusted context; refund fact is quarantined.",
+                    request.ReferenceType,
+                    request.ReferenceId);
+            }
+
             _logger.LogInformation(
                 "Payment for {ReferenceType} {ReferenceId} marked REFUNDED from payment.wallet.credited.",
                 request.ReferenceType,

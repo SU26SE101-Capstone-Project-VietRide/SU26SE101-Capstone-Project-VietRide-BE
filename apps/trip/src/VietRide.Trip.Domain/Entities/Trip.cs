@@ -19,6 +19,8 @@ public sealed class Trip : BaseEntity<Guid>
     public DateTimeOffset DepartureDateTime { get; private set; }
     public DateTimeOffset EstimatedArrivalTime { get; private set; }
     public DateTimeOffset? ActualDepartureTime { get; private set; }
+    public DateTimeOffset? DestinationArrivedAt { get; private set; }
+    public Guid? DestinationArrivedByUserId { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }
     public DateTimeOffset? DisruptedAt { get; private set; }
     public string? DisruptionReason { get; private set; }
@@ -179,6 +181,20 @@ public sealed class Trip : BaseEntity<Guid>
     public void CompleteAutomatically(DateTimeOffset completedAt)
     {
         CompleteCore(completedAt, completedByUserId: null);
+    }
+
+    public void MarkDestinationArrived(
+        DateTimeOffset actualArrivalTime,
+        Guid actorUserId)
+    {
+        ValidateGuid(actorUserId, nameof(actorUserId));
+        if (DestinationArrivedAt.HasValue)
+        {
+            throw new InvalidOperationException("Trip destination arrival has already been recorded.");
+        }
+
+        DestinationArrivedAt = actualArrivalTime;
+        DestinationArrivedByUserId = actorUserId;
     }
 
     private void CompleteCore(DateTimeOffset completedAt, Guid? completedByUserId)
