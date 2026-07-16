@@ -381,12 +381,12 @@ Dispatch tuần tự vì worktree đang chứa Day-38 changes trong DriverContro
 
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
-| 39.0 | ⬜ todo | — | — | Hard gate trước mutations. |
-| 39.1 | ⬜ todo | — | — | Incident vertical slice. |
-| 39.2 | ⬜ todo | — | — | Active-admin fan-out/retry. |
-| 39.3 | ⬜ todo | — | — | Stop/destination arrival + race safety. |
-| 39.4 | ⬜ todo | — | — | Parcel terminal anchor + canonical two-step. |
-| 39.5 | ⬜ todo | — | — | Day-wide acceptance. |
+| 39.0 | ✅ done | APPROVED (focused implementation + concurrency review) | 2026-07-15 | Redis v2 response/processing keys, raw fingerprint, owner-safe lock, exact errors; Shared build/format và `86/86` Web tests pass. Real Redis cùng supporting-service regression rerun thuộc 39.5. |
+| 39.1 | ✅ done | APPROVED (implementation + migration/contract review; real-DB rerun thuộc 39.5) | 2026-07-15 | Incident aggregate/API/Outbox, schema-qualified reversible migration, canonical contract và 9 focused tests; Trip build + 272 unit tests + EF no-pending-model pass. Ba PostgreSQL integration cases compile nhưng chờ isolated stack. |
+| 39.2 | ✅ done | APPROVED (Nest event/retry review) | 2026-07-15 | Incident payload parse trước I/O, payload eventId identity, Identity active-admin resolution, dedupe/no-op/retry và PII-safe mapping; Notification lint, 125 unit tests, 14 E2E tests và build đều pass. |
+| 39.3 | ✅ done | APPROVED (implementation + transaction/contract review; real-DB rerun thuộc 39.5) | 2026-07-15 | Canonical Driver/Assistant stop + destination arrival, Trip -> TripStop locking, typed Outbox, reversible migration và internal snapshot; Trip build/format, 288 unit tests, EF no-drift pass. Bốn PostgreSQL race/migration cases compile nhưng chờ isolated stack. |
+| 39.4 | ✅ done | APPROVED (Parcel CAS + cross-service arrival/delivery seam review) | 2026-07-16 | Matching stop/destination anchor, assigned-assistant authorization, `IN_TRANSIT -> UNLOADED -> DELIVERED_PENDING_CONFIRM`, one cargo release và one delivery token/event; Parcel build/format, `166/166` unit và `20/20` PostgreSQL integration tests pass. |
+| 39.5 | ✅ done | APPROVED (real-stack, migration, Postman và final verification review) | 2026-07-16 | `npm run e2e:day39` pass `14/14`, migration fresh/up/down/reapply và direct PostgreSQL/Redis/RabbitMQ assertions pass, cumulative Postman Day 39 parse `23` requests, cleanup không còn container/volume. |
 
 ## Business invariants và assumptions
 

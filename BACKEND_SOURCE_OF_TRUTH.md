@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.29.0
+> **Phiên bản:** 1.34.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-07-14
+> **Cập nhật lần cuối:** 2026-07-16
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1266,26 +1266,36 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | 15 | `POST /v1/operator/vouchers` | Booking |
 | 16 | `POST /v1/driver/trips/{tripId}/start` | Trip |
 | 17 | `POST /v1/driver/trips/{tripId}/complete` | Trip |
+| 18 | `POST /v1/driver/trips/{tripId}/incident` | Trip |
+| 19 | `POST /v1/driver/trips/{tripId}/stops/{stopId}/arrive` | Trip |
+| 20 | `POST /v1/driver/trips/{tripId}/destination/arrive` | Trip |
+| 21 | `POST /v1/assistant/parcels/{parcelId}/unload` | Parcel |
+| 22 | `POST /v1/assistant/parcels/{parcelId}/deliver` | Parcel |
 
 **Implementation:**
 
-- Redis key `<service>:idem:{key}` TTL 24h.
-- First request: handler chạy → INSERT response JSON vào Redis → return response.
-- Subsequent request cùng key:
-  - **Same body hash** → return cached response (HTTP code + body identical).
-  - **Different body hash** → HTTP 422 `IDEMPOTENCY_KEY_MISMATCH`.
-- Key format: UUID v4 do client generate. Reuse key 1 lần là acceptable; nếu retry phải dùng cùng key.
-
-**Day-21 Trip lifecycle no-body mutations:** fingerprint = HTTP method + normalized route/path
-parameters including `tripId` + authenticated `sub` + canonical empty-body marker. Authenticated
-role is not a fingerprint component. Authentication and UUID-v4 key/`tripId`/empty-body
-validation may run before key reservation; those validation failures are not cached. A valid new
-key is atomically reserved as pending before command execution. Trip assignment authorization
-runs downstream in the handler, and middleware finalizes its response for replay. Same key + same
-fingerprint replays the exact original HTTP status/body after completion, or returns
-`409 IDEMPOTENCY_REQUEST_PENDING` while pending. The same key with a different fingerprint
-returns `422 IDEMPOTENCY_KEY_MISMATCH`. Reuse a key only for the same logical request; a new
-logical attempt requires a new UUID-v4 key.
+- Response key: `<service>:idem:v2:response:{SHA256(idempotencyKey)}`, TTL 24 giờ. Processing key:
+  `<service>:idem:v2:processing:{SHA256(idempotencyKey)}`, TTL 120 giây. Không lưu raw key trong
+  namespace v2.
+- Fingerprint là SHA-256 của frame nhị phân length-prefix theo thứ tự: authenticated `sub`, method
+  uppercase, `PathBase + Path`, canonical query và raw body bytes. Canonical query flatten toàn bộ
+  key/value (kể cả duplicate), sort ordinal theo key rồi value. JSON khác whitespace hoặc property
+  order là request khác; role không thuộc fingerprint.
+- Request đầu tiên reserve processing key bằng Redis `SET NX EX` với owner token ngẫu nhiên rồi mới
+  chạy handler. Request cùng key và fingerprint khi lock còn tồn tại trả
+  `409 IDEMPOTENCY_REQUEST_PENDING`; khác fingerprint trả `422 IDEMPOTENCY_KEY_MISMATCH`. Nếu response
+  vừa hoàn tất trong race window thì replay thay vì trả pending.
+- Response `<500` lưu nguyên status, `Content-Type` và response bytes trong 24 giờ; replay không chạy
+  downstream. Exception hoặc response `5xx` không cache và phải owner-safe release processing lock.
+  Complete/release chỉ thành công khi owner token vẫn khớp, vì vậy stale request không được xóa hoặc
+  ghi đè lock/response của request mới.
+- Middleware áp dụng cho `POST/PATCH/PUT/DELETE` khi có header. Endpoint đánh dấu bắt buộc phải dùng
+  UUID v4; thiếu header trả exact `422 IDEMPOTENCY_KEY_REQUIRED`, malformed UUID trả
+  `422 VALIDATION_ERROR`.
+- Legacy cache `<service>:idem:{key}` chỉ chứa body hash nên không đủ an toàn để replay cross-path.
+  Trong thời gian rollout, nếu legacy key còn tồn tại thì fail closed bằng
+  `422 IDEMPOTENCY_KEY_MISMATCH`; không flush Redis business keys, để legacy entry tự hết hạn tối đa
+  sau 24 giờ.
 
 ### 5.7 Pagination — `PagedResult<T>` + `QueryOptions` (ADR 0004)
 
@@ -1391,6 +1401,10 @@ logical attempt requires a new UUID-v4 key.
 | | `WALLET_TOP_UP_AMOUNT_TOO_LOW` | 422 | < 10,000 VND |
 | **Trip** | `TRIP_NOT_FOUND` | 404 | |
 | | `TRIP_INVALID_TRANSITION` | 409 | Day-21 start/complete lifecycle precondition fails; do not introduce or use `INVALID_TRIP_STATUS` |
+| | `TRIP_NOT_IN_PROGRESS` | 422 | Incident/arrival chỉ hợp lệ khi Trip đang `IN_PROGRESS` |
+| | `TRIP_STOP_NOT_FOUND` | 404 | TripStop không tồn tại trong Trip được chỉ định |
+| | `TRIP_STOP_ALREADY_FINALIZED` | 409 | TripStop đã `ARRIVED` hoặc `SKIPPED` |
+| | `TRIP_DESTINATION_ALREADY_ARRIVED` | 409 | Destination-terminal anchor đã được ghi trước đó |
 | | `VEHICLE_NOT_FOUND` | 404 | Vehicle không tồn tại, đã soft-delete, hoặc không thuộc operator caller |
 | | `VEHICLE_TYPE_NOT_FOUND` | 404 | VehicleType không tồn tại hoặc không active |
 | | `TRIP_NOT_EDITABLE` | 409 | Status ≠ SCHEDULED |
@@ -1400,6 +1414,11 @@ logical attempt requires a new UUID-v4 key.
 | | `TRIP_NOT_ACCEPTING_PARCEL` | 409 | Trip IN_PROGRESS — không nhận parcel mới |
 | | `DRIVER_SCHEDULE_EDIT_TOO_LATE` | 409 | Edit schedule quá deadline |
 | **Parcel** | `PARCEL_NOT_FOUND` | 404 | |
+| | `INVALID_STATUS` | 409 | Unload/deliver không ở đúng source status hoặc CAS thua race |
+| | `DROP_OFF_STOP_NOT_FOUND` | 422 | `dropoffStopId` không tồn tại trong Trip snapshot |
+| | `DROP_OFF_STOP_NOT_ALLOWED` | 422 | TripStop khớp `dropoffStopId` không cho phép drop-off |
+| | `DROP_OFF_STOP_NOT_ARRIVED` | 422 | TripStop khớp `dropoffStopId` chưa `ARRIVED` |
+| | `DESTINATION_TERMINAL_NOT_ARRIVED` | 422 | Parcel terminal-bound chưa có destination arrival anchor |
 | | `PARCEL_CAPACITY_EXCEEDED` | 409 | Vượt available cargo capacity |
 | | `PARCEL_PRICING_NOT_CONFIGURED` | 422 | ParcelRouteFare chưa config |
 | | `PARCEL_DELIVERY_TOKEN_INVALID` | 401 | Token không match |
@@ -1450,7 +1469,7 @@ logical attempt requires a new UUID-v4 key.
 | | `RAG_ACCESS_DENIED_FOR_ROLE` | 403 | accessLevel không match role |
 | **Validation** | `VALIDATION_ERROR` | 422 | Field-level — kèm `errors` array |
 | | `IDEMPOTENCY_KEY_REQUIRED` | 422 | Mutation contract requires the header explicitly; middleware pass-through is not acceptance |
-| | `IDEMPOTENCY_KEY_MISMATCH` | 422 | Same key, different body |
+| | `IDEMPOTENCY_KEY_MISMATCH` | 422 | Same key, different request fingerprint (actor/method/path/query/raw body) |
 | | `IDEMPOTENCY_REQUEST_PENDING` | 409 | Same key is still being processed |
 | | `INVALID_SORT_FIELD` | 400 | sortBy value not in the per-aggregate whitelist |
 | **Generic** | `RESOURCE_NOT_FOUND` | 404 | Fallback |
@@ -1824,8 +1843,10 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `trip.stop.disabled` | Trip | Booking | `{ stopId, operatorId, replacedByStopId?, occurredAt }` |
 | `booking.stop_disabled.affected` | Booking | Notification | `{ stopId, replacedByStopId?, recipientUserIds[], affectedBookingCount, occurredAt }` |
 | `trip.stop.departed_with_pending` | Trip | Notification (Driver App boarding warning) | `{ eventId: Guid, occurredAt: DateTime (UTC), eventType: "trip.stop.departed_with_pending", tripId: Guid, stopId: Guid, stopName: string, pendingPassengerCount: int (> 0), driverUserId: Guid, assistantUserId: Guid?, departedAt: DateTimeOffset (UTC ISO-8601) }` |
+| `trip.stop.arrived` | Trip | Parcel, Notification | `{ eventId, occurredAt, eventType, tripId, stopId, operatorId, actorUserId, actualArrivalTime }`; Trip và TripStop lock theo thứ tự, `PENDING -> ARRIVED`, static ETA không đổi, business row + Outbox commit atomic |
+| `trip.destination.arrived` | Trip | Parcel | `{ eventId, occurredAt, eventType, tripId, destinationStationId, operatorId, actorUserId, actualArrivalTime }`; destination Station derive từ Route, anchor độc lập `completedAt`, express Trip zero-stop vẫn hợp lệ |
 | `trip.trip.delayed` | Trip (Tracking publishes via Trip outbox proxy hoặc Tracking outbox) | Notification | `{ tripId, delayMinutes, etaNew }` |
-| `trip.incident.reported` | Trip | Notification | `{ incidentId, tripId, category, reporterUserId }` |
+| `trip.incident.reported` | Trip | Notification | `{ eventId, occurredAt, incidentId, tripId, operatorId, reporterUserId, category, description?, photoUrls?, latitude?, longitude?, reportedAt }`; optional fields được omit khi null; Notification resolve active `OPERATOR_ADMIN` theo `operatorId` |
 | `trip.shuttle.assigned` | Trip | Notification | `{ shuttleTripId, mainTripId, bookingId, passengerUserId, ticketIds, pickupOrder, scheduledDepartureTime, scheduledEndTime, driver: { userId, displayName, phone }, vehicle: { id, licensePlate } }` |
 | `trip.shuttle.warning_issued` | Trip | Notification | `{ mainTripId, operatorId, alertType: WARNING_120|WARNING_60, pendingBookingCount, pendingPassengerCount, hardCutoffAt }` |
 | `trip.shuttle.unfulfilled` | Trip | Notification | `{ mainTripId, bookingId, passengerUserId, stationId, reason: AUTO_UNFULFILLED_CUTOFF }` |
@@ -1848,8 +1869,8 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `payment.trip_settlement.completed` | Payment | Notification (operator) | `{ eventId, occurredAt, settlementId, tripId, operatorId, netAmount, settlementMethod, settledAt }` |
 | `parcel.parcel.created` | Parcel | Notification, Trip (cargo counter reserve) | `{ parcelId, tripId, senderUserId, recipientUserId? }` |
 | `parcel.parcel.loaded` | Parcel | Notification, Trip (counter update) | `{ parcelId, tripId, actualWeightKg }` |
-| `parcel.parcel.unloaded` | Parcel | Notification | `{ parcelId, tripId }` |
-| `parcel.parcel.delivered_pending_confirm` | Parcel | Notification | `{ parcelId, recipientUserId?, deliveryToken, expiresAt }` |
+| `parcel.parcel.unloaded` | Parcel | Notification | `{ parcelId, tripId, userIds[] }`; chỉ CAS `IN_TRANSIT -> UNLOADED` thắng mới enqueue, `userIds` distinct gồm sender và recipient account nếu có |
+| `parcel.parcel.delivered_pending_confirm` | Parcel | Notification | `{ parcelId, parcelCode, operatorId, tripId, userId?, recipientUserIds[]?, deliveryToken, expiresAt }`; optional recipient fields bị omit khi không có account |
 | `parcel.parcel.delivery_confirmed` | Parcel | Notification | `{ parcelId }` |
 | `parcel.parcel.delivery_rejected` | Parcel | Notification | `{ parcelId, reason }` |
 | `parcel.parcel.cancelled` · `rejected` · `returned` · `auto_rejected` | Parcel | Notification, Trip (counter), Payment (refund) | `{ parcelId, refundAmount? }` |
@@ -2053,7 +2074,27 @@ PENDING_OPERATOR_ACTION ──→ PENDING | RETURNED
 
 **Terminal:** `DELIVERY_CONFIRMED`, `RETURN_INITIATED`, `CANCELLED`, `EXPIRED`, `REJECTED`, `RETURNED`.
 
-**Trip cargo counter rule:** mọi transition phải atomic với UPDATE `Trip.reservedParcelWeightKg` + `Trip.totalLoadedWeightKg` trong cùng transaction (chi tiết technical_context Section 6.6e).
+**Canonical two-step delivery (Day 39):**
+
+- Unload chỉ cho phép `IN_TRANSIT -> UNLOADED`. Parcel có `dropoffStopId` phải dùng đúng TripStop
+  khớp ID, `allowDropoff=true` và `status=ARRIVED`. Parcel có `dropoffStopId=null` chỉ dùng
+  `destinationArrivedAt`; không suy diễn từ stop trung gian cuối. Express Trip không có TripStop vẫn
+  unload được sau destination arrival.
+- CAS unload thắng set duy nhất `status`, `unloadedAt`, clear toàn bộ delivery-token/pending-confirm
+  fields và enqueue đúng một `parcel.parcel.unloaded` trong cùng Parcel-local transaction. Cargo
+  release chỉ chạy ở unload và không lặp lại ở deliver.
+- Deliver chỉ cho phép `UNLOADED -> DELIVERED_PENDING_CONFIRM`. CAS deliver thắng mới sinh token
+  48 giờ, set `deliveredPendingConfirmAt`/token/expiry và enqueue đúng một
+  `parcel.parcel.delivered_pending_confirm` trong cùng Parcel-local transaction. Flow recipient
+  confirm hiện hữu tiếp tục từ `DELIVERED_PENDING_CONFIRM`.
+- Replay được idempotency cache phục vụ mà không chạy handler. Hai request dùng key khác cùng race
+  thì chỉ một CAS thắng; request thua trả `409 INVALID_STATUS`, không enqueue Outbox và không gọi
+  cargo release.
+
+**Trip cargo counter rule:** các flow reserve/load/transfer giữ nguyên theo technical context
+Section 6.6e. Riêng canonical two-step delivery, cargo counter là Trip-owned qua internal API;
+Parcel không tạo cross-database transaction, release chỉ được gọi một lần sau CAS unload thắng và
+deliver không gọi lại.
 
 ### 8.4 PaymentStatus
 
@@ -2283,20 +2324,40 @@ INSERT wallet_transactions (...);
 
 ### 9.8 Idempotency (Redis-backed)
 
-**Key pattern:** `<service>:idem:{idempotencyKey}` TTL 24h.
+**Key patterns:**
+
+- `<service>:idem:v2:response:{SHA256(idempotencyKey)}` — completed response, TTL 24 giờ.
+- `<service>:idem:v2:processing:{SHA256(idempotencyKey)}` — owner processing lock, TTL 120 giây.
+- `<service>:idem:{idempotencyKey}` — legacy read-only detection trong rollout, không replay.
 
 **Pseudocode:**
 
 ```
-key = `booking:idem:${idempotencyKey}`
-cached = redis.GET(key)
-if cached:
-   if hash(currentBody) == cached.bodyHash:
-      return cached.response
-   else:
-      throw IDEMPOTENCY_KEY_MISMATCH
-result = handler.execute(...)
-redis.SETEX(key, 86400, { bodyHash: hash(body), response: result })
+keyHash = SHA256(idempotencyKey)
+legacyKey = `${service}:idem:${idempotencyKey}`
+responseKey = `${service}:idem:v2:response:${keyHash}`
+processingKey = `${service}:idem:v2:processing:${keyHash}`
+fingerprint = SHA256(frame(sub, UPPER(method), pathBase + path, canonicalQuery, rawBody))
+
+if redis.EXISTS(legacyKey): throw IDEMPOTENCY_KEY_MISMATCH
+if response = redis.GET(responseKey):
+   require response.requestFingerprint == fingerprint
+   return exact(response.status, response.contentType, response.bytes)
+
+owner = randomToken()
+if not redis.SET(processingKey, { fingerprint, owner }, NX, EX=120):
+   if response vừa xuất hiện: replay response
+   lock = redis.GET(processingKey)
+   if lock.fingerprint != fingerprint: throw IDEMPOTENCY_KEY_MISMATCH
+   throw IDEMPOTENCY_REQUEST_PENDING
+
+result = handler.execute()
+if exception or result.status >= 500:
+   compareOwnerAndDelete(processingKey, owner)
+   return/throw result
+
+compareOwnerThenAtomicallySetResponseAndDeleteLock(
+   processingKey, owner, responseKey, result, EX=86400)
 return result
 ```
 
@@ -2313,12 +2374,12 @@ Mọi key dùng pattern `<service>:<purpose>:<id>` để namespace per service. 
 | `gateway:rate_limit:{ip}:{route}` | Gateway | API rate limit | 1p |
 | `gateway:internal_jwt:{kid}` | Gateway | Internal JWT signing key cache (nếu rotate) | 1h |
 | `seat_lock:{tripId}:{seatNumber}` | Trip | Seat hold trong checkout | 10p |
-| `booking:idem:{key}` | Booking | Idempotency-Key cache | 24h |
-| `payment:idem:{key}` | Payment | Idempotency-Key cache | 24h |
+| `<service>:idem:v2:response:{sha256(key)}` | Business service | Idempotency completed-response cache | 24h |
+| `<service>:idem:v2:processing:{sha256(key)}` | Business service | Owner-safe in-flight processing lock | 120s |
+| `<service>:idem:{key}` | Business service | Legacy cache detection, fail closed; không tạo entry mới | tối đa 24h |
 | `payment:vnpay_ipn:{vnpTxnRef}` | Payment | Dedupe IPN callback | 24h |
 | `payment:invoice_download:{userId}:{invoiceId}` | Payment | Invoice signed-URL endpoint rate limit | 1p |
 | `payment:settlement_insufficient:{settlementId}` | Payment | Insufficient PlatformWallet alert dedupe | 24h |
-| `parcel:idem:{key}` | Parcel | Idempotency-Key cache | 24h |
 | `tracking:latest:{tripId}` | Tracking | Last known GPS position | 5p |
 | `tracking:gps_buffer:{tripId}` | Tracking | GPS trail buffer (list) | đến flush |
 | `tracking:eta:{tripId}:{stopId}` | Tracking | Dynamic ETA cached | 60s |
@@ -2852,6 +2913,10 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.34.0** | 2026-07-16 | Senior Backend Engineer | **MINOR** - Day 39 Incident vertical slice: thêm canonical assigned Driver/Assistant Incident API, persistence + transactional `trip.incident.reported` Outbox, validation/normalization category-description-photo-GPS; Notification resolve active `OPERATOR_ADMIN` cùng operator, fan-out in-app/push với retry, payload-event dedupe và PII-safe logging. |
+| **1.33.0** | 2026-07-15 | Senior Backend Engineer | **MINOR** - Day 39 Parcel delivery hardening: tách canonical `IN_TRANSIT -> UNLOADED` và `UNLOADED -> DELIVERED_PENDING_CONFIRM`; terminal-bound dùng `destinationArrivedAt`, stop-bound dùng đúng matching arrived stop; token chỉ sinh ở deliver, cargo release chỉ ở unload; CAS loser không phát Outbox hoặc release lần hai; chuẩn hóa endpoint, error và event contracts. |
+| **1.32.0** | 2026-07-15 | Senior Backend Engineer | **MINOR** - Day 39 Driver arrival hardening: chuyển stop-arrival sang canonical Driver/Assistant route, assignment authorization, ambient transaction và lock order `Trip -> TripStop`; thêm one-shot destination-terminal anchor độc lập Trip completion, internal snapshot field, typed `trip.stop.arrived`/`trip.destination.arrived` Outbox contracts và migration reversible. |
+| **1.31.0** | 2026-07-15 | Senior Backend Engineer | **MINOR** - Day 39 idempotency v2 baseline: fingerprint `sub + method + PathBase/Path + canonical query + raw body` bằng length-prefix framing; tách hashed response/processing namespace; processing lock `SET NX EX` 120 giây và owner-safe complete/release; replay giữ status/body/content type; legacy cache fail closed; đăng ký exact `IDEMPOTENCY_KEY_REQUIRED`. |
 | **1.30.0** | 2026-07-14 | Senior Backend Architect | **MINOR** - Freeze Day 38 Revision 6 contracts: trusted Payment context and legacy phased backfill; Driver/Assistant Trip completion; OperatorWallet subscription debit; per-Trip settlement failure/recovery; Invoice number/PDF retry/download; operator/admin APIs; canonical Invoice/settlement/terminal event payloads and new error codes. No bank withdrawal, e-invoice provider or booking/parcel platform fee. |
 | **1.29.0** | 2026-07-14 | BE lead (Vu) | **MINOR** - Freeze Day-21 Trip lifecycle contracts: no-body/idempotent Driver start and Driver/Assistant manual complete endpoints with exact ADR-0004 DTOs and assignment authorization; recurring 15/5/15-minute boarding/start/complete jobs with T-30/departure+30/ETA+30 thresholds and no GPS-primary trigger; retain `trip.trip.started`/`trip.trip.completed` payloads; register `TRIP_INVALID_TRANSITION`, Booking history source `COMPLETE_ON_TRIP_COMPLETED`, and append-only Trip-local manual-completion audit schema/action/atomicity. No implementation, dependency, Gateway, migration, or event-key change. |
 | **1.28.0** | 2026-07-14 | BE lead (Vu) | **MINOR** - Add operator/admin Station and Stop update-disable APIs, Stop-disable Trip Outbox to Booking pending-action and enriched Notification flow, enriched Trip detail Stop projection, PII-free booking seat requests, VNPay GET IPN and ready-to-fill sandbox configuration, 10-minute payment timeout, and VNPay `BOOKING_GROUP` confirmation/expiration support. |
