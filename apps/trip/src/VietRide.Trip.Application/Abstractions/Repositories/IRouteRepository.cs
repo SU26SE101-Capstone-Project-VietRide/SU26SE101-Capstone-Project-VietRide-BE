@@ -12,4 +12,7 @@ public interface IRouteRepository : IRepository<Route, Guid>
     Task<IReadOnlyList<Route>> ListByOperatorAsync(Guid operatorId, string? search, CancellationToken cancellationToken);
 
     Task<bool> ExistsActiveOwnedByOperatorAsync(Guid operatorId, Guid routeId, CancellationToken cancellationToken);
+
+    Task<Route?> AcquireOwnedActiveAsync(Guid operatorId, Guid routeId, CancellationToken cancellationToken)
+        => throw new NotSupportedException("Route locking is not supported by this repository implementation.");
 }

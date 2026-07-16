@@ -33,8 +33,7 @@ public sealed class TripGenerationServiceTests
         fixture.TripSeats.Items.Should().HaveCount(8);
         fixture.TripSeats.Items.Select(seat => seat.SeatNumber).Should().OnlyContain(seat => seat == "A1" || seat == "A3");
         fixture.TripStops.Items.Should().HaveCount(8);
-        fixture.TripStopFares.Items.Should().HaveCount(4);
-        fixture.TripStopFares.Items.Should().OnlyContain(fare => fare.FareFromThisStop.Amount == 180000);
+        fixture.TripStopFares.Items.Should().BeEmpty();
 
         var firstTrip = fixture.Trips.Items.OrderBy(trip => trip.DepartureDateTime).First();
         firstTrip.Source.Should().Be(TripSource.AUTO_FROM_SCHEDULE);
@@ -56,6 +55,18 @@ public sealed class TripGenerationServiceTests
         firstTripStops[1].AllowDropoff.Should().BeTrue();
         firstTripStops[1].DistanceFromOriginKm.Should().Be(120.5m);
         firstTripStops[1].EstimatedArrivalTime.Should().Be(firstTrip.DepartureDateTime.AddMinutes(210));
+    }
+
+    [Fact]
+    public async Task GenerateAsync_AcquiresScheduleLockBeforeCreatingAnyTrip()
+    {
+        var fixture = TripGenerationFixture.Create(routeDurationMinutes: 180);
+        fixture.Schedules.OnAcquire = () => fixture.Trips.Items.Should().BeEmpty();
+
+        await fixture.Service.GenerateAsync(fixture.Schedule.Id, CancellationToken.None);
+
+        fixture.Schedules.Calls.Should().Equal("schedule-lock");
+        fixture.Trips.Items.Should().NotBeEmpty();
     }
 
     [Fact]
@@ -132,13 +143,18 @@ public sealed class TripGenerationServiceTests
     [Fact]
     public async Task GenerateAsync_MissingVehicle_LogsSkipAndDoesNotCreateTrip()
     {
-        var fixture = TripGenerationFixture.Create(routeDurationMinutes: 180, includeVehicle: false);
+        var fixture = TripGenerationFixture.Create(routeDurationMinutes: 180);
+        fixture.Schedule.AssignVehicle(null);
 
         var result = await fixture.Service.GenerateAsync(fixture.Schedule.Id, CancellationToken.None);
 
         result.GeneratedCount.Should().Be(0);
-        result.SkippedCount.Should().Be(1);
-        fixture.SkipLogs.Items.Should().ContainSingle(log => log.DriverScheduleId == fixture.Schedule.Id);
+        result.SkippedCount.Should().Be(4);
+        fixture.SkipLogs.Items.Should().HaveCount(4)
+            .And.OnlyContain(log =>
+                log.DriverScheduleId == fixture.Schedule.Id
+                && log.Reason == TripGenerationSkipReason.OTHER
+                && log.Message!.Contains("No vehicle", StringComparison.Ordinal));
         fixture.Trips.Items.Should().BeEmpty();
     }
 
@@ -310,7 +326,7 @@ public sealed class TripGenerationServiceTests
                 Guid.NewGuid(),
                 "51B-12345",
                 JsonSerializer.SerializeToElement(CreateSeatLayout()),
-                3,
+                4,
                 1000m,
                 null);
             var schedule = DriverSchedule.Create(
@@ -384,15 +400,16 @@ public sealed class TripGenerationServiceTests
             => new(
                 1,
                 "BUS_3",
-                3,
+                4,
                 1,
-                3,
+                4,
                 1,
                 [],
                 [
                     new SeatLayoutSeatDto("A1", 1, 1, 1, "STANDARD", true, false, false),
                     new SeatLayoutSeatDto("A2", 1, 2, 1, "STANDARD", false, true, true),
                     new SeatLayoutSeatDto("A3", 1, 3, 1, "VIP", true, false, false),
+                    new SeatLayoutSeatDto("D1", 1, 4, 1, "DRIVER_AREA", false, false, false),
                 ]);
     }
 
@@ -448,6 +465,21 @@ public sealed class TripGenerationServiceTests
         public InMemoryDriverScheduleRepository(List<DriverSchedule> items)
             : base(items, schedule => schedule.Id)
         {
+        }
+
+        public List<string> Calls { get; } = [];
+
+        public Action? OnAcquire { get; set; }
+
+        public Task<DriverSchedule?> AcquireOwnedForUpdateAsync(
+            Guid scheduleId,
+            Guid operatorId,
+            CancellationToken cancellationToken = default)
+        {
+            Calls.Add("schedule-lock");
+            OnAcquire?.Invoke();
+            return Task.FromResult(Items.FirstOrDefault(schedule =>
+                schedule.Id == scheduleId && schedule.OperatorId == operatorId));
         }
 
         public Task<bool> HasDriverConflictAsync(
@@ -577,10 +609,10 @@ public sealed class TripGenerationServiceTests
         }
     }
 
-    private sealed class InMemoryTripStopFareRepository : InMemoryRepository<TripStopFare, Guid>, ITripStopFareRepository
+    private sealed class InMemoryTripStopFareRepository : InMemoryRepository<TripStopFare, (Guid TripId, Guid StopId)>, ITripStopFareRepository
     {
         public InMemoryTripStopFareRepository(List<TripStopFare> items)
-            : base(items, fare => fare.Id)
+            : base(items, fare => (fare.TripId, fare.StopId))
         {
         }
     }

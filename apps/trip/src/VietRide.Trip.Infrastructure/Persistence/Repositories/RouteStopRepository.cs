@@ -43,4 +43,34 @@ internal sealed class RouteStopRepository : IRouteStopRepository
         => dbContext.RouteStops.FirstOrDefaultAsync(
             routeStop => routeStop.RouteId == routeId && routeStop.StopId == stopId,
             cancellationToken);
+
+    public async Task<IReadOnlyList<RouteStop>> ListByRouteAsync(
+        Guid routeId,
+        CancellationToken cancellationToken) =>
+        await dbContext.RouteStops
+            .AsNoTracking()
+            .Where(routeStop => routeStop.RouteId == routeId)
+            .OrderBy(routeStop => routeStop.OrderIndex)
+            .ThenBy(routeStop => routeStop.StopId)
+            .ToArrayAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<RouteStop>> AcquireByRouteAsync(
+        Guid routeId,
+        CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException("A caller-owned transaction is required for Route-stop acquisition.");
+        }
+
+        return await dbContext.RouteStops
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_trip.route_stops
+                WHERE route_id = {routeId}
+                ORDER BY order_index, stop_id
+                FOR SHARE
+                """)
+            .ToArrayAsync(cancellationToken);
+    }
 }

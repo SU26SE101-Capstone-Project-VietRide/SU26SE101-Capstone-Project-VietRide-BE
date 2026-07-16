@@ -8,6 +8,12 @@ public interface IVehicleRepository : IRepository<Vehicle, Guid>
 {
     Task<Vehicle?> GetOwnedByIdAsync(Guid operatorId, Guid vehicleId, CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<Vehicle>> AcquireForVehicleSwapAsync(
+        Guid operatorId,
+        IReadOnlyCollection<Guid> vehicleIds,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("Vehicle-swap locking is not supported by this repository implementation.");
+
     Task<PagedResult<Vehicle>> ListByOperatorAsync(
         Guid operatorId,
         int page,

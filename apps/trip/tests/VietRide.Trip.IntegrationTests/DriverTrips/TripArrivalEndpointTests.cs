@@ -106,6 +106,9 @@ public sealed class TripArrivalEndpointTests
                 CreateRepository<IRouteRepository>(
                     assertionDb,
                     "VietRide.Trip.Infrastructure.Persistence.Repositories.RouteRepository"),
+                CreateRepository<IRouteStopFareTemplateRepository>(
+                    assertionDb,
+                    "VietRide.Trip.Infrastructure.Persistence.Repositories.RouteStopFareTemplateRepository"),
                 CreateRepository<IStationRepository>(
                     assertionDb,
                     "VietRide.Trip.Infrastructure.Persistence.Repositories.StationRepository"),

@@ -35,6 +35,7 @@ import { SendGridEmailProvider } from './sendgrid-email.provider';
 import { TripTrackingAlertEventsConsumer } from './trip-tracking-alert-events.consumer';
 import { TripAnnouncementRecipientProvider } from './trip-announcement-recipient.provider';
 import { ShuttleEventsConsumer } from './shuttle-events.consumer';
+import { BookingTripChangeEventsConsumer } from './booking-trip-change-events.consumer';
 
 @Module({
   controllers: [NotificationsController, OperatorNotificationsController, InternalEmailsController],
@@ -52,6 +53,7 @@ import { ShuttleEventsConsumer } from './shuttle-events.consumer';
     EmailTemplateRenderer,
     MessageIdempotencyService,
     CoreEventsConsumer,
+    BookingTripChangeEventsConsumer,
     TripTrackingAlertEventsConsumer,
     ParcelSubscriptionOperatorEventsConsumer,
     ShuttleEventsConsumer,

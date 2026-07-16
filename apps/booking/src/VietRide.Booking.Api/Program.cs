@@ -3,6 +3,7 @@ using Serilog;
 using VietRide.Booking.Application;
 using VietRide.Booking.Infrastructure;
 using VietRide.Booking.Infrastructure.DependencyInjection;
+using VietRide.Booking.Infrastructure.Jobs;
 using VietRide.Shared.Application.DependencyInjection;
 using VietRide.Shared.Messaging.DependencyInjection;
 using VietRide.Shared.Persistence.DependencyInjection;
@@ -34,6 +35,10 @@ if (registerMessaging)
 }
 
 builder.Services.AddInfrastructure(builder.Configuration, registerConsumers: registerMessaging);
+if (registerMessaging)
+{
+    builder.Services.AddBookingHangfire(builder.Configuration);
+}
 builder.Services.AddVietRideIdempotency("booking");
 
 var app = builder.Build();

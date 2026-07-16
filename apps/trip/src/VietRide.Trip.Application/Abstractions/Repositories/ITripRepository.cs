@@ -28,6 +28,23 @@ public interface ITripRepository : IRepository<Domain.Entities.Trip, Guid>
 
     Task<Domain.Entities.Trip?> GetWithSeatsAsync(Guid tripId, CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<Domain.Entities.Trip>> ListPendingByDriverScheduleAsync(
+        Guid driverScheduleId,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("DriverSchedule Trip enumeration is not supported by this repository implementation.");
+
+    Task<Domain.Entities.Trip?> AcquireForVehicleSwapAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("Vehicle-swap locking is not supported by this repository implementation.");
+
+    Task<bool> HasVehicleConflictAsync(
+        Guid vehicleId,
+        DateTimeOffset departureDateTime,
+        Guid excludedTripId,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("Vehicle conflict checks are not supported by this repository implementation.");
+
     Task<Domain.Entities.Trip?> GetForUpdateAsync(Guid tripId, CancellationToken cancellationToken)
         => GetByIdAsync(tripId, cancellationToken);
 

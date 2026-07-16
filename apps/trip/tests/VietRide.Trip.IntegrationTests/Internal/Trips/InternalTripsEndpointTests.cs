@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Json;
@@ -52,7 +53,48 @@ public sealed class InternalTripsEndpointTests
         document.RootElement.GetProperty("assistantUserId").GetGuid().Should().Be(assistantUserId);
         document.RootElement.GetProperty("destinationArrivedAt").ValueKind.Should().Be(JsonValueKind.Null);
         mediator.LastRequest.Should().BeOfType<GetTripSnapshotQuery>()
-            .Which.TripId.Should().Be(tripId);
+            .Which.Should().Be(new GetTripSnapshotQuery(tripId));
+    }
+
+    [Theory]
+    [InlineData("2026-07-15T09:30:00+07:00", "2026-07-15T02:30:00Z")]
+    [InlineData("2026-07-15T02:30:00Z", "2026-07-15T02:30:00Z")]
+    [InlineData("2026-07-15T02:30:00.1234567Z", "2026-07-15T02:30:00.1234567Z")]
+    [InlineData("2026-07-15T09:30:00.123+07:00", "2026-07-15T02:30:00.123Z")]
+    public async Task GetTrip_WithPricingAt_ForwardsNormalizedUtcInstant(string pricingAt, string expectedUtc)
+    {
+        var tripId = Guid.NewGuid();
+        var snapshot = CreateSnapshot(tripId, Guid.NewGuid(), null);
+        var mediator = new StubMediator(_ => snapshot);
+        using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
+        using var client = factory.CreateClient();
+
+        var response = await client.SendAsync(CreateAuthorizedRequest(
+            HttpMethod.Get,
+            $"/internal/v1/trips/{tripId}?pricingAt={Uri.EscapeDataString(pricingAt)}"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        mediator.LastRequest.Should().Be(
+            new GetTripSnapshotQuery(tripId, DateTimeOffset.Parse(expectedUtc, CultureInfo.InvariantCulture)));
+    }
+
+    [Theory]
+    [InlineData("not-a-timestamp")]
+    [InlineData("2026-07-15T09:30:00")]
+    [InlineData("07/15/2026T09:30:00Z")]
+    [InlineData("2026-07-15T09:30:00 +07:00")]
+    public async Task GetTrip_InvalidPricingAt_ReturnsValidationEnvelope(string pricingAt)
+    {
+        var mediator = new StubMediator(_ => throw new InvalidOperationException("Mediator must not be called."));
+        using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
+        using var client = factory.CreateClient();
+
+        var response = await client.SendAsync(CreateAuthorizedRequest(
+            HttpMethod.Get,
+            $"/internal/v1/trips/{Guid.NewGuid()}?pricingAt={Uri.EscapeDataString(pricingAt)}"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        await AssertErrorEnvelopeAsync(response, "VALIDATION_ERROR", hasFields: true);
     }
 
     [Fact]

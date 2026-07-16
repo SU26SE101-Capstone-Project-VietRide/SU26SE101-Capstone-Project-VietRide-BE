@@ -25,6 +25,10 @@ internal sealed class TripStopFareConfiguration : IEntityTypeConfiguration<TripS
             .HasColumnName("fare_from_this_stop")
             .HasColumnType("bigint")
             .HasConversion(m => m.Amount, amount => Money.FromRaw(amount));
+        builder.Property(fare => fare.Source)
+            .HasColumnName("source")
+            .HasColumnType("vietride_trip.trip_stop_fare_source")
+            .IsRequired();
         builder.Property(fare => fare.CreatedAt)
             .HasColumnName("created_at")
             .HasDefaultValueSql("now()");

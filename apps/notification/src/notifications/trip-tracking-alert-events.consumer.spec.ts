@@ -10,6 +10,7 @@ import {
   TRIP_INCIDENT_REPORTED_ROUTING_KEY,
   TRIP_STOP_DISABLED_ROUTING_KEY,
   TRIP_TRACKING_ALERT_QUEUE_BINDINGS,
+  TRIP_VEHICLE_SWAPPED_ROUTING_KEY,
 } from './trip-tracking-alert-events.constants';
 import { TripTrackingAlertEventsConsumer } from './trip-tracking-alert-events.consumer';
 
@@ -72,6 +73,16 @@ describe('TripTrackingAlertEventsConsumer', () => {
       TRIP_STOP_DISABLED_ROUTING_KEY,
       expect.any(Function),
       { prefetch: 1, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
+    );
+    expect(TRIP_TRACKING_ALERT_QUEUE_BINDINGS).toContainEqual({
+      queue: 'notification:trip-vehicle-swapped-crew',
+      routingKey: TRIP_VEHICLE_SWAPPED_ROUTING_KEY,
+    });
+    expect(TRIP_TRACKING_ALERT_QUEUE_BINDINGS).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ routingKey: 'trip.trip.schedule_changed' }),
+        expect.objectContaining({ routingKey: 'trip.trip.cancelled' }),
+      ]),
     );
   });
 

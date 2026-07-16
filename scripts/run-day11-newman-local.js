@@ -730,8 +730,7 @@ async function waitForGeneratedTripEvidence() {
       lastEvidence[0].seatCount >= 2 &&
       lastEvidence[0].a01Available >= 1 &&
       lastEvidence[0].a02Available >= 1 &&
-      lastEvidence[0].tripStopsCount >= 1 &&
-      lastEvidence[0].tripStopFaresCount >= 1
+      lastEvidence[0].tripStopsCount >= 1
     ) {
       return lastEvidence[0];
     }
@@ -882,7 +881,7 @@ async function main() {
   const generatedTrip = await waitForGeneratedTripEvidence();
   console.log('Day-11 generation evidence:');
   console.log(
-    `tripId=${generatedTrip.tripId}, status=${generatedTrip.status}, schedule=${seed.driverScheduleId}, seats=A01/A02 available, tripStops=${generatedTrip.tripStopsCount}, tripStopFares=${generatedTrip.tripStopFaresCount}`,
+    `tripId=${generatedTrip.tripId}, status=${generatedTrip.status}, schedule=${seed.driverScheduleId}, seats=A01/A02 available, tripStops=${generatedTrip.tripStopsCount}, legacyTripStopFares=${generatedTrip.tripStopFaresCount} (informational)`,
   );
 
   console.log(

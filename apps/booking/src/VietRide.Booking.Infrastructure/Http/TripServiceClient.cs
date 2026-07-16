@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
@@ -34,11 +35,29 @@ public sealed class TripServiceClient : ITripServiceClient
     public async Task<TripSnapshot?> GetTripSnapshotAsync(
         Guid tripId,
         CancellationToken cancellationToken = default)
+        => await GetTripSnapshotCoreAsync(
+            $"/internal/v1/trips/{tripId:D}",
+            cancellationToken).ConfigureAwait(false);
+
+    /// <inheritdoc/>
+    public async Task<TripSnapshot?> GetTripSnapshotAsync(
+        Guid tripId,
+        DateTimeOffset pricingAt,
+        CancellationToken cancellationToken)
+    {
+        var utcPricingAt = pricingAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+        var uri = $"/internal/v1/trips/{tripId:D}?pricingAt={Uri.EscapeDataString(utcPricingAt)}";
+        return await GetTripSnapshotCoreAsync(uri, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<TripSnapshot?> GetTripSnapshotCoreAsync(
+        string requestUri,
+        CancellationToken cancellationToken)
     {
         try
         {
             using var response = await _httpClient
-                .GetAsync($"/internal/v1/trips/{tripId:D}", cancellationToken)
+                .GetAsync(requestUri, cancellationToken)
                 .ConfigureAwait(false);
 
             if (response.StatusCode == HttpStatusCode.NotFound)

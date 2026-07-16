@@ -73,9 +73,15 @@ public class CreateRoundTripBookingIntegrationTests
             new TripSeatSummary(40, 39),
             null);
 
-        _factory.TripClient.GetTripSnapshotAsync(outboundTripId, Arg.Any<CancellationToken>())
+        _factory.TripClient.GetTripSnapshotAsync(
+                outboundTripId,
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
             .Returns(outboundTrip);
-        _factory.TripClient.GetTripSnapshotAsync(returnTripId, Arg.Any<CancellationToken>())
+        _factory.TripClient.GetTripSnapshotAsync(
+                returnTripId,
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
             .Returns(returnTrip);
         _factory.TripClient.LockRoundTripSeatsAsync(
                 Arg.Any<Guid>(),
@@ -198,7 +204,10 @@ public class CreateRoundTripBookingIntegrationTests
         var returnTripId = Guid.NewGuid();
         var stationId = Guid.NewGuid();
 
-        _factory.TripClient.GetTripSnapshotAsync(outboundTripId, Arg.Any<CancellationToken>())
+        _factory.TripClient.GetTripSnapshotAsync(
+                outboundTripId,
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
             .Returns(new TripSnapshot(
                 outboundTripId,
                 Guid.NewGuid(),
@@ -213,7 +222,10 @@ public class CreateRoundTripBookingIntegrationTests
                 [],
                 new TripSeatSummary(40, 38),
                 null));
-        _factory.TripClient.GetTripSnapshotAsync(returnTripId, Arg.Any<CancellationToken>())
+        _factory.TripClient.GetTripSnapshotAsync(
+                returnTripId,
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
             .Returns(new TripSnapshot(
                 returnTripId,
                 Guid.NewGuid(),
@@ -274,7 +286,7 @@ public class CreateRoundTripBookingIntegrationTests
         doc.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("VALIDATION_ERROR");
 
         await _factory.TripClient.DidNotReceiveWithAnyArgs()
-            .GetTripSnapshotAsync(default, default!);
+            .GetTripSnapshotAsync(default, default, default);
         await _factory.TripClient.DidNotReceiveWithAnyArgs()
             .LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default);
         await _factory.PaymentClient.DidNotReceiveWithAnyArgs()
@@ -292,7 +304,10 @@ public class CreateRoundTripBookingIntegrationTests
         var returnTripId = Guid.NewGuid();
         var stationId = Guid.NewGuid();
 
-        _factory.TripClient.GetTripSnapshotAsync(outboundTripId, Arg.Any<CancellationToken>())
+        _factory.TripClient.GetTripSnapshotAsync(
+                outboundTripId,
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
             .Returns(new TripSnapshot(
                 outboundTripId,
                 Guid.NewGuid(),
@@ -307,7 +322,10 @@ public class CreateRoundTripBookingIntegrationTests
                 [],
                 new TripSeatSummary(40, 38),
                 null));
-        _factory.TripClient.GetTripSnapshotAsync(returnTripId, Arg.Any<CancellationToken>())
+        _factory.TripClient.GetTripSnapshotAsync(
+                returnTripId,
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
             .Returns(new TripSnapshot(
                 returnTripId,
                 Guid.NewGuid(),

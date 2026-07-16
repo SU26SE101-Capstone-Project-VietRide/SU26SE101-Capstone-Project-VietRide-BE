@@ -1,6 +1,6 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.34.0
+> **Phiên bản:** 1.34.1
 > **Trạng thái:** ACTIVE — sealed for capstone v1
 > **Cập nhật lần cuối:** 2026-07-16
 > **Capstone:** SU26SE101 — SU26
@@ -26,7 +26,7 @@ Khi conflict, ưu tiên theo thứ tự sau:
 | # | File | Nội dung canonical | Khi nào reference |
 |---|---|---|---|
 | 1 | `SU26SE101_VIETRIDE_technical_context_v7.md` | **Business rules, flows, decisions, entity requirements, status machines, enum values** | Luôn là source-of-truth cuối cùng cho mọi câu hỏi business / domain. |
-| 2 | `Docs/API/VietRide_API_Contract_v1.md` | **Controller/DTO contract chi tiết** (request/response shape per endpoint) | Khi scaffold controller, DTO, FE call. |
+| 2 | `VietRide_API_Contract_v1.md` | **Controller/DTO contract chi tiết** (request/response shape per endpoint) | Khi scaffold controller, DTO, FE call. |
 | 3 | `db-schema/<service>/schema.sql` + `db-schema/<service>/README.md` | **DDL + entity rationale per service** | Khi sinh entity class, migration, repository, hoặc cần biết column type / constraint cụ thể. |
 | 4 | `db-schema/_global/cross-service-references.md` | **Danh sách logical FK cross-service** (enforce qua HTTP/event, KHÔNG hard FK DB) | Khi thiết kế inter-service call, snapshot field, event consume. |
 | 5 | `db-schema/_global/README.md` + `ERD_DRAWING_MASTER.md` + `erd-all-relations-drawing-order.md` | **DB conventions toàn hệ thống** (naming, datatype, soft delete, audit columns) + ERD master | Khi cần overview DB hoặc tra naming convention. |
@@ -39,7 +39,7 @@ Khi conflict, ưu tiên theo thứ tự sau:
 | Role | Đọc tối thiểu |
 |---|---|
 | Backend coding agent (scaffold service) | Section 0–3, 5–11 (skip business detail) + open file ở Section 4 khi cần entity |
-| Frontend / mobile agent | Section 2, 5, 6 + `Docs/API/VietRide_API_Contract_v1.md` + technical_context Section 4 (Client Apps) |
+| Frontend / mobile agent | Section 2, 5, 6 + `VietRide_API_Contract_v1.md` + technical_context Section 4 (Client Apps) |
 | QA / test agent | Section 8 (status machines), 9 (cross-cutting), 11 (job registry) + technical_context Section 6 (flows) |
 | DBA / migration agent | Section 4 + `db-schema/_global/README.md` + per-service `schema.sql` |
 | New developer | Đọc theo thứ tự Section 0 → 13 |
@@ -49,7 +49,7 @@ Khi conflict, ưu tiên theo thứ tự sau:
 1. **Mỗi thay đổi convention** (đổi error code, đổi naming rule, thêm event mới, v.v.) → bắt buộc append Section 13 changelog với date + commit hash.
 2. **Bump version** theo SemVer: PATCH cho typo/clarification, MINOR cho thêm section/registry entry, MAJOR cho breaking convention change.
 3. **Không paste DDL** vào doc này — chỉ reference path tới `db-schema/<service>/schema.sql`.
-4. **Không paste full API contract** — chỉ reference `Docs/API/VietRide_API_Contract_v1.md`.
+4. **Không paste full API contract** — chỉ reference `VietRide_API_Contract_v1.md`.
 5. **Khi flag gap** (rule mơ hồ trong technical_context): mở section `TBD / Open Questions` ở cuối doc thay vì tự suy diễn.
 
 ---
@@ -138,6 +138,7 @@ Khi conflict, ưu tiên theo thứ tự sau:
 | MediatR | **11.x** (MIT) | v12+ commercial license, KHÔNG upgrade |
 | FluentValidation | 11.x | |
 | FluentValidation.AspNetCore | 11.x | |
+| Hangfire.AspNetCore | latest stable, centrally pinned | Approved .NET Hangfire host/dashboard integration; no other Booking scheduler package |
 | Hangfire.PostgreSql | latest stable | Storage trong cùng DB service, schema `hangfire` |
 | Polly | 8.x | Circuit breaker + retry cho external HTTP |
 | Serilog.AspNetCore | latest | Structured logging console + file |
@@ -1068,7 +1069,7 @@ Idempotent: chạy migration 2 lần không lỗi (EF Core / Prisma migrations h
 
 `Location` is the admin-managed public origin/destination catalog used by FE trip search; `Station.locationId` and `Stop.locationId` are nullable links to this catalog.
 
-`Station` · `OperatorStation` · `Stop` · `Route` · `RouteStop` · `RouteStopFareTemplate` · `AlternativeRoute` · `AlternativeRouteStop` · `VehicleType` · `Vehicle` · `Trip` · `TripSeat` · `TripStop` · `TripStopFare` · `DriverSchedule` · `TripGenerationSkipLog` · `ShuttleTrip` · `ShuttlePassenger` · `Incident` · `OutboxEvent`
+`Station` · `OperatorStation` · `Stop` · `Route` · `RouteStop` · `RouteStopFareTemplate` · `AlternativeRoute` · `AlternativeRouteStop` · `VehicleType` · `Vehicle` · `Trip` · `TripSeat` · `TripStop` · `TripStopFare` · `DriverSchedule` · `TripGenerationSkipLog` · `TripAuditLog` · `DriverScheduleAuditLog` · `ShuttleTrip` · `ShuttlePassenger` · `Incident` · `OutboxEvent`
 
 #### Booking (`vietride_booking`)
 
@@ -1119,6 +1120,14 @@ Tham chiếu `db-schema/_global/cross-service-references.md` cho danh sách đ�
 - **Audit columns:** `created_at TIMESTAMPTZ DEFAULT now()` + `updated_at TIMESTAMPTZ DEFAULT now()` + trigger `trg_set_updated_at` cho UPDATE.
 - **Optimistic concurrency:** `row_version INT DEFAULT 0` cho `wallets`, `platform_wallets`, `operator_wallets`, `operator_trip_settlements`.
 - **Index baseline:** PK auto · mọi FK có index · enum status xuất hiện trong WHERE business flow có index (partial nếu cần) · timestamp có range query có index.
+- **Future-dated Trip fares:** Trip DB enables PostgreSQL `btree_gist`. `route_stop_fare_templates`
+  has a GiST exclusion guard on equality of `(route_id, stop_id)` plus overlap of the half-open
+  range `tstzrange(effective_from, coalesce(effective_until, 'infinity'), '[)')`; app validation is
+  UX only, while this database guard is the concurrency boundary. `trip_stop_fares.source` is
+  exactly `TEMPLATE_SNAPSHOT|MANUAL_OVERRIDE`, with existing rows backfilled to
+  `TEMPLATE_SNAPSHOT`. Day 22 creates no new `TEMPLATE_SNAPSHOT` rows; legacy rows remain readable
+  only for the omitted-`pricingAt` path and are non-authoritative for explicit `pricingAt`. Only an
+  explicit operator per-Trip fare override creates `MANUAL_OVERRIDE`.
 
 ### 4.5 Hangfire schema isolation
 
@@ -1266,11 +1275,14 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | 15 | `POST /v1/operator/vouchers` | Booking |
 | 16 | `POST /v1/driver/trips/{tripId}/start` | Trip |
 | 17 | `POST /v1/driver/trips/{tripId}/complete` | Trip |
-| 18 | `POST /v1/driver/trips/{tripId}/incident` | Trip |
-| 19 | `POST /v1/driver/trips/{tripId}/stops/{stopId}/arrive` | Trip |
-| 20 | `POST /v1/driver/trips/{tripId}/destination/arrive` | Trip |
-| 21 | `POST /v1/assistant/parcels/{parcelId}/unload` | Parcel |
-| 22 | `POST /v1/assistant/parcels/{parcelId}/deliver` | Parcel |
+| 18 | `PATCH /v1/operator/trips/{tripId}` | Trip |
+| 19 | `PATCH /v1/operator/driver-schedules/{scheduleId}?applyTo=...` | Trip |
+| 20 | `PATCH /v1/operator/driver-schedules/{scheduleId}/crew` (one-release deprecated alias) | Trip |
+| 21 | `POST /v1/driver/trips/{tripId}/incident` | Trip |
+| 22 | `POST /v1/driver/trips/{tripId}/stops/{stopId}/arrive` | Trip |
+| 23 | `POST /v1/driver/trips/{tripId}/destination/arrive` | Trip |
+| 24 | `POST /v1/assistant/parcels/{parcelId}/unload` | Parcel |
+| 25 | `POST /v1/assistant/parcels/{parcelId}/deliver` | Parcel |
 
 **Implementation:**
 
@@ -1296,6 +1308,72 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
   Trong thời gian rollout, nếu legacy key còn tồn tại thì fail closed bằng
   `422 IDEMPOTENCY_KEY_MISMATCH`; không flush Redis business keys, để legacy entry tự hết hạn tối đa
   sau 24 giờ.
+
+**Day-22 query-aware baseline:** Trip/DriverSchedule mutations include every query key/value in the
+fingerprint: keys sort ordinally, absent differs from empty, and repeated-value order is preserved.
+Day-39 idempotency v2 supersedes the original Day-22 route/body framing with `PathBase + Path` and
+raw request-body bytes while preserving those query semantics. A different `applyTo`, subject,
+path (including `/crew`), query value/order, or body returns `422 IDEMPOTENCY_KEY_MISMATCH`.
+
+The feasible pipeline preserves the current shared middleware: authentication (`401`) → endpoint
+role authorization (`403`) → shared pre-reservation checks (matched route, UUID-v4 key, body
+presence policy) → fingerprint reservation/replay/mismatch/pending → MVC binding plus endpoint
+query/body validation (`422`) → one handler-start `now` for a new reservation → domain
+preflight → one local commit → store the exact status/body for every reserved response below
+`500`. Reserved malformed JSON, missing/invalid `applyTo`, unknown/empty bodies, and
+FluentValidation `422` responses replay exactly. Pre-reservation authentication/authorization,
+unmatched-route, and malformed-key failures are not cached; a `5xx` releases the reservation.
+No MVC-before-middleware mechanism is introduced or claimed. Day-21 no-body lifecycle semantics
+remain unchanged.
+
+**Day-22 Trip PATCH domain contract:** `PATCH /v1/operator/trips/{tripId}` is
+`OPERATOR_ADMIN`, UUID-v4 idempotent, and accepts only `{baseFare?,notes?,vehicleId?,routeId?}`.
+Omitted means unchanged; `notes:null` clears after trim/blank normalization; null for other fields,
+empty/unknown-only body, departure, and crew are `422 VALIDATION_ERROR`. Actual-change lifecycle
+is `baseFare|routeId` only `SCHEDULED`, `vehicleId` in `SCHEDULED|BOARDING`, and `notes` in every
+non-terminal status. Execution order is tenant-scoped Trip load/masked `TRIP_NOT_FOUND` →
+normalize/actual `changedFields` → no-op `200` → lifecycle → tenant Route/Vehicle references →
+one Booking edit-impact call for route/vehicle → conflicts in exact order
+`TRIP_ROUTE_CHANGE_BOOKINGS_EXIST`, `TRIP_VEHICLE_SWAP_HELD_SEAT_CONFLICT`,
+`TRIP_VEHICLE_SWAP_TOO_LATE`, then remaining local conflicts → open one transaction →
+lock/reload/revalidate in fixed aggregate order Trip → seats → stops with stable collection order
+→ mutate → audit/Outbox → one save/commit. No transaction
+spans HTTP and no-op produces no audit/event/downstream call.
+
+Compatibility is keyed by normalized seat number and only for vehicle swaps:
+`STANDARD < SLEEPER_UPPER < SLEEPER_LOWER < VIP`; it never affects pricing and `DRIVER_AREA` is
+not a passenger seat. Absent is `SEAT_REMOVED`; same-number disabled or `DRIVER_AREA` is
+`SEAT_DISABLED`; lower rank is `SEAT_TYPE_DOWNGRADED`; equal/higher is compatible and preserves
+HELD/BOOKED. In `SCHEDULED`, incompatible HELD blocks; incompatible BOOKED may create
+`PENDING_SEAT_ASSIGNMENT` only when `min(now+4h, departure-30m) > now`. In `BOARDING`, any
+incompatible HELD/BOOKED is too late. Disabled/`DRIVER_AREA` entries never create TripSeats.
+
+**Day-22 DriverSchedule PATCH domain contract:** canonical body is exactly
+`{departureTime?,dayOfWeek?,driverUserId?,assistantUserId?,vehicleId?,validUntil?,isActive?}`;
+`routeId` and `validFrom` are immutable. Omitted means unchanged. Explicit null clears only
+assistant, vehicle, or validUntil; `validUntil:null` is open-ended. Other nulls and empty/
+unknown-only bodies are `VALIDATION_ERROR`. The order is tenant schedule load/masked `404` →
+normalize/no-op → local/window/null-vehicle rules → tenant/Identity references → overlap checks →
+branch. `FUTURE_ONLY` leaves generated Trips unchanged, makes no Booking call, and generates only
+uncovered future dates.
+With `vehicleId:null`, it clears only the schedule and logs every attempted date via existing
+`TripGenerationSkipLog` reason `OTHER` with a no-vehicle message until reassigned.
+`ALL_PENDING` with null vehicle is `422` before any Booking call/write because Trip vehicle is
+NOT NULL. Otherwise it deterministically enumerates `SCHEDULED|BOARDING`, fetches all Booking
+projections before any write/transaction, blocks the entire request with
+`DRIVER_SCHEDULE_EDIT_TOO_LATE` when a CONFIRMED Booking's Trip has `departure-now < 2h`, then
+uses HELD-conflict before too-late precedence (no route-change code). One transaction locks in
+fixed order schedule → Trips sorted `(departureDateTime,tripId)` → each Trip's seats → stops,
+reloads/revalidates, applies the schedule and all cascades, stages
+audit/Outbox, and saves/commits once; any failure rolls back all. Day removal cancels no-longer-
+matching pending Trips. `validUntil` shortening and `isActive=false` only stop generation and never
+mutate generated Trips; clear/reactivate may generate uncovered future dates. `/crew` is a
+one-release deprecated alias to this command with `ALL_PENDING`, not a second use case.
+Changing `departureTime`/`dayOfWeek` through `ALL_PENDING` is the only Day-22 path that cascades
+`departureDateTime`; that field is absent from the Trip PATCH body and changed-field registry.
+`trip_stops.estimated_arrival_time` is a static planned baseline: an approved pre-departure Route
+edit or DriverSchedule `ALL_PENDING` cascade may recompute it, while GPS/Tracking dynamic ETA never
+updates the column.
 
 ### 5.7 Pagination — `PagedResult<T>` + `QueryOptions` (ADR 0004)
 
@@ -1407,10 +1485,13 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | | `TRIP_DESTINATION_ALREADY_ARRIVED` | 409 | Destination-terminal anchor đã được ghi trước đó |
 | | `VEHICLE_NOT_FOUND` | 404 | Vehicle không tồn tại, đã soft-delete, hoặc không thuộc operator caller |
 | | `VEHICLE_TYPE_NOT_FOUND` | 404 | VehicleType không tồn tại hoặc không active |
-| | `TRIP_NOT_EDITABLE` | 409 | Status ≠ SCHEDULED |
+| | `TRIP_NOT_EDITABLE` | 409 | Requested Trip field is not editable in the current lifecycle state |
 | | `TRIP_ALREADY_TERMINAL` | 409 | Manual complete/fallback/disruption race already produced a terminal state |
 | | `TRIP_VEHICLE_CONFLICT` | 409 | Vehicle trùng giờ trên Trip khác |
 | | `TRIP_DRIVER_CONFLICT` | 409 | Driver trùng giờ |
+| | `TRIP_ROUTE_CHANGE_BOOKINGS_EXIST` | 409 | Route edit has an active `PENDING_PAYMENT\|CONFIRMED` Booking impact |
+| | `TRIP_VEHICLE_SWAP_HELD_SEAT_CONFLICT` | 409 | Vehicle swap would remove/disable/downgrade an HELD seat |
+| | `TRIP_VEHICLE_SWAP_TOO_LATE` | 409 | Vehicle swap has incompatible BOOKED/BOARDING seats after the strict reassignment window |
 | | `TRIP_NOT_ACCEPTING_PARCEL` | 409 | Trip IN_PROGRESS — không nhận parcel mới |
 | | `DRIVER_SCHEDULE_EDIT_TOO_LATE` | 409 | Edit schedule quá deadline |
 | **Parcel** | `PARCEL_NOT_FOUND` | 404 | |
@@ -1764,7 +1845,7 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 
 | Method + Path | Caller | Mục đích |
 |---|---|---|
-| `GET /internal/v1/trips/{tripId}` | Booking, Parcel, Tracking, Payment | Lookup trip snapshot |
+| `GET /internal/v1/trips/{tripId}?pricingAt=` | Booking, Parcel, Tracking, Payment | Raw Trip snapshot; optional ISO-offset `pricingAt` keeps fields unchanged and resolves Booking fare as `MANUAL_OVERRIDE` → active half-open `RouteStopFareTemplate` → `Trip.baseFare`. Without it, preserve persisted `MANUAL_OVERRIDE|TEMPLATE_SNAPSHOT` snapshot semantics and never consult current templates. New Booking creation/round-trip captures and reuses one handler-start value; Payment success never reprices. |
 | `POST /internal/v1/trips/{tripId}/lock-seats` | Booking | Lock seats trong checkout (TTL 10 phút Redis) |
 | `POST /internal/v1/trips/round-trip/lock-seats` | Booking | Lock outbound + return seats atomically in one Trip-owned Redis Lua script; if either leg fails, no seat is held |
 | `POST /internal/v1/trips/{tripId}/release-seats` | Booking | Release seat khi payment fail/timeout |
@@ -1779,6 +1860,7 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | Method + Path | Caller | Mục đích |
 |---|---|---|
 | `GET /internal/v1/bookings/{id}` | Tracking, Payment, Parcel | Lookup booking snapshot, including active ticket count for parcel attach |
+| `GET /internal/v1/bookings/trips/{tripId}/edit-impact?operatorId=` | Trip | Required trusted `operatorId`; every query predicates `trip_id` and `operator_id`, active is exactly `PENDING_PAYMENT|CONFIRMED`, raw PII-free `{tripId,activeBookingCount,activeBookings:[{bookingId,status,seatNumbers}]}`, empty is `200`. |
 | `GET /internal/v1/bookings/{id}/access-check?userId=` | Tracking | Verify Socket.IO joinTripTracking authz |
 | `GET /internal/v1/vouchers/by-code/{code}` | Booking (own service); also exposed for admin reports |
 
@@ -1829,6 +1911,10 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `booking.booking.confirmed` | Booking | Notification, Payment (settle hold), Booking (BookingStats counter), Trip (shuttle fan-out) | `{ bookingId, tripId, totalAmount, userId, voucherUsageId?, bookingCode?, tickets?: [{ ticketId, passengerUserId? }], ticketCodes?, ticketCount?, shuttlePickup?: { address, latitude, longitude } }` |
 | `booking.booking.cancelled` | Booking | Notification, Trip (release seats), Payment (refund), Booking (BookingStats counter) | `{ bookingId, userId, refundAmount, refundOverride, cancellationReason, bookingCode?, ticketCodes?, ticketCount? }` |
 | `booking.booking.refunded` | Booking | Notification, Booking (BookingStats counter) | `{ bookingId, userId, amount, bookingCode?, ticketCodes?, ticketCount? }` |
+| `booking.booking.seat_reassignment_required` | Booking | Notification | `{ eventId, occurredAt, bookingId, tripId, userId, pendingActionId, deadline, seatNumbers, reason: SEAT_REMOVED\|SEAT_DISABLED\|SEAT_TYPE_DOWNGRADED }` |
+| `booking.booking.schedule_change_informational` | Booking | Notification | For `CONFIRMED` Bookings only; exact MINOR-only `{ eventId, occurredAt, bookingId, tripId, userId, oldDeparture, newDeparture, severity: MINOR }`; no pending-action fields |
+| `booking.booking.schedule_change_required` | Booking | Notification | For `CONFIRMED` Bookings only; MEDIUM/MAJOR-only `{ eventId, occurredAt, bookingId, tripId, userId, pendingActionId, deadline, oldDeparture, newDeparture, severity: MEDIUM\|MAJOR }` |
+| `booking.booking.pending_action_realerted` | Booking | Notification | Common `{ eventId, occurredAt, bookingId, tripId, userId, pendingActionId, deadline }` plus either `{ reason: PENDING_SEAT_ASSIGNMENT, seatNumbers, seatImpactReason }` or `{ reason: SCHEDULE_CHANGE, oldDeparture, newDeparture, severity: MEDIUM\|MAJOR }` |
 | `booking.voucher.consent_accepted` | Booking | Notification | `{ voucherId, operatorId }` |
 | `booking.voucher.consent_rejected` | Booking | Notification | `{ voucherId, operatorId, reason? }` |
 | `trip.trip.boarding_started` | Trip | Notification | `{ tripId, boardingStartedAt }` |
@@ -1837,9 +1923,10 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `trip.trip.started` | Trip | Parcel (block new parcel), Tracking | `{ tripId, actualDepartureTime }` |
 | `trip.trip.completed` | Trip | Booking, Parcel, Payment (settlement eligibility) | `{ eventId, occurredAt, tripId, operatorId, terminalAt, completedAt, hasSubstitution }`; `completedAt` equals `terminalAt` and is retained as the Booking compatibility alias |
 | `trip.trip.disrupted` | Trip | Booking, Parcel, Payment | `{ eventId, occurredAt, tripId, operatorId, terminalAt, hasSubstitution, reason? }`; `hasSubstitution` is audit-only for Payment settlement, not for other consumers |
-| `trip.trip.cancelled` | Trip | Booking, Parcel, Payment | `{ tripId, cancelledAt, cancelReason }` |
+| `trip.trip.cancelled` | Trip | Booking, Parcel, Payment | `{ eventId, occurredAt, tripId, operatorId, cancelledAt, cancelReason }`; Day-22 day removal uses `DRIVER_SCHEDULE_DAY_REMOVED` and `cancelledAt=occurredAt`; Payment may consume the terminal fact for settlement eligibility, while refunds remain driven only by `booking.booking.cancelled` |
+| `trip.trip.vehicle_swapped` | Trip | Booking, Notification (crew only) | Exact `{ eventId,occurredAt,tripId,operatorId,oldVehicleId,newVehicleId,oldVehiclePlateNumber,newVehiclePlateNumber,departureDateTime,driverUserId,assistantUserId,seatImpacts:[{bookingId,seatNumbers,reason}] }`; `assistantUserId` present nullable, reasons exactly `SEAT_REMOVED\|SEAT_DISABLED\|SEAT_TYPE_DOWNGRADED` |
 | `trip.trip.route_changed` | Trip | Booking (create BookingPendingAction), Notification | `{ tripId, alternativeRouteId, affectedBookingIds }` |
-| `trip.trip.schedule_changed` | Trip | Booking, Notification | `{ tripId, oldDeparture, newDeparture, severity }` |
+| `trip.trip.schedule_changed` | Trip | Booking | Exact `{ eventId,occurredAt,tripId,operatorId,oldDeparture,newDeparture,severity }`, severity `MINOR\|MEDIUM\|MAJOR`; Notification consumes Booking-owned facts instead |
 | `trip.stop.disabled` | Trip | Booking | `{ stopId, operatorId, replacedByStopId?, occurredAt }` |
 | `booking.stop_disabled.affected` | Booking | Notification | `{ stopId, replacedByStopId?, recipientUserIds[], affectedBookingCount, occurredAt }` |
 | `trip.stop.departed_with_pending` | Trip | Notification (Driver App boarding warning) | `{ eventId: Guid, occurredAt: DateTime (UTC), eventType: "trip.stop.departed_with_pending", tripId: Guid, stopId: Guid, stopName: string, pendingPassengerCount: int (> 0), driverUserId: Guid, assistantUserId: Guid?, departedAt: DateTimeOffset (UTC ISO-8601) }` |
@@ -1878,6 +1965,21 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `parcel.parcel.transfer_initiated` | Parcel | Notification | `{ parcelId, originalTripId, newTripId }` |
 | `parcel.refund.initiated` | Parcel | Payment | `{ parcelId, refundAmount }` |
 | `rag.document.approved` | RAG AI | Notification (uploader) | `{ documentId }` |
+
+**Day-22 ownership:** For Day-22 vehicle swap, schedule change, and schedule-day-removal
+cancellation only, Trip emits domain facts while Booking owns passenger-impact state and passenger-
+notification facts. This scoped rule does not replace or alter the existing
+`trip.trip.route_changed` registry/consumer behavior. Notification never consumes
+`trip.trip.schedule_changed` or `trip.trip.cancelled` directly; the vehicle-swapped Trip fact
+targets crew only. For schedule changes, only `CONFIRMED` Bookings emit a Booking schedule fact:
+MINOR emits `booking.booking.schedule_change_informational`, MEDIUM/MAJOR emit
+`booking.booking.schedule_change_required`, and every other Booking status emits neither. On
+Day-22 day-removal cancellation, Booking cancels active rows and emits existing
+`booking.booking.cancelled`: `PENDING_PAYMENT` uses `refundAmount=0`; `CONFIRMED` uses a 100%
+refund of immutable persisted `Booking.totalAmount`. Payment refunds only from that Booking fact,
+preventing double refunds. Parcel independently consumes Trip cancellation. Day 22 owns fact
+publication, pending-action creation, and T+2h re-alert; Day 23 owns passenger accept/reject and
+timeout/refund resolution.
 
 ### 7.4 Outbox Pattern (durability cho publish event)
 
@@ -2055,6 +2157,33 @@ the authenticated actor and metadata `{tripId,role}`, and the `trip.trip.complet
 one Trip-local transaction. It performs no Identity read/write, creates no cross-database FK, and
 publishes no audit integration event.
 
+#### Day-22 Trip and DriverSchedule edit audit/pricing contract
+
+Day-22 extends `TripAuditAction` with exactly `TRIP_EDITED`, `TRIP_VEHICLE_SWAPPED`,
+`TRIP_ROUTE_CHANGED`, and `DRIVER_SCHEDULE_CASCADE_APPLIED`. Real schedule changes use separate
+`DriverScheduleAuditAction.DriverScheduleEdited = "DRIVER_SCHEDULE_EDITED"`. Both audit stores are
+append-only; same-value requests append nothing. Day-22 metadata is exactly
+`{changedFields,before,after,requestId}` and never contains the raw Idempotency-Key.
+
+`driver_schedule_audit_logs` mirrors the Trip audit shape with `driver_schedule_id` as a local FK
+to `driver_schedules(id) ON DELETE RESTRICT`, nullable logical `actor_user_id` (no cross-DB FK),
+`action varchar(64)`, nullable `metadata jsonb`, required application-captured `occurred_at`, and
+`created_at DEFAULT now()`. Indexes mirror the Trip audit read paths for schedule, nullable actor,
+and action. Trip/schedule state, every applicable audit row, and every Outbox row are staged and
+saved/committed once in the same Trip-local transaction.
+
+Trip edit persistence adds nullable `notes varchar(2000)` (trim; blank → null) and
+`trip_stop_fares.source = TEMPLATE_SNAPSHOT|MANUAL_OVERRIDE`. Existing fare rows backfill
+`TEMPLATE_SNAPSHOT`, but Day 22 creates no new rows with that source. Legacy snapshots remain
+readable for omitted `pricingAt`, are non-authoritative for explicit `pricingAt`, and only an
+explicit operator per-Trip fare override creates `MANUAL_OVERRIDE`. Booking pricing captures one
+handler-start `pricingAt` and resolves `MANUAL_OVERRIDE` → active template satisfying
+`effectiveFrom <= pricingAt < effectiveUntil` (or open-ended) → `Trip.baseFare`. Internal callers
+that omit `pricingAt` keep the persisted operational snapshot and never consult current templates.
+Once a Booking is inserted,
+`baseFare`, `discountAmount`, and `totalAmount` remain immutable; Payment success never re-queries
+Trip, and cancellation/refund uses persisted `totalAmount`.
+
 ### 8.3 ParcelStatus
 
 ```
@@ -2169,6 +2298,19 @@ PENDING_HOLD ─→ ELIGIBLE ─→ SETTLED
 ### 8.10 BookingPendingAction lifecycle
 
 `BookingPendingAction` track confirmation cần passenger phản hồi (ROUTE_CHANGE, SEAT_DOWNGRADE, SCHEDULE_CHANGE, PENDING_SEAT_ASSIGNMENT, STOP_DISABLED). Partial unique `UNIQUE(bookingId) WHERE resolvedAt IS NULL` — chỉ 1 active per booking. Action mới phát sinh → close action cũ với `resolvedAction = SUPERSEDED` rồi INSERT mới.
+
+Day-22 vehicle swap creates `PENDING_SEAT_ASSIGNMENT` only for an incompatible BOOKED seat on a
+`SCHEDULED` Trip when `deadline = min(event.occurredAt + 4h, departureDateTime - 30m)` is strictly
+later than the Booking handler clock. Metadata stores `sourceEventId` plus exact seat detail in the
+existing JSONB; no column is added. Schedule `MINOR` never creates an action and publishes only
+`booking.booking.schedule_change_informational`. `MEDIUM|MAJOR` creates `SCHEDULE_CHANGE` with the
+technical-context deadline and publishes the mandatory pending-action fact. Both statements apply
+only to `CONFIRMED` Bookings; every other Booking status emits neither schedule fact. Booking
+commits the action and initial Outbox atomically before ensuring the T+2h re-alert schedule.
+
+Day 22 does not resolve these actions. Passenger accept/reject and terminal timeout/refund remain
+Day 23. The T+2h job is only a re-alert and uses logical dedupe by `pendingActionId` as described
+in §10.1.
 
 ### 8.11 OperatorVoucherConsent
 
@@ -2361,6 +2503,9 @@ compareOwnerThenAtomicallySetResponseAndDeleteLock(
 return result
 ```
 
+Fingerprint normalization follows §5.6. Query keys are ordinal-sorted, absent differs from empty,
+decoded repeated values preserve their order, and no query parameter is omitted.
+
 ### 9.9 Redis namespace conventions
 
 Mọi key dùng pattern `<service>:<purpose>:<id>` để namespace per service. Cùng 1 Redis instance dùng chung (no DB number isolation). Mỗi service chỉ read/write key của riêng mình **trừ** `identity:jwks_cache` (Gateway + Tracking đọc read-only).
@@ -2460,8 +2605,20 @@ KHÔNG dùng Prometheus/Grafana/Jaeger/Loki cho v1 (xem technical_context 3.5).
 |---|---|---|---|
 | `SeatReleaseTimeoutJob` | Scheduled (per Booking) | 10 phút sau PENDING_PAYMENT VNPay | Release seat + Booking → EXPIRED |
 | `ScheduleChangeAutoAcceptJob` | Scheduled (per BookingPendingAction) | Action.deadline | Auto-accept SCHEDULE_CHANGE nếu user không phản hồi |
-| `PendingSeatAssignmentEscalationJob` | Recurring | Every 15 phút | T+2h re-alert; auto-cancel/refund 100% nếu unresolved tại `departure - 30 phút` |
+| `PendingActionRealertJob` | Scheduled (logical key `pendingActionId`) | Action occurrence + 2h | Day-22 re-alert only for unresolved, pre-deadline `PENDING_SEAT_ASSIGNMENT` or MEDIUM/MAJOR `SCHEDULE_CHANGE`; Day-23 owns resolution/refund |
 | `PartialNoShowDetectionJob` | Recurring | Every 5 phút | Detect mixed BOARDED + NO_SHOW → set Booking.status = PARTIAL_NO_SHOW |
+
+Booking hosts its own PostgreSQL-backed Hangfire storage/schema `hangfire`, queue `booking`, server
+`vietride-booking`, using only the approved centrally pinned `Hangfire.AspNetCore` and
+`Hangfire.PostgreSql`. Scheduling dedupe is logical by `pendingActionId`; broker retry/redelivery
+may create multiple physical jobs and no exact physical job-count guarantee exists. Every
+execution locks and rechecks action existence, unresolved state, and `now < deadline`, then uses a
+deterministic re-alert Outbox identity derived from `pendingActionId`. Outbox uniqueness permits one
+persisted side effect; duplicate physical jobs no-op. Consumer order is Booking DB commit → ensure
+schedule → Rabbit ACK. Crash after commit/before ensure or ACK is repaired by broker/DLQ replay,
+which finds the existing `(bookingId,sourceEventId)` action, emits no duplicate initial event,
+ensures scheduling, and then ACKs. No extra table, column, migration, `realerted_at`, custom poller,
+or dependency is permitted.
 
 #### Parcel
 
@@ -2913,6 +3070,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.34.1** | 2026-07-16 | BE lead (Vu) | **PATCH** - Merge the Day-22 Trip edit/effective-pricing/DriverSchedule cascade contracts into the current Day-39 baseline. Preserve trusted Booking impact, immutable Booking pricing/refund snapshots, fare-source overlap guard, Trip/schedule audits, Booking-owned passenger impact and Hangfire re-alert semantics; reconcile them with idempotency v2 and Day-38 Payment terminal-settlement consumption. |
 | **1.34.0** | 2026-07-16 | Senior Backend Engineer | **MINOR** - Day 39 Incident vertical slice: thêm canonical assigned Driver/Assistant Incident API, persistence + transactional `trip.incident.reported` Outbox, validation/normalization category-description-photo-GPS; Notification resolve active `OPERATOR_ADMIN` cùng operator, fan-out in-app/push với retry, payload-event dedupe và PII-safe logging. |
 | **1.33.0** | 2026-07-15 | Senior Backend Engineer | **MINOR** - Day 39 Parcel delivery hardening: tách canonical `IN_TRANSIT -> UNLOADED` và `UNLOADED -> DELIVERED_PENDING_CONFIRM`; terminal-bound dùng `destinationArrivedAt`, stop-bound dùng đúng matching arrived stop; token chỉ sinh ở deliver, cargo release chỉ ở unload; CAS loser không phát Outbox hoặc release lần hai; chuẩn hóa endpoint, error và event contracts. |
 | **1.32.0** | 2026-07-15 | Senior Backend Engineer | **MINOR** - Day 39 Driver arrival hardening: chuyển stop-arrival sang canonical Driver/Assistant route, assignment authorization, ambient transaction và lock order `Trip -> TripStop`; thêm one-shot destination-terminal anchor độc lập Trip completion, internal snapshot field, typed `trip.stop.arrived`/`trip.destination.arrived` Outbox contracts và migration reversible. |

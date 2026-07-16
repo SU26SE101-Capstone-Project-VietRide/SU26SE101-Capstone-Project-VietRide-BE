@@ -147,6 +147,16 @@ public interface ITripServiceClient
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// GET /internal/v1/trips/{tripId}?pricingAt=... — returns a trip snapshot whose
+    /// stop fares are resolved for the supplied pricing instant. New Booking creation
+    /// captures this value once at handler start and reuses it for every leg.
+    /// </summary>
+    Task<TripSnapshot?> GetTripSnapshotAsync(
+        Guid tripId,
+        DateTimeOffset pricingAt,
+        CancellationToken cancellationToken);
+
+    /// <summary>
     /// POST /internal/v1/trips/{tripId}/lock-seats — all-or-nothing seat hold.
     /// Idempotent: same Idempotency-Key returns the same <see cref="SeatLockResult"/>.
     /// Returns a <see cref="LockSeatsOutcome"/> discriminated union.

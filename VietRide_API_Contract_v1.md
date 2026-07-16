@@ -7,7 +7,7 @@
 - Public API prefix: `/v1`.
 - Internal service-to-service API prefix: `/internal/v1`, require valid Internal JWT, never exposed publicly through Gateway.
 - Auth header for public protected endpoints: `Authorization: Bearer <userAccessToken>`.
-- Idempotent write endpoints require `Idempotency-Key: <uuid-v4>` where noted. Same key + same actor/method/path/query/raw body replays the original status, `Content-Type`, and response bytes for 24 hours; an in-flight duplicate returns `409 IDEMPOTENCY_REQUEST_PENDING`, a changed fingerprint returns `422 IDEMPOTENCY_KEY_MISMATCH`, and a missing required header returns `422 IDEMPOTENCY_KEY_REQUIRED`.
+- Idempotent write endpoints require `Idempotency-Key: <uuid>` where noted.
 - Error response: `ApiResponse` envelope `{ success: false, statusCode, error: { code, message, fields? }, meta: { traceId, timestamp } }` — ADR 0004; `error.code` từ BSOT §5.9 registry (UPPER_SNAKE_CASE). `application/problem+json` (RFC 7807) đã DROP.
 - Money fields are VND `number` in JSON, stored as BIGINT in DB.
 - Datetime fields are ISO 8601 strings with offset.
@@ -1148,6 +1148,39 @@ Response `200`:
 `activeTicketCount` counts tickets in `ISSUED` or `USED`. Parcel attach must reject bookings with
 `activeTicketCount = 0`.
 
+### GET `/internal/v1/bookings/trips/{tripId}/edit-impact?operatorId={operatorId}`
+
+Auth: Internal JWT. Caller: Trip only. `operatorId` is required, non-empty, and is supplied from
+the tenant-scoped Trip aggregate, never from a public request body. Every Booking query predicates
+both `trip_id = tripId` and `operator_id = operatorId` before applying the active-status filter.
+
+Response `200` is a raw DTO (no `ApiResponse` success envelope):
+
+```json
+{
+  "tripId": "uuid",
+  "activeBookingCount": 2,
+  "activeBookings": [
+    {
+      "bookingId": "uuid",
+      "status": "PENDING_PAYMENT",
+      "seatNumbers": ["A01", "A02"]
+    },
+    {
+      "bookingId": "uuid",
+      "status": "CONFIRMED",
+      "seatNumbers": ["B01"]
+    }
+  ]
+}
+```
+
+Active means exactly `PENDING_PAYMENT|CONFIRMED`. An unaffected Trip returns `200` with count `0`
+and an empty array. Each Booking appears once and `seatNumbers` contains no duplicates. The
+response contains no user/contact PII. Missing/empty `operatorId` is
+`422 VALIDATION_ERROR`; invalid internal authentication is `401`; no cross-tenant row contributes
+to either the count or list.
+
 ### POST `/v1/bookings/{bookingId}/cancel`
 
 Auth: booking owner. Idempotency: required.
@@ -1646,10 +1679,11 @@ Response `200`:
 }
 ```
 
-### GET `/internal/v1/trips/{tripId}`
+### GET `/internal/v1/trips/{tripId}?pricingAt={iso8601}`
 
 Auth: Internal JWT. Callers: Booking, Parcel, Tracking, Payment (BSOT §7.2). Trip snapshot
-that Booking reads for checkout fare calc + pickup/dropoff validation. Returns a **raw DTO**
+that Booking reads for checkout fare calc + pickup/dropoff validation. `pricingAt` is optional;
+when present it must be an ISO-8601 datetime with offset. Returns a **raw DTO**
 (no `ApiResponse` envelope — §1.6.2 internal-endpoint convention); errors still use the
 envelope.
 
@@ -1681,14 +1715,25 @@ Response `200` (raw):
   "seatSummary": { "totalSeats": 40, "availableSeats": 18 },
   "returnRouteId": "uuid | null",
   "driverUserId": "uuid | null",
-  "assistantUserId": "uuid | null",
-  "destinationArrivedAt": "2026-05-18T19:55:00+07:00 | null"
+  "assistantUserId": "uuid | null"
 }
 ```
 
 Notes:
-- `fareFromThisStop` is the per-stop override from `trip_stop_fares` when present; otherwise
-  the caller falls back to `baseFare` (technical_context §6.10 step 2c). `null` ⇒ use `baseFare`.
+- The serialized response fields are unchanged whether `pricingAt` is present or omitted.
+- With `pricingAt`, Trip resolves each pickup fare in this exact order: persisted
+  `TripStopFare.source=MANUAL_OVERRIDE`; otherwise the active `RouteStopFareTemplate` whose
+  half-open window satisfies `effectiveFrom <= pricingAt < effectiveUntil` (or has no upper
+  bound); otherwise `Trip.baseFare`. Overlapping active template windows for the same
+  `(routeId,stopId)` are forbidden.
+- Without `pricingAt`, preserve the legacy operational snapshot: use a persisted
+  `MANUAL_OVERRIDE` or `TEMPLATE_SNAPSHOT` when present, otherwise `Trip.baseFare`; do not query
+  time-window templates. Existing Parcel, Notification, Payment, Tracking, and non-pricing
+  Booking callers therefore remain source/wire compatible.
+- Booking creation and both round-trip legs capture one handler-start `pricingAt` and pass that
+  same timestamp on every Trip pricing call. `PaymentSucceeded` never re-queries Trip pricing.
+- `fareFromThisStop` is the resolved per-stop override when present; otherwise the caller falls
+  back to `baseFare`. `null` ⇒ use `baseFare`.
 - `stops` are the along-route intermediate stops (snapshot of RouteStop into `trip_stops`),
   ordered by `orderIndex`; `allowPickup` / `allowDropoff` drive Day-13 pickup/dropoff validation.
 - `returnRouteId`: nullable UUID — the return-direction route linked via `Route.returnRouteId`
@@ -1697,9 +1742,6 @@ Notes:
   (technical_context_v7 line 1750). Trip will expose this field in Task 11.4.
 - `driverUserId` / `assistantUserId`: nullable UUID logical user keys used by downstream services
   for trip-assignment authorization. They do not create cross-database foreign keys.
-- `destinationArrivedAt`: nullable destination-terminal arrival anchor recorded explicitly by the
-  assigned Driver/Assistant. It is independent from `completedAt`; automatic Trip completion does
-  not synthesize this field.
 - Errors: `404 TRIP_NOT_FOUND`.
 
 ### POST `/internal/v1/trips/{tripId}/lock-seats`
@@ -1897,13 +1939,149 @@ Response `200`:
 }
 ```
 
+## Day 22 — Trip edit, pricing snapshot, and cascade contracts
+
+### PATCH `/v1/operator/trips/{tripId}`
+
+Auth: `OPERATOR_ADMIN` for the Trip operator. `Idempotency-Key`: required UUID v4. Existing
+Gateway prefixes already cover the path; the controller enforces the narrower write role.
+
+Request is exactly:
+
+```json
+{
+  "baseFare": 420000,
+  "notes": "Đón khách sớm 15 phút",
+  "vehicleId": "uuid",
+  "routeId": "uuid"
+}
+```
+
+All fields are optional, but at least one recognized field must be supplied. Omitted means
+unchanged. `notes:null` clears; notes are trimmed and blank normalizes to null. `baseFare`,
+`vehicleId`, and `routeId` do not accept null. Unknown-only/empty/malformed bodies and any
+attempt to edit `departureDateTime`, crew, or other fields return `422 VALIDATION_ERROR`.
+`baseFare` is VND to the đồng: raw BIGINT-compatible values are not floored to 1,000.
+
+Field lifecycle:
+
+| Field | Statuses in which an actual change is allowed |
+|---|---|
+| `baseFare` | `SCHEDULED` |
+| `routeId` | `SCHEDULED` |
+| `vehicleId` | `SCHEDULED\|BOARDING`, subject to the swap matrix |
+| `notes` | every non-terminal status (`SCHEDULED\|BOARDING\|IN_PROGRESS`) |
+
+The domain order is fixed: tenant-scoped Trip load (missing/cross-tenant is `404 TRIP_NOT_FOUND`)
+→ normalize and compute actual changed fields → same-value no-op `200` → validate the lifecycle
+matrix only for actual changes → validate new Route/Vehicle under the same tenant → make exactly
+one Booking edit-impact call when route/vehicle changes → apply conflict precedence
+`TRIP_ROUTE_CHANGE_BOOKINGS_EXIST`, then `TRIP_VEHICLE_SWAP_HELD_SEAT_CONFLICT`, then
+`TRIP_VEHICLE_SWAP_TOO_LATE`, then remaining local route/layout conflicts → only then open one
+local transaction → lock/reload/revalidate in fixed aggregate order Trip → seats → stops (with
+stable repository ordering inside each collection) → apply
+the complete mutation → stage audit/Outbox → save and commit once. No database transaction spans
+an HTTP call. A no-op creates no audit, event, or downstream call.
+
+Route change is rejected with exactly `409 TRIP_ROUTE_CHANGE_BOOKINGS_EXIST` when the trusted
+Booking projection contains any `PENDING_PAYMENT|CONFIRMED` Booking. Otherwise Trip atomically
+rebuilds Trip stops, per-stop fares, and the static planned ETA baseline from the new Route, with
+local HELD/BOOKED seat races revalidated under lock. An approved pre-departure Route edit or a
+DriverSchedule `ALL_PENDING` cascade may recompute this baseline; GPS/Tracking dynamic ETA never
+updates it.
+
+Vehicle compatibility is keyed by normalized `seatNumber` and uses this comparison only:
+`STANDARD < SLEEPER_UPPER < SLEEPER_LOWER < VIP`. The rank never affects pricing.
+`DRIVER_AREA` is not a passenger seat. For every old HELD/BOOKED passenger seat:
+
+| New layout at the same number | Result |
+|---|---|
+| number absent | `SEAT_REMOVED` |
+| `disabled=true` or type `DRIVER_AREA` | `SEAT_DISABLED` |
+| enabled passenger type with lower rank | `SEAT_TYPE_DOWNGRADED` |
+| enabled equal/higher-ranked passenger type | compatible; preserve HELD/BOOKED |
+
+For a `SCHEDULED` Trip, any incompatible HELD seat rejects the entire request with
+`409 TRIP_VEHICLE_SWAP_HELD_SEAT_CONFLICT`. An incompatible BOOKED seat may proceed only when
+`deadline = min(now + 4h, departureDateTime - 30m)` is strictly greater than the one captured
+handler-start `now`; otherwise return `409 TRIP_VEHICLE_SWAP_TOO_LATE`. For a `BOARDING` Trip,
+any incompatible HELD or BOOKED seat returns `409 TRIP_VEHICLE_SWAP_TOO_LATE`. AVAILABLE seats
+may be deterministically removed/replaced; new enabled non-`DRIVER_AREA` seats become AVAILABLE.
+
+Response `200`: `ApiResponse<TripDetailDto>`. Day 22 extends the existing DTO with nullable
+`notes`; all existing fields remain:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "tripId": "uuid",
+    "operatorId": "uuid",
+    "routeId": "uuid",
+    "vehicleId": "uuid",
+    "status": "SCHEDULED",
+    "departureDateTime": "2026-07-20T08:00:00+07:00",
+    "estimatedArrivalTime": "2026-07-20T15:00:00+07:00",
+    "baseFare": 420000,
+    "notes": "Đón khách sớm 15 phút",
+    "originStation": { "id": "uuid", "name": "Bến xe Miền Đông" },
+    "destinationStation": { "id": "uuid", "name": "Bến xe Đà Lạt" },
+    "stops": [],
+    "seatSummary": { "totalSeats": 40, "availableSeats": 18 },
+    "returnRouteId": null,
+    "fareBreakdown": { "baseFare": 420000, "stopFares": [] }
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T10:00:00Z" }
+}
+```
+
+### Day-22 idempotency and request precedence
+
+For the two canonical PATCH endpoints and deprecated `/crew` alias, the feasible shared pipeline
+is: authentication (`401`) → method-level role authorization (`403`) → shared pre-reservation
+checks (matched route, UUID-v4 key, body-presence policy) → normalized fingerprint
+reservation/replay/mismatch/pending → MVC JSON binding and endpoint query/body validation (`422`)
+→ capture one handler-start `now` for a newly reserved request → domain validation/preflight →
+one local transaction/commit → store the exact status/body for replay for every reserved response
+below `500`. Thus a reserved `422` from missing/invalid `applyTo`, malformed JSON, unknown/empty
+body, or FluentValidation is replayable. Authentication/authorization, unmatched-route, and
+malformed-key failures before reservation are not cached; a `5xx` releases the reservation.
+
+The fingerprint is exactly method + normalized route + normalized route values + normalized query
++ authenticated subject + canonical JSON body. Query keys sort ordinally; absent differs from
+empty; ASP.NET-decoded values are used; repeated-value order is preserved; no query is omitted.
+Semantically identical reordered query keys replay, while a different `applyTo`, subject, path
+(including `/crew`), route value, or body returns `422 IDEMPOTENCY_KEY_MISMATCH`. A matching
+in-flight request returns `409 IDEMPOTENCY_REQUEST_PENDING`.
+
+### Day-22 persistence and audit freeze
+
+- `Trip.notes` is nullable, trimmed, and at most 2,000 characters.
+- `TripStopFare.source` is exactly `TEMPLATE_SNAPSHOT|MANUAL_OVERRIDE`; pre-Day-22 rows backfill
+  `TEMPLATE_SNAPSHOT`. Day 22 creates no new `TEMPLATE_SNAPSHOT` rows: legacy rows remain readable
+  only for callers that omit `pricingAt` and are non-authoritative when explicit `pricingAt` is
+  supplied. Only an explicit operator per-Trip fare override persists `MANUAL_OVERRIDE`.
+- The Trip database explicitly enables PostgreSQL `btree_gist`. A GiST exclusion constraint on
+  `routeId`/`stopId` equality and
+  `tstzrange(effectiveFrom,coalesce(effectiveUntil,'infinity'),'[)')` overlap makes future-dated
+  templates concurrency-safe.
+- Real changes alone append Trip actions `TRIP_EDITED`, `TRIP_VEHICLE_SWAPPED`,
+  `TRIP_ROUTE_CHANGED`, or `DRIVER_SCHEDULE_CASCADE_APPLIED`; schedule changes append
+  `DRIVER_SCHEDULE_EDITED` to the separate append-only DriverSchedule audit store. Metadata is
+  exactly `{changedFields,before,after,requestId}` and never includes a raw Idempotency-Key.
+- The Day-22 conflict codes are exactly `TRIP_ROUTE_CHANGE_BOOKINGS_EXIST`,
+  `TRIP_VEHICLE_SWAP_HELD_SEAT_CONFLICT`, `TRIP_VEHICLE_SWAP_TOO_LATE`, and existing
+  `DRIVER_SCHEDULE_EDIT_TOO_LATE`; validation still uses `VALIDATION_ERROR`.
+
 ## Parcel Service
 
 Parcel cargo policy:
 - Dimension unit: centimeters; weight unit: kilograms.
 - Volume precision: `decimal(10,4)` m3.
 - Weight/DIM/chargeable precision: `decimal(8,2)` kg.
-- Money is VND `BIGINT`, floored to 1000 before persistence.
+- Money is VND `BIGINT` persisted to the đồng. `Money.FromRaw` is pass-through; a fractional
+  calculation rounds to the nearest đồng with `MidpointRounding.AwayFromZero`.
 - `PENDING_OPERATOR_ACTION` is disambiguated by `pendingActionType`: `CAPACITY_EXCEEDED`, `RESERVE_FAILED`, `REFUND_CONFIRMATION`.
 
 ### GET `/v1/parcels/available-trips`
@@ -2193,74 +2371,6 @@ Decision notes:
 - If actual price is lower outside tolerance, status becomes `PENDING_OPERATOR_ACTION` with pending action type `REFUND_CONFIRMATION`.
 - If actual price is higher outside tolerance, status becomes `PENDING_ADDITIONAL_PAYMENT`.
 
-### POST `/v1/assistant/parcels/{parcelId}/unload`
-
-Auth: assigned `ASSISTANT`. Idempotency: required. Request body: none.
-
-The parcel must belong to the caller's operator and current assigned Trip. The transition is
-exactly `IN_TRANSIT -> UNLOADED`:
-
-- When `dropoffStopId` is present, the matching TripStop must exist, allow drop-off, and have
-  status `ARRIVED`. A later intermediate stop or the destination anchor cannot substitute for
-  this exact stop.
-- When `dropoffStopId` is null, `destinationArrivedAt` from the Trip snapshot must be non-null.
-  The last intermediate stop is never used as the terminal anchor. An express Trip with zero
-  TripStops is valid after destination arrival.
-- The winning Parcel-local CAS sets `status=UNLOADED` and `unloadedAt`, keeps delivery-token and
-  pending-confirm fields null, and atomically enqueues one `parcel.parcel.unloaded` Outbox event.
-  Cargo release is invoked once by unload. It is not repeated by deliver.
-
-Response `200`:
-
-```json
-{
-  "success": true,
-  "statusCode": 200,
-  "data": {
-    "parcelId": "uuid",
-    "parcelCode": "VR-PCL-20260518-P7K3D9Q2",
-    "status": "UNLOADED"
-  },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T08:00:00Z" }
-}
-```
-
-Errors: `401 UNAUTHORIZED`; `403 FORBIDDEN` when the caller is not the assigned Assistant or
-operator scope does not match, including when the assigned Trip no longer exists; `404 PARCEL_NOT_FOUND`; `409 INVALID_STATUS`
-for a stale/replayed transition that is not served from the idempotency cache;
-`422 DROP_OFF_STOP_NOT_FOUND`, `DROP_OFF_STOP_NOT_ALLOWED`, `DROP_OFF_STOP_NOT_ARRIVED`, or
-`DESTINATION_TERMINAL_NOT_ARRIVED`; `503 TRIP_SERVICE_UNAVAILABLE`.
-
-### POST `/v1/assistant/parcels/{parcelId}/deliver`
-
-Auth: assigned `ASSISTANT`. Idempotency: required. Request body: none.
-
-The transition is exactly `UNLOADED -> DELIVERED_PENDING_CONFIRM`. The winning Parcel-local CAS
-generates a new opaque delivery token with a 48-hour expiry and atomically enqueues one
-`parcel.parcel.delivered_pending_confirm` Outbox event. This endpoint does not release cargo and
-does not emit `parcel.parcel.unloaded`. Recipient confirmation continues through
-`POST /v1/parcels/delivery/confirm` using the generated token.
-
-Response `200`:
-
-```json
-{
-  "success": true,
-  "statusCode": 200,
-  "data": {
-    "parcelId": "uuid",
-    "parcelCode": "VR-PCL-20260518-P7K3D9Q2",
-    "status": "DELIVERED_PENDING_CONFIRM",
-    "deliveredPendingConfirmAt": "2026-07-15T08:05:00Z"
-  },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T08:05:00Z" }
-}
-```
-
-Errors: `401 UNAUTHORIZED`; `403 FORBIDDEN` when the caller is not the assigned Assistant or
-operator scope does not match; `404 PARCEL_NOT_FOUND`; `409 INVALID_STATUS` when the Parcel is
-not `UNLOADED` or the CAS loses a race; `503 TRIP_SERVICE_UNAVAILABLE`.
-
 ### POST `/internal/v1/parcels/{parcelId}/mark-loaded`
 
 Auth: Internal JWT or Driver/Assistant through Driver App facade.
@@ -2490,21 +2600,7 @@ Request:
   "referenceId": "uuid",
   "userId": "uuid",
   "amount": 350000,
-  "method": "WALLET",
-  "context": {
-    "version": 1,
-    "allocations": [
-      {
-        "referenceId": "uuid",
-        "referenceType": "BOOKING",
-        "operatorId": "uuid",
-        "tripId": "uuid",
-        "grossAmount": 400000,
-        "voucherVietRideFundedAmount": 50000,
-        "voucherOperatorFundedAmount": 0
-      }
-    ]
-  }
+  "method": "WALLET"
 }
 ```
 
@@ -2532,18 +2628,8 @@ Request:
   "userId": "uuid",
   "method": "WALLET",
   "items": [
-    {
-      "referenceType": "BOOKING",
-      "referenceId": "uuid",
-      "amount": 350000,
-      "context": { "version": 1, "allocations": [{ "referenceId": "uuid", "referenceType": "BOOKING", "operatorId": "uuid", "tripId": "uuid", "grossAmount": 350000, "voucherVietRideFundedAmount": 0, "voucherOperatorFundedAmount": 0 }] }
-    },
-    {
-      "referenceType": "BOOKING",
-      "referenceId": "uuid",
-      "amount": 350000,
-      "context": { "version": 1, "allocations": [{ "referenceId": "uuid", "referenceType": "BOOKING", "operatorId": "uuid", "tripId": "uuid", "grossAmount": 350000, "voucherVietRideFundedAmount": 0, "voucherOperatorFundedAmount": 0 }] }
-    }
+    { "referenceType": "BOOKING", "referenceId": "uuid", "amount": 350000 },
+    { "referenceType": "BOOKING", "referenceId": "uuid", "amount": 350000 }
   ]
 }
 ```
@@ -2564,23 +2650,6 @@ Rules:
 - On success, Payment service creates one `SUCCEEDED` Payment row per item (`payments.reference_type=BOOKING`, `payments.reference_id=<bookingId>`) and one WALLET debit ledger entry per item (`wallet_transactions.reference_type=BOOKING_PAYMENT`, `wallet_transactions.reference_id=<bookingId>`), all committed in one Payment DB transaction; total wallet balance decrease equals the sum of item amounts.
 - Batch idempotency is endpoint-level via `payment:idem:{key}` replay plus duplicate `(referenceType, referenceId)` guard; do not write the same header idempotency key into every `payments.idempotency_key` row because the unique index is per row.
 - `BOOKING_GROUP` is not accepted on this WALLET batch endpoint; it remains VNPay-only for round-trip combined redirects.
-- `context` is required for every new charge and is built from the Booking/Parcel-owned server snapshot, never from a public client payload. For each allocation, paid economics are `grossAmount - voucherVietRideFundedAmount - voucherOperatorFundedAmount`; their sum must equal the Payment amount.
-- A single `BOOKING`, `PARCEL`, or `PARCEL_ADDITIONAL` payment has exactly one matching allocation. A VNPay `BOOKING_GROUP` payment has at least two `BOOKING` allocations and may span different operator/trip pairs.
-- Payment persists the canonical JSON context before any money mutation and never overwrites a non-empty context.
-
-### GET `/internal/v1/bookings/payment-context/{referenceType}/{referenceId}`
-
-Auth: Internal JWT. Caller: Payment Day-38 legacy context backfill. `referenceType` is `BOOKING` or `BOOKING_GROUP`.
-
-### GET `/internal/v1/parcels/payment-context/{referenceType}/{referenceId}`
-
-Auth: Internal JWT. Caller: Payment Day-38 legacy context backfill. `referenceType` is `PARCEL` or `PARCEL_ADDITIONAL`.
-
-Both owner endpoints return `{ version, canBackfill, quarantineReason, allocations }`. They return only trusted historical snapshots. If voucher funding or the historical amount cannot be proven, `canBackfill=false`, `allocations=[]`, and a stable `quarantineReason` is returned; the caller must not fabricate an allocation.
-
-### GET `/internal/v1/payments/context-readiness`
-
-Auth: Internal JWT. Returns `{ readyForPhaseB, pendingRedirectWithoutContext, succeededWithoutContext, quarantined }`. Phase B is ready only when no legacy pending VNPay callback lacks context and every succeeded historical row is either hydrated or explicitly quarantined.
 
 ### POST `/internal/v1/wallet/refund`
 
@@ -2850,19 +2919,18 @@ Auth: `OPERATOR_ADMIN`. Returns active plans only. Response uses the ADR 0004 en
 
 ### POST `/v1/operator/subscription/upgrade`
 
-Auth: `OPERATOR_ADMIN`. `Idempotency-Key`: required. Day 38 supports `VNPAY` and `WALLET`; Identity always snapshots the active plan, billing period and buyer data server-side before calling Payment.
+Auth: `OPERATOR_ADMIN`. Idempotency-Key: required. Day 37 supports VNPay only; `WALLET` is introduced after OperatorWallet is delivered in Day 38.
 
 Request:
 ```json
 {
   "planId": "uuid",
   "billingPeriod": "MONTHLY",
-  "paymentMethod": "VNPAY",
   "returnUrl": "https://app.vietride.vn/operator/subscription/result"
 }
 ```
 
-`billingPeriod` is `MONTHLY` or `YEARLY`. `paymentMethod` is `VNPAY` or `WALLET`. `returnUrl` is required only for `VNPAY` and must be omitted for `WALLET`. The client never supplies amount, operator identity, subscription period or buyer snapshot.
+`billingPeriod` is `MONTHLY` or `YEARLY`. Identity snapshots the selected active plan's server-side price; the client never supplies an amount.
 
 Response `202`:
 ```json
@@ -2884,142 +2952,6 @@ Response `202`:
 ```
 
 Errors: `403 FORBIDDEN`; `404 RESOURCE_NOT_FOUND`; `409 SUBSCRIPTION_PAYMENT_PENDING`; `422 VALIDATION_ERROR`; `422 IDEMPOTENCY_KEY_MISMATCH`.
-
-For `paymentMethod=WALLET`, a successful atomic OperatorWallet charge returns `200`:
-
-```json
-{
-  "success": true,
-  "statusCode": 200,
-  "data": {
-    "subscriptionId": "uuid",
-    "upgradeAttemptId": "uuid",
-    "status": "ACTIVE",
-    "paymentId": "uuid",
-    "amount": 500000,
-    "billingPeriod": "MONTHLY",
-    "invoiceStatus": "PENDING"
-  },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T10:00:00Z" }
-}
-```
-
-Additional errors: `402 WALLET_INSUFFICIENT_BALANCE`; `422 IDEMPOTENCY_KEY_REQUIRED`. Replaying the same key and request returns the original response. Reusing the key with a different payload returns `422 IDEMPOTENCY_KEY_MISMATCH`.
-
-## Invoice, OperatorWallet and Settlement — Day 38
-
-All list endpoints return the ADR 0004 paged envelope with `items`, `page`, `pageSize`, `totalItems`, `totalPages`, `hasNextPage`, and `hasPreviousPage`. `pageSize` is `1..100`; `sortDir` is `asc|desc`; unsupported `sortBy` returns `400 INVALID_SORT_FIELD`. Operator scope always comes from trusted JWT claims and is never accepted from query/body.
-
-### GET `/v1/operator/invoices`
-
-Auth: `OPERATOR_ADMIN`. Query: `page?`, `pageSize?`, `status?`, `from?`, `to?`, `sortBy?` (`issuedAt|createdAt|amount|invoiceNumber`), `sortDir?`.
-
-Item shape:
-
-```json
-{
-  "invoiceId": "uuid",
-  "invoiceNumber": "VR-INV-202607-000001",
-  "paymentId": "uuid",
-  "status": "ISSUED",
-  "amount": 500000,
-  "billingPeriod": "MONTHLY",
-  "periodFrom": "2026-07-15T00:00:00Z",
-  "periodTo": "2026-08-15T00:00:00Z",
-  "pdfGenerationStatus": "COMPLETED",
-  "createdAt": "2026-07-15T10:00:00Z",
-  "issuedAt": "2026-07-15T10:01:00Z"
-}
-```
-
-### GET `/v1/operator/invoices/{invoiceId}`
-
-Auth: `OPERATOR_ADMIN`. Returns the item above plus `planName`, `buyerSnapshot`, `invoiceWebUrl`, and `downloadApiUrl`. A missing or foreign-tenant invoice returns `404 INVOICE_NOT_FOUND` without existence disclosure.
-
-### GET `/v1/operator/invoices/{invoiceId}/download`
-
-Auth: `OPERATOR_ADMIN`. Rate limit: 10 requests/minute per `(userId, invoiceId)`. The only success wire shape is `200 ApiResponse`:
-
-```json
-{
-  "success": true,
-  "statusCode": 200,
-  "data": {
-    "downloadUrl": "https://storage.googleapis.com/...signed...",
-    "expiresAt": "2026-07-15T11:00:00Z"
-  },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T10:00:00Z" }
-}
-```
-
-The signed URL is generated after authorization, expires within 60 minutes and is never persisted, logged or emitted. Errors: `404 INVOICE_NOT_FOUND`; `500 INVOICE_PDF_GENERATION_FAILED`; `429 RATE_LIMIT_EXCEEDED`.
-
-### POST `/v1/admin/invoices/{invoiceId}/retry`
-
-Auth: `SYSTEM_ADMIN`. `Idempotency-Key`: required. Body is empty. A retryable `FAILED` invoice with attempts `<5` is CAS-transitioned to `PENDING` and enqueued; the request itself does not increment attempts.
-
-Response `202` data: `{ "invoiceId": "uuid", "pdfGenerationStatus": "PENDING", "attemptsUsed": 2 }`.
-
-Errors: `404 INVOICE_NOT_FOUND`; `409 INVOICE_RETRY_ALREADY_PENDING`; `409 INVOICE_RETRY_NOT_ALLOWED`; `422 IDEMPOTENCY_KEY_REQUIRED`; `422 IDEMPOTENCY_KEY_MISMATCH`. Same-key replay returns the original `202`; different keys racing for the same invoice yield one `202` and one `409 INVOICE_RETRY_ALREADY_PENDING`.
-
-### GET `/v1/operator/wallet`
-
-Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`.
-
-```json
-{
-  "success": true,
-  "statusCode": 200,
-  "data": {
-    "operatorId": "uuid",
-    "balance": 1250000,
-    "pendingHoldAmount": 300000,
-    "eligibleAmount": 450000,
-    "updatedAt": "2026-07-15T10:00:00Z"
-  },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T10:00:00Z" }
-}
-```
-
-### GET `/v1/operator/wallet/transactions`
-
-Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `type?`, `referenceType?`, `from?`, `to?`, `sortBy?` (`createdAt|amount`), `sortDir?`. Items contain `transactionId`, `type`, `amount`, `balanceBefore`, `balanceAfter`, `referenceType`, `referenceId`, `note`, `createdAt`.
-
-### GET `/v1/operator/trip-settlements`
-
-Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `status?`, `tripId?`, `from?`, `to?`, `sortBy?` (`createdAt|eligibleAt|settledAt|netAmount`), `sortDir?`. Items contain `settlementId`, `tripId`, `status`, `eligibleAt`, `netAmount`, `settlementMethod`, `settledAt`, `createdAt`.
-
-### GET `/v1/operator/ledger`
-
-Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `tripId?`, `entryType?`, `referenceType?`, `from?`, `to?`, `sortBy?` (`createdAt|amount`), `sortDir?`. Items contain `ledgerEntryId`, `tripId`, `entryType`, signed `amount`, `referenceType`, `referenceId`, `createdAt`. Internal source-event identifiers and sensitive notes are not returned.
-
-### GET `/v1/admin/trip-settlements`
-
-Auth: `SYSTEM_ADMIN`. Query: operator filters plus `operatorId?`, `stuckOnly?`, `severity?`. A stuck row is unresolved `ELIGIBLE` with `activeFailureCode != null`; `HIGH` means failure count `>=3` **or** stuck age `>21 days`.
-
-### POST `/v1/admin/trip-settlements/{settlementId}/settle`
-
-Auth: `SYSTEM_ADMIN`. `Idempotency-Key`: required. Body is empty. Only `PENDING_HOLD|ELIGIBLE` can settle. Response `200` data contains `settlementId`, `tripId`, `operatorId`, `netAmount`, `status`, `settlementMethod: "ADMIN_MANUAL"`, `settledAt`.
-
-Errors: `404 TRIP_SETTLEMENT_NOT_FOUND`; `409 TRIP_SETTLEMENT_ALREADY_SETTLED`; `500 PLATFORM_WALLET_INSUFFICIENT_BALANCE`; idempotency errors. Same-key replay returns the original result; a different manual key losing a concurrent manual/weekly race returns `409 TRIP_SETTLEMENT_ALREADY_SETTLED`.
-
-### GET `/v1/admin/platform-wallet`
-
-Auth: `SYSTEM_ADMIN`. Returns `{ platformWalletId, balance, updatedAt }`.
-
-### GET `/v1/admin/platform-wallet/transactions`
-
-Auth: `SYSTEM_ADMIN`. Paged query supports `type?`, `referenceType?`, `from?`, `to?`, `sortBy=createdAt|amount`, `sortDir?`. Items contain transaction identity, direction, positive amount, balance snapshots, reference, note and created time.
-
-### POST `/v1/admin/platform-wallet/adjust`
-
-Auth: `SYSTEM_ADMIN`. `Idempotency-Key`: required.
-
-Request: `{ "type": "CREDIT", "amount": 100000, "note": "Reconciliation correction" }`. `amount` is positive BIGINT VND; `note` is required. Response `200` returns the transaction and new balance. Concurrent DEBIT cannot make balance negative. Errors: `500 PLATFORM_WALLET_INSUFFICIENT_BALANCE`; validation/idempotency errors.
-
-### POST `/v1/admin/operators/{operatorId}/wallet/adjust`
-
-Auth: `SYSTEM_ADMIN`. `Idempotency-Key`: required. Request and response follow platform adjustment but target one OperatorWallet. A DEBIT that would make balance negative returns `402 WALLET_INSUFFICIENT_BALANCE`; unknown operator/wallet returns `404 RESOURCE_NOT_FOUND`.
 
 ### GET `/v1/admin/subscription-plans`
 
@@ -4268,7 +4200,9 @@ AlternativeRoute active limit exceeded:
 
 All public responses use the ADR 0004 `ApiResponse<T>` envelope. Success responses include `{ success, statusCode, data, meta }`; errors include `{ success: false, statusCode, error: { code, message, fields? }, meta }`.
 
-Write endpoints in this Day-9 section do not require `Idempotency-Key` per BSOT §5.6.
+Original Day-9 Vehicle/DriverSchedule create and activate writes do not require
+`Idempotency-Key`. The Day-22 full DriverSchedule PATCH and its deprecated `/crew` alias explicitly
+require a UUID-v4 key as documented below.
 
 Vehicle and DriverSchedule writes require the caller operator to be `APPROVED` and active. A non-APPROVED or inactive operator receives `403 FORBIDDEN`.
 
@@ -4602,6 +4536,65 @@ Response `201`: `DriverScheduleDto` in the ADR 0004 success envelope.
 
 Creating a DriverSchedule persists the recurring assignment and, when active, is the Day-11 trigger for Trip generation enqueue after the schedule commit succeeds. Day 9 shipped persistence only; the Day-11 contract closes the deferred driver/assistant role+operator validation carryover.
 
+### PATCH `/v1/operator/driver-schedules/{scheduleId}?applyTo=FUTURE_ONLY|ALL_PENDING`
+
+Auth: `OPERATOR_ADMIN`. `Idempotency-Key`: required UUID v4. `applyTo` is required and has exactly
+the two values shown above.
+
+Request is a partial update with exactly these fields:
+
+```json
+{
+  "departureTime": "08:30:00",
+  "dayOfWeek": [1, 3, 5],
+  "driverUserId": "uuid",
+  "assistantUserId": null,
+  "vehicleId": "uuid",
+  "validUntil": null,
+  "isActive": true
+}
+```
+
+`routeId` and `validFrom` are not editable. Omitted means unchanged. Explicit `null` clears only
+`assistantUserId`, `vehicleId`, or `validUntil`; `validUntil:null` restores an open-ended window.
+Explicit `null` for `departureTime`, `dayOfWeek`, `driverUserId`, or `isActive`, and empty,
+unknown-only, or malformed bodies return `422 VALIDATION_ERROR`. Missing/invalid `applyTo` also
+returns `422 VALIDATION_ERROR`. Changing `departureTime`/`dayOfWeek` through `ALL_PENDING` is the
+only Day-22 path that cascades a new `departureDateTime` to generated Trips; `departureDateTime`
+is absent from the Trip PATCH body and changed-field registry.
+
+Scope behavior:
+
+- `FUTURE_ONLY` changes the recurring schedule and leaves every generated Trip unchanged. If the
+  schedule is active and has a vehicle, generation creates only uncovered future dates. It does
+  not call Booking because no generated Trip is mutated. With
+  `vehicleId:null`, it clears only the schedule vehicle and every attempted date is skipped using
+  the existing `TripGenerationSkipLog` reason `OTHER` with a message identifying that no vehicle
+  is assigned; no new Trip is generated until a vehicle is assigned.
+- `ALL_PENDING` applies the effective schedule values to every linked Trip whose status is
+  `SCHEDULED|BOARDING`. `vehicleId:null` is rejected with `422 VALIDATION_ERROR` before any
+  Booking call or mutation because `Trip.vehicleId` is required. Removing a day cancels pending
+  Trips that no longer match. Shortening `validUntil` or setting `isActive=false` only stops future
+  generation and never cancels/mutates an already generated Trip; clearing `validUntil` or
+  reactivating may generate uncovered future dates only.
+
+Validation/execution order is fixed: tenant-scoped schedule load (missing/cross-tenant is masked
+`404 RESOURCE_NOT_FOUND`) → normalize and compute actual changes → same-value no-op `200` → local
+scalar/window and null-vehicle rules → tenant/Identity logical-reference validation →
+schedule/vehicle/crew overlap validation → branch by `applyTo`. `ALL_PENDING` deterministically
+enumerates `SCHEDULED|BOARDING` Trips and fetches every Booking edit-impact projection before any
+write/transaction. If any affected Trip with a `CONFIRMED` Booking has
+`departureDateTime - now < 2h`, return `409 DRIVER_SCHEDULE_EDIT_TOO_LATE`. Vehicle conflicts use
+`TRIP_VEHICLE_SWAP_HELD_SEAT_CONFLICT` before `TRIP_VEHICLE_SWAP_TOO_LATE`; route-change conflict
+does not apply because `routeId` is immutable here. Only after the full batch preflight succeeds
+may one transaction open and lock/reload/revalidate in fixed order: schedule first → Trips ordered
+by `(departureDateTime,tripId)` → each Trip's seats → stops, using stable repository ordering,
+apply all schedule and Trip cascades, stage audits/Outbox, and save/commit once. Any failure rolls
+back the entire batch; no transaction spans HTTP.
+
+Response `200`: the updated `DriverScheduleDto` in the ADR 0004 success envelope. A same-value
+request also returns the current DTO but creates no audit, event, or generation work.
+
 ### PATCH `/v1/operator/driver-schedules/{id}/activate`
 
 Auth: `OPERATOR_ADMIN`.
@@ -4626,7 +4619,9 @@ On success, activation may only transition `isActive=false` to `isActive=true`; 
 
 ### PATCH `/v1/operator/driver-schedules/{id}/crew`
 
-Auth: `OPERATOR_ADMIN`. Idempotency-Key: required.
+Auth: `OPERATOR_ADMIN`. `Idempotency-Key`: required UUID v4. **Deprecated for one release.** This
+path is an alias to the canonical full PATCH use case with `applyTo=ALL_PENDING`; it has no second
+business handler.
 
 ```json
 {
@@ -4635,10 +4630,10 @@ Auth: `OPERATOR_ADMIN`. Idempotency-Key: required.
 }
 ```
 
-Changes only the recurring crew assignment and the crew snapshot of linked trips in
-`SCHEDULED` or `BOARDING`. `IN_PROGRESS`, completed, cancelled, disrupted, and historical trips
-are never changed. The driver/assistant validation and active-schedule driver-conflict rules are
-the same as `POST /v1/operator/driver-schedules`. Response `200`: `DriverScheduleDto`.
+The body fields map to the canonical `driverUserId`/`assistantUserId` fields. `assistantUserId:null`
+clears. Validation, all-or-nothing cascade, Booking preflight, locks, audit/Outbox, and response
+are identical to the canonical endpoint. Cross-path reuse of an Idempotency-Key mismatches because
+the fingerprint includes normalized path and query. Response `200`: `DriverScheduleDto`.
 
 For every changed future trip, Trip publishes `trip.trip.crew_changed`; Notification sends a
 `TRIP_ASSIGNED` notification to newly assigned crew and `TRIP_ASSIGNMENT_REMOVED` to removed
@@ -4788,16 +4783,19 @@ Trip not assigned to the caller returns `403 FORBIDDEN`; malformed `tripId` retu
 ## Day 21 — Trip lifecycle automation
 
 Both lifecycle mutations have no request body. They require an `Idempotency-Key` header whose
-value is a UUID v4 and use the shared Day-39 idempotency v2 contract. Fingerprint là SHA-256 của
-length-prefix frame theo thứ tự authenticated `sub`, HTTP method uppercase, `PathBase + Path`,
-canonical query (mọi key/value, sort ordinal theo key rồi value, giữ duplicate) và raw body bytes;
-authenticated role không thuộc fingerprint. Vì body dùng raw bytes, JSON khác whitespace/property
-order là request khác. Request đầu reserve processing lock `SET NX EX` 120 giây trước handler.
-Retry cùng key/fingerprint replay nguyên status, `Content-Type` và response bytes trong 24 giờ;
-trong khi request đầu còn chạy trả `409 IDEMPOTENCY_REQUEST_PENDING`; khác bất kỳ component nào trả
-`422 IDEMPOTENCY_KEY_MISMATCH`. Exception/5xx không cache và chỉ owner được release lock. Missing
-header trả `422 IDEMPOTENCY_KEY_REQUIRED`; malformed UUID, malformed `tripId` hoặc body không rỗng
-trả `422 VALIDATION_ERROR` mà không đổi Trip state.
+value is a UUID v4. The idempotency fingerprint is exactly the HTTP method, normalized request
+route/path parameters including `tripId`, authenticated `sub`, and canonical empty-body marker;
+the authenticated role is not a fingerprint component. Request authentication and
+`tripId`/header/body validation may run before a new key is reserved; those validation failures
+are not cached and create no idempotency record. A valid new key is reserved atomically as pending
+before the command executes. Trip assignment authorization runs downstream in the handler, and
+middleware finalizes its response for replay. A retry with the same key and same fingerprint
+returns the original HTTP status and exact ADR 0004 response body after the first request
+completes, returns `409 IDEMPOTENCY_REQUEST_PENDING` while it is executing, and returns
+`422 IDEMPOTENCY_KEY_MISMATCH` if any fingerprint component differs. Clients reuse the same key
+only to retry the same logical mutation and use a new UUID-v4 key for a new attempt. Missing or
+malformed keys, malformed `tripId`, or any request body return `422 VALIDATION_ERROR` without
+changing Trip state.
 
 ### POST `/v1/driver/trips/{tripId}/start`
 
@@ -4828,7 +4826,7 @@ Data schema: `{ tripId: string(uuid), status: "IN_PROGRESS", actualDepartureTime
 
 Errors: `401 AUTH_TOKEN_INVALID`; `403 FORBIDDEN`; `404 TRIP_NOT_FOUND`;
 `409 TRIP_INVALID_TRANSITION`; `409 IDEMPOTENCY_REQUEST_PENDING`;
-`422 IDEMPOTENCY_KEY_REQUIRED`; `422 IDEMPOTENCY_KEY_MISMATCH`; `422 VALIDATION_ERROR`.
+`422 IDEMPOTENCY_KEY_MISMATCH`; `422 VALIDATION_ERROR`.
 
 ### POST `/v1/driver/trips/{tripId}/complete`
 
@@ -4865,7 +4863,7 @@ Data schema: `{ tripId: string(uuid), status: "COMPLETED", completedAt: string(d
 
 Errors: `401 AUTH_TOKEN_INVALID`; `403 FORBIDDEN`; `404 TRIP_NOT_FOUND`;
 `409 TRIP_INVALID_TRANSITION`; `409 IDEMPOTENCY_REQUEST_PENDING`;
-`422 IDEMPOTENCY_KEY_REQUIRED`; `422 IDEMPOTENCY_KEY_MISMATCH`; `422 VALIDATION_ERROR`.
+`422 IDEMPOTENCY_KEY_MISMATCH`; `422 VALIDATION_ERROR`.
 
 ### GET `/v1/bookings/trips/{tripId}/manifest`
 
@@ -5000,137 +4998,155 @@ Error responses use the ADR 0004 envelope:
 - `422 BOOKING_NOT_FOR_THIS_TRIP`: the code belongs to a different trip.
 - `422 VALIDATION_ERROR`: the route parameter or booking-code format is invalid.
 
-## Day 39 — Driver Ops Incident
-
-### POST `/v1/driver/trips/{tripId}/incident`
-
-Auth: `DRIVER` hoặc `ASSISTANT`. JWT `sub` phải bằng `driverUserId` hoặc `assistantUserId` của
-Trip. Endpoint chỉ chấp nhận Trip ở trạng thái `IN_PROGRESS`; không thay đổi trạng thái Trip.
-`Idempotency-Key` UUID v4 là bắt buộc và dùng shared idempotency v2.
-
-Request:
-
-```json
-{
-  "category": "TRAFFIC_JAM",
-  "description": "Kẹt xe tại nút giao",
-  "photoUrls": ["https://storage.example/incident-1.jpg"],
-  "latitude": 10.7731,
-  "longitude": 106.7032
-}
-```
-
-Quy tắc validation:
-
-- `category` phân biệt hoa/thường và chỉ nhận `TRAFFIC_JAM`, `VEHICLE_BREAKDOWN`, `ACCIDENT`,
-  `WEATHER`, `OTHER`.
-- `description` optional, trim; chuỗi chỉ có khoảng trắng được chuẩn hóa thành `null`; tối đa 500
-  ký tự sau trim.
-- `photoUrls` optional, tối đa 3 absolute HTTPS URL; từng phần tử được trim và giữ nguyên thứ tự.
-- `latitude` và `longitude` phải cùng có hoặc cùng vắng; giới hạn lần lượt `[-90,90]` và
-  `[-180,180]`.
-- `tripId`, `reportedByUserId` và `operatorId` được derive server-side; client không được truyền.
-
-Response `201` dùng ADR 0004:
-
-```json
-{
-  "success": true,
-  "statusCode": 201,
-  "data": {
-    "incidentId": "uuid",
-    "tripId": "uuid",
-    "reportedByUserId": "uuid",
-    "category": "TRAFFIC_JAM",
-    "description": "Kẹt xe tại nút giao",
-    "photoUrls": ["https://storage.example/incident-1.jpg"],
-    "latitude": 10.7731,
-    "longitude": 106.7032,
-    "reportedAt": "2026-07-16T03:00:00Z"
-  },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-16T03:00:00Z" }
-}
-```
-
-Incident và `trip.incident.reported` Outbox được commit trong cùng Trip-local transaction. Cùng
-key/fingerprint replay nguyên response `201`; concurrent request cùng key khi request đầu còn xử
-lý trả `409 IDEMPOTENCY_REQUEST_PENDING`.
-
-Errors: `401 AUTH_TOKEN_INVALID`; `403 FORBIDDEN`; `404 TRIP_NOT_FOUND`;
-`409 IDEMPOTENCY_REQUEST_PENDING`; `422 TRIP_NOT_IN_PROGRESS`; `422 VALIDATION_ERROR`;
-`422 IDEMPOTENCY_KEY_REQUIRED`; `422 IDEMPOTENCY_KEY_MISMATCH`.
-
-### POST `/v1/driver/trips/{tripId}/stops/{stopId}/arrive`
-
-Auth: `DRIVER` hoặc `ASSISTANT`; JWT `sub` phải là `driverUserId` hoặc `assistantUserId` được gán
-cho Trip. Request không có body và bắt buộc `Idempotency-Key` UUID v4 theo shared idempotency v2.
-
-Trip và TripStop được khóa theo thứ tự cố định `Trip -> TripStop` trong cùng ambient transaction.
-Chỉ Trip `IN_PROGRESS` và TripStop `PENDING` mới hợp lệ. Handler ghi
-`actualArrivalTime = IClock.UtcNow`, chuyển `PENDING -> ARRIVED`, giữ nguyên
-`estimatedArrivalTime`, rồi enqueue `trip.stop.arrived` vào Outbox trong cùng transaction.
-
-Response `200` dùng ADR 0004:
-
-```json
-{
-  "success": true,
-  "statusCode": 200,
-  "data": {
-    "tripId": "uuid",
-    "stopId": "uuid",
-    "status": "ARRIVED",
-    "actualArrivalTime": "2026-07-16T06:00:00Z"
-  },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-16T06:00:00Z" }
-}
-```
-
-Thứ tự kiểm tra nghiệp vụ: Trip tồn tại -> caller được gán -> TripStop tồn tại/được khóa ->
-TripStop còn `PENDING` -> Trip đang `IN_PROGRESS` -> mutate. Vì vậy TripStop đã `ARRIVED` hoặc
-`SKIPPED` luôn trả `409 TRIP_STOP_ALREADY_FINALIZED`, kể cả Trip sau đó đã về trạng thái terminal.
-
-Errors: `401 AUTH_TOKEN_INVALID`; `403 FORBIDDEN`; `404 TRIP_NOT_FOUND`;
-`404 TRIP_STOP_NOT_FOUND`; `409 TRIP_STOP_ALREADY_FINALIZED`;
-`409 IDEMPOTENCY_REQUEST_PENDING`; `422 TRIP_NOT_IN_PROGRESS`;
-`422 IDEMPOTENCY_KEY_REQUIRED`; `422 IDEMPOTENCY_KEY_MISMATCH`; `422 VALIDATION_ERROR`.
-
-Route cũ `POST /v1/operator/trips/{tripId}/stops/{stopId}/arrive` không còn tồn tại và trả `404`.
-
-### POST `/v1/driver/trips/{tripId}/destination/arrive`
-
-Auth và idempotency giống stop-arrival; request không có body. Endpoint áp dụng cả cho express
-Trip không có bất kỳ TripStop nào. Destination Station được derive server-side từ
-`Route.destinationStationId`; client không truyền station ID.
-
-Trip được khóa trong ambient transaction. Chỉ Trip `IN_PROGRESS` chưa có destination anchor mới
-hợp lệ. Handler ghi `Trip.destinationArrivedAt = IClock.UtcNow` và
-`Trip.destinationArrivedByUserId = JWT sub`, rồi enqueue `trip.destination.arrived` trong cùng
-transaction. Anchor này độc lập với `completedAt`; endpoint không complete Trip và auto-complete
-không tự tạo anchor.
-
-Response `200` dùng ADR 0004:
-
-```json
-{
-  "success": true,
-  "statusCode": 200,
-  "data": {
-    "tripId": "uuid",
-    "destinationStationId": "uuid",
-    "status": "ARRIVED",
-    "actualArrivalTime": "2026-07-16T06:00:00Z"
-  },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-16T06:00:00Z" }
-}
-```
-
-Errors: `401 AUTH_TOKEN_INVALID`; `403 FORBIDDEN`; `404 TRIP_NOT_FOUND`;
-`409 TRIP_DESTINATION_ALREADY_ARRIVED`; `409 IDEMPOTENCY_REQUEST_PENDING`;
-`422 TRIP_NOT_IN_PROGRESS`; `422 IDEMPOTENCY_KEY_REQUIRED`;
-`422 IDEMPOTENCY_KEY_MISMATCH`; `422 VALIDATION_ERROR`.
-
 ## Integration Event Contracts
+
+### Day-22 Trip edit and Booking passenger-impact facts
+
+All facts below use exchange `vietride.events`. Routing keys are exact. For the Day-22 vehicle
+swap, schedule-change, and schedule-day-removal cancellation flows below, Trip publishes only Trip
+domain facts and Booking owns passenger-impact state plus passenger notification facts. This
+Day-22 ownership statement does not replace or alter the existing `trip.trip.route_changed`
+registry/consumer behavior.
+
+`trip.trip.vehicle_swapped` — producer Trip; consumers Booking and Notification (crew only):
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-07-15T10:00:00Z",
+  "tripId": "uuid",
+  "operatorId": "uuid",
+  "oldVehicleId": "uuid",
+  "newVehicleId": "uuid",
+  "oldVehiclePlateNumber": "51B-111.11",
+  "newVehiclePlateNumber": "51B-222.22",
+  "departureDateTime": "2026-07-20T01:00:00Z",
+  "driverUserId": "uuid",
+  "assistantUserId": null,
+  "seatImpacts": [
+    { "bookingId": "uuid", "seatNumbers": ["A01"], "reason": "SEAT_REMOVED" }
+  ]
+}
+```
+
+`assistantUserId` is always serialized and may be null. `seatImpacts[].reason` is exactly
+`SEAT_REMOVED|SEAT_DISABLED|SEAT_TYPE_DOWNGRADED`; there are no additional seat-impact fields.
+Notification uses this Trip fact only for old/new crew vehicle-assignment messaging. Passenger
+messaging is produced after Booking creates its own pending action.
+
+`trip.trip.schedule_changed` — producer Trip; consumer Booking only:
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-07-15T10:00:00Z",
+  "tripId": "uuid",
+  "operatorId": "uuid",
+  "oldDeparture": "2026-07-20T01:00:00Z",
+  "newDeparture": "2026-07-20T03:00:00Z",
+  "severity": "MINOR"
+}
+```
+
+`severity` is exactly `MINOR|MEDIUM|MAJOR`. Notification never consumes this Trip fact directly.
+
+`trip.trip.cancelled` — producer Trip; consumers Booking and Parcel:
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-07-15T10:00:00Z",
+  "tripId": "uuid",
+  "operatorId": "uuid",
+  "cancelledAt": "2026-07-15T10:00:00Z",
+  "cancelReason": "DRIVER_SCHEDULE_DAY_REMOVED"
+}
+```
+
+Day-22 day removal uses the exact reason above and `cancelledAt=occurredAt`, while retaining both
+fields because they have distinct domain/event meanings. Booking cancels active Bookings:
+`PENDING_PAYMENT` emits the existing `booking.booking.cancelled` with `refundAmount=0`;
+`CONFIRMED` emits it with a 100% refund of immutable persisted `Booking.totalAmount`. Payment
+refunds only from `booking.booking.cancelled`; Payment and Notification do not consume
+`trip.trip.cancelled` directly. Parcel separately owns its cancellation reaction.
+
+Booking publishes exactly these four Day-22 passenger facts, all consumed by Notification. The
+two schedule facts are emitted only for Bookings in `CONFIRMED`: MINOR emits the informational
+fact, while MEDIUM/MAJOR emits the required fact. A Booking in any other status emits neither
+schedule fact.
+
+```text
+// booking.booking.seat_reassignment_required
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-07-15T10:00:00Z",
+  "bookingId": "uuid",
+  "tripId": "uuid",
+  "userId": "uuid",
+  "pendingActionId": "uuid",
+  "deadline": "2026-07-15T14:00:00Z",
+  "seatNumbers": ["A01"],
+  "reason": "SEAT_REMOVED"
+}
+
+// booking.booking.schedule_change_informational (MINOR only)
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-07-15T10:00:00Z",
+  "bookingId": "uuid",
+  "tripId": "uuid",
+  "userId": "uuid",
+  "oldDeparture": "2026-07-20T01:00:00Z",
+  "newDeparture": "2026-07-20T03:00:00Z",
+  "severity": "MINOR"
+}
+
+// booking.booking.schedule_change_required (MEDIUM/MAJOR only)
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-07-15T10:00:00Z",
+  "bookingId": "uuid",
+  "tripId": "uuid",
+  "userId": "uuid",
+  "pendingActionId": "uuid",
+  "deadline": "2026-07-16T10:00:00Z",
+  "oldDeparture": "2026-07-20T01:00:00Z",
+  "newDeparture": "2026-07-20T08:00:00Z",
+  "severity": "MAJOR"
+}
+
+// booking.booking.pending_action_realerted — seat-detail variant
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-07-15T12:00:00Z",
+  "bookingId": "uuid",
+  "tripId": "uuid",
+  "userId": "uuid",
+  "pendingActionId": "uuid",
+  "deadline": "2026-07-15T14:00:00Z",
+  "reason": "PENDING_SEAT_ASSIGNMENT",
+  "seatNumbers": ["A01"],
+  "seatImpactReason": "SEAT_REMOVED"
+}
+```
+
+The re-alert's schedule-detail variant has the same common fields, `reason=SCHEDULE_CHANGE`, and
+exact `{oldDeparture,newDeparture,severity}` where severity is `MEDIUM|MAJOR`; it has no seat
+detail. The informational event has no `pendingActionId` or `deadline`. Required schedule-change
+events always have both pending-action fields. Booking commits pending-action state and initial
+Outbox before ensuring a PostgreSQL-backed Hangfire T+2h re-alert schedule.
+
+Logical scheduling dedupe is by `pendingActionId`; retry/redelivery may create multiple physical
+Hangfire jobs. Every execution locks and rechecks action existence, unresolved state, and deadline,
+then writes a re-alert Outbox identity deterministically derived from `pendingActionId`; only one
+side effect can persist and duplicate jobs no-op. The Rabbit delivery contract is Booking DB commit
+→ ensure schedule → ACK. A crash before ensure/ACK is repaired by broker/DLQ replay, which loads the
+existing action, emits no duplicate initial event, ensures scheduling, and then ACKs. This adds no
+table, column, migration, `realertedAt`, custom poller, or package beyond approved
+`Hangfire.AspNetCore` and `Hangfire.PostgreSql`.
+
+Day 22 owns fact publication, Booking pending-action creation, and re-alert delivery. Day 23 owns
+passenger accept/reject and timeout/refund resolution; Day 22 does not implement those actions.
 
 ### `parcel.parcel.unloaded`
 

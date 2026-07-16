@@ -78,6 +78,24 @@ public sealed class TripSeat : BaseEntity<Guid>
         Status = TripSeatStatus.UNAVAILABLE;
     }
 
+    public bool ReconfigureAvailable(TripSeatType seatType)
+    {
+        if (seatType == TripSeatType.DRIVER_AREA)
+        {
+            throw new ArgumentException("Driver-area entries are not passenger seats.", nameof(seatType));
+        }
+
+        EnsureStatus(TripSeatStatus.AVAILABLE, nameof(ReconfigureAvailable));
+        if (SeatType == seatType && DisabledReason is null)
+        {
+            return false;
+        }
+
+        SeatType = seatType;
+        DisabledReason = null;
+        return true;
+    }
+
     private void EnsureStatus(TripSeatStatus expected, string operation)
     {
         if (Status != expected)

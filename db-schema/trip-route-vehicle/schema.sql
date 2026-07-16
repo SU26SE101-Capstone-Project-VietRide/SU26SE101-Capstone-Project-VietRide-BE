@@ -7,6 +7,7 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE EXTENSION IF NOT EXISTS "unaccent";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+CREATE EXTENSION IF NOT EXISTS "btree_gist";
 
 -- =============================================================================
 -- ENUMS
@@ -29,6 +30,10 @@ CREATE TYPE trip_seat_type AS ENUM (
 );
 
 CREATE TYPE trip_stop_status AS ENUM ('PENDING', 'ARRIVED', 'SKIPPED');
+
+CREATE TYPE trip_stop_fare_source AS ENUM (
+    'TEMPLATE_SNAPSHOT', 'MANUAL_OVERRIDE'
+);
 
 CREATE TYPE vehicle_status AS ENUM ('ACTIVE', 'MAINTENANCE', 'OFF_DUTY', 'RETIRED');
 
@@ -233,7 +238,13 @@ CREATE TABLE route_stop_fare_templates (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_route_stop_fare_templates_fare_non_negative CHECK (fare_from_this_stop >= 0),
     CONSTRAINT chk_route_stop_fare_templates_effective_order
-        CHECK (effective_until IS NULL OR effective_until > effective_from)
+        CHECK (effective_until IS NULL OR effective_until > effective_from),
+    CONSTRAINT ex_route_stop_fare_templates_no_overlap
+        EXCLUDE USING gist (
+            route_id WITH =,
+            stop_id WITH =,
+            tstzrange(effective_from, COALESCE(effective_until, 'infinity'::timestamptz), '[)') WITH &&
+        )
 );
 
 CREATE INDEX idx_route_stop_fare_templates_route_stop_effective
@@ -372,6 +383,27 @@ COMMENT ON COLUMN driver_schedules.departure_time IS
     'TIME (no timezone). Stored as local ICT semantic.';
 
 -- -----------------------------------------------------------------------------
+-- driver_schedule_audit_logs (append-only)
+-- -----------------------------------------------------------------------------
+CREATE TABLE driver_schedule_audit_logs (
+    id UUID PRIMARY KEY,
+    driver_schedule_id UUID NOT NULL REFERENCES driver_schedules (id) ON DELETE RESTRICT,
+    actor_user_id UUID NULL, -- logical FK -> identity.users.id
+    action VARCHAR(64) NOT NULL,
+    metadata JSONB NULL,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_driver_schedule_audit_logs_schedule_occurred
+    ON driver_schedule_audit_logs (driver_schedule_id, occurred_at DESC);
+CREATE INDEX idx_driver_schedule_audit_logs_actor_occurred
+    ON driver_schedule_audit_logs (actor_user_id, occurred_at DESC)
+    WHERE actor_user_id IS NOT NULL;
+CREATE INDEX idx_driver_schedule_audit_logs_action_occurred
+    ON driver_schedule_audit_logs (action, occurred_at DESC);
+
+-- -----------------------------------------------------------------------------
 -- trips
 -- -----------------------------------------------------------------------------
 CREATE TABLE trips (
@@ -395,6 +427,7 @@ CREATE TABLE trips (
     cancelled_by_user_id UUID NULL,
     cancel_reason TEXT NULL,
     completed_by_user_id UUID NULL,
+    notes VARCHAR(2000) NULL,
     -- Status
     status trip_status NOT NULL DEFAULT 'SCHEDULED',
     source trip_source NOT NULL,
@@ -528,7 +561,7 @@ CREATE INDEX idx_trip_stops_estimated_arrival ON trip_stops (estimated_arrival_t
     WHERE status = 'PENDING';
 
 COMMENT ON COLUMN trip_stops.estimated_arrival_time IS
-    'Static baseline. NEVER updated after Trip generate. Dynamic ETA lives in Redis only.';
+    'Static planned baseline. An approved pre-departure Route edit or DriverSchedule ALL_PENDING cascade may recompute it; GPS/Tracking dynamic ETA never updates this column.';
 
 -- -----------------------------------------------------------------------------
 -- trip_stop_fares (exception override per trip per stop; from RouteStopFareTemplate)
@@ -537,10 +570,14 @@ CREATE TABLE trip_stop_fares (
     trip_id UUID NOT NULL REFERENCES trips (id) ON DELETE CASCADE,
     stop_id UUID NOT NULL REFERENCES stops (id) ON DELETE RESTRICT,
     fare_from_this_stop BIGINT NOT NULL,
+    source trip_stop_fare_source NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (trip_id, stop_id),
     CONSTRAINT chk_trip_stop_fares_fare_non_negative CHECK (fare_from_this_stop >= 0)
 );
+
+COMMENT ON COLUMN trip_stop_fares.source IS
+    'TEMPLATE_SNAPSHOT is legacy-readable only; explicit per-Trip fare overrides use MANUAL_OVERRIDE.';
 
 -- -----------------------------------------------------------------------------
 -- trip_generation_skip_logs (Hangfire skip audit)

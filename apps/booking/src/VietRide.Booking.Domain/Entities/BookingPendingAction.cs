@@ -45,7 +45,18 @@ public sealed class BookingPendingAction : BaseEntity<Guid>
 
     public void Resolve(BookingPendingActionResolved resolvedAction, DateTimeOffset resolvedAt)
     {
+        if (ResolvedAt.HasValue)
+        {
+            return;
+        }
+
         ResolvedAt = resolvedAt;
         ResolvedAction = resolvedAction;
     }
+
+    /// <summary>
+    /// Returns whether the response deadline is strictly in the past.
+    /// Equality is still eligible for a passenger response.
+    /// </summary>
+    public bool IsDeadlineExpired(DateTimeOffset now) => Deadline < now;
 }
