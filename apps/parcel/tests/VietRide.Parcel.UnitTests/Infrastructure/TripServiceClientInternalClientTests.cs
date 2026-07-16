@@ -50,6 +50,7 @@ public class TripServiceClientInternalClientTests
     [Fact]
     public async Task GetTripParcelSnapshotAsync_Returns_Success_On_200()
     {
+        var destinationArrivedAt = new DateTimeOffset(2026, 7, 15, 9, 30, 0, TimeSpan.Zero);
         var snapshotJson = JsonSerializer.Serialize(new
         {
             tripId = TripId,
@@ -65,6 +66,7 @@ public class TripServiceClientInternalClientTests
             stops = Array.Empty<object>(),
             seatSummary = new { totalSeats = 40, availableSeats = 20 },
             returnRouteId = (Guid?)null,
+            destinationArrivedAt,
         }, JsonOptions);
 
         var client = BuildClient(HttpStatusCode.OK, snapshotJson);
@@ -76,6 +78,7 @@ public class TripServiceClientInternalClientTests
         result.Snapshot!.TripId.Should().Be(TripId);
         result.Snapshot.Status.Should().Be("SCHEDULED");
         result.Snapshot.BaseFare.Should().Be(200_000);
+        result.Snapshot.DestinationArrivedAt.Should().Be(destinationArrivedAt);
     }
 
     [Fact]

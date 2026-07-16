@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using VietRide.Parcel.Api.Controllers.Requests;
 using VietRide.Parcel.Api.Filters;
 using VietRide.Parcel.Application.Features.Parcels.AssistantTripParcels;
+using VietRide.Parcel.Application.Features.Parcels.Deliver;
 using VietRide.Parcel.Application.Features.Parcels.ManualConfirmDelivery;
 using VietRide.Parcel.Application.Features.Parcels.MarkLoaded;
 using VietRide.Parcel.Application.Features.Parcels.Reweigh;
@@ -103,6 +104,7 @@ public sealed class AssistantParcelsController : ControllerBase
     [HttpPost("{parcelId:guid}/unload")]
     [RequireIdempotencyKey]
     [ProducesResponseType(typeof(ApiResponse<UnloadParcelResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
@@ -114,9 +116,34 @@ public sealed class AssistantParcelsController : ControllerBase
     {
         var operatorId = CurrentUserClaims.GetOperatorId(User)
             ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        var userId = CurrentUserClaims.GetUserId(User);
 
         var result = await _mediator.Send(
-            new UnloadParcelCommand(parcelId, operatorId),
+            new UnloadParcelCommand(parcelId, userId, operatorId),
+            cancellationToken);
+
+        return Ok(result);
+    }
+
+    [HttpPost("{parcelId:guid}/deliver")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<DeliverParcelResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<DeliverParcelResponse>> DeliverAsync(
+        Guid parcelId,
+        CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        var userId = CurrentUserClaims.GetUserId(User);
+
+        var result = await _mediator.Send(
+            new DeliverParcelCommand(parcelId, userId, operatorId),
             cancellationToken);
 
         return Ok(result);

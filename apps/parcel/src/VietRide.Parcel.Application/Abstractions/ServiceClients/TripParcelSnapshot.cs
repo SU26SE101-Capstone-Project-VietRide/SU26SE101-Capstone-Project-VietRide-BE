@@ -13,4 +13,5 @@ public sealed record TripParcelSnapshot(
     TripStationDto DestinationStation,
     IReadOnlyList<TripStopDto> Stops,
     TripSeatSummaryDto SeatSummary,
-    Guid? ReturnRouteId);
+    Guid? ReturnRouteId,
+    DateTimeOffset? DestinationArrivedAt = null);
