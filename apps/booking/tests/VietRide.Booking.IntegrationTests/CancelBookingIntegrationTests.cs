@@ -256,7 +256,7 @@ public sealed class CancelBookingWebApplicationFactory : WebApplicationFactory<P
                 .Returns(ci => ci.Arg<Func<Task<TickPassengerBoardedResult>>>()());
             services.AddSingleton(mockUow);
 
-            services.AddSingleton<IConnectionMultiplexer>(_ => BuildRedis());
+            services.AddSingleton<IConnectionMultiplexer>(InMemoryIdempotencyRedis.Create());
         });
     }
 
@@ -266,40 +266,6 @@ public sealed class CancelBookingWebApplicationFactory : WebApplicationFactory<P
         var token = MintInternalJwt(userId.ToString(), role);
         client.DefaultRequestHeaders.Add("X-Internal-Auth", $"Bearer {token}");
         return client;
-    }
-
-    private static IConnectionMultiplexer BuildRedis()
-    {
-        var store = new Dictionary<string, string>();
-        var mockRedis = Substitute.For<IConnectionMultiplexer>();
-        var mockDb = Substitute.For<IDatabase>();
-        mockRedis.GetDatabase(Arg.Any<int>(), Arg.Any<object>()).Returns(mockDb);
-        mockDb.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>())
-            .Returns(ci =>
-            {
-                var key = ci.ArgAt<RedisKey>(0).ToString();
-                return store.TryGetValue(key, out var value)
-                    ? (RedisValue)value
-                    : RedisValue.Null;
-            });
-        mockDb.StringSetAsync(
-                Arg.Any<RedisKey>(),
-                Arg.Any<RedisValue>(),
-                Arg.Any<TimeSpan?>(),
-                Arg.Any<When>(),
-                Arg.Any<CommandFlags>())
-            .Returns(ci =>
-            {
-                var key = ci.ArgAt<RedisKey>(0).ToString();
-                if (store.ContainsKey(key))
-                {
-                    return false;
-                }
-
-                store[key] = ci.ArgAt<RedisValue>(1).ToString();
-                return true;
-            });
-        return mockRedis;
     }
 
     private static string MintInternalJwt(string subject, string role)

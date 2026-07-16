@@ -16,5 +16,6 @@ public static class TripPostgresTypeMapper
         dataSourceBuilder.MapEnum<TripSource>("vietride_trip.trip_source", new NpgsqlNullNameTranslator());
         dataSourceBuilder.MapEnum<TripSeatStatus>("vietride_trip.trip_seat_status", new NpgsqlNullNameTranslator());
         dataSourceBuilder.MapEnum<TripSeatType>("vietride_trip.trip_seat_type", new NpgsqlNullNameTranslator());
+        dataSourceBuilder.MapEnum<IncidentCategory>("vietride_trip.incident_category", new NpgsqlNullNameTranslator());
     }
 }

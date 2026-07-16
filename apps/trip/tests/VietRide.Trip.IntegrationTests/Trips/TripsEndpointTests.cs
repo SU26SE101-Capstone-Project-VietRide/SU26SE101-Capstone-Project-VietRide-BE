@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Web.Middleware;
 using VietRide.Trip.Application.Features.DriverTrips.GetAssignedTripRoute;
 using VietRide.Trip.Application.Features.Trips.GetTripDetail;
 using VietRide.Trip.Application.Features.Trips.GetTripSeatMap;
@@ -257,7 +258,7 @@ public sealed class TripsEndpointTests
             Guid.NewGuid()));
 
         response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
-        await AssertErrorEnvelopeAsync(response, "VALIDATION_ERROR");
+        await AssertErrorEnvelopeAsync(response, IdempotencyMiddleware.RequiredErrorCode);
         mediator.LastRequest.Should().BeNull();
     }
 

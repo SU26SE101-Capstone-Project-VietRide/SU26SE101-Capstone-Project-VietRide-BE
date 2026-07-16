@@ -21,5 +21,6 @@ public class DevTripServiceClientStubTests
         result.Snapshot!.TripId.Should().Be(tripId);
         result.Snapshot.Status.Should().Be("SCHEDULED");
         result.Snapshot.OriginStation.Name.Should().Be("Dev Origin");
+        result.Snapshot.DestinationArrivedAt.Should().NotBeNull();
     }
 }

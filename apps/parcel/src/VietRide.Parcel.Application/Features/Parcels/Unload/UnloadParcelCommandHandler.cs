@@ -13,8 +13,6 @@ namespace VietRide.Parcel.Application.Features.Parcels.Unload;
 public sealed class UnloadParcelCommandHandler
     : IRequestHandler<UnloadParcelCommand, UnloadParcelResponse>
 {
-    private static readonly TimeSpan DeliveryConfirmWindow = TimeSpan.FromHours(48);
-
     private readonly IParcelRepository _parcelRepository;
     private readonly ITripServiceClient _tripClient;
     private readonly IIntegrationEventOutbox _outbox;
@@ -47,6 +45,12 @@ public sealed class UnloadParcelCommandHandler
                 "FORBIDDEN",
                 $"Operator '{command.OperatorId}' is not assigned to parcel '{command.ParcelId}'.");
 
+        await EnsureAssignedAssistantAsync(
+            parcel.TripId,
+            command.ActorUserId,
+            command.OperatorId,
+            cancellationToken);
+
         if (parcel.Status != ParcelStatus.IN_TRANSIT)
             throw new CodedConflictException(
                 "INVALID_STATUS",
@@ -74,48 +78,28 @@ public sealed class UnloadParcelCommandHandler
         else
         {
             var trip = await GetRequiredTripSnapshotAsync(parcel.TripId, cancellationToken);
-            var finalStop = trip.Stops.OrderBy(s => s.OrderIndex).LastOrDefault();
-            if (finalStop is null)
+            if (!trip.DestinationArrivedAt.HasValue)
                 throw new CodedValidationException(
-                    "DROP_OFF_STOP_NOT_FOUND",
-                    $"Trip '{parcel.TripId}' does not have a final stop.");
-
-            if (!string.Equals(finalStop.Status, "ARRIVED", StringComparison.OrdinalIgnoreCase))
-                throw new CodedValidationException(
-                    "DROP_OFF_STOP_NOT_ARRIVED",
-                    $"Final stop '{finalStop.StopId}' has not arrived.");
+                    "DESTINATION_TERMINAL_NOT_ARRIVED",
+                    $"Trip '{parcel.TripId}' has not arrived at its destination terminal.");
         }
 
         var now = DateTimeOffset.UtcNow;
-        var deliveryToken = Guid.NewGuid();
-        var deliveryTokenExpiresAt = now.Add(DeliveryConfirmWindow);
         ParcelPaymentTransitionSnapshot snapshot;
 
         await _unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {
-            snapshot = await _parcelRepository.TryUnloadToPendingConfirmAsync(
-                command.ParcelId, deliveryToken, deliveryTokenExpiresAt, now, cancellationToken)
+            snapshot = await _parcelRepository.TryMarkUnloadedAsync(
+                command.ParcelId, now, cancellationToken)
                 ?? throw new CodedConflictException(
-                    "RACE_LOST",
+                    "INVALID_STATUS",
                     $"Parcel '{command.ParcelId}' status changed concurrently; cannot unload.");
 
             await ParcelOutboxEvents.EnqueueAsync(
                 _outbox,
                 ParcelOutboxEvents.Unloaded,
                 new { parcelId = snapshot.ParcelId, tripId = snapshot.TripId, userIds = new[] { parcel.SenderUserId }.Concat(parcel.RecipientUserId.HasValue ? new[] { parcel.RecipientUserId.Value } : Array.Empty<Guid>()).Distinct().ToArray() },
-                cancellationToken);
-            await ParcelOutboxEvents.EnqueueAsync(
-                _outbox,
-                ParcelOutboxEvents.DeliveredPendingConfirm,
-                BuildDeliveredPendingConfirmPayload(
-                    snapshot.ParcelId,
-                    snapshot.ParcelCode,
-                    snapshot.OperatorId,
-                    parcel.RecipientUserId,
-                    snapshot.TripId,
-                    deliveryToken,
-                    deliveryTokenExpiresAt),
                 cancellationToken);
 
             await EnsureCargoSuccessAsync(
@@ -141,32 +125,31 @@ public sealed class UnloadParcelCommandHandler
             snapshot.Status.ToString());
     }
 
-    private static Dictionary<string, object?> BuildDeliveredPendingConfirmPayload(
-        Guid parcelId,
-        string parcelCode,
-        Guid operatorId,
-        Guid? recipientUserId,
+    private async Task EnsureAssignedAssistantAsync(
         Guid tripId,
-        Guid deliveryToken,
-        DateTimeOffset expiresAt)
+        Guid actorUserId,
+        Guid operatorId,
+        CancellationToken cancellationToken)
     {
-        var payload = new Dictionary<string, object?>
+        var authorization = await _tripClient.AuthorizeAssistantForTripAsync(
+            tripId,
+            actorUserId,
+            operatorId,
+            cancellationToken);
+        switch (authorization.Kind)
         {
-            ["parcelId"] = parcelId,
-            ["parcelCode"] = parcelCode,
-            ["operatorId"] = operatorId,
-            ["tripId"] = tripId,
-            ["deliveryToken"] = deliveryToken,
-            ["expiresAt"] = expiresAt,
-        };
-
-        if (recipientUserId.HasValue)
-        {
-            payload["userId"] = recipientUserId.Value;
-            payload["recipientUserIds"] = new[] { recipientUserId.Value };
+            case TripCrewAuthorizationOutcomeKind.Authorized:
+                return;
+            case TripCrewAuthorizationOutcomeKind.Denied:
+            case TripCrewAuthorizationOutcomeKind.TripNotFound:
+                throw new ForbiddenException(
+                    "FORBIDDEN",
+                    "Only the assigned assistant can unload this parcel.");
+            default:
+                throw new ParcelDependencyUnavailableException(
+                    "TRIP_SERVICE_UNAVAILABLE",
+                    authorization.ErrorMessage ?? "Trip service unavailable.");
         }
-
-        return payload;
     }
 
     private async Task<TripParcelSnapshot> GetRequiredTripSnapshotAsync(
@@ -198,7 +181,7 @@ public sealed class UnloadParcelCommandHandler
         {
             TripCargoOutcomeKind.Success => Task.CompletedTask,
             TripCargoOutcomeKind.TripNotFound => throw new ParcelDependencyUnavailableException(
-                "TRIP_NOT_FOUND",
+                "TRIP_SERVICE_UNAVAILABLE",
                 outcome.ErrorMessage ?? "Trip was not found."),
             TripCargoOutcomeKind.CapacityExceeded => throw new ParcelDependencyUnavailableException(
                 "TRIP_CARGO_CAPACITY_EXCEEDED",

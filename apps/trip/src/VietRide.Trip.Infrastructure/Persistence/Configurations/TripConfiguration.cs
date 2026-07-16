@@ -33,6 +33,8 @@ internal sealed class TripConfiguration : IEntityTypeConfiguration<Domain.Entiti
         builder.Property(trip => trip.DepartureDateTime).HasColumnName("departure_date_time");
         builder.Property(trip => trip.EstimatedArrivalTime).HasColumnName("estimated_arrival_time");
         builder.Property(trip => trip.ActualDepartureTime).HasColumnName("actual_departure_time");
+        builder.Property(trip => trip.DestinationArrivedAt).HasColumnName("destination_arrived_at");
+        builder.Property(trip => trip.DestinationArrivedByUserId).HasColumnName("destination_arrived_by_user_id");
         builder.Property(trip => trip.CompletedAt).HasColumnName("completed_at");
         builder.Property(trip => trip.DisruptedAt).HasColumnName("disrupted_at");
         builder.Property(trip => trip.DisruptionReason).HasColumnName("disruption_reason");

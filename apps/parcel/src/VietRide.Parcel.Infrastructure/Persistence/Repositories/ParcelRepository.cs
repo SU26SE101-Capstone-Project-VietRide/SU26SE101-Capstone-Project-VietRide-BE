@@ -547,14 +547,29 @@ internal sealed class ParcelRepository : IParcelRepository
         return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
     }
 
-    public async Task<ParcelPaymentTransitionSnapshot?> TryUnloadToPendingConfirmAsync(
-        Guid parcelId, Guid deliveryToken, DateTimeOffset deliveryTokenExpiresAt, DateTimeOffset now, CancellationToken ct)
+    public async Task<ParcelPaymentTransitionSnapshot?> TryMarkUnloadedAsync(
+        Guid parcelId, DateTimeOffset now, CancellationToken ct)
     {
         var affected = await _db.Parcels
             .Where(p => p.Id == parcelId && p.Status == ParcelStatus.IN_TRANSIT)
             .ExecuteUpdateAsync(setters => setters
-                .SetProperty(p => p.Status, ParcelStatus.DELIVERED_PENDING_CONFIRM)
+                .SetProperty(p => p.Status, ParcelStatus.UNLOADED)
                 .SetProperty(p => p.UnloadedAt, now)
+                .SetProperty(p => p.DeliveredPendingConfirmAt, (DateTimeOffset?)null)
+                .SetProperty(p => p.DeliveryToken, (Guid?)null)
+                .SetProperty(p => p.DeliveryTokenExpiresAt, (DateTimeOffset?)null)
+                .SetProperty(p => p.DeliveryTokenRevokedAt, (DateTimeOffset?)null)
+                .SetProperty(p => p.UpdatedAt, now), ct);
+        return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
+    }
+
+    public async Task<ParcelPaymentTransitionSnapshot?> TryMarkDeliveredPendingConfirmAsync(
+        Guid parcelId, Guid deliveryToken, DateTimeOffset deliveryTokenExpiresAt, DateTimeOffset now, CancellationToken ct)
+    {
+        var affected = await _db.Parcels
+            .Where(p => p.Id == parcelId && p.Status == ParcelStatus.UNLOADED)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(p => p.Status, ParcelStatus.DELIVERED_PENDING_CONFIRM)
                 .SetProperty(p => p.DeliveredPendingConfirmAt, now)
                 .SetProperty(p => p.DeliveryToken, deliveryToken)
                 .SetProperty(p => p.DeliveryTokenExpiresAt, deliveryTokenExpiresAt)

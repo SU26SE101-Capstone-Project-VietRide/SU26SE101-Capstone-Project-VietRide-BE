@@ -42,6 +42,7 @@ public sealed class Phase67ParcelTests
     private static readonly Guid OperatorId = Guid.NewGuid();
     private static readonly Guid TripId = Guid.NewGuid();
     private static readonly Guid DropoffStopId = Guid.NewGuid();
+    private static readonly Guid AssistantUserId = Guid.NewGuid();
 
     [Fact]
     public async Task MarkLoaded_HappyPath_UsesAtomicRepositoryTransition()
@@ -82,87 +83,104 @@ public sealed class Phase67ParcelTests
         repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
 
         var handler = new UnloadParcelCommandHandler(repo, Substitute.For<ITripServiceClient>(), Outbox(), UnitOfWork());
-        var act = () => handler.Handle(new UnloadParcelCommand(ParcelId, Guid.NewGuid()), default);
+        var act = () => handler.Handle(
+            new UnloadParcelCommand(ParcelId, AssistantUserId, Guid.NewGuid()),
+            default);
 
         await act.Should().ThrowAsync<ForbiddenException>()
             .Where(e => e.ErrorCode == "FORBIDDEN");
     }
 
     [Fact]
-    public async Task Unload_HappyPath_ValidatesDropoffAndSetsPendingConfirm()
+    public async Task Unload_HappyPath_ValidatesDropoffAndSetsUnloadedOnly()
     {
         var parcel = CreateParcel(ParcelStatus.IN_TRANSIT);
         var repo = Substitute.For<IParcelRepository>();
         var tripClient = Substitute.For<ITripServiceClient>();
         repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
+        tripClient.AuthorizeAssistantForTripAsync(TripId, AssistantUserId, OperatorId, Arg.Any<CancellationToken>())
+            .Returns(new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Authorized));
         tripClient.GetTripParcelSnapshotAsync(TripId, Arg.Any<CancellationToken>())
             .Returns(new TripSnapshotOutcome(TripSnapshotOutcomeKind.Success, TripSnapshot(allowDropoff: true), null));
         tripClient.ReleaseCargoAsync(TripId, ParcelId, Arg.Any<decimal>(), Arg.Any<CancellationToken>())
             .Returns(new TripCargoOutcome(TripCargoOutcomeKind.Success, null));
-        repo.TryUnloadToPendingConfirmAsync(ParcelId, Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns(Snapshot(ParcelStatus.DELIVERED_PENDING_CONFIRM));
+        repo.TryMarkUnloadedAsync(ParcelId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(Snapshot(ParcelStatus.UNLOADED));
 
         var handler = new UnloadParcelCommandHandler(repo, tripClient, Outbox(), UnitOfWork());
-        var result = await handler.Handle(new UnloadParcelCommand(ParcelId, OperatorId), default);
+        var result = await handler.Handle(
+            new UnloadParcelCommand(ParcelId, AssistantUserId, OperatorId),
+            default);
 
-        result.Status.Should().Be("DELIVERED_PENDING_CONFIRM");
+        result.Status.Should().Be("UNLOADED");
+        await repo.Received(1).TryMarkUnloadedAsync(
+            ParcelId,
+            Arg.Any<DateTimeOffset>(),
+            Arg.Any<CancellationToken>());
+        await repo.DidNotReceive().TryMarkDeliveredPendingConfirmAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<Guid>(),
+            Arg.Any<DateTimeOffset>(),
+            Arg.Any<DateTimeOffset>(),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task Unload_WhenDropoffStopMissing_RequiresFinalStopArrived()
+    public async Task Unload_TerminalBound_RequiresDestinationArrivalAnchor()
     {
         var parcel = CreateParcel(ParcelStatus.IN_TRANSIT);
         Set<Guid?>(parcel, nameof(parcel.DropoffStopId), null);
         var repo = Substitute.For<IParcelRepository>();
         var tripClient = Substitute.For<ITripServiceClient>();
         repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
+        tripClient.AuthorizeAssistantForTripAsync(TripId, AssistantUserId, OperatorId, Arg.Any<CancellationToken>())
+            .Returns(new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Authorized));
         tripClient.GetTripParcelSnapshotAsync(TripId, Arg.Any<CancellationToken>())
             .Returns(new TripSnapshotOutcome(
                 TripSnapshotOutcomeKind.Success,
                 TripSnapshot(
                     allowDropoff: true,
-                    stops:
-                    [
-                        new TripStopDto(Guid.NewGuid(), 1, true, false, DateTimeOffset.UtcNow, 0, null, "ARRIVED", DateTimeOffset.UtcNow),
-                        new TripStopDto(Guid.NewGuid(), 2, false, true, DateTimeOffset.UtcNow, 20, null, "PENDING", null),
-                    ]),
+                    destinationArrivedAt: null),
                 null));
 
         var handler = new UnloadParcelCommandHandler(repo, tripClient, Outbox(), UnitOfWork());
-        var act = () => handler.Handle(new UnloadParcelCommand(ParcelId, OperatorId), default);
+        var act = () => handler.Handle(
+            new UnloadParcelCommand(ParcelId, AssistantUserId, OperatorId),
+            default);
 
         await act.Should().ThrowAsync<CodedValidationException>()
-            .Where(e => e.ErrorCode == "DROP_OFF_STOP_NOT_ARRIVED");
+            .Where(e => e.ErrorCode == "DESTINATION_TERMINAL_NOT_ARRIVED");
     }
 
     [Fact]
-    public async Task Unload_WhenDropoffStopMissing_AllowsAfterFinalStopArrived()
+    public async Task Unload_TerminalBound_AllowsExpressTripAfterDestinationArrival()
     {
         var parcel = CreateParcel(ParcelStatus.IN_TRANSIT);
         Set<Guid?>(parcel, nameof(parcel.DropoffStopId), null);
         var repo = Substitute.For<IParcelRepository>();
         var tripClient = Substitute.For<ITripServiceClient>();
         repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
+        tripClient.AuthorizeAssistantForTripAsync(TripId, AssistantUserId, OperatorId, Arg.Any<CancellationToken>())
+            .Returns(new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Authorized));
         tripClient.GetTripParcelSnapshotAsync(TripId, Arg.Any<CancellationToken>())
             .Returns(new TripSnapshotOutcome(
                 TripSnapshotOutcomeKind.Success,
                 TripSnapshot(
                     allowDropoff: true,
-                    stops:
-                    [
-                        new TripStopDto(Guid.NewGuid(), 1, true, false, DateTimeOffset.UtcNow, 0, null, "ARRIVED", DateTimeOffset.UtcNow),
-                        new TripStopDto(Guid.NewGuid(), 2, false, true, DateTimeOffset.UtcNow, 20, null, "ARRIVED", DateTimeOffset.UtcNow),
-                    ]),
+                    stops: [],
+                    destinationArrivedAt: DateTimeOffset.UtcNow),
                 null));
         tripClient.ReleaseCargoAsync(TripId, ParcelId, Arg.Any<decimal>(), Arg.Any<CancellationToken>())
             .Returns(new TripCargoOutcome(TripCargoOutcomeKind.Success, null));
-        repo.TryUnloadToPendingConfirmAsync(ParcelId, Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns(Snapshot(ParcelStatus.DELIVERED_PENDING_CONFIRM));
+        repo.TryMarkUnloadedAsync(ParcelId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(Snapshot(ParcelStatus.UNLOADED));
 
         var handler = new UnloadParcelCommandHandler(repo, tripClient, Outbox(), UnitOfWork());
-        var result = await handler.Handle(new UnloadParcelCommand(ParcelId, OperatorId), default);
+        var result = await handler.Handle(
+            new UnloadParcelCommand(ParcelId, AssistantUserId, OperatorId),
+            default);
 
-        result.Status.Should().Be("DELIVERED_PENDING_CONFIRM");
+        result.Status.Should().Be("UNLOADED");
     }
 
     [Fact]
@@ -578,7 +596,10 @@ public sealed class Phase67ParcelTests
             ParcelSizeCategory.MEDIUM,
             null);
 
-    private static TripParcelSnapshot TripSnapshot(bool allowDropoff, IReadOnlyList<TripStopDto>? stops = null)
+    private static TripParcelSnapshot TripSnapshot(
+        bool allowDropoff,
+        IReadOnlyList<TripStopDto>? stops = null,
+        DateTimeOffset? destinationArrivedAt = null)
         => new(
             TripId,
             OperatorId,
@@ -592,7 +613,8 @@ public sealed class Phase67ParcelTests
             new TripStationDto(Guid.NewGuid(), "Destination"),
             stops ?? [new TripStopDto(DropoffStopId, 1, false, allowDropoff, DateTimeOffset.UtcNow, 10, null, "ARRIVED", DateTimeOffset.UtcNow)],
             new TripSeatSummaryDto(40, 10),
-            null);
+            null,
+            destinationArrivedAt);
 
     private static void Set<T>(object target, string propertyName, T value)
     {

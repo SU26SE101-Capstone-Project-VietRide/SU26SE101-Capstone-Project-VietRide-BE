@@ -60,7 +60,8 @@ public sealed class DevTripServiceClient : ITripServiceClient
                     now),
             },
             SeatSummary: new TripSeatSummaryDto(40, 40),
-            ReturnRouteId: null);
+            ReturnRouteId: null,
+            DestinationArrivedAt: now);
 
         return Task.FromResult(new TripSnapshotOutcome(TripSnapshotOutcomeKind.Success, snapshot, null));
     }

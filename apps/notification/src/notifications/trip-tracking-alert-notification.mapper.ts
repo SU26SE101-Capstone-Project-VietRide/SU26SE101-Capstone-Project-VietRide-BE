@@ -97,13 +97,32 @@ const TripDelayedPayloadSchema = BaseTripAlertPayloadSchema.and(
   }),
 );
 
-const IncidentReportedPayloadSchema = BaseTripAlertPayloadSchema.and(
-  z.object({
+export const IncidentReportedPayloadSchema = z
+  .object({
+    eventId: z.string().uuid().optional(),
+    occurredAt: z.string().datetime({ offset: true }),
+    eventType: z.literal(TRIP_INCIDENT_REPORTED_ROUTING_KEY).optional(),
     incidentId: z.string().uuid(),
-    category: z.string().trim().min(1).optional(),
-    reporterUserId: z.string().uuid().optional(),
-  }),
-);
+    tripId: z.string().uuid(),
+    operatorId: z.string().uuid(),
+    reporterUserId: z.string().uuid(),
+    category: z.enum(['TRAFFIC_JAM', 'VEHICLE_BREAKDOWN', 'ACCIDENT', 'WEATHER', 'OTHER']),
+    description: z.string().trim().min(1).nullable().optional(),
+    photoUrls: z.array(z.string().url()).max(3).nullable().optional(),
+    latitude: z.number().min(-90).max(90).nullable().optional(),
+    longitude: z.number().min(-180).max(180).nullable().optional(),
+    reportedAt: z.string().datetime({ offset: true }),
+  })
+  .passthrough()
+  .superRefine((payload, ctx) => {
+    if ((payload.latitude != null) !== (payload.longitude != null)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Latitude and longitude must be supplied together',
+        path: ['latitude'],
+      });
+    }
+  });
 
 const OffRoutePayloadSchema = BaseTripAlertPayloadSchema.and(
   z.object({ durationSeconds: z.number().int().nonnegative().optional() }),
@@ -146,6 +165,7 @@ type RecipientPayload = z.infer<typeof RecipientPayloadSchema>;
 type BaseTripAlertPayload = z.infer<typeof BaseTripAlertPayloadSchema>;
 type ApproachingStopPayload = z.infer<typeof ApproachingStopPayloadSchema>;
 type StopDisabledPayload = z.infer<typeof StopDisabledPayloadSchema>;
+export type IncidentReportedPayload = z.infer<typeof IncidentReportedPayloadSchema>;
 
 export type TripTrackingAlertRoutingKey =
   | typeof TRIP_ASSIGNED_ROUTING_KEY
@@ -179,8 +199,11 @@ export function mapTripTrackingAlertToNotifications(
       return fanOut(TripCancelledPayloadSchema.parse(payload), mapTripCancelled);
     case TRIP_DELAYED_ROUTING_KEY:
       return fanOut(TripDelayedPayloadSchema.parse(payload), mapTripDelayed);
-    case TRIP_INCIDENT_REPORTED_ROUTING_KEY:
-      return fanOut(IncidentReportedPayloadSchema.parse(payload), mapIncidentReported);
+    case TRIP_INCIDENT_REPORTED_ROUTING_KEY: {
+      const incident = IncidentReportedPayloadSchema.parse(payload);
+      const recipients = RecipientPayloadSchema.parse(payload);
+      return mapIncidentReportedToNotifications(incident, collectRecipientUserIds(recipients));
+    }
     case TRIP_STOP_DISABLED_ROUTING_KEY:
       return fanOut(StopDisabledPayloadSchema.parse(payload), mapStopDisabled);
     case TRACKING_GPS_OFF_ROUTE_ROUTING_KEY:
@@ -317,17 +340,24 @@ function mapTripDelayed(
   };
 }
 
-function mapIncidentReported(
-  userId: string,
-  payload: z.infer<typeof IncidentReportedPayloadSchema>,
-): CreateNotificationDto {
-  return {
+export function mapIncidentReportedToNotifications(
+  payload: IncidentReportedPayload,
+  recipientUserIds: string[],
+): CreateNotificationDto[] {
+  return [...new Set(recipientUserIds)].map((userId) => ({
     userId,
     type: NotificationType.INCIDENT_REPORTED,
-    title: 'Co su co tren chuyen xe',
-    body: `${formatTripLabel(payload)} vua ghi nhan su co${payload.category ? `: ${payload.category}` : ''}.`,
-    data: buildTripData(payload),
-  };
+    title: 'Có sự cố trên chuyến xe',
+    body: `Chuyến ${payload.tripId} vừa ghi nhận sự cố: ${payload.category}.`,
+    data: {
+      incidentId: payload.incidentId,
+      tripId: payload.tripId,
+      operatorId: payload.operatorId,
+      reporterUserId: payload.reporterUserId,
+      category: payload.category,
+      reportedAt: payload.reportedAt,
+    },
+  }));
 }
 
 function mapOffRoute(

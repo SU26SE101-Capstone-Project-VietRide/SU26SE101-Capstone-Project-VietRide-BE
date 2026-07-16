@@ -29,6 +29,7 @@ public sealed class TripDbContext : VietRideDbContextBase
         builder.MapEnum<TripStopStatus>("trip_stop_status", PostgresEnumNameTranslator);
         builder.MapEnum<TripGenerationSkipReason>("trip_generation_skip_reason", PostgresEnumNameTranslator);
         builder.MapEnum<VehicleStatus>("vehicle_status", PostgresEnumNameTranslator);
+        builder.MapEnum<IncidentCategory>($"{SchemaName}.incident_category", PostgresEnumNameTranslator);
     }
 
     public DbSet<Location> Locations => Set<Location>();
@@ -75,6 +76,8 @@ public sealed class TripDbContext : VietRideDbContextBase
 
     public DbSet<ShuttleDispatchAlert> ShuttleDispatchAlerts => Set<ShuttleDispatchAlert>();
 
+    public DbSet<Incident> Incidents => Set<Incident>();
+
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
         configurationBuilder.Conventions.Remove(typeof(ForeignKeyIndexConvention));
@@ -91,6 +94,7 @@ public sealed class TripDbContext : VietRideDbContextBase
         modelBuilder.HasPostgresEnum("trip_stop_status", new[] { "PENDING", "ARRIVED", "SKIPPED" });
         modelBuilder.HasPostgresEnum("trip_generation_skip_reason", new[] { "SUBSCRIPTION_LIMIT_EXCEEDED", "VEHICLE_CONFLICT", "DRIVER_CONFLICT", "OTHER" });
         modelBuilder.HasPostgresEnum("vehicle_status", new[] { "ACTIVE", "MAINTENANCE", "OFF_DUTY", "RETIRED" });
+        modelBuilder.HasPostgresEnum(SchemaName, "incident_category", new[] { "TRAFFIC_JAM", "VEHICLE_BREAKDOWN", "ACCIDENT", "WEATHER", "OTHER" });
         base.OnModelCreating(modelBuilder);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(TripDbContext).Assembly);
         RemoveConventionIndex<Route>(modelBuilder, nameof(Route.DestinationStationId));

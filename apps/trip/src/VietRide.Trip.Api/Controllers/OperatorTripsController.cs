@@ -38,27 +38,6 @@ public sealed class OperatorTripsController : ControllerBase
             cancellationToken));
     }
 
-    [HttpPost("{tripId:guid}/stops/{stopId:guid}/arrive")]
-    [RequireIdempotencyKey]
-    [Authorize(Roles = OperatorWriteRoles)]
-    [ProducesResponseType(typeof(ApiResponse<ArriveTripStopResponse>), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
-    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
-    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<ArriveTripStopResponse>> ArriveStopAsync(
-        Guid tripId,
-        Guid stopId,
-        CancellationToken cancellationToken)
-    {
-        return Ok(await mediator.Send(
-            new ArriveTripStopCommand(
-                tripId,
-                stopId,
-                GetRequiredOperatorId(),
-                CurrentUserClaims.GetUserId(User)),
-            cancellationToken));
-    }
-
     [HttpPost("{tripId:guid}/substitute-vehicle")]
     [RequireIdempotencyKey]
     [Authorize(Roles = OperatorWriteRoles)]

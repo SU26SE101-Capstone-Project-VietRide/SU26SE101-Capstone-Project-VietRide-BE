@@ -7,7 +7,7 @@ namespace VietRide.Shared.Web.DependencyInjection;
 
 /// <summary>
 /// Configuration for <see cref="IdempotencyMiddleware"/>.
-/// The Redis key pattern is <c>&lt;service&gt;:idem:{key}</c> (BSOT §5.6).
+/// Redis v2 uses separate hashed-key response and processing namespaces (BSOT §5.6).
 /// </summary>
 public sealed class IdempotencyOptions
 {
@@ -23,7 +23,8 @@ public sealed class IdempotencyOptions
 /// A service opts in via <c>services.AddVietRideIdempotency("booking")</c> and
 /// <c>app.UseVietRideIdempotency()</c>. Endpoints requiring mandatory UUID-v4 validation carry
 /// <see cref="RequireIdempotencyAttribute"/> metadata. Run the middleware after routing and
-/// authentication so endpoint metadata and the authenticated subject are available. It assumes an
+/// authentication so endpoint metadata and the authenticated subject are available. The middleware
+/// also honors supplied keys on POST/PATCH/PUT/DELETE endpoints without mandatory metadata. It assumes an
 /// <see cref="StackExchange.Redis.IConnectionMultiplexer"/> is already registered.
 /// </summary>
 public static class IdempotencyServiceCollectionExtensions

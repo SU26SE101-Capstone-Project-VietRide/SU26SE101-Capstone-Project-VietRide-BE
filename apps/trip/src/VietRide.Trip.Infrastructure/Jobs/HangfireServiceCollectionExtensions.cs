@@ -18,9 +18,10 @@ public static class HangfireServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddTripHangfire(
         this IServiceCollection services,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        bool backgroundWorkersEnabled)
     {
-        if (!AreBackgroundWorkersEnabled(configuration))
+        if (!backgroundWorkersEnabled)
         {
             return services;
         }
@@ -57,7 +58,4 @@ public static class HangfireServiceCollectionExtensions
 
         return services;
     }
-
-    private static bool AreBackgroundWorkersEnabled(IConfiguration configuration) =>
-        configuration.GetValue<bool?>("Trip:BackgroundWorkers:Enabled") ?? true;
 }

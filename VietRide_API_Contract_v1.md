@@ -7,7 +7,7 @@
 - Public API prefix: `/v1`.
 - Internal service-to-service API prefix: `/internal/v1`, require valid Internal JWT, never exposed publicly through Gateway.
 - Auth header for public protected endpoints: `Authorization: Bearer <userAccessToken>`.
-- Idempotent write endpoints require `Idempotency-Key: <uuid>` where noted.
+- Idempotent write endpoints require `Idempotency-Key: <uuid-v4>` where noted. Same key + same actor/method/path/query/raw body replays the original status, `Content-Type`, and response bytes for 24 hours; an in-flight duplicate returns `409 IDEMPOTENCY_REQUEST_PENDING`, a changed fingerprint returns `422 IDEMPOTENCY_KEY_MISMATCH`, and a missing required header returns `422 IDEMPOTENCY_KEY_REQUIRED`.
 - Error response: `ApiResponse` envelope `{ success: false, statusCode, error: { code, message, fields? }, meta: { traceId, timestamp } }` — ADR 0004; `error.code` từ BSOT §5.9 registry (UPPER_SNAKE_CASE). `application/problem+json` (RFC 7807) đã DROP.
 - Money fields are VND `number` in JSON, stored as BIGINT in DB.
 - Datetime fields are ISO 8601 strings with offset.
@@ -1681,7 +1681,8 @@ Response `200` (raw):
   "seatSummary": { "totalSeats": 40, "availableSeats": 18 },
   "returnRouteId": "uuid | null",
   "driverUserId": "uuid | null",
-  "assistantUserId": "uuid | null"
+  "assistantUserId": "uuid | null",
+  "destinationArrivedAt": "2026-05-18T19:55:00+07:00 | null"
 }
 ```
 
@@ -1696,6 +1697,9 @@ Notes:
   (technical_context_v7 line 1750). Trip will expose this field in Task 11.4.
 - `driverUserId` / `assistantUserId`: nullable UUID logical user keys used by downstream services
   for trip-assignment authorization. They do not create cross-database foreign keys.
+- `destinationArrivedAt`: nullable destination-terminal arrival anchor recorded explicitly by the
+  assigned Driver/Assistant. It is independent from `completedAt`; automatic Trip completion does
+  not synthesize this field.
 - Errors: `404 TRIP_NOT_FOUND`.
 
 ### POST `/internal/v1/trips/{tripId}/lock-seats`
@@ -2188,6 +2192,74 @@ Decision notes:
 - If actual cargo exceeds trip capacity beyond auto-overflow, status becomes `PENDING_OPERATOR_ACTION` with pending action type `CAPACITY_EXCEEDED`.
 - If actual price is lower outside tolerance, status becomes `PENDING_OPERATOR_ACTION` with pending action type `REFUND_CONFIRMATION`.
 - If actual price is higher outside tolerance, status becomes `PENDING_ADDITIONAL_PAYMENT`.
+
+### POST `/v1/assistant/parcels/{parcelId}/unload`
+
+Auth: assigned `ASSISTANT`. Idempotency: required. Request body: none.
+
+The parcel must belong to the caller's operator and current assigned Trip. The transition is
+exactly `IN_TRANSIT -> UNLOADED`:
+
+- When `dropoffStopId` is present, the matching TripStop must exist, allow drop-off, and have
+  status `ARRIVED`. A later intermediate stop or the destination anchor cannot substitute for
+  this exact stop.
+- When `dropoffStopId` is null, `destinationArrivedAt` from the Trip snapshot must be non-null.
+  The last intermediate stop is never used as the terminal anchor. An express Trip with zero
+  TripStops is valid after destination arrival.
+- The winning Parcel-local CAS sets `status=UNLOADED` and `unloadedAt`, keeps delivery-token and
+  pending-confirm fields null, and atomically enqueues one `parcel.parcel.unloaded` Outbox event.
+  Cargo release is invoked once by unload. It is not repeated by deliver.
+
+Response `200`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "parcelId": "uuid",
+    "parcelCode": "VR-PCL-20260518-P7K3D9Q2",
+    "status": "UNLOADED"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T08:00:00Z" }
+}
+```
+
+Errors: `401 UNAUTHORIZED`; `403 FORBIDDEN` when the caller is not the assigned Assistant or
+operator scope does not match, including when the assigned Trip no longer exists; `404 PARCEL_NOT_FOUND`; `409 INVALID_STATUS`
+for a stale/replayed transition that is not served from the idempotency cache;
+`422 DROP_OFF_STOP_NOT_FOUND`, `DROP_OFF_STOP_NOT_ALLOWED`, `DROP_OFF_STOP_NOT_ARRIVED`, or
+`DESTINATION_TERMINAL_NOT_ARRIVED`; `503 TRIP_SERVICE_UNAVAILABLE`.
+
+### POST `/v1/assistant/parcels/{parcelId}/deliver`
+
+Auth: assigned `ASSISTANT`. Idempotency: required. Request body: none.
+
+The transition is exactly `UNLOADED -> DELIVERED_PENDING_CONFIRM`. The winning Parcel-local CAS
+generates a new opaque delivery token with a 48-hour expiry and atomically enqueues one
+`parcel.parcel.delivered_pending_confirm` Outbox event. This endpoint does not release cargo and
+does not emit `parcel.parcel.unloaded`. Recipient confirmation continues through
+`POST /v1/parcels/delivery/confirm` using the generated token.
+
+Response `200`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "parcelId": "uuid",
+    "parcelCode": "VR-PCL-20260518-P7K3D9Q2",
+    "status": "DELIVERED_PENDING_CONFIRM",
+    "deliveredPendingConfirmAt": "2026-07-15T08:05:00Z"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T08:05:00Z" }
+}
+```
+
+Errors: `401 UNAUTHORIZED`; `403 FORBIDDEN` when the caller is not the assigned Assistant or
+operator scope does not match; `404 PARCEL_NOT_FOUND`; `409 INVALID_STATUS` when the Parcel is
+not `UNLOADED` or the CAS loses a race; `503 TRIP_SERVICE_UNAVAILABLE`.
 
 ### POST `/internal/v1/parcels/{parcelId}/mark-loaded`
 
@@ -4716,19 +4788,16 @@ Trip not assigned to the caller returns `403 FORBIDDEN`; malformed `tripId` retu
 ## Day 21 — Trip lifecycle automation
 
 Both lifecycle mutations have no request body. They require an `Idempotency-Key` header whose
-value is a UUID v4. The idempotency fingerprint is exactly the HTTP method, normalized request
-route/path parameters including `tripId`, authenticated `sub`, and canonical empty-body marker;
-the authenticated role is not a fingerprint component. Request authentication and
-`tripId`/header/body validation may run before a new key is reserved; those validation failures
-are not cached and create no idempotency record. A valid new key is reserved atomically as pending
-before the command executes. Trip assignment authorization runs downstream in the handler, and
-middleware finalizes its response for replay. A retry with the same key and same fingerprint
-returns the original HTTP status and exact ADR 0004 response body after the first request
-completes, returns `409 IDEMPOTENCY_REQUEST_PENDING` while it is executing, and returns
-`422 IDEMPOTENCY_KEY_MISMATCH` if any fingerprint component differs. Clients reuse the same key
-only to retry the same logical mutation and use a new UUID-v4 key for a new attempt. Missing or
-malformed keys, malformed `tripId`, or any request body return `422 VALIDATION_ERROR` without
-changing Trip state.
+value is a UUID v4 and use the shared Day-39 idempotency v2 contract. Fingerprint là SHA-256 của
+length-prefix frame theo thứ tự authenticated `sub`, HTTP method uppercase, `PathBase + Path`,
+canonical query (mọi key/value, sort ordinal theo key rồi value, giữ duplicate) và raw body bytes;
+authenticated role không thuộc fingerprint. Vì body dùng raw bytes, JSON khác whitespace/property
+order là request khác. Request đầu reserve processing lock `SET NX EX` 120 giây trước handler.
+Retry cùng key/fingerprint replay nguyên status, `Content-Type` và response bytes trong 24 giờ;
+trong khi request đầu còn chạy trả `409 IDEMPOTENCY_REQUEST_PENDING`; khác bất kỳ component nào trả
+`422 IDEMPOTENCY_KEY_MISMATCH`. Exception/5xx không cache và chỉ owner được release lock. Missing
+header trả `422 IDEMPOTENCY_KEY_REQUIRED`; malformed UUID, malformed `tripId` hoặc body không rỗng
+trả `422 VALIDATION_ERROR` mà không đổi Trip state.
 
 ### POST `/v1/driver/trips/{tripId}/start`
 
@@ -4759,7 +4828,7 @@ Data schema: `{ tripId: string(uuid), status: "IN_PROGRESS", actualDepartureTime
 
 Errors: `401 AUTH_TOKEN_INVALID`; `403 FORBIDDEN`; `404 TRIP_NOT_FOUND`;
 `409 TRIP_INVALID_TRANSITION`; `409 IDEMPOTENCY_REQUEST_PENDING`;
-`422 IDEMPOTENCY_KEY_MISMATCH`; `422 VALIDATION_ERROR`.
+`422 IDEMPOTENCY_KEY_REQUIRED`; `422 IDEMPOTENCY_KEY_MISMATCH`; `422 VALIDATION_ERROR`.
 
 ### POST `/v1/driver/trips/{tripId}/complete`
 
@@ -4796,7 +4865,7 @@ Data schema: `{ tripId: string(uuid), status: "COMPLETED", completedAt: string(d
 
 Errors: `401 AUTH_TOKEN_INVALID`; `403 FORBIDDEN`; `404 TRIP_NOT_FOUND`;
 `409 TRIP_INVALID_TRANSITION`; `409 IDEMPOTENCY_REQUEST_PENDING`;
-`422 IDEMPOTENCY_KEY_MISMATCH`; `422 VALIDATION_ERROR`.
+`422 IDEMPOTENCY_KEY_REQUIRED`; `422 IDEMPOTENCY_KEY_MISMATCH`; `422 VALIDATION_ERROR`.
 
 ### GET `/v1/bookings/trips/{tripId}/manifest`
 
@@ -4931,7 +5000,241 @@ Error responses use the ADR 0004 envelope:
 - `422 BOOKING_NOT_FOR_THIS_TRIP`: the code belongs to a different trip.
 - `422 VALIDATION_ERROR`: the route parameter or booking-code format is invalid.
 
+## Day 39 — Driver Ops Incident
+
+### POST `/v1/driver/trips/{tripId}/incident`
+
+Auth: `DRIVER` hoặc `ASSISTANT`. JWT `sub` phải bằng `driverUserId` hoặc `assistantUserId` của
+Trip. Endpoint chỉ chấp nhận Trip ở trạng thái `IN_PROGRESS`; không thay đổi trạng thái Trip.
+`Idempotency-Key` UUID v4 là bắt buộc và dùng shared idempotency v2.
+
+Request:
+
+```json
+{
+  "category": "TRAFFIC_JAM",
+  "description": "Kẹt xe tại nút giao",
+  "photoUrls": ["https://storage.example/incident-1.jpg"],
+  "latitude": 10.7731,
+  "longitude": 106.7032
+}
+```
+
+Quy tắc validation:
+
+- `category` phân biệt hoa/thường và chỉ nhận `TRAFFIC_JAM`, `VEHICLE_BREAKDOWN`, `ACCIDENT`,
+  `WEATHER`, `OTHER`.
+- `description` optional, trim; chuỗi chỉ có khoảng trắng được chuẩn hóa thành `null`; tối đa 500
+  ký tự sau trim.
+- `photoUrls` optional, tối đa 3 absolute HTTPS URL; từng phần tử được trim và giữ nguyên thứ tự.
+- `latitude` và `longitude` phải cùng có hoặc cùng vắng; giới hạn lần lượt `[-90,90]` và
+  `[-180,180]`.
+- `tripId`, `reportedByUserId` và `operatorId` được derive server-side; client không được truyền.
+
+Response `201` dùng ADR 0004:
+
+```json
+{
+  "success": true,
+  "statusCode": 201,
+  "data": {
+    "incidentId": "uuid",
+    "tripId": "uuid",
+    "reportedByUserId": "uuid",
+    "category": "TRAFFIC_JAM",
+    "description": "Kẹt xe tại nút giao",
+    "photoUrls": ["https://storage.example/incident-1.jpg"],
+    "latitude": 10.7731,
+    "longitude": 106.7032,
+    "reportedAt": "2026-07-16T03:00:00Z"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-16T03:00:00Z" }
+}
+```
+
+Incident và `trip.incident.reported` Outbox được commit trong cùng Trip-local transaction. Cùng
+key/fingerprint replay nguyên response `201`; concurrent request cùng key khi request đầu còn xử
+lý trả `409 IDEMPOTENCY_REQUEST_PENDING`.
+
+Errors: `401 AUTH_TOKEN_INVALID`; `403 FORBIDDEN`; `404 TRIP_NOT_FOUND`;
+`409 IDEMPOTENCY_REQUEST_PENDING`; `422 TRIP_NOT_IN_PROGRESS`; `422 VALIDATION_ERROR`;
+`422 IDEMPOTENCY_KEY_REQUIRED`; `422 IDEMPOTENCY_KEY_MISMATCH`.
+
+### POST `/v1/driver/trips/{tripId}/stops/{stopId}/arrive`
+
+Auth: `DRIVER` hoặc `ASSISTANT`; JWT `sub` phải là `driverUserId` hoặc `assistantUserId` được gán
+cho Trip. Request không có body và bắt buộc `Idempotency-Key` UUID v4 theo shared idempotency v2.
+
+Trip và TripStop được khóa theo thứ tự cố định `Trip -> TripStop` trong cùng ambient transaction.
+Chỉ Trip `IN_PROGRESS` và TripStop `PENDING` mới hợp lệ. Handler ghi
+`actualArrivalTime = IClock.UtcNow`, chuyển `PENDING -> ARRIVED`, giữ nguyên
+`estimatedArrivalTime`, rồi enqueue `trip.stop.arrived` vào Outbox trong cùng transaction.
+
+Response `200` dùng ADR 0004:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "tripId": "uuid",
+    "stopId": "uuid",
+    "status": "ARRIVED",
+    "actualArrivalTime": "2026-07-16T06:00:00Z"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-16T06:00:00Z" }
+}
+```
+
+Thứ tự kiểm tra nghiệp vụ: Trip tồn tại -> caller được gán -> TripStop tồn tại/được khóa ->
+TripStop còn `PENDING` -> Trip đang `IN_PROGRESS` -> mutate. Vì vậy TripStop đã `ARRIVED` hoặc
+`SKIPPED` luôn trả `409 TRIP_STOP_ALREADY_FINALIZED`, kể cả Trip sau đó đã về trạng thái terminal.
+
+Errors: `401 AUTH_TOKEN_INVALID`; `403 FORBIDDEN`; `404 TRIP_NOT_FOUND`;
+`404 TRIP_STOP_NOT_FOUND`; `409 TRIP_STOP_ALREADY_FINALIZED`;
+`409 IDEMPOTENCY_REQUEST_PENDING`; `422 TRIP_NOT_IN_PROGRESS`;
+`422 IDEMPOTENCY_KEY_REQUIRED`; `422 IDEMPOTENCY_KEY_MISMATCH`; `422 VALIDATION_ERROR`.
+
+Route cũ `POST /v1/operator/trips/{tripId}/stops/{stopId}/arrive` không còn tồn tại và trả `404`.
+
+### POST `/v1/driver/trips/{tripId}/destination/arrive`
+
+Auth và idempotency giống stop-arrival; request không có body. Endpoint áp dụng cả cho express
+Trip không có bất kỳ TripStop nào. Destination Station được derive server-side từ
+`Route.destinationStationId`; client không truyền station ID.
+
+Trip được khóa trong ambient transaction. Chỉ Trip `IN_PROGRESS` chưa có destination anchor mới
+hợp lệ. Handler ghi `Trip.destinationArrivedAt = IClock.UtcNow` và
+`Trip.destinationArrivedByUserId = JWT sub`, rồi enqueue `trip.destination.arrived` trong cùng
+transaction. Anchor này độc lập với `completedAt`; endpoint không complete Trip và auto-complete
+không tự tạo anchor.
+
+Response `200` dùng ADR 0004:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "tripId": "uuid",
+    "destinationStationId": "uuid",
+    "status": "ARRIVED",
+    "actualArrivalTime": "2026-07-16T06:00:00Z"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-16T06:00:00Z" }
+}
+```
+
+Errors: `401 AUTH_TOKEN_INVALID`; `403 FORBIDDEN`; `404 TRIP_NOT_FOUND`;
+`409 TRIP_DESTINATION_ALREADY_ARRIVED`; `409 IDEMPOTENCY_REQUEST_PENDING`;
+`422 TRIP_NOT_IN_PROGRESS`; `422 IDEMPOTENCY_KEY_REQUIRED`;
+`422 IDEMPOTENCY_KEY_MISMATCH`; `422 VALIDATION_ERROR`.
+
 ## Integration Event Contracts
+
+### `parcel.parcel.unloaded`
+
+Producer: Parcel. Consumer: Notification. Exchange: `vietride.events`.
+
+```json
+{
+  "parcelId": "uuid",
+  "tripId": "uuid",
+  "userIds": ["sender-user-uuid", "recipient-user-uuid"]
+}
+```
+
+The Parcel-local transaction enqueues this event only for the winning
+`IN_TRANSIT -> UNLOADED` CAS. `userIds` is distinct and always includes the sender; it includes
+the recipient account when the Parcel has one. A replay or CAS loser emits no event.
+
+### `parcel.parcel.delivered_pending_confirm`
+
+Producer: Parcel. Consumer: Notification. Exchange: `vietride.events`.
+
+```json
+{
+  "parcelId": "uuid",
+  "parcelCode": "VR-PCL-20260518-P7K3D9Q2",
+  "operatorId": "uuid",
+  "tripId": "uuid",
+  "userId": "recipient-user-uuid",
+  "recipientUserIds": ["recipient-user-uuid"],
+  "deliveryToken": "uuid",
+  "expiresAt": "2026-07-17T08:05:00Z"
+}
+```
+
+The Parcel-local transaction enqueues this event only for the winning
+`UNLOADED -> DELIVERED_PENDING_CONFIRM` CAS. `userId` and `recipientUserIds` are omitted when no
+recipient account is linked. `deliveryToken` is generated only by deliver and expires after
+48 hours. A replay or CAS loser emits no event.
+
+### `trip.incident.reported`
+
+Producer: Trip. Consumer: Notification. Exchange: `vietride.events`. Optional fields bị omit khi
+không có giá trị; consumer chấp nhận cả omitted và `null` trong giai đoạn tương thích.
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-07-16T03:00:00Z",
+  "eventType": "trip.incident.reported",
+  "incidentId": "uuid",
+  "tripId": "uuid",
+  "operatorId": "uuid",
+  "reporterUserId": "uuid",
+  "category": "TRAFFIC_JAM",
+  "description": "Kẹt xe tại nút giao",
+  "photoUrls": ["https://storage.example/incident-1.jpg"],
+  "latitude": 10.7731,
+  "longitude": 106.7032,
+  "reportedAt": "2026-07-16T03:00:00Z"
+}
+```
+
+`occurredAt` và `reportedAt` dùng cùng instant từ `IClock`. Payload không chứa recipient IDs;
+Notification resolve active `OPERATOR_ADMIN` theo `operatorId`.
+
+### `trip.stop.arrived`
+
+Producer: Trip. Consumers: Parcel, Notification. Exchange: `vietride.events`.
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-07-16T06:00:00Z",
+  "eventType": "trip.stop.arrived",
+  "tripId": "uuid",
+  "stopId": "uuid",
+  "operatorId": "uuid",
+  "actorUserId": "uuid",
+  "actualArrivalTime": "2026-07-16T06:00:00Z"
+}
+```
+
+`eventId` là identity dedupe của consumer. `occurredAt` và `actualArrivalTime` dùng cùng instant từ
+`IClock`; payload không chứa ETA động và không thay đổi static `TripStop.estimatedArrivalTime`.
+
+### `trip.destination.arrived`
+
+Producer: Trip. Consumer: Parcel. Exchange: `vietride.events`.
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-07-16T06:00:00Z",
+  "eventType": "trip.destination.arrived",
+  "tripId": "uuid",
+  "destinationStationId": "uuid",
+  "operatorId": "uuid",
+  "actorUserId": "uuid",
+  "actualArrivalTime": "2026-07-16T06:00:00Z"
+}
+```
+
+Event chỉ được phát một lần cho mỗi Trip destination anchor. `destinationStationId` được derive từ
+Route; không tạo cross-database foreign key đến Identity cho `actorUserId`.
 
 ### `trip.trip.assigned` and `trip.trip.crew_changed`
 

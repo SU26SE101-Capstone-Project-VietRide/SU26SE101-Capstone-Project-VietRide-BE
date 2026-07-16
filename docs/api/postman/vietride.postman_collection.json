@@ -6454,6 +6454,557 @@
       ]
     },
     {
+      "name": "Day 39 - Driver Ops Incident & Arrival",
+      "description": "Gateway-only requests for the deterministic Day 39 seed. Run npm run e2e:day39 for races, transient Identity retry, RabbitMQ/Redis and direct database assertions.",
+      "item": [
+        {
+          "name": "01. Driver reports incident",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('driver incident created', () => { pm.response.to.have.status(201); pm.expect(body.success).to.eql(true); pm.expect(body.data.tripId).to.eql(pm.environment.get('day39IncidentTripId')); pm.expect(body.data.category).to.eql('VEHICLE_BREAKDOWN'); pm.expect(body.data.description).to.eql('Engine temperature exceeded the operating limit.'); });",
+                  "pm.environment.set('day39IncidentId', body.data.incidentId);",
+                  "pm.collectionVariables.set('day39IncidentReplayBody', pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day39DriverToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day39IncidentKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"VEHICLE_BREAKDOWN\",\n  \"description\": \"  Engine temperature exceeded the operating limit.  \",\n  \"photoUrls\": [\"https://assets.day39.test/incidents/engine.jpg\"],\n  \"latitude\": 10.7765,\n  \"longitude\": 106.7009\n}"
+            },
+            "url": "{{baseUrl}}/v1/driver/trips/{{day39IncidentTripId}}/incident"
+          }
+        },
+        {
+          "name": "02. Replay driver incident",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('incident replay is byte-stable', () => { pm.response.to.have.status(201); pm.expect(pm.response.text()).to.eql(pm.collectionVariables.get('day39IncidentReplayBody')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day39DriverToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day39IncidentKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"VEHICLE_BREAKDOWN\",\n  \"description\": \"  Engine temperature exceeded the operating limit.  \",\n  \"photoUrls\": [\"https://assets.day39.test/incidents/engine.jpg\"],\n  \"latitude\": 10.7765,\n  \"longitude\": 106.7009\n}"
+            },
+            "url": "{{baseUrl}}/v1/driver/trips/{{day39IncidentTripId}}/incident"
+          }
+        },
+        {
+          "name": "03. Assistant reports incident",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('assistant incident created', () => { pm.response.to.have.status(201); pm.expect(body.success).to.eql(true); pm.expect(body.data.category).to.eql('OTHER'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day39AssistantToken}}" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"OTHER\",\n  \"description\": \"Passenger requested operational support.\",\n  \"photoUrls\": [],\n  \"latitude\": null,\n  \"longitude\": null\n}"
+            },
+            "url": "{{baseUrl}}/v1/driver/trips/{{day39IncidentTripId}}/incident"
+          }
+        },
+        {
+          "name": "03b. Incident same-key body mismatch",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('incident key mismatch rejected', () => { pm.response.to.have.status(422); pm.expect(body.errorCode || body.error?.code).to.eql('IDEMPOTENCY_KEY_MISMATCH'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day39DriverToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day39IncidentKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"category\":\"OTHER\",\"description\":\"Different body for mismatch\",\"photoUrls\":[]}"
+            },
+            "url": "{{baseUrl}}/v1/driver/trips/{{day39IncidentTripId}}/incident"
+          }
+        },
+        {
+          "name": "04. Incident invalid enum",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('invalid category rejected', () => { pm.expect(pm.response.code).to.be.oneOf([400, 422]); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day39DriverToken}}" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"category\":\"NOT_A_CATEGORY\",\"description\":\"Invalid category\",\"photoUrls\":[]}"
+            },
+            "url": "{{baseUrl}}/v1/driver/trips/{{day39IncidentTripId}}/incident"
+          }
+        },
+        {
+          "name": "05. Incident missing idempotency key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('missing key rejected exactly', () => { pm.response.to.have.status(422); pm.expect(body.errorCode || body.error?.code).to.eql('IDEMPOTENCY_KEY_REQUIRED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day39DriverToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"category\":\"OTHER\",\"description\":\"Missing key\",\"photoUrls\":[]}"
+            },
+            "url": "{{baseUrl}}/v1/driver/trips/{{day39IncidentTripId}}/incident"
+          }
+        },
+        {
+          "name": "06. Unassigned driver cannot report incident",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('unassigned driver forbidden', () => { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day39UnassignedDriverToken}}" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"category\":\"OTHER\",\"description\":\"Forbidden\",\"photoUrls\":[]}"
+            },
+            "url": "{{baseUrl}}/v1/driver/trips/{{day39IncidentTripId}}/incident"
+          }
+        },
+        {
+          "name": "07. Incident before IN_PROGRESS",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('boarding incident rejected', () => { pm.response.to.have.status(422); pm.expect(body.errorCode || body.error?.code).to.eql('TRIP_NOT_IN_PROGRESS'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day39DriverToken}}" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"category\":\"OTHER\",\"description\":\"Wrong trip state\",\"photoUrls\":[]}"
+            },
+            "url": "{{baseUrl}}/v1/driver/trips/{{day39BoardingTripId}}/incident"
+          }
+        },
+        {
+          "name": "08. Driver arrives TripStop",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('stop arrived', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.status).to.eql('ARRIVED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day39DriverToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day39StopArrivalKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/driver/trips/{{day39StopTripId}}/stops/{{day39StopId}}/arrive"
+          }
+        },
+        {
+          "name": "09. Finalized TripStop cannot arrive again with a new key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('finalized stop rejected', () => { pm.response.to.have.status(409); pm.expect(body.errorCode || body.error?.code).to.eql('TRIP_STOP_ALREADY_FINALIZED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day39DriverToken}}" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" }
+            ],
+            "url": "{{baseUrl}}/v1/driver/trips/{{day39StopTripId}}/stops/{{day39StopId}}/arrive"
+          }
+        },
+        {
+          "name": "10. Legacy Operator arrival route is removed",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('legacy route removed', () => { pm.response.to.have.status(404); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day39OperatorAdminToken}}" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" }
+            ],
+            "url": "{{baseUrl}}/v1/operator/trips/{{day39StopTripId}}/stops/{{day39StopId}}/arrive"
+          }
+        },
+        {
+          "name": "11. Driver marks destination arrived",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('destination anchor created', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.tripId).to.eql(pm.environment.get('day39DestinationTripId')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day39DriverToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day39DestinationArrivalKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/driver/trips/{{day39DestinationTripId}}/destination/arrive"
+          }
+        },
+        {
+          "name": "12. Destination arrival before IN_PROGRESS",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('destination state guard', () => { pm.response.to.have.status(422); pm.expect(body.errorCode || body.error?.code).to.eql('TRIP_NOT_IN_PROGRESS'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day39DriverToken}}" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" }
+            ],
+            "url": "{{baseUrl}}/v1/driver/trips/{{day39BoardingTripId}}/destination/arrive"
+          }
+        },
+        {
+          "name": "12b. Destination already arrived with a new key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('destination finalization is one-shot', () => { pm.response.to.have.status(409); pm.expect(body.errorCode || body.error?.code).to.eql('TRIP_DESTINATION_ALREADY_ARRIVED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day39DriverToken}}" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" }
+            ],
+            "url": "{{baseUrl}}/v1/driver/trips/{{day39DestinationTripId}}/destination/arrive"
+          }
+        },
+        {
+          "name": "13. Operator sees incident notification",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('incident alert visible', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(JSON.stringify(body.data)).to.include(pm.environment.get('day39IncidentId')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{day39OperatorAdminToken}}" }],
+            "url": "{{baseUrl}}/v1/notifications?page=1&pageSize=50"
+          }
+        },
+        {
+          "name": "14. Stop-bound Parcel unload before anchor",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('stop anchor required', () => { pm.response.to.have.status(422); pm.expect(body.errorCode || body.error?.code).to.eql('DROP_OFF_STOP_NOT_ARRIVED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day39AssistantToken}}" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" }
+            ],
+            "url": "{{baseUrl}}/v1/assistant/parcels/{{day39StopParcelId}}/unload"
+          }
+        },
+        {
+          "name": "15. Assistant arrives Parcel TripStop",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('parcel stop anchor created', () => { pm.response.to.have.status(200); pm.expect(body.data.status).to.eql('ARRIVED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day39AssistantToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day39ParcelStopArrivalKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/driver/trips/{{day39ParcelStopTripId}}/stops/{{day39ParcelStopId}}/arrive"
+          }
+        },
+        {
+          "name": "16. Unload Parcel after stop arrival",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('parcel unloaded', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.status).to.eql('UNLOADED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day39AssistantToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day39UnloadKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/assistant/parcels/{{day39StopParcelId}}/unload"
+          }
+        },
+        {
+          "name": "17. Deliver unloaded Parcel",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('parcel pending confirmation', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.status).to.eql('DELIVERED_PENDING_CONFIRM'); pm.expect(body.data.deliveredPendingConfirmAt).to.be.a('string'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day39AssistantToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day39DeliverKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/assistant/parcels/{{day39StopParcelId}}/deliver"
+          }
+        },
+        {
+          "name": "18. Assistant marks express destination arrived",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('express destination anchor created', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.tripId).to.eql(pm.environment.get('day39ParcelExpressTripId')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day39AssistantToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day39ParcelDestinationArrivalKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/driver/trips/{{day39ParcelExpressTripId}}/destination/arrive"
+          }
+        },
+        {
+          "name": "18b. Auto-completed Trip is not a destination anchor",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('destination anchor required', () => { pm.response.to.have.status(422); pm.expect(body.errorCode || body.error?.code).to.eql('DESTINATION_TERMINAL_NOT_ARRIVED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day39AssistantToken}}" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" }
+            ],
+            "url": "{{baseUrl}}/v1/assistant/parcels/{{day39AutoCompletedParcelId}}/unload"
+          }
+        },
+        {
+          "name": "19. Unload terminal-bound Parcel",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('terminal parcel unloaded', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.status).to.eql('UNLOADED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day39AssistantToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day39TerminalUnloadKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/assistant/parcels/{{day39TerminalParcelId}}/unload"
+          }
+        },
+        {
+          "name": "20. Deliver terminal-bound Parcel",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('terminal parcel pending confirmation', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.status).to.eql('DELIVERED_PENDING_CONFIRM'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day39AssistantToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day39TerminalDeliverKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/assistant/parcels/{{day39TerminalParcelId}}/deliver"
+          }
+        }
+      ]
+    },
+    {
       "name": "Driver - Day 21 trip lifecycle",
       "description": "Manual Gateway-only view of Day-21 no-body lifecycle endpoints. The authoritative deterministic run is npm run postman:day21:local, which owns isolated fixtures, runtime JWTs and UUID-v4 keys, consumer polling, duplicate delivery, and cleanup.",
       "item": [
