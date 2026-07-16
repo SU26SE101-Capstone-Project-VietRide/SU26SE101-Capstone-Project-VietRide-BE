@@ -24,12 +24,13 @@ using VietRide.Shared.Persistence.UnitOfWork;
 
 namespace VietRide.Identity.IntegrationTests.Api;
 
-public sealed class DevicesEndpointsTests : IClassFixture<AuthWebApplicationFactory>, IClassFixture<DevicesEndpointsTests.IdentityDeviceEndpointFixture>
+public sealed class DevicesEndpointsTests : IClassFixture<AuthWebApplicationFactory>, IClassFixture<DevicesEndpointsTests.IdentityDeviceEndpointFixture>, IDisposable
 {
     private static readonly Guid CallerUserId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid OtherUserId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private readonly AuthWebApplicationFactory _factory;
     private readonly IdentityDeviceEndpointFixture _fixture;
+    private WebApplicationFactory<Program>? _dbBackedFactory;
 
     public DevicesEndpointsTests(AuthWebApplicationFactory factory, IdentityDeviceEndpointFixture fixture)
     {
@@ -236,7 +237,12 @@ public sealed class DevicesEndpointsTests : IClassFixture<AuthWebApplicationFact
 
     private HttpClient CreateDbBackedClient(Guid userId, bool addAuthHeader = true)
     {
-        var client = _factory.WithWebHostBuilder(builder =>
+        if (_dbBackedFactory is not null)
+        {
+            throw new InvalidOperationException("A database-backed client has already been created for this test.");
+        }
+
+        _dbBackedFactory = _factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("ConnectionStrings:Default", _fixture.ConnectionString);
             builder.ConfigureServices(services =>
@@ -263,7 +269,8 @@ public sealed class DevicesEndpointsTests : IClassFixture<AuthWebApplicationFact
                 services.AddScoped<VietRideDbContextBase>(sp => sp.GetRequiredService<IdentityDbContext>());
                 services.AddScoped<IUnitOfWork>(sp => new EfUnitOfWork(sp.GetRequiredService<VietRideDbContextBase>()));
             });
-        }).CreateClient();
+        });
+        var client = _dbBackedFactory.CreateClient();
 
         if (addAuthHeader)
         {
@@ -271,6 +278,12 @@ public sealed class DevicesEndpointsTests : IClassFixture<AuthWebApplicationFact
         }
 
         return client;
+    }
+
+    public void Dispose()
+    {
+        _dbBackedFactory?.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     private async Task SeedUsersAsync(params Guid[] userIds)
