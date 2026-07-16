@@ -548,10 +548,17 @@ public sealed class OperatorsControllerTests :
 
             builder.ConfigureTestServices(services =>
             {
-                services.AddDbContext<IdentityDbContext>(options => options
+                services.RemoveAll<DbContextOptions<IdentityDbContext>>();
+                services.AddScoped(sp => new DbContextOptionsBuilder<IdentityDbContext>()
                     .EnableServiceProviderCaching(false)
                     .ConfigureWarnings(warnings => warnings.Ignore(
-                        Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning)));
+                        Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning))
+                    .UseNpgsql(
+                        sp.GetRequiredService<NpgsqlDataSource>(),
+                        npgsql => npgsql.MigrationsHistoryTable(
+                            "__ef_migrations_history",
+                            IdentityDbContext.SchemaName))
+                    .Options);
                 services.RemoveAll<IEmailService>();
                 services.AddSingleton<IEmailService>(EmailService);
             });
