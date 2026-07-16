@@ -609,10 +609,10 @@ public sealed class TripGenerationServiceTests
         }
     }
 
-    private sealed class InMemoryTripStopFareRepository : InMemoryRepository<TripStopFare, Guid>, ITripStopFareRepository
+    private sealed class InMemoryTripStopFareRepository : InMemoryRepository<TripStopFare, (Guid TripId, Guid StopId)>, ITripStopFareRepository
     {
         public InMemoryTripStopFareRepository(List<TripStopFare> items)
-            : base(items, fare => fare.Id)
+            : base(items, fare => (fare.TripId, fare.StopId))
         {
         }
     }

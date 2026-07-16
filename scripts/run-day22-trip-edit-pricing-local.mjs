@@ -59,6 +59,8 @@ and verified cleanup.`);
 const ids = Object.freeze({
   operator: crypto.randomUUID(),
   admin: crypto.randomUUID(),
+  passenger: crypto.randomUUID(),
+  platformWallet: crypto.randomUUID(),
   otherAdmin: crypto.randomUUID(),
   staff: crypto.randomUUID(),
   driver: crypto.randomUUID(),
@@ -77,6 +79,8 @@ const ids = Object.freeze({
 });
 const runTag = ids.trip.replaceAll('-', '').slice(0, 10).toUpperCase();
 const idempotencyKeys = new Set();
+const bookingIds = new Set();
+let platformWalletBaseline;
 const applicationContainers = Object.freeze([
   'vietride_gateway',
   'vietride_identity',
@@ -717,6 +721,76 @@ function cleanup() {
       ),
     () =>
       psql(
+        'vietride_booking',
+        `
+      DELETE FROM vietride_booking.booking_stats_processed_events
+      WHERE booking_id IN (
+        SELECT id FROM vietride_booking.bookings
+        WHERE passenger_user_id = '${ids.passenger}' OR trip_id = '${ids.trip}'
+      );
+      DELETE FROM vietride_booking.booking_stats WHERE operator_id = '${ids.operator}';
+      DELETE FROM vietride_booking.outbox_events
+      WHERE payload->>'userId' = '${ids.passenger}'
+         OR payload->>'tripId' = '${ids.trip}'
+         OR payload->>'bookingId' IN (
+           SELECT id::text FROM vietride_booking.bookings
+           WHERE passenger_user_id = '${ids.passenger}' OR trip_id = '${ids.trip}'
+         );
+      DELETE FROM vietride_booking.booking_status_history
+      WHERE booking_id IN (
+        SELECT id FROM vietride_booking.bookings
+        WHERE passenger_user_id = '${ids.passenger}' OR trip_id = '${ids.trip}'
+      );
+      DELETE FROM vietride_booking.bookings
+      WHERE passenger_user_id = '${ids.passenger}' OR trip_id = '${ids.trip}';`,
+      ),
+    () => {
+      psql(
+        'vietride_payment',
+        `
+      DELETE FROM vietride_payment.refund_failure_logs
+      WHERE user_id = '${ids.passenger}'
+         OR booking_id IN (${[...bookingIds].map((id) => `'${id}'`).join(',') || 'NULL'});
+      DELETE FROM vietride_payment.outbox_events
+      WHERE payload->>'userId' = '${ids.passenger}'
+         OR payload->>'bookingId' IN (${[...bookingIds].map((id) => `'${id}'`).join(',') || 'NULL'})
+         OR payload->>'referenceId' IN (${[...bookingIds].map((id) => `'${id}'`).join(',') || 'NULL'});
+      DELETE FROM vietride_payment.wallet_transactions WHERE user_id = '${ids.passenger}';
+      DELETE FROM vietride_payment.platform_wallet_transactions
+      WHERE reference_id IN (${[...bookingIds].map((id) => `'${id}'`).join(',') || 'NULL'});
+      DELETE FROM vietride_payment.payments
+      WHERE user_id = '${ids.passenger}'
+         OR reference_id IN (${[...bookingIds].map((id) => `'${id}'`).join(',') || 'NULL'});
+      DELETE FROM vietride_payment.wallets WHERE user_id = '${ids.passenger}';`,
+      );
+      if (platformWalletBaseline?.createdByRun) {
+        psql(
+          'vietride_payment',
+          `DELETE FROM vietride_payment.platform_wallets WHERE id = '${platformWalletBaseline.id}';`,
+        );
+      } else if (platformWalletBaseline) {
+        psql(
+          'vietride_payment',
+          `UPDATE vietride_payment.platform_wallets
+           SET balance = ${platformWalletBaseline.balance},
+               row_version = ${platformWalletBaseline.rowVersion},
+               updated_at = '${platformWalletBaseline.updatedAt}'::timestamptz
+           WHERE id = '${platformWalletBaseline.id}';`,
+        );
+      }
+    },
+    () =>
+      psql(
+        'vietride_notification',
+        `
+      DELETE FROM vietride_notification.email_deliveries
+      WHERE notification_id IN (
+        SELECT id FROM vietride_notification.notifications WHERE user_id = '${ids.passenger}'
+      );
+      DELETE FROM vietride_notification.notifications WHERE user_id = '${ids.passenger}';`,
+      ),
+    () =>
+      psql(
         'vietride_trip',
         `
       DELETE FROM vietride_trip.outbox_events WHERE ${ownedOutboxPredicate()};
@@ -728,6 +802,13 @@ function cleanup() {
       DELETE FROM vietride_trip.vehicles WHERE id = '${ids.vehicle}';
       DELETE FROM vietride_trip.stations WHERE id IN ('${ids.originStation}', '${ids.destinationStation}');
       DELETE FROM vietride_trip.vehicle_types WHERE id = '${ids.vehicleType}';`,
+      ),
+    () =>
+      psql(
+        'vietride_identity',
+        `
+      DELETE FROM vietride_identity.users WHERE id IN ('${ids.admin}', '${ids.passenger}');
+      DELETE FROM vietride_identity.operators WHERE id = '${ids.operator}';`,
       ),
     cleanupRedis,
   ];
@@ -743,6 +824,71 @@ function cleanup() {
 }
 
 function assertClean() {
+  const notificationRemaining = Number(
+    psql(
+      'vietride_notification',
+      `SELECT count(*) FROM vietride_notification.notifications WHERE user_id = '${ids.passenger}'`,
+    ),
+  );
+  assert(
+    notificationRemaining === 0,
+    `Day-22 cleanup left ${notificationRemaining} owned Notification rows`,
+  );
+  const bookingCounts = psql(
+    'vietride_booking',
+    `
+    SELECT
+      (SELECT count(*) FROM vietride_booking.bookings
+       WHERE passenger_user_id = '${ids.passenger}' OR trip_id = '${ids.trip}') || '|' ||
+      (SELECT count(*) FROM vietride_booking.booking_stats WHERE operator_id = '${ids.operator}') || '|' ||
+      (SELECT count(*) FROM vietride_booking.outbox_events
+       WHERE payload->>'userId' = '${ids.passenger}' OR payload->>'tripId' = '${ids.trip}')`,
+  );
+  assert(
+    bookingCounts === '0|0|0',
+    `Day-22 cleanup left owned Booking rows: ${bookingCounts}`,
+  );
+  const paymentCounts = psql(
+    'vietride_payment',
+    `
+    SELECT
+      (SELECT count(*) FROM vietride_payment.wallets WHERE user_id = '${ids.passenger}') || '|' ||
+      (SELECT count(*) FROM vietride_payment.wallet_transactions WHERE user_id = '${ids.passenger}') || '|' ||
+      (SELECT count(*) FROM vietride_payment.payments WHERE user_id = '${ids.passenger}') || '|' ||
+      (SELECT count(*) FROM vietride_payment.refund_failure_logs WHERE user_id = '${ids.passenger}') || '|' ||
+      (SELECT count(*) FROM vietride_payment.outbox_events WHERE payload->>'userId' = '${ids.passenger}')`,
+  );
+  assert(
+    paymentCounts === '0|0|0|0|0',
+    `Day-22 cleanup left owned Payment rows: ${paymentCounts}`,
+  );
+  if (platformWalletBaseline?.createdByRun) {
+    assert(
+      psql(
+        'vietride_payment',
+        `SELECT count(*) FROM vietride_payment.platform_wallets WHERE id = '${platformWalletBaseline.id}'`,
+      ) === '0',
+      'Day-22 cleanup left the runner-created PlatformWallet',
+    );
+  } else if (platformWalletBaseline) {
+    assert(
+      psql(
+        'vietride_payment',
+        `SELECT balance::text || '|' || row_version::text
+         FROM vietride_payment.platform_wallets WHERE id = '${platformWalletBaseline.id}'`,
+      ) ===
+        `${platformWalletBaseline.balance}|${platformWalletBaseline.rowVersion}`,
+      'Day-22 cleanup did not restore the pre-run PlatformWallet state',
+    );
+  }
+  const identityCounts = psql(
+    'vietride_identity',
+    `
+    SELECT
+      (SELECT count(*) FROM vietride_identity.users WHERE id IN ('${ids.admin}', '${ids.passenger}')) || '|' ||
+      (SELECT count(*) FROM vietride_identity.operators WHERE id = '${ids.operator}')`,
+  );
+  assert(identityCounts === '0|0', `Day-22 cleanup left owned Identity rows: ${identityCounts}`);
   const parcelCounts = psql(
     'vietride_parcel',
     `
@@ -804,6 +950,59 @@ function assertClean() {
 function seed() {
   cleanup();
   psql(
+    'vietride_identity',
+    `
+    INSERT INTO vietride_identity.operators
+      (id, name, business_registration_number, tax_code, contact_email, contact_phone,
+       registration_status, approved_at, cancellation_policy, is_active)
+    VALUES
+      ('${ids.operator}', 'Day 22 Operator ${runTag}', 'D22BR${runTag}', 'D22TAX${runTag}',
+       'operator-${runTag.toLowerCase()}@day22.local', '0900000022', 'APPROVED', now(), '[]'::jsonb, true);
+    INSERT INTO vietride_identity.users
+      (id, email, display_name, role, status, operator_id)
+    VALUES
+      ('${ids.admin}', 'admin-${runTag.toLowerCase()}@day22.local', 'Day 22 Admin',
+       'OPERATOR_ADMIN', 'ACTIVE', '${ids.operator}'),
+      ('${ids.passenger}', 'passenger-${runTag.toLowerCase()}@day22.local', 'Day 22 Passenger',
+       'PASSENGER', 'ACTIVE', NULL);`,
+  );
+  const existingPlatformWallet = psql(
+    'vietride_payment',
+    `SELECT id::text || '|' || balance::text || '|' || row_version::text || '|' || updated_at::text
+     FROM vietride_payment.platform_wallets LIMIT 1`,
+  );
+  if (existingPlatformWallet) {
+    const [id, balance, rowVersion, updatedAt] = existingPlatformWallet.split('|');
+    platformWalletBaseline = {
+      id,
+      balance: Number(balance),
+      rowVersion: Number(rowVersion),
+      updatedAt,
+      createdByRun: false,
+    };
+  } else {
+    psql(
+      'vietride_payment',
+      `INSERT INTO vietride_payment.platform_wallets (id, balance, row_version)
+       VALUES ('${ids.platformWallet}', 0, 0);`,
+    );
+    platformWalletBaseline = {
+      id: ids.platformWallet,
+      balance: 0,
+      rowVersion: 0,
+      updatedAt: psql(
+        'vietride_payment',
+        `SELECT updated_at::text FROM vietride_payment.platform_wallets WHERE id = '${ids.platformWallet}'`,
+      ),
+      createdByRun: true,
+    };
+  }
+  psql(
+    'vietride_payment',
+    `INSERT INTO vietride_payment.wallets (user_id, balance, row_version)
+     VALUES ('${ids.passenger}', 1000000, 0);`,
+  );
+  psql(
     'vietride_trip',
     `
     INSERT INTO vietride_trip.stations (id, name, slug, city, province)
@@ -828,7 +1027,11 @@ function seed() {
       (id, operator_id, route_id, vehicle_id, driver_user_id, assistant_user_id, departure_date_time, estimated_arrival_time, status, source, base_fare, notes)
     VALUES
       ('${ids.trip}', '${ids.operator}', '${ids.route}', '${ids.vehicle}', '${ids.driver}', '${ids.assistant}', now() + interval '10 days', now() + interval '10 days 4 hours', 'SCHEDULED', 'MANUAL', 200000, NULL),
-      ('${ids.otherTrip}', '${ids.operator}', '${ids.route}', '${ids.vehicle}', '${ids.otherAdmin}', NULL, now() + interval '11 days', now() + interval '11 days 4 hours', 'SCHEDULED', 'MANUAL', 200000, NULL);`,
+      ('${ids.otherTrip}', '${ids.operator}', '${ids.route}', '${ids.vehicle}', '${ids.otherAdmin}', NULL, now() + interval '11 days', now() + interval '11 days 4 hours', 'SCHEDULED', 'MANUAL', 200000, NULL);
+    INSERT INTO vietride_trip.trip_seats (trip_id, seat_number, seat_type, status)
+    VALUES
+      ('${ids.trip}', 'A01', 'STANDARD', 'AVAILABLE'),
+      ('${ids.trip}', 'A02', 'VIP', 'AVAILABLE');`,
   );
   psql(
     'vietride_parcel',
@@ -841,7 +1044,9 @@ function seed() {
        '0900000022', '${ids.operator}', '${ids.trip}', 'SMALL', 1.00, 10000,
        'PENDING_PAYMENT');`,
   );
-  console.log('PASS | isolated Day-22 Trip, DriverSchedule, and Parcel fixtures seeded');
+  console.log(
+    'PASS | isolated Day-22 Identity, Wallet, Trip, DriverSchedule, and Parcel fixtures seeded',
+  );
 }
 
 async function issueTokens() {
@@ -872,9 +1077,10 @@ async function issueTokens() {
     token(ids.admin, 'OPERATOR_ADMIN', ids.operator),
     token(ids.otherAdmin, 'OPERATOR_ADMIN', ids.operator),
     token(ids.staff, 'OPERATOR_STAFF', ids.operator),
+    token(ids.passenger, 'PASSENGER'),
   ]);
   console.log('PASS | short-lived Day-22 JWTs generated at runtime (redacted)');
-  return { admin: values[0], otherAdmin: values[1], staff: values[2] };
+  return { admin: values[0], otherAdmin: values[1], staff: values[2], passenger: values[3] };
 }
 
 function rabbitCredentials() {
@@ -1198,6 +1404,45 @@ async function liveGatewayChecks() {
   );
   console.log('PASS | Trip no-op has no audit/event side effect');
 
+  async function createWalletBooking(seatNumber, expectedFare, label) {
+    const result = await request('POST', '/v1/bookings', {
+      token: tokens.passenger,
+      key: uuidKey(),
+      body: {
+        tripId: ids.trip,
+        pickup: { stationId: ids.originStation },
+        dropoff: { stationId: ids.destinationStation },
+        seats: [{ seatNumber }],
+        paymentMethod: 'WALLET',
+      },
+    });
+    expect(result, 201, null, label);
+    const bookingId = result.body?.data?.bookingId;
+    assert(typeof bookingId === 'string', `${label}: response has no bookingId`);
+    bookingIds.add(bookingId);
+    assert(result.body?.data?.status === 'CONFIRMED', `${label}: booking is not CONFIRMED`);
+    assert(result.body?.data?.totalAmount === expectedFare, `${label}: response fare mismatch`);
+    assert(
+      psql(
+        'vietride_booking',
+        `SELECT base_fare::text || '|' || discount_amount::text || '|' || total_amount::text || '|' || status::text
+         FROM vietride_booking.bookings WHERE id = '${bookingId}'`,
+      ) === `${expectedFare}|0|${expectedFare}|CONFIRMED`,
+      `${label}: immutable Booking fare snapshot was not persisted exactly`,
+    );
+    return bookingId;
+  }
+
+  const oldBookingId = await createWalletBooking('A01', 200000, 'booking captures pre-edit fare');
+  assert(
+    psql(
+      'vietride_payment',
+      `SELECT balance::text FROM vietride_payment.wallets WHERE user_id = '${ids.passenger}'`,
+    ) === '800000',
+    'pre-edit booking did not debit the passenger wallet by 200000',
+  );
+  console.log('PASS | pre-edit Booking and Wallet persist the original 200000 VND snapshot');
+
   const updateKey = uuidKey();
   const updated = await request('PATCH', tripPath, {
     token: tokens.admin,
@@ -1220,6 +1465,78 @@ async function liveGatewayChecks() {
     'Trip update did not write exactly one audit',
   );
   console.log('PASS | Trip update persists to-the-dong fare, trimmed notes, and one audit');
+
+  const newBookingId = await createWalletBooking(
+    'A02',
+    211111,
+    'booking captures post-edit fare',
+  );
+  assert(
+    psql(
+      'vietride_booking',
+      `SELECT base_fare::text || '|' || total_amount::text || '|' || status::text
+       FROM vietride_booking.bookings WHERE id = '${oldBookingId}'`,
+    ) === '200000|200000|CONFIRMED',
+    'Trip fare edit mutated the pre-existing Booking snapshot',
+  );
+  assert(
+    psql(
+      'vietride_payment',
+      `SELECT balance::text FROM vietride_payment.wallets WHERE user_id = '${ids.passenger}'`,
+    ) === '588889',
+    'post-edit booking did not debit the new 211111 VND fare',
+  );
+  console.log('PASS | post-edit Booking uses 211111 VND while the old snapshot remains 200000 VND');
+
+  const cancelled = await request('POST', `/v1/bookings/${oldBookingId}/cancel`, {
+    token: tokens.passenger,
+    key: uuidKey(),
+    body: { reason: 'USER_INITIATED' },
+  });
+  expect(cancelled, 200, null, 'cancel pre-edit booking');
+  assert(cancelled.body?.data?.refundAmount === 200000, 'cancellation preview repriced the old Booking');
+  await poll(
+    'refund completes from the immutable pre-edit Booking total',
+    async () => {
+      const bookingState = psql(
+        'vietride_booking',
+        `
+        SELECT
+          (SELECT status::text || '|' || base_fare::text || '|' || total_amount::text
+           FROM vietride_booking.bookings WHERE id = '${oldBookingId}') || '|' ||
+          (SELECT status::text || '|' || base_fare::text || '|' || total_amount::text
+           FROM vietride_booking.bookings WHERE id = '${newBookingId}') || '|' ||
+          (SELECT count(*) FROM vietride_booking.outbox_events
+           WHERE event_type = 'booking.booking.cancelled'
+             AND payload->>'bookingId' = '${oldBookingId}'
+             AND payload->>'refundAmount' = '200000') || '|' ||
+          (SELECT count(*) FROM vietride_booking.outbox_events
+           WHERE event_type = 'booking.booking.refunded'
+             AND payload->>'bookingId' = '${oldBookingId}'
+             AND payload->>'amount' = '200000')`,
+      );
+      const paymentState = psql(
+        'vietride_payment',
+        `
+        SELECT
+          (SELECT balance::text FROM vietride_payment.wallets WHERE user_id = '${ids.passenger}') || '|' ||
+          (SELECT count(*) FROM vietride_payment.wallet_transactions
+           WHERE user_id = '${ids.passenger}' AND type = 'CREDIT'
+             AND reference_type = 'BOOKING_REFUND' AND reference_id = '${oldBookingId}'
+             AND amount = 200000) || '|' ||
+          (SELECT count(*) FROM vietride_payment.platform_wallet_transactions
+           WHERE type = 'DEBIT' AND reference_type = 'BOOKING_REFUND'
+             AND reference_id = '${oldBookingId}' AND amount = 200000)`,
+      );
+      return `${bookingState}|${paymentState}`;
+    },
+    (state) =>
+      state ===
+      'REFUNDED|200000|200000|CONFIRMED|211111|211111|1|1|788889|1|1',
+  );
+  console.log(
+    'PASS | old Booking refunded exactly 200000 VND; new Booking remains confirmed at 211111 VND',
+  );
 
   const schedulePath = `/v1/operator/driver-schedules/${ids.schedule}`;
   const scheduleStateBefore = psql(
@@ -1402,7 +1719,7 @@ function focusedRegressionMatrix() {
     ],
     [
       'apps/trip/tests/VietRide.Trip.IntegrationTests/VietRide.Trip.IntegrationTests.csproj',
-      'FullyQualifiedName~EditTripEndpoint|FullyQualifiedName~UpdateDriverScheduleEndpoint|FullyQualifiedName~TripVehicleSwapService|FullyQualifiedName~TripStopFareSource|FullyQualifiedName~RouteStopFareTemplate',
+      'FullyQualifiedName~EditTripEndpoint|FullyQualifiedName~UpdateDriverScheduleEndpoint|FullyQualifiedName~TripVehicleSwapService|FullyQualifiedName~TripStopFareSource|FullyQualifiedName~RouteStopFareTemplate|FullyQualifiedName~GetTripSnapshotRelational',
     ],
     [
       'apps/booking/tests/VietRide.Booking.UnitTests/VietRide.Booking.UnitTests.csproj',

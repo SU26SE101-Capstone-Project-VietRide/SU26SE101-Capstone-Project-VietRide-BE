@@ -13,9 +13,13 @@ internal sealed class TripStopFareRepository : ITripStopFareRepository
         this.dbContext = dbContext;
     }
 
-    public Task<TripStopFare?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    public Task<TripStopFare?> GetByIdAsync(
+        (Guid TripId, Guid StopId) id,
+        CancellationToken cancellationToken = default)
     {
-        return dbContext.TripStopFares.FindAsync([id], cancellationToken).AsTask();
+        return dbContext.TripStopFares
+            .FindAsync([id.TripId, id.StopId], cancellationToken)
+            .AsTask();
     }
 
     public async Task<TripStopFare> AddAsync(
@@ -61,7 +65,6 @@ internal sealed class TripStopFareRepository : ITripStopFareRepository
 
         return await query
             .OrderBy(fare => fare.StopId)
-            .ThenBy(fare => fare.Id)
             .ToListAsync(cancellationToken);
     }
 

@@ -682,7 +682,8 @@ public sealed class EditTripCommandHandlerTests
         public Task<IReadOnlyList<TripStopFare>> AcquireByTripAsync(Guid tripId, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<TripStopFare>>(Items.Where(x => x.TripId == tripId).ToArray());
         public Task DeleteByTripAsync(Guid tripId, CancellationToken cancellationToken) { Items.RemoveAll(x => x.TripId == tripId); return Task.CompletedTask; }
         public void RemoveRange(IEnumerable<TripStopFare> fares) { foreach (var fare in fares.ToArray()) Items.Remove(fare); }
-        public Task<TripStopFare?> GetByIdAsync(Guid id, CancellationToken ct) => Task.FromResult(Items.SingleOrDefault(x => x.Id == id));
+        public Task<TripStopFare?> GetByIdAsync((Guid TripId, Guid StopId) id, CancellationToken ct) =>
+            Task.FromResult(Items.SingleOrDefault(x => x.TripId == id.TripId && x.StopId == id.StopId));
         public Task<TripStopFare> AddAsync(TripStopFare entity, CancellationToken ct) { Items.Add(entity); return Task.FromResult(entity); }
         public void Update(TripStopFare entity) { }
         public void Remove(TripStopFare entity) => Items.Remove(entity);

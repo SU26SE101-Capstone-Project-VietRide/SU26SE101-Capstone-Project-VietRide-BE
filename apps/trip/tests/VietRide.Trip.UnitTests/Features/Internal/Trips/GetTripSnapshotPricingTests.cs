@@ -286,7 +286,7 @@ public sealed class GetTripSnapshotPricingTests
         : FakeRepository<TripStop, (Guid, Guid)>(items, stop => (stop.TripId, stop.StopId)), ITripStopRepository;
 
     private sealed class FakeTripStopFareRepository(List<TripStopFare> items)
-        : FakeRepository<TripStopFare, Guid>(items, fare => fare.Id), ITripStopFareRepository;
+        : FakeRepository<TripStopFare, (Guid, Guid)>(items, fare => (fare.TripId, fare.StopId)), ITripStopFareRepository;
 
     private sealed class FakeRouteStopFareTemplateRepository(List<RouteStopFareTemplate> items)
         : FakeRepository<RouteStopFareTemplate, Guid>(items, template => template.Id), IRouteStopFareTemplateRepository

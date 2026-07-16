@@ -10,12 +10,12 @@
 | Runner syntax | `node --check scripts/run-day22-trip-edit-pricing-local.mjs` | PASS — 2026-07-16 |
 | Runner interface | `node scripts/run-day22-trip-edit-pricing-local.mjs --help` | PASS — 2026-07-16 |
 | Task-22.0 static gate | `node scripts/run-day22-trip-edit-pricing-local.mjs --static-only` | PASS (gate only; process ends `DIAGNOSTIC/DEFERRED`) — 2026-07-16 |
-| Isolated Gateway + live Parcel duplicate-cancellation proof + focused regression + Day-21 regression | `node scripts/run-day22-trip-edit-pricing-local.mjs` | PASS — included in the close-out run on 2026-07-16 |
-| Full .NET/TS/static close-out | `node scripts/run-day22-trip-edit-pricing-local.mjs --full-matrix` | PASS — exit 0 in 626.1 s on 2026-07-16 |
+| Isolated Gateway pricing/refund + live Parcel duplicate-cancellation proof + focused regression + Day-21 regression | `node scripts/run-day22-trip-edit-pricing-local.mjs` | PASS — included in the close-out run on 2026-07-16 |
+| Full .NET/TS/static close-out | `node scripts/run-day22-trip-edit-pricing-local.mjs --full-matrix` | PASS — exit 0 in 734.6 s on 2026-07-16 |
 
-The close-out TRX totals were Shared Libraries 81/81, Identity 388/388, Trip 571/571,
+The close-out TRX totals were Shared Libraries 81/81, Identity 388/388, Trip 573/573,
 Booking 459/459, Payment 88/88, and Parcel 175/175. The focused .NET matrix passed
-Trip 185/185, Booking 122/122, and Payment 23/23. Notification focused unit/E2E and the
+Trip 187/187, Booking 122/122, and Payment 23/23. Notification focused unit/E2E and the
 complete Nx build/lint/test matrix for 10 TypeScript projects passed. The runner stopped only the
 nine application containers during the heavy matrix (reducing PostgreSQL connections from 59 to
 6), then restarted all nine and waited for every health check to pass.
@@ -52,7 +52,7 @@ The `--static-only` run completed without starting the stack and proved:
 | Query key reorder, empty vs absent, repeated order, changed/invalid `applyTo` replay, `/crew` path-only mismatch | Live Gateway phase | PASS |
 | Trip and DriverSchedule same-value no-op; persisted schedule and Trip/DriverSchedule audit/Outbox counts unchanged | Live Gateway phase plus direct logical DB assertions | PASS |
 | Trip PATCH exact-dong scalar edit, trim, one audit; `departureDateTime` rejected | Live Gateway phase | PASS |
-| Explicit-pricing capture; old/new Booking snapshots/refund; omitted legacy callers | Focused `CreateBookingCommandHandlerTests`, `CreateRoundTripBookingCommandHandlerTests`, `TripServiceClientTests`, and Trip `GetTripSnapshotPricingTests` | PASS |
+| Explicit-pricing capture; old/new Booking snapshots/refund; omitted legacy callers | Real Gateway old/new/cancel/refund flow, focused Booking client/handler tests, and PostgreSQL `GetTripSnapshotRelationalTests` for explicit/omitted `pricingAt` | PASS |
 | `MANUAL_OVERRIDE` → active template → base; half-open boundaries | Trip pricing/unit and persistence tests in focused matrix | PASS |
 | No new `TEMPLATE_SNAPSHOT`; only explicit override writes `MANUAL_OVERRIDE` | Trip generation/pricing/source tests in focused matrix | PASS |
 | Route impact, local races, every seat compatibility cell | `EditTrip*` and `TripVehicleSwap*` controlled tests | PASS |
@@ -74,8 +74,9 @@ The `--static-only` run completed without starting the stack and proved:
 | Full .NET restore/build/format/TRX-tested six-solution matrix and Nx build/lint/test `--parallel=3 --exclude=VietRide.*` | `--full-matrix` hook mirroring `.github/workflows/ci.yml` | PASS |
 
 The controlled suites are intentionally used for exhaustive matrix cells, concurrency barriers,
-fault injection, and clock boundaries. The live phase is reserved for public Gateway middleware and
-transactional smoke evidence; it does not expose an internal endpoint or add a test backdoor.
+fault injection, and clock boundaries. The live phase covers public Gateway middleware plus the
+transactional old/new Booking and asynchronous refund chain; it exposes no internal endpoint and
+adds no test backdoor.
 
 ## Postman artifacts
 
@@ -102,11 +103,11 @@ physical Hangfire job count.
 
 ## Cleanup evidence template
 
-The runner seeds a unique Trip dependency graph and records every UUID-v4 idempotency key it owns.
-Its `finally` block deletes matching seeded-id/event-type Trip and Parcel Outbox rows,
-Trip/DriverSchedule audit rows, ParcelStats and Parcel fixtures, then Trips, DriverSchedules, Route,
-Vehicle, Stations, VehicleType, and exact Redis keys. It then independently includes all those
-database categories in the zero-count assertion.
+The runner seeds unique Identity, Wallet, Trip, Booking, Payment, Notification, and Parcel fixtures
+and records every UUID-v4 idempotency key and runtime Booking id it owns. Its `finally` block removes
+owned rows and Outbox/ledger/audit side effects across all six databases, restores the exact pre-run
+PlatformWallet balance/version, deletes exact Redis keys, and independently asserts every category
+is clean.
 
 | Cleanup check | Result | Evidence |
 |---|---|---|
@@ -121,7 +122,7 @@ database categories in the zero-count assertion.
 | Checkout/commit | `feat/day22-trip-edit-pricing` at pre-artifact HEAD `6d87aa1`; this file is delivered by the following Task-22.13 commit |
 | Runtime date/timezone | 2026-07-16; Asia/Bangkok |
 | Application image ids | Recorded below |
-| `--full-matrix` exit | 0; 626.1 s |
+| `--full-matrix` exit | 0; 734.6 s |
 | Day-21 regression exit | 0; fixture cleanup PASS |
 | Route-change Notification regression | PASS; focused Notification unit and E2E suites |
 | Cleanup result | PASS on success and observed failure paths; all nine application containers restored healthy |
@@ -129,12 +130,12 @@ database categories in the zero-count assertion.
 
 Application image ids used by the live phase:
 
-- `gateway`: `sha256:7b566d685d54c40f0883f6eeb26268d53283c13b42f49c2f79d4166f5d9b3c47`
-- `identity`: `sha256:e4d709d036a23c12eaf80d750c55910f713baa371e3df0cddce275ff9943f0ae`
-- `trip`: `sha256:e5d7da31dac2e37197663467b7c768b0e934c67c1b593cd99ccb27a472b0cbe2`
-- `booking`: `sha256:3e3cc9d68d001c9142bef76ef5b071b16eb67422057ce4cbdbded69bd18211d7`
-- `payment`: `sha256:7d0130820d8a5905d802f534600d5c647521f46a6a6cf6833c0173690f0c1083`
-- `parcel`: `sha256:6d65672013c38e50038e253182a29e395a3e6de56b72f88a08b807c0ebee09a3`
-- `tracking`: `sha256:079e457110136867ed43908e69bcdd158be994b18df75de2c0281d12722b08dd`
-- `notification`: `sha256:c997f7e8b30dd48874bf40bc9f357b2330e1230070e02fab825aae3474f02774`
-- `rag`: `sha256:ee6471ecc3f90b7abbf54c31cf54df1d5809699bbf7f3171e2ca6e9f80a28583`
+- `gateway`: `sha256:41e12426207c5cc287b668353046de97e0fc44393af84e445f6c0bc17f0e6ad7`
+- `identity`: `sha256:89e5c68aae0e499ac0571236fb9029a686b6dc493904438cb41330055829c7b9`
+- `trip`: `sha256:e314e7adf9ce34321d8cfedb1f368c9deee3d88e16f7f53a67691424ba8bb61d`
+- `booking`: `sha256:105bcce3635a522256958271d1a7a69e1f3e009d66e13174d9b42ba691341775`
+- `payment`: `sha256:3d91def4f4fe7caad9819f8a6c2351fca13a0878e6405e8028bde1f68b76ee33`
+- `parcel`: `sha256:c6fb4c70eae30e1716ae6b2e28fff815fe42c1f02489cefcaaf5e6ae94db0e1d`
+- `tracking`: `sha256:2f7246a56cf9f6f1c27451ecadf2f0dcf581eced4928157d17e6d7dc468b1bd5`
+- `notification`: `sha256:e55088079db8d9fa4d2c09d953015cf68f90c0c612f4f0a736de6fd85ed7c9a0`
+- `rag`: `sha256:590809435cbceb90fb328014b612f6f55300068990ad4609ab5eacf0c4f83f39`

@@ -3,7 +3,7 @@ using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Application.Abstractions.Repositories;
 
-public interface ITripStopFareRepository : IRepository<TripStopFare, Guid>
+public interface ITripStopFareRepository : IRepository<TripStopFare, (Guid TripId, Guid StopId)>
 {
     Task<IReadOnlyList<TripStopFare>> AcquireByTripAsync(Guid tripId, CancellationToken cancellationToken)
         => throw new NotSupportedException("Trip-stop-fare locking is not supported by this repository implementation.");
@@ -24,7 +24,6 @@ public interface ITripStopFareRepository : IRepository<TripStopFare, Guid>
             QueryNoTracking()
                 .Where(fare => fare.TripId == tripId && (!source.HasValue || fare.Source == source.Value))
                 .OrderBy(fare => fare.StopId)
-                .ThenBy(fare => fare.Id)
                 .ToList());
     }
 }
