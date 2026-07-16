@@ -264,7 +264,7 @@ public sealed class EditTripEndpointTests
 
     private static TripDbContext CreateTripDbContext(string databaseName)
     {
-        var connectionString = $"Host=localhost;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
+        var connectionString = CreateConnectionString(databaseName);
         var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
         TripDbContext.ConfigurePostgresEnums(dataSourceBuilder);
         var options = new DbContextOptionsBuilder<TripDbContext>()
@@ -275,6 +275,20 @@ public sealed class EditTripEndpointTests
                 npgsql.MigrationsHistoryTable("__ef_migrations_history", TripDbContext.SchemaName))
             .Options;
         return new TripDbContext(options, new SystemClock());
+    }
+
+    private static string CreateConnectionString(string databaseName)
+    {
+        const string fallback = "Host=localhost;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
+        var template = Environment.GetEnvironmentVariable("VIETRIDE_TRIP_TEST_CONNECTION_STRING");
+        if (string.IsNullOrWhiteSpace(template))
+        {
+            template = fallback;
+        }
+
+        return template.Contains("{databaseName}", StringComparison.OrdinalIgnoreCase)
+            ? template.Replace("{databaseName}", databaseName, StringComparison.OrdinalIgnoreCase)
+            : template;
     }
 
     private static ITripRepository CreateTripRepository(TripDbContext dbContext)
