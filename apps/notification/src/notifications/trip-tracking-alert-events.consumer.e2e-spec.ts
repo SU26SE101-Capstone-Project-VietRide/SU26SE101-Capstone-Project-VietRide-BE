@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
 import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
+import { OPERATOR_RECIPIENT_PROVIDER } from './parcel-subscription-operator-events.constants';
 import { TRIP_TRACKING_ALERT_QUEUE_BINDINGS } from './trip-tracking-alert-events.constants';
 import { TripTrackingAlertEventsConsumer } from './trip-tracking-alert-events.consumer';
 
@@ -17,6 +18,10 @@ describe('TripTrackingAlertEventsConsumer registration (e2e)', () => {
           useValue: { begin: jest.fn(), markProcessed: jest.fn(), release: jest.fn() },
         },
         { provide: NotificationsService, useValue: { createNotification: jest.fn() } },
+        {
+          provide: OPERATOR_RECIPIENT_PROVIDER,
+          useValue: { resolveOperatorRecipientUserIds: jest.fn() },
+        },
       ],
     }).compile();
 

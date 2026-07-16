@@ -9,13 +9,19 @@ import {
   TRIP_INCIDENT_REPORTED_ROUTING_KEY,
   TRIP_STOP_DISABLED_ROUTING_KEY,
 } from './trip-tracking-alert-events.constants';
-import { mapTripTrackingAlertToNotifications } from './trip-tracking-alert-notification.mapper';
+import {
+  IncidentReportedPayloadSchema,
+  mapIncidentReportedToNotifications,
+  mapTripTrackingAlertToNotifications,
+} from './trip-tracking-alert-notification.mapper';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const SECOND_USER_ID = '22222222-2222-4222-8222-222222222222';
 const TRIP_ID = '33333333-3333-4333-8333-333333333333';
 const STOP_ID = '44444444-4444-4444-8444-444444444444';
 const INCIDENT_ID = '55555555-5555-4555-8555-555555555555';
+const OPERATOR_ID = '66666666-6666-4666-8666-666666666666';
+const REPORTER_ID = '77777777-7777-4777-8777-777777777777';
 
 describe('mapTripTrackingAlertToNotifications', () => {
   it('maps a trip assignment to the driver and assistant', () => {
@@ -138,21 +144,40 @@ describe('mapTripTrackingAlertToNotifications', () => {
     ]);
   });
 
-  it('maps incident reported event', () => {
-    expect(
-      mapTripTrackingAlertToNotifications(TRIP_INCIDENT_REPORTED_ROUTING_KEY, {
-        userId: USER_ID,
-        tripId: TRIP_ID,
-        incidentId: INCIDENT_ID,
-        category: 'SAFETY',
-      }),
-    ).toEqual([
+  it('maps canonical incident to deduplicated resolved recipients without sensitive data', () => {
+    const payload = IncidentReportedPayloadSchema.parse(canonicalIncidentPayload());
+
+    expect(mapIncidentReportedToNotifications(payload, [USER_ID, USER_ID, SECOND_USER_ID])).toEqual([
       expect.objectContaining({
+        userId: USER_ID,
         type: NotificationType.INCIDENT_REPORTED,
-        title: 'Co su co tren chuyen xe',
-        body: `Chuyen ${TRIP_ID} vua ghi nhan su co: SAFETY.`,
+        title: 'Có sự cố trên chuyến xe',
+        body: `Chuyến ${TRIP_ID} vừa ghi nhận sự cố: TRAFFIC_JAM.`,
+        data: {
+          incidentId: INCIDENT_ID,
+          tripId: TRIP_ID,
+          operatorId: OPERATOR_ID,
+          reporterUserId: REPORTER_ID,
+          category: 'TRAFFIC_JAM',
+          reportedAt: '2026-07-16T03:00:00Z',
+        },
       }),
+      expect.objectContaining({ userId: SECOND_USER_ID }),
     ]);
+  });
+
+  it('accepts omitted or null optional incident fields without recipient ids', () => {
+    expect(
+      IncidentReportedPayloadSchema.parse(
+        canonicalIncidentPayload({
+          eventId: undefined,
+          description: null,
+          photoUrls: null,
+          latitude: null,
+          longitude: null,
+        }),
+      ),
+    ).toEqual(expect.objectContaining({ operatorId: OPERATOR_ID, eventId: undefined }));
   });
 
   it('maps stop disabled event for explicit recipients', () => {
@@ -186,3 +211,22 @@ describe('mapTripTrackingAlertToNotifications', () => {
     ).toThrow(ZodError);
   });
 });
+
+function canonicalIncidentPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    eventId: '88888888-8888-4888-8888-888888888888',
+    occurredAt: '2026-07-16T03:00:00Z',
+    eventType: TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+    incidentId: INCIDENT_ID,
+    tripId: TRIP_ID,
+    operatorId: OPERATOR_ID,
+    reporterUserId: REPORTER_ID,
+    category: 'TRAFFIC_JAM',
+    description: 'Không được đưa vào notification data',
+    photoUrls: ['https://storage.example/incident.jpg'],
+    latitude: 10.7731,
+    longitude: 106.7032,
+    reportedAt: '2026-07-16T03:00:00Z',
+    ...overrides,
+  };
+}
