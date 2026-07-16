@@ -5642,6 +5642,84 @@
           }
         }
       ]
+    },
+    {
+      "name": "Operator - Day 22 trip edit and schedule cascade",
+      "description": "Gateway-only manual view of the public Day-22 PATCH contracts. The authoritative deterministic verification is node scripts/run-day22-trip-edit-pricing-local.mjs; it owns isolated fixtures, runtime JWTs/UUID-v4 keys, exhaustive controlled regressions, Day-21 replay, evidence polling, and cleanup. Pricing and consumer seams remain internal and are never exposed here.",
+      "item": [
+        {
+          "name": "1. Same-value Trip PATCH is a no-op",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json(); pm.test('Trip no-op returns ADR-0004 success', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.tripId).to.eql(pm.environment.get('day22TripId')); pm.expect(body.data.notes).to.eql(null); pm.expect(body.meta.traceId).to.be.a('string'); });"
+          ] }}],
+          "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day22TripNoOpKey}}" }], "url": "{{baseUrl}}/v1/operator/trips/{{day22TripId}}", "body": { "mode": "raw", "raw": "{\n  \"notes\": null\n}" } }
+        },
+        {
+          "name": "2. Trip PATCH persists exact-dong fare and trimmed notes",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json(); pm.test('Canonical Trip edit returns the exact values', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.tripId).to.eql(pm.environment.get('day22TripId')); pm.expect(body.data.baseFare).to.eql(211111); pm.expect(body.data.notes).to.eql('Day 22 verified'); });"
+          ] }}],
+          "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day22TripEditKey}}" }], "url": "{{baseUrl}}/v1/operator/trips/{{day22TripId}}", "body": { "mode": "raw", "raw": "{\n  \"baseFare\": 211111,\n  \"notes\": \"  Day 22 verified  \"\n}" } }
+        },
+        {
+          "name": "3. Trip PATCH rejects departureDateTime",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json(); pm.test('Unknown Trip field is reserved MVC 422', () => { pm.response.to.have.status(422); pm.expect(body.success).to.eql(false); pm.expect(body.error.code).to.eql('VALIDATION_ERROR'); pm.expect(body.meta.traceId).to.be.a('string'); });",
+            "pm.environment.set('day22Reserved422Body', JSON.stringify(body));"
+          ] }}],
+          "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day22TripInvalidKey}}" }], "url": "{{baseUrl}}/v1/operator/trips/{{day22TripId}}", "body": { "mode": "raw", "raw": "{\n  \"departureDateTime\": \"2030-01-01T00:00:00Z\"\n}" } }
+        },
+        {
+          "name": "4. Reserved MVC 422 replays with the same key",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json(); pm.test('Reserved 422 is replayed', () => { pm.response.to.have.status(422); pm.expect(body.error.code).to.eql('VALIDATION_ERROR'); pm.expect(JSON.stringify(body)).to.eql(pm.environment.get('day22Reserved422Body')); });"
+          ] }}],
+          "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day22TripInvalidKey}}" }], "url": "{{baseUrl}}/v1/operator/trips/{{day22TripId}}", "body": { "mode": "raw", "raw": "{\n  \"departureDateTime\": \"2030-01-01T00:00:00Z\"\n}" } }
+        },
+        {
+          "name": "5. Changed invalid body mismatches before MVC",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json(); pm.test('Changed body uses idempotency mismatch', () => { pm.response.to.have.status(422); pm.expect(body.error.code).to.eql('IDEMPOTENCY_KEY_MISMATCH'); });"
+          ] }}],
+          "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day22TripInvalidKey}}" }], "url": "{{baseUrl}}/v1/operator/trips/{{day22TripId}}", "body": { "mode": "raw", "raw": "{\n  \"departureDateTime\": \"2031-01-01T00:00:00Z\"\n}" } }
+        },
+        {
+          "name": "6. DriverSchedule FUTURE_ONLY same-value PATCH is a no-op",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json(); pm.test('Schedule no-op returns ADR-0004 success', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.id).to.eql(pm.environment.get('day22DriverScheduleId')); });",
+            "pm.environment.set('day22ScheduleNoOpBody', JSON.stringify(body));"
+          ] }}],
+          "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day22ScheduleNoOpKey}}" }], "url": "{{baseUrl}}/v1/operator/driver-schedules/{{day22DriverScheduleId}}?probe=x&applyTo=FUTURE_ONLY", "body": { "mode": "raw", "raw": "{\n  \"departureTime\": \"08:30:00\"\n}" } }
+        },
+        {
+          "name": "7. DriverSchedule query-key reorder replays",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json(); pm.test('Query key order is canonical', () => { pm.response.to.have.status(200); pm.expect(JSON.stringify(body)).to.eql(pm.environment.get('day22ScheduleNoOpBody')); });"
+          ] }}],
+          "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day22ScheduleNoOpKey}}" }], "url": "{{baseUrl}}/v1/operator/driver-schedules/{{day22DriverScheduleId}}?applyTo=FUTURE_ONLY&probe=x", "body": { "mode": "raw", "raw": "{\n  \"departureTime\": \"08:30:00\"\n}" } }
+        },
+        {
+          "name": "8. Changed applyTo mismatches",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json(); pm.test('Changed applyTo uses idempotency mismatch', () => { pm.response.to.have.status(422); pm.expect(body.error.code).to.eql('IDEMPOTENCY_KEY_MISMATCH'); });"
+          ] }}],
+          "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day22ScheduleNoOpKey}}" }], "url": "{{baseUrl}}/v1/operator/driver-schedules/{{day22DriverScheduleId}}?applyTo=ALL_PENDING&probe=x", "body": { "mode": "raw", "raw": "{\n  \"departureTime\": \"08:30:00\"\n}" } }
+        },
+        {
+          "name": "9. ALL_PENDING rejects null vehicle",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json(); pm.test('ALL_PENDING null vehicle is invalid', () => { pm.response.to.have.status(422); pm.expect(body.error.code).to.eql('VALIDATION_ERROR'); });"
+          ] }}],
+          "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day22ScheduleInvalidKey}}" }], "url": "{{baseUrl}}/v1/operator/driver-schedules/{{day22DriverScheduleId}}?applyTo=ALL_PENDING", "body": { "mode": "raw", "raw": "{\n  \"vehicleId\": null\n}" } }
+        },
+        {
+          "name": "10. Deprecated crew alias delegates to ALL_PENDING",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json(); pm.test('Crew alias returns the schedule DTO', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.id).to.eql(pm.environment.get('day22DriverScheduleId')); });"
+          ] }}],
+          "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day22CrewAliasKey}}" }], "url": "{{baseUrl}}/v1/operator/driver-schedules/{{day22DriverScheduleId}}/crew", "body": { "mode": "raw", "raw": "{\n  \"driverUserId\": \"{{day22DriverUserId}}\",\n  \"assistantUserId\": \"{{day22AssistantUserId}}\"\n}" } }
+        }
+      ]
     }
   ]
 }

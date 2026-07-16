@@ -274,17 +274,17 @@ Ship operator Trip editing and DriverSchedule cascade without repricing an exist
 | 22.0 | ✅ done | APPROVE | 2026-07-15 | Two implementation patch rounds; contract/schema-comment verification green |
 | 22.1 | ✅ done | APPROVE | 2026-07-15 | Fresh retry after agent quota; full Booking/Trip build-format-test matrix green |
 | 22.2 | ✅ done | APPROVE | 2026-07-15 | Migration apply/down/reapply + pending-model, full Trip build-format-test matrix green |
-| 22.3 | 🔄 in progress | APPROVE | 2026-07-15 | Migration/static review complete; runtime matrix deferred per human instruction |
-| 22.4 | 🔄 in progress | APPROVE | 2026-07-15 | Implementation/static review complete; consolidated verification deferred per human instruction |
-| 22.5 | 🔄 in progress | APPROVE | 2026-07-15 | Pricing implementation/static review complete; consolidated verification deferred per human instruction |
-| 22.6 | 🔄 in progress | APPROVE | 2026-07-15 | Shared contracts/static review complete; consolidated verification deferred per human instruction |
-| 22.7 | 🔄 in progress | APPROVE | 2026-07-15 | Vehicle-swap service/static review complete; consolidated verification deferred per human instruction |
-| 22.8 | 🔄 in progress | APPROVE | 2026-07-15 | Trip PATCH/static review + targeted tests complete; consolidated verification deferred per human instruction |
-| 22.9 | 🔄 in progress | APPROVE | 2026-07-15 | Booking pending-action/Hangfire implementation and 30 targeted tests green; consolidated verification deferred per human instruction |
-| 22.10 | 🔄 in progress | APPROVE | 2026-07-15 | DriverSchedule PATCH/cascade implementation and concurrency review complete; consolidated verification deferred per human instruction |
-| 22.11 | 🔄 in progress | APPROVE | 2026-07-16 | Booking schedule/cancellation consumers and durable concurrency review complete; consolidated verification deferred per human instruction |
-| 22.12 | 🔄 in progress | APPROVE | 2026-07-16 | Notification ownership/bindings implementation and static review complete; consolidated verification deferred per human instruction |
-| 22.13 | ⬜ todo | — | — | — |
+| 22.3 | ✅ done | APPROVE | 2026-07-16 | Migration/static review plus consolidated runtime/build/test verification green |
+| 22.4 | ✅ done | APPROVE | 2026-07-16 | Booking pricing clock/snapshot implementation and consolidated verification green |
+| 22.5 | ✅ done | APPROVE | 2026-07-16 | Fare precedence/source implementation and consolidated verification green |
+| 22.6 | ✅ done | APPROVE | 2026-07-16 | Shared Day-22 contracts and complete TS matrix green |
+| 22.7 | ✅ done | APPROVE | 2026-07-16 | Vehicle-swap persistence/atomicity proof and consolidated verification green |
+| 22.8 | ✅ done | APPROVE | 2026-07-16 | Trip PATCH runtime transaction, Gateway, and full Trip matrix green |
+| 22.9 | ✅ done | APPROVE | 2026-07-16 | Booking pending-action/Hangfire targeted and full matrices green |
+| 22.10 | ✅ done | APPROVE | 2026-07-16 | DriverSchedule PATCH/cascade concurrency and full Trip matrix green |
+| 22.11 | ✅ done | APPROVE | 2026-07-16 | Booking schedule/cancellation, Payment, and live Parcel proofs green |
+| 22.12 | ✅ done | APPROVE | 2026-07-16 | Notification ownership/bindings, route-change regression, and full TS matrix green |
+| 22.13 | ✅ done | APPROVE | 2026-07-16 | Gateway/live/focused/Day-21/full-matrix close-out exit 0; cleanup and container restoration green |
 
 Legend: ⬜ todo · 🔄 in progress · ✅ done (reviewer APPROVED + human `/verify`) · ⚠️ done-with-carryover · ❌ blocked
 
