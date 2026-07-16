@@ -57,14 +57,15 @@ public sealed class InternalTripSeatLockHandlerTests
     }
 
     [Fact]
-    public void RequireIdempotencyKey_MissingHeader_ThrowsValidationException()
+    public void RequireIdempotencyKey_MissingHeader_ThrowsCodedValidationException()
     {
         var filter = new RequireIdempotencyKeyAttribute();
         var context = CreateActionExecutingContext(new DefaultHttpContext());
 
         var action = () => filter.OnActionExecuting(context);
 
-        var exception = action.Should().Throw<ValidationException>().Which;
+        var exception = action.Should().Throw<CodedValidationException>().Which;
+        exception.ErrorCode.Should().Be("IDEMPOTENCY_KEY_REQUIRED");
         exception.Errors.Should().ContainSingle(error => error.Field == "Idempotency-Key");
     }
 

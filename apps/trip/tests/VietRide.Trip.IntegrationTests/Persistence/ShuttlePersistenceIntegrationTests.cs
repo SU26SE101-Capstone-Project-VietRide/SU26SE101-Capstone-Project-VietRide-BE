@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql;
@@ -347,6 +348,7 @@ public sealed class ShuttlePersistenceIntegrationTests
         var options = new DbContextOptionsBuilder<TripDbContext>()
             .UseNpgsql(dataSource, npgsql =>
                 npgsql.MigrationsHistoryTable("__ef_migrations_history", TripDbContext.SchemaName))
+            .ConfigureWarnings(warnings => warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning))
             .Options;
         return new TripDbContext(options, clock);
     }

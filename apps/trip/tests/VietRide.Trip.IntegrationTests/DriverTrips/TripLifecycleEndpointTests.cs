@@ -190,7 +190,7 @@ public sealed class TripLifecycleEndpointTests
                 $"/v1/driver/trips/{denied.Id}/start",
                 "DRIVER",
                 denied.DriverUserId));
-            await AssertErrorAsync(missing, HttpStatusCode.UnprocessableEntity, "VALIDATION_ERROR");
+            await AssertErrorAsync(missing, HttpStatusCode.UnprocessableEntity, "IDEMPOTENCY_KEY_REQUIRED");
 
             var malformed = await client.SendAsync(CreateRequest(
                 HttpMethod.Post,
@@ -385,7 +385,7 @@ public sealed class TripLifecycleEndpointTests
         var actorId = Guid.NewGuid();
 
         var missing = await client.SendAsync(CreateRequest(HttpMethod.Post, path, role, actorId));
-        await AssertErrorAsync(missing, HttpStatusCode.UnprocessableEntity, "VALIDATION_ERROR");
+        await AssertErrorAsync(missing, HttpStatusCode.UnprocessableEntity, "IDEMPOTENCY_KEY_REQUIRED");
 
         var malformed = await client.SendAsync(CreateRequest(
             HttpMethod.Post,
@@ -963,10 +963,11 @@ public sealed class TripLifecycleEndpointTests
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            Environment.SetEnvironmentVariable("INTERNAL_JWT_SECRET", TestSecret);
             builder.UseSetting("INTERNAL_JWT_SECRET", TestSecret);
             builder.UseSetting("Trip:BackgroundWorkers:Enabled", "false");
-            builder.UseSetting("ConnectionStrings:Default", "Host=localhost;Port=5432;Database=test;Username=vietride;Password=vietride_dev");
+            builder.UseSetting(
+                "ConnectionStrings:Default",
+                global::VietRide.Trip.IntegrationTests.VietRideWebApplicationFactory.ResolveConnectionString("postgres"));
             builder.UseSetting("REDIS_URL", "localhost:6379");
             builder.UseEnvironment("Testing");
             builder.ConfigureTestServices(services =>

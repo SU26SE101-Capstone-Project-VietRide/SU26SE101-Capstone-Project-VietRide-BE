@@ -8,30 +8,30 @@ using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Application.Features.Trips.Operations;
 
-public sealed class ArriveTripStopCommandHandler
-    : IRequestHandler<ArriveTripStopCommand, ArriveTripStopResponse>
+public sealed class ArriveTripDestinationCommandHandler
+    : IRequestHandler<ArriveTripDestinationCommand, ArriveTripDestinationResponse>
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly ITripRepository trips;
-    private readonly ITripStopRepository tripStops;
+    private readonly IRouteRepository routes;
     private readonly IIntegrationEventOutbox outbox;
     private readonly IClock clock;
 
-    public ArriveTripStopCommandHandler(
+    public ArriveTripDestinationCommandHandler(
         ITripRepository trips,
-        ITripStopRepository tripStops,
+        IRouteRepository routes,
         IIntegrationEventOutbox outbox,
         IClock clock)
     {
         this.trips = trips;
-        this.tripStops = tripStops;
+        this.routes = routes;
         this.outbox = outbox;
         this.clock = clock;
     }
 
-    public async Task<ArriveTripStopResponse> Handle(
-        ArriveTripStopCommand request,
+    public async Task<ArriveTripDestinationResponse> Handle(
+        ArriveTripDestinationCommand request,
         CancellationToken cancellationToken)
     {
         var trip = await trips.GetForUpdateAsync(request.TripId, cancellationToken)
@@ -39,31 +39,30 @@ public sealed class ArriveTripStopCommandHandler
 
         EnsureAssignedCrew(trip, request.ActorUserId);
 
-        var stop = await tripStops.GetForUpdateAsync(
-            request.TripId,
-            request.StopId,
-            cancellationToken)
-            ?? throw new CodedNotFoundException("TRIP_STOP_NOT_FOUND", "Trip stop was not found.");
-
-        if (stop.Status != TripStopStatus.PENDING)
+        if (trip.DestinationArrivedAt.HasValue)
         {
             throw new CodedConflictException(
-                "TRIP_STOP_ALREADY_FINALIZED",
-                "Trip stop has already been arrived or skipped.");
+                "TRIP_DESTINATION_ALREADY_ARRIVED",
+                "Trip destination arrival has already been recorded.");
         }
 
         if (trip.Status != TripStatus.IN_PROGRESS)
         {
             throw new CodedValidationException(
                 "TRIP_NOT_IN_PROGRESS",
-                "Trip must be in progress before a stop arrival can be recorded.");
+                "Trip must be in progress before destination arrival can be recorded.");
         }
 
+        var route = await routes.GetByIdAsync(trip.RouteId, cancellationToken)
+            ?? throw new CodedNotFoundException(
+                "TRIP_NOT_FOUND",
+                "Trip route snapshot was not found.");
+
         var now = clock.UtcNow;
-        stop.MarkArrived(now);
-        var integrationEvent = new TripStopArrivedIntegrationEvent(
+        trip.MarkDestinationArrived(now, request.ActorUserId);
+        var integrationEvent = new TripDestinationArrivedIntegrationEvent(
             trip.Id,
-            stop.StopId,
+            route.DestinationStationId,
             trip.OperatorId,
             request.ActorUserId,
             now);
@@ -72,10 +71,10 @@ public sealed class ArriveTripStopCommandHandler
             JsonSerializer.Serialize(integrationEvent, JsonOptions),
             cancellationToken);
 
-        return new ArriveTripStopResponse(
+        return new ArriveTripDestinationResponse(
             trip.Id,
-            stop.StopId,
-            stop.Status.ToString(),
+            route.DestinationStationId,
+            "ARRIVED",
             now);
     }
 

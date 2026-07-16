@@ -3,6 +3,9 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using VietRide.Trip.Application.Abstractions.Jobs;
+using VietRide.Trip.Infrastructure.Jobs;
 
 namespace VietRide.Trip.IntegrationTests;
 
@@ -46,6 +49,15 @@ public class HealthEndpointTests : IClassFixture<VietRideWebApplicationFactory>
         doc.RootElement.GetProperty("success").GetBoolean().Should().BeTrue();
         doc.RootElement.GetProperty("statusCode").GetInt32().Should().Be((int)HttpStatusCode.OK);
         doc.RootElement.GetProperty("data").GetProperty("service").GetString().Should().Be("Trip");
+    }
+
+    [Fact]
+    public void TestHost_DisablesBackgroundJobScheduler()
+    {
+        using var scope = _factory.Services.CreateScope();
+
+        scope.ServiceProvider.GetRequiredService<ITripGenerationJobScheduler>()
+            .Should().BeOfType<DisabledTripGenerationJobScheduler>();
     }
 }
 

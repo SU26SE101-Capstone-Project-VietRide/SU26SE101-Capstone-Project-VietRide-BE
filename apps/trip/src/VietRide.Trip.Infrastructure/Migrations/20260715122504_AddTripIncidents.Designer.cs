@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using VietRide.Shared.Persistence.Outbox;
@@ -14,9 +15,11 @@ using VietRide.Trip.Infrastructure;
 namespace VietRide.Trip.Infrastructure.Migrations
 {
     [DbContext(typeof(TripDbContext))]
-    partial class TripDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260715122504_AddTripIncidents")]
+    partial class AddTripIncidents
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -24,6 +27,7 @@ namespace VietRide.Trip.Infrastructure.Migrations
                 .HasAnnotation("ProductVersion", "8.0.11")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_trip", "incident_category", new[] { "TRAFFIC_JAM", "VEHICLE_BREAKDOWN", "ACCIDENT", "WEATHER", "OTHER" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "trip_generation_skip_reason", new[] { "SUBSCRIPTION_LIMIT_EXCEEDED", "VEHICLE_CONFLICT", "DRIVER_CONFLICT", "OTHER" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "trip_seat_status", new[] { "AVAILABLE", "HELD", "BOOKED", "UNAVAILABLE" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "trip_seat_type", new[] { "STANDARD", "SLEEPER_LOWER", "SLEEPER_UPPER", "VIP", "DRIVER_AREA" });
@@ -31,7 +35,6 @@ namespace VietRide.Trip.Infrastructure.Migrations
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "trip_status", new[] { "SCHEDULED", "BOARDING", "IN_PROGRESS", "COMPLETED", "CANCELLED", "DISRUPTED" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "trip_stop_status", new[] { "PENDING", "ARRIVED", "SKIPPED" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vehicle_status", new[] { "ACTIVE", "MAINTENANCE", "OFF_DUTY", "RETIRED" });
-            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_trip", "incident_category", new[] { "TRAFFIC_JAM", "VEHICLE_BREAKDOWN", "ACCIDENT", "WEATHER", "OTHER" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_trip", "outbox_event_status", new[] { "PENDING", "PUBLISHING", "PUBLISHED", "FAILED" });
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
@@ -1254,14 +1257,6 @@ namespace VietRide.Trip.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("DepartureDateTime")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("departure_date_time");
-
-                    b.Property<DateTimeOffset?>("DestinationArrivedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("destination_arrived_at");
-
-                    b.Property<Guid?>("DestinationArrivedByUserId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("destination_arrived_by_user_id");
 
                     b.Property<DateTimeOffset?>("DisruptedAt")
                         .HasColumnType("timestamp with time zone")

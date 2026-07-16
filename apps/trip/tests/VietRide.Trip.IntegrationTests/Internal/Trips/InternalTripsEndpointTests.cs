@@ -50,6 +50,7 @@ public sealed class InternalTripsEndpointTests
         document.RootElement.GetProperty("returnRouteId").ValueKind.Should().Be(JsonValueKind.Null);
         document.RootElement.GetProperty("driverUserId").GetGuid().Should().Be(driverUserId);
         document.RootElement.GetProperty("assistantUserId").GetGuid().Should().Be(assistantUserId);
+        document.RootElement.GetProperty("destinationArrivedAt").ValueKind.Should().Be(JsonValueKind.Null);
         mediator.LastRequest.Should().BeOfType<GetTripSnapshotQuery>()
             .Which.TripId.Should().Be(tripId);
     }
@@ -198,7 +199,7 @@ public sealed class InternalTripsEndpointTests
         var response = await client.SendAsync(request);
 
         response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
-        await AssertErrorEnvelopeAsync(response, "VALIDATION_ERROR", hasFields: true);
+        await AssertErrorEnvelopeAsync(response, IdempotencyMiddleware.RequiredErrorCode, hasFields: true);
         mediator.SendCount.Should().Be(0);
     }
 
@@ -673,37 +674,49 @@ public sealed class InternalTripsEndpointTests
 
         private static RedisResult Complete(RedisKey[] keys, RedisValue[] values)
         {
-            var key = Key(keys[0]);
-            if (!InMemoryRedisConnectionMultiplexer.Store.TryGetValue(key, out var current))
+            var processingKey = Key(keys[0]);
+            if (!InMemoryRedisConnectionMultiplexer.Store.TryGetValue(processingKey, out var current))
             {
                 return RedisResult.Create((RedisValue)0);
             }
 
-            var currentEntry = JsonSerializer.Deserialize<SeatLockIdempotencyEntry>(
-                current!,
-                new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+            using var document = JsonDocument.Parse(current.ToString());
+            var root = document.RootElement;
+            var currentFingerprint = root.TryGetProperty("fingerprint", out var fingerprint)
+                ? fingerprint.GetString()
+                : root.GetProperty("requestFingerprint").GetString();
+            var currentOwnerToken = root.TryGetProperty("ownerToken", out var ownerTokenElement)
+                ? ownerTokenElement.GetString()
+                : root.GetProperty("reservationToken").GetString();
             if (values.Length == 1)
             {
-                var expectedReservationToken = values[0].ToString();
-                if (currentEntry.IsCompleted || !string.Equals(currentEntry.ReservationToken, expectedReservationToken, StringComparison.Ordinal))
+                if (!string.Equals(currentOwnerToken, values[0].ToString(), StringComparison.Ordinal))
                 {
                     return RedisResult.Create((RedisValue)0);
                 }
 
-                InMemoryRedisConnectionMultiplexer.Store.Remove(key);
+                InMemoryRedisConnectionMultiplexer.Store.Remove(processingKey);
                 return RedisResult.Create((RedisValue)1);
             }
 
             var requestFingerprint = values[0].ToString();
-            var reservationToken = values[1].ToString();
-            if (!string.Equals(currentEntry.RequestFingerprint, requestFingerprint, StringComparison.Ordinal) ||
-                !string.Equals(currentEntry.ReservationToken, reservationToken, StringComparison.Ordinal) ||
-                currentEntry.IsCompleted)
+            var ownerToken = values[1].ToString();
+            if (!string.Equals(currentFingerprint, requestFingerprint, StringComparison.Ordinal) ||
+                !string.Equals(currentOwnerToken, ownerToken, StringComparison.Ordinal))
             {
                 return RedisResult.Create((RedisValue)0);
             }
 
-            InMemoryRedisConnectionMultiplexer.Store[key] = values[2];
+            if (keys.Length == 1)
+            {
+                InMemoryRedisConnectionMultiplexer.Store[processingKey] = values[2];
+            }
+            else
+            {
+                InMemoryRedisConnectionMultiplexer.Store[Key(keys[1])] = values[2];
+                InMemoryRedisConnectionMultiplexer.Store.Remove(processingKey);
+            }
+
             return RedisResult.Create((RedisValue)1);
         }
 

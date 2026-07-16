@@ -15,4 +15,5 @@ public sealed record InternalTripSnapshotDto(
     InternalTripSeatSummaryDto SeatSummary,
     Guid? ReturnRouteId,
     Guid? DriverUserId,
-    Guid? AssistantUserId);
+    Guid? AssistantUserId,
+    DateTimeOffset? DestinationArrivedAt = null);
