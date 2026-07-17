@@ -1,7 +1,7 @@
 # VietRide — Technical Project Context (Agent-Ready v7)
 
 > **Capstone:** SU26SE101 — SU26
-> **Cập nhật:** 2026-05-21
+> **Cập nhật:** 2026-07-16 (Day 40 contract freeze)
 >
 > ## ⚠️ Đọc trước khi dùng — Mục đích của doc này
 >
@@ -607,7 +607,7 @@ Cùng codebase NextJS với Operator Web, phân biệt qua role SYSTEM_ADMIN. Na
 
   **ActivityLog — entity requirements (thuộc Identity & User Service):**
   - Link tới userId
-  - `action` enum: LOGIN | LOGOUT | BOOK_TICKET | CANCEL_TICKET | UPDATE_PROFILE | CHANGE_PASSWORD | CREATE_OPERATOR | APPROVE_OPERATOR | LOCK_USER (mở rộng khi cần)
+  - `action` enum: LOGIN | LOGOUT | BOOK_TICKET | CANCEL_TICKET | UPDATE_PROFILE | CHANGE_PASSWORD | CREATE_OPERATOR | APPROVE_OPERATOR | LOCK_USER | UNLOCK_USER | STATION_MERGED | STATION_NORMALIZED (mở rộng khi cần)
   - `metadata` JSONB nullable — context tùy action (bookingId, userAgent, etc.)
   - `ipAddress` string, `createdAt` datetime
   - Query pattern phổ biến: theo userId order by createdAt DESC → cần index phù hợp
@@ -1443,7 +1443,7 @@ PENDING_EMAIL_VERIFICATION | ACTIVE | LOCKED | DELETED
 
 - `PENDING_EMAIL_VERIFICATION`: user đăng ký bằng email/password nhưng chưa verify OTP. `PASSENGER` được login lấy access token cho mobile restricted session; FE khóa chức năng dựa trên `data.user.status`. Non-passenger pending email không được login và chỉ được request/verify OTP. Sau verify thành công → `ACTIVE`.
 - `ACTIVE`: account dùng bình thường. Google OAuth account tạo mới vào thẳng `ACTIVE` vì Google đã verify email ownership.
-- `LOCKED`: bị khóa do password lockout hoặc System Admin khóa thủ công. Không login, không refresh token, không request password reset.
+- `LOCKED`: bị khóa do password lockout hoặc System Admin khóa thủ công. Không login, không refresh token, không request password reset. `lockedFromStatus` bắt buộc lưu origin `ACTIVE` hoặc `PENDING_EMAIL_VERIFICATION`; manual admin lock chỉ nhận `ACTIVE`, password lockout có thể nhận cả hai. Unlock khôi phục đúng origin và không tự verify email.
 - `DELETED`: soft delete/anonymized account. Terminal cho v1; không login/reactivate trong app flow bình thường.
 
 **Operator.registrationStatus (canonical enum):**
@@ -4359,6 +4359,96 @@ ShuttlePassenger (manifest entry — link passenger booking with shuttle) {
 - Nếu cutoff đến mà chưa đủ ngưỡng → auto-cancel ShuttlePassenger requests + push notification.
 - **v1 KHÔNG implement** — operator fully manual quyết định.
 
+### 6.15 Day 40 — Admin Users, Station Cleanup và Platform Reports
+
+#### Admin User lifecycle và serialization
+
+System Admin có danh mục User toàn platform với search/filter/paging/sort và optional
+`includeDeleted`; response chỉ chứa profile/lifecycle fields, không chứa password hash, OAuth
+subject, token, OTP hoặc failed-login internals.
+
+Manual lock chỉ cho `ACTIVE -> LOCKED`; target đã `LOCKED` là ensure-locked success. Lock revoke mọi
+active RefreshToken bằng `ADMIN_REVOKE` và ghi `LOCK_USER` trong cùng transaction. Unlock restore
+đúng `lockedFromStatus` (`ACTIVE` hoặc `PENDING_EMAIL_VERIFICATION`), reset DB + Redis lockout state,
+clear origin, ghi `UNLOCK_USER`, không phục hồi token đã revoke và không promote pending account.
+Self-lock/self-unlock bị cấm. Hai endpoint bắt buộc shared Idempotency-Key v2; completed replay không
+dispatch command hoặc ghi audit lần hai. Day 40 không có access-token denylist.
+
+Tất cả flow sau phải dùng cùng PostgreSQL per-User serialization protocol: password login, Google
+login của existing/matched User, refresh, forgot/reset password, password-reset OTP failure,
+failed-login persistence và admin lock/unlock. Lookup ngoài transaction chỉ là routing hint. Mỗi
+flow lock/reload `users` bằng `FOR UPDATE`, recheck status và không quyết định từ EF tracked snapshot.
+Canonical lock order: User UUID ascending -> EmailVerificationToken UUID -> refresh-token/family
+UUID -> ActivityLog/Outbox. Token/OTP/password state chỉ được trả sau commit.
+
+Password login đúng verify lại hash dưới row lock; login sai dùng fresh-scope persister theo
+`userId`. Refresh dùng fresh executor lock User trước token, rotate/revoke family và commit outcome
+trước khi trả lỗi. Forgot/reset password lock User trước OTP; lock-first không tạo/consume OTP hoặc
+đổi password. Failed-login persister chỉ xử lý `ACTIVE` hoặc passenger
+`PENDING_EMAIL_VERIFICATION`; auto-lock lưu origin vừa reload. Những race hợp lệ đều tuyến tính:
+auth-first rồi lock revoke token vừa tạo, lock-first không token; unlock-first rồi failed-login tính
+attempt mới, failed-login-first rồi unlock clean counter; không outcome nào verify email ngầm.
+
+#### Immutable ActivityLog
+
+Admin query ActivityLog theo actor/action/UTC `[from,to)`, order `createdAt DESC,id DESC`.
+`ActivityLog.userId` là actor. Metadata lock/unlock chỉ chứa target/status fields; IP/user-agent là
+cột riêng. Station consumers dùng `sourceEventId` unique cho dedupe. Repository chỉ Add/read và
+PostgreSQL trigger chặn direct `UPDATE`/`DELETE`. Action mới: `UNLOCK_USER`, `STATION_MERGED`,
+`STATION_NORMALIZED`.
+
+#### Station normalize/merge
+
+Admin Station PATCH giữ request hiện hữu và deterministic slug từ `name+city+province`; collision
+dùng station-ID hash suffix. Normalize Station đã merged bị từ chối. Update và
+`trip.station.normalized` Outbox là một transaction.
+
+Merge nhận primary + duplicate, lock cả hai theo UUID ascending và recheck. Primary thắng
+`name,slug,city,province`; `addressStreet,locationId,contactPhone,contactEmail,operatingHours,
+facilities` chỉ fill khi primary null; coordinates là một cặp; `supportsShuttle` dùng OR. Cùng Trip
+DB transaction relink OperatorStation, Route origin/destination,
+AlternativeRoute destination, ShuttleTrip Station và redirect cũ. OperatorStation collision giữ
+primary mapping, OR active, fill nullable config rồi bỏ duplicate mapping. Preflight Route
+origin=destination/domain violation trả `STATION_MERGE_CONFLICT` và rollback toàn bộ. Duplicate được
+deactivate, soft-delete, set `mergedIntoStationId=primary`; mọi chain flatten trực tiếp.
+
+Internal Station lookup trả canonical active hoặc merged redirect (`isMerged`,
+`canonicalStationId`); ordinary soft-delete/missing vẫn 404. `trip.station.merged` mang actor,
+nullable request context, before/after allow-list snapshots và relink counts; snapshot không có
+contact phone/email. Booking và Identity dùng durable queue riêng; operational logs không in full
+payload, IP hoặc user-agent.
+
+Booking lưu `booking_station_redirects` local, không cross-DB FK. Consumer xử lý replay, out-of-order
+chain và poison cycle/self/over-32-hop; redirect + processed marker + active Booking relink cùng
+transaction. Mọi Station writer (`CreateBooking`, round trip, edit pickup/dropoff) và consumer dùng
+transaction advisory locks trên union Station IDs, UUID ascending; canonicalize request và fresh
+Trip snapshot trước validation, edit reload Booking `FOR UPDATE`. Writer-first/consumer-first đều
+kết thúc với không active Booking nào trỏ duplicate; Booking terminal/history không rewrite.
+
+Identity consumer ghi `STATION_MERGED`/`STATION_NORMALIZED` với actor từ event, source event unique,
+IP/user-agent ở cột audit; missing actor retry/DLQ, không tạo fake User.
+
+#### Platform earned report
+
+`GET /v1/admin/reports/platform` do Payment orchestration, `SYSTEM_ADMIN` only, bắt buộc RFC3339 UTC
+`from/to`, half-open `[from,to)`, tối đa 366 ngày. Payment không đọc foreign DB:
+
+- Booking source: `COMPLETED`, anchor `completedAt`, count + `SUM(totalAmount)`.
+- Trip source: `COMPLETED`, anchor `completedAt`, count.
+- Parcel source: `DELIVERY_CONFIRMED`, anchor `confirmedAt`, count + signed
+  `SUM(depositAmount + additionalAmount - refundAmount)`.
+
+Ba source HTTP call chạy song song, timeout 5 giây. `SUM(BIGINT)` PostgreSQL là NUMERIC và phải
+checked-convert group/total về Int64; Payment checked mọi phép cộng. Overflow trả
+`REPORT_VALUE_OVERFLOW`, không wrap/saturate/partial. Missing operator summary giữ tên null.
+`byOperator` là union IDs, sort net revenue giảm dần rồi ID; totals bằng sum breakdown; Parcel/net
+revenue có thể âm. Timeout/upstream 5xx khác/payload invalid trả `UPSTREAM_UNAVAILABLE`, không cache
+hoặc Payment write.
+
+Day 40 dùng live query với partial indexes trên terminal timestamp + operator. Stats materialization,
+Redis cache, Excel export và occupancy/cancellation/no-show analytics defer Day 42. Auto-merge bằng
+geo/fuzzy matching vẫn v2; Day 40 chỉ System Admin merge thủ công.
+
 ---
 
 ## 7. Non-Functional Requirements
@@ -4672,7 +4762,7 @@ Mỗi service chỉ được phép read/write key bắt đầu bằng prefix ser
   - **Trip:** `TRIP_NOT_FOUND`, `TRIP_NOT_EDITABLE`, `TRIP_VEHICLE_CONFLICT`, `TRIP_DRIVER_CONFLICT`, `TRIP_NOT_ACCEPTING_PARCEL` (Trip IN_PROGRESS — không nhận parcel mới), `DRIVER_SCHEDULE_EDIT_TOO_LATE`
   - **Parcel:** `PARCEL_NOT_FOUND`, `PARCEL_CAPACITY_EXCEEDED`, `PARCEL_PRICING_NOT_CONFIGURED`, `PARCEL_DELIVERY_TOKEN_INVALID`, `PARCEL_DELIVERY_TOKEN_EXPIRED`, `PARCEL_NOT_TRANSFERABLE` (parcel ở status sai khi confirm transfer), `PARCEL_ADDITIONAL_PAYMENT_REQUIRED` (cân lại > ước lượng, cần thanh toán thêm), `PARCEL_REVIEW_TIMEOUT` (EXTRA_LARGE auto-reject 24h)
   - **Stop/Route:** `STOP_NOT_FOUND`, `STOP_REPLACEMENT_CYCLE` (replacedByStopId tạo cycle), `STOP_REPLACEMENT_DIFFERENT_OPERATOR`, `STOP_DISABLED_BOOKING_AFFECTED` (cảnh báo khi disable Stop có booking active — không phải error block, chỉ alert), `STOP_NOT_PICKUP_ALLOWED`, `STOP_NOT_DROPOFF_ALLOWED`, `ROUTE_NOT_FOUND`, `ROUTE_RETURN_NOT_CONFIGURED` (Route.returnRouteId null khi đặt round-trip)
-  - **Station:** `STATION_NOT_FOUND`, `STATION_DUPLICATE_NEARBY` (warning khi operator tạo Station mới quá gần Station hiện có — gợi ý link thay vì tạo)
+  - **Station:** `STATION_NOT_FOUND`, `STATION_DUPLICATE_NEARBY` (warning khi operator tạo Station mới quá gần Station hiện có — gợi ý link thay vì tạo), `STATION_MERGE_CONFLICT` (merge vi phạm Route/domain invariant; không partial write)
   - **Invoice:** `INVOICE_NOT_FOUND`, `INVOICE_PDF_GENERATION_FAILED`
   - **Operator:** `OPERATOR_DUPLICATE_REGISTRATION` (businessRegistrationNumber đã tồn tại), `OPERATOR_DUPLICATE_TAX_CODE` (taxCode đã tồn tại)
   - **Auth:** `AUTH_INITIAL_PASSWORD_TOKEN_INVALID`, `AUTH_INITIAL_PASSWORD_TOKEN_EXPIRED`, `AUTH_PENDING_INITIAL_PASSWORD` (account chưa set password lần đầu, không login được)
@@ -4682,7 +4772,7 @@ Mỗi service chỉ được phép read/write key bắt đầu bằng prefix ser
   - **Tracking:** `TRACKING_ACCESS_DENIED` (joinTripTracking unauthorized), `TRACKING_TRIP_NOT_ACTIVE` (trip chưa IN_PROGRESS)
   - **RAG:** `RAG_DOCUMENT_NOT_APPROVED`, `RAG_ACCESS_DENIED_FOR_ROLE`
   - **Validation:** `VALIDATION_ERROR` (kèm `errors` array detail field-level)
-  - **Generic:** `RESOURCE_NOT_FOUND`, `FORBIDDEN`, `RATE_LIMITED`, `INTERNAL_ERROR`
+  - **Generic:** `RESOURCE_NOT_FOUND`, `FORBIDDEN`, `RATE_LIMITED`, `REPORT_VALUE_OVERFLOW` (report aggregate ngoài Int64), `UPSTREAM_UNAVAILABLE`, `INTERNAL_ERROR`
 
 **Request/response DTO shape (canonical):**
 - `POST /v1/bookings` request: `{ tripId, pickup: { stationId?: string, stopId?: string }, dropoff?: { stationId?: string, stopId?: string }, seats: [{ seatNumber }], voucherCode?, paymentMethod: "WALLET" | "VNPAY" }`
