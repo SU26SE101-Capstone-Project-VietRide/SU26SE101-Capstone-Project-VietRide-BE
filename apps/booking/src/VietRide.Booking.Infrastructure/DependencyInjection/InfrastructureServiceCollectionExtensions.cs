@@ -9,6 +9,7 @@ using VietRide.Booking.Application.Services;
 using VietRide.Booking.Infrastructure.Http;
 using VietRide.Booking.Infrastructure.Messaging;
 using VietRide.Booking.Infrastructure.Persistence.Repositories;
+using VietRide.Booking.Infrastructure.Services;
 using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Http.Resilience;
 using VietRide.Shared.Kernel.Abstractions;
@@ -117,6 +118,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IBookingRepository, BookingRepository>();
         services.AddScoped<IBookingStatusHistoryRepository, BookingStatusHistoryRepository>();
         services.AddScoped<IBookingPendingActionRepository, BookingPendingActionRepository>();
+        services.AddScoped<IBookingStationRedirectRepository, BookingStationRedirectRepository>();
+        services.AddScoped<IBookingStationCanonicalizer, BookingStationCanonicalizer>();
 
         // Repositories (Task 14.1)
         services.AddScoped<IVoucherRepository, VoucherRepository>();
@@ -153,6 +156,11 @@ public static class InfrastructureServiceCollectionExtensions
             {
                 options.QueueName = "booking.stop-disabled";
                 options.BindingKeys = [StopDisabledIntegrationEvent.EventType];
+            });
+            services.AddVietRideEventConsumer<StationMergedIntegrationEvent, StationMergedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "booking.station-merged";
+                options.BindingKeys = [StationMergedIntegrationEvent.EventType];
             });
             services.AddVietRideEventConsumer<PaymentExpiredIntegrationEvent, PaymentExpiredIntegrationEventHandler>(options =>
             {

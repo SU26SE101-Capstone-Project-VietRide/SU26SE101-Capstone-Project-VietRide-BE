@@ -11,6 +11,7 @@ using NSubstitute;
 using StackExchange.Redis;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
+using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Application.Features.Bookings.CreateBooking;
 using VietRide.Shared.Application.UnitOfWork;
 using BookingEntity = VietRide.Booking.Domain.Entities.Booking;
@@ -473,6 +474,8 @@ public class CreateBookingWebApplicationFactory : WebApplicationFactory<Program>
             // Replace ITripServiceClient and IPaymentServiceClient with mocks.
             services.AddSingleton(TripClient);
             services.AddSingleton(PaymentClient);
+            services.AddSingleton<IBookingStationCanonicalizer>(
+                PassthroughBookingStationCanonicalizer.Instance);
 
             // Replace IBookingRepository with a mock — the mock's AddAsync returns the entity
             // so the handler can access booking.Id and booking.Passengers after Add.

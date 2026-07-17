@@ -433,6 +433,8 @@ public class CreateRoundTripBookingIntegrationTests
             {
                 services.AddSingleton(TripClient);
                 services.AddSingleton(PaymentClient);
+                services.AddSingleton<IBookingStationCanonicalizer>(
+                    PassthroughBookingStationCanonicalizer.Instance);
                 services.AddSingleton(VoucherService);
                 services.AddSingleton(VoucherRepository);
 

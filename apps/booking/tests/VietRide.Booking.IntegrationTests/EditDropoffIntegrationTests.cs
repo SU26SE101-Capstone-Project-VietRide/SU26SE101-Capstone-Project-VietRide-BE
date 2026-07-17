@@ -11,6 +11,7 @@ using NSubstitute;
 using StackExchange.Redis;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
+using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Application.Features.Bookings.EditDropoff;
 using VietRide.Booking.Domain.ValueObjects;
 using VietRide.Shared.Application.UnitOfWork;
@@ -284,6 +285,14 @@ public sealed class EditDropoffWebApplicationFactory : WebApplicationFactory<Pro
         {
             services.AddSingleton(TripClient);
             services.AddSingleton(PaymentClient);
+            services.AddSingleton<IBookingStationCanonicalizer>(
+                PassthroughBookingStationCanonicalizer.Instance);
+            BookingRepository.FindByIdForUpdateAsync(
+                    Arg.Any<Guid>(),
+                    Arg.Any<CancellationToken>())
+                .Returns(call => BookingRepository.FindByIdAsync(
+                    call.Arg<Guid>(),
+                    call.Arg<CancellationToken>()));
             services.AddSingleton(BookingRepository);
 
             var mockClock = Substitute.For<IClock>();

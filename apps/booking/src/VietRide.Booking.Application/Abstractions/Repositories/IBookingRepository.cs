@@ -1,3 +1,4 @@
+using VietRide.Booking.Application.Features.Internal.Reports.PlatformBookings;
 using VietRide.Booking.Application.Features.OperatorBookings.GetOperatorBookingDetail;
 using VietRide.Booking.Application.Features.OperatorBookings.ListOperatorBookings;
 using VietRide.Booking.Domain.Enums;
@@ -12,6 +13,12 @@ namespace VietRide.Booking.Application.Abstractions.Repositories;
 /// </summary>
 public interface IBookingRepository : IRepository<BookingEntity, Guid>
 {
+    Task<IReadOnlyList<PlatformBookingReportItem>> GetPlatformBookingMetricsAsync(
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Platform Booking report is not implemented by this repository.");
+
     Task<OperatorBookingDetailDto?> GetOperatorBookingDetailAsync(Guid bookingId, Guid operatorId, CancellationToken ct = default)
         => throw new NotSupportedException("Operator booking detail is not implemented by this repository.");
 
@@ -37,6 +44,16 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
     /// Finds a booking by id using the aggregate-specific seam.
     /// </summary>
     Task<BookingEntity?> FindByIdAsync(Guid bookingId, CancellationToken ct = default);
+
+    Task<BookingEntity?> FindByIdForUpdateAsync(Guid bookingId, CancellationToken ct = default)
+        => FindByIdAsync(bookingId, ct);
+
+    Task<int> RelinkActiveStationReferencesAsync(
+        IReadOnlyCollection<Guid> sourceStationIds,
+        Guid canonicalStationId,
+        DateTimeOffset updatedAt,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Active Booking Station relinking is not implemented by this repository.");
 
     /// <summary>
     /// Returns a booking with Passengers and Tickets eagerly loaded.

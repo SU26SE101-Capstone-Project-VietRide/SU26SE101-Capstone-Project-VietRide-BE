@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using VietRide.Booking.Infrastructure;
@@ -12,9 +13,11 @@ using VietRide.Booking.Infrastructure;
 namespace VietRide.Booking.Infrastructure.Migrations
 {
     [DbContext(typeof(BookingDbContext))]
-    partial class BookingDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260716165252_AddBookingStationRedirects")]
+    partial class AddBookingStationRedirects
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -184,10 +187,6 @@ namespace VietRide.Booking.Infrastructure.Migrations
 
                     b.HasIndex("TripSnapshotDeparture")
                         .HasDatabaseName("idx_bookings_trip_snapshot_departure");
-
-                    b.HasIndex("CompletedAt", "OperatorId")
-                        .HasDatabaseName("idx_bookings_completed_report")
-                        .HasFilter("status = 'COMPLETED' AND completed_at IS NOT NULL");
 
                     b.HasIndex("OperatorId", "Status")
                         .HasDatabaseName("idx_bookings_operator_id_status");
