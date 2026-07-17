@@ -528,6 +528,91 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
   });
 
   it.each([
+    ['GET', '/v1/admin/users?page=1&pageSize=20', env.IDENTITY_BASE_URL],
+    [
+      'POST',
+      '/v1/admin/users/11111111-1111-1111-1111-111111111111/lock',
+      env.IDENTITY_BASE_URL,
+    ],
+    [
+      'POST',
+      '/v1/admin/users/11111111-1111-1111-1111-111111111111/unlock',
+      env.IDENTITY_BASE_URL,
+    ],
+    ['GET', '/v1/admin/activity-logs?page=1&pageSize=20', env.IDENTITY_BASE_URL],
+    [
+      'PATCH',
+      '/v1/admin/stations/11111111-1111-1111-1111-111111111111',
+      env.TRIP_BASE_URL,
+    ],
+    [
+      'POST',
+      '/v1/admin/stations/11111111-1111-1111-1111-111111111111/merge',
+      env.TRIP_BASE_URL,
+    ],
+    [
+      'GET',
+      '/v1/admin/reports/platform?from=2026-07-01T00%3A00%3A00Z&to=2026-08-01T00%3A00%3A00Z',
+      env.PAYMENT_BASE_URL,
+    ],
+  ] as const)(
+    'routes Day 40 SYSTEM_ADMIN %s %s to its owner',
+    async (method, path, target) => {
+      const upstreamHandler = arrangeProxyPass();
+      const signer = {
+        sign: jest.fn().mockResolvedValue('internal-token'),
+      } as unknown as InternalJwtSigner;
+      const handler = createProxyHandler(env, signer);
+      const authorization = await makeAuthorizationHeader({
+        sub: 'admin-1',
+        role: 'SYSTEM_ADMIN',
+      });
+      const req = makeRequest(
+        path,
+        { authorization, 'x-request-id': 'req-day40-admin-route' },
+        method,
+      );
+      const res = makeResponse();
+      const next = jest.fn() as NextFunction;
+
+      await handler(req, res, next);
+
+      expect(createProxyMiddlewareMock).toHaveBeenCalledWith(expect.objectContaining({ target }));
+      expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
+      expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+      expect(res.status).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['PASSENGER', 'OPERATOR_ADMIN', 'OPERATOR_STAFF', 'DRIVER', 'ASSISTANT'])(
+    'denies Day 40 platform report to %s',
+    async (role) => {
+      const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
+      const handler = createProxyHandler(env, signer);
+      const authorization = await makeAuthorizationHeader({ sub: 'non-admin-1', role });
+      const req = makeRequest(
+        '/v1/admin/reports/platform?from=2026-07-01T00%3A00%3A00Z&to=2026-08-01T00%3A00%3A00Z',
+        { authorization, 'x-request-id': 'req-day40-denied' },
+        'GET',
+      );
+      const res = makeResponse();
+      const next = jest.fn() as NextFunction;
+
+      await handler(req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.jsonBody).toMatchObject({
+        success: false,
+        statusCode: 403,
+        error: { code: 'FORBIDDEN' },
+      });
+      expect(signer.sign).not.toHaveBeenCalled();
+      expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+      expect(next).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
     ['PATCH', '/v1/admin/vouchers/11111111-1111-1111-1111-111111111111'],
     ['DELETE', '/v1/admin/vouchers/11111111-1111-1111-1111-111111111111'],
   ] as const)('routes SYSTEM_ADMIN %s %s to Booking', async (method, path) => {
