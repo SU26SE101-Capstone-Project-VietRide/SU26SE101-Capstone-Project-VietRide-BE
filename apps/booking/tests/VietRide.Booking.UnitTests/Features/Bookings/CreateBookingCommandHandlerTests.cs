@@ -119,7 +119,9 @@ public class CreateBookingCommandHandlerTests
 
         await _bookings.Received(1)
             .AddAsync(
-                Arg.Is<BookingEntity>(booking => booking.SeatLockToken == SeatLockToken),
+                Arg.Is<BookingEntity>(booking => booking.SeatLockToken == SeatLockToken
+                    && booking.TripSnapshotDeparture == ValidTrip.DepartureDateTime
+                    && booking.TripCurrentDeparture == ValidTrip.DepartureDateTime),
                 Arg.Any<CancellationToken>());
 
         await _statusHistory.Received(2).AddAsync(

@@ -343,7 +343,7 @@ $text=$sql -join [Environment]::NewLine
 foreach($v in @('trip_current_departure','idx_bookings_trip_current_departure','UPDATE bookings','trip_snapshot_departure')) {
   if ($text -notmatch [regex]::Escape($v)) { throw "Migration SQL missing $v" }
 }
-if ($text -match 'TripCurrentDeparture|FOREIGN KEY[^;]*trip_current_departure') { throw 'Migration violates snake_case/logical-FK rules' }
+if ($text -match '"TripCurrentDeparture"|FOREIGN KEY[^;]*trip_current_departure') { throw 'Migration violates snake_case/logical-FK rules' }
 if (-not (Select-String -Path "apps/booking/src/VietRide.Booking.Infrastructure/Migrations/$migration.cs" -Pattern 'protected override void Down' -Quiet)) { throw 'Migration Down is missing' }
 ```
 
@@ -916,7 +916,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Task 23.9 diff hygiene failed' }
 |---|---|---|---|---|
 | 23.0 | ✅ done | this commit | APPROVE | 2026-07-17; one review patch round; DOCS gate green; no scope expansion |
 | 23.1 | ✅ done | this commit | APPROVE | 2026-07-17; one review patch round; 4+6+6 focused tests green; no scope expansion |
-| 23.2 | ⬜ todo | — | — | Current-departure migration |
+| 23.2 | ✅ done | this commit | APPROVE | 2026-07-17; one EOL patch round; migration lifecycle + 2+1+2 tests green; human-approved guard correction |
 | 23.3 | ⬜ todo | — | — | Existing producer hardening |
 | 23.4 | ⬜ todo | — | — | Projection/CAS/Booking facts |
 | 23.5 | ⬜ todo | — | — | Cancelled compatibility rollout |

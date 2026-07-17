@@ -141,14 +141,18 @@ public class CreateRoundTripBookingCommandHandlerTests
                 b.BookingGroupId == result.BookingGroupId
                 && b.TripDirection == TripDirection.OUTBOUND
                 && b.TotalAmount.Amount == 200_000
-                && b.DiscountAmount.Amount == 0),
+                && b.DiscountAmount.Amount == 0
+                && b.TripSnapshotDeparture == OutboundTrip.DepartureDateTime
+                && b.TripCurrentDeparture == OutboundTrip.DepartureDateTime),
             Arg.Any<CancellationToken>());
         await _bookings.Received(1).AddAsync(
             Arg.Is<BookingEntity>(b =>
                 b.BookingGroupId == result.BookingGroupId
                 && b.TripDirection == TripDirection.RETURN
                 && b.TotalAmount.Amount == 180_000
-                && b.DiscountAmount.Amount == 0),
+                && b.DiscountAmount.Amount == 0
+                && b.TripSnapshotDeparture == ReturnTrip.DepartureDateTime
+                && b.TripCurrentDeparture == ReturnTrip.DepartureDateTime),
             Arg.Any<CancellationToken>());
 
         await _paymentClient.Received(1).BatchChargeAsync(

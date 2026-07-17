@@ -550,7 +550,8 @@ public sealed class CreateRoundTripBookingCommandHandler
             tripSnapshotRouteName: null,
             bookingGroupId: bookingGroupId,
             tripDirection: tripDirection,
-            seatLockToken: seatLockToken);
+            seatLockToken: seatLockToken,
+            tripCurrentDeparture: trip.DepartureDateTime);
 
         var ticketAllocations = BuildTicketAllocations(leg.Seats, perSeatFare, discountAmount, now);
         foreach (var allocation in ticketAllocations)

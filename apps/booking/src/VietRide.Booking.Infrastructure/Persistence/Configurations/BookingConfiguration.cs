@@ -146,6 +146,11 @@ internal sealed class BookingConfiguration : IEntityTypeConfiguration<BookingEnt
             .HasColumnName("trip_snapshot_departure")
             .IsRequired(false);
 
+        builder.Property(x => x.TripCurrentDeparture)
+            .HasColumnName("trip_current_departure")
+            .HasColumnType("timestamp with time zone")
+            .IsRequired(false);
+
         builder.Property(x => x.TripSnapshotRouteName)
             .HasColumnName("trip_snapshot_route_name")
             .HasMaxLength(255)
@@ -221,5 +226,9 @@ internal sealed class BookingConfiguration : IEntityTypeConfiguration<BookingEnt
 
         builder.HasIndex(x => x.TripSnapshotDeparture)
             .HasDatabaseName("idx_bookings_trip_snapshot_departure");
+
+        builder.HasIndex(x => x.TripCurrentDeparture)
+            .IsDescending()
+            .HasDatabaseName("idx_bookings_trip_current_departure");
     }
 }
