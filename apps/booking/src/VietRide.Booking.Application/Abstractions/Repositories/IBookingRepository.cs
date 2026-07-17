@@ -87,6 +87,13 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
     Task<BookingEntity?> FindByIdWithPassengersAsync(Guid bookingId, CancellationToken ct = default);
 
     /// <summary>
+    /// Locks one Booking aggregate for a pending-action resolution transaction.
+    /// Call only after locking the pending action so concurrent resolution paths use one order.
+    /// </summary>
+    Task<BookingEntity?> FindByIdForUpdateAsync(Guid bookingId, CancellationToken ct = default)
+        => throw new NotSupportedException("Booking pending-action lock lookup is not implemented by this repository.");
+
+    /// <summary>
     /// Returns the data needed to replay the Trip seat-lock seam for a payment event.
     /// Null means the booking is no longer PENDING_PAYMENT and the event is an idempotent no-op.
     /// </summary>

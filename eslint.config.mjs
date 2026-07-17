@@ -41,12 +41,15 @@ export default [
   },
   {
     files: [
+      'apps/gateway/**/*.ts',
       'apps/notification/**/*.ts',
       'libs/shared/contracts/**/*.ts'
     ],
     languageOptions: {
       parserOptions: {
         project: [
+          './apps/gateway/tsconfig.app.json',
+          './apps/gateway/tsconfig.spec.json',
           './apps/notification/tsconfig.app.json',
           './apps/notification/tsconfig.spec.json',
           './libs/shared/contracts/tsconfig.lib.json',

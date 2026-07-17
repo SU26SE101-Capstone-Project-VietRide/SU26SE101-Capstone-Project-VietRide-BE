@@ -387,6 +387,20 @@ internal sealed class BookingRepository : IBookingRepository
             .Include(b => b.ShuttleIntent)
             .FirstOrDefaultAsync(b => b.Id == bookingId, ct);
 
+    public async Task<BookingEntity?> FindByIdForUpdateAsync(
+        Guid bookingId,
+        CancellationToken ct = default)
+        => await _db.Bookings
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_booking.bookings
+                WHERE id = {bookingId}
+                FOR UPDATE
+                """)
+            .Include(booking => booking.Tickets)
+            .Include(booking => booking.ShuttleIntent)
+            .SingleOrDefaultAsync(ct);
+
     /// <inheritdoc/>
     public async Task<BookingPaymentTransitionSnapshot?> GetPendingPaymentTransitionSnapshotAsync(
         Guid bookingId,

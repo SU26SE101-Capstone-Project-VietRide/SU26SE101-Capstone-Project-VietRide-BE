@@ -59,4 +59,25 @@ public sealed class BookingPendingAction : BaseEntity<Guid>
     /// Equality is still eligible for a passenger response.
     /// </summary>
     public bool IsDeadlineExpired(DateTimeOffset now) => Deadline < now;
+
+    public void ResolveScheduleChange(
+        BookingPendingActionResolved resolvedAction,
+        DateTimeOffset resolvedAt,
+        DateTimeOffset effectiveCutoff)
+    {
+        if (Reason != BookingPendingActionReason.SCHEDULE_CHANGE
+            || ResolvedAt.HasValue
+            || resolvedAction is not (BookingPendingActionResolved.ACCEPTED or BookingPendingActionResolved.REJECTED))
+        {
+            throw new InvalidOperationException("Pending action cannot be resolved as a schedule change.");
+        }
+
+        if (resolvedAt > effectiveCutoff)
+        {
+            throw new InvalidOperationException("Pending action is past its effective cutoff.");
+        }
+
+        ResolvedAt = resolvedAt;
+        ResolvedAction = resolvedAction;
+    }
 }

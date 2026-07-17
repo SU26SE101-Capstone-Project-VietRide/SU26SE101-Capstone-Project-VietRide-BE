@@ -36,6 +36,10 @@ public sealed class HandleScheduleChangeCommandHandler(
         {
             schedules.Clear();
             await bookings.AcquireEventLockAsync(request.EventId, cancellationToken);
+            await pendingActions.GetActiveByTripForUpdateAsync(
+                request.TripId,
+                request.OperatorId,
+                cancellationToken);
             var candidates = await bookings.GetScheduleChangeBookingsForUpdateAsync(
                 request.TripId,
                 request.OperatorId,

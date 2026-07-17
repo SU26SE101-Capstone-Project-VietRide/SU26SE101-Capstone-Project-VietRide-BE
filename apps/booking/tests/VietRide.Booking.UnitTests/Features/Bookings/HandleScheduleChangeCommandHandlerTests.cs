@@ -119,6 +119,17 @@ public sealed class HandleScheduleChangeCommandHandlerTests
         await fixture.Handler.Handle(Command(OccurredAt.AddHours(3), "MEDIUM"), CancellationToken.None);
 
         calls.Should().Equal("commit", "schedule");
+        Received.InOrder(() =>
+        {
+            fixture.PendingActions.GetActiveByTripForUpdateAsync(
+                TripId,
+                OperatorId,
+                Arg.Any<CancellationToken>());
+            fixture.Bookings.GetScheduleChangeBookingsForUpdateAsync(
+                TripId,
+                OperatorId,
+                Arg.Any<CancellationToken>());
+        });
         captured.Should().NotBeNull();
         captured!.Reason.Should().Be(BookingPendingActionReason.SCHEDULE_CHANGE);
         captured.Severity.Should().Be(BookingPendingActionSeverity.MEDIUM);
