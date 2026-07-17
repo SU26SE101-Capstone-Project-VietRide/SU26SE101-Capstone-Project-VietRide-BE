@@ -119,8 +119,8 @@ public class CreateRoundTripBookingCommandHandlerTests
     {
         var now = new DateTimeOffset(2026, 7, 11, 2, 3, 4, TimeSpan.Zero);
         _clock.UtcNow.Returns(now);
-        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<CancellationToken>()).Returns(OutboundTrip);
-        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<CancellationToken>()).Returns(ReturnTrip);
+        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(OutboundTrip);
+        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(ReturnTrip);
         _tripClient.LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default)
             .ReturnsForAnyArgs(new LockRoundTripSeatsOutcome.Success(OutboundLockData, ReturnLockData));
         _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
@@ -199,6 +199,14 @@ public class CreateRoundTripBookingCommandHandlerTests
                 && history.ReasonCode == null),
             Arg.Any<CancellationToken>());
         _ = _clock.Received(1).UtcNow;
+        await _tripClient.Received(1).GetTripSnapshotAsync(
+            OutboundTripId,
+            now,
+            Arg.Any<CancellationToken>());
+        await _tripClient.Received(1).GetTripSnapshotAsync(
+            ReturnTripId,
+            now,
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -213,8 +221,8 @@ public class CreateRoundTripBookingCommandHandlerTests
         {
             OriginStation = new TripStationSnapshot(StationId, "Da Nang", true, 16.0544m, 108.2022m, true),
         };
-        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<CancellationToken>()).Returns(supportedOutbound);
-        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<CancellationToken>()).Returns(supportedReturn);
+        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(supportedOutbound);
+        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(supportedReturn);
         _tripClient.LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default)
             .ReturnsForAnyArgs(new LockRoundTripSeatsOutcome.Success(OutboundLockData, ReturnLockData));
         _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
@@ -241,8 +249,8 @@ public class CreateRoundTripBookingCommandHandlerTests
     {
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
         var outboundWithoutReturnRoute = OutboundTrip with { ReturnRouteId = null };
-        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<CancellationToken>()).Returns(outboundWithoutReturnRoute);
-        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<CancellationToken>()).Returns(ReturnTrip);
+        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(outboundWithoutReturnRoute);
+        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(ReturnTrip);
 
         var act = () => BuildSut().Handle(BuildCommand(), CancellationToken.None);
 
@@ -258,8 +266,8 @@ public class CreateRoundTripBookingCommandHandlerTests
     {
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
         var invalidReturnTrip = ReturnTrip with { DepartureDateTime = OutboundTrip.EstimatedArrivalTime };
-        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<CancellationToken>()).Returns(OutboundTrip);
-        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<CancellationToken>()).Returns(invalidReturnTrip);
+        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(OutboundTrip);
+        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(invalidReturnTrip);
 
         var act = () => BuildSut().Handle(BuildCommand(), CancellationToken.None);
 
@@ -274,8 +282,8 @@ public class CreateRoundTripBookingCommandHandlerTests
     public async Task Handle_BatchChargeFails_ReleasesBothLocksAndDoesNotConfirm()
     {
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
-        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<CancellationToken>()).Returns(OutboundTrip);
-        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<CancellationToken>()).Returns(ReturnTrip);
+        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(OutboundTrip);
+        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(ReturnTrip);
         _tripClient.LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default)
             .ReturnsForAnyArgs(new LockRoundTripSeatsOutcome.Success(OutboundLockData, ReturnLockData));
         _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
@@ -308,8 +316,8 @@ public class CreateRoundTripBookingCommandHandlerTests
     public async Task Handle_BatchChargeReturnsUnexpectedReferenceId_ReleasesBothLocksAndDoesNotConfirm()
     {
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
-        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<CancellationToken>()).Returns(OutboundTrip);
-        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<CancellationToken>()).Returns(ReturnTrip);
+        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(OutboundTrip);
+        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(ReturnTrip);
         _tripClient.LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default)
             .ReturnsForAnyArgs(new LockRoundTripSeatsOutcome.Success(OutboundLockData, ReturnLockData));
         _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
@@ -350,8 +358,8 @@ public class CreateRoundTripBookingCommandHandlerTests
     public async Task Handle_AtomicRoundTripLockFails_DoesNotReleaseOrCharge()
     {
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
-        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<CancellationToken>()).Returns(OutboundTrip);
-        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<CancellationToken>()).Returns(ReturnTrip);
+        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(OutboundTrip);
+        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(ReturnTrip);
         _tripClient.LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default)
             .ReturnsForAnyArgs(new LockRoundTripSeatsOutcome.SeatUnavailable(["A01"]));
 
@@ -390,8 +398,8 @@ public class CreateRoundTripBookingCommandHandlerTests
         const long returnDiscount = 18_000;
 
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
-        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<CancellationToken>()).Returns(OutboundTrip);
-        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<CancellationToken>()).Returns(ReturnTrip);
+        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(OutboundTrip);
+        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(ReturnTrip);
         _tripClient.LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default)
             .ReturnsForAnyArgs(new LockRoundTripSeatsOutcome.Success(OutboundLockData, ReturnLockData));
         _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
@@ -491,8 +499,8 @@ public class CreateRoundTripBookingCommandHandlerTests
         const long outboundDiscount = 20_000;
 
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
-        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<CancellationToken>()).Returns(OutboundTrip);
-        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<CancellationToken>()).Returns(ReturnTrip);
+        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(OutboundTrip);
+        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(ReturnTrip);
         _tripClient.LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default)
             .ReturnsForAnyArgs(new LockRoundTripSeatsOutcome.Success(OutboundLockData, ReturnLockData));
         _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
@@ -562,8 +570,8 @@ public class CreateRoundTripBookingCommandHandlerTests
         const long discount = 15_000;
 
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
-        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<CancellationToken>()).Returns(OutboundTrip);
-        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<CancellationToken>()).Returns(ReturnTrip);
+        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(OutboundTrip);
+        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(ReturnTrip);
         _tripClient.LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default)
             .ReturnsForAnyArgs(new LockRoundTripSeatsOutcome.Success(OutboundLockData, ReturnLockData));
         _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
@@ -636,8 +644,8 @@ public class CreateRoundTripBookingCommandHandlerTests
         const long outboundDiscount = 10_000;
 
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
-        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<CancellationToken>()).Returns(OutboundTrip);
-        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<CancellationToken>()).Returns(ReturnTrip);
+        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(OutboundTrip);
+        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(ReturnTrip);
         _tripClient.LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default)
             .ReturnsForAnyArgs(new LockRoundTripSeatsOutcome.Success(OutboundLockData, ReturnLockData));
         _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
@@ -704,8 +712,8 @@ public class CreateRoundTripBookingCommandHandlerTests
         const long outboundDiscount = 10_000;
 
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
-        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<CancellationToken>()).Returns(OutboundTrip);
-        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<CancellationToken>()).Returns(ReturnTrip);
+        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(OutboundTrip);
+        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(ReturnTrip);
         _tripClient.LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default)
             .ReturnsForAnyArgs(new LockRoundTripSeatsOutcome.Success(OutboundLockData, ReturnLockData));
         _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())

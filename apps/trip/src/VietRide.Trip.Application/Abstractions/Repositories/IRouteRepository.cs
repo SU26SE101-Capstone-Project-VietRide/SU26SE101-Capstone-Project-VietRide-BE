@@ -24,4 +24,7 @@ public interface IRouteRepository : IRepository<Route, Guid>
         Guid primaryStationId,
         CancellationToken cancellationToken = default)
         => throw new NotSupportedException("Route station-merge relinking is not implemented by this repository.");
+
+    Task<Route?> AcquireOwnedActiveAsync(Guid operatorId, Guid routeId, CancellationToken cancellationToken)
+        => throw new NotSupportedException("Route locking is not supported by this repository implementation.");
 }

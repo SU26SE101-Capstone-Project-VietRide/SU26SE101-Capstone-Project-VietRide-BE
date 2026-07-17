@@ -111,4 +111,38 @@ internal sealed class RouteRepository : IRouteRepository
 
         return (originCount, destinationCount);
     }
+
+    public async Task<Route?> AcquireOwnedActiveAsync(
+        Guid operatorId,
+        Guid routeId,
+        CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException("A caller-owned transaction is required for Route acquisition.");
+        }
+
+        var route = await dbContext.Routes
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_trip.routes
+                WHERE id = {routeId}
+                    AND operator_id = {operatorId}
+                    AND is_active = TRUE
+                    AND deleted_at IS NULL
+                FOR SHARE
+                """)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (route is null)
+        {
+            return null;
+        }
+
+        await dbContext.Entry(route).ReloadAsync(cancellationToken);
+        return route.OperatorId == operatorId
+            && route.IsActive
+            && route.DeletedAt is null
+            ? route
+            : null;
+    }
 }

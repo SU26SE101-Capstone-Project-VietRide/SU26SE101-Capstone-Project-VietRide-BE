@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using VietRide.Trip.Application.Abstractions.Repositories;
@@ -127,6 +129,63 @@ internal sealed class TripRepository : ITripRepository
         _dbContext.Trips
             .Include(trip => trip.Seats)
             .FirstOrDefaultAsync(trip => trip.Id == tripId, cancellationToken);
+
+    public async Task<IReadOnlyList<Domain.Entities.Trip>> ListPendingByDriverScheduleAsync(
+        Guid driverScheduleId,
+        CancellationToken cancellationToken) =>
+        await _dbContext.Trips
+            .AsNoTracking()
+            .Where(trip => trip.DriverScheduleId == driverScheduleId
+                && (trip.Status == TripStatus.SCHEDULED || trip.Status == TripStatus.BOARDING))
+            .OrderBy(trip => trip.DepartureDateTime)
+            .ThenBy(trip => trip.Id)
+            .ToArrayAsync(cancellationToken);
+
+    public async Task<Domain.Entities.Trip?> AcquireForVehicleSwapAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        EnsureCallerTransaction("vehicle-swap Trip acquisition");
+
+        var trip = await _dbContext.Trips
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_trip.trips
+                WHERE id = {tripId}
+                FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (trip is not null)
+        {
+            await _dbContext.Entry(trip).ReloadAsync(cancellationToken);
+        }
+
+        return trip;
+    }
+
+    public async Task<bool> HasVehicleConflictAsync(
+        Guid vehicleId,
+        DateTimeOffset departureDateTime,
+        Guid excludedTripId,
+        CancellationToken cancellationToken)
+    {
+        var normalizedDeparture = departureDateTime.ToUniversalTime();
+        if (_dbContext.Database.CurrentTransaction is not null)
+        {
+            var lockKey = CreateVehicleDepartureLockKey(vehicleId, normalizedDeparture);
+            await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock({lockKey})",
+                cancellationToken);
+        }
+
+        return await _dbContext.Trips.AnyAsync(
+            trip => trip.VehicleId == vehicleId
+                && trip.DepartureDateTime == normalizedDeparture
+                && trip.Id != excludedTripId
+                && trip.Status != TripStatus.CANCELLED
+                && trip.Status != TripStatus.COMPLETED,
+            cancellationToken);
+    }
 
     public async Task<Domain.Entities.Trip?> GetForUpdateAsync(
         Guid tripId,
@@ -456,6 +515,30 @@ internal sealed class TripRepository : ITripRepository
         {
             throw new ArgumentOutOfRangeException(nameof(volumeM3), volumeM3, "Cargo volume must be positive.");
         }
+    }
+
+    private void EnsureCallerTransaction(string operation)
+    {
+        if (_dbContext.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException($"A caller-owned transaction is required for {operation}.");
+        }
+    }
+
+    private static long CreateVehicleDepartureLockKey(Guid vehicleId, DateTimeOffset departureDateTime)
+    {
+        Span<byte> input = stackalloc byte[24];
+        vehicleId.TryWriteBytes(input[..16]);
+
+        // PostgreSQL timestamptz is stored at microsecond precision. Hash the same normalized
+        // instant that participates in uq_trips_vehicle_departure so equivalent offsets and
+        // sub-microsecond .NET values cannot acquire different locks for the same database key.
+        var utcMicroseconds = departureDateTime.ToUniversalTime().Ticks / 10;
+        BinaryPrimitives.WriteInt64BigEndian(input[16..], utcMicroseconds);
+
+        Span<byte> hash = stackalloc byte[SHA256.HashSizeInBytes];
+        SHA256.HashData(input, hash);
+        return BinaryPrimitives.ReadInt64BigEndian(hash);
     }
 
     private static void EnsureCapacity(

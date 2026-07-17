@@ -1,3 +1,4 @@
+using VietRide.Booking.Application.Features.Internal.Bookings;
 using VietRide.Booking.Application.Features.Internal.Reports.PlatformBookings;
 using VietRide.Booking.Application.Features.OperatorBookings.GetOperatorBookingDetail;
 using VietRide.Booking.Application.Features.OperatorBookings.ListOperatorBookings;
@@ -18,6 +19,33 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
         DateTimeOffset toUtc,
         CancellationToken ct = default)
         => throw new NotSupportedException("Platform Booking report is not implemented by this repository.");
+
+    Task AcquireEventLockAsync(Guid sourceEventId, CancellationToken ct = default)
+        => throw new NotSupportedException("Booking event lock is not implemented by this repository.");
+
+    Task<IReadOnlyList<BookingEntity>> GetConfirmedByTripAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Schedule-change booking lookup is not implemented by this repository.");
+
+    Task<IReadOnlyList<BookingEntity>> GetCancellableByTripAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Trip-cancellation booking lookup is not implemented by this repository.");
+
+    Task<bool> HasOutboxEventAsync(
+        string eventType,
+        Guid eventId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Outbox idempotency lookup is not implemented by this repository.");
+
+    Task<TripEditImpactDto> GetTripEditImpactAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Trip-edit impact is not implemented by this repository.");
 
     Task<OperatorBookingDetailDto?> GetOperatorBookingDetailAsync(Guid bookingId, Guid operatorId, CancellationToken ct = default)
         => throw new NotSupportedException("Operator booking detail is not implemented by this repository.");

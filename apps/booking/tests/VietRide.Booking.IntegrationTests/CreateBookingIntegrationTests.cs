@@ -65,7 +65,10 @@ public class CreateBookingIntegrationTests
             Stops: [],
             SeatSummary: new TripSeatSummary(40, 38));
 
-        _factory.TripClient.GetTripSnapshotAsync(tripId, Arg.Any<CancellationToken>())
+        _factory.TripClient.GetTripSnapshotAsync(
+                tripId,
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
             .Returns(tripSnapshot);
         _factory.TripClient.LockSeatsAsync(
                 tripId,
@@ -169,7 +172,10 @@ public class CreateBookingIntegrationTests
             Stops: [],
             SeatSummary: new TripSeatSummary(40, 0)); // no available seats
 
-        _factory.TripClient.GetTripSnapshotAsync(tripId, Arg.Any<CancellationToken>())
+        _factory.TripClient.GetTripSnapshotAsync(
+                tripId,
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
             .Returns(tripSnapshot);
         _factory.TripClient.LockSeatsAsync(
                 tripId,
@@ -262,7 +268,10 @@ public class CreateBookingIntegrationTests
             Stops: [],
             SeatSummary: new TripSeatSummary(40, 10));
 
-        _factory.TripClient.GetTripSnapshotAsync(tripId, Arg.Any<CancellationToken>())
+        _factory.TripClient.GetTripSnapshotAsync(
+                tripId,
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
             .Returns(tripSnapshot);
         _factory.TripClient.LockSeatsAsync(
                 tripId,
@@ -395,7 +404,7 @@ public class CreateBookingIntegrationTests
             .Should().NotBeNullOrEmpty();
 
         await _factory.TripClient.DidNotReceiveWithAnyArgs()
-            .GetTripSnapshotAsync(default, default);
+            .GetTripSnapshotAsync(default, default, default);
         await _factory.BookingRepository.DidNotReceiveWithAnyArgs()
             .AddAsync(default!, default);
     }
@@ -433,7 +442,7 @@ public class CreateBookingIntegrationTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         await _factory.TripClient.DidNotReceiveWithAnyArgs()
-            .GetTripSnapshotAsync(default, default);
+            .GetTripSnapshotAsync(default, default, default);
         await _factory.BookingRepository.DidNotReceiveWithAnyArgs()
             .AddAsync(default!, default);
     }

@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -545,8 +546,19 @@ public sealed class OperatorsControllerTests :
             builder.UseSetting("ConnectionStrings:Default", _connectionString);
             builder.UseSetting("REDIS_URL", "localhost:6379,abortConnect=false");
 
-            builder.ConfigureServices(services =>
+            builder.ConfigureTestServices(services =>
             {
+                services.RemoveAll<DbContextOptions<IdentityDbContext>>();
+                services.AddScoped(sp => new DbContextOptionsBuilder<IdentityDbContext>()
+                    .EnableServiceProviderCaching(false)
+                    .ConfigureWarnings(warnings => warnings.Ignore(
+                        Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning))
+                    .UseNpgsql(
+                        sp.GetRequiredService<NpgsqlDataSource>(),
+                        npgsql => npgsql.MigrationsHistoryTable(
+                            "__ef_migrations_history",
+                            IdentityDbContext.SchemaName))
+                    .Options);
                 services.RemoveAll<IEmailService>();
                 services.AddSingleton<IEmailService>(EmailService);
             });

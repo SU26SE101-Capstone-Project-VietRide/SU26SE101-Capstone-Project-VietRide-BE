@@ -56,6 +56,12 @@ public sealed class DevTripServiceClient : ITripServiceClient
         return Task.FromResult<TripSnapshot?>(snapshot);
     }
 
+    public Task<TripSnapshot?> GetTripSnapshotAsync(
+        Guid tripId,
+        DateTimeOffset pricingAt,
+        CancellationToken cancellationToken)
+        => GetTripSnapshotAsync(tripId, cancellationToken);
+
     public Task<LockSeatsOutcome> LockSeatsAsync(
         Guid tripId,
         IReadOnlyList<string> seatNumbers,

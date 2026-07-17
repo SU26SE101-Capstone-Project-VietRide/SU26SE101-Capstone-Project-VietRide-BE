@@ -68,6 +68,11 @@ public sealed class TripStop : BaseEntity<Guid>
         Status = TripStopStatus.SKIPPED;
     }
 
+    public void RecomputePlannedArrival(DateTimeOffset estimatedArrivalTime)
+    {
+        EstimatedArrivalTime = estimatedArrivalTime;
+    }
+
     private void EnsurePending(string operation)
     {
         if (Status != TripStopStatus.PENDING)

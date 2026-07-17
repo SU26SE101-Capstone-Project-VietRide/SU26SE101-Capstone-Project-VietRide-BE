@@ -8,6 +8,7 @@ import {
   TRIP_CREW_CHANGED_ROUTING_KEY,
   TRIP_INCIDENT_REPORTED_ROUTING_KEY,
   TRIP_STOP_DISABLED_ROUTING_KEY,
+  TRIP_VEHICLE_SWAPPED_ROUTING_KEY,
 } from './trip-tracking-alert-events.constants';
 import {
   IncidentReportedPayloadSchema,
@@ -61,6 +62,62 @@ describe('mapTripTrackingAlertToNotifications', () => {
       }),
       expect.objectContaining({ userId: USER_ID, type: NotificationType.TRIP_ASSIGNMENT_REMOVED }),
     ]);
+  });
+
+  it('maps a vehicle swap to the assigned crew only', () => {
+    const notifications = mapTripTrackingAlertToNotifications(TRIP_VEHICLE_SWAPPED_ROUTING_KEY, {
+      eventId: '99999999-9999-4999-8999-999999999999',
+      occurredAt: '2026-07-15T01:00:00+00:00',
+      tripId: TRIP_ID,
+      operatorId: '77777777-7777-4777-8777-777777777777',
+      oldVehicleId: '66666666-6666-4666-8666-666666666666',
+      newVehicleId: '77777777-7777-4777-8777-777777777778',
+      oldVehiclePlateNumber: '51B-111.11',
+      newVehiclePlateNumber: '51B-222.22',
+      departureDateTime: '2026-07-16T01:00:00+00:00',
+      driverUserId: USER_ID,
+      assistantUserId: SECOND_USER_ID,
+      seatImpacts: [
+        {
+          bookingId: '88888888-8888-4888-8888-888888888888',
+          seatNumbers: ['A01'],
+          reason: 'SEAT_REMOVED',
+        },
+      ],
+    });
+
+    expect(notifications).toEqual([
+      expect.objectContaining({ userId: USER_ID, type: NotificationType.VEHICLE_SWAPPED }),
+      expect.objectContaining({ userId: SECOND_USER_ID, type: NotificationType.VEHICLE_SWAPPED }),
+    ]);
+    expect(notifications).toHaveLength(2);
+    expect(notifications[0]?.data).toEqual(
+      expect.objectContaining({
+        oldVehiclePlateNumber: '51B-111.11',
+        newVehiclePlateNumber: '51B-222.22',
+        driverUserId: USER_ID,
+        assistantUserId: SECOND_USER_ID,
+      }),
+    );
+  });
+
+  it('does not create a recipient-less vehicle-swap notification', () => {
+    expect(
+      mapTripTrackingAlertToNotifications(TRIP_VEHICLE_SWAPPED_ROUTING_KEY, {
+        eventId: '99999999-9999-4999-8999-999999999999',
+        occurredAt: '2026-07-15T01:00:00+00:00',
+        tripId: TRIP_ID,
+        operatorId: '77777777-7777-4777-8777-777777777777',
+        oldVehicleId: '66666666-6666-4666-8666-666666666666',
+        newVehicleId: '77777777-7777-4777-8777-777777777778',
+        oldVehiclePlateNumber: '51B-111.11',
+        newVehiclePlateNumber: '51B-222.22',
+        departureDateTime: '2026-07-16T01:00:00+00:00',
+        driverUserId: USER_ID,
+        assistantUserId: null,
+        seatImpacts: [],
+      }),
+    ).toEqual([expect.objectContaining({ userId: USER_ID })]);
   });
 
   it('maps approaching stop wave 1 title and body', () => {

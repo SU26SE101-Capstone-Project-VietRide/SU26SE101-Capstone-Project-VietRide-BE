@@ -82,6 +82,8 @@ public sealed class CreateBookingCommandHandler
         CreateBookingCommand request,
         CancellationToken cancellationToken)
     {
+        var now = _clock.UtcNow;
+
         // -----------------------------------------------------------------------
         // 0. Business-rule guard — max 5 seats per booking (BSOT §5.9 registered code 422)
         //    FluentValidation catches shape errors in the pipeline; this guard fires for
@@ -98,7 +100,7 @@ public sealed class CreateBookingCommandHandler
         // -----------------------------------------------------------------------
         // 1. Fetch trip snapshot — validate trip exists and is SCHEDULED
         // -----------------------------------------------------------------------
-        var trip = await _tripClient.GetTripSnapshotAsync(request.TripId, cancellationToken);
+        var trip = await _tripClient.GetTripSnapshotAsync(request.TripId, now, cancellationToken);
         if (trip is null)
         {
             throw new CodedNotFoundException("TRIP_NOT_FOUND", $"Trip '{request.TripId}' not found.");
@@ -126,7 +128,6 @@ public sealed class CreateBookingCommandHandler
         trip = BookingStationCanonicalization.ResolveTrip(trip, stationCanonicalization);
 
         ValidateStopSelections(trip, request.PickupStopId, request.DropoffStopId);
-        var now = _clock.UtcNow;
         ValidateShuttleRequest(request, trip, now);
 
         // -----------------------------------------------------------------------

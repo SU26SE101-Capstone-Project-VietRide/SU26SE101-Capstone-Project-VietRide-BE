@@ -72,6 +72,30 @@ public sealed class DriverSchedule : BaseEntity<Guid>, IActivatable
         AssistantUserId = assistantUserId;
     }
 
+    public void UpdateRecurrence(
+        TimeOnly departureTime,
+        JsonElement dayOfWeek,
+        Guid driverUserId,
+        Guid? assistantUserId,
+        Guid? vehicleId,
+        DateOnly? validUntil,
+        bool isActive)
+    {
+        ValidateDayOfWeek(dayOfWeek);
+        ValidateGuid(driverUserId, nameof(driverUserId));
+        ValidateOptionalGuid(assistantUserId, nameof(assistantUserId));
+        ValidateOptionalGuid(vehicleId, nameof(vehicleId));
+        ValidateDateRange(ValidFrom, validUntil);
+
+        DepartureTime = departureTime;
+        DayOfWeek = dayOfWeek.Clone();
+        DriverUserId = driverUserId;
+        AssistantUserId = assistantUserId;
+        VehicleId = vehicleId;
+        ValidUntil = validUntil;
+        IsActive = isActive;
+    }
+
     public void Activate() => IsActive = true;
 
     public void Deactivate() => IsActive = false;

@@ -164,6 +164,74 @@ behavior is covered by Task 21.1's controlled middleware integration test, and j
 boundaries are covered by Task 21.4's fake-clock integration tests; this live runner does not use
 timing races, clock overrides, or job-control backdoors.
 
+## Day 22 Trip editing, pricing, cascades, and cancellation
+
+The cumulative collection now contains `Operator - Day 22 trip edit and schedule cascade`, a
+Gateway-only manual view of the public Trip and DriverSchedule PATCH contracts. It deliberately
+does not publish internal Booking-impact or Trip-snapshot endpoints. Manual execution needs a
+disposable `SCHEDULED` Trip and DriverSchedule owned by the runtime `OPERATOR_ADMIN` token; replace
+all `day22*` placeholders with fresh values and UUID-v4 keys.
+
+The authoritative reproducible entry point is the deterministic local runner:
+
+```powershell
+# Prerequisite: current Docker application profile is healthy and migrations are applied.
+docker compose -f infra/docker/docker-compose.yml --profile app up -d --build
+
+# Diagnostic Task-22.0 artifact/schema/contract gate; no containers required and never a close-out PASS.
+node scripts/run-day22-trip-edit-pricing-local.mjs --static-only
+
+# Gateway + live Parcel duplicate-event proof + focused tests + Day-21 regression + cleanup;
+# this diagnostic mode does not produce a close-out PASS without the full matrix.
+node scripts/run-day22-trip-edit-pricing-local.mjs
+
+# Reviewer close-out: also run all six .NET solutions and the complete Nx matrix.
+node scripts/run-day22-trip-edit-pricing-local.mjs --full-matrix
+```
+
+The runner creates a unique Route/Vehicle/Trip/DriverSchedule graph and short-lived local JWTs at
+runtime. Public requests go only through `GATEWAY_BASE_URL` (default `http://localhost:3000`).
+Direct database access is limited to deterministic setup, bounded logical-effect evidence, and
+cleanup. The runner also publishes the same `trip.trip.cancelled` payload twice with one `EventId`
+through RabbitMQ, waits for both Parcel acknowledgements and a drained queue, then proves the one
+supported `PENDING_PAYMENT` → `REJECTED` transition, one rejection Outbox event, and one rejected
+statistics increment. A `finally` block removes and verifies every owned row and exact Redis
+idempotency key on both success and failure. Its zero-count proof includes seeded Trip dependencies, Trip audits,
+DriverSchedule audits, Parcel/ParcelStats rows, and matching seeded-id/event-type Outbox rows;
+tokens and development signing material are never printed or written.
+
+The live Gateway phase proves authentication/authorization/key checks precede MVC, reserved
+body/query `422` replay, body/path/subject/query fingerprint mismatches, query-key canonicalization,
+empty-versus-absent and repeated-value ordering, no-op behavior, exact-dong scalar Trip edits,
+Trip-PATCH departure rejection, invalid-`applyTo` reserved/replayed `422`, DriverSchedule persisted
+no-op state plus unchanged Trip/DriverSchedule audit and Outbox counts, and a `/crew` reuse whose
+query/body fingerprint is otherwise identical so only the path differs. Focused controlled test
+projects cover the complete pricing precedence/window matrix,
+legacy omitted-pricing behavior, seat compatibility matrix and races, FUTURE_ONLY/ALL_PENDING batch
+rules, static ETA recomputation, Booking creation/client snapshot capture,
+Booking schedule/cancellation ownership, Payment cancellation/refund behavior,
+crash/DLQ scheduling repair, and locked deterministic pending-action re-alert execution.
+Parcel cancellation idempotency is owned by the mandatory live RabbitMQ phase described above,
+not by the focused test projects.
+
+Hangfire assertions are intentionally logical: the durable pending-action row and deterministic
+Outbox/Notification side effect derived from `pendingActionId` must be unique. Physical duplicate
+Hangfire jobs are permitted and are never counted as a failure. The focused Notification run also
+reruns existing route-change registry/consumer tests unchanged, and the Day-21 runner is executed
+as a mandatory regression unless a developer explicitly supplies `--skip-day21` for diagnosis.
+Every filtered .NET hook writes a deterministic TRX result and fails if its filter executes zero
+tests or reports any failure. `--static-only`, `--skip-targeted`, and `--skip-day21` are diagnostic
+modes and cannot produce close-out PASS; `--full-matrix` rejects either skip flag and mirrors the
+six-solution and TypeScript CI command matrix. After the live and focused phases, the full-matrix
+mode temporarily stops only the nine application containers to release their database pools. Its
+`finally` path restarts exactly those containers, waits for every health check, and leaves
+Postgres, PgBouncer, Redis, and RabbitMQ running throughout.
+
+Record reviewer output in
+[`docs/handoff/evidence/day-22-trip-edit-pricing.md`](../../handoff/evidence/day-22-trip-edit-pricing.md).
+The close-out rows in that file must match an exit-zero `--full-matrix` execution from the same
+checkout.
+
 To execute the authoritative local E2E matrix in dependency order, use this exact command from the
 repository root:
 

@@ -87,6 +87,10 @@ public sealed class PaymentEventHandlersTests
                 && history.ReasonCode == null),
             Arg.Any<CancellationToken>());
         _ = _clock.Received(1).UtcNow;
+        await _tripClient.DidNotReceiveWithAnyArgs()
+            .GetTripSnapshotAsync(default, default);
+        await _tripClient.DidNotReceiveWithAnyArgs()
+            .GetTripSnapshotAsync(default, default, default);
         await _outbox.Received(1)
             .EnqueueAsync(
                 "booking.booking.confirmed",

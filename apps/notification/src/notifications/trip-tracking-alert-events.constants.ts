@@ -1,3 +1,7 @@
+import { TRIP_VEHICLE_SWAPPED_ROUTING_KEY } from '@vietride/contracts';
+
+export { TRIP_VEHICLE_SWAPPED_ROUTING_KEY };
+
 export const TRIP_ASSIGNED_ROUTING_KEY = 'trip.trip.assigned';
 export const TRIP_CREW_CHANGED_ROUTING_KEY = 'trip.trip.crew_changed';
 export const TRIP_BOARDING_STARTED_ROUTING_KEY = 'trip.trip.boarding_started';
@@ -28,6 +32,10 @@ export const TRIP_TRACKING_ALERT_QUEUE_BINDINGS = [
   {
     queue: 'notification:trip-cancelled',
     routingKey: TRIP_CANCELLED_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:trip-vehicle-swapped-crew',
+    routingKey: TRIP_VEHICLE_SWAPPED_ROUTING_KEY,
   },
   {
     queue: 'notification:trip-delayed',

@@ -10,6 +10,7 @@ using VietRide.Trip.Application.Abstractions.Jobs;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Abstractions.SeatLock;
 using VietRide.Trip.Application.Abstractions.Services;
+using VietRide.Trip.Application.Services;
 using VietRide.Trip.Infrastructure.ExternalClients;
 using VietRide.Trip.Infrastructure.Jobs;
 using VietRide.Trip.Infrastructure.Messaging;
@@ -44,8 +45,10 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IVehicleTypeRepository, VehicleTypeRepository>();
         services.AddScoped<IVehicleRepository, VehicleRepository>();
         services.AddScoped<IDriverScheduleRepository, DriverScheduleRepository>();
+        services.AddScoped<IDriverScheduleAuditLogRepository, DriverScheduleAuditLogRepository>();
         services.AddScoped<ITripRepository, TripRepository>();
         services.AddScoped<ITripAuditLogRepository, TripAuditLogRepository>();
+        services.AddScoped<ITripVehicleSwapService, TripVehicleSwapService>();
         services.AddScoped<IRoundTripSeatLockStore, RedisRoundTripSeatLockStore>();
         services.AddScoped<ITripSeatRepository, TripSeatRepository>();
         services.AddScoped<ITripStopRepository, TripStopRepository>();

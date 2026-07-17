@@ -145,6 +145,13 @@ services:
       ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_trip;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD}'
       IDENTITY_SERVICE_BASE_URL: http://identity:5001
       BOOKING_BASE_URL: http://booking:5003
+      # Trip runs the outbox publisher and RabbitMQ consumers. Inside Docker it
+      # must use the Compose service hostname, never the localhost fallback.
+      RabbitMq__HostName: rabbitmq
+      RabbitMq__Port: '5672'
+      RabbitMq__UserName: ${RABBITMQ_USER:-vietride}
+      RabbitMq__Password: ${RABBITMQ_PASSWORD}
+      RabbitMq__ExchangeName: ${RABBITMQ_EXCHANGE:-vietride.events}
     healthcheck:
       test:
         ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5002/health || exit 1']

@@ -9,6 +9,10 @@ internal sealed class RouteStopFareTemplateConfiguration : IEntityTypeConfigurat
 {
     public void Configure(EntityTypeBuilder<RouteStopFareTemplate> builder)
     {
+        builder.HasAnnotation(
+            "VietRide:ExclusionConstraint:ex_route_stop_fare_templates_no_overlap",
+            "EXCLUDE USING gist (route_id WITH =, stop_id WITH =, tstzrange(effective_from, COALESCE(effective_until, 'infinity'::timestamptz), '[)') WITH &&)");
+
         builder.ToTable("route_stop_fare_templates", table =>
         {
             table.HasCheckConstraint(

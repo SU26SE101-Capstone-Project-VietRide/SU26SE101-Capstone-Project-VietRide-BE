@@ -78,6 +78,28 @@ describe('mapCoreEventToNotification', () => {
     );
   });
 
+  it('keeps Booking cancellation as the passenger cancellation notification path', () => {
+    expect(
+      mapCoreEventToNotification(BOOKING_CANCELLED_ROUTING_KEY, {
+        userId: USER_ID,
+        bookingId: BOOKING_ID,
+        tripId: TRIP_ID,
+        refundAmount: 0,
+        reason: 'DRIVER_SCHEDULE_DAY_REMOVED',
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.BOOKING_CANCELLED,
+        data: expect.objectContaining({
+          bookingId: BOOKING_ID,
+          tripId: TRIP_ID,
+          refundAmount: 0,
+        }),
+      }),
+    );
+  });
+
   it('maps booking refunded event', () => {
     expect(
       mapCoreEventToNotification(BOOKING_REFUNDED_ROUTING_KEY, {

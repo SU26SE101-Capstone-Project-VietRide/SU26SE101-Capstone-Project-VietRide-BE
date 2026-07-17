@@ -1,7 +1,12 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Npgsql;
+using VietRide.Identity.Infrastructure;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Persistence.UnitOfWork;
 using Xunit;
@@ -91,6 +96,20 @@ public sealed class UnitOfWorkWebApplicationFactory : WebApplicationFactory<Prog
         builder.UseSetting("IdentityJwt:Kid", "test-kid");
         builder.UseSetting("IdentityJwt:PrivateKey", DevPrivateKeyPem);
         builder.UseEnvironment("Testing");
+        builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<DbContextOptions<IdentityDbContext>>();
+            services.AddScoped(sp => new DbContextOptionsBuilder<IdentityDbContext>()
+                .EnableServiceProviderCaching(false)
+                .ConfigureWarnings(warnings => warnings.Ignore(
+                    Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning))
+                .UseNpgsql(
+                    sp.GetRequiredService<NpgsqlDataSource>(),
+                    npgsql => npgsql.MigrationsHistoryTable(
+                        "__ef_migrations_history",
+                        IdentityDbContext.SchemaName))
+                .Options);
+        });
         // NOTE: IUnitOfWork is NOT overridden here — the real EfUnitOfWork registration
         // from AddVietRideDbContext must be visible for the DI-resolution proof.
     }

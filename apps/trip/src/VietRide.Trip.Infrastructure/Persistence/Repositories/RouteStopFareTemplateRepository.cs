@@ -55,4 +55,18 @@ internal sealed class RouteStopFareTemplateRepository : IRouteStopFareTemplateRe
             .ThenBy(template => template.EffectiveFrom)
             .ThenBy(template => template.Id)
             .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<RouteStopFareTemplate>> ListActiveByRouteAsync(
+        Guid routeId,
+        DateTimeOffset pricingAt,
+        CancellationToken cancellationToken)
+        => await dbContext.RouteStopFareTemplates
+            .AsNoTracking()
+            .Where(template => template.RouteId == routeId
+                && template.EffectiveFrom <= pricingAt
+                && (!template.EffectiveUntil.HasValue || pricingAt < template.EffectiveUntil.Value))
+            .OrderBy(template => template.StopId)
+            .ThenByDescending(template => template.EffectiveFrom)
+            .ThenBy(template => template.Id)
+            .ToListAsync(cancellationToken);
 }

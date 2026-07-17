@@ -28,6 +28,7 @@ public sealed class Trip : BaseEntity<Guid>
     public Guid? CancelledByUserId { get; private set; }
     public string? CancelReason { get; private set; }
     public Guid? CompletedByUserId { get; private set; }
+    public string? Notes { get; private set; }
     public TripStatus Status { get; private set; } = TripStatus.SCHEDULED;
     public TripSource Source { get; private set; }
     public bool HasSubstitution { get; private set; }
@@ -87,7 +88,8 @@ public sealed class Trip : BaseEntity<Guid>
         decimal? maxCargoWeightKg,
         decimal? maxCargoVolumeM3,
         decimal estimatedPassengerLuggageKg,
-        bool hasSubstitution = false)
+        bool hasSubstitution = false,
+        string? notes = null)
     {
         ValidateGuid(operatorId, nameof(operatorId));
         ValidateGuid(routeId, nameof(routeId));
@@ -122,7 +124,38 @@ public sealed class Trip : BaseEntity<Guid>
             ReservedParcelVolumeM3 = 0m,
             TotalLoadedWeightKg = 0m,
             TotalLoadedVolumeM3 = 0m,
+            Notes = NormalizeNotes(notes),
         };
+    }
+
+    public void UpdateNotes(string? notes)
+    {
+        Notes = NormalizeNotes(notes);
+    }
+
+    public bool ChangeBaseFare(Money baseFare)
+    {
+        if (BaseFare == baseFare)
+        {
+            return false;
+        }
+
+        BaseFare = baseFare;
+        return true;
+    }
+
+    public bool ChangeRoute(Guid routeId, DateTimeOffset estimatedArrivalTime)
+    {
+        ValidateGuid(routeId, nameof(routeId));
+        ValidateArrivalAfterDeparture(DepartureDateTime, estimatedArrivalTime);
+        if (RouteId == routeId)
+        {
+            return false;
+        }
+
+        RouteId = routeId;
+        EstimatedArrivalTime = estimatedArrivalTime;
+        return true;
     }
 
     public void MarkBoarding(DateTimeOffset boardingAt)
@@ -209,6 +242,31 @@ public sealed class Trip : BaseEntity<Guid>
         ValidateOptionalGuid(assistantUserId, nameof(assistantUserId));
         DriverUserId = driverUserId;
         AssistantUserId = assistantUserId;
+    }
+
+    public bool ChangeVehicle(Guid vehicleId)
+    {
+        ValidateGuid(vehicleId, nameof(vehicleId));
+        if (VehicleId == vehicleId)
+        {
+            return false;
+        }
+
+        VehicleId = vehicleId;
+        return true;
+    }
+
+    public bool Reschedule(DateTimeOffset departureDateTime, DateTimeOffset estimatedArrivalTime)
+    {
+        ValidateArrivalAfterDeparture(departureDateTime, estimatedArrivalTime);
+        if (DepartureDateTime == departureDateTime && EstimatedArrivalTime == estimatedArrivalTime)
+        {
+            return false;
+        }
+
+        DepartureDateTime = departureDateTime;
+        EstimatedArrivalTime = estimatedArrivalTime;
+        return true;
     }
 
     public void UpdateCargoCounters(
@@ -307,6 +365,17 @@ public sealed class Trip : BaseEntity<Guid>
     {
         var normalized = value?.Trim();
         return string.IsNullOrEmpty(normalized) ? null : normalized;
+    }
+
+    private static string? NormalizeNotes(string? value)
+    {
+        var normalized = NormalizeOptionalText(value);
+        if (normalized?.Length > 2000)
+        {
+            throw new ArgumentException("Notes cannot exceed 2000 characters.", nameof(value));
+        }
+
+        return normalized;
     }
 
     private static string NormalizeSeatNumber(string seatNumber)

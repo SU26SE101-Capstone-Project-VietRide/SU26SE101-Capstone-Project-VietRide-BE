@@ -1,7 +1,9 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
+using VietRide.Booking.Application.Features.Internal.Bookings;
 using VietRide.Booking.Application.Features.Internal.Reports.PlatformBookings;
 using VietRide.Booking.Application.Features.OperatorBookings.GetOperatorBookingDetail;
 using VietRide.Booking.Application.Features.OperatorBookings.ListOperatorBookings;
@@ -54,6 +56,111 @@ internal sealed class BookingRepository : IBookingRepository
     // -----------------------------------------------------------------------
     // IBookingRepository — aggregate-specific queries
     // -----------------------------------------------------------------------
+
+    public Task AcquireEventLockAsync(Guid sourceEventId, CancellationToken ct = default)
+        => _db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock(hashtextextended({sourceEventId.ToString("N")}, 0))",
+            ct);
+
+    public async Task<IReadOnlyList<BookingEntity>> GetConfirmedByTripAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => await _db.Bookings
+            .Where(booking => booking.TripId == tripId
+                && booking.OperatorId == operatorId
+                && booking.Status == BookingStatus.CONFIRMED)
+            .OrderBy(booking => booking.Id)
+            .ToListAsync(ct);
+
+    public async Task<IReadOnlyList<BookingEntity>> GetCancellableByTripAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => await _db.Bookings
+            .Include(booking => booking.Tickets)
+            .Include(booking => booking.ShuttleIntent)
+            .Where(booking => booking.TripId == tripId
+                && booking.OperatorId == operatorId
+                && (booking.Status == BookingStatus.PENDING_PAYMENT
+                    || booking.Status == BookingStatus.CONFIRMED))
+            .OrderBy(booking => booking.Id)
+            .ToListAsync(ct);
+
+    public Task<bool> HasOutboxEventAsync(
+        string eventType,
+        Guid eventId,
+        CancellationToken ct = default)
+    {
+        var fragment = JsonSerializer.Serialize(
+            new { eventId },
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        return _db.OutboxEvents.AnyAsync(
+            row => row.EventType == eventType && EF.Functions.JsonContains(row.Payload, fragment),
+            ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<TripEditImpactDto> GetTripEditImpactAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct = default)
+    {
+        if (operatorId == Guid.Empty)
+        {
+            throw new ArgumentException("Operator id must be non-empty.", nameof(operatorId));
+        }
+
+        var activeBookings = await _db.Bookings
+            .AsNoTracking()
+            .Where(booking => booking.TripId == tripId && booking.OperatorId == operatorId)
+            .Where(booking => booking.Status == BookingStatus.PENDING_PAYMENT
+                || booking.Status == BookingStatus.CONFIRMED)
+            .OrderBy(booking => booking.Id)
+            .Select(booking => new
+            {
+                BookingId = booking.Id,
+                booking.Status,
+            })
+            .ToListAsync(ct);
+
+        if (activeBookings.Count == 0)
+        {
+            return new TripEditImpactDto(tripId, 0, []);
+        }
+
+        var bookingIds = activeBookings.Select(booking => booking.BookingId).ToArray();
+        var seatRows = await _db.Passengers
+            .AsNoTracking()
+            .Where(passenger => bookingIds.Contains(passenger.BookingId))
+            .OrderBy(passenger => passenger.BookingId)
+            .ThenBy(passenger => passenger.SeatNumber)
+            .Select(passenger => new
+            {
+                passenger.BookingId,
+                passenger.SeatNumber,
+            })
+            .ToListAsync(ct);
+
+        var seatsByBooking = seatRows
+            .GroupBy(row => row.BookingId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<string>)group
+                    .Select(row => row.SeatNumber)
+                    .Distinct(StringComparer.Ordinal)
+                    .Order(StringComparer.Ordinal)
+                    .ToArray());
+
+        var impacts = activeBookings
+            .Select(booking => new TripEditImpactDto.ActiveBooking(
+                booking.BookingId,
+                booking.Status.ToString(),
+                seatsByBooking.GetValueOrDefault(booking.BookingId, [])))
+            .ToArray();
+
+        return new TripEditImpactDto(tripId, impacts.Length, impacts);
+    }
 
     /// <inheritdoc/>
     public async Task<IReadOnlyList<PlatformBookingReportItem>> GetPlatformBookingMetricsAsync(

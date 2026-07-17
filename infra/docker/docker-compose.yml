@@ -219,6 +219,9 @@ services:
       Trip__UseDevStub: '${BOOKING_TRIP_USE_DEV_STUB:-false}'
       Payment__UseDevStub: '${BOOKING_PAYMENT_USE_DEV_STUB:-false}'
       Identity__UseDevStub: '${BOOKING_IDENTITY_USE_DEV_STUB:-false}'
+      Hangfire__SchemaName: hangfire
+      Hangfire__QueueName: booking
+      Hangfire__WorkerCount: '${BOOKING_HANGFIRE_WORKER_COUNT:-2}'
     ports:
       - '${BOOKING_PORT:-5003}:5003'
     healthcheck:

@@ -1,7 +1,11 @@
 import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
 import type { ConsumeMessage } from 'amqplib';
 import { NotificationType } from '../generated/notification-prisma-client';
-import { BOOKING_CONFIRMED_ROUTING_KEY, CORE_EVENT_QUEUE_BINDINGS } from './core-events.constants';
+import {
+  BOOKING_CANCELLED_ROUTING_KEY,
+  BOOKING_CONFIRMED_ROUTING_KEY,
+  CORE_EVENT_QUEUE_BINDINGS,
+} from './core-events.constants';
 import { CoreEventsConsumer } from './core-events.consumer';
 import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
@@ -43,6 +47,13 @@ describe('CoreEventsConsumer', () => {
         { prefetch: 1, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
       );
     }
+    expect(CORE_EVENT_QUEUE_BINDINGS).toContainEqual({
+      queue: 'notification:booking-cancelled',
+      routingKey: BOOKING_CANCELLED_ROUTING_KEY,
+    });
+    expect(CORE_EVENT_QUEUE_BINDINGS).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ routingKey: 'trip.trip.cancelled' })]),
+    );
   });
 
   it('creates notification for a new valid message', async () => {
