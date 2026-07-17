@@ -922,7 +922,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Task 23.9 diff hygiene failed' }
 | 23.5 | ✅ done | this commit | APPROVE | 2026-07-17; strict canonical/legacy identity rollout; reviewer-driven semantic/null hardening; ESLint config authorized; 2 Booking scope expansions |
 | 23.6 | ✅ done | this commit | APPROVE | 2026-07-17; one review patch round; PostgreSQL commit/rollback/race evidence; 4 producer/repository expansions + authorized ESLint config |
 | 23.7 | ✅ done | this commit | APPROVE | 2026-07-17; one review patch round; 40 focused tests green; PostgreSQL race/rollback coverage; 4 test-fixture/callsite expansions |
-| 23.8 | ⬜ todo | — | — | Notification compatibility |
+| 23.8 | ✅ done | this commit | APPROVE | 2026-07-17; 6 dedicated Jest tests green; lint/build/diff/Prisma fence pass; no scope expansion |
 | 23.9 | ⬜ todo | — | — | Focused journey evidence |
 
 ## Open questions

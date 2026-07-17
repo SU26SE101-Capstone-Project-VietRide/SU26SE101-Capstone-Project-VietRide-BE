@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import {
+  BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY,
   BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY,
   BOOKING_SCHEDULE_CHANGE_INFORMATIONAL_ROUTING_KEY,
   BOOKING_SCHEDULE_CHANGE_REQUIRED_ROUTING_KEY,
@@ -33,6 +34,10 @@ export const BOOKING_TRIP_CHANGE_QUEUE_BINDINGS = [
   {
     queue: 'notification:booking-pending-action-realerted',
     routingKey: BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:booking-pending-action-auto-resolved',
+    routingKey: BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY,
   },
 ] as const;
 
@@ -69,7 +74,7 @@ export class BookingTripChangeEventsConsumer implements OnModuleInit {
     payload: unknown,
     raw: ConsumeMessage,
   ): Promise<void> {
-    const messageId = raw.properties.messageId ?? raw.properties.correlationId;
+    const messageId = getMessageId(raw);
     if (!messageId) {
       throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
     }
@@ -88,14 +93,13 @@ export class BookingTripChangeEventsConsumer implements OnModuleInit {
 
     try {
       const notification = mapBookingTripChangeToNotification(routingKey, payload);
-      const eventId = readEventId(notification.data);
       await this.notificationsService.createNotification({
         ...notification,
-        dedupeKey: `${routingKey}:${eventId}:${notification.userId}:${notification.type}`,
+        dedupeKey: `${routingKey}:${messageId}:${notification.userId}:${notification.type}`,
       });
       await this.idempotency.markProcessed(routingKey, messageId);
       this.logger.info(
-        { routingKey, messageId, eventId, userId: notification.userId },
+        { routingKey, messageId, userId: notification.userId },
         'Processed Booking trip-change notification event',
       );
     } catch (error) {
@@ -114,15 +118,11 @@ export class BookingTripChangeEventsConsumer implements OnModuleInit {
   }
 }
 
-function readEventId(data: unknown): string {
-  if (typeof data !== 'object' || data === null || !('eventId' in data)) {
-    throw new Error('BOOKING_TRIP_CHANGE_EVENT_ID_MISSING');
-  }
+function getMessageId(raw: ConsumeMessage): string | undefined {
+  const properties: unknown = raw.properties;
+  if (typeof properties !== 'object' || properties === null) return undefined;
 
-  const eventId = (data as { eventId?: unknown }).eventId;
-  if (typeof eventId !== 'string') {
-    throw new Error('BOOKING_TRIP_CHANGE_EVENT_ID_MISSING');
-  }
-
-  return eventId;
+  const { messageId, correlationId } = properties as Record<string, unknown>;
+  if (typeof messageId === 'string') return messageId;
+  return typeof correlationId === 'string' ? correlationId : undefined;
 }

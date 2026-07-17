@@ -1,12 +1,15 @@
 import {
+  BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY,
   BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY,
   BOOKING_SCHEDULE_CHANGE_INFORMATIONAL_ROUTING_KEY,
   BOOKING_SCHEDULE_CHANGE_REQUIRED_ROUTING_KEY,
   BOOKING_SEAT_REASSIGNMENT_REQUIRED_ROUTING_KEY,
+  BookingPendingActionAutoResolvedEventSchema,
   BookingPendingActionRealertedEventSchema,
   BookingScheduleChangeInformationalEventSchema,
   BookingScheduleChangeRequiredEventSchema,
   BookingSeatReassignmentRequiredEventSchema,
+  type BookingPendingActionAutoResolvedEvent,
   type BookingPendingActionRealertedEvent,
   type BookingScheduleChangeInformationalEvent,
   type BookingScheduleChangeRequiredEvent,
@@ -19,7 +22,8 @@ export type BookingTripChangeRoutingKey =
   | typeof BOOKING_SEAT_REASSIGNMENT_REQUIRED_ROUTING_KEY
   | typeof BOOKING_SCHEDULE_CHANGE_INFORMATIONAL_ROUTING_KEY
   | typeof BOOKING_SCHEDULE_CHANGE_REQUIRED_ROUTING_KEY
-  | typeof BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY;
+  | typeof BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY
+  | typeof BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY;
 
 export function mapBookingTripChangeToNotification(
   routingKey: BookingTripChangeRoutingKey,
@@ -36,7 +40,23 @@ export function mapBookingTripChangeToNotification(
       return mapScheduleChangeRequired(BookingScheduleChangeRequiredEventSchema.parse(payload));
     case BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY:
       return mapPendingActionRealerted(BookingPendingActionRealertedEventSchema.parse(payload));
+    case BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY:
+      return mapPendingActionAutoResolved(
+        BookingPendingActionAutoResolvedEventSchema.parse(payload),
+      );
   }
+}
+
+function mapPendingActionAutoResolved(
+  payload: BookingPendingActionAutoResolvedEvent,
+): CreateNotificationDto {
+  return {
+    userId: payload.userId,
+    type: NotificationType.TRIP_SCHEDULE_CHANGED,
+    title: 'Da chap nhan lich chuyen moi',
+    body: `Lich chuyen ${payload.tripId} da duoc tu dong chap nhan.`,
+    data: bookingEventData(payload),
+  };
 }
 
 function mapSeatReassignmentRequired(
@@ -96,6 +116,7 @@ function mapPendingActionRealerted(payload: BookingPendingActionRealertedEvent):
 }
 
 function bookingEventData<T extends { userId: string }>(payload: T): Omit<T, 'userId'> {
-  const { userId: _userId, ...data } = payload;
+  const { userId, ...data } = payload;
+  void userId;
   return data;
 }

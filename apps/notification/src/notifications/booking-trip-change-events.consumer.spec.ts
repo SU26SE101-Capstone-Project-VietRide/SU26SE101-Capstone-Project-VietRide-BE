@@ -1,4 +1,5 @@
 import {
+  BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY,
   BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY,
   BOOKING_SCHEDULE_CHANGE_INFORMATIONAL_ROUTING_KEY,
   BOOKING_SCHEDULE_CHANGE_REQUIRED_ROUTING_KEY,
@@ -43,7 +44,7 @@ describe('BookingTripChangeEventsConsumer', () => {
     );
   });
 
-  it('binds exactly the four Booking-owned Day-22 passenger facts', async () => {
+  it('binds the Booking-owned passenger facts', async () => {
     await consumer.onModuleInit();
 
     expect(BOOKING_TRIP_CHANGE_QUEUE_BINDINGS.map(({ routingKey }) => routingKey)).toEqual([
@@ -51,8 +52,9 @@ describe('BookingTripChangeEventsConsumer', () => {
       BOOKING_SCHEDULE_CHANGE_INFORMATIONAL_ROUTING_KEY,
       BOOKING_SCHEDULE_CHANGE_REQUIRED_ROUTING_KEY,
       BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY,
+      BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY,
     ]);
-    expect(rabbitConsumer.subscribe).toHaveBeenCalledTimes(4);
+    expect(rabbitConsumer.subscribe).toHaveBeenCalledTimes(5);
     for (const binding of BOOKING_TRIP_CHANGE_QUEUE_BINDINGS) {
       expect(rabbitConsumer.subscribe).toHaveBeenCalledWith(
         binding.queue,
@@ -86,20 +88,19 @@ describe('BookingTripChangeEventsConsumer', () => {
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.TRIP_SCHEDULE_CHANGED,
-        dedupeKey: `${BOOKING_SCHEDULE_CHANGE_INFORMATIONAL_ROUTING_KEY}:${EVENT_ID}:${USER_ID}:${NotificationType.TRIP_SCHEDULE_CHANGED}`,
-        data: expect.not.objectContaining({
-          pendingActionId: expect.anything(),
-          deadline: expect.anything(),
-        }),
+        dedupeKey: `${BOOKING_SCHEDULE_CHANGE_INFORMATIONAL_ROUTING_KEY}:informational-message:${USER_ID}:${NotificationType.TRIP_SCHEDULE_CHANGED}`,
       }),
     );
+    const created = notificationsService.createNotification.mock.calls[0]?.[0];
+    expect(created?.data).not.toHaveProperty('pendingActionId');
+    expect(created?.data).not.toHaveProperty('deadline');
     expect(idempotency.markProcessed).toHaveBeenCalledWith(
       BOOKING_SCHEDULE_CHANGE_INFORMATIONAL_ROUTING_KEY,
       'informational-message',
     );
   });
 
-  it('uses the deterministic event id dedupe key across duplicate physical re-alert deliveries', async () => {
+  it('uses the broker MessageId in each physical re-alert dedupe key', async () => {
     idempotency.begin.mockResolvedValue('acquired');
     const payload = {
       eventId: EVENT_ID,
@@ -130,13 +131,13 @@ describe('BookingTripChangeEventsConsumer', () => {
     expect(notificationsService.createNotification).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        dedupeKey: `${BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY}:${EVENT_ID}:${USER_ID}:${NotificationType.TRIP_SCHEDULE_CHANGED}`,
+        dedupeKey: `${BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY}:physical-job-1:${USER_ID}:${NotificationType.TRIP_SCHEDULE_CHANGED}`,
       }),
     );
     expect(notificationsService.createNotification).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        dedupeKey: `${BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY}:${EVENT_ID}:${USER_ID}:${NotificationType.TRIP_SCHEDULE_CHANGED}`,
+        dedupeKey: `${BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY}:physical-job-2:${USER_ID}:${NotificationType.TRIP_SCHEDULE_CHANGED}`,
       }),
     );
   });

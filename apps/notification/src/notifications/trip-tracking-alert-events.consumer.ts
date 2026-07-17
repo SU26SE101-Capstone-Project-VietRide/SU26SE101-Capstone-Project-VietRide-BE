@@ -59,7 +59,7 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
       return;
     }
 
-    const messageId = raw.properties.messageId ?? raw.properties.correlationId;
+    const messageId = getMessageId(raw);
     if (!messageId) {
       throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
     }
@@ -113,7 +113,7 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
 
   private async handleIncidentReported(payload: unknown, raw: ConsumeMessage): Promise<void> {
     const parsed = IncidentReportedPayloadSchema.safeParse(payload);
-    const brokerMessageId = raw.properties.messageId ?? raw.properties.correlationId;
+    const brokerMessageId = getMessageId(raw);
     const messageId = parsed.success ? (parsed.data.eventId ?? brokerMessageId) : brokerMessageId;
     if (!messageId) {
       throw new Error(`MISSING_MESSAGE_ID_${TRIP_INCIDENT_REPORTED_ROUTING_KEY}`);
@@ -190,4 +190,13 @@ function buildNotificationDedupeKey(
   type: string,
 ): string {
   return `${routingKey}:${messageId}:${userId}:${type}`;
+}
+
+function getMessageId(raw: ConsumeMessage): string | undefined {
+  const properties: unknown = raw.properties;
+  if (typeof properties !== 'object' || properties === null) return undefined;
+
+  const { messageId, correlationId } = properties as Record<string, unknown>;
+  if (typeof messageId === 'string') return messageId;
+  return typeof correlationId === 'string' ? correlationId : undefined;
 }
