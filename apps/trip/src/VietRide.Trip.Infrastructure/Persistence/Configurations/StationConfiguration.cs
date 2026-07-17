@@ -9,7 +9,12 @@ internal sealed class StationConfiguration : IEntityTypeConfiguration<Station>
 {
     public void Configure(EntityTypeBuilder<Station> builder)
     {
-        builder.ToTable("stations");
+        builder.ToTable("stations", table =>
+        {
+            table.HasCheckConstraint(
+                "chk_stations_no_self_merge",
+                "merged_into_station_id IS NULL OR merged_into_station_id <> id");
+        });
 
         builder.HasKey(x => x.Id);
 
@@ -94,6 +99,11 @@ internal sealed class StationConfiguration : IEntityTypeConfiguration<Station>
             .HasColumnName("deleted_at")
             .IsRequired(false);
 
+        builder.Property(x => x.MergedIntoStationId)
+            .HasColumnName("merged_into_station_id")
+            .HasColumnType("uuid")
+            .IsRequired(false);
+
         builder.Property(x => x.CreatedAt)
             .HasColumnName("created_at")
             .HasDefaultValueSql("now()")
@@ -127,6 +137,16 @@ internal sealed class StationConfiguration : IEntityTypeConfiguration<Station>
             .WithMany()
             .HasForeignKey(x => x.LocationId)
             .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne<Station>()
+            .WithMany()
+            .HasForeignKey(x => x.MergedIntoStationId)
+            .OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_stations_merged_into_station");
+
+        builder.HasIndex(x => x.MergedIntoStationId)
+            .HasDatabaseName("idx_stations_merged_into")
+            .HasFilter("merged_into_station_id IS NOT NULL");
 
         builder.HasIndex(x => x.Name)
             .HasDatabaseName("idx_stations_name_trgm")

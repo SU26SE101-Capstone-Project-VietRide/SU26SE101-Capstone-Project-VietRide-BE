@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using VietRide.Shared.Persistence.Outbox;
@@ -14,9 +15,11 @@ using VietRide.Trip.Infrastructure;
 namespace VietRide.Trip.Infrastructure.Migrations
 {
     [DbContext(typeof(TripDbContext))]
-    partial class TripDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260716142716_AddStationMergeRedirect")]
+    partial class AddStationMergeRedirect
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1379,10 +1382,6 @@ namespace VietRide.Trip.Infrastructure.Migrations
                     b.HasIndex("DriverScheduleId")
                         .HasDatabaseName("idx_trips_driver_schedule_id")
                         .HasFilter("driver_schedule_id IS NOT NULL");
-
-                    b.HasIndex("CompletedAt", "OperatorId")
-                        .HasDatabaseName("idx_trips_completed_report")
-                        .HasFilter("status = 'COMPLETED' AND completed_at IS NOT NULL");
 
                     b.HasIndex("DriverUserId", "DepartureDateTime")
                         .IsUnique()

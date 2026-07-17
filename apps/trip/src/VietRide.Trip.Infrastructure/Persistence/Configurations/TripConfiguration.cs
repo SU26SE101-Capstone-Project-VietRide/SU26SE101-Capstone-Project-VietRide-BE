@@ -109,6 +109,9 @@ internal sealed class TripConfiguration : IEntityTypeConfiguration<Domain.Entiti
         builder.HasIndex(trip => trip.DriverScheduleId)
             .HasDatabaseName("idx_trips_driver_schedule_id")
             .HasFilter("driver_schedule_id IS NOT NULL");
+        builder.HasIndex(trip => new { trip.CompletedAt, trip.OperatorId })
+            .HasDatabaseName("idx_trips_completed_report")
+            .HasFilter("status = 'COMPLETED' AND completed_at IS NOT NULL");
 
         builder.HasOne<Route>()
             .WithMany()

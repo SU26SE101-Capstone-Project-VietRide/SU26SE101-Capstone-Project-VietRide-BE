@@ -77,4 +77,38 @@ internal sealed class RouteRepository : IRouteRepository
             && route.IsActive
             && route.DeletedAt == null,
             cancellationToken);
+
+    public Task<bool> HasStationMergeConflictAsync(
+        Guid duplicateStationId,
+        Guid primaryStationId,
+        CancellationToken cancellationToken = default)
+        => dbContext.Routes
+            .IgnoreQueryFilters()
+            .AnyAsync(route =>
+                (route.OriginStationId == duplicateStationId && route.DestinationStationId == primaryStationId)
+                || (route.OriginStationId == primaryStationId && route.DestinationStationId == duplicateStationId),
+                cancellationToken);
+
+    public async Task<(int OriginCount, int DestinationCount)> RelinkForStationMergeAsync(
+        Guid duplicateStationId,
+        Guid primaryStationId,
+        CancellationToken cancellationToken = default)
+    {
+        var routes = await dbContext.Routes
+            .FromSqlInterpolated($"SELECT * FROM vietride_trip.routes WHERE origin_station_id = {duplicateStationId} OR destination_station_id = {duplicateStationId} ORDER BY id::text FOR UPDATE")
+            .IgnoreQueryFilters()
+            .ToListAsync(cancellationToken);
+        var originCount = 0;
+        var destinationCount = 0;
+        foreach (var route in routes)
+        {
+            var relink = route.RelinkStation(duplicateStationId, primaryStationId);
+            if (relink.OriginChanged)
+                originCount++;
+            if (relink.DestinationChanged)
+                destinationCount++;
+        }
+
+        return (originCount, destinationCount);
+    }
 }

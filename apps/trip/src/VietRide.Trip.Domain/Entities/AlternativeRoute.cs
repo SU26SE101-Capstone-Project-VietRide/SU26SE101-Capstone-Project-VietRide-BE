@@ -71,6 +71,20 @@ public sealed class AlternativeRoute : BaseEntity<Guid>, IActivatable
 
     public void Deactivate() => IsActive = false;
 
+    public bool RelinkDestinationStation(Guid duplicateStationId, Guid primaryStationId)
+    {
+        ValidateGuid(duplicateStationId, nameof(duplicateStationId));
+        ValidateGuid(primaryStationId, nameof(primaryStationId));
+        if (duplicateStationId == primaryStationId)
+            throw new ArgumentException("Station merge IDs must be different.", nameof(primaryStationId));
+
+        if (DestinationStationId != duplicateStationId)
+            return false;
+
+        DestinationStationId = primaryStationId;
+        return true;
+    }
+
     private static string? NormalizeOptional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static void ValidateRequired(string value, string parameterName)

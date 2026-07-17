@@ -59,6 +59,26 @@ public sealed class OperatorStation : BaseEntity<Guid>, IActivatable
 
     public void Deactivate() => IsActive = false;
 
+    public void RelinkToStation(Guid stationId)
+    {
+        ValidateGuid(stationId, nameof(stationId));
+        StationId = stationId;
+    }
+
+    public void MergeConfigurationFrom(OperatorStation duplicate)
+    {
+        ArgumentNullException.ThrowIfNull(duplicate);
+        if (OperatorId != duplicate.OperatorId)
+            throw new InvalidOperationException("Operator-station mappings must belong to the same operator.");
+
+        DisplayNameOverride ??= duplicate.DisplayNameOverride;
+        CounterLocation ??= duplicate.CounterLocation;
+        ContactPhone ??= duplicate.ContactPhone;
+        Instructions ??= duplicate.Instructions;
+        if (duplicate.IsActive)
+            Activate();
+    }
+
     private static string? NormalizeOptional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static void ValidateGuid(Guid value, string parameterName)

@@ -92,8 +92,9 @@ public sealed class StationHandlersTests
     [Fact]
     public async Task InternalStationsController_ReturnsRawDto_WithoutApiResponseEnvelope()
     {
+        var stationId = Guid.NewGuid();
         var station = new InternalStationDto(
-            Guid.NewGuid(),
+            stationId,
             "Bến xe Miền Tây",
             "ben-xe-mien-tay",
             "Ho Chi Minh City",
@@ -101,6 +102,9 @@ public sealed class StationHandlersTests
             10.7212345m,
             106.6267890m,
             true,
+            true,
+            false,
+            stationId,
             default,
             default);
         var mediator = new CapturingMediator(station);

@@ -85,4 +85,18 @@ internal sealed class AlternativeRouteRepository : IAlternativeRouteRepository
         dbContext.AlternativeRouteStops.RemoveRange(existingStops);
         dbContext.AlternativeRouteStops.AddRange(stops);
     }
+
+    public async Task<int> RelinkDestinationForStationMergeAsync(
+        Guid duplicateStationId,
+        Guid primaryStationId,
+        CancellationToken cancellationToken = default)
+    {
+        var alternativeRoutes = await dbContext.AlternativeRoutes
+            .FromSqlInterpolated($"SELECT * FROM vietride_trip.alternative_routes WHERE destination_station_id = {duplicateStationId} ORDER BY id::text FOR UPDATE")
+            .ToListAsync(cancellationToken);
+        foreach (var alternativeRoute in alternativeRoutes)
+            alternativeRoute.RelinkDestinationStation(duplicateStationId, primaryStationId);
+
+        return alternativeRoutes.Count;
+    }
 }

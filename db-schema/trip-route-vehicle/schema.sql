@@ -92,8 +92,11 @@ CREATE TABLE stations (
     supports_shuttle BOOLEAN NOT NULL DEFAULT FALSE,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     deleted_at TIMESTAMPTZ NULL,
+    merged_into_station_id UUID NULL REFERENCES stations (id) ON DELETE RESTRICT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_stations_no_self_merge
+        CHECK (merged_into_station_id IS NULL OR merged_into_station_id <> id)
 );
 
 CREATE UNIQUE INDEX uq_stations_slug ON stations (slug) WHERE deleted_at IS NULL;
@@ -101,6 +104,8 @@ CREATE INDEX idx_stations_city_province ON stations (city, province) WHERE is_ac
 CREATE INDEX idx_stations_location_id ON stations (location_id)
     WHERE location_id IS NOT NULL AND is_active = TRUE;
 CREATE INDEX idx_stations_supports_shuttle ON stations (supports_shuttle) WHERE is_active = TRUE;
+CREATE INDEX idx_stations_merged_into ON stations (merged_into_station_id)
+    WHERE merged_into_station_id IS NOT NULL;
 CREATE INDEX idx_stations_name_trgm ON stations USING gin (name gin_trgm_ops)
     WHERE FALSE; -- placeholder: enable with pg_trgm if fuzzy autocomplete needed
 
@@ -426,6 +431,8 @@ CREATE INDEX idx_trips_route_departure ON trips (route_id, departure_date_time);
 CREATE INDEX idx_trips_status_departure ON trips (status, departure_date_time);
 CREATE INDEX idx_trips_assistant_user_id ON trips (assistant_user_id) WHERE assistant_user_id IS NOT NULL;
 CREATE INDEX idx_trips_driver_schedule_id ON trips (driver_schedule_id) WHERE driver_schedule_id IS NOT NULL;
+CREATE INDEX idx_trips_completed_report ON trips (completed_at, operator_id)
+    WHERE status = 'COMPLETED' AND completed_at IS NOT NULL;
 
 COMMENT ON COLUMN trips.estimated_passenger_luggage_kg IS
     'Snapshot at Trip create from VehicleType.estimatedPassengerLuggageKgPerSeat ?? Operator.luggagePolicy ?? 10 kg/seat × totalSeats.';

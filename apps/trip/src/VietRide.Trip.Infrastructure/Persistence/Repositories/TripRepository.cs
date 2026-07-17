@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Features.DriverTrips.GetAssignedTripRoute;
+using VietRide.Trip.Application.Features.Internal.Reports.PlatformTrips;
 using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Infrastructure.Persistence.Repositories;
@@ -16,6 +18,43 @@ internal sealed class TripRepository : ITripRepository
 
     public Task<Domain.Entities.Trip?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         _dbContext.Trips.FindAsync(new object[] { id }, cancellationToken).AsTask();
+
+    public async Task<IReadOnlyList<PlatformTripReportItem>> GetPlatformTripMetricsAsync(
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken = default)
+    {
+        var connection = _dbContext.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT operator_id,
+                   COUNT(*) AS completed_trip_count
+            FROM vietride_trip.trips
+            WHERE status = 'COMPLETED'::vietride_trip.trip_status
+              AND completed_at >= @from_utc
+              AND completed_at < @to_utc
+            GROUP BY operator_id
+            ORDER BY operator_id;
+            """;
+        command.Transaction = _dbContext.Database.CurrentTransaction?.GetDbTransaction();
+        AddParameter(command, "from_utc", fromUtc.ToUniversalTime());
+        AddParameter(command, "to_utc", toUtc.ToUniversalTime());
+
+        var items = new List<PlatformTripReportItem>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            items.Add(new PlatformTripReportItem(reader.GetGuid(0), reader.GetInt64(1)));
+        }
+
+        return items;
+    }
 
     public async Task<IReadOnlyList<Guid>> ListScheduledForAutoBoardingAsync(
         DateTimeOffset latestDeparture,
@@ -188,6 +227,17 @@ internal sealed class TripRepository : ITripRepository
             station.Name,
             station.Latitude is { } latitude ? (double)latitude : null,
             station.Longitude is { } longitude ? (double)longitude : null);
+
+    private static void AddParameter(
+        System.Data.Common.DbCommand command,
+        string name,
+        object value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value;
+        command.Parameters.Add(parameter);
+    }
 
     public async Task<TripCargoMutationResult?> ReserveCargoAsync(
         Guid tripId,

@@ -15,11 +15,16 @@ public sealed class GetStationByIdHandler : IRequestHandler<GetStationByIdQuery,
 
     public async Task<InternalStationDto> Handle(GetStationByIdQuery request, CancellationToken cancellationToken)
     {
-        var station = await stationRepository.GetByIdAsync(request.Id, cancellationToken);
-        if (station is null)
+        var station = await stationRepository.GetByIdIncludingDeletedAsync(request.Id, cancellationToken);
+        if (station is null
+            || (station.DeletedAt.HasValue && !station.MergedIntoStationId.HasValue))
         {
             throw new CodedNotFoundException("STATION_NOT_FOUND", "Station was not found.");
         }
+
+        var isMerged = station.DeletedAt.HasValue && station.MergedIntoStationId.HasValue;
+        if (!isMerged && (!station.IsActive || station.MergedIntoStationId.HasValue))
+            throw new CodedNotFoundException("STATION_NOT_FOUND", "Station was not found.");
 
         return new InternalStationDto(
             station.Id,
@@ -29,7 +34,10 @@ public sealed class GetStationByIdHandler : IRequestHandler<GetStationByIdQuery,
             station.Province,
             station.Latitude,
             station.Longitude,
+            station.SupportsShuttle,
             station.IsActive,
+            isMerged,
+            station.MergedIntoStationId ?? station.Id,
             station.CreatedAt,
             station.UpdatedAt);
     }

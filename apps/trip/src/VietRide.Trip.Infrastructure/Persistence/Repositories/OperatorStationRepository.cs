@@ -33,4 +33,38 @@ internal sealed class OperatorStationRepository : IOperatorStationRepository
 
     public IQueryable<OperatorStation> QueryNoTracking()
         => _dbContext.OperatorStations.AsNoTracking();
+
+    public async Task<(int RelinkedCount, int CollapsedCount)> RelinkForStationMergeAsync(
+        Guid duplicateStationId,
+        Guid primaryStationId,
+        CancellationToken cancellationToken = default)
+    {
+        var mappings = await _dbContext.OperatorStations
+            .FromSqlInterpolated($"SELECT * FROM vietride_trip.operator_stations WHERE station_id IN ({duplicateStationId}, {primaryStationId}) ORDER BY operator_id::text, id::text FOR UPDATE")
+            .ToListAsync(cancellationToken);
+        var primaryByOperator = mappings
+            .Where(mapping => mapping.StationId == primaryStationId)
+            .ToDictionary(mapping => mapping.OperatorId);
+        var duplicateMappings = mappings
+            .Where(mapping => mapping.StationId == duplicateStationId)
+            .ToArray();
+        var relinkedCount = 0;
+        var collapsedCount = 0;
+        foreach (var duplicateMapping in duplicateMappings)
+        {
+            if (primaryByOperator.TryGetValue(duplicateMapping.OperatorId, out var primaryMapping))
+            {
+                primaryMapping.MergeConfigurationFrom(duplicateMapping);
+                _dbContext.OperatorStations.Remove(duplicateMapping);
+                collapsedCount++;
+            }
+            else
+            {
+                duplicateMapping.RelinkToStation(primaryStationId);
+                relinkedCount++;
+            }
+        }
+
+        return (relinkedCount, collapsedCount);
+    }
 }

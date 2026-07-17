@@ -8,6 +8,9 @@ public sealed record InternalStationDto(
     string Province,
     decimal? Latitude,
     decimal? Longitude,
+    bool SupportsShuttle,
     bool IsActive,
+    bool IsMerged,
+    Guid CanonicalStationId,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
