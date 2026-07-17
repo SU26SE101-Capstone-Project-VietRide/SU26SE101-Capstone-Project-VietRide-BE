@@ -915,7 +915,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Task 23.9 diff hygiene failed' }
 | Task | Status | Commit | Review | Notes |
 |---|---|---|---|---|
 | 23.0 | ✅ done | this commit | APPROVE | 2026-07-17; one review patch round; DOCS gate green; no scope expansion |
-| 23.1 | ⬜ todo | — | — | Explicit Outbox identity |
+| 23.1 | ✅ done | this commit | APPROVE | 2026-07-17; one review patch round; 4+6+6 focused tests green; no scope expansion |
 | 23.2 | ⬜ todo | — | — | Current-departure migration |
 | 23.3 | ⬜ todo | — | — | Existing producer hardening |
 | 23.4 | ⬜ todo | — | — | Projection/CAS/Booking facts |

@@ -17,11 +17,24 @@ public sealed class IntegrationEventOutbox : IIntegrationEventOutbox
     }
 
     public Task EnqueueAsync(string eventType, string payloadJson, CancellationToken ct = default)
+        => EnqueueAsync(Guid.NewGuid(), eventType, payloadJson, ct);
+
+    public Task EnqueueAsync(
+        Guid eventId,
+        string eventType,
+        string payloadJson,
+        CancellationToken ct = default)
     {
-        // Id defaults to Guid.NewGuid(), Status defaults to PENDING, RetryCount to 0
-        // (entity initializers); CreatedAt is stamped by OutboxStore.AddAsync from IClock.
+        if (eventId == Guid.Empty)
+        {
+            throw new ArgumentException("Event id must not be empty.", nameof(eventId));
+        }
+
+        // Status defaults to PENDING and RetryCount to 0 (entity initializers);
+        // CreatedAt is stamped by OutboxStore.AddAsync from IClock.
         var outboxEvent = new OutboxEvent
         {
+            Id = eventId,
             EventType = eventType,
             Payload = payloadJson,
         };

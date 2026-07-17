@@ -19,7 +19,7 @@ namespace VietRide.Shared.Messaging.Outbox;
 /// <remarks>
 /// Per BACKEND_SOURCE_OF_TRUTH section 4.3 + 11.x: each service owns its
 /// own outbox table written inside the business write transaction
-/// (<c>OutboxInterceptor</c>). This worker provides at-least-once
+/// through <c>IIntegrationEventOutbox</c>. This worker provides at-least-once
 /// delivery — consumers MUST be idempotent.
 /// </remarks>
 public sealed class OutboxBackgroundService : BackgroundService, IOutboxPublisher
