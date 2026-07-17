@@ -876,7 +876,7 @@ Query parameters:
 |---|---|---|---|
 | `status` | string? | null | One `booking_status` value or a comma-separated list. Empty entries or unknown values return `422 VALIDATION_ERROR`. |
 | `tripId` | UUID? | null | Exact trip id; malformed UUID returns `422 VALIDATION_ERROR`. |
-| `date` | `YYYY-MM-DD`? | null | Calendar day in `Asia/Ho_Chi_Minh`. Convert local midnight and the next local midnight to the UTC half-open interval `[fromUtc, toUtc)` and filter `trip_snapshot_departure`. Invalid dates return `422 VALIDATION_ERROR`. |
+| `date` | `YYYY-MM-DD`? | null | Calendar day in `Asia/Ho_Chi_Minh` (ICT). Convert local midnight and the next local midnight to the UTC half-open interval `[fromUtc, toUtc)` and filter `trip_current_departure`. Invalid dates return `422 VALIDATION_ERROR`. |
 | `passengerPhone` | string? | null | Trim outer whitespace, then apply `PhoneNumber.Normalize`: accept only local `0xxxxxxxxx`/`0xxxxxxxxxx` or canonical `+84xxxxxxxxx`/`+84xxxxxxxxxx`; canonicalize local input to E.164. Internal spaces, hyphens, parentheses, or other separators are invalid and are not stripped. |
 | `bookingCode` | string? | null | Trimmed, non-empty, maximum 30 characters, exact case-insensitive match. |
 | `page` | integer | `1` | Must be `>= 1`. |
@@ -884,7 +884,7 @@ Query parameters:
 | `sortBy` | string | `createdAt` | Allow-list: `createdAt`, `departureAt`, `bookingCode`, `status`, `totalAmount`; otherwise `400 INVALID_SORT_FIELD`. |
 | `sortDir` | string | `desc` | `asc` or `desc`; otherwise `422 VALIDATION_ERROR`. |
 
-`search`, `searchIn`, `operatorId`, and `includeDeleted` are not supported. Every SQL query path first constrains `bookings.operator_id = :claimOperatorId`, before filters and pagination. Sort always adds `id` as the deterministic tie-breaker in the same direction as `sortDir`.
+`search`, `searchIn`, `operatorId`, and `includeDeleted` are not supported. Every SQL query path first constrains `bookings.operator_id = :claimOperatorId`, before filters and pagination. `sortBy=departureAt` sorts by `trip_current_departure`; there is no `currentDepartureAt` sort key. Sort always adds `id` as the deterministic tie-breaker in the same direction as `sortDir`.
 
 When `passengerPhone` is present, Booking validates and normalizes it before URI-escaping the canonical E.164 value and calling `GET /internal/v1/users/by-phone`. Only Identity's `404 RESOURCE_NOT_FOUND` means no matching user and produces a normal empty page.
 
@@ -904,7 +904,8 @@ Response `200`: ADR 0004 success envelope whose `data` is the seven-field `Paged
         "routeName": "Sai Gon - Da Lat",
         "originName": "Sai Gon",
         "destinationName": "Da Lat",
-        "departureAt": "2026-06-18T08:00:00+07:00"
+        "departureAt": "2026-06-18T08:00:00+07:00",
+        "currentDepartureAt": "2026-06-18T10:30:00+07:00"
       },
       "seatCount": 2,
       "totalAmount": 500000,
@@ -921,7 +922,7 @@ Response `200`: ADR 0004 success envelope whose `data` is the seven-field `Paged
 }
 ```
 
-Trip snapshot strings and `departureAt` are nullable for legacy rows. Money is VND backed by BIGINT, to-the-dong. An unknown normalized phone or a page beyond the last page returns HTTP 200 with `items: []` in the same seven-field shape; the requested `page`, effective `pageSize`, counts, and flags are returned normally.
+Trip snapshot strings and immutable `trip.departureAt` are nullable for legacy rows. Mutable `trip.currentDepartureAt` projects `trip_current_departure` and is also nullable only where a legacy row could not be backfilled. Neither list nor detail duplicates `currentDepartureAt` at the top level. Money is VND backed by BIGINT, to-the-dong. An unknown normalized phone or a page beyond the last page returns HTTP 200 with `items: []` in the same seven-field shape; the requested `page`, effective `pageSize`, counts, and flags are returned normally.
 
 Errors use the ADR 0004 envelope:
 
@@ -950,7 +951,8 @@ Response `200`:
       "routeName": "Sai Gon - Da Lat",
       "originName": "Sai Gon",
       "destinationName": "Da Lat",
-      "departureAt": "2026-06-18T08:00:00+07:00"
+      "departureAt": "2026-06-18T08:00:00+07:00",
+      "currentDepartureAt": "2026-06-18T10:30:00+07:00"
     },
     "seatCount": 1,
     "baseFare": 600000,
@@ -1266,16 +1268,36 @@ Rules: dropoff edit is in scope, but v1 fare stays full-price by pickup point, s
 
 ### POST `/v1/bookings/{bookingId}/pending-actions/{actionId}/resolve`
 
-Auth: booking owner for passenger decisions, operator for seat assignment resolution.
+Auth: user JWT with role `PASSENGER`, and the caller must own the Booking. A valid JWT with any
+other role returns `403 FORBIDDEN` before Booking/action lookup. This Day-23 endpoint resolves only
+a persisted `SCHEDULE_CHANGE`; operator seat assignment remains outside this contract.
+
+`Idempotency-Key` is required and must be UUID v4. The fingerprint includes actor, method, path,
+canonical query, and raw body. A same key + same payload request replays the stored status/body
+byte-identical before any current Booking/action state is inspected. A new key evaluates the
+current state and therefore receives the applicable terminal conflict. A same key with a different
+fingerprint returns `422 IDEMPOTENCY_KEY_MISMATCH`; an in-flight same request returns
+`409 IDEMPOTENCY_REQUEST_PENDING`.
 
 Request:
 ```json
 {
   "action": "ACCEPTED",
-  "selectedStopId": "uuid",
   "note": "optional"
 }
 ```
+
+The body has exactly `action: ACCEPTED|REJECTED` and optional `note`. `selectedStopId` is invalid,
+as is every other extra/request-shape field. Both route values must be UUIDs. Resolution at the
+effective cutoff is passenger-eligible; only a request strictly after the effective cutoff returns
+`BOOKING_PENDING_ACTION_EXPIRED`. For MEDIUM the cutoff is `initialDeadline`; for MAJOR it is
+`terminalDeadline` only when `initialDeadline < terminalDeadline`, otherwise `initialDeadline`.
+
+`ACCEPTED` atomically resolves the action and leaves the Booking `CONFIRMED`. `REJECTED` computes
+the frozen refund from immutable `Booking.totalAmount` (MEDIUM 50%, MAJOR 100%, rounded to the
+nearest VND with `MidpointRounding.AwayFromZero`), then atomically resolves the action, sets
+`refundOverride=true`, cancels the Booking with `SCHEDULE_CHANGED`, appends history, and enqueues exactly one authoritative
+`booking.booking.cancelled` containing that `refundAmount`.
 
 Response `200`:
 ```json
@@ -1291,6 +1313,23 @@ Response `200`:
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
+
+Errors use the ADR 0004 envelope. Authorization/masking and lookup order are exact:
+
+| HTTP | Error code | Trigger / masking rule |
+|---|---|---|
+| 401 | `AUTH_TOKEN_INVALID` | Missing, invalid, or expired user JWT. |
+| 403 | `FORBIDDEN` | Valid JWT role is not `PASSENGER`; reject before Booking/action lookup. |
+| 404 | `BOOKING_NOT_FOUND` | Booking is missing or not owned; also masks a discovered Booking/action ownership mismatch before action state is revealed. |
+| 404 | `BOOKING_PENDING_ACTION_NOT_FOUND` | Booking was found and owner-authorized, but `actionId` does not exist under that Booking. |
+| 409 | `BOOKING_PENDING_ACTION_NOT_RESOLVABLE` | Active action exists, but persisted reason/state or Booking state does not support this Day-23 resolution. |
+| 409 | `BOOKING_PENDING_ACTION_SUPERSEDED` | A new key targets an action terminally resolved as `SUPERSEDED`. |
+| 409 | `BOOKING_PENDING_ACTION_ALREADY_RESOLVED` | A new key targets an action resolved as `ACCEPTED` or `REJECTED`. |
+| 409 | `BOOKING_PENDING_ACTION_EXPIRED` | Passenger request is strictly after the effective cutoff; timeout owns the outcome and only auto-accepts, never cancels or refunds. Equality remains eligible. |
+| 409 | `IDEMPOTENCY_REQUEST_PENDING` | Same key/fingerprint is still executing. |
+| 422 | `IDEMPOTENCY_KEY_REQUIRED` | Required `Idempotency-Key` header is absent. |
+| 422 | `IDEMPOTENCY_KEY_MISMATCH` | Same key has a different actor/method/path/query/raw-body fingerprint. |
+| 422 | `VALIDATION_ERROR` | Malformed/non-v4 key; malformed route UUID; missing/invalid `action`; `selectedStopId` present; or another request-shape failure. |
 
 ### GET `/v1/operator/booking-stats`
 
@@ -4560,8 +4599,14 @@ Request is a partial update with exactly these fields:
 Explicit `null` for `departureTime`, `dayOfWeek`, `driverUserId`, or `isActive`, and empty,
 unknown-only, or malformed bodies return `422 VALIDATION_ERROR`. Missing/invalid `applyTo` also
 returns `422 VALIDATION_ERROR`. Changing `departureTime`/`dayOfWeek` through `ALL_PENDING` is the
-only Day-22 path that cascades a new `departureDateTime` to generated Trips; `departureDateTime`
-is absent from the Trip PATCH body and changed-field registry.
+only canonical path that cascades a new `departureDateTime` to generated Trips;
+`departureDateTime` is absent from the Trip PATCH body and changed-field registry. No dedicated
+Trip schedule endpoint or Gateway route exists.
+
+For each actual departure change, compute `delta = |newDeparture - oldDeparture|` and compare the
+calendar dates in ICT (`Asia/Ho_Chi_Minh`): MINOR is the same ICT date with `delta <= 2h`; MEDIUM
+is the same ICT date with `delta > 2h && delta < 6h`; MAJOR is `delta >= 6h` or any ICT date
+change.
 
 Scope behavior:
 
@@ -4583,14 +4628,19 @@ Validation/execution order is fixed: tenant-scoped schedule load (missing/cross-
 scalar/window and null-vehicle rules → tenant/Identity logical-reference validation →
 schedule/vehicle/crew overlap validation → branch by `applyTo`. `ALL_PENDING` deterministically
 enumerates `SCHEDULED|BOARDING` Trips and fetches every Booking edit-impact projection before any
-write/transaction. If any affected Trip with a `CONFIRMED` Booking has
-`departureDateTime - now < 2h`, return `409 DRIVER_SCHEDULE_EDIT_TOO_LATE`. Vehicle conflicts use
-`TRIP_VEHICLE_SWAP_HELD_SEAT_CONFLICT` before `TRIP_VEHICLE_SWAP_TOO_LATE`; route-change conflict
-does not apply because `routeId` is immutable here. Only after the full batch preflight succeeds
-may one transaction open and lock/reload/revalidate in fixed order: schedule first → Trips ordered
-by `(departureDateTime,tripId)` → each Trip's seats → stops, using stable repository ordering,
-apply all schedule and Trip cascades, stage audits/Outbox, and save/commit once. Any failure rolls
-back the entire batch; no transaction spans HTTP.
+write/transaction. Capture `now` once for the full preflight. If any affected Trip has a
+`CONFIRMED` Booking and either `oldDeparture - now < 2h` or computed
+`newDeparture - now < 2h`, return `409 DRIVER_SCHEDULE_EDIT_TOO_LATE`; exact equality on both sides
+is allowed. Vehicle conflicts use `TRIP_VEHICLE_SWAP_HELD_SEAT_CONFLICT` before
+`TRIP_VEHICLE_SWAP_TOO_LATE`; route-change conflict does not apply because `routeId` is immutable
+here. Only after the full batch preflight succeeds may one transaction open and
+lock/reload/revalidate in fixed order: schedule first → Trips ordered by
+`(departureDateTime,tripId)` → each Trip's seats → stops, using stable repository ordering, apply
+all schedule and Trip cascades, stage audits/Outbox, and save/commit once. Each changed departure
+stages `trip.trip.schedule_changed` with exact
+`{eventId,occurredAt,tripId,operatorId,oldDeparture,newDeparture,severity}` and preserves
+`payload.eventId == outbox_events.id == RabbitMQ MessageId`. Any failure rolls back the entire
+batch; no transaction spans HTTP.
 
 Response `200`: the updated `DriverScheduleDto` in the ADR 0004 success envelope. A same-value
 request also returns the current DTO but creates no audit, event, or generation work.
@@ -5146,7 +5196,9 @@ table, column, migration, `realertedAt`, custom poller, or package beyond approv
 `Hangfire.AspNetCore` and `Hangfire.PostgreSql`.
 
 Day 22 owns fact publication, Booking pending-action creation, and re-alert delivery. Day 23 owns
-passenger accept/reject and timeout/refund resolution; Day 22 does not implement those actions.
+passenger accept/reject and scheduled resolution: passenger rejection may refund by severity,
+while timeout only auto-accepts and never cancels or refunds. Day 22 does not implement those
+actions.
 
 ### `parcel.parcel.unloaded`
 
