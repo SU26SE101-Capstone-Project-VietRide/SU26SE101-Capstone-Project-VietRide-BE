@@ -14,13 +14,21 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
+using VietRide.Identity.Api.Controllers;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
 using VietRide.Identity.Application.Features.Admin.CreateAdminUser;
+using VietRide.Identity.Application.Features.Admin.ListUsers;
+using VietRide.Identity.Application.Features.Admin.LockUser;
+using VietRide.Identity.Application.Features.Admin.UnlockUser;
+using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Identity.Infrastructure;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Shared.Persistence;
 using VietRide.Shared.Persistence.Outbox;
+using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Identity.IntegrationTests.Api;
 
@@ -34,6 +42,127 @@ public sealed class AdminUsersEndpointsTests : IClassFixture<AuthWebApplicationF
     public AdminUsersEndpointsTests(AuthWebApplicationFactory factory)
     {
         _factory = factory;
+    }
+
+    [Fact]
+    public async Task ListUsers_SystemAdmin_ReturnsPagedEnvelopeWithoutSecretFields()
+    {
+        using var client = CreateClientWithSender(new AuthorizingAdminUsersSender());
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            "/v1/admin/users?search=passenger&role=PASSENGER&status=ACTIVE&page=1&pageSize=20&sortBy=createdAt&sortDir=desc");
+        request.Headers.TryAddWithoutValidation(
+            "X-Internal-Auth",
+            $"Bearer {CreateInternalJwt(SystemAdminId, UserRole.SYSTEM_ADMIN.ToString())}");
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        AssertSuccessEnvelope(doc, 200);
+        var item = doc.RootElement.GetProperty("data").GetProperty("items")[0];
+        item.GetProperty("email").GetString().Should().Be("passenger@example.com");
+        item.TryGetProperty("passwordHash", out _).Should().BeFalse();
+        item.TryGetProperty("oauthSubject", out _).Should().BeFalse();
+        item.TryGetProperty("failedLoginAttempts", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ListUsers_NonSystemAdmin_IsRejectedByControllerRoleGate()
+    {
+        using var client = CreateClientWithSender(new AuthorizingAdminUsersSender());
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/v1/admin/users");
+        request.Headers.TryAddWithoutValidation(
+            "X-Internal-Auth",
+            $"Bearer {CreateInternalJwt(PassengerId, UserRole.PASSENGER.ToString())}");
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task ListUsers_RealRepository_AppliesPhoneContainsFiltersPagingSortAndIncludeDeleted()
+    {
+        var dbFactory = new DbBackedAdminUsersFactory();
+        try
+        {
+            await dbFactory.InitializeAsync();
+            await using (var scope = dbFactory.Services.CreateAsyncScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+                var first = CreateActivePassenger(
+                    "zulu-list@example.com",
+                    "+84901123456",
+                    "Zulu List");
+                var second = CreateActivePassenger(
+                    "alpha-list@example.com",
+                    "+84902123456",
+                    "Alpha List");
+                var deleted = CreateActivePassenger(
+                    "deleted-list@example.com",
+                    "+84903123456",
+                    "Deleted List");
+                deleted.SoftDelete(DateTimeOffset.UtcNow);
+                await db.Users.AddRangeAsync(first, second, deleted);
+                await db.SaveChangesAsync();
+            }
+
+            using var client = dbFactory.CreateClient();
+            using var activeRequest = CreateSystemAdminRequest(
+                "/v1/admin/users?search=1234&role=PASSENGER&status=ACTIVE&includeDeleted=true&page=1&pageSize=1&sortBy=email&sortDir=asc");
+            var activeResponse = await client.SendAsync(activeRequest);
+
+            activeResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            using (var activeDocument = JsonDocument.Parse(await activeResponse.Content.ReadAsStringAsync()))
+            {
+                var data = activeDocument.RootElement.GetProperty("data");
+                data.GetProperty("totalItems").GetInt64().Should().Be(2);
+                data.GetProperty("items").GetArrayLength().Should().Be(1);
+                data.GetProperty("items")[0].GetProperty("email").GetString()
+                    .Should().Be("alpha-list@example.com");
+            }
+
+            using var hiddenDeletedRequest = CreateSystemAdminRequest(
+                "/v1/admin/users?search=1234&status=DELETED&includeDeleted=false");
+            var hiddenDeletedResponse = await client.SendAsync(hiddenDeletedRequest);
+            hiddenDeletedResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            using (var hiddenDocument = JsonDocument.Parse(await hiddenDeletedResponse.Content.ReadAsStringAsync()))
+            {
+                hiddenDocument.RootElement.GetProperty("data").GetProperty("totalItems").GetInt64()
+                    .Should().Be(0);
+            }
+
+            using var visibleDeletedRequest = CreateSystemAdminRequest(
+                "/v1/admin/users?search=1234&status=DELETED&includeDeleted=true");
+            var visibleDeletedResponse = await client.SendAsync(visibleDeletedRequest);
+            visibleDeletedResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            using var visibleDocument = JsonDocument.Parse(await visibleDeletedResponse.Content.ReadAsStringAsync());
+            visibleDocument.RootElement.GetProperty("data").GetProperty("totalItems").GetInt64()
+                .Should().Be(1);
+        }
+        finally
+        {
+            dbFactory.Dispose();
+            await dbFactory.DropDatabaseAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData(nameof(AdminUsersController.LockUser))]
+    [InlineData(nameof(AdminUsersController.UnlockUser))]
+    public void LockUnlock_UseSharedRequiredNoBodyIdempotency(string methodName)
+    {
+        var method = typeof(AdminUsersController).GetMethod(methodName)
+            ?? throw new InvalidOperationException($"Method {methodName} was not found.");
+
+        var attribute = method.GetCustomAttributes(typeof(RequireIdempotencyAttribute), inherit: true)
+            .Cast<RequireIdempotencyAttribute>()
+            .Single();
+
+        attribute.AllowRequestBody.Should().BeFalse();
+        method.GetParameters().Should().NotContain(parameter => parameter.GetCustomAttributes(true)
+            .Any(attributeValue => attributeValue.GetType().Name == "FromBodyAttribute"));
     }
 
     [Fact]
@@ -169,6 +298,22 @@ public sealed class AdminUsersEndpointsTests : IClassFixture<AuthWebApplicationF
         doc.RootElement.TryGetProperty("meta", out _).Should().BeTrue();
     }
 
+    private static HttpRequestMessage CreateSystemAdminRequest(string path)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, path);
+        request.Headers.TryAddWithoutValidation(
+            "X-Internal-Auth",
+            $"Bearer {CreateInternalJwt(SystemAdminId, UserRole.SYSTEM_ADMIN.ToString())}");
+        return request;
+    }
+
+    private static User CreateActivePassenger(string email, string phone, string displayName)
+    {
+        var user = User.CreatePassenger(email, PhoneNumber.Parse(phone), "test-password-hash", displayName);
+        user.VerifyEmail();
+        return user;
+    }
+
     private static string CreateInternalJwt(Guid userId, string role)
     {
         var now = DateTime.UtcNow;
@@ -189,7 +334,7 @@ public sealed class AdminUsersEndpointsTests : IClassFixture<AuthWebApplicationF
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    private sealed class DbBackedAdminUsersFactory : WebApplicationFactory<Program>
+    internal class DbBackedAdminUsersFactory : WebApplicationFactory<Program>
     {
         private readonly string _connectionString = BuildTestDatabaseConnectionString();
         private readonly string _databaseName;
@@ -310,7 +455,7 @@ public sealed class AdminUsersEndpointsTests : IClassFixture<AuthWebApplicationF
         }
     }
 
-    private sealed class CapturingEmailService : IEmailService
+    internal sealed class CapturingEmailService : IEmailService
     {
         public List<(string To, AccountCreatedEmailDto Info)> SentAccountCreatedLinks { get; } = [];
 
@@ -359,6 +504,33 @@ public sealed class AdminUsersEndpointsTests : IClassFixture<AuthWebApplicationF
                     DisplayName: command.DisplayName,
                     Role: UserRole.SYSTEM_ADMIN.ToString(),
                     Status: UserStatus.PENDING_INITIAL_PASSWORD.ToString()),
+
+                ListUsersQuery => PagedResult<AdminUserListItemDto>.Create(
+                    [new AdminUserListItemDto(
+                        PassengerId,
+                        "passenger@example.com",
+                        "Passenger",
+                        "+84900000000",
+                        null,
+                        UserRole.PASSENGER.ToString(),
+                        UserStatus.ACTIVE.ToString(),
+                        null,
+                        DateTimeOffset.Parse("2026-07-16T00:00:00Z"),
+                        DateTimeOffset.Parse("2026-07-16T00:00:00Z"),
+                        null)],
+                    1,
+                    20,
+                    1),
+
+                LockUserCommand command => new LockUserResponseDto(
+                    command.UserId,
+                    UserStatus.LOCKED.ToString(),
+                    true),
+
+                UnlockUserCommand command => new UnlockUserResponseDto(
+                    command.UserId,
+                    UserStatus.ACTIVE.ToString(),
+                    true),
 
                 _ => throw new InvalidOperationException($"Unexpected request type {request.GetType().Name}."),
             };

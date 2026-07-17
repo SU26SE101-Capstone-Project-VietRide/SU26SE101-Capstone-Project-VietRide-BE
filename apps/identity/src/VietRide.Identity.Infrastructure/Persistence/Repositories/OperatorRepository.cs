@@ -92,6 +92,21 @@ public sealed class OperatorRepository : IOperatorRepository
         return PagedResult<Operator>.Create(items, options.Page, options.PageSize, totalItems);
     }
 
+    public async Task<IReadOnlyList<Operator>> ListSummariesByIdsAsync(
+        IReadOnlyCollection<Guid> operatorIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (operatorIds.Count == 0)
+            return [];
+
+        return await _dbContext.Operators
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(operatorTenant => operatorIds.Contains(operatorTenant.Id))
+            .OrderBy(operatorTenant => operatorTenant.Id)
+            .ToListAsync(cancellationToken);
+    }
+
     private static IOrderedQueryable<Operator> ApplySort(
         IQueryable<Operator> query,
         string? sortBy,

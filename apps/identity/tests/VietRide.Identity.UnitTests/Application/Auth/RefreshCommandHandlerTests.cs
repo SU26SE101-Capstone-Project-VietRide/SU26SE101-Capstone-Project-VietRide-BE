@@ -36,13 +36,14 @@ public sealed class RefreshCommandHandlerTests
         accessTokenSvc.IssueToken(Arg.Any<User>()).Returns("new.access.token");
         refreshFactory.ComputeHash(Arg.Any<string>()).Returns(ci => "hash_of_" + ci.Arg<string>());
 
-        return new RefreshCommandHandler(
+        var executor = new LegacyRefreshSessionExecutor(
             users,
             refreshTokens,
-            accessTokenSvc,
             refreshFactory,
             refreshTokenFamilyRevoker,
             clock);
+
+        return new RefreshCommandHandler(executor, accessTokenSvc);
     }
 
     private static User MakeActiveUser()
@@ -263,11 +264,70 @@ public sealed class RefreshCommandHandlerTests
 
         // Reuse detection must be persisted outside the throwing transaction.
         await refreshTokenFamilyRevoker.Received(1).RevokeForReuseAsync(
-            familyId,
+            Arg.Is<IReadOnlyCollection<RefreshToken>>(tokens => tokens.Count == 1 && tokens.Single().FamilyId == familyId),
+            FrozenNow,
             Arg.Any<CancellationToken>());
         await refreshTokens.DidNotReceive().RevokeFamilyAsync(
             Arg.Any<Guid>(),
             Arg.Any<RefreshTokenRevokeReason>(),
             Arg.Any<CancellationToken>());
+    }
+
+    private sealed class LegacyRefreshSessionExecutor : IRefreshSessionExecutor
+    {
+        private static readonly TimeSpan RotationGracePeriod = TimeSpan.FromSeconds(30);
+        private readonly IUserRepository _users;
+        private readonly IRefreshTokenRepository _tokens;
+        private readonly IRefreshTokenFactory _factory;
+        private readonly IRefreshTokenFamilyRevoker _familyRevoker;
+        private readonly IClock _clock;
+
+        public LegacyRefreshSessionExecutor(
+            IUserRepository users,
+            IRefreshTokenRepository tokens,
+            IRefreshTokenFactory factory,
+            IRefreshTokenFamilyRevoker familyRevoker,
+            IClock clock)
+        {
+            _users = users;
+            _tokens = tokens;
+            _factory = factory;
+            _familyRevoker = familyRevoker;
+            _clock = clock;
+        }
+
+        public async Task<RefreshSessionResult> ExecuteAsync(
+            string rawRefreshToken,
+            CancellationToken ct = default)
+        {
+            var hash = _factory.ComputeHash(rawRefreshToken);
+            var existing = await _tokens.GetByTokenHashAsync(hash, ct);
+            if (existing is null)
+                return RefreshSessionResult.Invalid("Refresh token is invalid.");
+
+            if (existing.RevokedAt is not null)
+            {
+                if (existing.RevokedReason == RefreshTokenRevokeReason.NORMAL_ROTATION
+                    && _clock.UtcNow - existing.RevokedAt.Value <= RotationGracePeriod)
+                {
+                    return RefreshSessionResult.Invalid("Refresh token was already rotated.");
+                }
+
+                await _familyRevoker.RevokeForReuseAsync([existing], _clock.UtcNow, ct);
+                return RefreshSessionResult.Invalid("Refresh token has already been used.");
+            }
+
+            if (existing.ExpiresAt <= _clock.UtcNow)
+                return RefreshSessionResult.Invalid("Refresh token has expired.");
+
+            var user = await _users.GetByIdAsync(existing.UserId, ct);
+            if (user is null || user.Status != UserStatus.ACTIVE)
+                return RefreshSessionResult.Invalid("Refresh token is invalid for the current account status.");
+
+            existing.Revoke(_clock.UtcNow, RefreshTokenRevokeReason.NORMAL_ROTATION);
+            var (newRaw, newEntity) = _factory.Create(user.Id, existing.Id, existing.FamilyId);
+            await _tokens.AddAsync(newEntity, ct);
+            return RefreshSessionResult.Success(user, newRaw);
+        }
     }
 }

@@ -13,10 +13,8 @@ namespace VietRide.Identity.Infrastructure.Security;
 /// back the entire transaction on any exception. Without this persister the increment would
 /// be lost every time a wrong code is submitted, neutralising the anti-brute-force control.
 ///
-/// Design: a fresh <see cref="IServiceScope"/> is created per call, giving a fresh
-/// <see cref="IdentityDbContext"/> with no ambient transaction. <c>SaveChangesAsync</c>
-/// on that context issues a standalone UPDATE + auto-commit (no explicit transaction needed
-/// for a single-row write). The scope is disposed before the method returns.
+/// Design: a fresh scope starts a User-first transaction, then locks pending OTP rows in UUID
+/// order. This keeps OTP failure persistence linear with admin lock and password reset.
 /// </summary>
 internal sealed class OtpFailedAttemptPersister : IOtpFailedAttemptPersister
 {
@@ -36,16 +34,42 @@ internal sealed class OtpFailedAttemptPersister : IOtpFailedAttemptPersister
         await using var scope = _scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
 
-        var token = await db.EmailVerificationTokens
-            .Where(e => e.UserId == userId && e.Purpose == purpose && e.UsedAt == null)
-            .OrderByDescending(e => e.CreatedAt)
-            .FirstOrDefaultAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var user = await db.Users
+            .FromSqlInterpolated($"SELECT * FROM vietride_identity.users WHERE id = {userId} AND deleted_at IS NULL FOR UPDATE")
+            .IgnoreQueryFilters()
+            .SingleOrDefaultAsync(ct);
+
+        var statusEligible = purpose switch
+        {
+            EmailVerificationPurpose.PASSWORD_RESET => user?.Status == UserStatus.ACTIVE,
+            EmailVerificationPurpose.REGISTRATION => user?.Status == UserStatus.PENDING_EMAIL_VERIFICATION,
+            EmailVerificationPurpose.SET_INITIAL_PASSWORD => user?.Status == UserStatus.PENDING_INITIAL_PASSWORD,
+            _ => false,
+        };
+
+        if (!statusEligible)
+        {
+            await transaction.CommitAsync(ct);
+            return;
+        }
+
+        var tokens = await db.EmailVerificationTokens
+            .FromSqlInterpolated($"SELECT * FROM vietride_identity.email_verification_tokens WHERE user_id = {userId} AND purpose = {purpose} AND used_at IS NULL ORDER BY id FOR UPDATE")
+            .ToListAsync(ct);
+        var token = tokens
+            .OrderByDescending(candidate => candidate.CreatedAt)
+            .ThenByDescending(candidate => candidate.Id)
+            .FirstOrDefault();
 
         if (token is null)
+        {
+            await transaction.CommitAsync(ct);
             return;
+        }
 
         token.IncrementFailedAttempts();
-        db.EmailVerificationTokens.Update(token);
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
     }
 }

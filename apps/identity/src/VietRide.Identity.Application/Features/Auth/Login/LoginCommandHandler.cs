@@ -74,20 +74,24 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
             // attempts still fail uniformly but must not create a user-scoped Redis key.
             if (user is not null)
             {
-                var failedAttemptsInWindow = await _loginLockoutCounter.IncrementAsync(
-                    user.Id,
-                    cancellationToken);
-
                 await _failedLoginPersister.PersistAsync(
                     user.Id,
-                    failedAttemptsInWindow,
                     cancellationToken);
             }
 
             throw new UnauthorizedException("AUTH_INVALID_CREDENTIALS", "Invalid email or password.");
         }
 
-        var authenticatedUser = user!;
+        var authenticatedUser = await _users.GetByIdForUpdateAsync(user!.Id, cancellationToken)
+            ?? throw new UnauthorizedException("AUTH_INVALID_CREDENTIALS", "Invalid email or password.");
+
+        EnsureCanPasswordLogin(authenticatedUser);
+
+        if (authenticatedUser.PasswordHash is null
+            || !_hasher.Verify(request.Password, authenticatedUser.PasswordHash))
+        {
+            throw new UnauthorizedException("AUTH_INVALID_CREDENTIALS", "Invalid email or password.");
+        }
 
         // 5. Operator dashboard login is allowed only after the operator is approved.
         if (RequiresApprovedOperator(authenticatedUser))
@@ -127,4 +131,19 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
     private static bool RequiresApprovedOperator(User user)
         => user.OperatorId.HasValue
             && (user.Role == UserRole.OPERATOR_ADMIN || user.Role == UserRole.OPERATOR_STAFF);
+
+    private static void EnsureCanPasswordLogin(User user)
+    {
+        if (user.Status == UserStatus.LOCKED)
+            throw new ForbiddenException("AUTH_ACCOUNT_LOCKED", "Account is locked. Please contact support.");
+
+        if (user.Status == UserStatus.PENDING_EMAIL_VERIFICATION && user.Role != UserRole.PASSENGER)
+            throw new ForbiddenException("AUTH_EMAIL_NOT_VERIFIED", "Email address has not been verified.");
+
+        if (user.Status == UserStatus.PENDING_INITIAL_PASSWORD)
+            throw new ForbiddenException("AUTH_PENDING_INITIAL_PASSWORD", "Initial password has not been set.");
+
+        if (user.Status is not (UserStatus.ACTIVE or UserStatus.PENDING_EMAIL_VERIFICATION))
+            throw new ForbiddenException("FORBIDDEN", "Account is not active.");
+    }
 }
