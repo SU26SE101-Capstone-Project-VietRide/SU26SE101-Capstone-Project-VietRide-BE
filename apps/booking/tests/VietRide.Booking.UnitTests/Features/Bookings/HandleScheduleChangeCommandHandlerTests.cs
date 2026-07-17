@@ -110,6 +110,8 @@ public sealed class HandleScheduleChangeCommandHandlerTests
             });
         fixture.Scheduler.When(value => value.EnsureScheduled(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>()))
             .Do(_ => calls.Add("schedule"));
+        fixture.AutoAcceptScheduler.When(value => value.EnsureScheduled(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>()))
+            .Do(_ => calls.Add("auto-accept"));
         BookingPendingAction? captured = null;
         fixture.PendingActions.AddAsync(
                 Arg.Do<BookingPendingAction>(action => captured = action),
@@ -118,7 +120,7 @@ public sealed class HandleScheduleChangeCommandHandlerTests
 
         await fixture.Handler.Handle(Command(OccurredAt.AddHours(3), "MEDIUM"), CancellationToken.None);
 
-        calls.Should().Equal("commit", "schedule");
+        calls.Should().Equal("commit", "schedule", "auto-accept");
         Received.InOrder(() =>
         {
             fixture.PendingActions.GetActiveByTripForUpdateAsync(
@@ -144,6 +146,9 @@ public sealed class HandleScheduleChangeCommandHandlerTests
         metadata.RootElement.GetProperty("refundPercent").GetInt32().Should().Be(50);
         metadata.RootElement.GetProperty("refundAmount").GetInt64().Should().Be(50_000);
         fixture.Scheduler.Received(1).EnsureScheduled(captured.Id, OccurredAt.AddHours(2));
+        fixture.AutoAcceptScheduler.Received(1).EnsureScheduled(
+            captured.Id,
+            captured.Deadline.AddSeconds(1));
         await fixture.Outbox.Received(1).EnqueueAsync(
             Arg.Any<Guid>(),
             BookingScheduleChangeRequiredIntegrationEvent.EventTypeValue,
@@ -175,6 +180,7 @@ public sealed class HandleScheduleChangeCommandHandlerTests
         await fixture.Outbox.DidNotReceive().EnqueueAsync(
             Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         fixture.Scheduler.Received(1).EnsureScheduled(existing.Id, OccurredAt.AddHours(2));
+        fixture.AutoAcceptScheduler.Received(1).EnsureScheduled(existing.Id, existing.Deadline.AddSeconds(1));
     }
 
     [Fact]
@@ -263,7 +269,7 @@ public sealed class HandleScheduleChangeCommandHandlerTests
                 .Returns(call => call.Arg<Func<Task<int>>>()());
             Clock.UtcNow.Returns(OccurredAt.AddMinutes(5));
             Handler = new HandleScheduleChangeCommandHandler(
-                Bookings, PendingActions, Outbox, UnitOfWork, Scheduler, Clock);
+                Bookings, PendingActions, Outbox, UnitOfWork, Scheduler, Clock, AutoAcceptScheduler);
         }
 
         public IBookingRepository Bookings { get; } = Substitute.For<IBookingRepository>();
@@ -271,6 +277,8 @@ public sealed class HandleScheduleChangeCommandHandlerTests
         public IIntegrationEventOutbox Outbox { get; } = Substitute.For<IIntegrationEventOutbox>();
         public IUnitOfWork UnitOfWork { get; } = Substitute.For<IUnitOfWork>();
         public IPendingActionRealertScheduler Scheduler { get; } = Substitute.For<IPendingActionRealertScheduler>();
+        public IScheduleChangeAutoAcceptScheduler AutoAcceptScheduler { get; }
+            = Substitute.For<IScheduleChangeAutoAcceptScheduler>();
         public IClock Clock { get; } = Substitute.For<IClock>();
         public BookingEntity Booking { get; }
         public HandleScheduleChangeCommandHandler Handler { get; }

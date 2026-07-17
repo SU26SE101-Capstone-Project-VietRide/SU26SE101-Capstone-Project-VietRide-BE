@@ -80,4 +80,22 @@ public sealed class BookingPendingAction : BaseEntity<Guid>
         ResolvedAt = resolvedAt;
         ResolvedAction = resolvedAction;
     }
+
+    public void AutoAcceptScheduleChange(DateTimeOffset resolvedAt, DateTimeOffset effectiveCutoff)
+    {
+        if (Reason != BookingPendingActionReason.SCHEDULE_CHANGE
+            || Severity is null
+            || ResolvedAt.HasValue)
+        {
+            throw new InvalidOperationException("Pending action cannot be auto-accepted as a schedule change.");
+        }
+
+        if (resolvedAt <= effectiveCutoff)
+        {
+            throw new InvalidOperationException("Pending action has not passed its effective cutoff.");
+        }
+
+        ResolvedAt = resolvedAt;
+        ResolvedAction = BookingPendingActionResolved.ACCEPTED;
+    }
 }

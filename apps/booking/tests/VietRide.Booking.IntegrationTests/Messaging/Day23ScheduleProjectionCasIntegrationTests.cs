@@ -361,7 +361,8 @@ public sealed class Day23ScheduleProjectionCasIntegrationTests
             outbox ?? new IntegrationEventOutbox(new OutboxStore(db, clock)),
             new EfUnitOfWork(db),
             scheduler,
-            clock);
+            clock,
+            Substitute.For<IScheduleChangeAutoAcceptScheduler>());
     }
 
     private static HandleScheduleChangeCommand CreateCommand(

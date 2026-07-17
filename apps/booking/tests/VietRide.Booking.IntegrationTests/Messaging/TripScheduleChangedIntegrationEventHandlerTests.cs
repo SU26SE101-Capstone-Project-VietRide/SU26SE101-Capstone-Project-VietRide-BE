@@ -52,6 +52,7 @@ public sealed class TripScheduleChangedIntegrationEventHandlerTests
 
             var integrationEvent = CreateMediumEvent(tripId, operatorId);
             var scheduler = Substitute.For<IPendingActionRealertScheduler>();
+            var autoAcceptScheduler = Substitute.For<IScheduleChangeAutoAcceptScheduler>();
             var firstHasLock = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -60,12 +61,14 @@ public sealed class TripScheduleChangedIntegrationEventHandlerTests
             var firstHandler = CreateDatabaseBackedHandler(
                 firstDb,
                 scheduler,
+                autoAcceptScheduler,
                 async () =>
                 {
                     firstHasLock.TrySetResult();
                     await releaseFirst.Task;
                 });
-            var secondHandler = CreateDatabaseBackedHandler(secondDb, scheduler);
+            var secondHandler = CreateDatabaseBackedHandler(
+                secondDb, scheduler, autoAcceptScheduler);
 
             var first = firstHandler.HandleAsync(integrationEvent, CancellationToken.None);
             await firstHasLock.Task.WaitAsync(TimeSpan.FromSeconds(10));
@@ -123,6 +126,7 @@ public sealed class TripScheduleChangedIntegrationEventHandlerTests
             }
 
             scheduler.Received(2).EnsureScheduled(action.Id, NotifiedAt.AddHours(2));
+            autoAcceptScheduler.Received(2).EnsureScheduled(action.Id, action.Deadline.AddSeconds(1));
         }
         finally
         {
@@ -158,7 +162,10 @@ public sealed class TripScheduleChangedIntegrationEventHandlerTests
 
             await using (var firstDb = Day22EventDatabase.CreateDbContext(dataSource, NotifiedAt))
             {
-                var act = () => CreateDatabaseBackedHandler(firstDb, failingScheduler)
+                var act = () => CreateDatabaseBackedHandler(
+                        firstDb,
+                        failingScheduler,
+                        Substitute.For<IScheduleChangeAutoAcceptScheduler>())
                     .HandleAsync(integrationEvent, CancellationToken.None);
                 await act.Should().ThrowAsync<InvalidOperationException>()
                     .WithMessage("hangfire unavailable");
@@ -174,9 +181,13 @@ public sealed class TripScheduleChangedIntegrationEventHandlerTests
             }
 
             var repairScheduler = Substitute.For<IPendingActionRealertScheduler>();
+            var repairAutoAcceptScheduler = Substitute.For<IScheduleChangeAutoAcceptScheduler>();
             await using (var replayDb = Day22EventDatabase.CreateDbContext(dataSource, NotifiedAt))
             {
-                await CreateDatabaseBackedHandler(replayDb, repairScheduler)
+                await CreateDatabaseBackedHandler(
+                        replayDb,
+                        repairScheduler,
+                        repairAutoAcceptScheduler)
                     .HandleAsync(integrationEvent, CancellationToken.None);
             }
 
@@ -186,6 +197,9 @@ public sealed class TripScheduleChangedIntegrationEventHandlerTests
                 .CountAsync(row => row.EventType == BookingScheduleChangeRequiredIntegrationEvent.EventTypeValue))
                 .Should().Be(1);
             repairScheduler.Received(1).EnsureScheduled(pendingActionId, NotifiedAt.AddHours(2));
+            repairAutoAcceptScheduler.Received(1).EnsureScheduled(
+                pendingActionId,
+                NotifiedAt.AddHours(24).AddSeconds(1));
         }
         finally
         {
@@ -280,6 +294,7 @@ public sealed class TripScheduleChangedIntegrationEventHandlerTests
     private static IIntegrationEventHandler<TripScheduleChangedIntegrationEvent> CreateDatabaseBackedHandler(
         BookingDbContext db,
         IPendingActionRealertScheduler scheduler,
+        IScheduleChangeAutoAcceptScheduler autoAcceptScheduler,
         Func<Task>? afterLock = null)
     {
         var realBookings = Day22EventDatabase.CreateBookingRepository(db);
@@ -323,7 +338,8 @@ public sealed class TripScheduleChangedIntegrationEventHandlerTests
             new IntegrationEventOutbox(new OutboxStore(db, clock)),
             new EfUnitOfWork(db),
             scheduler,
-            clock);
+            clock,
+            autoAcceptScheduler);
         var mediator = Substitute.For<IMediator>();
         mediator.Send(Arg.Any<HandleScheduleChangeCommand>(), Arg.Any<CancellationToken>())
             .Returns(call => commandHandler.Handle(

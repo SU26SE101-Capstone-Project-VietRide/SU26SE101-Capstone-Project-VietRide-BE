@@ -20,7 +20,9 @@ public sealed class HandleScheduleChangeCommandHandler(
     IIntegrationEventOutbox outbox,
     IUnitOfWork unitOfWork,
     IPendingActionRealertScheduler scheduler,
-    IClock clock) : IRequestHandler<HandleScheduleChangeCommand, int>
+    IClock clock,
+    IScheduleChangeAutoAcceptScheduler autoAcceptScheduler)
+    : IRequestHandler<HandleScheduleChangeCommand, int>
 {
     private static readonly TimeSpan IctOffset = TimeSpan.FromHours(7);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -32,9 +34,11 @@ public sealed class HandleScheduleChangeCommandHandler(
         Validate(request);
         var now = clock.UtcNow;
         var schedules = new Dictionary<Guid, DateTimeOffset>();
+        var autoAcceptSchedules = new Dictionary<Guid, DateTimeOffset>();
         var affected = await unitOfWork.ExecuteInTransactionAsync(async () =>
         {
             schedules.Clear();
+            autoAcceptSchedules.Clear();
             await bookings.AcquireEventLockAsync(request.EventId, cancellationToken);
             await pendingActions.GetActiveByTripForUpdateAsync(
                 request.TripId,
@@ -72,6 +76,9 @@ public sealed class HandleScheduleChangeCommandHandler(
                         if (replayAction is not null)
                         {
                             schedules.TryAdd(replayAction.Id, request.OccurredAt.AddHours(2));
+                            autoAcceptSchedules.TryAdd(
+                                replayAction.Id,
+                                replayAction.Deadline.AddSeconds(1));
                         }
                     }
 
@@ -132,6 +139,7 @@ public sealed class HandleScheduleChangeCommandHandler(
                 if (existing is not null)
                 {
                     schedules.TryAdd(existing.Id, request.OccurredAt.AddHours(2));
+                    autoAcceptSchedules.TryAdd(existing.Id, existing.Deadline.AddSeconds(1));
                     continue;
                 }
 
@@ -188,6 +196,7 @@ public sealed class HandleScheduleChangeCommandHandler(
                     JsonSerializer.Serialize(required, JsonOptions),
                     cancellationToken);
                 schedules.TryAdd(action.Id, request.OccurredAt.AddHours(2));
+                autoAcceptSchedules.TryAdd(action.Id, initialDeadline.AddSeconds(1));
                 changed++;
             }
 
@@ -197,6 +206,11 @@ public sealed class HandleScheduleChangeCommandHandler(
         foreach (var schedule in schedules.OrderBy(item => item.Key))
         {
             scheduler.EnsureScheduled(schedule.Key, schedule.Value);
+        }
+
+        foreach (var schedule in autoAcceptSchedules.OrderBy(item => item.Key))
+        {
+            autoAcceptScheduler.EnsureScheduled(schedule.Key, schedule.Value);
         }
 
         return affected;

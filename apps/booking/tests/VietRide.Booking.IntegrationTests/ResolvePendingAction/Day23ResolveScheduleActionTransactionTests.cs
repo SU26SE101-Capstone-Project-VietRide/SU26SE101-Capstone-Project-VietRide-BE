@@ -170,7 +170,8 @@ public sealed class Day23ResolveScheduleActionTransactionTests
                 new IntegrationEventOutbox(new OutboxStore(producerDb, new FixedClock(Now.AddMinutes(1)))),
                 new EfUnitOfWork(producerDb),
                 Substitute.For<IPendingActionRealertScheduler>(),
-                new FixedClock(Now.AddMinutes(1)));
+                new FixedClock(Now.AddMinutes(1)),
+                Substitute.For<IScheduleChangeAutoAcceptScheduler>());
 
             var resolveTask = resolver.Handle(
                 Command(aggregate.Booking, aggregate.Action, "ACCEPTED"),

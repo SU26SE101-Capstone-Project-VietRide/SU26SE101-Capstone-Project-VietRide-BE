@@ -236,7 +236,7 @@ public sealed class Day23ScheduleProjectionRulesTests
                 .Returns(call => call.Arg<Func<Task<int>>>()());
             Clock.UtcNow.Returns(OccurredAt.AddMinutes(5));
             Handler = new HandleScheduleChangeCommandHandler(
-                Bookings, PendingActions, Outbox, UnitOfWork, Scheduler, Clock);
+                Bookings, PendingActions, Outbox, UnitOfWork, Scheduler, Clock, AutoAcceptScheduler);
         }
 
         public IBookingRepository Bookings { get; } = Substitute.For<IBookingRepository>();
@@ -246,6 +246,8 @@ public sealed class Day23ScheduleProjectionRulesTests
         public IUnitOfWork UnitOfWork { get; } = Substitute.For<IUnitOfWork>();
         public IPendingActionRealertScheduler Scheduler { get; }
             = Substitute.For<IPendingActionRealertScheduler>();
+        public IScheduleChangeAutoAcceptScheduler AutoAcceptScheduler { get; }
+            = Substitute.For<IScheduleChangeAutoAcceptScheduler>();
         public IClock Clock { get; } = Substitute.For<IClock>();
         public HandleScheduleChangeCommandHandler Handler { get; }
     }

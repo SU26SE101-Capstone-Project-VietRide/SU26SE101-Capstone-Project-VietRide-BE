@@ -5,6 +5,8 @@ namespace VietRide.Booking.Domain.Services;
 
 public static class ScheduleChangeResolutionStateMachine
 {
+    public const string MajorInitialPhase = "MAJOR_INITIAL_PHASE";
+
     public static DateTimeOffset GetEffectiveCutoff(
         BookingPendingAction action,
         DateTimeOffset initialDeadline,
@@ -29,4 +31,23 @@ public static class ScheduleChangeResolutionStateMachine
             _ => throw new InvalidOperationException("Pending action severity metadata is invalid."),
         };
     }
+
+    public static bool IsMajorInitialPhaseDue(
+        BookingPendingAction action,
+        DateTimeOffset initialDeadline,
+        DateTimeOffset? terminalDeadline,
+        DateTimeOffset now)
+        => action.Reason == BookingPendingActionReason.SCHEDULE_CHANGE
+            && action.Severity == BookingPendingActionSeverity.MAJOR
+            && terminalDeadline.HasValue
+            && initialDeadline < terminalDeadline.Value
+            && now > initialDeadline
+            && now <= terminalDeadline.Value;
+
+    public static bool IsAutoAcceptDue(
+        BookingPendingAction action,
+        DateTimeOffset initialDeadline,
+        DateTimeOffset? terminalDeadline,
+        DateTimeOffset now)
+        => now > GetEffectiveCutoff(action, initialDeadline, terminalDeadline);
 }
