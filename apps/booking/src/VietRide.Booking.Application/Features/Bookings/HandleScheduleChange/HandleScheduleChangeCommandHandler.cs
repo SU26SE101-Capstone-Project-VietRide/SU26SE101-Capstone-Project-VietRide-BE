@@ -153,7 +153,7 @@ public sealed class HandleScheduleChangeCommandHandler(
 
                 var initialDeadline = CalculateDeadline(request.OccurredAt, request.NewDeparture);
                 var terminalDeadline = request.Severity == "MAJOR"
-                    ? request.NewDeparture.AddMinutes(-30)
+                    ? NormalizeDeadline(request.NewDeparture.AddMinutes(-30))
                     : (DateTimeOffset?)null;
                 var refundBasisAmount = booking.TotalAmount.Amount;
                 var refundPercent = request.Severity == "MEDIUM" ? 50 : 100;
@@ -222,10 +222,16 @@ public sealed class HandleScheduleChangeCommandHandler(
     {
         if (newDeparture - notifiedAt > TimeSpan.FromHours(24))
         {
-            return Min(notifiedAt.AddHours(24), newDeparture.AddHours(-2));
+            return NormalizeDeadline(Min(notifiedAt.AddHours(24), newDeparture.AddHours(-2)));
         }
 
-        return Max(notifiedAt.AddHours(1), newDeparture.AddMinutes(-30));
+        return NormalizeDeadline(Max(notifiedAt.AddHours(1), newDeparture.AddMinutes(-30)));
+    }
+
+    private static DateTimeOffset NormalizeDeadline(DateTimeOffset deadline)
+    {
+        var utc = deadline.ToUniversalTime();
+        return utc.AddTicks(-(utc.Ticks % TimeSpan.TicksPerMicrosecond));
     }
 
     private static void Validate(HandleScheduleChangeCommand request)

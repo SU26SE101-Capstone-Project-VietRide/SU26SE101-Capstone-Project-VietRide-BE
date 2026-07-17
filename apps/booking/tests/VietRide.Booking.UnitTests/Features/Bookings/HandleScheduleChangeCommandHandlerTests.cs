@@ -95,6 +95,58 @@ public sealed class HandleScheduleChangeCommandHandlerTests
     }
 
     [Fact]
+    public async Task SubMicrosecondMajorDeadlinesUseOneCanonicalInstantAcrossOutputs()
+    {
+        var fixture = new Fixture();
+        var occurredAt = OccurredAt.AddTicks(7);
+        var oldDeparture = occurredAt.AddHours(27);
+        var newDeparture = occurredAt.AddHours(33);
+        var expectedInitial = occurredAt.AddHours(24).AddTicks(-7);
+        var expectedTerminal = newDeparture.AddMinutes(-30).AddTicks(-7);
+        BookingPendingAction? captured = null;
+        string? requiredPayload = null;
+        SetCurrentDeparture(fixture.Booking, oldDeparture);
+        fixture.PendingActions.AddAsync(
+                Arg.Do<BookingPendingAction>(action => captured = action),
+                Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<BookingPendingAction>());
+        fixture.Outbox.EnqueueAsync(
+                Arg.Any<Guid>(),
+                BookingScheduleChangeRequiredIntegrationEvent.EventTypeValue,
+                Arg.Do<string>(payload => requiredPayload = payload),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        await fixture.Handler.Handle(
+            Command(newDeparture, "MAJOR") with
+            {
+                OccurredAt = occurredAt,
+                OldDeparture = oldDeparture,
+            },
+            CancellationToken.None);
+
+        captured.Should().NotBeNull();
+        captured!.Deadline.Should().Be(expectedInitial);
+        using (var metadata = JsonDocument.Parse(captured.Metadata!))
+        {
+            metadata.RootElement.GetProperty("initialDeadline").GetDateTimeOffset().Should()
+                .Be(expectedInitial);
+            metadata.RootElement.GetProperty("terminalDeadline").GetDateTimeOffset().Should()
+                .Be(expectedTerminal);
+        }
+
+        using (var payload = JsonDocument.Parse(requiredPayload!))
+        {
+            payload.RootElement.GetProperty("deadline").GetDateTimeOffset().Should()
+                .Be(expectedInitial);
+        }
+
+        fixture.AutoAcceptScheduler.Received(1).EnsureScheduled(
+            captured.Id,
+            expectedInitial.AddSeconds(1));
+    }
+
+    [Fact]
     public async Task MediumCreatesExactActionAndOutboxThenSchedulesAfterCommit()
     {
         var fixture = new Fixture();
