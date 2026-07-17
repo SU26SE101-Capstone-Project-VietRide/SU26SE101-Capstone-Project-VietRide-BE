@@ -18,11 +18,14 @@ internal sealed class BookingCancelledIntegrationEventHandler
         BookingCancelledIntegrationEvent integrationEvent,
         CancellationToken cancellationToken)
     {
+        integrationEvent.Validate();
+
         await _mediator.Send(
             new UpdateBookingStatsCommand(
                 BookingCancelledIntegrationEvent.EventType,
-                integrationEvent.BookingId,
-                BookingStatsTransition.Cancelled),
+                integrationEvent.BookingId!.Value,
+                BookingStatsTransition.Cancelled,
+                DedupeId: integrationEvent.EventId ?? integrationEvent.BookingId.Value),
             cancellationToken);
     }
 }

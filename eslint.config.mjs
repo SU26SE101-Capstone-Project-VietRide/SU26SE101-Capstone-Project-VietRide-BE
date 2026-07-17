@@ -41,6 +41,23 @@ export default [
   },
   {
     files: [
+      'apps/notification/**/*.ts',
+      'libs/shared/contracts/**/*.ts'
+    ],
+    languageOptions: {
+      parserOptions: {
+        project: [
+          './apps/notification/tsconfig.app.json',
+          './apps/notification/tsconfig.spec.json',
+          './libs/shared/contracts/tsconfig.lib.json',
+          './libs/shared/contracts/tsconfig.spec.json'
+        ],
+        tsconfigRootDir: import.meta.dirname
+      }
+    }
+  },
+  {
+    files: [
       'apps/{gateway,tracking,notification,rag}/**/*.ts',
       'libs/**/*.ts'
     ],

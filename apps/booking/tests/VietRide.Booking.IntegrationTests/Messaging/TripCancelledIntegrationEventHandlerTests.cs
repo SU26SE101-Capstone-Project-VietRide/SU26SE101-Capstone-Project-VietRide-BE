@@ -212,7 +212,8 @@ public sealed class TripCancelledIntegrationEventHandlerTests
             bookings,
             Day22EventDatabase.CreateStatusHistoryRepository(db),
             new IntegrationEventOutbox(new OutboxStore(db, clock)),
-            new EfUnitOfWork(db));
+            new EfUnitOfWork(db),
+            clock);
         var mediator = Substitute.For<IMediator>();
         mediator.Send(Arg.Any<HandleTripCancelledCommand>(), Arg.Any<CancellationToken>())
             .Returns(call => commandHandler.Handle(

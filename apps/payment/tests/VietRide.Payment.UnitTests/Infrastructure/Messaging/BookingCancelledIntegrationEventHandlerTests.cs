@@ -18,11 +18,11 @@ public sealed class BookingCancelledIntegrationEventHandlerTests
         await handler.HandleAsync(integrationEvent, CancellationToken.None);
 
         var command = sender.LastRequest.Should().BeOfType<RefundToWalletCommand>().Subject;
-        command.UserId.Should().Be(integrationEvent.UserId);
-        command.Amount.Should().Be(integrationEvent.RefundAmount);
+        command.UserId.Should().Be(integrationEvent.UserId!.Value);
+        command.Amount.Should().Be(integrationEvent.RefundAmount!.Value);
         command.ReferenceType.Should().Be("BOOKING_REFUND");
-        command.ReferenceId.Should().Be(integrationEvent.BookingId);
-        command.IdempotencyKey.Should().Be($"booking-refund-{integrationEvent.BookingId:N}");
+        command.ReferenceId.Should().Be(integrationEvent.BookingId!.Value);
+        command.IdempotencyKey.Should().Be($"booking-refund-{integrationEvent.EventId!.Value:N}");
     }
 
     [Fact]
@@ -32,12 +32,14 @@ public sealed class BookingCancelledIntegrationEventHandlerTests
         // requires Amount > 0, so the handler must skip the credit rather than dead-letter.
         var sender = new CapturingSender();
         var handler = CreateHandler(sender);
-        var zeroRefundEvent = new BookingCancelledIntegrationEvent(
-            Guid.Parse("11111111-1111-1111-1111-111111111111"),
-            Guid.Parse("33333333-3333-3333-3333-333333333333"),
-            0,
-            false,
-            "Passenger cancellation");
+        var zeroRefundEvent = new BookingCancelledIntegrationEvent
+        {
+            BookingId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+            UserId = Guid.Parse("33333333-3333-3333-3333-333333333333"),
+            RefundAmount = 0,
+            RefundOverride = false,
+            CancellationReason = "Passenger cancellation",
+        };
 
         await handler.HandleAsync(zeroRefundEvent, CancellationToken.None);
 
@@ -60,8 +62,8 @@ public sealed class BookingCancelledIntegrationEventHandlerTests
             .Should()
             .OnlyContain(command =>
                 command.ReferenceType == "BOOKING_REFUND"
-                && command.ReferenceId == integrationEvent.BookingId
-                && command.UserId == integrationEvent.UserId);
+                && command.ReferenceId == integrationEvent.BookingId!.Value
+                && command.UserId == integrationEvent.UserId!.Value);
     }
 
     [Fact]
@@ -95,12 +97,16 @@ public sealed class BookingCancelledIntegrationEventHandlerTests
         => new(sender, NullLogger<BookingCancelledIntegrationEventHandler>.Instance);
 
     private static BookingCancelledIntegrationEvent CreateEvent()
-        => new(
-            Guid.Parse("11111111-1111-1111-1111-111111111111"),
-            Guid.Parse("33333333-3333-3333-3333-333333333333"),
-            175_000,
-            false,
-            "Passenger cancellation");
+        => new()
+        {
+            EventId = Guid.NewGuid(),
+            OccurredAtOffset = DateTimeOffset.Parse("2026-07-17T00:00:00Z"),
+            BookingId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+            UserId = Guid.Parse("33333333-3333-3333-3333-333333333333"),
+            RefundAmount = 175_000,
+            RefundOverride = false,
+            CancellationReason = "Passenger cancellation",
+        };
 
     private sealed class CapturingSender : ISender
     {

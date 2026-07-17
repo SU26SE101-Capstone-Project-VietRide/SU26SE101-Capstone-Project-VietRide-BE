@@ -88,6 +88,7 @@ public sealed class CancelBookingIntegrationTests : IClassFixture<CancelBookingW
             Arg.Is<IReadOnlyList<string>>(seats => seats.SequenceEqual(new[] { "A01" })),
             Arg.Any<CancellationToken>());
         await _factory.Outbox.Received(1).EnqueueAsync(
+            Arg.Is<Guid>(eventId => eventId != Guid.Empty),
             "booking.booking.cancelled",
             Arg.Is<string>(json => EventHasPassengerAndRefund(json, userId, 180_000)),
             Arg.Any<CancellationToken>());
@@ -130,6 +131,8 @@ public sealed class CancelBookingIntegrationTests : IClassFixture<CancelBookingW
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
         return root.GetProperty("userId").GetGuid() == userId
+            && root.GetProperty("eventId").GetGuid() != Guid.Empty
+            && root.GetProperty("occurredAt").GetDateTimeOffset() == Now
             && root.GetProperty("refundAmount").GetInt64() == refundAmount
             && root.GetProperty("refundOverride").GetBoolean() == false
             && root.GetProperty("cancellationReason").GetString() == "USER_INITIATED";

@@ -919,7 +919,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Task 23.9 diff hygiene failed' }
 | 23.2 | ✅ done | this commit | APPROVE | 2026-07-17; one EOL patch round; migration lifecycle + 2+1+2 tests green; human-approved guard correction |
 | 23.3 | ✅ done | this commit | APPROVE | 2026-07-17; one review patch round; 14+2+2+6+6 focused tests green; no scope expansion |
 | 23.4 | ✅ done | this commit | APPROVE | 2026-07-17; 1 patch round: PostgreSQL microsecond causal/CAS normalization and atomic `updated_at`; 2 authorized test-fixture expansions |
-| 23.5 | ⬜ todo | — | — | Cancelled compatibility rollout |
+| 23.5 | ✅ done | this commit | APPROVE | 2026-07-17; strict canonical/legacy identity rollout; reviewer-driven semantic/null hardening; ESLint config authorized; 2 Booking scope expansions |
 | 23.6 | ⬜ todo | — | — | Passenger resolve/refund |
 | 23.7 | ⬜ todo | — | — | Timeout state machine |
 | 23.8 | ⬜ todo | — | — | Notification compatibility |
