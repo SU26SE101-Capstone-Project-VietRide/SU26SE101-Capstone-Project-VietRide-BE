@@ -61,6 +61,11 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
             .HasDefaultValue(UserStatus.PENDING_EMAIL_VERIFICATION)
             .IsRequired();
 
+        builder.Property(u => u.LockedFromStatus)
+            .HasColumnName("locked_from_status")
+            .HasColumnType("user_status")
+            .IsRequired(false);
+
         builder.Property(u => u.OperatorId)
             .HasColumnName("operator_id")
             .HasColumnType("uuid")
@@ -141,6 +146,11 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
                 "chk_users_operator_role",
                 "(role IN ('DRIVER', 'ASSISTANT', 'OPERATOR_STAFF', 'OPERATOR_ADMIN') AND operator_id IS NOT NULL) " +
                 "OR (role IN ('PASSENGER', 'SYSTEM_ADMIN') AND operator_id IS NULL)");
+
+            t.HasCheckConstraint(
+                "chk_users_locked_from_status",
+                "((status = 'LOCKED' AND locked_from_status IN ('ACTIVE', 'PENDING_EMAIL_VERIFICATION')) " +
+                "OR (status <> 'LOCKED' AND locked_from_status IS NULL))");
         });
     }
 }

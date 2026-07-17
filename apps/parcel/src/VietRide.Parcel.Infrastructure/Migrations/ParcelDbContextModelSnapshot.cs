@@ -456,6 +456,10 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasDatabaseName("idx_parcels_voucher_usage_id")
                         .HasFilter("voucher_usage_id IS NOT NULL");
 
+                    b.HasIndex("ConfirmedAt", "OperatorId")
+                        .HasDatabaseName("idx_parcels_confirmed_report")
+                        .HasFilter("status = 'DELIVERY_CONFIRMED'::vietride_parcel.parcel_status AND confirmed_at IS NOT NULL");
+
                     b.HasIndex("OperatorId", "Status")
                         .HasDatabaseName("idx_parcels_operator_id_status");
 

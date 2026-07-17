@@ -117,6 +117,7 @@ public sealed class LoginCommandHandlerTests
 
         users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>())
             .Returns(user);
+        users.GetByIdForUpdateAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
 
         var result = await handler.Handle(new LoginCommand("user@example.com", "correct_password"), CancellationToken.None);
 
@@ -142,6 +143,7 @@ public sealed class LoginCommandHandlerTests
         var operatorId = Guid.NewGuid();
         var user = MakeOperatorUser(role, operatorId);
         users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>()).Returns(user);
+        users.GetByIdForUpdateAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
         operators.GetByIdAsync(operatorId, Arg.Any<CancellationToken>())
             .Returns(MakeOperator(OperatorRegistrationStatus.APPROVED));
 
@@ -165,6 +167,7 @@ public sealed class LoginCommandHandlerTests
         var operatorId = Guid.NewGuid();
         var user = MakeOperatorUser(role, operatorId);
         users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>()).Returns(user);
+        users.GetByIdForUpdateAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
 
         var result = await handler.Handle(new LoginCommand("user@example.com", "correct_password"), CancellationToken.None);
 
@@ -196,6 +199,7 @@ public sealed class LoginCommandHandlerTests
         var user = MakeOperatorUser(role, operatorId);
         var originalLastLoginAt = user.LastLoginAt;
         users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>()).Returns(user);
+        users.GetByIdForUpdateAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
         operators.GetByIdAsync(operatorId, Arg.Any<CancellationToken>()).Returns(MakeOperator(registrationStatus));
 
         var act = () => handler.Handle(new LoginCommand("user@example.com", "correct_password"), CancellationToken.None);
@@ -203,13 +207,13 @@ public sealed class LoginCommandHandlerTests
         await act.Should().ThrowAsync<ForbiddenException>()
             .Where(e => e.ErrorCode == "FORBIDDEN");
 
-        hasher.Received(1).Verify("correct_password", "stored_hash");
+        hasher.Received(2).Verify("correct_password", "stored_hash");
         user.LastLoginAt.Should().Be(originalLastLoginAt);
         accessTokenService.DidNotReceive().IssueToken(Arg.Any<User>());
         await tokens.DidNotReceive().AddAsync(Arg.Any<RefreshToken>(), Arg.Any<CancellationToken>());
         await lockoutCounter.DidNotReceive().ResetAsync(user.Id, Arg.Any<CancellationToken>());
         await lockoutCounter.DidNotReceive().IncrementAsync(user.Id, Arg.Any<CancellationToken>());
-        await failedLoginPersister.DidNotReceive().PersistAsync(user.Id, Arg.Any<long>(), Arg.Any<CancellationToken>());
+        await failedLoginPersister.DidNotReceive().PersistAsync(user.Id, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -218,7 +222,6 @@ public sealed class LoginCommandHandlerTests
         var (handler, users, _, _, _, failedLoginPersister, lockoutCounter) = CreateHandler();
         var user = MakeActiveUser();
         users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>()).Returns(user);
-        lockoutCounter.IncrementAsync(user.Id, Arg.Any<CancellationToken>()).Returns(1L);
         // hasher.Verify returns false by default in CreateHandler.
 
         var act = () => handler.Handle(new LoginCommand("user@example.com", "wrong_password"), CancellationToken.None);
@@ -226,8 +229,8 @@ public sealed class LoginCommandHandlerTests
         await act.Should().ThrowAsync<UnauthorizedException>()
             .Where(e => e.ErrorCode == "AUTH_INVALID_CREDENTIALS");
 
-        await lockoutCounter.Received(1).IncrementAsync(user.Id, Arg.Any<CancellationToken>());
-        await failedLoginPersister.Received(1).PersistAsync(user.Id, 1, Arg.Any<CancellationToken>());
+        await lockoutCounter.DidNotReceive().IncrementAsync(user.Id, Arg.Any<CancellationToken>());
+        await failedLoginPersister.Received(1).PersistAsync(user.Id, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -236,14 +239,13 @@ public sealed class LoginCommandHandlerTests
         var (handler, users, _, _, _, failedLoginPersister, lockoutCounter) = CreateHandler();
         var user = MakeActiveUser();
         users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>()).Returns(user);
-        lockoutCounter.IncrementAsync(user.Id, Arg.Any<CancellationToken>()).Returns(5L);
 
         var act = () => handler.Handle(new LoginCommand("user@example.com", "wrong_password"), CancellationToken.None);
 
         await act.Should().ThrowAsync<UnauthorizedException>()
             .Where(e => e.ErrorCode == "AUTH_INVALID_CREDENTIALS");
 
-        await failedLoginPersister.Received(1).PersistAsync(user.Id, 5, Arg.Any<CancellationToken>());
+        await failedLoginPersister.Received(1).PersistAsync(user.Id, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -255,6 +257,7 @@ public sealed class LoginCommandHandlerTests
         var user = User.CreatePassenger("user@example.com", TestPhone, "hash", "User");
 
         users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>()).Returns(user);
+        users.GetByIdForUpdateAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
 
         var result = await handler.Handle(new LoginCommand("user@example.com", "correct_password"), CancellationToken.None);
 
@@ -276,8 +279,8 @@ public sealed class LoginCommandHandlerTests
         await act.Should().ThrowAsync<UnauthorizedException>()
             .Where(e => e.ErrorCode == "AUTH_INVALID_CREDENTIALS");
 
-        await lockoutCounter.Received(1).IncrementAsync(user.Id, Arg.Any<CancellationToken>());
-        await failedLoginPersister.Received(1).PersistAsync(user.Id, 1, Arg.Any<CancellationToken>());
+        await lockoutCounter.DidNotReceive().IncrementAsync(user.Id, Arg.Any<CancellationToken>());
+        await failedLoginPersister.Received(1).PersistAsync(user.Id, Arg.Any<CancellationToken>());
     }
 
     [Fact]

@@ -2,8 +2,10 @@ using FluentAssertions;
 using NSubstitute;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
+using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Application.Features.Bookings.EditPickup;
 using VietRide.Booking.Domain.ValueObjects;
+using VietRide.Booking.UnitTests.TestDoubles;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
@@ -28,7 +30,11 @@ public sealed class EditPickupCommandHandlerTests
     private readonly ITripServiceClient _tripClient = Substitute.For<ITripServiceClient>();
     private readonly IClock _clock = Substitute.For<IClock>();
 
-    private EditPickupCommandHandler BuildSut() => new(_bookings, _tripClient, _clock);
+    private EditPickupCommandHandler BuildSut(IBookingStationCanonicalizer? stationCanonicalizer = null) => new(
+        _bookings,
+        _tripClient,
+        _clock,
+        stationCanonicalizer ?? PassthroughBookingStationCanonicalizer.Instance);
 
     [Fact]
     public async Task Handle_EqualFarePickupChange_UpdatesPickupAndReturnsZeroAmounts()
@@ -50,6 +56,26 @@ public sealed class EditPickupCommandHandlerTests
         booking.PickupStationId.Should().BeNull();
         booking.PickupStopId.Should().Be(EqualFareStopId);
         _bookings.Received(1).Update(booking);
+    }
+
+    [Fact]
+    public async Task Handle_StationRedirectPersistsCanonicalPickupAfterLockedReload()
+    {
+        var booking = CreateConfirmedBooking();
+        SetupBookingAndTrip(booking, CreateTripSnapshot(baseFare: 200_000));
+        var canonicalStationId = Guid.NewGuid();
+        var canonicalizer = new MappingBookingStationCanonicalizer(
+            new Dictionary<Guid, Guid> { [StationId] = canonicalStationId });
+
+        var result = await BuildSut(canonicalizer).Handle(
+            BuildCommand(booking.Id, pickupStationId: StationId),
+            CancellationToken.None);
+
+        result.Pickup.StationId.Should().Be(canonicalStationId);
+        booking.PickupStationId.Should().Be(canonicalStationId);
+        await _bookings.Received(1).FindByIdForUpdateAsync(
+            booking.Id,
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -141,6 +167,7 @@ public sealed class EditPickupCommandHandlerTests
     {
         _clock.UtcNow.Returns(Now);
         _bookings.FindByIdAsync(booking.Id, Arg.Any<CancellationToken>()).Returns(booking);
+        _bookings.FindByIdForUpdateAsync(booking.Id, Arg.Any<CancellationToken>()).Returns(booking);
         _tripClient.GetTripSnapshotAsync(TripId, Arg.Any<CancellationToken>()).Returns(trip);
     }
 

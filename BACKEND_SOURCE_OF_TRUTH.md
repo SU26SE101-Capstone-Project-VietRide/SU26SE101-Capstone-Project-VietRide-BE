@@ -1,6 +1,6 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.34.1
+> **Phiên bản:** 1.35.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
 > **Cập nhật lần cuối:** 2026-07-16
 > **Capstone:** SU26SE101 — SU26
@@ -1283,6 +1283,9 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | 23 | `POST /v1/driver/trips/{tripId}/destination/arrive` | Trip |
 | 24 | `POST /v1/assistant/parcels/{parcelId}/unload` | Parcel |
 | 25 | `POST /v1/assistant/parcels/{parcelId}/deliver` | Parcel |
+| 26 | `POST /v1/admin/users/{userId}/lock` | Identity |
+| 27 | `POST /v1/admin/users/{userId}/unlock` | Identity |
+| 28 | `POST /v1/admin/stations/{primaryStationId}/merge` | Trip |
 
 **Implementation:**
 
@@ -1308,6 +1311,11 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
   Trong thời gian rollout, nếu legacy key còn tồn tại thì fail closed bằng
   `422 IDEMPOTENCY_KEY_MISMATCH`; không flush Redis business keys, để legacy entry tự hết hạn tối đa
   sau 24 giờ.
+- Ba mutation Day 40 dùng trực tiếp shared
+  `VietRide.Shared.Web.Idempotency.RequireIdempotencyAttribute`; hai endpoint lock/unlock không có
+  body đặt `AllowRequestBody=false`. Không dùng controller-local header check hoặc Trip legacy
+  filter. `POST /internal/v1/operators/summaries/batch` là read-only POST, Internal-JWT-only và là
+  ngoại lệ rõ ràng không yêu cầu `Idempotency-Key`.
 
 **Day-22 query-aware baseline:** Trip/DriverSchedule mutations include every query key/value in the
 fingerprint: keys sort ordinally, absent differs from empty, and repeated-value order is preserved.
@@ -1526,6 +1534,7 @@ updates the column.
 | | `ALTERNATIVE_ROUTE_LIMIT_EXCEEDED` | 422 | Day-8 config-time third active AlternativeRoute for the same Route |
 | **Station** | `STATION_NOT_FOUND` | 404 | Day-7 Trip Station handlers use coded 404 path |
 | | `STATION_DUPLICATE_NEARBY` | 200 (warning) | Operator tạo Station < 100m gần Station hiện có |
+| | `STATION_MERGE_CONFLICT` | 409 | Merge làm Route origin=destination, vi phạm domain invariant hoặc precondition thay đổi sau khi lock; transaction không được partial relink |
 | **Location** | `LOCATION_NOT_FOUND` | 404 | Admin Location update/deactivate target does not exist |
 | | `LOCATION_CODE_CONFLICT` | 409 | Admin Location code already exists |
 | **Invoice** | `INVOICE_NOT_FOUND` | 404 | |
@@ -1557,6 +1566,7 @@ updates the column.
 | | `FORBIDDEN` | 403 | RBAC reject |
 | | `RATE_LIMITED` | 429 | Vượt rate limit |
 | | `RATE_LIMIT_EXCEEDED` | 429 | Per-user/per-resource Day-38 invoice download limit |
+| | `REPORT_VALUE_OVERFLOW` | 500 | Report source/orchestrator gặp count hoặc BIGINT/NUMERIC aggregate ngoài phạm vi Int64; không wrap, saturate hoặc trả partial |
 | | `UPSTREAM_UNAVAILABLE` | 502 | Downstream/inter-service dependency unavailable or returned an unusable/unexpected response (including Gateway connection failure) |
 | | `INTERNAL_ERROR` | 500 | Unhandled exception (Sentry capture) |
 
@@ -1810,6 +1820,63 @@ route; the operator Route endpoint remains role-isolated.
 createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) { ... }
 ```
 
+### 6.11 Day-40 Identity per-user serialization
+
+Mọi path đọc `User.status` rồi có thể phát token/OTP hoặc ghi auth state phải tuyến tính hóa trên
+cùng User: password login của User hiện hữu, Google login của linked/matched User, refresh,
+forgot/reset password, password-reset OTP failure, failed-login persistence và admin lock/unlock.
+
+1. Lookup email/OAuth subject/token hash trước transaction chỉ là routing hint để tìm `userId`.
+2. Mở PostgreSQL transaction, lock `users` bằng `SELECT ... FOR UPDATE`, rồi force reload status;
+   EF identity map không được trả snapshot đã track. Nhiều User được lock theo UUID lowercase format
+   `D`, ordinal ascending.
+3. Lock order sau User là `EmailVerificationToken` theo UUID, refresh-token row/family theo UUID,
+   rồi mới insert ActivityLog/Outbox. Không path nào lock token trước rồi quay lại User.
+4. Password login đúng verify lại password hash trên entity đã lock, update login state và insert
+   refresh token trong transaction; chỉ trả token sau commit. Login sai giao cho fresh-scope
+   `FailedLoginPersister.PersistAsync(userId)` để tránh ambient self-deadlock.
+5. Refresh dùng fresh-scope executor: lock User trước, re-read presented token `FOR UPDATE`, recheck
+   owner/revocation/expiry/status, rotate hoặc revoke family và commit outcome trước khi trả/throw.
+6. Forgot/reset password và OTP failure lock/reload User trước; chỉ `ACTIVE` được tạo/consume
+   `PASSWORD_RESET` OTP. Lock-first không tạo OTP/Outbox, không consume OTP, không đổi password.
+7. Failed-login persister chỉ xử lý `ACTIVE` hoặc passenger `PENDING_EMAIL_VERIFICATION`, tăng
+   Redis counter dưới row lock và ghi từ entity vừa reload. Khi auto-lock, nó lưu
+   `locked_from_status` bằng status nguồn; User đã `LOCKED` hoặc không login-eligible là no-op.
+8. Google account chưa tồn tại dựa vào unique email/OAuth constraints cho create race; token issue
+   vẫn nằm trong transaction sở hữu row mới.
+
+Identity thêm `users.locked_from_status user_status NULL`. Backfill User `LOCKED` cũ thành `ACTIVE`;
+check constraint chỉ nhận `ACTIVE|PENDING_EMAIL_VERIFICATION` và bắt buộc origin khác null đúng khi
+`status=LOCKED`. Manual lock chỉ cho `ACTIVE -> LOCKED`; password lockout còn cho phép
+`PENDING_EMAIL_VERIFICATION -> LOCKED`. Unlock restore đúng origin, reset DB + Redis lockout state,
+clear origin và không phục hồi refresh token đã revoke. Verify email vẫn là đường duy nhất chuyển
+pending passenger lên `ACTIVE`.
+
+Linearized outcomes bắt buộc:
+
+- Auth/refresh commit trước thì lock chạy sau revoke refresh token vừa tạo/rotate; lock commit trước
+  thì auth recheck thấy `LOCKED` và không tạo token.
+- Failed login commit trước thì lock ensure-locked chạy sau; lock trước thì persister no-op.
+- Failed login commit trước unlock thì unlock restore origin và clean counter; unlock trước thì lần
+  fail sau được tính trên status vừa restore, không promote pending-email thành active.
+- Forgot/reset commit trước có thể hoàn tất rồi lock giữ final `LOCKED`; lock trước làm password flow
+  generic-success/deny mà không tạo hoặc consume OTP.
+
+`POST /v1/admin/users/{userId}/lock` và `/unlock` chỉ cho `SYSTEM_ADMIN`, cấm self-action và dùng
+shared idempotency v2. Lock/ensure-lock revoke active refresh tokens với `ADMIN_REVOKE` và insert
+`LOCK_USER`; unlock insert `UNLOCK_USER`. Mỗi logical idempotent request ghi đúng một ActivityLog.
+Day 40 không thêm access-token denylist; access token cũ sống tối đa tới expiry.
+
+### 6.12 Day-40 immutable ActivityLog
+
+`ActivityLog.user_id` luôn là actor. Metadata lock/unlock chỉ chứa allow-list
+`targetUserId,previousStatus,newStatus,statusChanged`; không chứa password, OTP, token hoặc full
+request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`, nullable
+`source_event_id`, partial unique index trên source event và global index
+`(created_at DESC, id DESC)`. Application chỉ expose Add/read; PostgreSQL trigger từ chối mọi
+`UPDATE`/`DELETE`. Query admin dùng UTC half-open `[from,to)` và deterministic
+`created_at DESC,id DESC`.
+
 ---
 
 ## 7. Inter-service Communication
@@ -1838,6 +1905,7 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `POST /internal/v1/operators/{operatorId}/usage/increment` | Trip, Booking, Parcel | Body `{resource, delta}` where resource is `VEHICLES|DRIVERS|ASSISTANTS|OPERATOR_USERS|ROUTES|TRIPS_THIS_MONTH`; atomically increment usage counter without concurrent overshoot |
 | `POST /internal/v1/operators/{operatorId}/quota-allocations` | Trip | Claim durable idempotent quota allocation by `{ resource, resourceId, periodKey? }`; no distributed transaction |
 | `POST /internal/v1/operators/{operatorId}/quota-allocations/{allocationId}/release` | Trip | Idempotently release an allocation after local persistence fails or its resource is soft-deleted |
+| `POST /internal/v1/operators/summaries/batch` | Payment | Read-only batch lookup `{ operatorIds }`, tối đa 500 distinct non-empty UUID; raw response gồm cả operator soft-deleted, sort ID tăng dần; empty input trả empty list; không yêu cầu Idempotency-Key |
 | `POST /internal/v1/payments/subscription` | Identity | Create/replay a VNPay subscription payment from a server-side upgrade snapshot |
 | `POST /internal/v1/payments/{paymentId}/expire-subscription` | Identity | Idempotently expire a pending subscription payment during the Identity-owned auto-revert job |
 
@@ -1851,7 +1919,8 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `POST /internal/v1/trips/{tripId}/release-seats` | Booking | Release seat khi payment fail/timeout |
 | `POST /internal/v1/trips/{tripId}/book-seats` | Booking | Convert HELD → BOOKED khi payment success (API contract canonical name; was `confirm-seats`) |
 | `GET /internal/v1/trips/{tripId}/passengers-pending` | Booking | Cho operator dashboard |
-| `GET /internal/v1/stations/{id}` · `GET /internal/v1/stops/{id}` · `GET /internal/v1/routes/{id}` | All services | Trip internal-auth required; raw DTO lookup for canonical entity; station/stop not found returns ADR 0004 error envelope with `STATION_NOT_FOUND` / `STOP_NOT_FOUND` |
+| `GET /internal/v1/stations/{id}` · `GET /internal/v1/stops/{id}` · `GET /internal/v1/routes/{id}` | All services | Trip internal-auth required; raw DTO lookup. Station active returns canonical resolution; merged soft-delete returns original identity plus terminal `canonicalStationId`; ordinary soft-delete/missing returns `STATION_NOT_FOUND`. Stop not found returns `STOP_NOT_FOUND`. Errors use ADR 0004 envelope. |
+| `GET /internal/v1/reports/platform/trips?from=&to=` | Payment | Raw completed-Trip earned metrics grouped by operator; `status=COMPLETED`, `completed_at` in UTC `[from,to)` |
 | `GET /internal/v1/trips/{tripId}/capacity` | Parcel | Lấy available cargo capacity |
 | `POST /internal/v1/trips/{tripId}/cargo-counter/reserve` · `release` · `load` · `unload` | Parcel | Update reservedParcelWeightKg + totalLoadedWeightKg atomic |
 
@@ -1863,6 +1932,7 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `GET /internal/v1/bookings/trips/{tripId}/edit-impact?operatorId=` | Trip | Required trusted `operatorId`; every query predicates `trip_id` and `operator_id`, active is exactly `PENDING_PAYMENT|CONFIRMED`, raw PII-free `{tripId,activeBookingCount,activeBookings:[{bookingId,status,seatNumbers}]}`, empty is `200`. |
 | `GET /internal/v1/bookings/{id}/access-check?userId=` | Tracking | Verify Socket.IO joinTripTracking authz |
 | `GET /internal/v1/vouchers/by-code/{code}` | Booking (own service); also exposed for admin reports |
+| `GET /internal/v1/reports/platform/bookings?from=&to=` | Payment | Raw completed-Booking count/revenue grouped by operator; `status=COMPLETED`, `completed_at` in UTC `[from,to)` |
 
 #### Payment & Wallet Service
 
@@ -1880,6 +1950,7 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 |---|---|---|
 | `GET /internal/v1/parcels/{id}` | Tracking | Verify Socket.IO joinTripTracking (parcel sender/recipient) |
 | `GET /internal/v1/parcels/{id}/access-check?userId=` | Tracking | Same |
+| `GET /internal/v1/reports/platform/parcels?from=&to=` | Payment | Raw delivery-confirmed count/signed net revenue grouped by operator; `confirmed_at` in UTC `[from,to)` |
 
 #### Tracking Service
 
@@ -1928,6 +1999,8 @@ createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) {
 | `trip.trip.route_changed` | Trip | Booking (create BookingPendingAction), Notification | `{ tripId, alternativeRouteId, affectedBookingIds }` |
 | `trip.trip.schedule_changed` | Trip | Booking | Exact `{ eventId,occurredAt,tripId,operatorId,oldDeparture,newDeparture,severity }`, severity `MINOR\|MEDIUM\|MAJOR`; Notification consumes Booking-owned facts instead |
 | `trip.stop.disabled` | Trip | Booking | `{ stopId, operatorId, replacedByStopId?, occurredAt }` |
+| `trip.station.merged` | Trip | Booking, Identity | `{ eventId, occurredAt, eventType, actorUserId, ipAddress?, userAgent?, primaryStationId, duplicateStationId, primaryBefore, duplicateBefore, primaryAfter, relinkedCounts }`; Station snapshots omit contact phone/email |
+| `trip.station.normalized` | Trip | Identity | `{ eventId, occurredAt, eventType, actorUserId, ipAddress?, userAgent?, stationId, before, after }`; snapshots omit contact phone/email |
 | `booking.stop_disabled.affected` | Booking | Notification | `{ stopId, replacedByStopId?, recipientUserIds[], affectedBookingCount, occurredAt }` |
 | `trip.stop.departed_with_pending` | Trip | Notification (Driver App boarding warning) | `{ eventId: Guid, occurredAt: DateTime (UTC), eventType: "trip.stop.departed_with_pending", tripId: Guid, stopId: Guid, stopName: string, pendingPassengerCount: int (> 0), driverUserId: Guid, assistantUserId: Guid?, departedAt: DateTimeOffset (UTC ISO-8601) }` |
 | `trip.stop.arrived` | Trip | Parcel, Notification | `{ eventId, occurredAt, eventType, tripId, stopId, operatorId, actorUserId, actualArrivalTime }`; Trip và TripStop lock theo thứ tự, `PENDING -> ARRIVED`, static ETA không đổi, business row + Outbox commit atomic |
@@ -2045,6 +2118,101 @@ After retry_count >= 10: alert Sentry, leave FAILED for manual handle
 - **NestJS:** Axios typed client, same Polly equivalent qua `axios-retry` + circuit breaker `opossum`.
 
 **Day-19 Identity phone lookup boundary (Booking):** Booking validates and normalizes the public phone with `PhoneNumber.Normalize` before sending a URI-escaped canonical E.164 value. Retry remains limited to transient 5xx/network failures; 4xx is never retried. Only an Identity HTTP 404 whose ADR 0004 body has `error.code = RESOURCE_NOT_FOUND` is the expected no-match result. Caller-request cancellation propagates unchanged. Identity 401/403, every other or malformed 4xx response, 5xx after policy handling, timeout, circuit-open, transport, and response-deserialization failures are dependency failures and must become FE-facing HTTP 502 `UPSTREAM_UNAVAILABLE`; they must not be reported as caller authorization failures or empty results.
+
+### 7.7 Day-40 Station canonicalization và platform reports
+
+#### Trip Station normalize/merge
+
+`PATCH /v1/admin/stations/{id}` giữ toàn bộ request hiện hữu (`name`, address/location,
+city/province, coordinate pair, contact, operating hours, facilities, shuttle flag, active flag)
+và deterministic slug từ `name+city+province`; collision dùng station-ID hash suffix, không thêm
+`STATION_SLUG_CONFLICT`. Station đã merged không được normalize. Update và
+`trip.station.normalized` Outbox commit cùng transaction.
+
+`POST /v1/admin/stations/{primaryStationId}/merge` lock hai Station theo UUID ascending và recheck
+precondition. Primary thắng `name,slug,city,province`; `addressStreet,locationId,contactPhone,
+contactEmail,operatingHours,facilities` chỉ fill từ duplicate khi primary null; coordinates là một
+cặp; `supportsShuttle` dùng OR. Cùng một Trip DB transaction relink
+`OperatorStation.stationId`, Route origin/destination, AlternativeRoute destination,
+`ShuttleTrip.stationId` và mọi redirect cũ đang trỏ duplicate. OperatorStation collision giữ row
+primary, OR `isActive`, fill nullable config rồi xóa duplicate mapping. Preflight từ chối Route
+origin=destination/domain violation bằng `409 STATION_MERGE_CONFLICT`, không partial write/Outbox.
+Duplicate được `isActive=false`, soft-delete và set `merged_into_station_id=primaryId`; redirect cũ
+được flatten trực tiếp. Self-FK dùng `ON DELETE RESTRICT`, check khác chính nó và partial redirect
+index. Outbox `trip.station.merged` nằm cùng transaction.
+
+Internal Station lookup phân biệt: canonical active trả `200 isMerged=false`; soft-deleted do merge
+trả original identity cùng `isMerged=true,canonicalStationId`; ordinary soft-delete hoặc missing trả
+`404 STATION_NOT_FOUND`. Public lookup/search không expose deleted Station.
+
+#### Booking durable Station redirect
+
+Booking lưu redirect và processed marker trong một bảng, không cross-DB FK:
+
+```text
+booking_station_redirects
+  duplicate_station_id UUID PRIMARY KEY
+  canonical_station_id UUID NOT NULL
+  source_event_id UUID NOT NULL UNIQUE
+  occurred_at TIMESTAMPTZ NOT NULL
+  created_at TIMESTAMPTZ NOT NULL
+  updated_at TIMESTAMPTZ NOT NULL
+  CHECK (duplicate_station_id <> canonical_station_id)
+  INDEX (canonical_station_id)
+```
+
+Queue `booking.station-merged` là durable. Replay cùng `source_event_id` ACK; cùng duplicate nhưng
+khác event/target là poison conflict và không mark processed. Resolver follow tối đa 32 hop với
+visited set; cycle/self/overflow rollback để retry/DLQ. Event out-of-order vẫn flatten mọi alias
+trực tiếp tới terminal canonical, giữ `source_event_id` gốc của row cũ.
+
+Mọi writer và consumer dùng PostgreSQL transaction advisory lock
+`pg_advisory_xact_lock(hashtextextended('booking-station:' || stationId::text, 0))`; UUID format `D`
+lowercase được sort ordinal ascending. Consumer pre-read graph, lock union primary/duplicate/path và
+alias, re-read dưới lock; graph phát sinh ID mới thì rollback/retry tối đa ba lần rồi NACK transient.
+Trong transaction ổn định, upsert redirect, flatten alias và relink Booking
+`PENDING_PAYMENT|CONFIRMED` cùng nhau; terminal/historical Booking không đổi.
+
+`CreateBooking`, `CreateRoundTripBooking`, `EditPickup`, `EditDropoff` lock union Station ID từ
+request, Booking hiện tại và fresh Trip snapshot, canonicalize cả request lẫn snapshot trước mọi
+equality/domain validation. Edit còn lock/reload Booking row `FOR UPDATE`; không mutate tracked
+snapshot stale. Lock chung đóng race: writer-first thì consumer relink row vừa commit;
+consumer-first thì writer persist canonical ID. Sau cả hai commit không còn active Booking trỏ
+duplicate. Consumer không phát Payment/refund event.
+
+Identity consume hai Station events trên durable queue, insert `STATION_MERGED` hoặc
+`STATION_NORMALIZED` với `user_id=actorUserId`, `source_event_id=eventId`; IP/user-agent vào cột audit
+riêng, không metadata. Insert và marker atomic, duplicate no-op/ACK; missing actor retry/DLQ. Logs
+vận hành không in full payload, contact, IP hoặc user-agent.
+
+#### Earned platform report
+
+Payment sở hữu `GET /v1/admin/reports/platform?from=&to=` nhưng không đọc foreign DB. Cả hai RFC3339
+UTC boundary bắt buộc, `from < to`, tối đa 366 ngày, interval `[from,to)`. Ba source metrics:
+
+- Booking: `COMPLETED`, anchor `completed_at`, count và `SUM(total_amount)`.
+- Trip: `COMPLETED`, anchor `completed_at`, count.
+- Parcel: `DELIVERY_CONFIRMED`, anchor `confirmed_at`, count và signed
+  `SUM(deposit_amount + additional_amount - refund_amount)`.
+
+Không dùng payment-ledger time, non-terminal row hoặc Stats/cache. Source PostgreSQL đọc
+`SUM(BIGINT)` dưới dạng NUMERIC rồi checked-convert từng group và total về Int64. Payment checked
+mọi count/revenue/totals, union operator IDs, lookup Identity theo chunk 500, giữ missing operator
+với tên null, sort net revenue giảm dần rồi operator ID. Totals phải bằng sum `byOperator`;
+`parcelRevenueVnd`/`netRevenueVnd` có thể âm và không clamp.
+
+Ba metric call chạy song song với timeout 5 giây. Canonical upstream
+`500 REPORT_VALUE_OVERFLOW` được propagate cùng code; timeout/5xx khác/payload unusable thành
+`502 UPSTREAM_UNAVAILABLE`. Không partial response, cache hoặc Payment DB write. Partial indexes:
+
+```text
+Booking (completed_at, operator_id) WHERE status='COMPLETED' AND completed_at IS NOT NULL
+Trip    (completed_at, operator_id) WHERE status='COMPLETED' AND completed_at IS NOT NULL
+Parcel  (confirmed_at, operator_id) WHERE status='DELIVERY_CONFIRMED' AND confirmed_at IS NOT NULL
+```
+
+Day 40 là live indexed-report baseline. Stats materialization, Redis report cache, Excel export,
+occupancy/cancellation/no-show analytics thuộc Day 42 và không được kéo vào implementation này.
 
 ---
 
@@ -3070,6 +3238,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.35.0** | 2026-07-16 | Senior Backend Engineer | **MINOR** - Freeze Day 40 Admin Users + Station Cleanup + Platform Reports: shared-idempotent lock/unlock với PostgreSQL per-user serialization và `locked_from_status`; immutable ActivityLog; atomic Station normalize/merge cùng canonical redirects và Booking advisory-lock relink protocol; `trip.station.merged`/`normalized`; live UTC earned-report internal sources và Payment orchestration; đăng ký `STATION_MERGE_CONFLICT`/`REPORT_VALUE_OVERFLOW`; report cache/Stats/Excel và advanced analytics defer Day 42. |
 | **1.34.1** | 2026-07-16 | BE lead (Vu) | **PATCH** - Merge the Day-22 Trip edit/effective-pricing/DriverSchedule cascade contracts into the current Day-39 baseline. Preserve trusted Booking impact, immutable Booking pricing/refund snapshots, fare-source overlap guard, Trip/schedule audits, Booking-owned passenger impact and Hangfire re-alert semantics; reconcile them with idempotency v2 and Day-38 Payment terminal-settlement consumption. |
 | **1.34.0** | 2026-07-16 | Senior Backend Engineer | **MINOR** - Day 39 Incident vertical slice: thêm canonical assigned Driver/Assistant Incident API, persistence + transactional `trip.incident.reported` Outbox, validation/normalization category-description-photo-GPS; Notification resolve active `OPERATOR_ADMIN` cùng operator, fan-out in-app/push với retry, payload-event dedupe và PII-safe logging. |
 | **1.33.0** | 2026-07-15 | Senior Backend Engineer | **MINOR** - Day 39 Parcel delivery hardening: tách canonical `IN_TRANSIT -> UNLOADED` và `UNLOADED -> DELIVERED_PENDING_CONFIRM`; terminal-bound dùng `destinationArrivedAt`, stop-bound dùng đúng matching arrived stop; token chỉ sinh ở deliver, cargo release chỉ ở unload; CAS loser không phát Outbox hoặc release lần hai; chuẩn hóa endpoint, error và event contracts. |

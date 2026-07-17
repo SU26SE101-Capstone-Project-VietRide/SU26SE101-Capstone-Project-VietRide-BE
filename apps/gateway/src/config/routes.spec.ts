@@ -42,13 +42,16 @@ describe('buildRouteTable', () => {
       ['/v1/admin/operators', env.IDENTITY_BASE_URL],
       ['/v1/admin/operator-users', env.IDENTITY_BASE_URL],
       ['/v1/admin/users', env.IDENTITY_BASE_URL],
+      ['/v1/admin/activity-logs', env.IDENTITY_BASE_URL],
       ['/v1/admin/subscription-plans', env.IDENTITY_BASE_URL],
       ['/v1/admin/locations', env.TRIP_BASE_URL],
+      ['/v1/admin/stations', env.TRIP_BASE_URL],
       ['/v1/admin/booking-stats', env.BOOKING_BASE_URL],
       ['/v1/admin/vouchers', env.BOOKING_BASE_URL],
       ['/v1/admin/trip-settlements', env.PAYMENT_BASE_URL],
       ['/v1/admin/platform-wallet', env.PAYMENT_BASE_URL],
       ['/v1/admin/invoices', env.PAYMENT_BASE_URL],
+      ['/v1/admin/reports/platform', env.PAYMENT_BASE_URL],
     ] as const;
 
     expect(routes.find((r) => r.prefix === '/v1/admin')).toBeUndefined();
@@ -221,12 +224,19 @@ describe('buildRouteTable', () => {
       ['/v1/admin/operators/11111111-1111-1111-1111-111111111111/approve', env.IDENTITY_BASE_URL],
       ['/v1/admin/operator-users', env.IDENTITY_BASE_URL],
       ['/v1/admin/users', env.IDENTITY_BASE_URL],
+      ['/v1/admin/activity-logs', env.IDENTITY_BASE_URL],
       ['/v1/admin/subscription-plans', env.IDENTITY_BASE_URL],
       ['/v1/admin/locations', env.TRIP_BASE_URL],
+      ['/v1/admin/stations/11111111-1111-1111-1111-111111111111', env.TRIP_BASE_URL],
+      [
+        '/v1/admin/stations/11111111-1111-1111-1111-111111111111/merge',
+        env.TRIP_BASE_URL,
+      ],
       ['/v1/admin/booking-stats/aggregate', env.BOOKING_BASE_URL],
       ['/v1/admin/vouchers', env.BOOKING_BASE_URL],
       ['/v1/admin/vouchers/11111111-1111-1111-1111-111111111111/consents', env.BOOKING_BASE_URL],
       ['/v1/admin/platform-wallet', env.PAYMENT_BASE_URL],
+      ['/v1/admin/reports/platform', env.PAYMENT_BASE_URL],
       [
         '/v1/admin/trip-settlements/11111111-1111-1111-1111-111111111111/settle',
         env.PAYMENT_BASE_URL,
@@ -375,6 +385,10 @@ describe('buildRouteTable', () => {
 
   it('does not expose internal trip endpoints through Gateway', () => {
     expect(matchRoute(routes, '/internal/v1/trips/search')).toBeUndefined();
+    expect(matchRoute(routes, '/internal/v1/reports/platform/bookings')).toBeUndefined();
+    expect(matchRoute(routes, '/internal/v1/reports/platform/trips')).toBeUndefined();
+    expect(matchRoute(routes, '/internal/v1/reports/platform/parcels')).toBeUndefined();
+    expect(matchRoute(routes, '/internal/v1/operators/summaries/batch')).toBeUndefined();
     expect(routes.some((r) => r.prefix.startsWith('/internal'))).toBe(false);
   });
 

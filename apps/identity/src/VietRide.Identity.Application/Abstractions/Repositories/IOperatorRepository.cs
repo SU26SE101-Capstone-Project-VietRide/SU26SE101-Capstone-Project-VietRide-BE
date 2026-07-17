@@ -25,4 +25,9 @@ public interface IOperatorRepository : IRepository<Operator, Guid>
         QueryOptions options,
         OperatorRegistrationStatus? status,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<Operator>> ListSummariesByIdsAsync(
+        IReadOnlyCollection<Guid> operatorIds,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Operator summary listing is not implemented by this repository.");
 }

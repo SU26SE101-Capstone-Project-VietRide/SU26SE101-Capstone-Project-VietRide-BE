@@ -50,6 +50,7 @@ public sealed class CreateBookingCommandHandler
     private readonly IBookingService _bookingService;
     private readonly IVoucherService _voucherService;
     private readonly IIntegrationEventOutbox _outbox;
+    private readonly IBookingStationCanonicalizer _stationCanonicalizer;
     private readonly IClock _clock;
     private readonly ILogger<CreateBookingCommandHandler> _logger;
 
@@ -62,7 +63,8 @@ public sealed class CreateBookingCommandHandler
         IIntegrationEventOutbox outbox,
         IClock clock,
         ILogger<CreateBookingCommandHandler> logger,
-        IBookingStatusHistoryRepository statusHistory)
+        IBookingStatusHistoryRepository statusHistory,
+        IBookingStationCanonicalizer stationCanonicalizer)
     {
         _bookings = bookings;
         _statusHistory = statusHistory;
@@ -73,6 +75,7 @@ public sealed class CreateBookingCommandHandler
         _outbox = outbox;
         _clock = clock;
         _logger = logger;
+        _stationCanonicalizer = stationCanonicalizer;
     }
 
     public async Task<CreateBookingResult> Handle(
@@ -109,6 +112,20 @@ public sealed class CreateBookingCommandHandler
                 "BOOKING_TRIP_NOT_BOOKABLE",
                 $"Trip '{request.TripId}' is not in SCHEDULED status.");
         }
+
+        var stationCanonicalization = await _stationCanonicalizer.LockAndResolveAsync(
+            BookingStationCanonicalization.Collect(
+                request.PickupStationId,
+                request.DropoffStationId,
+                trip.OriginStation.Id,
+                trip.DestinationStation.Id),
+            cancellationToken);
+        request = request with
+        {
+            PickupStationId = stationCanonicalization.Resolve(request.PickupStationId),
+            DropoffStationId = stationCanonicalization.Resolve(request.DropoffStationId),
+        };
+        trip = BookingStationCanonicalization.ResolveTrip(trip, stationCanonicalization);
 
         ValidateStopSelections(trip, request.PickupStopId, request.DropoffStopId);
         ValidateShuttleRequest(request, trip, now);

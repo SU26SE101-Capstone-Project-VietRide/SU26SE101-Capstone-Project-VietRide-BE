@@ -16,4 +16,7 @@ public sealed record UpdateAdminStationCommand(
     string? OperatingHours,
     string? Facilities,
     bool? SupportsShuttle,
-    bool? IsActive) : IRequest<StationDto>;
+    bool? IsActive,
+    Guid ActorUserId,
+    string? IpAddress,
+    string? UserAgent) : IRequest<StationDto>;

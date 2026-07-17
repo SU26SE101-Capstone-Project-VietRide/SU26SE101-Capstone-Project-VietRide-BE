@@ -7,8 +7,9 @@ namespace VietRide.Identity.Application.Abstractions;
 public interface IFailedLoginPersister
 {
     /// <summary>
-    /// Applies the windowed failed-login counter to the user aggregate and commits
-    /// immediately. No-ops silently if the user no longer exists.
+    /// Locks and reloads the User, increments the Redis window under that row lock,
+    /// applies the fresh counter to the aggregate, and commits immediately.
+    /// No-ops when the User no longer exists or is no longer password-login eligible.
     /// </summary>
-    Task PersistAsync(Guid userId, long failedAttemptsInWindow, CancellationToken ct = default);
+    Task PersistAsync(Guid userId, CancellationToken ct = default);
 }

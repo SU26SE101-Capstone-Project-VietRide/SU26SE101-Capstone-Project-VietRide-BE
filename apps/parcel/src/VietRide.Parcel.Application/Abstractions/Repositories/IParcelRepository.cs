@@ -1,3 +1,4 @@
+using VietRide.Parcel.Application.Features.Internal.Reports.PlatformParcels;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Repositories;
 using VietRide.Shared.Kernel.Primitives;
@@ -8,6 +9,12 @@ namespace VietRide.Parcel.Application.Abstractions.Repositories;
 
 public interface IParcelRepository : IRepository<ParcelEntity, Guid>
 {
+    Task<IReadOnlyList<PlatformParcelReportItem>> GetPlatformParcelMetricsAsync(
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Platform Parcel report is not implemented by this repository.");
+
     Task<ParcelEntity?> FindByParcelCodeAsync(string parcelCode, CancellationToken ct = default);
 
     // Payment deposit transitions (PENDING_PAYMENT)

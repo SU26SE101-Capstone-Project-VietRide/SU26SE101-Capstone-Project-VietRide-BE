@@ -125,6 +125,26 @@ CREATE INDEX idx_bookings_booking_group_id ON bookings (booking_group_id)
 CREATE INDEX idx_bookings_status_created_at ON bookings (status, created_at)
     WHERE status IN ('PENDING_PAYMENT', 'CONFIRMED');
 CREATE INDEX idx_bookings_trip_snapshot_departure ON bookings (trip_snapshot_departure DESC);
+CREATE INDEX idx_bookings_completed_report ON bookings (completed_at, operator_id)
+    WHERE status = 'COMPLETED' AND completed_at IS NOT NULL;
+
+-- Durable local Station redirect graph and trip.station.merged processed-event marker.
+-- Both Station ids are logical references to Trip DB; no cross-database FK is allowed.
+CREATE TABLE booking_station_redirects (
+    duplicate_station_id UUID PRIMARY KEY,
+    canonical_station_id UUID NOT NULL,
+    source_event_id UUID NOT NULL,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_booking_station_redirects_not_self
+        CHECK (duplicate_station_id <> canonical_station_id)
+);
+
+CREATE UNIQUE INDEX uq_booking_station_redirects_source_event
+    ON booking_station_redirects (source_event_id);
+CREATE INDEX idx_booking_station_redirects_canonical
+    ON booking_station_redirects (canonical_station_id);
 
 -- Append-only authoritative Booking lifecycle timeline. Application code permits INSERT/read only.
 CREATE TABLE booking_status_history (

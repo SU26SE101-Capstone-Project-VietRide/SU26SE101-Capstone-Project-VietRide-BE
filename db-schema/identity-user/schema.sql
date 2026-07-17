@@ -62,7 +62,9 @@ CREATE TYPE activity_log_action AS ENUM (
     'TRIP_SETTLEMENT_MANUAL',
     'OPERATOR_WALLET_ADJUSTMENT',
     -- Initial password flow (Day 5)
-    'SET_INITIAL_PASSWORD', 'RESEND_INITIAL_PASSWORD'
+    'SET_INITIAL_PASSWORD', 'RESEND_INITIAL_PASSWORD',
+    -- Station cleanup audit (Day 40)
+    'STATION_MERGED', 'STATION_NORMALIZED'
     -- v2: 'BANK_ACCOUNT_UPDATED' (removed from v1 — bank withdrawal deferred)
     -- v2: 'OPERATOR_WITHDRAWAL_REQUESTED' / 'OPERATOR_WITHDRAWAL_PROCESSED'
 );
@@ -154,6 +156,7 @@ CREATE TABLE users (
     avatar_url TEXT NULL,
     role user_role NOT NULL,
     status user_status NOT NULL DEFAULT 'PENDING_EMAIL_VERIFICATION',
+    locked_from_status user_status NULL,
     operator_id UUID NULL REFERENCES operators (id) ON DELETE RESTRICT,
     -- Account lockout tracking
     failed_login_attempts INT NOT NULL DEFAULT 0,
@@ -172,6 +175,11 @@ CREATE TABLE users (
              AND operator_id IS NOT NULL)
             OR
             (role IN ('PASSENGER', 'SYSTEM_ADMIN') AND operator_id IS NULL)
+        ),
+    CONSTRAINT chk_users_locked_from_status
+        CHECK (
+            (status = 'LOCKED' AND locked_from_status IN ('ACTIVE', 'PENDING_EMAIL_VERIFICATION'))
+            OR (status <> 'LOCKED' AND locked_from_status IS NULL)
         )
 );
 
@@ -190,6 +198,8 @@ COMMENT ON COLUMN users.phone IS
     'E.164 VN format. REQUIRED for all roles except SYSTEM_ADMIN (and Google OAuth users before complete-profile). UNIQUE across all roles.';
 COMMENT ON COLUMN users.password_hash IS
     'bcrypt cost 12. NULL for Google-only accounts.';
+COMMENT ON COLUMN users.locked_from_status IS
+    'Required origin for LOCKED users. Manual admin lock stores ACTIVE; password lockout may store ACTIVE or PENDING_EMAIL_VERIFICATION. Unlock restores this exact status.';
 
 -- -----------------------------------------------------------------------------
 -- oauth_identities
@@ -296,6 +306,7 @@ CREATE TABLE activity_logs (
     metadata JSONB NULL,
     ip_address VARCHAR(45) NULL,
     user_agent VARCHAR(500) NULL,
+    source_event_id UUID NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -303,6 +314,26 @@ CREATE INDEX idx_activity_logs_user_id_created_at
     ON activity_logs (user_id, created_at DESC);
 CREATE INDEX idx_activity_logs_action_created_at
     ON activity_logs (action, created_at DESC);
+CREATE INDEX idx_activity_logs_created_at_id
+    ON activity_logs (created_at DESC, id DESC);
+CREATE UNIQUE INDEX uq_activity_logs_source_event_id
+    ON activity_logs (source_event_id)
+    WHERE source_event_id IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION vietride_identity.reject_activity_log_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $function$
+BEGIN
+    RAISE EXCEPTION 'activity_logs is append-only'
+        USING ERRCODE = '55000';
+END;
+$function$;
+
+CREATE TRIGGER trg_activity_logs_append_only
+BEFORE UPDATE OR DELETE ON activity_logs
+FOR EACH ROW
+EXECUTE FUNCTION vietride_identity.reject_activity_log_mutation();
 
 -- -----------------------------------------------------------------------------
 -- subscription_plans (SaaS plans defined by SYSTEM_ADMIN)

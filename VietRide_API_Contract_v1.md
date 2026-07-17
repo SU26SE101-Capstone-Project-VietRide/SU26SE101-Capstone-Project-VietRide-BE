@@ -838,6 +838,173 @@ Error `409` — duplicate email:
 }
 ```
 
+### GET `/v1/admin/users`
+
+Auth: `SYSTEM_ADMIN`. Idempotency-Key: not required.
+
+Query parameters:
+
+| Parameter | Type | Default | Validation / semantics |
+|---|---|---|---|
+| `search` | string? | null | Case-insensitive contains over email, display name and phone. |
+| `role` | UserRole? | null | Exact role filter. |
+| `status` | UserStatus? | null | Exact status filter. `DELETED` with `includeDeleted=false` returns an empty page. |
+| `operatorId` | UUID? | null | Exact logical operator filter. |
+| `includeDeleted` | boolean | `false` | `true` includes soft-deleted users; otherwise the global query filter remains active. |
+| `page` | integer | `1` | Minimum 1. |
+| `pageSize` | integer | `20` | Range 1..100. |
+| `sortBy` | string | `createdAt` | `createdAt,email,displayName,role,status`. |
+| `sortDir` | string | `desc` | `asc` or `desc`; `id` is the deterministic tie-breaker. |
+
+Response `200`: `PagedResult<AdminUserListItemDto>` in the ADR 0004 envelope.
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [{
+      "id": "uuid",
+      "email": "passenger@example.com",
+      "displayName": "Nguyen Van A",
+      "phone": "+84900000000",
+      "avatarUrl": null,
+      "role": "PASSENGER",
+      "status": "ACTIVE",
+      "operatorId": null,
+      "createdAt": "2026-07-16T01:00:00Z",
+      "updatedAt": "2026-07-16T01:00:00Z",
+      "deletedAt": null
+    }],
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 1,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-16T01:00:00Z" }
+}
+```
+
+The DTO never exposes password hashes, OAuth subjects, refresh tokens, OTP state or failed-login
+internals. Errors: `403 FORBIDDEN`, `400 INVALID_SORT_FIELD`, `422 VALIDATION_ERROR`.
+
+### POST `/v1/admin/users/{userId}/lock`
+
+Auth: `SYSTEM_ADMIN`. `Idempotency-Key` is required. Request has no body. Shared idempotency uses
+`AllowRequestBody=false`. The caller cannot lock itself (`403 FORBIDDEN`).
+
+Manual lock permits `ACTIVE -> LOCKED` and records `lockedFromStatus=ACTIVE`. A target already
+`LOCKED` returns ensure-locked success with `statusChanged=false`, preserves the origin, revokes any
+remaining active refresh token with `ADMIN_REVOKE`, and audits this logical request. Other status
+transitions return `422 USER_INVALID_STATUS_TRANSITION`.
+
+Response `200`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": { "userId": "uuid", "status": "LOCKED", "statusChanged": true },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-16T01:00:00Z" }
+}
+```
+
+### POST `/v1/admin/users/{userId}/unlock`
+
+Auth: `SYSTEM_ADMIN`. `Idempotency-Key` is required. Request has no body. The caller cannot unlock
+itself (`403 FORBIDDEN`). The target must be `LOCKED` with a valid `lockedFromStatus` of `ACTIVE` or
+`PENDING_EMAIL_VERIFICATION`. Unlock restores exactly that status, resets DB and Redis login-lockout
+state, clears `lockedFromStatus`, and never restores revoked refresh tokens. Missing/invalid origin
+is an invariant failure, not an implicit promotion to `ACTIVE`.
+
+Response `200`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "userId": "uuid",
+    "status": "PENDING_EMAIL_VERIFICATION",
+    "statusChanged": true
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-16T01:00:00Z" }
+}
+```
+
+Both lock/unlock return only these domain errors in addition to auth/validation envelopes:
+`RESOURCE_NOT_FOUND`, `FORBIDDEN`, `USER_INVALID_STATUS_TRANSITION`,
+`IDEMPOTENCY_KEY_REQUIRED`, `IDEMPOTENCY_KEY_MISMATCH`, `IDEMPOTENCY_REQUEST_PENDING`.
+
+### GET `/v1/admin/activity-logs`
+
+Auth: `SYSTEM_ADMIN`. Idempotency-Key: not required.
+
+Query: `userId?` (actor), `action?`, `from?`, `to?`, `page=1`, `pageSize=20`. Date boundaries are
+RFC 3339 UTC and use `[from,to)`; when both are supplied `from < to`. Ordering is always
+`createdAt DESC,id DESC`.
+
+Response `200`: `PagedResult<AdminActivityLogItemDto>` in the ADR 0004 envelope.
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [{
+      "id": "uuid",
+      "actor": {
+        "id": "uuid",
+        "email": "admin@vietride.vn",
+        "displayName": "System Administrator",
+        "role": "SYSTEM_ADMIN"
+      },
+      "action": "LOCK_USER",
+      "metadata": {
+        "targetUserId": "uuid",
+        "previousStatus": "ACTIVE",
+        "newStatus": "LOCKED",
+        "statusChanged": true
+      },
+      "ipAddress": "203.0.113.10",
+      "userAgent": "VietRide Admin Web",
+      "createdAt": "2026-07-16T01:00:00Z"
+    }],
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 1,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-16T01:00:00Z" }
+}
+```
+
+ActivityLog is append-only. No update/delete API exists and the database rejects direct
+`UPDATE`/`DELETE`. Metadata must not contain password, OTP or token material.
+
+### POST `/internal/v1/operators/summaries/batch`
+
+Auth: Internal JWT only. This is a read-only POST and does not require Idempotency-Key.
+
+Request:
+
+```json
+{ "operatorIds": ["uuid"] }
+```
+
+At most 500 distinct non-empty UUIDs are accepted. Empty input returns an empty raw array. Requested
+soft-deleted operators are included. Response items are sorted by ID ascending.
+
+Response `200` (raw internal success payload):
+
+```json
+[{ "operatorId": "uuid", "operatorName": "Nha xe A" }]
+```
+
 ## Booking Service
 
 ### GET `/v1/bookings/{bookingId}`
@@ -2953,6 +3120,243 @@ Response `202`:
 
 Errors: `403 FORBIDDEN`; `404 RESOURCE_NOT_FOUND`; `409 SUBSCRIPTION_PAYMENT_PENDING`; `422 VALIDATION_ERROR`; `422 IDEMPOTENCY_KEY_MISMATCH`.
 
+For `paymentMethod=WALLET`, a successful atomic OperatorWallet charge returns `200`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "subscriptionId": "uuid",
+    "upgradeAttemptId": "uuid",
+    "status": "ACTIVE",
+    "paymentId": "uuid",
+    "amount": 500000,
+    "billingPeriod": "MONTHLY",
+    "invoiceStatus": "PENDING"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T10:00:00Z" }
+}
+```
+
+Additional errors: `402 WALLET_INSUFFICIENT_BALANCE`; `422 IDEMPOTENCY_KEY_REQUIRED`. Replaying the same key and request returns the original response. Reusing the key with a different payload returns `422 IDEMPOTENCY_KEY_MISMATCH`.
+
+## Invoice, OperatorWallet and Settlement — Day 38
+
+All list endpoints return the ADR 0004 paged envelope with `items`, `page`, `pageSize`, `totalItems`, `totalPages`, `hasNextPage`, and `hasPreviousPage`. `pageSize` is `1..100`; `sortDir` is `asc|desc`; unsupported `sortBy` returns `400 INVALID_SORT_FIELD`. Operator scope always comes from trusted JWT claims and is never accepted from query/body.
+
+### GET `/v1/operator/invoices`
+
+Auth: `OPERATOR_ADMIN`. Query: `page?`, `pageSize?`, `status?`, `from?`, `to?`, `sortBy?` (`issuedAt|createdAt|amount|invoiceNumber`), `sortDir?`.
+
+Item shape:
+
+```json
+{
+  "invoiceId": "uuid",
+  "invoiceNumber": "VR-INV-202607-000001",
+  "paymentId": "uuid",
+  "status": "ISSUED",
+  "amount": 500000,
+  "billingPeriod": "MONTHLY",
+  "periodFrom": "2026-07-15T00:00:00Z",
+  "periodTo": "2026-08-15T00:00:00Z",
+  "pdfGenerationStatus": "COMPLETED",
+  "createdAt": "2026-07-15T10:00:00Z",
+  "issuedAt": "2026-07-15T10:01:00Z"
+}
+```
+
+### GET `/v1/operator/invoices/{invoiceId}`
+
+Auth: `OPERATOR_ADMIN`. Returns the item above plus `planName`, `buyerSnapshot`, `invoiceWebUrl`, and `downloadApiUrl`. A missing or foreign-tenant invoice returns `404 INVOICE_NOT_FOUND` without existence disclosure.
+
+### GET `/v1/operator/invoices/{invoiceId}/download`
+
+Auth: `OPERATOR_ADMIN`. Rate limit: 10 requests/minute per `(userId, invoiceId)`. The only success wire shape is `200 ApiResponse`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "downloadUrl": "https://storage.googleapis.com/...signed...",
+    "expiresAt": "2026-07-15T11:00:00Z"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T10:00:00Z" }
+}
+```
+
+The signed URL is generated after authorization, expires within 60 minutes and is never persisted, logged or emitted. Errors: `404 INVOICE_NOT_FOUND`; `500 INVOICE_PDF_GENERATION_FAILED`; `429 RATE_LIMIT_EXCEEDED`.
+
+### POST `/v1/admin/invoices/{invoiceId}/retry`
+
+Auth: `SYSTEM_ADMIN`. `Idempotency-Key`: required. Body is empty. A retryable `FAILED` invoice with attempts `<5` is CAS-transitioned to `PENDING` and enqueued; the request itself does not increment attempts.
+
+Response `202` data: `{ "invoiceId": "uuid", "pdfGenerationStatus": "PENDING", "attemptsUsed": 2 }`.
+
+Errors: `404 INVOICE_NOT_FOUND`; `409 INVOICE_RETRY_ALREADY_PENDING`; `409 INVOICE_RETRY_NOT_ALLOWED`; `422 IDEMPOTENCY_KEY_REQUIRED`; `422 IDEMPOTENCY_KEY_MISMATCH`. Same-key replay returns the original `202`; different keys racing for the same invoice yield one `202` and one `409 INVOICE_RETRY_ALREADY_PENDING`.
+
+### GET `/v1/operator/wallet`
+
+Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`.
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "operatorId": "uuid",
+    "balance": 1250000,
+    "pendingHoldAmount": 300000,
+    "eligibleAmount": 450000,
+    "updatedAt": "2026-07-15T10:00:00Z"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T10:00:00Z" }
+}
+```
+
+### GET `/v1/operator/wallet/transactions`
+
+Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `type?`, `referenceType?`, `from?`, `to?`, `sortBy?` (`createdAt|amount`), `sortDir?`. Items contain `transactionId`, `type`, `amount`, `balanceBefore`, `balanceAfter`, `referenceType`, `referenceId`, `note`, `createdAt`.
+
+### GET `/v1/operator/trip-settlements`
+
+Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `status?`, `tripId?`, `from?`, `to?`, `sortBy?` (`createdAt|eligibleAt|settledAt|netAmount`), `sortDir?`. Items contain `settlementId`, `tripId`, `status`, `eligibleAt`, `netAmount`, `settlementMethod`, `settledAt`, `createdAt`.
+
+### GET `/v1/operator/ledger`
+
+Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `tripId?`, `entryType?`, `referenceType?`, `from?`, `to?`, `sortBy?` (`createdAt|amount`), `sortDir?`. Items contain `ledgerEntryId`, `tripId`, `entryType`, signed `amount`, `referenceType`, `referenceId`, `createdAt`. Internal source-event identifiers and sensitive notes are not returned.
+
+### GET `/v1/admin/trip-settlements`
+
+Auth: `SYSTEM_ADMIN`. Query: operator filters plus `operatorId?`, `stuckOnly?`, `severity?`. A stuck row is unresolved `ELIGIBLE` with `activeFailureCode != null`; `HIGH` means failure count `>=3` **or** stuck age `>21 days`.
+
+### POST `/v1/admin/trip-settlements/{settlementId}/settle`
+
+Auth: `SYSTEM_ADMIN`. `Idempotency-Key`: required. Body is empty. Only `PENDING_HOLD|ELIGIBLE` can settle. Response `200` data contains `settlementId`, `tripId`, `operatorId`, `netAmount`, `status`, `settlementMethod: "ADMIN_MANUAL"`, `settledAt`.
+
+Errors: `404 TRIP_SETTLEMENT_NOT_FOUND`; `409 TRIP_SETTLEMENT_ALREADY_SETTLED`; `500 PLATFORM_WALLET_INSUFFICIENT_BALANCE`; idempotency errors. Same-key replay returns the original result; a different manual key losing a concurrent manual/weekly race returns `409 TRIP_SETTLEMENT_ALREADY_SETTLED`.
+
+### GET `/v1/admin/reports/platform?from={from}&to={to}`
+
+Auth: `SYSTEM_ADMIN`. Payment owns orchestration; Gateway only proxies and no service reads another
+service's database.
+
+`from` and `to` are both required RFC 3339 timestamps with UTC offset `Z`; `from < to`; maximum
+range is 366 days. Metrics use half-open UTC interval `[from,to)`.
+
+Response `200`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "period": {
+      "from": "2026-07-01T00:00:00Z",
+      "to": "2026-08-01T00:00:00Z",
+      "timezone": "UTC"
+    },
+    "totals": {
+      "completedBookingCount": 120,
+      "completedTripCount": 36,
+      "deliveredParcelCount": 18,
+      "bookingRevenueVnd": 48000000,
+      "parcelRevenueVnd": 3200000,
+      "netRevenueVnd": 51200000
+    },
+    "byOperator": [{
+      "operatorId": "uuid",
+      "operatorName": "Nha xe A",
+      "completedBookingCount": 120,
+      "completedTripCount": 36,
+      "deliveredParcelCount": 18,
+      "bookingRevenueVnd": 48000000,
+      "parcelRevenueVnd": 3200000,
+      "netRevenueVnd": 51200000
+    }],
+    "generatedAt": "2026-08-01T00:00:01Z"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-08-01T00:00:01Z" }
+}
+```
+
+`byOperator` is the union of IDs returned by Booking/Trip/Parcel, sorted by `netRevenueVnd DESC`
+then operator ID. Missing Identity summaries remain with `operatorName=null`. Totals must equal the
+checked sum of every breakdown row. Parcel and net revenue are signed and may be negative.
+
+Errors: `403 FORBIDDEN`, `422 VALIDATION_ERROR`, `500 REPORT_VALUE_OVERFLOW`,
+`502 UPSTREAM_UNAVAILABLE`. A canonical upstream `REPORT_VALUE_OVERFLOW` is propagated as the same
+500; timeout, other 5xx and unusable payloads map to 502. No partial response is permitted.
+
+### GET `/internal/v1/reports/platform/bookings?from={from}&to={to}`
+
+Auth: Internal JWT only. Raw success payload:
+
+```json
+{
+  "items": [{
+    "operatorId": "uuid",
+    "completedBookingCount": 120,
+    "bookingRevenueVnd": 48000000
+  }]
+}
+```
+
+Only Booking rows with `status=COMPLETED` and `completedAt` in UTC `[from,to)` contribute.
+
+### GET `/internal/v1/reports/platform/trips?from={from}&to={to}`
+
+Auth: Internal JWT only. Raw success payload:
+
+```json
+{
+  "items": [{ "operatorId": "uuid", "completedTripCount": 36 }]
+}
+```
+
+Only Trip rows with `status=COMPLETED` and `completedAt` in UTC `[from,to)` contribute.
+
+### GET `/internal/v1/reports/platform/parcels?from={from}&to={to}`
+
+Auth: Internal JWT only. Raw success payload:
+
+```json
+{
+  "items": [{
+    "operatorId": "uuid",
+    "deliveredParcelCount": 18,
+    "parcelRevenueVnd": 3200000
+  }]
+}
+```
+
+Only Parcel rows with `status=DELIVERY_CONFIRMED` and `confirmedAt` in UTC `[from,to)` contribute.
+Revenue is signed `depositAmount + additionalAmount - refundAmount` and is never clamped.
+
+All three source endpoints validate RFC 3339 UTC half-open ranges. PostgreSQL `SUM(BIGINT)` is
+read as NUMERIC and checked per group and total before mapping to Int64. Overflow returns an ADR
+0004 error envelope with `500 REPORT_VALUE_OVERFLOW`; internal successes remain raw.
+
+### GET `/v1/admin/platform-wallet`
+
+Auth: `SYSTEM_ADMIN`. Returns `{ platformWalletId, balance, updatedAt }`.
+
+### GET `/v1/admin/platform-wallet/transactions`
+
+Auth: `SYSTEM_ADMIN`. Paged query supports `type?`, `referenceType?`, `from?`, `to?`, `sortBy=createdAt|amount`, `sortDir?`. Items contain transaction identity, direction, positive amount, balance snapshots, reference, note and created time.
+
+### POST `/v1/admin/platform-wallet/adjust`
+
+Auth: `SYSTEM_ADMIN`. `Idempotency-Key`: required.
+
+Request: `{ "type": "CREDIT", "amount": 100000, "note": "Reconciliation correction" }`. `amount` is positive BIGINT VND; `note` is required. Response `200` returns the transaction and new balance. Concurrent DEBIT cannot make balance negative. Errors: `500 PLATFORM_WALLET_INSUFFICIENT_BALANCE`; validation/idempotency errors.
+
+### POST `/v1/admin/operators/{operatorId}/wallet/adjust`
+
+Auth: `SYSTEM_ADMIN`. `Idempotency-Key`: required. Request and response follow platform adjustment but target one OperatorWallet. A DEBIT that would make balance negative returns `402 WALLET_INSUFFICIENT_BALANCE`; unknown operator/wallet returns `404 RESOURCE_NOT_FOUND`.
+
 ### GET `/v1/admin/subscription-plans`
 
 Auth: `SYSTEM_ADMIN`. Query: `page?`, `pageSize?`, `includeInactive?`. Returns a paged ADR 0004 envelope.
@@ -3743,16 +4147,125 @@ Response `200`: updated Stop DTO.
 
 ### Admin Station and Stop management
 
-`SYSTEM_ADMIN` manages canonical stations through `GET/PATCH/DELETE /v1/admin/stations`
-and operator-owned stops through `GET/PATCH/DELETE /v1/admin/stops` (list supports
-`operatorId?`). Station delete is soft-delete and deactivates OperatorStation mappings.
-Stop delete follows the same replacement and historical-preservation rules above.
+`SYSTEM_ADMIN` manages canonical stations through `GET/PATCH/DELETE /v1/admin/stations` and
+operator-owned stops through `GET/PATCH/DELETE /v1/admin/stops` (list supports `operatorId?`).
+Station delete is an ordinary soft-delete and deactivates OperatorStation mappings; it does not
+create a canonical redirect. Stop delete follows the replacement and historical-preservation rules
+above.
+
+### PATCH `/v1/admin/stations/{id}`
+
+Auth: `SYSTEM_ADMIN`. The existing request contract remains additive and accepts any non-empty
+subset of:
+
+```json
+{
+  "name": "Ben xe Mien Dong Moi",
+  "addressStreet": "501 Hoang Huu Nam",
+  "locationId": "uuid",
+  "city": "Thu Duc",
+  "province": "Ho Chi Minh",
+  "latitude": 10.8796,
+  "longitude": 106.8142,
+  "contactPhone": "02812345678",
+  "contactEmail": "contact@example.com",
+  "operatingHours": { "mon": "05:00-22:00" },
+  "facilities": ["waiting_room", "parking"],
+  "supportsShuttle": true,
+  "isActive": true
+}
+```
+
+Coordinates must be supplied as a pair and fall in the normal latitude/longitude ranges. Slug is
+deterministically regenerated from `name + city + province`; collision uses a station-ID hash
+suffix. A Station already merged into another Station cannot be normalized. Response `200` is the
+existing canonical Station DTO in an ADR 0004 envelope. The Station update and
+`trip.station.normalized` Outbox event commit atomically.
+
+### POST `/v1/admin/stations/{primaryStationId}/merge`
+
+Auth: `SYSTEM_ADMIN`. `Idempotency-Key` is required.
+
+Request:
+
+```json
+{ "duplicateId": "uuid" }
+```
+
+Primary must be active, non-deleted and canonical. Duplicate must be non-deleted and canonical;
+the IDs must differ. Primary wins `name,slug,city,province`; `addressStreet`, `locationId`,
+`contactPhone`, `contactEmail`, `operatingHours` and `facilities` are filled from duplicate only when
+the primary value is absent, coordinates are merged as one pair, and
+`supportsShuttle = primary OR duplicate`. Trip atomically relinks OperatorStation, Route origin and
+destination, AlternativeRoute destination, ShuttleTrip Station and prior redirects. A merge that
+would make a Route origin equal destination or violate another domain invariant returns
+`409 STATION_MERGE_CONFLICT` with no partial side effect.
+
+Response `200`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "primaryStation": {
+      "id": "uuid",
+      "name": "Ben xe Mien Dong Moi",
+      "slug": "ben-xe-mien-dong-moi",
+      "city": "Thu Duc",
+      "province": "Ho Chi Minh",
+      "supportsShuttle": true,
+      "isActive": true
+    },
+    "duplicateStationId": "uuid",
+    "relinkedCounts": {
+      "operatorMappings": 2,
+      "collapsedOperatorMappings": 1,
+      "routeOrigins": 1,
+      "routeDestinations": 1,
+      "alternativeRoutes": 0,
+      "shuttleTrips": 0,
+      "flattenedRedirects": 1
+    }
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-16T01:00:00Z" }
+}
+```
+
+The duplicate is deactivated, soft-deleted and redirected directly to primary. OperatorStation
+collisions retain the primary mapping, OR `isActive`, fill only nullable primary config, then remove
+the duplicate mapping. The write and `trip.station.merged` Outbox event are one transaction.
+
+Errors: `403 FORBIDDEN`, `404 STATION_NOT_FOUND`, `409 STATION_MERGE_CONFLICT`,
+`422 VALIDATION_ERROR`, `IDEMPOTENCY_KEY_REQUIRED`, `IDEMPOTENCY_KEY_MISMATCH`,
+`IDEMPOTENCY_REQUEST_PENDING`.
 
 ### GET `/internal/v1/stations/{id}`
 
 Auth: internal service authentication required (`X-Internal-Auth: Bearer <jwt>`).
 
-Response `200`: raw Station DTO (successful internal response is not wrapped).
+Response `200`: raw internal Station resolution DTO (successful internal response is not wrapped).
+
+Active canonical Station:
+
+```json
+{
+  "id": "uuid",
+  "name": "Ben xe Mien Dong Moi",
+  "city": "Thu Duc",
+  "province": "Ho Chi Minh",
+  "latitude": 10.8796,
+  "longitude": 106.8142,
+  "supportsShuttle": true,
+  "isMerged": false,
+  "canonicalStationId": "uuid"
+}
+```
+
+A soft-deleted Station created by merge returns the original identity/profile fields with
+`isMerged=true` and the terminal `canonicalStationId`. A Station soft-deleted normally, without a
+redirect, returns `404 STATION_NOT_FOUND`, as does an unknown ID. Public Station DTOs never expose
+soft-deleted redirect rows.
 
 Errors:
 - `404 STATION_NOT_FOUND` — Station does not exist; returned in ADR 0004 error envelope.
@@ -5312,3 +5825,107 @@ Payload:
 The payload contains exactly the fields above. Day 18 freezes the contract and registry entry
 only. The Trip Outbox emitter, handler wiring, emit-condition tests, and Day-24 `NO_SHOW`
 detection remain deferred to Day 24.
+
+### `trip.station.merged`
+
+Producer: Trip. Consumers: Booking and Identity. Exchange: `vietride.events`. Trip commits the
+Outbox row in the same transaction as Station merge. Consumer queues are durable and independent.
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-07-16T01:00:00Z",
+  "eventType": "trip.station.merged",
+  "actorUserId": "uuid",
+  "ipAddress": "203.0.113.10",
+  "userAgent": "VietRide Admin Web",
+  "primaryStationId": "uuid",
+  "duplicateStationId": "uuid",
+  "primaryBefore": {
+    "id": "uuid",
+    "name": "Ben xe Mien Dong Moi",
+    "slug": "ben-xe-mien-dong-moi",
+    "city": "Thu Duc",
+    "province": "Ho Chi Minh",
+    "latitude": 10.8796,
+    "longitude": 106.8142,
+    "supportsShuttle": true,
+    "isActive": true
+  },
+  "duplicateBefore": {
+    "id": "uuid",
+    "name": "BX Mien Dong",
+    "slug": "bx-mien-dong",
+    "city": "Thu Duc",
+    "province": "Ho Chi Minh",
+    "latitude": 10.8797,
+    "longitude": 106.8141,
+    "supportsShuttle": false,
+    "isActive": true
+  },
+  "primaryAfter": {
+    "id": "uuid",
+    "name": "Ben xe Mien Dong Moi",
+    "slug": "ben-xe-mien-dong-moi",
+    "city": "Thu Duc",
+    "province": "Ho Chi Minh",
+    "latitude": 10.8796,
+    "longitude": 106.8142,
+    "supportsShuttle": true,
+    "isActive": true
+  },
+  "relinkedCounts": {
+    "operatorMappings": 2,
+    "collapsedOperatorMappings": 1,
+    "routeOrigins": 1,
+    "routeDestinations": 1,
+    "alternativeRoutes": 0,
+    "shuttleTrips": 0,
+    "flattenedRedirects": 1
+  }
+}
+```
+
+`ipAddress` and `userAgent` are nullable and intended only for immutable Identity audit columns.
+Station snapshots are allow-listed and must not contain contact phone/email. Operational logs must
+not emit the full event payload, IP or user-agent.
+
+### `trip.station.normalized`
+
+Producer: Trip. Consumer: Identity. Exchange: `vietride.events`. Payload:
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-07-16T01:00:00Z",
+  "eventType": "trip.station.normalized",
+  "actorUserId": "uuid",
+  "ipAddress": null,
+  "userAgent": null,
+  "stationId": "uuid",
+  "before": {
+    "id": "uuid",
+    "name": "BX Mien Dong",
+    "slug": "bx-mien-dong",
+    "city": "Thu Duc",
+    "province": "Ho Chi Minh",
+    "latitude": 10.8797,
+    "longitude": 106.8141,
+    "supportsShuttle": false,
+    "isActive": true
+  },
+  "after": {
+    "id": "uuid",
+    "name": "Ben xe Mien Dong Moi",
+    "slug": "ben-xe-mien-dong-moi",
+    "city": "Thu Duc",
+    "province": "Ho Chi Minh",
+    "latitude": 10.8796,
+    "longitude": 106.8142,
+    "supportsShuttle": true,
+    "isActive": true
+  }
+}
+```
+
+The same snapshot allow-list and PII-safe logging rules as `trip.station.merged` apply.

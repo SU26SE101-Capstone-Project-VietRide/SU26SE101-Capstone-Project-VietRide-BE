@@ -1041,6 +1041,10 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .HasColumnType("decimal(10,7)")
                         .HasColumnName("longitude");
 
+                    b.Property<Guid?>("MergedIntoStationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("merged_into_station_id");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(255)
@@ -1082,6 +1086,10 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .HasDatabaseName("idx_stations_location_id")
                         .HasFilter("location_id IS NOT NULL AND is_active = TRUE");
 
+                    b.HasIndex("MergedIntoStationId")
+                        .HasDatabaseName("idx_stations_merged_into")
+                        .HasFilter("merged_into_station_id IS NOT NULL");
+
                     b.HasIndex("Name")
                         .HasDatabaseName("idx_stations_name_trgm")
                         .HasFilter("FALSE");
@@ -1101,7 +1109,10 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .HasDatabaseName("idx_stations_city_province")
                         .HasFilter("is_active = TRUE");
 
-                    b.ToTable("stations", "vietride_trip");
+                    b.ToTable("stations", "vietride_trip", t =>
+                        {
+                            t.HasCheckConstraint("chk_stations_no_self_merge", "merged_into_station_id IS NULL OR merged_into_station_id <> id");
+                        });
                 });
 
             modelBuilder.Entity("VietRide.Trip.Domain.Entities.Stop", b =>
@@ -1368,6 +1379,10 @@ namespace VietRide.Trip.Infrastructure.Migrations
                     b.HasIndex("DriverScheduleId")
                         .HasDatabaseName("idx_trips_driver_schedule_id")
                         .HasFilter("driver_schedule_id IS NOT NULL");
+
+                    b.HasIndex("CompletedAt", "OperatorId")
+                        .HasDatabaseName("idx_trips_completed_report")
+                        .HasFilter("status = 'COMPLETED' AND completed_at IS NOT NULL");
 
                     b.HasIndex("DriverUserId", "DepartureDateTime")
                         .IsUnique()
@@ -2058,6 +2073,12 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .WithMany()
                         .HasForeignKey("LocationId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("VietRide.Trip.Domain.Entities.Station", null)
+                        .WithMany()
+                        .HasForeignKey("MergedIntoStationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_stations_merged_into_station");
                 });
 
             modelBuilder.Entity("VietRide.Trip.Domain.Entities.Stop", b =>

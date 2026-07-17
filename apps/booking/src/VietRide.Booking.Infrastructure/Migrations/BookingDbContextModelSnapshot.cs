@@ -24,8 +24,8 @@ namespace VietRide.Booking.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "booking_cancellation_reason", new[] { "USER_INITIATED", "OPERATOR_CANCELLED_TRIP", "OPERATOR_DISRUPTED_IN_PROGRESS", "SCHEDULE_CHANGED", "ROUTE_CHANGED_REFUSED", "VEHICLE_SUBSTITUTION_DOWNGRADE", "VEHICLE_SUBSTITUTION_NO_SEAT", "STOP_DISABLED_REFUSED" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "booking_pending_action_reason", new[] { "ROUTE_CHANGE", "SEAT_DOWNGRADE", "SCHEDULE_CHANGE", "PENDING_SEAT_ASSIGNMENT", "STOP_DISABLED" });
-            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "booking_pending_action_resolved", new[] { "ACCEPTED", "REFUSED", "AUTO_RESOLVED" });
-            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "booking_pending_action_severity", new[] { "INFO", "WARNING", "CRITICAL" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "booking_pending_action_resolved", new[] { "ACCEPTED", "REJECTED", "AUTO_FALLBACK_DESTINATION", "AUTO_CANCELLED_NO_SEAT", "OPERATOR_RESOLVED", "SUPERSEDED" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "booking_pending_action_severity", new[] { "MEDIUM", "MAJOR" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "booking_status", new[] { "PENDING_PAYMENT", "CONFIRMED", "COMPLETED", "EXPIRED", "CANCELLED", "NO_SHOW", "PARTIAL_NO_SHOW", "REFUNDED", "DISRUPTED" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "operator_voucher_consent_status", new[] { "PENDING", "ACCEPTED", "REJECTED" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "passenger_boarding_status", new[] { "PENDING", "BOARDED", "NO_SHOW" });
@@ -185,6 +185,10 @@ namespace VietRide.Booking.Infrastructure.Migrations
                     b.HasIndex("TripSnapshotDeparture")
                         .HasDatabaseName("idx_bookings_trip_snapshot_departure");
 
+                    b.HasIndex("CompletedAt", "OperatorId")
+                        .HasDatabaseName("idx_bookings_completed_report")
+                        .HasFilter("status = 'COMPLETED' AND completed_at IS NOT NULL");
+
                     b.HasIndex("OperatorId", "Status")
                         .HasDatabaseName("idx_bookings_operator_id_status");
 
@@ -237,7 +241,6 @@ namespace VietRide.Booking.Infrastructure.Migrations
                         .HasColumnName("metadata");
 
                     b.Property<int>("Reason")
-                        .IsRequired()
                         .HasColumnType("booking_pending_action_reason")
                         .HasColumnName("reason");
 
@@ -336,6 +339,52 @@ namespace VietRide.Booking.Infrastructure.Migrations
                             t.HasCheckConstraint("chk_booking_shuttle_intents_latitude", "pickup_latitude BETWEEN -90 AND 90");
 
                             t.HasCheckConstraint("chk_booking_shuttle_intents_longitude", "pickup_longitude BETWEEN -180 AND 180");
+                        });
+                });
+
+            modelBuilder.Entity("VietRide.Booking.Domain.Entities.BookingStationRedirect", b =>
+                {
+                    b.Property<Guid>("DuplicateStationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("duplicate_station_id");
+
+                    b.Property<Guid>("CanonicalStationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("canonical_station_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<Guid>("SourceEventId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("source_event_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("DuplicateStationId")
+                        .HasName("pk_booking_station_redirects");
+
+                    b.HasIndex("CanonicalStationId")
+                        .HasDatabaseName("idx_booking_station_redirects_canonical");
+
+                    b.HasIndex("SourceEventId")
+                        .IsUnique()
+                        .HasDatabaseName("uq_booking_station_redirects_source_event");
+
+                    b.ToTable("booking_station_redirects", "vietride_booking", t =>
+                        {
+                            t.HasCheckConstraint("chk_booking_station_redirects_not_self", "duplicate_station_id <> canonical_station_id");
                         });
                 });
 

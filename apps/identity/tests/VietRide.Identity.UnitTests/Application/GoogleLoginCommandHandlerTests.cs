@@ -26,6 +26,7 @@ public sealed class GoogleLoginCommandHandlerTests
     private readonly IUserRepository _users = Substitute.For<IUserRepository>();
     private readonly IRefreshTokenRepository _refreshTokens = Substitute.For<IRefreshTokenRepository>();
     private readonly IAccessTokenService _accessTokenService = Substitute.For<IAccessTokenService>();
+    private readonly ILoginLockoutCounter _loginLockoutCounter = Substitute.For<ILoginLockoutCounter>();
     private readonly IClock _clock = Substitute.For<IClock>();
 
     public GoogleLoginCommandHandlerTests()
@@ -54,6 +55,7 @@ public sealed class GoogleLoginCommandHandlerTests
                 googleUser.Subject,
                 Arg.Any<CancellationToken>())
             .Returns(user);
+        _users.GetByIdForUpdateAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
 
         var result = await handler.Handle(new GoogleLoginCommand("id-token"), CancellationToken.None);
 
@@ -91,6 +93,7 @@ public sealed class GoogleLoginCommandHandlerTests
             .Returns((User?)null);
         _users.GetByEmailAsync("existing@example.com", Arg.Any<CancellationToken>())
             .Returns(user);
+        _users.GetByIdForUpdateAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
 
         var result = await handler.Handle(new GoogleLoginCommand("id-token"), CancellationToken.None);
 
@@ -153,6 +156,7 @@ public sealed class GoogleLoginCommandHandlerTests
                 googleUser.Subject,
                 Arg.Any<CancellationToken>())
             .Returns(user);
+        _users.GetByIdForUpdateAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
 
         var act = () => handler.Handle(new GoogleLoginCommand("id-token"), CancellationToken.None);
 
@@ -201,6 +205,7 @@ public sealed class GoogleLoginCommandHandlerTests
             _refreshTokens,
             _accessTokenService,
             new RefreshTokenFactory(_clock),
+            _loginLockoutCounter,
             _clock);
     }
 

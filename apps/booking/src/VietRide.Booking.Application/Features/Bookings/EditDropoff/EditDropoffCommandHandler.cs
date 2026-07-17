@@ -1,10 +1,12 @@
 using MediatR;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
+using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
+using BookingEntity = VietRide.Booking.Domain.Entities.Booking;
 
 namespace VietRide.Booking.Application.Features.Bookings.EditDropoff;
 
@@ -18,16 +20,19 @@ public sealed class EditDropoffCommandHandler : IRequestHandler<EditDropoffComma
 
     private readonly IBookingRepository _bookings;
     private readonly ITripServiceClient _tripClient;
+    private readonly IBookingStationCanonicalizer _stationCanonicalizer;
     private readonly IClock _clock;
 
     public EditDropoffCommandHandler(
         IBookingRepository bookings,
         ITripServiceClient tripClient,
-        IClock clock)
+        IClock clock,
+        IBookingStationCanonicalizer stationCanonicalizer)
     {
         _bookings = bookings;
         _tripClient = tripClient;
         _clock = clock;
+        _stationCanonicalizer = stationCanonicalizer;
     }
 
     public async Task<EditDropoffResult> Handle(
@@ -42,19 +47,7 @@ public sealed class EditDropoffCommandHandler : IRequestHandler<EditDropoffComma
                 $"Booking '{request.BookingId}' not found.");
         }
 
-        if (booking.PassengerUserId != request.PassengerUserId)
-        {
-            throw new ForbiddenException(
-                "FORBIDDEN",
-                "Only the booking owner may edit dropoff.");
-        }
-
-        if (booking.Status != BookingStatus.CONFIRMED)
-        {
-            throw new ConflictException(
-                "BOOKING_CUTOFF_EXCEEDED",
-                "Only confirmed bookings may be edited before cutoff.");
-        }
+        EnsureEditable(booking, request.PassengerUserId);
 
         var trip = await _tripClient.GetTripSnapshotAsync(booking.TripId, cancellationToken);
         if (trip is null)
@@ -63,6 +56,25 @@ public sealed class EditDropoffCommandHandler : IRequestHandler<EditDropoffComma
                 "TRIP_NOT_FOUND",
                 $"Trip '{booking.TripId}' not found.");
         }
+
+        var stationCanonicalization = await _stationCanonicalizer.LockAndResolveAsync(
+            BookingStationCanonicalization.Collect(
+                request.DropoffStationId,
+                booking.PickupStationId,
+                booking.DropoffStationId,
+                trip.OriginStation.Id,
+                trip.DestinationStation.Id),
+            cancellationToken);
+        request = request with
+        {
+            DropoffStationId = stationCanonicalization.Resolve(request.DropoffStationId),
+        };
+        trip = BookingStationCanonicalization.ResolveTrip(trip, stationCanonicalization);
+        booking = await _bookings.FindByIdForUpdateAsync(request.BookingId, cancellationToken)
+            ?? throw new CodedNotFoundException(
+                "BOOKING_NOT_FOUND",
+                $"Booking '{request.BookingId}' not found.");
+        EnsureEditable(booking, request.PassengerUserId);
 
         if (_clock.UtcNow >= trip.DepartureDateTime.AddHours(-EditCutoffHours))
         {
@@ -89,6 +101,23 @@ public sealed class EditDropoffCommandHandler : IRequestHandler<EditDropoffComma
             BookingId: booking.Id,
             Dropoff: new EditDropoffResult.DropoffDto(booking.DropoffStationId, booking.DropoffStopId),
             FareDelta: Money.Zero.Amount);
+    }
+
+    private static void EnsureEditable(BookingEntity booking, Guid passengerUserId)
+    {
+        if (booking.PassengerUserId != passengerUserId)
+        {
+            throw new ForbiddenException(
+                "FORBIDDEN",
+                "Only the booking owner may edit dropoff.");
+        }
+
+        if (booking.Status != BookingStatus.CONFIRMED)
+        {
+            throw new ConflictException(
+                "BOOKING_CUTOFF_EXCEEDED",
+                "Only confirmed bookings may be edited before cutoff.");
+        }
     }
 
     private static void ValidateDropoffStation(Guid dropoffStationId, TripSnapshot trip)

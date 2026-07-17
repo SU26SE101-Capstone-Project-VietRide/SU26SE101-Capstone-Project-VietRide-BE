@@ -19,6 +19,7 @@ public sealed class GoogleLoginCommandHandler : IRequestHandler<GoogleLoginComma
     private readonly IRefreshTokenRepository _refreshTokens;
     private readonly IAccessTokenService _accessTokenService;
     private readonly IRefreshTokenFactory _refreshTokenFactory;
+    private readonly ILoginLockoutCounter _loginLockoutCounter;
     private readonly IClock _clock;
 
     public GoogleLoginCommandHandler(
@@ -28,6 +29,7 @@ public sealed class GoogleLoginCommandHandler : IRequestHandler<GoogleLoginComma
         IRefreshTokenRepository refreshTokens,
         IAccessTokenService accessTokenService,
         IRefreshTokenFactory refreshTokenFactory,
+        ILoginLockoutCounter loginLockoutCounter,
         IClock clock)
     {
         _googleIdTokenVerifier = googleIdTokenVerifier;
@@ -36,6 +38,7 @@ public sealed class GoogleLoginCommandHandler : IRequestHandler<GoogleLoginComma
         _refreshTokens = refreshTokens;
         _accessTokenService = accessTokenService;
         _refreshTokenFactory = refreshTokenFactory;
+        _loginLockoutCounter = loginLockoutCounter;
         _clock = clock;
     }
 
@@ -47,29 +50,42 @@ public sealed class GoogleLoginCommandHandler : IRequestHandler<GoogleLoginComma
         var providerSubject = googleUser.Subject.Trim();
         var emailLower = googleUser.Email.Trim().ToLowerInvariant();
 
-        var user = await _oauthIdentities.GetUserByProviderSubjectAsync(
+        var userHint = await _oauthIdentities.GetUserByProviderSubjectAsync(
             OAuthProvider.GOOGLE,
             providerSubject,
             cancellationToken);
+        var shouldCreateOAuthIdentity = false;
+        var isNewUser = false;
 
-        if (user is null)
+        if (userHint is null)
         {
-            user = await _users.GetByEmailAsync(emailLower, cancellationToken);
+            userHint = await _users.GetByEmailAsync(emailLower, cancellationToken);
 
-            if (user is null)
+            if (userHint is null)
             {
-                user = User.CreateGoogleAccount(
+                userHint = User.CreateGoogleAccount(
                     emailLower,
                     string.IsNullOrWhiteSpace(googleUser.DisplayName) ? emailLower : googleUser.DisplayName,
                     googleUser.AvatarUrl);
 
-                await _users.AddAsync(user, cancellationToken);
-            }
-            else
-            {
-                EnsureCanLogin(user);
+                await _users.AddAsync(userHint, cancellationToken);
+                isNewUser = true;
             }
 
+            shouldCreateOAuthIdentity = true;
+        }
+
+        var user = userHint;
+        if (!isNewUser)
+        {
+            user = await _users.GetByIdForUpdateAsync(userHint.Id, cancellationToken)
+                ?? throw new ForbiddenException("FORBIDDEN", "Account is not active.");
+            EnsureCanLogin(user);
+            await _loginLockoutCounter.ResetAsync(user.Id, cancellationToken);
+        }
+
+        if (shouldCreateOAuthIdentity)
+        {
             var oauthIdentity = OAuthIdentity.Create(
                 user.Id,
                 OAuthProvider.GOOGLE,
@@ -78,10 +94,6 @@ public sealed class GoogleLoginCommandHandler : IRequestHandler<GoogleLoginComma
                 _clock.UtcNow);
 
             await _oauthIdentities.AddAsync(oauthIdentity, cancellationToken);
-        }
-        else
-        {
-            EnsureCanLogin(user);
         }
 
         user.RecordSuccessfulLogin(_clock);

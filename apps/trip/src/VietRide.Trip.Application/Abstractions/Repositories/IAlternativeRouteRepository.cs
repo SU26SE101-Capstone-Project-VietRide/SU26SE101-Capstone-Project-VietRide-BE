@@ -16,4 +16,10 @@ public interface IAlternativeRouteRepository : IRepository<AlternativeRoute, Gui
     Task<IReadOnlyList<AlternativeRouteStop>> ListStopsAsync(Guid alternativeRouteId, CancellationToken cancellationToken);
 
     Task ReplaceStopsAsync(Guid alternativeRouteId, IReadOnlyCollection<AlternativeRouteStop> stops, CancellationToken cancellationToken);
+
+    Task<int> RelinkDestinationForStationMergeAsync(
+        Guid duplicateStationId,
+        Guid primaryStationId,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Alternative-route station relinking is not implemented by this repository.");
 }

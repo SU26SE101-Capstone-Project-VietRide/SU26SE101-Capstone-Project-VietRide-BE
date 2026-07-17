@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Features.Internal.Reports.PlatformParcels;
 using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Kernel.Primitives;
@@ -38,6 +39,63 @@ internal sealed class ParcelRepository : IParcelRepository
 
     public IQueryable<ParcelEntity> QueryNoTracking()
         => _db.Parcels.AsNoTracking();
+
+    public async Task<IReadOnlyList<PlatformParcelReportItem>> GetPlatformParcelMetricsAsync(
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken ct = default)
+    {
+        var connection = _db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync(ct);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT operator_id,
+                   COUNT(*)::numeric AS delivered_parcel_count,
+                   COALESCE(SUM(
+                       deposit_amount::numeric
+                       + additional_amount::numeric
+                       - refund_amount::numeric), 0)::numeric AS parcel_revenue_vnd
+            FROM vietride_parcel.parcels
+            WHERE status = 'DELIVERY_CONFIRMED'::vietride_parcel.parcel_status
+              AND confirmed_at >= @from_utc
+              AND confirmed_at < @to_utc
+            GROUP BY operator_id
+            ORDER BY operator_id;
+            """;
+        command.Transaction = _db.Database.CurrentTransaction?.GetDbTransaction();
+        AddParameter(command, "from_utc", fromUtc.ToUniversalTime());
+        AddParameter(command, "to_utc", toUtc.ToUniversalTime());
+
+        var items = new List<PlatformParcelReportItem>();
+        long totalCount = 0;
+        long totalRevenue = 0;
+        try
+        {
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var deliveredParcelCount = checked((long)reader.GetDecimal(1));
+                var parcelRevenueVnd = checked((long)reader.GetDecimal(2));
+                totalCount = checked(totalCount + deliveredParcelCount);
+                totalRevenue = checked(totalRevenue + parcelRevenueVnd);
+                items.Add(new PlatformParcelReportItem(
+                    reader.GetGuid(0),
+                    deliveredParcelCount,
+                    parcelRevenueVnd));
+            }
+        }
+        catch (OverflowException exception)
+        {
+            throw new PlatformReportValueOverflowException(exception);
+        }
+
+        return items;
+    }
 
     public async Task<ParcelEntity?> FindByParcelCodeAsync(string parcelCode, CancellationToken ct = default)
         => await _db.Parcels.FirstOrDefaultAsync(p => p.ParcelCode == parcelCode, ct);

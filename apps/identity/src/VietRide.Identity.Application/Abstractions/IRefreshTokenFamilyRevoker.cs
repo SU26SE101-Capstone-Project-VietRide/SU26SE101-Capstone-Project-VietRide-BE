@@ -1,13 +1,16 @@
 namespace VietRide.Identity.Application.Abstractions;
 
 /// <summary>
-/// Persists refresh-token family revocation independently of the ambient refresh
-/// command transaction so reuse detection survives the 401 exception path.
+/// Applies reuse revocation to refresh-token rows already locked and tracked by the
+/// caller's transaction. It never creates another scope or saves independently.
 /// </summary>
 public interface IRefreshTokenFamilyRevoker
 {
     /// <summary>
-    /// Revokes every token in the family with REUSE_DETECTED and commits immediately.
+    /// Revokes every supplied token with REUSE_DETECTED. The caller owns SaveChanges/commit.
     /// </summary>
-    Task RevokeForReuseAsync(Guid familyId, CancellationToken ct = default);
+    Task RevokeForReuseAsync(
+        IReadOnlyCollection<Domain.Entities.RefreshToken> tokens,
+        DateTimeOffset revokedAt,
+        CancellationToken ct = default);
 }

@@ -13,7 +13,8 @@ public sealed class ActivityLog
         ActivityLogAction action,
         string? metadata,
         string? ipAddress,
-        string? userAgent)
+        string? userAgent,
+        Guid? sourceEventId)
     {
         if (userId == Guid.Empty)
             throw new ArgumentException("Activity log user id is required.", nameof(userId));
@@ -30,6 +31,7 @@ public sealed class ActivityLog
         Metadata = metadata;
         IpAddress = ipAddress;
         UserAgent = userAgent;
+        SourceEventId = sourceEventId;
         CreatedAt = DateTimeOffset.UtcNow;
     }
 
@@ -45,13 +47,18 @@ public sealed class ActivityLog
 
     public string? UserAgent { get; private set; }
 
+    public Guid? SourceEventId { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private set; }
+
+    public User Actor { get; private set; } = null!;
 
     public static ActivityLog Create(
         Guid userId,
         ActivityLogAction action,
         string? metadata = null,
         string? ipAddress = null,
-        string? userAgent = null)
-        => new(userId, action, metadata, ipAddress, userAgent);
+        string? userAgent = null,
+        Guid? sourceEventId = null)
+        => new(userId, action, metadata, ipAddress, userAgent, sourceEventId);
 }

@@ -116,6 +116,16 @@ public static class InfrastructureServiceCollectionExtensions
                 options.QueueName = "identity.subscription-payment-succeeded";
                 options.BindingKeys = ["payment.subscription.payment_succeeded"];
             });
+            services.AddVietRideEventConsumer<StationMergedIntegrationEvent, StationMergedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "identity.station-merged";
+                options.BindingKeys = ["trip.station.merged"];
+            });
+            services.AddVietRideEventConsumer<StationNormalizedIntegrationEvent, StationNormalizedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "identity.station-normalized";
+                options.BindingKeys = ["trip.station.normalized"];
+            });
         }
 
         // ------------------------------------------------------------------
@@ -135,6 +145,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IRefreshTokenFactory, RefreshTokenFactory>();
         services.AddSingleton<IOtpFailedAttemptPersister, OtpFailedAttemptPersister>();
         services.AddSingleton<IFailedLoginPersister, FailedLoginPersister>();
+        services.AddSingleton<IPasswordResetSessionExecutor, PasswordResetSessionExecutor>();
+        services.AddSingleton<IRefreshSessionExecutor, RefreshSessionExecutor>();
         services.AddSingleton<IRefreshTokenFamilyRevoker, RefreshTokenFamilyRevoker>();
         services.AddSingleton<ILoginLockoutCounter, RedisLoginLockoutCounter>();
 

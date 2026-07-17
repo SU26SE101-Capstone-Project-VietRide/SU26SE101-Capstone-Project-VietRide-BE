@@ -48,6 +48,7 @@ public sealed class CreateRoundTripBookingCommandHandler
     private readonly IVoucherService _voucherService;
     private readonly IVoucherRepository _voucherRepository;
     private readonly IIntegrationEventOutbox _outbox;
+    private readonly IBookingStationCanonicalizer _stationCanonicalizer;
     private readonly IClock _clock;
     private readonly ILogger<CreateRoundTripBookingCommandHandler> _logger;
 
@@ -61,7 +62,8 @@ public sealed class CreateRoundTripBookingCommandHandler
         IIntegrationEventOutbox outbox,
         IClock clock,
         ILogger<CreateRoundTripBookingCommandHandler> logger,
-        IBookingStatusHistoryRepository statusHistory)
+        IBookingStatusHistoryRepository statusHistory,
+        IBookingStationCanonicalizer stationCanonicalizer)
     {
         _bookings = bookings;
         _statusHistory = statusHistory;
@@ -73,6 +75,7 @@ public sealed class CreateRoundTripBookingCommandHandler
         _outbox = outbox;
         _clock = clock;
         _logger = logger;
+        _stationCanonicalizer = stationCanonicalizer;
     }
 
     public async Task<CreateRoundTripBookingResult> Handle(
@@ -86,6 +89,32 @@ public sealed class CreateRoundTripBookingCommandHandler
 
         var outboundTrip = await GetScheduledTripAsync(request.Outbound.TripId, now, cancellationToken);
         var returnTrip = await GetScheduledTripAsync(request.Return.TripId, now, cancellationToken);
+        var stationCanonicalization = await _stationCanonicalizer.LockAndResolveAsync(
+            BookingStationCanonicalization.Collect(
+                request.Outbound.PickupStationId,
+                request.Outbound.DropoffStationId,
+                request.Return.PickupStationId,
+                request.Return.DropoffStationId,
+                outboundTrip.OriginStation.Id,
+                outboundTrip.DestinationStation.Id,
+                returnTrip.OriginStation.Id,
+                returnTrip.DestinationStation.Id),
+            cancellationToken);
+        request = request with
+        {
+            Outbound = request.Outbound with
+            {
+                PickupStationId = stationCanonicalization.Resolve(request.Outbound.PickupStationId),
+                DropoffStationId = stationCanonicalization.Resolve(request.Outbound.DropoffStationId),
+            },
+            Return = request.Return with
+            {
+                PickupStationId = stationCanonicalization.Resolve(request.Return.PickupStationId),
+                DropoffStationId = stationCanonicalization.Resolve(request.Return.DropoffStationId),
+            },
+        };
+        outboundTrip = BookingStationCanonicalization.ResolveTrip(outboundTrip, stationCanonicalization);
+        returnTrip = BookingStationCanonicalization.ResolveTrip(returnTrip, stationCanonicalization);
         ValidateStopSelections(outboundTrip, request.Outbound.PickupStopId, request.Outbound.DropoffStopId);
         ValidateStopSelections(returnTrip, request.Return.PickupStopId, request.Return.DropoffStopId);
         ValidateShuttleRequest(request.Outbound, outboundTrip, now);

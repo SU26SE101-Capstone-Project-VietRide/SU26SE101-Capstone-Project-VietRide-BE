@@ -181,6 +181,8 @@ CREATE INDEX idx_parcels_transfer_confirmed_by_user_id
     ON parcels (transfer_confirmed_by_user_id) WHERE transfer_confirmed_by_user_id IS NOT NULL;
 CREATE INDEX idx_parcels_returned_by_user_id
     ON parcels (returned_by_user_id) WHERE returned_by_user_id IS NOT NULL;
+CREATE INDEX idx_parcels_confirmed_report ON parcels (confirmed_at, operator_id)
+    WHERE status = 'DELIVERY_CONFIRMED' AND confirmed_at IS NOT NULL;
 
 COMMENT ON COLUMN parcels.parcel_code IS
     'Format VRP-yyyyMMdd-XXXXXXXX. Distinct from booking VR- prefix.';

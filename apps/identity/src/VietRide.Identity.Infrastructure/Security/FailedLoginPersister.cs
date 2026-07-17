@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using VietRide.Identity.Application.Abstractions;
+using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Identity.Infrastructure.Security;
@@ -21,19 +22,32 @@ internal sealed class FailedLoginPersister : IFailedLoginPersister
     /// <inheritdoc />
     public async Task PersistAsync(
         Guid userId,
-        long failedAttemptsInWindow,
         CancellationToken ct = default)
     {
         await using var scope = _scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
         var clock = scope.ServiceProvider.GetRequiredService<IClock>();
+        var lockoutCounter = scope.ServiceProvider.GetRequiredService<ILoginLockoutCounter>();
 
-        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+
+        var user = await db.Users
+            .FromSqlInterpolated($"SELECT * FROM vietride_identity.users WHERE id = {userId} AND deleted_at IS NULL FOR UPDATE")
+            .IgnoreQueryFilters()
+            .SingleOrDefaultAsync(ct);
         if (user is null)
             return;
 
+        if (user.Status != UserStatus.ACTIVE
+            && !(user.Status == UserStatus.PENDING_EMAIL_VERIFICATION && user.Role == UserRole.PASSENGER))
+        {
+            await transaction.CommitAsync(ct);
+            return;
+        }
+
+        var failedAttemptsInWindow = await lockoutCounter.IncrementAsync(userId, ct);
         user.RecordFailedLogin(clock, failedAttemptsInWindow);
-        db.Users.Update(user);
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
     }
 }
