@@ -4,4 +4,5 @@ public sealed record OperatorBookingTripDto(
     string? RouteName,
     string? OriginName,
     string? DestinationName,
-    DateTimeOffset? DepartureAt);
+    DateTimeOffset? DepartureAt,
+    DateTimeOffset? CurrentDepartureAt);

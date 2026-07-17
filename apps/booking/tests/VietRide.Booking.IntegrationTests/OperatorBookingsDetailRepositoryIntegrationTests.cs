@@ -38,7 +38,15 @@ public sealed class OperatorBookingsDetailRepositoryIntegrationTests
         var detail = await repository.GetOperatorBookingDetailAsync(bookingId, owner);
 
         detail.Should().NotBeNull();
-        detail!.Seats.Should().ContainSingle().Which.Should().BeEquivalentTo(new
+        detail!.Trip.Should().BeEquivalentTo(new
+        {
+            RouteName = "Route",
+            OriginName = "Origin",
+            DestinationName = "Destination",
+            DepartureAt = occurredAt,
+            CurrentDepartureAt = occurredAt,
+        });
+        detail.Seats.Should().ContainSingle().Which.Should().BeEquivalentTo(new
         {
             TicketCode = "VT-20260711-DETAIL01",
             SeatNumber = "A1",
@@ -71,10 +79,11 @@ public sealed class OperatorBookingsDetailRepositoryIntegrationTests
         await db.Database.ExecuteSqlInterpolatedAsync($@"
 INSERT INTO vietride_booking.bookings (id, booking_code, passenger_user_id, trip_id, operator_id,
  pickup_station_id, base_fare, discount_amount, total_amount, status, cancellation_reason, refund_override,
- trip_snapshot_origin_name, trip_snapshot_dest_name, trip_snapshot_departure, trip_snapshot_route_name, created_at, updated_at)
+ trip_snapshot_origin_name, trip_snapshot_dest_name, trip_snapshot_departure, trip_current_departure,
+ trip_snapshot_route_name, created_at, updated_at)
 VALUES ({bookingId}, {"VR-20260711-DETAIL01"}, {buyer}, {trip}, {owner}, {Guid.NewGuid()}, 100000, 0, 100000,
  'CANCELLED'::booking_status, 'USER_INITIATED'::booking_cancellation_reason, FALSE,
- 'Origin', 'Destination', {at}, 'Route', {at}, {at});");
+ 'Origin', 'Destination', {at}, {at}, 'Route', {at}, {at});");
         await db.Database.ExecuteSqlInterpolatedAsync($@"
 INSERT INTO vietride_booking.passengers (id, booking_id, seat_number, boarding_status, created_at, updated_at)
 VALUES ({passenger}, {bookingId}, {"A1"}, 'PENDING'::passenger_boarding_status, {at}, {at});");

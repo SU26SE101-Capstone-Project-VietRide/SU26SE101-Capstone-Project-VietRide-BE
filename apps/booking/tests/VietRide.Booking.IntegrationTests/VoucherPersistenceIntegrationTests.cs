@@ -6,12 +6,14 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
+using Npgsql.NameTranslation;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Booking.Infrastructure;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Shared.Persistence;
+using VietRide.Shared.Persistence.Outbox;
 
 namespace VietRide.Booking.IntegrationTests;
 
@@ -225,6 +227,9 @@ public sealed class VoucherPersistenceIntegrationTests
                 services.AddSingleton(_ =>
                 {
                     var dataSourceBuilder = new NpgsqlDataSourceBuilder(_connectionString);
+                    dataSourceBuilder.MapEnum<OutboxEventStatus>(
+                        $"{BookingDbContext.SchemaName}.outbox_event_status",
+                        new NpgsqlNullNameTranslator());
                     // Register all booking enum mappings (same as BookingDbContext.ConfigurePostgresTypes).
                     BookingDbContext.ConfigurePostgresTypes(dataSourceBuilder);
                     return dataSourceBuilder.Build();

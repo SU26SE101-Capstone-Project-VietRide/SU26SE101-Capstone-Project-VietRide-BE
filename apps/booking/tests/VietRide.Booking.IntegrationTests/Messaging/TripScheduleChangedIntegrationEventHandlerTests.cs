@@ -41,7 +41,8 @@ public sealed class TripScheduleChangedIntegrationEventHandlerTests
             await using var dataSource = Day22EventDatabase.CreateDataSource(connectionString);
             var tripId = Guid.NewGuid();
             var operatorId = Guid.NewGuid();
-            var booking = Day22EventDatabase.CreateBooking(tripId, operatorId, confirmed: true, 175_000);
+            var booking = Day22EventDatabase.CreateBooking(
+                tripId, operatorId, confirmed: true, 175_000, NotifiedAt.AddHours(27));
             await using (var seed = Day22EventDatabase.CreateDbContext(dataSource, NotifiedAt))
             {
                 await seed.Database.MigrateAsync();
@@ -92,19 +93,29 @@ public sealed class TripScheduleChangedIntegrationEventHandlerTests
             using (var metadata = JsonDocument.Parse(action.Metadata!))
             {
                 metadata.RootElement.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo(
-                    ["sourceEventId", "oldDeparture", "newDeparture", "severity"]);
+                    [
+                        "sourceEventId", "oldDeparture", "newDeparture", "severity", "initialDeadline",
+                        "terminalDeadline", "refundBasisAmount", "refundPercent", "refundAmount",
+                    ]);
                 metadata.RootElement.GetProperty("sourceEventId").GetGuid().Should().Be(integrationEvent.EventId);
                 metadata.RootElement.GetProperty("oldDeparture").GetDateTimeOffset().Should()
                     .Be(integrationEvent.OldDeparture);
                 metadata.RootElement.GetProperty("newDeparture").GetDateTimeOffset().Should()
                     .Be(integrationEvent.NewDeparture);
                 metadata.RootElement.GetProperty("severity").GetString().Should().Be("MEDIUM");
+                metadata.RootElement.GetProperty("initialDeadline").GetDateTimeOffset().Should()
+                    .Be(action.Deadline);
+                metadata.RootElement.GetProperty("terminalDeadline").ValueKind.Should().Be(JsonValueKind.Null);
+                metadata.RootElement.GetProperty("refundBasisAmount").GetInt64().Should().Be(175_000);
+                metadata.RootElement.GetProperty("refundPercent").GetInt32().Should().Be(50);
+                metadata.RootElement.GetProperty("refundAmount").GetInt64().Should().Be(87_500);
             }
 
             using (var payload = JsonDocument.Parse(outbox.Payload))
             {
                 payload.RootElement.GetProperty("eventId").GetGuid().Should()
                     .Be(DeriveRequiredEventId(integrationEvent.EventId, booking.Id, "MEDIUM"));
+                outbox.Id.Should().Be(payload.RootElement.GetProperty("eventId").GetGuid());
                 payload.RootElement.GetProperty("bookingId").GetGuid().Should().Be(booking.Id);
                 payload.RootElement.GetProperty("pendingActionId").GetGuid().Should().Be(action.Id);
                 payload.RootElement.GetProperty("deadline").GetDateTimeOffset().Should().Be(action.Deadline);
@@ -131,7 +142,8 @@ public sealed class TripScheduleChangedIntegrationEventHandlerTests
             await using var dataSource = Day22EventDatabase.CreateDataSource(connectionString);
             var tripId = Guid.NewGuid();
             var operatorId = Guid.NewGuid();
-            var booking = Day22EventDatabase.CreateBooking(tripId, operatorId, confirmed: true, 180_000);
+            var booking = Day22EventDatabase.CreateBooking(
+                tripId, operatorId, confirmed: true, 180_000, NotifiedAt.AddHours(27));
             await using (var seed = Day22EventDatabase.CreateDbContext(dataSource, NotifiedAt))
             {
                 await seed.Database.MigrateAsync();
@@ -284,6 +296,22 @@ public sealed class TripScheduleChangedIntegrationEventHandlerTests
         bookings.GetConfirmedByTripAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())
             .Returns(call => realBookings.GetConfirmedByTripAsync(
                 call.ArgAt<Guid>(0), call.ArgAt<Guid>(1), call.ArgAt<CancellationToken>(2)));
+        bookings.GetScheduleChangeBookingsForUpdateAsync(
+                Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(call => realBookings.GetScheduleChangeBookingsForUpdateAsync(
+                call.ArgAt<Guid>(0), call.ArgAt<Guid>(1), call.ArgAt<CancellationToken>(2)));
+        bookings.TryAdvanceTripCurrentDepartureAsync(
+                Arg.Any<Guid>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call => realBookings.TryAdvanceTripCurrentDepartureAsync(
+                call.ArgAt<Guid>(0),
+                call.ArgAt<DateTimeOffset>(1),
+                call.ArgAt<DateTimeOffset>(2),
+                call.ArgAt<DateTimeOffset>(3),
+                call.ArgAt<CancellationToken>(4)));
         bookings.HasOutboxEventAsync(Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())
             .Returns(call => realBookings.HasOutboxEventAsync(
                 call.ArgAt<string>(0), call.ArgAt<Guid>(1), call.ArgAt<CancellationToken>(2)));
@@ -359,7 +387,8 @@ internal static class Day22EventDatabase
         Guid tripId,
         Guid operatorId,
         bool confirmed,
-        long totalAmount)
+        long totalAmount,
+        DateTimeOffset? departure = null)
     {
         var booking = BookingEntity.CreatePendingPayment(
             BookingCode.Generate(DateTimeOffset.UtcNow),
@@ -372,7 +401,8 @@ internal static class Day22EventDatabase
             null,
             Money.FromRaw(totalAmount),
             Money.Zero,
-            Money.FromRaw(totalAmount));
+            Money.FromRaw(totalAmount),
+            tripSnapshotDeparture: departure);
         if (confirmed)
         {
             booking.Confirm(DateTimeOffset.Parse("2026-07-15T00:00:00Z"));

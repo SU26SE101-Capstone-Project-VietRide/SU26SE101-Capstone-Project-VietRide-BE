@@ -16,6 +16,20 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
     Task AcquireEventLockAsync(Guid sourceEventId, CancellationToken ct = default)
         => throw new NotSupportedException("Booking event lock is not implemented by this repository.");
 
+    Task<IReadOnlyList<BookingEntity>> GetScheduleChangeBookingsForUpdateAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Schedule-change projection lookup is not implemented by this repository.");
+
+    Task<bool> TryAdvanceTripCurrentDepartureAsync(
+        Guid bookingId,
+        DateTimeOffset expectedDeparture,
+        DateTimeOffset newDeparture,
+        DateTimeOffset updatedAt,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Schedule-change projection CAS is not implemented by this repository.");
+
     Task<IReadOnlyList<BookingEntity>> GetConfirmedByTripAsync(
         Guid tripId,
         Guid operatorId,

@@ -29,6 +29,7 @@ public sealed class HandleScheduleChangeCommandHandlerTests
         var fixture = new Fixture();
         string? payload = null;
         fixture.Outbox.EnqueueAsync(
+                Arg.Any<Guid>(),
                 BookingScheduleChangeInformationalIntegrationEvent.EventTypeValue,
                 Arg.Do<string>(value => payload = value),
                 Arg.Any<CancellationToken>())
@@ -72,6 +73,7 @@ public sealed class HandleScheduleChangeCommandHandlerTests
         {
             OldDeparture = oldDeparture,
         };
+        SetCurrentDeparture(fixture.Booking, oldDeparture);
 
         await fixture.Handler.Handle(command, CancellationToken.None);
     }
@@ -122,9 +124,17 @@ public sealed class HandleScheduleChangeCommandHandlerTests
         captured.Severity.Should().Be(BookingPendingActionSeverity.MEDIUM);
         using var metadata = JsonDocument.Parse(captured.Metadata!);
         metadata.RootElement.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo(
-            ["sourceEventId", "oldDeparture", "newDeparture", "severity"]);
+            [
+                "sourceEventId", "oldDeparture", "newDeparture", "severity", "initialDeadline",
+                "terminalDeadline", "refundBasisAmount", "refundPercent", "refundAmount",
+            ]);
+        metadata.RootElement.GetProperty("terminalDeadline").ValueKind.Should().Be(JsonValueKind.Null);
+        metadata.RootElement.GetProperty("refundBasisAmount").GetInt64().Should().Be(100_000);
+        metadata.RootElement.GetProperty("refundPercent").GetInt32().Should().Be(50);
+        metadata.RootElement.GetProperty("refundAmount").GetInt64().Should().Be(50_000);
         fixture.Scheduler.Received(1).EnsureScheduled(captured.Id, OccurredAt.AddHours(2));
         await fixture.Outbox.Received(1).EnqueueAsync(
+            Arg.Any<Guid>(),
             BookingScheduleChangeRequiredIntegrationEvent.EventTypeValue,
             Arg.Is<string>(value => HasMandatoryRequiredFields(value, captured.Id)),
             Arg.Any<CancellationToken>());
@@ -145,12 +155,14 @@ public sealed class HandleScheduleChangeCommandHandlerTests
                 EventId,
                 Arg.Any<CancellationToken>())
             .Returns([existing]);
+        SetCurrentDeparture(fixture.Booking, OccurredAt.AddHours(6));
 
         (await fixture.Handler.Handle(Command(OccurredAt.AddHours(6), "MAJOR"), CancellationToken.None))
             .Should().Be(0);
 
         await fixture.PendingActions.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
-        await fixture.Outbox.DidNotReceiveWithAnyArgs().EnqueueAsync(default!, default!, default);
+        await fixture.Outbox.DidNotReceive().EnqueueAsync(
+            Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         fixture.Scheduler.Received(1).EnsureScheduled(existing.Id, OccurredAt.AddHours(2));
     }
 
@@ -158,12 +170,14 @@ public sealed class HandleScheduleChangeCommandHandlerTests
     public async Task OnlyRepositoryConfirmedRowsAreEligible()
     {
         var fixture = new Fixture();
-        fixture.Bookings.GetConfirmedByTripAsync(TripId, OperatorId, Arg.Any<CancellationToken>()).Returns([]);
+        fixture.Bookings.GetScheduleChangeBookingsForUpdateAsync(
+            TripId, OperatorId, Arg.Any<CancellationToken>()).Returns([]);
 
         (await fixture.Handler.Handle(Command(OccurredAt.AddHours(2), "MINOR"), CancellationToken.None))
             .Should().Be(0);
 
-        await fixture.Outbox.DidNotReceiveWithAnyArgs().EnqueueAsync(default!, default!, default);
+        await fixture.Outbox.DidNotReceive().EnqueueAsync(
+            Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -207,10 +221,15 @@ public sealed class HandleScheduleChangeCommandHandlerTests
     {
         var booking = BookingEntity.CreatePendingPayment(
             BookingCode.Generate(OccurredAt), Guid.NewGuid(), TripId, OperatorId, Guid.NewGuid(),
-            null, null, null, Money.FromRaw(100_000), Money.Zero, Money.FromRaw(100_000));
+            null, null, null, Money.FromRaw(100_000), Money.Zero, Money.FromRaw(100_000),
+            tripSnapshotDeparture: OccurredAt);
         typeof(BookingEntity).GetProperty(nameof(BookingEntity.Status))!.SetValue(booking, BookingStatus.CONFIRMED);
         return booking;
     }
+
+    private static void SetCurrentDeparture(BookingEntity booking, DateTimeOffset departure)
+        => typeof(BookingEntity).GetProperty(nameof(BookingEntity.TripCurrentDeparture))!
+            .SetValue(booking, departure);
 
     private sealed class Fixture
     {
@@ -218,7 +237,14 @@ public sealed class HandleScheduleChangeCommandHandlerTests
         {
             Booking = CreateBooking();
             Bookings.AcquireEventLockAsync(EventId, Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-            Bookings.GetConfirmedByTripAsync(TripId, OperatorId, Arg.Any<CancellationToken>()).Returns([Booking]);
+            Bookings.GetScheduleChangeBookingsForUpdateAsync(
+                TripId, OperatorId, Arg.Any<CancellationToken>()).Returns([Booking]);
+            Bookings.TryAdvanceTripCurrentDepartureAsync(
+                Booking.Id,
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>()).Returns(true);
             Bookings.HasOutboxEventAsync(Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(false);
             PendingActions.GetByBookingAndSourceEventAsync(Booking.Id, EventId, Arg.Any<CancellationToken>()).Returns([]);
             PendingActions.GetActiveByBookingIdAsync(Booking.Id, Arg.Any<CancellationToken>()).Returns((BookingPendingAction?)null);
