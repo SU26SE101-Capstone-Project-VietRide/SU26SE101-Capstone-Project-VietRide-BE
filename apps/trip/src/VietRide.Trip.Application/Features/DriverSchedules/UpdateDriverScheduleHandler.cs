@@ -159,12 +159,12 @@ public sealed class UpdateDriverScheduleHandler
             var tooLate = pending.Any(trip =>
                 projections[trip.Id].ActiveBookings.Any(booking =>
                     string.Equals(booking.Status, "CONFIRMED", StringComparison.OrdinalIgnoreCase))
-                && trip.DepartureDateTime - now < TimeSpan.FromHours(2));
+                && IsInsideConfirmedBookingCutoff(trip, effective, changedFields, now));
             if (tooLate)
             {
                 throw new CodedConflictException(
                     "DRIVER_SCHEDULE_EDIT_TOO_LATE",
-                    "DriverSchedule changes cannot cascade within two hours of departure for a confirmed Booking.");
+                    "DriverSchedule changes require both old and new departures to remain at least two hours away for a confirmed Booking.");
             }
         }
 
@@ -426,8 +426,9 @@ public sealed class UpdateDriverScheduleHandler
                     trip.OperatorId,
                     oldDeparture,
                     newDeparture,
-                    CalculateSeverity(oldDeparture, newDeparture));
+                    TripScheduleChangedIntegrationEvent.ClassifySeverity(oldDeparture, newDeparture));
                 await outbox.EnqueueAsync(
+                    scheduleChanged.EventId,
                     scheduleChanged.EventType,
                     JsonSerializer.Serialize(scheduleChanged, JsonOptions),
                     cancellationToken);
@@ -870,13 +871,25 @@ public sealed class UpdateDriverScheduleHandler
         && left.ValidUntil == right.ValidUntil
         && left.IsActive == right.IsActive;
 
-    private static string CalculateSeverity(DateTimeOffset oldDeparture, DateTimeOffset newDeparture)
+    private static bool IsInsideConfirmedBookingCutoff(
+        Domain.Entities.Trip trip,
+        ScheduleState effective,
+        IReadOnlyCollection<string> changedFields,
+        DateTimeOffset now)
     {
-        var delta = (newDeparture - oldDeparture).Duration();
-        var sameLocalDate = oldDeparture.ToOffset(IctOffset).Date == newDeparture.ToOffset(IctOffset).Date;
-        if (sameLocalDate && delta <= TimeSpan.FromHours(2)) return "MINOR";
-        if (sameLocalDate && delta < TimeSpan.FromHours(6)) return "MEDIUM";
-        return "MAJOR";
+        if (trip.DepartureDateTime - now < TimeSpan.FromHours(2))
+        {
+            return true;
+        }
+
+        if (!changedFields.Contains("departureTime"))
+        {
+            return false;
+        }
+
+        var localDate = DateOnly.FromDateTime(trip.DepartureDateTime.ToOffset(IctOffset).DateTime);
+        var newDeparture = BuildDepartureDateTime(localDate, effective.DepartureTime);
+        return newDeparture - now < TimeSpan.FromHours(2);
     }
 
     private static DateTimeOffset BuildDepartureDateTime(DateOnly date, TimeOnly time) =>

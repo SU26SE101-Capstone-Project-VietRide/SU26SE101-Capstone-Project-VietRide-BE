@@ -6,6 +6,7 @@ namespace VietRide.Trip.Application.Events;
 public sealed class TripScheduleChangedIntegrationEvent : IntegrationEventBase
 {
     public const string EventTypeValue = "trip.trip.schedule_changed";
+    private static readonly TimeSpan IctOffset = TimeSpan.FromHours(7);
 
     public TripScheduleChangedIntegrationEvent(
         Guid eventId,
@@ -41,4 +42,25 @@ public sealed class TripScheduleChangedIntegrationEvent : IntegrationEventBase
 
     [JsonIgnore]
     public override string EventType => EventTypeValue;
+
+    public static string ClassifySeverity(
+        DateTimeOffset oldDeparture,
+        DateTimeOffset newDeparture)
+    {
+        var delta = (newDeparture - oldDeparture).Duration();
+        var sameIctDate = oldDeparture.ToOffset(IctOffset).Date
+            == newDeparture.ToOffset(IctOffset).Date;
+
+        if (sameIctDate && delta <= TimeSpan.FromHours(2))
+        {
+            return "MINOR";
+        }
+
+        if (sameIctDate && delta < TimeSpan.FromHours(6))
+        {
+            return "MEDIUM";
+        }
+
+        return "MAJOR";
+    }
 }

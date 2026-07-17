@@ -917,7 +917,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Task 23.9 diff hygiene failed' }
 | 23.0 | ✅ done | this commit | APPROVE | 2026-07-17; one review patch round; DOCS gate green; no scope expansion |
 | 23.1 | ✅ done | this commit | APPROVE | 2026-07-17; one review patch round; 4+6+6 focused tests green; no scope expansion |
 | 23.2 | ✅ done | this commit | APPROVE | 2026-07-17; one EOL patch round; migration lifecycle + 2+1+2 tests green; human-approved guard correction |
-| 23.3 | ⬜ todo | — | — | Existing producer hardening |
+| 23.3 | ✅ done | this commit | APPROVE | 2026-07-17; one review patch round; 14+2+2+6+6 focused tests green; no scope expansion |
 | 23.4 | ⬜ todo | — | — | Projection/CAS/Booking facts |
 | 23.5 | ⬜ todo | — | — | Cancelled compatibility rollout |
 | 23.6 | ⬜ todo | — | — | Passenger resolve/refund |
