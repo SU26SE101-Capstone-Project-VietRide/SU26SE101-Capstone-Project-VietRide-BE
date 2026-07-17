@@ -1,6 +1,7 @@
 using System.Reflection;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -390,6 +391,11 @@ public sealed class StationMergeSerializationTests
             destinationStationId,
             returnRouteId: Guid.NewGuid());
         tripClient.GetTripSnapshotAsync(tripId, Arg.Any<CancellationToken>()).Returns(trip);
+        tripClient.GetTripSnapshotAsync(
+                tripId,
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(trip);
         tripClient.LockSeatsAsync(default, default!, default, default!, default, default)
             .ReturnsForAnyArgs(new LockSeatsOutcome.Success(
                 new SeatLockResult(Guid.NewGuid(), ["A01"], Now.AddMinutes(10))));
@@ -441,6 +447,11 @@ public sealed class StationMergeSerializationTests
                         Guid.NewGuid(),
                         departureOffsetHours: 10);
                     tripClient.GetTripSnapshotAsync(returnTripId, Arg.Any<CancellationToken>()).Returns(returnTrip);
+                    tripClient.GetTripSnapshotAsync(
+                            returnTripId,
+                            Arg.Any<DateTimeOffset>(),
+                            Arg.Any<CancellationToken>())
+                        .Returns(returnTrip);
                     tripClient.LockRoundTripSeatsAsync(
                             default,
                             default!,
@@ -745,6 +756,8 @@ public sealed class StationMergeSerializationTests
                 .UseNpgsql(_dataSource, npgsql => npgsql.MigrationsHistoryTable(
                     "__ef_migrations_history",
                     BookingDbContext.SchemaName))
+                .ConfigureWarnings(warnings =>
+                    warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning))
                 .Options;
             return new BookingDbContext(options, new FixedClock(Now));
         }
