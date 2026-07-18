@@ -49,6 +49,21 @@ public class HealthEndpointTests : IClassFixture<VietRideWebApplicationFactory>
         doc.RootElement.GetProperty("success").GetBoolean().Should().BeTrue();
         doc.RootElement.GetProperty("data").GetProperty("service").GetString().Should().Be("Identity");
     }
+
+    [Fact]
+    public async Task GetSwagger_Returns200_WithUniqueOperatorSummarySchemas()
+    {
+        using var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/swagger/v1/swagger.json");
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        using var doc = JsonDocument.Parse(body);
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+        schemas.TryGetProperty("OperatorSummaryDto", out _).Should().BeTrue();
+        schemas.TryGetProperty("InternalOperatorSummaryDto", out _).Should().BeTrue();
+    }
 }
 
 public class VietRideWebApplicationFactory : WebApplicationFactory<Program>
