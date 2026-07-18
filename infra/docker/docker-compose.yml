@@ -29,6 +29,8 @@ x-dotnet-common: &dotnet-common
   depends_on:
     postgres:
       condition: service_healthy
+    redis:
+      condition: service_healthy
     rabbitmq:
       condition: service_healthy
 
@@ -284,6 +286,7 @@ services:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_parcel;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev};Maximum Pool Size=10;Minimum Pool Size=0;Connection Idle Lifetime=15'
+      REDIS_URL: redis:6379
       RabbitMq__HostName: rabbitmq
       RabbitMq__Port: '5672'
       RabbitMq__UserName: ${RABBITMQ_USER:-vietride}
