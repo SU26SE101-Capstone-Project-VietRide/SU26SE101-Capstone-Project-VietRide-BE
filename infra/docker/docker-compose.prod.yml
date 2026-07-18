@@ -28,6 +28,8 @@ x-dotnet-common: &dotnet-common
   depends_on:
     postgres:
       condition: service_healthy
+    redis:
+      condition: service_healthy
     rabbitmq:
       condition: service_healthy
 
@@ -143,6 +145,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_trip;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD}'
+      REDIS_URL: 'redis:6379,abortConnect=false'
       IDENTITY_SERVICE_BASE_URL: http://identity:5001
       BOOKING_BASE_URL: http://booking:5003
       # Trip runs the outbox publisher and RabbitMQ consumers. Inside Docker it
