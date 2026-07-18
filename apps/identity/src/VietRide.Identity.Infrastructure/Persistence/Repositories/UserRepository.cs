@@ -35,6 +35,59 @@ internal sealed class UserRepository : IUserRepository
             .FirstOrDefaultAsync(u => u.Phone == phone, ct);
     }
 
+    public async Task<User?> GetByIdForUpdateAsync(Guid id, CancellationToken ct = default)
+    {
+        var tracked = _db.Users.Local.FirstOrDefault(user => user.Id == id);
+        if (tracked is not null)
+            _db.Entry(tracked).State = EntityState.Detached;
+
+        return await _db.Users
+            .FromSqlInterpolated($"SELECT * FROM vietride_identity.users WHERE id = {id} AND deleted_at IS NULL FOR UPDATE")
+            .IgnoreQueryFilters()
+            .SingleOrDefaultAsync(ct);
+    }
+
+    public async Task<PagedResult<User>> ListAdminUsersAsync(
+        QueryOptions options,
+        UserRole? role,
+        UserStatus? status,
+        Guid? operatorId,
+        CancellationToken ct = default)
+    {
+        IQueryable<User> query;
+        if (!string.IsNullOrWhiteSpace(options.Search))
+        {
+            var searchPattern = $"%{options.Search.Trim()}%";
+            query = _db.Users
+                .FromSqlInterpolated($"SELECT * FROM vietride_identity.users WHERE email ILIKE {searchPattern} OR display_name ILIKE {searchPattern} OR phone ILIKE {searchPattern}")
+                .AsNoTracking();
+        }
+        else
+        {
+            query = _db.Users.AsNoTracking();
+        }
+
+        if (options.IncludeDeleted)
+            query = query.IgnoreQueryFilters();
+
+        if (role.HasValue)
+            query = query.Where(user => user.Role == role.Value);
+
+        if (status.HasValue)
+            query = query.Where(user => user.Status == status.Value);
+
+        if (operatorId.HasValue)
+            query = query.Where(user => user.OperatorId == operatorId.Value);
+
+        var totalItems = await query.LongCountAsync(ct);
+        var items = await ApplySort(query, options.SortBy, options.SortDir)
+            .Skip((options.Page - 1) * options.PageSize)
+            .Take(options.PageSize)
+            .ToListAsync(ct);
+
+        return PagedResult<User>.Create(items, options.Page, options.PageSize, totalItems);
+    }
+
     public async Task<PagedResult<User>> ListOperatorUsersAsync(
         QueryOptions options,
         Guid? operatorId,
@@ -129,7 +182,7 @@ internal sealed class UserRepository : IUserRepository
         string sortDir)
     {
         var descending = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
-        return sortBy?.Trim().ToLowerInvariant() switch
+        var ordered = sortBy?.Trim().ToLowerInvariant() switch
         {
             "email" => descending ? query.OrderByDescending(u => u.Email) : query.OrderBy(u => u.Email),
             "displayname" => descending ? query.OrderByDescending(u => u.DisplayName) : query.OrderBy(u => u.DisplayName),
@@ -137,5 +190,7 @@ internal sealed class UserRepository : IUserRepository
             "status" => descending ? query.OrderByDescending(u => u.Status) : query.OrderBy(u => u.Status),
             _ => descending ? query.OrderByDescending(u => u.CreatedAt) : query.OrderBy(u => u.CreatedAt),
         };
+
+        return descending ? ordered.ThenByDescending(u => u.Id) : ordered.ThenBy(u => u.Id);
     }
 }

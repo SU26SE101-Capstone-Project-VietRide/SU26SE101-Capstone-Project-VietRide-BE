@@ -37,12 +37,17 @@ public sealed class ActivityLogConfiguration : IEntityTypeConfiguration<Activity
             .HasColumnName("user_agent")
             .HasMaxLength(500);
 
+        builder.Property(activityLog => activityLog.SourceEventId)
+            .HasColumnName("source_event_id")
+            .HasColumnType("uuid")
+            .IsRequired(false);
+
         builder.Property(activityLog => activityLog.CreatedAt)
             .HasColumnName("created_at")
             .HasDefaultValueSql("now()")
             .IsRequired();
 
-        builder.HasOne<User>()
+        builder.HasOne(activityLog => activityLog.Actor)
             .WithMany()
             .HasForeignKey(activityLog => activityLog.UserId)
             .OnDelete(DeleteBehavior.Restrict);
@@ -54,5 +59,14 @@ public sealed class ActivityLogConfiguration : IEntityTypeConfiguration<Activity
         builder.HasIndex(activityLog => new { activityLog.Action, activityLog.CreatedAt })
             .HasDatabaseName("idx_activity_logs_action_created_at")
             .IsDescending(false, true);
+
+        builder.HasIndex(activityLog => new { activityLog.CreatedAt, activityLog.Id })
+            .HasDatabaseName("idx_activity_logs_created_at_id")
+            .IsDescending(true, true);
+
+        builder.HasIndex(activityLog => activityLog.SourceEventId)
+            .HasDatabaseName("uq_activity_logs_source_event_id")
+            .IsUnique()
+            .HasFilter("source_event_id IS NOT NULL");
     }
 }

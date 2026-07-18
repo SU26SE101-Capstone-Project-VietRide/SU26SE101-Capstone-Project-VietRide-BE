@@ -1,0 +1,88 @@
+name: day40-e2e
+
+# Isolated Day 40 acceptance overlay. The harness starts infrastructure first,
+# then only the services required by admin users, station merge, and reports.
+services:
+  postgres:
+    container_name: day40-e2e-postgres
+    ports:
+      - '55440:5432'
+
+  redis:
+    container_name: day40-e2e-redis
+    ports:
+      - '${REDIS_PORT:-56382}:6379'
+
+  rabbitmq:
+    container_name: day40-e2e-rabbitmq
+    ports:
+      - '55702:5672'
+      - '55703:15672'
+
+  identity:
+    container_name: day40-e2e-identity
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      EMAIL_PROVIDER: LOG
+    ports:
+      - '59001:5001'
+
+  trip:
+    container_name: day40-e2e-trip
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Identity__BaseUrl: http://identity:5001
+      Identity__UseDevStub: 'false'
+    ports:
+      - '59002:5002'
+
+  booking:
+    container_name: day40-e2e-booking
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Trip__BaseUrl: http://trip:5002
+      Trip__UseDevStub: 'false'
+      Payment__BaseUrl: http://payment:5004
+      Payment__UseDevStub: 'false'
+      Identity__BaseUrl: http://identity:5001
+      Identity__UseDevStub: 'false'
+    ports:
+      - '59003:5003'
+
+  payment:
+    container_name: day40-e2e-payment
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      InvoiceStorage__Provider: E2E_LOCAL
+      InvoiceStorage__Bucket: day40-e2e
+      InvoiceStorage__LocalRootPath: /tmp/day40-invoices
+      Booking__BaseUrl: http://booking:5003
+      BOOKING_SERVICE_BASE_URL: http://booking:5003
+      Trip__BaseUrl: http://trip:5002
+      TRIP_SERVICE_BASE_URL: http://trip:5002
+      Parcel__BaseUrl: http://parcel:5005
+      PARCEL_SERVICE_BASE_URL: http://parcel:5005
+      Identity__BaseUrl: http://identity:5001
+      IDENTITY_SERVICE_BASE_URL: http://identity:5001
+    tmpfs:
+      - /tmp/day40-invoices
+    ports:
+      - '59004:5004'
+
+  parcel:
+    container_name: day40-e2e-parcel
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+    ports:
+      - '59005:5005'
+
+  gateway:
+    container_name: day40-e2e-gateway
+    environment:
+      NODE_ENV: development
+    ports:
+      - '59300:3000'
+
+networks:
+  default:
+    name: day40-e2e-net

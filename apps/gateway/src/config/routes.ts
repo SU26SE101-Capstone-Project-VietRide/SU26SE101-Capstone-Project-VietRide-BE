@@ -95,6 +95,12 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['SYSTEM_ADMIN'],
     },
     {
+      prefix: '/v1/admin/activity-logs',
+      target: env.IDENTITY_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
       prefix: '/v1/operator/profile',
       target: env.IDENTITY_BASE_URL,
       authRequired: 'user',
@@ -144,6 +150,12 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     },
     {
       prefix: '/v1/admin/invoices',
+      target: env.PAYMENT_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
+      prefix: '/v1/admin/reports/platform',
       target: env.PAYMENT_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['SYSTEM_ADMIN'],

@@ -39,6 +39,48 @@ public sealed class IdempotencyMiddlewareTests
         await db.DidNotReceive().KeyExistsAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
     }
 
+    [Fact]
+    public async Task RequiredNoBodyEndpoint_EmptyBody_UsesSharedReservationAndExecutesOnce()
+    {
+        var (mux, db) = FakeRedis();
+        ConfigureEmptyV2(db);
+        var invoked = 0;
+        var context = BuildContext(body: string.Empty, allowRequestBody: false);
+
+        await Create(_ =>
+        {
+            invoked++;
+            return Task.CompletedTask;
+        }, mux).InvokeAsync(context);
+
+        invoked.Should().Be(1);
+        await db.Received(1).StringSetAsync(
+            ProcessingKey(Key),
+            Arg.Any<RedisValue>(),
+            TimeSpan.FromSeconds(120),
+            When.NotExists,
+            CommandFlags.None);
+    }
+
+    [Fact]
+    public async Task RequiredNoBodyEndpoint_NonEmptyBody_ReturnsValidationWithoutRedisOrDispatch()
+    {
+        var (mux, db) = FakeRedis();
+        var invoked = 0;
+        var context = BuildContext(body: "{}", allowRequestBody: false);
+
+        await Create(_ =>
+        {
+            invoked++;
+            return Task.CompletedTask;
+        }, mux).InvokeAsync(context);
+
+        invoked.Should().Be(0);
+        context.Response.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
+        ReadErrorCode(context).Should().Be("VALIDATION_ERROR");
+        await db.DidNotReceive().KeyExistsAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
+    }
+
     [Theory]
     [InlineData("GET")]
     [InlineData("HEAD")]
@@ -388,7 +430,8 @@ public sealed class IdempotencyMiddlewareTests
         string query = "",
         string body = "{\"value\":1}",
         string subject = "user-a",
-        bool optedIn = true)
+        bool optedIn = true,
+        bool allowRequestBody = true)
     {
         var context = new DefaultHttpContext();
         context.Request.Method = method;
@@ -407,7 +450,10 @@ public sealed class IdempotencyMiddlewareTests
         {
             context.SetEndpoint(new Endpoint(
                 _ => Task.CompletedTask,
-                new EndpointMetadataCollection(new RequireIdempotencyAttribute()),
+                new EndpointMetadataCollection(new RequireIdempotencyAttribute
+                {
+                    AllowRequestBody = allowRequestBody,
+                }),
                 "test"));
         }
 

@@ -72,7 +72,7 @@ For every task, the paths in its verification `$changed` arrays are the exact ba
 | verification commands | Run the exact DOCS block below. |
 | full regression owner | `audit-day` |
 | invariant flags | Markdown/SQL LF; SOT hierarchy; ADR 0004; exact lower-case past-tense routing keys; Money BIGINT/AwayFromZero; immutable snapshots; no cross-DB FK; no dependency change. |
-| acceptance | Every owned document contains its own applicable canonical Day-23 values; a value in another file cannot satisfy its gate. The API table and BSOT §5.9 ratify exactly `401 AUTH_TOKEN_INVALID`, `403 FORBIDDEN`, `404 BOOKING_NOT_FOUND`, `404 BOOKING_PENDING_ACTION_NOT_FOUND`, `409 BOOKING_PENDING_ACTION_NOT_RESOLVABLE`, `409 BOOKING_PENDING_ACTION_SUPERSEDED`, `409 BOOKING_PENDING_ACTION_ALREADY_RESOLVED`, `409 BOOKING_PENDING_ACTION_EXPIRED`, `409 IDEMPOTENCY_REQUEST_PENDING`, and `422 IDEMPOTENCY_KEY_REQUIRED|IDEMPOTENCY_KEY_MISMATCH|VALIDATION_ERROR`, including the masking/replay triggers in Contract changes. The operator list contract keeps its query keys/allow-list unchanged: `date` uses the ICT day of `trip_current_departure`, `sortBy=departureAt` sorts that projection followed by `id` in `sortDir`, and list/detail place `currentDepartureAt` only under `trip` beside immutable `departureAt`. BSOT is `1.35.0` with a dated changelog row; §7.3 contains exact event rows; §10.1 preserves the existing occurrence+2h `PendingActionRealertJob` scope and defines the separate Day-23 `ScheduleChangeAutoAcceptJob` initial/terminal phases, each at most once for its intended phase. Booking DDL and README contain the exact column/backfill/index contract. There is no dedicated Trip endpoint, alias, new `currentDepartureAt` sort key, timeout auto-refund/auto-cancel/fallback wording, MAJOR-only narrowing of the Day-22 job, or `+3h`-as-MAJOR contradiction. |
+| acceptance | Every owned document contains its own applicable canonical Day-23 values; a value in another file cannot satisfy its gate. The API table and BSOT §5.9 ratify exactly `401 AUTH_TOKEN_INVALID`, `403 FORBIDDEN`, `404 BOOKING_NOT_FOUND`, `404 BOOKING_PENDING_ACTION_NOT_FOUND`, `409 BOOKING_PENDING_ACTION_NOT_RESOLVABLE`, `409 BOOKING_PENDING_ACTION_SUPERSEDED`, `409 BOOKING_PENDING_ACTION_ALREADY_RESOLVED`, `409 BOOKING_PENDING_ACTION_EXPIRED`, `409 IDEMPOTENCY_REQUEST_PENDING`, and `422 IDEMPOTENCY_KEY_REQUIRED|IDEMPOTENCY_KEY_MISMATCH|VALIDATION_ERROR`, including the masking/replay triggers in Contract changes. The operator list contract keeps its query keys/allow-list unchanged: `date` uses the ICT day of `trip_current_departure`, `sortBy=departureAt` sorts that projection followed by `id` in `sortDir`, and list/detail place `currentDepartureAt` only under `trip` beside immutable `departureAt`. BSOT is `1.36.0` with a dated merge changelog row that reconciles the Day-23 and Day-40 baselines; §7.3 contains exact event rows; §10.1 preserves the existing occurrence+2h `PendingActionRealertJob` scope and defines the separate Day-23 `ScheduleChangeAutoAcceptJob` initial/terminal phases, each at most once for its intended phase. Booking DDL and README contain the exact column/backfill/index contract. There is no dedicated Trip endpoint, alias, new `currentDepartureAt` sort key, timeout auto-refund/auto-cancel/fallback wording, MAJOR-only narrowing of the Day-22 job, or `+3h`-as-MAJOR contradiction. |
 | source citations | technical context §6.13 and Booking entity requirements; API contract around lines 1267 and 4539; BSOT §§4.3, 5.9, 7.3–7.4, 8.10, 10.1, 13; Day-23 timeline; Booking/Trip schema READMEs. |
 
 ```powershell
@@ -89,11 +89,11 @@ git diff --check -- $docs
 if ($LASTEXITCODE -ne 0) { throw 'Day-23 document diff hygiene failed' }
 
 function Require-Literal([string]$Path,[string]$Literal) {
-  $text=Get-Content -Raw $Path
+  $text=Get-Content -Raw -Encoding utf8 $Path
   if (-not $text.Contains($Literal)) { throw "Missing exact '$Literal' in $Path" }
 }
 function Require-Regex([string]$Path,[string]$Pattern) {
-  $text=Get-Content -Raw $Path
+  $text=Get-Content -Raw -Encoding utf8 $Path
   if ($text -notmatch $Pattern) { throw "Missing canonical pattern '$Pattern' in $Path" }
 }
 function Require-Severity([string]$Path) {
@@ -134,7 +134,7 @@ Require-Regex 'db-schema/booking/README.md' '(?is)trip_snapshot_departure.{0,220
 Require-Literal 'db-schema/trip-route-vehicle/README.md' 'PATCH `/v1/operator/driver-schedules/{scheduleId}?applyTo=FUTURE_ONLY|ALL_PENDING`'
 Require-Regex 'db-schema/trip-route-vehicle/README.md' '(?is)oldDeparture.{0,200}(?:>=|≥)\s*2h.{0,200}newDeparture.{0,200}(?:>=|≥)\s*2h'
 
-$api=Get-Content -Raw 'VietRide_API_Contract_v1.md'
+$api=Get-Content -Raw -Encoding utf8 'VietRide_API_Contract_v1.md'
 $operatorList=[regex]::Match($api,'(?ms)^### GET `/v1/operator/bookings`.*?(?=^### )').Value
 $operatorDetail=[regex]::Match($api,'(?ms)^### GET `/v1/operator/bookings/\{id\}`.*?(?=^### )').Value
 if ([string]::IsNullOrWhiteSpace($operatorList)) { throw 'Operator booking list section not found' }
@@ -191,8 +191,8 @@ foreach($v in @('same key','same payload','byte-identical','new key','selectedSt
   if ($resolve -notmatch [regex]::Escape($v)) { throw "API resolve section missing $v" }
 }
 
-Require-Regex 'BACKEND_SOURCE_OF_TRUTH.md' '(?m)^> \*\*Phiên bản:\*\* 1\.35\.0\s*$'
-Require-Regex 'BACKEND_SOURCE_OF_TRUTH.md' '(?m)^\| \*\*1\.35\.0\*\* \| 2026-07-17 \| BE lead \(Vũ\) \| \*\*MINOR\*\* — Day-23 schedule-change contract, projection, errors, events, and jobs\.'
+Require-Regex 'BACKEND_SOURCE_OF_TRUTH.md' '(?m)^> \*\*Phiên bản:\*\* 1\.36\.0\s*$'
+Require-Regex 'BACKEND_SOURCE_OF_TRUTH.md' '(?m)^\| \*\*1\.36\.0\*\* \| 2026-07-18 \| BE lead \(Vũ\) \| \*\*MINOR\*\* — Day-23 schedule-change contract, projection, errors, events, and jobs; merged into the Day-40 baseline while preserving the Admin Users, Station Cleanup, and Platform Reports contracts\.'
 foreach($row in @(
   '| | `BOOKING_PENDING_ACTION_NOT_FOUND` | 404 |',
   '| | `BOOKING_PENDING_ACTION_NOT_RESOLVABLE` | 409 |',
@@ -202,7 +202,7 @@ foreach($row in @(
 )) { Require-Literal 'BACKEND_SOURCE_OF_TRUTH.md' $row }
 Require-Regex 'BACKEND_SOURCE_OF_TRUTH.md' '(?m)^\| `booking\.booking\.pending_action_auto_resolved` \| Booking \| Notification \| Exact `\{ eventId, occurredAt, bookingId, tripId, userId, pendingActionId, resolvedAction, severity, oldDeparture, newDeparture \}`; `resolvedAction=ACCEPTED` \|\s*$'
 Require-Regex 'BACKEND_SOURCE_OF_TRUTH.md' '(?m)^\| `booking\.booking\.cancelled` \| Booking \| Notification, Trip \(release seats\), Payment \(refund\), Booking \(BookingStats counter\) \|.*eventId.*occurredAt.*refundAmount.*$'
-$bsotText=Get-Content -Raw 'BACKEND_SOURCE_OF_TRUTH.md'
+$bsotText=Get-Content -Raw -Encoding utf8 'BACKEND_SOURCE_OF_TRUTH.md'
 $existingRealertRow=[regex]::Match($bsotText,'(?m)^\| `PendingActionRealertJob` \|.*$').Value
 if ([string]::IsNullOrWhiteSpace($existingRealertRow)) { throw 'PendingActionRealertJob registry row missing' }
 foreach($v in @('action occurrence + 2h','PENDING_SEAT_ASSIGNMENT','SCHEDULE_CHANGE','MEDIUM','MAJOR','unchanged Day-22','at most once')) {
@@ -218,15 +218,15 @@ if ($existingRealertRow -match 'MAJOR\s+first\s+phase\s+only' -or $autoAcceptRow
 }
 
 # Robust negatives. Endpoint/alias forms are forbidden anywhere in the four contract documents.
-$contractText=($docs[0..3] | ForEach-Object { Get-Content -Raw $_ }) -join "`n"
+$contractText=($docs[0..3] | ForEach-Object { Get-Content -Raw -Encoding utf8 $_ }) -join "`n"
 foreach($bad in @(
   '(?i)/(?:v1/)?operator/trips/\{[^}]+\}/(?:schedule(?:-change)?|departure(?:-time)?)\b',
   '(?i)/(?:v1/)?bookings/\{[^}]+\}/pending-actions/\{[^}]+\}/(?:accept(?:\|reject)?|reject)\b'
 )) { if ($contractText -match $bad) { throw "Obsolete endpoint/alias remains: $($Matches[0])" } }
 
-$timeline=[regex]::Match((Get-Content -Raw 'BE_TIMELINE_VU.md'),'(?ms)^### Day 23\b.*?(?=^### Day 24\b)').Value
-$technical=[regex]::Match((Get-Content -Raw 'SU26SE101_VIETRIDE_technical_context_v7.md'),'(?ms)^### 6\.13\b.*?(?=^### 6\.14\b)').Value
-$bsot=[regex]::Match((Get-Content -Raw 'BACKEND_SOURCE_OF_TRUTH.md'),'(?ms)^### 8\.10\b.*?(?=^### 8\.11\b)').Value
+$timeline=[regex]::Match((Get-Content -Raw -Encoding utf8 'BE_TIMELINE_VU.md'),'(?ms)^### Day 23\b.*?(?=^### Day 24\b)').Value
+$technical=[regex]::Match((Get-Content -Raw -Encoding utf8 'SU26SE101_VIETRIDE_technical_context_v7.md'),'(?ms)^### 6\.13\b.*?(?=^### 6\.14\b)').Value
+$bsot=[regex]::Match((Get-Content -Raw -Encoding utf8 'BACKEND_SOURCE_OF_TRUTH.md'),'(?ms)^### 8\.10\b.*?(?=^### 8\.11\b)').Value
 $scheduleBlocks="$timeline`n$technical`n$resolve`n$bsot"
 $badTimeout='(?is)(?:passenger\s+accepts?\s+or\s+auto(?:matic(?:ally)?)?[- ]?refund|timeout.{0,180}(?:auto(?:matic(?:ally)?)?[- ]?(?:refund(?:ed)?|cancel(?:led)?|fallback)|(?:tự động|auto).{0,50}(?:hoàn tiền|hoàn|hủy))|(?:auto(?:matic(?:ally)?)?[- ]?refund(?:ed)?|tự động.{0,30}hoàn).{0,180}timeout)'
 if ($scheduleBlocks -match $badTimeout) { throw "Obsolete schedule timeout/refund wording remains: $($Matches[0])" }

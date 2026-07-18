@@ -6,6 +6,7 @@ using VietRide.Identity.Application.Features.Internal.Operators.GetInternalOpera
 using VietRide.Identity.Application.Features.Internal.Operators.GetInternalOperatorSubscription;
 using VietRide.Identity.Application.Features.Internal.Operators.GetOperatorCrewUserIds;
 using VietRide.Identity.Application.Features.Internal.Operators.GetOperatorRecipientUsers;
+using VietRide.Identity.Application.Features.Internal.Operators.GetOperatorSummaries;
 using VietRide.Identity.Application.Features.Internal.Operators.IncrementOperatorUsage;
 using VietRide.Identity.Application.Features.Internal.Operators.QuotaAllocations;
 using VietRide.Shared.Kernel.Primitives;
@@ -73,6 +74,22 @@ public sealed class InternalOperatorsController : ControllerBase
         var result = await _mediator.Send(new GetOperatorCrewUserIdsQuery(operatorId), cancellationToken);
         return Ok(result);
     }
+
+    [HttpPost("summaries/batch")]
+    [ProducesResponseType(typeof(IReadOnlyList<OperatorSummaryDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<IReadOnlyList<OperatorSummaryDto>>> GetOperatorSummariesAsync(
+        [FromBody] GetOperatorSummariesRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(
+            new GetOperatorSummariesQuery(request.OperatorIds),
+            cancellationToken);
+
+        return Ok(result);
+    }
+
     [HttpPost("{operatorId:guid}/usage/increment")]
     [ProducesResponseType(typeof(InternalOperatorSubscriptionDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]

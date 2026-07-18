@@ -1,4 +1,5 @@
 using VietRide.Booking.Application.Features.Internal.Bookings;
+using VietRide.Booking.Application.Features.Internal.Reports.PlatformBookings;
 using VietRide.Booking.Application.Features.OperatorBookings.GetOperatorBookingDetail;
 using VietRide.Booking.Application.Features.OperatorBookings.ListOperatorBookings;
 using VietRide.Booking.Domain.Enums;
@@ -13,6 +14,12 @@ namespace VietRide.Booking.Application.Abstractions.Repositories;
 /// </summary>
 public interface IBookingRepository : IRepository<BookingEntity, Guid>
 {
+    Task<IReadOnlyList<PlatformBookingReportItem>> GetPlatformBookingMetricsAsync(
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Platform Booking report is not implemented by this repository.");
+
     Task AcquireEventLockAsync(Guid sourceEventId, CancellationToken ct = default)
         => throw new NotSupportedException("Booking event lock is not implemented by this repository.");
 
@@ -80,6 +87,13 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
     /// </summary>
     Task<BookingEntity?> FindByIdAsync(Guid bookingId, CancellationToken ct = default);
 
+    Task<int> RelinkActiveStationReferencesAsync(
+        IReadOnlyCollection<Guid> sourceStationIds,
+        Guid canonicalStationId,
+        DateTimeOffset updatedAt,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Active Booking Station relinking is not implemented by this repository.");
+
     /// <summary>
     /// Returns a booking with Passengers and Tickets eagerly loaded.
     /// Used for saga compensation checks and cancellation.
@@ -87,8 +101,8 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
     Task<BookingEntity?> FindByIdWithPassengersAsync(Guid bookingId, CancellationToken ct = default);
 
     /// <summary>
-    /// Locks one Booking aggregate for a pending-action resolution transaction.
-    /// Call only after locking the pending action so concurrent resolution paths use one order.
+    /// Locks one Booking aggregate for pending-action resolution and station-edit transactions.
+    /// Pending-action callers lock the action first so concurrent resolution paths use one order.
     /// </summary>
     Task<BookingEntity?> FindByIdForUpdateAsync(Guid bookingId, CancellationToken ct = default)
         => throw new NotSupportedException("Booking pending-action lock lookup is not implemented by this repository.");

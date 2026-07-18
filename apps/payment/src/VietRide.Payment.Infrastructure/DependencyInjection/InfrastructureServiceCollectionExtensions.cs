@@ -227,7 +227,41 @@ public static class InfrastructureServiceCollectionExtensions
                 ?? configuration["PARCEL_SERVICE_BASE_URL"]
                 ?? "http://parcel:8080");
 
+        RegisterPlatformReportClient<IBookingPlatformReportClient, BookingPlatformReportClient>(
+            services,
+            configuration["Booking:BaseUrl"]
+                ?? configuration["BOOKING_SERVICE_BASE_URL"]
+                ?? "http://booking:8080");
+        RegisterPlatformReportClient<ITripPlatformReportClient, TripPlatformReportClient>(
+            services,
+            configuration["Trip:BaseUrl"]
+                ?? configuration["TRIP_SERVICE_BASE_URL"]
+                ?? "http://trip:8080");
+        RegisterPlatformReportClient<IParcelPlatformReportClient, ParcelPlatformReportClient>(
+            services,
+            configuration["Parcel:BaseUrl"]
+                ?? configuration["PARCEL_SERVICE_BASE_URL"]
+                ?? "http://parcel:8080");
+        RegisterPlatformReportClient<IIdentityOperatorSummaryClient, IdentityOperatorSummaryClient>(
+            services,
+            configuration["Identity:BaseUrl"]
+                ?? configuration["IDENTITY_SERVICE_BASE_URL"]
+                ?? "http://identity:8080");
+
         return services;
+    }
+
+    private static void RegisterPlatformReportClient<TClient, TImplementation>(
+        IServiceCollection services,
+        string baseUrl)
+        where TClient : class
+        where TImplementation : class, TClient
+    {
+        services.AddHttpClient<TClient, TImplementation>(client =>
+        {
+            client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
+            client.Timeout = TimeSpan.FromSeconds(5);
+        });
     }
 
     private static void RegisterPaymentContextOwnerClient(

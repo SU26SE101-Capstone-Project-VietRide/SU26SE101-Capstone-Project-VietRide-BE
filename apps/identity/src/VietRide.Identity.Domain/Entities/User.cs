@@ -25,6 +25,7 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
     public string? AvatarUrl { get; private set; }
     public UserRole Role { get; private set; }
     public UserStatus Status { get; private set; }
+    public UserStatus? LockedFromStatus { get; private set; }
     public Guid? OperatorId { get; private set; }
 
     // Account lockout tracking — no LockedUntil column in schema.
@@ -280,6 +281,14 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
     /// </summary>
     public void RecordFailedLogin(IClock clock, long failedAttemptsInWindow)
     {
+        if (Status != UserStatus.ACTIVE
+            && !(Status == UserStatus.PENDING_EMAIL_VERIFICATION && Role == UserRole.PASSENGER))
+        {
+            throw new InvalidUserStatusTransitionException(
+                Status.ToString(),
+                UserStatus.LOCKED.ToString());
+        }
+
         if (failedAttemptsInWindow < 1)
         {
             throw new ArgumentOutOfRangeException(
@@ -295,6 +304,7 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
 
         if (failedAttemptsInWindow >= MaxFailedLoginAttempts)
         {
+            LockedFromStatus = Status;
             Status = UserStatus.LOCKED;
         }
     }
@@ -325,9 +335,42 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
     /// <summary>
     /// Locks the account manually (e.g. Admin action). Status becomes LOCKED.
     /// </summary>
-    public void Lock()
+    public bool Lock()
     {
+        if (Status == UserStatus.LOCKED)
+            return false;
+
+        if (Status != UserStatus.ACTIVE)
+        {
+            throw new InvalidUserStatusTransitionException(
+                Status.ToString(),
+                UserStatus.LOCKED.ToString());
+        }
+
+        LockedFromStatus = UserStatus.ACTIVE;
         Status = UserStatus.LOCKED;
+        return true;
+    }
+
+    /// <summary>
+    /// Restores a locked account to the exact status from which it was locked.
+    /// Revoked refresh tokens are intentionally not restored.
+    /// </summary>
+    public UserStatus Unlock()
+    {
+        if (Status != UserStatus.LOCKED
+            || LockedFromStatus is not (UserStatus.ACTIVE or UserStatus.PENDING_EMAIL_VERIFICATION))
+        {
+            throw new InvalidUserStatusTransitionException(
+                Status.ToString(),
+                LockedFromStatus?.ToString() ?? "UNKNOWN");
+        }
+
+        var restoredStatus = LockedFromStatus.Value;
+        Status = restoredStatus;
+        LockedFromStatus = null;
+        ResetFailedLogins();
+        return restoredStatus;
     }
 
     /// <summary>
@@ -339,5 +382,6 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
     {
         DeletedAt = deletedAt;
         Status = UserStatus.DELETED;
+        LockedFromStatus = null;
     }
 }

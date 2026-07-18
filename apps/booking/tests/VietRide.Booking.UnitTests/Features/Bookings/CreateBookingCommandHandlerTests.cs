@@ -9,6 +9,7 @@ using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Application.Features.Bookings.CreateBooking;
 using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
+using VietRide.Booking.UnitTests.TestDoubles;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
@@ -62,9 +63,10 @@ public class CreateBookingCommandHandlerTests
     private readonly IIntegrationEventOutbox _outbox = Substitute.For<IIntegrationEventOutbox>();
     private readonly IClock _clock = Substitute.For<IClock>();
 
-    private CreateBookingCommandHandler BuildSut() => new(
+    private CreateBookingCommandHandler BuildSut(IBookingStationCanonicalizer? stationCanonicalizer = null) => new(
         _bookings, _tripClient, _paymentClient, _bookingService, _voucherService, _outbox, _clock,
-        NullLogger<CreateBookingCommandHandler>.Instance, _statusHistory);
+        NullLogger<CreateBookingCommandHandler>.Instance, _statusHistory,
+        stationCanonicalizer ?? PassthroughBookingStationCanonicalizer.Instance);
 
     private static CreateBookingCommand BuildCommand(
         int seatCount = 1,
@@ -105,7 +107,10 @@ public class CreateBookingCommandHandlerTests
         _tripClient.BookSeatsAsync(default, default, default, default!, default)
             .ReturnsForAnyArgs(true);
 
-        var handler = BuildSut();
+        var canonicalStationId = Guid.NewGuid();
+        var canonicalizer = new MappingBookingStationCanonicalizer(
+            new Dictionary<Guid, Guid> { [StationId] = canonicalStationId });
+        var handler = BuildSut(canonicalizer);
         var command = BuildCommand(seatCount: 1, paymentMethod: "WALLET");
 
         // Act
@@ -121,8 +126,11 @@ public class CreateBookingCommandHandlerTests
             .AddAsync(
                 Arg.Is<BookingEntity>(booking => booking.SeatLockToken == SeatLockToken
                     && booking.TripSnapshotDeparture == ValidTrip.DepartureDateTime
-                    && booking.TripCurrentDeparture == ValidTrip.DepartureDateTime),
+                    && booking.TripCurrentDeparture == ValidTrip.DepartureDateTime
+                    && booking.PickupStationId == canonicalStationId),
                 Arg.Any<CancellationToken>());
+        canonicalizer.LockRequests.Should().ContainSingle()
+            .Which.Should().Contain(StationId);
 
         await _statusHistory.Received(2).AddAsync(
             Arg.Is<BookingStatusHistory>(history => history.BookingId == result.BookingId
@@ -294,7 +302,8 @@ public class CreateBookingCommandHandlerTests
             outbox,
             clock,
             NullLogger<CreateBookingCommandHandler>.Instance,
-            Substitute.For<IBookingStatusHistoryRepository>());
+            Substitute.For<IBookingStatusHistoryRepository>(),
+            PassthroughBookingStationCanonicalizer.Instance);
         var command = BuildCommand(seatCount: 1, paymentMethod: "WALLET");
 
         // Act: two passenger attempts race for the same trip/seat.

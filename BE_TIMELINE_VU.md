@@ -402,13 +402,32 @@
 - **Review**: incident does NOT auto-change Trip.status; arrival before Trip IN_PROGRESS returns 422
 
 ### Day 40 — Fri 2026-07-17 — Admin users + Station cleanup + Reports backend ([SCV-122](https://hoangvutran088.atlassian.net/browse/SCV-122))
-- `GET /admin/users` with filters + lock/unlock endpoints
-- `GET /admin/activity-logs` query with action/user/date filters
-- Station merge endpoint: `POST /admin/stations/merge` source → target, re-link OperatorStation rows, audit
-- Station normalize endpoint: update name/coords with audit
-- Platform reports aggregate: `GET /admin/reports/platform?from=&to=` (cross-operator revenue, trips, parcels)
-- **DoD**: admin merges 2 duplicate stations; activity log queryable; platform report returns aggregated numbers
-- **Review**: merge re-links all OperatorStation correctly; activity log cannot be modified after write
+- `GET /v1/admin/users` filters/search/paging/sort/includeDeleted; response không lộ auth secret.
+- Shared-idempotent `POST /v1/admin/users/{userId}/lock|unlock`; PostgreSQL per-User serialization
+  bao phủ password/Google login, refresh, forgot/reset password, failed-login và admin lifecycle.
+  Lock revoke refresh token; unlock restore đúng `lockedFromStatus` và reset DB + Redis counter.
+- `GET /v1/admin/activity-logs` theo actor/action/UTC `[from,to)`; ActivityLog insert/read-only và
+  PostgreSQL trigger chặn direct `UPDATE`/`DELETE`.
+- Mở rộng existing `PATCH /v1/admin/stations/{id}` để normalize + Outbox, giữ đầy đủ request/slug
+  contract hiện tại.
+- `POST /v1/admin/stations/{primaryStationId}/merge` relink toàn bộ Trip-owned Station FK và
+  OperatorStation atomically, collapse collision, flatten canonical redirects, publish
+  `trip.station.merged`.
+- Booking durable `booking_station_redirects` + advisory-lock canonicalization cho create/round-trip/
+  edit và consumer; active Booking eventual relink, terminal history giữ nguyên.
+- Identity consumers ghi immutable `STATION_MERGED`/`STATION_NORMALIZED` audit idempotently.
+- Booking/Trip/Parcel internal earned-report sources theo terminal timestamp UTC; Payment sở hữu
+  `GET /v1/admin/reports/platform?from=&to=` và orchestrate song song, không cross-DB read.
+- Signed Parcel net revenue được giữ nguyên; NUMERIC/BIGINT overflow trả
+  `500 REPORT_VALUE_OVERFLOW`; upstream failure trả 502 và không partial.
+- Gateway chỉ proxy/RBAC `SYSTEM_ADMIN`; cumulative Postman và isolated real-stack E2E dùng
+  PostgreSQL/Redis/RabbitMQ/API thật.
+- **DoD**: toàn bộ Task 40.0–40.12 pass; merge không partial/chain; User races tuyến tính; ActivityLog
+  bất biến; totals bằng `byOperator`; `npm run e2e:day40` in đủ summary bắt buộc.
+- **Review**: migration up/down/reapply; Identity và Booking race suites ≥50 lần/case; report boundary,
+  signed/overflow/upstream-failure; Gateway longest-prefix/RBAC; cleanup isolated stack.
+- **Defer Day 42**: Stats materialization, Redis report cache, Excel export và advanced
+  occupancy/cancellation/no-show analytics; Day 40 chỉ live indexed earned-report baseline.
 - **Sprint 5 demo**: full disruption + substitution scenarios + admin operations
 
 ---
@@ -426,9 +445,12 @@
 - **Review**: large dataset (10k rows) export doesn't OOM; tenant isolation verified
 
 ### Day 42 — Tue 2026-07-21 — Platform reports backend stabilization
-- Cross-operator aggregate endpoints for System Admin
-- BookingStats + ParcelStats aggregation across operators
-- Cache hot queries (5 min Redis TTL)
+- Không đổi public Day-40 `GET /v1/admin/reports/platform` contract hoặc metric anchors.
+- Materialize/validate BookingStats + ParcelStats (và Trip equivalent khi cần) từ live earned metrics
+  đã chốt Day 40; có reconciliation trước khi chuyển hot read.
+- Cache hot queries (5 min Redis TTL), cache key bao gồm exact UTC range và contract version.
+- Bổ sung occupancy/cancellation/no-show analytics hoặc Excel chỉ trong phạm vi ticket Day 42/41;
+  không backport vào Day 40.
 - Performance check: report endpoints respond <2s for typical period (1 month)
 - **DoD**: admin platform report endpoint stable; perf acceptable
 - **Review**: query 3-month period without timeout

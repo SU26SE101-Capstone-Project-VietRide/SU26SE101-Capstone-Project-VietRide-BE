@@ -8,6 +8,7 @@ using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Application.Features.Bookings.CreateRoundTripBooking;
 using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
+using VietRide.Booking.UnitTests.TestDoubles;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
@@ -83,9 +84,10 @@ public class CreateRoundTripBookingCommandHandlerTests
     private readonly IIntegrationEventOutbox _outbox = Substitute.For<IIntegrationEventOutbox>();
     private readonly IClock _clock = Substitute.For<IClock>();
 
-    private CreateRoundTripBookingCommandHandler BuildSut() => new(
+    private CreateRoundTripBookingCommandHandler BuildSut(IBookingStationCanonicalizer? stationCanonicalizer = null) => new(
         _bookings, _tripClient, _paymentClient, _bookingService, _voucherService, _voucherRepository, _outbox, _clock,
-        NullLogger<CreateRoundTripBookingCommandHandler>.Instance, _statusHistory);
+        NullLogger<CreateRoundTripBookingCommandHandler>.Instance, _statusHistory,
+        stationCanonicalizer ?? PassthroughBookingStationCanonicalizer.Instance);
 
     private static CreateRoundTripBookingCommand BuildCommand(
         string paymentMethod = "WALLET",
@@ -129,7 +131,10 @@ public class CreateRoundTripBookingCommandHandlerTests
             .ReturnsForAnyArgs(true);
 
         // No voucher code — voucherService must NOT be called
-        var result = await BuildSut().Handle(BuildCommand(voucherCode: null), CancellationToken.None);
+        var canonicalStationId = Guid.NewGuid();
+        var canonicalizer = new MappingBookingStationCanonicalizer(
+            new Dictionary<Guid, Guid> { [StationId] = canonicalStationId });
+        var result = await BuildSut(canonicalizer).Handle(BuildCommand(voucherCode: null), CancellationToken.None);
 
         result.GrandTotal.Should().Be(380_000);
         result.PaymentRedirectUrl.Should().BeNull();
@@ -140,6 +145,7 @@ public class CreateRoundTripBookingCommandHandlerTests
             Arg.Is<BookingEntity>(b =>
                 b.BookingGroupId == result.BookingGroupId
                 && b.TripDirection == TripDirection.OUTBOUND
+                && b.PickupStationId == canonicalStationId
                 && b.TotalAmount.Amount == 200_000
                 && b.DiscountAmount.Amount == 0
                 && b.TripSnapshotDeparture == OutboundTrip.DepartureDateTime
@@ -149,6 +155,7 @@ public class CreateRoundTripBookingCommandHandlerTests
             Arg.Is<BookingEntity>(b =>
                 b.BookingGroupId == result.BookingGroupId
                 && b.TripDirection == TripDirection.RETURN
+                && b.PickupStationId == canonicalStationId
                 && b.TotalAmount.Amount == 180_000
                 && b.DiscountAmount.Amount == 0
                 && b.TripSnapshotDeparture == ReturnTrip.DepartureDateTime

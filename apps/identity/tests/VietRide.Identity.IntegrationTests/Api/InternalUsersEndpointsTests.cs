@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using VietRide.Identity.Api.Controllers;
 using VietRide.Identity.Application.Abstractions.Repositories;
@@ -138,6 +139,7 @@ public sealed class InternalUsersEndpointsTests
         IReadOnlyList<User>? users = null)
     {
         var builder = WebApplication.CreateBuilder();
+        builder.Logging.ClearProviders();
         builder.WebHost.UseTestServer();
 
         builder.Services

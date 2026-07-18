@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Features.Internal.Bookings;
+using VietRide.Booking.Application.Features.Internal.Reports.PlatformBookings;
 using VietRide.Booking.Application.Features.OperatorBookings.GetOperatorBookingDetail;
 using VietRide.Booking.Application.Features.OperatorBookings.ListOperatorBookings;
 using VietRide.Booking.Domain.Enums;
@@ -210,6 +211,63 @@ internal sealed class BookingRepository : IBookingRepository
     }
 
     /// <inheritdoc/>
+    public async Task<IReadOnlyList<PlatformBookingReportItem>> GetPlatformBookingMetricsAsync(
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken ct = default)
+    {
+        var connection = _db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync(ct);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT operator_id,
+                   COUNT(*)::numeric AS completed_booking_count,
+                   COALESCE(SUM(total_amount), 0)::numeric AS booking_revenue_vnd
+            FROM vietride_booking.bookings
+            WHERE status = 'COMPLETED'::public.booking_status
+              AND completed_at >= @from_utc
+              AND completed_at < @to_utc
+            GROUP BY operator_id
+            ORDER BY operator_id;
+            """;
+        command.Transaction = _db.Database.CurrentTransaction?.GetDbTransaction();
+        AddParameter(command, "from_utc", fromUtc.ToUniversalTime());
+        AddParameter(command, "to_utc", toUtc.ToUniversalTime());
+
+        var items = new List<PlatformBookingReportItem>();
+        long totalCount = 0;
+        long totalRevenue = 0;
+
+        try
+        {
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var completedBookingCount = checked((long)reader.GetDecimal(1));
+                var bookingRevenueVnd = checked((long)reader.GetDecimal(2));
+
+                totalCount = checked(totalCount + completedBookingCount);
+                totalRevenue = checked(totalRevenue + bookingRevenueVnd);
+                items.Add(new PlatformBookingReportItem(
+                    reader.GetGuid(0),
+                    completedBookingCount,
+                    bookingRevenueVnd));
+            }
+        }
+        catch (OverflowException exception)
+        {
+            throw new PlatformReportValueOverflowException(exception);
+        }
+
+        return items;
+    }
+
+    /// <inheritdoc/>
     public async Task<OperatorBookingDetailDto?> GetOperatorBookingDetailAsync(
         Guid bookingId, Guid operatorId, CancellationToken ct = default)
     {
@@ -377,6 +435,55 @@ internal sealed class BookingRepository : IBookingRepository
             .Include(b => b.ShuttleIntent)
             .FirstOrDefaultAsync(b => b.Id == bookingId, ct);
 
+    public async Task<BookingEntity?> FindByIdForUpdateAsync(
+        Guid bookingId,
+        CancellationToken ct = default)
+    {
+        var trackedBooking = _db.Bookings.Local.SingleOrDefault(booking => booking.Id == bookingId);
+        if (trackedBooking is not null)
+            _db.Entry(trackedBooking).State = EntityState.Detached;
+
+        var trackedIntent = _db.BookingShuttleIntents.Local.SingleOrDefault(intent => intent.BookingId == bookingId);
+        if (trackedIntent is not null)
+            _db.Entry(trackedIntent).State = EntityState.Detached;
+
+        return await _db.Bookings
+            .FromSqlInterpolated($"SELECT * FROM vietride_booking.bookings WHERE id = {bookingId} FOR UPDATE")
+            .Include(booking => booking.Tickets)
+            .Include(booking => booking.ShuttleIntent)
+            .SingleOrDefaultAsync(ct);
+    }
+
+    public async Task<int> RelinkActiveStationReferencesAsync(
+        IReadOnlyCollection<Guid> sourceStationIds,
+        Guid canonicalStationId,
+        DateTimeOffset updatedAt,
+        CancellationToken ct = default)
+    {
+        var sourceIds = sourceStationIds.Distinct().ToArray();
+        if (sourceIds.Length == 0)
+            return 0;
+
+        return await _db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE vietride_booking.bookings
+            SET pickup_station_id = CASE
+                    WHEN pickup_station_id = ANY({sourceIds}) THEN {canonicalStationId}
+                    ELSE pickup_station_id
+                END,
+                dropoff_station_id = CASE
+                    WHEN dropoff_station_id = ANY({sourceIds}) THEN {canonicalStationId}
+                    ELSE dropoff_station_id
+                END,
+                updated_at = {updatedAt.ToUniversalTime()}
+            WHERE status IN (
+                    'PENDING_PAYMENT'::public.booking_status,
+                    'CONFIRMED'::public.booking_status)
+              AND (
+                    pickup_station_id = ANY({sourceIds})
+                    OR dropoff_station_id = ANY({sourceIds}))
+            """, ct);
+    }
+
     /// <inheritdoc/>
     public async Task<BookingEntity?> FindByIdWithPassengersAsync(
         Guid bookingId,
@@ -386,20 +493,6 @@ internal sealed class BookingRepository : IBookingRepository
             .Include(b => b.Tickets)
             .Include(b => b.ShuttleIntent)
             .FirstOrDefaultAsync(b => b.Id == bookingId, ct);
-
-    public async Task<BookingEntity?> FindByIdForUpdateAsync(
-        Guid bookingId,
-        CancellationToken ct = default)
-        => await _db.Bookings
-            .FromSqlInterpolated($"""
-                SELECT *
-                FROM vietride_booking.bookings
-                WHERE id = {bookingId}
-                FOR UPDATE
-                """)
-            .Include(booking => booking.Tickets)
-            .Include(booking => booking.ShuttleIntent)
-            .SingleOrDefaultAsync(ct);
 
     /// <inheritdoc/>
     public async Task<BookingPaymentTransitionSnapshot?> GetPendingPaymentTransitionSnapshotAsync(

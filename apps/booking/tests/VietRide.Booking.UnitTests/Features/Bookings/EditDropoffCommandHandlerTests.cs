@@ -2,8 +2,10 @@ using FluentAssertions;
 using NSubstitute;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
+using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Application.Features.Bookings.EditDropoff;
 using VietRide.Booking.Domain.ValueObjects;
+using VietRide.Booking.UnitTests.TestDoubles;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
@@ -30,7 +32,11 @@ public sealed class EditDropoffCommandHandlerTests
     private readonly ITripServiceClient _tripClient = Substitute.For<ITripServiceClient>();
     private readonly IClock _clock = Substitute.For<IClock>();
 
-    private EditDropoffCommandHandler BuildSut() => new(_bookings, _tripClient, _clock);
+    private EditDropoffCommandHandler BuildSut(IBookingStationCanonicalizer? stationCanonicalizer = null) => new(
+        _bookings,
+        _tripClient,
+        _clock,
+        stationCanonicalizer ?? PassthroughBookingStationCanonicalizer.Instance);
 
     [Theory]
     [MemberData(nameof(InvalidDropoffShapeCommands))]
@@ -74,12 +80,15 @@ public sealed class EditDropoffCommandHandlerTests
         var booking = CreateConfirmedBooking(pickupStopId: PickupStopId, dropoffStopId: ValidDropoffStopId);
         SetupBookingAndTrip(booking, CreateTripSnapshot());
         var command = BuildCommand(booking.Id, dropoffStationId: DestinationStationId);
+        var canonicalStationId = Guid.NewGuid();
+        var canonicalizer = new MappingBookingStationCanonicalizer(
+            new Dictionary<Guid, Guid> { [DestinationStationId] = canonicalStationId });
 
-        var result = await BuildSut().Handle(command, CancellationToken.None);
+        var result = await BuildSut(canonicalizer).Handle(command, CancellationToken.None);
 
-        result.Dropoff.StationId.Should().Be(DestinationStationId);
+        result.Dropoff.StationId.Should().Be(canonicalStationId);
         result.Dropoff.StopId.Should().BeNull();
-        booking.DropoffStationId.Should().Be(DestinationStationId);
+        booking.DropoffStationId.Should().Be(canonicalStationId);
         booking.DropoffStopId.Should().BeNull();
         _bookings.Received(1).Update(booking);
     }
@@ -178,6 +187,7 @@ public sealed class EditDropoffCommandHandlerTests
     {
         _clock.UtcNow.Returns(Now);
         _bookings.FindByIdAsync(booking.Id, Arg.Any<CancellationToken>()).Returns(booking);
+        _bookings.FindByIdForUpdateAsync(booking.Id, Arg.Any<CancellationToken>()).Returns(booking);
         _tripClient.GetTripSnapshotAsync(TripId, Arg.Any<CancellationToken>()).Returns(trip);
     }
 

@@ -32,16 +32,16 @@ Day 40 cung cấp bộ API quản trị platform dành riêng cho `SYSTEM_ADMIN`
 
 ## Success criteria (DoD - binary, verifiable)
 
-- [ ] Admin list/filter/page/sort user; không leak secret fields.
-- [ ] Mọi password/Google login, refresh, forgot/reset password, failed-login/OTP-failure persistence và admin lock/unlock của cùng một User được tuyến tính hóa bằng row lock PostgreSQL; không có token/OTP/password/counter ghi từ snapshot stale.
-- [ ] Lock revoke refresh tokens, chặn login/refresh/reset-password và ghi đúng một audit record cho mỗi logical idempotent request.
-- [ ] Unlock reset DB + Redis lockout state, khôi phục đúng `lockedFromStatus`, không phục hồi token cũ hoặc vô tình verify email; race với failed login chỉ cho các outcome tuyến tính đã định nghĩa.
-- [ ] ActivityLog query theo actor/action/date; direct SQL `UPDATE/DELETE` bị DB từ chối.
-- [ ] Normalize Station giữ toàn bộ contract/slug behavior hiện có và phát audit event.
-- [ ] Merge relink mọi Trip FK/OperatorStation atomically, không tạo redirect chain hay partial state.
-- [ ] Booking có redirect Station bền vững; mọi luồng ghi Station persist canonical ID, Booking active relink eventual và Booking terminal giữ source ID/snapshot.
-- [ ] Platform report trả earned metrics đúng UTC `[from,to)` và totals bằng `byOperator`.
-- [ ] Gateway/RBAC/Swagger/Postman và real-stack E2E pass.
+- [x] Admin list/filter/page/sort user; không leak secret fields.
+- [x] Mọi password/Google login, refresh, forgot/reset password, failed-login/OTP-failure persistence và admin lock/unlock của cùng một User được tuyến tính hóa bằng row lock PostgreSQL; không có token/OTP/password/counter ghi từ snapshot stale.
+- [x] Lock revoke refresh tokens, chặn login/refresh/reset-password và ghi đúng một audit record cho mỗi logical idempotent request.
+- [x] Unlock reset DB + Redis lockout state, khôi phục đúng `lockedFromStatus`, không phục hồi token cũ hoặc vô tình verify email; race với failed login chỉ cho các outcome tuyến tính đã định nghĩa.
+- [x] ActivityLog query theo actor/action/date; direct SQL `UPDATE/DELETE` bị DB từ chối.
+- [x] Normalize Station giữ toàn bộ contract/slug behavior hiện có và phát audit event.
+- [x] Merge relink mọi Trip FK/OperatorStation atomically, không tạo redirect chain hay partial state.
+- [x] Booking có redirect Station bền vững; mọi luồng ghi Station persist canonical ID, Booking active relink eventual và Booking terminal giữ source ID/snapshot.
+- [x] Platform report trả earned metrics đúng UTC `[from,to)` và totals bằng `byOperator`.
+- [x] Gateway/RBAC/Swagger/Postman và real-stack E2E pass.
 
 ## Contract changes
 
@@ -700,19 +700,19 @@ cleanup PASS
 
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
-| 40.0 | todo | - | - | Ready to dispatch sau khi user `ok/go` |
-| 40.1 | todo | - | - | Identity users |
-| 40.2 | todo | - | - | ActivityLog |
-| 40.3 | todo | - | - | Station persistence |
-| 40.4 | todo | - | - | Station APIs/events |
-| 40.5 | todo | - | - | Booking consumer |
-| 40.6 | todo | - | - | Identity consumer |
-| 40.7 | todo | - | - | Booking report |
-| 40.8 | todo | - | - | Trip report |
-| 40.9 | todo | - | - | Parcel report |
-| 40.10 | todo | - | - | Payment report |
-| 40.11 | todo | - | - | Gateway/Postman |
-| 40.12 | todo | - | - | Real-stack E2E |
+| 40.0 | done | APPROVE | 2026-07-16 | Contract/SOT, registries, protocols, Day 42 deferral và changelog đã freeze; `git diff --check` PASS. |
+| 40.1 | done | APPROVE | 2026-07-16 | Admin directory/lifecycle, per-User serialization, locked origin, shared idempotency, migration và PostgreSQL race gates PASS. |
+| 40.2 | done | APPROVE | 2026-07-16 | Immutable ActivityLog/read API, operator summaries, trigger/source-event migration và full Identity gates PASS. |
+| 40.3 | done | APPROVE | 2026-07-16 | Station self-redirect, aggregate relink/collision primitives, reversible migration và full Trip gates PASS. |
+| 40.4 | done | APPROVE | 2026-07-16 | Normalize/merge API, exact event allow-list, canonical resolution, shared idempotency, PostgreSQL concurrency/rollback và full Trip gates PASS. |
+| 40.5 | done | APPROVE | 2026-07-17 | Booking redirect bền vững, active-only relink, canonicalization cho mọi writer, migration reversible, graph/atomicity guard và PostgreSQL race `4 x 50` vòng PASS; full Booking build/format/test xanh. |
+| 40.6 | done | APPROVE | 2026-07-17 | Identity Station audit consumers dùng `source_event_id` idempotent, concurrent replay an toàn, invalid actor/payload đi failure path, migration enum reversible và PII-safe logging; full Identity build/format/test `269 + 153` xanh. |
+| 40.7 | done | APPROVE | 2026-07-17 | Booking source chỉ đếm `COMPLETED` theo `[from,to)`, trả raw internal DTO, kiểm tra `NUMERIC` về `Int64`, phát `REPORT_VALUE_OVERFLOW`, có partial index reversible và PostgreSQL lifecycle/planner tests; full Booking build/format/test xanh. |
+| 40.8 | done | APPROVE | 2026-07-17 | Trip source chỉ đếm `COMPLETED` theo `[from,to)`, raw internal auth, manual/automatic completion ổn định, partial index reversible và PostgreSQL planner tests; full Trip build/format/test xanh. |
+| 40.9 | done | APPROVE | 2026-07-17 | Parcel source chỉ lấy `DELIVERY_CONFIRMED` theo `[from,to)`, giữ signed `deposit + additional - refund`, kiểm tra `NUMERIC` về `Int64`, có overflow/index/migration/planner PostgreSQL tests; full Parcel build/format/test xanh. |
+| 40.10 | done | APPROVE | 2026-07-17 | Payment orchestration gọi song song ba nguồn metric với timeout 5 giây, Identity chunk 500, union/sort/tổng checked BIGINT, giữ signed Parcel net và name-null; query dùng read-only marker nên không mở Payment transaction/DB; exact overflow/502 mapping, RBAC/range, format, build, unit `98/98` và integration `35/35` đều xanh. |
+| 40.11 | done | APPROVE | 2026-07-17 | Gateway route đúng owner cho ActivityLog và platform report, giữ user/station longest-prefix, không expose internal API; SYSTEM_ADMIN allow và mọi role khác deny. Folder Postman tích lũy có 14 request cover happy/validation/idempotency replay-mismatch/RBAC/upstream failure bằng runtime variables; JSON/LF sạch, TS lint, Gateway test `158/158` và build xanh. |
+| 40.12 | done | APPROVE | 2026-07-17 | Isolated real-stack E2E `20/20` PASS với PostgreSQL/Redis/RabbitMQ/API thật; migration rollback/reapply, direct persistence assertions, race invariants và cleanup đều PASS. |
 
 ## Open questions
 

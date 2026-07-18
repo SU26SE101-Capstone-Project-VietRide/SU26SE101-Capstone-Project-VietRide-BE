@@ -230,5 +230,9 @@ internal sealed class BookingConfiguration : IEntityTypeConfiguration<BookingEnt
         builder.HasIndex(x => x.TripCurrentDeparture)
             .IsDescending()
             .HasDatabaseName("idx_bookings_trip_current_departure");
+
+        builder.HasIndex(x => new { x.CompletedAt, x.OperatorId })
+            .HasDatabaseName("idx_bookings_completed_report")
+            .HasFilter("status = 'COMPLETED' AND completed_at IS NOT NULL");
     }
 }

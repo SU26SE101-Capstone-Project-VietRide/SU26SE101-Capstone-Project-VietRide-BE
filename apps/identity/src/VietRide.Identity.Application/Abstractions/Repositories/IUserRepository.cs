@@ -22,6 +22,21 @@ public interface IUserRepository : IRepository<User, Guid>
     /// </summary>
     Task<User?> GetByPhoneAsync(string e164Phone, CancellationToken ct = default);
 
+    /// <summary>
+    /// Acquires a PostgreSQL row lock and returns a freshly reloaded User entity.
+    /// Callers must already be inside a transaction.
+    /// </summary>
+    Task<User?> GetByIdForUpdateAsync(Guid id, CancellationToken ct = default)
+        => GetByIdAsync(id, ct);
+
+    Task<PagedResult<User>> ListAdminUsersAsync(
+        QueryOptions options,
+        UserRole? role,
+        UserStatus? status,
+        Guid? operatorId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Admin user listing is not implemented by this repository.");
+
     Task<PagedResult<User>> ListOperatorUsersAsync(
         QueryOptions options,
         Guid? operatorId,

@@ -193,6 +193,10 @@ namespace VietRide.Booking.Infrastructure.Migrations
                     b.HasIndex("TripSnapshotDeparture")
                         .HasDatabaseName("idx_bookings_trip_snapshot_departure");
 
+                    b.HasIndex("CompletedAt", "OperatorId")
+                        .HasDatabaseName("idx_bookings_completed_report")
+                        .HasFilter("status = 'COMPLETED' AND completed_at IS NOT NULL");
+
                     b.HasIndex("OperatorId", "Status")
                         .HasDatabaseName("idx_bookings_operator_id_status");
 
@@ -343,6 +347,52 @@ namespace VietRide.Booking.Infrastructure.Migrations
                             t.HasCheckConstraint("chk_booking_shuttle_intents_latitude", "pickup_latitude BETWEEN -90 AND 90");
 
                             t.HasCheckConstraint("chk_booking_shuttle_intents_longitude", "pickup_longitude BETWEEN -180 AND 180");
+                        });
+                });
+
+            modelBuilder.Entity("VietRide.Booking.Domain.Entities.BookingStationRedirect", b =>
+                {
+                    b.Property<Guid>("DuplicateStationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("duplicate_station_id");
+
+                    b.Property<Guid>("CanonicalStationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("canonical_station_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<Guid>("SourceEventId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("source_event_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("DuplicateStationId")
+                        .HasName("pk_booking_station_redirects");
+
+                    b.HasIndex("CanonicalStationId")
+                        .HasDatabaseName("idx_booking_station_redirects_canonical");
+
+                    b.HasIndex("SourceEventId")
+                        .IsUnique()
+                        .HasDatabaseName("uq_booking_station_redirects_source_event");
+
+                    b.ToTable("booking_station_redirects", "vietride_booking", t =>
+                        {
+                            t.HasCheckConstraint("chk_booking_station_redirects_not_self", "duplicate_station_id <> canonical_station_id");
                         });
                 });
 

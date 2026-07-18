@@ -382,5 +382,9 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
         builder.HasIndex(x => x.ReturnedByUserId)
             .HasDatabaseName("idx_parcels_returned_by_user_id")
             .HasFilter("returned_by_user_id IS NOT NULL");
+
+        builder.HasIndex(x => new { x.ConfirmedAt, x.OperatorId })
+            .HasDatabaseName("idx_parcels_confirmed_report")
+            .HasFilter($"status = 'DELIVERY_CONFIRMED'::{ParcelStatusType} AND confirmed_at IS NOT NULL");
     }
 }

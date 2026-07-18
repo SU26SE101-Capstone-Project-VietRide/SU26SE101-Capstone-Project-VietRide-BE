@@ -102,6 +102,25 @@ public sealed class Route : BaseEntity<Guid>, ISoftDeletable, IActivatable
         IsActive = false;
     }
 
+    public (bool OriginChanged, bool DestinationChanged) RelinkStation(
+        Guid duplicateStationId,
+        Guid primaryStationId)
+    {
+        ValidateGuid(duplicateStationId, nameof(duplicateStationId));
+        ValidateGuid(primaryStationId, nameof(primaryStationId));
+        if (duplicateStationId == primaryStationId)
+            throw new ArgumentException("Station merge IDs must be different.", nameof(primaryStationId));
+
+        var originChanged = OriginStationId == duplicateStationId;
+        var destinationChanged = DestinationStationId == duplicateStationId;
+        var newOrigin = originChanged ? primaryStationId : OriginStationId;
+        var newDestination = destinationChanged ? primaryStationId : DestinationStationId;
+        ValidateDifferentStations(newOrigin, newDestination);
+        OriginStationId = newOrigin;
+        DestinationStationId = newDestination;
+        return (originChanged, destinationChanged);
+    }
+
     private static string ValidateName(string name)
     {
         var normalizedName = name?.Trim() ?? string.Empty;

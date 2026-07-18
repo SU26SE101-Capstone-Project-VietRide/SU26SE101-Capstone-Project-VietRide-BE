@@ -139,6 +139,8 @@ public sealed class ForgotPasswordCommandHandlerTests
 
         clock.UtcNow.Returns(FrozenNow);
         users.GetByEmailAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(user);
+        if (user is not null)
+            users.GetByIdForUpdateAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
         rateLimiter.TryIncrementAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(true);
         tokens.TryAddAsync(Arg.Any<EmailVerificationToken>(), Arg.Any<CancellationToken>()).Returns(true);
 

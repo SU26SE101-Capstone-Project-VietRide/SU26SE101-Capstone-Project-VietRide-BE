@@ -59,6 +59,14 @@ public sealed class ForgotPasswordCommandHandler : IRequestHandler<ForgotPasswor
             return new ForgotPasswordResponseDto(emailLower, OtpTtlMinutes);
         }
 
+        user = await _users.GetByIdForUpdateAsync(user.Id, cancellationToken);
+        if (user is null || user.Status != UserStatus.ACTIVE)
+        {
+            _logger.LogInformation(
+                "Password reset request became ineligible before serialization; returning generic success.");
+            return new ForgotPasswordResponseDto(emailLower, OtpTtlMinutes);
+        }
+
         var now = _clock.UtcNow;
         await _tokens.RevokeActiveByUserAndPurposeAsync(
             user.Id,

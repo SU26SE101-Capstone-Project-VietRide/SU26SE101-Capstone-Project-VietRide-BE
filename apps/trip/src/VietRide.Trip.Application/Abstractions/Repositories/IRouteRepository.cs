@@ -13,6 +13,18 @@ public interface IRouteRepository : IRepository<Route, Guid>
 
     Task<bool> ExistsActiveOwnedByOperatorAsync(Guid operatorId, Guid routeId, CancellationToken cancellationToken);
 
+    Task<bool> HasStationMergeConflictAsync(
+        Guid duplicateStationId,
+        Guid primaryStationId,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Route station-merge preflight is not implemented by this repository.");
+
+    Task<(int OriginCount, int DestinationCount)> RelinkForStationMergeAsync(
+        Guid duplicateStationId,
+        Guid primaryStationId,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Route station-merge relinking is not implemented by this repository.");
+
     Task<Route?> AcquireOwnedActiveAsync(Guid operatorId, Guid routeId, CancellationToken cancellationToken)
         => throw new NotSupportedException("Route locking is not supported by this repository implementation.");
 }

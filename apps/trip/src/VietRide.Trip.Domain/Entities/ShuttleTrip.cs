@@ -63,4 +63,18 @@ public sealed class ShuttleTrip : BaseEntity<Guid>
             throw new ArgumentException("Value cannot be empty.", parameterName);
         }
     }
+
+    public bool RelinkStation(Guid duplicateStationId, Guid primaryStationId)
+    {
+        ValidateId(duplicateStationId, nameof(duplicateStationId));
+        ValidateId(primaryStationId, nameof(primaryStationId));
+        if (duplicateStationId == primaryStationId)
+            throw new ArgumentException("Station merge IDs must be different.", nameof(primaryStationId));
+
+        if (StationId != duplicateStationId)
+            return false;
+
+        StationId = primaryStationId;
+        return true;
+    }
 }

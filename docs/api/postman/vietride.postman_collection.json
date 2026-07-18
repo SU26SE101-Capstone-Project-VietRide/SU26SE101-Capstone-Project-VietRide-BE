@@ -368,6 +368,58 @@
     {
       "key": "day38SettlementId",
       "value": ""
+    },
+    {
+      "key": "day40SystemAdminToken",
+      "value": ""
+    },
+    {
+      "key": "day40OperatorAdminToken",
+      "value": ""
+    },
+    {
+      "key": "day40SystemAdminUserId",
+      "value": "40000000-0000-4000-8000-000000000001"
+    },
+    {
+      "key": "day40TargetUserId",
+      "value": "40000000-0000-4000-8000-000000000102"
+    },
+    {
+      "key": "day40PrimaryStationId",
+      "value": "40000000-0000-4000-8000-000000000301"
+    },
+    {
+      "key": "day40DuplicateStationId",
+      "value": "40000000-0000-4000-8000-000000000302"
+    },
+    {
+      "key": "day40LockKey",
+      "value": "40000000-0000-4000-8000-000000009001"
+    },
+    {
+      "key": "day40UnlockKey",
+      "value": "40000000-0000-4000-8000-000000009002"
+    },
+    {
+      "key": "day40NormalizeKey",
+      "value": "40000000-0000-4000-8000-000000009003"
+    },
+    {
+      "key": "day40MergeKey",
+      "value": "40000000-0000-4000-8000-000000009004"
+    },
+    {
+      "key": "day40ReportFrom",
+      "value": "2026-07-01T00:00:00Z"
+    },
+    {
+      "key": "day40ReportTo",
+      "value": "2026-08-01T00:00:00Z"
+    },
+    {
+      "key": "day40ExpectedReportStatus",
+      "value": "200"
     }
   ],
   "item": [
@@ -7052,6 +7104,432 @@
               { "key": "Idempotency-Key", "value": "{{day21CompleteIdempotencyKey}}" }
             ],
             "url": "{{baseUrl}}/v1/driver/trips/{{day21TripId}}/complete"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Day 40 - Quản trị người dùng, chuẩn hóa trạm và báo cáo platform",
+      "description": "Các request Gateway cho seed xác định Day 40. Race, bất biến PostgreSQL, RabbitMQ, Redis và tình huống dừng/khởi động lại Parcel được kiểm tra bởi npm run e2e:day40.",
+      "item": [
+        {
+          "name": "01. Danh sách người dùng có lọc và phân trang",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('danh sách người dùng hợp lệ', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.items).to.be.an('array'); pm.expect(body.data.page).to.eql(1); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day40SystemAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/admin/users?role=PASSENGER&status=ACTIVE&includeDeleted=false&page=1&pageSize=20&sortBy=createdAt&sortDir=desc"
+          }
+        },
+        {
+          "name": "02. Bộ lọc vai trò không hợp lệ",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('vai trò sai bị từ chối', () => { pm.response.to.have.status(422); pm.expect(body.errorCode || body.error?.code).to.eql('VALIDATION_ERROR'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day40SystemAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/admin/users?role=NOT_A_ROLE&page=1&pageSize=20"
+          }
+        },
+        {
+          "name": "03. Khóa user thiếu Idempotency-Key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('bắt buộc idempotency key', () => { pm.response.to.have.status(422); pm.expect(body.errorCode || body.error?.code).to.eql('IDEMPOTENCY_KEY_REQUIRED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day40SystemAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/admin/users/{{day40TargetUserId}}/lock"
+          }
+        },
+        {
+          "name": "04. Khóa user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('user được khóa', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.userId).to.eql(pm.environment.get('day40TargetUserId')); pm.expect(body.data.status).to.eql('LOCKED'); });",
+                  "pm.collectionVariables.set('day40LockReplayBody', pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day40SystemAdminToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day40LockKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/admin/users/{{day40TargetUserId}}/lock"
+          }
+        },
+        {
+          "name": "05. Replay khóa user byte-equivalent",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('replay trả nguyên response', () => { pm.response.to.have.status(200); pm.expect(pm.response.text()).to.eql(pm.collectionVariables.get('day40LockReplayBody')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day40SystemAdminToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day40LockKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/admin/users/{{day40TargetUserId}}/lock"
+          }
+        },
+        {
+          "name": "06. Dùng lại key khác fingerprint",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('key mismatch bị từ chối', () => { pm.response.to.have.status(422); pm.expect(body.errorCode || body.error?.code).to.eql('IDEMPOTENCY_KEY_MISMATCH'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day40SystemAdminToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day40LockKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/admin/users/{{day40TargetUserId}}/unlock"
+          }
+        },
+        {
+          "name": "07. Mở khóa user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('user được mở khóa đúng origin', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.userId).to.eql(pm.environment.get('day40TargetUserId')); pm.expect(body.data.status).to.eql('ACTIVE'); pm.expect(body.data.statusChanged).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day40SystemAdminToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day40UnlockKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/admin/users/{{day40TargetUserId}}/unlock"
+          }
+        },
+        {
+          "name": "08. Danh sách ActivityLog",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('activity log trả dữ liệu phân trang', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.items).to.be.an('array'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day40SystemAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/admin/activity-logs?userId={{day40SystemAdminUserId}}&from={{day40ReportFrom}}&to={{day40ReportTo}}&page=1&pageSize=20"
+          }
+        },
+        {
+          "name": "09. Chuẩn hóa Station",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('station được chuẩn hóa', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.id).to.eql(pm.environment.get('day40PrimaryStationId')); pm.expect(body.data.supportsShuttle).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day40SystemAdminToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day40NormalizeKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/admin/stations/{{day40PrimaryStationId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supportsShuttle\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "10. Merge Station",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('station được merge', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.primaryStation.id).to.eql(pm.environment.get('day40PrimaryStationId')); pm.expect(body.data.duplicateStationId).to.eql(pm.environment.get('day40DuplicateStationId')); });",
+                  "pm.collectionVariables.set('day40MergeReplayBody', pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day40SystemAdminToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day40MergeKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/admin/stations/{{day40PrimaryStationId}}/merge",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"duplicateId\": \"{{day40DuplicateStationId}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "11. Replay merge Station byte-equivalent",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('merge replay trả nguyên response', () => { pm.response.to.have.status(200); pm.expect(pm.response.text()).to.eql(pm.collectionVariables.get('day40MergeReplayBody')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day40SystemAdminToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day40MergeKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/admin/stations/{{day40PrimaryStationId}}/merge",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"duplicateId\": \"{{day40DuplicateStationId}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "12. Báo cáo platform và chế độ upstream failure",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "const expectedStatus = Number(pm.environment.get('day40ExpectedReportStatus') || '200');",
+                  "pm.test('report trả đúng trạng thái runtime', () => { pm.response.to.have.status(expectedStatus); });",
+                  "if (expectedStatus === 502) { pm.test('upstream failure không trả partial', () => { pm.expect(body.success).to.eql(false); pm.expect(body.errorCode || body.error?.code).to.eql('UPSTREAM_UNAVAILABLE'); pm.expect(body.data).to.eql(undefined); }); } else { pm.test('report có period, totals và breakdown', () => { pm.expect(body.success).to.eql(true); pm.expect(body.data.period.timezone).to.eql('UTC'); pm.expect(body.data.totals).to.be.an('object'); pm.expect(body.data.byOperator).to.be.an('array'); }); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day40SystemAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/admin/reports/platform?from={{day40ReportFrom}}&to={{day40ReportTo}}"
+          }
+        },
+        {
+          "name": "13. Khoảng report không hợp lệ",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('range sai bị từ chối', () => { pm.response.to.have.status(422); pm.expect(body.errorCode || body.error?.code).to.eql('VALIDATION_ERROR'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day40SystemAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/admin/reports/platform?from={{day40ReportTo}}&to={{day40ReportFrom}}"
+          }
+        },
+        {
+          "name": "14. Operator không được xem report platform",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('RBAC chặn operator', () => { pm.response.to.have.status(403); pm.expect(body.errorCode || body.error?.code).to.eql('FORBIDDEN'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day40OperatorAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/admin/reports/platform?from={{day40ReportFrom}}&to={{day40ReportTo}}"
           }
         }
       ]

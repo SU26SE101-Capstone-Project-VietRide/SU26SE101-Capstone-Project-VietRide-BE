@@ -1,11 +1,18 @@
 using VietRide.Shared.Application.Repositories;
 using VietRide.Trip.Application.Features.DriverTrips.GetAssignedTripRoute;
+using VietRide.Trip.Application.Features.Internal.Reports.PlatformTrips;
 using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Application.Abstractions.Repositories;
 
 public interface ITripRepository : IRepository<Domain.Entities.Trip, Guid>
 {
+    Task<IReadOnlyList<PlatformTripReportItem>> GetPlatformTripMetricsAsync(
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Platform Trip report is not implemented by this repository.");
+
     Task<IReadOnlyList<Guid>> ListScheduledForAutoBoardingAsync(
         DateTimeOffset latestDeparture,
         CancellationToken cancellationToken)
