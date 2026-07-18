@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.35.0
+> **Phiên bản:** 1.36.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-07-16
+> **Cập nhật lần cuối:** 2026-07-18
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1105,6 +1105,7 @@ Tham chiếu `db-schema/_global/cross-service-references.md` cho danh sách đ�
 |---|---|
 | **HTTP validate at WRITE** | Tạo entity có logical FK đến service khác — gọi `GET /internal/v1/<resource>/{id}` với Internal JWT, retry qua Polly. Hỏng → return `VALIDATION_ERROR` 422. |
 | **Snapshot field** | Read-heavy data cần render UI mà không cross-service call. Set tại CREATE, **immutable** (operator edit nguồn KHÔNG update snapshot). Ví dụ: `Booking.tripSnapshotOriginName`. |
+| **Mutable event projection beside snapshot** | Khi UI/business cần trạng thái hiện tại, thêm cột projection riêng và tiến nó theo event CAS; không sửa snapshot. Day 23 dùng `Booking.trip_current_departure` bên cạnh immutable `trip_snapshot_departure`. |
 | **Event consume** | Cascading state change. RabbitMQ at-least-once + Outbox đảm bảo publish. |
 | **Tenant filter via Internal JWT** | Mọi query có `operator_id` phải `WHERE operator_id = :claim` từ Internal JWT. Enforce ở handler/middleware. |
 
@@ -1451,7 +1452,12 @@ updates the column.
 | | `BOOKING_TRIP_NOT_BOOKABLE` | 409 | Trip status ≠ SCHEDULED hoặc đã đóng |
 | | `BOOKING_CUTOFF_EXCEEDED` | 409 | Edit/cancel sau cutoff 2h |
 | | `BOOKING_MAX_SEATS_EXCEEDED` | 422 | Booking > 5 seats |
-| | `BOOKING_NOT_FOUND` | 404 | |
+| | `BOOKING_NOT_FOUND` | 404 | Booking missing; Day-23 pending-action resolve also uses this for not-owned Booking and masks a discovered Booking/action ownership mismatch before action state is revealed |
+| | `BOOKING_PENDING_ACTION_NOT_FOUND` | 404 | Owner-authorized Booking exists but the action id does not exist under that Booking |
+| | `BOOKING_PENDING_ACTION_NOT_RESOLVABLE` | 409 | Active action reason/state or Booking state does not support the Day-23 `SCHEDULE_CHANGE` resolution |
+| | `BOOKING_PENDING_ACTION_SUPERSEDED` | 409 | New idempotency key targets an action terminally resolved as `SUPERSEDED` |
+| | `BOOKING_PENDING_ACTION_ALREADY_RESOLVED` | 409 | New idempotency key targets an action resolved as `ACCEPTED` or `REJECTED` |
+| | `BOOKING_PENDING_ACTION_EXPIRED` | 409 | Passenger request is strictly after the effective cutoff; equality remains eligible, timeout owns the outcome, and the scheduled resolver only auto-accepts — it never cancels or refunds |
 | | `BOOKING_NOT_CANCELLABLE` | 409 | Status không trong CONFIRMED/PENDING_PAYMENT |
 | | `BOOKING_EDIT_PICKUP_PRICE_CHANGED` | 409 | Edit pickup làm THAY ĐỔI giá vé (tăng hoặc giảm) — v1 chỉ cho đổi cùng giá (fareDelta=0); muốn đổi giá: hủy vé + đặt lại (v1.11.0, thay BOOKING_EDIT_PICKUP_PRICE_INCREASE) |
 | | `BOOKING_NOT_FOR_THIS_TRIP` | 422 | QR scan booking hoặc boarding-tick passenger khác trip |
@@ -1569,6 +1575,23 @@ updates the column.
 | | `REPORT_VALUE_OVERFLOW` | 500 | Report source/orchestrator gặp count hoặc BIGINT/NUMERIC aggregate ngoài phạm vi Int64; không wrap, saturate hoặc trả partial |
 | | `UPSTREAM_UNAVAILABLE` | 502 | Downstream/inter-service dependency unavailable or returned an unusable/unexpected response (including Gateway connection failure) |
 | | `INTERNAL_ERROR` | 500 | Unhandled exception (Sentry capture) |
+
+**Day-23 exact resolver mapping — POST
+`/v1/bookings/{bookingId}/pending-actions/{actionId}/resolve`:** missing, invalid, or expired user
+JWT is `401 AUTH_TOKEN_INVALID`; a valid non-`PASSENGER` role is `403 FORBIDDEN` before any
+Booking/action lookup. Missing/not-owned Booking and a discovered Booking/action ownership
+mismatch are masked as `404 BOOKING_NOT_FOUND`; only after owner authorization may a missing
+action under that Booking return `404 BOOKING_PENDING_ACTION_NOT_FOUND`. An active incompatible
+reason/state returns `409 BOOKING_PENDING_ACTION_NOT_RESOLVABLE`; a new key targeting
+`SUPERSEDED`, `ACCEPTED|REJECTED`, or strictly-after-effective-cutoff state returns respectively
+`409 BOOKING_PENDING_ACTION_SUPERSEDED`, `409 BOOKING_PENDING_ACTION_ALREADY_RESOLVED`, or
+`409 BOOKING_PENDING_ACTION_EXPIRED` (equality remains eligible; timeout owns the outcome and only
+auto-accepts, never cancels or refunds). Missing key is
+`422 IDEMPOTENCY_KEY_REQUIRED`; malformed/non-v4 key, malformed route UUID, invalid action,
+`selectedStopId`, or another shape failure is `422 VALIDATION_ERROR`; same key with a different
+actor/method/path/query/raw-body fingerprint is `422 IDEMPOTENCY_KEY_MISMATCH`; the same executing
+fingerprint is `409 IDEMPOTENCY_REQUEST_PENDING`. Same key + same payload replays the stored
+response byte-identical before terminal lookup; only a new key evaluates the current state.
 
 > Day-21 carry-over: the only current out-of-scope `INVALID_TRIP_STATUS` usage is
 > `ArriveTripStopCommandHandler.cs:49`; Day-21 lifecycle code must use
@@ -1980,12 +2003,13 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | `identity.operator.approved` | Identity | Payment (init OperatorWallet) | `{ eventId, operatorId, approvedAt }`; new approvals generate an eventId in the approval transaction; legacy backfill reuses the stable eventId persisted in `operator_wallet_backfill_markers` |
 | `identity.operator.suspended` | Identity | Trip, Booking | `{ operatorId, suspendedAt }` |
 | `booking.booking.confirmed` | Booking | Notification, Payment (settle hold), Booking (BookingStats counter), Trip (shuttle fan-out) | `{ bookingId, tripId, totalAmount, userId, voucherUsageId?, bookingCode?, tickets?: [{ ticketId, passengerUserId? }], ticketCodes?, ticketCount?, shuttlePickup?: { address, latitude, longitude } }` |
-| `booking.booking.cancelled` | Booking | Notification, Trip (release seats), Payment (refund), Booking (BookingStats counter) | `{ bookingId, userId, refundAmount, refundOverride, cancellationReason, bookingCode?, ticketCodes?, ticketCount? }` |
+| `booking.booking.cancelled` | Booking | Notification, Trip (release seats), Payment (refund), Booking (BookingStats counter) | Canonical producer requires fresh UUID-v4 `eventId` and producer-captured offset-date-time `occurredAt`: `{ eventId, occurredAt, bookingId, userId, refundAmount, refundOverride, cancellationReason, bookingCode?, ticketCodes?, ticketCount? }`; one-release consumers accept only this complete canonical shape or the exact legacy shape with both identity fields absent, reject partial/malformed/extra fields, and fallback to `bookingId` only for that exact legacy payload |
 | `booking.booking.refunded` | Booking | Notification, Booking (BookingStats counter) | `{ bookingId, userId, amount, bookingCode?, ticketCodes?, ticketCount? }` |
 | `booking.booking.seat_reassignment_required` | Booking | Notification | `{ eventId, occurredAt, bookingId, tripId, userId, pendingActionId, deadline, seatNumbers, reason: SEAT_REMOVED\|SEAT_DISABLED\|SEAT_TYPE_DOWNGRADED }` |
 | `booking.booking.schedule_change_informational` | Booking | Notification | For `CONFIRMED` Bookings only; exact MINOR-only `{ eventId, occurredAt, bookingId, tripId, userId, oldDeparture, newDeparture, severity: MINOR }`; no pending-action fields |
 | `booking.booking.schedule_change_required` | Booking | Notification | For `CONFIRMED` Bookings only; MEDIUM/MAJOR-only `{ eventId, occurredAt, bookingId, tripId, userId, pendingActionId, deadline, oldDeparture, newDeparture, severity: MEDIUM\|MAJOR }` |
 | `booking.booking.pending_action_realerted` | Booking | Notification | Common `{ eventId, occurredAt, bookingId, tripId, userId, pendingActionId, deadline }` plus either `{ reason: PENDING_SEAT_ASSIGNMENT, seatNumbers, seatImpactReason }` or `{ reason: SCHEDULE_CHANGE, oldDeparture, newDeparture, severity: MEDIUM\|MAJOR }` |
+| `booking.booking.pending_action_auto_resolved` | Booking | Notification | Exact `{ eventId, occurredAt, bookingId, tripId, userId, pendingActionId, resolvedAction, severity, oldDeparture, newDeparture }`; `resolvedAction=ACCEPTED` |
 | `booking.voucher.consent_accepted` | Booking | Notification | `{ voucherId, operatorId }` |
 | `booking.voucher.consent_rejected` | Booking | Notification | `{ voucherId, operatorId, reason? }` |
 | `trip.trip.boarding_started` | Trip | Notification | `{ tripId, boardingStartedAt }` |
@@ -2051,8 +2075,20 @@ Day-22 day-removal cancellation, Booking cancels active rows and emits existing
 `booking.booking.cancelled`: `PENDING_PAYMENT` uses `refundAmount=0`; `CONFIRMED` uses a 100%
 refund of immutable persisted `Booking.totalAmount`. Payment refunds only from that Booking fact,
 preventing double refunds. Parcel independently consumes Trip cancellation. Day 22 owns fact
-publication, pending-action creation, and T+2h re-alert; Day 23 owns passenger accept/reject and
-timeout/refund resolution.
+publication, pending-action creation, and T+2h re-alert. Day 23 owns passenger accept/reject and
+scheduled resolution: passenger rejection may refund by severity, while timeout only auto-accepts
+and never cancels or refunds.
+
+**Day-23 schedule-change ownership:** PATCH
+`/v1/operator/driver-schedules/{scheduleId}?applyTo=FUTURE_ONLY|ALL_PENDING` remains the sole
+producer; there is no dedicated Trip schedule endpoint or Gateway route. Booking updates the
+mutable current-departure projection for `PENDING_PAYMENT|CONFIRMED`, but only `CONFIRMED` emits
+the informational/required passenger facts or holds one active action. Passenger resolution uses
+POST `/v1/bookings/{bookingId}/pending-actions/{actionId}/resolve`; a reject transaction emits the
+single authoritative `booking.booking.cancelled` carrying frozen `refundAmount`. Terminal MEDIUM
+and MAJOR scheduled acceptance emits `booking.booking.pending_action_auto_resolved`. Notification
+maps required, re-alerted, and auto-resolved facts to existing `TRIP_SCHEDULE_CHANGED`, deduped by
+MessageId; it needs no new notification type or persistence schema.
 
 ### 7.4 Outbox Pattern (durability cho publish event)
 
@@ -2085,6 +2121,13 @@ BEGIN TRANSACTION
   INSERT outbox_events { eventType: 'booking.booking.confirmed', payload: {...}, status: PENDING }
 COMMIT
 ```
+
+For every Day-23 integration event, the producer allocates the UUID before serialization and uses
+one identity end to end: `payload.eventId == outbox_events.id == RabbitMQ MessageId`. Retries reuse
+that row/id; they never generate a new payload identity. Fresh `booking.booking.cancelled`
+producers always write both UUID-v4 `eventId` and offset-date-time `occurredAt` together. The
+temporary legacy consumer branch is permitted only for the exact old payload with both fields
+absent; partial identity presence is invalid.
 
 **Publisher flow:**
 
@@ -2470,15 +2513,47 @@ PENDING_HOLD ─→ ELIGIBLE ─→ SETTLED
 Day-22 vehicle swap creates `PENDING_SEAT_ASSIGNMENT` only for an incompatible BOOKED seat on a
 `SCHEDULED` Trip when `deadline = min(event.occurredAt + 4h, departureDateTime - 30m)` is strictly
 later than the Booking handler clock. Metadata stores `sourceEventId` plus exact seat detail in the
-existing JSONB; no column is added. Schedule `MINOR` never creates an action and publishes only
-`booking.booking.schedule_change_informational`. `MEDIUM|MAJOR` creates `SCHEDULE_CHANGE` with the
-technical-context deadline and publishes the mandatory pending-action fact. Both statements apply
-only to `CONFIRMED` Bookings; every other Booking status emits neither schedule fact. Booking
-commits the action and initial Outbox atomically before ensuring the T+2h re-alert schedule.
+existing JSONB; no column is added.
 
-Day 22 does not resolve these actions. Passenger accept/reject and terminal timeout/refund remain
-Day 23. The T+2h job is only a re-alert and uses logical dedupe by `pendingActionId` as described
-in §10.1.
+Day-23 schedule changes are produced only by PATCH `/v1/operator/driver-schedules/{scheduleId}?applyTo=FUTURE_ONLY|ALL_PENDING`, specifically the
+`ALL_PENDING` branch. One captured clock preflights every affected Trip with a `CONFIRMED`
+Booking: both `oldDeparture - now` and computed `newDeparture - now` must be `>= 2h`; equality is
+allowed. Severity uses absolute delta and ICT calendar dates: MINOR is same-date `delta <= 2h`;
+MEDIUM is same-date `delta > 2h && delta < 6h`; MAJOR is `delta >= 6h` or an ICT date change.
+
+Booking preserves immutable `trip_snapshot_departure` and maintains nullable
+`trip_current_departure` (`TripCurrentDeparture`) as the mutable projection. Existing rows are
+backfilled from the snapshot. On `trip.trip.schedule_changed`, both `PENDING_PAYMENT` and
+`CONFIRMED` Bookings apply causal CAS: `current==old` advances to new, `current==new` is a duplicate
+no-op, and any other value retries then quarantines instead of overwriting. Only `CONFIRMED`
+Bookings emit passenger facts: MINOR emits informational only; MEDIUM/MAJOR supersede the old
+active action, create one `SCHEDULE_CHANGE`, and emit required. `date` queries use the ICT
+half-open day of the current projection; existing `sortBy=departureAt` orders that projection and
+then `id` in `sortDir`. List/detail add nested `trip.currentDepartureAt` beside immutable
+`trip.departureAt`; the `currentDepartureAt` field exists only under `trip`, with no top-level
+duplicate or new sort key. `STOP_DISABLED` deadlines use
+the current projection.
+
+Schedule action metadata freezes exact `sourceEventId`, `oldDeparture`, `newDeparture`, `severity`,
+`initialDeadline`, nullable `terminalDeadline`, `refundBasisAmount`, `refundPercent`, and
+`refundAmount`. The basis is immutable `Booking.totalAmount`; MEDIUM uses 50%, MAJOR uses 100%, and
+money arithmetic rounds to the nearest VND with `MidpointRounding.AwayFromZero`. For MAJOR,
+`terminalDeadline = newDeparture - 30m`; MEDIUM has no terminal deadline. The effective passenger
+cutoff is terminal only when MAJOR has `initialDeadline < terminalDeadline`, otherwise initial.
+
+POST `/v1/bookings/{bookingId}/pending-actions/{actionId}/resolve` is UUID-v4 idempotent,
+`PASSENGER`-only, owner-only, and limited to persisted reason `SCHEDULE_CHANGE`; the exact body is
+`{ action: ACCEPTED|REJECTED, note? }`, while `selectedStopId` is invalid. Same-key/same-payload
+replays byte-identical before terminal lookup. Equality at the effective cutoff remains eligible;
+only strictly-after is expired. ACCEPTED resolves the action and preserves `CONFIRMED`. REJECTED
+atomically resolves it, sets `refundOverride=true`, cancels Booking with `SCHEDULE_CHANGED`, appends history, and enqueues one
+authoritative `booking.booking.cancelled` carrying the frozen amount. No accept/reject alias or
+operator seat-assignment path is ratified here.
+
+The existing Day-22 `PendingActionRealertJob` remains an occurrence `+2h` informational phase for
+unresolved `PENDING_SEAT_ASSIGNMENT` and MEDIUM/MAJOR `SCHEDULE_CHANGE`, at most once for that
+intended phase. Separate Day-23 `ScheduleChangeAutoAcceptJob` owns the initial/terminal scheduled
+resolution phases in §10.1; neither scheduled phase cancels a Booking or creates a refund.
 
 ### 8.11 OperatorVoucherConsent
 
@@ -2772,21 +2847,37 @@ KHÔNG dùng Prometheus/Grafana/Jaeger/Loki cho v1 (xem technical_context 3.5).
 | Job | Type | Trigger | Notes |
 |---|---|---|---|
 | `SeatReleaseTimeoutJob` | Scheduled (per Booking) | 10 phút sau PENDING_PAYMENT VNPay | Release seat + Booking → EXPIRED |
-| `ScheduleChangeAutoAcceptJob` | Scheduled (per BookingPendingAction) | Action.deadline | Auto-accept SCHEDULE_CHANGE nếu user không phản hồi |
-| `PendingActionRealertJob` | Scheduled (logical key `pendingActionId`) | Action occurrence + 2h | Day-22 re-alert only for unresolved, pre-deadline `PENDING_SEAT_ASSIGNMENT` or MEDIUM/MAJOR `SCHEDULE_CHANGE`; Day-23 owns resolution/refund |
+| `ScheduleChangeAutoAcceptJob` | Scheduled (per BookingPendingAction) | `initialDeadline + 1s`, then optional `terminalDeadline + 1s` | MEDIUM finalizes at initial; MAJOR with `initialDeadline < terminalDeadline` may emit one distinct initial-phase re-alert then finalizes at terminal; lag/direct execution past terminal skips the optional phase; `initialDeadline >= terminalDeadline` finalizes strictly after initial; each intended phase is at most once and jobs never refund or cancel |
+| `PendingActionRealertJob` | Scheduled (logical key `pendingActionId`) | action occurrence + 2h | unchanged Day-22 scope: unresolved `PENDING_SEAT_ASSIGNMENT` plus MEDIUM/MAJOR `SCHEDULE_CHANGE`; at most once for this intended T+2 phase |
 | `PartialNoShowDetectionJob` | Recurring | Every 5 phút | Detect mixed BOARDED + NO_SHOW → set Booking.status = PARTIAL_NO_SHOW |
 
 Booking hosts its own PostgreSQL-backed Hangfire storage/schema `hangfire`, queue `booking`, server
 `vietride-booking`, using only the approved centrally pinned `Hangfire.AspNetCore` and
-`Hangfire.PostgreSql`. Scheduling dedupe is logical by `pendingActionId`; broker retry/redelivery
-may create multiple physical jobs and no exact physical job-count guarantee exists. Every
-execution locks and rechecks action existence, unresolved state, and `now < deadline`, then uses a
-deterministic re-alert Outbox identity derived from `pendingActionId`. Outbox uniqueness permits one
-persisted side effect; duplicate physical jobs no-op. Consumer order is Booking DB commit → ensure
-schedule → Rabbit ACK. Crash after commit/before ensure or ACK is repaired by broker/DLQ replay,
-which finds the existing `(bookingId,sourceEventId)` action, emits no duplicate initial event,
-ensures scheduling, and then ACKs. No extra table, column, migration, `realerted_at`, custom poller,
-or dependency is permitted.
+`Hangfire.PostgreSql`. Broker retry/redelivery may create multiple physical jobs; correctness uses
+logical identities and locked state rechecks, never an exact physical-job-count guarantee.
+
+The unchanged Day-22 T+2 execution locks and rechecks action existence, unresolved state, and
+`now < deadline`. Its deterministic identity derives only from `pendingActionId`; Outbox
+uniqueness permits one persisted side effect and duplicate physical jobs no-op. It
+continues to cover both reasons and both MEDIUM/MAJOR schedule severities above.
+
+The separate Day-23 state machine schedules the initial job for cutoff `+1s`, so a passenger call
+at equality remains eligible. MEDIUM atomically resolves `ACCEPTED` and enqueues
+`booking.booking.pending_action_auto_resolved` once. MAJOR with initial before terminal may enqueue
+one `booking.booking.pending_action_realerted` using identity derived from action plus
+`MAJOR_INITIAL_PHASE`, distinct from T+2, and then ensures the terminal job. If execution is already
+past terminal it accepts directly without that optional fact. Terminal/direct acceptance uses a
+deterministic action+outcome identity and enqueues auto-resolved once. `initialDeadline >=
+terminalDeadline` has no optional phase and accepts only strictly after initial. Passenger/job
+races lock/recheck so exactly one terminal outcome wins; no scheduled path changes Booking status
+or emits cancellation/refund.
+
+Consumer order is Booking DB commit → ensure schedule → Rabbit ACK. Crash after commit/before
+ensure or ACK is repaired by broker/DLQ replay, which finds the existing
+`(bookingId,sourceEventId)` action, emits no duplicate initial event, ensures scheduling, and then
+ACKs. Schedule failure after commit is repairable; rollback removes action/state and Outbox
+together. No extra table, column, migration, `realerted_at`, custom poller, or dependency is
+permitted.
 
 #### Parcel
 
@@ -3238,6 +3329,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.36.0** | 2026-07-18 | BE lead (Vũ) | **MINOR** — Day-23 schedule-change contract, projection, errors, events, and jobs; merged into the Day-40 baseline while preserving the Admin Users, Station Cleanup, and Platform Reports contracts. |
 | **1.35.0** | 2026-07-16 | Senior Backend Engineer | **MINOR** - Freeze Day 40 Admin Users + Station Cleanup + Platform Reports: shared-idempotent lock/unlock với PostgreSQL per-user serialization và `locked_from_status`; immutable ActivityLog; atomic Station normalize/merge cùng canonical redirects và Booking advisory-lock relink protocol; `trip.station.merged`/`normalized`; live UTC earned-report internal sources và Payment orchestration; đăng ký `STATION_MERGE_CONFLICT`/`REPORT_VALUE_OVERFLOW`; report cache/Stats/Excel và advanced analytics defer Day 42. |
 | **1.34.1** | 2026-07-16 | BE lead (Vu) | **PATCH** - Merge the Day-22 Trip edit/effective-pricing/DriverSchedule cascade contracts into the current Day-39 baseline. Preserve trusted Booking impact, immutable Booking pricing/refund snapshots, fare-source overlap guard, Trip/schedule audits, Booking-owned passenger impact and Hangfire re-alert semantics; reconcile them with idempotency v2 and Day-38 Payment terminal-settlement consumption. |
 | **1.34.0** | 2026-07-16 | Senior Backend Engineer | **MINOR** - Day 39 Incident vertical slice: thêm canonical assigned Driver/Assistant Incident API, persistence + transactional `trip.incident.reported` Outbox, validation/normalization category-description-photo-GPS; Notification resolve active `OPERATOR_ADMIN` cùng operator, fan-out in-app/push với retry, payload-event dedupe và PII-safe logging. |

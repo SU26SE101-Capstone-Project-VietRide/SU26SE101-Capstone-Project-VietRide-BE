@@ -27,7 +27,7 @@ public sealed class HandleStopDisabledCommandHandler(
             .Where(x => x.OperatorId == request.OperatorId
                 && (x.PickupStopId == request.StopId || x.DropoffStopId == request.StopId)
                 && (x.Status == BookingStatus.PENDING_PAYMENT || x.Status == BookingStatus.CONFIRMED))
-            .Select(x => new { x.Id, x.PassengerUserId, x.TripSnapshotDeparture })
+            .Select(x => new { x.Id, x.PassengerUserId, x.TripCurrentDeparture })
             .ToList();
 
         var recipients = new HashSet<Guid>();
@@ -44,9 +44,9 @@ public sealed class HandleStopDisabledCommandHandler(
             }
 
             var deadline = now.AddHours(24);
-            if (booking.TripSnapshotDeparture.HasValue)
-                deadline = deadline < booking.TripSnapshotDeparture.Value.AddHours(-2)
-                    ? deadline : booking.TripSnapshotDeparture.Value.AddHours(-2);
+            if (booking.TripCurrentDeparture.HasValue)
+                deadline = deadline < booking.TripCurrentDeparture.Value.AddHours(-2)
+                    ? deadline : booking.TripCurrentDeparture.Value.AddHours(-2);
             if (deadline < now) deadline = now;
 
             await pendingActions.AddAsync(BookingPendingAction.Create(

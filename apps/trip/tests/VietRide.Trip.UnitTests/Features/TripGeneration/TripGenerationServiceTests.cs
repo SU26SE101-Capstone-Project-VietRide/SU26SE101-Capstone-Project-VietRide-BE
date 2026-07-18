@@ -200,7 +200,7 @@ public sealed class TripGenerationServiceTests
                 fixture.Schedule.VehicleId!.Value,
                 Guid.NewGuid(),
                 null,
-                fixture.Schedule.Id,
+                driverScheduleId: null,
                 departureDateTime,
                 departureDateTime.AddMinutes(180),
                 TripSource.AUTO_FROM_SCHEDULE,

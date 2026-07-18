@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import {
+  BookingCancelledConsumerEventSchema,
+  type BookingCancelledConsumerEvent,
+} from '@vietride/contracts';
 import { NotificationType } from '../generated/notification-prisma-client';
 import type { CreateNotificationDto } from './dto/create-notification.dto';
 import {
@@ -9,11 +13,11 @@ import {
   WALLET_DEBITED_ROUTING_KEY,
 } from './core-events.constants';
 
-const MoneyAmountSchema = z
+const moneyAmountSchema = z
   .union([z.number().int().nonnegative(), z.string().regex(/^\d+$/)])
   .optional();
 
-const BookingEventPayloadSchema = z.object({
+const bookingEventPayloadSchema = z.object({
   userId: z.string().uuid(),
   bookingId: z.string().uuid(),
   tripId: z.string().uuid().optional(),
@@ -22,17 +26,17 @@ const BookingEventPayloadSchema = z.object({
   ticketCount: z.number().int().nonnegative().optional(),
   routeName: z.string().trim().min(1).optional(),
   reason: z.string().trim().min(1).optional(),
-  refundAmount: MoneyAmountSchema,
+  refundAmount: moneyAmountSchema,
 });
 
-const WalletEventPayloadSchema = z.object({
+const walletEventPayloadSchema = z.object({
   userId: z.string().uuid(),
   walletTransactionId: z.string().uuid().optional(),
   transactionId: z.string().uuid().optional(),
   referenceId: z.string().uuid().optional(),
   referenceType: z.string().trim().min(1).optional(),
-  amount: MoneyAmountSchema,
-  balanceAfter: MoneyAmountSchema,
+  amount: moneyAmountSchema,
+  balanceAfter: moneyAmountSchema,
   note: z.string().trim().min(1).optional(),
 });
 
@@ -49,20 +53,20 @@ export function mapCoreEventToNotification(
 ): CreateNotificationDto {
   switch (routingKey) {
     case BOOKING_CONFIRMED_ROUTING_KEY:
-      return mapBookingConfirmed(BookingEventPayloadSchema.parse(payload));
+      return mapBookingConfirmed(bookingEventPayloadSchema.parse(payload));
     case BOOKING_CANCELLED_ROUTING_KEY:
-      return mapBookingCancelled(BookingEventPayloadSchema.parse(payload));
+      return mapBookingCancelled(BookingCancelledConsumerEventSchema.parse(payload));
     case BOOKING_REFUNDED_ROUTING_KEY:
-      return mapBookingRefunded(BookingEventPayloadSchema.parse(payload));
+      return mapBookingRefunded(bookingEventPayloadSchema.parse(payload));
     case WALLET_CREDITED_ROUTING_KEY:
-      return mapWalletCredited(WalletEventPayloadSchema.parse(payload));
+      return mapWalletCredited(walletEventPayloadSchema.parse(payload));
     case WALLET_DEBITED_ROUTING_KEY:
-      return mapWalletDebited(WalletEventPayloadSchema.parse(payload));
+      return mapWalletDebited(walletEventPayloadSchema.parse(payload));
   }
 }
 
 function mapBookingConfirmed(
-  payload: z.infer<typeof BookingEventPayloadSchema>,
+  payload: z.infer<typeof bookingEventPayloadSchema>,
 ): CreateNotificationDto {
   return {
     userId: payload.userId,
@@ -73,20 +77,18 @@ function mapBookingConfirmed(
   };
 }
 
-function mapBookingCancelled(
-  payload: z.infer<typeof BookingEventPayloadSchema>,
-): CreateNotificationDto {
+function mapBookingCancelled(payload: BookingCancelledConsumerEvent): CreateNotificationDto {
   return {
     userId: payload.userId,
     type: NotificationType.BOOKING_CANCELLED,
     title: 'Ve da bi huy',
-    body: `Ve ${formatBookingLabel(payload)} da bi huy.${payload.reason ? ` Ly do: ${payload.reason}.` : ''}`,
+    body: `Ve ${formatBookingLabel(payload)} da bi huy. Ly do: ${payload.cancellationReason}.`,
     data: buildBookingData(payload),
   };
 }
 
 function mapBookingRefunded(
-  payload: z.infer<typeof BookingEventPayloadSchema>,
+  payload: z.infer<typeof bookingEventPayloadSchema>,
 ): CreateNotificationDto {
   const refundText = payload.refundAmount
     ? ` So tien hoan: ${formatMoney(payload.refundAmount)} VND.`
@@ -102,7 +104,7 @@ function mapBookingRefunded(
 }
 
 function mapWalletCredited(
-  payload: z.infer<typeof WalletEventPayloadSchema>,
+  payload: z.infer<typeof walletEventPayloadSchema>,
 ): CreateNotificationDto {
   return {
     userId: payload.userId,
@@ -114,7 +116,7 @@ function mapWalletCredited(
 }
 
 function mapWalletDebited(
-  payload: z.infer<typeof WalletEventPayloadSchema>,
+  payload: z.infer<typeof walletEventPayloadSchema>,
 ): CreateNotificationDto {
   return {
     userId: payload.userId,
@@ -125,11 +127,11 @@ function mapWalletDebited(
   };
 }
 
-function formatBookingLabel(payload: z.infer<typeof BookingEventPayloadSchema>): string {
+function formatBookingLabel(payload: { bookingCode?: string | undefined; bookingId: string }): string {
   return payload.bookingCode ? `#${payload.bookingCode}` : payload.bookingId;
 }
 
-function formatMoney(amount: z.infer<typeof MoneyAmountSchema>): string {
+function formatMoney(amount: z.infer<typeof moneyAmountSchema>): string {
   if (amount === undefined) {
     return '0';
   }
@@ -138,7 +140,17 @@ function formatMoney(amount: z.infer<typeof MoneyAmountSchema>): string {
 }
 
 function buildBookingData(
-  payload: z.infer<typeof BookingEventPayloadSchema>,
+  payload: {
+    bookingId: string;
+    bookingCode?: string | undefined;
+    ticketCodes?: string[] | undefined;
+    ticketCount?: number | undefined;
+    refundAmount?: z.infer<typeof moneyAmountSchema>;
+    tripId?: string | undefined;
+    routeName?: string | undefined;
+    reason?: string | undefined;
+    cancellationReason?: string | undefined;
+  },
 ): Record<string, unknown> {
   return {
     bookingId: payload.bookingId,
@@ -147,13 +159,13 @@ function buildBookingData(
     ticketCodes: payload.ticketCodes ?? null,
     ticketCount: payload.ticketCount ?? payload.ticketCodes?.length ?? null,
     routeName: payload.routeName ?? null,
-    reason: payload.reason ?? null,
+    reason: 'cancellationReason' in payload ? payload.cancellationReason : payload.reason ?? null,
     refundAmount: payload.refundAmount ?? null,
   };
 }
 
 function buildWalletData(
-  payload: z.infer<typeof WalletEventPayloadSchema>,
+  payload: z.infer<typeof walletEventPayloadSchema>,
 ): Record<string, unknown> {
   return {
     walletTransactionId: payload.walletTransactionId ?? payload.transactionId ?? null,

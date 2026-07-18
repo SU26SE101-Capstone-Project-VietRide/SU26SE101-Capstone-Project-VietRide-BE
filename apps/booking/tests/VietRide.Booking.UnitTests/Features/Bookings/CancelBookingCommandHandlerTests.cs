@@ -69,7 +69,11 @@ public sealed class CancelBookingCommandHandlerTests
         };
         SetupBookingTripAndOperator(booking, currentTrip);
         var capturedPayloads = new List<string>();
-        await _outbox.EnqueueAsync("booking.booking.cancelled", Arg.Do<string>(capturedPayloads.Add), Arg.Any<CancellationToken>());
+        await _outbox.EnqueueAsync(
+            Arg.Do<Guid>(_ => { }),
+            "booking.booking.cancelled",
+            Arg.Do<string>(capturedPayloads.Add),
+            Arg.Any<CancellationToken>());
 
         var result = await BuildSut().Handle(BuildCommand(booking.Id), CancellationToken.None);
 
@@ -92,6 +96,7 @@ public sealed class CancelBookingCommandHandlerTests
             false,
             Arg.Any<CancellationToken>());
         await _outbox.Received(1).EnqueueAsync(
+            Arg.Is<Guid>(eventId => eventId != Guid.Empty),
             "booking.booking.cancelled",
             Arg.Any<string>(),
             Arg.Any<CancellationToken>());
@@ -109,6 +114,8 @@ public sealed class CancelBookingCommandHandlerTests
         using var doc = JsonDocument.Parse(capturedPayloads[0]);
         var root = doc.RootElement;
         root.GetProperty("bookingId").GetGuid().Should().Be(booking.Id);
+        root.GetProperty("eventId").GetGuid().Should().NotBeEmpty();
+        root.GetProperty("occurredAt").GetDateTimeOffset().Should().Be(Now);
         root.GetProperty("userId").GetGuid().Should().Be(PassengerUserId);
         root.GetProperty("refundAmount").GetInt64().Should().Be(180_000);
         root.GetProperty("refundOverride").GetBoolean().Should().BeFalse();
@@ -127,6 +134,7 @@ public sealed class CancelBookingCommandHandlerTests
         result.Status.Should().Be("CANCELLED");
         result.RefundAmount.Should().Be(0);
         await _outbox.Received(1).EnqueueAsync(
+            Arg.Is<Guid>(eventId => eventId != Guid.Empty),
             "booking.booking.cancelled",
             Arg.Is<string>(json => HasZeroRefundAmount(json)),
             Arg.Any<CancellationToken>());
@@ -194,6 +202,7 @@ public sealed class CancelBookingCommandHandlerTests
             false,
             Arg.Any<CancellationToken>());
         await _outbox.Received(1).EnqueueAsync(
+            Arg.Is<Guid>(eventId => eventId != Guid.Empty),
             "booking.booking.cancelled",
             Arg.Any<string>(),
             Arg.Any<CancellationToken>());
@@ -212,6 +221,7 @@ public sealed class CancelBookingCommandHandlerTests
         await _tripClient.DidNotReceiveWithAnyArgs()
             .ReleaseSeatsAsync(default, default, default!, default);
         await _outbox.Received(1).EnqueueAsync(
+            Arg.Is<Guid>(eventId => eventId != Guid.Empty),
             "booking.booking.cancelled",
             Arg.Any<string>(),
             Arg.Any<CancellationToken>());
@@ -239,6 +249,7 @@ public sealed class CancelBookingCommandHandlerTests
         await second.Should().ThrowAsync<ConflictException>()
             .Where(e => e.ErrorCode == "BOOKING_NOT_CANCELLABLE");
         await _outbox.Received(1).EnqueueAsync(
+            Arg.Is<Guid>(eventId => eventId != Guid.Empty),
             "booking.booking.cancelled",
             Arg.Any<string>(),
             Arg.Any<CancellationToken>());

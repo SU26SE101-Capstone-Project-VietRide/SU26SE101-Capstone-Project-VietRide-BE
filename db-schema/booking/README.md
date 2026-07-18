@@ -7,13 +7,13 @@ Quản lý **booking lifecycle, multi-passenger per booking, seat reference, vou
 - **Database:** `vietride_booking`
 - **Framework:** .NET Core 8 + EF Core 8
 - **Extensions:** `pgcrypto`
-- **Hangfire schema:** `hangfire.*` trong cùng DB. Jobs: seat release khi VNPay timeout 15m, schedule-change auto-accept/escalation, PENDING_SEAT_ASSIGNMENT escalation T+2h + auto-cancel deadline.
+- **Hangfire schema:** `hangfire.*` trong cùng DB. Jobs: seat release khi VNPay timeout, unchanged Day-22 pending-action T+2h re-alert, và separate Day-23 schedule-change initial/terminal acceptance phases.
 
 ## Entity List
 
 | Entity | Purpose | Key business fields |
 |---|---|---|
-| `Booking` | Order/giao dich mua ve. Existing legacy row below used to describe Booking as the ticket; new design separates Ticket as proof of travel. | `bookingCode` UNIQUE, booking-level amount/status, trip snapshot, round-trip group |
+| `Booking` | Order/giao dich mua ve. Existing legacy row below used to describe Booking as the ticket; new design separates Ticket as proof of travel. | `bookingCode` UNIQUE, booking-level amount/status, immutable trip snapshot, mutable current-departure projection, round-trip group |
 | `Ticket` | Per-seat proof of travel / QR identity. | `ticketCode` UNIQUE, `passengerId` UNIQUE, `seatNumber`, `status`, fare/discount/paid snapshot, lifecycle timestamps |
 | `Booking` | Vé của 1 buyer cho 1 trip. | `bookingCode` UNIQUE, 4 pickup/dropoff FK (exclusive), `totalAmount` immutable snapshot, 4 trip snapshot fields, `bookingGroupId`/`tripDirection` round-trip, `cancellationReason` enum, `refundOverride` |
 | `Passenger` | Sub-entity của Booking (1–5/booking). Operational-only. | `seatNumber`, `boardingStatus`, `boardedAt`, `boardedAtStopId` |
@@ -34,11 +34,13 @@ Quản lý **booking lifecycle, multi-passenger per booking, seat reference, vou
   - Dropoff: **at most one** not null (cả 2 NULL = default terminal destination, lưu implicit).
   - Pattern này thay polymorphic discriminator để giữ strict FK ở DB layer.
 - **`Booking.total_amount` IMMUTABLE** sau INSERT — comment làm rõ. EF Core: configure as snapshot, không update trong handler.
+- **`trip_snapshot_departure` is immutable; `trip_current_departure` is the separate mutable projection.** Rollout backfills `trip_current_departure = trip_snapshot_departure`; `trip.trip.schedule_changed` advances only the current column by causal CAS (`current==old` apply, `current==new` duplicate, otherwise retry/quarantine). Consumer updates `PENDING_PAYMENT|CONFIRMED`, while only `CONFIRMED` emits schedule facts or creates one active `SCHEDULE_CHANGE`. Existing operator `date` and `sortBy=departureAt` queries use the current projection; `STOP_DISABLED` deadline calculation also uses it.
 - **`Booking.total_amount <= base_fare` CHECK** — discount không thể âm.
 - **`Booking.passenger_user_id`, `trip_id`, `operator_id`, `pickup_station_id`, `pickup_stop_id`, etc. là LOGICAL FK** — không có `REFERENCES`. Validate ở Booking Service handler khi tạo Booking (HTTP call sang Identity/Trip).
 - **`Passenger` UNIQUE `(booking_id, seat_number)`** — chống duplicate seat trong cùng booking.
 - **`booking_pending_actions` partial unique `(booking_id) WHERE resolved_at IS NULL`** — enforce v6 rule "chỉ 1 active per booking". Action mới phát sinh → app-layer phải close action cũ với `SUPERSEDED` trước khi INSERT mới.
 - **`booking_pending_actions.severity` nullable** — chỉ set cho SCHEDULE_CHANGE (MEDIUM/MAJOR). MINOR không persist record.
+- **Day-23 `SCHEDULE_CHANGE` metadata freeze:** exact `sourceEventId`, `oldDeparture`, `newDeparture`, `severity`, `initialDeadline`, nullable `terminalDeadline`, `refundBasisAmount`, `refundPercent`, `refundAmount`. Basis là immutable `Booking.total_amount`; MEDIUM = 50%, MAJOR = 100%, làm tròn đến VND bằng `MidpointRounding.AwayFromZero`. Passenger reject atomically resolves action, cancels Booking, appends history, and emits one authoritative cancellation fact. Scheduled acceptance only resolves `ACCEPTED`; it does not cancel/refund.
 - **`booking_transfers` 1 record per Passenger** (không phải 1 per Booking) — multi-passenger booking sẽ có N record cùng `booking_id` khác `passenger_id`. UNIQUE constraint NOT enforced ở DB (1 passenger có thể transfer nhiều lần nếu Trip_new lại DISRUPTED).
 - **`booking_stats`** dùng surrogate UUID PK + UNIQUE composite `(operator_id, stat_date, COALESCE(trip_id, ...))` — `trip_id` nullable cho per-operator-per-day aggregate row (trip_id=NULL coalesced to zero-UUID để UNIQUE bao trùm cả 2 case).
 - **`vouchers.applicable_operator_ids`/`applicable_route_ids`** dùng `UUID[]` array thay vì junction table — query với `= ANY(array)` đủ cho scale (mỗi voucher target ≤ 100 operator/route trong realistic case). Junction table phức tạp hơn không justify.
@@ -88,6 +90,7 @@ The persistence surface is insert/read only; no update/delete API or repository 
 | `idx_bookings_operator_id_status` | `(operator_id, status)` | B-tree | Operator dashboard |
 | `idx_bookings_booking_group_id` | `booking_group_id` partial | B-tree | Round-trip group lookup |
 | `idx_bookings_status_created_at` | `(status, created_at)` partial | B-tree | Hangfire VNPay timeout scan |
+| `idx_bookings_trip_current_departure` | `(trip_current_departure DESC)` | B-tree | Current schedule date filter and existing `departureAt` sort |
 | `idx_booking_status_history_booking_occurred_id` | `(booking_id, occurred_at, id)` | B-tree | Stable timeline read ordered by `occurred_at ASC, id ASC` |
 | `uq_passengers_booking_seat` | `(booking_id, seat_number)` | unique | Avoid duplicate seat |
 | `idx_passengers_boarding_status` | `(booking_id, boarding_status)` | B-tree | NO_SHOW detection job |
@@ -120,7 +123,7 @@ The persistence surface is insert/read only; no update/delete API or repository 
 
 - **Tool:** EF Core Migrations.
 - **Bootstrap order:** Sau Identity Service (logical FK validate target).
-- **Snapshot field maintenance:** `trip_snapshot_*` được set tại CREATE Booking, KHÔNG cập nhật khi Trip edit (snapshot rule).
+- **Snapshot/current departure rollout:** `trip_snapshot_*` được set tại CREATE Booking và KHÔNG cập nhật khi Trip edit. Add nullable `trip_current_departure`, backfill it from `trip_snapshot_departure`, then create `idx_bookings_trip_current_departure`; new Booking writes both departure fields initially, and later schedule events mutate only the current projection.
 - **Booking status history:** add through an EF Core migration in Task 19.0c; do not backfill pre-existing bookings. The migration must create the local `ON DELETE RESTRICT` FK and `(booking_id, occurred_at, id)` index. No DDL is added by this architecture-baseline task.
 - **`booking_pending_actions.metadata` JSONB schema** linh hoạt theo reason — không enforce schema ở DB, validate ở handler.
 

@@ -76,10 +76,10 @@ public sealed class InternalOperatorsController : ControllerBase
     }
 
     [HttpPost("summaries/batch")]
-    [ProducesResponseType(typeof(IReadOnlyList<OperatorSummaryDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(IReadOnlyList<InternalOperatorSummaryDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
-    public async Task<ActionResult<IReadOnlyList<OperatorSummaryDto>>> GetOperatorSummariesAsync(
+    public async Task<ActionResult<IReadOnlyList<InternalOperatorSummaryDto>>> GetOperatorSummariesAsync(
         [FromBody] GetOperatorSummariesRequest request,
         CancellationToken cancellationToken)
     {

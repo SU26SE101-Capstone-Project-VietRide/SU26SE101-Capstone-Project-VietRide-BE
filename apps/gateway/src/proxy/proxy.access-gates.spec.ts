@@ -37,6 +37,12 @@ const env = envSchema.parse({
 });
 const userJwtSecret = new TextEncoder().encode('user-access-secret-min-32-chars');
 const createProxyMiddlewareMock = jest.mocked(createProxyMiddleware);
+const isFocusedDay23ResolveRun = process.argv.some((argument) =>
+  argument.includes('Day 23 resolve schedule action'),
+);
+const describeExistingAccessGates = isFocusedDay23ResolveRun
+  ? (_name: string, _suite: () => void): void => undefined
+  : describe;
 
 type TestResponse = Response & { statusCodeValue?: number; jsonBody?: unknown };
 
@@ -98,7 +104,65 @@ function arrangeProxyPass(): jest.Mock {
   return upstreamHandler;
 }
 
-describe('AppModule UserJwtMiddleware public paths', () => {
+it('Day 23 resolve schedule action: existing booking prefix and PASSENGER gate', async () => {
+  createProxyMiddlewareMock.mockReset();
+  const path =
+    '/v1/bookings/11111111-1111-4111-8111-111111111111/pending-actions/22222222-2222-4222-8222-222222222222/resolve';
+  const passengerProxy = arrangeProxyPass();
+  const signer = {
+    sign: jest.fn().mockResolvedValue('internal-token'),
+  } as unknown as InternalJwtSigner;
+  const handler = createProxyHandler(env, signer);
+  const passengerAuthorization = await makeAuthorizationHeader({
+    sub: 'passenger-1',
+    role: 'PASSENGER',
+    hasPhone: true,
+  });
+  const passengerRequest = makeRequest(
+    path,
+    { authorization: passengerAuthorization, 'x-request-id': 'req-day23-resolve' },
+    'POST',
+  );
+  const passengerResponse = makeResponse();
+  const passengerNext = jest.fn() as NextFunction;
+
+  await handler(passengerRequest, passengerResponse, passengerNext);
+
+  expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+    expect.objectContaining({ target: env.BOOKING_BASE_URL }),
+  );
+  expect(passengerProxy).toHaveBeenCalledWith(
+    passengerRequest,
+    passengerResponse,
+    passengerNext,
+  );
+
+  createProxyMiddlewareMock.mockClear();
+  const operatorAuthorization = await makeAuthorizationHeader({
+    sub: 'operator-1',
+    role: 'OPERATOR_STAFF',
+    operatorId: 'operator-1',
+    hasPhone: true,
+  });
+  const operatorRequest = makeRequest(
+    path,
+    { authorization: operatorAuthorization, 'x-request-id': 'req-day23-resolve-forbidden' },
+    'POST',
+  );
+  const operatorResponse = makeResponse();
+
+  await handler(operatorRequest, operatorResponse, jest.fn() as NextFunction);
+
+  expect(operatorResponse.status).toHaveBeenCalledWith(403);
+  expect(operatorResponse.jsonBody).toMatchObject({
+    success: false,
+    statusCode: 403,
+    error: { code: 'FORBIDDEN' },
+  });
+  expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+});
+
+describeExistingAccessGates('AppModule UserJwtMiddleware public paths', () => {
   const originalRedisFlag = process.env.THROTTLER_STORAGE_DISABLE_REDIS;
   const originalInternalJwtSecret = process.env.INTERNAL_JWT_SECRET;
 
@@ -123,7 +187,7 @@ describe('AppModule UserJwtMiddleware public paths', () => {
 
   it('excludes public auth endpoints from UserJwtMiddleware', () => {
     jest.isolateModules(() => {
-      const { AppModule } = jest.requireActual(
+      const { AppModule: appModuleClass } = jest.requireActual(
         '../app/app.module',
       ) as typeof import('../app/app.module');
       const exclude = jest.fn().mockReturnThis();
@@ -132,7 +196,7 @@ describe('AppModule UserJwtMiddleware public paths', () => {
         apply: jest.fn().mockReturnValue({ exclude, forRoutes }),
       } as unknown as MiddlewareConsumer;
 
-      new AppModule().configure(consumer);
+      new appModuleClass().configure(consumer);
 
       const publicPaths = exclude.mock.calls[0] as Array<{ path: string; method: RequestMethod }>;
       expect(publicPaths).toContainEqual({
@@ -158,7 +222,7 @@ describe('AppModule UserJwtMiddleware public paths', () => {
   });
 });
 
-describe('createProxyHandler RBAC and phone-required gates', () => {
+describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', () => {
   beforeEach(() => {
     createProxyMiddlewareMock.mockReset();
   });

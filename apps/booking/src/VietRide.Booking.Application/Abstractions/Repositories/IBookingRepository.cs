@@ -23,6 +23,20 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
     Task AcquireEventLockAsync(Guid sourceEventId, CancellationToken ct = default)
         => throw new NotSupportedException("Booking event lock is not implemented by this repository.");
 
+    Task<IReadOnlyList<BookingEntity>> GetScheduleChangeBookingsForUpdateAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Schedule-change projection lookup is not implemented by this repository.");
+
+    Task<bool> TryAdvanceTripCurrentDepartureAsync(
+        Guid bookingId,
+        DateTimeOffset expectedDeparture,
+        DateTimeOffset newDeparture,
+        DateTimeOffset updatedAt,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Schedule-change projection CAS is not implemented by this repository.");
+
     Task<IReadOnlyList<BookingEntity>> GetConfirmedByTripAsync(
         Guid tripId,
         Guid operatorId,
@@ -73,9 +87,6 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
     /// </summary>
     Task<BookingEntity?> FindByIdAsync(Guid bookingId, CancellationToken ct = default);
 
-    Task<BookingEntity?> FindByIdForUpdateAsync(Guid bookingId, CancellationToken ct = default)
-        => FindByIdAsync(bookingId, ct);
-
     Task<int> RelinkActiveStationReferencesAsync(
         IReadOnlyCollection<Guid> sourceStationIds,
         Guid canonicalStationId,
@@ -88,6 +99,13 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
     /// Used for saga compensation checks and cancellation.
     /// </summary>
     Task<BookingEntity?> FindByIdWithPassengersAsync(Guid bookingId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Locks one Booking aggregate for pending-action resolution and station-edit transactions.
+    /// Pending-action callers lock the action first so concurrent resolution paths use one order.
+    /// </summary>
+    Task<BookingEntity?> FindByIdForUpdateAsync(Guid bookingId, CancellationToken ct = default)
+        => throw new NotSupportedException("Booking pending-action lock lookup is not implemented by this repository.");
 
     /// <summary>
     /// Returns the data needed to replay the Trip seat-lock seam for a payment event.

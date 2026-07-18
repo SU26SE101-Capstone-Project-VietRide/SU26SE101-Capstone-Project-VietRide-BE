@@ -62,6 +62,54 @@ internal sealed class BookingRepository : IBookingRepository
             $"SELECT pg_advisory_xact_lock(hashtextextended({sourceEventId.ToString("N")}, 0))",
             ct);
 
+    public async Task<IReadOnlyList<BookingEntity>> GetScheduleChangeBookingsForUpdateAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => await _db.Bookings
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_booking.bookings
+                WHERE trip_id = {tripId}
+                  AND operator_id = {operatorId}
+                  AND status IN (
+                      CAST('PENDING_PAYMENT' AS public.booking_status),
+                      CAST('CONFIRMED' AS public.booking_status))
+                ORDER BY id
+                FOR UPDATE
+                """)
+            .ToListAsync(ct);
+
+    public async Task<bool> TryAdvanceTripCurrentDepartureAsync(
+        Guid bookingId,
+        DateTimeOffset expectedDeparture,
+        DateTimeOffset newDeparture,
+        DateTimeOffset updatedAt,
+        CancellationToken ct = default)
+    {
+        var expectedUtc = NormalizeToPostgresTimestamp(expectedDeparture);
+        var newUtc = NormalizeToPostgresTimestamp(newDeparture);
+        var updatedUtc = NormalizeToPostgresTimestamp(updatedAt);
+        return await _db.Bookings
+            .Where(booking => booking.Id == bookingId
+                && (booking.Status == BookingStatus.PENDING_PAYMENT
+                    || booking.Status == BookingStatus.CONFIRMED)
+                && booking.TripCurrentDeparture == expectedUtc)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(
+                    booking => booking.TripCurrentDeparture,
+                    newUtc)
+                .SetProperty(
+                    booking => booking.UpdatedAt,
+                    updatedUtc), ct) == 1;
+    }
+
+    private static DateTimeOffset NormalizeToPostgresTimestamp(DateTimeOffset value)
+    {
+        var utc = value.ToUniversalTime();
+        return utc.AddTicks(-(utc.Ticks % TimeSpan.TicksPerMicrosecond));
+    }
+
     public async Task<IReadOnlyList<BookingEntity>> GetConfirmedByTripAsync(
         Guid tripId,
         Guid operatorId,
@@ -236,6 +284,7 @@ internal sealed class BookingRepository : IBookingRepository
                 row.TripSnapshotOriginName,
                 row.TripSnapshotDestName,
                 row.TripSnapshotDeparture,
+                row.TripCurrentDeparture,
                 SeatCount = row.Passengers.Count,
                 BaseFare = row.BaseFare.Amount,
                 DiscountAmount = row.DiscountAmount.Amount,
@@ -267,7 +316,8 @@ internal sealed class BookingRepository : IBookingRepository
 
         return new OperatorBookingDetailDto(booking.Id, booking.BookingCode, booking.BuyerUserId, booking.TripId,
             booking.Status, new OperatorBookingTripDto(booking.TripSnapshotRouteName, booking.TripSnapshotOriginName,
-                booking.TripSnapshotDestName, booking.TripSnapshotDeparture), booking.SeatCount, booking.BaseFare,
+                booking.TripSnapshotDestName, booking.TripSnapshotDeparture, booking.TripCurrentDeparture),
+            booking.SeatCount, booking.BaseFare,
             booking.DiscountAmount, booking.TotalAmount, booking.PickupStationId, booking.PickupStopId,
             booking.DropoffStationId, booking.DropoffStopId, booking.BookingGroupId, booking.TripDirection,
             booking.CancellationReason, booking.CreatedAt, seats, timeline);
@@ -294,9 +344,9 @@ internal sealed class BookingRepository : IBookingRepository
         if (criteria.TripId.HasValue)
             query = query.Where(booking => booking.TripId == criteria.TripId.Value);
         if (criteria.DepartureFrom.HasValue)
-            query = query.Where(booking => booking.TripSnapshotDeparture >= criteria.DepartureFrom.Value);
+            query = query.Where(booking => booking.TripCurrentDeparture >= criteria.DepartureFrom.Value);
         if (criteria.DepartureTo.HasValue)
-            query = query.Where(booking => booking.TripSnapshotDeparture < criteria.DepartureTo.Value);
+            query = query.Where(booking => booking.TripCurrentDeparture < criteria.DepartureTo.Value);
         if (criteria.PassengerUserId.HasValue)
             query = query.Where(booking => booking.PassengerUserId == criteria.PassengerUserId.Value);
         var totalItems = await query.LongCountAsync(ct);
@@ -323,7 +373,8 @@ internal sealed class BookingRepository : IBookingRepository
                     booking.TripSnapshotRouteName,
                     booking.TripSnapshotOriginName,
                     booking.TripSnapshotDestName,
-                    booking.TripSnapshotDeparture),
+                    booking.TripSnapshotDeparture,
+                    booking.TripCurrentDeparture),
                 booking.Passengers.Count,
                 booking.TotalAmount.Amount,
                 booking.CreatedAt))
@@ -338,8 +389,8 @@ internal sealed class BookingRepository : IBookingRepository
         bool descending)
         => (sortBy, descending) switch
         {
-            ("departureAt", false) => query.OrderBy(x => x.TripSnapshotDeparture).ThenBy(x => x.Id),
-            ("departureAt", true) => query.OrderByDescending(x => x.TripSnapshotDeparture).ThenByDescending(x => x.Id),
+            ("departureAt", false) => query.OrderBy(x => x.TripCurrentDeparture).ThenBy(x => x.Id),
+            ("departureAt", true) => query.OrderByDescending(x => x.TripCurrentDeparture).ThenByDescending(x => x.Id),
             ("bookingCode", false) => query.OrderBy(x => x.BookingCode).ThenBy(x => x.Id),
             ("bookingCode", true) => query.OrderByDescending(x => x.BookingCode).ThenByDescending(x => x.Id),
             ("status", false) => query.OrderBy(x => x.Status).ThenBy(x => x.Id),
@@ -398,6 +449,7 @@ internal sealed class BookingRepository : IBookingRepository
 
         return await _db.Bookings
             .FromSqlInterpolated($"SELECT * FROM vietride_booking.bookings WHERE id = {bookingId} FOR UPDATE")
+            .Include(booking => booking.Tickets)
             .Include(booking => booking.ShuttleIntent)
             .SingleOrDefaultAsync(ct);
     }

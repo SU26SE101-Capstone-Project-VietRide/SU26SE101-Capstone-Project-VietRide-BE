@@ -25,6 +25,7 @@ public sealed class GetOperatorSummariesTests
             new GetOperatorSummariesQuery([first.Id, second.Id, Guid.NewGuid()]),
             CancellationToken.None);
 
+        result.Should().AllBeOfType<InternalOperatorSummaryDto>();
         result.Select(item => item.OperatorId).Should().Equal(expected.Select(item => item.Id));
         result.Select(item => item.OperatorName).Should().Equal(expected.Select(item => item.Name));
     }

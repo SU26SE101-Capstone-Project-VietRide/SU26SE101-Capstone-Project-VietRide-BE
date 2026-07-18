@@ -6,4 +6,5 @@ public sealed record UpdateBookingStatsCommand(
     string EventType,
     Guid BookingId,
     BookingStatsTransition Transition,
-    long Amount = 0) : IRequest<bool>;
+    long Amount = 0,
+    Guid? DedupeId = null) : IRequest<bool>;

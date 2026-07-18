@@ -8,11 +8,9 @@ import {
   TRIP_ASSIGNED_ROUTING_KEY,
   TRIP_CREW_CHANGED_ROUTING_KEY,
   TRIP_BOARDING_STARTED_ROUTING_KEY,
-  TRIP_CANCELLED_ROUTING_KEY,
   TRIP_DELAYED_ROUTING_KEY,
   TRIP_INCIDENT_REPORTED_ROUTING_KEY,
   TRIP_ROUTE_CHANGED_ROUTING_KEY,
-  TRIP_SCHEDULE_CHANGED_ROUTING_KEY,
   TRIP_STOP_DISABLED_ROUTING_KEY,
   TRIP_VEHICLE_SWAPPED_ROUTING_KEY,
 } from './trip-tracking-alert-events.constants';
@@ -22,19 +20,19 @@ const APPROACHING_WAVE_TWO = 2;
 const APPROACHING_WAVE_ONE_DEFAULT_ETA_MINUTES = 30;
 const APPROACHING_WAVE_TWO_DEFAULT_ETA_MINUTES = 10;
 
-const RecipientPayloadSchema = z.object({
+const recipientPayloadSchema = z.object({
   userId: z.string().uuid().optional(),
   userIds: z.array(z.string().uuid()).optional(),
   recipientUserIds: z.array(z.string().uuid()).optional(),
 });
 
-const BaseTripAlertPayloadSchema = z
+const baseTripAlertPayloadSchema = z
   .object({
     tripId: z.string().uuid(),
     routeName: z.string().trim().min(1).optional(),
     reason: z.string().trim().min(1).optional(),
   })
-  .merge(RecipientPayloadSchema)
+  .merge(recipientPayloadSchema)
   .passthrough()
   .superRefine((payload, ctx) => {
     if (!payload.userId && !payload.userIds?.length && !payload.recipientUserIds?.length) {
@@ -46,7 +44,7 @@ const BaseTripAlertPayloadSchema = z
     }
   });
 
-const TripAssignedPayloadSchema = z.object({
+const tripAssignedPayloadSchema = z.object({
   tripId: z.string().uuid(),
   operatorId: z.string().uuid(),
   driverUserId: z.string().uuid(),
@@ -55,7 +53,7 @@ const TripAssignedPayloadSchema = z.object({
   vehiclePlateNumber: z.string().trim().min(1),
   departureDateTime: z.string().datetime({ offset: true }),
 });
-const TripCrewChangedPayloadSchema = z.object({
+const tripCrewChangedPayloadSchema = z.object({
   tripId: z.string().uuid(),
   operatorId: z.string().uuid(),
   oldDriverUserId: z.string().uuid(),
@@ -66,40 +64,25 @@ const TripCrewChangedPayloadSchema = z.object({
   vehiclePlateNumber: z.string().trim().min(1).nullable().optional(),
   departureDateTime: z.string().datetime({ offset: true }),
 });
-const BoardingStartedPayloadSchema = BaseTripAlertPayloadSchema.and(
+const boardingStartedPayloadSchema = baseTripAlertPayloadSchema.and(
   z.object({ boardingStartedAt: z.string().datetime().optional() }),
 );
 
-const RouteChangedPayloadSchema = BaseTripAlertPayloadSchema.and(
+const routeChangedPayloadSchema = baseTripAlertPayloadSchema.and(
   z.object({
     alternativeRouteId: z.string().uuid().optional(),
     affectedBookingIds: z.array(z.string().uuid()).optional(),
   }),
 );
 
-const ScheduleChangedPayloadSchema = BaseTripAlertPayloadSchema.and(
-  z.object({
-    oldDeparture: z.string().datetime().optional(),
-    newDeparture: z.string().datetime().optional(),
-    severity: z.string().trim().min(1).optional(),
-  }),
-);
-
-const TripCancelledPayloadSchema = BaseTripAlertPayloadSchema.and(
-  z.object({
-    cancelledAt: z.string().datetime().optional(),
-    cancelReason: z.string().trim().min(1).optional(),
-  }),
-);
-
-const TripDelayedPayloadSchema = BaseTripAlertPayloadSchema.and(
+const tripDelayedPayloadSchema = baseTripAlertPayloadSchema.and(
   z.object({
     delayMinutes: z.number().int().nonnegative().optional(),
     etaNew: z.string().datetime().optional(),
   }),
 );
 
-export const IncidentReportedPayloadSchema = z
+const incidentReportedPayloadSchema = z
   .object({
     eventId: z.string().uuid().optional(),
     occurredAt: z.string().datetime({ offset: true }),
@@ -117,7 +100,8 @@ export const IncidentReportedPayloadSchema = z
   })
   .passthrough()
   .superRefine((payload, ctx) => {
-    if ((payload.latitude != null) !== (payload.longitude != null)) {
+    if ((payload.latitude !== null && payload.latitude !== undefined) !==
+        (payload.longitude !== null && payload.longitude !== undefined)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'Latitude and longitude must be supplied together',
@@ -126,11 +110,11 @@ export const IncidentReportedPayloadSchema = z
     }
   });
 
-const OffRoutePayloadSchema = BaseTripAlertPayloadSchema.and(
+const offRoutePayloadSchema = baseTripAlertPayloadSchema.and(
   z.object({ durationSeconds: z.number().int().nonnegative().optional() }),
 );
 
-const ApproachingStopPayloadSchema = BaseTripAlertPayloadSchema.and(
+const approachingStopPayloadSchema = baseTripAlertPayloadSchema.and(
   z.object({
     stopId: z.string().uuid(),
     stopName: z.string().trim().min(1).optional(),
@@ -141,7 +125,7 @@ const ApproachingStopPayloadSchema = BaseTripAlertPayloadSchema.and(
   }),
 );
 
-const StopDisabledPayloadSchema = z
+const stopDisabledPayloadSchema = z
   .object({
     stopId: z.string().uuid(),
     replacedByStopId: z.string().uuid().optional(),
@@ -149,7 +133,7 @@ const StopDisabledPayloadSchema = z
     routeName: z.string().trim().min(1).optional(),
     reason: z.string().trim().min(1).optional(),
   })
-  .merge(RecipientPayloadSchema)
+  .merge(recipientPayloadSchema)
   .passthrough()
   .superRefine((payload, ctx) => {
     if (!payload.userId && !payload.userIds?.length && !payload.recipientUserIds?.length) {
@@ -161,21 +145,21 @@ const StopDisabledPayloadSchema = z
     }
   });
 
-type TripAssignedPayload = z.infer<typeof TripAssignedPayloadSchema>;
-type TripCrewChangedPayload = z.infer<typeof TripCrewChangedPayloadSchema>;
-type RecipientPayload = z.infer<typeof RecipientPayloadSchema>;
-type BaseTripAlertPayload = z.infer<typeof BaseTripAlertPayloadSchema>;
-type ApproachingStopPayload = z.infer<typeof ApproachingStopPayloadSchema>;
-type StopDisabledPayload = z.infer<typeof StopDisabledPayloadSchema>;
-export type IncidentReportedPayload = z.infer<typeof IncidentReportedPayloadSchema>;
+type TripAssignedPayload = z.infer<typeof tripAssignedPayloadSchema>;
+type TripCrewChangedPayload = z.infer<typeof tripCrewChangedPayloadSchema>;
+type RecipientPayload = z.infer<typeof recipientPayloadSchema>;
+type BaseTripAlertPayload = z.infer<typeof baseTripAlertPayloadSchema>;
+type ApproachingStopPayload = z.infer<typeof approachingStopPayloadSchema>;
+type StopDisabledPayload = z.infer<typeof stopDisabledPayloadSchema>;
+export type IncidentReportedPayload = z.infer<typeof incidentReportedPayloadSchema>;
+
+export { incidentReportedPayloadSchema as IncidentReportedPayloadSchema };
 
 export type TripTrackingAlertRoutingKey =
   | typeof TRIP_ASSIGNED_ROUTING_KEY
   | typeof TRIP_CREW_CHANGED_ROUTING_KEY
   | typeof TRIP_BOARDING_STARTED_ROUTING_KEY
   | typeof TRIP_ROUTE_CHANGED_ROUTING_KEY
-  | typeof TRIP_SCHEDULE_CHANGED_ROUTING_KEY
-  | typeof TRIP_CANCELLED_ROUTING_KEY
   | typeof TRIP_VEHICLE_SWAPPED_ROUTING_KEY
   | typeof TRIP_DELAYED_ROUTING_KEY
   | typeof TRIP_INCIDENT_REPORTED_ROUTING_KEY
@@ -189,32 +173,28 @@ export function mapTripTrackingAlertToNotifications(
 ): CreateNotificationDto[] {
   switch (routingKey) {
     case TRIP_ASSIGNED_ROUTING_KEY:
-      return mapTripAssigned(TripAssignedPayloadSchema.parse(payload));
+      return mapTripAssigned(tripAssignedPayloadSchema.parse(payload));
     case TRIP_CREW_CHANGED_ROUTING_KEY:
-      return mapTripCrewChanged(TripCrewChangedPayloadSchema.parse(payload));
+      return mapTripCrewChanged(tripCrewChangedPayloadSchema.parse(payload));
     case TRIP_BOARDING_STARTED_ROUTING_KEY:
-      return fanOut(BoardingStartedPayloadSchema.parse(payload), mapBoardingStarted);
+      return fanOut(boardingStartedPayloadSchema.parse(payload), mapBoardingStarted);
     case TRIP_ROUTE_CHANGED_ROUTING_KEY:
-      return fanOut(RouteChangedPayloadSchema.parse(payload), mapRouteChanged);
-    case TRIP_SCHEDULE_CHANGED_ROUTING_KEY:
-      return fanOut(ScheduleChangedPayloadSchema.parse(payload), mapScheduleChanged);
-    case TRIP_CANCELLED_ROUTING_KEY:
-      return fanOut(TripCancelledPayloadSchema.parse(payload), mapTripCancelled);
+      return fanOut(routeChangedPayloadSchema.parse(payload), mapRouteChanged);
     case TRIP_VEHICLE_SWAPPED_ROUTING_KEY:
       return mapTripVehicleSwapped(TripVehicleSwappedEventSchema.parse(payload));
     case TRIP_DELAYED_ROUTING_KEY:
-      return fanOut(TripDelayedPayloadSchema.parse(payload), mapTripDelayed);
+      return fanOut(tripDelayedPayloadSchema.parse(payload), mapTripDelayed);
     case TRIP_INCIDENT_REPORTED_ROUTING_KEY: {
-      const incident = IncidentReportedPayloadSchema.parse(payload);
-      const recipients = RecipientPayloadSchema.parse(payload);
+      const incident = incidentReportedPayloadSchema.parse(payload);
+      const recipients = recipientPayloadSchema.parse(payload);
       return mapIncidentReportedToNotifications(incident, collectRecipientUserIds(recipients));
     }
     case TRIP_STOP_DISABLED_ROUTING_KEY:
-      return fanOut(StopDisabledPayloadSchema.parse(payload), mapStopDisabled);
+      return fanOut(stopDisabledPayloadSchema.parse(payload), mapStopDisabled);
     case TRACKING_GPS_OFF_ROUTE_ROUTING_KEY:
-      return fanOut(OffRoutePayloadSchema.parse(payload), mapOffRoute);
+      return fanOut(offRoutePayloadSchema.parse(payload), mapOffRoute);
     case TRACKING_GPS_APPROACHING_STOP_ROUTING_KEY:
-      return fanOut(ApproachingStopPayloadSchema.parse(payload), mapApproachingStop);
+      return fanOut(approachingStopPayloadSchema.parse(payload), mapApproachingStop);
   }
 }
 
@@ -278,7 +258,7 @@ function mapTripCrewChanged(payload: TripCrewChangedPayload): CreateNotification
 }
 function mapBoardingStarted(
   userId: string,
-  payload: z.infer<typeof BoardingStartedPayloadSchema>,
+  payload: z.infer<typeof boardingStartedPayloadSchema>,
 ): CreateNotificationDto {
   return {
     userId,
@@ -291,41 +271,13 @@ function mapBoardingStarted(
 
 function mapRouteChanged(
   userId: string,
-  payload: z.infer<typeof RouteChangedPayloadSchema>,
+  payload: z.infer<typeof routeChangedPayloadSchema>,
 ): CreateNotificationDto {
   return {
     userId,
     type: NotificationType.TRIP_ROUTE_CHANGED,
     title: 'Lo trinh chuyen xe da thay doi',
     body: `${formatTripLabel(payload)} co dieu chinh lo trinh. Vui long kiem tra thong tin moi.`,
-    data: buildTripData(payload),
-  };
-}
-
-function mapScheduleChanged(
-  userId: string,
-  payload: z.infer<typeof ScheduleChangedPayloadSchema>,
-): CreateNotificationDto {
-  return {
-    userId,
-    type: NotificationType.TRIP_SCHEDULE_CHANGED,
-    title: 'Lich chuyen xe da thay doi',
-    body: `${formatTripLabel(payload)} co thay doi lich trinh. Vui long kiem tra gio khoi hanh moi.`,
-    data: buildTripData(payload),
-  };
-}
-
-function mapTripCancelled(
-  userId: string,
-  payload: z.infer<typeof TripCancelledPayloadSchema>,
-): CreateNotificationDto {
-  const reason = payload.cancelReason ?? payload.reason;
-
-  return {
-    userId,
-    type: NotificationType.TRIP_CANCELLED,
-    title: 'Chuyen xe da bi huy',
-    body: `${formatTripLabel(payload)} da bi huy.${reason ? ` Ly do: ${reason}.` : ''}`,
     data: buildTripData(payload),
   };
 }
@@ -359,7 +311,7 @@ function mapTripVehicleSwapped(
 
 function mapTripDelayed(
   userId: string,
-  payload: z.infer<typeof TripDelayedPayloadSchema>,
+  payload: z.infer<typeof tripDelayedPayloadSchema>,
 ): CreateNotificationDto {
   const delayText = payload.delayMinutes ? ` Du kien tre ${payload.delayMinutes} phut.` : '';
 
@@ -394,7 +346,7 @@ export function mapIncidentReportedToNotifications(
 
 function mapOffRoute(
   userId: string,
-  payload: z.infer<typeof OffRoutePayloadSchema>,
+  payload: z.infer<typeof offRoutePayloadSchema>,
 ): CreateNotificationDto {
   return {
     userId,

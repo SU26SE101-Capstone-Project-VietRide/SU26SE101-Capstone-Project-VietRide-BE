@@ -228,7 +228,8 @@ public sealed class CreateBookingCommandHandler
                 tripSnapshotDestName: trip.DestinationStation.Name,
                 tripSnapshotDeparture: trip.DepartureDateTime,
                 tripSnapshotRouteName: null,
-                seatLockToken: seatLockToken);
+                seatLockToken: seatLockToken,
+                tripCurrentDeparture: trip.DepartureDateTime);
 
             // Add passenger rows (operational-only — no PII stored)
             var ticketAllocations = BuildTicketAllocations(request.Seats, perSeatFare, discountAmount, now);

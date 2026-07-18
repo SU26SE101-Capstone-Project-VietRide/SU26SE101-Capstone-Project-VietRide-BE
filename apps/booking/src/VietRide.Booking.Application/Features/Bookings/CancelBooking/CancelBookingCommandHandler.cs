@@ -145,19 +145,21 @@ public sealed class CancelBookingCommandHandler : IRequestHandler<CancelBookingC
                 booking.Id);
         }
 
-        var cancelledEvent = new
-        {
-            bookingId = booking.Id,
-            bookingCode = booking.BookingCode.Value,
-            userId = booking.PassengerUserId,
-            refundAmount = refundAmount.Amount,
+        var eventId = Guid.NewGuid();
+        var cancelledEvent = new Events.BookingCancelledIntegrationEvent(
+            eventId,
+            now,
+            booking.Id,
+            booking.BookingCode.Value,
+            booking.PassengerUserId,
+            refundAmount.Amount,
             refundOverride,
-            cancellationReason = reason.ToString(),
-            ticketCodes = booking.Tickets.Select(ticket => ticket.TicketCode.Value).ToArray(),
-            ticketCount = booking.Tickets.Count,
-        };
+            reason.ToString(),
+            booking.Tickets.Select(ticket => ticket.TicketCode.Value).ToArray(),
+            booking.Tickets.Count);
 
         await _outbox.EnqueueAsync(
+            eventId,
             EventType,
             JsonSerializer.Serialize(cancelledEvent, JsonOptions),
             cancellationToken);

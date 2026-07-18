@@ -8,6 +8,7 @@ using VietRide.Booking.Domain.Enums;
 using VietRide.Booking.Domain.ValueObjects;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 using BookingEntity = VietRide.Booking.Domain.Entities.Booking;
 
@@ -27,6 +28,7 @@ public sealed class HandleTripCancelledCommandHandlerTests
         var fixture = new Fixture([pending, confirmed]);
         var payloads = new List<string>();
         fixture.Outbox.EnqueueAsync(
+                Arg.Any<Guid>(),
                 "booking.booking.cancelled",
                 Arg.Do<string>(payloads.Add),
                 Arg.Any<CancellationToken>())
@@ -64,6 +66,7 @@ public sealed class HandleTripCancelledCommandHandlerTests
         (await fixture.Handler.Handle(Command(), CancellationToken.None)).Should().Be(0);
 
         await fixture.Outbox.Received(1).EnqueueAsync(
+            Arg.Any<Guid>(),
             "booking.booking.cancelled",
             Arg.Any<string>(),
             Arg.Any<CancellationToken>());
@@ -109,7 +112,9 @@ public sealed class HandleTripCancelledCommandHandlerTests
         using var document = JsonDocument.Parse(payload);
         var root = document.RootElement;
         return root.EnumerateObject().Select(property => property.Name).ToHashSet(StringComparer.Ordinal).SetEquals(
-                ["bookingId", "bookingCode", "userId", "refundAmount", "refundOverride", "cancellationReason", "ticketCodes", "ticketCount"])
+                ["eventId", "occurredAt", "bookingId", "bookingCode", "userId", "refundAmount", "refundOverride", "cancellationReason", "ticketCodes", "ticketCount"])
+            && root.GetProperty("eventId").GetGuid() != Guid.Empty
+            && root.GetProperty("occurredAt").GetDateTimeOffset() == OccurredAt
             && root.GetProperty("refundOverride").GetBoolean()
             && root.GetProperty("cancellationReason").GetString() == "OPERATOR_CANCELLED_TRIP";
     }
@@ -131,13 +136,15 @@ public sealed class HandleTripCancelledCommandHandlerTests
             Bookings.GetCancellableByTripAsync(TripId, OperatorId, Arg.Any<CancellationToken>()).Returns(bookings);
             UnitOfWork.ExecuteInTransactionAsync(Arg.Any<Func<Task<int>>>(), Arg.Any<CancellationToken>())
                 .Returns(call => call.Arg<Func<Task<int>>>()());
-            Handler = new HandleTripCancelledCommandHandler(Bookings, History, Outbox, UnitOfWork);
+            Clock.UtcNow.Returns(OccurredAt);
+            Handler = new HandleTripCancelledCommandHandler(Bookings, History, Outbox, UnitOfWork, Clock);
         }
 
         public IBookingRepository Bookings { get; } = Substitute.For<IBookingRepository>();
         public IBookingStatusHistoryRepository History { get; } = Substitute.For<IBookingStatusHistoryRepository>();
         public IIntegrationEventOutbox Outbox { get; } = Substitute.For<IIntegrationEventOutbox>();
         public IUnitOfWork UnitOfWork { get; } = Substitute.For<IUnitOfWork>();
+        public IClock Clock { get; } = Substitute.For<IClock>();
         public HandleTripCancelledCommandHandler Handler { get; }
     }
 }

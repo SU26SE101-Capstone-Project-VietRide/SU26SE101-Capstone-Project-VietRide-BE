@@ -9,7 +9,9 @@ using VietRide.Booking.Application.Features.Bookings.CreateRoundTripBooking;
 using VietRide.Booking.Application.Features.Bookings.EditDropoff;
 using VietRide.Booking.Application.Features.Bookings.EditPickup;
 using VietRide.Booking.Application.Features.Bookings.GetBookingStatus;
+using VietRide.Booking.Application.Features.Bookings.ResolvePendingAction;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Booking.Api.Controllers;
 
@@ -243,6 +245,48 @@ public sealed class BookingsController : ControllerBase
         var result = await _sender.Send(command, ct);
 
         return StatusCode(StatusCodes.Status200OK, result);
+    }
+
+    /// <summary>Resolve a persisted passenger schedule-change action.</summary>
+    [HttpPost("{bookingId}/pending-actions/{actionId}/resolve")]
+    [Authorize(Roles = PassengerRole)]
+    [RequireIdempotency]
+    [ProducesResponseType(typeof(ApiResponse<ResolvePendingActionResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ResolvePendingAction(
+        [FromRoute] string bookingId,
+        [FromRoute] string actionId,
+        [FromBody] ResolvePendingActionRequest request,
+        CancellationToken ct)
+    {
+        var command = new ResolvePendingActionCommand(
+            ParseRouteGuid(bookingId, nameof(bookingId)),
+            ParseRouteGuid(actionId, nameof(actionId)),
+            GetPassengerUserId(),
+            Request.Headers[IdempotencyKeyHeader].ToString(),
+            request.Action,
+            request.Note,
+            request.ExtraFields?.Keys.ToArray() ?? []);
+        var result = await _sender.Send(command, ct);
+
+        return StatusCode(StatusCodes.Status200OK, result);
+    }
+
+    private static Guid ParseRouteGuid(string value, string field)
+    {
+        if (Guid.TryParse(value, out var parsed) && parsed != Guid.Empty)
+        {
+            return parsed;
+        }
+
+        throw new VietRide.Shared.Application.Exceptions.CodedValidationException(
+            "VALIDATION_ERROR",
+            "Route value must be a UUID.",
+            [new VietRide.Shared.Application.Exceptions.ValidationError(field, "Must be a valid UUID.")]);
     }
 
     // -----------------------------------------------------------------------

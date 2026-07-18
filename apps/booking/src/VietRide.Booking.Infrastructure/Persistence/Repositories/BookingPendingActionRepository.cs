@@ -19,6 +19,35 @@ internal sealed class BookingPendingActionRepository(BookingDbContext db) : IBoo
     public IQueryable<BookingPendingAction> Query() => db.BookingPendingActions;
     public IQueryable<BookingPendingAction> QueryNoTracking() => db.BookingPendingActions.AsNoTracking();
 
+    public Task<BookingPendingAction?> GetByIdForUpdateAsync(
+        Guid actionId,
+        CancellationToken ct = default)
+        => db.BookingPendingActions
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_booking.booking_pending_actions
+                WHERE id = {actionId}
+                FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(ct);
+
+    public async Task<IReadOnlyList<BookingPendingAction>> GetActiveByTripForUpdateAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => await db.BookingPendingActions
+            .FromSqlInterpolated($"""
+                SELECT action.*
+                FROM vietride_booking.booking_pending_actions AS action
+                INNER JOIN vietride_booking.bookings AS booking ON booking.id = action.booking_id
+                WHERE booking.trip_id = {tripId}
+                  AND booking.operator_id = {operatorId}
+                  AND action.resolved_at IS NULL
+                ORDER BY action.id
+                FOR UPDATE OF action
+                """)
+            .ToListAsync(ct);
+
     public Task<BookingPendingAction?> GetActiveByBookingIdAsync(Guid bookingId, CancellationToken ct = default)
         => db.BookingPendingActions
             .FirstOrDefaultAsync(action => action.BookingId == bookingId && action.ResolvedAt == null, ct);

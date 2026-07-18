@@ -78,7 +78,7 @@ describe('TripTrackingAlertEventsConsumer', () => {
       queue: 'notification:trip-vehicle-swapped-crew',
       routingKey: TRIP_VEHICLE_SWAPPED_ROUTING_KEY,
     });
-    expect(TRIP_TRACKING_ALERT_QUEUE_BINDINGS).toEqual(
+    expect(TRIP_TRACKING_ALERT_QUEUE_BINDINGS).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ routingKey: 'trip.trip.schedule_changed' }),
         expect.objectContaining({ routingKey: 'trip.trip.cancelled' }),

@@ -183,22 +183,19 @@ describe('mapTripTrackingAlertToNotifications', () => {
   });
 
   it('maps off-route alert', () => {
-    expect(
-      mapTripTrackingAlertToNotifications(TRACKING_GPS_OFF_ROUTE_ROUTING_KEY, {
+    const notifications = mapTripTrackingAlertToNotifications(
+      TRACKING_GPS_OFF_ROUTE_ROUTING_KEY,
+      {
         recipientUserIds: [USER_ID],
         tripId: TRIP_ID,
         durationSeconds: 180,
-      }),
-    ).toEqual([
-      expect.objectContaining({
-        type: NotificationType.OFF_ROUTE_ALERT,
-        title: 'Canh bao xe lech lo trinh',
-        data: expect.objectContaining({
-          tripId: TRIP_ID,
-          durationSeconds: 180,
-        }),
-      }),
-    ]);
+      },
+    );
+
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]?.type).toBe(NotificationType.OFF_ROUTE_ALERT);
+    expect(notifications[0]?.title).toBe('Canh bao xe lech lo trinh');
+    expect(notifications[0]?.data).toMatchObject({ tripId: TRIP_ID, durationSeconds: 180 });
   });
 
   it('maps canonical incident to deduplicated resolved recipients without sensitive data', () => {
@@ -238,25 +235,22 @@ describe('mapTripTrackingAlertToNotifications', () => {
   });
 
   it('maps stop disabled event for explicit recipients', () => {
-    expect(
-      mapTripTrackingAlertToNotifications(TRIP_STOP_DISABLED_ROUTING_KEY, {
+    const notifications = mapTripTrackingAlertToNotifications(TRIP_STOP_DISABLED_ROUTING_KEY, {
         userId: USER_ID,
         stopId: STOP_ID,
         stopName: 'Ben xe Da Lat',
         replacedByStopId: '66666666-6666-4666-8666-666666666666',
-      }),
-    ).toEqual([
-      expect.objectContaining({
-        userId: USER_ID,
-        type: NotificationType.STOP_DISABLED,
-        title: 'Diem dung tam ngung phuc vu',
-        body: expect.stringContaining('Ben xe Da Lat'),
-        data: expect.objectContaining({
-          stopId: STOP_ID,
-          replacedByStopId: '66666666-6666-4666-8666-666666666666',
-        }),
-      }),
-    ]);
+      });
+
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]?.userId).toBe(USER_ID);
+    expect(notifications[0]?.type).toBe(NotificationType.STOP_DISABLED);
+    expect(notifications[0]?.title).toBe('Diem dung tam ngung phuc vu');
+    expect(notifications[0]?.body).toContain('Ben xe Da Lat');
+    expect(notifications[0]?.data).toMatchObject({
+      stopId: STOP_ID,
+      replacedByStopId: '66666666-6666-4666-8666-666666666666',
+    });
   });
 
   it('rejects payload without recipient user id', () => {

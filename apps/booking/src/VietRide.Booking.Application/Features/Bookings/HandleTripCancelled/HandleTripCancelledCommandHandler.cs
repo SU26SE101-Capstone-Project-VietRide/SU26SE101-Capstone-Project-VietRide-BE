@@ -7,6 +7,7 @@ using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Booking.Application.Features.Bookings.HandleTripCancelled;
 
@@ -14,7 +15,8 @@ public sealed class HandleTripCancelledCommandHandler(
     IBookingRepository bookings,
     IBookingStatusHistoryRepository statusHistory,
     IIntegrationEventOutbox outbox,
-    IUnitOfWork unitOfWork) : IRequestHandler<HandleTripCancelledCommand, int>
+    IUnitOfWork unitOfWork,
+    IClock clock) : IRequestHandler<HandleTripCancelledCommand, int>
 {
     public const string DriverScheduleDayRemovedReason = "DRIVER_SCHEDULE_DAY_REMOVED";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -53,7 +55,11 @@ public sealed class HandleTripCancelledCommandHandler(
                         BookingCancellationReason.OPERATOR_CANCELLED_TRIP.ToString()),
                     cancellationToken);
 
+                var eventId = Guid.NewGuid();
+                var occurredAt = clock.UtcNow;
                 var cancelled = new BookingCancelledIntegrationEvent(
+                    eventId,
+                    occurredAt,
                     booking.Id,
                     booking.BookingCode.Value,
                     booking.PassengerUserId,
@@ -63,6 +69,7 @@ public sealed class HandleTripCancelledCommandHandler(
                     booking.Tickets.Select(ticket => ticket.TicketCode.Value).Order(StringComparer.Ordinal).ToArray(),
                     booking.Tickets.Count);
                 await outbox.EnqueueAsync(
+                    eventId,
                     BookingCancelledIntegrationEvent.EventTypeValue,
                     JsonSerializer.Serialize(cancelled, JsonOptions),
                     cancellationToken);

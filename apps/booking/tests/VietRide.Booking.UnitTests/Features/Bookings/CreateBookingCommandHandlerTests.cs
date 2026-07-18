@@ -125,6 +125,8 @@ public class CreateBookingCommandHandlerTests
         await _bookings.Received(1)
             .AddAsync(
                 Arg.Is<BookingEntity>(booking => booking.SeatLockToken == SeatLockToken
+                    && booking.TripSnapshotDeparture == ValidTrip.DepartureDateTime
+                    && booking.TripCurrentDeparture == ValidTrip.DepartureDateTime
                     && booking.PickupStationId == canonicalStationId),
                 Arg.Any<CancellationToken>());
         canonicalizer.LockRequests.Should().ContainSingle()

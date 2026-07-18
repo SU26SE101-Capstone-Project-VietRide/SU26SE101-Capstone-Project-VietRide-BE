@@ -16,7 +16,7 @@ describe('BookingTripChangeEventsConsumer registration (e2e)', () => {
     expect(providers).toContain(BookingTripChangeEventsConsumer);
   });
 
-  it('registers exactly the four Booking-owned Day-22 passenger subscriptions', async () => {
+  it('registers the Booking-owned passenger subscriptions', async () => {
     const subscribe = jest.fn();
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -32,7 +32,7 @@ describe('BookingTripChangeEventsConsumer registration (e2e)', () => {
 
     await moduleRef.init();
 
-    expect(subscribe).toHaveBeenCalledTimes(4);
+    expect(subscribe).toHaveBeenCalledTimes(5);
     for (const binding of BOOKING_TRIP_CHANGE_QUEUE_BINDINGS) {
       expect(subscribe).toHaveBeenCalledWith(
         binding.queue,

@@ -1,5 +1,6 @@
 export * from './events/identity-events';
 export * from './events/booking-created.event';
+export * from './events/booking-cancelled.event';
 export * from './events/trip-completed.event';
 export * from './events/payment-succeeded.event';
 export * from './events/trip-vehicle-swapped.event';
@@ -9,6 +10,7 @@ export * from './events/booking-seat-reassignment-required.event';
 export * from './events/booking-schedule-change-informational.event';
 export * from './events/booking-schedule-change-required.event';
 export * from './events/booking-pending-action-realerted.event';
+export * from './events/booking-pending-action-auto-resolved.event';
 export * from './events/subscription-payment-succeeded.event';
 export * from './events/invoice-issued.event';
 export * from './events/trip-settlement-completed.event';
