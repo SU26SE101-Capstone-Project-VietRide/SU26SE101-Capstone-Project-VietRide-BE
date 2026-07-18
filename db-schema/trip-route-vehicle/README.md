@@ -28,7 +28,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 | `Trip` | Chuyến cụ thể. | snapshot `baseFare`/`estimatedPassengerLuggageKg`/`maxCargoWeightKg`, nullable trimmed `notes` (max 2000), 2 cargo counter, `source` enum, `hasSubstitution` |
 | `TripAuditLog` | Append-only audit do Trip service sở hữu. | local `tripId` FK; logical `actorUserId`; JSONB metadata |
 | `TripSeat` | Trạng thái từng ghế per trip. | composite UNIQUE `(tripId, seatNumber)`, `status` enum |
-| `TripStop` | Snapshot RouteStop khi generate. | composite PK, `estimatedArrivalTime` static, `actualArrivalTime` set bởi Assistant |
+| `TripStop` | Snapshot RouteStop khi generate. | composite PK, `estimatedArrivalTime` static, nullable `actualArrivalTime`, nullable `actual_departure_time` persisted when assigned crew departs an arrived stop |
 | `TripStopFare` | Exception per trip per stop. | `source=TEMPLATE_SNAPSHOT|MANUAL_OVERRIDE`; Day 22 chỉ tạo mới `MANUAL_OVERRIDE` |
 | `DriverSchedule` | Recurring assignment driver/assistant↔vehicle↔route. | `dayOfWeek` JSONB array, `departureTime` TIME, `validFrom`/`validUntil` |
 | `DriverScheduleAuditLog` | Append-only audit do Trip service sở hữu. | local `driverScheduleId` FK; logical `actorUserId`; JSONB metadata |

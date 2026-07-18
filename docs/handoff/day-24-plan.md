@@ -577,7 +577,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Notification migration diff hygiene failed' }
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
 | 24.0 | ✅ done | APPROVE | 2026-07-18 | 2 patch rounds; no scope expansion; DOCS gate 20/20. |
-| 24.0a | ◌ todo | — | — | Trip EF migration; depends on 24.0 |
+| 24.0a | ✅ done | APPROVE | 2026-07-18 | Trip EF migration; no patch round or scope expansion; 2/2 focused tests. |
 | 24.0b | ◌ todo | — | — | Notification Prisma migration; depends on 24.0 |
 | 24.1 | ◌ todo | — | — | — |
 | 24.2 | ◌ todo | — | — | — |

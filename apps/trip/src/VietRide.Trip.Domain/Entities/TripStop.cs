@@ -19,6 +19,7 @@ public sealed class TripStop : BaseEntity<Guid>
     public int OrderIndex { get; private set; }
     public DateTimeOffset EstimatedArrivalTime { get; private set; }
     public DateTimeOffset? ActualArrivalTime { get; private set; }
+    public DateTimeOffset? ActualDepartureTime { get; private set; }
     public TripStopStatus Status { get; private set; } = TripStopStatus.PENDING;
     public bool AllowPickup { get; private set; }
     public bool AllowDropoff { get; private set; }
