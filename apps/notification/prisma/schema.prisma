@@ -59,6 +59,7 @@ enum NotificationType {
   SHUTTLE_ASSIGNED
   SHUTTLE_UNFULFILLED
   SHUTTLE_WARNING
+  DRIVER_STOP_DEPARTED_WITH_PENDING
 
   @@map("notification_type")
   @@schema("vietride_notification")

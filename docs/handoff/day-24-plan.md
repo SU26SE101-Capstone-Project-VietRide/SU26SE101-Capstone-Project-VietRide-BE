@@ -277,16 +277,25 @@ if ($LASTEXITCODE -ne 0) { throw 'Notification Prisma client generation failed' 
 
 $count=docker compose -f $compose exec -T postgres psql -U vietride -d $db -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='vietride_notification' AND t.typname='notification_type' AND e.enumlabel='DRIVER_STOP_DEPARTED_WITH_PENDING';"
 if ($LASTEXITCODE -ne 0 -or ($count -join '').Trim() -ne '1') { throw 'Notification enum apply assertion failed' }
+# Canonical artifacts retain their established order. Historical migrations append several
+# existing labels later than that artifact order; the fresh database must preserve that
+# historical order and append only the Day-24 value without rewriting old migrations.
 $canonicalExistingLabels=@('BOOKING_CONFIRMED','BOOKING_CANCELLED','BOOKING_DISRUPTED','BOOKING_REFUNDED','PASSENGER_NO_SHOW','TRIP_BOARDING_REMINDER','TRIP_VEHICLE_APPROACHING','TRIP_ROUTE_CHANGED','TRIP_SCHEDULE_CHANGED','TRIP_CANCELLED','TRIP_DELAYED','TRIP_DISRUPTED','STOP_DISABLED','VEHICLE_SUBSTITUTED','VEHICLE_SWAPPED','PARCEL_LOADED','PARCEL_IN_TRANSIT','PARCEL_DELIVERED_PENDING_CONFIRM','PARCEL_REJECTED','PARCEL_RETURNED','WALLET_CREDITED','WALLET_DEBITED','INCIDENT_REPORTED','OFF_ROUTE_ALERT','TRIP_DELAYED_ALERT','CARGO_NEAR_FULL_ALERT','PARCEL_REVIEW_REQUESTED','VOUCHER_CONSENT_REQUESTED','VOUCHER_CONSENT_ACCEPTED','VOUCHER_CONSENT_REJECTED','SUBSCRIPTION_LIMIT_EXCEEDED','SUBSCRIPTION_TRIAL_EXPIRING','SUBSCRIPTION_EXPIRED','SUBSCRIPTION_APPROVED','SUBSCRIPTION_PAYMENT_PENDING_WARN','SUBSCRIPTION_PAYMENT_AUTO_REVERTED','INVOICE_ISSUED','DRIVER_SCHEDULE_EDITED','PAYOUT_PROCESSED','PAYOUT_FAILED','OPERATOR_APPROVED','OPERATOR_SUSPENDED','TRIP_ASSIGNED','TRIP_ASSIGNMENT_REMOVED','OPERATOR_ANNOUNCEMENT','SHUTTLE_ASSIGNED','SHUTTLE_UNFULFILLED','SHUTTLE_WARNING')
 $labelsExpected=$canonicalExistingLabels+@('DRIVER_STOP_DEPARTED_WITH_PENDING')
+$historicalExistingLabels=@('BOOKING_CONFIRMED','BOOKING_CANCELLED','BOOKING_DISRUPTED','BOOKING_REFUNDED','PASSENGER_NO_SHOW','TRIP_BOARDING_REMINDER','TRIP_VEHICLE_APPROACHING','TRIP_ROUTE_CHANGED','TRIP_SCHEDULE_CHANGED','TRIP_CANCELLED','TRIP_DELAYED','TRIP_DISRUPTED','VEHICLE_SUBSTITUTED','VEHICLE_SWAPPED','PARCEL_LOADED','PARCEL_IN_TRANSIT','PARCEL_DELIVERED_PENDING_CONFIRM','PARCEL_REJECTED','PARCEL_RETURNED','WALLET_CREDITED','WALLET_DEBITED','INCIDENT_REPORTED','OFF_ROUTE_ALERT','TRIP_DELAYED_ALERT','CARGO_NEAR_FULL_ALERT','PARCEL_REVIEW_REQUESTED','VOUCHER_CONSENT_REQUESTED','SUBSCRIPTION_LIMIT_EXCEEDED','SUBSCRIPTION_TRIAL_EXPIRING','SUBSCRIPTION_EXPIRED','SUBSCRIPTION_APPROVED','DRIVER_SCHEDULE_EDITED','PAYOUT_PROCESSED','PAYOUT_FAILED','OPERATOR_APPROVED','OPERATOR_SUSPENDED','STOP_DISABLED','VOUCHER_CONSENT_ACCEPTED','VOUCHER_CONSENT_REJECTED','SUBSCRIPTION_PAYMENT_PENDING_WARN','SUBSCRIPTION_PAYMENT_AUTO_REVERTED','TRIP_ASSIGNED','TRIP_ASSIGNMENT_REMOVED','OPERATOR_ANNOUNCEMENT','SHUTTLE_ASSIGNED','SHUTTLE_UNFULFILLED','SHUTTLE_WARNING','INVOICE_ISSUED')
+$databaseLabelsExpected=$historicalExistingLabels+@('DRIVER_STOP_DEPARTED_WITH_PENDING')
 $notificationDdl=Get-Content -Raw -Encoding UTF8 'db-schema/notification/schema.sql'
 $notificationReadme=Get-Content -Raw -Encoding UTF8 'db-schema/notification/README.md'
 foreach($artifact in @(@{Name='db-schema/notification/schema.sql';Text=$notificationDdl},@{Name='db-schema/notification/README.md';Text=$notificationReadme})){ $previous=-1; foreach($label in $labelsExpected){ $position=$artifact.Text.IndexOf($label); if($position -lt 0 -or $position -le $previous){ throw "Canonical NotificationType order/content is missing or reordered in $($artifact.Name): $label" }; $previous=$position } }
 $labelsSql="SELECT string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder) FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='vietride_notification' AND t.typname='notification_type';"
 $labels=(docker compose -f $compose exec -T postgres psql -U vietride -d $db -At -v ON_ERROR_STOP=1 -c $labelsSql | Out-String).Trim()
-if($labels -ne ($labelsExpected -join ',')){throw "Notification enum labels differ from canonical fixture: $labels"}
-$fixtureSql="INSERT INTO \"vietride_notification\".\"notifications\" (\"id\",\"user_id\",\"type\",\"title\",\"body\",\"data\",\"created_at\") VALUES ('00000000-0000-0000-0000-000000000024','00000000-0000-0000-0000-000000000025','PASSENGER_NO_SHOW','day24 fixture','day24 fixture','{}'::jsonb,NOW());"
-$fixtureCountSql="SELECT count(*) FROM \"vietride_notification\".\"notifications\" WHERE \"id\"='00000000-0000-0000-0000-000000000024';"
+if($labels -ne ($databaseLabelsExpected -join ',')){throw "Notification enum labels differ from historical fixture: $labels"}
+$fixtureSql=@'
+INSERT INTO "vietride_notification"."notifications" ("id","user_id","type","title","body","data","created_at") VALUES ('00000000-0000-0000-0000-000000000024','00000000-0000-0000-0000-000000000025','PASSENGER_NO_SHOW','day24 fixture','day24 fixture','{}'::jsonb,NOW());
+'@
+$fixtureCountSql=@'
+SELECT count(*) FROM "vietride_notification"."notifications" WHERE "id"='00000000-0000-0000-0000-000000000024';
+'@
 $fixtureSql | docker compose -f $compose exec -T postgres psql -U vietride -d $db -v ON_ERROR_STOP=1
 if($LASTEXITCODE -ne 0){throw 'Notification legacy fixture insert failed'}
 
@@ -311,13 +320,13 @@ if ($LASTEXITCODE -ne 0) { throw 'Notification scratch Down proof failed' }
 $downCount=docker compose -f $compose exec -T postgres psql -U vietride -d $db -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='vietride_notification' AND t.typname='notification_type' AND e.enumlabel='DRIVER_STOP_DEPARTED_WITH_PENDING';"
 if ($LASTEXITCODE -ne 0 -or ($downCount -join '').Trim() -ne '0') { throw 'Notification scratch Down assertion failed' }
 $downLabels=(docker compose -f $compose exec -T postgres psql -U vietride -d $db -At -v ON_ERROR_STOP=1 -c $labelsSql | Out-String).Trim()
-if($downLabels -ne ($canonicalExistingLabels -join ',')){throw 'Notification Down changed an existing enum label or order'}
+if($downLabels -ne ($historicalExistingLabels -join ',')){throw 'Notification Down changed an existing historical enum label or order'}
 $downFixture=(docker compose -f $compose exec -T postgres psql -U vietride -d $db -At -v ON_ERROR_STOP=1 -c $fixtureCountSql | Out-String).Trim()
 if($downFixture -ne '1'){throw 'Notification Down did not preserve legacy fixture data'}
 Get-Content -Raw -LiteralPath $migration | docker compose -f $compose exec -T postgres psql -U vietride -d $db -v ON_ERROR_STOP=1
 if ($LASTEXITCODE -ne 0) { throw 'Notification migration SQL reapply failed' }
 $reapplyLabels=(docker compose -f $compose exec -T postgres psql -U vietride -d $db -At -v ON_ERROR_STOP=1 -c $labelsSql | Out-String).Trim()
-if($reapplyLabels -ne ($labelsExpected -join ',')){throw 'Notification reapply enum labels differ from canonical fixture'}
+if($reapplyLabels -ne ($databaseLabelsExpected -join ',')){throw 'Notification reapply enum labels differ from historical fixture'}
 $reapplyFixture=(docker compose -f $compose exec -T postgres psql -U vietride -d $db -At -v ON_ERROR_STOP=1 -c $fixtureCountSql | Out-String).Trim()
 if($reapplyFixture -ne '1'){throw 'Notification reapply did not preserve legacy fixture data'}
 npx prisma migrate diff --from-url $env:NOTIFICATION_DATABASE_URL --to-schema-datamodel $schema --exit-code
@@ -578,7 +587,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Notification migration diff hygiene failed' }
 |---|---|---|---|---|
 | 24.0 | ✅ done | APPROVE | 2026-07-18 | 2 patch rounds; no scope expansion; DOCS gate 20/20. |
 | 24.0a | ✅ done | APPROVE | 2026-07-18 | Trip EF migration; no patch round or scope expansion; 2/2 focused tests. |
-| 24.0b | ◌ todo | — | — | Notification Prisma migration; depends on 24.0 |
+| 24.0b | ✅ done | APPROVE | 2026-07-19 | PROJECT lifecycle green; 3 verifier-command corrections for PowerShell quoting and historical enum order; no production scope expansion. |
 | 24.1 | ◌ todo | — | — | — |
 | 24.2 | ◌ todo | — | — | — |
 | 24.3 | ◌ todo | — | — | — |
