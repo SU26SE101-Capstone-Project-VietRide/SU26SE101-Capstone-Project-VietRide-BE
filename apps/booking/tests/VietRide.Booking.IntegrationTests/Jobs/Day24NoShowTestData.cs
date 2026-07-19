@@ -14,28 +14,49 @@ public static class Day24NoShowTestData
         bool alongRoute,
         bool mixed)
     {
+        var seeded = await SeedAsync(db, alongRoute, mixed ? 2 : 1, mixed ? 1 : 0);
+        var boardedPassengerId = seeded.BoardedPassengerIds.Count == 0
+            ? (Guid?)null
+            : seeded.BoardedPassengerIds.Single();
+        return (seeded.Booking, seeded.PendingPassengerIds.Single(), boardedPassengerId);
+    }
+
+    public static async Task<SeededNoShow> SeedAsync(
+        BookingDbContext db,
+        bool alongRoute,
+        int passengerCount,
+        int boardedPassengerCount)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(passengerCount, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(passengerCount, 5);
+        ArgumentOutOfRangeException.ThrowIfNegative(boardedPassengerCount);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(boardedPassengerCount, passengerCount);
         var booking = BookingEntity.CreatePendingPayment(
             BookingCode.Generate(DateTimeOffset.UtcNow), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
             alongRoute ? null : Guid.NewGuid(), alongRoute ? Guid.NewGuid() : null,
             null, null, Money.FromRaw(100_000), Money.Zero, Money.FromRaw(100_000));
-        var firstTicket = booking.AddTicketedPassenger(
-            "A01", TicketCode.Generate(DateTimeOffset.UtcNow),
-            Money.FromRaw(100_000), Money.Zero, Money.FromRaw(100_000));
-        var secondTicket = mixed
-            ? booking.AddTicketedPassenger(
-                "A02", TicketCode.Generate(DateTimeOffset.UtcNow),
-                Money.FromRaw(100_000), Money.Zero, Money.FromRaw(100_000))
-            : null;
-        booking.Confirm(DateTimeOffset.UtcNow.AddHours(-1));
-        if (secondTicket is not null)
+        var passengerIds = new List<Guid>(passengerCount);
+        for (var index = 0; index < passengerCount; index++)
         {
-            var second = booking.Passengers.Single(passenger => passenger.Id == secondTicket.PassengerId);
-            second.MarkBoarded(DateTimeOffset.UtcNow.AddMinutes(-30), booking.PickupStopId);
+            var ticket = booking.AddTicketedPassenger(
+                $"A{index + 1:00}", TicketCode.Generate(DateTimeOffset.UtcNow.AddTicks(index)),
+                Money.FromRaw(100_000), Money.Zero, Money.FromRaw(100_000));
+            passengerIds.Add(ticket.PassengerId);
+        }
+
+        booking.Confirm(DateTimeOffset.UtcNow.AddHours(-1));
+        foreach (var passengerId in passengerIds.Take(boardedPassengerCount))
+        {
+            var passenger = booking.Passengers.Single(candidate => candidate.Id == passengerId);
+            passenger.MarkBoarded(DateTimeOffset.UtcNow.AddMinutes(-30), booking.PickupStopId);
         }
 
         db.Bookings.Add(booking);
         await db.SaveChangesAsync();
-        return (booking, firstTicket.PassengerId, secondTicket?.PassengerId);
+        return new SeededNoShow(
+            booking,
+            passengerIds.Skip(boardedPassengerCount).ToArray(),
+            passengerIds.Take(boardedPassengerCount).ToArray());
     }
 
     public static TripSnapshot Trip(BookingEntity booking, DateTimeOffset anchor)
@@ -56,3 +77,8 @@ public static class Day24NoShowTestData
             stops, new TripSeatSummary(10, 0), ActualDepartureTime: anchor);
     }
 }
+
+public sealed record SeededNoShow(
+    BookingEntity Booking,
+    IReadOnlyList<Guid> PendingPassengerIds,
+    IReadOnlyList<Guid> BoardedPassengerIds);

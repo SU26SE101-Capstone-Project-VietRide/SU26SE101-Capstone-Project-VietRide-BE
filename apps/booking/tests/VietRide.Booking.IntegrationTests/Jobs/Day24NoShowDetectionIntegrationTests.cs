@@ -21,15 +21,23 @@ public sealed class Day24NoShowDetectionIntegrationTests(
     : IClassFixture<Day24StopDisabledAutoFallbackFixture>
 {
     [Theory]
-    [InlineData(false, false, BookingStatus.NO_SHOW, "TERMINAL")]
-    [InlineData(true, true, BookingStatus.PARTIAL_NO_SHOW, "ALONG_ROUTE")]
-    public async Task EligibleBooking_TransitionsWithHistoryAndExactPendingOutbox(
-        bool alongRoute, bool mixed, BookingStatus expectedStatus, string triggerType)
+    [InlineData(false, 5, 0, BookingStatus.NO_SHOW, "TERMINAL")]
+    [InlineData(true, 5, 3, BookingStatus.PARTIAL_NO_SHOW, "ALONG_ROUTE")]
+    public async Task EligibleBooking_CoversAllPendingAndMixedThreeOfFiveWithExactPendingOutbox(
+        bool alongRoute,
+        int passengerCount,
+        int boardedPassengerCount,
+        BookingStatus expectedStatus,
+        string triggerType)
     {
         var anchor = DateTimeOffset.Parse("2026-07-24T10:00:00Z");
         var now = anchor.AddMinutes(16);
         await using var seed = fixture.CreateDb(now);
-        var seeded = await Day24NoShowTestData.SeedAsync(seed, alongRoute, mixed);
+        var seeded = await Day24NoShowTestData.SeedAsync(
+            seed,
+            alongRoute,
+            passengerCount,
+            boardedPassengerCount);
         var snapshot = Day24NoShowTestData.Trip(seeded.Booking, anchor);
         await seed.DisposeAsync();
 
@@ -44,9 +52,13 @@ public sealed class Day24NoShowDetectionIntegrationTests(
         booking.CancelledAt.Should().BeNull();
         (await verify.Tickets.AsNoTracking().Where(row => row.BookingId == booking.Id).ToListAsync())
             .Should().OnlyContain(ticket => ticket.Status == TicketStatus.ISSUED);
-        passengers.Single(row => row.Id == seeded.PendingPassengerId).BoardingStatus.Should().Be(PassengerBoardingStatus.NO_SHOW);
-        if (seeded.BoardedPassengerId.HasValue)
-            passengers.Single(row => row.Id == seeded.BoardedPassengerId).BoardingStatus.Should().Be(PassengerBoardingStatus.BOARDED);
+        passengers.Where(row => seeded.PendingPassengerIds.Contains(row.Id))
+            .Should().OnlyContain(passenger => passenger.BoardingStatus == PassengerBoardingStatus.NO_SHOW);
+        if (seeded.BoardedPassengerIds.Count > 0)
+        {
+            passengers.Where(row => seeded.BoardedPassengerIds.Contains(row.Id))
+                .Should().OnlyContain(passenger => passenger.BoardingStatus == PassengerBoardingStatus.BOARDED);
+        }
         var history = await verify.BookingStatusHistories.AsNoTracking().SingleAsync(row => row.BookingId == booking.Id);
         history.Status.Should().Be(expectedStatus);
         history.Source.Should().Be(BookingStatusHistorySource.MarkNoShow);
@@ -69,7 +81,43 @@ public sealed class Day24NoShowDetectionIntegrationTests(
         payload.RootElement.GetProperty("triggerType").GetString().Should().Be(triggerType);
         payload.RootElement.TryGetProperty("pickupStopId", out _).Should().Be(triggerType == "ALONG_ROUTE");
         payload.RootElement.GetProperty("newlyNoShowPassengerIds").EnumerateArray()
-            .Select(value => value.GetGuid()).Should().Equal(seeded.PendingPassengerId);
+            .Select(value => value.GetGuid()).Should().BeEquivalentTo(seeded.PendingPassengerIds);
+    }
+
+    [Fact]
+    public async Task EqualityAndAllBoardedFiveOfFive_RemainUntouchedWithoutHistoryOrOutbox()
+    {
+        var anchor = DateTimeOffset.Parse("2026-07-24T12:00:00Z");
+        var equality = anchor.AddMinutes(15);
+        await using var seed = fixture.CreateDb(equality);
+        var equalitySeeded = await Day24NoShowTestData.SeedAsync(seed, false, 5, 0);
+        var allBoardedSeeded = await Day24NoShowTestData.SeedAsync(seed, true, 5, 5);
+        var equalitySnapshot = Day24NoShowTestData.Trip(equalitySeeded.Booking, anchor);
+        var allBoardedSnapshot = Day24NoShowTestData.Trip(allBoardedSeeded.Booking, anchor);
+        await seed.DisposeAsync();
+
+        await ExecuteAsync(equality, equalitySnapshot);
+        await ExecuteAsync(anchor.AddMinutes(16), allBoardedSnapshot);
+
+        await using var verify = fixture.CreateDb(anchor.AddMinutes(16));
+        (await verify.Bookings.AsNoTracking().SingleAsync(row => row.Id == equalitySeeded.Booking.Id)).Status
+            .Should().Be(BookingStatus.CONFIRMED);
+        (await verify.Passengers.AsNoTracking().Where(row => row.BookingId == equalitySeeded.Booking.Id).ToListAsync())
+            .Should().OnlyContain(passenger => passenger.BoardingStatus == PassengerBoardingStatus.PENDING);
+        (await verify.Bookings.AsNoTracking().SingleAsync(row => row.Id == allBoardedSeeded.Booking.Id)).Status
+            .Should().Be(BookingStatus.CONFIRMED);
+        (await verify.Passengers.AsNoTracking().Where(row => row.BookingId == allBoardedSeeded.Booking.Id).ToListAsync())
+            .Should().OnlyContain(passenger => passenger.BoardingStatus == PassengerBoardingStatus.BOARDED);
+        (await verify.BookingStatusHistories.CountAsync(row =>
+            row.BookingId == equalitySeeded.Booking.Id || row.BookingId == allBoardedSeeded.Booking.Id)).Should().Be(0);
+        var forbiddenEventIds = new[]
+        {
+            NoShowDetectionJob.DeriveEventId(equalitySeeded.Booking.Id, BookingStatus.NO_SHOW),
+            NoShowDetectionJob.DeriveEventId(equalitySeeded.Booking.Id, BookingStatus.PARTIAL_NO_SHOW),
+            NoShowDetectionJob.DeriveEventId(allBoardedSeeded.Booking.Id, BookingStatus.NO_SHOW),
+            NoShowDetectionJob.DeriveEventId(allBoardedSeeded.Booking.Id, BookingStatus.PARTIAL_NO_SHOW),
+        };
+        (await verify.OutboxEvents.CountAsync(row => forbiddenEventIds.Contains(row.Id))).Should().Be(0);
     }
 
     [Fact]

@@ -13,7 +13,7 @@ namespace VietRide.Booking.IntegrationTests.Jobs;
 
 public sealed class Day24StopDisabledAutoFallbackFixture : IAsyncLifetime
 {
-    private readonly string _databaseName = $"vr_d24_fallback_{Guid.NewGuid():N}";
+    private readonly string _databaseName = $"vietride_booking_day24_{Guid.NewGuid():N}";
     private string? _connectionString;
     private NpgsqlDataSource? _dataSource;
 
