@@ -148,8 +148,11 @@ public sealed class CreateAdminUserCommandHandlerTests
         var initialPasswordTokens = Substitute.For<IInitialPasswordTokenService>();
         initialPasswordTokens.GenerateCode().Returns("initial-token");
         initialPasswordTokens.GetExpiresAt(Now).Returns(Now.AddHours(48));
-        initialPasswordTokens.BuildSetInitialPasswordUrl("initial-token")
-            .Returns("https://test.vietride.app/auth/set-password?token=initial-token");
+        // Stubbed for SYSTEM_ADMIN specifically rather than Arg.Any: this handler always
+        // creates a system admin, so if it ever passes a different role the stub returns
+        // null and the email assertions fail instead of quietly passing.
+        initialPasswordTokens.BuildSetInitialPasswordUrl("initial-token", UserRole.SYSTEM_ADMIN)
+            .Returns("https://test.vietride.app/auth/set-initial-password?token=initial-token");
         clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
 

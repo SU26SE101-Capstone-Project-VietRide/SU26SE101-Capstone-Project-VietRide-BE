@@ -78,6 +78,27 @@ public sealed class CreateOperatorUserCommandHandlerTests
         subscriptions.CapturedRole.Should().Be(role);
     }
 
+    // The role decides which landing page the emailed link points at: DRIVER/ASSISTANT
+    // must reach the mobile "open in app" page, OPERATOR_STAFF the operator web form.
+    // Passing the wrong role here silently sends someone to a page they cannot use.
+    [Theory]
+    [InlineData(UserRole.DRIVER)]
+    [InlineData(UserRole.ASSISTANT)]
+    [InlineData(UserRole.OPERATOR_STAFF)]
+    public async Task Handle_AllowedRoles_PassesCreatedRoleToUrlBuilder(UserRole role)
+    {
+        var users = new FakeUserRepository();
+        var operators = new FakeOperatorRepository(CreateOperator(OperatorRegistrationStatus.APPROVED));
+        var subscriptions = new FakeOperatorSubscriptionRepository(true);
+        var emailService = Substitute.For<IEmailService>();
+        var tokens = Substitute.For<IInitialPasswordTokenService>();
+        var handler = CreateHandler(users, operators, subscriptions, emailService, tokens);
+
+        await handler.Handle(CreateCommand(role), CancellationToken.None);
+
+        tokens.Received(1).BuildSetInitialPasswordUrl("initial-code", role);
+    }
+
     [Fact]
     public async Task Handle_NonAdminCaller_ReturnsForbiddenBeforeUserCounterTokenOrEmailSideEffects()
     {
@@ -207,13 +228,17 @@ public sealed class CreateOperatorUserCommandHandlerTests
         IUserRepository users,
         IOperatorRepository operators,
         IOperatorSubscriptionRepository subscriptions,
-        IEmailService emailService)
+        IEmailService emailService,
+        IInitialPasswordTokenService? initialPasswordTokens = null)
     {
-        var tokens = Substitute.For<IInitialPasswordTokenService>();
+        var tokens = initialPasswordTokens ?? Substitute.For<IInitialPasswordTokenService>();
         tokens.GenerateCode().Returns("initial-code");
         tokens.GetExpiresAt(Now).Returns(ExpiresAt);
-        tokens.BuildSetInitialPasswordUrl("initial-code")
-            .Returns("https://test.vietride.app/auth/set-password?token=initial-code");
+        // Arg.Any here because this handler legitimately creates DRIVER, ASSISTANT and
+        // OPERATOR_STAFF. Which role actually reaches the URL builder is asserted
+        // separately in Handle_AllowedRoles_PassesCreatedRoleToUrlBuilder.
+        tokens.BuildSetInitialPasswordUrl("initial-code", Arg.Any<UserRole>())
+            .Returns("https://test.vietride.app/auth/set-initial-password?token=initial-code");
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
 

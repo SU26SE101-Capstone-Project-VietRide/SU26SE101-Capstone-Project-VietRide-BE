@@ -10,6 +10,9 @@
 #   IMAGE_PREFIX  e.g. ghcr.io/su26se101-capstone-project-vietride/vietride
 #   IMAGE_TAG     e.g. v1.0.0  (the version tag you pushed)
 #
+# The frontend is NOT part of this file — it runs as its own compose project that
+# attaches to vietride_net. See the note above the nginx service.
+#
 # Usage on the server (the deploy workflow runs these for you):
 #   docker compose -f docker-compose.prod.yml pull
 #   docker compose -f docker-compose.prod.yml up -d
@@ -431,6 +434,19 @@ services:
       retries: 5
       start_period: 60s
 
+  # ── Frontend: NOT declared here, on purpose ─────────────────────────────────
+  # The operator web lives in a separate repo and ships on its own cadence, so it
+  # runs as its own compose project (`vietride-frontend`) that attaches to this
+  # stack's network. Its compose file lives in the FE repo.
+  #
+  # Declaring it here instead would couple the two deploys in both directions:
+  #   - this stack's `docker compose pull` pulls EVERY service, so a missing or
+  #     broken FE image would abort a backend deploy that has nothing to do with it;
+  #   - `up -d --remove-orphans` here could recreate or drop the FE container.
+  # Keeping it out means a backend deploy never touches the frontend, and vice
+  # versa. nginx finds it over vietride_net by the `frontend` alias, re-resolved
+  # per request, so either side can redeploy independently.
+
   # ── Edge: Nginx (internal reverse proxy — NO host port) ─────────────────────
   # Not published to the host. Cloudflare Tunnel reaches it over the docker network
   # (cloudflared → nginx:80). nginx terminates plain HTTP; TLS is handled at Cloudflare's
@@ -511,7 +527,7 @@ services:
   # ── Cloudflare Tunnel: outbound-only link to the Cloudflare edge ────────────
   # The server DIALS OUT to Cloudflare — no inbound port forwarding needed (works
   # behind the provider NAT / the 24450–24460 restriction). Cloudflare serves 443
-  # publicly for api.vietride.app and routes requests through this tunnel to nginx:80.
+  # publicly for api.vietride.online and routes requests through this tunnel to nginx:80.
   # Map the hostname → http://nginx:80 in the Cloudflare Zero Trust dashboard (or
   # config.yml) when you create the tunnel — see DEPLOY.md.
   cloudflared:
