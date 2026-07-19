@@ -46,7 +46,19 @@ public static class HangfireServiceCollectionExtensions
         });
         services.AddScoped<IPendingActionRealertScheduler, HangfirePendingActionRealertScheduler>();
         services.AddScoped<IScheduleChangeAutoAcceptScheduler, HangfireScheduleChangeAutoAcceptScheduler>();
+        services.AddSingleton<IStopDisabledAutoFallbackScheduler, HangfireStopDisabledAutoFallbackScheduler>();
 
         return services;
+    }
+
+    private sealed class HangfireStopDisabledAutoFallbackScheduler(IRecurringJobManager jobs)
+        : IStopDisabledAutoFallbackScheduler
+    {
+        public void EnsureScheduled()
+            => jobs.AddOrUpdate<StopDisabledAutoFallbackJob>(
+                "booking-stop-disabled-auto-fallback",
+                job => job.ExecuteAsync(CancellationToken.None),
+                Cron.MinuteInterval(5),
+                new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
     }
 }

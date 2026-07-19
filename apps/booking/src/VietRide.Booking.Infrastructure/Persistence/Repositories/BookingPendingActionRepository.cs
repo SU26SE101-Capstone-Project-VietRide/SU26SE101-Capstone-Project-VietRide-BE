@@ -31,6 +31,18 @@ internal sealed class BookingPendingActionRepository(BookingDbContext db) : IBoo
                 """)
             .SingleOrDefaultAsync(ct);
 
+    public Task<BookingPendingAction?> GetByIdForUpdateSkipLockedAsync(
+        Guid actionId,
+        CancellationToken ct = default)
+        => db.BookingPendingActions
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_booking.booking_pending_actions
+                WHERE id = {actionId}
+                FOR UPDATE SKIP LOCKED
+                """)
+            .SingleOrDefaultAsync(ct);
+
     public async Task<IReadOnlyList<BookingPendingAction>> GetActiveByTripForUpdateAsync(
         Guid tripId,
         Guid operatorId,
@@ -74,6 +86,17 @@ internal sealed class BookingPendingActionRepository(BookingDbContext db) : IBoo
 
         return candidates.Where(action => HasSourceEventId(action.Metadata, sourceEventId)).ToArray();
     }
+
+    public async Task<IReadOnlyList<BookingPendingAction>> GetExpiredStopDisabledCandidatesAsync(
+        DateTimeOffset now, CancellationToken ct = default)
+        => await db.BookingPendingActions
+            .AsNoTracking()
+            .Where(action => action.Reason == Domain.Enums.BookingPendingActionReason.STOP_DISABLED
+                && action.ResolvedAt == null
+                && action.Deadline < now)
+            .OrderBy(action => action.BookingId)
+            .ThenBy(action => action.Id)
+            .ToListAsync(ct);
 
     private static bool HasSourceEventId(string? metadata, Guid sourceEventId)
     {
