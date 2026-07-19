@@ -597,7 +597,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Notification migration diff hygiene failed' }
 | 24.7 | ✅ done | APPROVE | 2026-07-19 | Raw internal pending-passenger count seam; 8/8 unit and 6/6 PostgreSQL integration tests; documented pre-existing regex false-positive. |
 | 24.8 | ✅ done | APPROVE | 2026-07-19 | Durable driver stop departure with lock/CAS, crew/tenant/idempotency and 502 rollback; 91 focused .NET assertions plus contract/publisher evidence green. |
 | 24.9 | ✅ done | APPROVE | 2026-07-19 | 1 implementation patch round; notifications.module.ts expansion; 17 focused Jest selections green. |
-| 24.10 | ◌ todo | — | — | — |
+| 24.10 | ✅ done | APPROVE | 2026-07-19 | Deterministic evidence/Postman harness; fallback 5/5, no-show 5/5, TAP 5/5 and 19 focused requests; no secrets or production changes. |
 
 ## Open questions
 
