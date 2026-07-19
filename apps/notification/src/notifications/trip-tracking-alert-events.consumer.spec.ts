@@ -23,7 +23,7 @@ const REPORTER_ID = '66666666-6666-4666-8666-666666666666';
 const EVENT_ID = '77777777-7777-4777-8777-777777777777';
 const MESSAGE_ID = 'trip-alert-message-1';
 
-describe('TripTrackingAlertEventsConsumer', () => {
+describe('TripTrackingAlertEventsConsumer subscribes all phase 5 routing keys', () => {
   let rabbitConsumer: jest.Mocked<RabbitMqConsumer>;
   let idempotency: jest.Mocked<MessageIdempotencyService>;
   let notificationsService: jest.Mocked<NotificationsService>;
@@ -83,6 +83,35 @@ describe('TripTrackingAlertEventsConsumer', () => {
         expect.objectContaining({ routingKey: 'trip.trip.schedule_changed' }),
         expect.objectContaining({ routingKey: 'trip.trip.cancelled' }),
       ]),
+    );
+
+    idempotency.begin.mockResolvedValueOnce('acquired').mockResolvedValueOnce('duplicate');
+    const stopDisabledEvent = {
+      eventId: EVENT_ID,
+      occurredAt: '2026-07-18T03:00:00Z',
+      eventType: TRIP_STOP_DISABLED_ROUTING_KEY,
+      stopId: '88888888-8888-4888-8888-888888888888',
+      recipientUserIds: [USER_ID],
+      affectedBookingCount: 1,
+    };
+    await consumer.handle(
+      TRIP_STOP_DISABLED_ROUTING_KEY,
+      stopDisabledEvent,
+      createMessage(EVENT_ID),
+    );
+    await consumer.handle(
+      TRIP_STOP_DISABLED_ROUTING_KEY,
+      stopDisabledEvent,
+      createMessage(EVENT_ID),
+    );
+
+    expect(notificationsService.createNotification).toHaveBeenCalledTimes(1);
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.STOP_DISABLED,
+        dedupeKey: `${TRIP_STOP_DISABLED_ROUTING_KEY}:${EVENT_ID}:${USER_ID}:${NotificationType.STOP_DISABLED}`,
+      }),
     );
   });
 
@@ -225,10 +254,7 @@ describe('TripTrackingAlertEventsConsumer', () => {
       createMessage(MESSAGE_ID),
     );
 
-    expect(idempotency.begin).toHaveBeenCalledWith(
-      TRIP_INCIDENT_REPORTED_ROUTING_KEY,
-      MESSAGE_ID,
-    );
+    expect(idempotency.begin).toHaveBeenCalledWith(TRIP_INCIDENT_REPORTED_ROUTING_KEY, MESSAGE_ID);
     expect(idempotency.markProcessed).toHaveBeenCalledWith(
       TRIP_INCIDENT_REPORTED_ROUTING_KEY,
       MESSAGE_ID,
@@ -266,10 +292,7 @@ describe('TripTrackingAlertEventsConsumer', () => {
         createMessage(MESSAGE_ID),
       ),
     ).rejects.toThrow('IDENTITY_UNAVAILABLE');
-    expect(idempotency.release).toHaveBeenCalledWith(
-      TRIP_INCIDENT_REPORTED_ROUTING_KEY,
-      EVENT_ID,
-    );
+    expect(idempotency.release).toHaveBeenCalledWith(TRIP_INCIDENT_REPORTED_ROUTING_KEY, EVENT_ID);
     expect(idempotency.markProcessed).not.toHaveBeenCalled();
   });
 
@@ -285,10 +308,7 @@ describe('TripTrackingAlertEventsConsumer', () => {
         createMessage(MESSAGE_ID),
       ),
     ).rejects.toThrow('DB_UNAVAILABLE');
-    expect(idempotency.release).toHaveBeenCalledWith(
-      TRIP_INCIDENT_REPORTED_ROUTING_KEY,
-      EVENT_ID,
-    );
+    expect(idempotency.release).toHaveBeenCalledWith(TRIP_INCIDENT_REPORTED_ROUTING_KEY, EVENT_ID);
     expect(idempotency.markProcessed).not.toHaveBeenCalled();
   });
 });
@@ -302,7 +322,9 @@ function createMessage(messageId: string | undefined): ConsumeMessage {
   } as ConsumeMessage;
 }
 
-function canonicalIncidentPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function canonicalIncidentPayload(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     eventId: EVENT_ID,
     occurredAt: '2026-07-16T03:00:00Z',

@@ -21,7 +21,7 @@ const TRIP_ID = '33333333-3333-4333-8333-333333333333';
 const USER_ID = '44444444-4444-4444-8444-444444444444';
 const PENDING_ACTION_ID = '55555555-5555-4555-8555-555555555555';
 
-describe('BookingTripChangeEventsConsumer', () => {
+describe('BookingTripChangeEventsConsumer binds the Booking-owned passenger facts', () => {
   let rabbitConsumer: jest.Mocked<RabbitMqConsumer>;
   let idempotency: jest.Mocked<MessageIdempotencyService>;
   let notificationsService: jest.Mocked<NotificationsService>;
@@ -63,6 +63,12 @@ describe('BookingTripChangeEventsConsumer', () => {
         { prefetch: 1, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
       );
     }
+    expect(BOOKING_TRIP_CHANGE_QUEUE_BINDINGS.map(({ routingKey }) => routingKey)).not.toContain(
+      'booking.booking.stop_disabled_auto_fallback_applied',
+    );
+    expect(BOOKING_TRIP_CHANGE_QUEUE_BINDINGS.map(({ routingKey }) => routingKey)).not.toContain(
+      'booking.booking.passenger_no_show_marked',
+    );
   });
 
   it('creates one passenger informational notification without pending-action data', async () => {

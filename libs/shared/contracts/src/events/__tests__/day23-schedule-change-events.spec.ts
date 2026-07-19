@@ -55,16 +55,27 @@ describe('Day 23 schedule-change contract:', () => {
     ).toBe(false);
   });
 
-  it('preserves the exported Task 23.5 canonical and one-release cancellation schemas', () => {
+  it('exports the exact strict pending-action auto-resolved contract and keeps the Day 24 stop-disabled fallback fact outside the schedule-change contract', () => {
+    expect(
+      BookingPendingActionAutoResolvedEventSchema.safeParse({
+        ...canonicalAutoResolved,
+        eventType: 'booking.booking.stop_disabled_auto_fallback_applied',
+        disabledStopId: '66666666-6666-4666-8666-666666666666',
+        affectedField: 'PICKUP',
+        fallbackStationId: '77777777-7777-4777-8777-777777777777',
+        resolvedAction: 'AUTO_FALLBACK_DESTINATION',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('exports the exact strict pending-action auto-resolved contract and preserves the exported Task 23.5 canonical and one-release cancellation schemas', () => {
     const canonicalCancellation = {
       eventId: '66666666-6666-4666-8666-666666666666',
       occurredAt: '2026-07-17T10:00:00+07:00',
       ...cancellationFields,
     };
 
-    expect(BookingCancelledEventSchema.parse(canonicalCancellation)).toEqual(
-      canonicalCancellation,
-    );
+    expect(BookingCancelledEventSchema.parse(canonicalCancellation)).toEqual(canonicalCancellation);
     expect(BookingCancelledConsumerEventSchema.parse(canonicalCancellation)).toEqual(
       canonicalCancellation,
     );

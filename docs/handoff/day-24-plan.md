@@ -596,7 +596,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Notification migration diff hygiene failed' }
 | 24.6 | ◌ todo | — | — | — |
 | 24.7 | ◌ todo | — | — | — |
 | 24.8 | ◌ todo | — | — | — |
-| 24.9 | ◌ todo | — | — | — |
+| 24.9 | ✅ done | APPROVE | 2026-07-19 | 1 implementation patch round; notifications.module.ts expansion; 17 focused Jest selections green. |
 | 24.10 | ◌ todo | — | — | — |
 
 ## Open questions

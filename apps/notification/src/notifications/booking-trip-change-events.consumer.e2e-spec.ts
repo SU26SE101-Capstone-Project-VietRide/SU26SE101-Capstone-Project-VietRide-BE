@@ -9,9 +9,12 @@ import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
 import { NotificationsModule } from './notifications.module';
 
-describe('BookingTripChangeEventsConsumer registration (e2e)', () => {
+describe('BookingTripChangeEventsConsumer registers the Booking-owned passenger subscriptions (e2e)', () => {
   it('is registered by NotificationsModule', () => {
-    const providers = Reflect.getMetadata(MODULE_METADATA.PROVIDERS, NotificationsModule) as unknown[];
+    const providers = Reflect.getMetadata(
+      MODULE_METADATA.PROVIDERS,
+      NotificationsModule,
+    ) as unknown[];
 
     expect(providers).toContain(BookingTripChangeEventsConsumer);
   });
@@ -50,6 +53,18 @@ describe('BookingTripChangeEventsConsumer registration (e2e)', () => {
     expect(subscribe).not.toHaveBeenCalledWith(
       expect.any(String),
       'trip.trip.cancelled',
+      expect.any(Function),
+      expect.any(Object),
+    );
+    expect(subscribe).not.toHaveBeenCalledWith(
+      expect.any(String),
+      'booking.booking.stop_disabled_auto_fallback_applied',
+      expect.any(Function),
+      expect.any(Object),
+    );
+    expect(subscribe).not.toHaveBeenCalledWith(
+      expect.any(String),
+      'booking.booking.passenger_no_show_marked',
       expect.any(Function),
       expect.any(Object),
     );
