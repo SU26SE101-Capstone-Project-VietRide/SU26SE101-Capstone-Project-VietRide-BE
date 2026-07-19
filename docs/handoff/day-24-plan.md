@@ -588,7 +588,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Notification migration diff hygiene failed' }
 | 24.0 | ✅ done | APPROVE | 2026-07-18 | 2 patch rounds; no scope expansion; DOCS gate 20/20. |
 | 24.0a | ✅ done | APPROVE | 2026-07-18 | Trip EF migration; no patch round or scope expansion; 2/2 focused tests. |
 | 24.0b | ✅ done | APPROVE | 2026-07-19 | PROJECT lifecycle green; 3 verifier-command corrections for PowerShell quoting and historical enum order; no production scope expansion. |
-| 24.1 | ◌ todo | — | — | — |
+| 24.1 | ✅ done | APPROVE | 2026-07-19 | Real DELETE handler + Outbox integration; middleware replay/mismatch/missing-key/body rejection; 5/5 focused integration tests, format and diff checks green. |
 | 24.2 | ◌ todo | — | — | — |
 | 24.3 | ◌ todo | — | — | — |
 | 24.4 | ◌ todo | — | — | — |

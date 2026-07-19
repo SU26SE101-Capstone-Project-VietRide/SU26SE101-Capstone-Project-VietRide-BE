@@ -99,6 +99,19 @@ public sealed class Stop : BaseEntity<Guid>, ISoftDeletable, IActivatable
         SoftDelete(deletedAt);
     }
 
+    /// <summary>Disables the stop without changing its soft-delete history.</summary>
+    public void Disable(Guid? replacedByStopId)
+    {
+        ValidateOptionalGuid(replacedByStopId, nameof(replacedByStopId));
+        if (replacedByStopId == Id)
+        {
+            throw new ArgumentException("A stop cannot replace itself.", nameof(replacedByStopId));
+        }
+
+        ReplacedByStopId = replacedByStopId;
+        IsActive = false;
+    }
+
     private static string? NormalizeOptional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static void ValidateRequired(string value, string parameterName)
