@@ -211,6 +211,21 @@ internal sealed class BookingRepository : IBookingRepository
     }
 
     /// <inheritdoc/>
+    public Task<int> GetPendingPassengerCountAsync(
+        Guid tripId,
+        Guid stopId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => _db.Passengers
+            .AsNoTracking()
+            .CountAsync(passenger => passenger.BoardingStatus == PassengerBoardingStatus.PENDING
+                && passenger.Booking != null
+                && passenger.Booking.Status == BookingStatus.CONFIRMED
+                && passenger.Booking.TripId == tripId
+                && passenger.Booking.PickupStopId == stopId
+                && passenger.Booking.OperatorId == operatorId, ct);
+
+    /// <inheritdoc/>
     public async Task<IReadOnlyList<PlatformBookingReportItem>> GetPlatformBookingMetricsAsync(
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc,

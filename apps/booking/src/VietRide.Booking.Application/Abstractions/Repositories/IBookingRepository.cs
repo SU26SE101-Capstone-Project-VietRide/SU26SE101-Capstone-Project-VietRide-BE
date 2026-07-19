@@ -61,6 +61,13 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
         CancellationToken ct = default)
         => throw new NotSupportedException("Trip-edit impact is not implemented by this repository.");
 
+    Task<int> GetPendingPassengerCountAsync(
+        Guid tripId,
+        Guid stopId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Pending-passenger count is not implemented by this repository.");
+
     Task<OperatorBookingDetailDto?> GetOperatorBookingDetailAsync(Guid bookingId, Guid operatorId, CancellationToken ct = default)
         => throw new NotSupportedException("Operator booking detail is not implemented by this repository.");
 

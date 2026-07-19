@@ -1915,6 +1915,8 @@ Response `200`:
 
 ### GET `/internal/v1/bookings/trips/{tripId}/stops/{stopId}/pending-passenger-count?operatorId={operatorId}`
 
+Canonical route: `GET /internal/v1/bookings/trips/{tripId}/stops/{stopId}/pending-passenger-count?operatorId={operatorId}`.
+
 Auth: valid Internal JWT only. This is a raw internal success response (no `ApiResponse` envelope)
 and has no Gateway route. The sole caller is Trip after it has validated its own Trip, TripStop,
 assigned crew, and tenant. Booking performs no Trip/Stop lookup, caller-service/tenant-claim authorization,

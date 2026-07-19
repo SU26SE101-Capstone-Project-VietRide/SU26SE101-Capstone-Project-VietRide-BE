@@ -67,12 +67,20 @@ public sealed class InternalBookingsController : ControllerBase
         return Ok(result);
     }
 
-    [HttpGet("active-by-stop/{stopId:guid}/count")]
-    public async Task<ActionResult<object>> GetActiveCountByStopAsync(
-        Guid stopId, [FromQuery] Guid operatorId, CancellationToken cancellationToken)
-        => Ok(new
-        {
-            activeBookingCount = await _mediator.Send(
-             new GetActiveBookingCountByStopQuery(stopId, operatorId), cancellationToken)
-        });
+    [HttpGet("trips/{tripId}/stops/{stopId}/pending-passenger-count")]
+    [ProducesResponseType(typeof(PendingPassengerCountDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<PendingPassengerCountDto>> GetPendingPassengerCountAsync(
+        string tripId,
+        string stopId,
+        [FromQuery] string? operatorId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(
+            new GetPendingPassengerCountQuery(tripId, stopId, operatorId),
+            cancellationToken);
+
+        return Ok(result);
+    }
 }
