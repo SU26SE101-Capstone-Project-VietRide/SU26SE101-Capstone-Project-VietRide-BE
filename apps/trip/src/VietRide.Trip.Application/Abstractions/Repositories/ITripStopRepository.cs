@@ -19,4 +19,11 @@ public interface ITripStopRepository : IRepository<TripStop, (Guid TripId, Guid 
         Guid stopId,
         CancellationToken cancellationToken)
         => GetByIdAsync((tripId, stopId), cancellationToken);
+
+    Task<bool> TryMarkDepartedAsync(
+        Guid tripId,
+        Guid stopId,
+        DateTimeOffset departedAt,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("Trip-stop departure is not supported by this repository implementation.");
 }

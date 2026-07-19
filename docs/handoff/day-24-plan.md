@@ -595,7 +595,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Notification migration diff hygiene failed' }
 | 24.5 | ✅ done | APPROVE | 2026-07-19 | Additive raw Trip actualDepartureTime seam; 2/2 unit and 2/2 integration tests; CRLF/SOT checks green. |
 | 24.6 | ✅ done | APPROVE | 2026-07-19 | Strict no-show anchors, MARK_NO_SHOW history, PostgreSQL race, fail-closed Trip client and Outbox/Rabbit evidence green; terminal payload omits pickupStopId. |
 | 24.7 | ✅ done | APPROVE | 2026-07-19 | Raw internal pending-passenger count seam; 8/8 unit and 6/6 PostgreSQL integration tests; documented pre-existing regex false-positive. |
-| 24.8 | ◌ todo | — | — | — |
+| 24.8 | ✅ done | APPROVE | 2026-07-19 | Durable driver stop departure with lock/CAS, crew/tenant/idempotency and 502 rollback; 91 focused .NET assertions plus contract/publisher evidence green. |
 | 24.9 | ✅ done | APPROVE | 2026-07-19 | 1 implementation patch round; notifications.module.ts expansion; 17 focused Jest selections green. |
 | 24.10 | ◌ todo | — | — | — |
 

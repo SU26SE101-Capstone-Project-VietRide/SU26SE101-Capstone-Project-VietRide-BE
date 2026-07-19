@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using FluentAssertions;
+using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Infrastructure.ExternalClients;
 
 namespace VietRide.Trip.UnitTests.ExternalClients;
@@ -8,6 +9,7 @@ namespace VietRide.Trip.UnitTests.ExternalClients;
 public sealed class BookingImpactClientTests
 {
     private static readonly Guid TripId = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    private static readonly Guid StopId = Guid.Parse("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
     private static readonly Guid OperatorId = Guid.Parse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
 
     [Fact]
@@ -119,24 +121,118 @@ public sealed class BookingImpactClientTests
     }
 
     [Fact]
-    public async Task GetActiveBookingCountByStopAsync_PreservesExistingSeam()
+    public async Task GetPendingPassengerCountAsync_UsesCanonicalPathAndReturnsRawProjection()
     {
-        var stopId = Guid.Parse("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
         var handler = new CapturingJsonResponseHandler(
             HttpStatusCode.OK,
-            "{\"activeBookingCount\":3}");
+            $$"""
+            {"tripId":"{{TripId:D}}","stopId":"{{StopId:D}}","pendingPassengerCount":3}
+            """);
         using var httpClient = CreateHttpClient(handler);
         var client = new BookingImpactClient(httpClient);
 
-        var result = await client.GetActiveBookingCountByStopAsync(
-            stopId,
+        var result = await client.GetPendingPassengerCountAsync(
+            TripId,
+            StopId,
             OperatorId,
             CancellationToken.None);
 
-        result.Should().Be(3);
+        result.Should().Be(new TripStopPendingPassengerCountProjection(TripId, StopId, 3));
+        handler.LastRequest!.Method.Should().Be(HttpMethod.Get);
         handler.LastRequest!.RequestUri!.PathAndQuery.Should().Be(
-            $"/internal/v1/bookings/active-by-stop/{stopId:D}/count?operatorId={OperatorId:D}");
+            $"/internal/v1/bookings/trips/{TripId:D}/stops/{StopId:D}/pending-passenger-count?operatorId={OperatorId:D}");
     }
+
+    [Fact]
+    public async Task GetPendingPassengerCountAsync_AcceptsRawZero()
+    {
+        using var httpClient = CreateHttpClient(new JsonResponseHandler(HttpStatusCode.OK,
+            $$"""
+            {"tripId":"{{TripId:D}}","stopId":"{{StopId:D}}","pendingPassengerCount":0}
+            """));
+        var client = new BookingImpactClient(httpClient);
+
+        var result = await client.GetPendingPassengerCountAsync(
+            TripId, StopId, OperatorId, CancellationToken.None);
+
+        result.PendingPassengerCount.Should().Be(0);
+    }
+
+    [Theory]
+    [MemberData(nameof(InvalidPendingCountPayloads))]
+    public async Task GetPendingPassengerCountAsync_RejectsUnusablePayload(string json)
+    {
+        using var httpClient = CreateHttpClient(
+            new JsonResponseHandler(HttpStatusCode.OK, json));
+        var client = new BookingImpactClient(httpClient);
+
+        var act = () => client.GetPendingPassengerCountAsync(
+            TripId, StopId, OperatorId, CancellationToken.None);
+
+        await act.Should().ThrowAsync<HttpRequestException>()
+            .WithMessage("*invalid data*");
+    }
+
+    [Fact]
+    public async Task GetPendingPassengerCountAsync_RejectsNonSuccessResponse()
+    {
+        using var httpClient = CreateHttpClient(
+            new JsonResponseHandler(HttpStatusCode.ServiceUnavailable, "{}"));
+        var client = new BookingImpactClient(httpClient);
+
+        var act = () => client.GetPendingPassengerCountAsync(
+            TripId, StopId, OperatorId, CancellationToken.None);
+
+        await act.Should().ThrowAsync<HttpRequestException>();
+    }
+
+    [Fact]
+    public async Task GetPendingPassengerCountAsync_PropagatesCallerCancellation()
+    {
+        var handler = new CancellationHandler();
+        using var httpClient = CreateHttpClient(handler);
+        var client = new BookingImpactClient(httpClient);
+        using var cancellation = new CancellationTokenSource();
+
+        var request = client.GetPendingPassengerCountAsync(
+            TripId, StopId, OperatorId, cancellation.Token);
+        await handler.Started;
+        cancellation.Cancel();
+
+        var act = () => request;
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Theory]
+    [InlineData("trip")]
+    [InlineData("stop")]
+    [InlineData("operator")]
+    public async Task GetPendingPassengerCountAsync_RejectsEmptyIdentityBeforeSending(string field)
+    {
+        var handler = new CapturingJsonResponseHandler(HttpStatusCode.OK, "{}");
+        using var httpClient = CreateHttpClient(handler);
+        var client = new BookingImpactClient(httpClient);
+
+        var act = () => client.GetPendingPassengerCountAsync(
+            field == "trip" ? Guid.Empty : TripId,
+            field == "stop" ? Guid.Empty : StopId,
+            field == "operator" ? Guid.Empty : OperatorId,
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        handler.LastRequest.Should().BeNull();
+    }
+
+    public static TheoryData<string> InvalidPendingCountPayloads => new()
+    {
+        "not-json",
+        $$"""{"tripId":"{{Guid.NewGuid():D}}","stopId":"{{StopId:D}}","pendingPassengerCount":1}""",
+        $$"""{"tripId":"{{TripId:D}}","stopId":"{{Guid.NewGuid():D}}","pendingPassengerCount":1}""",
+        $$"""{"tripId":"{{TripId:D}}","stopId":"{{StopId:D}}","pendingPassengerCount":-1}""",
+        $$"""{"tripId":"{{TripId:D}}","stopId":"{{StopId:D}}","pendingPassengerCount":"1"}""",
+        $$"""{"tripId":"{{TripId:D}}","stopId":"{{StopId:D}}","pendingPassengerCount":1,"success":true}""",
+        $$"""{"tripId":"{{TripId:D}}","stopId":"{{StopId:D}}"}""",
+    };
 
     [Fact]
     public async Task GetTripEditImpactAsync_RejectsEmptyOperatorId_BeforeSendingRequest()
