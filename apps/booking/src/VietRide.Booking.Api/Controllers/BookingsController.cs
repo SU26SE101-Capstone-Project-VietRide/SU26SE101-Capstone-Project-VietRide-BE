@@ -3,6 +3,7 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Booking.Api.Controllers.Requests;
+using VietRide.Booking.Application.Features.Bookings.AcceptStopDisabledFallback;
 using VietRide.Booking.Application.Features.Bookings.CancelBooking;
 using VietRide.Booking.Application.Features.Bookings.CreateBooking;
 using VietRide.Booking.Application.Features.Bookings.CreateRoundTripBooking;
@@ -244,6 +245,27 @@ public sealed class BookingsController : ControllerBase
 
         var result = await _sender.Send(command, ct);
 
+        return StatusCode(StatusCodes.Status200OK, result);
+    }
+
+    /// <summary>Accept the route-origin/destination fallback for a STOP_DISABLED action.</summary>
+    [HttpPost("{bookingId:guid}/pending-action/{actionId:guid}/accept-fallback")]
+    [Authorize(Roles = PassengerRole)]
+    [RequireIdempotency]
+    [ProducesResponseType(typeof(ApiResponse<AcceptStopDisabledFallbackResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> AcceptStopDisabledFallback(
+        [FromRoute] Guid bookingId,
+        [FromRoute] Guid actionId,
+        CancellationToken ct)
+    {
+        var result = await _sender.Send(new AcceptStopDisabledFallbackCommand(
+            bookingId,
+            actionId,
+            GetPassengerUserId(),
+            GetRequiredIdempotencyKey()), ct);
         return StatusCode(StatusCodes.Status200OK, result);
     }
 

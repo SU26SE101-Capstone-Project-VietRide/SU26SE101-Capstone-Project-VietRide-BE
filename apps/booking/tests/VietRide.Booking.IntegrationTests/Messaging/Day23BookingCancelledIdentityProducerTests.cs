@@ -99,12 +99,13 @@ public sealed class Day23BookingCancelledIdentityProducerTests
                 .Returns(Task.CompletedTask);
             CancelHandler = new CancelBookingCommandHandler(
                 Bookings, TripClient, OperatorClient, Outbox, Clock,
-                NullLogger<CancelBookingCommandHandler>.Instance, History);
+                NullLogger<CancelBookingCommandHandler>.Instance, History, PendingActions);
             TripCancelledHandler = new HandleTripCancelledCommandHandler(Bookings, History, Outbox, UnitOfWork, Clock);
         }
 
         public IBookingRepository Bookings { get; } = Substitute.For<IBookingRepository>();
         public IBookingStatusHistoryRepository History { get; } = Substitute.For<IBookingStatusHistoryRepository>();
+        public IBookingPendingActionRepository PendingActions { get; } = Substitute.For<IBookingPendingActionRepository>();
         public ITripServiceClient TripClient { get; } = Substitute.For<ITripServiceClient>();
         public IOperatorServiceClient OperatorClient { get; } = Substitute.For<IOperatorServiceClient>();
         public IIntegrationEventOutbox Outbox { get; } = Substitute.For<IIntegrationEventOutbox>();

@@ -52,6 +52,15 @@ internal sealed class BookingPendingActionRepository(BookingDbContext db) : IBoo
         => db.BookingPendingActions
             .FirstOrDefaultAsync(action => action.BookingId == bookingId && action.ResolvedAt == null, ct);
 
+    public Task<BookingPendingAction?> GetActiveByBookingIdForUpdateAsync(Guid bookingId, CancellationToken ct = default)
+        => db.BookingPendingActions
+            .FromSqlInterpolated($"""
+                SELECT * FROM vietride_booking.booking_pending_actions
+                WHERE booking_id = {bookingId} AND resolved_at IS NULL
+                ORDER BY id LIMIT 1 FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(ct);
+
     public async Task<IReadOnlyList<BookingPendingAction>> GetByBookingAndSourceEventAsync(
         Guid bookingId,
         Guid sourceEventId,

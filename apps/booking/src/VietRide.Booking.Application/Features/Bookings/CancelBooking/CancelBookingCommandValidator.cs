@@ -22,7 +22,8 @@ public sealed class CancelBookingCommandValidator : AbstractValidator<CancelBook
 
         RuleFor(x => x.Reason)
             .NotEmpty()
-            .Equal(BookingCancellationReason.USER_INITIATED.ToString())
-            .WithMessage("reason must be USER_INITIATED.");
+            .Must(reason => reason is nameof(BookingCancellationReason.USER_INITIATED)
+                or nameof(BookingCancellationReason.STOP_DISABLED_REFUSED))
+            .WithMessage("reason must be USER_INITIATED or STOP_DISABLED_REFUSED.");
     }
 }

@@ -16,6 +16,9 @@ public interface IBookingPendingActionRepository : IRepository<BookingPendingAct
 
     Task<BookingPendingAction?> GetActiveByBookingIdAsync(Guid bookingId, CancellationToken ct = default);
 
+    Task<BookingPendingAction?> GetActiveByBookingIdForUpdateAsync(Guid bookingId, CancellationToken ct = default)
+        => throw new NotSupportedException("Pending-action booking lock lookup is not implemented by this repository.");
+
     Task<IReadOnlyList<BookingPendingAction>> GetByBookingAndSourceEventAsync(
         Guid bookingId,
         Guid sourceEventId,

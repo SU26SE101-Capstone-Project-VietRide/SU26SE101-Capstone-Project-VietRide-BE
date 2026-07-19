@@ -32,6 +32,7 @@ public sealed class CancelBookingCommandHandlerTests
     private readonly IOperatorServiceClient _operatorClient = Substitute.For<IOperatorServiceClient>();
     private readonly IIntegrationEventOutbox _outbox = Substitute.For<IIntegrationEventOutbox>();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly IBookingPendingActionRepository _pendingActions = Substitute.For<IBookingPendingActionRepository>();
 
     private CancelBookingCommandHandler BuildSut() => new(
         _bookings,
@@ -40,7 +41,8 @@ public sealed class CancelBookingCommandHandlerTests
         _outbox,
         _clock,
         NullLogger<CancelBookingCommandHandler>.Instance,
-        _statusHistory);
+        _statusHistory,
+        _pendingActions);
 
     [Fact]
     public void Validator_OperatorCancelledReason_ReturnsValidationError()
