@@ -166,13 +166,21 @@ public sealed class Day23CurrentDepartureOperationalReadIntegrationTests
         {
             var db = scope.ServiceProvider.GetRequiredService<BookingDbContext>();
             var clock = new FixedClock(now);
+            var tripClient = Substitute.For<ITripServiceClient>();
+            tripClient.GetTripSnapshotAsync(booking.TripId, Arg.Any<CancellationToken>())
+                .Returns(new TripSnapshot(
+                    booking.TripId, operatorId, Guid.NewGuid(), Guid.NewGuid(), "SCHEDULED",
+                    now.AddHours(3), now.AddHours(4), 100_000,
+                    new TripStationSnapshot(Guid.NewGuid(), "Origin"),
+                    new TripStationSnapshot(Guid.NewGuid(), "Destination"), [], new TripSeatSummary(10, 10)));
             var handler = new HandleStopDisabledCommandHandler(
                 scope.ServiceProvider.GetRequiredService<IBookingRepository>(),
                 scope.ServiceProvider.GetRequiredService<IBookingPendingActionRepository>(),
                 stats,
                 new IntegrationEventOutbox(new OutboxStore(db, clock)),
                 new EfUnitOfWork(db),
-                clock);
+                clock,
+                tripClient);
             (await handler.Handle(
                 new HandleStopDisabledCommand(Guid.NewGuid(), stopId, operatorId, null),
                 CancellationToken.None)).Should().Be(1);

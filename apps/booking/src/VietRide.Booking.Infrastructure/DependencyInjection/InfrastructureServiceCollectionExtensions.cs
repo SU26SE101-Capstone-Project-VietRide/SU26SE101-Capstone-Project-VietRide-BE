@@ -155,7 +155,7 @@ public static class InfrastructureServiceCollectionExtensions
             services.AddVietRideEventConsumer<StopDisabledIntegrationEvent, StopDisabledIntegrationEventHandler>(options =>
             {
                 options.QueueName = "booking.stop-disabled";
-                options.BindingKeys = [StopDisabledIntegrationEvent.EventType];
+                options.BindingKeys = [StopDisabledIntegrationEvent.EventTypeValue];
             });
             services.AddVietRideEventConsumer<StationMergedIntegrationEvent, StationMergedIntegrationEventHandler>(options =>
             {

@@ -1,6 +1,7 @@
 using FluentAssertions;
 using NSubstitute;
 using VietRide.Booking.Application.Abstractions.Repositories;
+using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Features.Bookings.HandleStopDisabled;
 using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.ValueObjects;
@@ -59,8 +60,14 @@ public sealed class HandleStopDisabledCommandHandlerTests
         unitOfWork.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(1);
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(now);
+        var tripClient = Substitute.For<ITripServiceClient>();
+        tripClient.GetTripSnapshotAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(new TripSnapshot(Guid.NewGuid(), operatorId, Guid.NewGuid(), Guid.NewGuid(), "SCHEDULED",
+                now.AddDays(1), now.AddDays(1), 100_000,
+                new TripStationSnapshot(Guid.NewGuid(), "Origin"),
+                new TripStationSnapshot(Guid.NewGuid(), "Destination"), [], new TripSeatSummary(10, 10)));
         var handler = new HandleStopDisabledCommandHandler(
-            bookings, pendingActions, stats, outbox, unitOfWork, clock);
+            bookings, pendingActions, stats, outbox, unitOfWork, clock, tripClient);
 
         (await handler.Handle(
             new HandleStopDisabledCommand(Guid.NewGuid(), stopId, operatorId, null),
