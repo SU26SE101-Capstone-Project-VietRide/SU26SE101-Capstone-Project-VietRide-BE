@@ -57,6 +57,7 @@ if (!IsWebApplicationFactoryHost())
 if (registerMessaging)
 {
     app.Services.GetRequiredService<IStopDisabledAutoFallbackScheduler>().EnsureScheduled();
+    app.Services.GetRequiredService<INoShowDetectionScheduler>().EnsureScheduled();
 }
 
 app.UseMiddleware<RequestLoggingMiddleware>();

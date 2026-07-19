@@ -593,7 +593,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Notification migration diff hygiene failed' }
 | 24.3 | ✅ done | APPROVE | 2026-07-19 | 3 review/patch rounds; added lock-based action resolution, strict metadata validation, idempotent fallback endpoint, and handler/controller-focused evidence. |
 | 24.4 | ✅ done | APPROVE | 2026-07-19 | 4 review/patch rounds; booking-first and action-first SKIP LOCKED races, real fallback mapping, Outbox/Rabbit restart and Hangfire registration evidence green. |
 | 24.5 | ✅ done | APPROVE | 2026-07-19 | Additive raw Trip actualDepartureTime seam; 2/2 unit and 2/2 integration tests; CRLF/SOT checks green. |
-| 24.6 | ◌ todo | — | — | — |
+| 24.6 | ✅ done | APPROVE | 2026-07-19 | Strict no-show anchors, MARK_NO_SHOW history, PostgreSQL race, fail-closed Trip client and Outbox/Rabbit evidence green; terminal payload omits pickupStopId. |
 | 24.7 | ◌ todo | — | — | — |
 | 24.8 | ◌ todo | — | — | — |
 | 24.9 | ✅ done | APPROVE | 2026-07-19 | 1 implementation patch round; notifications.module.ts expansion; 17 focused Jest selections green. |

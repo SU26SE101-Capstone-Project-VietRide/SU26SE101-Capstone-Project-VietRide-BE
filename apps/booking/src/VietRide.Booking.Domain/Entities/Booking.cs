@@ -333,4 +333,26 @@ public sealed class Booking : BaseEntity<Guid>
             ticket.Refund(refundedAt);
         }
     }
+
+    public IReadOnlyList<Guid> MarkPendingPassengersNoShow()
+    {
+        if (Status != BookingStatus.CONFIRMED)
+        {
+            return [];
+        }
+
+        var newlyMarked = _passengers
+            .Where(passenger => passenger.MarkNoShow())
+            .Select(passenger => passenger.Id)
+            .ToArray();
+        if (newlyMarked.Length == 0)
+        {
+            return newlyMarked;
+        }
+
+        Status = _passengers.All(passenger => passenger.BoardingStatus == PassengerBoardingStatus.NO_SHOW)
+            ? BookingStatus.NO_SHOW
+            : BookingStatus.PARTIAL_NO_SHOW;
+        return newlyMarked;
+    }
 }

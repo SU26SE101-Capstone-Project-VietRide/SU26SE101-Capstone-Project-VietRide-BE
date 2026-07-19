@@ -1,5 +1,7 @@
 namespace VietRide.Booking.Application.Abstractions.ServiceClients;
 
+using VietRide.Booking.Application.Exceptions;
+
 // ---------------------------------------------------------------------------
 // Result / DTO records for the Trip seam (FROZEN — BSOT §13 row 1.8.0).
 // Shapes match VietRide_API_Contract_v1.md lines 1065-1179 verbatim.
@@ -24,7 +26,9 @@ public sealed record TripSnapshot(
     TripSeatSummary SeatSummary,
     Guid? ReturnRouteId = null,
     Guid? DriverUserId = null,
-    Guid? AssistantUserId = null);
+    Guid? AssistantUserId = null,
+    DateTimeOffset? DestinationArrivedAt = null,
+    DateTimeOffset? ActualDepartureTime = null);
 
 /// <summary>Station snapshot embedded in <see cref="TripSnapshot"/>.</summary>
 public sealed record TripStationSnapshot(
@@ -44,7 +48,9 @@ public sealed record TripStopSnapshot(
     DateTimeOffset EstimatedArrivalTime,
     double DistanceFromOriginKm,
     long? FareFromThisStop,
-    bool IsActive = true);
+    bool IsActive = true,
+    string? Status = null,
+    DateTimeOffset? ActualArrivalTime = null);
 
 /// <summary>Seat availability summary embedded in <see cref="TripSnapshot"/>.</summary>
 public sealed record TripSeatSummary(int TotalSeats, int AvailableSeats);
@@ -145,6 +151,12 @@ public interface ITripServiceClient
     Task<TripSnapshot?> GetTripSnapshotAsync(
         Guid tripId,
         CancellationToken cancellationToken = default);
+
+    async Task<TripSnapshot> GetOperationalTripSnapshotAsync(
+        Guid tripId,
+        CancellationToken cancellationToken = default)
+        => await GetTripSnapshotAsync(tripId, cancellationToken)
+            ?? throw new BookingUpstreamUnavailableException("Trip operational snapshot is unavailable.");
 
     /// <summary>
     /// GET /internal/v1/trips/{tripId}?pricingAt=... — returns a trip snapshot whose

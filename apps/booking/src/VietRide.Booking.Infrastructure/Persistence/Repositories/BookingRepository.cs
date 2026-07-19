@@ -454,6 +454,33 @@ internal sealed class BookingRepository : IBookingRepository
             .SingleOrDefaultAsync(ct);
     }
 
+    public async Task<IReadOnlyList<BookingEntity>> GetNoShowCandidatesAsync(CancellationToken ct = default)
+        => await _db.Bookings.AsNoTracking()
+            .Where(booking => booking.Status == BookingStatus.CONFIRMED
+                && booking.Passengers.Any(passenger => passenger.BoardingStatus == PassengerBoardingStatus.PENDING))
+            .OrderBy(booking => booking.Id)
+            .ToListAsync(ct);
+
+    public async Task<BookingEntity?> FindConfirmedWithPassengersForUpdateAsync(
+        Guid bookingId,
+        CancellationToken ct = default)
+    {
+        foreach (var tracked in _db.ChangeTracker.Entries<BookingEntity>()
+                     .Where(entry => entry.Entity.Id == bookingId).ToArray())
+        {
+            tracked.State = EntityState.Detached;
+        }
+
+        return await _db.Bookings
+            .FromSqlInterpolated($"""
+                SELECT * FROM vietride_booking.bookings
+                WHERE id = {bookingId} AND status = 'CONFIRMED'
+                FOR UPDATE
+                """)
+            .Include(booking => booking.Passengers)
+            .SingleOrDefaultAsync(ct);
+    }
+
     public async Task<int> RelinkActiveStationReferencesAsync(
         IReadOnlyCollection<Guid> sourceStationIds,
         Guid canonicalStationId,

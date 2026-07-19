@@ -107,6 +107,14 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
     Task<BookingEntity?> FindByIdForUpdateAsync(Guid bookingId, CancellationToken ct = default)
         => throw new NotSupportedException("Booking pending-action lock lookup is not implemented by this repository.");
 
+    Task<IReadOnlyList<BookingEntity>> GetNoShowCandidatesAsync(CancellationToken ct = default)
+        => throw new NotSupportedException("No-show candidates are not implemented by this repository.");
+
+    Task<BookingEntity?> FindConfirmedWithPassengersForUpdateAsync(
+        Guid bookingId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("No-show booking lock lookup is not implemented by this repository.");
+
     /// <summary>
     /// Returns the data needed to replay the Trip seat-lock seam for a payment event.
     /// Null means the booking is no longer PENDING_PAYMENT and the event is an idempotent no-op.

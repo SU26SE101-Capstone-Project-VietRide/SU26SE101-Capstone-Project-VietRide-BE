@@ -47,6 +47,7 @@ public static class HangfireServiceCollectionExtensions
         services.AddScoped<IPendingActionRealertScheduler, HangfirePendingActionRealertScheduler>();
         services.AddScoped<IScheduleChangeAutoAcceptScheduler, HangfireScheduleChangeAutoAcceptScheduler>();
         services.AddSingleton<IStopDisabledAutoFallbackScheduler, HangfireStopDisabledAutoFallbackScheduler>();
+        services.AddSingleton<INoShowDetectionScheduler, HangfireNoShowDetectionScheduler>();
 
         return services;
     }
@@ -57,6 +58,17 @@ public static class HangfireServiceCollectionExtensions
         public void EnsureScheduled()
             => jobs.AddOrUpdate<StopDisabledAutoFallbackJob>(
                 "booking-stop-disabled-auto-fallback",
+                job => job.ExecuteAsync(CancellationToken.None),
+                Cron.MinuteInterval(5),
+                new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
+    }
+
+    private sealed class HangfireNoShowDetectionScheduler(IRecurringJobManager jobs)
+        : INoShowDetectionScheduler
+    {
+        public void EnsureScheduled()
+            => jobs.AddOrUpdate<NoShowDetectionJob>(
+                "booking-passenger-no-show-detection",
                 job => job.ExecuteAsync(CancellationToken.None),
                 Cron.MinuteInterval(5),
                 new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
