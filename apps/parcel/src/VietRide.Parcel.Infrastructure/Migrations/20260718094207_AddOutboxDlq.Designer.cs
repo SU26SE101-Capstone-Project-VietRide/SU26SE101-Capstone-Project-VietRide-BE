@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using VietRide.Parcel.Infrastructure;
@@ -11,9 +12,11 @@ using VietRide.Parcel.Infrastructure;
 namespace VietRide.Parcel.Infrastructure.Migrations
 {
     [DbContext(typeof(ParcelDbContext))]
-    partial class ParcelDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260718094207_AddOutboxDlq")]
+    partial class AddOutboxDlq
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -703,62 +706,6 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         {
                             t.HasCheckConstraint("chk_system_configs_version_positive", "version > 0");
                         });
-                });
-
-            modelBuilder.Entity("VietRide.Shared.Persistence.Outbox.OutboxDlq", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id")
-                        .HasDefaultValueSql("gen_random_uuid()");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<Guid>("EventId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("event_id");
-
-                    b.Property<string>("EventType")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("event_type");
-
-                    b.Property<string>("LastError")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("last_error");
-
-                    b.Property<string>("Payload")
-                        .IsRequired()
-                        .HasColumnType("jsonb")
-                        .HasColumnName("payload");
-
-                    b.Property<int>("RetryCount")
-                        .HasColumnType("integer")
-                        .HasColumnName("retry_count");
-
-                    b.Property<DateTimeOffset>("TerminalAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("terminal_at")
-                        .HasDefaultValueSql("now()");
-
-                    b.HasKey("Id")
-                        .HasName("pk_outbox_dlq");
-
-                    b.HasIndex("EventId")
-                        .IsUnique()
-                        .HasDatabaseName("uq_outbox_dlq_event_id");
-
-                    b.HasIndex("TerminalAt", "EventId")
-                        .IsDescending()
-                        .HasDatabaseName("idx_outbox_dlq_terminal_event_id");
-
-                    b.ToTable("outbox_dlq", "vietride_parcel");
                 });
 
             modelBuilder.Entity("VietRide.Shared.Persistence.Outbox.OutboxEvent", b =>

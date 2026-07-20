@@ -1,7 +1,11 @@
+using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Features.Internal.Reports.PlatformParcels;
+using VietRide.Parcel.Application.Features.Parcels.Reports;
 using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Kernel.Primitives;
@@ -13,10 +17,51 @@ namespace VietRide.Parcel.Infrastructure.Persistence.Repositories;
 internal sealed class ParcelRepository : IParcelRepository
 {
     private readonly ParcelDbContext _db;
+    private readonly ILogger<ParcelRepository> _logger;
 
     public ParcelRepository(ParcelDbContext db)
+        : this(db, NullLogger<ParcelRepository>.Instance)
+    {
+    }
+
+    public ParcelRepository(
+        ParcelDbContext db,
+        ILogger<ParcelRepository> logger)
     {
         _db = db;
+        _logger = logger;
+    }
+
+    public async IAsyncEnumerable<ParcelOperatorReportRow> StreamOperatorReportRowsAsync(
+        Guid operatorId,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var rows = _db.Parcels
+            .AsNoTracking()
+            .Where(parcel => parcel.OperatorId == operatorId
+                && parcel.CreatedAt >= fromUtc
+                && parcel.CreatedAt < toUtc)
+            .OrderBy(parcel => parcel.CreatedAt)
+            .ThenBy(parcel => parcel.Id)
+            .Select(parcel => new ParcelOperatorReportRow(
+                parcel.Id,
+                parcel.ParcelCode,
+                parcel.TripId,
+                parcel.Status.ToString(),
+                parcel.SizeCategory.ToString(),
+                parcel.TotalPrice.Amount,
+                parcel.DepositAmount.Amount,
+                parcel.AdditionalAmount.Amount,
+                parcel.RefundAmount.Amount,
+                parcel.CreatedAt,
+                parcel.ConfirmedAt));
+
+        await foreach (var row in rows.AsAsyncEnumerable().WithCancellation(ct).ConfigureAwait(false))
+        {
+            yield return row;
+        }
     }
 
     public async Task<ParcelEntity?> GetByIdAsync(Guid id, CancellationToken ct)
@@ -54,17 +99,35 @@ internal sealed class ParcelRepository : IParcelRepository
         await using var command = connection.CreateCommand();
         command.CommandText =
             """
-            SELECT operator_id,
-                   COUNT(*)::numeric AS delivered_parcel_count,
-                   COALESCE(SUM(
-                       deposit_amount::numeric
-                       + additional_amount::numeric
-                       - refund_amount::numeric), 0)::numeric AS parcel_revenue_vnd
-            FROM vietride_parcel.parcels
-            WHERE status = 'DELIVERY_CONFIRMED'::vietride_parcel.parcel_status
-              AND confirmed_at >= @from_utc
-              AND confirmed_at < @to_utc
-            GROUP BY operator_id
+            WITH live AS (
+                SELECT operator_id,
+                       COUNT(*)::numeric AS delivered_parcel_count,
+                       COALESCE(SUM(
+                           deposit_amount::numeric
+                           + additional_amount::numeric
+                           - refund_amount::numeric), 0)::numeric AS parcel_revenue_vnd
+                FROM vietride_parcel.parcels
+                WHERE status = 'DELIVERY_CONFIRMED'::vietride_parcel.parcel_status
+                  AND confirmed_at >= @from_utc
+                  AND confirmed_at < @to_utc
+                GROUP BY operator_id
+            ),
+            projected AS (
+                SELECT operator_id,
+                       COUNT(*)::numeric AS delivered_parcel_count,
+                       COALESCE(SUM(parcel_revenue_vnd), 0)::numeric AS parcel_revenue_vnd
+                FROM vietride_parcel.platform_parcel_stats
+                WHERE confirmed_at >= @from_utc
+                  AND confirmed_at < @to_utc
+                GROUP BY operator_id
+            )
+            SELECT COALESCE(live.operator_id, projected.operator_id) AS operator_id,
+                   COALESCE(live.delivered_parcel_count, 0)::numeric AS live_count,
+                   COALESCE(live.parcel_revenue_vnd, 0)::numeric AS live_revenue,
+                   COALESCE(projected.delivered_parcel_count, 0)::numeric AS projected_count,
+                   COALESCE(projected.parcel_revenue_vnd, 0)::numeric AS projected_revenue
+            FROM live
+            FULL OUTER JOIN projected USING (operator_id)
             ORDER BY operator_id;
             """;
         command.Transaction = _db.Database.CurrentTransaction?.GetDbTransaction();
@@ -81,10 +144,26 @@ internal sealed class ParcelRepository : IParcelRepository
             {
                 var deliveredParcelCount = checked((long)reader.GetDecimal(1));
                 var parcelRevenueVnd = checked((long)reader.GetDecimal(2));
+                var projectedCount = checked((long)reader.GetDecimal(3));
+                var projectedRevenue = checked((long)reader.GetDecimal(4));
+                var operatorId = reader.GetGuid(0);
+                if (deliveredParcelCount != projectedCount
+                    || parcelRevenueVnd != projectedRevenue)
+                {
+                    _logger.LogError(
+                        "Platform ParcelStats mismatch for operator {OperatorId}: live count {LiveCount}, projected count {ProjectedCount}, live revenue {LiveRevenueVnd}, projected revenue {ProjectedRevenueVnd}",
+                        operatorId,
+                        deliveredParcelCount,
+                        projectedCount,
+                        parcelRevenueVnd,
+                        projectedRevenue);
+                    throw new PlatformParcelStatsMismatchException();
+                }
+
                 totalCount = checked(totalCount + deliveredParcelCount);
                 totalRevenue = checked(totalRevenue + parcelRevenueVnd);
                 items.Add(new PlatformParcelReportItem(
-                    reader.GetGuid(0),
+                    operatorId,
                     deliveredParcelCount,
                     parcelRevenueVnd));
             }
