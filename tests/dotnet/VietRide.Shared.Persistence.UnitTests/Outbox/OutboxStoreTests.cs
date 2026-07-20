@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using NSubstitute;
 using VietRide.Shared.Messaging.Abstractions;
@@ -113,6 +114,141 @@ public sealed class OutboxStoreTests : IAsyncLifetime
         envelope.PublishedAt.Should().Be(published.UtcDateTime);
     }
 
+    [Fact]
+    public async Task MoveToDlq_SixthFailure_PersistsExactlyOneTerminalRecord()
+    {
+        var id = await SeedAsync(OutboxEventStatus.FAILED, retryCount: 5);
+
+        await using (var ctx = _fixture.CreateContext())
+        {
+            var store = _fixture.CreateStore(ctx);
+            await store.MoveToDlqAsync(
+                id,
+                "broker unavailable",
+                _fixture.Clock.UtcNow.UtcDateTime,
+                CancellationToken.None);
+        }
+
+        await using (var ctx = _fixture.CreateContext())
+        {
+            var store = _fixture.CreateStore(ctx);
+            await store.MoveToDlqAsync(
+                id,
+                "duplicate tick",
+                _fixture.Clock.UtcNow.UtcDateTime,
+                CancellationToken.None);
+        }
+
+        await using var assertion = _fixture.CreateContext();
+        var dlq = assertion.OutboxDlq.Should().ContainSingle(row => row.EventId == id).Subject;
+        dlq.RetryCount.Should().Be(6);
+        dlq.EventType.Should().Be("test.event");
+        using (var payload = JsonDocument.Parse(dlq.Payload))
+        {
+            payload.RootElement.GetProperty("hello").GetString().Should().Be("world");
+        }
+        dlq.LastError.Should().Be("broker unavailable");
+
+        var source = await FindAsync(assertion, id);
+        source.RetryCount.Should().Be(6);
+        source.LastError.Should().Be("broker unavailable");
+        var storeForFetch = _fixture.CreateStore(assertion);
+        var pending = await storeForFetch.FetchPendingAsync(BatchSize, 5, CancellationToken.None);
+        pending.Should().NotContain(row => row.Id == id);
+    }
+
+    [Fact]
+    public async Task MoveToDlq_CustomRetryBoundary_DerivesTerminalCountFromSourceRow()
+    {
+        var id = await SeedAsync(OutboxEventStatus.FAILED, retryCount: 2);
+
+        await using var ctx = _fixture.CreateContext();
+        var store = _fixture.CreateStore(ctx);
+        await store.MoveToDlqAsync(
+            id,
+            "configured boundary reached",
+            _fixture.Clock.UtcNow.UtcDateTime,
+            CancellationToken.None);
+
+        var dlq = ctx.OutboxDlq.Should().ContainSingle(row => row.EventId == id).Subject;
+        dlq.RetryCount.Should().Be(3);
+
+        var source = await FindAsync(ctx, id);
+        source.RetryCount.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task MoveToDlq_ConcurrentWorkers_CommitOneIdempotentTerminalRecord()
+    {
+        var id = await SeedAsync(OutboxEventStatus.FAILED, retryCount: 5);
+        var first = MoveToDlqInNewContextAsync(id, "first terminal error");
+        var second = MoveToDlqInNewContextAsync(id, "second terminal error");
+
+        await Task.WhenAll(first, second);
+
+        await using var assertion = _fixture.CreateContext();
+        var terminal = assertion.OutboxDlq.Should()
+            .ContainSingle(row => row.EventId == id)
+            .Subject;
+        terminal.RetryCount.Should().Be(6);
+        terminal.LastError.Should().BeOneOf("first terminal error", "second terminal error");
+        var source = await FindAsync(assertion, id);
+        source.RetryCount.Should().Be(6);
+        source.LastError.Should().Be(terminal.LastError);
+    }
+
+    [Fact]
+    public async Task MoveToDlq_PublishedSource_DoesNotCreateTerminalRecord()
+    {
+        var id = await SeedAsync(
+            OutboxEventStatus.PUBLISHED,
+            retryCount: 5,
+            publishedAt: _fixture.Clock.UtcNow);
+
+        await MoveToDlqInNewContextAsync(id, "late failed worker");
+
+        await using var assertion = _fixture.CreateContext();
+        assertion.OutboxDlq.Should().NotContain(row => row.EventId == id);
+        var source = await FindAsync(assertion, id);
+        source.Status.Should().Be(OutboxEventStatus.PUBLISHED);
+        source.RetryCount.Should().Be(5);
+        source.LastError.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task PublishSuccessVsTerminalFailure_Race_CommitsOneConsistentOutcome()
+    {
+        var ids = new List<Guid>();
+        for (var index = 0; index < 10; index++)
+            ids.Add(await SeedAsync(OutboxEventStatus.FAILED, retryCount: 5));
+
+        await Task.WhenAll(ids.SelectMany(id => new[]
+        {
+            MarkPublishedInNewContextAsync(id),
+            MoveToDlqInNewContextAsync(id, "terminal worker"),
+        }));
+
+        await using var assertion = _fixture.CreateContext();
+        foreach (var id in ids)
+        {
+            var source = await FindAsync(assertion, id);
+            var terminal = assertion.OutboxDlq.SingleOrDefault(row => row.EventId == id);
+            if (terminal is null)
+            {
+                source.Status.Should().Be(OutboxEventStatus.PUBLISHED);
+                source.PublishedAt.Should().NotBeNull();
+                source.LastError.Should().BeNull();
+            }
+            else
+            {
+                source.Status.Should().Be(OutboxEventStatus.FAILED);
+                source.PublishedAt.Should().BeNull();
+                source.RetryCount.Should().Be(terminal.RetryCount);
+                source.LastError.Should().Be(terminal.LastError);
+            }
+        }
+    }
+
     // --- helpers -----------------------------------------------------------
 
     /// Replicates OutboxBackgroundService.DrainOnceAsync against the fixture store.
@@ -160,6 +296,27 @@ public sealed class OutboxStoreTests : IAsyncLifetime
         ctx.OutboxEvents.Add(row);
         await ctx.SaveChangesAsync();
         return row.Id;
+    }
+
+    private async Task MoveToDlqInNewContextAsync(Guid id, string error)
+    {
+        await using var context = _fixture.CreateContext();
+        var store = _fixture.CreateStore(context);
+        await store.MoveToDlqAsync(
+            id,
+            error,
+            _fixture.Clock.UtcNow.UtcDateTime,
+            CancellationToken.None);
+    }
+
+    private async Task MarkPublishedInNewContextAsync(Guid id)
+    {
+        await using var context = _fixture.CreateContext();
+        var store = _fixture.CreateStore(context);
+        await store.MarkPublishedAsync(
+            id,
+            _fixture.Clock.UtcNow.UtcDateTime,
+            CancellationToken.None);
     }
 
     private static async Task<OutboxEvent> FindAsync(OutboxTestDbContext ctx, Guid id)

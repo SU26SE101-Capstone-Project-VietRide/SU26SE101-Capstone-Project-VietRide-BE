@@ -109,7 +109,14 @@ public sealed class OutboxBackgroundService : BackgroundService, IOutboxPublishe
                     "Outbox publish failed for {EventType} id={Id} attempt={Attempt}/{Max}. NextAttempt={NextAt}.",
                     outboxEvent.EventType, outboxEvent.Id, nextRetry, _options.MaxRetryCount, nextAt);
 
-                await store.MarkFailedAsync(outboxEvent.Id, ex.Message, nextAt, ct).ConfigureAwait(false);
+                if (giveUp)
+                {
+                    await store.MoveToDlqAsync(outboxEvent.Id, ex.Message, DateTime.UtcNow, ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    await store.MarkFailedAsync(outboxEvent.Id, ex.Message, nextAt, ct).ConfigureAwait(false);
+                }
             }
         }
 

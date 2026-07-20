@@ -122,6 +122,46 @@ public sealed class IdempotencyMiddlewareTests
     }
 
     [Fact]
+    public async Task RequireAllMutations_MissingPutKey_ReturnsRequiredError()
+    {
+        var (mux, db) = FakeRedis();
+        var invoked = 0;
+        var context = BuildContext(method: "PUT", key: null, optedIn: false);
+
+        await Create(_ =>
+        {
+            invoked++;
+            return Task.CompletedTask;
+        }, mux, requireAllMutations: true).InvokeAsync(context);
+
+        invoked.Should().Be(0);
+        context.Response.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
+        ReadErrorCode(context).Should().Be(IdempotencyMiddleware.RequiredErrorCode);
+        await db.DidNotReceive().KeyExistsAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
+    }
+
+    [Fact]
+    public async Task ExplicitExemption_BypassesMutationMiddleware()
+    {
+        var (mux, db) = FakeRedis();
+        var invoked = 0;
+        var context = BuildContext(method: "POST", key: null, optedIn: false);
+        context.SetEndpoint(new Endpoint(
+            _ => Task.CompletedTask,
+            new EndpointMetadataCollection(new SkipIdempotencyAttribute("provider callback dedupe")),
+            "callback"));
+
+        await Create(_ =>
+        {
+            invoked++;
+            return Task.CompletedTask;
+        }, mux, requireAllMutations: true).InvokeAsync(context);
+
+        invoked.Should().Be(1);
+        await db.DidNotReceive().KeyExistsAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
+    }
+
+    [Fact]
     public async Task FirstRequest_StoresResponseAndReplayPreservesStatusBodyAndContentType()
     {
         var (mux, db) = FakeRedis();
@@ -460,11 +500,14 @@ public sealed class IdempotencyMiddlewareTests
         return context;
     }
 
-    private static IdempotencyMiddleware Create(RequestDelegate next, IConnectionMultiplexer mux)
+    private static IdempotencyMiddleware Create(
+        RequestDelegate next,
+        IConnectionMultiplexer mux,
+        bool requireAllMutations = false)
         => new(
             next,
             mux,
-            new IdempotencyOptions { ServicePrefix = Prefix },
+            new IdempotencyOptions { ServicePrefix = Prefix, RequireAllMutations = requireAllMutations },
             NullLogger<IdempotencyMiddleware>.Instance);
 
     private static RedisKey LegacyKey(string key) => $"{Prefix}:idem:{key}";

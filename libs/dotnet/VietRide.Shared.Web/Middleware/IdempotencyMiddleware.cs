@@ -79,8 +79,15 @@ public sealed class IdempotencyMiddleware
             return;
         }
 
-        var metadata = context.GetEndpoint()?.Metadata.GetMetadata<RequireIdempotencyAttribute>();
-        var requiresIdempotency = metadata is not null;
+        var endpointMetadata = context.GetEndpoint()?.Metadata;
+        if (endpointMetadata?.GetMetadata<SkipIdempotencyAttribute>() is not null)
+        {
+            await _next(context);
+            return;
+        }
+
+        var metadata = endpointMetadata?.GetMetadata<RequireIdempotencyAttribute>();
+        var requiresIdempotency = metadata is not null || _options.RequireAllMutations;
         if (!TryReadHeaderValue(context, out var key))
         {
             if (requiresIdempotency)
@@ -107,8 +114,7 @@ public sealed class IdempotencyMiddleware
             return;
         }
 
-        if (metadata is not null
-            && !metadata.AllowRequestBody
+        if (metadata is { AllowRequestBody: false }
             && await HasNonEmptyRequestBodyAsync(context.Request, context.RequestAborted))
         {
             await WriteErrorAsync(
