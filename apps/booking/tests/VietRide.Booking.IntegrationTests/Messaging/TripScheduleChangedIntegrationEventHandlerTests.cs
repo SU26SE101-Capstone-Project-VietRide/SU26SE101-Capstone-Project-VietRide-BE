@@ -4,6 +4,7 @@ using System.Text.Json;
 using FluentAssertions;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Npgsql;
 using Npgsql.NameTranslation;
 using NSubstitute;
@@ -383,6 +384,8 @@ internal static class Day22EventDatabase
         var options = new DbContextOptionsBuilder<BookingDbContext>()
             .UseNpgsql(dataSource, npgsql =>
                 npgsql.MigrationsHistoryTable("__ef_migrations_history", BookingDbContext.SchemaName))
+            .ConfigureWarnings(warnings =>
+                warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning))
             .Options;
         return new BookingDbContext(options, new FixedClock(now));
     }

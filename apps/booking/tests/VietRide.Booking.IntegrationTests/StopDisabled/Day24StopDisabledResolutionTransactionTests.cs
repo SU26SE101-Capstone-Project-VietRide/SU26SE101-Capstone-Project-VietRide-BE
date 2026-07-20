@@ -2,11 +2,11 @@ using System.Text.Json;
 using FluentAssertions;
 using NSubstitute;
 using VietRide.Booking.Application.Abstractions.Repositories;
+using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Application.Features.Bookings.AcceptStopDisabledFallback;
 using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Booking.Domain.ValueObjects;
-using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 using Xunit;
@@ -44,19 +44,31 @@ public sealed class Day24StopDisabledResolutionTransactionTests
         pendingActions.GetByIdForUpdateAsync(action.Id, Arg.Any<CancellationToken>()).Returns(action);
         var bookings = Substitute.For<IBookingRepository>();
         bookings.FindByIdForUpdateAsync(booking.Id, Arg.Any<CancellationToken>()).Returns(booking);
-        var unitOfWork = Substitute.For<IUnitOfWork>();
-        unitOfWork.ExecuteInTransactionAsync(Arg.Any<Func<Task<AcceptStopDisabledFallbackResult>>>(), Arg.Any<CancellationToken>())
-            .Returns(call => call.Arg<Func<Task<AcceptStopDisabledFallbackResult>>>()());
-        unitOfWork.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(1);
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(now);
+        var stationCanonicalizer = Substitute.For<IBookingStationCanonicalizer>();
+        stationCanonicalizer.LockAndResolveAsync(
+                Arg.Any<IReadOnlyCollection<Guid>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var stationIds = call.Arg<IReadOnlyCollection<Guid>>();
+                return new StationCanonicalizationResult(
+                    stationIds.ToDictionary(id => id),
+                    stationIds.ToHashSet());
+            });
 
-        var result = await new AcceptStopDisabledFallbackCommandHandler(pendingActions, bookings, unitOfWork, clock)
+        var result = await new AcceptStopDisabledFallbackCommandHandler(
+                pendingActions,
+                bookings,
+                stationCanonicalizer,
+                clock)
             .Handle(new AcceptStopDisabledFallbackCommand(booking.Id, action.Id, passengerId, "retry-safe-key"), default);
 
         result.ResolvedAction.Should().Be(nameof(BookingPendingActionResolved.AUTO_FALLBACK_DESTINATION));
         booking.DropoffStationId.Should().Be(fallbackStopId);
         action.ResolvedAt.Should().Be(now);
-        await unitOfWork.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+        bookings.Received(1).Update(booking);
+        pendingActions.Received(1).Update(action);
     }
 }

@@ -130,4 +130,3 @@ public sealed class Day24OutboxRestartIdentityTests : IAsyncLifetime
             Substitute.For<ILogger<OutboxBackgroundService>>());
     }
 }
-

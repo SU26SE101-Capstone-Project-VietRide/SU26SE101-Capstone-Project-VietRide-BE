@@ -1,8 +1,8 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using NSubstitute;
-using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Repositories;
+using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Events;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Booking.Infrastructure.Jobs;

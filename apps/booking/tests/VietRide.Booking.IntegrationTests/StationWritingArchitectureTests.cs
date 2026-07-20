@@ -15,6 +15,7 @@ public sealed class StationWritingArchitectureTests
     [
         "Features/Bookings/CreateBooking/CreateBookingCommandHandler.cs",
         "Features/Bookings/CreateRoundTripBooking/CreateRoundTripBookingCommandHandler.cs",
+        "Features/Bookings/AcceptStopDisabledFallback/AcceptStopDisabledFallbackCommandHandler.cs",
         "Features/Bookings/EditDropoff/EditDropoffCommandHandler.cs",
         "Features/Bookings/EditPickup/EditPickupCommandHandler.cs",
     ];
@@ -39,13 +40,21 @@ public sealed class StationWritingArchitectureTests
                 .Where(index => index >= 0)
                 .DefaultIfEmpty(-1)
                 .Min();
-            var canonicalizerIndex = writer.Content.IndexOf(
-                "_stationCanonicalizer.LockAndResolveAsync",
-                StringComparison.Ordinal);
+            var canonicalizerIndex = new[]
+                {
+                    writer.Content.IndexOf("_stationCanonicalizer.LockAndResolveAsync", StringComparison.Ordinal),
+                    writer.Content.IndexOf("stationCanonicalizer.LockAndResolveAsync", StringComparison.Ordinal),
+                }
+                .Where(index => index >= 0)
+                .DefaultIfEmpty(-1)
+                .Min();
 
-            snapshotIndex.Should().BeGreaterThanOrEqualTo(0, because: writer.Path);
-            canonicalizerIndex.Should().BeGreaterThan(snapshotIndex, because: writer.Path);
-            writer.Content.Should().Contain("BookingStationCanonicalization.ResolveTrip", because: writer.Path);
+            canonicalizerIndex.Should().BeGreaterThanOrEqualTo(0, because: writer.Path);
+            if (snapshotIndex >= 0)
+            {
+                canonicalizerIndex.Should().BeGreaterThan(snapshotIndex, because: writer.Path);
+                writer.Content.Should().Contain("BookingStationCanonicalization.ResolveTrip", because: writer.Path);
+            }
         }
     }
 

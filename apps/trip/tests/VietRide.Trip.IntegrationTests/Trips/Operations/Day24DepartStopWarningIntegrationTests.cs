@@ -8,9 +8,11 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
+using Npgsql;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Shared.Persistence.Outbox;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
@@ -458,6 +460,17 @@ public sealed class Day24DepartStopWebApplicationFactory : WebApplicationFactory
         builder.UseEnvironment("Testing");
         builder.ConfigureTestServices(services =>
         {
+            services.RemoveAll<TripDbContext>();
+            services.RemoveAll<DbContextOptions<TripDbContext>>();
+            services.AddDbContext<TripDbContext>((serviceProvider, options) =>
+                options
+                    .UseNpgsql(
+                        serviceProvider.GetRequiredService<NpgsqlDataSource>(),
+                        npgsql => npgsql.MigrationsHistoryTable(
+                            "__ef_migrations_history",
+                            TripDbContext.SchemaName))
+                    .ConfigureWarnings(warnings =>
+                        warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning)));
             services.RemoveAll<IBookingImpactClient>();
             services.AddSingleton<IBookingImpactClient>(Booking);
         });
