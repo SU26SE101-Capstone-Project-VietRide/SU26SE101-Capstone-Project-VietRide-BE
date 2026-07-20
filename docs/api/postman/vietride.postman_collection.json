@@ -10,6 +10,14 @@
       "value": "http://localhost:3000"
     },
     {
+      "key": "day41ReportFrom",
+      "value": "2026-07-01"
+    },
+    {
+      "key": "day41ReportTo",
+      "value": "2026-07-31"
+    },
+    {
       "key": "email",
       "value": "passenger@example.com"
     },
@@ -7609,6 +7617,68 @@
             "const body = pm.response.json(); pm.test('Crew alias returns the schedule DTO', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.id).to.eql(pm.environment.get('day22DriverScheduleId')); });"
           ] }}],
           "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day22CrewAliasKey}}" }], "url": "{{baseUrl}}/v1/operator/driver-schedules/{{day22DriverScheduleId}}/crew", "body": { "mode": "raw", "raw": "{\n  \"driverUserId\": \"{{day22DriverUserId}}\",\n  \"assistantUserId\": \"{{day22AssistantUserId}}\"\n}" } }
+        }
+      ]
+    },
+    {
+      "name": "Day 41-43 - XLSX, platform report và DLQ",
+      "description": "Các request Gateway của Day 41-43. XLSX trả raw workbook; lỗi validation/auth dùng ADR 0004. E2E real-stack và kiểm tra persistence/asynchronous nằm trong harness riêng.",
+      "item": [
+        {
+          "name": "01. Operator bookings XLSX",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('XLSX bookings response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
+          ] }}],
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/reports/bookings/export?from={{day41ReportFrom}}&to={{day41ReportTo}}" }
+        },
+        {
+          "name": "02. Operator cancellation XLSX",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('XLSX cancellation response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
+          ] }}],
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/reports/cancellation/export?from={{day41ReportFrom}}&to={{day41ReportTo}}" }
+        },
+        {
+          "name": "03. Operator parcels XLSX",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('XLSX parcels response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
+          ] }}],
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/reports/parcels/export?from={{day41ReportFrom}}&to={{day41ReportTo}}" }
+        },
+        {
+          "name": "04. Operator revenue XLSX",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('XLSX revenue response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
+          ] }}],
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/reports/revenue/export?from={{day41ReportFrom}}&to={{day41ReportTo}}" }
+        },
+        {
+          "name": "05. Operator refunds XLSX",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('XLSX refunds response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
+          ] }}],
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/reports/refunds/export?from={{day41ReportFrom}}&to={{day41ReportTo}}" }
+        },
+        {
+          "name": "06. Operator occupancy XLSX",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('XLSX occupancy response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
+          ] }}],
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/reports/occupancy/export?from={{day41ReportFrom}}&to={{day41ReportTo}}" }
+        },
+        {
+          "name": "07. System admin platform report",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json(); pm.test('Platform report envelope', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data).to.have.property('totals'); });"
+          ] }}],
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/admin/reports/platform?from={{day41ReportFrom}}&to={{day41ReportTo}}" }
+        },
+        {
+          "name": "08. System admin DLQ review",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const body = pm.response.json(); pm.test('DLQ review envelope', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.items).to.be.an('array'); pm.expect(body.data).to.have.property('unavailableServices'); });"
+          ] }}],
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/admin/outbox/dlq?pageSize=50&sortDir=desc" }
         }
       ]
     }

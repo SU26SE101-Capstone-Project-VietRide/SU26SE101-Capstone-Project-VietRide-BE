@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "policy": "all-post-patch-put-delete",
+  "services": {
+    "booking": {
+      "servicePrefix": "booking",
+      "requireAllMutations": true,
+      "controllers": [
+        "AdminVouchersController",
+        "BookingsController",
+        "BoardingController",
+        "InternalVouchersController",
+        "AdminCampaignsController",
+        "OperatorVouchersController",
+        "OperatorVoucherConsentsController"
+      ],
+      "exemptions": [
+        {
+          "method": "POST",
+          "path": "/internal/v1/vouchers/validate",
+          "reason": "Voucher validation is read-only and does not create a usage record."
+        }
+      ]
+    },
+    "payment": {
+      "servicePrefix": "payment",
+      "requireAllMutations": true,
+      "controllers": [
+        "WalletController",
+        "InternalWalletController",
+        "InternalPaymentsController",
+        "AdminFinancialController",
+        "AdminInvoicesController",
+        "Day38E2eJobsController"
+      ],
+      "exemptions": [
+        {
+          "method": "POST",
+          "path": "/v1/payments/vnpay-topup-ipn",
+          "reason": "VNPay IPN is authenticated and deduplicated by the provider transaction reference."
+        },
+        {
+          "method": "POST",
+          "path": "/v1/payments/vnpay-ipn",
+          "reason": "VNPay IPN is authenticated and deduplicated by the provider transaction reference."
+        },
+        {
+          "method": "POST",
+          "path": "/v1/payments/subscription-vnpay-ipn",
+          "reason": "VNPay IPN is authenticated and deduplicated by the provider transaction reference."
+        }
+      ]
+    },
+    "parcel": {
+      "servicePrefix": "parcel",
+      "requireAllMutations": true,
+      "controllers": [
+        "AssistantParcelsController",
+        "InternalParcelsController",
+        "OperatorParcelRouteFaresController",
+        "OperatorParcelsController",
+        "ParcelsController",
+        "ParcelDeliveryController"
+      ],
+      "exemptions": []
+    }
+  }
+}
