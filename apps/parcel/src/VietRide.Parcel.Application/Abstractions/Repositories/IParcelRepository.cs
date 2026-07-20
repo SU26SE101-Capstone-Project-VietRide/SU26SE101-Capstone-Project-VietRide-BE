@@ -222,6 +222,16 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     Task<PagedResult<ParcelEntity>> ListReceivedByUserIdAsync(
         Guid userId, int page, int pageSize, CancellationToken ct);
 
+    Task<PagedResult<ParcelEntity>> ListSentByUserIdAsync(
+        Guid userId,
+        ParcelStatus? status,
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        int page,
+        int pageSize,
+        CancellationToken ct)
+        => throw new NotSupportedException("Sent parcel history is not implemented by this repository.");
+
     /// <summary>
     /// Paginated list of non-deleted parcels for an operator's trip.
     /// </summary>

@@ -10,6 +10,7 @@ using VietRide.Booking.Application.Features.OperatorBookings.ListOperatorBooking
 using VietRide.Booking.Domain.Enums;
 using VietRide.Booking.Domain.ValueObjects;
 using VietRide.Shared.Application.Repositories;
+using VietRide.Shared.Kernel.Primitives;
 using BookingEntity = VietRide.Booking.Domain.Entities.Booking;
 
 namespace VietRide.Booking.Infrastructure.Persistence.Repositories;
@@ -52,6 +53,39 @@ internal sealed class BookingRepository : IBookingRepository
 
     public IQueryable<BookingEntity> QueryNoTracking()
         => _db.Bookings.AsNoTracking();
+
+    public async Task<PagedResult<BookingEntity>> ListPassengerHistoryAsync(
+        Guid passengerUserId,
+        BookingStatus? status,
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        int page,
+        int pageSize,
+        CancellationToken ct = default)
+    {
+        var query = _db.Bookings
+            .AsNoTracking()
+            .Where(booking => booking.PassengerUserId == passengerUserId);
+
+        if (status.HasValue)
+            query = query.Where(booking => booking.Status == status.Value);
+        if (from.HasValue)
+            query = query.Where(booking => booking.CreatedAt >= from.Value);
+        if (to.HasValue)
+            query = query.Where(booking => booking.CreatedAt < to.Value);
+
+        var totalItems = await query.LongCountAsync(ct);
+        var items = await query
+            .Include(booking => booking.Tickets)
+            .AsSplitQuery()
+            .OrderByDescending(booking => booking.CreatedAt)
+            .ThenByDescending(booking => booking.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(ct);
+
+        return PagedResult<BookingEntity>.Create(items, page, pageSize, totalItems);
+    }
 
     // -----------------------------------------------------------------------
     // IBookingRepository — aggregate-specific queries

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Execute Day"
+  short_description: "Run approved VietRide day tasks sequentially"
+  default_prompt: "Use $execute-day to run all remaining tasks for a VietRide day sequentially with targeted verification."

@@ -7,6 +7,7 @@ using StackExchange.Redis;
 using VietRide.Parcel.Application.Abstractions.Caching;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Features.History;
 using VietRide.Parcel.Infrastructure.Caching;
 using VietRide.Parcel.Infrastructure.Http;
 using VietRide.Parcel.Infrastructure.Jobs;
@@ -71,6 +72,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddTransient<CorrelationIdDelegatingHandler>();
 
         services.AddScoped<IParcelRepository, ParcelRepository>();
+        services.AddScoped<SentParcelHistoryReader>();
         services.AddScoped<IParcelRouteFareRepository, ParcelRouteFareRepository>();
         services.AddScoped<IParcelStatsRepository, ParcelStatsRepository>();
         services.AddScoped<IParcelPricingPolicyRepository, ParcelPricingPolicyRepository>();

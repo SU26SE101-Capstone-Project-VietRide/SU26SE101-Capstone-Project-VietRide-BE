@@ -426,6 +426,16 @@ Streaming LLM response qua SSE, gọi vector DB, tích hợp nhiều external AP
 | **pgvector** | Vector similarity search cho RAG | PostgreSQL extension — thay thế Elasticsearch |
 | **SendGrid / SMTP** | Email — OTP đăng ký, parcel delivery link | Free tier 100 email/ngày |
 
+**Firebase Storage upload ảnh xe:** VietRide User Access Token không được dùng trực tiếp với
+Firebase. `OPERATOR_ADMIN` gọi `POST /v1/firebase/custom-token`; Identity revalidate User/Operator
+hiện tại rồi tạo Firebase Custom Token có UID = VietRide `userId` và claims
+`{ operatorId, role: OPERATOR_ADMIN }`. FE exchange bằng `signInWithCustomToken()`, upload đúng
+`vehicles/{operatorId}/{uuid-v4}.{ext}`, lấy download URL, gửi URL vào Vehicle API, sau đó
+`signOut()` (và cũng sign-out khi logout VietRide). Storage public-read riêng path ảnh xe; write
+chỉ đúng operator, MIME JPEG/PNG/WebP, kích thước lớn hơn 0 và nhỏ hơn 5 MiB; path khác default
+deny. User lock hoặc Operator suspend phát Outbox revoke request để Identity gọi Firebase
+`RevokeRefreshTokensAsync`. ID token đã phát có residual window tối đa khoảng một giờ.
+
 > **⚠️ Google Maps ETA — gọi có điều kiện, không gọi mỗi GPS packet:**
 > GPS update mỗi 3–5 giây × N active trips đồng thời → nếu gọi Maps API mỗi packet sẽ rất tốn kém (ví dụ 10 trips đang chạy = ~2 call/giây = >100k call/ngày, vượt free tier ngay ngày đầu).
 >
@@ -1721,6 +1731,16 @@ Trip history trong Passenger App hiển thị các booking mà user đó đã Đ
 Lý do: Passenger entity chỉ lưu operational data (seatNumber, boardingStatus), không lưu nhân thân và không liên kết tới User account khác buyer. Không thể lookup "booking nào có Passenger là tôi". Đây là design trade-off chấp nhận được cho v1 — đặt vé cho người khác vẫn thấy trong history của người đặt; người được đặt hộ không thấy (trừ khi họ tự vào app và đặt).
 
 **Trip info cho history list — snapshot strategy:** `GET /bookings/history` trả về data từ Booking DB, **không cần HTTP call sang Trip-Route-Vehicle Service**. Booking entity có 4 snapshot fields (`tripSnapshotOriginName`, `tripSnapshotDestName`, `tripSnapshotDeparture`, `tripSnapshotRouteName`) được set khi tạo Booking — đủ để render history row (tên tuyến, giờ khởi hành, tên bến). Xem entity spec ở section 8. Lý do chọn snapshot thay vì (b) HTTP call mỗi lần: N HTTP call khi load list — không scale, latency cao; thay vì (c) client ghép 2 API: double round-trip, lộ service boundary.
+
+**Passenger history facade — `GET /v1/passenger/history`:** FE chọn đúng một nhánh bằng query
+`type=TICKET|PARCEL`; v1 không có `ALL` và không free-text search. Parcel Service sở hữu facade vì
+dependency một chiều Parcel → Booking đã tồn tại. Nhánh `TICKET` chỉ gọi
+`GET /internal/v1/bookings/history?userId=...`, phân trang theo Booking và trả Ticket summaries
+bên trong Booking. Nhánh `PARCEL` chỉ query Parcel local với `senderUserId = JWT sub`; parcel mà
+user chỉ là người nhận không nằm trong nhánh này. Cả hai dùng `createdAt DESC, id DESC`, range
+`from` inclusive/`to` exclusive, `pageSize <= 100`. Booking upstream lỗi phải trả
+`502 UPSTREAM_UNAVAILABLE`, không giả thành trang rỗng. Trip enrichment cho parcel được deduplicate
+theo `tripId` và chạy bounded concurrency; Trip thiếu/lỗi chỉ làm journey fields null.
 
 **Round-trip booking (Đặt vé khứ hồi):**
 

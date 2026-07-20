@@ -19,6 +19,22 @@ scoped task and report back what you changed.
 - If the task is actually .NET service code or NestJS app code, say so and stop — it belongs to `dotnet-worker` / `nest-worker`.
 - Use the project skills when they fit the task.
 
+## Targeted verification contract
+The approved day plan supplies a `verification tier` (`DOCS`, `FOCUSED`, or `PROJECT`) and exact
+`verification commands`. Run those commands once after implementation. If a legacy plan omits
+them, treat the task as `FOCUSED` and derive the smallest checks that prove acceptance. Never
+substitute a full solution/workspace matrix; full regression belongs exclusively to `audit-day`.
+
+- `DOCS`: listed parse/syntax/citation/registry checks plus `git diff --check`; no application
+  build or test.
+- `FOCUSED` (default): changed-file validation and the narrowest script/config test or parser.
+- `PROJECT`: only the single affected project when cross-file configuration or fixtures require
+  it; never `run-many`, `--all`, every solution, or every workspace project.
+- Execute the plan's exact paths/filters. Zero discovered/executed tests is failed evidence.
+- Keep complete targeted-command output visible; do not redirect, truncate, or summarize it.
+- After a reviewer-requested patch, rerun only checks invalidated by the changed files; docs or
+  comments do not invalidate application tests.
+
 ## Before reporting done
-- Run the relevant build/lint for what you touched (`npx nx ...` for TS, `dotnet build`/`dotnet format --verify-no-changes` for .NET).
-- Report: files changed, commands run + result, and any follow-ups or risks. Do not commit unless explicitly asked."""
+- Report the verification tier, files changed, exact commands + full results, scope expansions,
+  and follow-ups/risks. Do not commit unless explicitly asked."""

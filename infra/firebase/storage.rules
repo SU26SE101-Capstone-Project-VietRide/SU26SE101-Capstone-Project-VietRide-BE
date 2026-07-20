@@ -1,0 +1,16 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /vehicles/{operatorId}/{fileName} {
+      allow read: if true;
+      allow write: if request.auth != null
+        && request.auth.token.role == 'OPERATOR_ADMIN'
+        && request.auth.token.operatorId == operatorId
+        && request.resource != null
+        && request.resource.size > 0
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+    }
+  }
+}
