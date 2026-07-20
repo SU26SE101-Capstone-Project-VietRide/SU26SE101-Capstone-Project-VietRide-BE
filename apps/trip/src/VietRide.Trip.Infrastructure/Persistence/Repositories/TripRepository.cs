@@ -1,10 +1,14 @@
 using System.Buffers.Binary;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Features.DriverTrips.GetAssignedTripRoute;
 using VietRide.Trip.Application.Features.Internal.Reports.PlatformTrips;
+using VietRide.Trip.Application.Features.OperatorReports;
 using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Infrastructure.Persistence.Repositories;
@@ -12,10 +16,19 @@ namespace VietRide.Trip.Infrastructure.Persistence.Repositories;
 internal sealed class TripRepository : ITripRepository
 {
     private readonly TripDbContext _dbContext;
+    private readonly ILogger<TripRepository> _logger;
 
     public TripRepository(TripDbContext dbContext)
+        : this(dbContext, NullLogger<TripRepository>.Instance)
+    {
+    }
+
+    public TripRepository(
+        TripDbContext dbContext,
+        ILogger<TripRepository> logger)
     {
         _dbContext = dbContext;
+        _logger = logger;
     }
 
     public Task<Domain.Entities.Trip?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
@@ -35,13 +48,26 @@ internal sealed class TripRepository : ITripRepository
         await using var command = connection.CreateCommand();
         command.CommandText =
             """
-            SELECT operator_id,
-                   COUNT(*) AS completed_trip_count
-            FROM vietride_trip.trips
-            WHERE status = 'COMPLETED'::vietride_trip.trip_status
-              AND completed_at >= @from_utc
-              AND completed_at < @to_utc
-            GROUP BY operator_id
+            WITH live AS (
+                SELECT operator_id, COUNT(*) AS completed_trip_count
+                FROM vietride_trip.trips
+                WHERE status = 'COMPLETED'::vietride_trip.trip_status
+                  AND completed_at >= @from_utc
+                  AND completed_at < @to_utc
+                GROUP BY operator_id
+            ),
+            projected AS (
+                SELECT operator_id, COUNT(*) AS completed_trip_count
+                FROM vietride_trip.platform_trip_stats
+                WHERE completed_at >= @from_utc
+                  AND completed_at < @to_utc
+                GROUP BY operator_id
+            )
+            SELECT COALESCE(live.operator_id, projected.operator_id) AS operator_id,
+                   COALESCE(live.completed_trip_count, 0) AS live_count,
+                   COALESCE(projected.completed_trip_count, 0) AS projected_count
+            FROM live
+            FULL OUTER JOIN projected USING (operator_id)
             ORDER BY operator_id;
             """;
         command.Transaction = _dbContext.Database.CurrentTransaction?.GetDbTransaction();
@@ -52,10 +78,51 @@ internal sealed class TripRepository : ITripRepository
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            items.Add(new PlatformTripReportItem(reader.GetGuid(0), reader.GetInt64(1)));
+            var operatorId = reader.GetGuid(0);
+            var completedTripCount = reader.GetInt64(1);
+            var projectedCount = reader.GetInt64(2);
+            if (completedTripCount != projectedCount)
+            {
+                _logger.LogError(
+                    "Platform TripStats mismatch for operator {OperatorId}: live count {LiveCount}, projected count {ProjectedCount}",
+                    operatorId,
+                    completedTripCount,
+                    projectedCount);
+                throw new PlatformTripStatsMismatchException();
+            }
+
+            items.Add(new PlatformTripReportItem(operatorId, completedTripCount));
         }
 
         return items;
+    }
+
+    public async IAsyncEnumerable<TripOperatorOccupancyRow> StreamOperatorOccupancyRowsAsync(
+        Guid operatorId,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var rows = _dbContext.Trips
+            .AsNoTracking()
+            .Where(trip => trip.OperatorId == operatorId
+                && trip.DepartureDateTime >= fromUtc
+                && trip.DepartureDateTime < toUtc)
+            .OrderBy(trip => trip.DepartureDateTime)
+            .ThenBy(trip => trip.Id)
+            .Select(trip => new TripOperatorOccupancyRow(
+                trip.Id,
+                trip.RouteId,
+                trip.Status.ToString(),
+                trip.DepartureDateTime,
+                trip.Seats.LongCount(seat => seat.SeatType != TripSeatType.DRIVER_AREA
+                    && seat.Status != TripSeatStatus.UNAVAILABLE),
+                trip.Seats.LongCount(seat => seat.Status == TripSeatStatus.BOOKED)));
+
+        await foreach (var row in rows.AsAsyncEnumerable().WithCancellation(cancellationToken).ConfigureAwait(false))
+        {
+            yield return row;
+        }
     }
 
     public async Task<IReadOnlyList<Guid>> ListScheduledForAutoBoardingAsync(

@@ -479,6 +479,75 @@ COMMENT ON COLUMN trips.destination_arrived_by_user_id IS
     'Logical FK to identity.users.id for the assigned Driver/Assistant who recorded destination arrival.';
 
 -- -----------------------------------------------------------------------------
+-- platform_trip_stats (Day 42 exact-range earned projection)
+-- -----------------------------------------------------------------------------
+CREATE TABLE platform_trip_stats (
+    trip_id UUID PRIMARY KEY REFERENCES trips(id) ON DELETE CASCADE,
+    operator_id UUID NOT NULL,
+    completed_at TIMESTAMPTZ NOT NULL,
+    projected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_platform_trip_stats_completed_operator
+    ON platform_trip_stats (completed_at, operator_id);
+
+CREATE OR REPLACE FUNCTION sync_platform_trip_stats()
+RETURNS TRIGGER AS $$
+DECLARE
+    source_id UUID := CASE WHEN TG_OP = 'DELETE' THEN OLD.id ELSE NEW.id END;
+BEGIN
+    IF TG_OP <> 'DELETE'
+       AND NEW.status = 'COMPLETED'::vietride_trip.trip_status
+       AND NEW.completed_at IS NOT NULL THEN
+        INSERT INTO platform_trip_stats (trip_id, operator_id, completed_at, projected_at)
+        VALUES (NEW.id, NEW.operator_id, NEW.completed_at, now())
+        ON CONFLICT (trip_id) DO UPDATE SET
+            operator_id = EXCLUDED.operator_id,
+            completed_at = EXCLUDED.completed_at,
+            projected_at = now();
+    ELSE
+        DELETE FROM platform_trip_stats WHERE trip_id = source_id;
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_sync_platform_trip_stats
+    AFTER INSERT OR UPDATE OR DELETE ON trips
+    FOR EACH ROW EXECUTE FUNCTION sync_platform_trip_stats();
+
+CREATE OR REPLACE FUNCTION rebuild_platform_trip_stats()
+RETURNS VOID AS $$
+BEGIN
+    INSERT INTO platform_trip_stats (trip_id, operator_id, completed_at, projected_at)
+    SELECT id, operator_id, completed_at, now()
+    FROM trips
+    WHERE status = 'COMPLETED'::vietride_trip.trip_status
+      AND completed_at IS NOT NULL
+    ON CONFLICT (trip_id) DO UPDATE SET
+        operator_id = EXCLUDED.operator_id,
+        completed_at = EXCLUDED.completed_at,
+        projected_at = now();
+
+    DELETE FROM platform_trip_stats projection
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM trips source
+        WHERE source.id = projection.trip_id
+          AND source.status = 'COMPLETED'::vietride_trip.trip_status
+          AND source.completed_at IS NOT NULL
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT rebuild_platform_trip_stats();
+
+-- -----------------------------------------------------------------------------
 -- trip_audit_logs (append-only)
 -- -----------------------------------------------------------------------------
 CREATE TABLE trip_audit_logs (
@@ -731,6 +800,23 @@ CREATE TABLE outbox_events (
 
 CREATE INDEX idx_outbox_events_status_created
     ON outbox_events (status, created_at) WHERE status IN ('PENDING', 'PUBLISHING', 'FAILED');
+
+-- -----------------------------------------------------------------------------
+-- outbox_dlq (terminal publish failures; one row per event)
+-- -----------------------------------------------------------------------------
+CREATE TABLE outbox_dlq (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id UUID NOT NULL,
+    event_type VARCHAR(100) NOT NULL,
+    payload JSONB NOT NULL,
+    retry_count INT NOT NULL,
+    last_error TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    terminal_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX uq_outbox_dlq_event_id ON outbox_dlq (event_id);
+CREATE INDEX idx_outbox_dlq_terminal_event_id ON outbox_dlq (terminal_at, event_id);
 
 -- =============================================================================
 -- TRIGGERS — auto-update updated_at
