@@ -256,8 +256,16 @@ public sealed class ResendInitialPasswordCommandHandlerTests
 
         public DateTimeOffset GetExpiresAt(DateTimeOffset now) => now.AddHours(48);
 
-        public string BuildSetInitialPasswordUrl(string code)
-            => $"https://test.vietride.app/auth/set-password?token={code}";
+        // Mirrors the real per-role branching so a handler that passes the wrong role
+        // shows up here instead of silently producing a plausible-looking URL.
+        public string BuildSetInitialPasswordUrl(string code, UserRole role)
+        {
+            var path = role is UserRole.DRIVER or UserRole.ASSISTANT
+                ? "/auth/set-password"
+                : "/auth/set-initial-password";
+
+            return $"https://test.vietride.app{path}?token={code}";
+        }
     }
 
     private sealed class CapturingEmailService : IEmailService
