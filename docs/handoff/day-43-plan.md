@@ -4,7 +4,7 @@
 
 - **Timeline ref**: `BE_TIMELINE_VU.md` → Day 43 (Jira: SCV-131)
 - **Prior checklist**: `docs/handoff/day-42-checklist.md` (`not found`)
-- **Plan status**: DRAFT → (reviewer) APPROVED / REVISION-REQUIRED
+- **Plan status**: APPROVED — các quyết định Day 43 đã khóa cho mục tiêu Day 41–43; Task 43.0 đồng bộ SOT trước implementation
 
 ## Objective
 Day 43 hardens delivery and retry safety for the transactional Outbox, idempotency enforcement, and scheduled-job operations. It introduces a durable, reviewable terminal path for exhausted Outbox publishes, verifies every in-scope mutation in Booking, Payment, and Parcel has correct idempotency behavior, and exposes job scheduling health without exposing Hangfire administration. The baseline task resolves source-of-truth conflicts before code is dispatched; it is not permission to invent the missing API contracts.
@@ -166,20 +166,30 @@ The Day 43 timeline requires two routes that do not exist in `VietRide_API_Contr
 
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
-| 43.0 | todo | — | — | Chờ human quyết định Q1–Q4. |
-| 43.1 | todo | — | — | Phụ thuộc 43.0. |
-| 43.2 | todo | — | — | Phụ thuộc 43.0, 43.1. |
-| 43.3 | todo | — | — | Phụ thuộc 43.0. |
-| 43.4 | todo | — | — | Phụ thuộc 43.0, 43.3. |
-| 43.5 | todo | — | — | Phụ thuộc 43.0, 43.3. |
-| 43.6 | todo | — | — | Phụ thuộc 43.0, 43.3. |
-| 43.7 | todo | — | — | Phụ thuộc 43.0, 43.5, 43.6. |
-| 43.8 | todo | — | — | Final verification gate. |
+| 43.0 | done | APPROVED (full audit) | 2026-07-20 | Q1–Q4 đã khóa và đồng bộ API contract/BSOT/schema. |
+| 43.1 | done | APPROVED (full audit) | 2026-07-20 | Shared terminal transition sau lần thất bại thứ sáu, atomic/unique DLQ và publisher tests đã pass. |
+| 43.2 | done | APPROVED (full audit) | 2026-07-20 | DLQ cho Identity/Trip/Booking/Payment/Parcel/Tracking, facade Identity và migration gate đã pass. |
+| 43.3 | done | APPROVED (full audit) | 2026-07-20 | Shared idempotency v2 và inventory verifier đã pass. |
+| 43.4 | done | APPROVED (full audit) | 2026-07-20 | Booking inventory: 7 controller, 24 mutation, 1 exemption. |
+| 43.5 | done | APPROVED (full audit) | 2026-07-20 | Payment inventory: 6 controller, 14 mutation, 3 exemption. |
+| 43.6 | done | APPROVED (full audit) | 2026-07-20 | Parcel inventory: 6 controller, 20 mutation, 0 exemption. |
+| 43.7 | done | APPROVED (full audit) | 2026-07-20 | Internal job health cho 5 Hangfire service, Internal JWT và lag semantics đã pass. |
+| 43.8 | done | APPROVED (full audit) | 2026-07-20 | RabbitMQ outage/drain, terminal DLQ, degraded source, cursor và full regression gates đã pass. |
 
 Legend: todo / in progress / done (reviewer APPROVED + human `/verify`) / done-with-carryover / blocked
 
-## Open questions
-The following are not fully decided by the current source of truth and must be resolved by a human before Task 43.0/code dispatch.
+## Quyết định contract đã khóa
+
+- Mọi publisher trong scope, gồm Identity, Trip, Booking, Payment, Parcel và Tracking, đều chuyển event sang DLQ bền vững sau lần publish thất bại thứ sáu (`retry_count > 5`). Không đổi lịch backoff ngoài terminal boundary.
+- Mỗi service giữ DLQ trong database của chính mình; Identity sở hữu facade `GET /v1/admin/outbox/dlq`. Facade dùng `SYSTEM_ADMIN`, cursor tổng hợp có service/cursor component, trả `200` kèm `unavailableServices` khi một nguồn tạm thời không truy cập được, và không trả partial totals giả. Không có replay/purge ở v1.
+- Payload DLQ chỉ phục vụ review, giữ event id/type/payload, retry count, last error, created/failed/terminal timestamps; payload không ghi log. Marker unique theo `(service,event_id)` bảo đảm không có terminal duplicate.
+- Idempotency audit bao phủ mọi POST/PATCH/PUT/DELETE của Booking, Payment và Parcel. VNPay IPN callback giữ HMAC/deduplication hiện hữu và là exemption có kiểm thử; delivery-token public action và internal mutation chỉ được exemption khi đã có cơ chế deduplication tương đương trong inventory. Missing, invalid UUID-v4, mismatch và in-flight dùng error contract hiện hành.
+- Mỗi service đang sở hữu Hangfire (`Identity`, `Trip`, `Booking`, `Payment`, `Parcel`) expose service-local `GET /internal/jobs/status`, chỉ Internal JWT, không qua Gateway và không mở dashboard. DTO gồm job id, status, lastRun, nextRun, lagSeconds; lag là `max(0, nowUtc - nextRunUtc)` cho job quá hạn, `null` khi chưa có next run/disabled. Endpoint không đổi schedule/readiness.
+- Chaos gate phải chứng minh RabbitMQ outage giữ Outbox trong Postgres, broker restart drain được event eligible, và event vượt threshold xuất hiện đúng một DLQ row/query được từ Identity facade.
+
+## Open questions đã đóng
+
+Các Q1–Q4 cũ bên dưới được giữ làm lịch sử của bản draft; quyết định ở mục trên là SOT hiện hành và không còn là blocker.
 
 **Q1 — Outbox retry boundary.** Day 43 says events failed `> 5 retries` enter `OutboxDLQ`; `BACKEND_SOURCE_OF_TRUTH.md` §10.3 and the shared `OutboxOptions` currently use 10. Should the terminal transition occur on the fifth failed publish (`retry_count = 5`) or after a sixth failed publish (`retry_count > 5`), and does this Day replace the global maximum for every publisher service?
 

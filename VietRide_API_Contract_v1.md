@@ -3240,8 +3240,9 @@ Errors: `404 TRIP_SETTLEMENT_NOT_FOUND`; `409 TRIP_SETTLEMENT_ALREADY_SETTLED`; 
 
 ### GET `/v1/admin/reports/platform?from={from}&to={to}`
 
-Auth: `SYSTEM_ADMIN`. Payment owns orchestration; Gateway only proxies and no service reads another
-service's database.
+Auth: `SYSTEM_ADMIN`. Booking owns the public facade and orchestration; Gateway only proxies and no
+service reads another service's database. Booking reads its local earned source and calls the raw
+Trip, Parcel, Payment-ledger and Identity endpoints below through Internal JWT.
 
 `from` and `to` are both required RFC 3339 timestamps with UTC offset `Z`; `from < to`; maximum
 range is 366 days. Metrics use half-open UTC interval `[from,to)`.
@@ -3287,8 +3288,9 @@ then operator ID. Missing Identity summaries remain with `operatorName=null`. To
 checked sum of every breakdown row. Parcel and net revenue are signed and may be negative.
 
 Errors: `403 FORBIDDEN`, `422 VALIDATION_ERROR`, `500 REPORT_VALUE_OVERFLOW`,
-`502 UPSTREAM_UNAVAILABLE`. A canonical upstream `REPORT_VALUE_OVERFLOW` is propagated as the same
-500; timeout, other 5xx and unusable payloads map to 502. No partial response is permitted.
+`503 UPSTREAM_UNAVAILABLE`. A canonical upstream `REPORT_VALUE_OVERFLOW` is propagated as the same
+500; timeout, other 5xx, unusable payloads and reconciliation mismatches map to 503. No partial or
+stale response is permitted.
 
 ### GET `/internal/v1/reports/platform/bookings?from={from}&to={to}`
 
@@ -5929,3 +5931,115 @@ Producer: Trip. Consumer: Identity. Exchange: `vietride.events`. Payload:
 ```
 
 The same snapshot allow-list and PII-safe logging rules as `trip.station.merged` apply.
+
+## Day 41–43 — Reporting and reliability contract addendum
+
+This addendum is the current contract for the Sprint 6 reporting and reliability scope. It
+supersedes the earlier Day-40 platform-owner wording where it conflicts with the rules below.
+
+### Operator XLSX exports
+
+The following six read-only routes are canonical and are proxied by Gateway to the service that
+owns the source database:
+
+| Route | Owner | Sheet | Filename prefix |
+|---|---|---|---|
+| `GET /v1/operator/reports/bookings/export` | Booking | `Bookings` | `bookings-report` |
+| `GET /v1/operator/reports/parcels/export` | Parcel | `Parcels` | `parcels-report` |
+| `GET /v1/operator/reports/revenue/export` | Payment | `Revenue` | `revenue-report` |
+| `GET /v1/operator/reports/occupancy/export` | Trip | `Occupancy` | `occupancy-report` |
+| `GET /v1/operator/reports/cancellation/export` | Booking | `Cancellations` | `cancellation-report` |
+| `GET /v1/operator/reports/refunds/export` | Payment | `Refunds` | `refunds-report` |
+
+All routes require `OPERATOR_ADMIN` or `OPERATOR_STAFF`. `operatorId` is read only from the
+authenticated operator claim; query/body values are ignored and are not accepted. `from` and `to`
+are optional ICT dates, inclusive. The default is the last 30 ICT calendar days including `to`;
+the maximum is 92 inclusive days. The service converts the range to UTC `[from,to)` and rejects
+invalid or oversized ranges with `422 REPORT_RANGE_INVALID`.
+
+Success is a raw file response with media type
+`application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, `Content-Disposition:
+attachment`, and a deterministic filename ending in `.xlsx`. Errors use the ADR 0004 envelope.
+Empty ranges still produce a valid workbook. No report contains passenger, sender or recipient
+PII. The existing `GET /v1/operator/parcels/reports/export?format=csv` route remains unchanged.
+
+Workbook columns are stable and typed as follows:
+
+- `Bookings`: `booking_id`, `booking_code`, `trip_id`, `status`, `passenger_count`,
+  `total_amount_vnd`, `created_at`, `confirmed_at`, `completed_at`.
+- `Parcels`: `parcel_id`, `parcel_code`, `trip_id`, `status`, `size_category`,
+  `total_price_vnd`, `deposit_amount_vnd`, `additional_amount_vnd`, `refund_amount_vnd`,
+  `created_at`, `confirmed_at`.
+- `Revenue`: `entry_id`, `entry_type`, `reference_type`, `reference_id`, `trip_id`, `amount_vnd`,
+  `occurred_at`, `note`.
+- `Occupancy`: `trip_id`, `route_id`, `status`, `departure_at`, `sellable_seat_count`,
+  `booked_seat_count`, `occupancy_percent`.
+- `Cancellations`: `booking_id`, `booking_code`, `trip_id`, `status`, `cancelled_at`,
+  `cancellation_reason`, `total_amount_vnd`.
+- `Refunds`: `entry_id`, `entry_type`, `reference_type`, `reference_id`, `trip_id`, `amount_vnd`,
+  `occurred_at`, `note`.
+
+Revenue and refund rows come from immutable Payment `OperatorLedgerEntry`. `BOOKING_GROUP`
+allocations are read from the existing Payment context and are not duplicated in a new attribution
+table. The shared writer uses ClosedXML `0.105.0`, a delete-on-close seekable temp stream and
+async row enumeration; it must not materialize a full output byte array or a duplicate full row
+list.
+
+### Platform report stabilization
+
+`GET /v1/admin/reports/platform?from=&to=` remains the public route and keeps its UTC `[from,to)`
+metric anchors. Booking owns the public facade from Day 42. Booking may call only internal raw
+source endpoints; each source reads its own database. Payment remains the authoritative ledger
+source for revenue reconciliation. Redis read-through cache keys are
+`platform-report:v1:{fromUtc}:{toUtc}` with a 5-minute TTL and exact UTC boundaries.
+
+The facade performs reconciliation before promoting Stats/cache data. A mismatch, downstream
+timeout, unavailable source or malformed payload fails the whole request with `503
+UPSTREAM_UNAVAILABLE`; no partial or stale totals are returned. Cache entries must include the
+contract version and exact range.
+
+Booking, Trip and Parcel each maintain a per-earned-record projection named respectively
+`platform_booking_stats`, `platform_trip_stats` and `platform_parcel_stats`. A source-row trigger
+updates the projection in the same local transaction, while a five-minute recurring backfill
+rebuilds it idempotently from live rows. Every raw internal source request compares projection and
+live aggregates for every operator in the exact UTC range. Any count/revenue mismatch returns
+`503 UPSTREAM_UNAVAILABLE`; a recent projection timestamp alone never bypasses reconciliation.
+
+`GET /internal/v1/reports/platform/ledger?from=&to=` is Internal-JWT-only and returns the raw
+Payment-owned payload `{ "items": [{ "operatorId", "bookingRevenueVnd", "parcelRevenueVnd" }] }`.
+It reads immutable `OperatorLedgerEntry` rows in UTC `[from,to)`, uses checked BIGINT aggregation,
+and never calls another service. Booking compares every operator revenue pair with the earned live
+Booking/Parcel sources before it publishes or caches the composite report.
+
+### Outbox DLQ review
+
+`GET /v1/admin/outbox/dlq` is an Identity-owned `SYSTEM_ADMIN` read-only facade. It aggregates
+per-service DLQ sources for Identity, Trip, Booking, Payment, Parcel and Tracking. Query supports
+`cursor?`, `pageSize` (1..100), `service?`, `eventType?`, `sortDir?`; the cursor is an opaque
+composite of service, terminal timestamp and event id. The success data is:
+
+```json
+{
+  "items": [{
+    "service": "booking", "eventId": "uuid", "eventType": "booking.booking_confirmed",
+    "payload": {}, "retryCount": 6, "lastError": "...",
+    "createdAt": "2026-07-22T00:00:00Z", "terminalAt": "2026-07-22T00:01:00Z"
+  }],
+  "nextCursor": null,
+  "unavailableServices": []
+}
+```
+
+If one source is unavailable, the facade returns `200` with `unavailableServices` and the
+available items; it does not fabricate totals. DLQ transition occurs after the sixth failed
+publish (`retry_count > 5`) and is unique per service/event id. Replay and purge are out of scope
+for v1. Payloads are never written to operational logs.
+
+### Internal Hangfire job health
+
+Each Hangfire-owning .NET service exposes a service-local, non-Gateway route
+`GET /internal/jobs/status`, protected by Internal JWT. The raw success payload is an array of
+`{ jobId, status, lastRun, nextRun, lagSeconds }`. `lagSeconds` is
+`max(0, nowUtc - nextRunUtc)` for overdue jobs and `null` when there is no next run or the job is
+disabled. The endpoint is read-only and does not alter schedules, readiness or Hangfire dashboard
+exposure.
