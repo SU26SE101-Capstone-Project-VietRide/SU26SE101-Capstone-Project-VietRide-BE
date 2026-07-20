@@ -1433,6 +1433,34 @@ Response `200`:
 
 Rules: dropoff edit is in scope, but v1 fare stays full-price by pickup point, so this endpoint does not create payment/refund side effects.
 
+## Day 24 — STOP_DISABLED passenger choices
+
+The three STOP_DISABLED mutations are owner-only, require a UUID-v4 `Idempotency-Key`, and
+accept a request at `deadline == now`; only a request strictly after the effective deadline is
+expired. The fingerprint is the authenticated actor, method, path, canonical query, and raw body.
+Booking captures one handler clock `capturedNow` and persists
+`deadline = min(capturedNow + 24h, tripCurrentDeparture - 2h)`; the scheduler selects only
+`deadline < now`; equality performs no synchronous fallback and is resolved by only the next
+five-minute scheduler pass after the strict boundary.
+Same-key/same-fingerprint replays the original HTTP status and bytes before action state lookup;
+same-key/different-fingerprint returns `422 IDEMPOTENCY_KEY_MISMATCH`; a new key after terminal
+resolution returns `409 BOOKING_PENDING_ACTION_ALREADY_RESOLVED` (or the documented expired/stale
+conflict when that state check wins). Ownership mismatches return `404 BOOKING_NOT_FOUND`.
+
+| Mutation | Exact request body | Successful response | STOP_DISABLED transition |
+|---|---|---|---|
+| `POST /v1/bookings/{bookingId}/edit-pickup` | Existing body `{ "pickup": { "stationId": "uuid", "stopId": "uuid|null" }, "paymentMethod": "WALLET" }` | Existing `200 ApiResponse<{bookingId,pickup,fareDelta:0,refundAmount:0,paymentRedirectUrl:null}>` | Atomically updates pickup, sets `resolvedAction=ACCEPTED`, and resolves the active action. |
+| `POST /v1/bookings/{bookingId}/edit-dropoff` | Existing body `{ "dropoff": { "stationId": "uuid|null", "stopId": "uuid|null" } }` | Existing `200 ApiResponse<{bookingId,dropoff,fareDelta:0}>` | Atomically updates dropoff, sets `resolvedAction=ACCEPTED`, and resolves the active action. |
+| `POST /v1/bookings/{bookingId}/pending-action/{actionId}/accept-fallback` | No body | `200 ApiResponse` (body shape is not specified by the ratified D24-2 record) | Atomically maps pickup to the route origin station or dropoff to the destination station, then resolves the action. |
+| `POST /v1/bookings/{bookingId}/cancel` | Existing body `{ "reason": "STOP_DISABLED_REFUSED" }` | Existing `200 ApiResponse<{bookingId,status:"CANCELLED",refundAmount:100% of totalAmount,refundMethod}>` | Atomically resolves, cancels, sets `refundOverride=true`, and emits only the existing `booking.booking.cancelled`. |
+
+The edit endpoints retain their existing price-neutral rules and do not add a STOP_DISABLED
+resolver body or broaden the Day-23 `POST /pending-actions/{actionId}/resolve` body. The Day-23 `SCHEDULE_CHANGE` resolver/body is unchanged. Every choice
+preserves passenger ownership and deadline checks. All three use `409 BOOKING_PENDING_ACTION_EXPIRED`
+for a strictly late request and `409 BOOKING_PENDING_ACTION_ALREADY_RESOLVED` for a new key after
+terminal resolution; missing/mismatched idempotency keys use `422 IDEMPOTENCY_KEY_REQUIRED` /
+`422 IDEMPOTENCY_KEY_MISMATCH`.
+
 ### POST `/v1/bookings/{bookingId}/pending-actions/{actionId}/resolve`
 
 Auth: user JWT with role `PASSENGER`, and the caller must own the Booking. A valid JWT with any
@@ -1885,9 +1913,40 @@ Response `200`:
 }
 ```
 
+### GET `/internal/v1/bookings/trips/{tripId}/stops/{stopId}/pending-passenger-count?operatorId={operatorId}`
+
+Canonical route: `GET /internal/v1/bookings/trips/{tripId}/stops/{stopId}/pending-passenger-count?operatorId={operatorId}`.
+
+Auth: valid Internal JWT only. This is a raw internal success response (no `ApiResponse` envelope)
+and has no Gateway route. The sole caller is Trip after it has validated its own Trip, TripStop,
+assigned crew, and tenant. Booking performs no Trip/Stop lookup, caller-service/tenant-claim authorization,
+or additional cross-service validation, and absent logical references do not become
+`403`/`404`.
+
+The exact predicate is:
+
+```text
+Booking.status = CONFIRMED
+AND Passenger.boardingStatus = PENDING
+AND Booking.tripId = :tripId
+AND Booking.pickupStopId = :stopId
+AND Booking.operatorId = :operatorId
+```
+
+Response `200` (raw), including the no-match case with count `0`:
+
+```json
+{ "tripId": "uuid", "stopId": "uuid", "pendingPassengerCount": 0 }
+```
+
+`tripId`, `stopId`, and `operatorId` must be non-empty, non-zero UUIDs. Malformed/all-zero input
+returns `422 VALIDATION_ERROR`; invalid Internal JWT returns `401 AUTH_TOKEN_INVALID`. No row
+match is still raw `200` with zero.
+
 ### GET `/internal/v1/trips/{tripId}?pricingAt={iso8601}`
 
-Auth: Internal JWT. Callers: Booking, Parcel, Tracking, Payment (BSOT §7.2). Trip snapshot
+Auth: valid Internal JWT only. Callers: Booking, Parcel, Tracking, Payment (BSOT §7.2). This
+endpoint adds no tenant authorization; invalid Internal JWT returns `401 AUTH_TOKEN_INVALID`. Trip snapshot
 that Booking reads for checkout fare calc + pickup/dropoff validation. `pricingAt` is optional;
 when present it must be an ISO-8601 datetime with offset. Returns a **raw DTO**
 (no `ApiResponse` envelope — §1.6.2 internal-endpoint convention); errors still use the
@@ -1902,6 +1961,7 @@ Response `200` (raw):
   "vehicleId": "uuid",
   "status": "SCHEDULED",
   "departureDateTime": "2026-05-18T08:00:00+07:00",
+  "actualDepartureTime": null,
   "estimatedArrivalTime": "2026-05-18T20:00:00+07:00",
   "baseFare": 400000,
   "originStation": { "id": "uuid", "name": "Bến xe Miền Đông" },
@@ -1913,6 +1973,8 @@ Response `200` (raw):
       "orderIndex": 1,
       "allowPickup": true,
       "allowDropoff": false,
+      "status": "PENDING",
+      "actualArrivalTime": null,
       "estimatedArrivalTime": "2026-05-18T09:30:00+07:00",
       "distanceFromOriginKm": 42.5,
       "fareFromThisStop": 350000
@@ -1948,6 +2010,10 @@ Notes:
   (technical_context_v7 line 1750). Trip will expose this field in Task 11.4.
 - `driverUserId` / `assistantUserId`: nullable UUID logical user keys used by downstream services
   for trip-assignment authorization. They do not create cross-database foreign keys.
+- `actualDepartureTime`: nullable UTC datetime captured by Trip when the vehicle actually leaves
+  the terminal. This additive field is authoritative for terminal no-show detection; existing
+  stop snapshot `status` and nullable `actualArrivalTime` remain authoritative for along-route
+  anchors. No event or projection is added to this snapshot seam.
 - Errors: `404 TRIP_NOT_FOUND`.
 
 ### POST `/internal/v1/trips/{tripId}/lock-seats`
@@ -1959,9 +2025,6 @@ is locked.
 Round-trip confirmation uses `POST /internal/v1/trips/round-trip/book-seats` with outbound
 and return legs (`tripId`, `seatLockToken`, `bookingId`, `passengerSeatAssignments`). Trip
 validates ownership of both locks before changing either leg and persists both legs atomically.
-
-Trip obtains the Stop-disable warning count through
-`GET /internal/v1/bookings/active-by-stop/{stopId}/count?operatorId=` (Internal JWT).
 
 Request:
 ```json
@@ -4126,9 +4189,12 @@ Identity validation failures (404, 5xx, transport, circuit-breaker) map to `422 
 
 Day 7 does not accept or mutate `shared_suggestion` / `sharedSuggestion`; that write path is deferred.
 
-`DELETE /v1/operator/stops/{id}?replacedByStopId=` disables the Stop without deleting
-historical RouteStop/TripStop rows. Replacement is optional and must be active, same-operator,
-non-self, and cycle-free. Response warning code is `STOP_DISABLED_BOOKING_AFFECTED`.
+`DELETE /v1/operator/stops/{id}?replacedByStopId=` is the sole Stop-disable mutation. It is
+bodyless, requires `OPERATOR_ADMIN` and a UUID-v4 `Idempotency-Key`, sets `isActive=false`,
+preserves `deletedAt`, and leaves historical RouteStop/TripStop rows intact. Replacement is
+optional and must be active, same-operator, non-self, and cycle-free. The old synchronous
+`STOP_DISABLED_BOOKING_AFFECTED` warning/count behavior is legacy/deprecated for this route;
+impact comes only from the asynchronous `booking.stop_disabled.affected` event.
 
 Coordinates validate latitude in [-90, 90] and longitude in [-180, 180].
 
@@ -4165,6 +4231,39 @@ Auth: `OPERATOR_STAFF`, `OPERATOR_ADMIN`.
 Tenant isolation: missing Stop or Stop owned by another operator returns `404 STOP_NOT_FOUND` in the ADR 0004 error envelope.
 
 Response `200`: canonical Stop DTO.
+
+### DELETE `/v1/operator/stops/{id}?replacedByStopId=`
+
+Auth: `OPERATOR_ADMIN`; request body: none. `replacedByStopId` is an optional UUID query
+parameter. `Idempotency-Key` is required and must be UUID v4. The fingerprint includes the
+authenticated actor, method, path, canonical query, and empty raw body. A same-key/same-
+fingerprint replay returns the original status and response bytes before current Stop state is
+looked up. A same-key/different-fingerprint request returns `422 IDEMPOTENCY_KEY_MISMATCH`.
+
+The first successful request sets `isActive=false`, does not change `deletedAt`, stores the
+optional replacement, and publishes exactly one `trip.stop.disabled` Outbox fact. A repeat using
+a new key and the same replacement is behavior-idempotent and returns `200`; a different
+replacement after disable returns `409 STOP_ALREADY_DISABLED`. A missing/cross-tenant Stop is
+masked as `404 STOP_NOT_FOUND`; invalid replacement input is `422 STOP_REPLACEMENT_INVALID`, a
+cycle is `422 STOP_REPLACEMENT_CYCLE`, a missing key is `422 IDEMPOTENCY_KEY_REQUIRED`, and a
+generic authorization failure is `403 FORBIDDEN`.
+
+Response `200` is exactly `ApiResponse<{ stop: StopDto, warning: null }>`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": { "stop": { "id": "uuid", "isActive": false }, "warning": null },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-25T10:00:00Z" }
+}
+```
+
+`warning` is a present JSON property whose value is `null`; `ActiveBookingCount` is omitted.
+Booking impact is observed only from `booking.stop_disabled.affected`, never by a synchronous
+Booking count call. `PATCH /v1/operator/stops/{id}` remains details-update-only: a PATCH leaves
+`isActive` and `deletedAt` unchanged and emits no `trip.stop.disabled` Outbox event; DELETE is not
+an alias for PATCH.
 
 ### PATCH `/v1/operator/stops/{id}`
 
@@ -5428,6 +5527,40 @@ Errors: `401 AUTH_TOKEN_INVALID`; `403 FORBIDDEN`; `404 TRIP_NOT_FOUND`;
 `409 TRIP_INVALID_TRANSITION`; `409 IDEMPOTENCY_REQUEST_PENDING`;
 `422 IDEMPOTENCY_KEY_MISMATCH`; `422 VALIDATION_ERROR`.
 
+### POST `/v1/driver/trips/{tripId}/stops/{stopId}/depart`
+
+Auth: assigned `DRIVER` or nullable assigned `ASSISTANT` for the same tenant. The request is
+bodyless and requires a UUID-v4 `Idempotency-Key` using the lifecycle fingerprint above. The
+first execution is valid only when `Trip.status=IN_PROGRESS`, `TripStop.status=ARRIVED`, and
+`TripStop.actualDepartureTime IS NULL`. Trip and TripStop are locked (or an equivalent CAS is
+used), the timestamp is persisted, then Trip calls the exact Booking pending-count seam. A
+positive count emits one `trip.stop.departed_with_pending` Outbox event; zero emits no event.
+
+Response `200` uses the public ADR 0004 envelope and data is exactly `{ tripId, stopId, departedAt, pendingPassengerCount, eventEmitted }`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "tripId": "uuid",
+    "stopId": "uuid",
+    "departedAt": "2026-06-25T10:00:00Z",
+    "pendingPassengerCount": 2,
+    "eventEmitted": true
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-25T10:00:00Z" }
+}
+```
+
+Same-key/same-fingerprint replays the original status/body bytes before current-state lookup;
+same-key/different-fingerprint returns `422 IDEMPOTENCY_KEY_MISMATCH`; a valid new key after
+departure returns `409 TRIP_STOP_ALREADY_DEPARTED`. A Trip outside `IN_PROGRESS` returns the
+existing `422 TRIP_NOT_IN_PROGRESS`; a `PENDING` or `SKIPPED` stop returns
+`422 TRIP_STOP_NOT_ARRIVED`; assignment/tenant failure returns `403 FORBIDDEN`; a Booking count
+dependency failure returns `502 UPSTREAM_UNAVAILABLE`; invalid/missing idempotency or UUID input
+returns `422 VALIDATION_ERROR`/`422 IDEMPOTENCY_KEY_REQUIRED` as applicable.
+
 ### GET `/v1/bookings/trips/{tripId}/manifest`
 
 Auth: `DRIVER` or `ASSISTANT`. The authenticated JWT `sub` must equal the Trip snapshot's
@@ -5839,6 +5972,69 @@ Producer: Trip. Consumer: Notification. Exchange: `vietride.events`.
 `oldDriverUserId` and nullable `oldAssistantUserId`. Notification treats routing key plus broker
 message ID as its idempotency identity.
 
+### `trip.stop.disabled`
+
+Producer: Trip. Consumer: Booking. Exchange: `vietride.events`. The exact payload is
+`{ eventId, occurredAt, eventType, stopId, operatorId, replacedByStopId? }`; `eventType` and the
+AMQP routing key are `trip.stop.disabled`. `eventId == OutboxEvent.Id == RabbitMQ MessageId` and
+retries reuse that identity. Booking creates STOP_DISABLED actions from this fact; no synchronous
+Booking impact/count call is part of the DELETE route.
+
+### `booking.stop_disabled.affected`
+
+Producer: Booking. Consumer: Notification. The exact payload is
+`{ eventId, occurredAt, eventType, stopId, replacedByStopId?, recipientUserIds[], affectedBookingCount }`;
+the routing key is `booking.stop_disabled.affected`. `recipientUserIds` is explicit and
+deduplicated. `eventId == OutboxEvent.Id == RabbitMQ MessageId`; consumer redelivery is deduped by
+that identity.
+
+### `booking.booking.stop_disabled_auto_fallback_applied`
+
+Producer: Booking. Consumer: Notification. Exactly one fact is emitted per resolved action:
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-06-25T10:00:00Z",
+  "eventType": "booking.booking.stop_disabled_auto_fallback_applied",
+  "bookingId": "uuid",
+  "tripId": "uuid",
+  "userId": "uuid",
+  "pendingActionId": "uuid",
+  "disabledStopId": "uuid",
+  "affectedField": "PICKUP",
+  "fallbackStationId": "uuid",
+  "resolvedAction": "AUTO_FALLBACK_DESTINATION"
+}
+```
+
+`affectedField` is `PICKUP|DROPOFF`; the routing key is
+`booking.booking.stop_disabled_auto_fallback_applied`. Identity is
+`eventId == OutboxEvent.Id == RabbitMQ MessageId`.
+
+### `booking.booking.passenger_no_show_marked`
+
+Producer: Booking. Consumer: Notification. One event is emitted for each Booking transition:
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-06-25T10:00:00Z",
+  "eventType": "booking.booking.passenger_no_show_marked",
+  "bookingId": "uuid",
+  "tripId": "uuid",
+  "userId": "uuid",
+  "bookingStatus": "PARTIAL_NO_SHOW",
+  "newlyNoShowPassengerIds": ["uuid"],
+  "triggerType": "ALONG_ROUTE",
+  "pickupStopId": "uuid"
+}
+```
+
+`bookingStatus` is `NO_SHOW|PARTIAL_NO_SHOW`, `triggerType` is `ALONG_ROUTE|TERMINAL`, and
+`pickupStopId` is omitted for terminal pickup. Identity is
+`eventId == OutboxEvent.Id == RabbitMQ MessageId` and duplicate EventIds are ignored.
+
 ### `trip.stop.departed_with_pending`
 
 Producer: Trip. Consumer: Notification (Driver App boarding warning). Exchange:
@@ -5874,9 +6070,10 @@ Payload:
 | `assistantUserId` | `Guid?` | yes, nullable | Assigned assistant notification target when present. |
 | `departedAt` | `DateTimeOffset` | yes | Stop-departure timestamp serialized as UTC ISO-8601. |
 
-The payload contains exactly the fields above. Day 18 freezes the contract and registry entry
-only. The Trip Outbox emitter, handler wiring, emit-condition tests, and Day-24 `NO_SHOW`
-detection remain deferred to Day 24.
+The payload contains exactly the fields above. Day 24 owns the durable TripStop departure
+command, positive-count emit condition, and Notification consumer. Notification recipients are
+the assigned non-null `driverUserId` and `assistantUserId` only; duplicate crew ids are
+deduplicated and a null assistant creates no recipient.
 
 ### `trip.station.merged`
 

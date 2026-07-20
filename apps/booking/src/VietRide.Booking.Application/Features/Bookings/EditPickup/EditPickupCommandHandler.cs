@@ -2,8 +2,10 @@ using MediatR;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
+using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 using BookingEntity = VietRide.Booking.Domain.Entities.Booking;
@@ -22,17 +24,23 @@ public sealed class EditPickupCommandHandler : IRequestHandler<EditPickupCommand
     private readonly ITripServiceClient _tripClient;
     private readonly IBookingStationCanonicalizer _stationCanonicalizer;
     private readonly IClock _clock;
+    private readonly IBookingPendingActionRepository? _pendingActions;
+    private readonly IUnitOfWork? _unitOfWork;
 
     public EditPickupCommandHandler(
         IBookingRepository bookings,
         ITripServiceClient tripClient,
         IClock clock,
-        IBookingStationCanonicalizer stationCanonicalizer)
+        IBookingStationCanonicalizer stationCanonicalizer,
+        IBookingPendingActionRepository? pendingActions = null,
+        IUnitOfWork? unitOfWork = null)
     {
         _bookings = bookings;
         _tripClient = tripClient;
         _clock = clock;
         _stationCanonicalizer = stationCanonicalizer;
+        _pendingActions = pendingActions;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<EditPickupResult> Handle(
@@ -101,6 +109,7 @@ public sealed class EditPickupCommandHandler : IRequestHandler<EditPickupCommand
 
         booking.ChangePickup(request.PickupStationId, request.PickupStopId);
         _bookings.Update(booking);
+        await ResolveStopDisabledActionAsync(booking.Id, cancellationToken);
 
         return new EditPickupResult(
             BookingId: booking.Id,
@@ -108,6 +117,18 @@ public sealed class EditPickupCommandHandler : IRequestHandler<EditPickupCommand
             FareDelta: Money.Zero.Amount,
             RefundAmount: Money.Zero.Amount,
             PaymentRedirectUrl: null);
+    }
+
+    private async Task ResolveStopDisabledActionAsync(Guid bookingId, CancellationToken ct)
+    {
+        if (_pendingActions is null) return;
+        var action = await _pendingActions.GetActiveByBookingIdForUpdateAsync(bookingId, ct);
+        if (action?.Reason != BookingPendingActionReason.STOP_DISABLED) return;
+        if (action.Deadline < _clock.UtcNow)
+            throw new ConflictException("BOOKING_PENDING_ACTION_EXPIRED", "Booking pending action has expired.");
+        action.Resolve(BookingPendingActionResolved.ACCEPTED, _clock.UtcNow);
+        _pendingActions.Update(action);
+        if (_unitOfWork is not null) await _unitOfWork.SaveChangesAsync(ct);
     }
 
     private static void EnsureEditable(BookingEntity booking, Guid passengerUserId)

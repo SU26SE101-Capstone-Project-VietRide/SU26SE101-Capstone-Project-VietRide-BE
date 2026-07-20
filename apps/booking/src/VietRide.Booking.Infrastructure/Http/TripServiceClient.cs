@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
+using VietRide.Booking.Application.Exceptions;
 
 namespace VietRide.Booking.Infrastructure.Http;
 
@@ -38,6 +39,39 @@ public sealed class TripServiceClient : ITripServiceClient
         => await GetTripSnapshotCoreAsync(
             $"/internal/v1/trips/{tripId:D}",
             cancellationToken).ConfigureAwait(false);
+
+    public async Task<TripSnapshot> GetOperationalTripSnapshotAsync(
+        Guid tripId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var snapshot = await GetTripSnapshotCoreAsync(
+                $"/internal/v1/trips/{tripId:D}", cancellationToken).ConfigureAwait(false);
+            if (snapshot is null
+                || snapshot.TripId != tripId
+                || string.IsNullOrWhiteSpace(snapshot.Status)
+                || snapshot.Stops is null
+                || snapshot.Stops.Any(stop => stop.StopId == Guid.Empty || string.IsNullOrWhiteSpace(stop.Status)))
+            {
+                throw new BookingUpstreamUnavailableException("Trip operational snapshot is malformed.");
+            }
+
+            return snapshot;
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new BookingUpstreamUnavailableException("Trip operational snapshot timed out.", exception);
+        }
+        catch (BookingUpstreamUnavailableException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or NotSupportedException)
+        {
+            throw new BookingUpstreamUnavailableException("Trip operational snapshot is unavailable.", exception);
+        }
+    }
 
     /// <inheritdoc/>
     public async Task<TripSnapshot?> GetTripSnapshotAsync(

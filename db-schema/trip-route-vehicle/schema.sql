@@ -553,6 +553,7 @@ CREATE TABLE trip_stops (
     order_index INT NOT NULL,
     estimated_arrival_time TIMESTAMPTZ NOT NULL,
     actual_arrival_time TIMESTAMPTZ NULL,
+    actual_departure_time TIMESTAMPTZ NULL,
     status trip_stop_status NOT NULL DEFAULT 'PENDING',
     allow_pickup BOOLEAN NOT NULL,
     allow_dropoff BOOLEAN NOT NULL,

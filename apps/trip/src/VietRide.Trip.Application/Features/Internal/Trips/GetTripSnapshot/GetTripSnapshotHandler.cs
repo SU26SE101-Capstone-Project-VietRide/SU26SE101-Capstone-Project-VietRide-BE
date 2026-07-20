@@ -99,7 +99,8 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
             route.ReturnRouteId,
             trip.DriverUserId,
             trip.AssistantUserId,
-            trip.DestinationArrivedAt);
+            trip.DestinationArrivedAt,
+            trip.ActualDepartureTime);
 
         return dto;
     }

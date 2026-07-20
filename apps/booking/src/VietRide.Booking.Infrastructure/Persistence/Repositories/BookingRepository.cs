@@ -211,6 +211,21 @@ internal sealed class BookingRepository : IBookingRepository
     }
 
     /// <inheritdoc/>
+    public Task<int> GetPendingPassengerCountAsync(
+        Guid tripId,
+        Guid stopId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => _db.Passengers
+            .AsNoTracking()
+            .CountAsync(passenger => passenger.BoardingStatus == PassengerBoardingStatus.PENDING
+                && passenger.Booking != null
+                && passenger.Booking.Status == BookingStatus.CONFIRMED
+                && passenger.Booking.TripId == tripId
+                && passenger.Booking.PickupStopId == stopId
+                && passenger.Booking.OperatorId == operatorId, ct);
+
+    /// <inheritdoc/>
     public async Task<IReadOnlyList<PlatformBookingReportItem>> GetPlatformBookingMetricsAsync(
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc,
@@ -451,6 +466,33 @@ internal sealed class BookingRepository : IBookingRepository
             .FromSqlInterpolated($"SELECT * FROM vietride_booking.bookings WHERE id = {bookingId} FOR UPDATE")
             .Include(booking => booking.Tickets)
             .Include(booking => booking.ShuttleIntent)
+            .SingleOrDefaultAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<BookingEntity>> GetNoShowCandidatesAsync(CancellationToken ct = default)
+        => await _db.Bookings.AsNoTracking()
+            .Where(booking => booking.Status == BookingStatus.CONFIRMED
+                && booking.Passengers.Any(passenger => passenger.BoardingStatus == PassengerBoardingStatus.PENDING))
+            .OrderBy(booking => booking.Id)
+            .ToListAsync(ct);
+
+    public async Task<BookingEntity?> FindConfirmedWithPassengersForUpdateAsync(
+        Guid bookingId,
+        CancellationToken ct = default)
+    {
+        foreach (var tracked in _db.ChangeTracker.Entries<BookingEntity>()
+                     .Where(entry => entry.Entity.Id == bookingId).ToArray())
+        {
+            tracked.State = EntityState.Detached;
+        }
+
+        return await _db.Bookings
+            .FromSqlInterpolated($"""
+                SELECT * FROM vietride_booking.bookings
+                WHERE id = {bookingId} AND status = 'CONFIRMED'
+                FOR UPDATE
+                """)
+            .Include(booking => booking.Passengers)
             .SingleOrDefaultAsync(ct);
     }
 

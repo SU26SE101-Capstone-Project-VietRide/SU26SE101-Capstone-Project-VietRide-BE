@@ -1,4 +1,5 @@
 import {
+  BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY,
   BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY,
   BOOKING_SCHEDULE_CHANGE_INFORMATIONAL_ROUTING_KEY,
   BOOKING_SCHEDULE_CHANGE_REQUIRED_ROUTING_KEY,
@@ -26,7 +27,7 @@ const common = {
   userId: USER_ID,
 };
 
-describe('mapBookingTripChangeToNotification', () => {
+describe('mapBookingTripChangeToNotification Day 24 auto-resolved compatibility', () => {
   it('maps every seat-reassignment field to the passenger notification', () => {
     expect(
       mapBookingTripChangeToNotification(BOOKING_SEAT_REASSIGNMENT_REQUIRED_ROUTING_KEY, {
@@ -189,6 +190,37 @@ describe('mapBookingTripChangeToNotification', () => {
         oldDeparture: OLD_DEPARTURE,
         newDeparture: NEW_DEPARTURE,
         severity: 'MINOR',
+      }),
+    ).toThrow(ZodError);
+  });
+
+  it('Day 24 auto-resolved compatibility remains schedule-change-only', () => {
+    const notification = mapBookingTripChangeToNotification(
+      BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY,
+      {
+        ...common,
+        pendingActionId: PENDING_ACTION_ID,
+        resolvedAction: 'ACCEPTED',
+        severity: 'MAJOR',
+        oldDeparture: OLD_DEPARTURE,
+        newDeparture: NEW_DEPARTURE,
+      },
+    );
+
+    expect(notification).toEqual(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.TRIP_SCHEDULE_CHANGED,
+      }),
+    );
+    expect(() =>
+      mapBookingTripChangeToNotification(BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY, {
+        ...common,
+        pendingActionId: PENDING_ACTION_ID,
+        resolvedAction: 'AUTO_FALLBACK_DESTINATION',
+        affectedField: 'PICKUP',
+        disabledStopId: '66666666-6666-4666-8666-666666666666',
+        fallbackStationId: '77777777-7777-4777-8777-777777777777',
       }),
     ).toThrow(ZodError);
   });

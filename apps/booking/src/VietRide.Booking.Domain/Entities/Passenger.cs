@@ -47,8 +47,14 @@ public sealed class Passenger : BaseEntity<Guid>
         BoardedAtStopId = boardedAtStopId;
     }
 
-    public void MarkNoShow()
+    public bool MarkNoShow()
     {
+        if (BoardingStatus != PassengerBoardingStatus.PENDING)
+        {
+            return false;
+        }
+
         BoardingStatus = PassengerBoardingStatus.NO_SHOW;
+        return true;
     }
 }

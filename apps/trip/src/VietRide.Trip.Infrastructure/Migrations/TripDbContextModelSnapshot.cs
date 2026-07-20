@@ -1729,6 +1729,10 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("actual_arrival_time");
 
+                    b.Property<DateTimeOffset?>("ActualDepartureTime")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("actual_departure_time");
+
                     b.Property<bool>("AllowDropoff")
                         .HasColumnType("boolean")
                         .HasColumnName("allow_dropoff");

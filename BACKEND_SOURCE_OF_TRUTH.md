@@ -1,6 +1,6 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.36.0
+> **Phiên bản:** 1.37.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
 > **Cập nhật lần cuối:** 2026-07-18
 > **Capstone:** SU26SE101 — SU26
@@ -1287,6 +1287,16 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | 26 | `POST /v1/admin/users/{userId}/lock` | Identity |
 | 27 | `POST /v1/admin/users/{userId}/unlock` | Identity |
 | 28 | `POST /v1/admin/stations/{primaryStationId}/merge` | Trip |
+| 29 | `DELETE /v1/operator/stops/{id}?replacedByStopId=` | Trip |
+| 30 | `POST /v1/bookings/{bookingId}/pending-action/{actionId}/accept-fallback` | Booking |
+| 31 | `POST /v1/driver/trips/{tripId}/stops/{stopId}/depart` | Trip |
+
+Day-24 mutations use the same v2 fingerprint/replay contract: UUID-v4 key, actor/method/path/
+canonical-query/raw-body fingerprint, byte-identical replay before current-state lookup, and
+`422 IDEMPOTENCY_KEY_MISMATCH` for reuse with a different fingerprint. The retained
+`PATCH /v1/operator/stops/{id}` is details-update-only and never disables a Stop; DELETE is the
+sole disable route. A same-replacement DELETE with a new key is behavior-idempotent (`200`), while
+a different replacement after disable is `409 STOP_ALREADY_DISABLED`.
 
 **Implementation:**
 
@@ -1496,6 +1506,8 @@ updates the column.
 | | `TRIP_NOT_IN_PROGRESS` | 422 | Incident/arrival chỉ hợp lệ khi Trip đang `IN_PROGRESS` |
 | | `TRIP_STOP_NOT_FOUND` | 404 | TripStop không tồn tại trong Trip được chỉ định |
 | | `TRIP_STOP_ALREADY_FINALIZED` | 409 | TripStop đã `ARRIVED` hoặc `SKIPPED` |
+| | `TRIP_STOP_NOT_ARRIVED` | 422 | Day-24 departure requires TripStop.status = ARRIVED |
+| | `TRIP_STOP_ALREADY_DEPARTED` | 409 | A new idempotency key targets a TripStop with actualDepartureTime already set |
 | | `TRIP_DESTINATION_ALREADY_ARRIVED` | 409 | Destination-terminal anchor đã được ghi trước đó |
 | | `VEHICLE_NOT_FOUND` | 404 | Vehicle không tồn tại, đã soft-delete, hoặc không thuộc operator caller |
 | | `VEHICLE_TYPE_NOT_FOUND` | 404 | VehicleType không tồn tại hoặc không active |
@@ -1521,13 +1533,13 @@ updates the column.
 | | `PARCEL_NOT_TRANSFERABLE` | 409 | Status sai khi confirm transfer |
 | | `PARCEL_ADDITIONAL_PAYMENT_REQUIRED` | 402 | Cân lại > ước lượng |
 | | `PARCEL_REVIEW_TIMEOUT` | 409 | EXTRA_LARGE auto-reject 24h |
-| **Stop / Route** | `STOP_NOT_FOUND` | 404 | Day-7 Trip Stop handlers use coded 404 path |
+| **Stop / Route** | `STOP_NOT_FOUND` | 404 | Day-7 Trip Stop handlers use coded 404 path; cross-tenant DELETE is masked here |
 | | `STOP_REPLACEMENT_INVALID` | 422 | Replacement Stop missing, inactive, cross-operator, or self-reference |
 | | `STOP_REPLACEMENT_CYCLE` | 422 | Replacement chain would create a cycle |
-| | `STOP_DISABLED_BOOKING_AFFECTED` | 200 warning | Stop disabled; response includes active booking count |
+| | `STOP_ALREADY_DISABLED` | 409 | A different replacement is requested after the Stop has already been disabled |
+| | `STOP_DISABLED_BOOKING_AFFECTED` | 200 warning (legacy/deprecated for DELETE) | Retained only for unrelated legacy warning usages; Day-24 DELETE returns `warning: null` and omits `ActiveBookingCount` |
 | | `STOP_REPLACEMENT_CYCLE` | 422 | replacedByStopId tạo cycle |
 | | `STOP_REPLACEMENT_DIFFERENT_OPERATOR` | 403 | Stop thay thế khác operator |
-| | `STOP_DISABLED_BOOKING_AFFECTED` | 200 (warning) | Alert khi disable Stop có booking active |
 | | `STOP_NOT_PICKUP_ALLOWED` | 422 | RouteStop.allowPickup = false |
 | | `STOP_NOT_DROPOFF_ALLOWED` | 422 | RouteStop.allowDropoff = false |
 | | `ROUTE_NOT_FOUND` | 404 | |
@@ -1936,7 +1948,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 
 | Method + Path | Caller | Mục đích |
 |---|---|---|
-| `GET /internal/v1/trips/{tripId}?pricingAt=` | Booking, Parcel, Tracking, Payment | Raw Trip snapshot; optional ISO-offset `pricingAt` keeps fields unchanged and resolves Booking fare as `MANUAL_OVERRIDE` → active half-open `RouteStopFareTemplate` → `Trip.baseFare`. Without it, preserve persisted `MANUAL_OVERRIDE|TEMPLATE_SNAPSHOT` snapshot semantics and never consult current templates. New Booking creation/round-trip captures and reuses one handler-start value; Payment success never reprices. |
+| `GET /internal/v1/trips/{tripId}?pricingAt=` | Booking, Parcel, Tracking, Payment | Raw Trip snapshot; Day 24 appends nullable trip-level `actualDepartureTime` while preserving stop `status`/nullable `actualArrivalTime`. Valid Internal JWT only (`401 AUTH_TOKEN_INVALID`), no tenant authorization. Optional ISO-offset `pricingAt` resolves Booking fare as `MANUAL_OVERRIDE` → active half-open `RouteStopFareTemplate` → `Trip.baseFare`; omitted preserves persisted legacy snapshot semantics. No event/projection is added. |
 | `POST /internal/v1/trips/{tripId}/lock-seats` | Booking | Lock seats trong checkout (TTL 10 phút Redis) |
 | `POST /internal/v1/trips/round-trip/lock-seats` | Booking | Lock outbound + return seats atomically in one Trip-owned Redis Lua script; if either leg fails, no seat is held |
 | `POST /internal/v1/trips/{tripId}/release-seats` | Booking | Release seat khi payment fail/timeout |
@@ -1953,6 +1965,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 |---|---|---|
 | `GET /internal/v1/bookings/{id}` | Tracking, Payment, Parcel | Lookup booking snapshot, including active ticket count for parcel attach |
 | `GET /internal/v1/bookings/trips/{tripId}/edit-impact?operatorId=` | Trip | Required trusted `operatorId`; every query predicates `trip_id` and `operator_id`, active is exactly `PENDING_PAYMENT|CONFIRMED`, raw PII-free `{tripId,activeBookingCount,activeBookings:[{bookingId,status,seatNumbers}]}`, empty is `200`. |
+| `GET /internal/v1/bookings/trips/{tripId}/stops/{stopId}/pending-passenger-count?operatorId=` | Trip | Raw exact `{tripId,stopId,pendingPassengerCount}`. Predicate is `Booking.status=CONFIRMED AND Passenger.boardingStatus=PENDING AND Booking.tripId=:tripId AND Booking.pickupStopId=:stopId AND Booking.operatorId=:operatorId`. Valid Internal JWT only; malformed/all-zero UUID → `422 VALIDATION_ERROR`, invalid JWT → `401 AUTH_TOKEN_INVALID`; no Trip/Stop lookup, tenant claim, or absent-reference `403`/`404`. |
 | `GET /internal/v1/bookings/{id}/access-check?userId=` | Tracking | Verify Socket.IO joinTripTracking authz |
 | `GET /internal/v1/vouchers/by-code/{code}` | Booking (own service); also exposed for admin reports |
 | `GET /internal/v1/reports/platform/bookings?from=&to=` | Payment | Raw completed-Booking count/revenue grouped by operator; `status=COMPLETED`, `completed_at` in UTC `[from,to)` |
@@ -1989,6 +2002,18 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 
 > Identity selects its `IEmailService` impl via `EMAIL_PROVIDER` (`SENDGRID` = real delivery through this endpoint, the container/prod default; `LOG` = log-only for local dev) and reads the base URL from `EMAIL_SERVICE_BASE_URL` (`http://notification:3002`). Identity takes NO SendGrid dependency — SendGrid stays Notification-only (§1.2 / §3.5). The outbound Internal JWT is minted by the same per-service `InternalJwtTokenFactory` + shared `InternalJwtDelegatingHandler` pattern used by Trip/Booking/Payment (§5.3).
 
+#### Day-24 public Trip stop departure
+
+`POST /v1/driver/trips/{tripId}/stops/{stopId}/depart` is bodyless, assigned `DRIVER`/`ASSISTANT`
+only, tenant-scoped, and requires UUID-v4 Idempotency-Key. First execution requires
+`Trip.status=IN_PROGRESS`, `TripStop.status=ARRIVED`, and null `actualDepartureTime`; Trip and
+TripStop lock/CAS recheck before persisting one timestamp. Success is public `200 ApiResponse` with
+exact data `{tripId,stopId,departedAt,pendingPassengerCount,eventEmitted}`. New-key repeat after
+departure is `409 TRIP_STOP_ALREADY_DEPARTED`; `PENDING|SKIPPED` is
+`422 TRIP_STOP_NOT_ARRIVED`; upstream Booking failure is `502 UPSTREAM_UNAVAILABLE`. Same-key
+replay and mismatch follow §5.6. A positive exact Booking pending-count result emits only
+`trip.stop.departed_with_pending`.
+
 ### 7.3 RabbitMQ event registry
 
 **Exchange:** `vietride.events` (topic exchange).
@@ -2022,10 +2047,12 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | `trip.trip.vehicle_swapped` | Trip | Booking, Notification (crew only) | Exact `{ eventId,occurredAt,tripId,operatorId,oldVehicleId,newVehicleId,oldVehiclePlateNumber,newVehiclePlateNumber,departureDateTime,driverUserId,assistantUserId,seatImpacts:[{bookingId,seatNumbers,reason}] }`; `assistantUserId` present nullable, reasons exactly `SEAT_REMOVED\|SEAT_DISABLED\|SEAT_TYPE_DOWNGRADED` |
 | `trip.trip.route_changed` | Trip | Booking (create BookingPendingAction), Notification | `{ tripId, alternativeRouteId, affectedBookingIds }` |
 | `trip.trip.schedule_changed` | Trip | Booking | Exact `{ eventId,occurredAt,tripId,operatorId,oldDeparture,newDeparture,severity }`, severity `MINOR\|MEDIUM\|MAJOR`; Notification consumes Booking-owned facts instead |
-| `trip.stop.disabled` | Trip | Booking | `{ stopId, operatorId, replacedByStopId?, occurredAt }` |
+| `trip.stop.disabled` | Trip | Booking | Exact `{ eventId, occurredAt, eventType, stopId, operatorId, replacedByStopId? }`; `eventId == OutboxEvent.Id == RabbitMQ MessageId`. |
 | `trip.station.merged` | Trip | Booking, Identity | `{ eventId, occurredAt, eventType, actorUserId, ipAddress?, userAgent?, primaryStationId, duplicateStationId, primaryBefore, duplicateBefore, primaryAfter, relinkedCounts }`; Station snapshots omit contact phone/email |
 | `trip.station.normalized` | Trip | Identity | `{ eventId, occurredAt, eventType, actorUserId, ipAddress?, userAgent?, stationId, before, after }`; snapshots omit contact phone/email |
-| `booking.stop_disabled.affected` | Booking | Notification | `{ stopId, replacedByStopId?, recipientUserIds[], affectedBookingCount, occurredAt }` |
+| `booking.stop_disabled.affected` | Booking | Notification | Exact `{ eventId, occurredAt, eventType, stopId, replacedByStopId?, recipientUserIds[], affectedBookingCount }`; explicit deduped recipients; identity equals Outbox/Rabbit MessageId. |
+| `booking.booking.stop_disabled_auto_fallback_applied` | Booking | Notification | Exact `{ eventId, occurredAt, eventType, bookingId, tripId, userId, pendingActionId, disabledStopId, affectedField, fallbackStationId, resolvedAction }`; `affectedField=PICKUP|DROPOFF`, `resolvedAction=AUTO_FALLBACK_DESTINATION`; one fact per action. |
+| `booking.booking.passenger_no_show_marked` | Booking | Notification | Exact `{ eventId, occurredAt, eventType, bookingId, tripId, userId, bookingStatus, newlyNoShowPassengerIds[], triggerType, pickupStopId? }`; status `NO_SHOW|PARTIAL_NO_SHOW`, trigger `ALONG_ROUTE|TERMINAL`; one fact per Booking transition. |
 | `trip.stop.departed_with_pending` | Trip | Notification (Driver App boarding warning) | `{ eventId: Guid, occurredAt: DateTime (UTC), eventType: "trip.stop.departed_with_pending", tripId: Guid, stopId: Guid, stopName: string, pendingPassengerCount: int (> 0), driverUserId: Guid, assistantUserId: Guid?, departedAt: DateTimeOffset (UTC ISO-8601) }` |
 | `trip.stop.arrived` | Trip | Parcel, Notification | `{ eventId, occurredAt, eventType, tripId, stopId, operatorId, actorUserId, actualArrivalTime }`; Trip và TripStop lock theo thứ tự, `PENDING -> ARRIVED`, static ETA không đổi, business row + Outbox commit atomic |
 | `trip.destination.arrived` | Trip | Parcel | `{ eventId, occurredAt, eventType, tripId, destinationStationId, operatorId, actorUserId, actualArrivalTime }`; destination Station derive từ Route, anchor độc lập `completedAt`, express Trip zero-stop vẫn hợp lệ |
@@ -2122,12 +2149,18 @@ BEGIN TRANSACTION
 COMMIT
 ```
 
-For every Day-23 integration event, the producer allocates the UUID before serialization and uses
-one identity end to end: `payload.eventId == outbox_events.id == RabbitMQ MessageId`. Retries reuse
+For every Day-23 and Day-24 integration event, the producer allocates the UUID before serialization
+and uses one identity end to end: `payload.eventId == outbox_events.id == RabbitMQ MessageId`.
+Retries reuse
 that row/id; they never generate a new payload identity. Fresh `booking.booking.cancelled`
 producers always write both UUID-v4 `eventId` and offset-date-time `occurredAt` together. The
 temporary legacy consumer branch is permitted only for the exact old payload with both fields
 absent; partial identity presence is invalid.
+
+A Day-24 crash/restart after local commit reuses the persisted Outbox id and payload; publisher
+retry never allocates a new EventId. Consumers dedupe by RabbitMQ MessageId/EventId before state or
+notification side effects, so redelivery/restart creates no duplicate action, transition,
+event-derived notification, or refund.
 
 **Publisher flow:**
 
@@ -2282,8 +2315,13 @@ PENDING_PAYMENT ─┬─→ CONFIRMED ─┬─→ COMPLETED
 - `COMPLETED`: Booking Service consume `trip.trip.completed`.
 - Day-21 history source for this consumer is `COMPLETE_ON_TRIP_COMPLETED`; it appends `COMPLETED`
   with null actor/reason in the same Booking-local transaction as the guarded status transition.
-- `NO_SHOW`: Tất cả `Passenger.boardingStatus = NO_SHOW`.
-- `PARTIAL_NO_SHOW`: Hangfire job — có cả BOARDED + NO_SHOW trong cùng booking sau Trip.actualDepartureTime + 15 phút.
+- `NO_SHOW`: Day-24 `NoShowDetectionJob` marks all remaining `PENDING` passengers only after the
+  along-route anchor `TripStop.actualArrivalTime + 15m < now` or terminal anchor
+  `Trip.actualDepartureTime + 15m < now` (strict; equality excluded). All-pending bookings become
+  `NO_SHOW`.
+- `PARTIAL_NO_SHOW`: the same locked/rechecked job marks remaining pending passengers and sets
+  the Booking to `PARTIAL_NO_SHOW` when at least one passenger is already `BOARDED`; all-boarded
+  bookings are unchanged. Missing/stale raw anchors fail closed.
 - `CANCELLED → REFUNDED`: Booking Service consume `payment.wallet.credited`.
 - `DISRUPTED`: Booking Service consume `trip.trip.disrupted { hasSubstitution: false }`.
 - `cancellationReason` enum: `USER_INITIATED | OPERATOR_CANCELLED_TRIP | OPERATOR_DISRUPTED_IN_PROGRESS | SCHEDULE_CHANGED | ROUTE_CHANGED_REFUSED | VEHICLE_SUBSTITUTION_DOWNGRADE | VEHICLE_SUBSTITUTION_NO_SEAT | STOP_DISABLED_REFUSED`.
@@ -2313,6 +2351,7 @@ Current writers and population rules are frozen as follows:
 | `CONFIRM_ON_PAYMENT` | `CONFIRMED` | null | null | Per writer rules below. |
 | `EXPIRE_ON_PAYMENT` | `EXPIRED` | null | null | Per writer rules below. |
 | `CANCEL_BOOKING` | `CANCELLED` | authenticated passenger user id | exact existing `BookingCancellationReason` enum name | Per writer rules below. |
+| `MARK_NO_SHOW` | `NO_SHOW` or `PARTIAL_NO_SHOW` | null | null | Day-24 strict anchor job; one row only for a guarded Booking transition. |
 | `MARK_REFUNDED` | `REFUNDED` | null | null | Per writer rules below. |
 | `COMPLETE_ON_TRIP_COMPLETED` | `COMPLETED` | null | null | `occurredAt=event.completedAt`; same Booking-local transaction as the guarded status transition; guarded no-op/replay appends no row. |
 
@@ -2554,6 +2593,38 @@ The existing Day-22 `PendingActionRealertJob` remains an occurrence `+2h` inform
 unresolved `PENDING_SEAT_ASSIGNMENT` and MEDIUM/MAJOR `SCHEDULE_CHANGE`, at most once for that
 intended phase. Separate Day-23 `ScheduleChangeAutoAcceptJob` owns the initial/terminal scheduled
 resolution phases in §10.1; neither scheduled phase cancels a Booking or creates a refund.
+
+#### Day-24 STOP_DISABLED and no-show rules
+
+`trip.stop.disabled` is the sole impact source for the canonical bodyless DELETE stop mutation;
+the response has `warning: null` as a present property and omits `ActiveBookingCount`. Booking
+creates one active `STOP_DISABLED` action per eligible confirmed booking (`Trip.status` is
+`SCHEDULED|BOARDING`) and stores exact metadata `{disabledStopId, affectedField:PICKUP|DROPOFF,
+suggestedStopId?, fallbackStationId}`, where fallback is route origin for `PICKUP` and route
+destination for `DROPOFF`. The handler captures one `capturedNow` and persists
+`deadline = min(capturedNow + 24h, tripCurrentDeparture - 2h)`; `deadline == now` remains passenger
+eligible, with no synchronous fallback.
+only a later scheduler pass after the equality edge may resolve that action.
+
+Passenger replacement reuses edit-pickup/edit-dropoff and atomically resolves the action. The
+bodyless singular `accept-fallback` route maps pickup to the route origin or dropoff to the route
+destination and resolves `AUTO_FALLBACK_DESTINATION`; the response shape is the existing generic
+`ApiResponse` result (D24-2 ratifies no additional fields). Cancellation reuses Booking cancel with
+`STOP_DISABLED_REFUSED`, atomically resolves/cancels, sets `refundOverride=true`, and refunds 100%.
+All mutations are owner/deadline/idempotency checked; Day-23 `SCHEDULE_CHANGE` resolver/body is
+unchanged. A new key after terminal resolution is `BOOKING_PENDING_ACTION_ALREADY_RESOLVED`.
+
+`StopDisabledAutoFallbackJob` runs every 5 minutes and selects only `reason=STOP_DISABLED`,
+`resolvedAt IS NULL`, and strict `deadline < now`. It resolves the terminal fallback and emits one
+`booking.booking.stop_disabled_auto_fallback_applied` fact per action. `NoShowDetectionJob` also
+runs every 5 minutes with separate strict along-route and terminal anchors, fails closed on missing
+raw snapshots, lock/rechecks state, records `MARK_NO_SHOW`, and emits one
+`booking.booking.passenger_no_show_marked` fact per Booking transition.
+
+Task ownership is explicit: Task 24.0a owns only Trip EF/domain/migration paths for nullable
+`trip_stops.actual_departure_time`; Task 24.0b owns only Notification Prisma/DDL paths for
+`DRIVER_STOP_DEPARTED_WITH_PENDING`. Task 24.0 and Tasks 24.1–24.10 do not edit DDL, EF snapshots,
+or Prisma migrations.
 
 ### 8.11 OperatorVoucherConsent
 
@@ -2849,7 +2920,8 @@ KHÔNG dùng Prometheus/Grafana/Jaeger/Loki cho v1 (xem technical_context 3.5).
 | `SeatReleaseTimeoutJob` | Scheduled (per Booking) | 10 phút sau PENDING_PAYMENT VNPay | Release seat + Booking → EXPIRED |
 | `ScheduleChangeAutoAcceptJob` | Scheduled (per BookingPendingAction) | `initialDeadline + 1s`, then optional `terminalDeadline + 1s` | MEDIUM finalizes at initial; MAJOR with `initialDeadline < terminalDeadline` may emit one distinct initial-phase re-alert then finalizes at terminal; lag/direct execution past terminal skips the optional phase; `initialDeadline >= terminalDeadline` finalizes strictly after initial; each intended phase is at most once and jobs never refund or cancel |
 | `PendingActionRealertJob` | Scheduled (logical key `pendingActionId`) | action occurrence + 2h | unchanged Day-22 scope: unresolved `PENDING_SEAT_ASSIGNMENT` plus MEDIUM/MAJOR `SCHEDULE_CHANGE`; at most once for this intended T+2 phase |
-| `PartialNoShowDetectionJob` | Recurring | Every 5 phút | Detect mixed BOARDED + NO_SHOW → set Booking.status = PARTIAL_NO_SHOW |
+| `StopDisabledAutoFallbackJob` | Recurring | Every 5 phút | Select only unresolved `STOP_DISABLED` actions with strict `deadline < now`; equality remains passenger-action eligible, then atomically terminal-fallback and emit one `booking.booking.stop_disabled_auto_fallback_applied` per action. |
+| `NoShowDetectionJob` | Recurring | Every 5 phút | Separate strict anchors: `TripStop.actualArrivalTime + 15m < now` for along-route and `Trip.actualDepartureTime + 15m < now` for terminal. Fail closed on missing snapshot, lock/recheck, mark PENDING passengers, set `NO_SHOW`/`PARTIAL_NO_SHOW`, append `MARK_NO_SHOW`, and emit one passenger-no-show fact per transition. |
 
 Booking hosts its own PostgreSQL-backed Hangfire storage/schema `hangfire`, queue `booking`, server
 `vietride-booking`, using only the approved centrally pinned `Hangfire.AspNetCore` and
@@ -3329,6 +3401,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.37.0** | 2026-07-18 | BE lead (Vũ) | **MINOR** — Freeze Day-24 stop-disable, passenger STOP_DISABLED choices, strict deadline fallback, Trip snapshot/pending-count/departure seams, no-show anchors/history source, event identity/consumer facts, and the two migration ownership rows. DELETE is the sole disable route; legacy synchronous `STOP_DISABLED_BOOKING_AFFECTED` warning/count behavior is deprecated for that route. |
 | **1.36.0** | 2026-07-18 | BE lead (Vũ) | **MINOR** — Day-23 schedule-change contract, projection, errors, events, and jobs; merged into the Day-40 baseline while preserving the Admin Users, Station Cleanup, and Platform Reports contracts. |
 | **1.35.0** | 2026-07-16 | Senior Backend Engineer | **MINOR** - Freeze Day 40 Admin Users + Station Cleanup + Platform Reports: shared-idempotent lock/unlock với PostgreSQL per-user serialization và `locked_from_status`; immutable ActivityLog; atomic Station normalize/merge cùng canonical redirects và Booking advisory-lock relink protocol; `trip.station.merged`/`normalized`; live UTC earned-report internal sources và Payment orchestration; đăng ký `STATION_MERGE_CONFLICT`/`REPORT_VALUE_OVERFLOW`; report cache/Stats/Excel và advanced analytics defer Day 42. |
 | **1.34.1** | 2026-07-16 | BE lead (Vu) | **PATCH** - Merge the Day-22 Trip edit/effective-pricing/DriverSchedule cascade contracts into the current Day-39 baseline. Preserve trusted Booking impact, immutable Booking pricing/refund snapshots, fare-source overlap guard, Trip/schedule audits, Booking-owned passenger impact and Hangfire re-alert semantics; reconcile them with idempotency v2 and Day-38 Payment terminal-settlement consumption. |

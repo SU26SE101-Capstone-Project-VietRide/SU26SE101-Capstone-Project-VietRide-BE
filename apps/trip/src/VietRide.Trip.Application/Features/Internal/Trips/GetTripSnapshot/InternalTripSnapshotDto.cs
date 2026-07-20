@@ -16,4 +16,5 @@ public sealed record InternalTripSnapshotDto(
     Guid? ReturnRouteId,
     Guid? DriverUserId,
     Guid? AssistantUserId,
-    DateTimeOffset? DestinationArrivedAt = null);
+    DateTimeOffset? DestinationArrivedAt = null,
+    DateTimeOffset? ActualDepartureTime = null);

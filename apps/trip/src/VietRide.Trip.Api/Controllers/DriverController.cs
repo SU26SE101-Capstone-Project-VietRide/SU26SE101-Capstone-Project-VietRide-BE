@@ -13,6 +13,8 @@ using ArriveTripDestinationCommand = VietRide.Trip.Application.Features.Trips.Op
 using ArriveTripDestinationResponse = VietRide.Trip.Application.Features.Trips.Operations.ArriveTripDestinationResponse;
 using ArriveTripStopCommand = VietRide.Trip.Application.Features.Trips.Operations.ArriveTripStopCommand;
 using ArriveTripStopResponse = VietRide.Trip.Application.Features.Trips.Operations.ArriveTripStopResponse;
+using DepartStopCommand = VietRide.Trip.Application.Features.Trips.Operations.DepartStopCommand;
+using DepartStopResponse = VietRide.Trip.Application.Features.Trips.Operations.DepartStopResponse;
 
 namespace VietRide.Trip.Api.Controllers;
 
@@ -141,6 +143,39 @@ public sealed class DriverController : ControllerBase
             new ArriveTripStopCommand(tripId, stopId, actorUserId),
             cancellationToken));
     }
+
+    [HttpPost("trips/{tripId:guid}/stops/{stopId:guid}/depart")]
+    [RequireIdempotency(AllowRequestBody = false)]
+    [ProducesResponseType(typeof(ApiResponse<DepartStopResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status502BadGateway)]
+    public async Task<ActionResult<DepartStopResponse>> DepartStopAsync(
+        Guid tripId,
+        Guid stopId,
+        CancellationToken cancellationToken)
+    {
+        var actorUserId = CurrentUserClaims.GetUserId(User);
+        var actorRole = CurrentUserClaims.GetRole(User);
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new VietRide.Shared.Application.Exceptions.ForbiddenException(
+                "FORBIDDEN",
+                "Operator tenant scope is required.");
+        return Ok(await mediator.Send(
+            new DepartStopCommand(tripId, stopId, actorUserId, actorRole, operatorId),
+            cancellationToken));
+    }
+
+    [HttpPost("trips/{tripId}/stops/{stopId}/depart")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    [RequireIdempotency(AllowRequestBody = false)]
+    public ActionResult RejectMalformedDepartStop(string tripId, string stopId)
+        => throw new VietRide.Shared.Application.Exceptions.CodedValidationException(
+            "VALIDATION_ERROR",
+            "tripId and stopId must be valid non-empty UUIDs.");
 
     [HttpPost("trips/{tripId:guid}/destination/arrive")]
     [RequireIdempotency(AllowRequestBody = false)]

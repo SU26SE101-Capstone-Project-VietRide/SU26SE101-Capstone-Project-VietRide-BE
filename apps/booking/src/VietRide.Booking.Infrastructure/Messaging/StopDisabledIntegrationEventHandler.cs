@@ -10,5 +10,5 @@ internal sealed class StopDisabledIntegrationEventHandler(IMediator mediator)
     public async Task HandleAsync(StopDisabledIntegrationEvent integrationEvent, CancellationToken cancellationToken)
         => await mediator.Send(new HandleStopDisabledCommand(
             integrationEvent.EventId, integrationEvent.StopId, integrationEvent.OperatorId,
-            integrationEvent.ReplacedByStopId), cancellationToken);
+                integrationEvent.ReplacedByStopId), cancellationToken);
 }

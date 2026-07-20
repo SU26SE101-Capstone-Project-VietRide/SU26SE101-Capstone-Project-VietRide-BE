@@ -229,12 +229,14 @@ public sealed class EditPickupWebApplicationFactory : WebApplicationFactory<Prog
     public ITripServiceClient TripClient { get; } = Substitute.For<ITripServiceClient>();
     public IPaymentServiceClient PaymentClient { get; } = Substitute.For<IPaymentServiceClient>();
     public IBookingRepository BookingRepository { get; } = Substitute.For<IBookingRepository>();
+    public IBookingPendingActionRepository PendingActionRepository { get; } = Substitute.For<IBookingPendingActionRepository>();
 
     public void ResetCalls()
     {
         TripClient.ClearReceivedCalls();
         PaymentClient.ClearReceivedCalls();
         BookingRepository.ClearReceivedCalls();
+        PendingActionRepository.ClearReceivedCalls();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -259,6 +261,7 @@ public sealed class EditPickupWebApplicationFactory : WebApplicationFactory<Prog
                     call.Arg<Guid>(),
                     call.Arg<CancellationToken>()));
             services.AddSingleton(BookingRepository);
+            services.AddSingleton(PendingActionRepository);
 
             var mockClock = Substitute.For<IClock>();
             mockClock.UtcNow.Returns(FixedNow);

@@ -7,5 +7,4 @@ public sealed record DisableStopCommand(Guid? OperatorId, Guid StopId, Guid? Rep
 
 public sealed record DisableStopResponse(
     StopDto Stop,
-    string Warning,
-    int ActiveBookingCount);
+    string? Warning);

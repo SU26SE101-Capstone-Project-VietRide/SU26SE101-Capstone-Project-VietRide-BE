@@ -254,13 +254,36 @@
 - **Review**: snapshot không đổi; chỉ một active pending action; equality cutoff vẫn passenger-eligible; không có timeout cancellation/refund hoặc operator seat-assignment contract trong Day 23.
 
 ### Day 24 — Thu 2026-06-25 — Stop disable + No-show
-- `DELETE /operator/stops/{id}` (soft delete with replacedByStopId for migration)
-- Bookings using disabled stop get BookingPendingAction STOP_DISABLED with deadline `min(now+24h, departure-2h)`
-- Passenger chooses replacement stop OR terminal OR cancel 100% refund
-- Auto-fallback to terminal at deadline
-- NO_SHOW handler: Trip leaves stop+15min without passenger tick → Booking NO_SHOW (no refund); PARTIAL_NO_SHOW for partial booking
-- **DoD**: stop disable creates pending actions for affected bookings; NO_SHOW marked correctly after grace period
-- **Review**: NO_SHOW vs PARTIAL_NO_SHOW (3/5 boarded) accuracy test
+- Canonical disable mutation: bodyless `DELETE /v1/operator/stops/{id}?replacedByStopId=` for
+  `OPERATOR_ADMIN`, required UUID-v4 `Idempotency-Key`. It sets `is_active=false`, preserves
+  `deleted_at`, and publishes `trip.stop.disabled`; retained PATCH is details-update-only. The
+  old synchronous `STOP_DISABLED_BOOKING_AFFECTED` warning/count behavior is legacy/deprecated
+  for DELETE; async `booking.stop_disabled.affected` is the sole impact source.
+- Booking consumes `trip.stop.disabled` for eligible `CONFIRMED` bookings on
+  `SCHEDULED|BOARDING` trips and creates at most one active `STOP_DISABLED` action. One
+  handler-captured `capturedNow` is persisted through
+  `deadline = min(capturedNow + 24h, tripCurrentDeparture - 2h)`.
+- Passenger resolves before or exactly at the deadline by reusing edit-pickup/edit-dropoff,
+  accepting the terminal through bodyless
+  `POST /v1/bookings/{bookingId}/pending-action/{actionId}/accept-fallback`, or cancelling with
+  `STOP_DISABLED_REFUSED` for a 100% refund. The Day-23 `SCHEDULE_CHANGE` resolver is unchanged.
+- `StopDisabledAutoFallbackJob` runs every 5 minutes and selects only unresolved actions with
+  `deadline < now`; equality creates no synchronous fallback and is resolved only by a later pass.
+- `NoShowDetectionJob` runs every 5 minutes. Along-route eligibility is strictly
+  `TripStop.actualArrivalTime + 15 minutes < now`; terminal eligibility is strictly
+  `Trip.actualDepartureTime + 15 minutes < now`. Booking fails closed when the Trip snapshot or
+  anchor is unavailable, locks/rechecks state, marks remaining `PENDING` passengers `NO_SHOW`,
+  then sets all-pending bookings to `NO_SHOW` and mixed boarded/pending bookings to
+  `PARTIAL_NO_SHOW`; all-boarded bookings remain unchanged.
+- Driver/Assistant stop departure is bodyless
+  `POST /v1/driver/trips/{tripId}/stops/{stopId}/depart`, requires UUID-v4 idempotency, and is
+  valid only for assigned crew on an `IN_PROGRESS` trip with an `ARRIVED`, not-yet-departed stop.
+  Trip persists `TripStop.actualDepartureTime`, calls Booking's exact pending-passenger count, and
+  emits `trip.stop.departed_with_pending` only when the count is positive.
+- **DoD**: exact stop-disable action/deadline/idempotency behavior, passenger choices, two strict
+  five-minute jobs, Outbox identity, and notification facts are covered by focused evidence.
+- **Review**: equality edges, replay/mismatch/race/restart behavior, `NO_SHOW` vs
+  `PARTIAL_NO_SHOW` (3/5 boarded), and all-boarded (5/5) accuracy tests.
 
 ### Day 25 — Fri 2026-06-26 — Parcel Service: ParcelRouteFare + Create parcel ([SCV-104](https://hoangvutran088.atlassian.net/browse/SCV-104))
 - EF migration: ParcelRouteFare, Parcel, ParcelStats tables

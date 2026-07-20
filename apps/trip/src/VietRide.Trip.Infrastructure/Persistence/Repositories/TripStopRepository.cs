@@ -29,6 +29,27 @@ internal sealed class TripStopRepository : ITripStopRepository
             cancellationToken);
     }
 
+    public Task<bool> TryMarkDepartedAsync(
+        Guid tripId,
+        Guid stopId,
+        DateTimeOffset departedAt,
+        CancellationToken cancellationToken)
+        => TryMarkDepartedCoreAsync(tripId, stopId, departedAt, cancellationToken);
+
+    private async Task<bool> TryMarkDepartedCoreAsync(
+        Guid tripId,
+        Guid stopId,
+        DateTimeOffset departedAt,
+        CancellationToken cancellationToken)
+        => await _dbContext.TripStops
+            .Where(stop => stop.TripId == tripId
+                && stop.StopId == stopId
+                && stop.Status == TripStopStatus.ARRIVED
+                && stop.ActualDepartureTime == null)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(stop => stop.ActualDepartureTime, departedAt),
+                cancellationToken) == 1;
+
     public async Task<TripStop> AddAsync(TripStop entity, CancellationToken cancellationToken = default)
     {
         await _dbContext.TripStops.AddAsync(entity, cancellationToken);

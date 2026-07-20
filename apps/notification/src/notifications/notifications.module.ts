@@ -36,6 +36,9 @@ import { TripTrackingAlertEventsConsumer } from './trip-tracking-alert-events.co
 import { TripAnnouncementRecipientProvider } from './trip-announcement-recipient.provider';
 import { ShuttleEventsConsumer } from './shuttle-events.consumer';
 import { BookingTripChangeEventsConsumer } from './booking-trip-change-events.consumer';
+import { Day24DepartedPendingEventsConsumer } from './day24-departed-pending-events.consumer';
+import { Day24NoShowEventsConsumer } from './day24-no-show-events.consumer';
+import { Day24StopDisabledAutoFallbackEventsConsumer } from './day24-stop-disabled-auto-fallback-events.consumer';
 
 @Module({
   controllers: [NotificationsController, OperatorNotificationsController, InternalEmailsController],
@@ -54,6 +57,9 @@ import { BookingTripChangeEventsConsumer } from './booking-trip-change-events.co
     MessageIdempotencyService,
     CoreEventsConsumer,
     BookingTripChangeEventsConsumer,
+    Day24StopDisabledAutoFallbackEventsConsumer,
+    Day24NoShowEventsConsumer,
+    Day24DepartedPendingEventsConsumer,
     TripTrackingAlertEventsConsumer,
     ParcelSubscriptionOperatorEventsConsumer,
     ShuttleEventsConsumer,

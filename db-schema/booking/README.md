@@ -130,3 +130,35 @@ The persistence surface is insert/read only; no update/delete API or repository 
 ## Open Questions
 
 Không có. Section 6.1, 6.2, 6.4, 6.4.1, 6.12, 6.13 + Section 8 đã spec đầy đủ.
+
+## Day-24 contract freeze
+
+`STOP_DISABLED` is a persisted `BookingPendingAction` reason with one active action per Booking.
+The old synchronous `STOP_DISABLED_BOOKING_AFFECTED` warning/count behavior is legacy/deprecated
+for DELETE; Booking impact arrives only through `booking.stop_disabled.affected`.
+Only `CONFIRMED` bookings on `SCHEDULED|BOARDING` Trips are eligible when Booking consumes the
+canonical `trip.stop.disabled` fact. The handler captures one `capturedNow` and computes
+`deadline = min(capturedNow + 24h, tripCurrentDeparture - 2h)` (persisted column
+`trip_current_departure`); `deadline == now` remains
+passenger-action eligible, performs no synchronous fallback, and is resolved only by the next
+five-minute scheduler pass after the strict boundary (`deadline < now`). Metadata is exactly
+`disabledStopId`, `affectedField=PICKUP|DROPOFF`, optional `suggestedStopId`, and
+`fallbackStationId` selected by the affected field: route origin for `PICKUP`, route destination
+for `DROPOFF`.
+
+Passenger replacement reuses edit-pickup/edit-dropoff and atomically resolves the active action;
+bodyless `accept-fallback` maps pickup to origin or dropoff to destination and resolves
+`AUTO_FALLBACK_DESTINATION`; cancellation reuses `STOP_DISABLED_REFUSED`, atomically cancels and
+refunds 100%. All mutations are owner/deadline/idempotency checked. The generic Day-23
+`SCHEDULE_CHANGE` resolver remains strict and unchanged. The exact fallback response data shape is
+not expanded here because D24-2 ratifies only the bodyless singular route and transition.
+
+The raw pending-count seam counts only rows matching
+`Booking.status=CONFIRMED AND Passenger.boardingStatus=PENDING AND Booking.tripId=:tripId AND
+Booking.pickupStopId=:stopId AND Booking.operatorId=:operatorId`; no match returns raw zero. It
+performs no Trip/Stop lookup or tenant-claim validation and fails closed only at the HTTP auth/input
+boundary. `NoShowDetectionJob` (every 5 minutes) uses strict
+`TripStop.actualArrivalTime + 15m < now` or `Trip.actualDepartureTime + 15m < now`, locks/rechecks
+state, marks remaining pending passengers, records history source `MARK_NO_SHOW`, and emits one
+passenger-no-show fact per Booking transition. Missing anchors/upstream snapshots produce no state
+change.

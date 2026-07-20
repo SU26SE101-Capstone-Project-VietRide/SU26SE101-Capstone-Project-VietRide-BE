@@ -61,6 +61,13 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
         CancellationToken ct = default)
         => throw new NotSupportedException("Trip-edit impact is not implemented by this repository.");
 
+    Task<int> GetPendingPassengerCountAsync(
+        Guid tripId,
+        Guid stopId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Pending-passenger count is not implemented by this repository.");
+
     Task<OperatorBookingDetailDto?> GetOperatorBookingDetailAsync(Guid bookingId, Guid operatorId, CancellationToken ct = default)
         => throw new NotSupportedException("Operator booking detail is not implemented by this repository.");
 
@@ -106,6 +113,14 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
     /// </summary>
     Task<BookingEntity?> FindByIdForUpdateAsync(Guid bookingId, CancellationToken ct = default)
         => throw new NotSupportedException("Booking pending-action lock lookup is not implemented by this repository.");
+
+    Task<IReadOnlyList<BookingEntity>> GetNoShowCandidatesAsync(CancellationToken ct = default)
+        => throw new NotSupportedException("No-show candidates are not implemented by this repository.");
+
+    Task<BookingEntity?> FindConfirmedWithPassengersForUpdateAsync(
+        Guid bookingId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("No-show booking lock lookup is not implemented by this repository.");
 
     /// <summary>
     /// Returns the data needed to replay the Trip seat-lock seam for a payment event.

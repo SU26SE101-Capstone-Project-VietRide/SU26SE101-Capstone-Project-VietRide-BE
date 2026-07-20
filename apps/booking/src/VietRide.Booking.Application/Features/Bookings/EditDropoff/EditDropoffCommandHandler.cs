@@ -4,6 +4,7 @@ using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 using BookingEntity = VietRide.Booking.Domain.Entities.Booking;
@@ -22,17 +23,23 @@ public sealed class EditDropoffCommandHandler : IRequestHandler<EditDropoffComma
     private readonly ITripServiceClient _tripClient;
     private readonly IBookingStationCanonicalizer _stationCanonicalizer;
     private readonly IClock _clock;
+    private readonly IBookingPendingActionRepository? _pendingActions;
+    private readonly IUnitOfWork? _unitOfWork;
 
     public EditDropoffCommandHandler(
         IBookingRepository bookings,
         ITripServiceClient tripClient,
         IClock clock,
-        IBookingStationCanonicalizer stationCanonicalizer)
+        IBookingStationCanonicalizer stationCanonicalizer,
+        IBookingPendingActionRepository? pendingActions = null,
+        IUnitOfWork? unitOfWork = null)
     {
         _bookings = bookings;
         _tripClient = tripClient;
         _clock = clock;
         _stationCanonicalizer = stationCanonicalizer;
+        _pendingActions = pendingActions;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<EditDropoffResult> Handle(
@@ -96,11 +103,24 @@ public sealed class EditDropoffCommandHandler : IRequestHandler<EditDropoffComma
 
         booking.ChangeDropoff(request.DropoffStationId, request.DropoffStopId);
         _bookings.Update(booking);
+        await ResolveStopDisabledActionAsync(booking.Id, cancellationToken);
 
         return new EditDropoffResult(
             BookingId: booking.Id,
             Dropoff: new EditDropoffResult.DropoffDto(booking.DropoffStationId, booking.DropoffStopId),
             FareDelta: Money.Zero.Amount);
+    }
+
+    private async Task ResolveStopDisabledActionAsync(Guid bookingId, CancellationToken ct)
+    {
+        if (_pendingActions is null) return;
+        var action = await _pendingActions.GetActiveByBookingIdForUpdateAsync(bookingId, ct);
+        if (action?.Reason != BookingPendingActionReason.STOP_DISABLED) return;
+        if (action.Deadline < _clock.UtcNow)
+            throw new ConflictException("BOOKING_PENDING_ACTION_EXPIRED", "Booking pending action has expired.");
+        action.Resolve(BookingPendingActionResolved.ACCEPTED, _clock.UtcNow);
+        _pendingActions.Update(action);
+        if (_unitOfWork is not null) await _unitOfWork.SaveChangesAsync(ct);
     }
 
     private static void EnsureEditable(BookingEntity booking, Guid passengerUserId)

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Idempotency;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Api.Filters;
 using VietRide.Trip.Application.Features.Stops;
@@ -101,9 +102,13 @@ public sealed class OperatorStopsController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
-    [RequireIdempotencyKey]
+    [RequireIdempotency(AllowRequestBody = false)]
     [Authorize(Roles = OperatorWriteRoles)]
     [ProducesResponseType(typeof(ApiResponse<DisableStopResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<DisableStopResponse>> DeleteAsync(
         Guid id, [FromQuery] Guid? replacedByStopId, CancellationToken cancellationToken)
         => Ok(await mediator.Send(new DisableStopCommand(GetRequiredOperatorId(), id, replacedByStopId), cancellationToken));

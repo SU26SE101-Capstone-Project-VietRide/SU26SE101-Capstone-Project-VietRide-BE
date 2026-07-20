@@ -8,6 +8,11 @@ public interface IBookingPendingActionRepository : IRepository<BookingPendingAct
     Task<BookingPendingAction?> GetByIdForUpdateAsync(Guid actionId, CancellationToken ct = default)
         => throw new NotSupportedException("Pending-action lock lookup is not implemented by this repository.");
 
+    Task<BookingPendingAction?> GetByIdForUpdateSkipLockedAsync(
+        Guid actionId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Non-blocking pending-action lock lookup is not implemented by this repository.");
+
     Task<IReadOnlyList<BookingPendingAction>> GetActiveByTripForUpdateAsync(
         Guid tripId,
         Guid operatorId,
@@ -16,8 +21,14 @@ public interface IBookingPendingActionRepository : IRepository<BookingPendingAct
 
     Task<BookingPendingAction?> GetActiveByBookingIdAsync(Guid bookingId, CancellationToken ct = default);
 
+    Task<BookingPendingAction?> GetActiveByBookingIdForUpdateAsync(Guid bookingId, CancellationToken ct = default)
+        => throw new NotSupportedException("Pending-action booking lock lookup is not implemented by this repository.");
+
     Task<IReadOnlyList<BookingPendingAction>> GetByBookingAndSourceEventAsync(
         Guid bookingId,
         Guid sourceEventId,
         CancellationToken ct = default);
+
+    Task<IReadOnlyList<BookingPendingAction>> GetExpiredStopDisabledCandidatesAsync(
+        DateTimeOffset now, CancellationToken ct = default);
 }
