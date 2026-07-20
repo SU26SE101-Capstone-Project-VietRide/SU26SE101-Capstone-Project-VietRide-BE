@@ -553,7 +553,7 @@ describe('createProxyHandler RBAC and phone-required gates', () => {
     [
       'GET',
       '/v1/admin/reports/platform?from=2026-07-01T00%3A00%3A00Z&to=2026-08-01T00%3A00%3A00Z',
-      env.PAYMENT_BASE_URL,
+      env.BOOKING_BASE_URL,
     ],
   ] as const)(
     'routes Day 40 SYSTEM_ADMIN %s %s to its owner',
