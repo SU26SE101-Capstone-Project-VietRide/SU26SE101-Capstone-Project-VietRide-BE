@@ -81,6 +81,10 @@ CREATE TYPE subscription_upgrade_attempt_status AS ENUM (
     'INITIATED', 'PAYMENT_PENDING', 'SUCCEEDED', 'EXPIRED', 'FAILED'
 );
 
+CREATE TYPE outbox_event_status AS ENUM (
+    'PENDING', 'PUBLISHING', 'PUBLISHED', 'FAILED'
+);
+
 -- =============================================================================
 -- TABLES
 -- =============================================================================
@@ -457,6 +461,37 @@ CREATE TABLE operator_wallet_backfill_markers (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- -----------------------------------------------------------------------------
+-- outbox_events and terminal outbox_dlq
+-- -----------------------------------------------------------------------------
+CREATE TABLE outbox_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_type VARCHAR(100) NOT NULL,
+    payload JSONB NOT NULL,
+    status outbox_event_status NOT NULL DEFAULT 'PENDING',
+    retry_count INT NOT NULL DEFAULT 0,
+    last_error TEXT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    published_at TIMESTAMPTZ NULL
+);
+
+CREATE INDEX idx_outbox_events_status_created
+    ON outbox_events (status, created_at) WHERE status IN ('PENDING', 'PUBLISHING', 'FAILED');
+
+CREATE TABLE outbox_dlq (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id UUID NOT NULL,
+    event_type VARCHAR(100) NOT NULL,
+    payload JSONB NOT NULL,
+    retry_count INT NOT NULL,
+    last_error TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    terminal_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX uq_outbox_dlq_event_id ON outbox_dlq (event_id);
+CREATE INDEX idx_outbox_dlq_terminal_event_id ON outbox_dlq (terminal_at, event_id);
 
 -- =============================================================================
 -- TRIGGERS — auto-update updated_at on UPDATE
