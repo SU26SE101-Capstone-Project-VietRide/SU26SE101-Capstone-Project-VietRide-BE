@@ -7,6 +7,7 @@ using VietRide.Shared.Kernel.Primitives;
 namespace VietRide.Payment.Api.Controllers;
 
 [ApiController]
+[NonController]
 [Route("v1/admin/reports/platform")]
 [Authorize(Roles = "SYSTEM_ADMIN")]
 public sealed class AdminPlatformReportsController : ControllerBase
@@ -23,7 +24,7 @@ public sealed class AdminPlatformReportsController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status500InternalServerError)]
-    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status502BadGateway)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<PlatformReportResult>> GetAsync(
         [FromQuery] string? from,
         [FromQuery] string? to,

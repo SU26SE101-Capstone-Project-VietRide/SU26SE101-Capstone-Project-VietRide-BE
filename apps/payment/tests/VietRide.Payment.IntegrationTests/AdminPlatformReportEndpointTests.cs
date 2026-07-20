@@ -1,7 +1,6 @@
 using System.Net;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
-using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
@@ -13,6 +12,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using StackExchange.Redis;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
+using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Application.Features.Admin.PlatformReports;
 
 namespace VietRide.Payment.IntegrationTests;
@@ -28,19 +28,9 @@ public sealed class AdminPlatformReportEndpointTests
     }
 
     [Fact]
-    public async Task GetPlatformReport_SystemAdminReturnsEnvelopeWithUnionAndSignedTotals()
+    public async Task GetPlatformReport_IsNotExposedByPaymentAfterBookingOwnershipTransfer()
     {
         _factory.Reset();
-        var operatorA = Guid.Parse("40000000-0000-0000-0000-000000000001");
-        var operatorB = Guid.Parse("40000000-0000-0000-0000-000000000002");
-        _factory.Bookings.GetAsync(default, default, default!)
-            .ReturnsForAnyArgs(new[] { new BookingPlatformReportItem(operatorA, 2, 500_000) });
-        _factory.Trips.GetAsync(default, default, default!)
-            .ReturnsForAnyArgs(new[] { new TripPlatformReportItem(operatorB, 3) });
-        _factory.Parcels.GetAsync(default, default, default!)
-            .ReturnsForAnyArgs(new[] { new ParcelPlatformReportItem(operatorA, 1, -50_000) });
-        _factory.Identity.GetAsync(default!, default!)
-            .ReturnsForAnyArgs(new[] { new OperatorSummaryItem(operatorA, "Operator A") });
         using var client = _factory.CreateRoleClient("SYSTEM_ADMIN");
 
         var response = await client.GetAsync(
@@ -48,28 +38,31 @@ public sealed class AdminPlatformReportEndpointTests
             "?from=2026-07-01T00%3A00%3A00Z" +
             "&to=2026-08-01T00%3A00%3A00Z");
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var root = document.RootElement;
-        root.GetProperty("success").GetBoolean().Should().BeTrue();
-        var data = root.GetProperty("data");
-        data.GetProperty("period").GetProperty("from").GetString()
-            .Should().Be("2026-07-01T00:00:00Z");
-        var totals = data.GetProperty("totals");
-        totals.GetProperty("completedBookingCount").GetInt64().Should().Be(2);
-        totals.GetProperty("completedTripCount").GetInt64().Should().Be(3);
-        totals.GetProperty("parcelRevenueVnd").GetInt64().Should().Be(-50_000);
-        totals.GetProperty("netRevenueVnd").GetInt64().Should().Be(450_000);
-        var operators = data.GetProperty("byOperator").EnumerateArray().ToArray();
-        operators.Should().HaveCount(2);
-        operators[0].GetProperty("operatorId").GetGuid().Should().Be(operatorA);
-        operators[0].GetProperty("operatorName").GetString().Should().Be("Operator A");
-        operators[1].GetProperty("operatorId").GetGuid().Should().Be(operatorB);
-        operators[1].GetProperty("operatorName").ValueKind.Should().Be(JsonValueKind.Null);
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        await _factory.Bookings.DidNotReceiveWithAnyArgs().GetAsync(default, default, default!);
+        await _factory.Trips.DidNotReceiveWithAnyArgs().GetAsync(default, default, default!);
+        await _factory.Parcels.DidNotReceiveWithAnyArgs().GetAsync(default, default, default!);
+        await _factory.Identity.DidNotReceiveWithAnyArgs().GetAsync(default!, default!);
+        await _factory.Ledger.DidNotReceiveWithAnyArgs()
+            .GetPlatformLedgerMetricsAsync(default, default, default!);
     }
 
     [Fact]
-    public async Task GetPlatformReport_EnforcesRbacAndRangeBeforeCallingSources()
+    public async Task GetPlatformReport_LegacyPaymentRouteDoesNotInvokeLedgerOrIdentity()
+    {
+        _factory.Reset();
+        using var client = _factory.CreateRoleClient("SYSTEM_ADMIN");
+
+        var response = await client.GetAsync(
+            "/v1/admin/reports/platform?from=2026-07-01T00%3A00%3A00Z&to=2026-08-01T00%3A00%3A00Z");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        await _factory.Bookings.DidNotReceiveWithAnyArgs().GetAsync(default, default, default!);
+        await _factory.Identity.DidNotReceiveWithAnyArgs().GetAsync(default!, default!);
+    }
+
+    [Fact]
+    public async Task GetPlatformReport_LegacyPaymentRouteIsAbsentForEveryRoleAndRange()
     {
         _factory.Reset();
         using var operatorClient = _factory.CreateRoleClient("OPERATOR_ADMIN");
@@ -80,48 +73,27 @@ public sealed class AdminPlatformReportEndpointTests
         var invalid = await adminClient.GetAsync(
             "/v1/admin/reports/platform?from=2026-07-01T00%3A00%3A00%2B00%3A00&to=2026-08-01T00%3A00%3A00Z");
 
-        forbidden.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        invalid.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
-        await AssertErrorCodeAsync(invalid, "VALIDATION_ERROR");
+        forbidden.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        invalid.StatusCode.Should().Be(HttpStatusCode.NotFound);
         await _factory.Bookings.DidNotReceiveWithAnyArgs().GetAsync(default, default, default!);
         await _factory.Trips.DidNotReceiveWithAnyArgs().GetAsync(default, default, default!);
         await _factory.Parcels.DidNotReceiveWithAnyArgs().GetAsync(default, default, default!);
     }
 
-    [Theory]
-    [InlineData(true, HttpStatusCode.InternalServerError, "REPORT_VALUE_OVERFLOW")]
-    [InlineData(false, HttpStatusCode.BadGateway, "UPSTREAM_UNAVAILABLE")]
-    public async Task GetPlatformReport_MapsUpstreamFailuresWithoutPartialResponse(
-        bool overflow,
-        HttpStatusCode expectedStatus,
-        string expectedCode)
+    [Fact]
+    public async Task GetPlatformReport_LegacyPaymentRouteCannotReachUpstreamClients()
     {
         _factory.Reset();
-        Exception upstreamException = overflow
-            ? new PlatformReportValueOverflowException()
-            : new UpstreamUnavailableException();
-        _factory.Bookings.GetAsync(default, default, default!)
-            .ReturnsForAnyArgs(Task.FromException<IReadOnlyList<BookingPlatformReportItem>>(
-                upstreamException));
         using var client = _factory.CreateRoleClient("SYSTEM_ADMIN");
 
         var response = await client.GetAsync(
             "/v1/admin/reports/platform?from=2026-07-01T00%3A00%3A00Z&to=2026-08-01T00%3A00%3A00Z");
 
-        response.StatusCode.Should().Be(expectedStatus);
-        await AssertErrorCodeAsync(response, expectedCode);
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        await _factory.Bookings.DidNotReceiveWithAnyArgs().GetAsync(default, default, default!);
         await _factory.Identity.DidNotReceiveWithAnyArgs().GetAsync(default!, default!);
     }
 
-    private static async Task AssertErrorCodeAsync(
-        HttpResponseMessage response,
-        string expectedCode)
-    {
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        document.RootElement.GetProperty("success").GetBoolean().Should().BeFalse();
-        document.RootElement.GetProperty("error").GetProperty("code").GetString()
-            .Should().Be(expectedCode);
-    }
 }
 
 public sealed class PlatformReportWebApplicationFactory : WebApplicationFactory<Program>
@@ -134,6 +106,8 @@ public sealed class PlatformReportWebApplicationFactory : WebApplicationFactory<
         Substitute.For<IParcelPlatformReportClient>();
     public IIdentityOperatorSummaryClient Identity { get; } =
         Substitute.For<IIdentityOperatorSummaryClient>();
+    public IOperatorLedgerEntryRepository Ledger { get; } =
+        Substitute.For<IOperatorLedgerEntryRepository>();
 
     public void Reset()
     {
@@ -141,6 +115,7 @@ public sealed class PlatformReportWebApplicationFactory : WebApplicationFactory<
         Trips.ClearReceivedCalls();
         Parcels.ClearReceivedCalls();
         Identity.ClearReceivedCalls();
+        Ledger.ClearReceivedCalls();
         Bookings.GetAsync(default, default, default!)
             .ReturnsForAnyArgs(Array.Empty<BookingPlatformReportItem>());
         Trips.GetAsync(default, default, default!)
@@ -149,6 +124,8 @@ public sealed class PlatformReportWebApplicationFactory : WebApplicationFactory<
             .ReturnsForAnyArgs(Array.Empty<ParcelPlatformReportItem>());
         Identity.GetAsync(default!, default!)
             .ReturnsForAnyArgs(Array.Empty<OperatorSummaryItem>());
+        Ledger.GetPlatformLedgerMetricsAsync(default, default, default!)
+            .ReturnsForAnyArgs(Array.Empty<PlatformLedgerReportItem>());
     }
 
     public HttpClient CreateRoleClient(string role)
@@ -174,11 +151,13 @@ public sealed class PlatformReportWebApplicationFactory : WebApplicationFactory<
             services.RemoveAll<ITripPlatformReportClient>();
             services.RemoveAll<IParcelPlatformReportClient>();
             services.RemoveAll<IIdentityOperatorSummaryClient>();
+            services.RemoveAll<IOperatorLedgerEntryRepository>();
             services.RemoveAll<IConnectionMultiplexer>();
             services.AddSingleton(Bookings);
             services.AddSingleton(Trips);
             services.AddSingleton(Parcels);
             services.AddSingleton(Identity);
+            services.AddSingleton(Ledger);
             services.AddSingleton<IConnectionMultiplexer>(InMemoryIdempotencyRedis.Create());
             services.AddAuthentication(options =>
                 {

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Payment.Application.Features.Payments.ConfirmBookingPayment;
 using VietRide.Payment.Application.Features.Payments.ConfirmSubscriptionPayment;
+using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Payment.Api.Controllers;
 
@@ -19,6 +20,7 @@ public sealed class VnPaySubscriptionIpnController : ControllerBase
     }
 
     [HttpPost("subscription-vnpay-ipn")]
+    [SkipIdempotency("VNPay IPN is authenticated and deduplicated by the provider transaction reference.")]
     public async Task<IActionResult> ConfirmAsync(CancellationToken cancellationToken)
     {
         var parameters = new Dictionary<string, string>(StringComparer.Ordinal);

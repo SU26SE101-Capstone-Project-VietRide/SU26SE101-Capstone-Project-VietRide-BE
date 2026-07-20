@@ -36,6 +36,7 @@ Service xử lý **mọi giao dịch tiền**: payment VNPay/Wallet cho Booking/
 | `OperatorLedgerEntry` | **Audit log** per booking/parcel revenue/refund. | `trip_id` nullable, `entryType` enum, `amount` signed. **KHÔNG có balance_before/after** (drop từ v1 wallet model). |
 | `RefundFailureLog` | Retry tracking khi refund event consume fail. | `retryCount` ≤ 5 → admin manual |
 | `OutboxEvent` | Outbox pattern. | |
+| `OutboxDlq` | Terminal Outbox failures for admin review. | unique `eventId`, payload, retry metadata, `terminalAt` |
 
 ## Design Decisions
 
@@ -153,6 +154,8 @@ Trước đây flow check `OperatorBalance >= refundTotal` + `OPERATOR_INSUFFICI
 | `uq_operator_ledger_entries_source` | `(source_event_id, entry_type, reference_id)` | unique | Allocation/event replay dedupe |
 | `idx_refund_failure_logs_unresolved` | `last_attempt_at` partial | B-tree | Hangfire retry job |
 | `idx_outbox_events_status_created` | partial | B-tree | Outbox worker poll |
+| `uq_outbox_dlq_event_id` | `event_id` | unique | One terminal row per event |
+| `idx_outbox_dlq_terminal_event_id` | `(terminal_at, event_id)` | B-tree | Composite cursor review theo contract |
 
 ## Cross-service References (Logical FK)
 

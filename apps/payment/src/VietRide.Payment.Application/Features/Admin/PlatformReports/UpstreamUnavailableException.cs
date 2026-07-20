@@ -9,6 +9,6 @@ public sealed class UpstreamUnavailableException : Exception, ICodedHttpExceptio
     {
     }
 
-    public int StatusCode => 502;
+    public int StatusCode => 503;
     public string ErrorCode => "UPSTREAM_UNAVAILABLE";
 }
