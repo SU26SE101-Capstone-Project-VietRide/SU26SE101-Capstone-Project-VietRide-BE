@@ -74,6 +74,23 @@ CREATE INDEX idx_outbox_events_status_next_retry
 CREATE INDEX idx_outbox_events_status_updated
     ON outbox_events (status, updated_at);
 
+-- -----------------------------------------------------------------------------
+-- outbox_dlq (durable terminal path after retry_count > 5)
+-- -----------------------------------------------------------------------------
+CREATE TABLE outbox_dlq (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id UUID NOT NULL,
+    event_type VARCHAR(100) NOT NULL,
+    payload JSONB NOT NULL,
+    retry_count INT NOT NULL,
+    last_error TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    terminal_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX uq_outbox_dlq_event_id ON outbox_dlq (event_id);
+CREATE INDEX idx_outbox_dlq_terminal_event_id ON outbox_dlq (terminal_at, event_id);
+
 -- =============================================================================
 -- NOTE: NestJS Tracking Service does NOT use Hangfire.
 -- BullMQ scheduled jobs (Redis-backed) handle GPS batch flush + Outbox poll.

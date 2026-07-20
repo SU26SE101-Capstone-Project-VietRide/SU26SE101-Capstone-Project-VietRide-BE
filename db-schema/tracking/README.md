@@ -18,6 +18,7 @@ Tracking Service là **NestJS service** xử lý real-time GPS broadcast (Socket
 |---|---|---|
 | `GpsTrail` | GPS history per trip. Persisted from Redis buffer. | `tripId`, `lat`/`lng` decimal(10,7), `speedKmh` nullable, `recordedAt` |
 | `OutboxEvent` | Outbox pattern. | `eventType` (TripDelayed/OffRouteAlert/etc.), `payload` JSONB |
+| `OutboxDlq` | Terminal publish failures for operational review. | unique `eventId`, event metadata/payload, retry count, terminal time |
 
 ## Design Decisions
 
@@ -34,6 +35,13 @@ Tracking Service là **NestJS service** xử lý real-time GPS broadcast (Socket
   - `tracking:active_trips` — set membership
   - `tracking:approaching_notified:{tripId}:{bookingId}:w{1|2}` — dedupe approaching alert (TTL đến hết chuyến)
 
+### Outbox DLQ
+
+`outbox_dlq` retains exactly one terminal record per `event_id` after the sixth failed
+publish (`retry_count > 5`). The worker keeps the source event at `FAILED` with
+`retry_count = 6`, so it is no longer selected for retry. Payload is operational review
+data and must never be written to application logs. Replay and purge are out of scope for v1.
+
 ## Index Strategy
 
 | Index | Columns | Type | Purpose |
@@ -41,6 +49,8 @@ Tracking Service là **NestJS service** xử lý real-time GPS broadcast (Socket
 | `idx_gps_trails_trip_id_recorded_at` | `(trip_id, recorded_at)` | B-tree | Trail playback per trip |
 | `idx_gps_trails_recorded_at` | `recorded_at` | B-tree | Time-range cleanup (90-day retention) |
 | `idx_outbox_events_status_created` | partial | B-tree | Outbox poll |
+| `uq_outbox_dlq_event_id` | `event_id` | unique | Prevent duplicate terminal records on worker replay |
+| `idx_outbox_dlq_terminal_event_id` | `(terminal_at, event_id)` | B-tree | Read DLQ theo cursor contract |
 
 ## Cross-service References (Logical FK)
 

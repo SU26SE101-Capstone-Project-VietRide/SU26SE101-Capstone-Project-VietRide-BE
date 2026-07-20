@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '../generated/tracking-prisma-client';
 import { TrackingPrismaService } from '../prisma/tracking-prisma.service';
 import {
   OUTBOX_LAST_ERROR_MAX_LENGTH,
@@ -8,6 +9,7 @@ import {
   OUTBOX_RETRY_MAX_DELAY_MS,
   OUTBOX_STALE_PUBLISHING_ERROR,
 } from './outbox.constants';
+import type { OutboxDlqQueryDto } from './outbox-dlq-query.dto';
 
 export type OutboxEventStatus = 'PENDING' | 'PUBLISHING' | 'PUBLISHED' | 'FAILED';
 
@@ -21,6 +23,16 @@ export interface OutboxEventRecord {
   createdAt: Date;
   updatedAt: Date;
   publishedAt: Date | null;
+}
+
+export interface OutboxDlqReadItem {
+  eventId: string;
+  eventType: string;
+  payload: unknown;
+  retryCount: number;
+  lastError: string;
+  createdAt: Date;
+  terminalAt: Date;
 }
 
 @Injectable()
@@ -43,11 +55,8 @@ export class OutboxRepository {
       const failedRows = await this.prisma.outboxEvent.findMany({
         where: {
           status: 'FAILED',
-          retryCount: { lt: OUTBOX_MAX_RETRIES },
-          OR: [
-            { nextRetryAt: null },
-            { nextRetryAt: { lte: new Date() } },
-          ],
+          retryCount: { lte: OUTBOX_MAX_RETRIES },
+          OR: [{ nextRetryAt: null }, { nextRetryAt: { lte: new Date() } }],
         },
         orderBy: {
           createdAt: 'asc',
@@ -60,26 +69,63 @@ export class OutboxRepository {
     return rows as OutboxEventRecord[];
   }
 
+  async readDlq(query: OutboxDlqQueryDto): Promise<OutboxDlqReadItem[]> {
+    const descending = query.sortDir === 'desc';
+    const cursorFilter =
+      query.afterTerminalAt && query.afterId
+        ? descending
+          ? {
+              OR: [
+                { terminalAt: { lt: query.afterTerminalAt } },
+                { terminalAt: query.afterTerminalAt, eventId: { lt: query.afterId } },
+              ],
+            }
+          : {
+              OR: [
+                { terminalAt: { gt: query.afterTerminalAt } },
+                { terminalAt: query.afterTerminalAt, eventId: { gt: query.afterId } },
+              ],
+            }
+        : {};
+
+    return this.prisma.outboxDlq.findMany({
+      where: {
+        ...(query.eventType ? { eventType: query.eventType } : {}),
+        ...cursorFilter,
+      },
+      orderBy: [
+        { terminalAt: descending ? 'desc' : 'asc' },
+        { eventId: descending ? 'desc' : 'asc' },
+      ],
+      take: query.pageSize,
+      select: {
+        eventId: true,
+        eventType: true,
+        payload: true,
+        retryCount: true,
+        lastError: true,
+        createdAt: true,
+        terminalAt: true,
+      },
+    });
+  }
+
   async recoverStalePublishingEvents(now: Date = new Date()): Promise<number> {
     const staleBefore = new Date(now.getTime() - OUTBOX_PUBLISHING_STALE_MS);
-    const result = await this.prisma.outboxEvent.updateMany({
+    const staleEvents = await this.prisma.outboxEvent.findMany({
       where: {
         status: 'PUBLISHING',
         updatedAt: {
           lt: staleBefore,
         },
       },
-      data: {
-        status: 'FAILED',
-        retryCount: {
-          increment: 1,
-        },
-        lastError: OUTBOX_STALE_PUBLISHING_ERROR,
-        nextRetryAt: now,
-      },
+      select: { id: true },
     });
 
-    return result.count;
+    const results = await Promise.all(
+      staleEvents.map((event) => this.markFailed(event.id, OUTBOX_STALE_PUBLISHING_ERROR, now)),
+    );
+    return results.filter(Boolean).length;
   }
 
   async markPublishing(id: string): Promise<boolean> {
@@ -99,36 +145,77 @@ export class OutboxRepository {
     return result.count === 1;
   }
 
-  async markPublished(id: string, publishedAt: Date): Promise<void> {
-    await this.prisma.outboxEvent.update({
-      where: { id },
+  async markPublished(id: string, publishedAt: Date): Promise<boolean> {
+    const result = await this.prisma.outboxEvent.updateMany({
+      where: { id, status: 'PUBLISHING' },
       data: {
         status: 'PUBLISHED',
         publishedAt,
         lastError: null,
       },
     });
+
+    return result.count === 1;
   }
 
-  async markFailed(id: string, error: unknown, currentRetryCount: number): Promise<void> {
-    const delayMs = Math.min(
-      Math.pow(2, currentRetryCount) * OUTBOX_RETRY_BASE_DELAY_MS,
-      OUTBOX_RETRY_MAX_DELAY_MS,
-    );
-    const nextRetryAt = new Date(Date.now() + delayMs);
+  async markFailed(id: string, error: unknown, failedAt: Date = new Date()): Promise<boolean> {
+    const lastError = formatLastError(error);
 
-    await this.prisma.outboxEvent.update({
-      where: { id },
-      data: {
-        status: 'FAILED',
-        retryCount: {
-          increment: 1,
+    return this.prisma.$transaction(async (tx) => {
+      const event = await tx.outboxEvent.findUnique({ where: { id } });
+      if (!event || event.status !== 'PUBLISHING') {
+        return false;
+      }
+
+      const retryCount = event.retryCount + 1;
+      const isTerminal = retryCount > OUTBOX_MAX_RETRIES;
+      const nextRetryAt = isTerminal
+        ? null
+        : new Date(failedAt.getTime() + retryDelayMs(event.retryCount));
+      const updated = await tx.outboxEvent.updateMany({
+        where: {
+          id,
+          status: 'PUBLISHING',
+          retryCount: event.retryCount,
         },
-        lastError: formatLastError(error),
-        nextRetryAt,
-      },
+        data: {
+          status: 'FAILED',
+          retryCount,
+          lastError,
+          nextRetryAt,
+        },
+      });
+
+      if (updated.count !== 1) {
+        return false;
+      }
+
+      if (isTerminal) {
+        await tx.outboxDlq.upsert({
+          where: { eventId: event.id },
+          create: {
+            eventId: event.id,
+            eventType: event.eventType,
+            payload: event.payload === null ? Prisma.JsonNull : event.payload,
+            retryCount,
+            lastError,
+            createdAt: event.createdAt,
+            terminalAt: failedAt,
+          },
+          update: {},
+        });
+      }
+
+      return true;
     });
   }
+}
+
+function retryDelayMs(currentRetryCount: number): number {
+  return Math.min(
+    Math.pow(2, currentRetryCount) * OUTBOX_RETRY_BASE_DELAY_MS,
+    OUTBOX_RETRY_MAX_DELAY_MS,
+  );
 }
 
 function formatLastError(error: unknown): string {

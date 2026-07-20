@@ -3,7 +3,8 @@ export const OUTBOX_JOB_NAME = 'tracking-outbox-publish';
 export const OUTBOX_SCHEDULER_ID = 'tracking-outbox-publish-scheduler';
 export const OUTBOX_WORKER_CONCURRENCY = 1;
 export const OUTBOX_LAST_ERROR_MAX_LENGTH = 2_000;
-export const OUTBOX_MAX_RETRIES = 10;
+// An event enters the durable DLQ after the sixth failed publish (retry_count > 5).
+export const OUTBOX_MAX_RETRIES = 5;
 export const OUTBOX_RETRY_BASE_DELAY_MS = 2_000;
 export const OUTBOX_RETRY_MAX_DELAY_MS = 3_600_000;
 export const OUTBOX_PUBLISHING_STALE_MS = 120_000;
