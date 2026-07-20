@@ -1,6 +1,6 @@
 ---
 name: add-integration-event
-description: Add an Outbox-published integration event in a VietRide .NET service — define the IIntegrationEvent payload, set its EventType routing key (<svc>.<aggregate>.<verb_past>), enqueue an OutboxMessage via IOutboxStore in the same transaction, and record it in the BSOT event registry. Use when an endpoint/handler must emit a cross-service event.
+description: Add an Outbox-published integration event in a VietRide .NET service. Define the IIntegrationEvent payload and service-aggregate-past-verb routing key, enqueue an OutboxMessage in the same transaction, and record it in the BSOT event registry. Use when an endpoint or handler must emit a cross-service event.
 ---
 
 # Add an integration event (Outbox + RabbitMQ)
@@ -45,10 +45,22 @@ relays each to the RabbitMQ topic exchange `vietride.events`.
 4. **Cross-check the consumer schema** with the NestJS side (Notification/Tracking, owner: Tuyên) —
    the TS payload type in `libs/shared/contracts` must match field-for-field.
 
-## Verify
-- `dotnet build` + `dotnet format --verify-no-changes` clean.
-- Integration test: trigger the handler, assert an `OutboxMessages` row is written (Type = routing
-  key, ProcessedAt null) in the same transaction as the business write.
-- After the publisher tick, the message lands on `vietride.events` with that routing key and
-  `MessageId == EventId`.
-- Kill the publisher mid-flight, restart → the unprocessed row is still eventually published (no loss).
+## Verify with the task policy
+
+Use the invoking task's exact `verification commands` and tier. Do not append a full service
+build/test matrix. Standalone use defaults to `FOCUSED` and defines exact filters first.
+
+- Run the affected integration-test class/filter and confirm at least one test executes. Trigger
+  the handler and assert an `OutboxMessages` row is written in the business transaction with the
+  routing key and `ProcessedAt == null`.
+- Run focused publisher filters/fixtures that prove the message reaches `vietride.events` with
+  the expected routing key and `MessageId == EventId`, and that an unprocessed row survives a
+  publisher restart and is eventually delivered. These event-specific checks remain mandatory;
+  do not widen them into unrelated messaging suites.
+- A targeted test compiles referenced production projects. Build only the smallest `.csproj`
+  when no suitable test reference exists.
+- Format only changed C# paths with
+  `dotnet format <affected-sln> --verify-no-changes --include <changed paths>`; lint only changed
+  contract files if a TS consumer contract changed.
+
+Full touched-solution/workspace regression belongs only to `/audit-day <N>`.

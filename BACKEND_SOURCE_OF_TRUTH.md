@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.37.0
+> **Phiên bản:** 1.38.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-07-18
+> **Cập nhật lần cuối:** 2026-07-20
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -145,6 +145,7 @@ Khi conflict, ưu tiên theo thứ tự sau:
 | BCrypt.Net-Next | latest | bcrypt cost 12 |
 | Mapster | 7.x | Optional, dùng cho DTO mapping (chọn vì source-gen compile-time, không reflection runtime như AutoMapper, license MIT). Có thể skip dùng tay. |
 | Microsoft.IdentityModel.Tokens | latest | Sign/verify JWT |
+| FirebaseAdmin | **3.6.0** | Identity-only Firebase Custom Token minting and refresh-session revocation |
 
 ### 2.2 NestJS services
 
@@ -1964,6 +1965,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | Method + Path | Caller | Mục đích |
 |---|---|---|
 | `GET /internal/v1/bookings/{id}` | Tracking, Payment, Parcel | Lookup booking snapshot, including active ticket count for parcel attach |
+| `GET /internal/v1/bookings/history?userId=&status=&from=&to=&page=&pageSize=` | Parcel | Owner-scoped Booking history for the passenger facade; pages Booking aggregates, includes Ticket summaries, uses `[from,to)` over `created_at`, and orders `created_at DESC, id DESC` |
 | `GET /internal/v1/bookings/trips/{tripId}/edit-impact?operatorId=` | Trip | Required trusted `operatorId`; every query predicates `trip_id` and `operator_id`, active is exactly `PENDING_PAYMENT|CONFIRMED`, raw PII-free `{tripId,activeBookingCount,activeBookings:[{bookingId,status,seatNumbers}]}`, empty is `200`. |
 | `GET /internal/v1/bookings/trips/{tripId}/stops/{stopId}/pending-passenger-count?operatorId=` | Trip | Raw exact `{tripId,stopId,pendingPassengerCount}`. Predicate is `Booking.status=CONFIRMED AND Passenger.boardingStatus=PENDING AND Booking.tripId=:tripId AND Booking.pickupStopId=:stopId AND Booking.operatorId=:operatorId`. Valid Internal JWT only; malformed/all-zero UUID → `422 VALIDATION_ERROR`, invalid JWT → `401 AUTH_TOKEN_INVALID`; no Trip/Stop lookup, tenant claim, or absent-reference `403`/`404`. |
 | `GET /internal/v1/bookings/{id}/access-check?userId=` | Tracking | Verify Socket.IO joinTripTracking authz |
@@ -2027,6 +2029,7 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `identity.user.deleted` | Identity | Booking, Payment | `{ userId }` (soft delete cascade) |
 | `identity.operator.approved` | Identity | Payment (init OperatorWallet) | `{ eventId, operatorId, approvedAt }`; new approvals generate an eventId in the approval transaction; legacy backfill reuses the stable eventId persisted in `operator_wallet_backfill_markers` |
 | `identity.operator.suspended` | Identity | Trip, Booking | `{ operatorId, suspendedAt }` |
+| `identity.firebase_session.revoke_requested` | Identity | Identity | `{ eventId, occurredAt, userId, reason }`; user lock emits one request, operator suspend emits one per scoped `OPERATOR_ADMIN`; consumer calls Firebase refresh-token revocation, treats missing Firebase users as no-op, and lets transient failures retry/DLQ |
 | `booking.booking.confirmed` | Booking | Notification, Payment (settle hold), Booking (BookingStats counter), Trip (shuttle fan-out) | `{ bookingId, tripId, totalAmount, userId, voucherUsageId?, bookingCode?, tickets?: [{ ticketId, passengerUserId? }], ticketCodes?, ticketCount?, shuttlePickup?: { address, latitude, longitude } }` |
 | `booking.booking.cancelled` | Booking | Notification, Trip (release seats), Payment (refund), Booking (BookingStats counter) | Canonical producer requires fresh UUID-v4 `eventId` and producer-captured offset-date-time `occurredAt`: `{ eventId, occurredAt, bookingId, userId, refundAmount, refundOverride, cancellationReason, bookingCode?, ticketCodes?, ticketCount? }`; one-release consumers accept only this complete canonical shape or the exact legacy shape with both identity fields absent, reject partial/malformed/extra fields, and fallback to `bookingId` only for that exact legacy payload |
 | `booking.booking.refunded` | Booking | Notification, Booking (BookingStats counter) | `{ bookingId, userId, amount, bookingCode?, ticketCodes?, ticketCount? }` |
@@ -3068,6 +3071,9 @@ SYSTEM_ADMIN_BOOTSTRAP_EMAIL=admin@vietride.app
 SYSTEM_ADMIN_BOOTSTRAP_PASSWORD=...     # only first deploy
 GOOGLE_OAUTH_CLIENT_ID=...
 GOOGLE_OAUTH_CLIENT_SECRET=...
+FIREBASE_PROJECT_ID=...
+FIREBASE_CLIENT_EMAIL=...
+FIREBASE_PRIVATE_KEY=...                  # PEM; literal \n accepted and normalized in-process
 EMAIL_SERVICE_BASE_URL=http://notification:3002
 PASSWORD_HASH_COST=12
 PUBLIC_APP_URL=https://app.vietride.app
@@ -3401,6 +3407,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.38.0** | 2026-07-20 | BE lead (Vũ) | **MINOR** — Add Identity-owned Firebase Custom Token issuance for active `OPERATOR_ADMIN` users under active approved operators, transactional lock/suspend Firebase-session revocation, vehicle-image Storage Rules and credential registry; add owner-scoped Booking history with Ticket summaries, sender-only Parcel history, and the branch-selective Parcel-owned `GET /v1/passenger/history?type=TICKET\|PARCEL` facade. No schema or migration change. |
 | **1.37.0** | 2026-07-18 | BE lead (Vũ) | **MINOR** — Freeze Day-24 stop-disable, passenger STOP_DISABLED choices, strict deadline fallback, Trip snapshot/pending-count/departure seams, no-show anchors/history source, event identity/consumer facts, and the two migration ownership rows. DELETE is the sole disable route; legacy synchronous `STOP_DISABLED_BOOKING_AFFECTED` warning/count behavior is deprecated for that route. |
 | **1.36.0** | 2026-07-18 | BE lead (Vũ) | **MINOR** — Day-23 schedule-change contract, projection, errors, events, and jobs; merged into the Day-40 baseline while preserving the Admin Users, Station Cleanup, and Platform Reports contracts. |
 | **1.35.0** | 2026-07-16 | Senior Backend Engineer | **MINOR** - Freeze Day 40 Admin Users + Station Cleanup + Platform Reports: shared-idempotent lock/unlock với PostgreSQL per-user serialization và `locked_from_status`; immutable ActivityLog; atomic Station normalize/merge cùng canonical redirects và Booking advisory-lock relink protocol; `trip.station.merged`/`normalized`; live UTC earned-report internal sources và Payment orchestration; đăng ký `STATION_MERGE_CONFLICT`/`REPORT_VALUE_OVERFLOW`; report cache/Stats/Excel và advanced analytics defer Day 42. |

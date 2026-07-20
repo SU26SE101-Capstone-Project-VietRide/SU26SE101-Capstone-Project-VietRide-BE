@@ -47,4 +47,9 @@ public interface IUserRepository : IRepository<User, Guid>
     Task<IReadOnlyList<Guid>> ListActiveOperatorAdminIdsAsync(
         Guid operatorId,
         CancellationToken ct = default);
+
+    Task<IReadOnlyList<Guid>> ListOperatorAdminIdsAsync(
+        Guid operatorId,
+        CancellationToken ct = default)
+        => ListActiveOperatorAdminIdsAsync(operatorId, ct);
 }

@@ -13,12 +13,18 @@ namespace VietRide.Identity.Application.Features.Admin.SuspendOperator;
 public sealed class SuspendOperatorCommandHandler : IRequestHandler<SuspendOperatorCommand, SuspendOperatorResponseDto>
 {
     private readonly IOperatorRepository _operators;
+    private readonly IUserRepository _users;
     private readonly IClock _clock;
     private readonly IIntegrationEventOutbox _outbox;
 
-    public SuspendOperatorCommandHandler(IOperatorRepository operators, IClock clock, IIntegrationEventOutbox outbox)
+    public SuspendOperatorCommandHandler(
+        IOperatorRepository operators,
+        IUserRepository users,
+        IClock clock,
+        IIntegrationEventOutbox outbox)
     {
         _operators = operators;
+        _users = users;
         _clock = clock;
         _outbox = outbox;
     }
@@ -43,6 +49,23 @@ public sealed class SuspendOperatorCommandHandler : IRequestHandler<SuspendOpera
             OperatorSuspendedIntegrationEvent.EventType,
             JsonSerializer.Serialize(integrationEvent),
             cancellationToken);
+
+        var operatorAdminIds = await _users.ListOperatorAdminIdsAsync(
+            operatorEntity.Id,
+            cancellationToken);
+        foreach (var userId in operatorAdminIds)
+        {
+            var firebaseEvent = new FirebaseSessionRevocationRequestedIntegrationEvent(
+                Guid.NewGuid(),
+                suspendedAt,
+                userId,
+                "OPERATOR_SUSPENDED");
+            await _outbox.EnqueueAsync(
+                firebaseEvent.EventId,
+                FirebaseSessionRevocationRequestedIntegrationEvent.EventType,
+                JsonSerializer.Serialize(firebaseEvent),
+                cancellationToken);
+        }
 
         return new SuspendOperatorResponseDto(operatorEntity.Id, operatorEntity.RegistrationStatus.ToString());
     }

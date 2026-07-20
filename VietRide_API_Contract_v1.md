@@ -708,6 +708,29 @@ Error `422` — invalid device token payload:
 }
 ```
 
+### POST `/v1/firebase/custom-token`
+
+Auth: `OPERATOR_ADMIN`. Body: empty. Idempotency-Key: not required.
+
+Identity revalidates the persisted caller before minting a token: the User must still be
+`ACTIVE`, have role `OPERATOR_ADMIN`, have a non-null `operatorId`, and belong to an active
+Operator whose registration status is `APPROVED`. Firebase UID is the VietRide `userId` and the
+custom claims are `{ operatorId, role: "OPERATOR_ADMIN" }`.
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": { "token": "firebase-custom-token" },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-20T10:00:00Z" }
+}
+```
+
+Errors: `401 UNAUTHORIZED` when authentication is absent, `403 FORBIDDEN` when the persisted
+user/operator state is no longer eligible, and `502 UPSTREAM_UNAVAILABLE` when Firebase Auth
+cannot mint the token. Token values and Firebase credentials must never be logged.
+
 ### POST `/v1/operator/users/{userId}/resend-initial-password`
 
 Auth: `OPERATOR_ADMIN`. Tenant isolation: caller `operatorId` must match the target user's `operatorId`. Caller Operator must currently be `APPROVED`; tokens issued before a later suspend/reject return `403 FORBIDDEN` without token/email/ActivityLog side effects. Idempotency-Key: not required by BSOT §5.6.
@@ -1255,7 +1278,11 @@ Rules:
 
 Auth: `PASSENGER`.
 
-Query: `status?`, `from?`, `to?`, `page?`, `pageSize?`.
+Query: `status?`, `from?`, `to?`, `page=1`, `pageSize=20` (maximum 100). `status`, when supplied,
+must be a `BookingStatus`. `from` and `to` are RFC 3339 timestamps filtering `createdAt`, with
+`from` inclusive, `to` exclusive, and `from < to`. Ordering is fixed as
+`createdAt DESC, bookingId DESC`. Results are bookings owned by JWT `sub`; pagination is per
+Booking, and each Booking carries its Ticket summaries.
 
 Response `200`:
 ```json
@@ -1269,10 +1296,23 @@ Response `200`:
         "bookingCode": "VR-20260518-ABCD1234",
         "tripId": "uuid",
         "status": "CONFIRMED",
+        "createdAt": "2026-05-01T09:00:00Z",
         "departureDateTime": "2026-05-18T08:00:00+07:00",
-        "originStationName": "Bến xe Miền Đông",
-        "destinationStationName": "Bến xe Mỹ Đình",
-        "totalAmount": 350000
+        "originName": "Bến xe Miền Đông",
+        "destinationName": "Bến xe Mỹ Đình",
+        "totalAmount": 350000,
+        "bookingGroupId": null,
+        "tripDirection": null,
+        "routeName": "TP.HCM - Hà Nội",
+        "tickets": [
+          {
+            "ticketId": "uuid",
+            "ticketCode": "VT-20260518-ABCDEFGH",
+            "seatNumber": "A01",
+            "status": "ISSUED",
+            "paidAmount": 350000
+          }
+        ]
       }
     ],
     "page": 1,
@@ -1285,6 +1325,16 @@ Response `200`:
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
+
+Validation failures return `422 VALIDATION_ERROR`.
+
+### GET `/internal/v1/bookings/history`
+
+Auth: Internal JWT. Caller: Parcel Service. Never exposed through Gateway.
+
+Query: required `userId`, plus the same `status?`, `from?`, `to?`, `page=1`, and `pageSize=20`
+semantics as the public Booking history endpoint. It returns the same paged data DTO, preserving
+Booking ownership, per-Booking pagination, nested Ticket summaries, and deterministic ordering.
 
 ### GET `/internal/v1/bookings/{bookingId}`
 
@@ -2467,6 +2517,72 @@ Response `200`:
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
+
+### GET `/v1/parcels/sent`
+
+Auth: `PASSENGER`.
+
+Query: `status?`, `from?`, `to?`, `page=1`, `pageSize=20` (maximum 100). `status`, when supplied,
+must be a `ParcelStatus`; timestamps use the same inclusive/exclusive RFC 3339 range semantics as
+Booking history. Returns only rows where `senderUserId == JWT sub`, ordered by
+`createdAt DESC, parcelId DESC`. Received-only parcels are not included.
+
+Response data is paged and each item contains `parcelId`, `parcelCode`, `tripId`, `status`,
+`createdAt`, `totalAmount`, `recipientName`, `sizeCategory`, `photoUrl`, `deliveryMethod`, and
+nullable journey fields `originName`, `destinationName`, `departureDateTime`, and
+`estimatedArrivalTime`. Trip enrichment failure leaves only the journey fields null and does not
+turn a successful local history query into an error.
+
+### GET `/v1/passenger/history`
+
+Auth: `PASSENGER`. This facade is owned by Parcel Service and does not fan out both branches.
+
+Query:
+- `type` (required): `TICKET | PARCEL`; `ALL` is not supported.
+- `status?`: `BookingStatus` for `TICKET`, `ParcelStatus` for `PARCEL`.
+- `from?`, `to?`: RFC 3339 `createdAt` range; `from` inclusive, `to` exclusive, `from < to`.
+- `page=1`, `pageSize=20`, maximum `100`.
+
+Ordering is fixed as `createdAt DESC, id DESC`. `TICKET` pages Booking aggregates and invokes only
+Booking's internal history endpoint. `PARCEL` invokes only Parcel's local sent-history query.
+
+Response `200` item shape:
+```json
+{
+  "type": "TICKET",
+  "id": "booking-uuid",
+  "code": "VR-20260518-ABCD1234",
+  "tripId": "uuid",
+  "status": "CONFIRMED",
+  "createdAt": "2026-05-01T09:00:00Z",
+  "totalAmount": 350000,
+  "originName": "Bến xe Miền Đông",
+  "destinationName": "Bến xe Mỹ Đình",
+  "departureDateTime": "2026-05-18T08:00:00+07:00",
+  "estimatedArrivalTime": null,
+  "ticket": {
+    "bookingGroupId": null,
+    "tripDirection": null,
+    "routeName": "TP.HCM - Hà Nội",
+    "tickets": [
+      {
+        "ticketId": "uuid",
+        "ticketCode": "VT-20260518-ABCDEFGH",
+        "seatNumber": "A01",
+        "status": "ISSUED",
+        "paidAmount": 350000
+      }
+    ]
+  },
+  "parcel": null
+}
+```
+
+For `PARCEL`, `ticket` is null and `parcel` is
+`{ bookingId, recipientName, sizeCategory, photoUrl, deliveryMethod }`. Exactly one of `ticket` or
+`parcel` is non-null. Journey fields may be null for legacy data or unavailable Trip enrichment.
+Booking unavailability on `TICKET` returns `502 UPSTREAM_UNAVAILABLE`; it must not be represented
+as an empty page. Validation failures return `422 VALIDATION_ERROR`.
 
 ### GET `/v1/parcels/{parcelId}`
 

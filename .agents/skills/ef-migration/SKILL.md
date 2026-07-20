@@ -35,7 +35,21 @@ Override design-time connection via env (`IDENTITY_DESIGN_CONNECTION`, `TRIP_DES
 - Cross-check the resulting schema against `db-schema/<service>/schema.sql` (canonical DDL).
 - Don't add a NuGet package as a side effect; if a design package is missing, declare its version in `Directory.Packages.props` (CPM) and reference it version-less.
 
-## Verify
-- The migration file + `<DbContext>ModelSnapshot.cs` are generated under `Infrastructure/Migrations/`.
-- `dotnet ef database update` runs clean from an empty DB, then `Down` (or `migrations remove` pre-apply) works.
-- `dotnet format apps/<svc>/VietRide.<Svc>.sln --verify-no-changes` — generated `.cs` must be CRLF and formatted (the format-on-edit hook handles touched files).
+## Verify with the task policy
+
+Migration lifecycle checks are task-specific and remain mandatory when listed in acceptance;
+they are not full regression. Use the plan's exact connection/database and commands:
+
+1. Generate the migration and its designer/snapshot under `Infrastructure/Migrations/`.
+2. Inspect generated SQL against canonical DDL, snake_case, cross-service FK, audit, soft-delete,
+   activation, and reversible `Down()` rules.
+3. Apply from an empty database, migrate down to the prior migration, and reapply the new
+   migration.
+4. Run `dotnet ef migrations has-pending-model-changes` with the same project/startup arguments
+   and require no pending model changes.
+5. Format only the generated/changed C# paths with
+   `dotnet format apps/<svc>/VietRide.<Svc>.sln --verify-no-changes --include <changed paths>`;
+   generated `.cs` must be CRLF.
+
+Do not append full solution tests/builds. Full touched-solution regression belongs only to
+`/audit-day <N>`.

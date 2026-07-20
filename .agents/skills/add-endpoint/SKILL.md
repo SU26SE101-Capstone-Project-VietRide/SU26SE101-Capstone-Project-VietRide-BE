@@ -1,6 +1,6 @@
 ---
 name: add-endpoint
-description: Add an HTTP endpoint to a VietRide .NET service (thin controller -> MediatR.Send), with the ADR 0004 ApiResponse envelope, Idempotency-Key on mutations, Swashbuckle annotation, and the matching Gateway route entry. Use when exposing a new REST endpoint defined in VietRide_API_Contract_v1.md.
+description: Add an HTTP endpoint to a VietRide .NET service with a thin controller dispatching MediatR.Send, the ADR 0004 ApiResponse envelope, Idempotency-Key on mutations, Swashbuckle annotations, and a matching Gateway route when needed. Use when exposing a REST endpoint defined in VietRide_API_Contract_v1.md.
 ---
 
 # Add a .NET endpoint + wire the Gateway route
@@ -31,7 +31,20 @@ description: Add an HTTP endpoint to a VietRide .NET service (thin controller ->
 4. If a new path family: add one `ProxyRoute` in `routes.ts` and a unit case in `routes.spec.ts` if patterns there cover it.
 5. If the endpoint emits an event, use the `add-integration-event` skill.
 
-## Verify
-- `.NET`: `dotnet build` + `dotnet format --verify-no-changes` clean for the service sln.
-- `Gateway`: `npx nx run gateway:test` and `npx nx run gateway:lint` green (TS = LF endings).
-- Manually: Gateway proxies the path to the service; protected path returns 401 without a token; mutation returns the same response on duplicate `Idempotency-Key`.
+## Verify with the task policy
+
+Use the invoking task's exact `verification commands` and tier. Do not append full
+solution/workspace checks. Standalone use defaults to `FOCUSED` and defines exact filters first.
+
+- Run the affected controller/handler test class with a non-empty .NET filter. Because it
+  compiles referenced production projects, build only the smallest affected `.csproj` when no
+  suitable test reference exists.
+- Format only changed C# paths with
+  `dotnet format apps/<service>/VietRide.<Service>.sln --verify-no-changes --include <changed paths>`.
+- If `routes.ts` changed, run the affected Gateway route spec and lint changed TS files; build
+  only the `gateway` Nx project when production TS changed. Do not run all Gateway tests merely
+  because the endpoint sits behind an existing route.
+- Verify the approved behavior that applies to this endpoint: Gateway proxying, auth rejection,
+  and mutation idempotency. Keep each check endpoint-specific.
+
+Full touched-solution/workspace regression belongs only to `/audit-day <N>`.

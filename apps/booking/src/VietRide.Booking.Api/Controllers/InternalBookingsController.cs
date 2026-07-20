@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using VietRide.Booking.Application.Features.Bookings.History;
 using VietRide.Booking.Application.Features.Internal.Bookings;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Authentication;
@@ -17,6 +18,26 @@ public sealed class InternalBookingsController : ControllerBase
     public InternalBookingsController(IMediator mediator)
     {
         _mediator = mediator;
+    }
+
+    [HttpGet("history")]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<BookingHistoryItemDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<PagedResult<BookingHistoryItemDto>>> GetHistoryAsync(
+        [FromQuery] Guid userId,
+        [FromQuery] string? status,
+        [FromQuery] string? from,
+        [FromQuery] string? to,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _mediator.Send(
+            new GetBookingHistoryQuery(userId, status, from, to, page, pageSize),
+            cancellationToken);
+
+        return Ok(result);
     }
 
     [HttpGet("{bookingId:guid}")]

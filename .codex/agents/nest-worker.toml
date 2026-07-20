@@ -41,7 +41,29 @@ shape → zod DTO validation; the Gateway stays a thin proxy (no business logic 
 - **Responses/errors**: ADR 0004 (BSOT §5.4/§5.5) supersedes RFC 7807/`application/problem+json`: use the `ApiResponse<T>` envelope via the shared `nest-common` envelope filter (success `{success,statusCode,data,meta}`; error `{success:false,statusCode,error:{code,message,fields?},meta}`), with `meta.traceId` and `error.code` UPPER_SNAKE_CASE from BSOT §5.9.
 - TypeScript strict mode; validate input with zod (`ZodValidationPipe`).
 
+## Targeted verification contract
+The approved day plan supplies a `verification tier` (`DOCS`, `FOCUSED`, or `PROJECT`) and exact
+`verification commands`. Run those commands once after implementation; do not replace them with
+workspace-wide or all-project checks. If a legacy plan omits these fields, treat the task as
+`FOCUSED` and derive the smallest checks that prove its acceptance. Full workspace regression
+belongs exclusively to `audit-day`.
+
+- `DOCS`: run only the listed parse/syntax/citation/registry checks plus `git diff --check`; do
+  not build or test application code.
+- `FOCUSED` (default): run the exact affected spec/test path, lint only changed files, and run the
+  affected Nx project build only when production source changed and compilation evidence is needed.
+- `PROJECT`: reserved for DI, global middleware, app-wide configuration, shared contracts, or
+  shared fixtures. Run only the affected Nx project targets — never `run-many`, `--all`, or the
+  whole TS workspace.
+- Use the exact app/project, spec path, and arguments from the plan. A test command that discovers
+  or executes zero tests is failed evidence; correct the narrow selector rather than widening to
+  the whole workspace.
+- Keep complete targeted-command output visible to yourself and the reviewer. Do not redirect,
+  truncate, or replace it with a quiet/summary log.
+- On a reviewer follow-up, patch continuously and rerun only invalidated checks: docs/comments do
+  not invalidate tests; production/test changes invalidate their affected spec; DI, shared
+  contracts, and global configuration may require the affected project-level checks.
+
 ## Before reporting done
-- `npx nx run <app>:lint` and `npx nx run <app>:test` green (CI uses `--exclude="VietRide.*"`, i.e. TS only).
-- `npx nx run <app>:build` succeeds.
-- Report files changed, commands + results, follow-ups. Do not commit unless asked."""
+- Report the verification tier, files changed, exact commands + full results, scope expansions,
+  and follow-ups. Do not commit unless asked."""

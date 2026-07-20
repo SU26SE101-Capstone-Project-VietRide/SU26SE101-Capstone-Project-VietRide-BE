@@ -900,6 +900,37 @@ internal sealed class ParcelRepository : IParcelRepository
         return PagedResult<ParcelEntity>.Create(items, page, pageSize, total);
     }
 
+    public async Task<PagedResult<ParcelEntity>> ListSentByUserIdAsync(
+        Guid userId,
+        ParcelStatus? status,
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        int page,
+        int pageSize,
+        CancellationToken ct)
+    {
+        var query = _db.Parcels
+            .AsNoTracking()
+            .Where(parcel => parcel.SenderUserId == userId);
+
+        if (status.HasValue)
+            query = query.Where(parcel => parcel.Status == status.Value);
+        if (from.HasValue)
+            query = query.Where(parcel => parcel.CreatedAt >= from.Value);
+        if (to.HasValue)
+            query = query.Where(parcel => parcel.CreatedAt < to.Value);
+
+        var total = await query.LongCountAsync(ct);
+        var items = await query
+            .OrderByDescending(parcel => parcel.CreatedAt)
+            .ThenByDescending(parcel => parcel.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(ct);
+
+        return PagedResult<ParcelEntity>.Create(items, page, pageSize, total);
+    }
+
     public async Task<PagedResult<ParcelEntity>> ListByTripAndOperatorAsync(
         Guid tripId, Guid operatorId, int page, int pageSize, CancellationToken ct)
     {

@@ -91,6 +91,21 @@ public static class InfrastructureServiceCollectionExtensions
                 options.ClientSecret = clientSecret;
         });
 
+        var firebaseOptions = new FirebaseAuthOptions
+        {
+            ProjectId = configuration["FIREBASE_PROJECT_ID"] ?? string.Empty,
+            ClientEmail = configuration["FIREBASE_CLIENT_EMAIL"] ?? string.Empty,
+            PrivateKey = configuration["FIREBASE_PRIVATE_KEY"] ?? string.Empty,
+        };
+        if (string.Equals(configuration["ASPNETCORE_ENVIRONMENT"], "Production", StringComparison.OrdinalIgnoreCase)
+            && !firebaseOptions.IsConfigured)
+        {
+            throw new InvalidOperationException(
+                "FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY are required in Production.");
+        }
+        services.AddSingleton(firebaseOptions);
+        services.AddSingleton<IFirebaseAuthService, FirebaseAuthService>();
+
         // ------------------------------------------------------------------
         // Repositories
         // ------------------------------------------------------------------
@@ -125,6 +140,11 @@ public static class InfrastructureServiceCollectionExtensions
             {
                 options.QueueName = "identity.station-normalized";
                 options.BindingKeys = ["trip.station.normalized"];
+            });
+            services.AddVietRideEventConsumer<FirebaseSessionRevokeRequestedIntegrationEvent, FirebaseSessionRevokeRequestedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "identity.firebase-session-revocation";
+                options.BindingKeys = ["identity.firebase_session.revoke_requested"];
             });
         }
 

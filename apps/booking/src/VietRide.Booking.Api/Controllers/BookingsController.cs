@@ -10,6 +10,7 @@ using VietRide.Booking.Application.Features.Bookings.CreateRoundTripBooking;
 using VietRide.Booking.Application.Features.Bookings.EditDropoff;
 using VietRide.Booking.Application.Features.Bookings.EditPickup;
 using VietRide.Booking.Application.Features.Bookings.GetBookingStatus;
+using VietRide.Booking.Application.Features.Bookings.History;
 using VietRide.Booking.Application.Features.Bookings.ResolvePendingAction;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Idempotency;
@@ -35,6 +36,32 @@ public sealed class BookingsController : ControllerBase
     public BookingsController(ISender sender)
     {
         _sender = sender;
+    }
+
+    [HttpGet("history")]
+    [Authorize(Roles = PassengerRole)]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<BookingHistoryItemDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<PagedResult<BookingHistoryItemDto>>> GetHistoryAsync(
+        [FromQuery] string? status,
+        [FromQuery] string? from,
+        [FromQuery] string? to,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _sender.Send(
+            new GetBookingHistoryQuery(
+                GetPassengerUserId(),
+                status,
+                from,
+                to,
+                page,
+                pageSize),
+            cancellationToken);
+
+        return Ok(result);
     }
 
     /// <summary>Poll the minimal Booking-owned state after a payment callback.</summary>

@@ -1,6 +1,6 @@
 ---
 name: audit-day
-description: Close out a VietRide timeline day. Independently audits the day's delivered code against the source-of-truth (technical_context_v7 + API contract + BSOT + db-schema) and the Day-N DoD/Review in BE_TIMELINE_VU.md, runs the verification matrix, then writes docs/handoff/day-<N>-checklist.md (DoD result + verification + carry-over for Day N+1). Use at end of day before commit (e.g. /audit-day 3).
+description: Close out a VietRide timeline day. After implementation and before day close or push, independently audit delivered code against the source-of-truth and Day-N DoD/Review, run the full verification matrix, then write the numbered day checklist. This is the sole default full-regression owner, for example /audit-day 3.
 ---
 
 # Audit & close a backend day
@@ -9,6 +9,14 @@ Parametric generalization of `docs/internal/day-1-2-review-prompt.md` — same r
 day number changes, so end-of-day verification is identical every day (no per-day prose drift).
 
 `$ARGUMENTS` = the timeline day number `N`. If absent, ask which day.
+
+Run this after every task is implemented and approved, and before declaring the day closed or
+pushing it. In `/execute-day` batch mode, task commits already exist; manual `/implement-task`
+mode may still have an uncommitted intended diff. This is the **sole default owner of the full
+regression matrix**: implementers run targeted task checks and reviewers assess their evidence,
+but neither replaces nor reduces this audit. Do not reuse, trust, or skip a matrix row because
+task-level evidence was green. This ownership clarification does not change the matrix or its
+coverage below.
 
 ## Method (read-only audit — do NOT fix code here)
 Answer two questions; **both** must pass to call the day done:
@@ -23,8 +31,9 @@ Read `docs/handoff/day-<N>-plan.md` and the Day-N timeline entry first. Verify b
 files and quoting evidence — do not trust filenames, a worker's self-report, **or the plan's
 `## Progress tracker` table**. That tracker is orchestrator bookkeeping, NOT audit evidence: a
 ✅ there means "reviewer approved during the day", not "audit-verified". Re-run the verification
-matrix and re-read the code against the SOT regardless of what the tracker says — a task marked
-✅ that fails verification here is a ❌, and the checklist records the real result.
+matrix and re-read the code against the SOT regardless of what the tracker or targeted task
+evidence says — a task marked ✅ that fails verification here is a ❌, and the checklist records
+the real result.
 
 ## Verification matrix (run EVERYTHING the day touched — every tier must PASS to close)
 This skill is self-contained: it does NOT delegate behavioral checks to `/verify`. Run each tier

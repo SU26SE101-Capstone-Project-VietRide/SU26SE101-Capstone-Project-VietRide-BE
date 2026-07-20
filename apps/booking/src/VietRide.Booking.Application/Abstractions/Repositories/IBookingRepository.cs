@@ -4,6 +4,7 @@ using VietRide.Booking.Application.Features.OperatorBookings.GetOperatorBookingD
 using VietRide.Booking.Application.Features.OperatorBookings.ListOperatorBookings;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Repositories;
+using VietRide.Shared.Kernel.Primitives;
 using BookingEntity = VietRide.Booking.Domain.Entities.Booking;
 
 namespace VietRide.Booking.Application.Abstractions.Repositories;
@@ -14,6 +15,16 @@ namespace VietRide.Booking.Application.Abstractions.Repositories;
 /// </summary>
 public interface IBookingRepository : IRepository<BookingEntity, Guid>
 {
+    Task<PagedResult<BookingEntity>> ListPassengerHistoryAsync(
+        Guid passengerUserId,
+        BookingStatus? status,
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        int page,
+        int pageSize,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Passenger booking history is not implemented by this repository.");
+
     Task<IReadOnlyList<PlatformBookingReportItem>> GetPlatformBookingMetricsAsync(
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc,
