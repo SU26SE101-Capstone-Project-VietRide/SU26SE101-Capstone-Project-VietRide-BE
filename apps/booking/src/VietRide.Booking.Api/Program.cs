@@ -1,3 +1,5 @@
+using Hangfire;
+using Hangfire.Common;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 using VietRide.Booking.Application;
@@ -39,7 +41,7 @@ if (registerMessaging)
 {
     builder.Services.AddBookingHangfire(builder.Configuration);
 }
-builder.Services.AddVietRideIdempotency("booking");
+builder.Services.AddVietRideIdempotency("booking", requireAllMutations: true);
 
 var app = builder.Build();
 
@@ -60,6 +62,20 @@ app.UseAuthorization();
 app.UseVietRideIdempotency();
 app.MapVietRideHealth(ServiceName);
 app.MapControllers();
+
+if (registerMessaging)
+{
+    using var scope = app.Services.CreateScope();
+    var recurringJobs = scope.ServiceProvider.GetRequiredService<IRecurringJobManager>();
+#pragma warning disable CS0618
+    recurringJobs.AddOrUpdate(
+        PlatformBookingStatsBackfillJob.RecurringJobId,
+        Job.FromExpression<PlatformBookingStatsBackfillJob>(job =>
+            job.RunAsync(CancellationToken.None)),
+        "*/5 * * * *",
+        new RecurringJobOptions { QueueName = "booking", TimeZone = TimeZoneInfo.Utc });
+#pragma warning restore CS0618
+}
 
 app.Run();
 

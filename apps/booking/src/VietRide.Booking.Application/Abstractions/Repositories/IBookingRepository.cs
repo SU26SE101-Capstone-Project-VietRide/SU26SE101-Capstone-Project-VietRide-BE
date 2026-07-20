@@ -2,6 +2,7 @@ using VietRide.Booking.Application.Features.Internal.Bookings;
 using VietRide.Booking.Application.Features.Internal.Reports.PlatformBookings;
 using VietRide.Booking.Application.Features.OperatorBookings.GetOperatorBookingDetail;
 using VietRide.Booking.Application.Features.OperatorBookings.ListOperatorBookings;
+using VietRide.Booking.Application.Features.OperatorReports;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Repositories;
 using BookingEntity = VietRide.Booking.Domain.Entities.Booking;
@@ -14,6 +15,13 @@ namespace VietRide.Booking.Application.Abstractions.Repositories;
 /// </summary>
 public interface IBookingRepository : IRepository<BookingEntity, Guid>
 {
+    IAsyncEnumerable<BookingOperatorReportRow> StreamOperatorReportRowsAsync(
+        Guid operatorId,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        bool cancellationOnly,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Operator Booking report is not implemented by this repository.");
     Task<IReadOnlyList<PlatformBookingReportItem>> GetPlatformBookingMetricsAsync(
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc,
