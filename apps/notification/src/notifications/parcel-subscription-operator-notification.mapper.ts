@@ -1,4 +1,10 @@
+/* eslint-disable @typescript-eslint/naming-convention -- existing event schema exports follow contract naming. */
 import { z } from 'zod';
+import {
+  ParcelAutoRejectedEventSchema,
+  ParcelLoadedEventSchema,
+  type ParcelLoadedEvent,
+} from '@vietride/contracts';
 import { NotificationType } from '../generated/notification-prisma-client';
 import type { CreateNotificationDto } from './dto/create-notification.dto';
 import {
@@ -68,6 +74,14 @@ const ParcelReviewRequestedPayloadSchema = BaseParcelPayloadSchema.and(
     reviewReason: z.string().trim().min(1).optional(),
   }),
 );
+
+const ParcelUnloadedPayloadSchema = z
+  .object({
+    parcelId: z.string().uuid(),
+    tripId: z.string().uuid(),
+    userIds: z.array(z.string().uuid()).min(1),
+  })
+  .strict();
 
 const ParcelTransferInitiatedPayloadSchema = BaseParcelPayloadSchema.and(
   z.object({
@@ -200,17 +214,9 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
         mapParcelCreated,
       );
     case PARCEL_LOADED_ROUTING_KEY:
-      return fanOut(
-        BaseParcelPayloadSchema.parse(payload),
-        resolveOperatorRecipientUserIds,
-        mapParcelLoaded,
-      );
+      return (await mapParcelLoadedEvent(ParcelLoadedEventSchema.parse(payload))).map((item) => item);
     case PARCEL_UNLOADED_ROUTING_KEY:
-      return fanOut(
-        BaseParcelPayloadSchema.parse(payload),
-        resolveOperatorRecipientUserIds,
-        mapParcelUnloaded,
-      );
+      return mapParcelUnloadedEvent(ParcelUnloadedPayloadSchema.parse(payload));
     case PARCEL_DELIVERED_PENDING_CONFIRM_ROUTING_KEY:
       return fanOut(
         BaseParcelPayloadSchema.parse(payload),
@@ -249,7 +255,7 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
       );
     case PARCEL_AUTO_REJECTED_ROUTING_KEY:
       return fanOut(
-        BaseParcelPayloadSchema.parse(payload),
+        ParcelAutoRejectedEventSchema.parse(payload),
         resolveOperatorRecipientUserIds,
         mapParcelAutoRejected,
       );
@@ -409,6 +415,20 @@ function mapParcelLoaded(userId: string, payload: ParcelPayload): CreateNotifica
     NotificationType.PARCEL_LOADED,
     'Hang da duoc len xe',
     'da duoc tai len xe.',
+  );
+}
+
+function mapParcelLoadedEvent(payload: ParcelLoadedEvent): CreateNotificationDto[] {
+  return payload.userIds.map((userId) =>
+    mapParcelLoaded(userId, { ...payload, userId }),
+  );
+}
+
+function mapParcelUnloadedEvent(
+  payload: z.infer<typeof ParcelUnloadedPayloadSchema>,
+): CreateNotificationDto[] {
+  return payload.userIds.map((userId) =>
+    mapParcelUnloaded(userId, { ...payload, userId }),
   );
 }
 

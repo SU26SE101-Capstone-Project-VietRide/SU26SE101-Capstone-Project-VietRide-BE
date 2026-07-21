@@ -164,7 +164,7 @@ All tasks have disjoint base/auto-expand envelopes and are marked parallel-safe 
 | 29.2 | ✅ done | APPROVE | 2026-07-22 | reviewer patch: exact payload/metadata assertions and atomic Redis SETNX seam; no scope expansion |
 | 29.3 | ✅ done | APPROVE | 2026-07-22 | reviewer patch: SkipTransaction + atomic cargo/Outbox transaction; expanded CargoMutationCommand.cs per finding |
 | 29.4 | ✅ done | APPROVE | 2026-07-22 | reviewer patch: real winner/CAS, PostgreSQL atomicity, Outbox/Rabbit restart evidence; no scope expansion |
-| 29.5 | ⬜ todo | — | — | — |
+| 29.5 | ✅ done | APPROVE | 2026-07-22 | reviewer patch: provider-backed operator recipient scoping and duplicate persistence proof; no scope expansion |
 | 29.6 | ⬜ todo | — | — | — |
 
 Legend: ⬜ todo · 🔄 in progress · ✅ done (reviewer APPROVED + targeted verification green) · ⚠️ done-with-carryover · ❌ blocked

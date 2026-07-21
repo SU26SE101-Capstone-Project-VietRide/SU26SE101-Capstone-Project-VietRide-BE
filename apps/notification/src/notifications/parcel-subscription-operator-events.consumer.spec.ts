@@ -54,6 +54,14 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
     );
   });
 
+  it('rejects Sprint 4 Parcel producer-consumer schema drift before persistence', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    await expect(
+      consumer.handle(PARCEL_LOADED_ROUTING_KEY, { parcelId: 'invalid' }, createMessage(MESSAGE_ID)),
+    ).resolves.toBeUndefined();
+    expect(notificationsService.createNotification).not.toHaveBeenCalled();
+  });
+
   it('subscribes all phase 6 routing keys', async () => {
     await consumer.onModuleInit();
 
@@ -210,6 +218,7 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.INVOICE_ISSUED,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         data: expect.objectContaining({ invoiceWebUrl }),
       }),
     );
@@ -353,7 +362,16 @@ function createMessage(messageId: string | undefined): ConsumeMessage {
   } as ConsumeMessage;
 }
 
-function createNotification(type: NotificationType) {
+function createNotification(type: NotificationType): {
+  id: string;
+  userId: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  data: null;
+  readAt: null;
+  createdAt: string;
+} {
   return {
     id: '99999999-9999-4999-8999-999999999999',
     userId: USER_ID,
