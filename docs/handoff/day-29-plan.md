@@ -165,7 +165,7 @@ All tasks have disjoint base/auto-expand envelopes and are marked parallel-safe 
 | 29.3 | ✅ done | APPROVE | 2026-07-22 | reviewer patch: SkipTransaction + atomic cargo/Outbox transaction; expanded CargoMutationCommand.cs per finding |
 | 29.4 | ✅ done | APPROVE | 2026-07-22 | reviewer patch: real winner/CAS, PostgreSQL atomicity, Outbox/Rabbit restart evidence; no scope expansion |
 | 29.5 | ✅ done | APPROVE | 2026-07-22 | reviewer patch: provider-backed operator recipient scoping and duplicate persistence proof; no scope expansion |
-| 29.6 | ⬜ todo | — | — | — |
+| 29.6 | ✅ done | APPROVE | 2026-07-22 | 3 reviewer patch rounds; real Gateway/Rabbit lifecycle passed 277 assertions; no scope expansion |
 
 Legend: ⬜ todo · 🔄 in progress · ✅ done (reviewer APPROVED + targeted verification green) · ⚠️ done-with-carryover · ❌ blocked
 

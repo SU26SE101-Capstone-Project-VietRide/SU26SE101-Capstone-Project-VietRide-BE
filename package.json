@@ -35,6 +35,7 @@
     "postman:full:local": "node scripts/run-full-e2e-local.mjs",
     "postman:day20:local": "node scripts/run-day20-sprint3-e2e-local.mjs",
     "postman:day21:local": "node scripts/run-day21-trip-lifecycle-local.mjs",
+    "e2e:day29": "node scripts/run-day29-sprint4-e2e.mjs",
     "lint:ts": "nx run-many -t lint --exclude=\"VietRide.*\"",
     "test:ts": "nx run-many -t test --exclude=\"VietRide.*\" --ci --passWithNoTests",
     "build:ts": "nx run-many -t build --exclude=\"VietRide.*\""
