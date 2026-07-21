@@ -127,6 +127,13 @@ services:
       SYSTEM_ADMIN_BOOTSTRAP_DISPLAY_NAME: ${SYSTEM_ADMIN_BOOTSTRAP_DISPLAY_NAME:-System Administrator}
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID}
       GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET}
+      # Identity mints Firebase custom tokens (operator web sign-in) and revokes
+      # Firebase sessions on lock/suspend. AddInfrastructure THROWS on boot in
+      # Production when these are unset, so `:?` fails the deploy at `compose config`
+      # instead of leaving the container in a crash loop.
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:?FIREBASE_PROJECT_ID is required in production}
+      FIREBASE_CLIENT_EMAIL: ${FIREBASE_CLIENT_EMAIL:?FIREBASE_CLIENT_EMAIL is required in production}
+      FIREBASE_PRIVATE_KEY: ${FIREBASE_PRIVATE_KEY:?FIREBASE_PRIVATE_KEY is required in production}
       ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_identity;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD}'
       RabbitMq__HostName: rabbitmq
       RabbitMq__Port: '5672'
