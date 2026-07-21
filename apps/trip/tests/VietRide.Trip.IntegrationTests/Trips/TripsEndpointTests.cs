@@ -114,10 +114,41 @@ public sealed class TripsEndpointTests
         AssertSuccessEnvelope(document, 200);
         var data = document.RootElement.GetProperty("data");
         data.GetProperty("tripId").GetGuid().Should().Be(tripId);
+        data.GetProperty("destinationArrivedAt").GetDateTimeOffset()
+            .Should().Be(DateTimeOffset.Parse("2026-05-18T20:05:00+07:00"));
+        var stop = data.GetProperty("stops")[0];
+        stop.GetProperty("status").GetString().Should().Be("ARRIVED");
+        stop.GetProperty("actualArrivalTime").GetDateTimeOffset()
+            .Should().Be(DateTimeOffset.Parse("2026-05-18T09:35:00+07:00"));
         data.GetProperty("seatSummary").GetProperty("availableSeats").GetInt32().Should().Be(18);
         data.GetProperty("fareBreakdown").GetProperty("baseFare").GetInt64().Should().Be(400000);
         mediator.LastRequest.Should().BeOfType<GetTripDetailQuery>()
             .Which.TripId.Should().Be(tripId);
+    }
+
+    [Fact]
+    public async Task GetDetail_BeforeArrival_SerializesNullOperationalTimestamps()
+    {
+        var tripId = Guid.NewGuid();
+        var detail = CreateDetail(tripId);
+        detail = detail with
+        {
+            DestinationArrivedAt = null,
+            Stops = [detail.Stops[0] with { Status = "PENDING", ActualArrivalTime = null }],
+        };
+        var mediator = new StubMediator(_ => detail);
+        using var factory = new TripsEndpointWebApplicationFactory(mediator);
+        using var client = factory.CreateClient();
+
+        var response = await client.SendAsync(CreateAuthorizedRequest(HttpMethod.Get, $"/v1/trips/{tripId}"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = document.RootElement.GetProperty("data");
+        data.GetProperty("destinationArrivedAt").ValueKind.Should().Be(JsonValueKind.Null);
+        var stop = data.GetProperty("stops")[0];
+        stop.GetProperty("status").GetString().Should().Be("PENDING");
+        stop.GetProperty("actualArrivalTime").ValueKind.Should().Be(JsonValueKind.Null);
     }
 
     [Fact]
@@ -273,10 +304,11 @@ public sealed class TripsEndpointTests
             "SCHEDULED",
             DateTimeOffset.Parse("2026-05-18T08:00:00+07:00"),
             DateTimeOffset.Parse("2026-05-18T20:00:00+07:00"),
+            DateTimeOffset.Parse("2026-05-18T20:05:00+07:00"),
             400000,
             new TripStationDto(Guid.NewGuid(), "Bến xe Miền Đông"),
             new TripStationDto(Guid.NewGuid(), "Bến xe Mỹ Đình"),
-            [new TripStopDto(stopId, "Tram Phu Lam", "123 Hong Bang", 10.7321m, 106.6142m, true, 1, true, false, DateTimeOffset.Parse("2026-05-18T09:30:00+07:00"), 42.5, 350000, 350000)],
+            [new TripStopDto(stopId, "Tram Phu Lam", "123 Hong Bang", 10.7321m, 106.6142m, true, 1, true, false, "ARRIVED", DateTimeOffset.Parse("2026-05-18T09:30:00+07:00"), DateTimeOffset.Parse("2026-05-18T09:35:00+07:00"), 42.5, 350000, 350000)],
             new TripSeatSummaryDto(40, 18),
             null,
             new TripFareBreakdownDto(400000, [new TripFareStopDto(stopId, 350000)]));

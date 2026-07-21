@@ -8,6 +8,7 @@ public sealed record TripDetailDto(
     string Status,
     DateTimeOffset DepartureDateTime,
     DateTimeOffset EstimatedArrivalTime,
+    DateTimeOffset? DestinationArrivedAt,
     long BaseFare,
     TripStationDto OriginStation,
     TripStationDto DestinationStation,

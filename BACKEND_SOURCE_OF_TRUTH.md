@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.35.0
+> **Phiên bản:** 1.35.1
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-07-16
+> **Cập nhật lần cuối:** 2026-07-21
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -2328,6 +2328,12 @@ SCHEDULED ─┬─→ BOARDING ─→ IN_PROGRESS ─┬─→ COMPLETED
 - `Trip.source` enum: `MANUAL | AUTO_FROM_SCHEDULE | VEHICLE_SUBSTITUTION` (VEHICLE_SUBSTITUTION exempt subscription `maxTripsPerMonth` counter).
 - `DELAYED` là overlay flag (Redis), KHÔNG phải status riêng.
 
+**Public Trip detail operational projection:** `GET /v1/trips/{tripId}` trả
+`destinationArrivedAt` nullable và mỗi TripStop trả `status=PENDING|ARRIVED|SKIPPED` cùng
+`actualArrivalTime` nullable. `actualArrivalTime` chỉ có giá trị khi stop là `ARRIVED`; stop
+`PENDING`/`SKIPPED` và Trip chưa đến destination trả `null`. Đây là read projection từ trạng thái
+đã persist, không tạo lifecycle transition, event hoặc schema mới.
+
 #### Authoritative Trip manual-completion audit contract (Day 21)
 
 `trip_audit_logs` is append-only and Trip-owned. It has exactly these columns:
@@ -3265,6 +3271,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.35.1** | 2026-07-21 | Codex | **PATCH** - Expose persisted TripStop `status`/`actualArrivalTime` and Trip `destinationArrivedAt` through the protected public Trip detail projection; no schema, event, Gateway, or lifecycle change. |
 | **1.35.0** | 2026-07-16 | Senior Backend Engineer | **MINOR** - Freeze Day 40 Admin Users + Station Cleanup + Platform Reports: shared-idempotent lock/unlock với PostgreSQL per-user serialization và `locked_from_status`; immutable ActivityLog; atomic Station normalize/merge cùng canonical redirects và Booking advisory-lock relink protocol; `trip.station.merged`/`normalized`; live UTC earned-report internal sources và Payment orchestration; đăng ký `STATION_MERGE_CONFLICT`/`REPORT_VALUE_OVERFLOW`; report cache/Stats/Excel và advanced analytics defer Day 42. |
 | **1.34.1** | 2026-07-16 | BE lead (Vu) | **PATCH** - Merge the Day-22 Trip edit/effective-pricing/DriverSchedule cascade contracts into the current Day-39 baseline. Preserve trusted Booking impact, immutable Booking pricing/refund snapshots, fare-source overlap guard, Trip/schedule audits, Booking-owned passenger impact and Hangfire re-alert semantics; reconcile them with idempotency v2 and Day-38 Payment terminal-settlement consumption. |
 | **1.34.0** | 2026-07-16 | Senior Backend Engineer | **MINOR** - Day 39 Incident vertical slice: thêm canonical assigned Driver/Assistant Incident API, persistence + transactional `trip.incident.reported` Outbox, validation/normalization category-description-photo-GPS; Notification resolve active `OPERATOR_ADMIN` cùng operator, fan-out in-app/push với retry, payload-event dedupe và PII-safe logging. |

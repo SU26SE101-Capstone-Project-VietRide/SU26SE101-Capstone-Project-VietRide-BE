@@ -64,7 +64,9 @@ internal static class TripProjectionMapper
                     stop.OrderIndex,
                     stop.AllowPickup,
                     stop.AllowDropoff,
+                    stop.Status.ToString(),
                     stop.EstimatedArrivalTime,
+                    stop.ActualArrivalTime,
                     stop.DistanceFromOriginKm.HasValue ? (double)stop.DistanceFromOriginKm.Value : null,
                     fareOverride,
                     fareOverride ?? trip.BaseFare.Amount);
@@ -79,6 +81,7 @@ internal static class TripProjectionMapper
             trip.Status.ToString(),
             trip.DepartureDateTime,
             trip.EstimatedArrivalTime,
+            trip.DestinationArrivedAt,
             trip.BaseFare.Amount,
             new TripStationDto(originStation.Id, originStation.Name),
             new TripStationDto(destinationStation.Id, destinationStation.Name),

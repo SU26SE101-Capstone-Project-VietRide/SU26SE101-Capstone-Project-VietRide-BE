@@ -1821,10 +1821,16 @@ Auth: protected.
 
 Response `200`: trip detail with route, stations, stops, seat summary, fare summary.
 
+Trip detail includes nullable `destinationArrivedAt` (ISO-8601 datetime with offset). It is
+`null` until the assigned Driver/Assistant records physical arrival at the destination terminal.
+
 Each stop includes `stopId`, `name`, `address`, `latitude`, `longitude`, `isActive`,
-`orderIndex`, `allowPickup`, `allowDropoff`, `estimatedArrivalTime`,
+`orderIndex`, `allowPickup`, `allowDropoff`, `status` (`PENDING|ARRIVED|SKIPPED`),
+`estimatedArrivalTime`, nullable `actualArrivalTime`,
 `distanceFromOriginKm`, nullable `fareFromThisStop`, and `effectiveFare`.
 `effectiveFare = fareFromThisStop ?? baseFare`; this is pickup-point pricing, not segment fare.
+`actualArrivalTime` is populated only for `ARRIVED`; it remains `null` for `PENDING` and
+`SKIPPED`.
 
 ### GET `/v1/trips/{tripId}/seat-map`
 
