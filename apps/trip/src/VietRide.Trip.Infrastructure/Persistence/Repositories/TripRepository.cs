@@ -465,15 +465,15 @@ internal sealed class TripRepository : ITripRepository
             ? await _dbContext.Database.BeginTransactionAsync(cancellationToken)
             : null;
 
+        await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT 1 FROM vietride_trip.trips WHERE id = {tripId} FOR UPDATE",
+            cancellationToken);
+
         var trip = await _dbContext.Trips.FirstOrDefaultAsync(trip => trip.Id == tripId, cancellationToken);
         if (trip is null)
         {
             return null;
         }
-
-        await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-            $"SELECT 1 FROM vietride_trip.trips WHERE id = {tripId} FOR UPDATE",
-            cancellationToken);
 
         var result = await mutate(trip);
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -498,7 +498,8 @@ internal sealed class TripRepository : ITripRepository
             max,
             trip.MaxCargoVolumeM3 ?? 0m,
             percentFull,
-            !wasNearFullBefore && IsNearFull(trip.TotalLoadedWeightKg, trip.MaxCargoWeightKg));
+            !wasNearFullBefore && IsNearFull(trip.TotalLoadedWeightKg, trip.MaxCargoWeightKg),
+            trip.OperatorId);
     }
 
     private static bool IsNearFull(decimal loadedWeightKg, decimal? maxCargoWeightKg)
