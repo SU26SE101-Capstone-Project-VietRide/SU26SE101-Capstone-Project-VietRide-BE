@@ -252,9 +252,7 @@ public static class InfrastructureServiceCollectionExtensions
 
         services.AddHttpClient<ISubscriptionPaymentClient, SubscriptionPaymentClient>(client =>
             {
-                var baseUrl = configuration["PAYMENT_SERVICE_BASE_URL"]
-                    ?? Environment.GetEnvironmentVariable("PAYMENT_SERVICE_BASE_URL")
-                    ?? "http://payment:8080";
+                var baseUrl = ResolveSubscriptionPaymentBaseUrl(configuration);
                 client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
                 client.Timeout = TimeSpan.FromSeconds(30);
             })
@@ -262,6 +260,21 @@ public static class InfrastructureServiceCollectionExtensions
             .AddHttpMessageHandler<InternalJwtDelegatingHandler>()
             .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
             .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
+    }
+
+    private static string ResolveSubscriptionPaymentBaseUrl(IConfiguration configuration)
+    {
+        var baseUrl = configuration["Payment:BaseUrl"]
+            ?? configuration["PAYMENT_SERVICE_BASE_URL"]
+            ?? Environment.GetEnvironmentVariable("PAYMENT_SERVICE_BASE_URL");
+
+        if (string.IsNullOrWhiteSpace(baseUrl))
+        {
+            throw new InvalidOperationException(
+                "Payment base URL must be configured via Payment:BaseUrl or PAYMENT_SERVICE_BASE_URL.");
+        }
+
+        return baseUrl;
     }
 
     private static void AddAdminOutboxDlqSourceClients(
