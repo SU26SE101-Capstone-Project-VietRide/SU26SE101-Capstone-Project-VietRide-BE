@@ -11,6 +11,7 @@ using VietRide.Parcel.Application.Features.Parcels.Reweigh;
 using VietRide.Parcel.Application.Features.Parcels.Unload;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Parcel.Api.Controllers;
 
@@ -44,6 +45,35 @@ public sealed class AssistantParcelsController : ControllerBase
 
         var result = await _mediator.Send(
             new GetAssistantTripParcelsQuery(tripId, userId, operatorId, page, pageSize),
+            cancellationToken);
+
+        return Ok(result);
+    }
+
+    [HttpPost("{parcelId:guid}/load")]
+    [RequireIdempotency]
+    [ProducesResponseType(typeof(ApiResponse<MarkParcelLoadedResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<MarkParcelLoadedResponse>> LoadAsync(
+        Guid parcelId,
+        [FromBody] LoadParcelRequest request,
+        CancellationToken cancellationToken)
+    {
+        var userId = CurrentUserClaims.GetUserId(User);
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+
+        var result = await _mediator.Send(
+            new MarkParcelLoadedCommand(
+                parcelId,
+                request.TripId,
+                request.ParcelCode,
+                userId,
+                operatorId),
             cancellationToken);
 
         return Ok(result);

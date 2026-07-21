@@ -1,3 +1,4 @@
+using System.Text.Json;
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
@@ -12,6 +13,8 @@ namespace VietRide.Parcel.Application.Features.Parcels.MarkLoaded;
 public sealed class MarkParcelLoadedCommandHandler
     : IRequestHandler<MarkParcelLoadedCommand, MarkParcelLoadedResponse>
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     private readonly IParcelRepository _parcelRepository;
     private readonly ITripServiceClient _tripClient;
     private readonly IIntegrationEventOutbox _outbox;
@@ -39,11 +42,6 @@ public sealed class MarkParcelLoadedCommandHandler
                 "PARCEL_NOT_FOUND",
                 $"Parcel with id '{command.ParcelId}' not found.");
 
-        if (parcel.Status != ParcelStatus.PENDING)
-            throw new CodedConflictException(
-                "INVALID_STATUS",
-                $"Parcel '{command.ParcelId}' is in status '{parcel.Status}' and cannot be loaded.");
-
         if (command.OperatorId.HasValue && parcel.OperatorId != command.OperatorId.Value)
             throw new ForbiddenException(
                 "FORBIDDEN",
@@ -54,10 +52,24 @@ public sealed class MarkParcelLoadedCommandHandler
                 "PARCEL_NOT_FOUND",
                 $"Parcel with id '{command.ParcelId}' not found.");
 
+        if (command.OperatorId.HasValue && command.LoadedByUserId.HasValue)
+        {
+            await EnsureAssignedAssistantAsync(
+                parcel.TripId,
+                command.LoadedByUserId.Value,
+                command.OperatorId.Value,
+                cancellationToken);
+        }
+
         if (parcel.ParcelCode != command.ParcelCode)
             throw new CodedNotFoundException(
                 "PARCEL_NOT_FOUND",
                 $"Parcel with id '{command.ParcelId}' not found.");
+
+        if (parcel.Status != ParcelStatus.PENDING)
+            throw new CodedConflictException(
+                "INVALID_STATUS",
+                $"Parcel '{command.ParcelId}' is in status '{parcel.Status}' and cannot be loaded.");
 
         var now = DateTimeOffset.UtcNow;
         var snapshot = await _parcelRepository.TryMarkLoadedAsync(
@@ -70,7 +82,7 @@ public sealed class MarkParcelLoadedCommandHandler
 
         if (snapshot is null)
             throw new CodedConflictException(
-                "RACE_LOST",
+                "INVALID_STATUS",
                 $"Parcel '{command.ParcelId}' status changed concurrently; cannot mark loaded.");
 
         await EnsureCargoSuccessAsync(
@@ -81,10 +93,28 @@ public sealed class MarkParcelLoadedCommandHandler
                 parcel.ActualVolumeM3 ?? parcel.EstimatedVolumeM3,
                 cancellationToken));
 
-        await ParcelOutboxEvents.EnqueueAsync(
-            _outbox,
+        var eventId = Guid.NewGuid();
+        var userIds = new[] { parcel.SenderUserId }
+            .Concat(parcel.RecipientUserId.HasValue
+                ? new[] { parcel.RecipientUserId.Value }
+                : Array.Empty<Guid>())
+            .Distinct()
+            .ToArray();
+        var payload = JsonSerializer.Serialize(
+            new
+            {
+                eventId,
+                occurredAt = now,
+                parcelId = snapshot.ParcelId,
+                tripId = snapshot.TripId,
+                actualWeightKg = parcel.ActualWeightKg ?? parcel.EstimatedWeightKg,
+                userIds,
+            },
+            JsonOptions);
+        await _outbox.EnqueueAsync(
+            eventId,
             ParcelOutboxEvents.Loaded,
-            new { parcelId = snapshot.ParcelId, tripId = snapshot.TripId, actualWeightKg = parcel.ActualWeightKg ?? parcel.EstimatedWeightKg, userIds = new[] { parcel.SenderUserId }.Concat(parcel.RecipientUserId.HasValue ? new[] { parcel.RecipientUserId.Value } : Array.Empty<Guid>()).Distinct().ToArray() },
+            payload,
             cancellationToken);
 
         await _statsRepository.UpsertIncrementAsync(
@@ -94,6 +124,34 @@ public sealed class MarkParcelLoadedCommandHandler
             cancellationToken);
 
         return new MarkParcelLoadedResponse(snapshot.ParcelId, snapshot.ParcelCode, snapshot.Status.ToString());
+    }
+
+    private async Task EnsureAssignedAssistantAsync(
+        Guid tripId,
+        Guid actorUserId,
+        Guid operatorId,
+        CancellationToken cancellationToken)
+    {
+        var authorization = await _tripClient.AuthorizeAssistantForTripAsync(
+            tripId,
+            actorUserId,
+            operatorId,
+            cancellationToken);
+
+        switch (authorization.Kind)
+        {
+            case TripCrewAuthorizationOutcomeKind.Authorized:
+                return;
+            case TripCrewAuthorizationOutcomeKind.Denied:
+            case TripCrewAuthorizationOutcomeKind.TripNotFound:
+                throw new ForbiddenException(
+                    "FORBIDDEN",
+                    "Only the assigned assistant can load this parcel.");
+            default:
+                throw new ParcelDependencyUnavailableException(
+                    "TRIP_SERVICE_UNAVAILABLE",
+                    authorization.ErrorMessage ?? "Trip service unavailable.");
+        }
     }
 
     private static Task EnsureCargoSuccessAsync(TripCargoOutcome outcome)
