@@ -2756,6 +2756,53 @@ Decision notes:
 - If actual price is lower outside tolerance, status becomes `PENDING_OPERATOR_ACTION` with pending action type `REFUND_CONFIRMATION`.
 - If actual price is higher outside tolerance, status becomes `PENDING_ADDITIONAL_PAYMENT`.
 
+### POST `/v1/assistant/parcels/{parcelId}/load`
+
+Auth: `ASSISTANT`. The authenticated assistant identity and operator tenant are derived from the
+JWT; neither is accepted from the request body. The caller must be assigned to the addressed Trip
+under that same operator.
+
+Idempotency: required. `Idempotency-Key` must be a UUID-v4. A same-key/same-payload retry replays
+the original response without repeating the Parcel transition, cargo mutation, statistics update,
+or Outbox write. Reusing the same key with a different actor, method, path, query, or raw body
+returns `422 IDEMPOTENCY_KEY_MISMATCH`.
+
+Request:
+```json
+{
+  "tripId": "uuid",
+  "parcelCode": "VRP-20260722-ABCDEFGH"
+}
+```
+
+Response `200` (`ApiResponse`):
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "parcelId": "uuid",
+    "parcelCode": "VRP-20260722-ABCDEFGH",
+    "status": "LOADED"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-22T10:00:00Z" }
+}
+```
+
+Errors:
+- `401 UNAUTHORIZED` when the access token is missing or invalid.
+- `403 FORBIDDEN` when the assistant is not assigned to the Trip or the assigned crew/operator
+  tenant does not match.
+- `404 PARCEL_NOT_FOUND` when the addressed Parcel is hidden, `tripId` does not match, or the
+  scanned `parcelCode` does not match. These cases do not disclose a foreign Parcel.
+- `409 INVALID_STATUS` when the Parcel is not `PENDING` or this request loses the transition race.
+- `422 IDEMPOTENCY_KEY_MISMATCH` for same-key/different-payload reuse under the shared idempotency
+  contract.
+
+Day-29 E2E setup uses an isolated operator-owned Trip graph fixture with its assigned assistant,
+vehicle cargo snapshot, and three Parcels. The fixture is created out of band; this contract does
+not expose a public/manual Trip-create endpoint.
+
 ### POST `/internal/v1/parcels/{parcelId}/mark-loaded`
 
 Auth: Internal JWT or Driver/Assistant through Driver App facade.

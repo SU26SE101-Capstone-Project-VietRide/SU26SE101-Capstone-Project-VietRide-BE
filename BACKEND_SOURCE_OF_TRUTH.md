@@ -2061,6 +2061,7 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `trip.destination.arrived` | Trip | Parcel | `{ eventId, occurredAt, eventType, tripId, destinationStationId, operatorId, actorUserId, actualArrivalTime }`; destination Station derive từ Route, anchor độc lập `completedAt`, express Trip zero-stop vẫn hợp lệ |
 | `trip.trip.delayed` | Trip (Tracking publishes via Trip outbox proxy hoặc Tracking outbox) | Notification | `{ tripId, delayMinutes, etaNew }` |
 | `trip.incident.reported` | Trip | Notification | `{ eventId, occurredAt, incidentId, tripId, operatorId, reporterUserId, category, description?, photoUrls?, latitude?, longitude?, reportedAt }`; optional fields được omit khi null; Notification resolve active `OPERATOR_ADMIN` theo `operatorId` |
+| `trip.cargo.threshold_crossed` | Trip | Notification | Exact `{ eventId, occurredAt, tripId, operatorId, loadedWeightKg, maxCargoWeightKg, percentFull }`; `eventId == OutboxEvent.id == RabbitMQ MessageId` |
 | `trip.shuttle.assigned` | Trip | Notification | `{ shuttleTripId, mainTripId, bookingId, passengerUserId, ticketIds, pickupOrder, scheduledDepartureTime, scheduledEndTime, driver: { userId, displayName, phone }, vehicle: { id, licensePlate } }` |
 | `trip.shuttle.warning_issued` | Trip | Notification | `{ mainTripId, operatorId, alertType: WARNING_120|WARNING_60, pendingBookingCount, pendingPassengerCount, hardCutoffAt }` |
 | `trip.shuttle.unfulfilled` | Trip | Notification | `{ mainTripId, bookingId, passengerUserId, stationId, reason: AUTO_UNFULFILLED_CUTOFF }` |
@@ -2082,12 +2083,13 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `payment.invoice.issued` | Payment | Notification | `{ eventId, occurredAt, invoiceId, invoiceNumber, operatorId, amount, invoiceWebUrl, downloadApiUrl }`; neither URL is a Firebase signed URL |
 | `payment.trip_settlement.completed` | Payment | Notification (operator) | `{ eventId, occurredAt, settlementId, tripId, operatorId, netAmount, settlementMethod, settledAt }` |
 | `parcel.parcel.created` | Parcel | Notification, Trip (cargo counter reserve) | `{ parcelId, tripId, senderUserId, recipientUserId? }` |
-| `parcel.parcel.loaded` | Parcel | Notification, Trip (counter update) | `{ parcelId, tripId, actualWeightKg }` |
+| `parcel.parcel.loaded` | Parcel | Notification, Trip (counter update) | Exact `{ eventId, occurredAt, parcelId, tripId, actualWeightKg, userIds[] }`; direct `userIds[]` contains the sender and recipient account when present; `eventId == OutboxEvent.id == RabbitMQ MessageId` |
 | `parcel.parcel.unloaded` | Parcel | Notification | `{ parcelId, tripId, userIds[] }`; chỉ CAS `IN_TRANSIT -> UNLOADED` thắng mới enqueue, `userIds` distinct gồm sender và recipient account nếu có |
 | `parcel.parcel.delivered_pending_confirm` | Parcel | Notification | `{ parcelId, parcelCode, operatorId, tripId, userId?, recipientUserIds[]?, deliveryToken, expiresAt }`; optional recipient fields bị omit khi không có account |
 | `parcel.parcel.delivery_confirmed` | Parcel | Notification | `{ parcelId }` |
 | `parcel.parcel.delivery_rejected` | Parcel | Notification | `{ parcelId, reason }` |
-| `parcel.parcel.cancelled` · `rejected` · `returned` · `auto_rejected` | Parcel | Notification, Trip (counter), Payment (refund) | `{ parcelId, refundAmount? }` |
+| `parcel.parcel.cancelled` · `rejected` · `returned` | Parcel | Notification, Trip (counter), Payment (refund) | `{ parcelId, refundAmount? }` |
+| `parcel.parcel.auto_rejected` | Parcel | Notification, Trip (counter), Payment (refund) | Exact `{ eventId, occurredAt, parcelId, parcelCode, operatorId, userId, tripId, refundAmount }`; `userId` is the persisted sender for late-load, additional-payment-timeout, and review-timeout facts; `eventId == OutboxEvent.id == RabbitMQ MessageId` |
 | `parcel.parcel.review_requested` | Parcel (EXTRA_LARGE) | Notification (operator) | `{ parcelId, operatorId }` |
 | `parcel.parcel.transfer_initiated` | Parcel | Notification | `{ parcelId, originalTripId, newTripId }` |
 | `parcel.refund.initiated` | Parcel | Payment | `{ parcelId, refundAmount }` |
@@ -3407,6 +3409,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.39.0** | 2026-07-22 | BE lead (Vũ) | **MINOR** — Day-29 freezes the assistant Parcel load HTTP contract, registers `trip.cargo.threshold_crossed`, and reconciles Parcel `loaded` direct recipients plus `auto_rejected` sender identity. No schema or migration change. |
 | **1.38.0** | 2026-07-20 | BE lead (Vũ) | **MINOR** — Add Identity-owned Firebase Custom Token issuance for active `OPERATOR_ADMIN` users under active approved operators, transactional lock/suspend Firebase-session revocation, vehicle-image Storage Rules and credential registry; add owner-scoped Booking history with Ticket summaries, sender-only Parcel history, and the branch-selective Parcel-owned `GET /v1/passenger/history?type=TICKET\|PARCEL` facade. No schema or migration change. |
 | **1.37.0** | 2026-07-18 | BE lead (Vũ) | **MINOR** — Freeze Day-24 stop-disable, passenger STOP_DISABLED choices, strict deadline fallback, Trip snapshot/pending-count/departure seams, no-show anchors/history source, event identity/consumer facts, and the two migration ownership rows. DELETE is the sole disable route; legacy synchronous `STOP_DISABLED_BOOKING_AFFECTED` warning/count behavior is deprecated for that route. |
 | **1.36.0** | 2026-07-18 | BE lead (Vũ) | **MINOR** — Day-23 schedule-change contract, projection, errors, events, and jobs; merged into the Day-40 baseline while preserving the Admin Users, Station Cleanup, and Platform Reports contracts. |
