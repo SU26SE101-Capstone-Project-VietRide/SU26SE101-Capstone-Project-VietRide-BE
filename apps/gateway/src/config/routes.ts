@@ -306,6 +306,11 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['DRIVER', 'ASSISTANT'],
     },
     {
+      prefix: '/v1/assistant/parcels',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+    },
+    {
       prefix: '/v1/assistant',
       target: env.TRIP_BASE_URL,
       authRequired: 'user',
@@ -398,7 +403,6 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     },
 
     // Parcel
-    { prefix: '/v1/assistant/parcels', target: env.PARCEL_BASE_URL, authRequired: 'user' },
     { prefix: '/v1/operator/parcels', target: env.PARCEL_BASE_URL, authRequired: 'user' },
     {
       prefix: '/v1/operator/parcel-route-fares',
