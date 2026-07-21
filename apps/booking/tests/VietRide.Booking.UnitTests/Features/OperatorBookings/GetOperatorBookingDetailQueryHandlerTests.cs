@@ -58,7 +58,8 @@ public sealed class GetOperatorBookingDetailQueryHandlerTests
 
     private OperatorBookingDetailDto Detail()
         => new(_bookingId, "VR-CODE", Guid.NewGuid(), Guid.NewGuid(), "CANCELLED",
-            new OperatorBookingTripDto("Route", "Origin", "Destination", DateTimeOffset.UtcNow), 1,
+            new OperatorBookingTripDto(
+                "Route", "Origin", "Destination", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow), 1,
             100_000, 0, 100_000, Guid.NewGuid(), null, Guid.NewGuid(), null, null, null, "USER_INITIATED",
             DateTimeOffset.UtcNow,
             [new(Guid.NewGuid(), Guid.NewGuid(), "VT-CODE", "A1", "CANCELLED", "PENDING")],

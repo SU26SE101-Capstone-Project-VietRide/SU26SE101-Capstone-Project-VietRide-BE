@@ -4,10 +4,12 @@ using Microsoft.AspNetCore.Mvc;
 using VietRide.Parcel.Api.Controllers.Requests;
 using VietRide.Parcel.Api.Filters;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Features.History;
 using VietRide.Parcel.Application.Features.Parcels.AvailableTrips;
 using VietRide.Parcel.Application.Features.Parcels.Create;
 using VietRide.Parcel.Application.Features.Parcels.Detail;
 using VietRide.Parcel.Application.Features.Parcels.Received;
+using VietRide.Parcel.Application.Features.Parcels.Sent;
 using VietRide.Parcel.Application.Features.Vouchers;
 using VietRide.Shared.Kernel.Primitives;
 
@@ -131,6 +133,32 @@ public sealed class ParcelsController : ControllerBase
         var userId = CurrentUserClaims.GetUserId(User);
         var result = await _mediator.Send(
             new GetReceivedParcelsQuery(userId, page, pageSize),
+            cancellationToken);
+
+        return Ok(result);
+    }
+
+    [HttpGet("sent")]
+    [Authorize(Roles = "PASSENGER")]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<SentParcelHistoryItemDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<PagedResult<SentParcelHistoryItemDto>>> GetSentAsync(
+        [FromQuery] string? status,
+        [FromQuery] string? from,
+        [FromQuery] string? to,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _mediator.Send(
+            new GetSentParcelsQuery(
+                CurrentUserClaims.GetUserId(User),
+                status,
+                from,
+                to,
+                page,
+                pageSize),
             cancellationToken);
 
         return Ok(result);

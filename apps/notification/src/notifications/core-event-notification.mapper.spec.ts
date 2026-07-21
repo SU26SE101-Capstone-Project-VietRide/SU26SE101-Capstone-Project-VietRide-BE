@@ -43,31 +43,31 @@ describe('mapCoreEventToNotification', () => {
   });
 
   it('maps booking ticket metadata when present', () => {
-    expect(
-      mapCoreEventToNotification(BOOKING_CONFIRMED_ROUTING_KEY, {
-        userId: USER_ID,
-        bookingId: BOOKING_ID,
-        tripId: TRIP_ID,
-        bookingCode: 'VR123',
-        ticketCodes: ['VT-20260706-ABCDEFGH', 'VT-20260706-HGFEDCBA'],
-        ticketCount: 2,
-      }),
-    ).toEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          ticketCodes: ['VT-20260706-ABCDEFGH', 'VT-20260706-HGFEDCBA'],
-          ticketCount: 2,
-        }),
-      }),
-    );
+    const notification = mapCoreEventToNotification(BOOKING_CONFIRMED_ROUTING_KEY, {
+      userId: USER_ID,
+      bookingId: BOOKING_ID,
+      tripId: TRIP_ID,
+      bookingCode: 'VR123',
+      ticketCodes: ['VT-20260706-ABCDEFGH', 'VT-20260706-HGFEDCBA'],
+      ticketCount: 2,
+    });
+
+    expect(notification.data).toMatchObject({
+      ticketCodes: ['VT-20260706-ABCDEFGH', 'VT-20260706-HGFEDCBA'],
+      ticketCount: 2,
+    });
   });
 
   it('maps booking cancelled event', () => {
     expect(
       mapCoreEventToNotification(BOOKING_CANCELLED_ROUTING_KEY, {
+        eventId: '55555555-5555-4555-8555-555555555555',
+        occurredAt: '2026-07-17T00:00:00+00:00',
         userId: USER_ID,
         bookingId: BOOKING_ID,
-        reason: 'Passenger cancelled',
+        refundAmount: 0,
+        refundOverride: false,
+        cancellationReason: 'Passenger cancelled',
       }),
     ).toEqual(
       expect.objectContaining({
@@ -79,25 +79,21 @@ describe('mapCoreEventToNotification', () => {
   });
 
   it('keeps Booking cancellation as the passenger cancellation notification path', () => {
-    expect(
-      mapCoreEventToNotification(BOOKING_CANCELLED_ROUTING_KEY, {
-        userId: USER_ID,
-        bookingId: BOOKING_ID,
-        tripId: TRIP_ID,
-        refundAmount: 0,
-        reason: 'DRIVER_SCHEDULE_DAY_REMOVED',
-      }),
-    ).toEqual(
+    const notification = mapCoreEventToNotification(BOOKING_CANCELLED_ROUTING_KEY, {
+      userId: USER_ID,
+      bookingId: BOOKING_ID,
+      refundAmount: 0,
+      refundOverride: true,
+      cancellationReason: 'DRIVER_SCHEDULE_DAY_REMOVED',
+    });
+
+    expect(notification).toEqual(
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.BOOKING_CANCELLED,
-        data: expect.objectContaining({
-          bookingId: BOOKING_ID,
-          tripId: TRIP_ID,
-          refundAmount: 0,
-        }),
       }),
     );
+    expect(notification.data).toMatchObject({ bookingId: BOOKING_ID, refundAmount: 0 });
   });
 
   it('maps booking refunded event', () => {
@@ -117,48 +113,48 @@ describe('mapCoreEventToNotification', () => {
   });
 
   it('maps wallet credited event', () => {
-    expect(
-      mapCoreEventToNotification(WALLET_CREDITED_ROUTING_KEY, {
-        userId: USER_ID,
-        walletTransactionId: WALLET_TRANSACTION_ID,
-        amount: 50000,
-        balanceAfter: 150000,
-        referenceType: 'TOP_UP',
-      }),
-    ).toEqual(
+    const notification = mapCoreEventToNotification(WALLET_CREDITED_ROUTING_KEY, {
+      userId: USER_ID,
+      walletTransactionId: WALLET_TRANSACTION_ID,
+      amount: 50000,
+      balanceAfter: 150000,
+      referenceType: 'TOP_UP',
+    });
+
+    expect(notification).toEqual(
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.WALLET_CREDITED,
         title: 'Vi da duoc cong tien',
         body: 'Vi VietRide cua ban vua duoc cong 50000 VND.',
-        data: expect.objectContaining({
-          walletTransactionId: WALLET_TRANSACTION_ID,
-          amount: 50000,
-          balanceAfter: 150000,
-          referenceType: 'TOP_UP',
-        }),
       }),
     );
+    expect(notification.data).toMatchObject({
+      walletTransactionId: WALLET_TRANSACTION_ID,
+      amount: 50000,
+      balanceAfter: 150000,
+      referenceType: 'TOP_UP',
+    });
   });
 
   it('maps wallet debited event', () => {
-    expect(
-      mapCoreEventToNotification(WALLET_DEBITED_ROUTING_KEY, {
-        userId: USER_ID,
-        transactionId: WALLET_TRANSACTION_ID,
-        amount: '75000',
-      }),
-    ).toEqual(
+    const notification = mapCoreEventToNotification(WALLET_DEBITED_ROUTING_KEY, {
+      userId: USER_ID,
+      transactionId: WALLET_TRANSACTION_ID,
+      amount: '75000',
+    });
+
+    expect(notification).toEqual(
       expect.objectContaining({
         type: NotificationType.WALLET_DEBITED,
         title: 'Vi da bi tru tien',
         body: 'Vi VietRide cua ban vua bi tru 75000 VND.',
-        data: expect.objectContaining({
-          walletTransactionId: WALLET_TRANSACTION_ID,
-          amount: '75000',
-        }),
       }),
     );
+    expect(notification.data).toMatchObject({
+      walletTransactionId: WALLET_TRANSACTION_ID,
+      amount: '75000',
+    });
   });
 
   it('rejects malformed payload', () => {

@@ -83,7 +83,8 @@ jobs:
             if [ ! -r "$FIREBASE_CREDENTIAL" ]; then
               echo "::error::$FIREBASE_CREDENTIAL is missing or unreadable"; exit 1
             fi
-            for key in INVOICE_STORAGE_BUCKET INVOICE_STORAGE_STABLE_BASE_URL OPERATOR_WEB_INVOICE_DETAIL_BASE_URL; do
+            for key in INVOICE_STORAGE_BUCKET INVOICE_STORAGE_STABLE_BASE_URL OPERATOR_WEB_INVOICE_DETAIL_BASE_URL \
+                       FIREBASE_PROJECT_ID FIREBASE_CLIENT_EMAIL FIREBASE_PRIVATE_KEY; do
               if ! grep -Eq "^${key}=.+" .env; then
                 echo "::error::$key is missing or empty in /opt/vietride/infra/docker/.env"; exit 1
               fi
@@ -101,8 +102,12 @@ jobs:
             if ! docker compose -f docker-compose.prod.yml --env-file .env up -d --remove-orphans; then
               echo "::error::Production stack failed to become healthy"
               docker compose -f docker-compose.prod.yml --env-file .env ps
-              docker compose -f docker-compose.prod.yml --env-file .env logs --no-color --tail=200 booking
-              docker compose -f docker-compose.prod.yml --env-file .env logs --no-color --tail=200 payment
+              # Dump every app service, not just booking/payment — when identity (or any
+              # other service) is the one crash-looping, a two-service dump hides the cause.
+              for svc in identity trip booking payment parcel gateway tracking notification rag; do
+                echo "----- logs: $svc -----"
+                docker compose -f docker-compose.prod.yml --env-file .env logs --no-color --tail=80 "$svc" || true
+              done
               exit 1
             fi
 
@@ -148,7 +153,8 @@ jobs:
             if [ ! -r "$FIREBASE_CREDENTIAL" ]; then
               echo "::error::$FIREBASE_CREDENTIAL is missing or unreadable"; exit 1
             fi
-            for key in INVOICE_STORAGE_BUCKET INVOICE_STORAGE_STABLE_BASE_URL OPERATOR_WEB_INVOICE_DETAIL_BASE_URL; do
+            for key in INVOICE_STORAGE_BUCKET INVOICE_STORAGE_STABLE_BASE_URL OPERATOR_WEB_INVOICE_DETAIL_BASE_URL \
+                       FIREBASE_PROJECT_ID FIREBASE_CLIENT_EMAIL FIREBASE_PRIVATE_KEY; do
               if ! grep -Eq "^${key}=.+" .env; then
                 echo "::error::$key is missing or empty in /opt/vietride/infra/docker/.env"; exit 1
               fi
@@ -166,8 +172,12 @@ jobs:
             if ! docker compose -f docker-compose.prod.yml --env-file .env up -d --remove-orphans; then
               echo "::error::Production stack failed to become healthy"
               docker compose -f docker-compose.prod.yml --env-file .env ps
-              docker compose -f docker-compose.prod.yml --env-file .env logs --no-color --tail=200 booking
-              docker compose -f docker-compose.prod.yml --env-file .env logs --no-color --tail=200 payment
+              # Dump every app service, not just booking/payment — when identity (or any
+              # other service) is the one crash-looping, a two-service dump hides the cause.
+              for svc in identity trip booking payment parcel gateway tracking notification rag; do
+                echo "----- logs: $svc -----"
+                docker compose -f docker-compose.prod.yml --env-file .env logs --no-color --tail=80 "$svc" || true
+              done
               exit 1
             fi
 

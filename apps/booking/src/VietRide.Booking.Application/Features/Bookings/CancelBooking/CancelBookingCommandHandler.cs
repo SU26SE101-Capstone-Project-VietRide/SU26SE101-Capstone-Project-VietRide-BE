@@ -32,6 +32,7 @@ public sealed class CancelBookingCommandHandler : IRequestHandler<CancelBookingC
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IClock _clock;
     private readonly ILogger<CancelBookingCommandHandler> _logger;
+    private readonly IBookingPendingActionRepository _pendingActions;
 
     public CancelBookingCommandHandler(
         IBookingRepository bookings,
@@ -40,7 +41,8 @@ public sealed class CancelBookingCommandHandler : IRequestHandler<CancelBookingC
         IIntegrationEventOutbox outbox,
         IClock clock,
         ILogger<CancelBookingCommandHandler> logger,
-        IBookingStatusHistoryRepository statusHistory)
+        IBookingStatusHistoryRepository statusHistory,
+        IBookingPendingActionRepository pendingActions)
     {
         _bookings = bookings;
         _statusHistory = statusHistory;
@@ -49,6 +51,7 @@ public sealed class CancelBookingCommandHandler : IRequestHandler<CancelBookingC
         _outbox = outbox;
         _clock = clock;
         _logger = logger;
+        _pendingActions = pendingActions;
     }
 
     public async Task<CancelBookingResult> Handle(
@@ -94,7 +97,18 @@ public sealed class CancelBookingCommandHandler : IRequestHandler<CancelBookingC
 
         var now = _clock.UtcNow;
         var reason = Enum.Parse<BookingCancellationReason>(request.Reason, ignoreCase: false);
-        var refundOverride = false;
+        var refundOverride = reason == BookingCancellationReason.STOP_DISABLED_REFUSED;
+        BookingPendingAction? stopDisabledAction = null;
+        if (reason == BookingCancellationReason.STOP_DISABLED_REFUSED)
+        {
+            stopDisabledAction = await _pendingActions.GetActiveByBookingIdForUpdateAsync(booking.Id, cancellationToken);
+            if (stopDisabledAction is null)
+                throw new ConflictException("BOOKING_PENDING_ACTION_NOT_RESOLVABLE", "No active STOP_DISABLED action exists.");
+            if (stopDisabledAction is null || stopDisabledAction.Reason != BookingPendingActionReason.STOP_DISABLED)
+                throw new ConflictException("BOOKING_PENDING_ACTION_NOT_RESOLVABLE", "No active STOP_DISABLED action exists.");
+            if (stopDisabledAction.Deadline < now)
+                throw new ConflictException("BOOKING_PENDING_ACTION_EXPIRED", "Booking pending action has expired.");
+        }
         var operatorLookup = await _operatorClient.GetOperatorAsync(booking.OperatorId, cancellationToken);
         var policy = ParseCancellationPolicy(operatorLookup?.CancellationPolicy);
         var paidAmount = booking.Status == BookingStatus.PENDING_PAYMENT
@@ -118,6 +132,12 @@ public sealed class CancelBookingCommandHandler : IRequestHandler<CancelBookingC
             throw new ConflictException(
                 "BOOKING_NOT_CANCELLABLE",
                 "Only CONFIRMED or PENDING_PAYMENT bookings may be cancelled.");
+        }
+
+        if (stopDisabledAction is not null)
+        {
+            stopDisabledAction.Resolve(BookingPendingActionResolved.REJECTED, now);
+            _pendingActions.Update(stopDisabledAction);
         }
 
         await _statusHistory.AddAsync(
@@ -145,19 +165,21 @@ public sealed class CancelBookingCommandHandler : IRequestHandler<CancelBookingC
                 booking.Id);
         }
 
-        var cancelledEvent = new
-        {
-            bookingId = booking.Id,
-            bookingCode = booking.BookingCode.Value,
-            userId = booking.PassengerUserId,
-            refundAmount = refundAmount.Amount,
+        var eventId = Guid.NewGuid();
+        var cancelledEvent = new Events.BookingCancelledIntegrationEvent(
+            eventId,
+            now,
+            booking.Id,
+            booking.BookingCode.Value,
+            booking.PassengerUserId,
+            refundAmount.Amount,
             refundOverride,
-            cancellationReason = reason.ToString(),
-            ticketCodes = booking.Tickets.Select(ticket => ticket.TicketCode.Value).ToArray(),
-            ticketCount = booking.Tickets.Count,
-        };
+            reason.ToString(),
+            booking.Tickets.Select(ticket => ticket.TicketCode.Value).ToArray(),
+            booking.Tickets.Count);
 
         await _outbox.EnqueueAsync(
+            eventId,
             EventType,
             JsonSerializer.Serialize(cancelledEvent, JsonOptions),
             cancellationToken);

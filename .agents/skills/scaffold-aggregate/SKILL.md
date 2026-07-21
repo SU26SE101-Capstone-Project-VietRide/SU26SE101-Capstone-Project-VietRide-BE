@@ -21,7 +21,9 @@ service first** — the file tree below is the convention, not a fixed list (BSO
 - **One class per file.** Naming (fixed, BSOT §3.5): `<Verb><Aggregate>Command/Query/Handler/Validator`, `I<Aggregate>Repository`, `<Aggregate>Service`, `<Entity>Configuration`.
 - Domain project has **zero external refs** (no EF Core, no MediatR). Invariants live in entity methods (e.g. `token.Revoke()`), not in handlers.
 - Controllers call `MediatR.Send(...)` only — never a service/repo directly.
-- Money is `Money` (BIGINT VND, floor-1000) from `VietRide.Shared.Kernel`. Never decimal.
+- Money is `Money` (BIGINT VND) from `VietRide.Shared.Kernel`. `Money.FromRaw` preserves the
+  value to the đồng; fractional calculation results round to the nearest đồng with
+  `MidpointRounding.AwayFromZero`. Never persist decimal/float money.
 - EF: snake_case columns (shared naming convention), soft-delete (`deleted_at` via getter-only `ISoftDeletable`); entities with an enable/disable toggle ALSO implement `IActivatable` (`is_active`) — separate concern, see ADR 0003. Audit columns via `IAuditable`. Base entity from `VietRide.Shared.Kernel/Primitives/BaseEntity.cs`.
 - Repository extends the generic `IRepository<TEntity,TId>` / `EfRepository<TEntity,TId>` from the shared libs; only add aggregate-specific queries.
 - Result/error: handlers return `Result<T>`; failures map to the ADR 0004 `ApiResponse` error envelope (`error.code` UPPER_SNAKE_CASE from BSOT §5.9), wrapped by the shared envelope filter — not RFC 7807.
@@ -50,8 +52,19 @@ Also: add `DbSet<<Aggregate>>` to the service `DbContext`, register repo + servi
 5. Write Infrastructure EF configuration (snake_case, soft-delete filter, audit) + repository impl, register DbSet + DI.
 6. Do NOT add a migration here — use the `ef-migration` skill afterward.
 
-## Verify
-- `dotnet build apps/<service>/VietRide.<Service>.sln -c Release` is clean.
-- `dotnet format apps/<service>/VietRide.<Service>.sln --verify-no-changes` reports no changes.
-- NetArchTest dependency-direction tests still pass (`dotnet test`).
-- If you added a `PackageReference`, it must be version-less (CPM) and the version declared in `Directory.Packages.props`.
+## Verify with the task policy
+
+When a day-plan task invokes this skill, run its exact `verification commands` for its
+`verification tier`; do not append a full service-solution build or test. Standalone use defaults
+to `FOCUSED` and derives exact commands before editing.
+
+- Run the aggregate's affected test class/filter and confirm at least one test executes. The
+  targeted test compiles its referenced production projects; do not add a redundant solution
+  build. If no relevant test project references the new code, build the smallest affected
+  `.csproj` only.
+- Run the relevant dependency-direction test filter for the scaffolded layers; do not run the
+  whole test solution.
+- Format only changed C# paths with
+  `dotnet format apps/<service>/VietRide.<Service>.sln --verify-no-changes --include <changed paths>`.
+- New dependencies remain forbidden without explicit approval. Full touched-solution regression
+  belongs only to `/audit-day <N>`.

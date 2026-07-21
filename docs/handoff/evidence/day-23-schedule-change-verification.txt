@@ -1,0 +1,175 @@
+Task 23.9 targeted verification transcript
+Date: 2026-07-17 (Asia/Bangkok)
+Tier: FOCUSED
+Stack: current-checkout d607d13 Booking image; Gateway/Identity/Trip/Booking/Payment/Notification,
+PostgreSQL, Redis, RabbitMQ, and PgBouncer healthy.
+
+Command: node --check scripts/run-day23-schedule-change-local.mjs
+Exit: 0
+Output: (none)
+
+Command: node --test --test-reporter=tap scripts/run-day23-schedule-change-local.test.mjs
+Exit: 0
+Output:
+TAP version 13
+# PASS | Postman Day-23 Gateway-only matrix (17 requests)
+# PASS | isolated Day-23 fixture cleanup verified
+# PASS | isolated Day-23 fixture cleanup verified
+# Subtest: severity boundaries use absolute delta and ICT calendar dates
+ok 1 - severity boundaries use absolute delta and ICT calendar dates
+  ---
+  duration_ms: 16.35
+  type: 'test'
+  ...
+# Subtest: UUID-v4 guard accepts runtime keys and rejects placeholders/non-v4 values
+ok 2 - UUID-v4 guard accepts runtime keys and rejects placeholders/non-v4 values
+  ---
+  duration_ms: 0.2567
+  type: 'test'
+  ...
+# Subtest: Gateway fence rejects direct-service, internal, clock/job, and alias paths
+ok 3 - Gateway fence rejects direct-service, internal, clock/job, and alias paths
+  ---
+  duration_ms: 0.4844
+  type: 'test'
+  ...
+# Subtest: decision-complete resolver error matrix is represented
+ok 4 - decision-complete resolver error matrix is represented
+  ---
+  duration_ms: 0.5342
+  type: 'test'
+  ...
+# Subtest: Postman artifacts expose only the canonical Day-23 Gateway journey
+ok 5 - Postman artifacts expose only the canonical Day-23 Gateway journey
+  ---
+  duration_ms: 2.7992
+  type: 'test'
+  ...
+# Subtest: runtime lifecycle cleans resources after setup and journey success
+ok 6 - runtime lifecycle cleans resources after setup and journey success
+  ---
+  duration_ms: 0.2798
+  type: 'test'
+  ...
+# Subtest: partial setup failure still cleans every resource recorded before failure
+ok 7 - partial setup failure still cleans every resource recorded before failure
+  ---
+  duration_ms: 0.4033
+  type: 'test'
+  ...
+# Subtest: journey and cleanup failures are both retained in AggregateError
+ok 8 - journey and cleanup failures are both retained in AggregateError
+  ---
+  duration_ms: 0.1979
+  type: 'test'
+  ...
+# Subtest: pending probe uses an explicit lock handshake with bounded cleanup
+ok 9 - pending probe uses an explicit lock handshake with bounded cleanup
+  ---
+  duration_ms: 0.373
+  type: 'test'
+  ...
+# PASS | isolated Day-23 fixture cleanup verified
+# Subtest: faulted pending probe settles its in-flight request before outer cleanup starts
+ok 10 - faulted pending probe settles its in-flight request before outer cleanup starts
+  ---
+  duration_ms: 7.4928
+  type: 'test'
+  ...
+1..10
+# tests 10
+# suites 0
+# pass 10
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 206.8145
+Strict TAP summary assertion: PASS
+
+Commands:
+  Get-Content -Raw docs/api/postman/vietride.postman_collection.json | ConvertFrom-Json -ErrorAction Stop
+  Get-Content -Raw docs/api/postman/vietride.local.postman_environment.json | ConvertFrom-Json -ErrorAction Stop
+Exit: 0
+Output: (none; both cumulative JSON documents parsed)
+
+Command: dotnet test apps/booking/tests/VietRide.Booking.IntegrationTests/VietRide.Booking.IntegrationTests.csproj -c Release --filter FullyQualifiedName~Day23ScheduleDeadlinePrecisionIntegrationTests --logger trx;LogFileName=deadline-precision.trx --results-directory TestResults/day23/task-23-9-evidence
+Exit: 0
+Output: Passed: 1, Failed: 0, Skipped: 0, Total: 1
+
+Command: node scripts/run-day23-schedule-change-local.mjs --focused
+Exit: 0
+Output:
+PASS | Postman Day-23 Gateway-only matrix (17 requests)
+PASS | validated 12 retained Task 23.3-23.8 result locators
+PASS | isolated Day-23 fixture graph seeded (runtime UUID redacted)
+PASS | runtime JWTs issued (redacted)
+PASS | MEDIUM ALL_PENDING producer | HTTP 200
+PASS | mediumAccept exact projection/action/event cardinality
+PASS | mediumAccept frozen action metadata
+PASS | mediumAccept required action freezes MEDIUM/100001/50/50001
+PASS | MEDIUM ALL_PENDING producer | HTTP 200
+PASS | mediumReject exact projection/action/event cardinality
+PASS | mediumReject frozen action metadata
+PASS | mediumReject required action freezes MEDIUM/100001/50/50001
+PASS | MAJOR ALL_PENDING producer | HTTP 200
+PASS | majorReject exact projection/action/event cardinality
+PASS | majorReject frozen action metadata
+PASS | majorReject required action freezes MAJOR/100001/100/100001
+PASS | MINOR ALL_PENDING producer | HTTP 200
+PASS | minor exact projection/action/event cardinality
+PASS | MEDIUM ALL_PENDING producer | HTTP 200
+PASS | pending exact projection/action/event cardinality
+PASS | MEDIUM ALL_PENDING producer | HTTP 200
+PASS | longRange exact projection/action/event cardinality
+PASS | longRange frozen action metadata
+PASS | longRange required action freezes MEDIUM/100001/50/50001
+PASS | passenger accepts >24h MEDIUM precision branch | HTTP 200
+PASS | passenger accepts MEDIUM | HTTP 200
+PASS | new key sees terminal action | HTTP 409 BOOKING_PENDING_ACTION_ALREADY_RESOLVED
+PASS | changed replay body mismatches | HTTP 422 IDEMPOTENCY_KEY_MISMATCH
+PASS | mediumReject rejection | HTTP 200
+PASS | majorReject rejection | HTTP 200
+PASS | missing JWT | HTTP 401 AUTH_TOKEN_INVALID
+PASS | role gate before lookup | HTTP 403 FORBIDDEN
+PASS | owner masking | HTTP 404 BOOKING_NOT_FOUND
+PASS | missing action under owned Booking | HTTP 404 BOOKING_PENDING_ACTION_NOT_FOUND
+PASS | pending probe LOCK_ACQUIRED
+PASS | pending probe processing owner acquired
+PASS | in-flight duplicate is pending | HTTP 409 IDEMPOTENCY_REQUEST_PENDING
+PASS | pending probe LOCK_RELEASED
+PASS | active action/Booking state not resolvable | HTTP 409 BOOKING_PENDING_ACTION_NOT_RESOLVABLE
+PASS | superseded action | HTTP 409 BOOKING_PENDING_ACTION_SUPERSEDED
+PASS | strictly-after cutoff | HTTP 409 BOOKING_PENDING_ACTION_EXPIRED
+PASS | missing idempotency key | HTTP 422 IDEMPOTENCY_KEY_REQUIRED
+PASS | invalid key and request shape | HTTP 422 VALIDATION_ERROR
+PASS | operator reads current departure projection | HTTP 200
+PASS | Notification rows persisted for schedule facts
+PASS | bounded DB/Outbox/Notification/RabbitMQ runtime evidence
+PASS | timeout equality/phases remain proven by retained frozen-clock PostgreSQL evidence; no wall-clock wait
+PASS | isolated Day-23 fixture cleanup verified
+PASS | Day-23 focused runtime journey completed
+
+Command: git diff --check -- <seven Task 23.9 paths>
+Exit: 0
+Output: (none)
+
+Explicit LF and trailing-whitespace guard
+Exit: 0
+Output:
+PASS | LF and no trailing whitespace | scripts/run-day23-schedule-change-local.mjs
+PASS | LF and no trailing whitespace | scripts/run-day23-schedule-change-local.test.mjs
+PASS | LF and no trailing whitespace | docs/api/postman/vietride.postman_collection.json
+PASS | LF and no trailing whitespace | docs/api/postman/vietride.local.postman_environment.json
+PASS | LF and no trailing whitespace | docs/api/postman/README.md
+PASS | LF and no trailing whitespace | docs/handoff/evidence/day-23-schedule-change.md
+PASS | LF and no trailing whitespace | docs/handoff/evidence/day-23-schedule-change-verification.txt
+
+Retained controlled-result locator root:
+TestResults/day23/task-23-9-evidence
+
+The manifest validates 11 TRX files and one Jest JSON file. Each declared command contains its
+exact filter; every TRX contains that suite marker, executed >= 1, and failed = 0; Jest reports
+success, passed >= 1, and failed = 0. The locators cover current-departure reads, projection CAS,
+resolver authorization/idempotency/transaction/deadline precision, timeout races, explicit Outbox
+identity, Outbox restart identity, RabbitMQ identity, and Notification mapping/dedupe.

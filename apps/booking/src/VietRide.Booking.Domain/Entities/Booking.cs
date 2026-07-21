@@ -46,10 +46,13 @@ public sealed class Booking : BaseEntity<Guid>
     public Guid? BookingGroupId { get; private set; }
     public TripDirection? TripDirection { get; private set; }
 
-    // Trip snapshot (avoid cross-service call for history list)
+    // Immutable trip snapshot (avoid cross-service call for history list)
     public string? TripSnapshotOriginName { get; private set; }
     public string? TripSnapshotDestName { get; private set; }
     public DateTimeOffset? TripSnapshotDeparture { get; private set; }
+
+    // Mutable schedule projection, initialized from the departure snapshot.
+    public DateTimeOffset? TripCurrentDeparture { get; private set; }
     public string? TripSnapshotRouteName { get; private set; }
 
     // Lifecycle timestamps
@@ -89,7 +92,8 @@ public sealed class Booking : BaseEntity<Guid>
         string? tripSnapshotRouteName = null,
         Guid? bookingGroupId = null,
         Enums.TripDirection? tripDirection = null,
-        Guid? seatLockToken = null)
+        Guid? seatLockToken = null,
+        DateTimeOffset? tripCurrentDeparture = null)
     {
         // Pickup: exactly one must be set
         var pickupCount = (pickupStationId.HasValue ? 1 : 0) + (pickupStopId.HasValue ? 1 : 0);
@@ -104,6 +108,11 @@ public sealed class Booking : BaseEntity<Guid>
         // Amount invariants
         if (totalAmount > baseFare)
             throw new ArgumentException("Total amount cannot exceed base fare.");
+
+        if (tripCurrentDeparture.HasValue && tripCurrentDeparture != tripSnapshotDeparture)
+            throw new ArgumentException(
+                "Trip current departure must initially match the trip snapshot departure.",
+                nameof(tripCurrentDeparture));
 
         return new Booking
         {
@@ -125,6 +134,7 @@ public sealed class Booking : BaseEntity<Guid>
             TripSnapshotOriginName = tripSnapshotOriginName,
             TripSnapshotDestName = tripSnapshotDestName,
             TripSnapshotDeparture = tripSnapshotDeparture,
+            TripCurrentDeparture = tripCurrentDeparture ?? tripSnapshotDeparture,
             TripSnapshotRouteName = tripSnapshotRouteName,
             BookingGroupId = bookingGroupId,
             TripDirection = tripDirection,
@@ -322,5 +332,27 @@ public sealed class Booking : BaseEntity<Guid>
         {
             ticket.Refund(refundedAt);
         }
+    }
+
+    public IReadOnlyList<Guid> MarkPendingPassengersNoShow()
+    {
+        if (Status != BookingStatus.CONFIRMED)
+        {
+            return [];
+        }
+
+        var newlyMarked = _passengers
+            .Where(passenger => passenger.MarkNoShow())
+            .Select(passenger => passenger.Id)
+            .ToArray();
+        if (newlyMarked.Length == 0)
+        {
+            return newlyMarked;
+        }
+
+        Status = _passengers.All(passenger => passenger.BoardingStatus == PassengerBoardingStatus.NO_SHOW)
+            ? BookingStatus.NO_SHOW
+            : BookingStatus.PARTIAL_NO_SHOW;
+        return newlyMarked;
     }
 }

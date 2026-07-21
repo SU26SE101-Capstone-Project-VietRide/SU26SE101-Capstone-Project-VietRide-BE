@@ -95,6 +95,7 @@ CREATE TABLE bookings (
     trip_snapshot_origin_name VARCHAR(255) NULL,
     trip_snapshot_dest_name VARCHAR(255) NULL,
     trip_snapshot_departure TIMESTAMPTZ NULL,
+    trip_current_departure TIMESTAMPTZ NULL,
     trip_snapshot_route_name VARCHAR(255) NULL,
     -- timestamps
     confirmed_at TIMESTAMPTZ NULL,
@@ -146,6 +147,13 @@ CREATE UNIQUE INDEX uq_booking_station_redirects_source_event
 CREATE INDEX idx_booking_station_redirects_canonical
     ON booking_station_redirects (canonical_station_id);
 
+-- Rollout backfill: preserve immutable history while seeding the mutable schedule projection.
+UPDATE bookings
+SET trip_current_departure = trip_snapshot_departure
+WHERE trip_current_departure IS NULL;
+
+CREATE INDEX idx_bookings_trip_current_departure ON bookings (trip_current_departure DESC);
+
 -- Append-only authoritative Booking lifecycle timeline. Application code permits INSERT/read only.
 CREATE TABLE booking_status_history (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -164,6 +172,10 @@ COMMENT ON COLUMN bookings.booking_code IS
     'Format VR-yyyyMMdd-XXXXXXXX (8 chars base32 uppercase). Booking/order code for history and backward compatibility; ticket QR uses tickets.ticket_code.';
 COMMENT ON COLUMN bookings.total_amount IS
     'IMMUTABLE after INSERT. Snapshot of fare at booking time. Operator fare edits do not affect existing bookings.';
+COMMENT ON COLUMN bookings.trip_snapshot_departure IS
+    'IMMUTABLE historical departure captured when the Booking is created; schedule events never update it.';
+COMMENT ON COLUMN bookings.trip_current_departure IS
+    'Mutable current-departure projection, backfilled from trip_snapshot_departure and advanced causally by schedule events.';
 COMMENT ON COLUMN bookings.refund_override IS
     'true when refund 100% regardless of cancellation policy (operator-fault scenarios).';
 COMMENT ON COLUMN bookings.seat_lock_token IS

@@ -10,6 +10,9 @@
 #   IMAGE_PREFIX  e.g. ghcr.io/su26se101-capstone-project-vietride/vietride
 #   IMAGE_TAG     e.g. v1.0.0  (the version tag you pushed)
 #
+# The frontend is NOT part of this file — it runs as its own compose project that
+# attaches to vietride_net. See the note above the nginx service.
+#
 # Usage on the server (the deploy workflow runs these for you):
 #   docker compose -f docker-compose.prod.yml pull
 #   docker compose -f docker-compose.prod.yml up -d
@@ -27,6 +30,8 @@ x-dotnet-common: &dotnet-common
     INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
   depends_on:
     postgres:
+      condition: service_healthy
+    redis:
       condition: service_healthy
     rabbitmq:
       condition: service_healthy
@@ -122,6 +127,13 @@ services:
       SYSTEM_ADMIN_BOOTSTRAP_DISPLAY_NAME: ${SYSTEM_ADMIN_BOOTSTRAP_DISPLAY_NAME:-System Administrator}
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID}
       GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET}
+      # Identity mints Firebase custom tokens (operator web sign-in) and revokes
+      # Firebase sessions on lock/suspend. AddInfrastructure THROWS on boot in
+      # Production when these are unset, so `:?` fails the deploy at `compose config`
+      # instead of leaving the container in a crash loop.
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:?FIREBASE_PROJECT_ID is required in production}
+      FIREBASE_CLIENT_EMAIL: ${FIREBASE_CLIENT_EMAIL:?FIREBASE_CLIENT_EMAIL is required in production}
+      FIREBASE_PRIVATE_KEY: ${FIREBASE_PRIVATE_KEY:?FIREBASE_PRIVATE_KEY is required in production}
       ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_identity;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD}'
       RabbitMq__HostName: rabbitmq
       RabbitMq__Port: '5672'
@@ -143,6 +155,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_trip;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD}'
+      REDIS_URL: 'redis:6379,abortConnect=false'
       IDENTITY_SERVICE_BASE_URL: http://identity:5001
       BOOKING_BASE_URL: http://booking:5003
       # Trip runs the outbox publisher and RabbitMQ consumers. Inside Docker it
@@ -216,7 +229,7 @@ services:
       InvoiceStorage__StableBaseUrl: ${INVOICE_STORAGE_STABLE_BASE_URL:?INVOICE_STORAGE_STABLE_BASE_URL is required in production}
       OperatorWeb__InvoiceDetailBaseUrl: ${OPERATOR_WEB_INVOICE_DETAIL_BASE_URL:?OPERATOR_WEB_INVOICE_DETAIL_BASE_URL is required in production}
       GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase/service-account.json
-      VNPAY_IPN_URL: ${VNPAY_IPN_URL}
+      VNPAY_IPN_URL: ${VNPAY_IPN_URL:-https://api.vietride.online/v1/payments/vnpay-ipn}
       VNPAY_PAYMENT_TIMEOUT_MINUTES: ${VNPAY_PAYMENT_TIMEOUT_MINUTES:-10}
     volumes:
       - /opt/vietride/secrets/firebase-service-account.json:/run/secrets/firebase/service-account.json:ro
@@ -428,6 +441,19 @@ services:
       retries: 5
       start_period: 60s
 
+  # ── Frontend: NOT declared here, on purpose ─────────────────────────────────
+  # The operator web lives in a separate repo and ships on its own cadence, so it
+  # runs as its own compose project (`vietride-frontend`) that attaches to this
+  # stack's network. Its compose file lives in the FE repo.
+  #
+  # Declaring it here instead would couple the two deploys in both directions:
+  #   - this stack's `docker compose pull` pulls EVERY service, so a missing or
+  #     broken FE image would abort a backend deploy that has nothing to do with it;
+  #   - `up -d --remove-orphans` here could recreate or drop the FE container.
+  # Keeping it out means a backend deploy never touches the frontend, and vice
+  # versa. nginx finds it over vietride_net by the `frontend` alias, re-resolved
+  # per request, so either side can redeploy independently.
+
   # ── Edge: Nginx (internal reverse proxy — NO host port) ─────────────────────
   # Not published to the host. Cloudflare Tunnel reaches it over the docker network
   # (cloudflared → nginx:80). nginx terminates plain HTTP; TLS is handled at Cloudflare's
@@ -508,7 +534,7 @@ services:
   # ── Cloudflare Tunnel: outbound-only link to the Cloudflare edge ────────────
   # The server DIALS OUT to Cloudflare — no inbound port forwarding needed (works
   # behind the provider NAT / the 24450–24460 restriction). Cloudflare serves 443
-  # publicly for api.vietride.app and routes requests through this tunnel to nginx:80.
+  # publicly for api.vietride.online and routes requests through this tunnel to nginx:80.
   # Map the hostname → http://nginx:80 in the Cloudflare Zero Trust dashboard (or
   # config.yml) when you create the tunnel — see DEPLOY.md.
   cloudflared:

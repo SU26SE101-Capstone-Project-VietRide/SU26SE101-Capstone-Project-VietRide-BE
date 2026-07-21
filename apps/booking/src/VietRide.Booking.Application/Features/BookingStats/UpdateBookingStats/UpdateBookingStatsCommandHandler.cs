@@ -32,7 +32,7 @@ public sealed class UpdateBookingStatsCommandHandler
     {
         var claimed = await _stats.TryClaimProcessedEventAsync(
             request.EventType,
-            request.BookingId,
+            request.DedupeId ?? request.BookingId,
             DateTimeOffset.UtcNow,
             cancellationToken);
 

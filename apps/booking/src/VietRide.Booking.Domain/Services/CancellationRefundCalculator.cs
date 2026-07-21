@@ -4,6 +4,25 @@ namespace VietRide.Booking.Domain.Services;
 
 public static class CancellationRefundCalculator
 {
+    public static Money CalculateExplicitPercentRefund(Money refundBasis, int refundPercent)
+    {
+        if (refundBasis.Amount < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(refundBasis), "Refund basis cannot be negative.");
+        }
+
+        if (refundPercent is not (50 or 100))
+        {
+            throw new ArgumentOutOfRangeException(nameof(refundPercent), "Schedule-change refund must be 50% or 100%.");
+        }
+
+        var amount = Math.Round(
+            refundBasis.Amount * (refundPercent / 100m),
+            0,
+            MidpointRounding.AwayFromZero);
+        return Money.FromRaw((long)amount);
+    }
+
     public static Money CalculateRefundAmount(
         Money paidAmount,
         decimal hoursToDeparture,

@@ -13,6 +13,23 @@ describe('buildRouteTable', () => {
     expect(routes.length).toBeGreaterThan(10);
   });
 
+  it('routes Firebase custom tokens and unified passenger history to their owners', () => {
+    const firebaseRoute = matchRoute(routes, '/v1/firebase/custom-token');
+    expect(firebaseRoute).toMatchObject({
+      target: env.IDENTITY_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    });
+
+    const historyRoute = matchRoute(routes, '/v1/passenger/history');
+    expect(historyRoute).toMatchObject({
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['PASSENGER'],
+    });
+    expect(matchRoute(routes, '/v1/passenger')).toMatchObject({ target: env.IDENTITY_BASE_URL });
+  });
+
   it('every Identity route points at IDENTITY_BASE_URL', () => {
     const identityRoutes = routes.filter(
       (r) =>

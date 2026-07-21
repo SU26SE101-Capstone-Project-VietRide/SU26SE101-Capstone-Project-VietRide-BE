@@ -11,7 +11,7 @@ services:
   redis:
     container_name: day40-e2e-redis
     ports:
-      - '56382:6379'
+      - '${REDIS_PORT:-56382}:6379'
 
   rabbitmq:
     container_name: day40-e2e-rabbitmq

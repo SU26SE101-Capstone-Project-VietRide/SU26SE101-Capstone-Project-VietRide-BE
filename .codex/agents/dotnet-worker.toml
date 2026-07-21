@@ -17,7 +17,7 @@ service before writing anything new.
 - **CPM**: `<PackageReference>` version-less; declare versions in `Directory.Packages.props`.
 - **Line endings**: all `.cs/.csproj` = CRLF.
 - **Password hashing**: BCrypt.Net-Next cost 12.
-- **Money**: `Money` (BIGINT VND, floor-1000) from `VietRide.Shared.Kernel`; never decimal.
+- **Money**: BIGINT VND kept to the đồng. `Money.FromRaw` is pass-through; fractional calculation results round to the nearest đồng with `MidpointRounding.AwayFromZero`. Never persist decimal/float money.
 - **Auth**: Internal JWT HS256 (`vietride-gateway`/`vietride-internal`, `X-Internal-Auth`, 120s); User token RS256 via JWKS (`vietride-identity`/`vietride-api`).
 - **Persistence**: one DbContext/service, snake_case, soft-delete (`deleted_at` only via getter-only `ISoftDeletable`; `is_active` is a SEPARATE activation flag via `IActivatable` — see ADR 0003), audit columns, Outbox.
 - **Responses/errors**: ADR 0004 (BSOT §5.4/§5.5) supersedes RFC 7807/`application/problem+json`: use the `ApiResponse<T>` envelope (success `{success,statusCode,data,meta}`; error `{success:false,statusCode,error:{code,message,fields?},meta}`), with `meta.traceId` and `error.code` UPPER_SNAKE_CASE from BSOT §5.9.
@@ -39,8 +39,35 @@ split after a real pain point. Logic placement: business invariants/state transi
 **Domain entity methods** (not handlers, not validators); input shape/format → FluentValidation
 validators; cross-aggregate / DB-dependent checks → handler/service.
 
+## Targeted verification contract
+The approved day plan supplies a `verification tier` (`DOCS`, `FOCUSED`, or `PROJECT`) and exact
+`verification commands`. Run those commands once after implementation; do not replace them with
+a full solution matrix. If a legacy plan omits these fields, treat the task as `FOCUSED` and
+derive the smallest checks that prove its acceptance. Full solution build/format/test belongs
+exclusively to `audit-day`.
+
+- `DOCS`: run only the listed parse/syntax/citation/registry checks plus `git diff --check`; do
+  not build or test application code.
+- `FOCUSED` (default): run the exact affected test class/filter, changed-file format check, and
+  only the smallest production project build when no suitable test project references it.
+- `PROJECT`: reserved for DI, global middleware, DbContext-wide behavior, shared fixtures, or
+  configuration. Run the affected test project/project build only — never the service solution.
+- For .NET tests use the exact test `.csproj` and a narrow filter such as
+  `dotnet test <test.csproj> --filter "FullyQualifiedName~<class-or-namespace>"`. Confirm the
+  output reports at least one executed test; zero matching/executed tests is failed evidence.
+  A targeted test already compiles its referenced production projects, so do not add a build.
+- When no suitable test project exists, build only the smallest affected production `.csproj`.
+  Format only changed paths with
+  `dotnet format <service.sln> --verify-no-changes --include <changed-paths>`.
+- Migration acceptance still requires its exact generate/apply/Down/reapply/pending-model checks;
+  these are task-specific checks, not permission to run a full solution matrix.
+- Keep complete targeted-command output visible to yourself and the reviewer. Do not redirect,
+  truncate, or replace it with a quiet/summary log.
+- On a reviewer follow-up, patch continuously and rerun only invalidated checks: docs/comments do
+  not invalidate tests; production/test changes invalidate their matching filter; DI, shared
+  contracts, and migrations may require the affected project-level check.
+
 ## Before reporting done
-- `dotnet build apps/<svc>/VietRide.<Svc>.sln -c Release` clean.
-- `dotnet format apps/<svc>/VietRide.<Svc>.sln --verify-no-changes` reports no changes.
-- `dotnet test` for the service passes (incl. NetArchTest dependency rules). Add ≥1 happy-path + ≥1 error-case test for new handlers/endpoints.
-- Report files changed, commands + results, follow-ups. Do not commit unless asked."""
+- Add ≥1 happy-path + ≥1 error-case test for new handlers/endpoints when required by acceptance.
+- Report the verification tier, files changed, exact commands + full results, scope expansions,
+  and follow-ups. Do not commit unless asked."""

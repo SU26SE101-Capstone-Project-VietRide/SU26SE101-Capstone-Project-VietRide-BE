@@ -22,6 +22,7 @@ internal sealed class TripStopConfiguration : IEntityTypeConfiguration<TripStop>
             .HasColumnName("estimated_arrival_time")
             .HasComment("Static baseline. NEVER updated after Trip generate. Dynamic ETA lives in Redis only.");
         builder.Property(stop => stop.ActualArrivalTime).HasColumnName("actual_arrival_time");
+        builder.Property(stop => stop.ActualDepartureTime).HasColumnName("actual_departure_time");
         builder.Property(stop => stop.Status)
             .HasColumnName("status")
             .HasColumnType("vietride_trip.trip_stop_status")

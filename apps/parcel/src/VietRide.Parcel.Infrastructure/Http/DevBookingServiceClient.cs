@@ -12,6 +12,19 @@ public sealed class DevBookingServiceClient : IBookingServiceClient
         _logger = logger;
     }
 
+    public Task<BookingHistoryOutcome> GetPassengerHistoryAsync(
+        Guid userId,
+        string? status,
+        string? from,
+        string? to,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(new BookingHistoryOutcome(
+            true,
+            new BookingHistoryPage([], page, pageSize, 0, 0, false, page > 1),
+            null));
+
     public Task<BookingLookupOutcome> GetBookingSnapshotAsync(
         Guid bookingId,
         CancellationToken cancellationToken = default)

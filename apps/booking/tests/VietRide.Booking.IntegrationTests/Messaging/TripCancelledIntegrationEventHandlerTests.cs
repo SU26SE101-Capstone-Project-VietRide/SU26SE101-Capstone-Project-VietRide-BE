@@ -98,7 +98,9 @@ public sealed class TripCancelledIntegrationEventHandlerTests
                 .SingleAsync(row => row.EventType == BookingCancelledEvent.EventTypeValue);
             using var payload = JsonDocument.Parse(outbox.Payload);
             payload.RootElement.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo(
-                ["bookingId", "bookingCode", "userId", "refundAmount", "refundOverride", "cancellationReason", "ticketCodes", "ticketCount"]);
+                ["eventId", "occurredAt", "bookingId", "bookingCode", "userId", "refundAmount", "refundOverride", "cancellationReason", "ticketCodes", "ticketCount"]);
+            payload.RootElement.GetProperty("eventId").GetGuid().Should().Be(outbox.Id);
+            payload.RootElement.GetProperty("occurredAt").GetDateTimeOffset().Should().Be(CancelledAt);
             payload.RootElement.GetProperty("bookingId").GetGuid().Should().Be(booking.Id);
             payload.RootElement.GetProperty("bookingCode").GetString().Should().Be(booking.BookingCode.Value);
             payload.RootElement.GetProperty("userId").GetGuid().Should().Be(booking.PassengerUserId);
@@ -212,7 +214,8 @@ public sealed class TripCancelledIntegrationEventHandlerTests
             bookings,
             Day22EventDatabase.CreateStatusHistoryRepository(db),
             new IntegrationEventOutbox(new OutboxStore(db, clock)),
-            new EfUnitOfWork(db));
+            new EfUnitOfWork(db),
+            clock);
         var mediator = Substitute.For<IMediator>();
         mediator.Send(Arg.Any<HandleTripCancelledCommand>(), Arg.Any<CancellationToken>())
             .Returns(call => commandHandler.Handle(

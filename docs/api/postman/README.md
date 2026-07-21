@@ -232,6 +232,36 @@ Record reviewer output in
 The close-out rows in that file must match an exit-zero `--full-matrix` execution from the same
 checkout.
 
+## Day 23 schedule-change journey
+
+The collection folder `Day 23 - Schedule change journey` is a Gateway-only manual companion to
+the focused runner. It contains the canonical DriverSchedule `ALL_PENDING` producer and passenger
+`/resolve` route; it intentionally contains no dedicated Trip schedule route, `/accept` or
+`/reject` alias, internal clock route, or job-control route. Runtime JWTs and fixture identifiers
+are placeholders. Use only isolated local fixtures and remove all owned rows/side effects after a
+manual run.
+
+```powershell
+node --check scripts/run-day23-schedule-change-local.mjs
+node --test --test-reporter=tap scripts/run-day23-schedule-change-local.test.mjs
+node scripts/run-day23-schedule-change-local.mjs --focused
+```
+
+`--focused` validates both Postman JSON artifacts and the retained Task 23.3-23.8 TRX/Jest
+manifest, then runs a concrete isolated journey. It seeds unique Identity/Trip/Booking fixtures,
+issues short-lived runtime JWTs, calls DriverSchedule `ALL_PENDING` and passenger `/resolve` only
+through the Gateway, and inspects bounded PostgreSQL Outbox/Notification plus RabbitMQ queue state.
+The live matrix asserts exact PENDING_PAYMENT/MINOR/MEDIUM/MAJOR action/event cardinality, frozen
+refund metadata, an explicit lock-handshake idempotency race whose first request must settle before
+fixture cleanup, and a >24-hour deadline-precision
+case. Its `finally` path tracks and removes the complete owned DB/Redis graph and proves zero rows/keys after both
+success and partial-setup/runtime failure. It never waits for a business deadline. Exhaustive
+two-hour equality, projection CAS/quarantine, timeout equality/phases/races, restart, and RabbitMQ
+MessageId behavior remain owned by the real-PostgreSQL/frozen-clock suites delivered in Tasks
+23.3-23.8. This preserves the production clock and avoids a hidden test endpoint. See
+[`docs/handoff/evidence/day-23-schedule-change.md`](../../handoff/evidence/day-23-schedule-change.md)
+for the acceptance-to-evidence map.
+
 To execute the authoritative local E2E matrix in dependency order, use this exact command from the
 repository root:
 

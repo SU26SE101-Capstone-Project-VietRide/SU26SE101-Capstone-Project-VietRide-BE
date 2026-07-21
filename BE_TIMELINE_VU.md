@@ -242,22 +242,48 @@
 - **Review**: snapshot integrity test (book → operator edits fare → cancel → refund uses original fare)
 
 ### Day 23 — Wed 2026-06-24 — Schedule change 3 levels + BookingPendingAction ([SCV-100](https://hoangvutran088.atlassian.net/browse/SCV-100))
-- `PATCH /operator/trips/{id}/schedule` changes departureDateTime
-- Classify delta per v7 6.13: MINOR (auto-inform), MEDIUM (50% refund if cancel), MAJOR (100% refund if cancel)
-- BookingPendingAction created for MEDIUM/MAJOR with type SCHEDULE_CHANGE
-- Passenger endpoints: `POST /bookings/{id}/pending-actions/{actionId}/accept|reject`
-- Hangfire timeout: pending action auto-fallback if user doesn't respond within deadline
-- **DoD**: operator changes departure by +3h → all confirmed bookings get MAJOR pending action; passenger accepts or auto-refund
-- **Review**: only ONE active pending action per booking allowed; timeout cleanup runs
+- Producer duy nhất: PATCH `/v1/operator/driver-schedules/{scheduleId}?applyTo=FUTURE_ONLY|ALL_PENDING`; chỉ `ALL_PENDING` mới cascade giờ khởi hành của Trip đã sinh. Không thêm Trip schedule endpoint hoặc Gateway route.
+- Phân loại theo `delta = |newDeparture - oldDeparture|` và ngày lịch ICT: **MINOR** khi cùng ngày và `delta <= 2h`; **MEDIUM** khi cùng ngày và `delta > 2h && delta < 6h`; **MAJOR** khi `delta >= 6h` hoặc đổi ngày ICT.
+- Với Booking `CONFIRMED`, preflight `ALL_PENDING` dùng một clock capture: cả `oldDeparture - now` và `newDeparture - now` phải `>= 2h`; equality được phép. Bất kỳ giá trị nào `< 2h` trả `DRIVER_SCHEDULE_EDIT_TOO_LATE` trước write.
+- Booking giữ `trip_snapshot_departure` immutable và cập nhật projection `trip_current_departure` cho `PENDING_PAYMENT|CONFIRMED` theo CAS event (`current==old` apply, `current==new` duplicate, khác cả hai thì retry/quarantine). Chỉ `CONFIRMED` phát informational hoặc tạo đúng một active `SCHEDULE_CHANGE`.
+- Passenger owner resolve qua POST `/v1/bookings/{bookingId}/pending-actions/{actionId}/resolve` với UUID-v4 `Idempotency-Key` và body đúng `{ action: ACCEPTED|REJECTED, note? }`; `selectedStopId` invalid. Same-key/same-payload replay byte-identical trước khi xét terminal state.
+- Reject dùng immutable `Booking.totalAmount`: MEDIUM 50%, MAJOR 100%, làm tròn `MidpointRounding.AwayFromZero`; resolve action, cancel Booking, append history và enqueue đúng một `booking.booking.cancelled` trong cùng transaction.
+- Day-22 `PendingActionRealertJob` giữ nguyên occurrence `+2h` cho unresolved `PENDING_SEAT_ASSIGNMENT` và MEDIUM/MAJOR `SCHEDULE_CHANGE`, at most once. Day-23 `ScheduleChangeAutoAcceptJob` chạy sau cutoff `+1s`: MEDIUM finalize ở `initialDeadline`; MAJOR chỉ có optional initial-phase re-alert khi `initialDeadline < terminalDeadline`, rồi finalize ở `terminalDeadline`; direct/final resolution chỉ ACCEPTED và không thực hiện cancellation/refund.
+- Mọi Day-23 event giữ cùng identity `payload.eventId == outbox_events.id == RabbitMQ MessageId`; terminal MEDIUM/MAJOR phát `booking.booking.pending_action_auto_resolved` với `resolvedAction=ACCEPTED`.
+- **DoD**: projection hiện tại, severity boundaries, passenger resolve/refund, timeout phases, event identity, Notification dedupe và exact error mapping đều có focused evidence; full regression chỉ chạy ở `/audit-day 23`.
+- **Review**: snapshot không đổi; chỉ một active pending action; equality cutoff vẫn passenger-eligible; không có timeout cancellation/refund hoặc operator seat-assignment contract trong Day 23.
 
 ### Day 24 — Thu 2026-06-25 — Stop disable + No-show
-- `DELETE /operator/stops/{id}` (soft delete with replacedByStopId for migration)
-- Bookings using disabled stop get BookingPendingAction STOP_DISABLED with deadline `min(now+24h, departure-2h)`
-- Passenger chooses replacement stop OR terminal OR cancel 100% refund
-- Auto-fallback to terminal at deadline
-- NO_SHOW handler: Trip leaves stop+15min without passenger tick → Booking NO_SHOW (no refund); PARTIAL_NO_SHOW for partial booking
-- **DoD**: stop disable creates pending actions for affected bookings; NO_SHOW marked correctly after grace period
-- **Review**: NO_SHOW vs PARTIAL_NO_SHOW (3/5 boarded) accuracy test
+- Canonical disable mutation: bodyless `DELETE /v1/operator/stops/{id}?replacedByStopId=` for
+  `OPERATOR_ADMIN`, required UUID-v4 `Idempotency-Key`. It sets `is_active=false`, preserves
+  `deleted_at`, and publishes `trip.stop.disabled`; retained PATCH is details-update-only. The
+  old synchronous `STOP_DISABLED_BOOKING_AFFECTED` warning/count behavior is legacy/deprecated
+  for DELETE; async `booking.stop_disabled.affected` is the sole impact source.
+- Booking consumes `trip.stop.disabled` for eligible `CONFIRMED` bookings on
+  `SCHEDULED|BOARDING` trips and creates at most one active `STOP_DISABLED` action. One
+  handler-captured `capturedNow` is persisted through
+  `deadline = min(capturedNow + 24h, tripCurrentDeparture - 2h)`.
+- Passenger resolves before or exactly at the deadline by reusing edit-pickup/edit-dropoff,
+  accepting the terminal through bodyless
+  `POST /v1/bookings/{bookingId}/pending-action/{actionId}/accept-fallback`, or cancelling with
+  `STOP_DISABLED_REFUSED` for a 100% refund. The Day-23 `SCHEDULE_CHANGE` resolver is unchanged.
+- `StopDisabledAutoFallbackJob` runs every 5 minutes and selects only unresolved actions with
+  `deadline < now`; equality creates no synchronous fallback and is resolved only by a later pass.
+- `NoShowDetectionJob` runs every 5 minutes. Along-route eligibility is strictly
+  `TripStop.actualArrivalTime + 15 minutes < now`; terminal eligibility is strictly
+  `Trip.actualDepartureTime + 15 minutes < now`. Booking fails closed when the Trip snapshot or
+  anchor is unavailable, locks/rechecks state, marks remaining `PENDING` passengers `NO_SHOW`,
+  then sets all-pending bookings to `NO_SHOW` and mixed boarded/pending bookings to
+  `PARTIAL_NO_SHOW`; all-boarded bookings remain unchanged.
+- Driver/Assistant stop departure is bodyless
+  `POST /v1/driver/trips/{tripId}/stops/{stopId}/depart`, requires UUID-v4 idempotency, and is
+  valid only for assigned crew on an `IN_PROGRESS` trip with an `ARRIVED`, not-yet-departed stop.
+  Trip persists `TripStop.actualDepartureTime`, calls Booking's exact pending-passenger count, and
+  emits `trip.stop.departed_with_pending` only when the count is positive.
+- **DoD**: exact stop-disable action/deadline/idempotency behavior, passenger choices, two strict
+  five-minute jobs, Outbox identity, and notification facts are covered by focused evidence.
+- **Review**: equality edges, replay/mismatch/race/restart behavior, `NO_SHOW` vs
+  `PARTIAL_NO_SHOW` (3/5 boarded), and all-boarded (5/5) accuracy tests.
 
 ### Day 25 — Fri 2026-06-26 — Parcel Service: ParcelRouteFare + Create parcel ([SCV-104](https://hoangvutran088.atlassian.net/browse/SCV-104))
 - EF migration: ParcelRouteFare, Parcel, ParcelStats tables

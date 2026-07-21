@@ -12,6 +12,7 @@ namespace VietRide.Trip.Application.Features.TripGeneration;
 public sealed class TripGenerationService
 {
     private const int GenerationWindowDays = 14;
+    private static readonly TimeSpan IctOffset = TimeSpan.FromHours(7);
 
     private const string TripAssignedEventType = "trip.trip.assigned";
     private const string SubscriptionLimitTripSkippedEventType = "subscription.limit.trip_skipped";
@@ -61,7 +62,9 @@ public sealed class TripGenerationService
         Guid? driverScheduleId,
         CancellationToken cancellationToken)
     {
-        var schedules = GetSchedules(driverScheduleId);
+        var now = clock.UtcNow;
+        var today = DateOnly.FromDateTime(now.ToOffset(IctOffset).DateTime);
+        var schedules = GetSchedules(driverScheduleId, today);
         var generatedCount = 0;
         var skippedCount = 0;
         var existingDriverDepartures = PreloadExistingDriverDepartures();
@@ -73,7 +76,6 @@ public sealed class TripGenerationService
                 scheduleCandidate.Id,
                 scheduleCandidate.OperatorId,
                 cancellationToken);
-            var today = DateOnly.FromDateTime(clock.UtcNow.UtcDateTime);
             if (schedule is null
                 || !schedule.IsActive
                 || (schedule.ValidUntil.HasValue && schedule.ValidUntil.Value < today))
@@ -81,12 +83,13 @@ public sealed class TripGenerationService
                 continue;
             }
 
+            var existingScheduleDates = LoadExistingServiceDates(schedule.Id);
             var route = routeRepository.QueryNoTracking().FirstOrDefault(route => route.Id == schedule.RouteId);
             if (route is null || !route.IsActive || route.DeletedAt is not null)
             {
                 skippedCount += await LogSkipAsync(
                     schedule,
-                    DateOnly.FromDateTime(clock.UtcNow.UtcDateTime),
+                    today,
                     "Route was missing or inactive.",
                     cancellationToken);
                 continue;
@@ -97,7 +100,7 @@ public sealed class TripGenerationService
                 .OrderBy(routeStop => routeStop.OrderIndex)
                 .ToList();
             var scheduleDays = ParseScheduleDays(schedule.DayOfWeek);
-            var serviceDates = MatchingServiceDates(schedule, scheduleDays).ToList();
+            var serviceDates = MatchingServiceDates(schedule, scheduleDays, now).ToList();
             var vehicle = schedule.VehicleId.HasValue
                 ? vehicleRepository.QueryNoTracking().FirstOrDefault(vehicle => vehicle.Id == schedule.VehicleId.Value)
                 : null;
@@ -127,12 +130,21 @@ public sealed class TripGenerationService
                     throw MissingEstimatedDurationException();
                 }
 
-                skippedCount += await LogMissingDurationSkipsAsync(schedule, serviceDates, cancellationToken);
+                skippedCount += await LogMissingDurationSkipsAsync(
+                    schedule,
+                    serviceDates,
+                    today,
+                    cancellationToken);
                 continue;
             }
 
             foreach (var serviceDate in serviceDates)
             {
+                if (existingScheduleDates.Contains(serviceDate))
+                {
+                    continue;
+                }
+
                 var departureDateTime = BuildDepartureDateTime(serviceDate, schedule.DepartureTime);
                 if (existingDriverDepartures.Contains((schedule.DriverUserId, departureDateTime))
                     || TripExistsForDriver(schedule.DriverUserId, departureDateTime))
@@ -205,6 +217,7 @@ public sealed class TripGenerationService
                 try
                 {
                     await tripRepository.AddAsync(trip, cancellationToken);
+                    existingScheduleDates.Add(serviceDate);
                     existingDriverDepartures.Add((schedule.DriverUserId, departureDateTime));
                     existingVehicleDepartures.Add((vehicle.Id, departureDateTime));
                     await AddSeatsAsync(trip.Id, vehicle, cancellationToken);
@@ -265,9 +278,8 @@ public sealed class TripGenerationService
         await quotaClient.ReleaseQuotaAllocationAsync(operatorId, allocationId.Value, cancellationToken);
     }
 
-    private IReadOnlyList<DriverSchedule> GetSchedules(Guid? driverScheduleId)
+    private IReadOnlyList<DriverSchedule> GetSchedules(Guid? driverScheduleId, DateOnly today)
     {
-        var today = DateOnly.FromDateTime(clock.UtcNow.UtcDateTime);
         var query = driverScheduleRepository.QueryNoTracking()
             .Where(schedule => schedule.IsActive && (!schedule.ValidUntil.HasValue || schedule.ValidUntil.Value >= today));
 
@@ -359,11 +371,12 @@ public sealed class TripGenerationService
     private async Task<int> LogMissingDurationSkipsAsync(
         DriverSchedule schedule,
         IReadOnlyCollection<DateOnly> serviceDates,
+        DateOnly fallbackDate,
         CancellationToken cancellationToken)
     {
         var skippedCount = 0;
         IEnumerable<DateOnly> datesToLog = serviceDates.Count == 0
-            ? [DateOnly.FromDateTime(clock.UtcNow.UtcDateTime)]
+            ? [fallbackDate]
             : serviceDates;
 
         foreach (var serviceDate in datesToLog)
@@ -387,10 +400,10 @@ public sealed class TripGenerationService
 
     private IEnumerable<DateOnly> MatchingServiceDates(
         DriverSchedule schedule,
-        IReadOnlySet<int> scheduleDays)
+        IReadOnlySet<int> scheduleDays,
+        DateTimeOffset now)
     {
-        var now = clock.UtcNow;
-        var localToday = DateOnly.FromDateTime(now.ToOffset(TimeSpan.FromHours(7)).DateTime);
+        var localToday = DateOnly.FromDateTime(now.ToOffset(IctOffset).DateTime);
         var generationWindowEnd = now.AddDays(GenerationWindowDays);
 
         for (var offset = 0; offset <= GenerationWindowDays; offset++)
@@ -408,6 +421,16 @@ public sealed class TripGenerationService
 
             yield return candidate;
         }
+    }
+
+    private HashSet<DateOnly> LoadExistingServiceDates(Guid driverScheduleId)
+    {
+        return tripRepository.QueryNoTracking()
+            .Where(trip => trip.Status != TripStatus.CANCELLED
+                && trip.DriverScheduleId == driverScheduleId)
+            .AsEnumerable()
+            .Select(trip => DateOnly.FromDateTime(trip.DepartureDateTime.ToOffset(IctOffset).DateTime))
+            .ToHashSet();
     }
 
     private HashSet<(Guid DriverUserId, DateTimeOffset DepartureDateTime)> PreloadExistingDriverDepartures()
@@ -485,7 +508,7 @@ public sealed class TripGenerationService
     private static DateTimeOffset BuildDepartureDateTime(DateOnly date, TimeOnly time)
     {
         var localDateTime = date.ToDateTime(time);
-        return new DateTimeOffset(localDateTime, TimeSpan.FromHours(7)).ToUniversalTime();
+        return new DateTimeOffset(localDateTime, IctOffset).ToUniversalTime();
     }
 
     private static HashSet<int> ParseScheduleDays(JsonElement dayOfWeek)

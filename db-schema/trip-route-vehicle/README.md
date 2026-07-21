@@ -28,7 +28,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 | `Trip` | Chuyến cụ thể. | snapshot `baseFare`/`estimatedPassengerLuggageKg`/`maxCargoWeightKg`, nullable trimmed `notes` (max 2000), 2 cargo counter, `source` enum, `hasSubstitution` |
 | `TripAuditLog` | Append-only audit do Trip service sở hữu. | local `tripId` FK; logical `actorUserId`; JSONB metadata |
 | `TripSeat` | Trạng thái từng ghế per trip. | composite UNIQUE `(tripId, seatNumber)`, `status` enum |
-| `TripStop` | Snapshot RouteStop khi generate. | composite PK, `estimatedArrivalTime` static, `actualArrivalTime` set bởi Assistant |
+| `TripStop` | Snapshot RouteStop khi generate. | composite PK, `estimatedArrivalTime` static, nullable `actualArrivalTime`, nullable `actual_departure_time` persisted when assigned crew departs an arrived stop |
 | `TripStopFare` | Exception per trip per stop. | `source=TEMPLATE_SNAPSHOT|MANUAL_OVERRIDE`; Day 22 chỉ tạo mới `MANUAL_OVERRIDE` |
 | `DriverSchedule` | Recurring assignment driver/assistant↔vehicle↔route. | `dayOfWeek` JSONB array, `departureTime` TIME, `validFrom`/`validUntil` |
 | `DriverScheduleAuditLog` | Append-only audit do Trip service sở hữu. | local `driverScheduleId` FK; logical `actorUserId`; JSONB metadata |
@@ -58,6 +58,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 - **`TripStop.estimated_arrival_time` immutable sau khi generate** — DELAYED chỉ ở Redis (v6 quyết định KHÔNG thêm `Trip.isDelayed`).
 - **`TripStopFare` composite PK `(trip_id, stop_id)`** — chỉ tồn tại cho stop có exception. `source` chỉ nhận `TEMPLATE_SNAPSHOT|MANUAL_OVERRIDE`; pre-Day-22 rows backfill `TEMPLATE_SNAPSHOT`, còn Day 22 không tạo snapshot mới và explicit per-Trip override dùng `MANUAL_OVERRIDE`.
 - **`DriverSchedule.day_of_week` JSONB** thay vì bit mask — đọc dễ, mở rộng nếu cần thêm flag per day.
+- **Day-23 schedule-change producer:** PATCH `/v1/operator/driver-schedules/{scheduleId}?applyTo=FUTURE_ONLY|ALL_PENDING` is the only contract that may cascade a generated Trip departure; only `ALL_PENDING` mutates Trips, and no dedicated Trip schedule endpoint/Gateway route exists. One captured clock requires `oldDeparture - now >= 2h` and computed `newDeparture - now >= 2h` for every affected Trip with a `CONFIRMED` Booking; equality is valid and either strict-less value rejects the whole batch. Absolute delta on ICT dates classifies same-date `<= 2h` as MINOR, same-date `> 2h && < 6h` as MEDIUM, and `>= 6h` or an ICT date change as MAJOR. Each committed change emits exact `trip.trip.schedule_changed {eventId,occurredAt,tripId,operatorId,oldDeparture,newDeparture,severity}` atomically through Outbox with the same payload/row/MessageId identity.
 - **`ShuttlePassenger.shuttle_trip_id` nullable** — passenger có thể đăng ký shuttle trước khi operator tạo ShuttleTrip (`PENDING_ASSIGNMENT` status).
 - **`Incident.photo_urls` JSONB** thay vì junction table — max 3 URLs, đơn giản, không có query cần JOIN.
 - **`OutboxEvent`** trong cùng service DB — atomic INSERT với business write trong 1 transaction (Outbox pattern). Worker poll mỗi 5s, dùng `BackgroundService` (.NET).

@@ -42,7 +42,7 @@ const e2eEnv = useDev
       POSTGRES_USER: 'day40_e2e',
       POSTGRES_PASSWORD: 'day40_e2e_postgres_only',
       POSTGRES_PORT: '55440',
-      REDIS_PORT: '56382',
+      REDIS_PORT: process.env.DAY40_E2E_REDIS_PORT || '56382',
       RABBITMQ_USER: 'day40_e2e',
       RABBITMQ_PASSWORD: 'day40_e2e_rabbit_only',
       RABBITMQ_PORT: '55702',

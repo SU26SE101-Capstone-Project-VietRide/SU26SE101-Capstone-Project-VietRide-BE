@@ -17,8 +17,10 @@ internal sealed class BookingShuttleCancelledIntegrationEventHandler
         BookingShuttleCancelledIntegrationEvent integrationEvent,
         CancellationToken cancellationToken)
     {
+        integrationEvent.Validate();
+
         var manifests = await _db.ShuttlePassengers
-            .Where(passenger => passenger.BookingId == integrationEvent.BookingId
+            .Where(passenger => passenger.BookingId == integrationEvent.BookingId!.Value
                 && passenger.Status != Domain.Entities.ShuttlePassenger.CancelledStatus
                 && passenger.Status != Domain.Entities.ShuttlePassenger.DeliveredStatus)
             .ToArrayAsync(cancellationToken);

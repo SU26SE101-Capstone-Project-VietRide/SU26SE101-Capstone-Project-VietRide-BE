@@ -5,6 +5,7 @@ using VietRide.Booking.Application.Features.OperatorBookings.ListOperatorBooking
 using VietRide.Booking.Application.Features.OperatorReports;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Repositories;
+using VietRide.Shared.Kernel.Primitives;
 using BookingEntity = VietRide.Booking.Domain.Entities.Booking;
 
 namespace VietRide.Booking.Application.Abstractions.Repositories;
@@ -22,6 +23,16 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
         bool cancellationOnly,
         CancellationToken ct = default)
         => throw new NotSupportedException("Operator Booking report is not implemented by this repository.");
+    Task<PagedResult<BookingEntity>> ListPassengerHistoryAsync(
+        Guid passengerUserId,
+        BookingStatus? status,
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        int page,
+        int pageSize,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Passenger booking history is not implemented by this repository.");
+
     Task<IReadOnlyList<PlatformBookingReportItem>> GetPlatformBookingMetricsAsync(
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc,
@@ -30,6 +41,20 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
 
     Task AcquireEventLockAsync(Guid sourceEventId, CancellationToken ct = default)
         => throw new NotSupportedException("Booking event lock is not implemented by this repository.");
+
+    Task<IReadOnlyList<BookingEntity>> GetScheduleChangeBookingsForUpdateAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Schedule-change projection lookup is not implemented by this repository.");
+
+    Task<bool> TryAdvanceTripCurrentDepartureAsync(
+        Guid bookingId,
+        DateTimeOffset expectedDeparture,
+        DateTimeOffset newDeparture,
+        DateTimeOffset updatedAt,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Schedule-change projection CAS is not implemented by this repository.");
 
     Task<IReadOnlyList<BookingEntity>> GetConfirmedByTripAsync(
         Guid tripId,
@@ -54,6 +79,13 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
         Guid operatorId,
         CancellationToken ct = default)
         => throw new NotSupportedException("Trip-edit impact is not implemented by this repository.");
+
+    Task<int> GetPendingPassengerCountAsync(
+        Guid tripId,
+        Guid stopId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Pending-passenger count is not implemented by this repository.");
 
     Task<OperatorBookingDetailDto?> GetOperatorBookingDetailAsync(Guid bookingId, Guid operatorId, CancellationToken ct = default)
         => throw new NotSupportedException("Operator booking detail is not implemented by this repository.");
@@ -81,9 +113,6 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
     /// </summary>
     Task<BookingEntity?> FindByIdAsync(Guid bookingId, CancellationToken ct = default);
 
-    Task<BookingEntity?> FindByIdForUpdateAsync(Guid bookingId, CancellationToken ct = default)
-        => FindByIdAsync(bookingId, ct);
-
     Task<int> RelinkActiveStationReferencesAsync(
         IReadOnlyCollection<Guid> sourceStationIds,
         Guid canonicalStationId,
@@ -96,6 +125,21 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
     /// Used for saga compensation checks and cancellation.
     /// </summary>
     Task<BookingEntity?> FindByIdWithPassengersAsync(Guid bookingId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Locks one Booking aggregate for pending-action resolution and station-edit transactions.
+    /// Pending-action callers lock the action first so concurrent resolution paths use one order.
+    /// </summary>
+    Task<BookingEntity?> FindByIdForUpdateAsync(Guid bookingId, CancellationToken ct = default)
+        => throw new NotSupportedException("Booking pending-action lock lookup is not implemented by this repository.");
+
+    Task<IReadOnlyList<BookingEntity>> GetNoShowCandidatesAsync(CancellationToken ct = default)
+        => throw new NotSupportedException("No-show candidates are not implemented by this repository.");
+
+    Task<BookingEntity?> FindConfirmedWithPassengersForUpdateAsync(
+        Guid bookingId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("No-show booking lock lookup is not implemented by this repository.");
 
     /// <summary>
     /// Returns the data needed to replay the Trip seat-lock seam for a payment event.

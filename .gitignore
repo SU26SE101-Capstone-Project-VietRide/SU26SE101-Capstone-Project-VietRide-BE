@@ -6,8 +6,7 @@
 # ── Node / TypeScript / Nx ───────────────────────────────────────────────────
 node_modules/
 dist/
-.nx/cache
-.nx/workspace-data
+.nx/
 .angular/
 .eslintcache
 .tsbuildinfo

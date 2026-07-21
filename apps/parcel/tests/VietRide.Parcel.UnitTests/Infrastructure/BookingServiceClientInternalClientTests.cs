@@ -78,6 +78,60 @@ public class BookingServiceClientInternalClientTests
         result.Kind.Should().Be(BookingLookupOutcomeKind.TransportError);
     }
 
+    [Fact]
+    public async Task GetPassengerHistoryAsync_UsesInternalEndpointAndReadsEnvelope()
+    {
+        var userId = Guid.NewGuid();
+        var body = JsonSerializer.Serialize(new
+        {
+            success = true,
+            statusCode = 200,
+            data = new
+            {
+                items = Array.Empty<object>(),
+                page = 2,
+                pageSize = 10,
+                totalItems = 0,
+                totalPages = 0,
+                hasNextPage = false,
+                hasPreviousPage = true,
+            },
+        }, JsonOptions);
+        var client = BuildClient(HttpStatusCode.OK, body);
+
+        var result = await client.GetPassengerHistoryAsync(
+            userId,
+            "CONFIRMED",
+            "2026-07-01T00:00:00+07:00",
+            "2026-07-02T00:00:00+07:00",
+            2,
+            10);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Page!.Page.Should().Be(2);
+        _handler.LastRequest!.RequestUri!.AbsolutePath.Should().Be("/internal/v1/bookings/history");
+        _handler.LastRequest.RequestUri.Query.Should().Contain($"userId={userId:D}");
+        _handler.LastRequest.RequestUri.Query.Should().Contain("status=CONFIRMED");
+        _handler.LastRequest.RequestUri.Query.Should().Contain("from=2026-07-01T00%3A00%3A00%2B07%3A00");
+    }
+
+    [Fact]
+    public async Task GetPassengerHistoryAsync_ReturnsFailureForUpstreamError()
+    {
+        var client = BuildClient(HttpStatusCode.ServiceUnavailable, "{}");
+
+        var result = await client.GetPassengerHistoryAsync(
+            Guid.NewGuid(),
+            null,
+            null,
+            null,
+            1,
+            20);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Page.Should().BeNull();
+    }
+
     private BookingServiceClient BuildClient(HttpStatusCode status, string body)
     {
         _handler = new FakeMessageHandler(status, body);

@@ -33,17 +33,26 @@ public static class HealthCheckBuilderExtensions
                 tags: new[] { "ready", "db" });
         }
 
-        // Redis — optional per service.
-        var redisHost = configuration["REDIS_HOST"];
-        var redisPort = configuration["REDIS_PORT"] ?? "6379";
-        var redisPass = configuration["REDIS_PASSWORD"];
-        if (!string.IsNullOrWhiteSpace(redisHost))
+        // Redis — optional per service. Prefer the runtime connection string so the
+        // readiness probe checks the same endpoint as the application itself.
+        var redisConnectionString = configuration["REDIS_URL"];
+        if (string.IsNullOrWhiteSpace(redisConnectionString))
         {
-            var redisConn = string.IsNullOrEmpty(redisPass)
-                ? $"{redisHost}:{redisPort}"
-                : $"{redisHost}:{redisPort},password={redisPass}";
+            var redisHost = configuration["REDIS_HOST"];
+            var redisPort = configuration["REDIS_PORT"] ?? "6379";
+            var redisPass = configuration["REDIS_PASSWORD"];
+            if (!string.IsNullOrWhiteSpace(redisHost))
+            {
+                redisConnectionString = string.IsNullOrEmpty(redisPass)
+                    ? $"{redisHost}:{redisPort}"
+                    : $"{redisHost}:{redisPort},password={redisPass}";
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(redisConnectionString))
+        {
             builder.AddRedis(
-                redisConnectionString: redisConn,
+                redisConnectionString: redisConnectionString,
                 name: "redis",
                 failureStatus: HealthStatus.Unhealthy,
                 tags: new[] { "ready", "cache" });

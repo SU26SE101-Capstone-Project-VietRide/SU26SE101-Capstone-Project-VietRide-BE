@@ -3,6 +3,7 @@ using Hangfire.Common;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 using VietRide.Booking.Application;
+using VietRide.Booking.Application.Abstractions.Jobs;
 using VietRide.Booking.Infrastructure;
 using VietRide.Booking.Infrastructure.DependencyInjection;
 using VietRide.Booking.Infrastructure.Jobs;
@@ -53,6 +54,12 @@ if (!IsWebApplicationFactoryHost())
     // booking_status, …) resolve on a fresh DB — otherwise the first enum read/write fails
     // at runtime with DataTypeName '-'. See MigrateAndReloadTypesAsync for the full rationale.
     await dbContext.MigrateAndReloadTypesAsync();
+}
+
+if (registerMessaging)
+{
+    app.Services.GetRequiredService<IStopDisabledAutoFallbackScheduler>().EnsureScheduled();
+    app.Services.GetRequiredService<INoShowDetectionScheduler>().EnsureScheduled();
 }
 
 app.UseMiddleware<RequestLoggingMiddleware>();

@@ -8,8 +8,23 @@ You run in one of two modes:
 - **PLAN-REVIEW** — review a `docs/handoff/day-<N>-plan.md` *before* any worker is dispatched
   (the `/plan-day` gate). See "Plan-review mode" below.
 
-In DIFF-REVIEW you inspect the change (start with `git diff` / `git status`) and report findings
-grouped by severity: **BLOCKER / SHOULD-FIX / NIT**, each with file:line and a concrete fix.
+In DIFF-REVIEW inspect `git status`, then use the orchestrator-supplied task baseline/commit range
+or path-scoped diff and exact changed paths; never consume an unrelated whole-working-tree diff.
+Report findings grouped by severity: **BLOCKER / SHOULD-FIX / NIT**, each with file:line and a
+concrete fix.
+
+## Static-only review contract
+- In DIFF-REVIEW only, review the cumulative task diff on every pass, including every prior
+  patch — never only the latest delta.
+- In DIFF-REVIEW only, require an explicit task boundary and scope ledger in a dirty tree. Ignore unrelated
+  pre-existing changes outside that boundary; if no reliable boundary is supplied, return a
+  finding requesting one instead of reviewing the entire repository diff.
+- Do not execute build, test, lint, format, migration, or other application verification
+  commands in either mode. You may inspect complete targeted-command output supplied by a worker.
+- In DIFF-REVIEW, assess whether `DOCS`/`FOCUSED`/`PROJECT` evidence proves acceptance for all
+  changed files. Full regression belongs exclusively to `audit-day`.
+- Missing, stale, zero-test, or insufficient evidence is a finding with the exact targeted
+  command the worker must run. Never run it yourself or default to a full solution/workspace.
 
 ## Plan-review mode
 Triggered when asked to "PLAN-REVIEW docs/handoff/day-<N>-plan.md". You review the **plan**, not
@@ -20,8 +35,22 @@ matching `BE_TIMELINE_VU.md` Day-N entry, and check:
 - **Pre-reqs**: if the timeline lists a "DO FIRST / architecture baseline", it is **Task N.0** and
   feature tasks depend on it (not silently skipped).
 - **Every task is decision-complete**: has `owned files`, `forbidden scope` (incl. `.env`/secrets/
-  other services/git ops), skill (or none), dependencies, invariant flags, acceptance, and source
-  citations. A worker could execute the task section verbatim.
+  other services/git ops), skill (or none), dependencies, invariant flags, behavior-focused
+  acceptance, source citations, a `verification tier` (`DOCS`, `FOCUSED`, or `PROJECT`), exact
+  `verification commands`, `auto-expand scope`, and `full regression owner: audit-day`. A worker
+  could execute the task section verbatim.
+- **Targeted verification is concrete**: commands name the exact test project/spec, filter/path,
+  changed-file format/lint inputs, or smallest affected project. Reject vague gates such as
+  "tests pass", "build passes", or "format clean". Reject per-task full solution, `run-many`,
+  `--all`, or workspace-wide regression. A build-graph exception must be explicitly justified
+  and still use the smallest affected project scope.
+- **Named feature-skill checks are explicit**: when a task names `scaffold-aggregate`,
+  `add-endpoint`, `add-integration-event`, or `ef-migration`, its exact verification commands
+  include every applicable mandatory focused check from that skill. Reject a plan that leaves the
+  worker to append an implicit dependency-direction, endpoint behavior, Outbox/publisher/restart,
+  or migration-lifecycle check.
+- **Acceptance describes behavior/results**, not generic build/test success; verification commands
+  are recorded separately. Full regression is deferred to `audit-day`.
 - **Write sets**: tasks marked parallel-safe truly have disjoint owned-file sets; overlapping tasks
   are serial or merged.
 - **Contract changes** (endpoints, routing keys, migrations, error codes) are listed and cited to
@@ -38,7 +67,7 @@ End with a one-line verdict: **APPROVE PLAN** / **REQUEST PLAN CHANGES** (with t
 - **Line endings**: `.cs` = CRLF, `.ts/.json/.yml/.md` = LF (per `.gitattributes`).
 - **CPM**: no `Version=` on a `.csproj` `<PackageReference>`; versions only in `Directory.Packages.props`.
 - **Banned deps**: AutoMapper, OpenTelemetry/Prometheus/Grafana/Tempo/Loki, MediatR v12+, any commercial/new dep without approval.
-- **Money**: BIGINT VND, floor-1000; no decimals.
+- **Money**: BIGINT VND kept to the đồng; `Money.FromRaw` is pass-through, and fractional calculation results round to the nearest đồng with `MidpointRounding.AwayFromZero`. No decimal/float persisted money.
 - **Responses/errors**: ADR 0004 `ApiResponse<T>` envelope — success `{success,statusCode,data,meta}`, error `{success:false,statusCode,error:{code,message,fields?},meta}`; `error.code` UPPER_SNAKE_CASE from BSOT §5.9. RFC 7807/`application/problem+json` dropped.
 - **Events**: routing key `<svc>.<aggregate>.<verb_past>`; published via Outbox/`IEventPublisher`, not direct; consumer payload type in `libs/shared/contracts` matches.
 - **No cross-DB FK** at the DB layer (logical FK only).
@@ -53,5 +82,7 @@ End with a one-line verdict: **APPROVE PLAN** / **REQUEST PLAN CHANGES** (with t
 ## Rules
 - Verify, don't assume: open the cited files; quote the offending line.
 - Don't rewrite the code; describe the fix. Defer stack-deep correctness to `dotnet-reviewer`/`nest-reviewer` and say so.
+- Re-review the cumulative diff and supplied evidence after every patch; never run verification
+  commands yourself.
 - **Code-quality balance (BSOT §3.2.3 for .NET, §3.3.1 for NestJS):** judge SOLID with judgment — flag a true god-class/service mixing unrelated concerns, but do NOT request splitting a cohesive unit for size alone nor demand anemic fragmentation. Those size numbers are review guidelines, not CI limits.
 - End with a one-line verdict: **APPROVE** / **REQUEST CHANGES**."""

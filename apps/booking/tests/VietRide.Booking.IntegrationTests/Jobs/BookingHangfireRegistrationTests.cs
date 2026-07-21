@@ -43,6 +43,10 @@ public sealed class BookingHangfireRegistrationTests(
             && descriptor.ImplementationType == typeof(HangfirePendingActionRealertScheduler)
             && descriptor.Lifetime == ServiceLifetime.Scoped);
         services.Should().Contain(descriptor =>
+            descriptor.ServiceType == typeof(IScheduleChangeAutoAcceptScheduler)
+            && descriptor.ImplementationType == typeof(HangfireScheduleChangeAutoAcceptScheduler)
+            && descriptor.Lifetime == ServiceLifetime.Scoped);
+        services.Should().Contain(descriptor =>
             descriptor.ServiceType == typeof(Microsoft.Extensions.Hosting.IHostedService));
     }
 

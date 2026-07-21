@@ -1,9 +1,12 @@
 using System.Text.Json;
 using MediatR;
 using VietRide.Identity.Application.Abstractions.Repositories;
+using VietRide.Identity.Application.Events;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
+using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Identity.Application.Features.Admin.LockUser;
 
@@ -12,15 +15,21 @@ public sealed class LockUserCommandHandler : IRequestHandler<LockUserCommand, Lo
     private readonly IUserRepository _users;
     private readonly IRefreshTokenRepository _refreshTokens;
     private readonly IActivityLogRepository _activityLogs;
+    private readonly IClock _clock;
+    private readonly IIntegrationEventOutbox _outbox;
 
     public LockUserCommandHandler(
         IUserRepository users,
         IRefreshTokenRepository refreshTokens,
-        IActivityLogRepository activityLogs)
+        IActivityLogRepository activityLogs,
+        IClock clock,
+        IIntegrationEventOutbox outbox)
     {
         _users = users;
         _refreshTokens = refreshTokens;
         _activityLogs = activityLogs;
+        _clock = clock;
+        _outbox = outbox;
     }
 
     public async Task<LockUserResponseDto> Handle(
@@ -43,6 +52,17 @@ public sealed class LockUserCommandHandler : IRequestHandler<LockUserCommand, Lo
         await _refreshTokens.RevokeActiveByUserAsync(
             user.Id,
             RefreshTokenRevokeReason.ADMIN_REVOKE,
+            cancellationToken);
+
+        var firebaseEvent = new FirebaseSessionRevocationRequestedIntegrationEvent(
+            Guid.NewGuid(),
+            _clock.UtcNow,
+            user.Id,
+            "USER_LOCKED");
+        await _outbox.EnqueueAsync(
+            firebaseEvent.EventId,
+            FirebaseSessionRevocationRequestedIntegrationEvent.EventType,
+            JsonSerializer.Serialize(firebaseEvent),
             cancellationToken);
 
         var metadata = JsonSerializer.Serialize(new

@@ -3,13 +3,17 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Booking.Api.Controllers.Requests;
+using VietRide.Booking.Application.Features.Bookings.AcceptStopDisabledFallback;
 using VietRide.Booking.Application.Features.Bookings.CancelBooking;
 using VietRide.Booking.Application.Features.Bookings.CreateBooking;
 using VietRide.Booking.Application.Features.Bookings.CreateRoundTripBooking;
 using VietRide.Booking.Application.Features.Bookings.EditDropoff;
 using VietRide.Booking.Application.Features.Bookings.EditPickup;
 using VietRide.Booking.Application.Features.Bookings.GetBookingStatus;
+using VietRide.Booking.Application.Features.Bookings.History;
+using VietRide.Booking.Application.Features.Bookings.ResolvePendingAction;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Booking.Api.Controllers;
 
@@ -32,6 +36,32 @@ public sealed class BookingsController : ControllerBase
     public BookingsController(ISender sender)
     {
         _sender = sender;
+    }
+
+    [HttpGet("history")]
+    [Authorize(Roles = PassengerRole)]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<BookingHistoryItemDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<PagedResult<BookingHistoryItemDto>>> GetHistoryAsync(
+        [FromQuery] string? status,
+        [FromQuery] string? from,
+        [FromQuery] string? to,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _sender.Send(
+            new GetBookingHistoryQuery(
+                GetPassengerUserId(),
+                status,
+                from,
+                to,
+                page,
+                pageSize),
+            cancellationToken);
+
+        return Ok(result);
     }
 
     /// <summary>Poll the minimal Booking-owned state after a payment callback.</summary>
@@ -243,6 +273,69 @@ public sealed class BookingsController : ControllerBase
         var result = await _sender.Send(command, ct);
 
         return StatusCode(StatusCodes.Status200OK, result);
+    }
+
+    /// <summary>Accept the route-origin/destination fallback for a STOP_DISABLED action.</summary>
+    [HttpPost("{bookingId:guid}/pending-action/{actionId:guid}/accept-fallback")]
+    [Authorize(Roles = PassengerRole)]
+    [RequireIdempotency]
+    [ProducesResponseType(typeof(ApiResponse<AcceptStopDisabledFallbackResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> AcceptStopDisabledFallback(
+        [FromRoute] Guid bookingId,
+        [FromRoute] Guid actionId,
+        CancellationToken ct)
+    {
+        var result = await _sender.Send(new AcceptStopDisabledFallbackCommand(
+            bookingId,
+            actionId,
+            GetPassengerUserId(),
+            GetRequiredIdempotencyKey()), ct);
+        return StatusCode(StatusCodes.Status200OK, result);
+    }
+
+    /// <summary>Resolve a persisted passenger schedule-change action.</summary>
+    [HttpPost("{bookingId}/pending-actions/{actionId}/resolve")]
+    [Authorize(Roles = PassengerRole)]
+    [RequireIdempotency]
+    [ProducesResponseType(typeof(ApiResponse<ResolvePendingActionResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ResolvePendingAction(
+        [FromRoute] string bookingId,
+        [FromRoute] string actionId,
+        [FromBody] ResolvePendingActionRequest request,
+        CancellationToken ct)
+    {
+        var command = new ResolvePendingActionCommand(
+            ParseRouteGuid(bookingId, nameof(bookingId)),
+            ParseRouteGuid(actionId, nameof(actionId)),
+            GetPassengerUserId(),
+            Request.Headers[IdempotencyKeyHeader].ToString(),
+            request.Action,
+            request.Note,
+            request.ExtraFields?.Keys.ToArray() ?? []);
+        var result = await _sender.Send(command, ct);
+
+        return StatusCode(StatusCodes.Status200OK, result);
+    }
+
+    private static Guid ParseRouteGuid(string value, string field)
+    {
+        if (Guid.TryParse(value, out var parsed) && parsed != Guid.Empty)
+        {
+            return parsed;
+        }
+
+        throw new VietRide.Shared.Application.Exceptions.CodedValidationException(
+            "VALIDATION_ERROR",
+            "Route value must be a UUID.",
+            [new VietRide.Shared.Application.Exceptions.ValidationError(field, "Must be a valid UUID.")]);
     }
 
     // -----------------------------------------------------------------------

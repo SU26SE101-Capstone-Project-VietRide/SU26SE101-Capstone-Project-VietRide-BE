@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
@@ -221,6 +222,8 @@ public sealed class TripCompletedIntegrationEventTests
         var options = new DbContextOptionsBuilder<BookingDbContext>()
             .UseNpgsql(dataSource, npgsql =>
                 npgsql.MigrationsHistoryTable("__ef_migrations_history", BookingDbContext.SchemaName))
+            .ConfigureWarnings(warnings =>
+                warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning))
             .Options;
         return new BookingDbContext(options, new SystemClock());
     }

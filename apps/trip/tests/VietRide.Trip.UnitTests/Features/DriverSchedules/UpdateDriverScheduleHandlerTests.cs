@@ -616,12 +616,19 @@ public sealed class UpdateDriverScheduleHandlerTests
 
     private sealed class OutboxStub : IIntegrationEventOutbox
     {
-        public List<(string Type, string Payload)> Items { get; } = [];
+        public List<(Guid Id, string Type, string Payload)> Items { get; } = [];
         public bool ThrowOnEnqueue { get; set; }
         public Task EnqueueAsync(string eventType, string payloadJson, CancellationToken cancellationToken = default)
+            => EnqueueAsync(Guid.NewGuid(), eventType, payloadJson, cancellationToken);
+
+        public Task EnqueueAsync(
+            Guid eventId,
+            string eventType,
+            string payloadJson,
+            CancellationToken cancellationToken = default)
         {
             if (ThrowOnEnqueue) throw new InvalidOperationException("outbox failure");
-            Items.Add((eventType, payloadJson));
+            Items.Add((eventId, eventType, payloadJson));
             return Task.CompletedTask;
         }
     }

@@ -1,3 +1,3 @@
 namespace VietRide.Identity.Application.Features.Internal.Operators.GetOperatorSummaries;
 
-public sealed record OperatorSummaryDto(Guid OperatorId, string OperatorName);
+public sealed record InternalOperatorSummaryDto(Guid OperatorId, string OperatorName);

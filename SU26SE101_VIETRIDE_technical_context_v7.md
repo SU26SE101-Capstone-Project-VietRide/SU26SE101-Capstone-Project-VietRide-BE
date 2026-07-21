@@ -426,6 +426,16 @@ Streaming LLM response qua SSE, gọi vector DB, tích hợp nhiều external AP
 | **pgvector** | Vector similarity search cho RAG | PostgreSQL extension — thay thế Elasticsearch |
 | **SendGrid / SMTP** | Email — OTP đăng ký, parcel delivery link | Free tier 100 email/ngày |
 
+**Firebase Storage upload ảnh xe:** VietRide User Access Token không được dùng trực tiếp với
+Firebase. `OPERATOR_ADMIN` gọi `POST /v1/firebase/custom-token`; Identity revalidate User/Operator
+hiện tại rồi tạo Firebase Custom Token có UID = VietRide `userId` và claims
+`{ operatorId, role: OPERATOR_ADMIN }`. FE exchange bằng `signInWithCustomToken()`, upload đúng
+`vehicles/{operatorId}/{uuid-v4}.{ext}`, lấy download URL, gửi URL vào Vehicle API, sau đó
+`signOut()` (và cũng sign-out khi logout VietRide). Storage public-read riêng path ảnh xe; write
+chỉ đúng operator, MIME JPEG/PNG/WebP, kích thước lớn hơn 0 và nhỏ hơn 5 MiB; path khác default
+deny. User lock hoặc Operator suspend phát Outbox revoke request để Identity gọi Firebase
+`RevokeRefreshTokensAsync`. ID token đã phát có residual window tối đa khoảng một giờ.
+
 > **⚠️ Google Maps ETA — gọi có điều kiện, không gọi mỗi GPS packet:**
 > GPS update mỗi 3–5 giây × N active trips đồng thời → nếu gọi Maps API mỗi packet sẽ rất tốn kém (ví dụ 10 trips đang chạy = ~2 call/giây = >100k call/ngày, vượt free tier ngay ngày đầu).
 >
@@ -481,8 +491,10 @@ Streaming LLM response qua SSE, gọi vector DB, tích hợp nhiều external AP
 - Xác nhận từng hành khách đã lên xe (tick hoặc scan QR vé)
 - **Cảnh báo bỏ sót hành khách ("Avoid missing passengers"):**
   - Khi xe đang tại stop (GPS trong vòng 200m từ stop) → app tự động highlight danh sách passenger chưa tick tại stop này
-  - Khi Driver/Assistant bấm "Rời điểm dừng" (hoặc GPS phát hiện xe đã rời stop > 500m) → nếu còn passenger PENDING tại stop đó → hiện popup cảnh báo: "Còn [N] hành khách chưa lên xe tại [stop name]. Xác nhận rời điểm?"
-  - Driver/Assistant có thể xác nhận rời (các passenger đó sẽ bị mark potentially no-show) hoặc quay lại tick
+  - Khi Driver/Assistant bấm "Rời điểm dừng" → bodyless `POST /v1/driver/trips/{tripId}/stops/{stopId}/depart`
+    persists `TripStop.actualDepartureTime` and asks Booking for the exact pending-passenger count.
+    A positive count emits `trip.stop.departed_with_pending`; GPS is a future adapter to this
+    same command and is not a second write path.
 - Nhận push notification thay đổi lộ trình, lịch trình từ operator
 - **Tab "Hỗ trợ" — RAG AI (Driver/Assistant App):**
   - Truy cập chatbot RAG AI với context DRIVER role (query được: FAQ, quy trình vận hành, chính sách hàng ký gửi, thông tin tuyến)
@@ -1720,6 +1732,16 @@ Lý do: Passenger entity chỉ lưu operational data (seatNumber, boardingStatus
 
 **Trip info cho history list — snapshot strategy:** `GET /bookings/history` trả về data từ Booking DB, **không cần HTTP call sang Trip-Route-Vehicle Service**. Booking entity có 4 snapshot fields (`tripSnapshotOriginName`, `tripSnapshotDestName`, `tripSnapshotDeparture`, `tripSnapshotRouteName`) được set khi tạo Booking — đủ để render history row (tên tuyến, giờ khởi hành, tên bến). Xem entity spec ở section 8. Lý do chọn snapshot thay vì (b) HTTP call mỗi lần: N HTTP call khi load list — không scale, latency cao; thay vì (c) client ghép 2 API: double round-trip, lộ service boundary.
 
+**Passenger history facade — `GET /v1/passenger/history`:** FE chọn đúng một nhánh bằng query
+`type=TICKET|PARCEL`; v1 không có `ALL` và không free-text search. Parcel Service sở hữu facade vì
+dependency một chiều Parcel → Booking đã tồn tại. Nhánh `TICKET` chỉ gọi
+`GET /internal/v1/bookings/history?userId=...`, phân trang theo Booking và trả Ticket summaries
+bên trong Booking. Nhánh `PARCEL` chỉ query Parcel local với `senderUserId = JWT sub`; parcel mà
+user chỉ là người nhận không nằm trong nhánh này. Cả hai dùng `createdAt DESC, id DESC`, range
+`from` inclusive/`to` exclusive, `pageSize <= 100`. Booking upstream lỗi phải trả
+`502 UPSTREAM_UNAVAILABLE`, không giả thành trang rỗng. Trip enrichment cho parcel được deduplicate
+theo `tripId` và chạy bounded concurrency; Trip thiếu/lỗi chỉ làm journey fields null.
+
 **Round-trip booking (Đặt vé khứ hồi):**
 
 v1 scope đặt vé khứ hồi đầy đủ. UI 1 luồng checkout, backend 2 Booking độc lập.
@@ -2237,21 +2259,27 @@ Driver/Assistant App tại mỗi điểm đón:
   - Tick "Đã lên xe" cho từng passenger
   - Khi xe rời stop, hệ thống flag những passenger chưa tick là "potentially no-show"
 
-Hangfire job (chạy mỗi 5 phút) — 2 trigger riêng theo loại pickup:
+Hangfire `NoShowDetectionJob` (chạy mỗi 5 phút) có 2 trigger strict theo loại pickup:
 
-  TRIGGER A — Along-route pickup (Booking.pickupStopId NOT NULL):
-    Tìm Booking status CONFIRMED + Booking.pickupStopId thuộc TripStop có status = ARRIVED
-      AND TripStop.actualArrivalTime < now - interval '15 minutes'
-      AND tất cả Passenger trong booking chưa được tick boarding
-    → Booking → NO_SHOW
+  TRIGGER A — Along-route pickup (`Booking.pickupStopId NOT NULL`):
+    chỉ đủ điều kiện khi `Booking.status=CONFIRMED`, pickup TripStop có
+    `status=ARRIVED`, và `TripStop.actualArrivalTime + 15 minutes < now` (equality bị loại).
 
-  TRIGGER B — Terminal pickup (Booking.pickupStationId NOT NULL, pickupStopId NULL):
-    Tìm Booking status CONFIRMED + Trip.status = IN_PROGRESS
-      AND Trip.actualDepartureTime < now - interval '15 minutes'
-      AND tất cả Passenger trong booking chưa được tick boarding
-    → Booking → NO_SHOW
-    (Lý do: terminal pickup không có TripStop record cho origin station; dùng actualDepartureTime
-     vì đó là thời điểm xe rời bến — passenger không lên trước đó = no-show.)
+  TRIGGER B — Terminal pickup (`Booking.pickupStationId NOT NULL`, `pickupStopId NULL`):
+    chỉ đủ điều kiện khi `Booking.status=CONFIRMED`, `Trip.status=IN_PROGRESS`, và
+    `Trip.actualDepartureTime + 15 minutes < now` (equality bị loại). Terminal không có
+    TripStop anchor nên dùng trực tiếp thời điểm rời bến.
+
+Booking fails closed khi raw Trip snapshot/anchor upstream lỗi hoặc thiếu; không suy diễn từ
+planned ETA, stale projection, hoặc Outbox publish time. Job locks Booking/Passenger rows,
+rechecks the strict anchor and status, marks every remaining `PENDING` passenger as `NO_SHOW`,
+and appends one `MARK_NO_SHOW` history row plus one
+`booking.booking.passenger_no_show_marked` fact per Booking transition.
+
+The existing raw `GET /internal/v1/trips/{tripId}` snapshot is extended only with nullable
+trip-level `actualDepartureTime`; stop `status` and nullable `actualArrivalTime` remain
+authoritative. It requires only a valid Internal JWT (`401 AUTH_TOKEN_INVALID` otherwise), adds no
+tenant authorization, and introduces no event/projection seam.
 
   Common cho cả A và B:
     → TripSeat status giữ nguyên BOOKED (không release — ghế đã bán, hành khách bỏ tự nguyện)
@@ -2284,6 +2312,11 @@ Trường hợp 2: MỘT PHẦN Passenger no-show (ví dụ 1 BOARDED + 2 NO_SHO
 Trường hợp 3: TẤT CẢ Passenger BOARDED
   → Booking giữ CONFIRMED → COMPLETED khi Trip COMPLETED (bình thường)
 ```
+
+Exactly one `booking.booking.passenger_no_show_marked` event is emitted for each successful
+Booking transition, with `bookingStatus=NO_SHOW|PARTIAL_NO_SHOW`, newly marked passenger ids,
+`triggerType=ALONG_ROUTE|TERMINAL`, and an optional `pickupStopId` only for along-route pickup.
+The event identity is stable end-to-end: `eventId == OutboxEvent.Id == RabbitMQ MessageId`.
 
 Passenger entity cần track per-passenger boarding: `boardingStatus` enum (PENDING | BOARDED | NO_SHOW, default PENDING), thời điểm boarded, và stop nơi passenger thực sự lên xe (để audit + đối chiếu pickup stop đã đặt).
 
@@ -2476,19 +2509,20 @@ route change không tự tạo refund 100% khi chuyến vẫn tiếp tục vận
 
 ### 6.4.1 Stop Disable Flow (Operator disable Stop đang được dùng)
 
-Khi Operator disable một Stop (`PATCH /v1/operator/stops/{stopId}` với `isActive=false`) đang được booking active dùng làm `pickupStopId` hoặc `dropoffStopId`, hệ thống KHÔNG block disable nhưng PHẢI notice tất cả passenger bị ảnh hưởng.
+Khi Operator disable một Stop, canonical mutation là bodyless
+`DELETE /v1/operator/stops/{stopId}?replacedByStopId=`. `OPERATOR_ADMIN` phải gửi UUID-v4
+`Idempotency-Key`; first success sets `isActive=false`, preserves `deletedAt`, stores the optional
+same-operator/cycle-free replacement, and publishes `trip.stop.disabled`. `PATCH
+/v1/operator/stops/{stopId}` remains details-update-only: it never disables a Stop and never emits
+`trip.stop.disabled`.
 
 **Flow:**
 
 ```
 Operator bấm "Vô hiệu hóa Stop" trên dashboard:
-  → UI hiển thị warning: "Stop [X] đang được dùng bởi [N] booking active.
-     Hệ thống sẽ gửi notification cho passenger và đề xuất stop thay thế.
-     Xác nhận disable?"
-  → Operator có thể link Stop thay thế (replacedByStopId) trong cùng dialog (optional)
-  → Confirm:
-      UPDATE Stop SET isActive=false, replacedByStopId=<optional>
-      Publish event StopDisabled { stopId, replacedByStopId? }
+  → DELETE ghi Stop và Outbox atomically; response luôn có `warning: null` và KHÔNG có
+    `ActiveBookingCount`. `STOP_DISABLED_BOOKING_AFFECTED` là legacy/deprecated cho DELETE;
+    Booking impact is sourced only from `booking.stop_disabled.affected`.
 
 Booking Service consume StopDisabled:
   FOR EACH Booking WHERE (pickupStopId = stopId OR dropoffStopId = stopId)
@@ -2496,12 +2530,14 @@ Booking Service consume StopDisabled:
                           AND Trip.status IN (SCHEDULED, BOARDING):
     INSERT BookingPendingAction {
       reason   = STOP_DISABLED,
-      deadline = min(now + 24h, Trip.departureDateTime - 2h),  // cùng cutoff edit pickup
+      deadline = min(capturedNow + 24h, Trip.tripCurrentDeparture - 2h),
       metadata = {
         disabledStopId,
-        affectedField: "pickup" | "dropoff",
-        suggestedStopId: replacedByStopId,    // operator gợi ý nếu có
-        fallbackStationId: Route.destinationStationId  // dùng cho dropoff fallback
+        affectedField: "PICKUP" | "DROPOFF",
+        suggestedStopId: replacedByStopId,
+        fallbackStationId: affectedField == "PICKUP"
+          ? Route.originStationId
+          : Route.destinationStationId
       }
     }
     Push notification passenger:
@@ -2523,13 +2559,18 @@ Passenger 3 options trong window:
      → Booking → CANCELLED, refundOverride=true, cancellationReason=STOP_DISABLED_REFUSED
      → Refund 100% (lỗi operator, không áp cancellation policy)
 
-Hangfire job (Booking Service, mỗi 5 phút):
+Hangfire `StopDisabledAutoFallbackJob` (Booking Service, mỗi 5 phút):
   SELECT BookingPendingAction WHERE reason = STOP_DISABLED
     AND resolvedAt IS NULL AND deadline < now
   → Auto-fallback giống option 2 (terminal đích)
   → resolvedAction = AUTO_FALLBACK_DESTINATION
+  → Publish one `booking.booking.stop_disabled_auto_fallback_applied` per resolved action
   → Push notification: "Vì bạn không phản hồi, vé chuyển về [terminal name]."
 ```
+
+`deadline == now` still creates the action and remains passenger-action eligible; no synchronous
+fallback occurs at equality (no synchronous fallback); only a later scheduler pass with strict
+`deadline < now` resolves it.
 
 **Phân biệt STOP_DISABLED vs ROUTE_CHANGE:**
 
@@ -3624,7 +3665,7 @@ UI hỏi: "Bạn có muốn tạo lịch chiều về (HN→SG) cho tài xế A?
 
 `TripStop` là snapshot các điểm dừng của một chuyến cụ thể. Khác với `TripStopFare` (chỉ tồn tại khi operator muốn override `Route.baseFare` cho stop cụ thể), `TripStop` tồn tại cho **mọi chuyến có RouteStop entries** để Driver App hiển thị danh sách stop còn lại và Tracking Service tính ETA per stop.
 
-Fields cần có: tripId + stopId composite key, `orderIndex` (1-indexed, thứ tự dừng trên chuyến), `estimatedArrivalTime` (static baseline — tính từ Trip.departureDateTime + RouteStop.estimatedDurationFromOriginMinutes, **KHÔNG bao giờ update sau khi generate**), `actualArrivalTime` nullable (khi xe thực sự đến — xem note bên dưới về cơ chế set), `status` enum (PENDING | ARRIVED | SKIPPED — SKIPPED khi stop bị disable lúc generate Trip), **`allowPickup` boolean + `allowDropoff` boolean**, **`distanceFromOriginKm` decimal nullable** (snapshot từ RouteStop dùng cho DISRUPTED refund).
+Fields cần có: tripId + stopId composite key, `orderIndex` (1-indexed, thứ tự dừng trên chuyến), `estimatedArrivalTime` (static baseline — tính từ Trip.departureDateTime + RouteStop.estimatedDurationFromOriginMinutes, **KHÔNG bao giờ update sau khi generate**), `actualArrivalTime` nullable (khi xe thực sự đến — xem note bên dưới về cơ chế set), `actualDepartureTime` nullable (durable Day-24 stop-departure anchor), `status` enum (PENDING | ARRIVED | SKIPPED — SKIPPED khi stop bị disable lúc generate Trip), **`allowPickup` boolean + `allowDropoff` boolean**, **`distanceFromOriginKm` decimal nullable** (snapshot từ RouteStop dùng cho DISRUPTED refund).
 
 > **Cơ chế set `TripStop.actualArrivalTime` — Assistant explicit confirm:**
 > Assistant bấm nút "Đã đến [tên stop]" trong Driver App khi xe dừng tại điểm dừng đó → API call `POST /v1/driver/trips/{tripId}/stops/{stopId}/arrive` → Trip-Route-Vehicle Service set `TripStop.actualArrivalTime = now`, `TripStop.status = ARRIVED`. Nút này chỉ enable khi Trip.status = IN_PROGRESS.
@@ -3632,6 +3673,25 @@ Fields cần có: tripId + stopId composite key, `orderIndex` (1-indexed, thứ 
 > **Lý do chọn explicit confirm thay vì GPS auto-detect:** GPS auto-detect tạo cross-service write phức tạp (Tracking Service NestJS phải write sang Trip-Route-Vehicle ASP.NET Core DB qua HTTP/event, coupling chặt). GPS có thể giật (xe dừng đèn đỏ gần stop) → false positive. Explicit confirm đơn giản, nhất quán với các confirm action khác của Assistant (LOADED, UNLOADED). DISRUPTED refund luôn có fallback stop-order ratio nếu `actualArrivalTime` chưa được set — không bị block.
 >
 > **Endpoint:** `POST /v1/driver/trips/{tripId}/stops/{stopId}/arrive` — role DRIVER hoặc ASSISTANT của trip đó, precondition Trip.status = IN_PROGRESS và TripStop.status = PENDING.
+
+> **Day-24 departure endpoint:** bodyless `POST /v1/driver/trips/{tripId}/stops/{stopId}/depart` —
+> assigned DRIVER/ASSISTANT only, tenant-scoped, required UUID-v4 Idempotency-Key, precondition
+> `Trip.status=IN_PROGRESS`, `TripStop.status=ARRIVED`, and nullable
+> `TripStop.actualDepartureTime IS NULL`. Trip and TripStop are lock/CAS rechecked before
+> persisting one departure timestamp. Trip then calls Booking's exact pending-count predicate;
+> only a positive count publishes `trip.stop.departed_with_pending`. GPS is a future adapter to
+> this command.
+> Booking counts exactly `Booking.status=CONFIRMED AND Passenger.boardingStatus=PENDING AND
+> Booking.tripId=:tripId AND Booking.pickupStopId=:stopId AND Booking.operatorId=:operatorId`.
+> The seam uses only a valid Internal JWT, returns raw zero for no match, rejects malformed/all-zero
+> UUID input with `422 VALIDATION_ERROR`, and performs no Trip/Stop lookup, tenant/caller-service
+> authorization, or absent-reference `403`/`404` validation.
+> Public success is `200 ApiResponse<DepartStopResponse>` with data exactly
+> `{tripId,stopId,departedAt,pendingPassengerCount,eventEmitted}`. Wrong Trip state is
+> `422 TRIP_NOT_IN_PROGRESS`, `PENDING|SKIPPED` is `422 TRIP_STOP_NOT_ARRIVED`, a new key after
+> departure is `409 TRIP_STOP_ALREADY_DEPARTED`, and Booking dependency failure is
+> `502 UPSTREAM_UNAVAILABLE`. Same-key replay is byte-identical; fingerprint mismatch is
+> `422 IDEMPOTENCY_KEY_MISMATCH`.
 
 > Hangfire job generate TripStop khi tạo Trip, copy từ RouteStop. Route change (alternative route) cập nhật TripStop per trip, không ảnh hưởng Route gốc.
 
@@ -4256,78 +4316,90 @@ Example 3 — FALLBACK (operator chưa nhập distance), xe đi qua 2/4 stop sau
 
 ### 6.13 Schedule Change — Operator đổi giờ khởi hành (3 mức)
 
-**Phân loại 3 mức:**
+**Producer và cutoff:** PATCH `/v1/operator/driver-schedules/{scheduleId}?applyTo=FUTURE_ONLY|ALL_PENDING`
+là producer duy nhất của schedule change; chỉ nhánh `ALL_PENDING` được cascade
+`Trip.departureDateTime`. Không có endpoint đổi lịch riêng trên Trip và không cần Gateway route
+mới. Handler capture clock đúng một lần. Với mỗi Trip có Booking `CONFIRMED`, cả
+`oldDeparture - now` và computed `newDeparture - now` phải `>= 2h`; equality được phép, còn bất kỳ
+giá trị nào `< 2h` trả `409 DRIVER_SCHEDULE_EDIT_TOO_LATE` trước transaction.
 
-| Severity | Điều kiện | Refund (nếu passenger cancel) | Xử lý |
+**Phân loại theo `delta = |newDeparture - oldDeparture|` và ngày lịch ICT:**
+
+| Severity | Điều kiện | Refund khi passenger reject | Xử lý Booking `CONFIRMED` |
 |---|---|---|---|
-| **MINOR** | cùng ngày và delta ≤ 2 giờ | 0% | Auto-accept. Booking publish informational. Khuyến nghị (không bắt buộc) operator gửi voucher xin lỗi. KHÔNG tạo BookingPendingAction. |
-| **MEDIUM** | cùng ngày và 2 giờ < delta < 6 giờ | 50% | INSERT BookingPendingAction { reason = SCHEDULE_CHANGE, severity = MEDIUM }. |
-| **MAJOR** | delta ≥ 6 giờ hoặc đổi sang ngày khác | 100% | INSERT BookingPendingAction { reason = SCHEDULE_CHANGE, severity = MAJOR }. Lỗi nhà xe. Passenger có quyền hủy 100%. |
+| **MINOR** | cùng ngày ICT và `delta <= 2h` | 0% | Không tạo `BookingPendingAction`; publish informational fact. |
+| **MEDIUM** | cùng ngày ICT và `delta > 2h && delta < 6h` | 50% | Tạo `SCHEDULE_CHANGE` severity MEDIUM. |
+| **MAJOR** | `delta >= 6h` hoặc đổi ngày ICT | 100% | Tạo `SCHEDULE_CHANGE` severity MAJOR. |
 
-**Confirmation window cho SCHEDULE_CHANGE (MEDIUM/MAJOR):**
+**Projection và causal sequencing trong Booking:**
 
-Case A — Schedule change xảy ra > 24h trước giờ khởi hành mới:
-  deadline = min(notifiedAt + 24h, newDepartureAt - 2h)
+- `trip_snapshot_departure` là lịch sử immutable; không sửa khi Trip đổi giờ.
+- `trip_current_departure` là projection mutable, backfill ban đầu từ snapshot. Consumer áp dụng
+  `trip.trip.schedule_changed` cho Booking `PENDING_PAYMENT|CONFIRMED`: nếu current bằng
+  `oldDeparture` thì CAS sang `newDeparture`; nếu current đã bằng `newDeparture` thì duplicate
+  no-op; nếu khác cả hai thì retry rồi quarantine, không overwrite mù.
+- Chỉ Booking `CONFIRMED` publish passenger fact: MINOR phát
+  `booking.booking.schedule_change_informational`; MEDIUM/MAJOR supersede action active cũ rồi tạo
+  đúng một active `SCHEDULE_CHANGE` và phát `booking.booking.schedule_change_required`.
+  `PENDING_PAYMENT` chỉ cập nhật projection. Notification không consume Trip fact trực tiếp.
+- Query operator giữ key cũ: `date` lọc half-open ICT day trên `trip_current_departure`, còn
+  `sortBy=departureAt` sort projection này rồi `id` cùng chiều `sortDir`. Response list/detail đặt
+  `trip.currentDepartureAt` cạnh immutable `trip.departureAt`; không có top-level duplicate hoặc
+  sort key `currentDepartureAt`.
+- Deadline của `STOP_DISABLED` dùng `trip_current_departure`, không dùng snapshot cũ.
 
-Case B — Schedule change xảy ra trong vòng 24h trước giờ khởi hành mới:
-  deadline = max(notifiedAt + 60m, newDepartureAt - 30m)
+**Deadline và metadata freeze cho MEDIUM/MAJOR:**
 
-**Quyền của passenger trong confirmation window:**
-  1. Accept giờ mới → resolvedAt = now, resolvedAction = ACCEPTED (BookingPendingAction cleared). Booking giữ CONFIRMED.
-  2. Reject → Booking CANCELLED, `refundOverride = true`, `cancellationReason = SCHEDULE_CHANGED`. Refund:
-     - MEDIUM → 50% giá vé
-     - MAJOR → 100% giá vé
+```text
+if occurredAt is more than 24h before newDeparture:
+  initialDeadline = min(occurredAt + 24h, newDeparture - 2h)
+else:
+  initialDeadline = max(occurredAt + 60m, newDeparture - 30m)
 
-**Timeout — hết window không phản hồi:**
-  → MEDIUM: auto-accept (resolvedAction = ACCEPTED). Passenger sau đó muốn hủy → USER_INITIATED, theo `Operator.cancellationPolicy` thông thường.
-  → MAJOR: **KHÔNG auto-cancel, KHÔNG auto-accept silently.** Re-alert passenger; nếu vẫn không phản hồi đến T-30 phút trước departure mới → auto-accept (passenger đã có nhiều cơ hội phản hồi). Lý do: MAJOR là lỗi nhà xe, không nên silently force passenger lên chuyến mới.
-
-**Flow:**
+terminalDeadline = newDeparture - 30m for MAJOR; null for MEDIUM
+effectiveCutoff = terminalDeadline when MAJOR and initialDeadline < terminalDeadline;
+                  otherwise initialDeadline
 ```
-DriverSchedule `ALL_PENDING` cascade cập nhật Trip.departureDateTime; canonical Trip PATCH không
-nhận field này:
-  → Tính delta = |newDepartureDateTime - oldDepartureDateTime|
-  → severity = MINOR  if delta ≤ 2h và cùng ngày
-              MEDIUM if 2h < delta < 6h và cùng ngày
-              MAJOR  if delta ≥ 6h hoặc đổi sang ngày khác
-  → Trip commit state + Outbox `trip.trip.schedule_changed`
-    `{eventId,occurredAt,tripId,operatorId,oldDeparture,newDeparture,severity}`
-    (Booking là consumer duy nhất; Notification không consume Trip fact trực tiếp)
-  → Booking consume; FOR EACH Booking WHERE tripId = trip.id AND status = CONFIRMED:
-      nếu severity = MINOR:
-        Publish `booking.booking.schedule_change_informational`
-        `{eventId,occurredAt,bookingId,tripId,userId,oldDeparture,newDeparture,severity:MINOR}`
-        đến Notification; không có pendingActionId/deadline; không tạo BookingPendingAction
-        (Operator được khuyến nghị attach voucher xin lỗi — UI có nút "Gửi voucher xin lỗi")
-      nếu severity ∈ {MEDIUM, MAJOR}:
-        INSERT BookingPendingAction {
-          reason = SCHEDULE_CHANGE,
-          severity = MEDIUM | MAJOR,
-          deadline = [tính theo Case A/B ở trên],
-          resolvedAt = NULL,
-          metadata = { refundPercentIfCancel: 50 | 100 }
-        }
-        Publish `booking.booking.schedule_change_required` với mandatory
-        `{eventId,occurredAt,bookingId,tripId,userId,pendingActionId,deadline,
-          oldDeparture,newDeparture,severity}` để Notification render theo severity:
-          MEDIUM: "Chuyến [X] đổi giờ từ [old] sang [new] (hơn 2 giờ).
-                   Bạn có thể chấp nhận hoặc hủy với hoàn 50%."
-          MAJOR:  "Chuyến [X] đổi giờ ≥ 6h từ [old] sang [new].
-                   Bạn có quyền chấp nhận chuyến mới hoặc hủy hoàn 100%."
-  → Booking status khác CONFIRMED không publish informational/required schedule fact.
 
-Day-22 Hangfire T+2h re-alert (logical dedupe by pendingActionId; physical duplicate jobs allowed):
-  mỗi execution lock/recheck action exists + unresolved + before deadline, rồi publish
-  `booking.booking.pending_action_realerted` bằng deterministic Outbox identity derived từ
-  pendingActionId; chỉ một side effect persist, duplicate job no-op.
+Action metadata freeze đúng
+`{sourceEventId,oldDeparture,newDeparture,severity,initialDeadline,terminalDeadline,
+refundBasisAmount,refundPercent,refundAmount}`. `refundBasisAmount` luôn là immutable
+`Booking.totalAmount`; `refundPercent` là 50 hoặc 100; `refundAmount` làm tròn đến đồng gần nhất
+bằng `MidpointRounding.AwayFromZero`. Không dùng giá hiện tại từ Trip hay Payment làm refund basis.
 
-Day-23 timeout/resolution job:
-  SELECT BookingPendingAction WHERE reason = SCHEDULE_CHANGE
-    AND resolvedAt IS NULL AND deadline < now
-  → severity = MEDIUM → auto-accept (resolvedAction = ACCEPTED)
-  → severity = MAJOR  → re-alert; nếu chưa resolve và sát departure -30m → auto-accept
-  → Push thông báo cho passenger
-```
+**Passenger resolution:** POST `/v1/bookings/{bookingId}/pending-actions/{actionId}/resolve` chỉ
+cho JWT role `PASSENGER` và đúng Booking owner, body đúng `{ action: ACCEPTED|REJECTED, note? }`,
+UUID-v4 `Idempotency-Key` bắt buộc. Persisted reason phải là `SCHEDULE_CHANGE`; `selectedStopId`
+invalid và operator seat assignment không thuộc contract này. Same-key/same-payload replay
+byte-identical trước khi đọc terminal state; new key mới nhận conflict terminal. Request tại
+`now == effectiveCutoff` vẫn hợp lệ; chỉ `now > effectiveCutoff` là expired và job sở hữu outcome.
+
+- `ACCEPTED`: resolve action với `resolvedAction=ACCEPTED`; Booking giữ `CONFIRMED`.
+- `REJECTED`: trong một Booking transaction, resolve action, set Booking `CANCELLED` với
+  `refundOverride=true`, `cancellationReason=SCHEDULE_CHANGED`, append status history, và enqueue đúng một authoritative
+  `booking.booking.cancelled` chứa frozen `refundAmount`. MEDIUM hoàn 50%; MAJOR hoàn 100%.
+
+**Scheduled phases:** Day-22 `PendingActionRealertJob` không đổi: chạy tại action occurrence `+2h`
+cho unresolved `PENDING_SEAT_ASSIGNMENT` và MEDIUM/MAJOR `SCHEDULE_CHANGE`, mỗi intended phase at
+most once. Day-23 `ScheduleChangeAutoAcceptJob` là job riêng:
+
+- MEDIUM finalize `ACCEPTED` tại `initialDeadline + 1s`.
+- MAJOR khi `initialDeadline < terminalDeadline`: tại initial phase có thể phát đúng một re-alert
+  với identity riêng, rồi finalize `ACCEPTED` tại `terminalDeadline + 1s`. Nếu job lag đã qua
+  terminal deadline thì đi thẳng final phase, không phát initial-phase fact.
+- MAJOR khi `initialDeadline >= terminalDeadline`: không có initial-phase re-alert và chỉ finalize
+  khi strict-after `initialDeadline`.
+- Không phase nào cancel Booking hoặc tạo refund. Chỉ MEDIUM final và MAJOR terminal/direct phát
+  `booking.booking.pending_action_auto_resolved` với exact payload
+  `{eventId,occurredAt,bookingId,tripId,userId,pendingActionId,resolvedAction,severity,
+  oldDeparture,newDeparture}`, trong đó `resolvedAction=ACCEPTED`.
+
+Mọi Day-23 Outbox fact dùng một identity xuyên suốt:
+`payload.eventId == outbox_events.id == RabbitMQ MessageId`. `booking.booking.cancelled` producer
+mới luôn có fresh UUID-v4 `eventId` và producer-captured offset-date-time `occurredAt`; consumer chỉ
+fallback theo `bookingId` cho exact legacy payload thiếu đồng thời cả hai field, không chấp nhận
+partial identity. Notification map required/re-alerted/auto-resolved schedule facts sang type hiện
+có `TRIP_SCHEDULE_CHANGED` và dedupe theo MessageId.
 
 ### 6.14 Shuttle Service (Xe trung chuyển)
 
@@ -4725,19 +4797,20 @@ Role:              PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_AD
 | **Route.returnRouteId** | Nullable self-FK — link tuyến chiều về, dùng cho DriverSchedule round-trip UX. |
 | **Booking → Passenger** | 1-to-many, max 5. `Passenger` là **operational record** chỉ lưu seatNumber + boardingStatus + boardedAt + boardedAtStopId. KHÔNG lưu nhân thân (no fullName/phone/idNumber). Booking chỉ lưu thông tin người mua (buyer). DB constraint COUNT ≤ 5. |
 | **Booking pickup/dropoff FK** | 4 cột: `pickupStationId` + `pickupStopId` (mutually exclusive, exactly one not null) và `dropoffStationId` + `dropoffStopId` (mutually exclusive, cả 2 null = default terminal đích). DB CHECK constraint. |
+| **Booking schedule projection** | `tripSnapshotDeparture` / `trip_snapshot_departure` là immutable history snapshot. Nullable `tripCurrentDeparture` / `trip_current_departure` được backfill từ snapshot và chỉ tiến theo CAS `trip.trip.schedule_changed`; Booking `PENDING_PAYMENT|CONFIRMED` đều cập nhật projection, nhưng chỉ `CONFIRMED` tạo schedule facts/action. Query hiện tại và `STOP_DISABLED` deadline dùng current projection. |
 | **Trip pickup/dropoff control** | KHÔNG có flag `allowAlongRoutePickup` / `allowAlongRouteDropoff` ở Trip. KHÔNG có `defaultAllowAlongRoute*` ở Route. `RouteStop` entries là single source of truth, với **2 flag per entry: `allowPickup` + `allowDropoff` (default cả 2 = true, DB CHECK ít nhất 1 = true)** — phân loại pickup-only / dropoff-only / both. TripStop snapshot 2 flag khi Hangfire generate Trip (immutable). Validation booking + parcel: pickupStopId cần `allowPickup=true`; dropoffStopId cần `allowDropoff=true`. Edge case operational stop defer v2 qua `RouteStop.isPublicVisible`. |
 | **Trip fare** | `Trip.baseFare` = giá vé theo chặng/tuyến (áp dụng từ đầu tuyến hoặc bất kỳ along-route stop nào). Booking capture/reuse một handler-start `pricingAt` và dùng `fareFromThisStop` đã được Trip resolve trong snapshot cho pickup stop; explicit precedence là persisted `TripStopFare` có `source=MANUAL_OVERRIDE` → active `RouteStopFareTemplate` half-open tại `pricingAt` → `Trip.baseFare`. Legacy `TEMPLATE_SNAPSHOT` vẫn readable, non-authoritative khi có `pricingAt`, và chỉ tham gia resolution cho legacy compatibility khi omitted `pricingAt`; Day 22 không tạo snapshot row mới. Dropoff miễn phí tại mọi stop, không ảnh hưởng giá. |
 | **Seat lock along-route** | Ghế lock từ đầu chuyến, không phân theo segment. Chi phí operator chấp nhận. |
 | **DriverSchedule** | `dayOfWeek` JSON array + `departureTime TIME`. Hangfire generate Trip 14 ngày kế tiếp qua 2 trigger: (1) immediate on-create/activate, (2) weekly job CN 23:00. Idempotent check (driverId + departureDateTime). Không cho 2 schedule active cùng driverId overlap giờ. Vehicle conflict cũng check. |
 | **Alternative Route** | Tối đa 2 per Route chính. Stop sequence riêng hoàn toàn — không reuse `RouteStop`. Quan hệ: `Route → AlternativeRoute → AlternativeRouteStop → Stop`. |
-| **Stop độc lập** | Một Stop có thể thuộc nhiều Route. Khi disable, set `isActive=false`, không xóa RouteStop. `replacedByStopId` nullable self-FK — operator manual link stop thay thế qua endpoint `PATCH /v1/operator/stops/{stopId}` body `{ isActive?, replacedByStopId? }` (role OPERATOR_STAFF/ADMIN; validate Stop thay thế thuộc cùng operator, không tạo cycle replacedByStopId). UI Operator Web hiển thị warning khi disable Stop và prompt operator chọn Stop thay thế từ dropdown các Stop active cùng operator. Auto-suggest geo proximity defer v2. |
+| **Stop độc lập** | Một Stop có thể thuộc nhiều Route. Canonical disable là bodyless `DELETE /v1/operator/stops/{stopId}?replacedByStopId=` cho `OPERATOR_ADMIN`, required UUID-v4 `Idempotency-Key`; set `isActive=false`, giữ `deletedAt`, không xóa RouteStop, và publish `trip.stop.disabled`. `replacedByStopId` nullable self-FK phải active/cùng operator/non-self/cycle-free. Retained PATCH là details-update-only, không đổi `isActive`/`deletedAt` và không emit disable event. Async `booking.stop_disabled.affected` là sole impact source; không có synchronous count/warning seam. Auto-suggest geo proximity defer v2. |
 | **Trip cargo counters** | `Trip.totalLoadedWeightKg` (denormalized — parcel **vật lý đang trên xe**): ADD khi LOADED; REMOVE khi UNLOADED, RETURN_INITIATED, PENDING_OPERATOR_ACTION→RETURNED/PENDING(transfer), PENDING_TRANSFER_CONFIRM→LOADED Trip_new (release Trip_old). `Trip.reservedParcelWeightKg` (parcel "đã commit vào trip" — bao gồm cả deposit chưa load lẫn đã load): ADD khi PaymentSucceeded(PARCEL)→PENDING, khi parcel transfer **vào** trip; REMOVE khi PENDING→CANCELLED, PENDING→REJECTED, PENDING_ADDITIONAL_PAYMENT→REJECTED, PENDING_OPERATOR_ACTION→RETURNED, PENDING_OPERATOR_ACTION→PENDING(transfer out), PENDING_TRANSFER_CONFIRM→LOADED Trip_new (release Trip_old), TRANSFER_ESCALATED→RETURNED, IN_TRANSIT→UNLOADED. `Trip.estimatedPassengerLuggageKg` (config từ operator policy hoặc tính theo số ghế booked). **Available capacity formula = `Vehicle.maxCargoWeightKg - estimatedPassengerLuggageKg - reservedParcelWeightKg`** (dùng cho parcel mới). Alert khi `totalLoadedWeightKg ≥ 80% maxCargoWeightKg`. Counter update PHẢI atomic với status transition trong cùng DB transaction. |
-| **TripStop** | `{tripId, stopId, orderIndex, estimatedArrivalTime (static planned baseline), actualArrivalTime nullable, status PENDING\|ARRIVED\|SKIPPED, distanceFromOriginKm nullable}`. Approved pre-departure Route edit hoặc DriverSchedule `ALL_PENDING` cascade có thể recompute baseline; GPS/Tracking dynamic ETA không bao giờ update field này. Copy `distanceFromOriginKm` từ RouteStop khi generate — dùng cho DISRUPTED refund mà không cần join ngược. |
+| **TripStop** | `{tripId, stopId, orderIndex, estimatedArrivalTime (static planned baseline), actualArrivalTime nullable, actualDepartureTime nullable, status PENDING\|ARRIVED\|SKIPPED, distanceFromOriginKm nullable}`. `actualDepartureTime` is the durable Day-24 stop-departure anchor; arrival/status remain authoritative for no-show. Approved pre-departure Route edit hoặc DriverSchedule `ALL_PENDING` cascade có thể recompute baseline; GPS/Tracking dynamic ETA không bao giờ update field này. Copy `distanceFromOriginKm` từ RouteStop khi generate — dùng cho DISRUPTED refund mà không cần join ngược. |
 | **Trip.source** | `MANUAL \| AUTO_FROM_SCHEDULE \| VEHICLE_SUBSTITUTION`. Manual create: Operator nhập form → hệ thống generate TripSeat + TripStop; Day 22 không copy fare-template thành TripStopFare mới. Initial status: SCHEDULED nếu departure > 30 phút; BOARDING ngay nếu ≤ 30 phút (publish TripBoardingStarted ngay, không đợi Hangfire). Reject nếu departure trong quá khứ. **VEHICLE_SUBSTITUTION**: Trip_new tạo từ 6.12 Vehicle Substitution flow — Trip Service set source = VEHICLE_SUBSTITUTION explicitly khi INSERT; counter check `maxTripsPerMonth` skip + `currentTripsThisMonth` không increment (xem 4.5 c.0). |
 | **RouteStopFareTemplate** | `{routeId, stopId, fareFromThisStop BIGINT, effectiveFrom datetime, effectiveUntil datetime nullable}` — **Exception override** cho stop có giá khác `Route.baseFare`. Operator chỉ tạo entry cho stop muốn config giá riêng — stop không có entry dùng baseFare. Day 22 không tạo `TEMPLATE_SNAPSHOT` khi Hangfire/manual generate Trip; legacy snapshot chỉ còn readable ở request không có `pricingAt`. Chỉ explicit operator per-Trip fare override tạo `MANUAL_OVERRIDE`. Với một handler-start `pricingAt`, precedence là `MANUAL_OVERRIDE` → active template half-open window → `Trip.baseFare`. Trip DB dùng `btree_gist` exclusion guard để không có overlapping window cùng `(routeId,stopId)`. |
 | **Pricing config — future-dated + manual override** | Mọi entity pricing (`Route.baseFare`, `RouteStopFareTemplate`, `ParcelRouteFare`) hỗ trợ **effectiveFrom** và **effectiveUntil** datetime. Operator có thể config giá trước nhiều tháng (vd set giá Tết từ tháng 10). Đến thời điểm hiệu lực, hệ thống tự dùng giá mới. Operator có thể **manual override** giá per trip tại thời điểm tạo/sửa trip (không bị khóa bởi schedule). KHÔNG hardcode pricing trong code. |
 | **Voucher** | Platform-wide. Fields: code, type, value, minOrderAmount, maxDiscountAmount, totalUsageLimit, perUserLimit, validFrom, validUntil, applicableOperatorIds, applicableRouteIds, isActive, **`fundingType` enum `VIETRIDE_FUNDED \| OPERATOR_FUNDED`**. `VoucherUsage` track per (voucherId, userId, bookingId, bookingGroupId, **`fundedBy` snapshot enum** = voucher.fundingType tại thời điểm apply — dùng cho settlement reconcile). DELETE khi CANCELLED/REFUNDED. Round-trip: 2 VoucherUsage records, limit check bằng `COUNT(DISTINCT bookingGroupId)`. **`OperatorVoucherConsent` entity**: track operator opt-in cho voucher OPERATOR_FUNDED — schema chi tiết ở Booking Service entity list (cùng service với Voucher để strict FK). Validation khi apply voucher: nếu `fundingType=OPERATOR_FUNDED` → check `OperatorVoucherConsent.status=ACCEPTED` cho `Trip.operatorId`; sai → error `VOUCHER_NOT_APPLICABLE`. |
-| **BookingPendingAction** | `{id, bookingId FK, reason (ROUTE_CHANGE\|SEAT_DOWNGRADE\|SCHEDULE_CHANGE\|PENDING_SEAT_ASSIGNMENT\|STOP_DISABLED), severity (nullable, dùng cho SCHEDULE_CHANGE: MEDIUM\|MAJOR — KHÔNG include MINOR vì MINOR không persist record), deadline, resolvedAt nullable, resolvedAction nullable, metadata JSONB, createdAt}`. Partial unique: `UNIQUE(bookingId) WHERE resolvedAt IS NULL` — chỉ 1 active per booking. Action mới phát sinh: close action cũ với `SUPERSEDED` trước khi INSERT mới. Xem flow theo từng reason tại section 6.4 (ROUTE_CHANGE), 6.4.1 (STOP_DISABLED), 6.12 (PENDING_SEAT_ASSIGNMENT), 6.13 (SCHEDULE_CHANGE). |
+| **BookingPendingAction** | `{id, bookingId FK, reason (ROUTE_CHANGE\|SEAT_DOWNGRADE\|SCHEDULE_CHANGE\|PENDING_SEAT_ASSIGNMENT\|STOP_DISABLED), severity (nullable, dùng cho SCHEDULE_CHANGE: MEDIUM\|MAJOR — KHÔNG include MINOR vì MINOR không persist record), deadline, resolvedAt nullable, resolvedAction nullable, metadata JSONB, createdAt}`. Partial unique: `UNIQUE(bookingId) WHERE resolvedAt IS NULL` — chỉ 1 active per booking. Action mới phát sinh: close action cũ với `SUPERSEDED` trước khi INSERT mới. Schedule metadata freeze exact `sourceEventId`, `oldDeparture`, `newDeparture`, `severity`, `initialDeadline`, nullable `terminalDeadline`, `refundBasisAmount`, `refundPercent`, `refundAmount`; refund basis là immutable `Booking.totalAmount`, money BIGINT và phép chia làm tròn `MidpointRounding.AwayFromZero`. Xem flow theo từng reason tại section 6.4 (ROUTE_CHANGE), 6.4.1 (STOP_DISABLED), 6.12 (PENDING_SEAT_ASSIGNMENT), 6.13 (SCHEDULE_CHANGE). |
 | **Voucher code generation** | Code unique indexed. Admin tạo voucher có 2 cách: (a) nhập code thủ công (vd "TET2026"), (b) bấm "Auto generate" → BE gen 8 ký tự uppercase base32 unique (vd "VC7K2X9P"). UI radio chọn mode. BE validate uniqueness ở cả 2 case. |
 | **Invoice (subscription)** | Entity thuộc Payment & Wallet Service. Track invoice VietRide xuất cho operator cho mỗi kỳ subscription (xem 4.5). v1: PDF only, không integrate e-invoice provider. v2: tích hợp VNPT/Misa/Viettel. |
 | **BookingTransfer** | `{id, bookingId, passengerId, originalTripId, newTripId, originalSeatNumber, newSeatNumber nullable, transferredAt, transferredByUserId, note nullable}`. **1 record per Passenger** của Booking — multi-passenger booking sẽ tạo nhiều BookingTransfer cùng `bookingId` khác `passengerId`. Created khi Vehicle Substitution (6.12). |
@@ -4830,9 +4903,9 @@ Mỗi service chỉ được phép read/write key bắt đầu bằng prefix ser
   - **Voucher:** `VOUCHER_NOT_FOUND`, `VOUCHER_EXPIRED`, `VOUCHER_NOT_APPLICABLE`, `VOUCHER_USAGE_LIMIT_REACHED`, `VOUCHER_USER_LIMIT_REACHED`, `VOUCHER_MIN_ORDER_NOT_MET`
   - **Payment:** `PAYMENT_INSUFFICIENT_WALLET`, `PAYMENT_VNPAY_ERROR`, `PAYMENT_TIMEOUT`, `PAYMENT_ALREADY_PROCESSED`, `PAYMENT_SIGNATURE_INVALID` (VNPay HMAC verify fail)
   - **Wallet:** `WALLET_INSUFFICIENT_BALANCE`, `WALLET_TOP_UP_FAILED`, `WALLET_TOP_UP_AMOUNT_TOO_LOW`
-  - **Trip:** `TRIP_NOT_FOUND`, `TRIP_NOT_EDITABLE`, `TRIP_VEHICLE_CONFLICT`, `TRIP_DRIVER_CONFLICT`, `TRIP_ROUTE_CHANGE_BOOKINGS_EXIST`, `TRIP_VEHICLE_SWAP_HELD_SEAT_CONFLICT`, `TRIP_VEHICLE_SWAP_TOO_LATE`, `TRIP_NOT_ACCEPTING_PARCEL` (Trip IN_PROGRESS — không nhận parcel mới), `DRIVER_SCHEDULE_EDIT_TOO_LATE`
+  - **Trip:** `TRIP_NOT_FOUND`, `TRIP_NOT_EDITABLE`, `TRIP_VEHICLE_CONFLICT`, `TRIP_DRIVER_CONFLICT`, `TRIP_ROUTE_CHANGE_BOOKINGS_EXIST`, `TRIP_VEHICLE_SWAP_HELD_SEAT_CONFLICT`, `TRIP_VEHICLE_SWAP_TOO_LATE`, `TRIP_NOT_ACCEPTING_PARCEL` (Trip IN_PROGRESS — không nhận parcel mới), `TRIP_NOT_IN_PROGRESS`, `TRIP_STOP_NOT_ARRIVED`, `TRIP_STOP_ALREADY_DEPARTED`, `DRIVER_SCHEDULE_EDIT_TOO_LATE`
   - **Parcel:** `PARCEL_NOT_FOUND`, `PARCEL_CAPACITY_EXCEEDED`, `PARCEL_PRICING_NOT_CONFIGURED`, `PARCEL_DELIVERY_TOKEN_INVALID`, `PARCEL_DELIVERY_TOKEN_EXPIRED`, `PARCEL_NOT_TRANSFERABLE` (parcel ở status sai khi confirm transfer), `PARCEL_ADDITIONAL_PAYMENT_REQUIRED` (cân lại > ước lượng, cần thanh toán thêm), `PARCEL_REVIEW_TIMEOUT` (EXTRA_LARGE auto-reject 24h)
-  - **Stop/Route:** `STOP_NOT_FOUND`, `STOP_REPLACEMENT_CYCLE` (replacedByStopId tạo cycle), `STOP_REPLACEMENT_DIFFERENT_OPERATOR`, `STOP_DISABLED_BOOKING_AFFECTED` (cảnh báo khi disable Stop có booking active — không phải error block, chỉ alert), `STOP_NOT_PICKUP_ALLOWED`, `STOP_NOT_DROPOFF_ALLOWED`, `ROUTE_NOT_FOUND`, `ROUTE_RETURN_NOT_CONFIGURED` (Route.returnRouteId null khi đặt round-trip)
+  - **Stop/Route:** `STOP_NOT_FOUND`, `STOP_REPLACEMENT_INVALID`, `STOP_REPLACEMENT_CYCLE` (replacedByStopId tạo cycle), `STOP_REPLACEMENT_DIFFERENT_OPERATOR`, `STOP_ALREADY_DISABLED`, `STOP_DISABLED_BOOKING_AFFECTED` (legacy/deprecated synchronous warning/count for DELETE; unrelated usages remain unchanged), `STOP_NOT_PICKUP_ALLOWED`, `STOP_NOT_DROPOFF_ALLOWED`, `ROUTE_NOT_FOUND`, `ROUTE_RETURN_NOT_CONFIGURED` (Route.returnRouteId null khi đặt round-trip)
   - **Station:** `STATION_NOT_FOUND`, `STATION_DUPLICATE_NEARBY` (warning khi operator tạo Station mới quá gần Station hiện có — gợi ý link thay vì tạo), `STATION_MERGE_CONFLICT` (merge vi phạm Route/domain invariant; không partial write)
   - **Invoice:** `INVOICE_NOT_FOUND`, `INVOICE_PDF_GENERATION_FAILED`
   - **Operator:** `OPERATOR_DUPLICATE_REGISTRATION` (businessRegistrationNumber đã tồn tại), `OPERATOR_DUPLICATE_TAX_CODE` (taxCode đã tồn tại)
@@ -4977,7 +5050,7 @@ Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → 
 - **`NotificationDelivery`** — Track FCM push attempt per notification: fcmToken, status SENT | FAILED | RETRYING, retryCount, lastError.
 - **Không có `OutboxEvent`** — Notification chỉ consume RabbitMQ, không publish.
 
-**`Notification.type` enum:** `BOOKING_CONFIRMED | BOOKING_CANCELLED | BOOKING_DISRUPTED | BOOKING_REFUNDED | PASSENGER_NO_SHOW | TRIP_BOARDING_REMINDER | TRIP_VEHICLE_APPROACHING | TRIP_ROUTE_CHANGED | TRIP_SCHEDULE_CHANGED | TRIP_CANCELLED | TRIP_DELAYED | TRIP_DISRUPTED | VEHICLE_SUBSTITUTED | VEHICLE_SWAPPED | PARCEL_LOADED | PARCEL_IN_TRANSIT | PARCEL_DELIVERED_PENDING_CONFIRM | PARCEL_REJECTED | PARCEL_RETURNED | WALLET_CREDITED | WALLET_DEBITED | INCIDENT_REPORTED | OFF_ROUTE_ALERT | TRIP_DELAYED_ALERT | CARGO_NEAR_FULL_ALERT | PARCEL_REVIEW_REQUESTED | VOUCHER_CONSENT_REQUESTED | SUBSCRIPTION_LIMIT_EXCEEDED | SUBSCRIPTION_TRIAL_EXPIRING | SUBSCRIPTION_EXPIRED | SUBSCRIPTION_APPROVED | DRIVER_SCHEDULE_EDITED | PAYOUT_PROCESSED | PAYOUT_FAILED`.
+**`Notification.type` enum:** `BOOKING_CONFIRMED | BOOKING_CANCELLED | BOOKING_DISRUPTED | BOOKING_REFUNDED | PASSENGER_NO_SHOW | DRIVER_STOP_DEPARTED_WITH_PENDING | TRIP_BOARDING_REMINDER | TRIP_VEHICLE_APPROACHING | TRIP_ROUTE_CHANGED | TRIP_SCHEDULE_CHANGED | TRIP_CANCELLED | TRIP_DELAYED | TRIP_DISRUPTED | VEHICLE_SUBSTITUTED | VEHICLE_SWAPPED | PARCEL_LOADED | PARCEL_IN_TRANSIT | PARCEL_DELIVERED_PENDING_CONFIRM | PARCEL_REJECTED | PARCEL_RETURNED | WALLET_CREDITED | WALLET_DEBITED | INCIDENT_REPORTED | OFF_ROUTE_ALERT | TRIP_DELAYED_ALERT | CARGO_NEAR_FULL_ALERT | PARCEL_REVIEW_REQUESTED | VOUCHER_CONSENT_REQUESTED | SUBSCRIPTION_LIMIT_EXCEEDED | SUBSCRIPTION_TRIAL_EXPIRING | SUBSCRIPTION_EXPIRED | SUBSCRIPTION_APPROVED | DRIVER_SCHEDULE_EDITED | PAYOUT_PROCESSED | PAYOUT_FAILED`.
 
 #### FCM Token Lifecycle (Identity Service)
 

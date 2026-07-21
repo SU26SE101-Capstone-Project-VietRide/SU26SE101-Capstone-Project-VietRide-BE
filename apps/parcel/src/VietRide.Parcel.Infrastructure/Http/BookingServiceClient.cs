@@ -22,6 +22,58 @@ public sealed class BookingServiceClient : IBookingServiceClient
         _logger = logger;
     }
 
+    public async Task<BookingHistoryOutcome> GetPassengerHistoryAsync(
+        Guid userId,
+        string? status,
+        string? from,
+        string? to,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var query = new List<string>
+        {
+            $"userId={userId:D}",
+            $"page={page}",
+            $"pageSize={pageSize}",
+        };
+        if (status is not null)
+            query.Add($"status={Uri.EscapeDataString(status)}");
+        if (from is not null)
+            query.Add($"from={Uri.EscapeDataString(from)}");
+        if (to is not null)
+            query.Add($"to={Uri.EscapeDataString(to)}");
+
+        try
+        {
+            using var response = await _httpClient.GetAsync(
+                $"/internal/v1/bookings/history?{string.Join('&', query)}",
+                cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                return new BookingHistoryOutcome(
+                    false,
+                    null,
+                    $"Booking service returned status {(int)response.StatusCode}.");
+            }
+
+            var payload = await ReadDataAsync<BookingHistoryPage>(response, cancellationToken)
+                .ConfigureAwait(false);
+            return payload is null
+                ? new BookingHistoryOutcome(false, null, "Booking service returned an empty history response.")
+                : new BookingHistoryOutcome(true, payload, null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "BookingServiceClient.GetPassengerHistoryAsync({UserId}) failed.", userId);
+            return new BookingHistoryOutcome(false, null, "Booking service transport failure.");
+        }
+    }
+
     public async Task<BookingLookupOutcome> GetBookingSnapshotAsync(
         Guid bookingId,
         CancellationToken cancellationToken = default)

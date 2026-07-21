@@ -1,21 +1,22 @@
-using System.Text.Json.Serialization;
 using VietRide.Shared.Messaging.Abstractions;
 
 namespace VietRide.Booking.Infrastructure.Messaging;
 
-public sealed record StopDisabledIntegrationEvent : IIntegrationEvent
+public sealed class StopDisabledIntegrationEvent : IntegrationEventBase
 {
-    public const string EventType = "trip.stop.disabled";
+    public const string EventTypeValue = "trip.stop.disabled";
+
+    public StopDisabledIntegrationEvent(Guid eventId, DateTimeOffset occurredAt, Guid stopId, Guid operatorId, Guid? replacedByStopId)
+        : base(eventId, occurredAt.UtcDateTime)
+    {
+        StopId = stopId;
+        OperatorId = operatorId;
+        ReplacedByStopId = replacedByStopId;
+    }
+
     public Guid StopId { get; init; }
     public Guid OperatorId { get; init; }
     public Guid? ReplacedByStopId { get; init; }
 
-    [JsonIgnore]
-    public Guid EventId => StopId;
-
-    [JsonIgnore]
-    public DateTime OccurredAt => DateTime.UtcNow;
-
-    [JsonIgnore]
-    string IIntegrationEvent.EventType => EventType;
+    public override string EventType => EventTypeValue;
 }

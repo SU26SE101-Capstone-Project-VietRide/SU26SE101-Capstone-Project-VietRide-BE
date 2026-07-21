@@ -1,4 +1,5 @@
 import {
+  BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY,
   BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY,
   BOOKING_SCHEDULE_CHANGE_INFORMATIONAL_ROUTING_KEY,
   BOOKING_SCHEDULE_CHANGE_REQUIRED_ROUTING_KEY,
@@ -26,7 +27,7 @@ const common = {
   userId: USER_ID,
 };
 
-describe('mapBookingTripChangeToNotification', () => {
+describe('mapBookingTripChangeToNotification Day 24 auto-resolved compatibility', () => {
   it('maps every seat-reassignment field to the passenger notification', () => {
     expect(
       mapBookingTripChangeToNotification(BOOKING_SEAT_REASSIGNMENT_REQUIRED_ROUTING_KEY, {
@@ -65,46 +66,39 @@ describe('mapBookingTripChangeToNotification', () => {
       },
     );
 
-    expect(notification).toEqual(
-      expect.objectContaining({
-        userId: USER_ID,
-        type: NotificationType.TRIP_SCHEDULE_CHANGED,
-        data: expect.objectContaining({
-          oldDeparture: OLD_DEPARTURE,
-          newDeparture: NEW_DEPARTURE,
-          severity: 'MINOR',
-        }),
-      }),
-    );
-    expect(notification.data).not.toEqual(
-      expect.objectContaining({ pendingActionId: expect.anything(), deadline: expect.anything() }),
-    );
+    expect(notification.userId).toBe(USER_ID);
+    expect(notification.type).toBe(NotificationType.TRIP_SCHEDULE_CHANGED);
+    expect(notification.data).toMatchObject({
+      oldDeparture: OLD_DEPARTURE,
+      newDeparture: NEW_DEPARTURE,
+      severity: 'MINOR',
+    });
+    expect(notification.data).not.toHaveProperty('pendingActionId');
+    expect(notification.data).not.toHaveProperty('deadline');
   });
 
   it('maps MEDIUM/MAJOR required schedule fields and rejects MINOR', () => {
     for (const severity of ['MEDIUM', 'MAJOR'] as const) {
-      expect(
-        mapBookingTripChangeToNotification(BOOKING_SCHEDULE_CHANGE_REQUIRED_ROUTING_KEY, {
+      const notification = mapBookingTripChangeToNotification(
+        BOOKING_SCHEDULE_CHANGE_REQUIRED_ROUTING_KEY,
+        {
           ...common,
           pendingActionId: PENDING_ACTION_ID,
           deadline: DEADLINE,
           oldDeparture: OLD_DEPARTURE,
           newDeparture: NEW_DEPARTURE,
           severity,
-        }),
-      ).toEqual(
-        expect.objectContaining({
-          userId: USER_ID,
-          type: NotificationType.TRIP_SCHEDULE_CHANGED,
-          data: expect.objectContaining({
-            pendingActionId: PENDING_ACTION_ID,
-            deadline: DEADLINE,
-            oldDeparture: OLD_DEPARTURE,
-            newDeparture: NEW_DEPARTURE,
-            severity,
-          }),
-        }),
+        },
       );
+      expect(notification.userId).toBe(USER_ID);
+      expect(notification.type).toBe(NotificationType.TRIP_SCHEDULE_CHANGED);
+      expect(notification.data).toMatchObject({
+        pendingActionId: PENDING_ACTION_ID,
+        deadline: DEADLINE,
+        oldDeparture: OLD_DEPARTURE,
+        newDeparture: NEW_DEPARTURE,
+        severity,
+      });
     }
 
     expect(() =>
@@ -120,28 +114,27 @@ describe('mapBookingTripChangeToNotification', () => {
   });
 
   it('maps both re-alert discriminants and rejects mismatched details', () => {
-    expect(
-      mapBookingTripChangeToNotification(BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY, {
+    const seatRealert = mapBookingTripChangeToNotification(
+      BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY,
+      {
         ...common,
         pendingActionId: PENDING_ACTION_ID,
         deadline: DEADLINE,
         reason: 'PENDING_SEAT_ASSIGNMENT',
         seatNumbers: ['A01'],
         seatImpactReason: 'SEAT_REMOVED',
-      }),
-    ).toEqual(
-      expect.objectContaining({
-        type: NotificationType.VEHICLE_SUBSTITUTED,
-        data: expect.objectContaining({
-          reason: 'PENDING_SEAT_ASSIGNMENT',
-          seatNumbers: ['A01'],
-          seatImpactReason: 'SEAT_REMOVED',
-        }),
-      }),
+      },
     );
+    expect(seatRealert.type).toBe(NotificationType.VEHICLE_SUBSTITUTED);
+    expect(seatRealert.data).toMatchObject({
+      reason: 'PENDING_SEAT_ASSIGNMENT',
+      seatNumbers: ['A01'],
+      seatImpactReason: 'SEAT_REMOVED',
+    });
 
-    expect(
-      mapBookingTripChangeToNotification(BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY, {
+    const scheduleRealert = mapBookingTripChangeToNotification(
+      BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY,
+      {
         ...common,
         pendingActionId: PENDING_ACTION_ID,
         deadline: DEADLINE,
@@ -149,13 +142,10 @@ describe('mapBookingTripChangeToNotification', () => {
         oldDeparture: OLD_DEPARTURE,
         newDeparture: NEW_DEPARTURE,
         severity: 'MAJOR',
-      }),
-    ).toEqual(
-      expect.objectContaining({
-        type: NotificationType.TRIP_SCHEDULE_CHANGED,
-        data: expect.objectContaining({ reason: 'SCHEDULE_CHANGE', severity: 'MAJOR' }),
-      }),
+      },
     );
+    expect(scheduleRealert.type).toBe(NotificationType.TRIP_SCHEDULE_CHANGED);
+    expect(scheduleRealert.data).toMatchObject({ reason: 'SCHEDULE_CHANGE', severity: 'MAJOR' });
 
     expect(() =>
       mapBookingTripChangeToNotification(BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY, {
@@ -192,13 +182,45 @@ describe('mapBookingTripChangeToNotification', () => {
       }),
     ).toThrow(ZodError);
 
-    const { userId: _userId, ...withoutUser } = common;
+    const { userId: removedUserId, ...withoutUser } = common;
+    void removedUserId;
     expect(() =>
       mapBookingTripChangeToNotification(BOOKING_SCHEDULE_CHANGE_INFORMATIONAL_ROUTING_KEY, {
         ...withoutUser,
         oldDeparture: OLD_DEPARTURE,
         newDeparture: NEW_DEPARTURE,
         severity: 'MINOR',
+      }),
+    ).toThrow(ZodError);
+  });
+
+  it('Day 24 auto-resolved compatibility remains schedule-change-only', () => {
+    const notification = mapBookingTripChangeToNotification(
+      BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY,
+      {
+        ...common,
+        pendingActionId: PENDING_ACTION_ID,
+        resolvedAction: 'ACCEPTED',
+        severity: 'MAJOR',
+        oldDeparture: OLD_DEPARTURE,
+        newDeparture: NEW_DEPARTURE,
+      },
+    );
+
+    expect(notification).toEqual(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.TRIP_SCHEDULE_CHANGED,
+      }),
+    );
+    expect(() =>
+      mapBookingTripChangeToNotification(BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY, {
+        ...common,
+        pendingActionId: PENDING_ACTION_ID,
+        resolvedAction: 'AUTO_FALLBACK_DESTINATION',
+        affectedField: 'PICKUP',
+        disabledStopId: '66666666-6666-4666-8666-666666666666',
+        fallbackStationId: '77777777-7777-4777-8777-777777777777',
       }),
     ).toThrow(ZodError);
   });

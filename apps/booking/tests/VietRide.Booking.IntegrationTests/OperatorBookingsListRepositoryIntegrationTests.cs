@@ -68,6 +68,7 @@ public sealed class OperatorBookingsListRepositoryIntegrationTests
             OriginName = "Origin",
             DestinationName = "Destination",
             DepartureAt = departure,
+            CurrentDepartureAt = departure,
         });
         item.SeatCount.Should().Be(1);
         item.TotalAmount.Should().Be(120_000);
@@ -150,12 +151,12 @@ public sealed class OperatorBookingsListRepositoryIntegrationTests
 INSERT INTO vietride_booking.bookings (
     id, booking_code, passenger_user_id, trip_id, operator_id, pickup_station_id,
     base_fare, discount_amount, total_amount, status, refund_override,
-    trip_snapshot_origin_name, trip_snapshot_dest_name, trip_snapshot_departure,
+    trip_snapshot_origin_name, trip_snapshot_dest_name, trip_snapshot_departure, trip_current_departure,
     trip_snapshot_route_name, created_at, updated_at)
 VALUES (
     {id}, {code}, {passengerUserId}, {tripId}, {operatorId}, {Guid.NewGuid()},
     {amount}, 0, {amount}, {status}::booking_status, FALSE,
-    'Origin', 'Destination', {departure}, 'Route', {createdAt}, {createdAt});");
+    'Origin', 'Destination', {departure}, {departure}, 'Route', {createdAt}, {createdAt});");
         await db.Database.ExecuteSqlInterpolatedAsync($@"
 INSERT INTO vietride_booking.passengers (
     id, booking_id, seat_number, boarding_status, created_at, updated_at)

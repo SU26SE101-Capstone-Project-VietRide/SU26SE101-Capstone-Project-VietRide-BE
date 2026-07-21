@@ -2,6 +2,15 @@ namespace VietRide.Parcel.Application.Abstractions.ServiceClients;
 
 public interface IBookingServiceClient
 {
+    Task<BookingHistoryOutcome> GetPassengerHistoryAsync(
+        Guid userId,
+        string? status,
+        string? from,
+        string? to,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default);
+
     Task<BookingLookupOutcome> GetBookingSnapshotAsync(
         Guid bookingId,
         CancellationToken cancellationToken = default);

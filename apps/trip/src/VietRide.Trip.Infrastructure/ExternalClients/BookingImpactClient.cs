@@ -1,19 +1,62 @@
 using System.Net.Http.Json;
+using System.Text.Json;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 
 namespace VietRide.Trip.Infrastructure.ExternalClients;
 
 public sealed class BookingImpactClient(HttpClient httpClient) : IBookingImpactClient
 {
-    public async Task<int> GetActiveBookingCountByStopAsync(
-        Guid stopId, Guid operatorId, CancellationToken cancellationToken)
+    public async Task<TripStopPendingPassengerCountProjection> GetPendingPassengerCountAsync(
+        Guid tripId,
+        Guid stopId,
+        Guid operatorId,
+        CancellationToken cancellationToken)
     {
-        // Successful /internal responses are intentionally raw (ApiResponseResultFilter
-        // only wraps public endpoints), so deserialize the count projection directly.
-        var response = await httpClient.GetFromJsonAsync<CountResponse>(
-            $"/internal/v1/bookings/active-by-stop/{stopId:D}/count?operatorId={operatorId:D}", cancellationToken);
-        return response?.ActiveBookingCount
-            ?? throw new HttpRequestException("Booking impact count returned no data.");
+        ValidateId(tripId, nameof(tripId));
+        ValidateId(stopId, nameof(stopId));
+        ValidateId(operatorId, nameof(operatorId));
+
+        using var response = await httpClient.GetAsync(
+            $"/internal/v1/bookings/trips/{tripId:D}/stops/{stopId:D}/pending-passenger-count?operatorId={operatorId:D}",
+            cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        await using var content = await response.Content.ReadAsStreamAsync(cancellationToken);
+        try
+        {
+            using var document = await JsonDocument.ParseAsync(content, cancellationToken: cancellationToken);
+            var root = document.RootElement;
+            var properties = root.ValueKind == JsonValueKind.Object
+                ? root.EnumerateObject().Select(property => property.Name).ToHashSet(StringComparer.Ordinal)
+                : new HashSet<string>(StringComparer.Ordinal);
+            if (!properties.SetEquals(["tripId", "stopId", "pendingPassengerCount"])
+                || !root.TryGetProperty("tripId", out var responseTripId)
+                || !responseTripId.TryGetGuid(out var parsedTripId)
+                || parsedTripId != tripId
+                || !root.TryGetProperty("stopId", out var responseStopId)
+                || !responseStopId.TryGetGuid(out var parsedStopId)
+                || parsedStopId != stopId
+                || !root.TryGetProperty("pendingPassengerCount", out var countElement)
+                || !countElement.TryGetInt32(out var count)
+                || count < 0)
+            {
+                throw new HttpRequestException("Booking pending-passenger count returned invalid data.");
+            }
+
+            return new TripStopPendingPassengerCountProjection(parsedTripId, parsedStopId, count);
+        }
+        catch (JsonException exception)
+        {
+            throw new HttpRequestException(
+                "Booking pending-passenger count returned invalid data.",
+                exception);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new HttpRequestException(
+                "Booking pending-passenger count returned invalid data.",
+                exception);
+        }
     }
 
     public async Task<TripBookingImpactProjection> GetTripEditImpactAsync(
@@ -62,5 +105,11 @@ public sealed class BookingImpactClient(HttpClient httpClient) : IBookingImpactC
         return true;
     }
 
-    private sealed record CountResponse(int ActiveBookingCount);
+    private static void ValidateId(Guid value, string parameterName)
+    {
+        if (value == Guid.Empty)
+        {
+            throw new ArgumentException("Value must be non-empty.", parameterName);
+        }
+    }
 }

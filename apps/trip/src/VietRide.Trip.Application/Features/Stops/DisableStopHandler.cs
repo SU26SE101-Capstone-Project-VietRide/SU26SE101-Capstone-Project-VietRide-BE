@@ -5,6 +5,7 @@ using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Events;
 
 namespace VietRide.Trip.Application.Features.Stops;
 
@@ -15,16 +16,14 @@ public sealed class DisableStopHandler : IRequestHandler<DisableStopCommand, Dis
     private readonly IIdentityInternalClient identity;
     private readonly IIntegrationEventOutbox outbox;
     private readonly IClock clock;
-    private readonly IBookingImpactClient bookingImpact;
 
     public DisableStopHandler(IStopRepository stops, IIdentityInternalClient identity,
-        IIntegrationEventOutbox outbox, IClock clock, IBookingImpactClient bookingImpact)
+        IIntegrationEventOutbox outbox, IClock clock)
     {
         this.stops = stops;
         this.identity = identity;
         this.outbox = outbox;
         this.clock = clock;
-        this.bookingImpact = bookingImpact;
     }
 
     public async Task<DisableStopResponse> Handle(DisableStopCommand request, CancellationToken cancellationToken)
@@ -38,27 +37,35 @@ public sealed class DisableStopHandler : IRequestHandler<DisableStopCommand, Dis
                 throw new CodedNotFoundException("STOP_NOT_FOUND", "Stop was not found.");
         }
 
+        if (!stop.IsActive)
+        {
+            if (stop.ReplacedByStopId == request.ReplacedByStopId)
+            {
+                return new DisableStopResponse(StopMapper.ToDto(stop), null);
+            }
+
+            throw new CodedConflictException("STOP_ALREADY_DISABLED", "Stop is already disabled.");
+        }
+
         if (request.ReplacedByStopId.HasValue)
         {
             ValidateReplacement(stop, request.ReplacedByStopId.Value);
         }
 
         var now = clock.UtcNow;
-        var activeBookingCount = await bookingImpact.GetActiveBookingCountByStopAsync(
-            stop.Id, stop.OperatorId, cancellationToken);
         // TransactionBehavior owns the command transaction and SaveChanges boundary.
         // Keeping an explicit transaction here would nest EF transactions at runtime.
-        stop.SoftDelete(now, request.ReplacedByStopId);
+        stop.Disable(request.ReplacedByStopId);
         stops.Update(stop);
-        await outbox.EnqueueAsync("trip.stop.disabled", JsonSerializer.Serialize(new
-        {
-            stopId = stop.Id,
-            operatorId = stop.OperatorId,
-            replacedByStopId = request.ReplacedByStopId,
-            occurredAt = now,
-        }, JsonOptions), cancellationToken);
+        var evt = new StopDisabledIntegrationEvent(
+            Guid.NewGuid(), now, stop.Id, stop.OperatorId, request.ReplacedByStopId);
+        await outbox.EnqueueAsync(
+            evt.EventId,
+            evt.EventType,
+            JsonSerializer.Serialize(evt, JsonOptions),
+            cancellationToken);
 
-        return new DisableStopResponse(StopMapper.ToDto(stop), "STOP_DISABLED_BOOKING_AFFECTED", activeBookingCount);
+        return new DisableStopResponse(StopMapper.ToDto(stop), null);
     }
 
     private void ValidateReplacement(Domain.Entities.Stop source, Guid replacementId)

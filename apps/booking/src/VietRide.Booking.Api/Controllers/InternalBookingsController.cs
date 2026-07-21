@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using VietRide.Booking.Application.Features.Bookings.History;
 using VietRide.Booking.Application.Features.Internal.Bookings;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Authentication;
@@ -17,6 +18,26 @@ public sealed class InternalBookingsController : ControllerBase
     public InternalBookingsController(IMediator mediator)
     {
         _mediator = mediator;
+    }
+
+    [HttpGet("history")]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<BookingHistoryItemDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<PagedResult<BookingHistoryItemDto>>> GetHistoryAsync(
+        [FromQuery] Guid userId,
+        [FromQuery] string? status,
+        [FromQuery] string? from,
+        [FromQuery] string? to,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _mediator.Send(
+            new GetBookingHistoryQuery(userId, status, from, to, page, pageSize),
+            cancellationToken);
+
+        return Ok(result);
     }
 
     [HttpGet("{bookingId:guid}")]
@@ -67,12 +88,20 @@ public sealed class InternalBookingsController : ControllerBase
         return Ok(result);
     }
 
-    [HttpGet("active-by-stop/{stopId:guid}/count")]
-    public async Task<ActionResult<object>> GetActiveCountByStopAsync(
-        Guid stopId, [FromQuery] Guid operatorId, CancellationToken cancellationToken)
-        => Ok(new
-        {
-            activeBookingCount = await _mediator.Send(
-             new GetActiveBookingCountByStopQuery(stopId, operatorId), cancellationToken)
-        });
+    [HttpGet("trips/{tripId}/stops/{stopId}/pending-passenger-count")]
+    [ProducesResponseType(typeof(PendingPassengerCountDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<PendingPassengerCountDto>> GetPendingPassengerCountAsync(
+        string tripId,
+        string stopId,
+        [FromQuery] string? operatorId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(
+            new GetPendingPassengerCountQuery(tripId, stopId, operatorId),
+            cancellationToken);
+
+        return Ok(result);
+    }
 }

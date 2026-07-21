@@ -4,7 +4,7 @@ using VietRide.Identity.Application.Abstractions.Repositories;
 namespace VietRide.Identity.Application.Features.Internal.Operators.GetOperatorSummaries;
 
 public sealed class GetOperatorSummariesQueryHandler
-    : IRequestHandler<GetOperatorSummariesQuery, IReadOnlyList<OperatorSummaryDto>>
+    : IRequestHandler<GetOperatorSummariesQuery, IReadOnlyList<InternalOperatorSummaryDto>>
 {
     private readonly IOperatorRepository _operators;
 
@@ -13,7 +13,7 @@ public sealed class GetOperatorSummariesQueryHandler
         _operators = operators;
     }
 
-    public async Task<IReadOnlyList<OperatorSummaryDto>> Handle(
+    public async Task<IReadOnlyList<InternalOperatorSummaryDto>> Handle(
         GetOperatorSummariesQuery request,
         CancellationToken cancellationToken)
     {
@@ -25,7 +25,7 @@ public sealed class GetOperatorSummariesQueryHandler
             cancellationToken);
         return operators
             .OrderBy(operatorTenant => operatorTenant.Id)
-            .Select(operatorTenant => new OperatorSummaryDto(operatorTenant.Id, operatorTenant.Name))
+            .Select(operatorTenant => new InternalOperatorSummaryDto(operatorTenant.Id, operatorTenant.Name))
             .ToArray();
     }
 }

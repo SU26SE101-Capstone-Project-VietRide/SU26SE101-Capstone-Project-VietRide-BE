@@ -133,7 +133,8 @@ public sealed class ListOperatorBookingsQueryHandlerTests
     {
         var item = new OperatorBookingListItem(
             Guid.NewGuid(), "VR001", Guid.NewGuid(), "CONFIRMED",
-            new OperatorBookingTripDto("R", "O", "D", DateTimeOffset.UtcNow), 2, 100_000, DateTimeOffset.UtcNow);
+            new OperatorBookingTripDto("R", "O", "D", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow),
+            2, 100_000, DateTimeOffset.UtcNow);
         _repository.ListOperatorBookingsAsync(Arg.Any<OperatorBookingListCriteria>(), Arg.Any<CancellationToken>())
             .Returns(new OperatorBookingListPage([item], 21));
         var sut = new ListOperatorBookingsQueryHandler(_repository, _identity);
