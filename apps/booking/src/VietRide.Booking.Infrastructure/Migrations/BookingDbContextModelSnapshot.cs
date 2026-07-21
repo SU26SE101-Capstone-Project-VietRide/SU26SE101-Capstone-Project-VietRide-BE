@@ -1099,6 +1099,62 @@ namespace VietRide.Booking.Infrastructure.Migrations
                     b.ToTable("voucher_usages", "vietride_booking");
                 });
 
+            modelBuilder.Entity("VietRide.Shared.Persistence.Outbox.OutboxDlq", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("event_id");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("event_type");
+
+                    b.Property<string>("LastError")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("last_error");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("payload");
+
+                    b.Property<int>("RetryCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("retry_count");
+
+                    b.Property<DateTimeOffset>("TerminalAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("terminal_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("Id")
+                        .HasName("pk_outbox_dlq");
+
+                    b.HasIndex("EventId")
+                        .IsUnique()
+                        .HasDatabaseName("uq_outbox_dlq_event_id");
+
+                    b.HasIndex("TerminalAt", "EventId")
+                        .IsDescending()
+                        .HasDatabaseName("idx_outbox_dlq_terminal_event_id");
+
+                    b.ToTable("outbox_dlq", "vietride_booking");
+                });
+
             modelBuilder.Entity("VietRide.Shared.Persistence.Outbox.OutboxEvent", b =>
                 {
                     b.Property<Guid>("Id")

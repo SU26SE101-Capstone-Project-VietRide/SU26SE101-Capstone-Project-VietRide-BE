@@ -1,6 +1,11 @@
+using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using VietRide.Payment.Application.Abstractions.Repositories;
+using VietRide.Payment.Application.Features.Admin.PlatformReports;
+using VietRide.Payment.Application.Features.OperatorReports;
 using VietRide.Payment.Domain.Entities;
+using VietRide.Payment.Domain.Enums;
 
 namespace VietRide.Payment.Infrastructure.Persistence.Repositories;
 
@@ -14,6 +19,106 @@ internal sealed class OperatorLedgerEntryRepository : IOperatorLedgerEntryReposi
     public void Remove(OperatorLedgerEntry entity) => throw new NotSupportedException("Operator ledger is immutable.");
     public IQueryable<OperatorLedgerEntry> Query() => _db.OperatorLedgerEntries;
     public IQueryable<OperatorLedgerEntry> QueryNoTracking() => _db.OperatorLedgerEntries.AsNoTracking();
+
+    public async Task<IReadOnlyList<PlatformLedgerReportItem>> GetPlatformLedgerMetricsAsync(
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken ct = default)
+    {
+        var connection = _db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync(ct).ConfigureAwait(false);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT operator_id,
+                   COALESCE(SUM(amount) FILTER (
+                       WHERE reference_type = 'BOOKING'::vietride_payment.operator_ledger_reference_type
+                         AND entry_type <> 'VOUCHER_OPERATOR_FUNDED_AUDIT'::vietride_payment.operator_ledger_entry_type
+                   ), 0)::numeric AS booking_revenue_vnd,
+                   COALESCE(SUM(amount) FILTER (
+                       WHERE reference_type = 'PARCEL'::vietride_payment.operator_ledger_reference_type
+                         AND entry_type <> 'VOUCHER_OPERATOR_FUNDED_AUDIT'::vietride_payment.operator_ledger_entry_type
+                   ), 0)::numeric AS parcel_revenue_vnd
+            FROM vietride_payment.operator_ledger_entries
+            WHERE created_at >= @from_utc
+              AND created_at < @to_utc
+            GROUP BY operator_id
+            ORDER BY operator_id;
+            """;
+        command.Transaction = _db.Database.CurrentTransaction?.GetDbTransaction();
+        AddParameter(command, "from_utc", fromUtc.ToUniversalTime());
+        AddParameter(command, "to_utc", toUtc.ToUniversalTime());
+
+        var result = new List<PlatformLedgerReportItem>();
+        try
+        {
+            await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                result.Add(new PlatformLedgerReportItem(
+                    reader.GetGuid(0),
+                    checked((long)reader.GetDecimal(1)),
+                    checked((long)reader.GetDecimal(2))));
+            }
+        }
+        catch (OverflowException exception)
+        {
+            throw new PlatformReportValueOverflowException(exception);
+        }
+
+        return result;
+    }
+
+    public async IAsyncEnumerable<OperatorLedgerReportRow> StreamOperatorReportRowsAsync(
+        Guid operatorId,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        bool refundOnly,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var query = _db.OperatorLedgerEntries
+            .AsNoTracking()
+            .Where(entry => entry.OperatorId == operatorId
+                && entry.CreatedAt >= fromUtc
+                && entry.CreatedAt < toUtc);
+
+        query = refundOnly
+            ? query.Where(entry => entry.EntryType == OperatorLedgerEntryType.BOOKING_REFUND
+                || entry.EntryType == OperatorLedgerEntryType.PARCEL_REFUND)
+            : query.Where(entry => entry.EntryType == OperatorLedgerEntryType.BOOKING_REVENUE
+                || entry.EntryType == OperatorLedgerEntryType.PARCEL_REVENUE
+                || entry.EntryType == OperatorLedgerEntryType.ADJUSTMENT);
+
+        var rows = query
+            .OrderBy(entry => entry.CreatedAt)
+            .ThenBy(entry => entry.Id)
+            .Select(entry => new OperatorLedgerReportRow(
+                entry.Id,
+                entry.EntryType.ToString(),
+                entry.ReferenceType.ToString(),
+                entry.ReferenceId,
+                entry.TripId,
+                entry.Amount,
+                entry.CreatedAt,
+                entry.Note));
+
+        await foreach (var row in rows.AsAsyncEnumerable().WithCancellation(ct).ConfigureAwait(false))
+        {
+            yield return row;
+        }
+    }
     public Task<long> SumTripNetAmountAsync(Guid operatorId, Guid tripId, CancellationToken cancellationToken)
         => _db.OperatorLedgerEntries.Where(x => x.OperatorId == operatorId && x.TripId == tripId).SumAsync(x => x.Amount, cancellationToken);
+
+    private static void AddParameter(System.Data.Common.DbCommand command, string name, object value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value;
+        command.Parameters.Add(parameter);
+    }
 }

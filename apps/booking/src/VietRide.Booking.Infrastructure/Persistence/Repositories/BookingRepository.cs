@@ -1,12 +1,16 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Features.Internal.Bookings;
 using VietRide.Booking.Application.Features.Internal.Reports.PlatformBookings;
 using VietRide.Booking.Application.Features.OperatorBookings.GetOperatorBookingDetail;
 using VietRide.Booking.Application.Features.OperatorBookings.ListOperatorBookings;
+using VietRide.Booking.Application.Features.OperatorReports;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Booking.Domain.ValueObjects;
 using VietRide.Shared.Application.Repositories;
@@ -23,10 +27,19 @@ namespace VietRide.Booking.Infrastructure.Persistence.Repositories;
 internal sealed class BookingRepository : IBookingRepository
 {
     private readonly BookingDbContext _db;
+    private readonly ILogger<BookingRepository> _logger;
 
     public BookingRepository(BookingDbContext db)
+        : this(db, NullLogger<BookingRepository>.Instance)
+    {
+    }
+
+    public BookingRepository(
+        BookingDbContext db,
+        ILogger<BookingRepository> logger)
     {
         _db = db;
+        _logger = logger;
     }
 
     // -----------------------------------------------------------------------
@@ -274,14 +287,32 @@ internal sealed class BookingRepository : IBookingRepository
         await using var command = connection.CreateCommand();
         command.CommandText =
             """
-            SELECT operator_id,
-                   COUNT(*)::numeric AS completed_booking_count,
-                   COALESCE(SUM(total_amount), 0)::numeric AS booking_revenue_vnd
-            FROM vietride_booking.bookings
-            WHERE status = 'COMPLETED'::public.booking_status
-              AND completed_at >= @from_utc
-              AND completed_at < @to_utc
-            GROUP BY operator_id
+            WITH live AS (
+                SELECT operator_id,
+                       COUNT(*)::numeric AS completed_booking_count,
+                       COALESCE(SUM(total_amount), 0)::numeric AS booking_revenue_vnd
+                FROM vietride_booking.bookings
+                WHERE status = 'COMPLETED'::public.booking_status
+                  AND completed_at >= @from_utc
+                  AND completed_at < @to_utc
+                GROUP BY operator_id
+            ),
+            projected AS (
+                SELECT operator_id,
+                       COUNT(*)::numeric AS completed_booking_count,
+                       COALESCE(SUM(booking_revenue_vnd), 0)::numeric AS booking_revenue_vnd
+                FROM vietride_booking.platform_booking_stats
+                WHERE completed_at >= @from_utc
+                  AND completed_at < @to_utc
+                GROUP BY operator_id
+            )
+            SELECT COALESCE(live.operator_id, projected.operator_id) AS operator_id,
+                   COALESCE(live.completed_booking_count, 0)::numeric AS live_count,
+                   COALESCE(live.booking_revenue_vnd, 0)::numeric AS live_revenue,
+                   COALESCE(projected.completed_booking_count, 0)::numeric AS projected_count,
+                   COALESCE(projected.booking_revenue_vnd, 0)::numeric AS projected_revenue
+            FROM live
+            FULL OUTER JOIN projected USING (operator_id)
             ORDER BY operator_id;
             """;
         command.Transaction = _db.Database.CurrentTransaction?.GetDbTransaction();
@@ -299,11 +330,27 @@ internal sealed class BookingRepository : IBookingRepository
             {
                 var completedBookingCount = checked((long)reader.GetDecimal(1));
                 var bookingRevenueVnd = checked((long)reader.GetDecimal(2));
+                var projectedCount = checked((long)reader.GetDecimal(3));
+                var projectedRevenue = checked((long)reader.GetDecimal(4));
+                var operatorId = reader.GetGuid(0);
+
+                if (completedBookingCount != projectedCount
+                    || bookingRevenueVnd != projectedRevenue)
+                {
+                    _logger.LogError(
+                        "Platform BookingStats mismatch for operator {OperatorId}: live count {LiveCount}, projected count {ProjectedCount}, live revenue {LiveRevenueVnd}, projected revenue {ProjectedRevenueVnd}",
+                        operatorId,
+                        completedBookingCount,
+                        projectedCount,
+                        bookingRevenueVnd,
+                        projectedRevenue);
+                    throw new PlatformBookingStatsMismatchException();
+                }
 
                 totalCount = checked(totalCount + completedBookingCount);
                 totalRevenue = checked(totalRevenue + bookingRevenueVnd);
                 items.Add(new PlatformBookingReportItem(
-                    reader.GetGuid(0),
+                    operatorId,
                     completedBookingCount,
                     bookingRevenueVnd));
             }
@@ -314,6 +361,43 @@ internal sealed class BookingRepository : IBookingRepository
         }
 
         return items;
+    }
+
+    public async IAsyncEnumerable<BookingOperatorReportRow> StreamOperatorReportRowsAsync(
+        Guid operatorId,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        bool cancellationOnly,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var query = _db.Bookings
+            .AsNoTracking()
+            .Where(booking => booking.OperatorId == operatorId);
+
+        query = cancellationOnly
+            ? query.Where(booking => booking.CancelledAt >= fromUtc && booking.CancelledAt < toUtc)
+            : query.Where(booking => booking.CreatedAt >= fromUtc && booking.CreatedAt < toUtc);
+
+        var rows = query
+            .OrderBy(booking => cancellationOnly ? booking.CancelledAt : booking.CreatedAt)
+            .ThenBy(booking => booking.Id)
+            .Select(booking => new BookingOperatorReportRow(
+                booking.Id,
+                booking.BookingCode.Value,
+                booking.TripId,
+                booking.Status.ToString(),
+                booking.Passengers.Count,
+                booking.TotalAmount.Amount,
+                booking.CreatedAt,
+                booking.ConfirmedAt,
+                booking.CompletedAt,
+                booking.CancelledAt,
+                booking.CancellationReason == null ? null : booking.CancellationReason.ToString()));
+
+        await foreach (var row in rows.AsAsyncEnumerable().WithCancellation(ct).ConfigureAwait(false))
+        {
+            yield return row;
+        }
     }
 
     /// <inheritdoc/>

@@ -24,6 +24,9 @@ public abstract class VietRideDbContextBase : DbContext
     /// Outbox table — every service that publishes events writes here in same transaction.
     public DbSet<OutboxEvent> OutboxEvents => Set<OutboxEvent>();
 
+    /// Terminal outbox publish failures retained for operational review.
+    public DbSet<OutboxDlq> OutboxDlq => Set<OutboxDlq>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -60,6 +63,26 @@ public abstract class VietRideDbContextBase : DbContext
             b.HasIndex(x => new { x.Status, x.CreatedAt })
                 .HasDatabaseName("idx_outbox_events_status_created")
                 .HasFilter($"status IN ('PENDING'::{outboxEventStatusTypeName}, 'PUBLISHING'::{outboxEventStatusTypeName}, 'FAILED'::{outboxEventStatusTypeName})");
+        });
+
+        modelBuilder.Entity<OutboxDlq>(b =>
+        {
+            b.ToTable("outbox_dlq");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
+            b.Property(x => x.EventId).IsRequired();
+            b.Property(x => x.EventType).IsRequired().HasMaxLength(100);
+            b.Property(x => x.Payload).HasColumnType("jsonb").IsRequired();
+            b.Property(x => x.RetryCount).IsRequired();
+            b.Property(x => x.LastError).IsRequired();
+            b.Property(x => x.CreatedAt).IsRequired();
+            b.Property(x => x.TerminalAt).HasDefaultValueSql("now()").IsRequired();
+            b.HasIndex(x => x.EventId)
+                .HasDatabaseName("uq_outbox_dlq_event_id")
+                .IsUnique();
+            b.HasIndex(x => new { x.TerminalAt, x.EventId })
+                .HasDatabaseName("idx_outbox_dlq_terminal_event_id")
+                .IsDescending(true, true);
         });
 
         modelBuilder.ApplySnakeCaseNaming();

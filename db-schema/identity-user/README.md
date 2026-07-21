@@ -22,6 +22,8 @@ Identity & User Service quản lý **authentication, authorization, user profile
 | `ActivityLog` | Audit log user actions. | `action`, `metadata` JSONB |
 | `SubscriptionPlan` | SaaS plan catalog (System Admin định nghĩa). | Resource limits + module flags |
 | `OperatorSubscription` | 1-1 với Operator: plan hiện tại, usage counters, billing period. | `status`, `expiresAt`, `previousActivePlanId` (cho revert), counter fields |
+| `OutboxEvent` | Outbox giao dịch của Identity. | `eventType`, `payload`, `status`, retry metadata |
+| `OutboxDlq` | Các event Outbox đã thất bại terminal để System Admin review. | unique `eventId`, payload, `retryCount`, `terminalAt` |
 
 ## Design Decisions
 
@@ -60,6 +62,9 @@ Identity & User Service quản lý **authentication, authorization, user profile
 | `idx_subscription_plans_is_active` | `is_active` | B-tree | List plans for upgrade UI |
 | `idx_operator_subscriptions_status` | `status` | B-tree | Hangfire jobs (EXPIRED, PENDING_PAYMENT scans) |
 | `idx_operator_subscriptions_expires_at` | `expires_at` | partial (`status='ACTIVE'`) | Trial expire daily job |
+| `idx_outbox_events_status_created` | `(status, created_at)` partial | B-tree | Outbox worker poll |
+| `uq_outbox_dlq_event_id` | `event_id` | unique | One terminal row per event |
+| `idx_outbox_dlq_terminal_event_id` | `(terminal_at, event_id)` | B-tree | Composite cursor review theo contract |
 
 ## Cross-service References (Logical FK)
 

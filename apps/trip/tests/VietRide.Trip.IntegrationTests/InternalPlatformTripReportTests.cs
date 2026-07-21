@@ -112,6 +112,31 @@ public sealed class InternalPlatformTripReportTests
     }
 
     [Fact]
+    public async Task TripStatsMismatch_FailsClosedAndIdempotentBackfillRecovers()
+    {
+        await _factory.InitializeDatabaseAsync();
+        await _factory.ResetTripsAsync();
+        var operatorId = Guid.Parse("40000000-0000-0000-0000-000000000014");
+        await _factory.SeedTripAsync(operatorId, TripStatus.COMPLETED, From.AddDays(12));
+        await _factory.DeletePlatformProjectionAsync();
+
+        using var client = _factory.CreateInternalClient();
+        var mismatch = await client.GetAsync(ReportPath(From, To));
+
+        mismatch.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        await AssertErrorCodeAsync(mismatch, "UPSTREAM_UNAVAILABLE");
+
+        (await _factory.RunPlatformBackfillTwiceAsync()).Should().Be(1);
+        var recovered = await client.GetAsync(ReportPath(From, To));
+        recovered.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await recovered.Content.ReadAsStringAsync());
+        AssertItem(
+            document.RootElement.GetProperty("items").EnumerateArray().Single(),
+            operatorId,
+            1);
+    }
+
+    [Fact]
     public async Task CompletedReportMigration_IsReversibleAndPlannerUsesPartialIndex()
     {
         await _factory.InitializeDatabaseAsync();
@@ -292,6 +317,27 @@ public sealed class PlatformTripReportWebApplicationFactory : WebApplicationFact
         await using var scope = Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<TripDbContext>();
         return await db.Trips.CountAsync();
+    }
+
+    public async Task DeletePlatformProjectionAsync()
+    {
+        await using var scope = Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<TripDbContext>();
+        await db.Database.ExecuteSqlRawAsync(
+            "DELETE FROM vietride_trip.platform_trip_stats;");
+    }
+
+    public async Task<long> RunPlatformBackfillTwiceAsync()
+    {
+        await using var scope = Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<TripDbContext>();
+        await db.Database.ExecuteSqlRawAsync(
+            "SELECT vietride_trip.rebuild_platform_trip_stats(); " +
+            "SELECT vietride_trip.rebuild_platform_trip_stats();");
+        return await db.Database.SqlQueryRaw<long>(
+                "SELECT COUNT(*)::bigint AS \"Value\" " +
+                "FROM vietride_trip.platform_trip_stats")
+            .SingleAsync();
     }
 
     public async Task MigrateAsync(string? targetMigration = null)

@@ -143,6 +143,36 @@ public sealed class InternalPlatformBookingReportTests
     }
 
     [Fact]
+    public async Task BookingStatsMismatch_FailsClosedAndIdempotentBackfillRecovers()
+    {
+        await _factory.InitializeDatabaseAsync();
+        await _factory.ResetAsync();
+        var operatorId = Guid.Parse("40000000-0000-0000-0000-000000000005");
+        await _factory.SeedBookingAsync(
+            operatorId,
+            BookingStatus.COMPLETED,
+            From.AddDays(12),
+            610_000);
+        await _factory.DeletePlatformProjectionAsync();
+
+        using var client = _factory.CreateInternalClient();
+        var mismatch = await client.GetAsync(ReportPath(From, To));
+
+        mismatch.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        await AssertErrorCodeAsync(mismatch, "UPSTREAM_UNAVAILABLE");
+
+        (await _factory.RunPlatformBackfillTwiceAsync()).Should().Be(1);
+        var recovered = await client.GetAsync(ReportPath(From, To));
+        recovered.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await recovered.Content.ReadAsStringAsync());
+        AssertItem(
+            document.RootElement.GetProperty("items").EnumerateArray().Single(),
+            operatorId,
+            1,
+            610_000);
+    }
+
+    [Fact]
     public async Task CompletedReportMigration_IsReversibleAndPlannerUsesPartialIndex()
     {
         await _factory.InitializeDatabaseAsync();
@@ -340,6 +370,27 @@ public sealed class PlatformBookingReportWebApplicationFactory
         var db = scope.ServiceProvider.GetRequiredService<BookingDbContext>();
         return await db.BookingStatusHistories.AsNoTracking().CountAsync(
             row => row.Source == "COMPLETE_ON_TRIP_COMPLETED");
+    }
+
+    public async Task DeletePlatformProjectionAsync()
+    {
+        await using var scope = Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<BookingDbContext>();
+        await db.Database.ExecuteSqlRawAsync(
+            "DELETE FROM vietride_booking.platform_booking_stats;");
+    }
+
+    public async Task<long> RunPlatformBackfillTwiceAsync()
+    {
+        await using var scope = Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<BookingDbContext>();
+        await db.Database.ExecuteSqlRawAsync(
+            "SELECT vietride_booking.rebuild_platform_booking_stats(); " +
+            "SELECT vietride_booking.rebuild_platform_booking_stats();");
+        return await db.Database.SqlQueryRaw<long>(
+                "SELECT COUNT(*)::bigint AS \"Value\" " +
+                "FROM vietride_booking.platform_booking_stats")
+            .SingleAsync();
     }
 
     public async Task MigrateAsync(string? targetMigration = null)

@@ -25,6 +25,7 @@ Quản lý **booking lifecycle, multi-passenger per booking, seat reference, vou
 | `VoucherUsage` | 1 record per apply. | `funded_by` snapshot, `bookingGroupId` nullable cho round-trip limit |
 | `OperatorVoucherConsent` | Operator opt-in cho OPERATOR_FUNDED voucher. | `status` enum, UNIQUE `(operatorId, voucherId)`, `rejectReason` |
 | `OutboxEvent` | Reliability — Outbox pattern. | `eventType`, `payload`, `status` |
+| `OutboxDlq` | Terminal Outbox failures for admin review. | unique `eventId`, payload, retry metadata, `terminalAt` |
 
 ## Design Decisions
 
@@ -43,6 +44,7 @@ Quản lý **booking lifecycle, multi-passenger per booking, seat reference, vou
 - **Day-23 `SCHEDULE_CHANGE` metadata freeze:** exact `sourceEventId`, `oldDeparture`, `newDeparture`, `severity`, `initialDeadline`, nullable `terminalDeadline`, `refundBasisAmount`, `refundPercent`, `refundAmount`. Basis là immutable `Booking.total_amount`; MEDIUM = 50%, MAJOR = 100%, làm tròn đến VND bằng `MidpointRounding.AwayFromZero`. Passenger reject atomically resolves action, cancels Booking, appends history, and emits one authoritative cancellation fact. Scheduled acceptance only resolves `ACCEPTED`; it does not cancel/refund.
 - **`booking_transfers` 1 record per Passenger** (không phải 1 per Booking) — multi-passenger booking sẽ có N record cùng `booking_id` khác `passenger_id`. UNIQUE constraint NOT enforced ở DB (1 passenger có thể transfer nhiều lần nếu Trip_new lại DISRUPTED).
 - **`booking_stats`** dùng surrogate UUID PK + UNIQUE composite `(operator_id, stat_date, COALESCE(trip_id, ...))` — `trip_id` nullable cho per-operator-per-day aggregate row (trip_id=NULL coalesced to zero-UUID để UNIQUE bao trùm cả 2 case).
+- **`platform_booking_stats`** là projection Day 42 theo từng Booking `COMPLETED`, được trigger đồng bộ cùng transaction và job `booking.platform-stats-backfill` rebuild idempotent từ earned live; platform report chỉ cache sau khi projection khớp live theo operator/range.
 - **`vouchers.applicable_operator_ids`/`applicable_route_ids`** dùng `UUID[]` array thay vì junction table — query với `= ANY(array)` đủ cho scale (mỗi voucher target ≤ 100 operator/route trong realistic case). Junction table phức tạp hơn không justify.
 - **`vouchers.owner_operator_id` nullable (logical FK identity.operators):** NULL = admin platform voucher; NOT NULL = operator self-created voucher (OPERATOR_FUNDED, self-consented, tenant-scoped). Enforced by `chk_vouchers_operator_owned_funding`: `owner_operator_id IS NULL OR funding_type = 'OPERATOR_FUNDED'`. Operator-owned vouchers bypass the consent flow (self-created = self-consented), emit NO integration event, and are scoped to `owner_operator_id == caller` in all CRUD operations.
 - **`vouchers.deleted_at` soft-delete (ADR 0003):** Admin hard-delete cũ chuyển thành soft-delete. `uq_vouchers_code` trở thành partial unique index `WHERE deleted_at IS NULL` để cho phép tái sử dụng code sau khi soft-delete. Voucher có cả `is_active` (activation toggle, `IActivatable`) và `deleted_at` (soft-delete, `ISoftDeletable`) — hai concern riêng biệt theo ADR 0003.
@@ -99,12 +101,15 @@ The persistence surface is insert/read only; no update/delete API or repository 
 | `idx_booking_transfers_booking_id` | `booking_id` | B-tree | Transfer history per booking |
 | `idx_booking_transfers_original_trip_id` | `original_trip_id` | B-tree | Audit Vehicle Substitution |
 | `uq_booking_stats_operator_date_trip` | `(operator_id, stat_date, COALESCE(trip_id, ...))` | unique | UPSERT upsert lookup |
+| `idx_platform_booking_stats_completed_operator` | `(completed_at, operator_id)` | B-tree | Exact UTC range reconciliation |
 | `uq_vouchers_code` | `code` | unique | Code redeem lookup |
 | `idx_voucher_usages_voucher_user` | `(voucher_id, user_id)` | B-tree | Per-user usage limit |
 | `idx_voucher_usages_voucher_group` | `(voucher_id, booking_group_id)` partial | B-tree | Round-trip COUNT DISTINCT |
 | `uq_operator_voucher_consents_operator_voucher` | `(operator_id, voucher_id)` | unique | 1 consent per pair |
 | `idx_operator_voucher_consents_operator_status` | `(operator_id, status)` | B-tree | Operator Web "Voucher đề xuất" tab |
 | `idx_outbox_events_status_created` | `(status, created_at)` partial | B-tree | Outbox worker poll |
+| `uq_outbox_dlq_event_id` | `event_id` | unique | One terminal row per event |
+| `idx_outbox_dlq_terminal_event_id` | `(terminal_at, event_id)` | B-tree | Composite cursor review theo contract |
 
 ## Cross-service References (Logical FK)
 

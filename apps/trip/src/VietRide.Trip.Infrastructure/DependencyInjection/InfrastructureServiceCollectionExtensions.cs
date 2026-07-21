@@ -1,10 +1,12 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using StackExchange.Redis;
+using VietRide.Shared.Application.Reporting;
 using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Http.Resilience;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Messaging.DependencyInjection;
+using VietRide.Shared.Reporting;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Jobs;
 using VietRide.Trip.Application.Abstractions.Repositories;
@@ -34,6 +36,7 @@ public static class InfrastructureServiceCollectionExtensions
         IConfiguration configuration,
         bool backgroundWorkersEnabled)
     {
+        services.AddSingleton<IExcelReportWriter, ClosedXmlExcelReportWriter>();
         services.AddScoped<ILocationRepository, LocationRepository>();
         services.AddScoped<IStationRepository, StationRepository>();
         services.AddScoped<IOperatorStationRepository, OperatorStationRepository>();
@@ -68,6 +71,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<AutoBoardingJob>();
         services.AddScoped<AutoStartFallbackJob>();
         services.AddScoped<AutoCompletedFallbackJob>();
+        services.AddScoped<PlatformTripStatsBackfillJob>();
         if (backgroundWorkersEnabled)
         {
             services.AddVietRideEventConsumer<BookingShuttleConfirmedIntegrationEvent, BookingShuttleConfirmedIntegrationEventHandler>(options =>
@@ -83,6 +87,7 @@ public static class InfrastructureServiceCollectionExtensions
             services.AddHostedService<TripGenerationRecurringJobRegistrationHostedService>();
             services.AddHostedService<ShuttleDispatchSafetyJobRegistrationHostedService>();
             services.AddHostedService<TripLifecycleJobRegistrationHostedService>();
+            services.AddHostedService<PlatformTripStatsBackfillJobRegistrationHostedService>();
         }
 
         var redisUrl = configuration["REDIS_URL"]

@@ -7,6 +7,7 @@ using VietRide.Booking.Application.Features.Vouchers.AvailableVouchers;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Authentication;
+using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Booking.Api.Controllers;
 
@@ -25,6 +26,7 @@ public sealed class InternalVouchersController : ControllerBase
     }
 
     [HttpPost("validate")]
+    [SkipIdempotency("Voucher validation is read-only and does not create a usage record.")]
     [ProducesResponseType(typeof(ApiResponse<InternalValidateVoucherResult>), StatusCodes.Status200OK)]
     public async Task<IActionResult> Validate([FromBody] InternalValidateVoucherRequest request, CancellationToken ct)
     {

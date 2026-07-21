@@ -1,12 +1,19 @@
 using VietRide.Shared.Application.Repositories;
 using VietRide.Trip.Application.Features.DriverTrips.GetAssignedTripRoute;
 using VietRide.Trip.Application.Features.Internal.Reports.PlatformTrips;
+using VietRide.Trip.Application.Features.OperatorReports;
 using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Application.Abstractions.Repositories;
 
 public interface ITripRepository : IRepository<Domain.Entities.Trip, Guid>
 {
+    IAsyncEnumerable<TripOperatorOccupancyRow> StreamOperatorOccupancyRowsAsync(
+        Guid operatorId,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Operator occupancy report is not implemented by this repository.");
     Task<IReadOnlyList<PlatformTripReportItem>> GetPlatformTripMetricsAsync(
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc,

@@ -213,11 +213,13 @@ services:
       RabbitMq__ExchangeName: ${RABBITMQ_EXCHANGE:-vietride.events}
       TRIP_SERVICE_BASE_URL: http://trip:5002
       PAYMENT_SERVICE_BASE_URL: http://payment:5004
+      PARCEL_SERVICE_BASE_URL: http://parcel:5005
       IDENTITY_SERVICE_BASE_URL: http://identity:5001
       # appsettings.json hard-codes Trip/Payment/Identity:BaseUrl = localhost (dev outside Docker);
       # override the config keys so the in-container clients reach the sibling services.
       Trip__BaseUrl: http://trip:5002
       Payment__BaseUrl: http://payment:5004
+      Parcel__BaseUrl: http://parcel:5005
       Identity__BaseUrl: http://identity:5001
       # Real cross-service seam by default (overrides appsettings.Development.json UseDevStub=true).
       # Set BOOKING_TRIP_USE_DEV_STUB / BOOKING_PAYMENT_USE_DEV_STUB / BOOKING_IDENTITY_USE_DEV_STUB =true locally to use the dev stubs.

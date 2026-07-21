@@ -152,15 +152,32 @@ export function createProxyHandler(env: Env, signer: InternalJwtSigner): Express
         target: route.target,
         changeOrigin: true,
         on: {
-          proxyReq: (proxyReq) => {
+          proxyReq: (proxyReq, sourceReq, downstreamRes) => {
             if (!route.forwardUserAuthorization) {
               proxyReq.removeHeader('authorization');
             }
+
+            const response = downstreamRes as Response;
+            function cleanupAbortListeners(): void {
+              sourceReq.off('aborted', abortUpstream);
+              response.off('close', abortUpstream);
+              response.off('finish', cleanupAbortListeners);
+            }
+            function abortUpstream(): void {
+              if (!response.writableEnded && !proxyReq.destroyed) {
+                proxyReq.destroy();
+              }
+              cleanupAbortListeners();
+            }
+
+            sourceReq.once('aborted', abortUpstream);
+            response.once('close', abortUpstream);
+            response.once('finish', cleanupAbortListeners);
           },
           error: (err, proxyReq, res) => {
             logger.error(`Upstream ${route.target} error: ${err.message}`);
             const r = res as Response;
-            if (!r.headersSent) {
+            if (!r.headersSent && !r.destroyed) {
               const reqId = resolveRequestId(proxyReq as RequestIdSource);
               r.setHeader('X-Request-Id', reqId);
               r.status(502).json(

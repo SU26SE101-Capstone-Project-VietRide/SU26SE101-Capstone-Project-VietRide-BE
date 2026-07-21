@@ -37,6 +37,8 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 | `ShuttlePassenger` | Manifest entry shuttle. | `shuttleTripId` nullable (chờ assign), `pickupAddress`+lat/lng |
 | `Incident` | Driver-reported incident. | `category` enum, `photoUrls` JSONB max 3 |
 | `OutboxEvent` | Reliability — Outbox pattern. | `eventType`, `payload` JSONB, `status` enum |
+| `OutboxDlq` | Terminal Outbox failures for admin review. | unique `eventId`, payload, retry metadata, `terminalAt` |
+| `PlatformTripStats` | Projection Day 42 theo từng Trip `COMPLETED`. | `tripId`, `operatorId`, `completedAt`, `projectedAt` |
 
 ## Design Decisions
 
@@ -60,6 +62,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 - **`ShuttlePassenger.shuttle_trip_id` nullable** — passenger có thể đăng ký shuttle trước khi operator tạo ShuttleTrip (`PENDING_ASSIGNMENT` status).
 - **`Incident.photo_urls` JSONB** thay vì junction table — max 3 URLs, đơn giản, không có query cần JOIN.
 - **`OutboxEvent`** trong cùng service DB — atomic INSERT với business write trong 1 transaction (Outbox pattern). Worker poll mỗi 5s, dùng `BackgroundService` (.NET).
+- **`platform_trip_stats`** được trigger đồng bộ cùng transaction và job `trip.platform-stats-backfill` rebuild idempotent từ earned live; platform report chỉ cache sau khi projection khớp live theo operator/range.
 
 ## Index Strategy
 
@@ -80,6 +83,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 | `uq_trips_vehicle_departure` | `(vehicle_id, departure_date_time)` partial | unique | Vehicle conflict |
 | `idx_trips_route_departure` | `(route_id, departure_date_time)` | B-tree | Trip search by route + date |
 | `idx_trips_status_departure` | `(status, departure_date_time)` | B-tree | Hangfire BOARDING/COMPLETED scans |
+| `idx_platform_trip_stats_completed_operator` | `(completed_at, operator_id)` | B-tree | Exact UTC range reconciliation |
 | `idx_trip_audit_logs_trip_occurred` | `(trip_id, occurred_at DESC)` | B-tree | Audit timeline per trip |
 | `idx_trip_audit_logs_actor_occurred` | `(actor_user_id, occurred_at DESC)` | partial B-tree | Audit timeline per actor |
 | `idx_trip_audit_logs_action_occurred` | `(action, occurred_at DESC)` | B-tree | Audit lookup per action |
@@ -95,6 +99,8 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 | `idx_trip_gen_skip_logs_operator_date` | `(operator_id, skipped_date DESC)` | B-tree | Dashboard "skipped this month" |
 | `idx_shuttle_passengers_main_trip_status` | `(main_trip_id, status)` | B-tree | "Shuttle requests pending" view |
 | `idx_outbox_events_status_created` | `(status, created_at)` partial | B-tree | Outbox worker polling |
+| `uq_outbox_dlq_event_id` | `event_id` | unique | One terminal row per event |
+| `idx_outbox_dlq_terminal_event_id` | `(terminal_at, event_id)` | B-tree | Composite cursor review theo contract |
 
 ## Cross-service References (Logical FK)
 

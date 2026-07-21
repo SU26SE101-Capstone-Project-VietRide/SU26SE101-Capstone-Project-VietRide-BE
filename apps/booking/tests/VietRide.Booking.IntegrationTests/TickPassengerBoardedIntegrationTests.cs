@@ -110,7 +110,7 @@ public sealed class TickPassengerBoardedIntegrationTests
         root.GetProperty("success").GetBoolean().Should().BeFalse();
         root.GetProperty("statusCode").GetInt32().Should().Be(422);
         root.GetProperty("error").GetProperty("code").GetString()
-            .Should().Be("VALIDATION_ERROR");
+            .Should().Be("IDEMPOTENCY_KEY_REQUIRED");
         passenger.BoardingStatus.Should().Be(PassengerBoardingStatus.PENDING);
         passenger.BoardedAt.Should().BeNull();
         await _factory.TripClient.DidNotReceiveWithAnyArgs()

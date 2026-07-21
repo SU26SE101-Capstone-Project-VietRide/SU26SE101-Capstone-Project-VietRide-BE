@@ -33,11 +33,11 @@ public sealed class InvoiceEndpointsTests
         await using var factory = CreateFactory(mediator);
         using var client = factory.CreateClient();
         using var first = CreateRequest(HttpMethod.Post, $"/v1/admin/invoices/{InvoiceId:D}/retry", "SYSTEM_ADMIN");
-        first.Headers.TryAddWithoutValidation("Idempotency-Key", "invoice-retry-test-key");
+        first.Headers.TryAddWithoutValidation("Idempotency-Key", "11111111-1111-4111-8111-111111111111");
 
         var firstResponse = await client.SendAsync(first);
         using var replay = CreateRequest(HttpMethod.Post, $"/v1/admin/invoices/{InvoiceId:D}/retry", "SYSTEM_ADMIN");
-        replay.Headers.TryAddWithoutValidation("Idempotency-Key", "invoice-retry-test-key");
+        replay.Headers.TryAddWithoutValidation("Idempotency-Key", "11111111-1111-4111-8111-111111111111");
         var replayResponse = await client.SendAsync(replay);
 
         firstResponse.StatusCode.Should().Be(HttpStatusCode.Accepted);
@@ -125,18 +125,18 @@ public sealed class InvoiceEndpointsTests
         using var client = factory.CreateClient();
         using var request = CreateRequest(HttpMethod.Post,
             $"/v1/admin/operators/{OperatorId:D}/wallet/adjust", "SYSTEM_ADMIN");
-        request.Headers.TryAddWithoutValidation("Idempotency-Key", "operator-adjust-test-key");
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", "22222222-2222-4222-8222-222222222222");
         request.Content = JsonContent.Create(new { type = "CREDIT", amount = 100_000, note = "Correction" });
 
         var response = await client.SendAsync(request);
         using var replay = CreateRequest(HttpMethod.Post,
             $"/v1/admin/operators/{OperatorId:D}/wallet/adjust", "SYSTEM_ADMIN");
-        replay.Headers.TryAddWithoutValidation("Idempotency-Key", "operator-adjust-test-key");
+        replay.Headers.TryAddWithoutValidation("Idempotency-Key", "22222222-2222-4222-8222-222222222222");
         replay.Content = JsonContent.Create(new { type = "CREDIT", amount = 100_000, note = "Correction" });
         var replayResponse = await client.SendAsync(replay);
         using var mismatch = CreateRequest(HttpMethod.Post,
             $"/v1/admin/operators/{OperatorId:D}/wallet/adjust", "SYSTEM_ADMIN");
-        mismatch.Headers.TryAddWithoutValidation("Idempotency-Key", "operator-adjust-test-key");
+        mismatch.Headers.TryAddWithoutValidation("Idempotency-Key", "22222222-2222-4222-8222-222222222222");
         mismatch.Content = JsonContent.Create(new { type = "CREDIT", amount = 200_000, note = "Correction" });
         var mismatchResponse = await client.SendAsync(mismatch);
 

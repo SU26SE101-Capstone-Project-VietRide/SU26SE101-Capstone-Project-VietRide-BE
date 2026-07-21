@@ -13,10 +13,12 @@ using VietRide.Parcel.Infrastructure.Http;
 using VietRide.Parcel.Infrastructure.Jobs;
 using VietRide.Parcel.Infrastructure.Messaging;
 using VietRide.Parcel.Infrastructure.Persistence.Repositories;
+using VietRide.Shared.Application.Reporting;
 using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Http.Resilience;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Messaging.DependencyInjection;
+using VietRide.Shared.Reporting;
 
 namespace VietRide.Parcel.Infrastructure.DependencyInjection;
 
@@ -28,6 +30,7 @@ public static class InfrastructureServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
+        services.AddSingleton<IExcelReportWriter, ClosedXmlExcelReportWriter>();
         var connectionString = configuration.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default is not configured.");
 
@@ -48,6 +51,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ParcelPendingAutoRejectJob>();
         services.AddScoped<ParcelLifecycleSweepJob>();
         services.AddScoped<ParcelDeliveryPendingConfirmReminderJob>();
+        services.AddScoped<PlatformParcelStatsBackfillJob>();
 
         return services;
     }

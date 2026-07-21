@@ -2,18 +2,22 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Polly;
 using StackExchange.Redis;
+using VietRide.Booking.Application.Abstractions.Caching;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Application.Services;
+using VietRide.Booking.Infrastructure.Caching;
 using VietRide.Booking.Infrastructure.Http;
 using VietRide.Booking.Infrastructure.Messaging;
 using VietRide.Booking.Infrastructure.Persistence.Repositories;
 using VietRide.Booking.Infrastructure.Services;
+using VietRide.Shared.Application.Reporting;
 using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Http.Resilience;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Messaging.DependencyInjection;
+using VietRide.Shared.Reporting;
 
 namespace VietRide.Booking.Infrastructure.DependencyInjection;
 
@@ -35,6 +39,20 @@ public static class InfrastructureServiceCollectionExtensions
         IConfiguration configuration,
         bool registerConsumers = true)
     {
+        services.AddSingleton<IExcelReportWriter, ClosedXmlExcelReportWriter>();
+        services.AddScoped<IPlatformReportCache, RedisPlatformReportCache>();
+        services.AddHttpClient<ITripPlatformReportClient, TripPlatformReportClient>(client =>
+            ConfigurePlatformReportClient(client, ResolveTripBaseUrl(configuration)))
+            .AddHttpMessageHandler<CorrelationIdDelegatingHandler>();
+        services.AddHttpClient<IParcelPlatformReportClient, ParcelPlatformReportClient>(client =>
+            ConfigurePlatformReportClient(client, ResolveParcelBaseUrl(configuration)))
+            .AddHttpMessageHandler<CorrelationIdDelegatingHandler>();
+        services.AddHttpClient<IPaymentPlatformLedgerClient, PaymentPlatformLedgerClient>(client =>
+            ConfigurePlatformReportClient(client, ResolvePaymentBaseUrl(configuration)))
+            .AddHttpMessageHandler<CorrelationIdDelegatingHandler>();
+        services.AddHttpClient<IIdentityPlatformReportClient, IdentityPlatformReportClient>(client =>
+            ConfigurePlatformReportClient(client, ResolveIdentityBaseUrl(configuration)))
+            .AddHttpMessageHandler<CorrelationIdDelegatingHandler>();
         // Redis — required by IdempotencyMiddleware (wired in Program.cs via AddVietRideIdempotency).
         // Falls back gracefully if REDIS_URL is absent (AbortOnConnectFail = false).
         var redisUrl = configuration["REDIS_URL"]
@@ -332,5 +350,28 @@ public static class InfrastructureServiceCollectionExtensions
         }
 
         return baseUrl;
+    }
+
+    private static string ResolveParcelBaseUrl(IConfiguration configuration)
+    {
+        var baseUrl = configuration["Parcel:BaseUrl"]
+            ?? Environment.GetEnvironmentVariable("PARCEL_SERVICE_BASE_URL");
+
+        if (string.IsNullOrWhiteSpace(baseUrl))
+        {
+            throw new InvalidOperationException(
+                "Parcel base URL must be configured via Parcel:BaseUrl or PARCEL_SERVICE_BASE_URL.");
+        }
+
+        return baseUrl;
+    }
+
+    private static void ConfigurePlatformReportClient(HttpClient client, string baseUrl)
+    {
+        client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
+        client.Timeout = TimeSpan.FromSeconds(5);
+        client.DefaultRequestHeaders.Accept.Clear();
+        client.DefaultRequestHeaders.Accept.Add(
+            new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
     }
 }

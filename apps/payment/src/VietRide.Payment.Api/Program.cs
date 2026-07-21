@@ -56,7 +56,7 @@ redisOptions.AbortOnConnectFail = false;
 builder.Services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(redisOptions));
 
 builder.Services.AddInfrastructure(builder.Configuration, registerConsumers: registerMessaging);
-builder.Services.AddVietRideIdempotency("payment");
+builder.Services.AddVietRideIdempotency("payment", requireAllMutations: true);
 
 var app = builder.Build();
 

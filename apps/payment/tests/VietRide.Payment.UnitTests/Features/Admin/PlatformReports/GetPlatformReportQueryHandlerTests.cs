@@ -1,7 +1,9 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
+using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Application.Features.Admin.PlatformReports;
+using VietRide.Payment.Domain.Entities;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Abstractions;
 
@@ -201,6 +203,56 @@ public sealed class GetPlatformReportQueryHandlerTests
     }
 
     [Fact]
+    public async Task Handle_WhenLedgerRevenueDoesNotMatchLiveSources_RejectsWholeReport()
+    {
+        var operatorId = Guid.Parse("40000000-0000-0000-0000-000000000004");
+        var bookings = new FakeBookingClient
+        {
+            Rows = [new BookingPlatformReportItem(operatorId, 2, 500_000)],
+        };
+        var parcels = new FakeParcelClient
+        {
+            Rows = [new ParcelPlatformReportItem(operatorId, 1, 100_000)],
+        };
+        var ledger = new FakeLedgerRepository(
+            [new(operatorId, 499_000, 100_000)]);
+        var identity = new FakeIdentityClient();
+        var handler = CreateHandler(
+            bookings,
+            new FakeTripClient(),
+            parcels,
+            identity,
+            ledger);
+
+        var act = () => handler.Handle(ValidQuery(), CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<UpstreamUnavailableException>();
+        exception.Which.ErrorCode.Should().Be("UPSTREAM_UNAVAILABLE");
+        exception.Which.StatusCode.Should().Be(503);
+        identity.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Handle_WhenLedgerContainsUnknownRevenue_RejectsWholeReport()
+    {
+        var operatorId = Guid.Parse("40000000-0000-0000-0000-000000000005");
+        var ledger = new FakeLedgerRepository(
+            [new(operatorId, 100_000, 0)]);
+        var identity = new FakeIdentityClient();
+        var handler = CreateHandler(
+            new FakeBookingClient(),
+            new FakeTripClient(),
+            new FakeParcelClient(),
+            identity,
+            ledger);
+
+        var act = () => handler.Handle(ValidQuery(), CancellationToken.None);
+
+        await act.Should().ThrowAsync<UpstreamUnavailableException>();
+        identity.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Handle_WithInvalidRange_DoesNotCallSources()
     {
         var bookings = new FakeBookingClient();
@@ -221,18 +273,68 @@ public sealed class GetPlatformReportQueryHandlerTests
         parcels.CallCount.Should().Be(0);
     }
 
+    [Fact]
+    public async Task LedgerSource_WithValidRange_ReturnsRepositoryRowsAndExactBounds()
+    {
+        var rows = new[]
+        {
+            new PlatformLedgerReportItem(
+                Guid.Parse("40000000-0000-0000-0000-000000000006"),
+                100_000,
+                50_000),
+        };
+        var ledger = new FakeLedgerRepository(rows);
+        var handler = new GetPlatformLedgerReportQueryHandler(ledger);
+
+        var result = await handler.Handle(
+            new GetPlatformLedgerReportQuery(
+                "2026-07-01T00:00:00Z",
+                "2026-08-01T00:00:00Z"),
+            CancellationToken.None);
+
+        result.Items.Should().BeSameAs(rows);
+        ledger.CallCount.Should().Be(1);
+        ledger.From.Should().Be(DateTimeOffset.Parse("2026-07-01T00:00:00Z"));
+        ledger.To.Should().Be(DateTimeOffset.Parse("2026-08-01T00:00:00Z"));
+    }
+
     private static GetPlatformReportQueryHandler CreateHandler(
         IBookingPlatformReportClient bookings,
         ITripPlatformReportClient trips,
         IParcelPlatformReportClient parcels,
-        IIdentityOperatorSummaryClient identity)
-        => new(
+        IIdentityOperatorSummaryClient identity,
+        IOperatorLedgerEntryRepository? ledger = null)
+    {
+        ledger ??= CreateMatchingLedger(bookings, parcels);
+        return new GetPlatformReportQueryHandler(
             bookings,
             trips,
             parcels,
             identity,
             new FixedClock(GeneratedAt),
-            NullLogger<GetPlatformReportQueryHandler>.Instance);
+            NullLogger<GetPlatformReportQueryHandler>.Instance,
+            ledger);
+    }
+
+    private static IOperatorLedgerEntryRepository CreateMatchingLedger(
+        IBookingPlatformReportClient bookings,
+        IParcelPlatformReportClient parcels)
+    {
+        var bookingRows = (bookings as FakeBookingClient)?.Rows ?? [];
+        var parcelRows = (parcels as FakeParcelClient)?.Rows ?? [];
+        var operatorIds = bookingRows.Select(row => row.OperatorId)
+            .Concat(parcelRows.Select(row => row.OperatorId))
+            .Distinct()
+            .ToArray();
+        var rows = operatorIds.Select(operatorId => new PlatformLedgerReportItem(
+            operatorId,
+            bookingRows.Where(row => row.OperatorId == operatorId)
+                .Aggregate(0L, (total, row) => checked(total + row.BookingRevenueVnd)),
+            parcelRows.Where(row => row.OperatorId == operatorId)
+                .Aggregate(0L, (total, row) => checked(total + row.ParcelRevenueVnd))))
+            .ToArray();
+        return new FakeLedgerRepository(rows);
+    }
 
     private static GetPlatformReportQuery ValidQuery()
         => new("2026-07-01T00:00:00Z", "2026-08-01T00:00:00Z");
@@ -309,6 +411,48 @@ public sealed class GetPlatformReportQueryHandlerTests
             return Handler?.Invoke(operatorIds, cancellationToken)
                 ?? Task.FromResult<IReadOnlyList<OperatorSummaryItem>>([]);
         }
+    }
+
+    private sealed class FakeLedgerRepository : IOperatorLedgerEntryRepository
+    {
+        private readonly IReadOnlyList<PlatformLedgerReportItem> _rows;
+
+        public FakeLedgerRepository(IReadOnlyList<PlatformLedgerReportItem> rows)
+        {
+            _rows = rows;
+        }
+
+        public int CallCount { get; private set; }
+        public DateTimeOffset From { get; private set; }
+        public DateTimeOffset To { get; private set; }
+
+        public Task<IReadOnlyList<PlatformLedgerReportItem>> GetPlatformLedgerMetricsAsync(
+            DateTimeOffset fromUtc,
+            DateTimeOffset toUtc,
+            CancellationToken ct = default)
+        {
+            CallCount++;
+            From = fromUtc;
+            To = toUtc;
+            return Task.FromResult(_rows);
+        }
+
+        public Task<OperatorLedgerEntry?> GetByIdAsync(Guid id, CancellationToken ct)
+            => Task.FromResult<OperatorLedgerEntry?>(null);
+
+        public Task<OperatorLedgerEntry> AddAsync(OperatorLedgerEntry entity, CancellationToken ct)
+            => throw new NotSupportedException();
+
+        public void Update(OperatorLedgerEntry entity) => throw new NotSupportedException();
+        public void Remove(OperatorLedgerEntry entity) => throw new NotSupportedException();
+        public IQueryable<OperatorLedgerEntry> Query() => Array.Empty<OperatorLedgerEntry>().AsQueryable();
+        public IQueryable<OperatorLedgerEntry> QueryNoTracking() => Query();
+
+        public Task<long> SumTripNetAmountAsync(
+            Guid operatorId,
+            Guid tripId,
+            CancellationToken cancellationToken)
+            => throw new NotSupportedException();
     }
 
     private sealed class FixedClock : IClock

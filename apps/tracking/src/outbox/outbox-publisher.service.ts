@@ -43,11 +43,13 @@ export class OutboxPublisherService {
         eventId: event.id,
         eventType: event.eventType,
       });
-      await this.repository.markPublished(event.id, new Date());
-      return true;
+      return this.repository.markPublished(event.id, new Date());
     } catch (error) {
-      await this.repository.markFailed(event.id, error, event.retryCount);
-      this.logger.warn({ err: error, eventId: event.id, eventType: event.eventType }, 'Outbox event publish failed');
+      await this.repository.markFailed(event.id, error);
+      this.logger.warn(
+        { err: error, eventId: event.id, eventType: event.eventType },
+        'Outbox event publish failed',
+      );
       return false;
     }
   }

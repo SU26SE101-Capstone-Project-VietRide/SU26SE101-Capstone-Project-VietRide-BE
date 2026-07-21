@@ -2,7 +2,7 @@
 
 - **Timeline ref**: `BE_TIMELINE_VU.md` → Day 41 — Operator Excel export backend (Jira: SCV-125)
 - **Prior checklist**: `docs/handoff/day-40-checklist.md` — `not found` tại thời điểm lập kế hoạch; không coi platform report Day 40 là dependency đã hoàn tất
-- **Plan status**: DRAFT — REVISION-REQUIRED cho đến khi các quyết định trong `Open questions` được người dùng khóa và Task 41.0 cập nhật contract
+- **Plan status**: APPROVED — các quyết định contract được khóa cho mục tiêu Day 41–43; Task 41.0 cập nhật SOT/API contract trước feature implementation
 
 ## Objective
 
@@ -162,19 +162,29 @@ human OQ → 41.0 → 41.1 ─┬→ 41.2 ─┐
 
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
-| 41.0 | ⬜ todo | — | — | Blocked cho đến khi OQ-1..OQ-6 được khóa. |
-| 41.1 | ⬜ todo | — | — | — |
-| 41.2 | ⬜ todo | — | — | — |
-| 41.3 | ⬜ todo | — | — | — |
-| 41.4 | ⬜ todo | — | — | — |
-| 41.5 | ⬜ todo | — | — | — |
-| 41.6 | ⬜ todo | — | — | — |
+| 41.0 | ✅ done | APPROVED (full audit) | 2026-07-20 | Contract, owner, range, workbook và error registry đã khóa trong API contract/BSOT. |
+| 41.1 | ✅ done | APPROVED (full audit) | 2026-07-20 | Shared writer, typed cells, temp-file cleanup và harness 10.000 dòng đã pass. |
+| 41.2 | ✅ done | APPROVED (full audit) | 2026-07-20 | Booking/cancellation XLSX, tenant/range và cancellation propagation đã pass. |
+| 41.3 | ✅ done | APPROVED (full audit) | 2026-07-20 | Parcel XLSX và compatibility test exact CSV legacy đã pass. |
+| 41.4 | ✅ done | APPROVED (full audit) | 2026-07-20 | Revenue/refund XLSX từ immutable operator ledger đã pass. |
+| 41.5 | ✅ done | APPROVED (full audit) | 2026-07-20 | Occupancy XLSX từ Trip/TripSeat đã pass. |
+| 41.6 | ✅ done | APPROVED (full audit) | 2026-07-20 | Gateway/Postman và isolated real-stack E2E sáu XLSX + tenant + abort cleanup đã pass. |
 
 Legend: ⬜ todo · 🔄 in progress · ✅ done (reviewer APPROVED + human `/verify`) · ⚠️ done-with-carryover · ❌ blocked
 
-## Open questions
+## Quyết định contract đã khóa
 
-Các câu hỏi sau không có câu trả lời canonical trong SOT hiện tại. Không dispatch Task 41.0 trước khi human chọn:
+- Dùng sáu route tách: `GET /v1/operator/reports/bookings/export`, `/parcels/export`, `/revenue/export`, `/occupancy/export`, `/cancellation/export`, `/refunds/export`; Gateway proxy từng route đến service sở hữu dữ liệu. Không dùng facade generic.
+- Cả `OPERATOR_ADMIN` và `OPERATOR_STAFF` được truy cập; `operatorId` chỉ lấy từ JWT, không nhận từ query/body và mọi query có predicate tenant.
+- `from`/`to` là ngày ICT inclusive, mặc định 30 ngày inclusive, tối đa 92 ngày; chuyển thành UTC `[from,to)` và lỗi là `422 REPORT_RANGE_INVALID`.
+- Workbook dùng sheet tương ứng với report, header ổn định bằng tiếng Anh ASCII, không có PII hành khách/người gửi/người nhận. Các cột định danh chỉ là UUID/code nghiệp vụ, metric BIGINT và timestamp/date typed cell.
+- Booking lấy `created_at`; cancellation lấy `cancelled_at`; parcel lấy `created_at`; revenue/refund lấy `OperatorLedgerEntry` immutable theo `created_at` và các loại `BOOKING_REVENUE`, `PARCEL_REVENUE`, `BOOKING_REFUND`, `PARCEL_REFUND`, `ADJUSTMENT` theo contract. `BOOKING_GROUP` dùng allocation/context hiện hữu, không tạo attribution table.
+- ClosedXML `0.105.0` là dependency đã được chấp thuận. Writer dùng temp `FileStream` delete-on-close, không tạo full output `byte[]` hoặc full row list. Row cap chỉ được thêm sau benchmark và phải có error code contract; mốc bắt buộc là 10.000 dòng/report không OOM.
+- Success trả raw XLSX với MIME và `Content-Disposition`; validation/auth/server errors dùng ADR 0004. Endpoint CSV Parcel hiện hữu giữ nguyên behavior.
+
+## Open questions đã đóng
+
+Các OQ-1..OQ-6 cũ bên dưới được giữ làm lịch sử của bản draft; quyết định ở mục trên là SOT hiện hành và không còn là blocker.
 
 1. **OQ-1 — Route shape/owner**: dùng sáu route tách `GET /v1/operator/reports/{bookings|parcels|revenue|occupancy|cancellation|refunds}/export` và Gateway route từng prefix đến service owner (khuyến nghị, giữ no cross-DB), hay route generic technical-context `GET /v1/operator/reports/export?reportType=...&format=xlsx` với một facade? Nếu chọn facade, service owner và internal contracts phải được chỉ định rõ.
 2. **OQ-2 — Authorization**: cho cả `OPERATOR_ADMIN|OPERATOR_STAFF` như operator report/read endpoint hiện hữu (khuyến nghị), hay chỉ `OPERATOR_ADMIN`?

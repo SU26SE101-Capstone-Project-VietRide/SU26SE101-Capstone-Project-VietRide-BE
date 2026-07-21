@@ -45,9 +45,15 @@ public sealed class ScanBookingCodeForTripIntegrationTests
             .Returns(CreateTripSnapshot(tripId, operatorId, driverUserId));
 
         var client = _factory.CreateAuthenticatedClient(driverUserId, "DRIVER");
-        var response = await client.PostAsJsonAsync(
-            $"/v1/bookings/trips/{tripId}/boarding/qr-scan",
-            new { bookingCode = BookingCodeValue });
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/v1/bookings/trips/{tripId}/boarding/qr-scan")
+        {
+            Content = JsonContent.Create(new { bookingCode = BookingCodeValue }),
+        };
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", Guid.NewGuid().ToString())
+            .Should().BeTrue();
+        var response = await client.SendAsync(request);
         var json = await response.Content.ReadAsStringAsync();
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);

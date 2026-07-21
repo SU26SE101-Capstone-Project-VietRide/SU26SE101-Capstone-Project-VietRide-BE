@@ -1,0 +1,104 @@
+name: day41-43-e2e
+
+# Isolated acceptance overlay for reporting and reliability hardening.
+# The runner always removes this project's volumes before and after a run.
+services:
+  postgres:
+    container_name: day41-43-e2e-postgres
+    ports:
+      - '55443:5432'
+
+  redis:
+    container_name: day41-43-e2e-redis
+    ports:
+      - '56384:6379'
+
+  rabbitmq:
+    container_name: day41-43-e2e-rabbitmq
+    ports:
+      - '55742:5672'
+      - '55743:15672'
+
+  identity:
+    container_name: day41-43-e2e-identity
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      EMAIL_PROVIDER: LOG
+      TRIP_SERVICE_BASE_URL: http://trip:5002
+      BOOKING_SERVICE_BASE_URL: http://booking:5003
+      PAYMENT_SERVICE_BASE_URL: http://payment:5004
+      PARCEL_SERVICE_BASE_URL: http://parcel:5005
+      TRACKING_BASE_URL: http://tracking:3001
+    ports:
+      - '59101:5001'
+
+  trip:
+    container_name: day41-43-e2e-trip
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Identity__BaseUrl: http://identity:5001
+      Identity__UseDevStub: 'false'
+    ports:
+      - '59102:5002'
+
+  booking:
+    container_name: day41-43-e2e-booking
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Trip__BaseUrl: http://trip:5002
+      Trip__UseDevStub: 'false'
+      Payment__BaseUrl: http://payment:5004
+      Payment__UseDevStub: 'false'
+      Parcel__BaseUrl: http://parcel:5005
+      Identity__BaseUrl: http://identity:5001
+      Identity__UseDevStub: 'false'
+    ports:
+      - '59103:5003'
+
+  payment:
+    container_name: day41-43-e2e-payment
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      InvoiceStorage__Provider: E2E_LOCAL
+      InvoiceStorage__Bucket: day41-43-e2e
+      InvoiceStorage__LocalRootPath: /tmp/day41-43-invoices
+      Booking__BaseUrl: http://booking:5003
+      BOOKING_SERVICE_BASE_URL: http://booking:5003
+      Trip__BaseUrl: http://trip:5002
+      TRIP_SERVICE_BASE_URL: http://trip:5002
+      Parcel__BaseUrl: http://parcel:5005
+      PARCEL_SERVICE_BASE_URL: http://parcel:5005
+      Identity__BaseUrl: http://identity:5001
+      IDENTITY_SERVICE_BASE_URL: http://identity:5001
+    tmpfs:
+      - /tmp/day41-43-invoices
+    ports:
+      - '59104:5004'
+
+  parcel:
+    container_name: day41-43-e2e-parcel
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+    ports:
+      - '59105:5005'
+
+  tracking:
+    container_name: day41-43-e2e-tracking
+    environment:
+      NODE_ENV: development
+      TRACKING_OUTBOX_PUBLISH_ENABLED: 'true'
+      TRACKING_OUTBOX_PUBLISH_INTERVAL_MS: '1000'
+      TRACKING_CORS_ORIGIN: http://localhost:59430
+    ports:
+      - '59111:3001'
+
+  gateway:
+    container_name: day41-43-e2e-gateway
+    environment:
+      NODE_ENV: development
+    ports:
+      - '59430:3000'
+
+networks:
+  default:
+    name: day41-43-e2e-net

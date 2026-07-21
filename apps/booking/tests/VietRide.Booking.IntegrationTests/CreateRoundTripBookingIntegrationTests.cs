@@ -283,7 +283,7 @@ public class CreateRoundTripBookingIntegrationTests
         response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
         var json = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(json);
-        doc.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("VALIDATION_ERROR");
+        doc.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("IDEMPOTENCY_KEY_REQUIRED");
 
         await _factory.TripClient.DidNotReceiveWithAnyArgs()
             .GetTripSnapshotAsync(default, default, default);

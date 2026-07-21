@@ -231,7 +231,7 @@ public sealed class ParcelEndpointTests : IClassFixture<VietRideWebApplicationFa
     // ── Idempotency-Key: mutations without it → 422 ─────────────────
 
     [Fact]
-    public async Task FareCreate_MissingIdempotencyKey_Returns422_VALIDATION_ERROR()
+    public async Task FareCreate_MissingIdempotencyKey_Returns422_IDEMPOTENCY_KEY_REQUIRED()
     {
         using var client = CreateAuthenticatedClient("OPERATOR_ADMIN", operatorId: NewId.ToString());
 
@@ -241,11 +241,11 @@ public sealed class ParcelEndpointTests : IClassFixture<VietRideWebApplicationFa
         await AssertValidationEnvelope(response, HttpStatusCode.UnprocessableEntity);
         var body = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(body);
-        doc.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("VALIDATION_ERROR");
+        doc.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("IDEMPOTENCY_KEY_REQUIRED");
     }
 
     [Fact]
-    public async Task FareUpdate_MissingIdempotencyKey_Returns422_VALIDATION_ERROR()
+    public async Task FareUpdate_MissingIdempotencyKey_Returns422_IDEMPOTENCY_KEY_REQUIRED()
     {
         using var client = CreateAuthenticatedClient("OPERATOR_ADMIN", operatorId: NewId.ToString());
 
@@ -256,11 +256,11 @@ public sealed class ParcelEndpointTests : IClassFixture<VietRideWebApplicationFa
         await AssertValidationEnvelope(response, HttpStatusCode.UnprocessableEntity);
         var body = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(body);
-        doc.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("VALIDATION_ERROR");
+        doc.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("IDEMPOTENCY_KEY_REQUIRED");
     }
 
     [Fact]
-    public async Task ParcelCreate_MissingIdempotencyKey_Returns422_VALIDATION_ERROR()
+    public async Task ParcelCreate_MissingIdempotencyKey_Returns422_IDEMPOTENCY_KEY_REQUIRED()
     {
         using var client = CreateAuthenticatedClient("PASSENGER");
 
@@ -278,7 +278,7 @@ public sealed class ParcelEndpointTests : IClassFixture<VietRideWebApplicationFa
         await AssertValidationEnvelope(response, HttpStatusCode.UnprocessableEntity);
         var body = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(body);
-        doc.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("VALIDATION_ERROR");
+        doc.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("IDEMPOTENCY_KEY_REQUIRED");
     }
 
     [Fact]

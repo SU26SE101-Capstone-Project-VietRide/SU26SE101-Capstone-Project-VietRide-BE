@@ -16,7 +16,9 @@ Quản lý **parcel lifecycle full**: tạo request, deposit + re-weigh + additi
 | `Parcel` | Hàng ký gửi (40+ field). | `parcelCode` UNIQUE, `senderUserId` NOT NULL, `recipientUserId` nullable, `dropoffStopId` nullable, `sizeCategory` enum, deposit/additional pricing, transfer/return/review/delivery-token fields, full status machine |
 | `ParcelRouteFare` | Operator config giá per route per size. | composite PK `(routeId, sizeCategory)`, future-dated effective window |
 | `ParcelStats` | Counter table per operator per day. | UNIQUE `(operatorId, statDate)` |
+| `PlatformParcelStats` | Projection Day 42 theo từng Parcel `DELIVERY_CONFIRMED`. | `parcelId`, `operatorId`, `confirmedAt`, signed `parcelRevenueVnd` |
 | `OutboxEvent` | Outbox. | |
+| `OutboxDlq` | Terminal Outbox failures for admin review. | unique `eventId`, payload, retry metadata, `terminalAt` |
 
 ## Design Decisions
 
@@ -38,6 +40,7 @@ Quản lý **parcel lifecycle full**: tạo request, deposit + re-weigh + additi
 - **`parcel_route_fares` composite PK `(route_id, size_category)`** — natural key; 1 route có ≤ 4 fare entry (4 size category).
 - **NO junction table cho parcel review** — `review_decision`/`reviewed_at`/`reviewed_by_user_id` nullable trên Parcel. Chỉ EXTRA_LARGE dùng (3 field còn lại NULL cho SMALL/MEDIUM/LARGE).
 - **NO junction cho parcel transfer history** — `transfer_target_trip_id`/`transfer_requested_at`/`transfer_confirmed_at`/`transfer_confirmed_by_user_id` snapshot 1 lần transfer cuối; nếu cần audit nhiều transfer (parcel chuyển 3 lần) thì query OutboxEvent.
+- **`platform_parcel_stats`** được trigger đồng bộ cùng transaction và job `parcel.platform-stats-backfill` rebuild idempotent từ earned live; platform report chỉ cache sau khi projection khớp live theo operator/range.
 
 ## Index Strategy
 
@@ -54,7 +57,10 @@ Quản lý **parcel lifecycle full**: tạo request, deposit + re-weigh + additi
 | `idx_parcels_transfer_target_trip_id` | partial | B-tree | "Parcels awaiting confirm on this trip" |
 | `idx_parcel_route_fares_operator_id` | `operator_id` | B-tree | Dashboard fare list |
 | `uq_parcel_stats_operator_date` | `(operator_id, stat_date)` | unique | Counter upsert |
+| `idx_platform_parcel_stats_confirmed_operator` | `(confirmed_at, operator_id)` | B-tree | Exact UTC range reconciliation |
 | `idx_outbox_events_status_created` | partial | B-tree | Outbox poll |
+| `uq_outbox_dlq_event_id` | `event_id` | unique | One terminal row per event |
+| `idx_outbox_dlq_terminal_event_id` | `(terminal_at, event_id)` | B-tree | Composite cursor review theo contract |
 
 ## Cross-service References (Logical FK)
 
