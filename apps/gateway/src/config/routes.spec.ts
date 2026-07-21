@@ -613,6 +613,29 @@ describe('buildRouteTable', () => {
       expect(route?.requiredRoles).toBeUndefined();
     });
   });
+
+  it('routes the Assistant trip parcel list to Parcel without capturing other Assistant paths', () => {
+    const parcelListRoute = matchRoute(
+      routes,
+      '/v1/assistant/trips/11111111-1111-4111-8111-111111111111/parcels',
+    );
+    const otherAssistantRoute = matchRoute(
+      routes,
+      '/v1/assistant/trips/11111111-1111-4111-8111-111111111111/manifest',
+    );
+
+    expect(parcelListRoute).toMatchObject({
+      prefix: '/v1/assistant/trips/{tripId}/parcels',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['ASSISTANT'],
+    });
+    expect(otherAssistantRoute).toMatchObject({
+      prefix: '/v1/assistant',
+      target: env.TRIP_BASE_URL,
+    });
+  });
+
   it('routes parcels to Parcel without a gateway-level role guard', () => {
     const route = matchRoute(routes, '/v1/parcels');
     const routeDetail = matchRoute(routes, '/v1/parcels/11111111-1111-1111-1111-111111111111');

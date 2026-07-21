@@ -117,6 +117,8 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       REDIS_URL: 'redis:6379,abortConnect=false'
+      PAYMENT_SERVICE_BASE_URL: http://payment:5004
+      Payment__BaseUrl: http://payment:5004
       # Non-OTP transactional emails (including set-initial-password links) must
       # be delivered by Notification -> SendGrid in production, never log-only.
       EMAIL_PROVIDER: SENDGRID

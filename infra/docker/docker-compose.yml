@@ -137,6 +137,7 @@ services:
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       REDIS_URL: 'redis:6379,abortConnect=false'
       PAYMENT_SERVICE_BASE_URL: http://payment:5004
+      Payment__BaseUrl: http://payment:5004
       # Real email delivery via Notification internal endpoint (POST /internal/v1/emails).
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-SENDGRID}
       EMAIL_SERVICE_BASE_URL: http://notification:3002
