@@ -341,7 +341,7 @@ INSERT INTO vietride_identity.subscription_plans
 VALUES
   ('${ids.subscriptionPlan}','Day30 fixture plan','Generated-ID demo quota fixture',0,0,20,20,20,20,20,20,true);
 INSERT INTO vietride_identity.operator_subscriptions
-  (id,operator_id,plan_id,status,started_at,expires_at)
+  (id,operator_id,active_plan_id,status,started_at,expires_at)
 VALUES
   ('${ids.subscription}','${ids.operator}','${ids.subscriptionPlan}','ACTIVE',now()-interval '1 day',now()+interval '30 days');
 COMMIT;
