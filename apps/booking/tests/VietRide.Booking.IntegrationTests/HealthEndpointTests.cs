@@ -3,6 +3,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using VietRide.Testing;
 
 namespace VietRide.Booking.IntegrationTests;
 
@@ -44,6 +45,14 @@ public class HealthEndpointTests : IClassFixture<VietRideWebApplicationFactory>
         doc.RootElement.GetProperty("success").GetBoolean().Should().BeTrue();
         doc.RootElement.GetProperty("statusCode").GetInt32().Should().Be((int)HttpStatusCode.OK);
         doc.RootElement.GetProperty("data").GetProperty("service").GetString().Should().Be("Booking");
+    }
+
+    [Fact]
+    public async Task GetSwagger_IdempotencyContractMatchesRuntimeMetadata()
+    {
+        using var client = _factory.CreateClient();
+
+        await IdempotencyOpenApiContractAssertions.AssertMatchesRuntimeMetadataAsync(client, _factory.Services);
     }
 }
 

@@ -1,7 +1,11 @@
+using System.Text.Json;
 using MediatR;
 using VietRide.Payment.Application.Abstractions.Repositories;
+using VietRide.Payment.Application.Events;
+using VietRide.Payment.Application.Models;
 using VietRide.Payment.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Payment.Application.Features.Internal.Payments.ExpireSubscriptionPayment;
@@ -11,10 +15,15 @@ public sealed class ExpireSubscriptionPaymentCommandHandler
 {
     private readonly IPaymentRepository _payments;
     private readonly IClock _clock;
+    private readonly IIntegrationEventOutbox _outbox;
 
-    public ExpireSubscriptionPaymentCommandHandler(IPaymentRepository payments, IClock clock)
+    public ExpireSubscriptionPaymentCommandHandler(
+        IPaymentRepository payments,
+        IIntegrationEventOutbox outbox,
+        IClock clock)
     {
         _payments = payments;
+        _outbox = outbox;
         _clock = clock;
     }
 
@@ -31,6 +40,16 @@ public sealed class ExpireSubscriptionPaymentCommandHandler
 
         payment.MarkExpired(_clock.UtcNow);
         _payments.Update(payment);
+        var context = SubscriptionPaymentContextCodec.DeserializeTrusted(payment.Context);
+        var evt = new SubscriptionPaymentExpiredIntegrationEvent(
+            payment.Id,
+            payment.ReferenceId,
+            payment.OperatorId ?? Guid.Empty,
+            context.OperatorSubscriptionId);
+        await _outbox.EnqueueAsync(
+            evt.EventType,
+            JsonSerializer.Serialize(evt, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            cancellationToken).ConfigureAwait(false);
         return true;
     }
 }

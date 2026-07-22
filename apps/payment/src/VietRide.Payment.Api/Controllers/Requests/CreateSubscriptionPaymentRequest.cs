@@ -11,6 +11,7 @@ public sealed record CreateSubscriptionPaymentRequest(
     string BillingPeriod,
     string PaymentMethod,
     long Amount,
+    DateTimeOffset DueAt,
     SubscriptionPaymentContextV1 Context)
 {
     public CreateSubscriptionPaymentCommand ToCommand(string idempotencyKey, string clientIpAddress)
@@ -24,5 +25,6 @@ public sealed record CreateSubscriptionPaymentRequest(
             Amount,
             Context,
             idempotencyKey,
-            clientIpAddress);
+            clientIpAddress,
+            DueAt);
 }

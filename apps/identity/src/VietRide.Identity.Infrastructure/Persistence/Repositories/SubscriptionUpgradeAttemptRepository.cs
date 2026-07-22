@@ -58,4 +58,14 @@ public sealed class SubscriptionUpgradeAttemptRepository : ISubscriptionUpgradeA
             .Where(attempt => attempt.Status == status && attempt.DueAt <= dueBefore)
             .OrderBy(attempt => attempt.DueAt)
             .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<SubscriptionUpgradeAttempt>> ListActiveAsync(
+        int take,
+        CancellationToken cancellationToken = default)
+        => await _dbContext.SubscriptionUpgradeAttempts
+            .Where(attempt => attempt.Status == SubscriptionUpgradeAttemptStatus.INITIATED
+                || attempt.Status == SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING)
+            .OrderBy(attempt => attempt.DueAt)
+            .Take(take)
+            .ToListAsync(cancellationToken);
 }

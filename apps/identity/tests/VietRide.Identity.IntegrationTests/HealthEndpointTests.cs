@@ -3,6 +3,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using VietRide.Testing;
 
 namespace VietRide.Identity.IntegrationTests;
 
@@ -63,6 +64,14 @@ public class HealthEndpointTests : IClassFixture<VietRideWebApplicationFactory>
         var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
         schemas.TryGetProperty("OperatorSummaryDto", out _).Should().BeTrue();
         schemas.TryGetProperty("InternalOperatorSummaryDto", out _).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetSwagger_IdempotencyContractMatchesRuntimeMetadata()
+    {
+        using var client = _factory.CreateClient();
+
+        await IdempotencyOpenApiContractAssertions.AssertMatchesRuntimeMetadataAsync(client, _factory.Services);
     }
 }
 

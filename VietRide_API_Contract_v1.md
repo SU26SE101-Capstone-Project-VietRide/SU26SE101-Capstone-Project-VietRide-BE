@@ -3343,7 +3343,15 @@ Response `200`:
     "expiresAt": "2026-08-14T10:00:00Z",
     "plan": { "planId": "uuid", "name": "Pro", "price": 500000, "limits": {}, "modules": {} },
     "usage": {},
-    "pendingUpgrade": null
+    "pendingUpgrade": {
+      "upgradeAttemptId": "uuid",
+      "targetPlan": { "planId": "uuid", "name": "Enterprise", "limits": {}, "modules": {} },
+      "amount": 900000,
+      "billingPeriod": "MONTHLY",
+      "dueAt": "2026-07-14T10:15:00Z",
+      "remainingSeconds": 720,
+      "latestPayment": { "paymentId": "uuid", "status": "FAILED", "canRetry": true }
+    }
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-07-14T10:00:00Z" }
 }
@@ -3357,13 +3365,14 @@ Auth: `OPERATOR_ADMIN`. Returns active plans only. Response uses the ADR 0004 en
 
 ### POST `/v1/operator/subscription/upgrade`
 
-Auth: `OPERATOR_ADMIN`. Idempotency-Key: required. Day 37 supports VNPay only; `WALLET` is introduced after OperatorWallet is delivered in Day 38.
+Auth: `OPERATOR_ADMIN`. Idempotency-Key: required. `plan` hiện tại không đổi cho đến khi Payment `SUCCEEDED`; target plan chỉ xuất hiện trong `pendingUpgrade`.
 
 Request:
 ```json
 {
   "planId": "uuid",
   "billingPeriod": "MONTHLY",
+  "paymentMethod": "VNPAY",
   "returnUrl": "https://app.vietride.vn/operator/subscription/result"
 }
 ```
@@ -3383,7 +3392,9 @@ Response `202`:
     "amount": 500000,
     "billingPeriod": "MONTHLY",
     "paymentRedirectUrl": "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?...",
-    "dueAt": "2026-07-21T10:00:00Z"
+    "dueAt": "2026-07-14T10:15:00Z",
+    "activePlan": { "planId": "uuid", "name": "Starter", "limits": {}, "modules": {} },
+    "pendingTargetPlan": { "planId": "uuid", "name": "Pro", "limits": {}, "modules": {} }
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-07-14T10:00:00Z" }
 }
@@ -3411,6 +3422,14 @@ For `paymentMethod=WALLET`, a successful atomic OperatorWallet charge returns `2
 ```
 
 Additional errors: `402 WALLET_INSUFFICIENT_BALANCE`; `422 IDEMPOTENCY_KEY_REQUIRED`. Replaying the same key and request returns the original response. Reusing the key with a different payload returns `422 IDEMPOTENCY_KEY_MISMATCH`.
+
+### POST `/v1/operator/subscription/upgrade/{upgradeAttemptId}/retry-payment`
+
+Auth: `OPERATOR_ADMIN`. `Idempotency-Key` bắt buộc. Chỉ cho phép khi attempt còn trong cửa sổ 15 phút và latest payment là `FAILED` hoặc `EXPIRED`. Mỗi retry tạo `paymentId` và `vnp_TxnRef` mới nhưng không kéo dài `dueAt`.
+
+Response `202` dùng cùng `SubscriptionUpgradeResponseDto` với `paymentRedirectUrl` mới. Errors: `403 SUBSCRIPTION_UPGRADE_FORBIDDEN`; `404 RESOURCE_NOT_FOUND`; `409 SUBSCRIPTION_UPGRADE_EXPIRED`; `409 SUBSCRIPTION_PAYMENT_NOT_RETRYABLE`; `422 IDEMPOTENCY_KEY_REQUIRED`.
+
+VNPay gọi canonical `GET|POST /v1/payments/vnpay-ipn`. `returnUrl` chỉ đưa browser về FE và không được phép mutate Payment hoặc Subscription.
 
 ## Invoice, OperatorWallet and Settlement — Day 38
 

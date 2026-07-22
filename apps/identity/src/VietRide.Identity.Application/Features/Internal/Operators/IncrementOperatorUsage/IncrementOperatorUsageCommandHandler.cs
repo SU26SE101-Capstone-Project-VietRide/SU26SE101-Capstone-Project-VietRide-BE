@@ -56,11 +56,10 @@ public sealed class IncrementOperatorUsageCommandHandler
         switch (subscription.Status)
         {
             case SubscriptionStatus.ACTIVE:
+            case SubscriptionStatus.PENDING_PAYMENT:
                 return;
             case SubscriptionStatus.EXPIRED:
                 throw new IdentityDomainException("SUBSCRIPTION_EXPIRED", "Operator subscription has expired.");
-            case SubscriptionStatus.PENDING_PAYMENT:
-                throw new ConflictException("SUBSCRIPTION_PAYMENT_PENDING", "Operator subscription payment is pending.");
             default:
                 throw new ValidationException(
                     "Operator subscription must be active before usage can be incremented.",

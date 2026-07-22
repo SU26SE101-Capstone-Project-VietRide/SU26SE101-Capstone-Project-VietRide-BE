@@ -4,6 +4,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using VietRide.Testing;
 using VietRide.Trip.Application.Abstractions.Jobs;
 using VietRide.Trip.Infrastructure.Jobs;
 
@@ -58,6 +59,14 @@ public class HealthEndpointTests : IClassFixture<VietRideWebApplicationFactory>
 
         scope.ServiceProvider.GetRequiredService<ITripGenerationJobScheduler>()
             .Should().BeOfType<DisabledTripGenerationJobScheduler>();
+    }
+
+    [Fact]
+    public async Task GetSwagger_IdempotencyContractMatchesRuntimeMetadata()
+    {
+        using var client = _factory.CreateClient();
+
+        await IdempotencyOpenApiContractAssertions.AssertMatchesRuntimeMetadataAsync(client, _factory.Services);
     }
 }
 

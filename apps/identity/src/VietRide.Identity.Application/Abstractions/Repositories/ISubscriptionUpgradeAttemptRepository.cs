@@ -28,4 +28,8 @@ public interface ISubscriptionUpgradeAttemptRepository : IRepository<Subscriptio
         SubscriptionUpgradeAttemptStatus status,
         DateTimeOffset dueBefore,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<SubscriptionUpgradeAttempt>> ListActiveAsync(
+        int take,
+        CancellationToken cancellationToken = default);
 }

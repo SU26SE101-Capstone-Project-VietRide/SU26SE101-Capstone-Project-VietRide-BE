@@ -24,7 +24,9 @@ internal static class SubscriptionMapper
     public static OperatorSubscriptionDto ToSubscriptionDto(
         OperatorSubscription subscription,
         SubscriptionPlan plan,
-        SubscriptionUpgradeAttempt? pendingUpgrade) => new(
+        SubscriptionUpgradeAttempt? pendingUpgrade,
+        SubscriptionPlan? targetPlan,
+        DateTimeOffset now) => new(
         subscription.Id,
         subscription.Status.ToString(),
         subscription.BillingPeriod?.ToString(),
@@ -41,11 +43,17 @@ internal static class SubscriptionMapper
             subscription.LastResetAt),
         pendingUpgrade is null ? null : new PendingSubscriptionUpgradeDto(
             pendingUpgrade.Id,
-            pendingUpgrade.TargetPlanId,
+            ToPlanDto(targetPlan ?? throw new InvalidOperationException("Pending upgrade target plan is missing.")),
             pendingUpgrade.BillingPeriod.ToString(),
             pendingUpgrade.Amount.Amount,
-            pendingUpgrade.PaymentId,
-            pendingUpgrade.DueAt));
+            pendingUpgrade.DueAt,
+            Math.Max(0, (int)Math.Ceiling((pendingUpgrade.DueAt - now).TotalSeconds)),
+            new PendingSubscriptionPaymentDto(
+                pendingUpgrade.PaymentId,
+                pendingUpgrade.LatestPaymentStatus.ToString(),
+                pendingUpgrade.DueAt > now
+                    && pendingUpgrade.LatestPaymentStatus is SubscriptionPaymentSessionStatus.FAILED
+                        or SubscriptionPaymentSessionStatus.EXPIRED)));
 
     public static SubscriptionBillingPeriod ParseBillingPeriod(string value)
         => Enum.TryParse<SubscriptionBillingPeriod>(value, ignoreCase: false, out var period)

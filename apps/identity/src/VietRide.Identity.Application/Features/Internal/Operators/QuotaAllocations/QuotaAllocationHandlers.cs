@@ -20,8 +20,7 @@ public sealed class ClaimQuotaAllocationCommandHandler : IRequestHandler<ClaimQu
         if (existing is not null) return new(existing.Id, existing.Resource.ToString(), existing.ResourceId, existing.PeriodKey);
         var current = await _subscriptions.GetCurrentWithPlanByOperatorIdAsync(request.OperatorId, ct) ?? throw new NotFoundException(nameof(OperatorSubscription), request.OperatorId);
         if (current.Subscription.Status == SubscriptionStatus.EXPIRED) throw new IdentityDomainException("SUBSCRIPTION_EXPIRED", "Operator subscription has expired.");
-        if (current.Subscription.Status == SubscriptionStatus.PENDING_PAYMENT) throw new CodedConflictException("SUBSCRIPTION_PAYMENT_PENDING", "Subscription payment is pending.");
-        if (current.Subscription.Status != SubscriptionStatus.ACTIVE) throw new CodedValidationException("VALIDATION_ERROR", "Subscription must be ACTIVE.");
+        if (current.Subscription.Status is not (SubscriptionStatus.ACTIVE or SubscriptionStatus.PENDING_PAYMENT)) throw new CodedValidationException("VALIDATION_ERROR", "Subscription must be ACTIVE or PENDING_PAYMENT.");
         var updated = await _subscriptions.TryIncrementUsageWithinLimitAsync(request.OperatorId, resource, 1, ct);
         if (updated is null) throw new IdentityDomainException("SUBSCRIPTION_LIMIT_EXCEEDED", "Subscription limit exceeded.");
         var allocation = SubscriptionQuotaAllocation.Create(request.OperatorId, current.Subscription.Id, resource, request.ResourceId, request.PeriodKey);

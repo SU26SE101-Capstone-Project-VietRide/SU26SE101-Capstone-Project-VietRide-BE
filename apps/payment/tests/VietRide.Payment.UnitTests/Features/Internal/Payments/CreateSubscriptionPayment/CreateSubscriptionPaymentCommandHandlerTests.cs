@@ -124,6 +124,36 @@ public sealed class CreateSubscriptionPaymentCommandHandlerTests
         payload.RootElement.GetProperty("periodFrom").GetDateTimeOffset().Should().Be(Now);
     }
 
+    [Fact]
+    public async Task Handle_FailedVnPaySession_AllowsNewSequentialSessionWithNewKey()
+    {
+        var fixture = new Fixture(700_000);
+        var first = await fixture.Handler.Handle(fixture.Command("VNPAY"), CancellationToken.None);
+        var failedPayment = fixture.Payments.Items.Single();
+        var confirm = new ConfirmSubscriptionPaymentCommandHandler(
+            fixture.VnPay,
+            fixture.Payments,
+            fixture.PlatformWallets,
+            fixture.Outbox,
+            new FrozenClock(Now));
+
+        await confirm.Handle(
+            new ConfirmSubscriptionPaymentCommand(new Dictionary<string, string>
+            {
+                ["vnp_TxnRef"] = failedPayment.VnPayTxnRef!,
+                ["vnp_ResponseCode"] = "24",
+                ["vnp_Amount"] = "50000000",
+            }),
+            CancellationToken.None);
+        var retry = await fixture.Handler.Handle(fixture.Command("VNPAY", "idem-retry"), CancellationToken.None);
+
+        failedPayment.Status.Should().Be(PaymentStatus.FAILED);
+        retry.PaymentId.Should().NotBe(first.PaymentId);
+        fixture.Payments.Items.Should().HaveCount(2);
+        fixture.Payments.Items.Count(payment => payment.Status == PaymentStatus.PENDING_REDIRECT).Should().Be(1);
+        fixture.Outbox.Events.Should().ContainSingle(evt => evt.EventType == "payment.subscription.payment_failed");
+    }
+
     private sealed class Fixture
     {
         public Guid UpgradeAttemptId { get; } = Guid.NewGuid();
@@ -153,7 +183,7 @@ public sealed class CreateSubscriptionPaymentCommandHandlerTests
                 new FrozenClock(Now));
         }
 
-        public CreateSubscriptionPaymentCommand Command(string method) => new(
+        public CreateSubscriptionPaymentCommand Command(string method, string idempotencyKey = "idem-subscription") => new(
             UpgradeAttemptId,
             SubscriptionId,
             OperatorId,
@@ -179,7 +209,7 @@ public sealed class CreateSubscriptionPaymentCommandHandlerTests
                     null,
                     "District 1",
                     "Ho Chi Minh City")),
-            "idem-subscription",
+            idempotencyKey,
             "203.0.113.10");
     }
 
@@ -194,6 +224,7 @@ public sealed class CreateSubscriptionPaymentCommandHandlerTests
         public IQueryable<PaymentEntity> QueryNoTracking() => Query();
         public Task<PaymentEntity?> FindByIdempotencyKeyAsync(string key, CancellationToken ct) => Task.FromResult(Items.SingleOrDefault(x => x.IdempotencyKey == key));
         public Task<PaymentEntity?> FindByReferenceAsync(PaymentReferenceType type, Guid id, CancellationToken ct) => Task.FromResult(Items.SingleOrDefault(x => x.ReferenceType == type && x.ReferenceId == id));
+        public Task<PaymentEntity?> FindLatestByReferenceAsync(PaymentReferenceType type, Guid id, CancellationToken ct) => Task.FromResult(Items.LastOrDefault(x => x.ReferenceType == type && x.ReferenceId == id));
         public Task AcquirePaymentReferenceLockAsync(PaymentReferenceType type, Guid id, CancellationToken ct) => Task.CompletedTask;
         public Task<WalletTransaction> DebitWalletBookingPaymentAsync(Guid userId, Guid bookingId, Money amount, CancellationToken ct) => throw new NotSupportedException();
         public Task<WalletTransaction> DebitWalletPaymentAsync(Guid userId, Guid id, Money amount, WalletTransactionRef walletRef, CancellationToken ct) => throw new NotSupportedException();

@@ -20,6 +20,7 @@ import {
   OperatorAnnouncementService,
   type OperatorAnnouncementResult,
 } from './operator-announcement.service';
+import { ApiIdempotencyRequired } from '../swagger/idempotency.swagger';
 
 @ApiTags('Operator notifications')
 @ApiBearerAuth()
@@ -30,6 +31,7 @@ export class OperatorNotificationsController {
 
   @Post()
   @HttpCode(202)
+  @ApiIdempotencyRequired()
   @ApiResponse({ status: 202, description: 'Announcement accepted for delivery.' })
   async create(
     @Body(new ZodValidationPipe(CreateOperatorAnnouncementSchema))

@@ -544,6 +544,10 @@ namespace VietRide.Payment.Infrastructure.Migrations
                         .HasColumnName("created_at")
                         .HasDefaultValueSql("now()");
 
+                    b.Property<DateTimeOffset?>("DueAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("due_at");
+
                     b.Property<DateTimeOffset?>("ExpiredAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("expired_at");

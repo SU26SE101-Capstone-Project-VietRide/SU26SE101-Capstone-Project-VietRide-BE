@@ -7,7 +7,6 @@ public sealed class OperatorSubscription : BaseEntity<Guid>
 {
     public Guid OperatorId { get; private set; }
     public Guid PlanId { get; private set; }
-    public Guid? PreviousActivePlanId { get; private set; }
     public SubscriptionStatus Status { get; private set; }
     public DateTimeOffset? StartedAt { get; private set; }
     public DateTimeOffset? ExpiresAt { get; private set; }
@@ -20,7 +19,6 @@ public sealed class OperatorSubscription : BaseEntity<Guid>
     public int CurrentRoutes { get; private set; }
     public int CurrentTripsThisMonth { get; private set; }
     public DateTimeOffset LastResetAt { get; private set; }
-    public DateTimeOffset? WarnSentAt { get; private set; }
     public DateTimeOffset? TrialExpiringWarnSentAt { get; private set; }
 
     private OperatorSubscription() { }
@@ -76,7 +74,7 @@ public sealed class OperatorSubscription : BaseEntity<Guid>
         Status = SubscriptionStatus.CANCELLED;
     }
 
-    public void MoveToPendingPayment(Guid newPlanId, SubscriptionPaymentMethod paymentMethod)
+    public void MoveToPendingPayment(SubscriptionPaymentMethod paymentMethod)
     {
         if (Status == SubscriptionStatus.PENDING_PAYMENT)
         {
@@ -88,26 +86,36 @@ public sealed class OperatorSubscription : BaseEntity<Guid>
             throw new InvalidOperationException("Only active or expired subscriptions can start an upgrade.");
         }
 
-        PreviousActivePlanId = Status == SubscriptionStatus.ACTIVE ? PlanId : PreviousActivePlanId;
-        PlanId = newPlanId;
         Status = SubscriptionStatus.PENDING_PAYMENT;
         PaymentMethod = paymentMethod;
     }
 
-    public void RevertPendingPayment(Guid restoredPlanId, DateTimeOffset revertedAt)
+    public void ExpirePendingPayment(
+        SubscriptionFallbackPolicy fallbackPolicy,
+        Guid starterPlanId,
+        DateTimeOffset expiredAt)
     {
         if (Status != SubscriptionStatus.PENDING_PAYMENT)
         {
             throw new InvalidOperationException("Only pending-payment subscriptions can be reverted.");
         }
 
-        PlanId = restoredPlanId;
-        PreviousActivePlanId = null;
-        Status = SubscriptionStatus.ACTIVE;
+        if (fallbackPolicy == SubscriptionFallbackPolicy.ACTIVATE_STARTER)
+        {
+            PlanId = starterPlanId;
+            StartedAt = expiredAt;
+            ExpiresAt = expiredAt.AddDays(30);
+            Status = SubscriptionStatus.ACTIVE;
+        }
+        else
+        {
+            Status = ExpiresAt.HasValue && ExpiresAt <= expiredAt
+                ? SubscriptionStatus.EXPIRED
+                : SubscriptionStatus.ACTIVE;
+        }
+
         PaymentMethod = null;
         BillingPeriod = null;
-        StartedAt ??= revertedAt;
-        ExpiresAt ??= revertedAt.AddDays(30);
     }
 
     public void ActivatePaid(
@@ -128,8 +136,6 @@ public sealed class OperatorSubscription : BaseEntity<Guid>
         Status = SubscriptionStatus.ACTIVE;
         StartedAt = periodFrom;
         ExpiresAt = periodTo;
-        PreviousActivePlanId = null;
-        WarnSentAt = null;
     }
 
     public void MarkExpired(DateTimeOffset expiredAt)

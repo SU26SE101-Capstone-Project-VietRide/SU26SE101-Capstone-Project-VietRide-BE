@@ -7,6 +7,7 @@ using VietRide.Payment.Application.Features.Internal.Payments.ChargePayment;
 using VietRide.Payment.Application.Features.Internal.Payments.CreateSubscriptionPayment;
 using VietRide.Payment.Application.Features.Internal.Payments.ExpireSubscriptionPayment;
 using VietRide.Payment.Application.Features.Internal.Payments.GetPaymentContextReadiness;
+using VietRide.Payment.Application.Features.Internal.Payments.GetSubscriptionPaymentStatuses;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Authentication;
@@ -129,6 +130,18 @@ public sealed class InternalPaymentsController : ControllerBase
         var result = await _mediator.Send(
             new GetPaymentContextReadinessQuery(),
             cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpGet("subscription-status")]
+    [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<SubscriptionPaymentStatusDto>>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<SubscriptionPaymentStatusDto>>> GetSubscriptionStatusesAsync(
+        [FromQuery] Guid[] upgradeAttemptId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(
+            new GetSubscriptionPaymentStatusesQuery(upgradeAttemptId),
+            cancellationToken).ConfigureAwait(false);
         return Ok(result);
     }
 }

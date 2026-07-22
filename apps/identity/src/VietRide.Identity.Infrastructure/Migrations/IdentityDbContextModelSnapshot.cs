@@ -479,12 +479,7 @@ namespace VietRide.Identity.Infrastructure.Migrations
 
                     b.Property<Guid>("PlanId")
                         .HasColumnType("uuid")
-                        .HasColumnName("plan_id");
-
-                    b.Property<Guid?>("PreviousActivePlanId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("previous_active_plan_id")
-                        .HasComment("Plan ACTIVE before PENDING_PAYMENT; used by revert flow if payment times out after 7 days.");
+                        .HasColumnName("active_plan_id");
 
                     b.Property<DateTimeOffset?>("StartedAt")
                         .HasColumnType("timestamp with time zone")
@@ -506,10 +501,6 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasColumnName("updated_at")
                         .HasDefaultValueSql("now()");
 
-                    b.Property<DateTimeOffset?>("WarnSentAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("warn_sent_at");
-
                     b.HasKey("Id")
                         .HasName("pk_operator_subscriptions");
 
@@ -522,11 +513,7 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasDatabaseName("uq_operator_subscriptions_operator_id");
 
                     b.HasIndex("PlanId")
-                        .HasDatabaseName("idx_operator_subscriptions_plan_id");
-
-                    b.HasIndex("PreviousActivePlanId")
-                        .HasDatabaseName("idx_operator_subscriptions_previous_active_plan_id")
-                        .HasFilter("previous_active_plan_id IS NOT NULL");
+                        .HasDatabaseName("idx_operator_subscriptions_active_plan_id");
 
                     b.HasIndex("Status")
                         .HasDatabaseName("idx_operator_subscriptions_status");
@@ -858,11 +845,23 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("due_at");
 
+                    b.Property<string>("FallbackPolicy")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasColumnName("fallback_policy");
+
                     b.Property<string>("IdempotencyKey")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
                         .HasColumnName("idempotency_key");
+
+                    b.Property<string>("LatestPaymentStatus")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("latest_payment_status");
 
                     b.Property<Guid>("OperatorId")
                         .HasColumnType("uuid")
@@ -870,7 +869,13 @@ namespace VietRide.Identity.Infrastructure.Migrations
 
                     b.Property<Guid?>("PaymentId")
                         .HasColumnType("uuid")
-                        .HasColumnName("payment_id");
+                        .HasColumnName("latest_payment_id");
+
+                    b.Property<int>("PaymentSessionVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("payment_session_version");
 
                     b.Property<SubscriptionUpgradeAttemptStatus>("Status")
                         .HasColumnType("subscription_upgrade_attempt_status")
@@ -890,10 +895,6 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasColumnName("updated_at")
                         .HasDefaultValueSql("now()");
 
-                    b.Property<DateTimeOffset?>("WarnSentAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("warn_sent_at");
-
                     b.HasKey("Id")
                         .HasName("pk_subscription_upgrade_attempts");
 
@@ -905,9 +906,8 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasDatabaseName("ix_subscription_upgrade_attempts_operator_id");
 
                     b.HasIndex("PaymentId")
-                        .IsUnique()
-                        .HasDatabaseName("uq_subscription_upgrade_attempts_payment_id")
-                        .HasFilter("payment_id IS NOT NULL");
+                        .HasDatabaseName("idx_subscription_upgrade_attempts_latest_payment_id")
+                        .HasFilter("latest_payment_id IS NOT NULL");
 
                     b.HasIndex("SubscriptionId")
                         .IsUnique()
@@ -1261,12 +1261,6 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_operator_subscriptions_plan_id");
-
-                    b.HasOne("VietRide.Identity.Domain.Entities.SubscriptionPlan", null)
-                        .WithMany()
-                        .HasForeignKey("PreviousActivePlanId")
-                        .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("fk_operator_subscriptions_previous_active_plan_id");
                 });
 
             modelBuilder.Entity("VietRide.Identity.Domain.Entities.RefreshToken", b =>

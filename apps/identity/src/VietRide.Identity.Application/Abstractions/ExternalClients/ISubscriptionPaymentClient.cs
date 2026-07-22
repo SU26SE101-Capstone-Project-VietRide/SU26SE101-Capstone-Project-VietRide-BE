@@ -7,6 +7,10 @@ public interface ISubscriptionPaymentClient
         CancellationToken cancellationToken = default);
 
     Task ExpireAsync(Guid paymentId, string idempotencyKey, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<SubscriptionPaymentStatusResult>> GetStatusesAsync(
+        IReadOnlyCollection<Guid> upgradeAttemptIds,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed record SubscriptionPaymentCreationRequest(
@@ -19,7 +23,8 @@ public sealed record SubscriptionPaymentCreationRequest(
     long Amount,
     SubscriptionPaymentSnapshot Snapshot,
     string IdempotencyKey,
-    string ClientIpAddress);
+    string ClientIpAddress,
+    DateTimeOffset? DueAt = null);
 
 public sealed record SubscriptionPaymentSnapshot(
     int Version,
@@ -47,3 +52,18 @@ public sealed record SubscriptionPaymentCreationResult(
     string Status,
     string? PaymentRedirectUrl,
     string? InvoiceStatus);
+
+public sealed record SubscriptionPaymentStatusResult(
+    Guid PaymentId,
+    Guid UpgradeAttemptId,
+    Guid OperatorId,
+    Guid OperatorSubscriptionId,
+    Guid PlanId,
+    string Status,
+    long Amount,
+    string Method,
+    string BillingPeriod,
+    DateTimeOffset PeriodFrom,
+    DateTimeOffset PeriodTo,
+    DateTimeOffset? SucceededAt,
+    DateTimeOffset? DueAt);
