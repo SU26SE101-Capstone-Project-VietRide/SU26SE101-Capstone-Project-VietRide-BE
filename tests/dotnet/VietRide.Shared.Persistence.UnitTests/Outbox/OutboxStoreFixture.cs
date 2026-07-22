@@ -74,7 +74,7 @@ public sealed class OutboxStoreFixture : IAsyncLifetime
     public async Task ResetAsync()
     {
         await using var ctx = CreateContext();
-        await ctx.Database.ExecuteSqlRawAsync("TRUNCATE TABLE outbox_events RESTART IDENTITY CASCADE;");
+        await ctx.Database.ExecuteSqlRawAsync("TRUNCATE TABLE outbox_dlq, outbox_events RESTART IDENTITY CASCADE;");
     }
 
     private async Task CreateDatabaseAsync()

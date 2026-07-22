@@ -617,7 +617,7 @@ describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', 
     [
       'GET',
       '/v1/admin/reports/platform?from=2026-07-01T00%3A00%3A00Z&to=2026-08-01T00%3A00%3A00Z',
-      env.PAYMENT_BASE_URL,
+      env.BOOKING_BASE_URL,
     ],
   ] as const)(
     'routes Day 40 SYSTEM_ADMIN %s %s to its owner',
@@ -1351,5 +1351,57 @@ describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', 
     );
     expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
     expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('routes the trip parcel list to Parcel for Assistant and rejects Driver', async () => {
+    const path = '/v1/assistant/trips/11111111-1111-4111-8111-111111111111/parcels?page=1&pageSize=20';
+    const upstreamHandler = arrangeProxyPass();
+    const signer = {
+      sign: jest.fn().mockResolvedValue('internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const assistantAuthorization = await makeAuthorizationHeader({
+      sub: 'assistant-1',
+      role: 'ASSISTANT',
+      operatorId: 'operator-1',
+    });
+    const assistantRequest = makeRequest(
+      path,
+      { authorization: assistantAuthorization, 'x-request-id': 'req-assistant-trip-parcels' },
+      'GET',
+    );
+    const assistantResponse = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(assistantRequest, assistantResponse, next);
+
+    expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+      expect.objectContaining({ target: env.PARCEL_BASE_URL }),
+    );
+    expect(upstreamHandler).toHaveBeenCalledWith(assistantRequest, assistantResponse, next);
+    expect(assistantResponse.status).not.toHaveBeenCalled();
+
+    createProxyMiddlewareMock.mockClear();
+    const driverAuthorization = await makeAuthorizationHeader({
+      sub: 'driver-1',
+      role: 'DRIVER',
+      operatorId: 'operator-1',
+    });
+    const driverRequest = makeRequest(
+      path,
+      { authorization: driverAuthorization, 'x-request-id': 'req-driver-trip-parcels' },
+      'GET',
+    );
+    const driverResponse = makeResponse();
+
+    await handler(driverRequest, driverResponse, jest.fn() as NextFunction);
+
+    expect(driverResponse.status).toHaveBeenCalledWith(403);
+    expect(driverResponse.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 403,
+      error: { code: 'FORBIDDEN' },
+    });
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
   });
 });

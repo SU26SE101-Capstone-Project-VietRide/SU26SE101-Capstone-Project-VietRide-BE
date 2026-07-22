@@ -2,6 +2,7 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Payment.Application.Features.TopUps.ConfirmTopUp;
+using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Payment.Api.Controllers;
 
@@ -22,6 +23,7 @@ public sealed class VnPayIpnController : ControllerBase
     /// </summary>
     [HttpGet("vnpay-topup-ipn")]
     [HttpPost("vnpay-topup-ipn")]
+    [SkipIdempotency("VNPay IPN is authenticated and deduplicated by the provider transaction reference.")]
     [ProducesResponseType(typeof(ConfirmTopUpResult), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ConfirmTopUpResult), StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> ConfirmTopUp(CancellationToken ct)

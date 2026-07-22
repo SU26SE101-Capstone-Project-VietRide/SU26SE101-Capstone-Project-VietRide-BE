@@ -6,6 +6,7 @@
     <ProjectReference Include="..\..\..\..\libs\dotnet\VietRide.Shared.Persistence\VietRide.Shared.Persistence.csproj" />
     <ProjectReference Include="..\..\..\..\libs\dotnet\VietRide.Shared.Http\VietRide.Shared.Http.csproj" />
     <ProjectReference Include="..\..\..\..\libs\dotnet\VietRide.Shared.Messaging\VietRide.Shared.Messaging.csproj" />
+    <ProjectReference Include="..\..\..\..\libs\dotnet\VietRide.Shared.Reporting\VietRide.Shared.Reporting.csproj" />
   </ItemGroup>
 
   <ItemGroup>

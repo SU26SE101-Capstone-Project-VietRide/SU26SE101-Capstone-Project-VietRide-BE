@@ -1,0 +1,17 @@
+{
+  "generatedAt": "2026-07-19T03:59:01.967Z",
+  "fixture": {
+    "operators": 20,
+    "bookings": 100000,
+    "payments": 100000,
+    "parcels": 50000,
+    "trips": 10000
+  },
+  "coldDurationMs": 388,
+  "warmDurationMs": 104,
+  "sampledMemoryBytes": {
+    "booking": 133483725,
+    "payment": 126877696,
+    "parcel": 136105165
+  }
+}

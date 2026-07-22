@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
+import { EventEmitter } from 'node:events';
 import { InternalJwtSigner } from '../auth/internal-jwt.signer';
 import type { RequestWithUser } from '../auth/user-jwt.middleware';
 import { envSchema } from '../config/env.schema';
@@ -202,5 +203,67 @@ describe('createProxyHandler auth enforcement', () => {
       meta: { traceId: 'req-upstream' },
     });
     expect(next).not.toHaveBeenCalled();
+  });
+
+  it('destroys the upstream request when the downstream client disconnects', async () => {
+    const proxyReq = {
+      destroyed: false,
+      destroy: jest.fn(),
+      removeHeader: jest.fn(),
+    };
+    createProxyMiddlewareMock.mockImplementation((options) => {
+      return ((req, res) => {
+        options.on?.proxyReq?.(proxyReq as never, req, res, {});
+      }) as ReturnType<typeof createProxyMiddleware>;
+    });
+    const signer = {
+      sign: jest.fn().mockResolvedValue('internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const req = Object.assign(
+      new EventEmitter(),
+      makeRequest('/v1/auth/login', { 'x-request-id': 'req-client-abort' }),
+    ) as unknown as Request;
+    const res = Object.assign(new EventEmitter(), makeResponse(), {
+      writableEnded: false,
+      destroyed: false,
+    }) as unknown as Response & EventEmitter;
+
+    await handler(req, res, jest.fn() as NextFunction);
+    res.emit('close');
+
+    expect(proxyReq.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not destroy the upstream request after a normal response finishes', async () => {
+    const proxyReq = {
+      destroyed: false,
+      destroy: jest.fn(),
+      removeHeader: jest.fn(),
+    };
+    createProxyMiddlewareMock.mockImplementation((options) => {
+      return ((req, res) => {
+        options.on?.proxyReq?.(proxyReq as never, req, res, {});
+      }) as ReturnType<typeof createProxyMiddleware>;
+    });
+    const signer = {
+      sign: jest.fn().mockResolvedValue('internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const req = Object.assign(
+      new EventEmitter(),
+      makeRequest('/v1/auth/login', { 'x-request-id': 'req-complete' }),
+    ) as unknown as Request;
+    const res = Object.assign(new EventEmitter(), makeResponse(), {
+      writableEnded: false,
+      destroyed: false,
+    }) as unknown as Response & EventEmitter;
+
+    await handler(req, res, jest.fn() as NextFunction);
+    Object.defineProperty(res, 'writableEnded', { value: true });
+    res.emit('finish');
+    res.emit('close');
+
+    expect(proxyReq.destroy).not.toHaveBeenCalled();
   });
 });

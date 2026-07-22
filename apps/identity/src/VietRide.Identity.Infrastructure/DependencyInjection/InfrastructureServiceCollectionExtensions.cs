@@ -114,6 +114,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IEmailVerificationTokenRepository, EmailVerificationTokenRepository>();
         services.AddScoped<IUserDeviceRepository, UserDeviceRepository>();
         services.AddScoped<IActivityLogRepository, ActivityLogRepository>();
+        services.AddScoped<IAdminOutboxDlqRepository, AdminOutboxDlqRepository>();
         services.AddScoped<IOAuthIdentityRepository, OAuthIdentityRepository>();
         services.AddScoped<IOperatorRepository, OperatorRepository>();
         services.AddScoped<IOperatorWalletBackfillMarkerRepository, OperatorWalletBackfillMarkerRepository>();
@@ -123,6 +124,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ISubscriptionQuotaAllocationRepository, SubscriptionQuotaAllocationRepository>();
 
         AddSubscriptionPaymentClient(services, configuration);
+        AddAdminOutboxDlqSourceClients(services, configuration);
         services.AddScoped<SubscriptionLifecycleJob>();
         if (registerEventConsumer)
         {
@@ -270,11 +272,65 @@ public static class InfrastructureServiceCollectionExtensions
 
         services.AddHttpClient<ISubscriptionPaymentClient, SubscriptionPaymentClient>(client =>
             {
-                var baseUrl = configuration["PAYMENT_SERVICE_BASE_URL"]
-                    ?? Environment.GetEnvironmentVariable("PAYMENT_SERVICE_BASE_URL")
-                    ?? "http://payment:8080";
+                var baseUrl = ResolveSubscriptionPaymentBaseUrl(configuration);
                 client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
                 client.Timeout = TimeSpan.FromSeconds(30);
+            })
+            .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
+            .AddHttpMessageHandler<InternalJwtDelegatingHandler>()
+            .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
+            .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
+    }
+
+    private static string ResolveSubscriptionPaymentBaseUrl(IConfiguration configuration)
+    {
+        var baseUrl = configuration["Payment:BaseUrl"]
+            ?? configuration["PAYMENT_SERVICE_BASE_URL"]
+            ?? Environment.GetEnvironmentVariable("PAYMENT_SERVICE_BASE_URL");
+
+        if (string.IsNullOrWhiteSpace(baseUrl))
+        {
+            throw new InvalidOperationException(
+                "Payment base URL must be configured via Payment:BaseUrl or PAYMENT_SERVICE_BASE_URL.");
+        }
+
+        return baseUrl;
+    }
+
+    private static void AddAdminOutboxDlqSourceClients(
+        IServiceCollection services,
+        IConfiguration configuration)
+    {
+        services.TryAddSingleton<IAdminOutboxDlqSourceClient, AdminOutboxDlqSourceClient>();
+        services.AddHttpContextAccessor();
+        services.TryAddTransient<InternalJwtDelegatingHandler>();
+        services.TryAddTransient<CorrelationIdDelegatingHandler>();
+
+        AddAdminOutboxDlqClient(services, configuration, "trip", "TRIP_SERVICE_BASE_URL", null, "http://trip:5002");
+        AddAdminOutboxDlqClient(services, configuration, "booking", "BOOKING_SERVICE_BASE_URL", null, "http://booking:5003");
+        AddAdminOutboxDlqClient(services, configuration, "payment", "PAYMENT_SERVICE_BASE_URL", null, "http://payment:5004");
+        AddAdminOutboxDlqClient(services, configuration, "parcel", "PARCEL_SERVICE_BASE_URL", null, "http://parcel:5005");
+        AddAdminOutboxDlqClient(services, configuration, "tracking", "TRACKING_BASE_URL", "TRACKING_SERVICE_BASE_URL", "http://tracking:3001");
+    }
+
+    private static void AddAdminOutboxDlqClient(
+        IServiceCollection services,
+        IConfiguration configuration,
+        string service,
+        string environmentKey,
+        string? alternateEnvironmentKey,
+        string defaultBaseUrl)
+    {
+        services.AddHttpClient($"admin-outbox-dlq-{service}", client =>
+            {
+                var baseUrl = configuration[environmentKey]
+                    ?? Environment.GetEnvironmentVariable(environmentKey)
+                    ?? (alternateEnvironmentKey is null ? null : configuration[alternateEnvironmentKey])
+                    ?? (alternateEnvironmentKey is null ? null : Environment.GetEnvironmentVariable(alternateEnvironmentKey))
+                    ?? defaultBaseUrl;
+                client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
+                client.Timeout = TimeSpan.FromSeconds(10);
+                client.DefaultRequestHeaders.Accept.ParseAdd("application/json");
             })
             .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
             .AddHttpMessageHandler<InternalJwtDelegatingHandler>()

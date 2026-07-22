@@ -37,25 +37,72 @@ public sealed class SubscriptionPaymentClient : ISubscriptionPaymentClient
         };
         message.Headers.TryAddWithoutValidation("Idempotency-Key", request.IdempotencyKey);
 
-        using var response = await _httpClient.SendAsync(message, cancellationToken).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
+        HttpResponseMessage response;
+        try
         {
-            var failure = await response.Content.ReadFromJsonAsync<ApiResponse>(
-                JsonOptions,
-                cancellationToken).ConfigureAwait(false);
+            response = await _httpClient.SendAsync(message, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException)
+        {
             throw new SubscriptionPaymentClientException(
-                (int)response.StatusCode,
-                failure?.Error.Code ?? "PAYMENT_SERVICE_ERROR",
-                failure?.Error.Message ?? "Payment subscription creation failed.");
+                503,
+                "PAYMENT_SERVICE_UNAVAILABLE",
+                "Payment service is unavailable.",
+                exception);
         }
 
-        var envelope = await response.Content.ReadFromJsonAsync<ApiResponse<SubscriptionPaymentCreationResult>>(
-            JsonOptions,
-            cancellationToken).ConfigureAwait(false);
-        if (envelope is null || !envelope.Success || envelope.Data is null)
-            throw new HttpRequestException("Payment subscription creation returned an invalid API envelope.");
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                ApiResponse? failure = null;
+                try
+                {
+                    failure = await response.Content.ReadFromJsonAsync<ApiResponse>(
+                        JsonOptions,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is JsonException or NotSupportedException)
+                {
+                    // Preserve the upstream status when a proxy or service returns a non-ADR response.
+                }
 
-        return envelope.Data;
+                throw new SubscriptionPaymentClientException(
+                    (int)response.StatusCode,
+                    failure?.Error.Code ?? "PAYMENT_SERVICE_ERROR",
+                    failure?.Error.Message ?? "Payment subscription creation failed.");
+            }
+
+            ApiResponse<SubscriptionPaymentCreationResult>? envelope;
+            try
+            {
+                envelope = await response.Content.ReadFromJsonAsync<ApiResponse<SubscriptionPaymentCreationResult>>(
+                    JsonOptions,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is JsonException or NotSupportedException)
+            {
+                throw new SubscriptionPaymentClientException(
+                    502,
+                    "PAYMENT_SERVICE_INVALID_RESPONSE",
+                    "Payment service returned an invalid API response.",
+                    exception);
+            }
+
+            if (envelope is null || !envelope.Success || envelope.Data is null)
+            {
+                throw new SubscriptionPaymentClientException(
+                    502,
+                    "PAYMENT_SERVICE_INVALID_RESPONSE",
+                    "Payment service returned an invalid API envelope.");
+            }
+
+            return envelope.Data;
+        }
     }
 
     public async Task ExpireAsync(Guid paymentId, string idempotencyKey, CancellationToken cancellationToken = default)

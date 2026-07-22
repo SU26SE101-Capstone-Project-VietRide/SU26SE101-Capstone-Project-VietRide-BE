@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
+using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Payment.Application.Features.Admin.PlatformReports;
@@ -16,6 +17,7 @@ public sealed class GetPlatformReportQueryHandler
     private readonly IIdentityOperatorSummaryClient _identity;
     private readonly IClock _clock;
     private readonly ILogger<GetPlatformReportQueryHandler> _logger;
+    private readonly IOperatorLedgerEntryRepository _ledger;
 
     public GetPlatformReportQueryHandler(
         IBookingPlatformReportClient bookings,
@@ -23,7 +25,8 @@ public sealed class GetPlatformReportQueryHandler
         IParcelPlatformReportClient parcels,
         IIdentityOperatorSummaryClient identity,
         IClock clock,
-        ILogger<GetPlatformReportQueryHandler> logger)
+        ILogger<GetPlatformReportQueryHandler> logger,
+        IOperatorLedgerEntryRepository ledger)
     {
         _bookings = bookings;
         _trips = trips;
@@ -31,6 +34,7 @@ public sealed class GetPlatformReportQueryHandler
         _identity = identity;
         _clock = clock;
         _logger = logger;
+        _ledger = ledger;
     }
 
     public async Task<PlatformReportResult> Handle(
@@ -41,13 +45,18 @@ public sealed class GetPlatformReportQueryHandler
         Task<IReadOnlyList<BookingPlatformReportItem>> bookingTask;
         Task<IReadOnlyList<TripPlatformReportItem>> tripTask;
         Task<IReadOnlyList<ParcelPlatformReportItem>> parcelTask;
+        Task<IReadOnlyList<PlatformLedgerReportItem>> ledgerTask;
 
         try
         {
             bookingTask = _bookings.GetAsync(range.From, range.To, cancellationToken);
             tripTask = _trips.GetAsync(range.From, range.To, cancellationToken);
             parcelTask = _parcels.GetAsync(range.From, range.To, cancellationToken);
-            await Task.WhenAll(bookingTask, tripTask, parcelTask);
+            ledgerTask = _ledger.GetPlatformLedgerMetricsAsync(
+                range.From,
+                range.To,
+                cancellationToken);
+            await Task.WhenAll(bookingTask, tripTask, parcelTask, ledgerTask);
         }
         catch (PlatformReportValueOverflowException)
         {
@@ -68,6 +77,7 @@ public sealed class GetPlatformReportQueryHandler
                 await bookingTask,
                 await tripTask,
                 await parcelTask);
+            ReconcileLedgerRevenue(accumulators, await ledgerTask);
             var names = await LoadOperatorNamesAsync(accumulators.Keys, cancellationToken);
             var byOperator = accumulators.Values
                 .Select(item => item.ToResult(names.GetValueOrDefault(item.OperatorId)))
@@ -181,6 +191,73 @@ public sealed class GetPlatformReportQueryHandler
             throw new UpstreamUnavailableException();
         }
     }
+
+    private void ReconcileLedgerRevenue(
+        IDictionary<Guid, OperatorAccumulator> accumulators,
+        IReadOnlyList<PlatformLedgerReportItem> ledgerRows)
+    {
+        var ledgerByOperator = new Dictionary<Guid, PlatformLedgerReportItem>();
+        foreach (var row in ledgerRows)
+        {
+            if (row.OperatorId == Guid.Empty
+                || !ledgerByOperator.TryAdd(row.OperatorId, row))
+            {
+                throw new UpstreamUnavailableException();
+            }
+        }
+
+        foreach (var accumulator in accumulators.Values)
+        {
+            ledgerByOperator.TryGetValue(accumulator.OperatorId, out var ledger);
+            var ledgerBookingRevenue = ledger?.BookingRevenueVnd ?? 0;
+            var ledgerParcelRevenue = ledger?.ParcelRevenueVnd ?? 0;
+            if (accumulator.BookingRevenueVnd != ledgerBookingRevenue
+                || accumulator.ParcelRevenueVnd != ledgerParcelRevenue)
+            {
+                LogReconciliationMismatch(
+                    accumulator.OperatorId,
+                    accumulator.BookingRevenueVnd,
+                    ledgerBookingRevenue,
+                    accumulator.ParcelRevenueVnd,
+                    ledgerParcelRevenue);
+                throw new UpstreamUnavailableException();
+            }
+
+            ledgerByOperator.Remove(accumulator.OperatorId);
+        }
+
+        foreach (var ledger in ledgerByOperator.Values)
+        {
+            if (ledger.BookingRevenueVnd == 0 && ledger.ParcelRevenueVnd == 0)
+            {
+                continue;
+            }
+
+            LogReconciliationMismatch(
+                ledger.OperatorId,
+                0,
+                ledger.BookingRevenueVnd,
+                0,
+                ledger.ParcelRevenueVnd);
+            throw new UpstreamUnavailableException();
+        }
+    }
+
+    private void LogReconciliationMismatch(
+        Guid operatorId,
+        long liveBookingRevenue,
+        long ledgerBookingRevenue,
+        long liveParcelRevenue,
+        long ledgerParcelRevenue)
+        => _logger.LogError(
+            "Platform report reconciliation mismatch for {OperatorId}: "
+            + "live booking {LiveBookingRevenueVnd}, ledger booking {LedgerBookingRevenueVnd}, "
+            + "live parcel {LiveParcelRevenueVnd}, ledger parcel {LedgerParcelRevenueVnd}",
+            operatorId,
+            liveBookingRevenue,
+            ledgerBookingRevenue,
+            liveParcelRevenue,
+            ledgerParcelRevenue);
 
     private static OperatorAccumulator Get(
         IDictionary<Guid, OperatorAccumulator> accumulators,

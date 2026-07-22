@@ -16,6 +16,12 @@ public sealed class IdempotencyOptions
     /// when it wires the middleware. Defaults to "svc" for controlled test pipelines.
     /// </summary>
     public string ServicePrefix { get; set; } = "svc";
+
+    /// <summary>
+    /// Requires a valid UUID-v4 key for every POST/PATCH/PUT/DELETE endpoint unless it has an
+    /// explicit <see cref="SkipIdempotencyAttribute"/> exemption.
+    /// </summary>
+    public bool RequireAllMutations { get; set; }
 }
 
 /// <summary>
@@ -35,9 +41,14 @@ public static class IdempotencyServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddVietRideIdempotency(
         this IServiceCollection services,
-        string servicePrefix = "svc")
+        string servicePrefix = "svc",
+        bool requireAllMutations = false)
     {
-        services.AddSingleton(new IdempotencyOptions { ServicePrefix = servicePrefix });
+        services.AddSingleton(new IdempotencyOptions
+        {
+            ServicePrefix = servicePrefix,
+            RequireAllMutations = requireAllMutations,
+        });
         return services;
     }
 

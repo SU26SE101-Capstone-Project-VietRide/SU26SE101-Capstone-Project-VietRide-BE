@@ -28,7 +28,7 @@ public sealed class InternalWalletRefundEndpointTests
         var mediator = new CapturingMediator();
         await using var factory = CreateFactory(mediator);
         using var client = factory.CreateClient();
-        var request = CreateRequest(idempotencyKey: $"idem-{Guid.NewGuid():N}");
+        var request = CreateRequest(idempotencyKey: Guid.NewGuid().ToString());
 
         var response = await client.SendAsync(request);
 
@@ -60,7 +60,7 @@ public sealed class InternalWalletRefundEndpointTests
         var body = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(body);
         doc.RootElement.GetProperty("success").GetBoolean().Should().BeFalse();
-        doc.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("VALIDATION_ERROR");
+        doc.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("IDEMPOTENCY_KEY_REQUIRED");
         mediator.SendCount.Should().Be(0);
     }
 
@@ -73,7 +73,7 @@ public sealed class InternalWalletRefundEndpointTests
         };
         await using var factory = CreateFactory(mediator);
         using var client = factory.CreateClient();
-        var request = CreateRequest(idempotencyKey: $"idem-{Guid.NewGuid():N}");
+        var request = CreateRequest(idempotencyKey: Guid.NewGuid().ToString());
 
         var response = await client.SendAsync(request);
 
@@ -91,7 +91,7 @@ public sealed class InternalWalletRefundEndpointTests
         var mediator = new CapturingMediator();
         await using var factory = CreateFactory(mediator);
         using var client = factory.CreateClient();
-        var idempotencyKey = $"idem-{Guid.NewGuid():N}";
+        var idempotencyKey = Guid.NewGuid().ToString();
         var first = CreateRequest(idempotencyKey);
         var second = CreateRequest(idempotencyKey);
 
@@ -110,7 +110,7 @@ public sealed class InternalWalletRefundEndpointTests
         var mediator = new CapturingMediator();
         await using var factory = CreateFactory(mediator);
         using var client = factory.CreateClient();
-        var idempotencyKey = $"idem-{Guid.NewGuid():N}";
+        var idempotencyKey = Guid.NewGuid().ToString();
         var first = CreateRequest(idempotencyKey, amount: 175_000);
         var second = CreateRequest(idempotencyKey, amount: 176_000);
 

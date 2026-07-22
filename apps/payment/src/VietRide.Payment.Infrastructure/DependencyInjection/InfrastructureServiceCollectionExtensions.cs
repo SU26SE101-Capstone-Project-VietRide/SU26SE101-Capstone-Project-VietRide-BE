@@ -27,9 +27,11 @@ using VietRide.Payment.Infrastructure.Messaging;
 using VietRide.Payment.Infrastructure.Persistence.Repositories;
 using VietRide.Payment.Infrastructure.Refunds;
 using VietRide.Payment.Infrastructure.VnPay;
+using VietRide.Shared.Application.Reporting;
 using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Messaging.DependencyInjection;
+using VietRide.Shared.Reporting;
 
 namespace VietRide.Payment.Infrastructure.DependencyInjection;
 
@@ -52,6 +54,7 @@ public static class InfrastructureServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
+        services.AddSingleton<IExcelReportWriter, ClosedXmlExcelReportWriter>();
         var connectionString = configuration.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default is not configured.");
 

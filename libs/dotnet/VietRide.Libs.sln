@@ -1,4 +1,4 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
@@ -20,6 +20,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VietRide.Shared.Persistence.UnitTests", "..\..\tests\dotnet\VietRide.Shared.Persistence.UnitTests\VietRide.Shared.Persistence.UnitTests.csproj", "{D2E08E24-4CC6-436A-894A-7AA9EAD9C07F}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VietRide.Shared.Messaging.UnitTests", "..\..\tests\dotnet\VietRide.Shared.Messaging.UnitTests\VietRide.Shared.Messaging.UnitTests.csproj", "{52696276-5280-4054-BF78-0E53BA20D2D8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VietRide.Shared.Reporting.UnitTests", "..\..\tests\dotnet\VietRide.Shared.Reporting.UnitTests\VietRide.Shared.Reporting.UnitTests.csproj", "{B099093D-88BA-4266-BA82-B1355FCB583B}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -66,5 +68,9 @@ Global
 		{52696276-5280-4054-BF78-0E53BA20D2D8}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{52696276-5280-4054-BF78-0E53BA20D2D8}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{52696276-5280-4054-BF78-0E53BA20D2D8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B099093D-88BA-4266-BA82-B1355FCB583B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B099093D-88BA-4266-BA82-B1355FCB583B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B099093D-88BA-4266-BA82-B1355FCB583B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B099093D-88BA-4266-BA82-B1355FCB583B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

@@ -45,6 +45,7 @@ public static class HangfireServiceCollectionExtensions
             options.WorkerCount = workerCount;
         });
         services.AddScoped<IPendingActionRealertScheduler, HangfirePendingActionRealertScheduler>();
+        services.AddScoped<PlatformBookingStatsBackfillJob>();
         services.AddScoped<IScheduleChangeAutoAcceptScheduler, HangfireScheduleChangeAutoAcceptScheduler>();
         services.AddSingleton<IStopDisabledAutoFallbackScheduler, HangfireStopDisabledAutoFallbackScheduler>();
         services.AddSingleton<INoShowDetectionScheduler, HangfireNoShowDetectionScheduler>();

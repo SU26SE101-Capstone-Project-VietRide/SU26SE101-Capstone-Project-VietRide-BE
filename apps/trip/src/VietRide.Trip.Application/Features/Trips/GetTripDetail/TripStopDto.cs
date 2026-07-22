@@ -10,7 +10,9 @@ public sealed record TripStopDto(
     int OrderIndex,
     bool AllowPickup,
     bool AllowDropoff,
+    string Status,
     DateTimeOffset EstimatedArrivalTime,
+    DateTimeOffset? ActualArrivalTime,
     double? DistanceFromOriginKm,
     long? FareFromThisStop,
     long EffectiveFare);

@@ -124,12 +124,21 @@ public sealed class InternalPlatformParcelReportTests
     {
         await _factory.InitializeDatabaseAsync();
         await _factory.ResetAsync();
+        var operatorId = Guid.Parse("40000000-0000-0000-0000-000000000023");
+        var perParcelRevenue = (long.MaxValue / 2) + 1;
         await _factory.SeedParcelAsync(
-            Guid.Parse("40000000-0000-0000-0000-000000000023"),
+            operatorId,
             ParcelStatus.DELIVERY_CONFIRMED,
             From.AddDays(1),
-            deposit: long.MaxValue,
-            additional: long.MaxValue,
+            deposit: perParcelRevenue,
+            additional: 0,
+            refund: 0);
+        await _factory.SeedParcelAsync(
+            operatorId,
+            ParcelStatus.DELIVERY_CONFIRMED,
+            From.AddDays(1),
+            deposit: perParcelRevenue,
+            additional: 0,
             refund: 0);
 
         using var client = _factory.CreateInternalClient();
@@ -137,6 +146,38 @@ public sealed class InternalPlatformParcelReportTests
 
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
         await AssertErrorCodeAsync(response, "REPORT_VALUE_OVERFLOW");
+    }
+
+    [Fact]
+    public async Task ParcelStatsMismatch_FailsClosedAndIdempotentBackfillRecovers()
+    {
+        await _factory.InitializeDatabaseAsync();
+        await _factory.ResetAsync();
+        var operatorId = Guid.Parse("40000000-0000-0000-0000-000000000024");
+        await _factory.SeedParcelAsync(
+            operatorId,
+            ParcelStatus.DELIVERY_CONFIRMED,
+            From.AddDays(12),
+            deposit: 700_000,
+            additional: 50_000,
+            refund: 10_000);
+        await _factory.DeletePlatformProjectionAsync();
+
+        using var client = _factory.CreateInternalClient();
+        var mismatch = await client.GetAsync(ReportPath(From, To));
+
+        mismatch.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        await AssertErrorCodeAsync(mismatch, "UPSTREAM_UNAVAILABLE");
+
+        (await _factory.RunPlatformBackfillTwiceAsync()).Should().Be(1);
+        var recovered = await client.GetAsync(ReportPath(From, To));
+        recovered.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await recovered.Content.ReadAsStringAsync());
+        AssertItem(
+            document.RootElement.GetProperty("items").EnumerateArray().Single(),
+            operatorId,
+            1,
+            740_000);
     }
 
     [Fact]
@@ -304,6 +345,27 @@ public sealed class PlatformParcelReportWebApplicationFactory : WebApplicationFa
                 CAST({status.ToString()} AS vietride_parcel.parcel_status),
                 {confirmedAt});
             """);
+    }
+
+    public async Task DeletePlatformProjectionAsync()
+    {
+        await using var scope = Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ParcelDbContext>();
+        await db.Database.ExecuteSqlRawAsync(
+            "DELETE FROM vietride_parcel.platform_parcel_stats;");
+    }
+
+    public async Task<long> RunPlatformBackfillTwiceAsync()
+    {
+        await using var scope = Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ParcelDbContext>();
+        await db.Database.ExecuteSqlRawAsync(
+            "SELECT vietride_parcel.rebuild_platform_parcel_stats(); " +
+            "SELECT vietride_parcel.rebuild_platform_parcel_stats();");
+        return await db.Database.SqlQueryRaw<long>(
+                "SELECT COUNT(*)::bigint AS \"Value\" " +
+                "FROM vietride_parcel.platform_parcel_stats")
+            .SingleAsync();
     }
 
     public async Task MigrateAsync(string? targetMigration = null)

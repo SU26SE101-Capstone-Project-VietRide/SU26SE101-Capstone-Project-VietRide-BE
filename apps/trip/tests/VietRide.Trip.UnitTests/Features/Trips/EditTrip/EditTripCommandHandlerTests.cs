@@ -888,6 +888,7 @@ public sealed class EditTripCommandHandlerTests
         trip.Status.ToString(),
         trip.DepartureDateTime,
         trip.EstimatedArrivalTime,
+        trip.DestinationArrivedAt,
         trip.BaseFare.Amount,
         new TripStationDto(Guid.NewGuid(), "Origin"),
         new TripStationDto(Guid.NewGuid(), "Destination"),

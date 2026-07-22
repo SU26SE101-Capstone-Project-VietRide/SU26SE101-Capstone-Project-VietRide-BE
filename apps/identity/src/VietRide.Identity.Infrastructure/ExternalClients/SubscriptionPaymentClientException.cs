@@ -7,8 +7,12 @@ public sealed class SubscriptionPaymentClientException : Exception, ICodedHttpEx
     public int StatusCode { get; }
     public string ErrorCode { get; }
 
-    public SubscriptionPaymentClientException(int statusCode, string errorCode, string message)
-        : base(message)
+    public SubscriptionPaymentClientException(
+        int statusCode,
+        string errorCode,
+        string message,
+        Exception? innerException = null)
+        : base(message, innerException)
     {
         StatusCode = statusCode;
         ErrorCode = errorCode;

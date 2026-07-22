@@ -33,4 +33,10 @@ public interface IOutboxStore
     /// signature compatibility but NOT persisted (no due-time column exists).
     /// </summary>
     Task MarkFailedAsync(Guid id, string error, DateTime nextAttemptAt, CancellationToken ct);
+
+    /// <summary>
+    /// Atomically persist a terminal DLQ record and advance the source outbox row beyond the
+    /// retry boundary. Repeated calls for the same event are idempotent.
+    /// </summary>
+    Task MoveToDlqAsync(Guid id, string error, DateTime terminalAt, CancellationToken ct);
 }

@@ -55,31 +55,166 @@ public sealed class OutboxStore : IOutboxStore
 
     public async Task MarkPublishedAsync(Guid id, DateTime publishedAt, CancellationToken ct)
     {
-        var row = await _db.OutboxEvents.FirstOrDefaultAsync(x => x.Id == id, ct).ConfigureAwait(false);
-        if (row is null)
-        {
-            return;
-        }
+        await using var transaction = _db.Database.CurrentTransaction is null
+            ? await _db.Database.BeginTransactionAsync(ct).ConfigureAwait(false)
+            : null;
+        var schema = GetOutboxSchema();
+        await LockSourceAsync(schema, id, ct).ConfigureAwait(false);
+        var sql =
+            """
+            UPDATE "__SCHEMA__".outbox_events source
+            SET status = 'PUBLISHED',
+                published_at = {1},
+                last_error = NULL
+            WHERE source.id = {0}
+              AND source.status IN ('PENDING', 'FAILED')
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM "__SCHEMA__".outbox_dlq terminal
+                  WHERE terminal.event_id = source.id
+              );
+            """.Replace("__SCHEMA__", schema, StringComparison.Ordinal);
 
-        row.Status = OutboxEventStatus.PUBLISHED;
-        row.PublishedAt = publishedAt;
-        await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+        await _db.Database.ExecuteSqlRawAsync(
+            sql,
+            new object[] { id, publishedAt },
+            ct).ConfigureAwait(false);
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
+        }
     }
 
     public async Task MarkFailedAsync(Guid id, string error, DateTime nextAttemptAt, CancellationToken ct)
     {
-        // nextAttemptAt is accepted for signature compatibility but NOT persisted:
-        // the option-(a) schema has no due-time column. Retry is bounded purely
-        // by poll cadence + RetryCount.
-        var row = await _db.OutboxEvents.FirstOrDefaultAsync(x => x.Id == id, ct).ConfigureAwait(false);
-        if (row is null)
+        // nextAttemptAt is accepted for signature compatibility but NOT persisted.
+        await using var transaction = _db.Database.CurrentTransaction is null
+            ? await _db.Database.BeginTransactionAsync(ct).ConfigureAwait(false)
+            : null;
+        var schema = GetOutboxSchema();
+        await LockSourceAsync(schema, id, ct).ConfigureAwait(false);
+        var sql =
+            """
+            UPDATE "__SCHEMA__".outbox_events source
+            SET retry_count = source.retry_count + 1,
+                last_error = {1},
+                status = 'FAILED'
+            WHERE source.id = {0}
+              AND source.status IN ('PENDING', 'FAILED')
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM "__SCHEMA__".outbox_dlq terminal
+                  WHERE terminal.event_id = source.id
+              );
+            """.Replace("__SCHEMA__", schema, StringComparison.Ordinal);
+
+        await _db.Database.ExecuteSqlRawAsync(
+            sql,
+            new object[] { id, error },
+            ct).ConfigureAwait(false);
+        if (transaction is not null)
         {
-            return;
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
+        }
+    }
+
+    public async Task MoveToDlqAsync(Guid id, string error, DateTime terminalAt, CancellationToken ct)
+    {
+        await using var transaction = _db.Database.CurrentTransaction is null
+            ? await _db.Database.BeginTransactionAsync(ct).ConfigureAwait(false)
+            : null;
+        var schema = GetOutboxSchema();
+        await LockSourceAsync(schema, id, ct).ConfigureAwait(false);
+
+        var sql =
+            """
+            WITH terminal_source AS (
+                UPDATE "__SCHEMA__".outbox_events source
+                SET retry_count = source.retry_count + 1,
+                    last_error = {1},
+                    status = 'FAILED'
+                WHERE source.id = {0}
+                  AND source.status IN ('PENDING', 'FAILED')
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM "__SCHEMA__".outbox_dlq existing
+                      WHERE existing.event_id = source.id
+                  )
+                RETURNING
+                    source.id,
+                    source.event_type,
+                    source.payload,
+                    source.retry_count,
+                    source.last_error,
+                    source.created_at
+            )
+            INSERT INTO "__SCHEMA__".outbox_dlq (
+                id,
+                event_id,
+                event_type,
+                payload,
+                retry_count,
+                last_error,
+                created_at,
+                terminal_at
+            )
+            SELECT
+                gen_random_uuid(),
+                source.id,
+                source.event_type,
+                source.payload,
+                source.retry_count,
+                source.last_error,
+                source.created_at,
+                {2}
+            FROM terminal_source source
+            ON CONFLICT (event_id) DO NOTHING;
+
+            UPDATE "__SCHEMA__".outbox_events source
+            SET retry_count = GREATEST(source.retry_count, terminal.retry_count),
+                last_error = terminal.last_error,
+                status = 'FAILED'
+            FROM "__SCHEMA__".outbox_dlq terminal
+            WHERE source.id = {0}
+              AND terminal.event_id = source.id
+              AND source.status <> 'PUBLISHED';
+            """.Replace("__SCHEMA__", schema, StringComparison.Ordinal);
+
+        await _db.Database.ExecuteSqlRawAsync(
+            sql,
+            new object[] { id, error, terminalAt },
+            ct).ConfigureAwait(false);
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
+        }
+    }
+
+    private async Task LockSourceAsync(string schema, Guid id, CancellationToken ct)
+    {
+        var sql =
+            """
+            SELECT 1
+            FROM "__SCHEMA__".outbox_events source
+            WHERE source.id = {0}
+            FOR UPDATE;
+            """.Replace("__SCHEMA__", schema, StringComparison.Ordinal);
+
+        await _db.Database.ExecuteSqlRawAsync(
+            sql,
+            new object[] { id },
+            ct).ConfigureAwait(false);
+    }
+
+    private string GetOutboxSchema()
+    {
+        var schema = _db.Model.FindEntityType(typeof(OutboxEvent))?.GetSchema();
+        if (string.IsNullOrWhiteSpace(schema)
+            || schema.Any(character => !char.IsLetterOrDigit(character) && character != '_'))
+        {
+            throw new InvalidOperationException("Outbox entity schema is missing or invalid.");
         }
 
-        row.RetryCount += 1;
-        row.LastError = error;
-        row.Status = OutboxEventStatus.FAILED;
-        await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return schema;
     }
 }

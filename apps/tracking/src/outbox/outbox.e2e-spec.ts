@@ -42,10 +42,7 @@ describe('OutboxModule (e2e)', () => {
     };
 
     const moduleRef = await Test.createTestingModule({
-      imports: [
-        createOutboxTestGlobals(publisher),
-        OutboxModule,
-      ],
+      imports: [createOutboxTestGlobals(publisher), OutboxModule],
     })
       .overrideProvider(TrackingPrismaService)
       .useValue(prisma)
@@ -55,7 +52,7 @@ describe('OutboxModule (e2e)', () => {
 
     await expect(service.publishPendingOnce(25)).resolves.toBe(1);
 
-    expect(prisma.outboxEvent.findMany).toHaveBeenNthCalledWith(1, {
+    expect(prisma.outboxEvent.findMany).toHaveBeenNthCalledWith(2, {
       where: { status: 'PENDING' },
       orderBy: { createdAt: 'asc' },
       take: 25,
@@ -68,8 +65,8 @@ describe('OutboxModule (e2e)', () => {
         eventType: TRIP_DELAYED_EVENT_TYPE,
       },
     );
-    expect(prisma.outboxEvent.update).toHaveBeenCalledWith({
-      where: { id: EVENT_ID },
+    expect(prisma.outboxEvent.updateMany).toHaveBeenCalledWith({
+      where: { id: EVENT_ID, status: 'PUBLISHING' },
       data: {
         status: 'PUBLISHED',
         publishedAt: expect.any(Date),
@@ -123,7 +120,9 @@ function createTestEnv(): Env {
   };
 }
 
-function createOutboxTestGlobals(publisher: { publish: jest.MockedFunction<() => Promise<void>> }): Type<unknown> {
+function createOutboxTestGlobals(publisher: {
+  publish: jest.MockedFunction<() => Promise<void>>;
+}): Type<unknown> {
   @Global()
   @Module({
     providers: [

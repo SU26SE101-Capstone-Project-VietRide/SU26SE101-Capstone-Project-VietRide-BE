@@ -23,8 +23,8 @@ describe('OutboxPublisherService', () => {
       recoverStalePublishingEvents: jest.fn(async () => 0),
       findPublishable: jest.fn(),
       markPublishing: jest.fn(async () => true),
-      markPublished: jest.fn(async () => undefined),
-      markFailed: jest.fn(async () => undefined),
+      markPublished: jest.fn(async () => true),
+      markFailed: jest.fn(async () => true),
     } as unknown as jest.Mocked<OutboxRepository>;
     publisher = {
       publish: jest.fn(async () => undefined),
@@ -84,7 +84,7 @@ describe('OutboxPublisherService', () => {
       expect.objectContaining({ tripId: EVENT_ID }),
       expect.objectContaining({ eventType: OFF_ROUTE_ALERT_EVENT_TYPE }),
     );
-    expect(repository.markFailed).toHaveBeenCalledWith(EVENT_ID, error, 0);
+    expect(repository.markFailed).toHaveBeenCalledWith(EVENT_ID, error);
     expect(repository.markPublished).not.toHaveBeenCalled();
   });
 
@@ -117,7 +117,7 @@ describe('OutboxPublisherService', () => {
     await expect(service.publishPendingOnce(25)).resolves.toBe(0);
 
     expect(publisher.publish).not.toHaveBeenCalled();
-    expect(repository.markFailed).toHaveBeenCalledWith(EVENT_ID, expect.any(Error), 0);
+    expect(repository.markFailed).toHaveBeenCalledWith(EVENT_ID, expect.any(Error));
   });
 
   it('routes approaching alerts to the gps approaching stop key', async () => {

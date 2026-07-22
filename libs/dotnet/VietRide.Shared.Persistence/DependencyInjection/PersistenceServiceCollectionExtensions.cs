@@ -51,6 +51,7 @@ public static class PersistenceServiceCollectionExtensions
         // Expose the concrete context as VietRideDbContextBase for shared services (e.g. OutboxStore).
         services.AddScoped<VietRideDbContextBase>(sp => sp.GetRequiredService<TContext>());
         services.AddScoped<IOutboxStore, OutboxStore>();
+        services.AddScoped<IOutboxDlqReader, OutboxDlqReader>();
         services.AddScoped<IIntegrationEventOutbox, IntegrationEventOutbox>();
 
         // Wire the shared IUnitOfWork implementation backed by VietRideDbContextBase.

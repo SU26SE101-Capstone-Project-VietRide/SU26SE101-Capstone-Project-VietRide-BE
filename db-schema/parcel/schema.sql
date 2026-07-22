@@ -184,6 +184,97 @@ CREATE INDEX idx_parcels_returned_by_user_id
 CREATE INDEX idx_parcels_confirmed_report ON parcels (confirmed_at, operator_id)
     WHERE status = 'DELIVERY_CONFIRMED' AND confirmed_at IS NOT NULL;
 
+-- -----------------------------------------------------------------------------
+-- platform_parcel_stats (Day 42 exact-range earned projection)
+-- -----------------------------------------------------------------------------
+CREATE TABLE platform_parcel_stats (
+    parcel_id UUID PRIMARY KEY REFERENCES parcels(id) ON DELETE CASCADE,
+    operator_id UUID NOT NULL,
+    confirmed_at TIMESTAMPTZ NOT NULL,
+    parcel_revenue_vnd BIGINT NOT NULL,
+    projected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_platform_parcel_stats_confirmed_operator
+    ON platform_parcel_stats (confirmed_at, operator_id);
+
+CREATE OR REPLACE FUNCTION sync_platform_parcel_stats()
+RETURNS TRIGGER AS $$
+DECLARE
+    source_id UUID := CASE WHEN TG_OP = 'DELETE' THEN OLD.id ELSE NEW.id END;
+BEGIN
+    IF TG_OP <> 'DELETE'
+       AND NEW.status = 'DELIVERY_CONFIRMED'::vietride_parcel.parcel_status
+       AND NEW.confirmed_at IS NOT NULL THEN
+        INSERT INTO platform_parcel_stats (
+            parcel_id, operator_id, confirmed_at, parcel_revenue_vnd, projected_at
+        )
+        VALUES (
+            NEW.id,
+            NEW.operator_id,
+            NEW.confirmed_at,
+            (NEW.deposit_amount::numeric
+                + NEW.additional_amount::numeric
+                - NEW.refund_amount::numeric)::bigint,
+            now()
+        )
+        ON CONFLICT (parcel_id) DO UPDATE SET
+            operator_id = EXCLUDED.operator_id,
+            confirmed_at = EXCLUDED.confirmed_at,
+            parcel_revenue_vnd = EXCLUDED.parcel_revenue_vnd,
+            projected_at = now();
+    ELSE
+        DELETE FROM platform_parcel_stats WHERE parcel_id = source_id;
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_sync_platform_parcel_stats
+    AFTER INSERT OR UPDATE OR DELETE ON parcels
+    FOR EACH ROW EXECUTE FUNCTION sync_platform_parcel_stats();
+
+CREATE OR REPLACE FUNCTION rebuild_platform_parcel_stats()
+RETURNS VOID AS $$
+BEGIN
+    INSERT INTO platform_parcel_stats (
+        parcel_id, operator_id, confirmed_at, parcel_revenue_vnd, projected_at
+    )
+    SELECT
+        id,
+        operator_id,
+        confirmed_at,
+        (deposit_amount::numeric
+            + additional_amount::numeric
+            - refund_amount::numeric)::bigint,
+        now()
+    FROM parcels
+    WHERE status = 'DELIVERY_CONFIRMED'::vietride_parcel.parcel_status
+      AND confirmed_at IS NOT NULL
+    ON CONFLICT (parcel_id) DO UPDATE SET
+        operator_id = EXCLUDED.operator_id,
+        confirmed_at = EXCLUDED.confirmed_at,
+        parcel_revenue_vnd = EXCLUDED.parcel_revenue_vnd,
+        projected_at = now();
+
+    DELETE FROM platform_parcel_stats projection
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM parcels source
+        WHERE source.id = projection.parcel_id
+          AND source.status = 'DELIVERY_CONFIRMED'::vietride_parcel.parcel_status
+          AND source.confirmed_at IS NOT NULL
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT rebuild_platform_parcel_stats();
+
 COMMENT ON COLUMN parcels.parcel_code IS
     'Format VRP-yyyyMMdd-XXXXXXXX. Distinct from booking VR- prefix.';
 COMMENT ON COLUMN parcels.sender_user_id IS
@@ -292,6 +383,23 @@ CREATE TABLE outbox_events (
 
 CREATE INDEX idx_outbox_events_status_created
     ON outbox_events (status, created_at) WHERE status IN ('PENDING', 'PUBLISHING', 'FAILED');
+
+-- -----------------------------------------------------------------------------
+-- outbox_dlq (terminal publish failures; one row per event)
+-- -----------------------------------------------------------------------------
+CREATE TABLE outbox_dlq (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id UUID NOT NULL,
+    event_type VARCHAR(100) NOT NULL,
+    payload JSONB NOT NULL,
+    retry_count INT NOT NULL,
+    last_error TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    terminal_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX uq_outbox_dlq_event_id ON outbox_dlq (event_id);
+CREATE INDEX idx_outbox_dlq_terminal_event_id ON outbox_dlq (terminal_at, event_id);
 
 -- =============================================================================
 -- TRIGGERS

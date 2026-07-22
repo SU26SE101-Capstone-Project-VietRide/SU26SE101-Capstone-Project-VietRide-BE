@@ -115,6 +115,12 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['SYSTEM_ADMIN'],
     },
     {
+      prefix: '/v1/admin/outbox/dlq',
+      target: env.IDENTITY_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
       prefix: '/v1/operator/profile',
       target: env.IDENTITY_BASE_URL,
       authRequired: 'user',
@@ -170,9 +176,45 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     },
     {
       prefix: '/v1/admin/reports/platform',
-      target: env.PAYMENT_BASE_URL,
+      target: env.BOOKING_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
+      prefix: '/v1/operator/reports/bookings',
+      target: env.BOOKING_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
+    {
+      prefix: '/v1/operator/reports/cancellation',
+      target: env.BOOKING_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
+    {
+      prefix: '/v1/operator/reports/parcels',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
+    {
+      prefix: '/v1/operator/reports/revenue',
+      target: env.PAYMENT_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
+    {
+      prefix: '/v1/operator/reports/refunds',
+      target: env.PAYMENT_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
+    {
+      prefix: '/v1/operator/reports/occupancy',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
     },
     {
       prefix: '/v1/operator/invoices',
@@ -304,6 +346,13 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       target: env.TRIP_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['DRIVER', 'ASSISTANT'],
+    },
+    {
+      prefix: '/v1/assistant/trips/{tripId}/parcels',
+      pathPattern: /^\/v1\/assistant\/trips\/[0-9a-fA-F-]{36}\/parcels$/,
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['ASSISTANT'],
     },
     {
       prefix: '/v1/assistant/parcels',

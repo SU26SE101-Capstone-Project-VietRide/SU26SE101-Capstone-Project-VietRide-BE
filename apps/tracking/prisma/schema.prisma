@@ -53,3 +53,18 @@ model OutboxEvent {
   @@map("outbox_events")
   @@schema("vietride_tracking")
 }
+
+model OutboxDlq {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventId     String   @unique(map: "uq_outbox_dlq_event_id") @map("event_id") @db.Uuid
+  eventType   String   @map("event_type") @db.VarChar(100)
+  payload     Json
+  retryCount  Int      @map("retry_count")
+  lastError   String   @map("last_error") @db.Text
+  createdAt   DateTime @map("created_at") @db.Timestamptz(6)
+  terminalAt  DateTime @default(now()) @map("terminal_at") @db.Timestamptz(6)
+
+  @@index([terminalAt, eventId], map: "idx_outbox_dlq_terminal_event_id")
+  @@map("outbox_dlq")
+  @@schema("vietride_tracking")
+}

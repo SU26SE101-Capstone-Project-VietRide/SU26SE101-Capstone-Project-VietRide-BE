@@ -185,8 +185,9 @@ Notification-Integration.md
 API-Shuttle.md
 API-Invoice-OperatorWallet-Settlement.md
 API-Driver-Ops-Day39.md
-
-
+API-Admin-Ops-Day40.md
+API-Day41-43.md
+BE-GAPS-v2-PhanHoi.md
 
 # ── Prisma / Generated code ──────────────────────────────────────────────────
 **/src/generated/

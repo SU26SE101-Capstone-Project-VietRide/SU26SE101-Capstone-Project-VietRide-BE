@@ -23,6 +23,10 @@ export class ApiResponseInterceptor implements NestInterceptor {
     const res = http.getResponse<Response>();
     const req = http.getRequest<Request>();
 
+    if (req.path === '/internal' || req.path.startsWith('/internal/')) {
+      return next.handle();
+    }
+
     return next.handle().pipe(
       map((body: unknown) => {
         // 204 — no body

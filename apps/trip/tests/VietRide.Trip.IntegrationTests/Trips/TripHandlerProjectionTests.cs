@@ -5,6 +5,7 @@ using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Features.Trips.GetTripDetail;
 using VietRide.Trip.Application.Features.Trips.GetTripSeatMap;
 using VietRide.Trip.Application.Features.Trips.SearchTrips;
 using VietRide.Trip.Application.Features.Vehicles;
@@ -132,6 +133,45 @@ public sealed class TripHandlerProjectionTests
 
         result.Seats.Should().ContainSingle().Which.Should().BeEquivalentTo(
             new TripSeatMapSeatDto("A01", "AVAILABLE", "SLEEPER_LOWER", 7, 3, 2));
+    }
+
+    [Fact]
+    public async Task GetDetail_ProjectsPersistedStopAndDestinationArrivalState()
+    {
+        var operatorId = Guid.NewGuid();
+        var origin = Station.Create("Bến xe Miền Đông", "ben-xe-mien-dong", "Hồ Chí Minh", "Hồ Chí Minh");
+        var destination = Station.Create("Bến xe Đà Lạt", "ben-xe-da-lat", "Đà Lạt", "Lâm Đồng");
+        var route = Route.Create(operatorId, "HCM - Đà Lạt", origin.Id, destination.Id, Money.FromRaw(400000), 310m, 420);
+        var trip = CreateTrip(operatorId, route.Id, DateTimeOffset.Parse("2026-07-21T01:00:00Z"));
+        var destinationArrivedAt = DateTimeOffset.Parse("2026-07-21T08:30:00Z");
+        trip.MarkDestinationArrived(destinationArrivedAt, Guid.NewGuid());
+
+        var pendingStop = Stop.Create(operatorId, "Điểm chờ", 10.1m, 106.1m);
+        var arrivedStop = Stop.Create(operatorId, "Điểm đã đến", 11.1m, 107.1m);
+        var skippedStop = Stop.Create(operatorId, "Điểm bỏ qua", 12.1m, 108.1m);
+        var pending = TripStop.Create(trip.Id, pendingStop.Id, 1, trip.DepartureDateTime.AddHours(1), true, true, 40m);
+        var arrived = TripStop.Create(trip.Id, arrivedStop.Id, 2, trip.DepartureDateTime.AddHours(2), true, true, 80m);
+        var skipped = TripStop.Create(trip.Id, skippedStop.Id, 3, trip.DepartureDateTime.AddHours(3), true, true, 120m);
+        var stopArrivedAt = DateTimeOffset.Parse("2026-07-21T03:05:00Z");
+        arrived.MarkArrived(stopArrivedAt);
+        skipped.MarkSkipped();
+
+        var handler = new GetTripDetailHandler(
+            new InMemoryTripRepository([trip]),
+            new InMemoryRouteRepository([route]),
+            new InMemoryStationRepository([origin, destination]),
+            new InMemoryStopRepository([pendingStop, arrivedStop, skippedStop]),
+            new InMemoryTripSeatRepository([]),
+            new InMemoryTripStopRepository([skipped, arrived, pending]),
+            new InMemoryTripStopFareRepository([]));
+
+        var result = await handler.Handle(new GetTripDetailQuery(trip.Id), CancellationToken.None);
+
+        result.DestinationArrivedAt.Should().Be(destinationArrivedAt);
+        result.Stops.Select(stop => stop.Status).Should().Equal("PENDING", "ARRIVED", "SKIPPED");
+        result.Stops[0].ActualArrivalTime.Should().BeNull();
+        result.Stops[1].ActualArrivalTime.Should().Be(stopArrivedAt);
+        result.Stops[2].ActualArrivalTime.Should().BeNull();
     }
 
     private static DomainTrip CreateTrip(Guid operatorId, Guid routeId, DateTimeOffset departure)
@@ -372,6 +412,18 @@ public sealed class TripHandlerProjectionTests
     {
         public InMemoryTripStopRepository(List<TripStop> stops)
             : base(stops, stop => (stop.TripId, stop.StopId)) { }
+    }
+
+    private sealed class InMemoryStopRepository : InMemoryRepository<Stop, Guid>, IStopRepository
+    {
+        public InMemoryStopRepository(List<Stop> stops)
+            : base(stops, stop => stop.Id) { }
+    }
+
+    private sealed class InMemoryTripStopFareRepository : InMemoryRepository<TripStopFare, (Guid TripId, Guid StopId)>, ITripStopFareRepository
+    {
+        public InMemoryTripStopFareRepository(List<TripStopFare> fares)
+            : base(fares, fare => (fare.TripId, fare.StopId)) { }
     }
 
     private sealed class InMemoryVehicleRepository : InMemoryRepository<Vehicle, Guid>, IVehicleRepository

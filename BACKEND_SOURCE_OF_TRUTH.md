@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.38.0
+> **Phiên bản:** 1.38.1
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-07-20
+> **Cập nhật lần cuối:** 2026-07-21
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1586,6 +1586,7 @@ updates the column.
 | | `RATE_LIMITED` | 429 | Vượt rate limit |
 | | `RATE_LIMIT_EXCEEDED` | 429 | Per-user/per-resource Day-38 invoice download limit |
 | | `REPORT_VALUE_OVERFLOW` | 500 | Report source/orchestrator gặp count hoặc BIGINT/NUMERIC aggregate ngoài phạm vi Int64; không wrap, saturate hoặc trả partial |
+| | `REPORT_RANGE_INVALID` | 422 | Operator report range không phải ngày ICT hợp lệ, đảo chiều hoặc vượt 92 ngày inclusive |
 | | `UPSTREAM_UNAVAILABLE` | 502 | Downstream/inter-service dependency unavailable or returned an unusable/unexpected response (including Gateway connection failure) |
 | | `INTERNAL_ERROR` | 500 | Unhandled exception (Sentry capture) |
 
@@ -2268,7 +2269,8 @@ vận hành không in full payload, contact, IP hoặc user-agent.
 
 #### Earned platform report
 
-Payment sở hữu `GET /v1/admin/reports/platform?from=&to=` nhưng không đọc foreign DB. Cả hai RFC3339
+Booking sở hữu public facade `GET /v1/admin/reports/platform?from=&to=` từ Day 42; Payment không
+đọc foreign DB và vẫn là authoritative ledger source. Cả hai RFC3339
 UTC boundary bắt buộc, `from < to`, tối đa 366 ngày, interval `[from,to)`. Ba source metrics:
 
 - Booking: `COMPLETED`, anchor `completed_at`, count và `SUM(total_amount)`.
@@ -2276,15 +2278,18 @@ UTC boundary bắt buộc, `from < to`, tối đa 366 ngày, interval `[from,to)
 - Parcel: `DELIVERY_CONFIRMED`, anchor `confirmed_at`, count và signed
   `SUM(deposit_amount + additional_amount - refund_amount)`.
 
-Không dùng payment-ledger time, non-terminal row hoặc Stats/cache. Source PostgreSQL đọc
+Earned live vẫn là metric anchor; không dùng payment-ledger time, non-terminal row hoặc Stats/cache
+chưa reconciliation làm nguồn trả kết quả. Source PostgreSQL đọc
 `SUM(BIGINT)` dưới dạng NUMERIC rồi checked-convert từng group và total về Int64. Payment checked
 mọi count/revenue/totals, union operator IDs, lookup Identity theo chunk 500, giữ missing operator
 với tên null, sort net revenue giảm dần rồi operator ID. Totals phải bằng sum `byOperator`;
 `parcelRevenueVnd`/`netRevenueVnd` có thể âm và không clamp.
 
-Ba metric call chạy song song với timeout 5 giây. Canonical upstream
+Booking gọi bốn nguồn Trip/Parcel/Payment-ledger và Booking local song song với timeout 5 giây,
+sau đó mới lookup Identity. Canonical upstream
 `500 REPORT_VALUE_OVERFLOW` được propagate cùng code; timeout/5xx khác/payload unusable thành
-`502 UPSTREAM_UNAVAILABLE`. Không partial response, cache hoặc Payment DB write. Partial indexes:
+`503 UPSTREAM_UNAVAILABLE`; ledger mismatch cũng trả cùng `503`. Không partial/stale response hoặc
+Payment DB write. Chỉ kết quả đã reconciliation mới được ghi Redis cache. Partial indexes:
 
 ```text
 Booking (completed_at, operator_id) WHERE status='COMPLETED' AND completed_at IS NOT NULL
@@ -2292,8 +2297,30 @@ Trip    (completed_at, operator_id) WHERE status='COMPLETED' AND completed_at IS
 Parcel  (confirmed_at, operator_id) WHERE status='DELIVERY_CONFIRMED' AND confirmed_at IS NOT NULL
 ```
 
-Day 40 là live indexed-report baseline. Stats materialization, Redis report cache, Excel export,
-occupancy/cancellation/no-show analytics thuộc Day 42 và không được kéo vào implementation này.
+Day 40 là live indexed-report baseline. Day 42 materializes/validates Stats, reconciles against
+earned live sources, and promotes a Booking-owned Redis hot read only after a successful
+reconciliation. Redis TTL is five minutes and the exact UTC range plus `platform-report:v1` are
+part of the key. Day 41 owns the six operator XLSX routes and ClosedXML writer; no cross-DB query
+or new Payment attribution table is allowed.
+
+Mỗi nguồn Day 42 có projection per-earned-record riêng trong DB của service:
+`platform_booking_stats`, `platform_trip_stats`, `platform_parcel_stats`. Projection lưu source ID,
+operator, earned timestamp và revenue tương ứng; trigger đồng bộ nó trong cùng transaction với
+Booking/Trip/Parcel. Các recurring job `booking|trip|parcel.platform-stats-backfill` chạy mỗi năm
+phút và rebuild idempotent từ bảng live để sửa drift. Mỗi internal source query đối chiếu live với
+projection theo từng operator và exact UTC range trước khi trả dữ liệu; mismatch ghi structured log,
+trả `503 UPSTREAM_UNAVAILABLE` và không được cache. `projected_at` là freshness marker vận hành,
+nhưng timestamp mới không được dùng thay cho đối chiếu giá trị thực.
+
+#### Day 43 reliability contract
+
+All Outbox publishers, including Tracking, transition an exhausted event to a per-service durable
+DLQ after the sixth failed publish (`retry_count > 5`). The terminal row preserves event identity,
+type, payload, retry count, last error, created time and terminal time, and is unique by event id.
+Identity owns the `SYSTEM_ADMIN` read-only aggregate facade `GET /v1/admin/outbox/dlq`; it uses an
+opaque composite cursor and reports unavailable source services without inventing totals. No
+replay or purge is implemented in v1. Every Hangfire-owning service exposes the internal JWT-only
+`GET /internal/jobs/status`; lag is `max(0, nowUtc - nextRunUtc)` or null when no next run exists.
 
 ---
 
@@ -2387,6 +2414,12 @@ SCHEDULED ─┬─→ BOARDING ─→ IN_PROGRESS ─┬─→ COMPLETED
   - Case 2: Operator hủy IN_PROGRESS bất khả kháng → Trip DISRUPTED, KHÔNG BookingTransfer, auto-refund proportional theo `distanceFromOriginKm`.
 - `Trip.source` enum: `MANUAL | AUTO_FROM_SCHEDULE | VEHICLE_SUBSTITUTION` (VEHICLE_SUBSTITUTION exempt subscription `maxTripsPerMonth` counter).
 - `DELAYED` là overlay flag (Redis), KHÔNG phải status riêng.
+
+**Public Trip detail operational projection:** `GET /v1/trips/{tripId}` trả
+`destinationArrivedAt` nullable và mỗi TripStop trả `status=PENDING|ARRIVED|SKIPPED` cùng
+`actualArrivalTime` nullable. `actualArrivalTime` chỉ có giá trị khi stop là `ARRIVED`; stop
+`PENDING`/`SKIPPED` và Trip chưa đến destination trả `null`. Đây là read projection từ trạng thái
+đã persist, không tạo lifecycle transition, event hoặc schema mới.
 
 #### Authoritative Trip manual-completion audit contract (Day 21)
 
@@ -3410,6 +3443,7 @@ PR fail nếu bất kỳ step nào fail.
 | Version | Date | Author | Change |
 |---|---|---|---|
 | **1.39.0** | 2026-07-22 | BE lead (Vũ) | **MINOR** — Day-29 freezes the assistant Parcel load HTTP contract, registers `trip.cargo.threshold_crossed`, and reconciles Parcel `loaded` direct recipients plus `auto_rejected` sender identity. No schema or migration change. |
+| **1.38.1** | 2026-07-21 | Codex | **PATCH** - Expose persisted TripStop `status`/`actualArrivalTime` and Trip `destinationArrivedAt` through the protected public Trip detail projection; no schema, event, Gateway, or lifecycle change. |
 | **1.38.0** | 2026-07-20 | BE lead (Vũ) | **MINOR** — Add Identity-owned Firebase Custom Token issuance for active `OPERATOR_ADMIN` users under active approved operators, transactional lock/suspend Firebase-session revocation, vehicle-image Storage Rules and credential registry; add owner-scoped Booking history with Ticket summaries, sender-only Parcel history, and the branch-selective Parcel-owned `GET /v1/passenger/history?type=TICKET\|PARCEL` facade. No schema or migration change. |
 | **1.37.0** | 2026-07-18 | BE lead (Vũ) | **MINOR** — Freeze Day-24 stop-disable, passenger STOP_DISABLED choices, strict deadline fallback, Trip snapshot/pending-count/departure seams, no-show anchors/history source, event identity/consumer facts, and the two migration ownership rows. DELETE is the sole disable route; legacy synchronous `STOP_DISABLED_BOOKING_AFFECTED` warning/count behavior is deprecated for that route. |
 | **1.36.0** | 2026-07-18 | BE lead (Vũ) | **MINOR** — Day-23 schedule-change contract, projection, errors, events, and jobs; merged into the Day-40 baseline while preserving the Admin Users, Station Cleanup, and Platform Reports contracts. |

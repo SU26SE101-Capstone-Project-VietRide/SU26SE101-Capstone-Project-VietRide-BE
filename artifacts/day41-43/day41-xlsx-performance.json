@@ -1,0 +1,47 @@
+{
+  "generatedAt": "2026-07-19T03:57:36.308Z",
+  "reports": [
+    {
+      "report": "bookings",
+      "service": "booking",
+      "durationMs": 12308,
+      "fileBytes": 873585,
+      "sampledPeakMemoryBytes": 457388851
+    },
+    {
+      "report": "parcels",
+      "service": "parcel",
+      "durationMs": 12197,
+      "fileBytes": 523520,
+      "sampledPeakMemoryBytes": 330825728
+    },
+    {
+      "report": "revenue",
+      "service": "payment",
+      "durationMs": 12325,
+      "fileBytes": 1587025,
+      "sampledPeakMemoryBytes": 394474291
+    },
+    {
+      "report": "occupancy",
+      "service": "trip",
+      "durationMs": 10247,
+      "fileBytes": 333974,
+      "sampledPeakMemoryBytes": 327994573
+    },
+    {
+      "report": "cancellation",
+      "service": "booking",
+      "durationMs": 4092,
+      "fileBytes": 310307,
+      "sampledPeakMemoryBytes": 470391194
+    },
+    {
+      "report": "refunds",
+      "service": "payment",
+      "durationMs": 4005,
+      "fileBytes": 572786,
+      "sampledPeakMemoryBytes": 508454502
+    }
+  ]
+}

@@ -15,4 +15,10 @@ public sealed class OutboxTestDbContext : VietRideDbContextBase
         : base(options, clock)
     {
     }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.HasDefaultSchema("public");
+        base.OnModelCreating(modelBuilder);
+    }
 }

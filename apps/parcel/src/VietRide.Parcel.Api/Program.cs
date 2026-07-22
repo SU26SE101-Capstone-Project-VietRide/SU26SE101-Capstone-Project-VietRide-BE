@@ -43,7 +43,7 @@ if (registerMessaging)
 }
 
 builder.Services.AddInfrastructure(builder.Configuration, builder.Environment, registerConsumers: registerMessaging);
-builder.Services.AddVietRideIdempotency("parcel");
+builder.Services.AddVietRideIdempotency("parcel", requireAllMutations: true);
 
 var app = builder.Build();
 
@@ -95,6 +95,10 @@ if (registerMessaging)
         "*/5 * * * *");
     recurringJobs.AddOrUpdate<ParcelLifecycleSweepJob>(
         ParcelLifecycleSweepJob.RecurringJobId,
+        job => job.RunAsync(CancellationToken.None),
+        "*/5 * * * *");
+    recurringJobs.AddOrUpdate<PlatformParcelStatsBackfillJob>(
+        PlatformParcelStatsBackfillJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
         "*/5 * * * *");
     recurringJobs.AddOrUpdate<ParcelDeliveryPendingConfirmReminderJob>(

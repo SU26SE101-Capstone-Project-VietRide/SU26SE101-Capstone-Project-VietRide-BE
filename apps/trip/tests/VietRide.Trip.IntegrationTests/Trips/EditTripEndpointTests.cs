@@ -378,6 +378,7 @@ public sealed class EditTripEndpointTests
         "SCHEDULED",
         DateTimeOffset.Parse("2026-07-20T08:00:00+07:00"),
         DateTimeOffset.Parse("2026-07-20T12:00:00+07:00"),
+        null,
         450_001,
         new TripStationDto(Guid.NewGuid(), "Origin"),
         new TripStationDto(Guid.NewGuid(), "Destination"),

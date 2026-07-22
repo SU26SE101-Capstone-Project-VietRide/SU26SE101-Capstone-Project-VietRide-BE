@@ -60,6 +60,7 @@ describe('buildRouteTable', () => {
       ['/v1/admin/operator-users', env.IDENTITY_BASE_URL],
       ['/v1/admin/users', env.IDENTITY_BASE_URL],
       ['/v1/admin/activity-logs', env.IDENTITY_BASE_URL],
+      ['/v1/admin/outbox/dlq', env.IDENTITY_BASE_URL],
       ['/v1/admin/subscription-plans', env.IDENTITY_BASE_URL],
       ['/v1/admin/locations', env.TRIP_BASE_URL],
       ['/v1/admin/stations', env.TRIP_BASE_URL],
@@ -68,7 +69,7 @@ describe('buildRouteTable', () => {
       ['/v1/admin/trip-settlements', env.PAYMENT_BASE_URL],
       ['/v1/admin/platform-wallet', env.PAYMENT_BASE_URL],
       ['/v1/admin/invoices', env.PAYMENT_BASE_URL],
-      ['/v1/admin/reports/platform', env.PAYMENT_BASE_URL],
+      ['/v1/admin/reports/platform', env.BOOKING_BASE_URL],
     ] as const;
 
     expect(routes.find((r) => r.prefix === '/v1/admin')).toBeUndefined();
@@ -125,6 +126,29 @@ describe('buildRouteTable', () => {
       expect(route?.authRequired).toBe('user');
       expect(route?.requiredRoles).toEqual(['PASSENGER']);
     });
+  });
+
+  it('routes all six operator XLSX reports to their owning services with operator roles', () => {
+    const expected = [
+      ['/v1/operator/reports/bookings/export', env.BOOKING_BASE_URL],
+      ['/v1/operator/reports/cancellation/export', env.BOOKING_BASE_URL],
+      ['/v1/operator/reports/parcels/export', env.PARCEL_BASE_URL],
+      ['/v1/operator/reports/revenue/export', env.PAYMENT_BASE_URL],
+      ['/v1/operator/reports/refunds/export', env.PAYMENT_BASE_URL],
+      ['/v1/operator/reports/occupancy/export', env.TRIP_BASE_URL],
+    ] as const;
+
+    expected.forEach(([path, target]) => {
+      const route = matchRoute(routes, path);
+      expect(route?.target).toBe(target);
+      expect(route?.authRequired).toBe('user');
+      expect(route?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
+    });
+  });
+
+  it('keeps DLQ and job-health internal routes out of Gateway', () => {
+    expect(matchRoute(routes, '/internal/v1/outbox/dlq')).toBeUndefined();
+    expect(matchRoute(routes, '/internal/jobs/status')).toBeUndefined();
   });
 
   it('routes trip operations to Booking instead of the passenger booking route', () => {
@@ -245,15 +269,12 @@ describe('buildRouteTable', () => {
       ['/v1/admin/subscription-plans', env.IDENTITY_BASE_URL],
       ['/v1/admin/locations', env.TRIP_BASE_URL],
       ['/v1/admin/stations/11111111-1111-1111-1111-111111111111', env.TRIP_BASE_URL],
-      [
-        '/v1/admin/stations/11111111-1111-1111-1111-111111111111/merge',
-        env.TRIP_BASE_URL,
-      ],
+      ['/v1/admin/stations/11111111-1111-1111-1111-111111111111/merge', env.TRIP_BASE_URL],
       ['/v1/admin/booking-stats/aggregate', env.BOOKING_BASE_URL],
       ['/v1/admin/vouchers', env.BOOKING_BASE_URL],
       ['/v1/admin/vouchers/11111111-1111-1111-1111-111111111111/consents', env.BOOKING_BASE_URL],
       ['/v1/admin/platform-wallet', env.PAYMENT_BASE_URL],
-      ['/v1/admin/reports/platform', env.PAYMENT_BASE_URL],
+      ['/v1/admin/reports/platform', env.BOOKING_BASE_URL],
       [
         '/v1/admin/trip-settlements/11111111-1111-1111-1111-111111111111/settle',
         env.PAYMENT_BASE_URL,
@@ -568,7 +589,9 @@ describe('buildRouteTable', () => {
   });
 
   it('routes assistant and operator parcel actions to Parcel without gateway-level role guards', () => {
-    const assistantParcelIndex = routes.findIndex((route) => route.prefix === '/v1/assistant/parcels');
+    const assistantParcelIndex = routes.findIndex(
+      (route) => route.prefix === '/v1/assistant/parcels',
+    );
     const assistantIndex = routes.findIndex((route) => route.prefix === '/v1/assistant');
 
     expect(assistantParcelIndex).toBeGreaterThanOrEqual(0);
@@ -596,6 +619,29 @@ describe('buildRouteTable', () => {
       expect(route?.requiredRoles).toBeUndefined();
     });
   });
+
+  it('routes the Assistant trip parcel list to Parcel without capturing other Assistant paths', () => {
+    const parcelListRoute = matchRoute(
+      routes,
+      '/v1/assistant/trips/11111111-1111-4111-8111-111111111111/parcels',
+    );
+    const otherAssistantRoute = matchRoute(
+      routes,
+      '/v1/assistant/trips/11111111-1111-4111-8111-111111111111/manifest',
+    );
+
+    expect(parcelListRoute).toMatchObject({
+      prefix: '/v1/assistant/trips/{tripId}/parcels',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['ASSISTANT'],
+    });
+    expect(otherAssistantRoute).toMatchObject({
+      prefix: '/v1/assistant',
+      target: env.TRIP_BASE_URL,
+    });
+  });
+
   it('routes parcels to Parcel without a gateway-level role guard', () => {
     const route = matchRoute(routes, '/v1/parcels');
     const routeDetail = matchRoute(routes, '/v1/parcels/11111111-1111-1111-1111-111111111111');
