@@ -20,6 +20,7 @@ public sealed class Payment : BaseEntity<Guid>
     public string? VnPayResponseCode { get; private set; }
     public string? IdempotencyKey { get; private set; }
     public string? PaymentRedirectUrl { get; private set; }
+    public DateTimeOffset? DueAt { get; private set; }
     public DateTimeOffset? SucceededAt { get; private set; }
     public DateTimeOffset? FailedAt { get; private set; }
     public DateTimeOffset? ExpiredAt { get; private set; }
@@ -126,7 +127,8 @@ public sealed class Payment : BaseEntity<Guid>
         Money amount,
         string vnPayTxnRef,
         string idempotencyKey,
-        string paymentRedirectUrl)
+        string paymentRedirectUrl,
+        DateTimeOffset? dueAt = null)
     {
         if (referenceId == Guid.Empty)
             throw new ArgumentException("Reference id is required.", nameof(referenceId));
@@ -153,6 +155,7 @@ public sealed class Payment : BaseEntity<Guid>
             VnPayTxnRef = vnPayTxnRef,
             IdempotencyKey = idempotencyKey,
             PaymentRedirectUrl = paymentRedirectUrl,
+            DueAt = dueAt,
         };
     }
 
@@ -172,7 +175,8 @@ public sealed class Payment : BaseEntity<Guid>
         Money amount,
         string vnPayTxnRef,
         string idempotencyKey,
-        string paymentRedirectUrl)
+        string paymentRedirectUrl,
+        DateTimeOffset dueAt)
     {
         if (upgradeAttemptId == Guid.Empty)
             throw new ArgumentException("Upgrade attempt id is required.", nameof(upgradeAttemptId));
@@ -199,6 +203,7 @@ public sealed class Payment : BaseEntity<Guid>
             VnPayTxnRef = vnPayTxnRef,
             IdempotencyKey = idempotencyKey,
             PaymentRedirectUrl = paymentRedirectUrl,
+            DueAt = dueAt,
         };
     }
 

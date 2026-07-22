@@ -66,20 +66,23 @@ public sealed class VnPayClient : IVnPayClient
         Money amount,
         string vnPayTxnRef,
         string clientIpAddress,
-        DateTimeOffset createdAt)
+        DateTimeOffset createdAt,
+        DateTimeOffset? expiresAt = null)
         => BuildRedirectUrl(
             amount,
             vnPayTxnRef,
             clientIpAddress,
             createdAt,
-            $"VietRide subscription payment {upgradeAttemptId} for operator {operatorId}");
+            $"VietRide subscription payment {upgradeAttemptId} for operator {operatorId}",
+            expiresAt);
 
     private string BuildRedirectUrl(
         Money amount,
         string vnPayTxnRef,
         string clientIpAddress,
         DateTimeOffset createdAt,
-        string orderInfo)
+        string orderInfo,
+        DateTimeOffset? expiresAt = null)
     {
         EnsureSignatureOptions();
 
@@ -97,7 +100,7 @@ public sealed class VnPayClient : IVnPayClient
             ["vnp_OrderType"] = DefaultOrderType,
             ["vnp_ReturnUrl"] = _options.ReturnUrl,
             ["vnp_TxnRef"] = vnPayTxnRef,
-            ["vnp_ExpireDate"] = FormatVnPayDate(createdAt.AddMinutes(_options.PaymentTimeoutMinutes)),
+            ["vnp_ExpireDate"] = FormatVnPayDate(expiresAt ?? createdAt.AddMinutes(_options.PaymentTimeoutMinutes)),
         };
 
         var hashData = BuildQuery(parameters);

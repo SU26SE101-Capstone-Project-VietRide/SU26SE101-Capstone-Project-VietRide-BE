@@ -1,8 +1,7 @@
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using VietRide.Payment.Application.Features.Payments.ConfirmBookingPayment;
-using VietRide.Payment.Application.Features.Payments.ConfirmSubscriptionPayment;
+using VietRide.Payment.Application.Features.Payments.DispatchVnPayIpn;
 using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Payment.Api.Controllers;
@@ -33,7 +32,7 @@ public sealed class VnPaySubscriptionIpnController : ControllerBase
                 parameters[pair.Key] = pair.Value.ToString();
         }
 
-        var result = await _sender.Send(new ConfirmSubscriptionPaymentCommand(parameters), cancellationToken);
-        return new JsonResult(result) { StatusCode = result.StatusCode };
+        var result = await _sender.Send(new DispatchVnPayIpnCommand(parameters), cancellationToken);
+        return new JsonResult(result) { StatusCode = StatusCodes.Status200OK };
     }
 }

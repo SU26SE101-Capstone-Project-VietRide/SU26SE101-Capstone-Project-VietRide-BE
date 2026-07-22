@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Authentication;
+using VietRide.Shared.Web.Idempotency;
 using VietRide.Shared.Web.Middleware;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Api.Filters;
@@ -281,6 +282,7 @@ public sealed class InternalTripsController : ControllerBase
     }
 
     [HttpPost("round-trip/lock-seats")]
+    [IdempotencyOpenApi]
     [ProducesResponseType(typeof(ApiResponse<LockRoundTripSeatsResult>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]

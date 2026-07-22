@@ -51,6 +51,30 @@ internal sealed class PaymentRepository : IPaymentRepository
             payment => payment.ReferenceType == referenceType && payment.ReferenceId == referenceId,
             cancellationToken);
 
+    public async Task<PaymentEntity?> FindLatestByReferenceAsync(
+        PaymentReferenceType referenceType,
+        Guid referenceId,
+        CancellationToken cancellationToken)
+        => await _db.Payments
+            .Where(payment => payment.ReferenceType == referenceType && payment.ReferenceId == referenceId)
+            .OrderByDescending(payment => payment.CreatedAt)
+            .ThenByDescending(payment => payment.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<PaymentEntity>> ListLatestSubscriptionPaymentsAsync(
+        IReadOnlyCollection<Guid> upgradeAttemptIds,
+        CancellationToken cancellationToken)
+        => await _db.Payments
+            .AsNoTracking()
+            .Where(payment => payment.ReferenceType == PaymentReferenceType.SUBSCRIPTION
+                && upgradeAttemptIds.Contains(payment.ReferenceId))
+            .GroupBy(payment => payment.ReferenceId)
+            .Select(group => group
+                .OrderByDescending(payment => payment.CreatedAt)
+                .ThenByDescending(payment => payment.Id)
+                .First())
+            .ToListAsync(cancellationToken);
+
     public async Task AcquirePaymentReferenceLockAsync(
         PaymentReferenceType referenceType,
         Guid referenceId,
@@ -143,6 +167,7 @@ internal sealed class PaymentRepository : IPaymentRepository
                   AND reference_type IN (
                       'BOOKING'::vietride_payment.payment_reference_type,
                       'BOOKING_GROUP'::vietride_payment.payment_reference_type,
+                      'SUBSCRIPTION'::vietride_payment.payment_reference_type,
                       'PARCEL'::vietride_payment.payment_reference_type,
                       'PARCEL_ADDITIONAL'::vietride_payment.payment_reference_type)
                   AND created_at < {expiresBefore}

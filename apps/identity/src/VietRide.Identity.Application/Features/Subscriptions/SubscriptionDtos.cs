@@ -41,11 +41,17 @@ public sealed record OperatorSubscriptionDto(
 
 public sealed record PendingSubscriptionUpgradeDto(
     Guid UpgradeAttemptId,
-    Guid TargetPlanId,
+    SubscriptionPlanDto TargetPlan,
     string BillingPeriod,
     long Amount,
+    DateTimeOffset DueAt,
+    int RemainingSeconds,
+    PendingSubscriptionPaymentDto LatestPayment);
+
+public sealed record PendingSubscriptionPaymentDto(
     Guid? PaymentId,
-    DateTimeOffset DueAt);
+    string Status,
+    bool CanRetry);
 
 public sealed record SubscriptionUpgradeResponseDto(
     Guid SubscriptionId,
@@ -56,4 +62,6 @@ public sealed record SubscriptionUpgradeResponseDto(
     string BillingPeriod,
     string? PaymentRedirectUrl,
     DateTimeOffset? DueAt,
-    string? InvoiceStatus);
+    string? InvoiceStatus,
+    SubscriptionPlanDto? ActivePlan = null,
+    SubscriptionPlanDto? PendingTargetPlan = null);

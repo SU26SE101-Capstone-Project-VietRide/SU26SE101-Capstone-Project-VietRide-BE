@@ -24,6 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\..\..\tests\dotnet\IdempotencyOpenApiContractAssertions.cs" Link="Testing\IdempotencyOpenApiContractAssertions.cs" />
     <ProjectReference Include="..\..\src\VietRide.Payment.Api\VietRide.Payment.Api.csproj" />
     <ProjectReference Include="..\..\src\VietRide.Payment.Infrastructure\VietRide.Payment.Infrastructure.csproj" />
   </ItemGroup>

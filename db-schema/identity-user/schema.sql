@@ -374,8 +374,7 @@ CREATE INDEX idx_subscription_plans_is_active ON subscription_plans (is_active);
 CREATE TABLE operator_subscriptions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     operator_id UUID NOT NULL UNIQUE REFERENCES operators (id) ON DELETE RESTRICT,
-    plan_id UUID NOT NULL REFERENCES subscription_plans (id) ON DELETE RESTRICT,
-    previous_active_plan_id UUID NULL REFERENCES subscription_plans (id) ON DELETE SET NULL,
+    active_plan_id UUID NOT NULL REFERENCES subscription_plans (id) ON DELETE RESTRICT,
     status subscription_status NOT NULL DEFAULT 'PENDING_APPROVAL',
     started_at TIMESTAMPTZ NULL,
     expires_at TIMESTAMPTZ NULL,
@@ -390,7 +389,6 @@ CREATE TABLE operator_subscriptions (
     current_trips_this_month INT NOT NULL DEFAULT 0,
     last_reset_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     -- Notification flags
-    warn_sent_at TIMESTAMPTZ NULL,
     trial_expiring_warn_sent_at TIMESTAMPTZ NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -399,12 +397,7 @@ CREATE TABLE operator_subscriptions (
 CREATE INDEX idx_operator_subscriptions_status ON operator_subscriptions (status);
 CREATE INDEX idx_operator_subscriptions_expires_at ON operator_subscriptions (expires_at)
     WHERE status = 'ACTIVE';
-CREATE INDEX idx_operator_subscriptions_plan_id ON operator_subscriptions (plan_id);
-CREATE INDEX idx_operator_subscriptions_previous_active_plan_id
-    ON operator_subscriptions (previous_active_plan_id) WHERE previous_active_plan_id IS NOT NULL;
-
-COMMENT ON COLUMN operator_subscriptions.previous_active_plan_id IS
-    'Plan ACTIVE before PENDING_PAYMENT; used by revert flow if payment times out after 7 days.';
+CREATE INDEX idx_operator_subscriptions_active_plan_id ON operator_subscriptions (active_plan_id);
 COMMENT ON COLUMN operator_subscriptions.current_trips_this_month IS
     'Reset to 0 monthly by Hangfire (day 1, 00:01). Skipped for Trip.source = VEHICLE_SUBSTITUTION.';
 
@@ -419,17 +412,19 @@ CREATE TABLE subscription_upgrade_attempts (
     billing_period subscription_billing_period NOT NULL,
     amount BIGINT NOT NULL CHECK (amount >= 0),
     status subscription_upgrade_attempt_status NOT NULL,
-    payment_id UUID NULL,
+    latest_payment_id UUID NULL,
+    latest_payment_status VARCHAR(16) NOT NULL DEFAULT 'NONE',
+    payment_session_version INT NOT NULL DEFAULT 0,
+    fallback_policy VARCHAR(24) NOT NULL DEFAULT 'RESTORE_CURRENT',
     idempotency_key VARCHAR(100) NOT NULL,
     due_at TIMESTAMPTZ NOT NULL,
-    warn_sent_at TIMESTAMPTZ NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT uq_subscription_upgrade_attempts_idempotency_key UNIQUE (idempotency_key)
 );
 
-CREATE UNIQUE INDEX uq_subscription_upgrade_attempts_payment_id
-    ON subscription_upgrade_attempts (payment_id) WHERE payment_id IS NOT NULL;
+CREATE INDEX idx_subscription_upgrade_attempts_latest_payment_id
+    ON subscription_upgrade_attempts (latest_payment_id) WHERE latest_payment_id IS NOT NULL;
 CREATE UNIQUE INDEX uq_subscription_upgrade_attempts_active_subscription
     ON subscription_upgrade_attempts (subscription_id)
     WHERE status IN ('INITIATED', 'PAYMENT_PENDING');

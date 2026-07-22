@@ -7,6 +7,7 @@ using VietRide.Identity.Application.Features.Subscriptions.ListSubscriptionPlans
 using VietRide.Identity.Application.Features.Subscriptions.ManageSubscriptionPlan;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Identity.Api.Controllers;
 
@@ -31,6 +32,7 @@ public sealed class AdminSubscriptionPlansController : ControllerBase
         => Ok(await _sender.Send(new ListSubscriptionPlansQuery(includeInactive), cancellationToken));
 
     [HttpPost]
+    [IdempotencyOpenApi]
     [ProducesResponseType(typeof(ApiResponse<SubscriptionPlanDto>), StatusCodes.Status201Created)]
     public async Task<ActionResult<SubscriptionPlanDto>> CreateAsync(
         [FromBody] SubscriptionPlanRequest request,
@@ -42,6 +44,7 @@ public sealed class AdminSubscriptionPlansController : ControllerBase
     }
 
     [HttpPatch("{planId:guid}")]
+    [IdempotencyOpenApi]
     [ProducesResponseType(typeof(ApiResponse<SubscriptionPlanDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<SubscriptionPlanDto>> UpdateAsync(
         Guid planId,

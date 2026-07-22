@@ -39,6 +39,7 @@ public static class SwaggerSetupExtensions
             });
 
             c.OperationFilter<AuthorizeOperationFilter>();
+            c.OperationFilter<IdempotencyOperationFilter>();
         });
 
         return services;

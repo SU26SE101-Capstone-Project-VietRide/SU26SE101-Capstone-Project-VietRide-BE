@@ -122,6 +122,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ISubscriptionPlanRepository, SubscriptionPlanRepository>();
         services.AddScoped<ISubscriptionUpgradeAttemptRepository, SubscriptionUpgradeAttemptRepository>();
         services.AddScoped<ISubscriptionQuotaAllocationRepository, SubscriptionQuotaAllocationRepository>();
+        services.AddScoped<SubscriptionPaymentActivationService>();
 
         AddSubscriptionPaymentClient(services, configuration);
         AddAdminOutboxDlqSourceClients(services, configuration);
@@ -132,6 +133,16 @@ public static class InfrastructureServiceCollectionExtensions
             {
                 options.QueueName = "identity.subscription-payment-succeeded";
                 options.BindingKeys = ["payment.subscription.payment_succeeded"];
+            });
+            services.AddVietRideEventConsumer<SubscriptionPaymentFailedIntegrationEvent, SubscriptionPaymentTerminalIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "identity.subscription-payment-failed";
+                options.BindingKeys = ["payment.subscription.payment_failed"];
+            });
+            services.AddVietRideEventConsumer<SubscriptionPaymentExpiredIntegrationEvent, SubscriptionPaymentTerminalIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "identity.subscription-payment-expired";
+                options.BindingKeys = ["payment.subscription.payment_expired"];
             });
             services.AddVietRideEventConsumer<StationMergedIntegrationEvent, StationMergedIntegrationEventHandler>(options =>
             {

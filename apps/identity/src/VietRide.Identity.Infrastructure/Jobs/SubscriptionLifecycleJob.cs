@@ -6,6 +6,7 @@ using VietRide.Identity.Application.Abstractions.ExternalClients;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
+using VietRide.Identity.Infrastructure.Messaging;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
@@ -25,6 +26,7 @@ public sealed class SubscriptionLifecycleJob
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IClock _clock;
+    private readonly SubscriptionPaymentActivationService _activation;
     private readonly ILogger<SubscriptionLifecycleJob> _logger;
 
     public SubscriptionLifecycleJob(
@@ -34,6 +36,7 @@ public sealed class SubscriptionLifecycleJob
         IIntegrationEventOutbox outbox,
         IUnitOfWork unitOfWork,
         IClock clock,
+        SubscriptionPaymentActivationService activation,
         ILogger<SubscriptionLifecycleJob> logger)
     {
         _subscriptions = subscriptions;
@@ -42,6 +45,7 @@ public sealed class SubscriptionLifecycleJob
         _outbox = outbox;
         _unitOfWork = unitOfWork;
         _clock = clock;
+        _activation = activation;
         _logger = logger;
     }
 
@@ -96,26 +100,6 @@ public sealed class SubscriptionLifecycleJob
             }, cancellationToken);
         }
 
-        var pendingThreshold = now.AddHours(-24);
-        var pending = await _attempts.Query()
-            .Where(attempt => attempt.Status == SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING
-                && attempt.CreatedAt <= pendingThreshold
-                && !attempt.WarnSentAt.HasValue)
-            .ToListAsync(cancellationToken);
-        foreach (var attempt in pending)
-        {
-            attempt.MarkWarningSent(now);
-            _attempts.Update(attempt);
-            await EnqueueAsync("identity.subscription.payment_pending_warn", new
-            {
-                subscriptionId = attempt.SubscriptionId,
-                operatorId = attempt.OperatorId,
-                paymentId = attempt.PaymentId,
-                dueAt = attempt.DueAt,
-                occurredAt = now,
-            }, cancellationToken);
-        }
-
         await _unitOfWork.SaveChangesAsync(cancellationToken);
     }
 
@@ -123,33 +107,97 @@ public sealed class SubscriptionLifecycleJob
     public async Task AutoRevertAsync(CancellationToken cancellationToken = default)
     {
         var now = _clock.UtcNow;
-        var due = await _attempts.ListDueAsync(SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING, now, cancellationToken);
-        foreach (var attempt in due)
+        var active = await _attempts.ListActiveAsync(100, cancellationToken);
+        if (active.Count == 0)
         {
-            if (!attempt.PaymentId.HasValue)
+            await RepairOrphanedPendingSubscriptionsAsync(now, cancellationToken);
+            return;
+        }
+
+        IReadOnlyList<SubscriptionPaymentStatusResult> paymentStatuses;
+        try
+        {
+            paymentStatuses = await _payments.GetStatusesAsync(
+                active.Select(attempt => attempt.Id).ToArray(),
+                cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Subscription payment reconciliation could not query Payment service.");
+            throw;
+        }
+
+        var byAttempt = paymentStatuses.ToDictionary(status => status.UpgradeAttemptId);
+        foreach (var attempt in active)
+        {
+            byAttempt.TryGetValue(attempt.Id, out var payment);
+            if (payment?.Status == "SUCCEEDED" && payment.SucceededAt.HasValue)
+            {
+                var activated = await _activation.ActivateAsync(
+                    new SubscriptionPaymentActivationContext(
+                        Guid.Empty,
+                        payment.PaymentId,
+                        payment.UpgradeAttemptId,
+                        payment.OperatorId,
+                        payment.OperatorSubscriptionId,
+                        payment.PlanId,
+                        payment.Amount,
+                        payment.Method,
+                        payment.BillingPeriod,
+                        payment.PeriodFrom,
+                        payment.PeriodTo,
+                        payment.SucceededAt.Value),
+                    cancellationToken);
+                if (activated || attempt.DueAt > now)
+                    continue;
+            }
+
+            if (attempt.PaymentId.HasValue && payment is null)
+                _logger.LogWarning(
+                    "Quarantining subscription payment reconciliation for attempt {UpgradeAttemptId}: latest payment {PaymentId} is missing from Payment service.",
+                    attempt.Id,
+                    attempt.PaymentId);
+
+            if (payment is not null && attempt.PaymentId == payment.PaymentId)
+            {
+                if (payment.Status == "FAILED" && attempt.LatestPaymentStatus == SubscriptionPaymentSessionStatus.PENDING)
+                    attempt.MarkPaymentFailed(payment.PaymentId);
+                else if (payment.Status == "EXPIRED" && attempt.LatestPaymentStatus == SubscriptionPaymentSessionStatus.PENDING)
+                    attempt.MarkPaymentExpired(payment.PaymentId);
+            }
+
+            if (attempt.DueAt > now)
                 continue;
 
-            await _payments.ExpireAsync(attempt.PaymentId.Value, $"subscription-revert:{attempt.Id:N}", cancellationToken);
+            if (payment?.Status == "PENDING_REDIRECT")
+                await _payments.ExpireAsync(payment.PaymentId, $"subscription-reconcile-expire:{attempt.Id:N}", cancellationToken);
+
             var subscription = await _subscriptions.GetByIdAsync(attempt.SubscriptionId, cancellationToken);
-            if (subscription is null || subscription.Status != SubscriptionStatus.PENDING_PAYMENT)
-                continue;
+            if (subscription?.Status == SubscriptionStatus.PENDING_PAYMENT)
+            {
+                subscription.ExpirePendingPayment(attempt.FallbackPolicy, SubscriptionPlan.StarterPlanId, now);
+                _subscriptions.Update(subscription);
+            }
+            else if (subscription is null)
+            {
+                _logger.LogWarning(
+                    "Quarantining expired subscription upgrade attempt {UpgradeAttemptId}: subscription {SubscriptionId} is missing.",
+                    attempt.Id,
+                    attempt.SubscriptionId);
+            }
 
-            var previousPlanId = subscription.PreviousActivePlanId;
-            var restoredPlanId = previousPlanId ?? SubscriptionPlan.StarterPlanId;
-            subscription.RevertPendingPayment(restoredPlanId, now);
-            attempt.MarkExpired(attempt.PaymentId.Value);
-            _subscriptions.Update(subscription);
+            attempt.MarkExpired();
             _attempts.Update(attempt);
             await EnqueueAsync("identity.subscription.payment_auto_reverted", new
             {
-                subscriptionId = subscription.Id,
-                operatorId = subscription.OperatorId,
-                previousPlanId,
-                restoredPlanId,
+                subscriptionId = attempt.SubscriptionId,
+                operatorId = attempt.OperatorId,
+                activePlanId = subscription?.PlanId,
                 occurredAt = now,
             }, cancellationToken);
         }
 
+        await RepairOrphanedPendingSubscriptionsAsync(now, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
     }
 
@@ -172,4 +220,31 @@ public sealed class SubscriptionLifecycleJob
 
     private Task EnqueueAsync(string eventType, object payload, CancellationToken cancellationToken)
         => _outbox.EnqueueAsync(eventType, JsonSerializer.Serialize(payload), cancellationToken);
+
+    private async Task RepairOrphanedPendingSubscriptionsAsync(
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var orphaned = await _subscriptions.Query()
+            .Where(subscription => subscription.Status == SubscriptionStatus.PENDING_PAYMENT
+                && !_attempts.Query().Any(attempt => attempt.SubscriptionId == subscription.Id
+                    && (attempt.Status == SubscriptionUpgradeAttemptStatus.INITIATED
+                        || attempt.Status == SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING)))
+            .Take(100)
+            .ToListAsync(cancellationToken);
+        foreach (var subscription in orphaned)
+        {
+            _logger.LogWarning(
+                "Quarantining and repairing pending subscription {SubscriptionId}: no active upgrade attempt exists.",
+                subscription.Id);
+            subscription.ExpirePendingPayment(
+                SubscriptionFallbackPolicy.RESTORE_CURRENT,
+                SubscriptionPlan.StarterPlanId,
+                now);
+            _subscriptions.Update(subscription);
+        }
+
+        if (orphaned.Count > 0)
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+    }
 }

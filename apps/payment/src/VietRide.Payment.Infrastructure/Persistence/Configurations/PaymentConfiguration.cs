@@ -77,6 +77,10 @@ internal sealed class PaymentConfiguration : IEntityTypeConfiguration<PaymentEnt
             .HasColumnType("text")
             .IsRequired(false);
 
+        builder.Property(x => x.DueAt)
+            .HasColumnName("due_at")
+            .IsRequired(false);
+
         builder.Property(x => x.SucceededAt).HasColumnName("succeeded_at").IsRequired(false);
         builder.Property(x => x.FailedAt).HasColumnName("failed_at").IsRequired(false);
         builder.Property(x => x.ExpiredAt).HasColumnName("expired_at").IsRequired(false);

@@ -1,10 +1,35 @@
 {
-  "version": 1,
-  "policy": "all-post-patch-put-delete",
+  "version": 2,
+  "policy": "runtime-metadata-aligned-openapi",
   "services": {
+    "identity": {
+      "stack": "dotnet",
+      "servicePrefix": "identity",
+      "requireAllMutations": false,
+      "expectedMutationCount": 34,
+      "expectedRequiredCount": 6,
+      "metadataAttributes": {
+        "RequireIdempotency": "libs/dotnet/VietRide.Shared.Web/Idempotency/RequireIdempotencyAttribute.cs",
+        "IdempotencyOpenApi": "libs/dotnet/VietRide.Shared.Web/Idempotency/IdempotencyOpenApiAttribute.cs"
+      }
+    },
+    "trip": {
+      "stack": "dotnet",
+      "servicePrefix": "trip",
+      "requireAllMutations": false,
+      "expectedMutationCount": 50,
+      "expectedRequiredCount": 28,
+      "metadataAttributes": {
+        "RequireIdempotency": "libs/dotnet/VietRide.Shared.Web/Idempotency/RequireIdempotencyAttribute.cs",
+        "RequireIdempotencyKey": "apps/trip/src/VietRide.Trip.Api/Filters/RequireIdempotencyKeyAttribute.cs",
+        "IdempotencyOpenApi": "libs/dotnet/VietRide.Shared.Web/Idempotency/IdempotencyOpenApiAttribute.cs"
+      }
+    },
     "booking": {
+      "stack": "dotnet",
       "servicePrefix": "booking",
       "requireAllMutations": true,
+      "expectedMutationCount": 26,
       "controllers": [
         "AdminVouchersController",
         "BookingsController",
@@ -23,8 +48,10 @@
       ]
     },
     "payment": {
+      "stack": "dotnet",
       "servicePrefix": "payment",
       "requireAllMutations": true,
+      "expectedMutationCount": 14,
       "controllers": [
         "WalletController",
         "InternalWalletController",
@@ -52,8 +79,10 @@
       ]
     },
     "parcel": {
+      "stack": "dotnet",
       "servicePrefix": "parcel",
       "requireAllMutations": true,
+      "expectedMutationCount": 21,
       "controllers": [
         "AssistantParcelsController",
         "InternalParcelsController",
@@ -63,6 +92,14 @@
         "ParcelDeliveryController"
       ],
       "exemptions": []
+    },
+    "notification": {
+      "stack": "nestjs",
+      "sourceDirectory": "apps/notification/src",
+      "requiredDecorator": "ApiIdempotencyRequired",
+      "decoratorFile": "apps/notification/src/swagger/idempotency.swagger.ts",
+      "expectedMutationCount": 3,
+      "expectedRequiredCount": 1
     }
   }
 }

@@ -24,6 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\..\..\tests\dotnet\IdempotencyOpenApiContractAssertions.cs" Link="Testing\IdempotencyOpenApiContractAssertions.cs" />
     <ProjectReference Include="..\..\src\VietRide.Identity.Api\VietRide.Identity.Api.csproj" />
     <ProjectReference Include="..\..\src\VietRide.Identity.Infrastructure\VietRide.Identity.Infrastructure.csproj" />
     <ProjectReference Include="..\..\..\..\libs\dotnet\VietRide.Shared.Persistence\VietRide.Shared.Persistence.csproj" />

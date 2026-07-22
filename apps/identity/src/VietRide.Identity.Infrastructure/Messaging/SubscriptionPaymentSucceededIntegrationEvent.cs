@@ -9,11 +9,13 @@ public sealed class SubscriptionPaymentSucceededIntegrationEvent : IntegrationEv
     public Guid UpgradeAttemptId { get; init; }
     public Guid OperatorId { get; init; }
     public Guid OperatorSubscriptionId { get; init; }
+    public Guid PlanId { get; init; }
     public long Amount { get; init; }
     public string Method { get; init; } = string.Empty;
     public string PlanName { get; init; } = string.Empty;
     public string BillingPeriod { get; init; } = string.Empty;
     public DateTimeOffset PeriodFrom { get; init; }
     public DateTimeOffset PeriodTo { get; init; }
+    public DateTimeOffset SucceededAt { get; init; }
     public SubscriptionBuyerSnapshot BuyerSnapshot { get; init; } = new();
 }

@@ -87,7 +87,7 @@ Subscription hết hạn vẫn đọc được. FE dùng `status`, `plan`, `usag
 |---|---|
 | `PENDING_APPROVAL` | Hiển thị đang chờ duyệt; chưa cho upgrade. |
 | `ACTIVE` | Hiển thị gói và usage; cho phép chọn upgrade. |
-| `PENDING_PAYMENT` | Hiển thị payment đang chờ, dùng `pendingUpgrade.paymentId` và không gửi upgrade mới. |
+| `PENDING_PAYMENT` | `plan` vẫn là gói đang cấp quyền; hiển thị `pendingUpgrade.targetPlan` riêng và dùng `latestPayment.canRetry` để quyết định cho retry. |
 | `EXPIRED` | Vẫn hiển thị dữ liệu; các màn hình tạo/sửa resource có thể nhận `402 SUBSCRIPTION_EXPIRED`. Hiển thị CTA gia hạn/upgrade. |
 | `CANCELLED` | Hiển thị subscription đã hủy; liên hệ quản trị nếu cần. |
 
@@ -133,6 +133,7 @@ Request:
 {
   "planId": "b143713b-3810-4657-b9ca-92db51d7ae9e",
   "billingPeriod": "YEARLY",
+  "paymentMethod": "VNPAY",
   "returnUrl": "https://app.vietride.vn/operator/subscription/result"
 }
 ```
@@ -153,7 +154,9 @@ Response thành công: `202 Accepted`.
     "amount": 1200000,
     "billingPeriod": "YEARLY",
     "paymentRedirectUrl": "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?...",
-    "dueAt": "2026-07-19T08:00:00Z"
+    "dueAt": "2026-07-19T08:15:00Z",
+    "activePlan": { "planId": "00000000-0000-0000-0000-000000000001", "name": "Starter Free Trial" },
+    "pendingTargetPlan": { "planId": "b143713b-3810-4657-b9ca-92db51d7ae9e", "name": "Professional" }
   },
   "meta": { "traceId": "...", "timestamp": "..." }
 }
@@ -165,9 +168,15 @@ Response thành công: `202 Accepted`.
 2. FE gọi API upgrade với một `Idempotency-Key` mới.
 3. Khi nhận `202`, lưu `paymentId` và chuyển trình duyệt tới `paymentRedirectUrl` bằng `window.location.assign(...)`.
 4. VNPay xử lý thanh toán và backend nhận IPN. FE không gọi IPN.
-5. Khi người dùng quay lại ứng dụng hoặc mở lại màn subscription, FE gọi lại `GET /v1/operator/subscription` cho đến khi `status` là `ACTIVE` và plan đã cập nhật.
+5. Khi người dùng quay lại ứng dụng hoặc mở lại màn subscription, FE gọi lại `GET /v1/operator/subscription` cho đến khi `status` là `ACTIVE` và plan đã cập nhật. Return URL không xác nhận hay mutate payment.
 
 Khi network retry, FE gửi lại request body và cùng `Idempotency-Key`; backend trả lại cùng payment thay vì tạo payment mới.
+
+### Retry payment trong attempt hiện tại
+
+`POST /v1/operator/subscription/upgrade/{upgradeAttemptId}/retry-payment`
+
+Header `Idempotency-Key` bắt buộc và phải là key mới cho retry mới. Chỉ gọi khi `pendingUpgrade.remainingSeconds > 0` và `pendingUpgrade.latestPayment.canRetry = true`. Response `202` trả `paymentId`, `paymentRedirectUrl` mới; `dueAt` giữ nguyên. Attempt tự kết thúc sau tối đa 15 phút.
 
 ### Lỗi quan trọng
 
@@ -243,11 +252,11 @@ Request có cùng cấu trúc tạo plan. Để tắt plan, gửi `isActive: fal
 | Module Parcel bị tắt khi tạo parcel | `403 SUBSCRIPTION_MODULE_DISABLED` | Không tiếp tục payment/cargo flow; hiển thị yêu cầu nâng cấp plan. |
 | Module Shuttle bị tắt khi tạo Vehicle/Route | `403 SUBSCRIPTION_MODULE_DISABLED` | Khóa thao tác tạo và hiển thị CTA nâng cấp. |
 | Chạm limit Vehicle/Route/Trip | `422 SUBSCRIPTION_LIMIT_EXCEEDED` | Hiển thị usage hiện tại, giới hạn plan và CTA nâng cấp. |
-| Payment upgrade đang chờ | `409 SUBSCRIPTION_PAYMENT_PENDING` | Giữ một trạng thái payment duy nhất; dùng API xem subscription để đồng bộ. |
+| Payment upgrade đang chờ | `409 SUBSCRIPTION_PAYMENT_PENDING` | Dùng API xem subscription; nếu `latestPayment.canRetry=true` thì gọi endpoint retry, không tạo attempt mới. |
 
 ## Lưu ý tích hợp
 
 - Không gọi hoặc hiển thị các endpoint `/internal/v1/*`; chúng chỉ dành cho service-to-service.
-- Không tự gọi `POST /v1/payments/subscription-vnpay-ipn`; endpoint này dành cho VNPay callback.
+- Không tự gọi IPN. Canonical callback dành cho VNPay là `GET|POST /v1/payments/vnpay-ipn`; endpoint subscription cũ chỉ là alias tương thích.
 - Luôn dùng HTTP status thực tế cùng `error.code`; không chỉ kiểm tra `success`.
 - Khi `currentTripsThisMonth` reset vào đầu tháng, FE đọc lại API subscription thay vì tự reset cache theo giờ thiết bị.

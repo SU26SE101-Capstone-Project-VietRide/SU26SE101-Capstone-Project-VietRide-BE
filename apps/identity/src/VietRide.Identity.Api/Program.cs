@@ -108,8 +108,8 @@ if (registerRecurringJobs)
     recurringJobs.AddOrUpdate<SubscriptionLifecycleJob>(
         SubscriptionLifecycleJob.RevertJobId,
         job => job.AutoRevertAsync(CancellationToken.None),
-        "0 2 * * *",
-        new RecurringJobOptions { TimeZone = ict });
+        Cron.Minutely(),
+        new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
     recurringJobs.AddOrUpdate<SubscriptionLifecycleJob>(
         SubscriptionLifecycleJob.MonthlyResetJobId,
         job => job.ResetMonthlyTripUsageAsync(CancellationToken.None),
