@@ -118,7 +118,7 @@ The Day-30 timeline lists no “Pre-reqs / architecture baseline,” so this pla
 |---|---|---|---|---|
 | 30.1 | ✅ done | APPROVE | 2026-07-22 | Structural/ledger/Prettier/diff checks PASS; user-authorized mechanical Prettier scope expansion on the two JSON files. |
 | 30.2 | ✅ done | APPROVE | 2026-07-22 | Unit/live/evidence/ledger checks PASS; helper wrapper expansion and user-authorized Windows verification amendment; cleanup ordering patched and re-reviewed. |
-| 30.3 | ⬜ todo | — | — | — |
+| 30.3 | ✅ done | APPROVE | 2026-07-22 | DOCS structure/evidence/ledger/Prettier/diff checks PASS; PASS branch records no known spillover. |
 
 Legend: ⬜ todo · 🔄 in progress · ✅ done (reviewer APPROVED + targeted verification green) · ⚠️ done-with-carryover · ❌ blocked
 
