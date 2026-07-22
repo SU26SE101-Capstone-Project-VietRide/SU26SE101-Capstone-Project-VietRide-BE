@@ -133,8 +133,9 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddOptions<VnPayOptions>()
             .Validate(options => options.PaymentTimeoutMinutes > 0, "VNPay payment timeout must be positive.")
             .Validate(options => IsAbsoluteHttpsUrl(options.BaseUrl)
-                && IsAbsoluteHttpsUrl(options.ReturnUrl)
+                && IsAllowedReturnUrl(options.ReturnUrl)
                 && IsAbsoluteHttpsUrl(options.IpnUrl), "VNPay URLs must be absolute HTTPS URLs.")
+            .Validate(options => HasCanonicalVnPayIpnPath(options.IpnUrl), "VNPay IPN URL must use /v1/payments/vnpay-ipn.")
             .Validate(options => !string.Equals(configuration["ASPNETCORE_ENVIRONMENT"], "Production", StringComparison.OrdinalIgnoreCase)
                 || (!string.IsNullOrWhiteSpace(options.TmnCode) && !string.IsNullOrWhiteSpace(options.HashSecret)),
                 "VNPay TMN code and hash secret are required in production.")
@@ -283,4 +284,13 @@ public static class InfrastructureServiceCollectionExtensions
 
     private static bool IsAbsoluteHttpsUrl(string? value)
         => Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps;
+
+    private static bool IsAllowedReturnUrl(string? value)
+        => Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            && (uri.Scheme == Uri.UriSchemeHttps
+                || (uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback));
+
+    private static bool HasCanonicalVnPayIpnPath(string? value)
+        => Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            && string.Equals(uri.AbsolutePath.TrimEnd('/'), "/v1/payments/vnpay-ipn", StringComparison.OrdinalIgnoreCase);
 }

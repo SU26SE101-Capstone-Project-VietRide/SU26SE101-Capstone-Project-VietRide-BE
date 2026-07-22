@@ -12,7 +12,7 @@ namespace VietRide.Identity.Application.Features.Subscriptions.UpgradeSubscripti
 public sealed class UpgradeSubscriptionCommandHandler
     : IRequestHandler<UpgradeSubscriptionCommand, SubscriptionUpgradeResponseDto>
 {
-    private static readonly TimeSpan PaymentWindow = TimeSpan.FromDays(7);
+    private static readonly TimeSpan PaymentWindow = TimeSpan.FromMinutes(15);
 
     private readonly IOperatorSubscriptionRepository _subscriptions;
     private readonly ISubscriptionPlanRepository _plans;
@@ -84,7 +84,8 @@ public sealed class UpgradeSubscriptionCommandHandler
                     amount.Amount,
                     snapshot,
                     request.IdempotencyKey,
-                    request.ClientIpAddress),
+                    request.ClientIpAddress,
+                    attempt.DueAt),
                 cancellationToken);
         }
         catch (Exception exception) when (exception is ICodedHttpException { StatusCode: >= 400 and < 500 })
@@ -103,6 +104,10 @@ public sealed class UpgradeSubscriptionCommandHandler
                 cancellationToken);
         }
 
+        var activePlan = payment.Status == "SUCCEEDED"
+            ? targetPlan
+            : await GetActivePlanAsync(attempt.SubscriptionId, cancellationToken);
+
         return new SubscriptionUpgradeResponseDto(
             attempt.SubscriptionId,
             attempt.Id,
@@ -112,7 +117,9 @@ public sealed class UpgradeSubscriptionCommandHandler
             billingPeriod.ToString(),
             payment.PaymentRedirectUrl,
             payment.Status == "SUCCEEDED" ? null : attempt.DueAt,
-            payment.InvoiceStatus);
+            payment.InvoiceStatus,
+            SubscriptionMapper.ToPlanDto(activePlan),
+            payment.Status == "SUCCEEDED" ? null : SubscriptionMapper.ToPlanDto(targetPlan));
     }
 
     private async Task<SubscriptionUpgradeAttempt> GetOrCreateAttemptAsync(
@@ -160,6 +167,7 @@ public sealed class UpgradeSubscriptionCommandHandler
                 billingPeriod,
                 amount,
                 request.IdempotencyKey,
+                SubscriptionFallbackPolicy.RESTORE_CURRENT,
                 now,
                 now.Add(PaymentWindow));
             await _attempts.AddAsync(attempt, cancellationToken);
@@ -197,10 +205,9 @@ public sealed class UpgradeSubscriptionCommandHandler
             attempt.BindPendingPayment(paymentId);
             if (subscription.Status is SubscriptionStatus.ACTIVE or SubscriptionStatus.EXPIRED)
             {
-                subscription.MoveToPendingPayment(attempt.TargetPlanId, paymentMethod);
+                subscription.MoveToPendingPayment(paymentMethod);
             }
             else if (subscription.Status != SubscriptionStatus.PENDING_PAYMENT
-                || subscription.PlanId != attempt.TargetPlanId
                 || subscription.PaymentMethod != paymentMethod)
             {
                 throw new CodedConflictException(
@@ -255,6 +262,14 @@ public sealed class UpgradeSubscriptionCommandHandler
     private async Task<Operator> GetOperatorAsync(Guid operatorId, CancellationToken cancellationToken)
         => await _operators.GetByIdNoTrackingAsync(operatorId, cancellationToken)
             ?? throw new NotFoundException(nameof(Operator), operatorId);
+
+    private async Task<SubscriptionPlan> GetActivePlanAsync(Guid subscriptionId, CancellationToken cancellationToken)
+    {
+        var subscription = await _subscriptions.GetByIdAsync(subscriptionId, cancellationToken)
+            ?? throw new NotFoundException(nameof(OperatorSubscription), subscriptionId);
+        return await _plans.GetByIdAsync(subscription.PlanId, cancellationToken)
+            ?? throw new NotFoundException(nameof(SubscriptionPlan), subscription.PlanId);
+    }
 
     private static SubscriptionPaymentSnapshot CreateSnapshot(
         Guid subscriptionId,

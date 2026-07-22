@@ -849,42 +849,28 @@ SubscriptionPlan "Starter (Free Trial)" (id=fixed-UUID, isActive=true) {
 **`PENDING_PAYMENT` lifecycle:**
 
 ```
-Operator chọn upgrade lên paid plan HOẶC Admin tạo operator với paid plan:
+Operator chọn upgrade lên paid plan:
+  → Giữ nguyên OperatorSubscription.activePlanId (nguồn entitlement duy nhất)
+  → Tạo SubscriptionUpgradeAttempt(targetPlanId, dueAt=now+15 phút)
   → OperatorSubscription.status = PENDING_PAYMENT
-  → Payment record tạo với referenceType=SUBSCRIPTION, status=PENDING_REDIRECT, method=VNPAY
-  → Push notification OPERATOR_ADMIN: "Gói [planName] chờ thanh toán. Vui lòng hoàn tất trong 7 ngày."
+  → Tạo Payment session referenceType=SUBSCRIPTION, status=PENDING_REDIRECT
 
-Trong khi PENDING_PAYMENT:
-  - Operator login OK (read actions cho phép)
-  - Write actions (tạo Trip/Vehicle/Route): áp dụng theo `Operator.previousActivePlanId` nếu có (giữ limits của plan cũ); nếu chưa từng có active plan → áp Starter Free Trial limits.
+Trong 15 phút:
+  - Login/read/write vẫn dùng limits và modules của activePlanId.
+  - Cancel/failure/timeout chỉ đóng Payment session hiện tại; operator có thể retry bằng session mới,
+    vnp_TxnRef mới; retry không kéo dài dueAt của attempt.
+  - Payment SUCCEEDED trước dueAt phát `payment.subscription.payment_succeeded`; Identity đổi
+    activePlanId sang targetPlanId đúng một lần và chuyển subscription về ACTIVE.
 
-Hangfire `subscription-pending-payment-warn` job (hourly, Payment Service):
-  SELECT OperatorSubscription WHERE status=PENDING_PAYMENT
-    AND createdAt < now - 24 hours
-    AND warnSentAt IS NULL
-  → Publish event `payment.subscription.payment_pending_warn`
-  → Notification Service push + email OPERATOR_ADMIN:
-     "Gói [planName] chưa thanh toán sau 24h. Vui lòng hoàn tất trong 6 ngày nữa hoặc sẽ tự động chuyển về Starter Free Trial."
-  → UPDATE OperatorSubscription SET warnSentAt = now
+Reconciliation `identity.subscription-auto-revert` chạy mỗi phút:
+  - Payment SUCCEEDED nhưng event bị mất → gọi cùng activation service với consumer.
+  - Payment FAILED/EXPIRED → đồng bộ latest payment status và cho retry nếu còn hạn.
+  - Đủ 15 phút → kiểm tra Payment lần cuối, expire session còn pending, đóng attempt EXPIRED và
+    giữ active plan cũ (hoặc Starter theo fallback policy).
+  - Callback success sau dueAt bị từ chối, không credit ledger/invoice và không activate plan.
 
-Hangfire `subscription-pending-payment-revert` job (daily 02:00, Payment Service):
-  SELECT OperatorSubscription WHERE status=PENDING_PAYMENT
-    AND createdAt < now - 7 days
-  FOR EACH:
-    → Revert logic:
-      Nếu Operator đã từng có plan ACTIVE trước đó (`previousActivePlanId IS NOT NULL`):
-        → Restore plan cũ: status=ACTIVE, startedAt=now, expiresAt=now+30 days (extension)
-        → Note: KHÔNG charge lại operator vì plan cũ đã paid period trước đó
-      Nếu Operator chưa từng có plan ACTIVE:
-        → status=ACTIVE với planId=defaultPlan (Starter Free Trial), expiresAt=now+30 days
-    → Cancel Payment record (status=EXPIRED, voucher: KHÔNG có)
-    → Publish event `payment.subscription.payment_auto_reverted`
-    → Notification Service push OPERATOR_ADMIN:
-       "Gói [planName] chưa thanh toán sau 7 ngày. Tài khoản đã chuyển về [oldPlanName]. Bạn có thể nâng cấp lại bất cứ lúc nào."
-
-OperatorSubscription thêm field:
-  - `previousActivePlanId UUID nullable FK → SubscriptionPlan` — plan ACTIVE trước khi chuyển PENDING_PAYMENT
-  - `warnSentAt datetime nullable` — đã gửi 24h warn chưa
+Payment là nguồn sự thật duy nhất về trạng thái tiền. Return URL chỉ phục vụ UX; canonical IPN là
+`GET|POST /v1/payments/vnpay-ipn`. Các endpoint IPN cũ chỉ là alias tương thích.
 ```
 
 **Error codes mới:** `SUBSCRIPTION_PAYMENT_PENDING` (operator gọi endpoint upgrade trong khi đang có PENDING_PAYMENT — phải resolve trước).
@@ -4834,7 +4820,7 @@ Role:              PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_AD
 | Booking | Seat release khi VNPay timeout · schedule-change auto-accept · PENDING_SEAT_ASSIGNMENT escalation (interval 15 phút) |
 | Trip-Route-Vehicle | Auto-BOARDING 30 phút trước departure · COMPLETED fallback +30 phút sau ETA · Generate Trip từ DriverSchedule (CN 23:00) |
 | Parcel | Undo-reject 15 phút · auto-reject EXTRA_LARGE 24h · auto-reject PENDING 30 phút khi IN_PROGRESS · auto-reject PENDING_ADDITIONAL_PAYMENT khi quá `additionalPaymentDeadline` (interval 5 phút) · PENDING_TRANSFER_CONFIRM escalation 30 phút · PENDING_OPERATOR_ACTION re-alert 2h |
-| Payment | PENDING_REDIRECT expired 15 phút · TopUpRequest expired 15 phút · **Trip settlement eligibility flag (daily 02:00)** — set `OperatorTripSettlement.status=ELIGIBLE` khi `eligibleAt <= now` · **Trip settlement weekly auto-settle (Monday 09:00 weekly)** — debit PlatformWallet + credit OperatorWallet cho mọi settlement ELIGIBLE · Subscription trial expire check (daily 00:30) · Trial expiring T-3 days warn (daily 09:00) · Subscription PENDING_PAYMENT 24h warn (hourly) + 7d auto-revert (daily 02:00) · Subscription paid invoice generation post-payment-success (event-driven, không phải scheduled — nhưng retry via Hangfire nếu PDF gen fail) |
+| Payment | PENDING_REDIRECT expired 15 phút · TopUpRequest expired 15 phút · **Trip settlement eligibility flag (daily 02:00)** — set `OperatorTripSettlement.status=ELIGIBLE` khi `eligibleAt <= now` · **Trip settlement weekly auto-settle (Monday 09:00 weekly)** — debit PlatformWallet + credit OperatorWallet cho mọi settlement ELIGIBLE · Subscription trial expire check (daily 00:30) · Trial expiring T-3 days warn (daily 09:00) · Subscription upgrade attempt hết hạn sau 15 phút và reconciliation chạy mỗi phút · Subscription paid invoice generation post-payment-success (event-driven, không phải scheduled — nhưng retry via Hangfire nếu PDF gen fail) |
 | Identity | OTP expired cleanup (optional) · FCM token stale cleanup (weekly) |
 
 **Redis namespace conventions (canonical — tránh conflict cross-service):**
@@ -4977,7 +4963,7 @@ Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → 
   - **`parcelNoShowPolicy` JSONB** — `{ noShowFeePercent, additionalPaymentTimeoutMinutes }`, default `{ 0, 30 }`.
   - **`luggagePolicy` JSONB** — `{ defaultLuggageKgPerSeat }`, default `{ 10 }`.
 - **`SubscriptionPlan`** — Gói SaaS với resource limits + module flags (xem 4.5).
-- **`OperatorSubscription`** — 1-1 với Operator. Track plan hiện tại, status (PENDING_APPROVAL | ACTIVE | EXPIRED | CANCELLED | PENDING_PAYMENT), usage counters, billing period, `previousActivePlanId` cho revert flow.
+- **`OperatorSubscription`** — 1-1 với Operator. `activePlanId` luôn là plan đang cấp entitlement; target plan và payment session nằm trong `SubscriptionUpgradeAttempt`.
 - **`ActivityLog`** — Audit log user action (xem 4.4).
 - **`UserDevice`** — FCM token per device (xem FCM Token Lifecycle bên dưới).
 

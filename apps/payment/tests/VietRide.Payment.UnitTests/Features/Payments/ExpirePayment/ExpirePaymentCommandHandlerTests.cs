@@ -30,7 +30,7 @@ public sealed class ExpirePaymentCommandHandlerTests
         result.ExpiredCount.Should().Be(1);
         stalePayment.Status.Should().Be(PaymentStatus.EXPIRED);
         stalePayment.ExpiredAt.Should().Be(Now);
-        repository.LastExpiresBefore.Should().Be(Now.AddMinutes(-10));
+        repository.LastExpiresBefore.Should().Be(Now.AddMinutes(-15));
         outbox.Events.Should().ContainSingle(evt => evt.EventType == "payment.payment.expired");
         using var payload = JsonDocument.Parse(outbox.Events.Single().PayloadJson);
         payload.RootElement.GetProperty("paymentId").GetGuid().Should().Be(stalePayment.Id);
@@ -41,7 +41,7 @@ public sealed class ExpirePaymentCommandHandlerTests
     [Fact]
     public async Task Handle_WhenPaymentIsExactly15MinutesOld_LeavesItPendingAndDoesNotEnqueue()
     {
-        var payment = CreatePendingVnPayBookingPayment(Guid.NewGuid(), Now.AddMinutes(-10));
+        var payment = CreatePendingVnPayBookingPayment(Guid.NewGuid(), Now.AddMinutes(-15));
         var repository = new FakePaymentRepository(payment);
         var outbox = new FakeIntegrationEventOutbox();
         var handler = CreateHandler(repository, outbox);

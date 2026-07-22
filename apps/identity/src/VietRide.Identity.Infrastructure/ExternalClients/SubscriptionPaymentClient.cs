@@ -32,6 +32,7 @@ public sealed class SubscriptionPaymentClient : ISubscriptionPaymentClient
                 request.BillingPeriod,
                 request.PaymentMethod,
                 request.Amount,
+                request.DueAt,
                 Context = request.Snapshot,
             }, options: JsonOptions),
         };
@@ -112,5 +113,24 @@ public sealed class SubscriptionPaymentClient : ISubscriptionPaymentClient
         using var response = await _httpClient.SendAsync(message, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
             throw new HttpRequestException($"Payment subscription expiry failed with status {(int)response.StatusCode}.");
+    }
+
+    public async Task<IReadOnlyList<SubscriptionPaymentStatusResult>> GetStatusesAsync(
+        IReadOnlyCollection<Guid> upgradeAttemptIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (upgradeAttemptIds.Count == 0)
+            return Array.Empty<SubscriptionPaymentStatusResult>();
+        var query = string.Join("&", upgradeAttemptIds.Select(id => $"upgradeAttemptId={id:D}"));
+        using var response = await _httpClient.GetAsync(
+            $"/internal/v1/payments/subscription-status?{query}",
+            cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        var envelope = await response.Content.ReadFromJsonAsync<ApiResponse<IReadOnlyList<SubscriptionPaymentStatusResult>>>(
+            JsonOptions,
+            cancellationToken).ConfigureAwait(false);
+        if (envelope is null || !envelope.Success || envelope.Data is null)
+            throw new SubscriptionPaymentClientException(502, "PAYMENT_SERVICE_INVALID_RESPONSE", "Payment status response is invalid.");
+        return envelope.Data;
     }
 }

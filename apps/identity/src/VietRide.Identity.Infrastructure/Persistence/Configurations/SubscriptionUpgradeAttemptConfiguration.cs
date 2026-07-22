@@ -19,16 +19,18 @@ internal sealed class SubscriptionUpgradeAttemptConfiguration : IEntityTypeConfi
         builder.Property(attempt => attempt.BillingPeriod).HasColumnName("billing_period").HasColumnType("subscription_billing_period").IsRequired();
         builder.Property(attempt => attempt.Amount).HasColumnName("amount").HasColumnType("bigint").HasConversion(money => money.Amount, amount => Money.FromRaw(amount)).IsRequired();
         builder.Property(attempt => attempt.Status).HasColumnName("status").HasColumnType("subscription_upgrade_attempt_status").IsRequired();
-        builder.Property(attempt => attempt.PaymentId).HasColumnName("payment_id").HasColumnType("uuid");
+        builder.Property(attempt => attempt.PaymentId).HasColumnName("latest_payment_id").HasColumnType("uuid");
+        builder.Property(attempt => attempt.LatestPaymentStatus).HasColumnName("latest_payment_status").HasConversion<string>().HasMaxLength(16).IsRequired();
+        builder.Property(attempt => attempt.PaymentSessionVersion).HasColumnName("payment_session_version").HasDefaultValue(0).IsRequired();
+        builder.Property(attempt => attempt.FallbackPolicy).HasColumnName("fallback_policy").HasConversion<string>().HasMaxLength(24).IsRequired();
         builder.Property(attempt => attempt.IdempotencyKey).HasColumnName("idempotency_key").HasMaxLength(100).IsRequired();
         builder.Property(attempt => attempt.DueAt).HasColumnName("due_at").IsRequired();
-        builder.Property(attempt => attempt.WarnSentAt).HasColumnName("warn_sent_at");
         builder.Property(attempt => attempt.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()").IsRequired();
         builder.Property(attempt => attempt.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("now()").IsRequired();
         builder.Ignore(attempt => attempt.RowVersion);
         builder.HasIndex(attempt => attempt.IdempotencyKey).HasDatabaseName("uq_subscription_upgrade_attempts_idempotency_key").IsUnique();
         builder.HasIndex(attempt => new { attempt.Status, attempt.DueAt }).HasDatabaseName("idx_subscription_upgrade_attempts_status_due_at");
-        builder.HasIndex(attempt => attempt.PaymentId).HasDatabaseName("uq_subscription_upgrade_attempts_payment_id").IsUnique().HasFilter("payment_id IS NOT NULL");
+        builder.HasIndex(attempt => attempt.PaymentId).HasDatabaseName("idx_subscription_upgrade_attempts_latest_payment_id").HasFilter("latest_payment_id IS NOT NULL");
         builder.HasIndex(attempt => attempt.SubscriptionId)
             .HasDatabaseName("uq_subscription_upgrade_attempts_active_subscription")
             .IsUnique()

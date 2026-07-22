@@ -13,9 +13,11 @@ public sealed class SubscriptionUpgradeAttempt : BaseEntity<Guid>
     public Money Amount { get; private set; } = Money.Zero;
     public SubscriptionUpgradeAttemptStatus Status { get; private set; }
     public Guid? PaymentId { get; private set; }
+    public SubscriptionPaymentSessionStatus LatestPaymentStatus { get; private set; }
+    public int PaymentSessionVersion { get; private set; }
+    public SubscriptionFallbackPolicy FallbackPolicy { get; private set; }
     public string IdempotencyKey { get; private set; } = string.Empty;
     public DateTimeOffset DueAt { get; private set; }
-    public DateTimeOffset? WarnSentAt { get; private set; }
 
     private SubscriptionUpgradeAttempt() { }
 
@@ -26,6 +28,7 @@ public sealed class SubscriptionUpgradeAttempt : BaseEntity<Guid>
         SubscriptionBillingPeriod billingPeriod,
         Money amount,
         string idempotencyKey,
+        SubscriptionFallbackPolicy fallbackPolicy,
         DateTimeOffset createdAt,
         DateTimeOffset dueAt)
     {
@@ -42,21 +45,58 @@ public sealed class SubscriptionUpgradeAttempt : BaseEntity<Guid>
             BillingPeriod = billingPeriod,
             Amount = amount,
             Status = SubscriptionUpgradeAttemptStatus.INITIATED,
+            LatestPaymentStatus = SubscriptionPaymentSessionStatus.NONE,
+            FallbackPolicy = fallbackPolicy,
             IdempotencyKey = idempotencyKey.Trim(),
             DueAt = dueAt,
         };
     }
 
+    public static SubscriptionUpgradeAttempt Create(
+        Guid subscriptionId,
+        Guid operatorId,
+        Guid targetPlanId,
+        SubscriptionBillingPeriod billingPeriod,
+        Money amount,
+        string idempotencyKey,
+        DateTimeOffset createdAt,
+        DateTimeOffset dueAt)
+        => Create(
+            subscriptionId,
+            operatorId,
+            targetPlanId,
+            billingPeriod,
+            amount,
+            idempotencyKey,
+            SubscriptionFallbackPolicy.RESTORE_CURRENT,
+            createdAt,
+            dueAt);
+
     public void BindPendingPayment(Guid paymentId)
     {
         if (Status is not (SubscriptionUpgradeAttemptStatus.INITIATED or SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING))
-            throw new InvalidOperationException("Only an initiated upgrade attempt can bind a pending payment.");
+            throw new InvalidOperationException("Only an active upgrade attempt can bind a pending payment.");
 
-        if (PaymentId.HasValue && PaymentId != paymentId)
-            throw new InvalidOperationException("A different payment is already bound to this upgrade attempt.");
+        if (LatestPaymentStatus == SubscriptionPaymentSessionStatus.PENDING && PaymentId != paymentId)
+            throw new InvalidOperationException("A payment session is already pending for this upgrade attempt.");
 
+        if (PaymentId != paymentId)
+            PaymentSessionVersion++;
         PaymentId = paymentId;
+        LatestPaymentStatus = SubscriptionPaymentSessionStatus.PENDING;
         Status = SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING;
+    }
+
+    public void MarkPaymentFailed(Guid paymentId)
+    {
+        EnsureLatestPayment(paymentId);
+        LatestPaymentStatus = SubscriptionPaymentSessionStatus.FAILED;
+    }
+
+    public void MarkPaymentExpired(Guid paymentId)
+    {
+        EnsureLatestPayment(paymentId);
+        LatestPaymentStatus = SubscriptionPaymentSessionStatus.EXPIRED;
     }
 
     public void MarkSucceeded(Guid paymentId)
@@ -67,6 +107,7 @@ public sealed class SubscriptionUpgradeAttempt : BaseEntity<Guid>
             throw new InvalidOperationException("Only the pending bound payment can complete an upgrade attempt.");
 
         Status = SubscriptionUpgradeAttemptStatus.SUCCEEDED;
+        LatestPaymentStatus = SubscriptionPaymentSessionStatus.SUCCEEDED;
     }
 
     public void MarkExpired(Guid paymentId)
@@ -77,6 +118,19 @@ public sealed class SubscriptionUpgradeAttempt : BaseEntity<Guid>
             throw new InvalidOperationException("Only the pending bound payment can expire an upgrade attempt.");
 
         Status = SubscriptionUpgradeAttemptStatus.EXPIRED;
+        LatestPaymentStatus = SubscriptionPaymentSessionStatus.EXPIRED;
+    }
+
+    public void MarkExpired()
+    {
+        if (Status == SubscriptionUpgradeAttemptStatus.EXPIRED)
+            return;
+        if (Status is not (SubscriptionUpgradeAttemptStatus.INITIATED or SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING))
+            throw new InvalidOperationException("Only an active upgrade attempt can expire.");
+
+        Status = SubscriptionUpgradeAttemptStatus.EXPIRED;
+        if (LatestPaymentStatus == SubscriptionPaymentSessionStatus.PENDING)
+            LatestPaymentStatus = SubscriptionPaymentSessionStatus.EXPIRED;
     }
 
     public void MarkFailed()
@@ -87,13 +141,12 @@ public sealed class SubscriptionUpgradeAttempt : BaseEntity<Guid>
             throw new InvalidOperationException("Only an active upgrade attempt can fail.");
 
         Status = SubscriptionUpgradeAttemptStatus.FAILED;
+        LatestPaymentStatus = SubscriptionPaymentSessionStatus.FAILED;
     }
 
-    public void MarkWarningSent(DateTimeOffset sentAt)
+    private void EnsureLatestPayment(Guid paymentId)
     {
-        if (WarnSentAt.HasValue)
-            return;
-
-        WarnSentAt = sentAt;
+        if (Status != SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING || PaymentId != paymentId)
+            throw new InvalidOperationException("Only the latest payment session can change this upgrade attempt.");
     }
 }

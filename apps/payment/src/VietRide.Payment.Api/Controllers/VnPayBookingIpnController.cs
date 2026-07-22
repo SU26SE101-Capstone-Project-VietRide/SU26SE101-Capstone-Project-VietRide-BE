@@ -1,7 +1,7 @@
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using VietRide.Payment.Application.Features.Payments.ConfirmBookingPayment;
+using VietRide.Payment.Application.Features.Payments.DispatchVnPayIpn;
 using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Payment.Api.Controllers;
@@ -24,12 +24,11 @@ public sealed class VnPayBookingIpnController : ControllerBase
     [HttpGet("vnpay-ipn")]
     [HttpPost("vnpay-ipn")]
     [SkipIdempotency("VNPay IPN is authenticated and deduplicated by the provider transaction reference.")]
-    [ProducesResponseType(typeof(ConfirmBookingPaymentResult), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ConfirmBookingPaymentResult), StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> ConfirmBookingPayment(CancellationToken ct)
+    [ProducesResponseType(typeof(DispatchVnPayIpnResult), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ConfirmPayment(CancellationToken ct)
     {
         var parameters = await ReadVnPayParametersAsync(ct);
-        var result = await _sender.Send(new ConfirmBookingPaymentCommand(parameters), ct);
+        var result = await _sender.Send(new DispatchVnPayIpnCommand(parameters), ct);
 
         return new JsonResult(result) { StatusCode = StatusCodes.Status200OK };
     }

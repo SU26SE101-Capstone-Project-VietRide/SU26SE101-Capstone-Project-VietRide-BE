@@ -18,6 +18,34 @@ public sealed class UpgradeSubscriptionCommandHandlerTests
     private static readonly DateTimeOffset Now = new(2026, 7, 15, 10, 0, 0, TimeSpan.Zero);
 
     [Fact]
+    public void PendingPayment_KeepsActiveEntitlementPlanAndUsesFifteenMinuteAttemptDeadline()
+    {
+        var activePlanId = Guid.NewGuid();
+        var subscription = OperatorSubscription.CreateActiveTrial(
+            Guid.NewGuid(),
+            activePlanId,
+            Now.AddDays(-1),
+            Now.AddDays(29));
+        var attempt = SubscriptionUpgradeAttempt.Create(
+            subscription.Id,
+            subscription.OperatorId,
+            Guid.NewGuid(),
+            SubscriptionBillingPeriod.MONTHLY,
+            Money.FromRaw(500_000),
+            "idem-vnpay",
+            SubscriptionFallbackPolicy.RESTORE_CURRENT,
+            Now,
+            Now.AddMinutes(15));
+
+        subscription.MoveToPendingPayment(SubscriptionPaymentMethod.VNPAY);
+
+        subscription.PlanId.Should().Be(activePlanId);
+        subscription.Status.Should().Be(SubscriptionStatus.PENDING_PAYMENT);
+        attempt.DueAt.Should().Be(Now.AddMinutes(15));
+        attempt.LatestPaymentStatus.Should().Be(SubscriptionPaymentSessionStatus.NONE);
+    }
+
+    [Fact]
     public async Task Handle_WalletUpgrade_BuildsTrustedSnapshotAndReturnsActiveContract()
     {
         var operatorId = Guid.NewGuid();
@@ -145,17 +173,18 @@ public sealed class UpgradeSubscriptionCommandHandlerTests
             Money.FromRaw(500_000),
             "idem-wallet",
             Now,
-            Now.AddDays(7));
+            Now.AddMinutes(15));
         var attempts = Substitute.For<ISubscriptionUpgradeAttemptRepository>();
         var subscriptions = Substitute.For<IOperatorSubscriptionRepository>();
         var unitOfWork = Substitute.For<IUnitOfWork>();
         attempts.GetByIdForUpdateAsync(attempt.Id, Arg.Any<CancellationToken>()).Returns(attempt);
         subscriptions.GetByIdForUpdateAsync(subscription.Id, Arg.Any<CancellationToken>()).Returns(subscription);
-        var handler = new SubscriptionPaymentSucceededIntegrationEventHandler(
+        var activation = new SubscriptionPaymentActivationService(
             attempts,
             subscriptions,
             unitOfWork,
-            NullLogger<SubscriptionPaymentSucceededIntegrationEventHandler>.Instance);
+            NullLogger<SubscriptionPaymentActivationService>.Instance);
+        var handler = new SubscriptionPaymentSucceededIntegrationEventHandler(activation);
 
         await handler.HandleAsync(
             new SubscriptionPaymentSucceededIntegrationEvent
@@ -164,10 +193,12 @@ public sealed class UpgradeSubscriptionCommandHandlerTests
                 UpgradeAttemptId = attempt.Id,
                 OperatorId = operatorId,
                 OperatorSubscriptionId = subscription.Id,
+                PlanId = planId,
                 Amount = 500_000,
                 Method = "WALLET",
                 PlanName = "Pro",
                 BillingPeriod = "MONTHLY",
+                SucceededAt = Now,
                 PeriodFrom = Now,
                 PeriodTo = Now.AddMonths(1),
                 BuyerSnapshot = new VietRide.Identity.Infrastructure.Messaging.SubscriptionBuyerSnapshot

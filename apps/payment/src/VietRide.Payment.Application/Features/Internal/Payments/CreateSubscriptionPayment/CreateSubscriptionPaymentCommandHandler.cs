@@ -63,7 +63,7 @@ public sealed class CreateSubscriptionPaymentCommandHandler
                 cancellationToken)
             .ConfigureAwait(false);
 
-        var existing = await _payments.FindByReferenceAsync(
+        var existing = await _payments.FindLatestByReferenceAsync(
                 PaymentReferenceType.SUBSCRIPTION,
                 request.UpgradeAttemptId,
                 cancellationToken)
@@ -71,7 +71,8 @@ public sealed class CreateSubscriptionPaymentCommandHandler
         if (existing is not null)
         {
             EnsureReplayMatches(existing, request);
-            return ToResult(existing);
+            if (existing.Status is PaymentStatus.PENDING_REDIRECT or PaymentStatus.SUCCEEDED)
+                return ToResult(existing);
         }
 
         var contextJson = SubscriptionPaymentContextCodec.ValidateAndSerialize(request.Context, request.SubscriptionId);
@@ -86,6 +87,9 @@ public sealed class CreateSubscriptionPaymentCommandHandler
         var method = Enum.Parse<PaymentMethod>(request.PaymentMethod, ignoreCase: false);
         var amount = Money.FromRaw(request.Amount);
         var now = _clock.UtcNow;
+        var dueAt = request.DueAt ?? now.AddMinutes(15);
+        if (dueAt <= now)
+            throw new CodedConflictException("SUBSCRIPTION_UPGRADE_EXPIRED", "Subscription upgrade attempt has expired.");
         if (method == PaymentMethod.WALLET)
         {
             var wallet = await _operatorWallets.FindByOperatorIdAsync(request.OperatorId, cancellationToken)
@@ -134,14 +138,16 @@ public sealed class CreateSubscriptionPaymentCommandHandler
             amount,
             txnRef,
             request.ClientIpAddress,
-            now);
+            now,
+            dueAt);
         var payment = PaymentEntity.CreatePendingRedirectVnPaySubscription(
             request.UpgradeAttemptId,
             request.OperatorId,
             amount,
             txnRef,
             request.IdempotencyKey,
-            redirectUrl);
+            redirectUrl,
+            dueAt);
         payment.AttachContext(contextJson);
 
         await _payments.AddAsync(payment, cancellationToken).ConfigureAwait(false);
@@ -196,6 +202,7 @@ public sealed class CreateSubscriptionPaymentCommandHandler
             context.OperatorSubscriptionId,
             payment.Amount.Amount,
             payment.Method.ToString(),
+            payment.SucceededAt ?? _clock.UtcNow,
             context);
         return _outbox.EnqueueAsync(
             evt.EventType,

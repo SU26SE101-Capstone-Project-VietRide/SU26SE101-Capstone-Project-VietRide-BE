@@ -24,15 +24,9 @@ internal sealed class OperatorSubscriptionConfiguration : IEntityTypeConfigurati
             .IsRequired();
 
         builder.Property(s => s.PlanId)
-            .HasColumnName("plan_id")
+            .HasColumnName("active_plan_id")
             .HasColumnType("uuid")
             .IsRequired();
-
-        builder.Property(s => s.PreviousActivePlanId)
-            .HasColumnName("previous_active_plan_id")
-            .HasColumnType("uuid")
-            .IsRequired(false)
-            .HasComment("Plan ACTIVE before PENDING_PAYMENT; used by revert flow if payment times out after 7 days.");
 
         builder.Property(s => s.Status)
             .HasColumnName("status")
@@ -94,10 +88,6 @@ internal sealed class OperatorSubscriptionConfiguration : IEntityTypeConfigurati
             .HasDefaultValueSql("now()")
             .IsRequired();
 
-        builder.Property(s => s.WarnSentAt)
-            .HasColumnName("warn_sent_at")
-            .IsRequired(false);
-
         builder.Property(s => s.TrialExpiringWarnSentAt)
             .HasColumnName("trial_expiring_warn_sent_at")
             .IsRequired(false);
@@ -127,12 +117,6 @@ internal sealed class OperatorSubscriptionConfiguration : IEntityTypeConfigurati
             .OnDelete(DeleteBehavior.Restrict)
             .HasConstraintName("fk_operator_subscriptions_plan_id");
 
-        builder.HasOne<SubscriptionPlan>()
-            .WithMany()
-            .HasForeignKey(s => s.PreviousActivePlanId)
-            .OnDelete(DeleteBehavior.SetNull)
-            .HasConstraintName("fk_operator_subscriptions_previous_active_plan_id");
-
         builder.HasIndex(s => s.OperatorId)
             .HasDatabaseName("uq_operator_subscriptions_operator_id")
             .IsUnique();
@@ -145,10 +129,6 @@ internal sealed class OperatorSubscriptionConfiguration : IEntityTypeConfigurati
             .HasFilter("status = 'ACTIVE'");
 
         builder.HasIndex(s => s.PlanId)
-            .HasDatabaseName("idx_operator_subscriptions_plan_id");
-
-        builder.HasIndex(s => s.PreviousActivePlanId)
-            .HasDatabaseName("idx_operator_subscriptions_previous_active_plan_id")
-            .HasFilter("previous_active_plan_id IS NOT NULL");
+            .HasDatabaseName("idx_operator_subscriptions_active_plan_id");
     }
 }

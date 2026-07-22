@@ -33,7 +33,7 @@ public sealed class VnPayClientTests
         url.Should().Contain(vnPayTxnRef);
         url.Should().Contain("vnp_Amount=10000000");
         url.Should().Contain("vnp_CreateDate=20260612170000");
-        url.Should().Contain("vnp_ExpireDate=20260612171000");
+        url.Should().Contain("vnp_ExpireDate=20260612171500");
         url.Should().Contain("vnp_SecureHash=");
         var secureHash = ExtractQueryValue(url, "vnp_SecureHash");
         secureHash.Should().HaveLength(128);

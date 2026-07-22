@@ -84,12 +84,6 @@ public sealed class IdentityInternalClient : IIdentityInternalClient, ISubscript
                     false, 402, "SUBSCRIPTION_EXPIRED", "Operator subscription has expired.");
             }
 
-            if (string.Equals(status, "PENDING_PAYMENT", StringComparison.Ordinal))
-            {
-                return new OperatorWriteEligibilityValidation(
-                    false, 409, "SUBSCRIPTION_PAYMENT_PENDING", "Operator subscription payment is pending.");
-            }
-
             var enableShuttle = payload.TryGetProperty("plan", out var plan)
                 && plan.TryGetProperty("modules", out var modules)
                 && modules.TryGetProperty("enableShuttle", out var value)

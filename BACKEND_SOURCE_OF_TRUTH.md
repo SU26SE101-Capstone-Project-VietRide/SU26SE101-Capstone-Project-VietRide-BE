@@ -1271,6 +1271,7 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | 9 | `POST /v1/wallet/top-up/init` | Payment |
 | 10 | `POST /v1/admin/trip-settlements/{id}/settle` | Payment |
 | 11 | `POST /v1/operator/subscription/upgrade` | Identity (+Payment) |
+| 11b | `POST /v1/operator/subscription/upgrade/{upgradeAttemptId}/retry-payment` | Identity (+Payment) |
 | 12 | `POST /v1/operator/voucher-consents/{id}/accept` | Booking |
 | 13 | `POST /v1/operator/voucher-consents/{id}/reject` | Booking |
 | 14 | `POST /v1/admin/vouchers` | Booking |
@@ -1566,7 +1567,9 @@ updates the column.
 | **Subscription** | `SUBSCRIPTION_LIMIT_EXCEEDED` | 422 | Vượt maxVehicles/maxRoutes/etc. |
 | | `SUBSCRIPTION_MODULE_DISABLED` | 403 | Module flag = false (e.g. enableParcel) |
 | | `SUBSCRIPTION_EXPIRED` | 402 | OperatorSubscription expired |
-| | `SUBSCRIPTION_PAYMENT_PENDING` | 409 | Có PENDING_PAYMENT, phải resolve trước |
+| | `SUBSCRIPTION_PAYMENT_PENDING` | 409 | Có upgrade attempt active; dùng GET subscription và retry session nếu được phép |
+| | `SUBSCRIPTION_UPGRADE_EXPIRED` | 409 | Upgrade attempt đã quá hạn 15 phút |
+| | `SUBSCRIPTION_PAYMENT_NOT_RETRYABLE` | 409 | Latest payment chưa FAILED/EXPIRED hoặc session khác còn pending |
 | **Settlement** | `TRIP_SETTLEMENT_NOT_FOUND` | 404 | |
 | | `TRIP_SETTLEMENT_ALREADY_SETTLED` | 409 | Status = SETTLED/CANCELLED |
 | | `PLATFORM_WALLET_INSUFFICIENT_BALANCE` | 500 | Refund/settle thất bại, alert Admin |
@@ -2073,11 +2076,12 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `payment.payment.expired` | Payment | Booking, Parcel | `{ paymentId, referenceType, referenceId }` |
 | `payment.wallet.credited` | Payment | Booking (mark REFUNDED), Parcel (mark REFUNDED), Notification | `{ userId, amount, referenceType, referenceId }` |
 | `payment.wallet.debited` | Payment | Notification | `{ userId, amount, referenceType, referenceId }` |
-| `payment.subscription.payment_succeeded` | Payment | Identity, Payment Invoice pipeline | `{ eventId, occurredAt, paymentId, upgradeAttemptId, operatorId, operatorSubscriptionId, amount, method, planName, billingPeriod, periodFrom, periodTo, buyerSnapshot }`; WALLET and VNPay use one schema |
+| `payment.subscription.payment_succeeded` | Payment | Identity, Payment Invoice pipeline | `{ eventId, occurredAt, paymentId, upgradeAttemptId, operatorId, operatorSubscriptionId, planId, amount, method, planName, billingPeriod, periodFrom, periodTo, succeededAt, buyerSnapshot }`; WALLET and VNPay use one schema |
+| `payment.subscription.payment_failed` | Payment | Identity | `{ eventId, occurredAt, paymentId, upgradeAttemptId, operatorId, operatorSubscriptionId, responseCode }`; đóng session, attempt còn retry được trước dueAt |
+| `payment.subscription.payment_expired` | Payment | Identity | `{ eventId, occurredAt, paymentId, upgradeAttemptId, operatorId, operatorSubscriptionId }`; đóng session, không kéo dài attempt dueAt |
 | `identity.subscription.usage_warning` | Identity | Notification | `{ subscriptionId, operatorId, resource, usage, limit, periodKey, occurredAt }` |
 | `identity.subscription.trial_expiring` | Identity | Notification | `{ subscriptionId, operatorId, expiresAt, daysRemaining, occurredAt }` |
 | `identity.subscription.expired` | Identity | Notification | `{ subscriptionId, operatorId, expiredAt, occurredAt }` |
-| `identity.subscription.payment_pending_warn` | Identity | Notification | `{ subscriptionId, operatorId, paymentId, dueAt, occurredAt }` |
 | `identity.subscription.payment_auto_reverted` | Identity | Notification | `{ subscriptionId, operatorId, previousPlanId, restoredPlanId, occurredAt }` |
 | `subscription.limit.trip_skipped` | Trip | Notification | `{ operatorId, driverScheduleId, skippedDate, periodKey, occurredAt }` |
 | `payment.invoice.issued` | Payment | Notification | `{ eventId, occurredAt, invoiceId, invoiceNumber, operatorId, amount, invoiceWebUrl, downloadApiUrl }`; neither URL is a Firebase signed URL |

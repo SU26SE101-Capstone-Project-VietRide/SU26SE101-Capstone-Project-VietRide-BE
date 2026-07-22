@@ -15,6 +15,27 @@ public interface IPaymentRepository : IRepository<PaymentEntity, Guid>
         Guid referenceId,
         CancellationToken cancellationToken);
 
+    Task<PaymentEntity?> FindLatestByReferenceAsync(
+        PaymentReferenceType referenceType,
+        Guid referenceId,
+        CancellationToken cancellationToken)
+        => FindByReferenceAsync(referenceType, referenceId, cancellationToken);
+
+    Task<IReadOnlyList<PaymentEntity>> ListLatestSubscriptionPaymentsAsync(
+        IReadOnlyCollection<Guid> upgradeAttemptIds,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        IReadOnlyList<PaymentEntity> result = QueryNoTracking()
+            .Where(payment => payment.ReferenceType == PaymentReferenceType.SUBSCRIPTION
+                && upgradeAttemptIds.Contains(payment.ReferenceId))
+            .AsEnumerable()
+            .GroupBy(payment => payment.ReferenceId)
+            .Select(group => group.OrderByDescending(payment => payment.CreatedAt).First())
+            .ToArray();
+        return Task.FromResult(result);
+    }
+
     Task AcquirePaymentReferenceLockAsync(
         PaymentReferenceType referenceType,
         Guid referenceId,

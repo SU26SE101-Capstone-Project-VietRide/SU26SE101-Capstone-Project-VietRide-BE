@@ -110,6 +110,7 @@ CREATE TABLE payments (
     vnpay_response_code VARCHAR(10) NULL,
     idempotency_key VARCHAR(100) NULL,
     payment_redirect_url TEXT NULL,
+    due_at TIMESTAMPTZ NULL,       -- hard deadline for subscription payment sessions
     succeeded_at TIMESTAMPTZ NULL,
     failed_at TIMESTAMPTZ NULL,
     expired_at TIMESTAMPTZ NULL,
@@ -134,6 +135,8 @@ CREATE INDEX idx_payments_status_created_at ON payments (status, created_at)
     WHERE status IN ('PENDING_REDIRECT');
 CREATE INDEX idx_payments_context_reconciliation ON payments (context_reconciliation_required, status)
     WHERE context_reconciliation_required = TRUE;
+CREATE INDEX idx_payments_subscription_due_at ON payments (due_at)
+    WHERE reference_type = 'SUBSCRIPTION' AND due_at IS NOT NULL;
 
 COMMENT ON COLUMN payments.vnpay_txn_ref IS
     'VNPay vnp_TxnRef — unique per VNPay transaction. NULL for WALLET method.';

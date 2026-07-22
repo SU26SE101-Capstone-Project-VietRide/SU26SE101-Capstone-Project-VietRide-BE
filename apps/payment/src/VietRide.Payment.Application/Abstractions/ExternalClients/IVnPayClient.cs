@@ -29,14 +29,30 @@ public interface IVnPayClient
         DateTimeOffset createdAt)
         => throw new NotSupportedException("This VNPay client does not support subscription-payment redirect URLs.");
 
+    string CreateSubscriptionPaymentRedirectUrl(
+        Guid upgradeAttemptId,
+        Guid operatorId,
+        Money amount,
+        string vnPayTxnRef,
+        string clientIpAddress,
+        DateTimeOffset createdAt,
+        DateTimeOffset? expiresAt)
+        => CreateSubscriptionPaymentRedirectUrl(
+            upgradeAttemptId,
+            operatorId,
+            amount,
+            vnPayTxnRef,
+            clientIpAddress,
+            createdAt);
+
     bool VerifySignature(IReadOnlyDictionary<string, string> parameters)
         => throw new NotSupportedException("This VNPay client does not support signature verification.");
 
     bool IsExpectedMerchant(IReadOnlyDictionary<string, string> parameters) => true;
 
     Task<bool> TryReserveIpnAsync(string vnPayTxnRef, CancellationToken cancellationToken)
-        => throw new NotSupportedException("This VNPay client does not support IPN dedupe reservation.");
+        => Task.FromResult(true);
 
     Task ReleaseIpnReservationAsync(string vnPayTxnRef, CancellationToken cancellationToken)
-        => throw new NotSupportedException("This VNPay client does not support IPN dedupe reservation release.");
+        => Task.CompletedTask;
 }
