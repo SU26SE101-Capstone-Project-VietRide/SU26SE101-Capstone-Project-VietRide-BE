@@ -283,6 +283,22 @@ For the reviewer-facing Sprint-3 sequence and the VNPay execution boundary, see
 [`docs/handoff/sprint-3-demo-script.md`](../../handoff/sprint-3-demo-script.md). The VNPay coverage
 uses a signed local IPN simulation; it is not a real bank or merchant-sandbox transaction.
 
+## Day 30 - Sprint 4 demo
+
+The cumulative collection folder `Day 30 - Sprint 4 demo` is a manual/importable companion for
+the operator schedule, assigned-crew Trip lifecycle, and Parcel load/unload flow. Populate its
+empty local environment placeholders with runtime JWTs and fixture identifiers before a manual
+run; never commit those values.
+
+The authoritative self-seeding run remains:
+
+```powershell
+npm run e2e:day30
+```
+
+That runner owns fixture creation, runtime credentials, deterministic verification, and cleanup;
+the Postman folder does not replace it.
+
 ## Notes
 
 - Requests hit the **Gateway** (`:3000`) using the real resource-prefixed routes
