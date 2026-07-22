@@ -1,12 +1,14 @@
 using Microsoft.AspNetCore.Mvc.Filters;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Parcel.Api.Filters;
 
 [AttributeUsage(AttributeTargets.Method)]
-public sealed class RequireIdempotencyKeyAttribute : Attribute, IActionFilter
+public sealed class RequireIdempotencyKeyAttribute : Attribute, IActionFilter, IIdempotencyPolicyMetadata
 {
     public const string HeaderName = "Idempotency-Key";
+    public bool IsRequired => true;
 
     public void OnActionExecuting(ActionExecutingContext context)
     {

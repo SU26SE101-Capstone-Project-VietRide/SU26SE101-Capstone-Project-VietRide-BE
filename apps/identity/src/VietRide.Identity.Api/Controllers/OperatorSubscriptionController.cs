@@ -10,6 +10,7 @@ using VietRide.Identity.Application.Features.Subscriptions.UpgradeSubscription;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Identity.Api.Controllers;
 
@@ -41,6 +42,7 @@ public sealed class OperatorSubscriptionController : ControllerBase
         => Ok(await _sender.Send(new ListSubscriptionPlansQuery(false), cancellationToken));
 
     [HttpPost("upgrade")]
+    [IdempotencyOpenApi]
     [ProducesResponseType(typeof(ApiResponse<SubscriptionUpgradeResponseDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<SubscriptionUpgradeResponseDto>), StatusCodes.Status202Accepted)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status402PaymentRequired)]
@@ -73,6 +75,7 @@ public sealed class OperatorSubscriptionController : ControllerBase
     }
 
     [HttpPost("upgrade/{upgradeAttemptId:guid}/retry-payment")]
+    [IdempotencyOpenApi]
     [ProducesResponseType(typeof(ApiResponse<SubscriptionUpgradeResponseDto>), StatusCodes.Status202Accepted)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]

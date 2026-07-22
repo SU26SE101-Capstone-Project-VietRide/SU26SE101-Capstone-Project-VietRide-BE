@@ -23,6 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\..\..\tests\dotnet\IdempotencyOpenApiContractAssertions.cs" Link="Testing\IdempotencyOpenApiContractAssertions.cs" />
     <ProjectReference Include="..\..\src\VietRide.Parcel.Api\VietRide.Parcel.Api.csproj" />
   </ItemGroup>
 

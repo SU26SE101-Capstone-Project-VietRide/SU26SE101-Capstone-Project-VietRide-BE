@@ -29,7 +29,7 @@ namespace VietRide.Identity.Infrastructure.Migrations
             migrationBuilder.Sql("""
                 UPDATE vietride_identity.operator_subscriptions
                 SET plan_id = COALESCE(previous_active_plan_id, '00000000-0000-0000-0000-000000000001'::uuid)
-                WHERE status = 'PENDING_PAYMENT'::vietride_identity.subscription_status;
+                WHERE status = 'PENDING_PAYMENT';
                 """);
 
             migrationBuilder.DropColumn(

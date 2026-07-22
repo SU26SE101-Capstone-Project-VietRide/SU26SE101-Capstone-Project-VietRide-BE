@@ -7,6 +7,10 @@ import { AppModule } from './app/app.module';
 import { InternalJwtSigner } from './auth/internal-jwt.signer';
 import { loadEnv } from './config/env.schema';
 import { createProxyHandler } from './proxy/proxy.middleware';
+import {
+  idempotencyParameterMacro,
+  vietRideIdempotencySwaggerPlugin,
+} from './swagger/idempotency-swagger';
 
 async function bootstrap(): Promise<void> {
   const env = loadEnv();
@@ -28,6 +32,8 @@ async function bootstrap(): Promise<void> {
       // All downstream specs share the UserAccessToken scheme. Keep the entered
       // bearer token while Swagger UI switches between service definitions.
       persistAuthorization: true,
+      parameterMacro: idempotencyParameterMacro,
+      plugins: [vietRideIdempotencySwaggerPlugin],
       urls: [
         { name: 'Identity Service', url: '/api-specs/identity' },
         { name: 'Trip Service', url: '/api-specs/trip' },

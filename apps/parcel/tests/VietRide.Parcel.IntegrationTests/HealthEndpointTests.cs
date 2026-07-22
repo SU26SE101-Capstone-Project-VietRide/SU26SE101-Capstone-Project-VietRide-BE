@@ -9,6 +9,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using StackExchange.Redis;
+using VietRide.Testing;
 
 namespace VietRide.Parcel.IntegrationTests;
 
@@ -52,6 +53,14 @@ public class HealthEndpointTests : IClassFixture<VietRideWebApplicationFactory>
         doc.RootElement.GetProperty("success").GetBoolean().Should().BeTrue();
         doc.RootElement.GetProperty("statusCode").GetInt32().Should().Be((int)HttpStatusCode.OK);
         doc.RootElement.GetProperty("data").GetProperty("service").GetString().Should().Be("Parcel");
+    }
+
+    [Fact]
+    public async Task GetSwagger_IdempotencyContractMatchesRuntimeMetadata()
+    {
+        using var client = _factory.CreateClient();
+
+        await IdempotencyOpenApiContractAssertions.AssertMatchesRuntimeMetadataAsync(client, _factory.Services);
     }
 }
 

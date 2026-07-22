@@ -3,7 +3,8 @@ import path from 'node:path';
 
 const root = process.cwd();
 const inventoryPath = path.join(root, 'tests/dotnet/idempotency-endpoint-inventory.json');
-const mutationAttribute = /\[\s*Http(Post|Patch|Put|Delete)(?:Attribute)?(?:\s*\(\s*"([^"]*)"\s*\))?\s*\]/g;
+const mutationAttribute =
+  /\[\s*Http(Post|Patch|Put|Delete)(?:Attribute)?(?:\s*\(\s*"([^"]*)"\s*\))?\s*\]/g;
 const skipAttribute = /\[\s*SkipIdempotency\(\s*"([^"]+)"\s*\)\s*\]/g;
 const errors = [];
 
@@ -26,7 +27,9 @@ function combineRoute(controllerRoute, actionRoute, controllerName) {
 }
 
 function findControllerRoute(source, classIndex, file) {
-  const routeMatches = [...source.slice(0, classIndex).matchAll(/\[\s*Route\(\s*"([^"]+)"\s*\)\s*\]/g)];
+  const routeMatches = [
+    ...source.slice(0, classIndex).matchAll(/\[\s*Route\(\s*"([^"]+)"\s*\)\s*\]/g),
+  ];
   if (routeMatches.length !== 1) {
     fail(`${file}: expected exactly one controller [Route], found ${routeMatches.length}`);
     return '';
@@ -49,7 +52,35 @@ function findAction(source, attributeEnd, file) {
   };
 }
 
-function scanController(file, serviceName) {
+function findAttributeBlockStart(source, attributeStart) {
+  let blockStart = attributeStart;
+
+  while (blockStart > 0) {
+    let cursor = blockStart;
+    while (cursor > 0 && /\s/.test(source[cursor - 1])) cursor -= 1;
+    if (source[cursor - 1] !== ']') break;
+
+    let depth = 0;
+    let openingBracket = -1;
+    for (let index = cursor - 1; index >= 0; index -= 1) {
+      if (source[index] === ']') depth += 1;
+      if (source[index] === '[') {
+        depth -= 1;
+        if (depth === 0) {
+          openingBracket = index;
+          break;
+        }
+      }
+    }
+
+    if (openingBracket === -1) break;
+    blockStart = openingBracket;
+  }
+
+  return blockStart;
+}
+
+function scanController(file, serviceName, requiredMetadata = []) {
   const source = fs.readFileSync(file, 'utf8');
   const relativeFile = path.relative(root, file).replace(/\\/g, '/');
   const classMatch = /\bclass\s+([A-Za-z_]\w*Controller)\b/.exec(source);
@@ -70,11 +101,15 @@ function scanController(file, serviceName) {
   mutationAttribute.lastIndex = 0;
   let attribute;
   while ((attribute = mutationAttribute.exec(source)) !== null) {
+    const attributeBlockStart = findAttributeBlockStart(source, attribute.index);
     const action = findAction(source, mutationAttribute.lastIndex, relativeFile);
     if (!action) continue;
 
+    const actionAttributes =
+      source.slice(attributeBlockStart, mutationAttribute.lastIndex) + action.attributes;
+
     skipAttribute.lastIndex = 0;
-    const skipMatches = [...action.attributes.matchAll(skipAttribute)];
+    const skipMatches = [...actionAttributes.matchAll(skipAttribute)];
     if (skipMatches.length > 1) {
       fail(`${relativeFile}:${action.name}: multiple [SkipIdempotency] attributes`);
     }
@@ -88,6 +123,12 @@ function scanController(file, serviceName) {
       method,
       path: route,
       exemptionReason: skipMatches[0]?.[1] ?? null,
+      requiredBy: requiredMetadata.filter((attributeName) => {
+        const pattern = new RegExp(
+          `\\[\\s*${attributeName}(?:Attribute)?(?:\\s*\\([^\\]]*\\))?\\s*\\]`,
+        );
+        return pattern.test(actionAttributes);
+      }),
       file: relativeFile,
     });
   }
@@ -121,11 +162,21 @@ function validateProgram(serviceName, service) {
 
   const source = fs.readFileSync(programPath, 'utf8');
   const escapedPrefix = service.servicePrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const registration = new RegExp(
+  const requireAllRegistration = new RegExp(
     `AddVietRideIdempotency\\s*\\(\\s*"${escapedPrefix}"\\s*,\\s*requireAllMutations\\s*:\\s*true\\s*\\)`,
   );
-  if (!service.requireAllMutations || !registration.test(source)) {
-    fail(`${serviceName}: Program.cs must register service prefix "${service.servicePrefix}" with requireAllMutations: true`);
+  const explicitRegistration = new RegExp(
+    `AddVietRideIdempotency\\s*\\(\\s*"${escapedPrefix}"(?:\\s*,\\s*requireAllMutations\\s*:\\s*false)?\\s*\\)`,
+  );
+  if (service.requireAllMutations && !requireAllRegistration.test(source)) {
+    fail(
+      `${serviceName}: Program.cs must register service prefix "${service.servicePrefix}" with requireAllMutations: true`,
+    );
+  }
+  if (!service.requireAllMutations && !explicitRegistration.test(source)) {
+    fail(
+      `${serviceName}: Program.cs must register service prefix "${service.servicePrefix}" without require-all mutations`,
+    );
   }
   if (!/\bUseVietRideIdempotency\s*\(\s*\)/.test(source)) {
     fail(`${serviceName}: Program.cs must call UseVietRideIdempotency()`);
@@ -155,7 +206,9 @@ function validateService(serviceName, service) {
 
   for (const mutation of mutations) {
     if (!mutation.exemptionReason && !approvedControllers.has(mutation.controllerName)) {
-      fail(`${mutation.file}:${mutation.actionName}: ${mutation.method} ${mutation.path} is not covered by the controller inventory or [SkipIdempotency]`);
+      fail(
+        `${mutation.file}:${mutation.actionName}: ${mutation.method} ${mutation.path} is not covered by the controller inventory or [SkipIdempotency]`,
+      );
     }
   }
 
@@ -171,9 +224,14 @@ function validateService(serviceName, service) {
   }
 
   const codeExemptions = mutations.filter((mutation) => mutation.exemptionReason);
-  const discoveredSkipCount = scanned.reduce((total, controller) => total + controller.skipCount, 0);
+  const discoveredSkipCount = scanned.reduce(
+    (total, controller) => total + controller.skipCount,
+    0,
+  );
   if (discoveredSkipCount !== codeExemptions.length) {
-    fail(`${serviceName}: found ${discoveredSkipCount} [SkipIdempotency] attributes but only ${codeExemptions.length} are attached to mutation actions`);
+    fail(
+      `${serviceName}: found ${discoveredSkipCount} [SkipIdempotency] attributes but only ${codeExemptions.length} are attached to mutation actions`,
+    );
   }
 
   const exemptionKey = (entry) => `${entry.method.toUpperCase()} ${normalizeRoute(entry.path)}`;
@@ -195,7 +253,9 @@ function validateService(serviceName, service) {
     codeExemptionKeys.add(key);
     const approvedReason = inventoryExemptions.get(key);
     if (approvedReason === undefined) {
-      fail(`${exemption.file}:${exemption.actionName}: exemption ${key} is missing from the inventory`);
+      fail(
+        `${exemption.file}:${exemption.actionName}: exemption ${key} is missing from the inventory`,
+      );
     } else if (approvedReason !== exemption.exemptionReason) {
       fail(`${exemption.file}:${exemption.actionName}: exemption reason mismatch for ${key}`);
     }
@@ -207,15 +267,188 @@ function validateService(serviceName, service) {
     }
   }
 
-  return { controllers: approvedControllers.size, mutations: mutations.length, exemptions: codeExemptions.length };
+  if (
+    Number.isInteger(service.expectedMutationCount) &&
+    mutations.length !== service.expectedMutationCount
+  ) {
+    fail(
+      `${serviceName}: expected ${service.expectedMutationCount} mutations, found ${mutations.length}; classify the endpoint and update the inventory`,
+    );
+  }
+
+  return {
+    controllers: approvedControllers.size,
+    mutations: mutations.length,
+    exemptions: codeExemptions.length,
+  };
+}
+
+function validateMetadataDeclarations(serviceName, service) {
+  for (const [attributeName, relativeFile] of Object.entries(service.metadataAttributes ?? {})) {
+    const file = path.join(root, relativeFile);
+    if (!fs.existsSync(file)) {
+      fail(`${serviceName}: metadata attribute file not found: ${relativeFile}`);
+      continue;
+    }
+
+    const source = fs.readFileSync(file, 'utf8');
+    const declaration = new RegExp(
+      `class\\s+${attributeName}(?:Attribute)?\\b[^\\r\\n{]*IIdempotencyPolicyMetadata`,
+    );
+    if (!declaration.test(source)) {
+      fail(`${relativeFile}: ${attributeName} must implement IIdempotencyPolicyMetadata`);
+    }
+  }
+}
+
+function validateExplicitDotnetService(serviceName, service) {
+  validateProgram(serviceName, service);
+  validateMetadataDeclarations(serviceName, service);
+
+  const apiName = serviceName[0].toUpperCase() + serviceName.slice(1);
+  const controllerDirectory = path.join(
+    root,
+    'apps',
+    serviceName,
+    'src',
+    `VietRide.${apiName}.Api`,
+    'Controllers',
+  );
+  const metadataNames = Object.keys(service.metadataAttributes ?? {});
+  const files = listControllerFiles(controllerDirectory);
+  const scanned = files.map((file) => scanController(file, serviceName, metadataNames));
+  const mutations = scanned.flatMap((controller) => controller.mutations);
+  const required = mutations.filter((mutation) => mutation.requiredBy.length > 0);
+
+  for (const mutation of mutations) {
+    if (mutation.exemptionReason) {
+      fail(
+        `${mutation.file}:${mutation.actionName}: explicit-policy services must not use [SkipIdempotency] without an inventory exemption model`,
+      );
+    }
+    if (mutation.requiredBy.length > 1) {
+      fail(
+        `${mutation.file}:${mutation.actionName}: multiple idempotency metadata attributes: ${mutation.requiredBy.join(', ')}`,
+      );
+    }
+  }
+
+  if (
+    Number.isInteger(service.expectedMutationCount) &&
+    mutations.length !== service.expectedMutationCount
+  ) {
+    fail(
+      `${serviceName}: expected ${service.expectedMutationCount} mutations, found ${mutations.length}; classify the endpoint and update the inventory`,
+    );
+  }
+  if (
+    Number.isInteger(service.expectedRequiredCount) &&
+    required.length !== service.expectedRequiredCount
+  ) {
+    fail(
+      `${serviceName}: expected ${service.expectedRequiredCount} explicitly required mutations, found ${required.length}`,
+    );
+  }
+
+  return { controllers: files.length, mutations: mutations.length, required: required.length };
+}
+
+function listFiles(directory, predicate) {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const fullPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) return listFiles(fullPath, predicate);
+    return entry.isFile() && predicate(fullPath) ? [fullPath] : [];
+  });
+}
+
+function scanNestController(file, serviceName, decoratorName) {
+  const source = fs.readFileSync(file, 'utf8');
+  const relativeFile = path.relative(root, file).replace(/\\/g, '/');
+  const controller = /@Controller\(\s*(?:(['"])(.*?)\1)?\s*\)/.exec(source);
+  if (!controller) {
+    fail(`${relativeFile}: @Controller route not found`);
+    return [];
+  }
+
+  const mutations = [];
+  const httpDecorator = /@(Post|Patch|Put|Delete)\(\s*(?:(['"])(.*?)\2)?\s*\)/g;
+  let match;
+  while ((match = httpDecorator.exec(source)) !== null) {
+    const remainder = source.slice(httpDecorator.lastIndex);
+    const nextMutation = remainder.search(/@(Post|Patch|Put|Delete)\s*\(/);
+    const method = /(?:^|\r?\n)\s*(?:public\s+)?(?:async\s+)?([A-Za-z_]\w*)\s*\(/m.exec(remainder);
+    if (!method || (nextMutation !== -1 && nextMutation < method.index)) {
+      fail(`${relativeFile}: @${match[1]} is not followed by a controller action`);
+      continue;
+    }
+
+    const attributes = remainder.slice(0, method.index);
+    const decoratorPattern = new RegExp(`@${decoratorName}\\s*\\(\\s*\\)`);
+    mutations.push({
+      serviceName,
+      actionName: method[1],
+      method: match[1].toUpperCase(),
+      path: combineRoute(
+        controller[2] ?? '',
+        match[3] ?? '',
+        path.basename(file, '.controller.ts'),
+      ),
+      requiredBy: decoratorPattern.test(attributes) ? [decoratorName] : [],
+      file: relativeFile,
+    });
+  }
+
+  return mutations;
+}
+
+function validateNestService(serviceName, service) {
+  const sourceDirectory = path.join(root, service.sourceDirectory);
+  const files = listFiles(
+    sourceDirectory,
+    (file) => file.endsWith('.controller.ts') && !file.endsWith('.spec.ts'),
+  );
+  const mutations = files.flatMap((file) =>
+    scanNestController(file, serviceName, service.requiredDecorator),
+  );
+  const required = mutations.filter((mutation) => mutation.requiredBy.length > 0);
+
+  if (
+    Number.isInteger(service.expectedMutationCount) &&
+    mutations.length !== service.expectedMutationCount
+  ) {
+    fail(
+      `${serviceName}: expected ${service.expectedMutationCount} mutations, found ${mutations.length}; classify the endpoint and update the inventory`,
+    );
+  }
+  if (
+    Number.isInteger(service.expectedRequiredCount) &&
+    required.length !== service.expectedRequiredCount
+  ) {
+    fail(
+      `${serviceName}: expected ${service.expectedRequiredCount} decorated mutations, found ${required.length}`,
+    );
+  }
+  if (required.length > 0) {
+    const decoratorFile = path.join(root, service.decoratorFile);
+    const decoratorSource = fs.readFileSync(decoratorFile, 'utf8');
+    for (const requiredToken of ['ApiHeader', 'ApiExtension']) {
+      if (!decoratorSource.includes(requiredToken)) {
+        fail(
+          `${service.decoratorFile}: ${service.requiredDecorator} must compose ${requiredToken}`,
+        );
+      }
+    }
+  }
+
+  return { controllers: files.length, mutations: mutations.length, required: required.length };
 }
 
 const inventory = JSON.parse(fs.readFileSync(inventoryPath, 'utf8'));
-if (inventory.version !== 1 || inventory.policy !== 'all-post-patch-put-delete') {
-  fail('inventory must use version 1 and policy all-post-patch-put-delete');
+if (inventory.version !== 2 || inventory.policy !== 'runtime-metadata-aligned-openapi') {
+  fail('inventory must use version 2 and policy runtime-metadata-aligned-openapi');
 }
 
-const expectedServices = ['booking', 'payment', 'parcel'];
+const expectedServices = ['identity', 'trip', 'booking', 'payment', 'parcel', 'notification'];
 const actualServices = Object.keys(inventory.services ?? {}).sort();
 if (JSON.stringify(actualServices) !== JSON.stringify([...expectedServices].sort())) {
   fail(`inventory services must be exactly: ${expectedServices.join(', ')}`);
@@ -225,7 +458,13 @@ const results = [];
 for (const serviceName of expectedServices) {
   const service = inventory.services?.[serviceName];
   if (!service) continue;
-  results.push([serviceName, validateService(serviceName, service)]);
+  const result =
+    service.stack === 'nestjs'
+      ? validateNestService(serviceName, service)
+      : service.requireAllMutations
+        ? validateService(serviceName, service)
+        : validateExplicitDotnetService(serviceName, service);
+  results.push([serviceName, result]);
 }
 
 if (errors.length > 0) {
@@ -234,7 +473,11 @@ if (errors.length > 0) {
   process.exitCode = 1;
 } else {
   const details = results
-    .map(([name, result]) => `${name}=${result.controllers} controllers/${result.mutations} mutations/${result.exemptions} exemptions`)
+    .map(([name, result]) =>
+      result.exemptions === undefined
+        ? `${name}=${result.controllers} controllers/${result.mutations} mutations/${result.required} required`
+        : `${name}=${result.controllers} controllers/${result.mutations} mutations/${result.exemptions} exemptions`,
+    )
     .join(', ');
   console.log(`idempotency inventory PASS (${details})`);
 }

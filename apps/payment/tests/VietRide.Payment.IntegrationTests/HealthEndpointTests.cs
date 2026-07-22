@@ -3,6 +3,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using VietRide.Testing;
 
 namespace VietRide.Payment.IntegrationTests;
 
@@ -59,6 +60,14 @@ public class HealthEndpointTests : IClassFixture<VietRideWebApplicationFactory>
         response.StatusCode.Should().Be(HttpStatusCode.OK, body);
         body.Should().Contain("BatchChargePaymentRequestItem");
         body.Should().Contain("BatchChargePaymentResultItem");
+    }
+
+    [Fact]
+    public async Task GetSwagger_IdempotencyContractMatchesRuntimeMetadata()
+    {
+        using var client = _factory.CreateClient();
+
+        await IdempotencyOpenApiContractAssertions.AssertMatchesRuntimeMetadataAsync(client, _factory.Services);
     }
 }
 
