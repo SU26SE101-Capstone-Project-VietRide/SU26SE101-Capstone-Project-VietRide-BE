@@ -1,6 +1,9 @@
-import { TRIP_VEHICLE_SWAPPED_ROUTING_KEY } from '@vietride/contracts';
+import {
+  TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY,
+  TRIP_VEHICLE_SWAPPED_ROUTING_KEY,
+} from '@vietride/contracts';
 
-export { TRIP_VEHICLE_SWAPPED_ROUTING_KEY };
+export { TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY, TRIP_VEHICLE_SWAPPED_ROUTING_KEY };
 
 export const TRIP_ASSIGNED_ROUTING_KEY = 'trip.trip.assigned';
 export const TRIP_CREW_CHANGED_ROUTING_KEY = 'trip.trip.crew_changed';
@@ -34,6 +37,10 @@ export const TRIP_TRACKING_ALERT_QUEUE_BINDINGS = [
   {
     queue: 'notification:trip-incident-reported',
     routingKey: TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:trip-cargo-threshold-crossed',
+    routingKey: TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY,
   },
   {
     // Keep a new queue identity because the legacy queue used trip.stop.disabled

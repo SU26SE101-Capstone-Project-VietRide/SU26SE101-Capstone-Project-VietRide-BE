@@ -9,4 +9,5 @@ public sealed record TripCargoMutationResult(
     decimal MaxCargoWeightKg,
     decimal MaxCargoVolumeM3,
     decimal PercentFull,
-    bool NearFullCrossed);
+    bool NearFullCrossed,
+    Guid OperatorId);

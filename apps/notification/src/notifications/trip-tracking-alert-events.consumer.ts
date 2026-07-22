@@ -1,4 +1,5 @@
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
+import { TripCargoThresholdCrossedEventSchema } from '@vietride/contracts';
 import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
 import type { ConsumeMessage } from 'amqplib';
 import { ZodError } from 'zod';
@@ -9,12 +10,14 @@ import { createNotificationLogger } from './notification-logger';
 import type { OperatorRecipientProvider } from './operator-recipient.provider';
 import { OPERATOR_RECIPIENT_PROVIDER } from './parcel-subscription-operator-events.constants';
 import {
+  TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY,
   TRIP_INCIDENT_REPORTED_ROUTING_KEY,
   TRIP_TRACKING_ALERT_QUEUE_BINDINGS,
 } from './trip-tracking-alert-events.constants';
 import {
   IncidentReportedPayloadSchema,
   mapIncidentReportedToNotifications,
+  mapTripCargoThresholdCrossedToNotifications,
   mapTripTrackingAlertToNotifications,
   type TripTrackingAlertRoutingKey,
 } from './trip-tracking-alert-notification.mapper';
@@ -54,6 +57,10 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
     payload: unknown,
     raw: ConsumeMessage,
   ): Promise<void> {
+    if (routingKey === TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY) {
+      await this.handleCargoThresholdCrossed(payload, raw);
+      return;
+    }
     if (routingKey === TRIP_INCIDENT_REPORTED_ROUTING_KEY) {
       await this.handleIncidentReported(payload, raw);
       return;
@@ -107,6 +114,57 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
       }
 
       await this.idempotency.release(routingKey, messageId);
+      throw error;
+    }
+  }
+
+  private async handleCargoThresholdCrossed(payload: unknown, raw: ConsumeMessage): Promise<void> {
+    const parsed = TripCargoThresholdCrossedEventSchema.safeParse(payload);
+    const brokerMessageId = getMessageId(raw);
+    const messageId = parsed.success ? parsed.data.eventId : brokerMessageId;
+    if (!messageId) {
+      throw new Error(`MISSING_MESSAGE_ID_${TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY}`);
+    }
+
+    const processingState = await this.idempotency.begin(
+      TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY,
+      messageId,
+    );
+    if (processingState === 'duplicate') return;
+    if (processingState === 'locked') {
+      throw new Error(`MESSAGE_LOCKED_${TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY}_${messageId}`);
+    }
+
+    try {
+      if (!parsed.success) {
+        await this.idempotency.markProcessed(TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY, messageId);
+        return;
+      }
+      const recipientUserIds = [
+        ...new Set(
+          await this.operatorRecipients.resolveOperatorRecipientUserIds(parsed.data.operatorId),
+        ),
+      ];
+      const notifications = mapTripCargoThresholdCrossedToNotifications(
+        parsed.data,
+        recipientUserIds,
+      );
+      await Promise.all(
+        notifications.map((notification) =>
+          this.notificationsService.createNotification({
+            ...notification,
+            dedupeKey: buildNotificationDedupeKey(
+              TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY,
+              messageId,
+              notification.userId,
+              notification.type,
+            ),
+          }),
+        ),
+      );
+      await this.idempotency.markProcessed(TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY, messageId);
+    } catch (error) {
+      await this.idempotency.release(TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY, messageId);
       throw error;
     }
   }

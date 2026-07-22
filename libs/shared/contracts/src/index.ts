@@ -16,6 +16,8 @@ export * from './events/booking-stop-disabled-auto-fallback-applied.event';
 export * from './events/booking-passenger-no-show-marked.event';
 export * from './events/trip-stop-departed-with-pending.event';
 export * from './events/day24-stop-no-show-events';
+export * from './events/trip-cargo-threshold-crossed.event';
+export * from './events/parcel-sprint4-events';
 export * from './events/subscription-payment-succeeded.event';
 export * from './events/invoice-issued.event';
 export * from './events/trip-settlement-completed.event';

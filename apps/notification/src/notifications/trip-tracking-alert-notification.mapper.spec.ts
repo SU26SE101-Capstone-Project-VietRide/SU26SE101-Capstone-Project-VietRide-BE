@@ -14,6 +14,7 @@ import {
 import {
   IncidentReportedPayloadSchema,
   mapIncidentReportedToNotifications,
+  mapTripCargoThresholdCrossedToNotifications,
   mapTripTrackingAlertToNotifications,
 } from './trip-tracking-alert-notification.mapper';
 
@@ -26,6 +27,37 @@ const OPERATOR_ID = '66666666-6666-4666-8666-666666666666';
 const REPORTER_ID = '77777777-7777-4777-8777-777777777777';
 
 describe('mapTripTrackingAlertToNotifications maps stop disabled event for explicit recipients and maps departed-with-pending warning to assigned driver and assistant only', () => {
+  it('maps a valid cargo threshold fact to CARGO_NEAR_FULL_ALERT', () => {
+    const notifications = mapTripCargoThresholdCrossedToNotifications(
+      {
+        eventId: '88888888-8888-4888-8888-888888888888',
+        occurredAt: '2026-07-18T03:00:00Z',
+        tripId: TRIP_ID,
+        operatorId: OPERATOR_ID,
+        loadedWeightKg: 80,
+        maxCargoWeightKg: 100,
+        percentFull: 80,
+      }, [USER_ID],
+    );
+    expect(notifications[0]).toEqual(expect.objectContaining({ userId: USER_ID, type: NotificationType.CARGO_NEAR_FULL_ALERT }));
+  });
+
+  it('scopes cargo recipients to active admins of the payload operator', () => {
+    const notifications = mapTripCargoThresholdCrossedToNotifications(
+      {
+        eventId: '88888888-8888-4888-8888-888888888888',
+        occurredAt: '2026-07-18T03:00:00Z',
+        tripId: TRIP_ID,
+        operatorId: OPERATOR_ID,
+        loadedWeightKg: 80,
+        maxCargoWeightKg: 100,
+        percentFull: 80,
+      },
+      [USER_ID, USER_ID, SECOND_USER_ID],
+    );
+    expect(notifications.map((notification) => notification.userId)).toEqual([USER_ID, SECOND_USER_ID]);
+  });
+
   it('maps a trip assignment to the driver and assistant', () => {
     const notifications = mapTripTrackingAlertToNotifications(TRIP_ASSIGNED_ROUTING_KEY, {
       tripId: TRIP_ID,

@@ -82,7 +82,7 @@
       "stack": "dotnet",
       "servicePrefix": "parcel",
       "requireAllMutations": true,
-      "expectedMutationCount": 20,
+      "expectedMutationCount": 21,
       "controllers": [
         "AssistantParcelsController",
         "InternalParcelsController",

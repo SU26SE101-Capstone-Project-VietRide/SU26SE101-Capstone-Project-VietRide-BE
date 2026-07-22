@@ -20,6 +20,8 @@ const PARCEL_ID = '44444444-4444-4444-8444-444444444444';
 const VOUCHER_ID = '55555555-5555-4555-8555-555555555555';
 const MESSAGE_ID = 'phase-6-message-1';
 const INVOICE_ID = '66666666-6666-4666-8666-666666666666';
+const TRIP_ID = '77777777-7777-4777-8777-777777777777';
+const PARCEL_EVENT_ID = '88888888-8888-4888-8888-888888888888';
 const RECIPIENT_EMAIL = 'operator-admin@vietride.local';
 
 describe('ParcelSubscriptionOperatorEventsConsumer', () => {
@@ -54,6 +56,18 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
     );
   });
 
+  it('rejects Sprint 4 Parcel producer-consumer schema drift before persistence', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    await expect(
+      consumer.handle(
+        PARCEL_LOADED_ROUTING_KEY,
+        { parcelId: 'invalid' },
+        createMessage(MESSAGE_ID),
+      ),
+    ).resolves.toBeUndefined();
+    expect(notificationsService.createNotification).not.toHaveBeenCalled();
+  });
+
   it('subscribes all phase 6 routing keys', async () => {
     await consumer.onModuleInit();
 
@@ -78,22 +92,21 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
 
     await consumer.handle(
       PARCEL_LOADED_ROUTING_KEY,
-      {
-        userId: USER_ID,
-        parcelId: PARCEL_ID,
-        parcelCode: 'PRC123',
-      },
-      createMessage(MESSAGE_ID),
+      parcelLoadedPayload(),
+      createMessage(PARCEL_EVENT_ID),
     );
 
     expect(notificationsService.createNotification).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.PARCEL_LOADED,
-        dedupeKey: `${PARCEL_LOADED_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:${NotificationType.PARCEL_LOADED}`,
+        dedupeKey: `${PARCEL_LOADED_ROUTING_KEY}:${PARCEL_EVENT_ID}:${USER_ID}:${NotificationType.PARCEL_LOADED}`,
       }),
     );
-    expect(idempotency.markProcessed).toHaveBeenCalledWith(PARCEL_LOADED_ROUTING_KEY, MESSAGE_ID);
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      PARCEL_LOADED_ROUTING_KEY,
+      PARCEL_EVENT_ID,
+    );
   });
 
   it('uses operator recipient provider when payload only has operatorId', async () => {
@@ -210,6 +223,7 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.INVOICE_ISSUED,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         data: expect.objectContaining({ invoiceWebUrl }),
       }),
     );
@@ -334,12 +348,12 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
     await expect(
       consumer.handle(
         PARCEL_LOADED_ROUTING_KEY,
-        { userId: USER_ID, parcelId: PARCEL_ID },
-        createMessage(MESSAGE_ID),
+        parcelLoadedPayload(),
+        createMessage(PARCEL_EVENT_ID),
       ),
     ).rejects.toThrow('DATABASE_UNAVAILABLE');
 
-    expect(idempotency.release).toHaveBeenCalledWith(PARCEL_LOADED_ROUTING_KEY, MESSAGE_ID);
+    expect(idempotency.release).toHaveBeenCalledWith(PARCEL_LOADED_ROUTING_KEY, PARCEL_EVENT_ID);
     expect(idempotency.markProcessed).not.toHaveBeenCalled();
   });
 });
@@ -353,7 +367,27 @@ function createMessage(messageId: string | undefined): ConsumeMessage {
   } as ConsumeMessage;
 }
 
-function createNotification(type: NotificationType) {
+function parcelLoadedPayload(): Record<string, unknown> {
+  return {
+    eventId: PARCEL_EVENT_ID,
+    occurredAt: '2026-07-22T03:00:00Z',
+    parcelId: PARCEL_ID,
+    tripId: TRIP_ID,
+    actualWeightKg: 12.5,
+    userIds: [USER_ID],
+  };
+}
+
+function createNotification(type: NotificationType): {
+  id: string;
+  userId: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  data: null;
+  readAt: null;
+  createdAt: string;
+} {
   return {
     id: '99999999-9999-4999-8999-999999999999',
     userId: USER_ID,
