@@ -48,6 +48,13 @@ The Day-30 timeline lists no “Pre-reqs / architecture baseline,” so this pla
 
 ### Task 30.2 — Build and run the self-cleaning Sprint-4 demo harness
 
+> **User-authorized verification amendment (2026-07-22):** The inline live-wrapper command's
+> Windows `spawnSync('npm.cmd')` normal-child launch is superseded by the exact command
+> `node scripts/run-day30-sprint4-demo-live-wrapper.mjs`. This Day-30-only non-test helper must
+> preserve the same 1,200,000 ms child timeout, stdout/stderr leak scan, failure-injection and
+> normal-run summary validation, and zero-exit requirements. All other Task 30.2 verification
+> commands remain unchanged.
+
 | Field | Value |
 |---|---|
 | stack/owner | cross-cutting |
@@ -110,7 +117,7 @@ The Day-30 timeline lists no “Pre-reqs / architecture baseline,” so this pla
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
 | 30.1 | ✅ done | APPROVE | 2026-07-22 | Structural/ledger/Prettier/diff checks PASS; user-authorized mechanical Prettier scope expansion on the two JSON files. |
-| 30.2 | ⬜ todo | — | — | — |
+| 30.2 | ✅ done | APPROVE | 2026-07-22 | Unit/live/evidence/ledger checks PASS; helper wrapper expansion and user-authorized Windows verification amendment; cleanup ordering patched and re-reviewed. |
 | 30.3 | ⬜ todo | — | — | — |
 
 Legend: ⬜ todo · 🔄 in progress · ✅ done (reviewer APPROVED + targeted verification green) · ⚠️ done-with-carryover · ❌ blocked
