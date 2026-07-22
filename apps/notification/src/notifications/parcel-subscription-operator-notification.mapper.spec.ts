@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment -- Jest asymmetric matchers expose any by design. */
 import { ZodError } from 'zod';
 import { NotificationType } from '../generated/notification-prisma-client';
 import {
@@ -5,6 +6,8 @@ import {
   BOOKING_VOUCHER_CONSENT_REJECTED_ROUTING_KEY,
   INVOICE_ISSUED_ROUTING_KEY,
   PARCEL_LOADED_ROUTING_KEY,
+  PARCEL_UNLOADED_ROUTING_KEY,
+  PARCEL_AUTO_REJECTED_ROUTING_KEY,
   PARCEL_REVIEW_REQUESTED_ROUTING_KEY,
   PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY,
   PAYOUT_FAILED_ROUTING_KEY,
@@ -27,15 +30,72 @@ const VOUCHER_ID = '99999999-9999-4999-8999-999999999999';
 const PLAN_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
 describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
+  it('maps Sprint 4 Parcel facts to tenant-scoped notifications', async () => {
+    const loaded = await mapParcelSubscriptionOperatorEventToNotifications(
+      PARCEL_LOADED_ROUTING_KEY,
+      {
+        eventId: '88888888-8888-4888-8888-888888888888',
+        occurredAt: '2026-07-18T03:00:00Z',
+        parcelId: PARCEL_ID,
+        tripId: TRIP_ID,
+        actualWeightKg: 12.5,
+        userIds: [USER_ID, SECOND_USER_ID],
+      },
+      resolveNoOperatorRecipients,
+    );
+    const unloaded = await mapParcelSubscriptionOperatorEventToNotifications(
+      PARCEL_UNLOADED_ROUTING_KEY,
+      { parcelId: PARCEL_ID, tripId: TRIP_ID, userIds: [USER_ID] },
+      resolveNoOperatorRecipients,
+    );
+    const rejected = await mapParcelSubscriptionOperatorEventToNotifications(
+      PARCEL_AUTO_REJECTED_ROUTING_KEY,
+      {
+        eventId: '99999999-9999-4999-8999-999999999999',
+        occurredAt: '2026-07-18T03:00:00Z',
+        parcelId: PARCEL_ID,
+        parcelCode: 'PRC123',
+        operatorId: OPERATOR_ID,
+        userId: USER_ID,
+        tripId: TRIP_ID,
+        refundAmount: 100,
+      },
+      resolveNoOperatorRecipients,
+    );
+    expect(loaded).toHaveLength(2);
+    expect(unloaded[0]?.type).toBe(NotificationType.PARCEL_IN_TRANSIT);
+    expect(rejected[0]?.type).toBe(NotificationType.PARCEL_REJECTED);
+  });
+
+  it('rejects Sprint 4 Parcel producer-consumer schema drift before persistence', async () => {
+    await expect(
+      mapParcelSubscriptionOperatorEventToNotifications(
+        PARCEL_LOADED_ROUTING_KEY,
+        {
+          eventId: '88888888-8888-4888-8888-888888888888',
+          occurredAt: '2026-07-18T03:00:00Z',
+          parcelId: PARCEL_ID,
+          tripId: TRIP_ID,
+          actualWeightKg: 12.5,
+          userIds: [USER_ID],
+          parcelCode: 'legacy',
+        },
+        resolveNoOperatorRecipients,
+      ),
+    ).rejects.toThrow(ZodError);
+  });
+
   it('maps parcel loaded event to a sender notification', async () => {
     await expect(
       mapParcelSubscriptionOperatorEventToNotifications(
         PARCEL_LOADED_ROUTING_KEY,
         {
-          userId: USER_ID,
+          eventId: '88888888-8888-4888-8888-888888888888',
+          occurredAt: '2026-07-18T03:00:00Z',
           parcelId: PARCEL_ID,
-          parcelCode: 'PRC123',
           tripId: TRIP_ID,
+          actualWeightKg: 12.5,
+          userIds: [USER_ID],
         },
         resolveNoOperatorRecipients,
       ),
@@ -44,10 +104,9 @@ describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
         userId: USER_ID,
         type: NotificationType.PARCEL_LOADED,
         title: 'Hang da duoc len xe',
-        body: 'Don PRC123 da duoc tai len xe.',
+        body: `Don gui hang ${PARCEL_ID} da duoc tai len xe.`,
         data: expect.objectContaining({
           parcelId: PARCEL_ID,
-          parcelCode: 'PRC123',
           tripId: TRIP_ID,
         }),
       },

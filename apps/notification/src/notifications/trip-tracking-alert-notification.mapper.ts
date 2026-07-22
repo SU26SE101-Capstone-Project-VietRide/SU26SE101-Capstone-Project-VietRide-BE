@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   BookingStopDisabledAffectedEventSchema,
   TRIP_STOP_DEPARTED_WITH_PENDING_ROUTING_KEY,
+  TripCargoThresholdCrossedEventSchema,
   TripStopDepartedWithPendingEventSchema,
   TripVehicleSwappedEventSchema,
   type BookingStopDisabledAffectedEvent,
@@ -13,6 +14,7 @@ import {
   TRACKING_GPS_APPROACHING_STOP_ROUTING_KEY,
   TRACKING_GPS_OFF_ROUTE_ROUTING_KEY,
   TRIP_ASSIGNED_ROUTING_KEY,
+  TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY,
   TRIP_CREW_CHANGED_ROUTING_KEY,
   TRIP_BOARDING_STARTED_ROUTING_KEY,
   TRIP_DELAYED_ROUTING_KEY,
@@ -145,6 +147,7 @@ export { incidentReportedPayloadSchema as IncidentReportedPayloadSchema };
 
 export type TripTrackingAlertRoutingKey =
   | typeof TRIP_ASSIGNED_ROUTING_KEY
+  | typeof TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY
   | typeof TRIP_CREW_CHANGED_ROUTING_KEY
   | typeof TRIP_BOARDING_STARTED_ROUTING_KEY
   | typeof TRIP_ROUTE_CHANGED_ROUTING_KEY
@@ -163,6 +166,11 @@ export function mapTripTrackingAlertToNotifications(
   switch (routingKey) {
     case TRIP_ASSIGNED_ROUTING_KEY:
       return mapTripAssigned(tripAssignedPayloadSchema.parse(payload));
+    case TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY:
+      return mapTripCargoThresholdCrossed(
+        TripCargoThresholdCrossedEventSchema.parse(payload),
+        [],
+      );
     case TRIP_CREW_CHANGED_ROUTING_KEY:
       return mapTripCrewChanged(tripCrewChangedPayloadSchema.parse(payload));
     case TRIP_BOARDING_STARTED_ROUTING_KEY:
@@ -187,6 +195,35 @@ export function mapTripTrackingAlertToNotifications(
     case TRACKING_GPS_APPROACHING_STOP_ROUTING_KEY:
       return fanOut(approachingStopPayloadSchema.parse(payload), mapApproachingStop);
   }
+}
+
+export function mapTripCargoThresholdCrossedToNotifications(
+  payload: unknown,
+  recipientUserIds: string[],
+): CreateNotificationDto[] {
+  const parsed = TripCargoThresholdCrossedEventSchema.parse(payload);
+  return mapTripCargoThresholdCrossed(parsed, recipientUserIds);
+}
+
+function mapTripCargoThresholdCrossed(
+  payload: z.infer<typeof TripCargoThresholdCrossedEventSchema>,
+  recipientUserIds: string[],
+): CreateNotificationDto[] {
+  return [...new Set(recipientUserIds)].map((userId) => ({
+    userId,
+    type: NotificationType.CARGO_NEAR_FULL_ALERT,
+    title: 'Khoang hang gan day',
+    body: `Chuyen ${payload.tripId} da su dung ${payload.percentFull}% suc chua khoang hang (${payload.loadedWeightKg}/${payload.maxCargoWeightKg} kg).`,
+    data: {
+      eventId: payload.eventId,
+      occurredAt: payload.occurredAt,
+      tripId: payload.tripId,
+      operatorId: payload.operatorId,
+      loadedWeightKg: payload.loadedWeightKg,
+      maxCargoWeightKg: payload.maxCargoWeightKg,
+      percentFull: payload.percentFull,
+    },
+  }));
 }
 
 function mapTripAssigned(payload: TripAssignedPayload): CreateNotificationDto[] {

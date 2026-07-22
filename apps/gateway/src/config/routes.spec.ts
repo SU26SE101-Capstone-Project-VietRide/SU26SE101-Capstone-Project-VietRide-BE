@@ -269,10 +269,7 @@ describe('buildRouteTable', () => {
       ['/v1/admin/subscription-plans', env.IDENTITY_BASE_URL],
       ['/v1/admin/locations', env.TRIP_BASE_URL],
       ['/v1/admin/stations/11111111-1111-1111-1111-111111111111', env.TRIP_BASE_URL],
-      [
-        '/v1/admin/stations/11111111-1111-1111-1111-111111111111/merge',
-        env.TRIP_BASE_URL,
-      ],
+      ['/v1/admin/stations/11111111-1111-1111-1111-111111111111/merge', env.TRIP_BASE_URL],
       ['/v1/admin/booking-stats/aggregate', env.BOOKING_BASE_URL],
       ['/v1/admin/vouchers', env.BOOKING_BASE_URL],
       ['/v1/admin/vouchers/11111111-1111-1111-1111-111111111111/consents', env.BOOKING_BASE_URL],
@@ -592,6 +589,15 @@ describe('buildRouteTable', () => {
   });
 
   it('routes assistant and operator parcel actions to Parcel without gateway-level role guards', () => {
+    const assistantParcelIndex = routes.findIndex(
+      (route) => route.prefix === '/v1/assistant/parcels',
+    );
+    const assistantIndex = routes.findIndex((route) => route.prefix === '/v1/assistant');
+
+    expect(assistantParcelIndex).toBeGreaterThanOrEqual(0);
+    expect(assistantIndex).toBeGreaterThanOrEqual(0);
+    expect(assistantParcelIndex).toBeLessThan(assistantIndex);
+
     const cases = [
       ['/v1/assistant/parcels/11111111-1111-1111-1111-111111111111/load', '/v1/assistant/parcels'],
       [

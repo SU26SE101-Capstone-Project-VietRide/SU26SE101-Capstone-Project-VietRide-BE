@@ -1,3 +1,4 @@
+using System.Text.Json;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using VietRide.Parcel.Application.Abstractions.Repositories;
@@ -108,18 +109,21 @@ public sealed class ExpireParcelAdditionalPaymentCommandHandler
                     snapshot.OperatorId,
                     snapshot.DepositAmount,
                     cancellationToken);
-                await ParcelOutboxEvents.EnqueueAsync(
-                    _outbox,
+                var eventId = Guid.NewGuid();
+                await _outbox.EnqueueAsync(
+                    eventId,
                     ParcelOutboxEvents.AutoRejected,
-                    new
+                    JsonSerializer.Serialize(new
                     {
+                        eventId,
+                        occurredAt = now,
                         parcelId = snapshot.ParcelId,
                         parcelCode = snapshot.ParcelCode,
                         operatorId = snapshot.OperatorId,
                         userId = snapshot.SenderUserId,
                         tripId = snapshot.TripId,
                         refundAmount,
-                    },
+                    }),
                     cancellationToken);
                 await ParcelOutboxEvents.EnqueueRefundAsync(
                     _outbox,

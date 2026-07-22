@@ -8,6 +8,7 @@ import {
   TRACKING_GPS_OFF_ROUTE_ROUTING_KEY,
   TRIP_DELAYED_ROUTING_KEY,
   TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+  TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY,
   TRIP_STOP_DISABLED_ROUTING_KEY,
   TRIP_TRACKING_ALERT_QUEUE_BINDINGS,
   TRIP_VEHICLE_SWAPPED_ROUTING_KEY,
@@ -146,6 +147,43 @@ describe('TripTrackingAlertEventsConsumer subscribes all phase 5 routing keys', 
       }),
     );
     expect(idempotency.markProcessed).toHaveBeenCalledWith(TRIP_DELAYED_ROUTING_KEY, MESSAGE_ID);
+  });
+
+  it('deduplicates duplicate cargo delivery by message id', async () => {
+    idempotency.begin.mockResolvedValueOnce('acquired').mockResolvedValueOnce('duplicate');
+    operatorRecipients.resolveOperatorRecipientUserIds.mockResolvedValue([
+      USER_ID,
+      SECOND_USER_ID,
+      USER_ID,
+    ]);
+    notificationsService.createNotification.mockResolvedValue({} as never);
+    const payload = cargoPayload();
+    await consumer.handle(TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY, payload, createMessage(EVENT_ID));
+    await consumer.handle(TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY, payload, createMessage(EVENT_ID));
+    expect(operatorRecipients.resolveOperatorRecipientUserIds).toHaveBeenCalledWith(OPERATOR_ID);
+    expect(notificationsService.createNotification).toHaveBeenCalledTimes(2);
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: USER_ID }),
+    );
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SECOND_USER_ID }),
+    );
+  });
+
+  it('finalizes malformed cargo payload without persistence', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    await expect(
+      consumer.handle(TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY, { eventId: EVENT_ID }, createMessage(EVENT_ID)),
+    ).resolves.toBeUndefined();
+    expect(notificationsService.createNotification).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY, EVENT_ID);
+  });
+
+  it('releases the processing lock after transient recipient or persistence failure', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipients.resolveOperatorRecipientUserIds.mockRejectedValue(new Error('IDENTITY_UNAVAILABLE'));
+    await expect(consumer.handle(TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY, cargoPayload(), createMessage(EVENT_ID))).rejects.toThrow('IDENTITY_UNAVAILABLE');
+    expect(idempotency.release).toHaveBeenCalledWith(TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY, EVENT_ID);
   });
 
   it('skips duplicate delayed message id', async () => {
@@ -336,5 +374,17 @@ function canonicalIncidentPayload(
     category: 'TRAFFIC_JAM',
     reportedAt: '2026-07-16T03:00:00Z',
     ...overrides,
+  };
+}
+
+function cargoPayload(): Record<string, unknown> {
+  return {
+    eventId: EVENT_ID,
+    occurredAt: '2026-07-16T03:00:00Z',
+    tripId: TRIP_ID,
+    operatorId: OPERATOR_ID,
+    loadedWeightKg: 80,
+    maxCargoWeightKg: 100,
+    percentFull: 80,
   };
 }

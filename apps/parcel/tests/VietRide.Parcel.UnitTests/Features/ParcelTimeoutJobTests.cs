@@ -26,6 +26,189 @@ public sealed class ParcelTimeoutJobTests
     private static readonly Guid TripId = Guid.NewGuid();
     private static readonly Guid OperatorId = Guid.NewGuid();
 
+    [Fact]
+    public async Task LateLoadCasLoser_LeavesStateAndOutboxUnchanged()
+    {
+        var repo = Substitute.For<IParcelRepository>();
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(Now);
+        var trip = Substitute.For<ITripServiceClient>();
+        trip.GetTripParcelSnapshotAsync(TripId, Arg.Any<CancellationToken>())
+            .Returns(new TripSnapshotOutcome(TripSnapshotOutcomeKind.Success,
+                CreateTripSnapshot("IN_PROGRESS", Now.AddMinutes(-31)), null));
+        repo.ListPendingForLoadCheckAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new[] { new PendingParcelTripRef(ParcelId, TripId, Now.AddHours(-1)) });
+        repo.TryAutoRejectPendingAsync(ParcelId, Arg.Any<string>(), Now, Arg.Any<CancellationToken>())
+            .Returns((ParcelPaymentTransitionSnapshot?)null);
+        var outbox = Outbox();
+        var handler = new AutoRejectPendingParcelCommandHandler(repo, trip, Identity(), clock,
+            UnitOfWork(), outbox, Substitute.For<ILogger<AutoRejectPendingParcelCommandHandler>>(), Stats());
+
+        (await handler.Handle(new AutoRejectPendingParcelCommand(), default)).Should().Be(0);
+        await outbox.DidNotReceiveWithAnyArgs().EnqueueAsync(default!, default!, default!, default);
+    }
+
+    [Fact]
+    public async Task AdditionalPaymentTimeoutCasLoser_LeavesStateRefundAndOutboxUnchanged()
+    {
+        var repo = Substitute.For<IParcelRepository>();
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(Now);
+        repo.ListAdditionalPaymentTimedOutIdsAsync(Now, Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new[] { ParcelId });
+        repo.TryMarkAdditionalExpiredByDeadlineAsync(ParcelId, Now, Arg.Any<CancellationToken>())
+            .Returns((ParcelPaymentTransitionSnapshot?)null);
+        var outbox = Outbox();
+        var handler = CreateAdditionalPaymentHandler(repo, clock, outbox);
+
+        (await handler.Handle(new ExpireParcelAdditionalPaymentCommand(), default)).Should().Be(0);
+        await outbox.DidNotReceiveWithAnyArgs().EnqueueAsync(default!, default!, default!, default);
+    }
+
+    [Fact]
+    public async Task ReviewTimeoutCasLoser_LeavesStateAndOutboxUnchanged()
+    {
+        var repo = Substitute.For<IParcelRepository>();
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(Now);
+        repo.ListReviewTimedOutIdsAsync(Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new[] { ParcelId });
+        repo.TryAutoRejectReviewAsync(ParcelId, Arg.Any<string>(), Now, Arg.Any<CancellationToken>())
+            .Returns((ParcelPaymentTransitionSnapshot?)null);
+        var outbox = Outbox();
+        var handler = new ExpireParcelReviewCommandHandler(repo, clock, UnitOfWork(), outbox, Stats(),
+            Substitute.For<ILogger<ExpireParcelReviewCommandHandler>>());
+
+        (await handler.Handle(new ExpireParcelReviewCommand(), default)).Should().Be(0);
+        await outbox.DidNotReceiveWithAnyArgs().EnqueueAsync(default!, default!, default!, default);
+    }
+
+    [Fact]
+    public async Task LateLoadDuplicateInvocation_EmitsNoAdditionalAutoRejectedOutbox()
+    {
+        var repo = Substitute.For<IParcelRepository>();
+        var clock = Substitute.For<IClock>();
+        var trip = Substitute.For<ITripServiceClient>();
+        var unitOfWork = UnitOfWork();
+        var outbox = Outbox();
+        var stats = Stats();
+        clock.UtcNow.Returns(Now);
+        trip.GetTripParcelSnapshotAsync(TripId, Arg.Any<CancellationToken>())
+            .Returns(new TripSnapshotOutcome(TripSnapshotOutcomeKind.Success,
+                CreateTripSnapshot("IN_PROGRESS", Now.AddMinutes(-31)), null));
+        repo.ListPendingForLoadCheckAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new[] { new PendingParcelTripRef(ParcelId, TripId, Now.AddHours(-1)) });
+        repo.TryAutoRejectPendingAsync(ParcelId, "PARCEL_LATE_LOAD", Now, Arg.Any<CancellationToken>())
+            .Returns(Snapshot(ParcelStatus.REJECTED), (ParcelPaymentTransitionSnapshot?)null);
+        var handler = new AutoRejectPendingParcelCommandHandler(repo, trip, Identity(), clock,
+            unitOfWork, outbox, Substitute.For<ILogger<AutoRejectPendingParcelCommandHandler>>(), stats);
+
+        (await handler.Handle(new AutoRejectPendingParcelCommand(), default)).Should().Be(1);
+        (await handler.Handle(new AutoRejectPendingParcelCommand(), default)).Should().Be(0);
+
+        await repo.Received(2).TryAutoRejectPendingAsync(
+            ParcelId, "PARCEL_LATE_LOAD", Now, Arg.Any<CancellationToken>());
+        await outbox.Received(1).EnqueueAsync(
+            Arg.Any<Guid>(), ParcelOutboxEvents.AutoRejected, Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await outbox.Received(1).EnqueueAsync(
+            ParcelOutboxEvents.RefundInitiated, Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await stats.Received(1).UpsertIncrementAsync(
+            OperatorId,
+            Arg.Any<DateOnly>(),
+            Arg.Is<int>(value => value == 0),
+            Arg.Is<int>(value => value == 0),
+            Arg.Is<int>(value => value == 0),
+            Arg.Is<int>(value => value == 1),
+            Arg.Is<int>(value => value == 0),
+            Arg.Is<long>(value => value == 0),
+            Arg.Any<long>(),
+            Arg.Any<CancellationToken>());
+        await unitOfWork.Received(1).CommitAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task AdditionalPaymentTimeoutDuplicateInvocation_EmitsNoAdditionalRefundOrAutoRejectedOutbox()
+    {
+        var repo = Substitute.For<IParcelRepository>();
+        var clock = Substitute.For<IClock>();
+        var unitOfWork = UnitOfWork();
+        var outbox = Outbox();
+        var stats = Stats();
+        clock.UtcNow.Returns(Now);
+        repo.ListAdditionalPaymentTimedOutIdsAsync(Now, Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new[] { ParcelId });
+        repo.TryMarkAdditionalExpiredByDeadlineAsync(ParcelId, Now, Arg.Any<CancellationToken>())
+            .Returns(Snapshot(ParcelStatus.REJECTED), (ParcelPaymentTransitionSnapshot?)null);
+        var handler = new ExpireParcelAdditionalPaymentCommandHandler(
+            repo,
+            Identity(),
+            clock,
+            unitOfWork,
+            outbox,
+            Substitute.For<ILogger<ExpireParcelAdditionalPaymentCommandHandler>>(),
+            stats);
+
+        (await handler.Handle(new ExpireParcelAdditionalPaymentCommand(), default)).Should().Be(1);
+        (await handler.Handle(new ExpireParcelAdditionalPaymentCommand(), default)).Should().Be(0);
+
+        await repo.Received(2).TryMarkAdditionalExpiredByDeadlineAsync(
+            ParcelId, Now, Arg.Any<CancellationToken>());
+        await outbox.Received(1).EnqueueAsync(
+            Arg.Any<Guid>(), ParcelOutboxEvents.AutoRejected, Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await outbox.Received(1).EnqueueAsync(
+            ParcelOutboxEvents.RefundInitiated, Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await stats.Received(1).UpsertIncrementAsync(
+            OperatorId,
+            Arg.Any<DateOnly>(),
+            Arg.Is<int>(value => value == 0),
+            Arg.Is<int>(value => value == 0),
+            Arg.Is<int>(value => value == 0),
+            Arg.Is<int>(value => value == 1),
+            Arg.Is<int>(value => value == 0),
+            Arg.Is<long>(value => value == 0),
+            Arg.Any<long>(),
+            Arg.Any<CancellationToken>());
+        await unitOfWork.Received(1).CommitAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ReviewTimeoutDuplicateInvocation_EmitsNoAdditionalAutoRejectedOutbox()
+    {
+        var repo = Substitute.For<IParcelRepository>();
+        var clock = Substitute.For<IClock>();
+        var unitOfWork = UnitOfWork();
+        var outbox = Outbox();
+        var stats = Stats();
+        clock.UtcNow.Returns(Now);
+        repo.ListReviewTimedOutIdsAsync(Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new[] { ParcelId });
+        repo.TryAutoRejectReviewAsync(ParcelId, "PARCEL_REVIEW_TIMEOUT", Now, Arg.Any<CancellationToken>())
+            .Returns(Snapshot(ParcelStatus.REJECTED), (ParcelPaymentTransitionSnapshot?)null);
+        var handler = new ExpireParcelReviewCommandHandler(repo, clock, unitOfWork, outbox, stats,
+            Substitute.For<ILogger<ExpireParcelReviewCommandHandler>>());
+
+        (await handler.Handle(new ExpireParcelReviewCommand(), default)).Should().Be(1);
+        (await handler.Handle(new ExpireParcelReviewCommand(), default)).Should().Be(0);
+
+        await repo.Received(2).TryAutoRejectReviewAsync(
+            ParcelId, "PARCEL_REVIEW_TIMEOUT", Now, Arg.Any<CancellationToken>());
+        await outbox.Received(1).EnqueueAsync(
+            Arg.Any<Guid>(), ParcelOutboxEvents.AutoRejected, Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await outbox.DidNotReceiveWithAnyArgs().EnqueueAsync(default!, default!, default);
+        await stats.Received(1).UpsertIncrementAsync(
+            OperatorId,
+            Arg.Any<DateOnly>(),
+            Arg.Is<int>(value => value == 0),
+            Arg.Is<int>(value => value == 0),
+            Arg.Is<int>(value => value == 0),
+            Arg.Is<int>(value => value == 1),
+            Arg.Is<int>(value => value == 0),
+            Arg.Is<long>(value => value == 0),
+            Arg.Is<long>(value => value == 0),
+            Arg.Any<CancellationToken>());
+        await unitOfWork.Received(1).CommitAsync(Arg.Any<CancellationToken>());
+    }
+
     // ================================================================
     // Review timeout job
     // ================================================================
@@ -563,9 +746,13 @@ public sealed class ParcelTimeoutJobTests
 
     private static ExpireParcelAdditionalPaymentCommandHandler CreateAdditionalPaymentHandler(
         IParcelRepository repo, IClock clock)
+        => CreateAdditionalPaymentHandler(repo, clock, Outbox());
+
+    private static ExpireParcelAdditionalPaymentCommandHandler CreateAdditionalPaymentHandler(
+        IParcelRepository repo, IClock clock, IIntegrationEventOutbox outbox)
     {
         return new ExpireParcelAdditionalPaymentCommandHandler(repo, Identity(), clock,
-            UnitOfWork(), Outbox(),
+            UnitOfWork(), outbox,
             Substitute.For<ILogger<ExpireParcelAdditionalPaymentCommandHandler>>(), Stats());
     }
 
