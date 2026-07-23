@@ -8,6 +8,7 @@ using VietRide.Parcel.Application.Features.History;
 using VietRide.Parcel.Application.Features.PassengerHistory;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Kernel.ValueObjects;
 using ParcelEntity = VietRide.Parcel.Domain.Entities.Parcel;
 
 namespace VietRide.Parcel.UnitTests.Features.PassengerHistory;
@@ -71,12 +72,30 @@ public sealed class GetPassengerHistoryQueryHandlerTests
     }
 
     [Fact]
-    public async Task ParcelBranch_CallsOnlySenderScopedLocalRepository()
+    public async Task ParcelBranch_ReturnsPhotoUrlAndCallsOnlySenderScopedLocalRepository()
     {
+        const string photoUrl = "https://storage.googleapis.com/vietride.appspot.com/parcels/photo.jpg";
         var userId = Guid.NewGuid();
         var bookingClient = Substitute.For<IBookingServiceClient>();
         var parcelRepository = Substitute.For<IParcelRepository>();
         var tripClient = Substitute.For<ITripServiceClient>();
+        var parcel = ParcelEntity.CreatePendingPayment(
+            "VR-PCL-HISTORY",
+            userId,
+            Guid.NewGuid(),
+            "Recipient",
+            PhoneNumber.Normalize("0900000000"),
+            null,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            null,
+            null,
+            "Fragile",
+            photoUrl,
+            ParcelSizeCategory.SMALL,
+            1m,
+            ParcelDeliveryMethod.TERMINAL_PICKUP,
+            Money.FromRaw(50_000));
         parcelRepository.ListSentByUserIdAsync(
                 userId,
                 ParcelStatus.IN_TRANSIT,
@@ -85,7 +104,9 @@ public sealed class GetPassengerHistoryQueryHandlerTests
                 1,
                 20,
                 Arg.Any<CancellationToken>())
-            .Returns(PagedResult<ParcelEntity>.Create([], 1, 20, 0));
+            .Returns(PagedResult<ParcelEntity>.Create([parcel], 1, 20, 1));
+        tripClient.GetTripParcelSnapshotAsync(parcel.TripId, Arg.Any<CancellationToken>())
+            .Returns(new TripSnapshotOutcome(TripSnapshotOutcomeKind.TransportError, null, "unavailable"));
         var handler = new GetPassengerHistoryQueryHandler(
             bookingClient,
             new SentParcelHistoryReader(parcelRepository, tripClient));
@@ -94,7 +115,9 @@ public sealed class GetPassengerHistoryQueryHandlerTests
             new GetPassengerHistoryQuery(userId, "PARCEL", "IN_TRANSIT", null, null, 1, 20),
             CancellationToken.None);
 
-        result.Items.Should().BeEmpty();
+        result.Items.Should().ContainSingle();
+        result.Items[0].Parcel.Should().NotBeNull();
+        result.Items[0].Parcel!.PhotoUrl.Should().Be(photoUrl);
         await bookingClient.DidNotReceive().GetPassengerHistoryAsync(
             Arg.Any<Guid>(),
             Arg.Any<string?>(),

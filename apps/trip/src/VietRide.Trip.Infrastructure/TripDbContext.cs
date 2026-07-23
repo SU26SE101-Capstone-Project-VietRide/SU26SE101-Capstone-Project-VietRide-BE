@@ -23,14 +23,14 @@ public sealed class TripDbContext : VietRideDbContextBase
 
     public static void ConfigurePostgresEnums(NpgsqlDataSourceBuilder builder)
     {
-        builder.MapEnum<TripStatus>("trip_status", PostgresEnumNameTranslator);
-        builder.MapEnum<TripSource>("trip_source", PostgresEnumNameTranslator);
-        builder.MapEnum<TripSeatStatus>("trip_seat_status", PostgresEnumNameTranslator);
-        builder.MapEnum<TripSeatType>("trip_seat_type", PostgresEnumNameTranslator);
-        builder.MapEnum<TripStopStatus>("trip_stop_status", PostgresEnumNameTranslator);
-        builder.MapEnum<TripStopFareSource>("trip_stop_fare_source", PostgresEnumNameTranslator);
-        builder.MapEnum<TripGenerationSkipReason>("trip_generation_skip_reason", PostgresEnumNameTranslator);
-        builder.MapEnum<VehicleStatus>("vehicle_status", PostgresEnumNameTranslator);
+        builder.MapEnum<TripStatus>($"{SchemaName}.trip_status", PostgresEnumNameTranslator);
+        builder.MapEnum<TripSource>($"{SchemaName}.trip_source", PostgresEnumNameTranslator);
+        builder.MapEnum<TripSeatStatus>($"{SchemaName}.trip_seat_status", PostgresEnumNameTranslator);
+        builder.MapEnum<TripSeatType>($"{SchemaName}.trip_seat_type", PostgresEnumNameTranslator);
+        builder.MapEnum<TripStopStatus>($"{SchemaName}.trip_stop_status", PostgresEnumNameTranslator);
+        builder.MapEnum<TripStopFareSource>($"{SchemaName}.trip_stop_fare_source", PostgresEnumNameTranslator);
+        builder.MapEnum<TripGenerationSkipReason>($"{SchemaName}.trip_generation_skip_reason", PostgresEnumNameTranslator);
+        builder.MapEnum<VehicleStatus>($"{SchemaName}.vehicle_status", PostgresEnumNameTranslator);
         builder.MapEnum<IncidentCategory>($"{SchemaName}.incident_category", PostgresEnumNameTranslator);
     }
 

@@ -60,7 +60,8 @@ public sealed class GetAssistantTripParcelsQueryHandler
             parcel.DropoffStopId,
             parcel.SizeCategory.ToString(),
             parcel.EstimatedWeightKg,
-            parcel.Description)).ToList();
+            parcel.Description,
+            parcel.PhotoUrl)).ToList();
 
         return PagedResult<AssistantTripParcelResponse>.Create(
             items,

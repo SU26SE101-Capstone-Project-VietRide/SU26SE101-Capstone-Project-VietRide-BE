@@ -13,6 +13,7 @@ namespace VietRide.Parcel.UnitTests.Features.Parcels.AssistantTripParcels;
 
 public sealed class GetAssistantTripParcelsQueryHandlerTests
 {
+    private const string PhotoUrl = "https://storage.googleapis.com/vietride.appspot.com/parcels/photo.jpg";
     private static readonly Guid TripId = Guid.NewGuid();
     private static readonly Guid UserId = Guid.NewGuid();
     private static readonly Guid OperatorId = Guid.NewGuid();
@@ -41,7 +42,8 @@ public sealed class GetAssistantTripParcelsQueryHandlerTests
             parcel.DropoffStopId,
             parcel.SizeCategory.ToString(),
             parcel.EstimatedWeightKg,
-            parcel.Description));
+            parcel.Description,
+            parcel.PhotoUrl));
         await repository.Received(1).ListByTripAndOperatorAsync(TripId, OperatorId, 1, 20, Arg.Any<CancellationToken>());
     }
 
@@ -87,7 +89,7 @@ public sealed class GetAssistantTripParcelsQueryHandlerTests
             Guid.NewGuid(),
             null,
             "Goi hang nho",
-            null,
+            PhotoUrl,
             ParcelSizeCategory.SMALL,
             2.5m,
             ParcelDeliveryMethod.TERMINAL_PICKUP,

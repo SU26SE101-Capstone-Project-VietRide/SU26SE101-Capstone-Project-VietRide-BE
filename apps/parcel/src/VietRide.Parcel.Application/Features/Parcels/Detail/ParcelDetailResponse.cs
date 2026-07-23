@@ -12,6 +12,7 @@ public sealed record ParcelDetailResponse(
     Guid TripId,
     Guid? DropoffStopId,
     string? Description,
+    string? PhotoUrl,
     string SizeCategory,
     decimal EstimatedWeightKg,
     decimal? ActualWeightKg,

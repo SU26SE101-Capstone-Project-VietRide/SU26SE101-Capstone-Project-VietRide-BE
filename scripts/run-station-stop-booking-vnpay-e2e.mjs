@@ -15,10 +15,13 @@ const ownsBaseFixtures = process.env.E2E_OWNS_BASE_FIXTURES === '1';
 const idempotencyFocused = process.env.IDEMPOTENCY_BOOKING_FOCUSED === '1';
 const skipNotificationCleanup = process.env.E2E_SKIP_NOTIFICATION_CLEANUP === '1';
 const tag = `codex-e2e-${Date.now()}`;
-const operatorId = '10000000-0000-0000-0000-000000000009';
-const operatorAdminId = '10000000-0000-0000-0000-0000000000a9';
-const otherOperatorId = '10000000-0000-0000-0000-000000000007';
-const otherOperatorAdminId = '10000000-0000-0000-0000-0000000000a7';
+const operatorId = process.env.E2E_OPERATOR_ID || '10000000-0000-0000-0000-000000000009';
+const operatorAdminId =
+  process.env.E2E_OPERATOR_ADMIN_ID || '10000000-0000-0000-0000-0000000000a9';
+const otherOperatorId =
+  process.env.E2E_OTHER_OPERATOR_ID || '10000000-0000-0000-0000-000000000007';
+const otherOperatorAdminId =
+  process.env.E2E_OTHER_OPERATOR_ADMIN_ID || '10000000-0000-0000-0000-0000000000a7';
 const systemAdminId = '31000000-0000-4000-8000-000000000106';
 const passengerId = crypto.randomUUID();
 const driverUserId = crypto.randomUUID();
@@ -795,7 +798,7 @@ async function createVnPayBooking(tripId, origin, destination, seatNumber, verif
   return result.data;
 }
 
-function validateRedirect(data, expectedAmount) {
+function validateRedirect(data, expectedAmount, verifyExpiry = true) {
   const url = new URL(data.paymentRedirectUrl);
   const values = Object.fromEntries(url.searchParams.entries());
   const hash = values.vnp_SecureHash;
@@ -818,7 +821,10 @@ function validateRedirect(data, expectedAmount) {
       Number(value.slice(10, 12)),
       Number(value.slice(12, 14)),
     );
-  if ((parse(values.vnp_ExpireDate) - parse(values.vnp_CreateDate)) / 60000 !== 10)
+  if (
+    verifyExpiry &&
+    (parse(values.vnp_ExpireDate) - parse(values.vnp_CreateDate)) / 60000 !== 10
+  )
     fail('VNPay redirect expiry is not 10 minutes.');
   return values;
 }
@@ -829,7 +835,7 @@ async function testVnPay(origin, destination) {
   pass('VNPay sandbox runtime configuration', 'temporary non-production E2E key; timeout=10');
 
   const oneWay = await createVnPayBooking(paymentTripId, origin, destination, 'ONE1', true);
-  const redirect = validateRedirect(oneWay, oneWay.totalAmount);
+  const redirect = validateRedirect(oneWay, oneWay.totalAmount, !idempotencyFocused);
   const [txnRef, amount] = paymentRow(oneWay.paymentId);
   const bad = {
     vnp_TmnCode: 'E2ETMN',

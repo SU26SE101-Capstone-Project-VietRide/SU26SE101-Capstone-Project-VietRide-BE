@@ -187,7 +187,7 @@ public sealed class Parcel : BaseEntity<Guid>
             DropoffStopId = dropoffStopId,
             BookingId = bookingId,
             Description = description,
-            PhotoUrl = photoUrl,
+            PhotoUrl = NormalizeOptional(photoUrl),
             SizeCategory = sizeCategory,
             EstimatedLengthCm = estimatedLengthCm,
             EstimatedWidthCm = estimatedWidthCm,
@@ -306,7 +306,7 @@ public sealed class Parcel : BaseEntity<Guid>
             DropoffStopId = dropoffStopId,
             BookingId = bookingId,
             Description = description,
-            PhotoUrl = photoUrl,
+            PhotoUrl = NormalizeOptional(photoUrl),
             SizeCategory = sizeCategory,
             EstimatedLengthCm = estimatedLengthCm,
             EstimatedWidthCm = estimatedWidthCm,
@@ -334,4 +334,7 @@ public sealed class Parcel : BaseEntity<Guid>
     {
         VoucherUsageId = voucherUsageId;
     }
+
+    private static string? NormalizeOptional(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
