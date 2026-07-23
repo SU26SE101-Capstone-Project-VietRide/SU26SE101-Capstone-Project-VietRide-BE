@@ -61,6 +61,8 @@ public sealed class VehicleTypeRepositoryPersistenceTests
         TripDbContext.ConfigurePostgresEnums(dataSourceBuilder);
         var options = new DbContextOptionsBuilder<TripDbContext>()
             .UseNpgsql(dataSourceBuilder.Build())
+            .ConfigureWarnings(warnings => warnings.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning))
             .Options;
 
         return new TripDbContext(options, new SystemClock());

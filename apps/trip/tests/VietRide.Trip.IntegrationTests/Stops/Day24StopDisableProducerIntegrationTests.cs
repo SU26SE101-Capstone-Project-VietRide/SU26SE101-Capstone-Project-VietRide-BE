@@ -168,6 +168,15 @@ public sealed class Day24StopDisableProducerIntegrationTests
             builder.UseEnvironment("Testing");
             builder.ConfigureTestServices(services =>
             {
+                services.RemoveAll<DbContextOptions<TripDbContext>>();
+                services.AddDbContext<TripDbContext>((provider, options) =>
+                    options.UseNpgsql(
+                            provider.GetRequiredService<Npgsql.NpgsqlDataSource>(),
+                            npgsql => npgsql.MigrationsHistoryTable(
+                                "__ef_migrations_history",
+                                TripDbContext.SchemaName))
+                        .ConfigureWarnings(warnings => warnings.Ignore(
+                            Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning)));
                 services.RemoveAll<IIdentityInternalClient>();
                 services.AddScoped<IIdentityInternalClient, AllowedIdentityClient>();
             });

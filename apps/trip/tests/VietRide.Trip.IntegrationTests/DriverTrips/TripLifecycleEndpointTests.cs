@@ -202,7 +202,7 @@ public sealed class TripLifecycleEndpointTests
 
             await using var assertionDb = CreateDbContext(databaseName);
             var outbox = await assertionDb.OutboxEvents.SingleAsync(item => item.EventType == "trip.trip.started");
-            AssertStartedPayload(outbox.Payload, assigned.Id, now);
+            AssertStartedPayload(outbox.Payload, outbox.Id, assigned.Id, now);
         }
         finally
         {
@@ -419,7 +419,7 @@ public sealed class TripLifecycleEndpointTests
             persisted.Status.Should().Be(TripStatus.IN_PROGRESS);
             persisted.ActualDepartureTime.Should().Be(now);
             var outbox = await assertionDb.OutboxEvents.SingleAsync(item => item.EventType == "trip.trip.started");
-            AssertStartedPayload(outbox.Payload, trip.Id, now);
+            AssertStartedPayload(outbox.Payload, outbox.Id, trip.Id, now);
             (await assertionDb.TripAuditLogs.CountAsync(item => item.TripId == trip.Id)).Should().Be(0);
         }
         finally
@@ -744,12 +744,17 @@ public sealed class TripLifecycleEndpointTests
         root.GetProperty("meta").GetProperty("traceId").GetString().Should().NotBeNullOrWhiteSpace();
     }
 
-    private static void AssertStartedPayload(string payload, Guid tripId, DateTimeOffset now)
+    private static void AssertStartedPayload(
+        string payload,
+        Guid eventId,
+        Guid tripId,
+        DateTimeOffset now)
     {
         using var document = JsonDocument.Parse(payload);
         var root = document.RootElement;
         root.EnumerateObject().Select(item => item.Name).Should().BeEquivalentTo(
-            ["tripId", "actualDepartureTime"]);
+            ["eventId", "tripId", "actualDepartureTime"]);
+        root.GetProperty("eventId").GetGuid().Should().Be(eventId);
         root.GetProperty("tripId").GetGuid().Should().Be(tripId);
         root.GetProperty("actualDepartureTime").GetDateTimeOffset().Should().Be(now);
     }
