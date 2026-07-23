@@ -68,6 +68,7 @@ public sealed class ReturnParcelCommandHandler
                 snapshot.ParcelId,
                 parcel.ActualWeightKg ?? parcel.EstimatedWeightKg,
                 parcel.ActualVolumeM3 ?? parcel.EstimatedVolumeM3,
+                command.IdempotencyKey ?? snapshot.ParcelId,
                 cancellationToken));
 
         var refundAmount = await ParcelRefundAmountCalculator.CalculateRefundAsync(

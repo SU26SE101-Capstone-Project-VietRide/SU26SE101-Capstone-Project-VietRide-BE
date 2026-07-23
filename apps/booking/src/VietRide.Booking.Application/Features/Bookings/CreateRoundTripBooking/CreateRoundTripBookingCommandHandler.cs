@@ -143,7 +143,7 @@ public sealed class CreateRoundTripBookingCommandHandler
             request.Return.TripId,
             returnSeatNumbers,
             request.PassengerUserId,
-            idempotencyKey: $"lock-round-trip-{request.IdempotencyKey}",
+            idempotencyKey: request.IdempotencyKey,
             ttlSeconds: SeatLockTtlSeconds,
             cancellationToken: cancellationToken);
 
@@ -640,7 +640,7 @@ public sealed class CreateRoundTripBookingCommandHandler
                             returnBooking.TotalAmount.Amount,
                             CreateLegPaymentContext(returnBooking, returnVoucherFundingType)),
                     ],
-                    idempotencyKey: $"charge-round-trip-{request.IdempotencyKey}",
+                    idempotencyKey: request.IdempotencyKey,
                     cancellationToken: cancellationToken);
 
                 switch (batchOutcome)
@@ -663,7 +663,7 @@ public sealed class CreateRoundTripBookingCommandHandler
                 userId: request.PassengerUserId,
                 amount: grandTotal.Amount,
                 method: request.PaymentMethod,
-                idempotencyKey: $"charge-round-trip-{request.IdempotencyKey}",
+                idempotencyKey: request.IdempotencyKey,
                 context: CreateGroupPaymentContext(
                     outboundBooking,
                     returnBooking,

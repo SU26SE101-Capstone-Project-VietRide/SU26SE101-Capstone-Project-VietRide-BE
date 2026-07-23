@@ -4,6 +4,7 @@ using Npgsql;
 using Npgsql.NameTranslation;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Persistence;
+using VietRide.Shared.Persistence.Inbox;
 using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Infrastructure;
@@ -100,6 +101,7 @@ public sealed class TripDbContext : VietRideDbContextBase
         modelBuilder.HasPostgresEnum("trip_generation_skip_reason", new[] { "SUBSCRIPTION_LIMIT_EXCEEDED", "VEHICLE_CONFLICT", "DRIVER_CONFLICT", "OTHER" });
         modelBuilder.HasPostgresEnum("vehicle_status", new[] { "ACTIVE", "MAINTENANCE", "OFF_DUTY", "RETIRED" });
         modelBuilder.HasPostgresEnum(SchemaName, "incident_category", new[] { "TRAFFIC_JAM", "VEHICLE_BREAKDOWN", "ACCIDENT", "WEATHER", "OTHER" });
+        modelBuilder.AddVietRideIntegrationInbox();
         base.OnModelCreating(modelBuilder);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(TripDbContext).Assembly);
         RemoveConventionIndex<Route>(modelBuilder, nameof(Route.DestinationStationId));

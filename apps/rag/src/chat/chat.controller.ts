@@ -13,6 +13,7 @@ import { ChatService } from './chat.service';
 import type { RagChatSseEvent } from './chat.types';
 import { CreateChatDto, CreateChatSchema } from './dto/create-chat.dto';
 import { errorEnvelopeSchema } from '../swagger/api-response.schemas';
+import { ApiIdempotencyRequired } from '../swagger/idempotency.swagger';
 
 const RAG_CHAT_REQUEST_MAX_MESSAGE_CHARS = 4_000;
 
@@ -24,6 +25,7 @@ export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
   @Post()
+  @ApiIdempotencyRequired()
   @ApiOperation({ summary: 'Chat with RAG knowledge base using SSE' })
   @ApiBody({
     schema: {

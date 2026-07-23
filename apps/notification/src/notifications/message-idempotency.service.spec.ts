@@ -1,4 +1,5 @@
 import { RedisService } from '@vietride/nest-redis';
+import { NotificationPrismaService } from '../prisma/notification-prisma.service';
 import {
   RABBITMQ_IDEMPOTENCY_TTL_SECONDS,
   RABBITMQ_PROCESSING_LOCK_TTL_SECONDS,
@@ -12,32 +13,33 @@ describe('MessageIdempotencyService', () => {
   let redisGet: jest.Mock;
   let redisSet: jest.Mock;
   let redisDel: jest.Mock;
-  let redisMultiSet: jest.Mock;
-  let redisMultiDel: jest.Mock;
-  let redisMultiExec: jest.Mock;
+  let redisEval: jest.Mock;
+  let prismaFindUnique: jest.Mock;
+  let prismaCreate: jest.Mock;
   let service: MessageIdempotencyService;
 
   beforeEach(() => {
     redisGet = jest.fn();
     redisSet = jest.fn();
     redisDel = jest.fn();
-    redisMultiSet = jest.fn();
-    redisMultiDel = jest.fn();
-    redisMultiExec = jest.fn();
-    const multi = {
-      set: redisMultiSet.mockReturnThis(),
-      del: redisMultiDel.mockReturnThis(),
-      exec: redisMultiExec,
-    };
+    redisEval = jest.fn();
+    prismaFindUnique = jest.fn().mockResolvedValue(null);
+    prismaCreate = jest.fn();
     const redis = {
       getClient: jest.fn(() => ({
         get: redisGet,
         set: redisSet,
         del: redisDel,
-        multi: jest.fn(() => multi),
+        eval: redisEval,
       })),
     } as unknown as RedisService;
-    service = new MessageIdempotencyService(redis);
+    const prisma = {
+      processedMessage: {
+        findUnique: prismaFindUnique,
+        create: prismaCreate,
+      },
+    } as unknown as NotificationPrismaService;
+    service = new MessageIdempotencyService(redis, prisma);
   });
 
   it('returns duplicate when processed key already exists', async () => {
@@ -48,6 +50,15 @@ describe('MessageIdempotencyService', () => {
     expect(redisSet).not.toHaveBeenCalled();
   });
 
+  it('returns durable duplicate and rejects a mismatched payload', async () => {
+    prismaFindUnique.mockResolvedValue({ payloadHash: 'DIFFERENT' });
+
+    await expect(service.begin(ROUTING_KEY, MESSAGE_ID, Buffer.from('payload'))).rejects.toThrow(
+      'MESSAGE_PAYLOAD_MISMATCH',
+    );
+    expect(redisGet).not.toHaveBeenCalled();
+  });
+
   it('acquires processing lock for a new message', async () => {
     redisGet.mockResolvedValue(null);
     redisSet.mockResolvedValue('OK');
@@ -56,7 +67,7 @@ describe('MessageIdempotencyService', () => {
 
     expect(redisSet).toHaveBeenCalledWith(
       `notification:idem:processing:${ROUTING_KEY}:${MESSAGE_ID}`,
-      '1',
+      expect.stringMatching(/^[0-9a-f-]{36}$/),
       'EX',
       RABBITMQ_PROCESSING_LOCK_TTL_SECONDS,
       'NX',
@@ -71,25 +82,44 @@ describe('MessageIdempotencyService', () => {
   });
 
   it('marks processed and clears processing lock after success', async () => {
+    redisGet.mockResolvedValue(null);
+    redisSet.mockResolvedValueOnce('OK').mockResolvedValueOnce('OK');
+    await service.begin(ROUTING_KEY, MESSAGE_ID, Buffer.from('payload'));
     await service.markProcessed(ROUTING_KEY, MESSAGE_ID);
 
-    expect(redisMultiSet).toHaveBeenCalledWith(
+    expect(prismaCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        consumerName: ROUTING_KEY,
+        messageId: MESSAGE_ID,
+        routingKey: ROUTING_KEY,
+        payloadHash: expect.stringMatching(/^[0-9A-F]{64}$/),
+      }),
+    });
+    expect(redisSet).toHaveBeenLastCalledWith(
       `notification:idem:processed:${ROUTING_KEY}:${MESSAGE_ID}`,
       '1',
       'EX',
       RABBITMQ_IDEMPOTENCY_TTL_SECONDS,
     );
-    expect(redisMultiDel).toHaveBeenCalledWith(
+    expect(redisEval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('GET'"),
+      1,
       `notification:idem:processing:${ROUTING_KEY}:${MESSAGE_ID}`,
+      expect.stringMatching(/^[0-9a-f-]{36}$/),
     );
-    expect(redisMultiExec).toHaveBeenCalled();
   });
 
   it('releases processing lock for transient failures', async () => {
+    redisGet.mockResolvedValue(null);
+    redisSet.mockResolvedValue('OK');
+    await service.begin(ROUTING_KEY, MESSAGE_ID, Buffer.from('payload'));
     await service.release(ROUTING_KEY, MESSAGE_ID);
 
-    expect(redisDel).toHaveBeenCalledWith(
+    expect(redisEval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('GET'"),
+      1,
       `notification:idem:processing:${ROUTING_KEY}:${MESSAGE_ID}`,
+      expect.stringMatching(/^[0-9a-f-]{36}$/),
     );
   });
 });

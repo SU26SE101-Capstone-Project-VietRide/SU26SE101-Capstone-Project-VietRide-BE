@@ -32,7 +32,8 @@ public sealed class UpdateParcelStatusCommandHandler
                 command.OperatorId,
                 command.UserId,
                 command.Reason!,
-                IsStatusOverride: true),
+                IsStatusOverride: true,
+                command.IdempotencyKey),
             cancellationToken);
     }
 }

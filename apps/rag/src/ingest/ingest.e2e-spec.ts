@@ -26,7 +26,7 @@ describe('IngestService (e2e)', () => {
       countChunks: jest.fn(),
     };
     const idempotency = {
-      begin: jest.fn().mockResolvedValue('acquired'),
+      begin: jest.fn().mockResolvedValue({ state: 'acquired', ownerToken: 'owner-e2e' }),
       markProcessed: jest.fn(),
       release: jest.fn(),
     };

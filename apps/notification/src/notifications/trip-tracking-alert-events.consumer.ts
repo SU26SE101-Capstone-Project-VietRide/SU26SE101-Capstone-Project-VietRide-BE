@@ -71,7 +71,7 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
       throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
     }
 
-    const processingState = await this.idempotency.begin(routingKey, messageId);
+    const processingState = await this.idempotency.begin(routingKey, messageId, raw.content);
     if (processingState === 'duplicate') {
       this.logger.info(
         { routingKey, messageId, processingState },
@@ -129,6 +129,7 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
     const processingState = await this.idempotency.begin(
       TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY,
       messageId,
+      raw.content,
     );
     if (processingState === 'duplicate') return;
     if (processingState === 'locked') {
@@ -180,6 +181,7 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
     const processingState = await this.idempotency.begin(
       TRIP_INCIDENT_REPORTED_ROUTING_KEY,
       messageId,
+      raw.content,
     );
     if (processingState === 'duplicate') {
       this.logger.info(

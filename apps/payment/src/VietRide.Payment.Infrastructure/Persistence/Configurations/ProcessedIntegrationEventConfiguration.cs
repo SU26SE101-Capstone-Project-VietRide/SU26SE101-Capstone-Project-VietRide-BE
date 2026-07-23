@@ -13,6 +13,7 @@ internal sealed class ProcessedIntegrationEventConfiguration : IEntityTypeConfig
         builder.Property(x => x.Id).HasColumnName("id").HasColumnType("uuid").HasDefaultValueSql("gen_random_uuid()");
         builder.Property(x => x.Consumer).HasColumnName("consumer").HasMaxLength(150).IsRequired();
         builder.Property(x => x.EventId).HasColumnName("event_id").HasColumnType("uuid").IsRequired();
+        builder.Property(x => x.PayloadHash).HasColumnName("payload_hash").HasMaxLength(64).IsFixedLength();
         builder.Property(x => x.ProcessedAt).HasColumnName("processed_at").IsRequired();
         builder.Property(x => x.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()").IsRequired();
         builder.Ignore(x => x.UpdatedAt);

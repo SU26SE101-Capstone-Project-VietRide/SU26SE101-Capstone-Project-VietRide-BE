@@ -11,6 +11,7 @@ using VietRide.Identity.Application.Features.Internal.Operators.IncrementOperato
 using VietRide.Identity.Application.Features.Internal.Operators.QuotaAllocations;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Authentication;
+using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Identity.Api.Controllers;
 
@@ -76,6 +77,7 @@ public sealed class InternalOperatorsController : ControllerBase
     }
 
     [HttpPost("summaries/batch")]
+    [SkipIdempotency("Operator summary batching is a read-only query exposed as POST for bounded request payloads.")]
     [ProducesResponseType(typeof(IReadOnlyList<InternalOperatorSummaryDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]

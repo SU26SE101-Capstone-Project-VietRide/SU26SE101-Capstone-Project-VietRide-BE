@@ -89,7 +89,7 @@ public sealed class ReviewParcelCommandHandler
             }
 
             // Initiate payment after atomic status transition
-            var idempotencyKey = $"parcel:deposit:{command.ParcelId}";
+            var idempotencyKey = command.IdempotencyKey ?? command.ParcelId.ToString("D");
             var outcome = await _paymentClient.ChargeParcelPaymentAsync(
                 "PARCEL",
                 command.ParcelId,

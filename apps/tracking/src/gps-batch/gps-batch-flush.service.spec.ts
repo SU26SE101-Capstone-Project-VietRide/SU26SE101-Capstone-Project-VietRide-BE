@@ -85,6 +85,7 @@ describe('GpsBatchFlushService', () => {
           headingDeg: 90,
         },
       ],
+      skipDuplicates: true,
     });
   });
 
@@ -139,11 +140,28 @@ describe('GpsBatchFlushService', () => {
       data: [
         expect.objectContaining({ recordedAt: new Date('2026-06-03T09:00:00.000Z') }),
       ],
+      skipDuplicates: true,
     });
+
     // Processing key deleted after success
     expect(redisClient.buffers.has(processingKey())).toBe(false);
     // New buffer still intact (not drained while processing existed)
     expect(redisClient.buffers.has(bufferKey())).toBe(true);
+  });
+
+  it('reports only rows inserted after database duplicate filtering', async () => {
+    redisClient.activeTripIds = [FIRST_TRIP_ID];
+    redisClient.buffers.set(bufferKey(), [
+      JSON.stringify(createGpsPayload(FIRST_TRIP_ID, '2026-06-03T10:00:00.000Z')),
+    ]);
+    prisma.gpsTrail.createMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(service.flushOnce()).resolves.toBe(0);
+
+    expect(prisma.gpsTrail.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({ skipDuplicates: true }),
+    );
+    expect(redisClient.buffers.has(processingKey())).toBe(false);
   });
 
   it('recovers when all buffer rows are all-invalid', async () => {

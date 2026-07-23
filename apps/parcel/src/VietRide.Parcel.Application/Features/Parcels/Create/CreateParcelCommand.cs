@@ -23,7 +23,8 @@ public sealed record CreateParcelCommand(
     decimal EstimatedWeightKg,
     string DeliveryMethod,
     string PaymentMethod,
-    string? VoucherCode = null) : IRequest<CreateParcelResponse>
+    string? VoucherCode = null,
+    string? IdempotencyKey = null) : IRequest<CreateParcelResponse>
 {
     public CreateParcelCommand(
         Guid senderUserId,
@@ -61,7 +62,8 @@ public sealed record CreateParcelCommand(
             estimatedWeightKg,
             deliveryMethod,
             paymentMethod,
-            voucherCode)
+            voucherCode,
+            null)
     {
     }
 }

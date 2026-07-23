@@ -66,7 +66,7 @@ public sealed class PaymentEventHandlersTests
         payload.RootElement.GetProperty("amount").GetInt64().Should().Be(100_000);
         payload.RootElement.GetProperty("referenceType").GetString().Should().Be("PARCEL_REFUND");
         payload.RootElement.GetProperty("referenceId").GetGuid().Should().Be(parcelId);
-        payload.RootElement.GetProperty("idempotencyKey").GetString().Should().Be($"parcel:refund:{parcelId:D}");
+        payload.RootElement.GetProperty("idempotencyKey").GetString().Should().Be(parcelId.ToString("D"));
     }
 
     [Fact]

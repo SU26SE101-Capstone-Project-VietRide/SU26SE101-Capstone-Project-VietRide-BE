@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Headers, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { ApiBody, ApiHeader, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ZodValidationPipe } from '@vietride/nest-common';
 import { InternalJwtAuthGuard } from '../auth/internal-jwt-auth.guard';
@@ -10,6 +10,8 @@ import {
   successEnvelopeSchema,
 } from '../swagger/api-response.schemas';
 import { NotificationsService, type EmailDeliveryDto } from './notifications.service';
+import { ApiIdempotencyRequired } from '../swagger/idempotency.swagger';
+import { requireUuidV4IdempotencyKey } from '../swagger/idempotency-key';
 
 @ApiTags('Internal')
 @UseGuards(InternalJwtAuthGuard)
@@ -18,6 +20,7 @@ export class InternalEmailsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
   @Post()
+  @ApiIdempotencyRequired()
   @HttpCode(202)
   @ApiOperation({
     summary: 'Enqueue an internal email delivery',
@@ -51,7 +54,12 @@ export class InternalEmailsController {
   })
   async enqueueEmail(
     @Body(new ZodValidationPipe(CreateEmailSendSchema)) dto: CreateEmailSendDto,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
   ): Promise<EmailDeliveryDto> {
-    return this.notificationsService.enqueueEmail(dto);
+    const key = requireUuidV4IdempotencyKey(idempotencyKey);
+    return this.notificationsService.enqueueEmail({
+      ...dto,
+      dedupeKey: dto.dedupeKey ?? `http-email:${key}`,
+    });
   }
 }

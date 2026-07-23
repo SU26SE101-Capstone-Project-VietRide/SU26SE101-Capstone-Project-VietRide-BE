@@ -21,6 +21,25 @@ public sealed class IdempotencyMiddlewareTests
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     [Fact]
+    public async Task RequireAllMutation_UnknownRoute_BypassesIdempotencyAndPreserves404Pipeline()
+    {
+        var (mux, db) = FakeRedis();
+        var invoked = 0;
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Post;
+        context.Response.Body = new MemoryStream();
+
+        await Create(_ =>
+        {
+            invoked++;
+            return Task.CompletedTask;
+        }, mux, requireAllMutations: true).InvokeAsync(context);
+
+        invoked.Should().Be(1);
+        await db.DidNotReceive().KeyExistsAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
+    }
+
+    [Fact]
     public async Task MissingRequiredHeader_ReturnsExactRequiredError()
     {
         var (mux, db) = FakeRedis();
@@ -494,6 +513,13 @@ public sealed class IdempotencyMiddlewareTests
                 {
                     AllowRequestBody = allowRequestBody,
                 }),
+                "test"));
+        }
+        else
+        {
+            context.SetEndpoint(new Endpoint(
+                _ => Task.CompletedTask,
+                new EndpointMetadataCollection(),
                 "test"));
         }
 

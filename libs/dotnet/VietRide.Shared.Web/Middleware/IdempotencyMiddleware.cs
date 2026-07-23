@@ -80,6 +80,12 @@ public sealed class IdempotencyMiddleware
         }
 
         var endpointMetadata = context.GetEndpoint()?.Metadata;
+        if (endpointMetadata is null)
+        {
+            await _next(context);
+            return;
+        }
+
         if (endpointMetadata?.GetMetadata<SkipIdempotencyAttribute>() is not null)
         {
             await _next(context);

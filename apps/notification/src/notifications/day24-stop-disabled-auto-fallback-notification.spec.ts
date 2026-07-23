@@ -73,11 +73,13 @@ describe('Day 24 fallback notification:', () => {
       1,
       BOOKING_STOP_DISABLED_AUTO_FALLBACK_APPLIED_ROUTING_KEY,
       EVENT_ID,
+      undefined,
     );
     expect(idempotency.begin).toHaveBeenNthCalledWith(
       2,
       BOOKING_STOP_DISABLED_AUTO_FALLBACK_APPLIED_ROUTING_KEY,
       EVENT_ID,
+      undefined,
     );
     expect(notificationsService.createNotification).toHaveBeenCalledTimes(1);
     expect(notificationsService.createNotification).toHaveBeenCalledWith(

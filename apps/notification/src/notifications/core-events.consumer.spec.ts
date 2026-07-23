@@ -79,7 +79,11 @@ describe('CoreEventsConsumer', () => {
       createMessage(MESSAGE_ID),
     );
 
-    expect(idempotency.begin).toHaveBeenCalledWith(BOOKING_CONFIRMED_ROUTING_KEY, MESSAGE_ID);
+    expect(idempotency.begin).toHaveBeenCalledWith(
+      BOOKING_CONFIRMED_ROUTING_KEY,
+      MESSAGE_ID,
+      undefined,
+    );
     expect(notificationsService.createNotification).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: USER_ID,

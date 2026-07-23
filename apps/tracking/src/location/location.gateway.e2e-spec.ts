@@ -15,8 +15,7 @@ import { TripDelayService, type TripDelayEtaUpdate } from '../trip-delay/trip-de
 import { LocationGateway } from './location.gateway';
 import {
   TRACKING_SOCKET_PATH,
-  trackingGpsBufferKey,
-  trackingLatestKey,
+  trackingGpsIdempotencyKey,
 } from './location.constants';
 import { LocationService } from './location.service';
 
@@ -43,21 +42,12 @@ interface GpsUpdateAck {
   message?: string;
 }
 
-interface RedisMultiMock {
-  set: jest.MockedFunction<
-    (key: string, value: string, mode: string, ttl: number) => RedisMultiMock
-  >;
-  rpush: jest.MockedFunction<(key: string, value: string) => RedisMultiMock>;
-  sadd: jest.MockedFunction<(key: string, value: string) => RedisMultiMock>;
-  exec: jest.MockedFunction<() => Promise<Array<[Error | null, unknown]> | null>>;
-}
-
 describe('LocationGateway identity-backed realtime (e2e)', () => {
   let app: INestApplication;
   let port: number;
   let privateKey: KeyLike;
   let publicKeyPem: string;
-  let redisMulti: RedisMultiMock;
+  let redisEval: jest.MockedFunction<(...args: unknown[]) => Promise<number>>;
   let etaHandleGpsUpdate: jest.MockedFunction<(event: unknown) => Promise<EtaUpdateEvent | null>>;
   let approachingHandleEtaUpdate: jest.MockedFunction<(event: EtaUpdateEvent) => Promise<number>>;
   let offRouteHandleGpsUpdate: jest.MockedFunction<(event: unknown) => Promise<unknown>>;
@@ -70,7 +60,7 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     privateKey = generated.privateKey;
     publicKeyPem = await exportSPKI(generated.publicKey);
 
-    redisMulti = createRedisMultiMock();
+    redisEval = jest.fn(async () => 1);
     etaHandleGpsUpdate = jest.fn(async (event: unknown) => {
       void event;
       return null;
@@ -89,7 +79,7 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     }));
     const redisService = {
       getClient: jest.fn(() => ({
-        multi: jest.fn(() => redisMulti),
+        eval: redisEval,
       })),
     };
 
@@ -145,7 +135,8 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
   });
 
   beforeEach(() => {
-    resetRedisMultiMock(redisMulti);
+    redisEval.mockClear();
+    redisEval.mockResolvedValue(1);
     etaHandleGpsUpdate.mockClear();
     etaHandleGpsUpdate.mockResolvedValue(null);
     approachingHandleEtaUpdate.mockClear();
@@ -201,7 +192,7 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     const ack = await emitWithAck<GpsUpdateAck>(socket, 'gps:update', createGpsPayload());
 
     expect(ack).toEqual({ success: false, error: 'ACCESS_DENIED' });
-    expect(redisMulti.exec).not.toHaveBeenCalled();
+    expect(redisEval).not.toHaveBeenCalled();
     socket.disconnect();
   });
 
@@ -213,18 +204,19 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     const ack = await emitWithAck<GpsUpdateAck>(socket, 'gps:update', payload);
 
     expect(ack).toEqual({ success: true });
-    expect(redisMulti.set).toHaveBeenCalledWith(
-      trackingLatestKey(TEST_TRIP_ID),
+    expect(redisEval).toHaveBeenCalledWith(
       expect.any(String),
-      'EX',
-      expect.any(Number),
-    );
-    expect(redisMulti.rpush).toHaveBeenCalledWith(
-      trackingGpsBufferKey(TEST_TRIP_ID),
+      4,
+      trackingGpsIdempotencyKey(TEST_TRIP_ID, payload.recordedAt as string),
       expect.any(String),
+      expect.any(String),
+      'tracking:active_trips',
+      expect.stringMatching(/^[a-f0-9]{64}$/),
+      expect.any(String),
+      '86400',
+      '300',
+      TEST_TRIP_ID,
     );
-    expect(redisMulti.sadd).toHaveBeenCalledWith('tracking:active_trips', TEST_TRIP_ID);
-    expect(redisMulti.exec).toHaveBeenCalledTimes(1);
     await waitForCondition(() => offRouteHandleGpsUpdate.mock.calls.length > 0);
     await waitForCondition(() => etaHandleGpsUpdate.mock.calls.length > 0);
     expect(offRouteHandleGpsUpdate).toHaveBeenCalledWith(
@@ -263,11 +255,43 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
   it('rejects gps:update when Redis write fails', async () => {
     const token = await signIdentityToken('DRIVER', TEST_OPERATOR_ID);
     const socket = await connectSocket(token);
-    redisMulti.exec.mockRejectedValueOnce(new Error('REDIS_DOWN'));
+    redisEval.mockRejectedValueOnce(new Error('REDIS_DOWN'));
 
     const ack = await emitWithAck<GpsUpdateAck>(socket, 'gps:update', createGpsPayload());
 
     expect(ack).toEqual({ success: false, error: 'TRACKING_UNAVAILABLE' });
+    expect(offRouteHandleGpsUpdate).not.toHaveBeenCalled();
+    expect(etaHandleGpsUpdate).not.toHaveBeenCalled();
+    socket.disconnect();
+  });
+
+  it('does not append, broadcast, or detect a duplicate gps:update', async () => {
+    const token = await signIdentityToken('DRIVER', TEST_OPERATOR_ID);
+    const socket = await connectSocket(token);
+    const payload = createGpsPayload();
+    redisEval.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+
+    const first = await emitWithAck<GpsUpdateAck>(socket, 'gps:update', payload);
+    await waitForCondition(() => offRouteHandleGpsUpdate.mock.calls.length === 1);
+    const duplicate = await emitWithAck<GpsUpdateAck>(socket, 'gps:update', payload);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(first).toEqual({ success: true });
+    expect(duplicate).toEqual({ success: true });
+    expect(redisEval).toHaveBeenCalledTimes(2);
+    expect(offRouteHandleGpsUpdate).toHaveBeenCalledTimes(1);
+    expect(etaHandleGpsUpdate).toHaveBeenCalledTimes(1);
+    socket.disconnect();
+  });
+
+  it('rejects the same gps operation identity with a different payload', async () => {
+    const token = await signIdentityToken('DRIVER', TEST_OPERATOR_ID);
+    const socket = await connectSocket(token);
+    redisEval.mockResolvedValueOnce(-1);
+
+    const ack = await emitWithAck<GpsUpdateAck>(socket, 'gps:update', createGpsPayload());
+
+    expect(ack).toEqual({ success: false, error: 'IDEMPOTENCY_KEY_REUSED' });
     expect(offRouteHandleGpsUpdate).not.toHaveBeenCalled();
     expect(etaHandleGpsUpdate).not.toHaveBeenCalled();
     socket.disconnect();
@@ -421,45 +445,6 @@ function createGpsPayload(): Record<string, unknown> {
     headingDeg: 90,
     recordedAt: new Date('2026-06-03T10:00:00.000Z').toISOString(),
   };
-}
-
-function createRedisMultiMock(): RedisMultiMock {
-  const multi = {} as RedisMultiMock;
-  multi.set = jest.fn((key: string, value: string, mode: string, ttl: number) => {
-    void key;
-    void value;
-    void mode;
-    void ttl;
-    return multi;
-  });
-  multi.rpush = jest.fn((key: string, value: string) => {
-    void key;
-    void value;
-    return multi;
-  });
-  multi.sadd = jest.fn((key: string, value: string) => {
-    void key;
-    void value;
-    return multi;
-  });
-  multi.exec = jest.fn(async () => createRedisExecResult());
-  return multi;
-}
-
-function resetRedisMultiMock(multi: RedisMultiMock): void {
-  multi.set.mockClear();
-  multi.rpush.mockClear();
-  multi.sadd.mockClear();
-  multi.exec.mockClear();
-  multi.exec.mockResolvedValue(createRedisExecResult());
-}
-
-function createRedisExecResult(): Array<[Error | null, unknown]> {
-  return [
-    [null, 'OK'],
-    [null, 1],
-    [null, 1],
-  ];
 }
 
 async function waitForCondition(condition: () => boolean): Promise<void> {

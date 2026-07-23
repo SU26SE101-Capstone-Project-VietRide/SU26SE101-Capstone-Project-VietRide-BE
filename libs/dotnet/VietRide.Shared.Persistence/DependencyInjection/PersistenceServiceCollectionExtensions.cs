@@ -3,8 +3,10 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Npgsql.NameTranslation;
+using VietRide.Shared.Application.Inbox;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Shared.Persistence.Inbox;
 using VietRide.Shared.Persistence.Outbox;
 using VietRide.Shared.Persistence.UnitOfWork;
 
@@ -14,6 +16,14 @@ namespace VietRide.Shared.Persistence.DependencyInjection;
 /// Wires Npgsql provider + Npgsql retry policy + outbox store.
 public static class PersistenceServiceCollectionExtensions
 {
+    public static IServiceCollection AddVietRideIntegrationInbox<TContext>(
+        this IServiceCollection services)
+        where TContext : VietRideDbContextBase
+    {
+        services.AddScoped<IIntegrationEventInbox, EfIntegrationEventInbox<TContext>>();
+        return services;
+    }
+
     public static IServiceCollection AddVietRideDbContext<TContext>(
         this IServiceCollection services,
         IConfiguration configuration,

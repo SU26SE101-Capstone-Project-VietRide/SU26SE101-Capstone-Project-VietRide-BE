@@ -108,24 +108,19 @@ public sealed class ReweighParcelCommandHandler
                 "TRIP_SERVICE_UNAVAILABLE",
                 capacityBefore.ErrorMessage ?? "Trip cargo capacity is unavailable.");
 
+        var allowCapacityOverflow = IsAutoOverflowAllowed(
+            capacityBefore.Capacity,
+            parcel,
+            actualCargo,
+            autoOverflowPercent);
         var capacityOutcome = await _tripClient.RemeasureCargoAsync(
             parcel.TripId,
             parcel.Id,
             actualCargo.WeightKg,
             actualCargo.VolumeM3,
-            allowCapacityOverflow: false,
+            allowCapacityOverflow,
+            Guid.TryParse(command.IdempotencyKey, out var operationId) ? operationId : parcel.Id,
             cancellationToken);
-        if (capacityOutcome.Kind == TripCargoOutcomeKind.CapacityExceeded
-            && IsAutoOverflowAllowed(capacityBefore.Capacity, parcel, actualCargo, autoOverflowPercent))
-        {
-            capacityOutcome = await _tripClient.RemeasureCargoAsync(
-                parcel.TripId,
-                parcel.Id,
-                actualCargo.WeightKg,
-                actualCargo.VolumeM3,
-                allowCapacityOverflow: true,
-                cancellationToken);
-        }
 
         if (capacityOutcome.Kind != TripCargoOutcomeKind.Success)
         {
@@ -268,7 +263,7 @@ public sealed class ReweighParcelCommandHandler
             }
 
             // Initiate additional payment
-            var idempotencyKey = $"parcel:additional:{command.ParcelId}";
+            var idempotencyKey = command.IdempotencyKey ?? command.ParcelId.ToString("D");
             var outcome = await _paymentClient.ChargeParcelPaymentAsync(
                 "PARCEL_ADDITIONAL",
                 command.ParcelId,

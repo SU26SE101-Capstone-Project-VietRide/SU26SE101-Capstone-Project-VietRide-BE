@@ -51,7 +51,7 @@ public sealed class OperatorUsersEndpointsTests : IClassFixture<AuthWebApplicati
     [Fact]
     public async Task ResendInitialPassword_Anonymous_Returns401()
     {
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
 
         var response = await client.PostAsync($"/v1/operator/users/{TargetUserId}/resend-initial-password", null);
 
@@ -155,7 +155,7 @@ public sealed class OperatorUsersEndpointsTests : IClassFixture<AuthWebApplicati
     [Fact]
     public async Task CreateOperatorUser_InvalidRole_Returns422ValidationErrorEnvelope()
     {
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
         using var request = CreateCreateRequest(
             UserRole.OPERATOR_ADMIN.ToString(),
             OperatorId,
@@ -192,7 +192,7 @@ public sealed class OperatorUsersEndpointsTests : IClassFixture<AuthWebApplicati
         {
             await dbFactory.InitializeAsync();
             await dbFactory.SeedCreateOperatorUserAsync(OperatorId, OperatorAdminId);
-            using var client = dbFactory.CreateClient();
+            using var client = dbFactory.CreateIdempotentClient();
             using var request = CreateCreateRequest(
                 UserRole.OPERATOR_ADMIN.ToString(),
                 OperatorId,
@@ -292,7 +292,7 @@ public sealed class OperatorUsersEndpointsTests : IClassFixture<AuthWebApplicati
         {
             await dbFactory.InitializeAsync();
             await dbFactory.SeedCreateOperatorUserAsync(OperatorId, OperatorAdminId, currentDrivers: 4);
-            using var client = dbFactory.CreateClient();
+            using var client = dbFactory.CreateIdempotentClient();
             using var firstRequest = CreateCreateRequest(
                 UserRole.OPERATOR_ADMIN.ToString(),
                 OperatorId,
@@ -344,7 +344,7 @@ public sealed class OperatorUsersEndpointsTests : IClassFixture<AuthWebApplicati
             await dbFactory.InitializeAsync();
             await dbFactory.SeedResendHappyPathAsync(OperatorId, TargetUserId, targetEmail, oldCode);
 
-            using var client = dbFactory.CreateClient();
+            using var client = dbFactory.CreateIdempotentClient();
             using var request = CreateRequest(TargetUserId, UserRole.OPERATOR_ADMIN.ToString(), OperatorId);
             var beforeSend = DateTimeOffset.UtcNow;
 
@@ -412,7 +412,7 @@ public sealed class OperatorUsersEndpointsTests : IClassFixture<AuthWebApplicati
             await dbFactory.InitializeAsync();
             await dbFactory.SeedResendHappyPathAsync(OperatorId, TargetUserId, targetEmail, oldCode, status);
 
-            using var client = dbFactory.CreateClient();
+            using var client = dbFactory.CreateIdempotentClient();
             using var request = CreateRequest(TargetUserId, UserRole.OPERATOR_ADMIN.ToString(), OperatorId);
 
             var response = await client.SendAsync(request);
@@ -443,7 +443,7 @@ public sealed class OperatorUsersEndpointsTests : IClassFixture<AuthWebApplicati
         try
         {
             await dbFactory.InitializeAsync();
-            using var client = dbFactory.CreateClient();
+            using var client = dbFactory.CreateIdempotentClient();
             using var request = CreateRequest(TargetUserId, role: null, OperatorId);
 
             var response = await client.SendAsync(request);
@@ -533,7 +533,7 @@ public sealed class OperatorUsersEndpointsTests : IClassFixture<AuthWebApplicati
                 services.RemoveAll<IMediator>();
                 services.AddSingleton(sender);
             });
-        }).CreateClient();
+        }).CreateIdempotentClient();
     }
 
     private static HttpRequestMessage CreateRequest(Guid userId, string? role, Guid? operatorId)

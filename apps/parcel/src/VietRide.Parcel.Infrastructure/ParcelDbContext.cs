@@ -5,6 +5,7 @@ using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Persistence;
+using VietRide.Shared.Persistence.Inbox;
 using ParcelEntity = VietRide.Parcel.Domain.Entities.Parcel;
 
 namespace VietRide.Parcel.Infrastructure;
@@ -43,6 +44,7 @@ public sealed class ParcelDbContext : VietRideDbContextBase
         modelBuilder.HasPostgresEnum(SchemaName, "parcel_delivery_method", Enum.GetNames<ParcelDeliveryMethod>());
 
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(ParcelDbContext).Assembly);
+        modelBuilder.AddVietRideIntegrationInbox();
 
         base.OnModelCreating(modelBuilder);
     }

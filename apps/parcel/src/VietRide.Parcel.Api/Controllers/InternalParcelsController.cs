@@ -38,7 +38,17 @@ public sealed class InternalParcelsController : ControllerBase
         CancellationToken cancellationToken)
     {
         var result = await _mediator.Send(
-            new MarkParcelLoadedCommand(parcelId, request.TripId, request.ParcelCode, request.ConfirmedByUserId, null),
+            new MarkParcelLoadedCommand(
+                parcelId,
+                request.TripId,
+                request.ParcelCode,
+                request.ConfirmedByUserId,
+                null,
+                Guid.TryParse(
+                    Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString(),
+                    out var operationId)
+                    ? operationId
+                    : parcelId),
             cancellationToken);
 
         return Ok(result);

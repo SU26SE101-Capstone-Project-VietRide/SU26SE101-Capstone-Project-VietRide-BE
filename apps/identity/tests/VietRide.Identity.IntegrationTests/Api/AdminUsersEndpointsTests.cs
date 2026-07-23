@@ -108,7 +108,7 @@ public sealed class AdminUsersEndpointsTests : IClassFixture<AuthWebApplicationF
                 await db.SaveChangesAsync();
             }
 
-            using var client = dbFactory.CreateClient();
+            using var client = dbFactory.CreateIdempotentClient();
             using var activeRequest = CreateSystemAdminRequest(
                 "/v1/admin/users?search=1234&role=PASSENGER&status=ACTIVE&includeDeleted=true&page=1&pageSize=1&sortBy=email&sortDir=asc");
             var activeResponse = await client.SendAsync(activeRequest);
@@ -202,7 +202,7 @@ public sealed class AdminUsersEndpointsTests : IClassFixture<AuthWebApplicationF
         {
             await dbFactory.InitializeAsync();
 
-            using var client = dbFactory.CreateClient();
+            using var client = dbFactory.CreateIdempotentClient();
             using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/admin/users")
             {
                 Content = JsonContent.Create(new
@@ -287,7 +287,7 @@ public sealed class AdminUsersEndpointsTests : IClassFixture<AuthWebApplicationF
                 services.RemoveAll<IMediator>();
                 services.AddSingleton(sender);
             });
-        }).CreateClient();
+        }).CreateIdempotentClient();
     }
 
     private static void AssertSuccessEnvelope(JsonDocument doc, int expectedStatusCode)

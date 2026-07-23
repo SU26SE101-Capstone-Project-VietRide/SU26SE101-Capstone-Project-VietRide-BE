@@ -132,7 +132,8 @@ public sealed class BookingsController : ControllerBase
                 : new ShuttlePickupCommand(
                     request.ShuttlePickup.Address,
                     request.ShuttlePickup.Latitude,
-                    request.ShuttlePickup.Longitude));
+                    request.ShuttlePickup.Longitude),
+            IdempotencyKey: GetRequiredIdempotencyKey());
 
         var result = await _sender.Send(command, ct);
 

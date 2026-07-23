@@ -132,6 +132,8 @@ public sealed class TripPersistenceModelTests
         var connectionString = ResolveConnectionString("vietride_trip_model_tests");
         var options = new DbContextOptionsBuilder<TripDbContext>()
             .UseNpgsql(connectionString)
+            .ConfigureWarnings(warnings => warnings.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning))
             .Options;
 
         return new TripDbContext(options, new SystemClock());

@@ -53,6 +53,7 @@ export class Day24NoShowEventsConsumer implements OnModuleInit {
     const processingState = await this.idempotency.begin(
       BOOKING_PASSENGER_NO_SHOW_MARKED_ROUTING_KEY,
       eventId,
+      raw.content,
     );
     if (processingState === 'duplicate') return;
     if (processingState === 'locked') {

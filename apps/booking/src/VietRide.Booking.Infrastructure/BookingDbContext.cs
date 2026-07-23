@@ -5,6 +5,7 @@ using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Persistence;
+using VietRide.Shared.Persistence.Inbox;
 using BookingEntity = VietRide.Booking.Domain.Entities.Booking;
 
 namespace VietRide.Booking.Infrastructure;
@@ -64,6 +65,7 @@ public sealed class BookingDbContext : VietRideDbContextBase
         // Apply all IEntityTypeConfiguration<T> defined in this assembly BEFORE base
         // (base applies snake_case naming + OutboxEvent mapping).
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(BookingDbContext).Assembly);
+        modelBuilder.AddVietRideIntegrationInbox();
 
         base.OnModelCreating(modelBuilder);
     }

@@ -134,7 +134,7 @@ public sealed class InternalPaymentsController : ControllerBase
     }
 
     [HttpGet("subscription-status")]
-    [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<SubscriptionPaymentStatusDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(IReadOnlyList<SubscriptionPaymentStatusDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IReadOnlyList<SubscriptionPaymentStatusDto>>> GetSubscriptionStatusesAsync(
         [FromQuery] Guid[] upgradeAttemptId,
         CancellationToken cancellationToken)

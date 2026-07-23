@@ -23,7 +23,10 @@ export class EmailSendQueue implements OnModuleDestroy {
       prefix: BULLMQ_QUEUE_PREFIX,
       defaultJobOptions: {
         attempts: EMAIL_SEND_ATTEMPTS,
-        removeOnComplete: true,
+        removeOnComplete: {
+          age: 86_400,
+          count: 10_000,
+        },
         removeOnFail: { age: 7 * 24 * 60 * 60, count: 1000 },
       },
     });

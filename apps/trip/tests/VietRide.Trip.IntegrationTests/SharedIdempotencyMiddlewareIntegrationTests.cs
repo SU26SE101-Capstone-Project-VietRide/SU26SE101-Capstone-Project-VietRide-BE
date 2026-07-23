@@ -372,6 +372,13 @@ public sealed class SharedIdempotencyMiddlewareIntegrationTests : IAsyncLifetime
                 }),
                 "test"));
         }
+        else
+        {
+            context.SetEndpoint(new Endpoint(
+                _ => Task.CompletedTask,
+                new EndpointMetadataCollection(),
+                "test"));
+        }
 
         if (key is not null)
         {

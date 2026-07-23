@@ -29,6 +29,7 @@ builder.Services.AddVietRideSharedWeb(builder.Configuration, ServiceName);
 builder.Services.AddVietRideDbContext<BookingDbContext>(
     builder.Configuration,
     configureDataSource: BookingDbContext.ConfigurePostgresTypes);
+builder.Services.AddVietRideIntegrationInbox<BookingDbContext>();
 builder.Services.AddVietRideMediatRBehaviors(
     handlerAssemblies: [typeof(ApplicationAssemblyMarker).Assembly]);
 var registerMessaging = !builder.Environment.IsEnvironment("Testing");

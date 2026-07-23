@@ -328,6 +328,10 @@ function idemHash(key) {
 }
 
 async function publish(routingKey, payload, transportId = randomUUID()) {
+  return publishRaw(routingKey, JSON.stringify(payload), transportId);
+}
+
+async function publishRaw(routingKey, payloadJson, transportId = randomUUID()) {
   const connection = await amqp.connect({
     hostname: '127.0.0.1',
     port: useDev ? Number(process.env.RABBITMQ_PORT || 5672) : 55692,
@@ -337,7 +341,7 @@ async function publish(routingKey, payload, transportId = randomUUID()) {
   try {
     const channel = await connection.createConfirmChannel();
     await channel.assertExchange('vietride.events', 'topic', { durable: true });
-    channel.publish('vietride.events', routingKey, Buffer.from(JSON.stringify(payload)), {
+    channel.publish('vietride.events', routingKey, Buffer.from(payloadJson), {
       persistent: true,
       contentType: 'application/json',
       messageId: transportId,
@@ -1081,11 +1085,9 @@ async function runAcceptance() {
   );
 
   await scenario(6, 'Consumer dedupe uses payload eventId, not transport message ID', async () => {
-    const payload = JSON.parse(
-      scalar(
-        tripSql(
-          `SELECT payload::text FROM outbox_events WHERE event_type='trip.incident.reported' AND payload->>'incidentId'='${state.incident.incidentId}' LIMIT 1`,
-        ),
+    const payloadJson = scalar(
+      tripSql(
+        `SELECT payload::text FROM outbox_events WHERE event_type='trip.incident.reported' AND payload->>'incidentId'='${state.incident.incidentId}' LIMIT 1`,
       ),
     );
     const before = count(
@@ -1093,7 +1095,7 @@ async function runAcceptance() {
         `SELECT count(*) FROM notifications WHERE type='INCIDENT_REPORTED' AND data->>'incidentId'='${state.incident.incidentId}'`,
       ),
     );
-    await publish('trip.incident.reported', payload, randomUUID());
+    await publishRaw('trip.incident.reported', payloadJson, randomUUID());
     await new Promise((resolve) => setTimeout(resolve, 2_000));
     assert(
       count(
@@ -1187,8 +1189,7 @@ async function runAcceptance() {
           tripSql(
             `SELECT status FROM trip_stops WHERE trip_id='${ids.stopTrip}' AND stop_id='${ids.stopTripStop}'`,
           ),
-        ) ===
-          'ARRIVED',
+        ) === 'ARRIVED',
         'TripStop did not become ARRIVED',
       );
       assert(
@@ -1300,11 +1301,10 @@ async function runAcceptance() {
           token: state.tokens.driver,
           key: idemKey('stop-race-a'),
         }),
-        api(
-          'POST',
-          `/v1/driver/trips/${ids.stopRaceTrip}/stops/${ids.stopRaceTripStop}/arrive`,
-          { token: state.tokens.assistant, key: idemKey('stop-race-b') },
-        ),
+        api('POST', `/v1/driver/trips/${ids.stopRaceTrip}/stops/${ids.stopRaceTripStop}/arrive`, {
+          token: state.tokens.assistant,
+          key: idemKey('stop-race-b'),
+        }),
       ]);
       assert(
         race.filter((response) => response.status === 200).length === 1 &&
@@ -1334,11 +1334,10 @@ async function runAcceptance() {
         `/v1/driver/trips/${ids.destinationTrip}/destination/arrive`,
         { token: state.tokens.driver, key: idemKey('destination-normal') },
       );
-      const express = await api(
-        'POST',
-        `/v1/driver/trips/${ids.expressTrip}/destination/arrive`,
-        { token: state.tokens.assistant, key: idemKey('destination-express') },
-      );
+      const express = await api('POST', `/v1/driver/trips/${ids.expressTrip}/destination/arrive`, {
+        token: state.tokens.assistant,
+        key: idemKey('destination-express'),
+      });
       assert(
         normal.status === 200 && express.status === 200,
         `Destination arrival failed: ${JSON.stringify({ normal, express })}`,

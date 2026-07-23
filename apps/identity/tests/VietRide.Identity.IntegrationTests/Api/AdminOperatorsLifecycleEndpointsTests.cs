@@ -42,7 +42,7 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
         await _factory.SeedOperatorAsync("Alpha Transit", "BRN-ALPHA", "TAX-ALPHA", OperatorRegistrationStatus.APPROVED);
         await _factory.SeedOperatorAsync("Zebra Transit", "BRN-ZEBRA", "TAX-ZEBRA", OperatorRegistrationStatus.APPROVED);
         await _factory.SeedOperatorAsync("Beta Pending", "BRN-BETA", "TAX-BETA", OperatorRegistrationStatus.PENDING);
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
         using var request = AuthorizedGet("/v1/admin/operators?status=APPROVED&search=BRN-&sortBy=name&sortDir=asc&page=1&pageSize=1");
 
         var response = await client.SendAsync(request);
@@ -68,7 +68,7 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
     public async Task List_Anonymous_Returns401()
     {
         await _factory.ResetAsync();
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
 
         var response = await client.GetAsync("/v1/admin/operators?page=1&pageSize=20");
 
@@ -79,7 +79,7 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
     public async Task List_NonSystemAdmin_Returns403()
     {
         await _factory.ResetAsync();
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
         using var request = AuthorizedGet("/v1/admin/operators", UserRole.OPERATOR_ADMIN.ToString());
 
         var response = await client.SendAsync(request);
@@ -92,7 +92,7 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
     {
         await _factory.ResetAsync();
         await _factory.SeedSystemAdminAsync(SystemAdminId);
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
         using var request = AuthorizedGet("/v1/admin/operators?status=1");
 
         var response = await client.SendAsync(request);
@@ -108,7 +108,7 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
         await _factory.ResetAsync();
         await _factory.SeedSystemAdminAsync(SystemAdminId);
         var operatorId = await _factory.SeedPendingOperatorAsync();
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
         using var request = AuthorizedPost($"/v1/admin/operators/{operatorId}/approve", new { });
 
         var response = await client.SendAsync(request);
@@ -151,7 +151,7 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
         await _factory.ResetAsync();
         await _factory.SeedSystemAdminAsync(SystemAdminId);
         var operatorId = await _factory.SeedApprovedOperatorAsync(SystemAdminId);
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
         using var request = AuthorizedPost($"/v1/admin/operators/{operatorId}/approve", new { });
 
         var response = await client.SendAsync(request);
@@ -168,7 +168,7 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
         await _factory.ResetAsync();
         await _factory.SeedSystemAdminAsync(SystemAdminId);
         var operatorId = await _factory.SeedPendingOperatorAsync();
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
         using var request = AuthorizedPost($"/v1/admin/operators/{operatorId}/reject", new RejectOperatorRequest("Business registration documents are invalid."));
 
         var response = await client.SendAsync(request);
@@ -199,7 +199,7 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
         await _factory.ResetAsync();
         await _factory.SeedSystemAdminAsync(SystemAdminId);
         var operatorId = await _factory.SeedApprovedOperatorAsync(SystemAdminId);
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
         using var request = AuthorizedPost($"/v1/admin/operators/{operatorId}/reject", new RejectOperatorRequest("Invalid documents."));
 
         var response = await client.SendAsync(request);
@@ -216,7 +216,7 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
         await _factory.ResetAsync();
         await _factory.SeedSystemAdminAsync(SystemAdminId);
         var operatorId = await _factory.SeedApprovedOperatorAsync(SystemAdminId);
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
         using var request = AuthorizedPost($"/v1/admin/operators/{operatorId}/suspend", new SuspendOperatorRequest("Policy violation"));
 
         var response = await client.SendAsync(request);
@@ -240,11 +240,12 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
         outboxEvent.EventType.Should().Be("identity.operator.suspended");
         outboxEvent.Status.Should().Be(OutboxEventStatus.PENDING);
         using var suspendedPayload = JsonDocument.Parse(outboxEvent.Payload);
+        suspendedPayload.RootElement.GetProperty("eventId").GetGuid().Should().Be(outboxEvent.Id);
         suspendedPayload.RootElement.GetProperty("operatorId").GetGuid().Should().Be(operatorId);
         // Postgres timestamptz truncates to microseconds; the payload carries full .NET ticks.
         suspendedPayload.RootElement.GetProperty("suspendedAt").GetDateTimeOffset()
             .Should().BeCloseTo(operatorEntity.SuspendedAt!.Value, TimeSpan.FromMilliseconds(1));
-        suspendedPayload.RootElement.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(["operatorId", "suspendedAt"]);
+        suspendedPayload.RootElement.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(["eventId", "operatorId", "suspendedAt"]);
     }
 
     [Fact]
@@ -253,7 +254,7 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
         await _factory.ResetAsync();
         await _factory.SeedSystemAdminAsync(SystemAdminId);
         var operatorId = await _factory.SeedPendingOperatorAsync();
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
         using var request = AuthorizedPost($"/v1/admin/operators/{operatorId}/suspend", new SuspendOperatorRequest("Policy violation"));
 
         var response = await client.SendAsync(request);

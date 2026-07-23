@@ -7,4 +7,5 @@ namespace VietRide.Parcel.Application.Features.Parcels.Unload;
 public sealed record UnloadParcelCommand(
     Guid ParcelId,
     Guid ActorUserId,
-    Guid OperatorId) : IRequest<UnloadParcelResponse>;
+    Guid OperatorId,
+    Guid? IdempotencyKey = null) : IRequest<UnloadParcelResponse>;

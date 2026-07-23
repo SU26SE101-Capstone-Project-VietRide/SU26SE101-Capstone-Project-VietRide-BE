@@ -73,7 +73,8 @@ public sealed class AssistantParcelsController : ControllerBase
                 request.TripId,
                 request.ParcelCode,
                 userId,
-                operatorId),
+                operatorId,
+                ReadIdempotencyKey(parcelId)),
             cancellationToken);
 
         return Ok(result);
@@ -103,7 +104,8 @@ public sealed class AssistantParcelsController : ControllerBase
             request.ActualHeightCm,
             request.ActualWeightKg,
             request.ActualSizeCategory,
-            request.PaymentMethod), cancellationToken);
+            request.PaymentMethod,
+            Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString()), cancellationToken);
 
         return Ok(result);
     }
@@ -149,7 +151,7 @@ public sealed class AssistantParcelsController : ControllerBase
         var userId = CurrentUserClaims.GetUserId(User);
 
         var result = await _mediator.Send(
-            new UnloadParcelCommand(parcelId, userId, operatorId),
+            new UnloadParcelCommand(parcelId, userId, operatorId, ReadIdempotencyKey(parcelId)),
             cancellationToken);
 
         return Ok(result);
@@ -178,4 +180,11 @@ public sealed class AssistantParcelsController : ControllerBase
 
         return Ok(result);
     }
+
+    private Guid ReadIdempotencyKey(Guid fallback)
+        => Guid.TryParse(
+            Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString(),
+            out var key)
+            ? key
+            : fallback;
 }

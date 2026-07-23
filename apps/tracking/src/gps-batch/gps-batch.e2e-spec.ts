@@ -55,6 +55,7 @@ describe('GpsBatchModule (e2e)', () => {
           recordedAt: new Date('2026-06-03T10:00:00.000Z'),
         },
       ],
+      skipDuplicates: true,
     });
     expect(redisClient.eval).toHaveBeenCalledWith(
       expect.any(String),

@@ -147,6 +147,7 @@ public sealed class ExpireParcelAdditionalPaymentCommandHandler
                         parcel.Id,
                         parcel.ActualWeightKg ?? parcel.EstimatedWeightKg,
                         parcel.ActualVolumeM3 ?? parcel.EstimatedVolumeM3,
+                        parcel.Id,
                         cancellationToken);
                 if (releaseOutcome.Kind != TripCargoOutcomeKind.Success)
                 {

@@ -63,7 +63,10 @@ public sealed class DevBookingServiceClient : IBookingServiceClient
         CancellationToken cancellationToken = default)
         => Task.FromResult(new VoucherUsageOutcome(VoucherUsageOutcomeKind.Success, Guid.NewGuid(), null));
 
-    public Task DeleteVoucherUsageByReferenceAsync(Guid parcelId, CancellationToken cancellationToken = default)
+    public Task DeleteVoucherUsageByReferenceAsync(
+        Guid parcelId,
+        Guid voucherUsageId,
+        CancellationToken cancellationToken = default)
         => Task.CompletedTask;
 
     public Task<IReadOnlyList<AvailableVoucherDto>> GetAvailableParcelVouchersAsync(

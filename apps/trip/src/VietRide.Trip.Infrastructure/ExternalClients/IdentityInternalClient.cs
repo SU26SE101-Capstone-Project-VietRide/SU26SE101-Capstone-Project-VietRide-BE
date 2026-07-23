@@ -200,7 +200,7 @@ public sealed class IdentityInternalClient : IIdentityInternalClient, ISubscript
             {
                 Content = JsonContent.Create(new { resource, resourceId, periodKey }),
             };
-            request.Headers.TryAddWithoutValidation("Idempotency-Key", $"trip-quota:{operatorId:N}:{resource}:{resourceId:N}");
+            request.Headers.TryAddWithoutValidation("Idempotency-Key", resourceId.ToString("D"));
             using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
@@ -223,7 +223,7 @@ public sealed class IdentityInternalClient : IIdentityInternalClient, ISubscript
     public async Task ReleaseQuotaAllocationAsync(Guid operatorId, Guid allocationId, CancellationToken cancellationToken = default)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/internal/v1/operators/{operatorId:D}/quota-allocations/{allocationId:D}/release");
-        request.Headers.TryAddWithoutValidation("Idempotency-Key", $"trip-quota-release:{allocationId:N}");
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", allocationId.ToString("D"));
         using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
     }

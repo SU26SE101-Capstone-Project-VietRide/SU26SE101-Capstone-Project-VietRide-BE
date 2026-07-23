@@ -55,7 +55,7 @@ export class CoreEventsConsumer implements OnModuleInit {
     }
     const messageId = resolveDedupeIdentity(routingKey, payload, brokerMessageId);
 
-    const processingState = await this.idempotency.begin(routingKey, messageId);
+    const processingState = await this.idempotency.begin(routingKey, messageId, raw.content);
     if (processingState === 'duplicate') {
       this.logger.info(
         { routingKey, messageId, processingState },

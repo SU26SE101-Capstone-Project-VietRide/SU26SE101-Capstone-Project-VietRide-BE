@@ -7,4 +7,5 @@ public sealed record ReturnParcelCommand(
     Guid OperatorId,
     Guid ReturnedByUserId,
     string Reason,
-    bool IsStatusOverride = false) : IRequest<OperationalParcelResponse>;
+    bool IsStatusOverride = false,
+    Guid? IdempotencyKey = null) : IRequest<OperationalParcelResponse>;

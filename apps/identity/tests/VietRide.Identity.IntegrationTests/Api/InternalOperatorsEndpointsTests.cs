@@ -36,7 +36,7 @@ public sealed class InternalOperatorsEndpointsTests
         {
             await factory.InitializeAsync();
             await factory.SeedOperatorSubscriptionAsync(OperatorId);
-            using var anonymousClient = factory.CreateClient();
+            using var anonymousClient = factory.CreateIdempotentClient();
 
             var anonymous = await anonymousClient.GetAsync($"/internal/v1/operators/{OperatorId}");
 
@@ -51,7 +51,7 @@ public sealed class InternalOperatorsEndpointsTests
             var userJwt = await anonymousClient.SendAsync(userJwtRequest);
             userJwt.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
 
-            using var internalClient = factory.CreateClient();
+            using var internalClient = factory.CreateIdempotentClient();
             AddInternalJwt(internalClient);
 
             var allowed = await internalClient.GetAsync($"/internal/v1/operators/{OperatorId}");
@@ -76,7 +76,7 @@ public sealed class InternalOperatorsEndpointsTests
         try
         {
             await factory.InitializeAsync();
-            using var client = factory.CreateClient();
+            using var client = factory.CreateIdempotentClient();
             AddInternalJwt(client);
 
             var response = await client.GetAsync($"/internal/v1/operators/{MissingOperatorId}");
@@ -98,7 +98,7 @@ public sealed class InternalOperatorsEndpointsTests
         {
             await factory.InitializeAsync();
             await factory.SeedOperatorSubscriptionAsync(OperatorId, currentOperatorUsers: 1, currentDrivers: 2);
-            using var client = factory.CreateClient();
+            using var client = factory.CreateIdempotentClient();
             AddInternalJwt(client);
 
             var response = await client.GetAsync($"/internal/v1/operators/{OperatorId}/subscription");
@@ -137,7 +137,7 @@ public sealed class InternalOperatorsEndpointsTests
         {
             await factory.InitializeAsync();
             await factory.SeedOperatorSubscriptionAsync(OperatorId);
-            using var client = factory.CreateClient();
+            using var client = factory.CreateIdempotentClient();
             AddInternalJwt(client);
 
             var response = await client.PostAsJsonAsync(
@@ -163,7 +163,7 @@ public sealed class InternalOperatorsEndpointsTests
         {
             await factory.InitializeAsync();
             await factory.SeedOperatorSubscriptionAsync(OperatorId, currentDrivers: 5);
-            using var client = factory.CreateClient();
+            using var client = factory.CreateIdempotentClient();
             AddInternalJwt(client);
 
             var response = await client.PostAsJsonAsync(
@@ -191,7 +191,7 @@ public sealed class InternalOperatorsEndpointsTests
         {
             await factory.InitializeAsync();
             await factory.SeedOperatorSubscriptionAsync(OperatorId, subscriptionStatus: SubscriptionStatus.EXPIRED);
-            using var client = factory.CreateClient();
+            using var client = factory.CreateIdempotentClient();
             AddInternalJwt(client);
 
             var response = await client.PostAsJsonAsync(
@@ -217,7 +217,7 @@ public sealed class InternalOperatorsEndpointsTests
         {
             await factory.InitializeAsync();
             await factory.SeedOperatorSubscriptionAsync(OperatorId);
-            using var client = factory.CreateClient();
+            using var client = factory.CreateIdempotentClient();
             AddInternalJwt(client);
 
             var response = await client.PostAsJsonAsync(
@@ -241,8 +241,8 @@ public sealed class InternalOperatorsEndpointsTests
         {
             await factory.InitializeAsync();
             await factory.SeedOperatorSubscriptionAsync(OperatorId, currentDrivers: 4);
-            using var clientOne = factory.CreateClient();
-            using var clientTwo = factory.CreateClient();
+            using var clientOne = factory.CreateIdempotentClient();
+            using var clientTwo = factory.CreateIdempotentClient();
             AddInternalJwt(clientOne);
             AddInternalJwt(clientTwo);
 

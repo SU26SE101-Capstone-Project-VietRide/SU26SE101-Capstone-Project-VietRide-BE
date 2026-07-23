@@ -44,7 +44,7 @@ public sealed class HandleTripDisruptedCommandHandler
                     parcel.ParcelId,
                     parcel.SenderUserId,
                     refundAmount,
-                    $"parcel:refund:disruption:{parcel.ParcelId:D}",
+                    parcel.ParcelId.ToString("D"),
                     cancellationToken);
             }
 

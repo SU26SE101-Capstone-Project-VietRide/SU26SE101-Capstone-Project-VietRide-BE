@@ -6,40 +6,55 @@ services:
   postgres:
     container_name: day37-e2e-postgres
     ports:
-      - "55437:5432"
+      - '55437:5432'
+    healthcheck: &fast-healthcheck
+      interval: 2s
+      timeout: 5s
+      retries: 90
+      start_period: 5s
   redis:
     container_name: day37-e2e-redis
     ports:
-      - "56379:6379"
+      - '56379:6379'
+    healthcheck: *fast-healthcheck
   rabbitmq:
     container_name: day37-e2e-rabbitmq
     ports:
-      - "55672:5672"
-      - "55673:15672"
+      - '55672:5672'
+      - '55673:15672'
   identity:
     container_name: day37-e2e-identity
     ports:
-      - "55001:5001"
+      - '55001:5001'
+    healthcheck: *fast-healthcheck
   trip:
     container_name: day37-e2e-trip
     ports:
-      - "55002:5002"
+      - '55002:5002'
+    healthcheck: *fast-healthcheck
   booking:
     container_name: day37-e2e-booking
     ports:
-      - "55003:5003"
+      - '55003:5003'
+    healthcheck: *fast-healthcheck
   payment:
     container_name: day37-e2e-payment
     ports:
-      - "55004:5004"
+      - '55004:5004'
+    healthcheck: *fast-healthcheck
   parcel:
     container_name: day37-e2e-parcel
     ports:
-      - "55005:5005"
+      - '55005:5005'
+  notification:
+    container_name: day37-e2e-notification
+    ports:
+      - '55012:3002'
   gateway:
     container_name: day37-e2e-gateway
     ports:
-      - "55300:3000"
+      - '55300:3000'
+    healthcheck: *fast-healthcheck
 
 networks:
   default:

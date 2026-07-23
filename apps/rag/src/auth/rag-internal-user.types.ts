@@ -9,4 +9,5 @@ export interface RagInternalUser {
 
 export interface RequestWithRagInternalUser extends Request {
   user?: RagInternalUser;
+  idempotencyOperationId?: string;
 }

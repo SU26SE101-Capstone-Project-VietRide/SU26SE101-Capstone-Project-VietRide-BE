@@ -34,8 +34,9 @@ public interface IIntegrationEventOutbox
 
     /// <summary>
     /// Enqueue an integration event (added to the ambient EF transaction; it is
-    /// committed by the caller's unit-of-work SaveChanges). This compatibility
-    /// overload allocates a new event identity.
+    /// committed by the caller's unit-of-work SaveChanges). Implementations use
+    /// a valid payload <c>eventId</c> as the canonical identity when present;
+    /// otherwise they allocate and persist a new identity in the payload.
     /// </summary>
     /// <param name="eventType">Logical event type / routing key.</param>
     /// <param name="payloadJson">Already-serialized JSON payload.</param>

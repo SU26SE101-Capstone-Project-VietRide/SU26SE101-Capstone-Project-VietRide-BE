@@ -7,6 +7,7 @@ const mutationAttribute =
   /\[\s*Http(Post|Patch|Put|Delete)(?:Attribute)?(?:\s*\(\s*"([^"]*)"\s*\))?\s*\]/g;
 const skipAttribute = /\[\s*SkipIdempotency\(\s*"([^"]+)"\s*\)\s*\]/g;
 const errors = [];
+const discoveredEndpoints = new Map();
 
 function fail(message) {
   errors.push(message);
@@ -183,6 +184,51 @@ function validateProgram(serviceName, service) {
   }
 }
 
+function validateExactEndpoints(serviceName, service, mutations) {
+  const endpointKey = (entry) => `${entry.method.toUpperCase()} ${normalizeRoute(entry.path)}`;
+  const expected = new Map();
+  for (const endpoint of service.endpoints ?? []) {
+    const key = endpointKey(endpoint);
+    if (expected.has(key)) fail(`${serviceName}: duplicate inventory endpoint ${key}`);
+    if (!['required', 'exempt'].includes(endpoint.policy)) {
+      fail(`${serviceName}: ${key} must be classified as required or exempt`);
+    }
+    if (endpoint.policy === 'exempt' && !endpoint.reason?.trim()) {
+      fail(`${serviceName}: exempt endpoint ${key} must include a reason`);
+    }
+    expected.set(key, endpoint);
+  }
+
+  const actual = new Map();
+  for (const mutation of mutations) {
+    const key = endpointKey(mutation);
+    const policy = mutation.exemptionReason
+      ? 'exempt'
+      : mutation.requiredBy?.length > 0 || service.requireAllMutations
+        ? 'required'
+        : 'unclassified';
+    if (actual.has(key)) fail(`${serviceName}: duplicate runtime mutation ${key}`);
+    actual.set(key, { ...mutation, policy });
+    const approved = expected.get(key);
+    if (!approved) {
+      fail(`${mutation.file}:${mutation.actionName}: ${key} is missing from the exact inventory`);
+      continue;
+    }
+    if (approved.policy !== policy) {
+      fail(`${mutation.file}:${mutation.actionName}: ${key} runtime=${policy} inventory=${approved.policy}`);
+    }
+    if (policy === 'exempt' && approved.reason !== mutation.exemptionReason) {
+      fail(`${mutation.file}:${mutation.actionName}: exemption reason mismatch for ${key}`);
+    }
+  }
+  for (const key of expected.keys()) {
+    if (!actual.has(key)) fail(`${serviceName}: inventory endpoint ${key} does not exist at runtime`);
+  }
+  if (actual.size !== expected.size) {
+    fail(`${serviceName}: exact inventory has ${expected.size} endpoints but runtime has ${actual.size}`);
+  }
+}
+
 function validateService(serviceName, service) {
   validateProgram(serviceName, service);
 
@@ -198,28 +244,40 @@ function validateService(serviceName, service) {
   const files = listControllerFiles(controllerDirectory);
   const scanned = files.map((file) => scanController(file, serviceName));
   const mutations = scanned.flatMap((controller) => controller.mutations);
+  discoveredEndpoints.set(
+    serviceName,
+    mutations.map((mutation) => ({
+      method: mutation.method,
+      path: mutation.path,
+      policy: mutation.exemptionReason ? 'exempt' : 'required',
+      ...(mutation.exemptionReason ? { reason: mutation.exemptionReason } : {}),
+    })),
+  );
+  validateExactEndpoints(serviceName, service, mutations);
   const approvedControllers = new Set(service.controllers ?? []);
 
   if (approvedControllers.size !== (service.controllers ?? []).length) {
     fail(`${serviceName}: duplicate controller entry in inventory`);
   }
 
-  for (const mutation of mutations) {
-    if (!mutation.exemptionReason && !approvedControllers.has(mutation.controllerName)) {
-      fail(
-        `${mutation.file}:${mutation.actionName}: ${mutation.method} ${mutation.path} is not covered by the controller inventory or [SkipIdempotency]`,
-      );
+  if (!service.endpoints) {
+    for (const mutation of mutations) {
+      if (!mutation.exemptionReason && !approvedControllers.has(mutation.controllerName)) {
+        fail(
+          `${mutation.file}:${mutation.actionName}: ${mutation.method} ${mutation.path} is not covered by the controller inventory or [SkipIdempotency]`,
+        );
+      }
     }
-  }
 
-  for (const controllerName of approvedControllers) {
-    const controller = scanned.find((item) => item.controllerName === controllerName);
-    if (!controller) {
-      fail(`${serviceName}: inventory controller ${controllerName} does not exist`);
-      continue;
-    }
-    if (!controller.mutations.some((mutation) => !mutation.exemptionReason)) {
-      fail(`${serviceName}: inventory controller ${controllerName} has no non-exempt mutation`);
+    for (const controllerName of approvedControllers) {
+      const controller = scanned.find((item) => item.controllerName === controllerName);
+      if (!controller) {
+        fail(`${serviceName}: inventory controller ${controllerName} does not exist`);
+        continue;
+      }
+      if (!controller.mutations.some((mutation) => !mutation.exemptionReason)) {
+        fail(`${serviceName}: inventory controller ${controllerName} has no non-exempt mutation`);
+      }
     }
   }
 
@@ -236,7 +294,10 @@ function validateService(serviceName, service) {
 
   const exemptionKey = (entry) => `${entry.method.toUpperCase()} ${normalizeRoute(entry.path)}`;
   const inventoryExemptions = new Map();
-  for (const exemption of service.exemptions ?? []) {
+  const approvedExemptions = service.endpoints
+    ? service.endpoints.filter((endpoint) => endpoint.policy === 'exempt')
+    : service.exemptions ?? [];
+  for (const exemption of approvedExemptions) {
     const key = exemptionKey(exemption);
     if (inventoryExemptions.has(key)) {
       fail(`${serviceName}: duplicate exemption ${key}`);
@@ -319,6 +380,14 @@ function validateExplicitDotnetService(serviceName, service) {
   const scanned = files.map((file) => scanController(file, serviceName, metadataNames));
   const mutations = scanned.flatMap((controller) => controller.mutations);
   const required = mutations.filter((mutation) => mutation.requiredBy.length > 0);
+  discoveredEndpoints.set(
+    serviceName,
+    mutations.map((mutation) => ({
+      method: mutation.method,
+      path: mutation.path,
+      policy: mutation.requiredBy.length > 0 ? 'required' : 'unclassified',
+    })),
+  );
 
   for (const mutation of mutations) {
     if (mutation.exemptionReason) {
@@ -384,6 +453,7 @@ function scanNestController(file, serviceName, decoratorName) {
 
     const attributes = remainder.slice(0, method.index);
     const decoratorPattern = new RegExp(`@${decoratorName}\\s*\\(\\s*\\)`);
+    const exemptDecoratorPattern = /@ApiIdempotencyExempt\s*\(\s*[^)]*\)/;
     mutations.push({
       serviceName,
       actionName: method[1],
@@ -394,6 +464,9 @@ function scanNestController(file, serviceName, decoratorName) {
         path.basename(file, '.controller.ts'),
       ),
       requiredBy: decoratorPattern.test(attributes) ? [decoratorName] : [],
+      exemptionReason: exemptDecoratorPattern.test(attributes)
+        ? /@ApiIdempotencyExempt\s*\(\s*['"]([^'"]+)['"]\s*,?\s*\)/.exec(attributes)?.[1] ?? null
+        : null,
       file: relativeFile,
     });
   }
@@ -411,6 +484,20 @@ function validateNestService(serviceName, service) {
     scanNestController(file, serviceName, service.requiredDecorator),
   );
   const required = mutations.filter((mutation) => mutation.requiredBy.length > 0);
+  discoveredEndpoints.set(
+    serviceName,
+    mutations.map((mutation) => ({
+      method: mutation.method,
+      path: mutation.path,
+      policy: mutation.exemptionReason
+        ? 'exempt'
+        : mutation.requiredBy.length > 0
+          ? 'required'
+          : 'unclassified',
+      ...(mutation.exemptionReason ? { reason: mutation.exemptionReason } : {}),
+    })),
+  );
+  validateExactEndpoints(serviceName, service, mutations);
 
   if (
     Number.isInteger(service.expectedMutationCount) &&
@@ -443,12 +530,140 @@ function validateNestService(serviceName, service) {
   return { controllers: files.length, mutations: mutations.length, required: required.length };
 }
 
-const inventory = JSON.parse(fs.readFileSync(inventoryPath, 'utf8'));
-if (inventory.version !== 2 || inventory.policy !== 'runtime-metadata-aligned-openapi') {
-  fail('inventory must use version 2 and policy runtime-metadata-aligned-openapi');
+function validateSocketOperations(socketOperations) {
+  const gatewayFile = path.join(root, 'apps/tracking/src/location/location.gateway.ts');
+  const source = fs.readFileSync(gatewayFile, 'utf8');
+  const discovered = [...source.matchAll(/@SubscribeMessage\(\s*['"]([^'"]*gps:update)['"]\s*\)/g)]
+    .map((match) => match[1])
+    .sort();
+  const expected = (socketOperations ?? []).map((entry) => entry.event).sort();
+
+  if (JSON.stringify(discovered) !== JSON.stringify(expected)) {
+    fail(
+      `tracking socket inventory mismatch: runtime=${discovered.join(', ')} inventory=${expected.join(', ')}`,
+    );
+  }
+  for (const operation of socketOperations ?? []) {
+    if (operation.service !== 'tracking' || operation.policy !== 'required') {
+      fail(`socket ${operation.event}: must be tracking/required`);
+    }
+  }
+
+  const requiredTokens = [
+    'trackingGpsIdempotencyKey',
+    'shuttleGpsIdempotencyKey',
+    'GPS_OPERATION_PAYLOAD_MISMATCH',
+    'if (result.duplicate)',
+  ];
+  const trackingSource = [
+    source,
+    fs.readFileSync(path.join(root, 'apps/tracking/src/location/location.service.ts'), 'utf8'),
+    fs.readFileSync(path.join(root, 'apps/tracking/src/shuttle/shuttle.service.ts'), 'utf8'),
+  ].join('\n');
+  for (const token of requiredTokens) {
+    if (!trackingSource.includes(token)) {
+      fail(`tracking socket idempotency implementation is missing ${token}`);
+    }
+  }
 }
 
-const expectedServices = ['identity', 'trip', 'booking', 'payment', 'parcel', 'notification'];
+function validateCrossSystemCoverage(coverage) {
+  const dotnetServices = ['identity', 'trip', 'booking', 'payment', 'parcel'];
+  const dotnetSourceFiles = dotnetServices.flatMap((service) =>
+    listFiles(path.join(root, 'apps', service, 'src'), (file) => file.endsWith('.cs')),
+  );
+  const handlerCount = dotnetSourceFiles.reduce((total, file) => {
+    const source = fs.readFileSync(file, 'utf8');
+    return total + [...source.matchAll(/IIntegrationEventHandler\s*</g)].length;
+  }, 0);
+  if (handlerCount !== coverage.dotnetRabbitMqRegistrations) {
+    fail(
+      `.NET RabbitMQ inventory drift: expected ${coverage.dotnetRabbitMqRegistrations}, found ${handlerCount}`,
+    );
+  }
+
+  for (const service of ['identity', 'trip', 'booking', 'parcel']) {
+    const serviceSources = dotnetSourceFiles
+      .filter((file) => file.includes(`${path.sep}apps${path.sep}${service}${path.sep}`))
+      .map((file) => fs.readFileSync(file, 'utf8'))
+      .join('\n');
+    if (
+      !serviceSources.includes('AddVietRideIntegrationInbox<') ||
+      !serviceSources.includes('AddVietRideIntegrationInbox()')
+    ) {
+      fail(`${service}: RabbitMQ handlers exist but durable integration inbox is not fully wired`);
+    }
+  }
+
+  const notificationFiles = listFiles(
+    path.join(root, 'apps/notification/src'),
+    (file) => file.endsWith('.ts') && !file.endsWith('.spec.ts'),
+  );
+  const subscriptionCount = notificationFiles.reduce((total, file) => {
+    const source = fs.readFileSync(file, 'utf8');
+    return total + [...source.matchAll(/\.subscribe\s*\(/g)].length;
+  }, 0);
+  if (subscriptionCount !== coverage.notificationRabbitMqSubscriptions) {
+    fail(
+      `Notification RabbitMQ inventory drift: expected ${coverage.notificationRabbitMqSubscriptions}, found ${subscriptionCount}`,
+    );
+  }
+
+  const outboundPattern = /HttpMethod\.(Post|Put|Patch|Delete)\b/g;
+  const outboundCallsites = [];
+  for (const file of dotnetSourceFiles) {
+    const source = fs.readFileSync(file, 'utf8');
+    for (const match of source.matchAll(outboundPattern)) {
+      outboundCallsites.push({ file, source, method: match[1] });
+    }
+  }
+  if (outboundCallsites.length !== coverage.dotnetOutboundHttpMutations) {
+    fail(
+      `.NET outbound HTTP mutation inventory drift: expected ${coverage.dotnetOutboundHttpMutations}, found ${outboundCallsites.length}`,
+    );
+  }
+
+  const exemptions = new Set(coverage.dotnetOutboundHttpExemptions ?? []);
+  for (const callsite of outboundCallsites) {
+    const relativeFile = path.relative(root, callsite.file).replace(/\\/g, '/');
+    if (exemptions.has(relativeFile)) continue;
+    if (!callsite.source.includes('Idempotency-Key')) {
+      fail(`${relativeFile}: outbound ${callsite.method} does not forward Idempotency-Key`);
+    }
+  }
+  for (const exemption of exemptions) {
+    if (!outboundCallsites.some((callsite) => path.relative(root, callsite.file).replace(/\\/g, '/') === exemption)) {
+      fail(`outbound HTTP exemption no longer exists: ${exemption}`);
+    }
+  }
+
+  const forbiddenInternalKey = /(?:Idempotency-Key|idempotencyKey)[^\r\n]{0,100}\$"[^"\r\n]*(?:cargo:|refund:|booking-|payment:|parcel:)/i;
+  for (const file of dotnetSourceFiles) {
+    const source = fs.readFileSync(file, 'utf8');
+    if (forbiddenInternalKey.test(source)) {
+      fail(`${path.relative(root, file)}: prefixed internal idempotency key is forbidden`);
+    }
+  }
+
+  const routeTable = path.join(root, coverage.gatewayRouteTable ?? '');
+  if (!fs.existsSync(routeTable)) {
+    fail(`Gateway route table not found: ${coverage.gatewayRouteTable}`);
+  } else {
+    const routeSource = fs.readFileSync(routeTable, 'utf8');
+    for (const service of ['IDENTITY', 'TRIP', 'BOOKING', 'PAYMENT', 'PARCEL', 'NOTIFICATION', 'RAG']) {
+      if (!routeSource.includes(`env.${service}_BASE_URL`)) {
+        fail(`Gateway route table has no ${service} target`);
+      }
+    }
+  }
+}
+
+const inventory = JSON.parse(fs.readFileSync(inventoryPath, 'utf8'));
+if (inventory.version !== 3 || inventory.policy !== 'system-wide-idempotency-contract') {
+  fail('inventory must use version 3 and policy system-wide-idempotency-contract');
+}
+
+const expectedServices = ['identity', 'trip', 'booking', 'payment', 'parcel', 'notification', 'rag'];
 const actualServices = Object.keys(inventory.services ?? {}).sort();
 if (JSON.stringify(actualServices) !== JSON.stringify([...expectedServices].sort())) {
   fail(`inventory services must be exactly: ${expectedServices.join(', ')}`);
@@ -465,6 +680,14 @@ for (const serviceName of expectedServices) {
         ? validateService(serviceName, service)
         : validateExplicitDotnetService(serviceName, service);
   results.push([serviceName, result]);
+}
+
+validateSocketOperations(inventory.socketOperations);
+validateCrossSystemCoverage(inventory.coverage ?? {});
+
+if (process.argv.includes('--discover')) {
+  console.log(JSON.stringify(Object.fromEntries(discoveredEndpoints), null, 2));
+  process.exit(0);
 }
 
 if (errors.length > 0) {
