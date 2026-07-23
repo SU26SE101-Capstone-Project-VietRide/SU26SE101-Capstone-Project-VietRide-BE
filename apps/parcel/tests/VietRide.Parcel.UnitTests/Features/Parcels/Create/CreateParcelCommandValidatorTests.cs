@@ -11,12 +11,26 @@ public sealed class CreateParcelCommandValidatorTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    [InlineData("https://firebasestorage.googleapis.com/v0/b/vietride.appspot.com/o/parcels%2Fphoto.jpg?alt=media")]
-    [InlineData("https://storage.googleapis.com/vietride.appspot.com/parcels/photo.webp")]
-    [InlineData("  https://storage.googleapis.com/vietride.appspot.com/parcels/photo.webp  ")]
-    public void Validate_AcceptsOptionalOrConfiguredFirebasePhotoUrl(string? photoUrl)
+    public void Validate_AcceptsOptionalPhotoUrl(string? photoUrl)
     {
         var result = CreateValidator().Validate(CreateCommand(photoUrl));
+
+        result.Errors.Should().NotContain(error => error.PropertyName == "photoUrl");
+    }
+
+    [Theory]
+    [InlineData("https://firebasestorage.googleapis.com/v0/b/vietride.appspot.com/o/parcels%2F{0}%2Fphoto.jpg?alt=media")]
+    [InlineData("https://storage.googleapis.com/vietride.appspot.com/parcels/{0}/photo.webp")]
+    [InlineData("  https://storage.googleapis.com/vietride.appspot.com/parcels/{0}/photo.webp  ")]
+    public void Validate_AcceptsConfiguredFirebasePhotoUrlOwnedBySender(string template)
+    {
+        var senderUserId = Guid.NewGuid();
+        var photoUrl = string.Format(
+            System.Globalization.CultureInfo.InvariantCulture,
+            template,
+            senderUserId);
+
+        var result = CreateValidator().Validate(CreateCommand(photoUrl, senderUserId));
 
         result.Errors.Should().NotContain(error => error.PropertyName == "photoUrl");
     }
@@ -50,12 +64,27 @@ public sealed class CreateParcelCommandValidatorTests
             && error.ErrorCode == "VALIDATION_FAILED");
     }
 
+    [Fact]
+    public void Validate_RejectsConfiguredFirebasePhotoUrlOwnedByAnotherUser()
+    {
+        var senderUserId = Guid.NewGuid();
+        var otherUserId = Guid.NewGuid();
+        var photoUrl =
+            $"https://storage.googleapis.com/{BucketName}/parcels/{otherUserId:D}/photo.webp";
+
+        var result = CreateValidator().Validate(CreateCommand(photoUrl, senderUserId));
+
+        result.Errors.Should().ContainSingle(error =>
+            error.PropertyName == "photoUrl"
+            && error.ErrorCode == "VALIDATION_FAILED");
+    }
+
     private static CreateParcelCommandValidator CreateValidator()
         => new(new ParcelImageOptions(BucketName));
 
-    private static CreateParcelCommand CreateCommand(string? photoUrl)
+    private static CreateParcelCommand CreateCommand(string? photoUrl, Guid? senderUserId = null)
         => new(
-            Guid.NewGuid(),
+            senderUserId ?? Guid.NewGuid(),
             null,
             "Recipient",
             "0900000000",

@@ -1,18 +1,14 @@
 using FluentValidation;
 using VietRide.Parcel.Domain.Enums;
+using VietRide.Shared.Application.Security;
 
 namespace VietRide.Parcel.Application.Features.Parcels.Create;
 
 public sealed class CreateParcelCommandValidator : AbstractValidator<CreateParcelCommand>
 {
-    private const int MaximumPhotoUrlLength = 2_048;
-    private const string FirebaseStorageHost = "firebasestorage.googleapis.com";
-    private const string GoogleStorageHost = "storage.googleapis.com";
-    private readonly string _firebaseStorageBucket;
-
     public CreateParcelCommandValidator(ParcelImageOptions imageOptions)
     {
-        _firebaseStorageBucket = imageOptions.FirebaseStorageBucket;
+        var firebaseUrls = new FirebaseStorageImageUrlValidator(imageOptions.FirebaseStorageBucket);
 
         RuleFor(x => x.SenderUserId)
             .NotEmpty();
@@ -62,41 +58,12 @@ public sealed class CreateParcelCommandValidator : AbstractValidator<CreateParce
             .MaximumLength(2000)
             .When(x => x.Description is not null);
 
-        RuleFor(x => x.PhotoUrl)
-            .Must(BeAllowedPhotoUrl)
+        RuleFor(x => x)
+            .Must(x => string.IsNullOrWhiteSpace(x.PhotoUrl) || firebaseUrls.IsValidOwnedImageUrl(
+                x.PhotoUrl,
+                $"parcels/{x.SenderUserId:D}/"))
             .OverridePropertyName("photoUrl")
             .WithErrorCode("VALIDATION_FAILED")
-            .WithMessage("PhotoUrl must be an HTTPS Firebase Storage URL for the configured bucket and at most 2048 characters.")
-            .When(x => !string.IsNullOrWhiteSpace(x.PhotoUrl));
-    }
-
-    private bool BeAllowedPhotoUrl(string? value)
-    {
-        var candidate = value?.Trim();
-        if (string.IsNullOrEmpty(candidate)
-            || candidate.Length > MaximumPhotoUrlLength
-            || string.IsNullOrWhiteSpace(_firebaseStorageBucket)
-            || !Uri.TryCreate(candidate, UriKind.Absolute, out var uri)
-            || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
-            || !uri.IsDefaultPort)
-        {
-            return false;
-        }
-
-        if (string.Equals(uri.Host, FirebaseStorageHost, StringComparison.OrdinalIgnoreCase))
-        {
-            var prefix = $"/v0/b/{_firebaseStorageBucket}/o/";
-            return uri.AbsolutePath.StartsWith(prefix, StringComparison.Ordinal)
-                && uri.AbsolutePath.Length > prefix.Length;
-        }
-
-        if (string.Equals(uri.Host, GoogleStorageHost, StringComparison.OrdinalIgnoreCase))
-        {
-            var prefix = $"/{_firebaseStorageBucket}/";
-            return uri.AbsolutePath.StartsWith(prefix, StringComparison.Ordinal)
-                && uri.AbsolutePath.Length > prefix.Length;
-        }
-
-        return false;
+            .WithMessage("PhotoUrl must be an owned Firebase parcel photo URL.");
     }
 }

@@ -10,4 +10,5 @@ public sealed record HandleTripCancelledCommand(
     Guid TripId,
     Guid OperatorId,
     DateTimeOffset CancelledAt,
-    string CancelReason) : IRequest<int>;
+    string CancelReason,
+    bool AllowOperatorReason = false) : IRequest<int>;

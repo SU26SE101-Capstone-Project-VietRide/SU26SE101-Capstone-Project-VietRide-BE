@@ -81,6 +81,39 @@ public sealed class BookingPendingAction : BaseEntity<Guid>
         ResolvedAction = resolvedAction;
     }
 
+    public void ResolveRouteChange(
+        BookingPendingActionResolved resolvedAction,
+        DateTimeOffset resolvedAt)
+    {
+        if (Reason != BookingPendingActionReason.ROUTE_CHANGE
+            || ResolvedAt.HasValue
+            || resolvedAction is not (BookingPendingActionResolved.ACCEPTED or BookingPendingActionResolved.REJECTED))
+        {
+            throw new InvalidOperationException("Pending action cannot be resolved as a route change.");
+        }
+
+        if (resolvedAt > Deadline)
+        {
+            throw new InvalidOperationException("Pending action is past its route-change deadline.");
+        }
+
+        ResolvedAt = resolvedAt;
+        ResolvedAction = resolvedAction;
+    }
+
+    public void AutoFallbackRouteChange(DateTimeOffset resolvedAt)
+    {
+        if (Reason != BookingPendingActionReason.ROUTE_CHANGE
+            || ResolvedAt.HasValue
+            || resolvedAt <= Deadline)
+        {
+            throw new InvalidOperationException("Pending action cannot be expired as a route change.");
+        }
+
+        ResolvedAt = resolvedAt;
+        ResolvedAction = BookingPendingActionResolved.AUTO_FALLBACK_DESTINATION;
+    }
+
     public void AutoAcceptScheduleChange(DateTimeOffset resolvedAt, DateTimeOffset effectiveCutoff)
     {
         if (Reason != BookingPendingActionReason.SCHEDULE_CHANGE

@@ -75,7 +75,7 @@ describe('createProxyHandler auth enforcement', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it.each(['/.well-known/assetlinks.json', '/auth/set-password'])(
+  it.each(['/.well-known/assetlinks.json', '/auth/set-password', '/payments/return'])(
     'lets %s fall through to Nest controllers',
     async (path) => {
       const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;

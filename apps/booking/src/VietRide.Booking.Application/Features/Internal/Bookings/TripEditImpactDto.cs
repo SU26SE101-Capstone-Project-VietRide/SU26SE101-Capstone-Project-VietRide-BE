@@ -8,5 +8,6 @@ public sealed record TripEditImpactDto(
     public sealed record ActiveBooking(
         Guid BookingId,
         string Status,
-        IReadOnlyList<string> SeatNumbers);
+        IReadOnlyList<string> SeatNumbers,
+        long TotalAmount = 0);
 }

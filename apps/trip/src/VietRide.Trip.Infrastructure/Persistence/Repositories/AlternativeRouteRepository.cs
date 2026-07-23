@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Events;
 using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Infrastructure.Persistence.Repositories;
@@ -39,14 +40,47 @@ internal sealed class AlternativeRouteRepository : IAlternativeRouteRepository
         Guid alternativeRouteId,
         CancellationToken cancellationToken)
         => dbContext.AlternativeRoutes
+            .AsNoTracking()
             .Join(
-                dbContext.Routes,
+                dbContext.Routes.AsNoTracking(),
                 alternativeRoute => alternativeRoute.RouteId,
                 route => route.Id,
                 (alternativeRoute, route) => new { alternativeRoute, route })
             .Where(x => x.alternativeRoute.Id == alternativeRouteId && x.route.OperatorId == operatorId)
             .Select(x => x.alternativeRoute)
             .FirstOrDefaultAsync(cancellationToken);
+
+    public async Task<AlternativeRoute?> AcquireOwnedByIdAsync(
+        Guid operatorId,
+        Guid alternativeRouteId,
+        CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException(
+                "A caller-owned transaction is required for alternative-route acquisition.");
+        }
+
+        await dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT 1 FROM vietride_trip.alternative_routes WHERE id = {alternativeRouteId} FOR UPDATE",
+            cancellationToken);
+
+        var alternativeRoute = await dbContext.AlternativeRoutes
+            .SingleOrDefaultAsync(item => item.Id == alternativeRouteId, cancellationToken);
+        if (alternativeRoute is null)
+        {
+            return null;
+        }
+
+        await dbContext.Entry(alternativeRoute).ReloadAsync(cancellationToken);
+        var belongsToOperator = await dbContext.Routes
+            .AsNoTracking()
+            .AnyAsync(
+                route => route.Id == alternativeRoute.RouteId
+                    && route.OperatorId == operatorId,
+                cancellationToken);
+        return belongsToOperator ? alternativeRoute : null;
+    }
 
     public Task<int> CountActiveByRouteAsync(Guid routeId, CancellationToken cancellationToken)
         => dbContext.AlternativeRoutes.CountAsync(
@@ -72,6 +106,92 @@ internal sealed class AlternativeRouteRepository : IAlternativeRouteRepository
             .OrderBy(stop => stop.OrderIndex)
             .ThenBy(stop => stop.StopId)
             .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<TripRouteChangedCandidateStop>> ListCandidateStopsAsync(
+        Guid alternativeRouteId,
+        DateTimeOffset estimatedArrivalBase,
+        CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException(
+                "A caller-owned transaction is required for route-change candidate snapshots.");
+        }
+
+        await dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+             SELECT 1
+             FROM vietride_trip.alternative_route_stops AS route_stop
+             JOIN vietride_trip.stops AS stop ON stop.id = route_stop.stop_id
+             WHERE route_stop.alternative_route_id = {alternativeRouteId}
+             ORDER BY route_stop.order_index, route_stop.stop_id
+             FOR SHARE OF route_stop, stop
+             """,
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+             SELECT 1
+             FROM vietride_trip.stations AS station
+             JOIN vietride_trip.alternative_routes AS alternative_route
+               ON alternative_route.destination_station_id = station.id
+             WHERE alternative_route.id = {alternativeRouteId}
+             FOR SHARE OF station
+             """,
+            cancellationToken);
+
+        var intermediateStops = await dbContext.AlternativeRouteStops
+            .AsNoTracking()
+            .Where(item => item.AlternativeRouteId == alternativeRouteId)
+            .Join(
+                dbContext.Stops.AsNoTracking(),
+                item => item.StopId,
+                stop => stop.Id,
+                (item, stop) => new
+                {
+                    item.StopId,
+                    stop.Name,
+                    item.OrderIndex,
+                    item.EstimatedDurationFromOriginMinutes,
+                })
+            .OrderBy(item => item.OrderIndex)
+            .ThenBy(item => item.StopId)
+            .ToListAsync(cancellationToken);
+
+        var destination = await dbContext.AlternativeRoutes
+            .AsNoTracking()
+            .Where(item => item.Id == alternativeRouteId)
+            .Join(
+                dbContext.Stations.AsNoTracking(),
+                item => item.DestinationStationId,
+                station => station.Id,
+                (item, station) => new
+                {
+                    StationId = station.Id,
+                    station.Name,
+                    item.EstimatedDurationMinutes,
+                })
+            .SingleAsync(cancellationToken);
+
+        var result = intermediateStops
+            .Select(item => new TripRouteChangedCandidateStop(
+                item.StopId,
+                null,
+                item.Name,
+                item.OrderIndex,
+                estimatedArrivalBase.AddMinutes(item.EstimatedDurationFromOriginMinutes)))
+            .ToList();
+        var destinationSequence = result.Count == 0 ? 1 : result.Max(item => item.Sequence) + 1;
+        var destinationDuration = destination.EstimatedDurationMinutes
+            ?? intermediateStops.LastOrDefault()?.EstimatedDurationFromOriginMinutes
+            ?? 0;
+        result.Add(new TripRouteChangedCandidateStop(
+            null,
+            destination.StationId,
+            destination.Name,
+            destinationSequence,
+            estimatedArrivalBase.AddMinutes(destinationDuration)));
+        return result;
+    }
 
     public async Task ReplaceStopsAsync(
         Guid alternativeRouteId,

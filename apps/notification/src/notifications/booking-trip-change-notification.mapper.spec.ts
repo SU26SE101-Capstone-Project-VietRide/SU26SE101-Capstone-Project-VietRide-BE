@@ -1,6 +1,7 @@
 import {
   BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY,
   BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY,
+  BOOKING_ROUTE_CHANGE_AUTO_FALLBACK_APPLIED_ROUTING_KEY,
   BOOKING_SCHEDULE_CHANGE_INFORMATIONAL_ROUTING_KEY,
   BOOKING_SCHEDULE_CHANGE_REQUIRED_ROUTING_KEY,
   BOOKING_SEAT_REASSIGNMENT_REQUIRED_ROUTING_KEY,
@@ -223,5 +224,29 @@ describe('mapBookingTripChangeToNotification Day 24 auto-resolved compatibility'
         fallbackStationId: '77777777-7777-4777-8777-777777777777',
       }),
     ).toThrow(ZodError);
+  });
+
+  it('maps the route-change timeout fallback with shuttle coordination data', () => {
+    const notification = mapBookingTripChangeToNotification(
+      BOOKING_ROUTE_CHANGE_AUTO_FALLBACK_APPLIED_ROUTING_KEY,
+      {
+        ...common,
+        eventType: BOOKING_ROUTE_CHANGE_AUTO_FALLBACK_APPLIED_ROUTING_KEY,
+        pendingActionId: PENDING_ACTION_ID,
+        originalStopId: '66666666-6666-4666-8666-666666666666',
+        fallbackDestinationStationId: '77777777-7777-4777-8777-777777777777',
+        shuttleRequired: true,
+        resolvedAction: 'AUTO_FALLBACK_DESTINATION',
+      },
+    );
+
+    expect(notification.userId).toBe(USER_ID);
+    expect(notification.type).toBe(NotificationType.TRIP_ROUTE_CHANGED);
+    expect(notification.data).toMatchObject({
+      originalStopId: '66666666-6666-4666-8666-666666666666',
+      fallbackDestinationStationId: '77777777-7777-4777-8777-777777777777',
+      shuttleRequired: true,
+      resolvedAction: 'AUTO_FALLBACK_DESTINATION',
+    });
   });
 });

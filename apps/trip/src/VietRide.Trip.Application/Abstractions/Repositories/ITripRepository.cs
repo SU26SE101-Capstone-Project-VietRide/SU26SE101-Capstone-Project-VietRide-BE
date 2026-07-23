@@ -62,6 +62,16 @@ public interface ITripRepository : IRepository<Domain.Entities.Trip, Guid>
     Task<Domain.Entities.Trip?> GetForUpdateAsync(Guid tripId, CancellationToken cancellationToken)
         => GetByIdAsync(tripId, cancellationToken);
 
+    Task<Domain.Entities.Trip?> GetRouteChangePreflightAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("Route-change preflight is not supported by this repository implementation.");
+
+    Task<Domain.Entities.Trip?> AcquireForRouteChangeAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("Route-change locking is not supported by this repository implementation.");
+
     Task<DriverTripRouteDto?> GetDriverTripRouteAsync(Guid tripId, CancellationToken cancellationToken)
         => throw new NotSupportedException("Driver trip route reads are not supported by this repository implementation.");
 

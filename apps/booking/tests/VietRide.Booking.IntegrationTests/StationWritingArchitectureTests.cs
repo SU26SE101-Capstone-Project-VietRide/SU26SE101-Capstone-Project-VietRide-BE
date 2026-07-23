@@ -18,6 +18,7 @@ public sealed class StationWritingArchitectureTests
         "Features/Bookings/AcceptStopDisabledFallback/AcceptStopDisabledFallbackCommandHandler.cs",
         "Features/Bookings/EditDropoff/EditDropoffCommandHandler.cs",
         "Features/Bookings/EditPickup/EditPickupCommandHandler.cs",
+        "Features/Bookings/ResolvePendingAction/ResolvePendingActionCommandHandler.cs",
     ];
 
     [Fact]

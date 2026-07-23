@@ -67,7 +67,6 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       pathPattern: /^\/v1\/firebase\/custom-token$/,
       target: env.IDENTITY_BASE_URL,
       authRequired: 'user',
-      requiredRoles: ['OPERATOR_ADMIN'],
     },
     {
       prefix: '/v1/passenger/history',
@@ -438,6 +437,7 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       publicSubpaths: [
         { method: 'GET', path: '/v1/payments/vnpay-ipn' },
         { method: 'POST', path: '/v1/payments/vnpay-ipn' },
+        { method: 'GET', path: '/v1/payments/vnpay-return-status' },
         { method: 'GET', path: '/v1/payments/vnpay-topup-ipn' },
         { method: 'POST', path: '/v1/payments/vnpay-topup-ipn' },
         { method: 'POST', path: '/v1/payments/subscription-vnpay-ipn' },

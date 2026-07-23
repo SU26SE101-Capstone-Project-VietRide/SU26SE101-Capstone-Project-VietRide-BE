@@ -80,6 +80,36 @@ public sealed class RefundToWalletCommandHandlerTests
     }
 
     [Fact]
+    public async Task Handle_WhenParcelHasAdditionalPayment_RefundsCombinedPaidAmount()
+    {
+        var userId = Guid.NewGuid();
+        var parcelId = Guid.NewGuid();
+        var wallets = new FakeWalletRepository(userId, Money.FromRaw(1_000_000));
+        var platformWallets = new FakePlatformWalletRepository(Money.FromRaw(500_000));
+        var outbox = new FakeIntegrationEventOutbox();
+        var handler = new RefundToWalletCommandHandler(
+            wallets,
+            platformWallets,
+            outbox,
+            new FakePaymentRepository(
+                parcelId,
+                PaymentReferenceType.PARCEL,
+                parcelAdditionalAmount: 75_000),
+            new NoOpRevenueLedgerWriter());
+
+        var result = await handler.Handle(
+            CreateCommand(userId, parcelId, referenceType: "PARCEL_REFUND"),
+            CancellationToken.None);
+
+        result.BalanceAfter.Should().Be(1_175_000);
+        wallets.Transactions.Should().ContainSingle(transaction =>
+            transaction.ReferenceType == WalletTransactionRef.PARCEL_REFUND
+            && transaction.ReferenceId == parcelId
+            && transaction.Amount == Money.FromRaw(175_000));
+        platformWallets.Balance.Amount.Should().Be(325_000);
+    }
+
+    [Fact]
     public async Task Handle_WhenReferenceWasAlreadyRefunded_ReturnsExistingTransactionWithoutDoubleCredit()
     {
         var userId = Guid.NewGuid();
@@ -301,31 +331,62 @@ public sealed class RefundToWalletCommandHandlerTests
 
     private sealed class FakePaymentRepository : IPaymentRepository
     {
-        private readonly VietRide.Payment.Domain.Entities.Payment _payment;
+        private readonly IReadOnlyList<VietRide.Payment.Domain.Entities.Payment> _payments;
 
-        public FakePaymentRepository(Guid referenceId, PaymentReferenceType referenceType)
+        public FakePaymentRepository(
+            Guid referenceId,
+            PaymentReferenceType referenceType,
+            long? parcelAdditionalAmount = null)
         {
-            _payment = VietRide.Payment.Domain.Entities.Payment.CreateSucceededWalletCharge(
+            var primaryAmount = 175_000 - (parcelAdditionalAmount ?? 0);
+            var operatorId = Guid.NewGuid();
+            var tripId = Guid.NewGuid();
+            var payments = new List<VietRide.Payment.Domain.Entities.Payment>
+            {
+                CreatePayment(referenceId, referenceType, primaryAmount, operatorId, tripId),
+            };
+            if (parcelAdditionalAmount.HasValue)
+            {
+                payments.Add(CreatePayment(
+                    referenceId,
+                    PaymentReferenceType.PARCEL_ADDITIONAL,
+                    parcelAdditionalAmount.Value,
+                    operatorId,
+                    tripId));
+            }
+
+            _payments = payments;
+        }
+
+        private static VietRide.Payment.Domain.Entities.Payment CreatePayment(
+            Guid referenceId,
+            PaymentReferenceType referenceType,
+            long amount,
+            Guid operatorId,
+            Guid tripId)
+        {
+            var payment = VietRide.Payment.Domain.Entities.Payment.CreateSucceededWalletCharge(
                 referenceType,
                 referenceId,
                 Guid.NewGuid(),
-                Money.FromRaw(175_000),
+                Money.FromRaw(amount),
                 DateTimeOffset.UtcNow.AddDays(-1));
-            _payment.AttachContext(PaymentContextCodec.ValidateAndSerialize(
+            payment.AttachContext(PaymentContextCodec.ValidateAndSerialize(
                 new PaymentContextV1(1,
                 [
                     new PaymentAllocationV1(
                         referenceId,
                         referenceType.ToString(),
-                        Guid.NewGuid(),
-                        Guid.NewGuid(),
-                        175_000,
+                        operatorId,
+                        tripId,
+                        amount,
                         0,
                         0),
                 ]),
                 referenceType.ToString(),
                 referenceId,
-                175_000));
+                amount));
+            return payment;
         }
 
         public Task<VietRide.Payment.Domain.Entities.Payment?> FindByReferenceAsync(
@@ -333,12 +394,11 @@ public sealed class RefundToWalletCommandHandlerTests
             Guid referenceId,
             CancellationToken cancellationToken)
             => Task.FromResult<VietRide.Payment.Domain.Entities.Payment?>(
-                _payment.ReferenceType == referenceType && _payment.ReferenceId == referenceId
-                    ? _payment
-                    : null);
+                _payments.SingleOrDefault(payment =>
+                    payment.ReferenceType == referenceType && payment.ReferenceId == referenceId));
 
         public IQueryable<VietRide.Payment.Domain.Entities.Payment> Query()
-            => new[] { _payment }.AsQueryable();
+            => _payments.AsQueryable();
 
         public IQueryable<VietRide.Payment.Domain.Entities.Payment> QueryNoTracking() => Query();
         public Task<VietRide.Payment.Domain.Entities.Payment?> GetByIdAsync(Guid id, CancellationToken ct) => throw new NotSupportedException();

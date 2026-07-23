@@ -14,7 +14,9 @@ const composeOverlay = process.env.E2E_COMPOSE_OVERLAY;
 const ownsBaseFixtures = process.env.E2E_OWNS_BASE_FIXTURES === '1';
 const idempotencyFocused = process.env.IDEMPOTENCY_BOOKING_FOCUSED === '1';
 const skipNotificationCleanup = process.env.E2E_SKIP_NOTIFICATION_CLEANUP === '1';
-const tag = `codex-e2e-${Date.now()}`;
+const runNumber = Date.now();
+const tag = `codex-e2e-${runNumber}`;
+const passengerPhone = `+849${String(runNumber).slice(-8)}`;
 const operatorId = process.env.E2E_OPERATOR_ID || '10000000-0000-0000-0000-000000000009';
 const operatorAdminId =
   process.env.E2E_OPERATOR_ADMIN_ID || '10000000-0000-0000-0000-0000000000a9';
@@ -248,6 +250,20 @@ async function sendIpn(values, expectedRspCode) {
   return body;
 }
 
+async function getVnPayReturnStatus(values, expectedStatus) {
+  const parameters = { ...values, vnp_SecureHash: signVnPay(values) };
+  const response = await fetch(
+    `${gateway}/v1/payments/vnpay-return-status?${new URLSearchParams(parameters)}`,
+  );
+  const body = await response.json();
+  if (response.status !== 200 || body?.data?.status !== expectedStatus) {
+    fail(
+      `VNPay return status expected HTTP 200/${expectedStatus}, got ${response.status}/${JSON.stringify(body)}`,
+    );
+  }
+  return body.data;
+}
+
 function paymentRow(paymentId) {
   return scalar(
     'vietride_payment',
@@ -350,7 +366,7 @@ function seedIdentity() {
         : ''
     }
     insert into vietride_identity.users (id,email,phone,password_hash,display_name,role,status)
-    values ('${passengerId}','${tag}@example.test','+84908880001',null,'${tag} passenger','PASSENGER'::user_role,'ACTIVE'::user_status);
+    values ('${passengerId}','${tag}@example.test','${passengerPhone}',null,'${tag} passenger','PASSENGER'::user_role,'ACTIVE'::user_status);
   `,
   );
 }
@@ -379,12 +395,17 @@ function seedTrips(originStationId, destinationStationId, stopId) {
   let selectedVehicleId = vehicleId;
   let selectedDriverUserId = driverUserId;
   if (!ownsBaseFixtures) {
-    const vehicle = scalar(
+    selectedVehicleId = scalar(
       'vietride_trip',
-      `select vehicle_id||'|'||driver_user_id from vietride_trip.trips where operator_id='${operatorId}' limit 1`,
-    ).split('|');
-    if (vehicle.length !== 2) fail('No existing operator vehicle/driver fixture is available.');
-    [selectedVehicleId, selectedDriverUserId] = vehicle;
+      `select id from vietride_trip.vehicles where operator_id='${operatorId}' and is_active=true limit 1`,
+    );
+    selectedDriverUserId = scalar(
+      'vietride_identity',
+      `select id from vietride_identity.users where operator_id='${operatorId}' and role='DRIVER' and status='ACTIVE' limit 1`,
+    );
+    if (!selectedVehicleId || !selectedDriverUserId) {
+      fail('No existing active operator vehicle/driver fixture is available.');
+    }
   }
   runSql(
     'vietride_trip',
@@ -589,6 +610,7 @@ async function testTripAndBookingContract(origin, destination, affected) {
   const stop = detail?.data?.stops?.find((item) => item.stopId === affected);
   if (!stop) fail('Trip detail did not include Stop projection.');
   const expectedKeys = [
+    'actualArrivalTime',
     'address',
     'allowDropoff',
     'allowPickup',
@@ -601,6 +623,7 @@ async function testTripAndBookingContract(origin, destination, affected) {
     'longitude',
     'name',
     'orderIndex',
+    'status',
     'stopId',
   ];
   if (JSON.stringify(Object.keys(stop).sort()) !== JSON.stringify(expectedKeys))
@@ -703,8 +726,8 @@ async function testStopDisable(affected, replacement) {
     true,
   );
   if (
-    result?.data?.warning !== 'STOP_DISABLED_BOOKING_AFFECTED' ||
-    result.data.activeBookingCount !== 1 ||
+    result?.data?.warning !== null ||
+    Object.hasOwn(result?.data ?? {}, 'activeBookingCount') ||
     result.data.stop.isActive !== false
   )
     fail(`Stop disable response mismatch: ${JSON.stringify(result)}`);
@@ -750,7 +773,7 @@ async function testStopDisable(affected, replacement) {
     );
   pass(
     'Stop disable Outbox -> Booking pending action -> Notification',
-    'activeBookingCount=1; idempotent 1/1',
+    'warning=null; async pending action; idempotent 1/1',
   );
 }
 
@@ -844,6 +867,7 @@ async function testVnPay(origin, destination) {
     vnp_ResponseCode: '00',
     vnp_TransactionStatus: '00',
   };
+  await getVnPayReturnStatus(bad, 'PENDING_REDIRECT');
   const invalidResponse = await fetch(
     `${gateway}/v1/payments/vnpay-ipn?${new URLSearchParams({ ...bad, vnp_SecureHash: 'invalid' })}`,
   );
@@ -854,6 +878,7 @@ async function testVnPay(origin, destination) {
     fail('Invalid signature mutated Payment state.');
   await sendIpn(bad, '00');
   await pollBookingStatus(oneWay.bookingId, 'CONFIRMED');
+  await getVnPayReturnStatus(bad, 'SUCCEEDED');
   await sendIpn(bad, '02');
   if (
     scalar(
@@ -863,8 +888,8 @@ async function testVnPay(origin, destination) {
   )
     fail('One-way signed IPN did not book seat.');
   pass(
-    'VNPay one-way redirect + signed GET IPN + replay',
-    `txnRef=${redirect.vnp_TxnRef}; RspCode=00/02/97`,
+    'VNPay one-way redirect + signed return polling + GET IPN + replay',
+    `txnRef=${redirect.vnp_TxnRef}; return=PENDING_REDIRECT->SUCCEEDED; RspCode=00/02/97`,
   );
 
   if (idempotencyFocused) return;

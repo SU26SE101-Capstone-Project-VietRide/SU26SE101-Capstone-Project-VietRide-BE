@@ -11,20 +11,17 @@ public sealed class HandleTripCancelledCommandHandler
     : IRequestHandler<HandleTripCancelledCommand, int>
 {
     private readonly IParcelRepository _parcelRepository;
-    private readonly IIdentityServiceClient _identityClient;
     private readonly ITripServiceClient _tripClient;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IParcelStatsRepository _statsRepository;
 
     public HandleTripCancelledCommandHandler(
         IParcelRepository parcelRepository,
-        IIdentityServiceClient identityClient,
         ITripServiceClient tripClient,
         IIntegrationEventOutbox outbox,
         IParcelStatsRepository statsRepository)
     {
         _parcelRepository = parcelRepository;
-        _identityClient = identityClient;
         _tripClient = tripClient;
         _outbox = outbox;
         _statsRepository = statsRepository;
@@ -67,11 +64,9 @@ public sealed class HandleTripCancelledCommandHandler
                     parcel.ParcelId,
                     cancellationToken));
 
-            var refundAmount = await ParcelRefundAmountCalculator.CalculateRefundAsync(
-                _identityClient,
-                parcel.OperatorId,
-                parcel.DepositAmount + parcel.AdditionalAmount,
-                cancellationToken);
+            // An operator-cancelled trip is not a passenger/parcel no-show.
+            // Refund every amount already collected for a pending parcel.
+            var refundAmount = checked(parcel.DepositAmount + parcel.AdditionalAmount);
             refundAmounts[parcel.ParcelId] = refundAmount;
             await ParcelOutboxEvents.EnqueueAsync(
                 _outbox,

@@ -1,6 +1,8 @@
 using MediatR;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using VietRide.Payment.Application.Features.Internal.Wallets.RefundToWallet;
+using VietRide.Payment.Infrastructure.Refunds;
 using VietRide.Shared.Messaging.Abstractions;
 
 namespace VietRide.Payment.Infrastructure.Messaging;
@@ -9,17 +11,26 @@ public sealed class BookingCancelledIntegrationEventHandler
     : IIntegrationEventHandler<BookingCancelledIntegrationEvent>
 {
     private const string BookingRefundReferenceType = "BOOKING_REFUND";
-    private const int MaxAttempts = 3;
-
+    private const int ImmediateAttempts = 3;
     private readonly ISender _sender;
     private readonly ILogger<BookingCancelledIntegrationEventHandler> _logger;
+    private readonly IServiceProvider? _services;
 
     public BookingCancelledIntegrationEventHandler(
         ISender sender,
         ILogger<BookingCancelledIntegrationEventHandler> logger)
+        : this(sender, logger, null)
+    {
+    }
+
+    public BookingCancelledIntegrationEventHandler(
+        ISender sender,
+        ILogger<BookingCancelledIntegrationEventHandler> logger,
+        IServiceProvider? services)
     {
         _sender = sender;
         _logger = logger;
+        _services = services;
     }
 
     public async Task HandleAsync(
@@ -39,31 +50,47 @@ public sealed class BookingCancelledIntegrationEventHandler
             return;
         }
 
-        var command = new RefundToWalletCommand(
-            integrationEvent.UserId!.Value,
-            integrationEvent.RefundAmount.Value,
-            BookingRefundReferenceType,
-            integrationEvent.BookingId!.Value,
-            (integrationEvent.EventId ?? integrationEvent.BookingId)!.Value.ToString("D"));
-
-        for (var attempt = 1; attempt <= MaxAttempts; attempt++)
+        var refunds = _services?.GetService<RefundRetryService>();
+        if (refunds is not null)
         {
-            try
+            var refunded = await refunds.ExecuteBookingRefundAsync(
+                integrationEvent,
+                cancellationToken).ConfigureAwait(false);
+            if (!refunded)
             {
-                await _sender.Send(command, cancellationToken).ConfigureAwait(false);
-                break;
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex) when (attempt < MaxAttempts)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "Wallet refund attempt {Attempt} failed for booking {BookingId}; retrying.",
-                    attempt,
+                _logger.LogInformation(
+                    "Deferred wallet refund for booking {BookingId} to the recurring retry job.",
                     integrationEvent.BookingId);
+                return;
+            }
+        }
+        else
+        {
+            var command = new RefundToWalletCommand(
+                integrationEvent.UserId!.Value,
+                integrationEvent.RefundAmount.Value,
+                BookingRefundReferenceType,
+                integrationEvent.BookingId!.Value,
+                (integrationEvent.EventId ?? integrationEvent.BookingId)!.Value.ToString("D"));
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    await _sender.Send(command, cancellationToken).ConfigureAwait(false);
+                    break;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception exception) when (attempt < ImmediateAttempts)
+                {
+                    _logger.LogWarning(
+                        exception,
+                        "Wallet refund attempt {Attempt} failed for booking {BookingId}; retrying before acknowledgement.",
+                        attempt,
+                        integrationEvent.BookingId);
+                }
             }
         }
 

@@ -4,6 +4,7 @@ using VietRide.Identity.Application.Features.Operators;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Security;
 using VietRide.Shared.Kernel.Primitives;
 using Xunit;
 
@@ -136,7 +137,8 @@ public sealed class ProfileOperatorProfileHandlerTests
     [Fact]
     public void UpdateOperatorProfileValidator_WhenPolicyShapeInvalid_ReturnsValidationError()
     {
-        var validator = new UpdateOperatorProfileValidator();
+        var validator = new UpdateOperatorProfileValidator(
+            new FirebaseStorageImageUrlValidator("vietride-test.firebasestorage.app"));
         var invalidCancellationPolicy = JsonDocument.Parse("{\"hoursBeforeDeparture\":2,\"feePercent\":90}")
             .RootElement
             .Clone();

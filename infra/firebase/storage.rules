@@ -6,8 +6,49 @@ service firebase.storage {
       allow read: if true;
       allow write: if request.auth != null
         && request.auth.token.role == 'OPERATOR_ADMIN'
+        && request.auth.token.uploadPurpose == 'VEHICLE_IMAGE'
         && request.auth.token.operatorId == operatorId
-        && request.resource != null
+        && validImage();
+    }
+
+    match /operators/{operatorId}/logo/{fileName} {
+      allow read: if true;
+      allow write: if request.auth != null
+        && request.auth.token.role == 'OPERATOR_ADMIN'
+        && request.auth.token.uploadPurpose == 'OPERATOR_LOGO'
+        && request.auth.token.operatorId == operatorId
+        && validImage();
+    }
+
+    match /parcels/{userId}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && request.auth.uid == userId
+        && request.auth.token.role == 'PASSENGER'
+        && request.auth.token.uploadPurpose == 'PARCEL_PHOTO'
+        && validImage();
+    }
+
+    match /incidents/{operatorId}/{userId}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && request.auth.uid == userId
+        && request.auth.token.operatorId == operatorId
+        && request.auth.token.role in ['DRIVER', 'ASSISTANT']
+        && request.auth.token.uploadPurpose == 'INCIDENT_PHOTO'
+        && validImage();
+    }
+
+    match /avatars/{userId}/{fileName} {
+      allow read: if true;
+      allow write: if request.auth != null
+        && request.auth.uid == userId
+        && request.auth.token.uploadPurpose == 'USER_AVATAR'
+        && validImage();
+    }
+
+    function validImage() {
+      return request.resource != null
         && request.resource.size > 0
         && request.resource.size < 5 * 1024 * 1024
         && request.resource.contentType.matches('image/(jpeg|png|webp)');

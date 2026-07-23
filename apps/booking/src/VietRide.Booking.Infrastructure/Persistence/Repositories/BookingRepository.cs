@@ -216,6 +216,7 @@ internal sealed class BookingRepository : IBookingRepository
             {
                 BookingId = booking.Id,
                 booking.Status,
+                TotalAmount = booking.TotalAmount.Amount,
             })
             .ToListAsync(ct);
 
@@ -251,7 +252,8 @@ internal sealed class BookingRepository : IBookingRepository
             .Select(booking => new TripEditImpactDto.ActiveBooking(
                 booking.BookingId,
                 booking.Status.ToString(),
-                seatsByBooking.GetValueOrDefault(booking.BookingId, [])))
+                seatsByBooking.GetValueOrDefault(booking.BookingId, []),
+                booking.TotalAmount))
             .ToArray();
 
         return new TripEditImpactDto(tripId, impacts.Length, impacts);

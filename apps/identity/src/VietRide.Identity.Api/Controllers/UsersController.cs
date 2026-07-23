@@ -4,7 +4,9 @@ using Microsoft.AspNetCore.Mvc;
 using VietRide.Identity.Api.Controllers.Requests;
 using VietRide.Identity.Application.Features.Users.CompleteProfile;
 using VietRide.Identity.Application.Features.Users.GetMe;
+using VietRide.Identity.Application.Features.Users.UpdateAvatar;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Identity.Api.Controllers;
 
@@ -55,6 +57,25 @@ public sealed class UsersController : ControllerBase
             new CompleteProfileCommand(CurrentUserClaims.GetUserId(User), request.Phone),
             ct);
 
+        return Ok(result);
+    }
+
+    /// <summary>Update or clear the authenticated caller's Firebase-hosted avatar.</summary>
+    [HttpPatch("me/avatar")]
+    [RequireIdempotency]
+    [ProducesResponseType(typeof(ApiResponse<UpdateAvatarResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> UpdateAvatar(
+        [FromBody] UpdateAvatarRequest request,
+        CancellationToken ct)
+    {
+        var result = await _sender.Send(
+            new UpdateAvatarCommand(
+                CurrentUserClaims.GetUserId(User),
+                request.AvatarUrl),
+            ct);
         return Ok(result);
     }
 }

@@ -71,7 +71,8 @@ public sealed class TripEditImpactEndpointTests
         impacts[0].EnumerateObject().Select(property => property.Name).Should().Equal(
             "bookingId",
             "status",
-            "seatNumbers");
+            "seatNumbers",
+            "totalAmount");
         impacts[0].GetProperty("bookingId").GetGuid().Should().Be(firstBookingId);
         impacts[0].GetProperty("status").GetString().Should().Be("PENDING_PAYMENT");
         impacts[0].GetProperty("seatNumbers").EnumerateArray()

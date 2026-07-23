@@ -133,10 +133,10 @@ public sealed class LifecycleOperatorCommandHandlerTests
         var fixture = new Fixture();
         var operatorEntity = PendingOperator();
         operatorEntity.Approve(CallerUserId, FixedNow.AddDays(-1));
-        var operatorAdminIds = new[] { Guid.NewGuid(), Guid.NewGuid() };
+        var operatorScopedUserIds = new[] { Guid.NewGuid(), Guid.NewGuid() };
         fixture.Operators.GetByIdAsync(operatorEntity.Id, Arg.Any<CancellationToken>()).Returns(operatorEntity);
-        fixture.Users.ListOperatorAdminIdsAsync(operatorEntity.Id, Arg.Any<CancellationToken>())
-            .Returns(operatorAdminIds);
+        fixture.Users.ListOperatorScopedUserIdsAsync(operatorEntity.Id, Arg.Any<CancellationToken>())
+            .Returns(operatorScopedUserIds);
 
         var response = await fixture.SuspendHandler.Handle(
             new SuspendOperatorCommand(UserRole.SYSTEM_ADMIN.ToString(), CallerUserId, operatorEntity.Id, "Policy violation"),
@@ -154,7 +154,7 @@ public sealed class LifecycleOperatorCommandHandlerTests
         await fixture.Outbox.Received(2).EnqueueAsync(
             Arg.Any<Guid>(),
             FirebaseSessionRevocationRequestedIntegrationEvent.EventType,
-            Arg.Is<string>(payload => operatorAdminIds.Any(userId =>
+            Arg.Is<string>(payload => operatorScopedUserIds.Any(userId =>
                 payload.Contains(userId.ToString(), StringComparison.Ordinal))),
             Arg.Any<CancellationToken>());
     }

@@ -17,6 +17,7 @@ const tripId = '40000000-0000-4000-8000-000000000502';
 const operatorAdminId = crypto.randomUUID();
 const passengerAId = crypto.randomUUID();
 const passengerBId = crypto.randomUUID();
+const driverId = crypto.randomUUID();
 const bookingAId = crypto.randomUUID();
 const bookingBId = crypto.randomUUID();
 const passengerRowA1Id = crypto.randomUUID();
@@ -41,7 +42,7 @@ const parcelReceivedCode = `VR-PCL-${datePart}-${codeSuffix()}`;
 const objectPath = `vehicles/${operatorId}/${crypto.randomUUID()}.png`;
 const staffFirebaseId = crypto.randomUUID();
 let firebaseApp;
-let storageObjectCreated = false;
+const storageObjectPaths = new Set();
 
 function readEnv(file) {
   const result = {};
@@ -133,7 +134,8 @@ function seedData() {
     values
       ('${operatorAdminId}','${tag}-operator@example.test',null,'${tag} operator','OPERATOR_ADMIN','ACTIVE','${operatorId}'),
       ('${passengerAId}','${tag}-a@example.test',null,'${tag} passenger A','PASSENGER','ACTIVE',null),
-      ('${passengerBId}','${tag}-b@example.test',null,'${tag} passenger B','PASSENGER','ACTIVE',null);
+      ('${passengerBId}','${tag}-b@example.test',null,'${tag} passenger B','PASSENGER','ACTIVE',null),
+      ('${driverId}','${tag}-driver@example.test',null,'${tag} driver','DRIVER','ACTIVE','${operatorId}');
   `);
   runSql('vietride_booking', `
     begin;
@@ -260,41 +262,100 @@ function getFirebaseAdminApp() {
   return firebaseApp;
 }
 
-async function testFirebase(operatorToken, systemAdminToken) {
-  const tokenResponse = await api('POST', '/v1/firebase/custom-token', operatorToken, undefined, 200);
+async function requestFirebaseSession(vietRideToken, purpose) {
+  const tokenResponse = await api(
+    'POST',
+    '/v1/firebase/custom-token',
+    vietRideToken,
+    purpose ? { purpose } : undefined,
+    200,
+  );
   const customToken = tokenResponse?.data?.token;
-  if (!customToken) throw new Error('Identity did not return a Firebase custom token.');
+  if (!customToken) throw new Error(`Identity did not return a Firebase custom token for ${purpose ?? 'default purpose'}.`);
+  const session = await exchangeCustomToken(customToken);
+  if (!session.idToken || !session.refreshToken) {
+    throw new Error(`Firebase token exchange returned no session tokens for ${purpose ?? 'default purpose'}.`);
+  }
+  return { tokenResponse, customToken, session };
+}
+
+async function uploadValidImage(pathValue, idToken, png) {
+  const result = await upload(pathValue, idToken, 'image/png', png, 200);
+  storageObjectPaths.add(pathValue);
+  if (result?.name !== pathValue) throw new Error(`Firebase Storage returned an unexpected object path for ${pathValue}.`);
+}
+
+function downloadUrl(pathValue) {
+  return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(required('FIREBASE_WEB_STORAGE_BUCKET'))}/o/${encodeURIComponent(pathValue)}?alt=media`;
+}
+
+async function testFirebase(operatorToken, passengerToken, driverToken, systemAdminToken) {
+  const { tokenResponse, customToken, session } = await requestFirebaseSession(operatorToken);
   const claims = decodeJwtPayload(customToken);
   if (claims.uid !== operatorAdminId
       || claims.claims?.operatorId !== operatorId
-      || claims.claims?.role !== 'OPERATOR_ADMIN') {
+      || claims.claims?.role !== 'OPERATOR_ADMIN'
+      || claims.claims?.uploadPurpose !== 'VEHICLE_IMAGE'
+      || tokenResponse?.data?.uploadPath !== `vehicles/${operatorId}/`) {
     throw new Error('Firebase custom-token UID/custom claims do not match VietRide identity.');
   }
   pass('Firebase Custom Token UID and claims');
 
-  const session = await exchangeCustomToken(customToken);
-  if (!session.idToken || !session.refreshToken) throw new Error('Firebase token exchange returned no session tokens.');
   const idTokenClaims = decodeJwtPayload(session.idToken);
   if (idTokenClaims.user_id !== operatorAdminId
       || idTokenClaims.operatorId !== operatorId
-      || idTokenClaims.role !== 'OPERATOR_ADMIN') {
+      || idTokenClaims.role !== 'OPERATOR_ADMIN'
+      || idTokenClaims.uploadPurpose !== 'VEHICLE_IMAGE') {
     throw new Error('Firebase ID token did not carry the expected exchanged custom claims.');
   }
   pass('Firebase custom-token exchange');
 
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
-  const validUpload = await upload(objectPath, session.idToken, 'image/png', png, 200);
-  storageObjectCreated = true;
-  if (validUpload?.name !== objectPath) throw new Error('Firebase Storage returned an unexpected object path.');
+  await uploadValidImage(objectPath, session.idToken, png);
   pass('Firebase Storage valid operator upload', objectPath);
 
-  const publicRead = await fetch(
-    `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(required('FIREBASE_WEB_STORAGE_BUCKET'))}/o/${encodeURIComponent(objectPath)}?alt=media`,
-  );
+  const publicRead = await fetch(downloadUrl(objectPath));
   if (!publicRead.ok || !Buffer.from(await publicRead.arrayBuffer()).equals(png)) {
     throw new Error(`Firebase Storage public read failed (${publicRead.status}).`);
   }
   pass('Firebase Storage public read');
+
+  const logoPath = `operators/${operatorId}/logo/${crypto.randomUUID()}.webp`;
+  const logoAuth = await requestFirebaseSession(operatorToken, 'OPERATOR_LOGO');
+  await uploadValidImage(logoPath, logoAuth.session.idToken, png);
+  await upload(`vehicles/${operatorId}/${crypto.randomUUID()}.png`, logoAuth.session.idToken, 'image/png', png, 403);
+  pass('Firebase Storage OPERATOR_LOGO purpose and cross-purpose isolation', logoPath);
+
+  const parcelPath = `parcels/${passengerAId}/${crypto.randomUUID()}.jpg`;
+  const parcelAuth = await requestFirebaseSession(passengerToken, 'PARCEL_PHOTO');
+  await uploadValidImage(parcelPath, parcelAuth.session.idToken, png);
+  await upload(`parcels/${passengerBId}/${crypto.randomUUID()}.jpg`, parcelAuth.session.idToken, 'image/jpeg', png, 403);
+  pass('Firebase Storage PARCEL_PHOTO owner isolation', parcelPath);
+
+  const avatarPath = `avatars/${passengerAId}/${crypto.randomUUID()}.png`;
+  const avatarAuth = await requestFirebaseSession(passengerToken, 'USER_AVATAR');
+  await uploadValidImage(avatarPath, avatarAuth.session.idToken, png);
+  await upload(`avatars/${passengerBId}/${crypto.randomUUID()}.png`, avatarAuth.session.idToken, 'image/png', png, 403);
+  await api(
+    'PATCH',
+    '/v1/users/me/avatar',
+    passengerToken,
+    { avatarUrl: downloadUrl(avatarPath) },
+    200,
+    true,
+  );
+  const me = await api('GET', '/v1/users/me', passengerToken, undefined, 200);
+  if (me?.data?.avatarUrl !== downloadUrl(avatarPath)) {
+    throw new Error('Passenger avatar URL was not persisted by Identity.');
+  }
+  pass('Firebase Storage USER_AVATAR owner isolation and Identity persistence', avatarPath);
+
+  const incidentPath = `incidents/${operatorId}/${driverId}/${crypto.randomUUID()}.png`;
+  const incidentAuth = await requestFirebaseSession(driverToken, 'INCIDENT_PHOTO');
+  await uploadValidImage(incidentPath, incidentAuth.session.idToken, png);
+  await upload(`incidents/${operatorId}/${passengerAId}/${crypto.randomUUID()}.png`, incidentAuth.session.idToken, 'image/png', png, 403);
+  await upload(`incidents/${crypto.randomUUID()}/${driverId}/${crypto.randomUUID()}.png`, incidentAuth.session.idToken, 'image/png', png, 403);
+  pass('Firebase Storage INCIDENT_PHOTO user/operator isolation', incidentPath);
 
   await upload(`vehicles/${crypto.randomUUID()}/${crypto.randomUUID()}.png`, session.idToken, 'image/png', png, 403);
   pass('Firebase Storage rejects mismatched operator path');
@@ -342,8 +403,12 @@ async function testFirebase(operatorToken, systemAdminToken) {
 async function cleanup() {
   try {
     getFirebaseAdminApp();
-    if (storageObjectCreated) await getStorage(firebaseApp).bucket().file(objectPath).delete({ ignoreNotFound: true });
+    for (const pathValue of storageObjectPaths) {
+      await getStorage(firebaseApp).bucket().file(pathValue).delete({ ignoreNotFound: true });
+    }
     await getAuth(firebaseApp).deleteUser(operatorAdminId).catch(() => {});
+    await getAuth(firebaseApp).deleteUser(passengerAId).catch(() => {});
+    await getAuth(firebaseApp).deleteUser(driverId).catch(() => {});
     await getAuth(firebaseApp).deleteUser(staffFirebaseId).catch(() => {});
     await deleteApp(firebaseApp);
   } catch (error) {
@@ -353,9 +418,9 @@ async function cleanup() {
     runSql('vietride_booking', `delete from vietride_booking.bookings where id in ('${bookingAId}','${bookingBId}');`);
     runSql('vietride_parcel', `delete from vietride_parcel.parcels where id in ('${parcelSentAId}','${parcelSentBId}','${parcelReceivedAId}');`);
     runSql('vietride_identity', `
-      delete from vietride_identity.activity_logs where user_id in ('${operatorAdminId}','${passengerAId}','${passengerBId}');
-      delete from vietride_identity.refresh_tokens where user_id in ('${operatorAdminId}','${passengerAId}','${passengerBId}');
-      delete from vietride_identity.users where id in ('${operatorAdminId}','${passengerAId}','${passengerBId}');
+      delete from vietride_identity.activity_logs where user_id in ('${operatorAdminId}','${passengerAId}','${passengerBId}','${driverId}');
+      delete from vietride_identity.refresh_tokens where user_id in ('${operatorAdminId}','${passengerAId}','${passengerBId}','${driverId}');
+      delete from vietride_identity.users where id in ('${operatorAdminId}','${passengerAId}','${passengerBId}','${driverId}');
     `);
     pass('E2E database cleanup');
   } catch (error) {
@@ -386,8 +451,14 @@ async function main() {
     role: 'PASSENGER',
     email: `${tag}-a@example.test`,
   });
+  const driverToken = await issueToken({
+    subject: driverId,
+    role: 'DRIVER',
+    email: `${tag}-driver@example.test`,
+    operator: operatorId,
+  });
   await testHistory(passengerAToken);
-  await testFirebase(operatorToken, systemAdminToken);
+  await testFirebase(operatorToken, passengerAToken, driverToken, systemAdminToken);
 }
 
 try {

@@ -266,6 +266,33 @@ internal sealed class TripRepository : ITripRepository
             cancellationToken);
     }
 
+    public Task<Domain.Entities.Trip?> GetRouteChangePreflightAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+        => _dbContext.Trips
+            .AsNoTracking()
+            .SingleOrDefaultAsync(trip => trip.Id == tripId, cancellationToken);
+
+    public async Task<Domain.Entities.Trip?> AcquireForRouteChangeAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        EnsureCallerTransaction("route-change Trip acquisition");
+
+        await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT 1 FROM vietride_trip.trips WHERE id = {tripId} FOR UPDATE",
+            cancellationToken);
+        var trip = await _dbContext.Trips.SingleOrDefaultAsync(
+            item => item.Id == tripId,
+            cancellationToken);
+        if (trip is not null)
+        {
+            await _dbContext.Entry(trip).ReloadAsync(cancellationToken);
+        }
+
+        return trip;
+    }
+
     public async Task<DriverTripRouteDto?> GetDriverTripRouteAsync(
         Guid tripId,
         CancellationToken cancellationToken)

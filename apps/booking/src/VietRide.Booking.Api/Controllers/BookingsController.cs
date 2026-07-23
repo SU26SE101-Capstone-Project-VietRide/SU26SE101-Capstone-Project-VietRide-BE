@@ -298,6 +298,7 @@ public sealed class BookingsController : ControllerBase
     }
 
     /// <summary>Resolve a persisted passenger schedule-change action.</summary>
+    [NonAction]
     [HttpPost("{bookingId}/pending-actions/{actionId}/resolve")]
     [Authorize(Roles = PassengerRole)]
     [RequireIdempotency]
@@ -320,7 +321,9 @@ public sealed class BookingsController : ControllerBase
             Request.Headers[IdempotencyKeyHeader].ToString(),
             request.Action,
             request.Note,
-            request.ExtraFields?.Keys.ToArray() ?? []);
+            request.ExtraFields?.Keys.ToArray() ?? [],
+            request.SelectedStopId,
+            request.SelectedStationId);
         var result = await _sender.Send(command, ct);
 
         return StatusCode(StatusCodes.Status200OK, result);

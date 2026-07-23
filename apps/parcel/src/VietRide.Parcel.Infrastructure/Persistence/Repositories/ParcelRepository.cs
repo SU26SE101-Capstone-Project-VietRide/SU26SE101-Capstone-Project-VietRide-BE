@@ -868,6 +868,27 @@ internal sealed class ParcelRepository : IParcelRepository
             ct);
     }
 
+    public async Task<IReadOnlyList<TripCancellationParcelImpact>> GetTripCancellationImpactAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct)
+        => await _db.Parcels
+            .AsNoTracking()
+            .Where(parcel => parcel.TripId == tripId && parcel.OperatorId == operatorId)
+            .Where(parcel => parcel.Status == ParcelStatus.PENDING_OPERATOR_REVIEW
+                || parcel.Status == ParcelStatus.PENDING_PAYMENT
+                || parcel.Status == ParcelStatus.PENDING
+                || parcel.Status == ParcelStatus.LOADED
+                || parcel.Status == ParcelStatus.IN_TRANSIT)
+            .OrderBy(parcel => parcel.Id)
+            .Select(parcel => new TripCancellationParcelImpact(
+                parcel.Id,
+                parcel.Status.ToString(),
+                parcel.Status == ParcelStatus.PENDING
+                    ? parcel.DepositAmount.Amount + parcel.AdditionalAmount.Amount
+                    : 0))
+            .ToListAsync(ct);
+
     public async Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkRequestTransferByTripIdAsync(
         Guid oldTripId,
         Guid newTripId,

@@ -12,6 +12,7 @@ public sealed class Trip : BaseEntity<Guid>
 
     public Guid OperatorId { get; private set; }
     public Guid RouteId { get; private set; }
+    public Guid? AlternativeRouteId { get; private set; }
     public Guid VehicleId { get; private set; }
     public Guid DriverUserId { get; private set; }
     public Guid? AssistantUserId { get; private set; }
@@ -156,6 +157,28 @@ public sealed class Trip : BaseEntity<Guid>
         RouteId = routeId;
         EstimatedArrivalTime = estimatedArrivalTime;
         return true;
+    }
+
+    public bool ChangeAlternativeRoute(Guid alternativeRouteId)
+    {
+        EnsureAlternativeRouteChangeAllowed();
+        if (alternativeRouteId == Guid.Empty)
+            throw new ArgumentException("Value cannot be empty.", nameof(alternativeRouteId));
+
+        if (AlternativeRouteId == alternativeRouteId)
+            return false;
+
+        AlternativeRouteId = alternativeRouteId;
+        return true;
+    }
+
+    public void EnsureAlternativeRouteChangeAllowed()
+    {
+        if (Status is not (TripStatus.SCHEDULED or TripStatus.BOARDING or TripStatus.IN_PROGRESS))
+        {
+            throw new InvalidOperationException(
+                "Only scheduled, boarding, or in-progress trips can change alternative route.");
+        }
     }
 
     public void MarkBoarding(DateTimeOffset boardingAt)

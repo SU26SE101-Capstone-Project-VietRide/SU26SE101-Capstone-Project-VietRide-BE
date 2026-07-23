@@ -1382,6 +1382,10 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("actual_departure_time");
 
+                    b.Property<Guid?>("AlternativeRouteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("alternative_route_id");
+
                     b.Property<Guid?>("AssistantUserId")
                         .HasColumnType("uuid")
                         .HasColumnName("assistant_user_id");
@@ -1530,6 +1534,9 @@ namespace VietRide.Trip.Infrastructure.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_trips");
+
+                    b.HasIndex("AlternativeRouteId")
+                        .HasDatabaseName("idx_trips_alternative_route_id");
 
                     b.HasIndex("AssistantUserId")
                         .HasDatabaseName("idx_trips_assistant_user_id")
@@ -2272,6 +2279,11 @@ namespace VietRide.Trip.Infrastructure.Migrations
 
             modelBuilder.Entity("VietRide.Trip.Domain.Entities.Trip", b =>
                 {
+                    b.HasOne("VietRide.Trip.Domain.Entities.AlternativeRoute", null)
+                        .WithMany()
+                        .HasForeignKey("AlternativeRouteId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
                     b.HasOne("VietRide.Trip.Domain.Entities.DriverSchedule", null)
                         .WithMany()
                         .HasForeignKey("DriverScheduleId")

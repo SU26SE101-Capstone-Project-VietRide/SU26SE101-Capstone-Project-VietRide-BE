@@ -19,6 +19,13 @@ public sealed class ResolvePendingActionCommandValidator : AbstractValidator<Res
         RuleFor(command => command.ExtraFields)
             .Empty()
             .WithMessage("Request contains unsupported fields.");
+        RuleFor(command => command)
+            .Must(command => !(command.SelectedStopId.HasValue && command.SelectedStationId.HasValue))
+            .WithMessage("Exactly one selected route-change candidate identity is allowed.");
+        RuleFor(command => command)
+            .Must(command => command.Action != "REJECTED"
+                || (!command.SelectedStopId.HasValue && !command.SelectedStationId.HasValue))
+            .WithMessage("REJECTED does not accept a selected route-change candidate.");
     }
 
     private static bool IsUuidV4(string? value)

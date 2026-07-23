@@ -502,6 +502,35 @@ Error `401` — missing or invalid token:
 }
 ```
 
+### PATCH `/v1/users/me/avatar`
+
+Auth: User Access Token (RS256). Idempotency-Key: required.
+
+The client first uploads the image using the Firebase custom token flow, then sends the
+Firebase Storage download URL here. Identity accepts only an HTTPS URL in the configured
+Firebase bucket under `avatars/{callerUserId}/`; the URL is never accepted for another user
+or an unrelated path.
+
+Request:
+```json
+{
+  "avatarUrl": "https://firebasestorage.googleapis.com/v0/b/vietride.firebasestorage.app/o/avatars%2Fuser-id%2Favatar.webp?alt=media"
+}
+```
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": { "avatarUrl": "https://firebasestorage.googleapis.com/..." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-23T10:00:00Z" }
+}
+```
+
+Errors: `401 AUTH_TOKEN_INVALID`, `404 USER_NOT_FOUND`, and `422 VALIDATION_ERROR` for a
+missing, malformed, or caller-unowned Firebase URL.
+
 ### GET `/v1/passenger/me`
 
 Auth: User Access Token (RS256). Idempotency-Key: not required (read endpoint).
@@ -710,19 +739,38 @@ Error `422` — invalid device token payload:
 
 ### POST `/v1/firebase/custom-token`
 
-Auth: `OPERATOR_ADMIN`. Body: empty. Idempotency-Key: not required.
+Auth: User Access Token (RS256). Body is optional for backward compatibility; an empty body
+defaults to `VEHICLE_IMAGE`. Idempotency-Key: not required.
 
-Identity revalidates the persisted caller before minting a token: the User must still be
-`ACTIVE`, have role `OPERATOR_ADMIN`, have a non-null `operatorId`, and belong to an active
-Operator whose registration status is `APPROVED`. Firebase UID is the VietRide `userId` and the
-custom claims are `{ operatorId, role: "OPERATOR_ADMIN" }`.
+Optional request:
+```json
+{ "purpose": "VEHICLE_IMAGE" }
+```
+
+Allowed purposes and claims:
+
+| Purpose | Allowed role(s) | Upload prefix |
+|---|---|---|
+| `VEHICLE_IMAGE` | `OPERATOR_ADMIN` | `vehicles/{operatorId}/` |
+| `OPERATOR_LOGO` | `OPERATOR_ADMIN` | `operators/{operatorId}/logo/` |
+| `PARCEL_PHOTO` | `PASSENGER` | `parcels/{userId}/` |
+| `INCIDENT_PHOTO` | `DRIVER`, `ASSISTANT` | `incidents/{operatorId}/{userId}/` |
+| `USER_AVATAR` | any active user | `avatars/{userId}/` |
+
+Identity revalidates the persisted caller before minting a token. Operator-scoped users must
+still belong to an active, `APPROVED` Operator. Firebase UID is the VietRide `userId`; claims
+include `role`, `uploadPurpose`, and `operatorId` when applicable.
 
 Response `200`:
 ```json
 {
   "success": true,
   "statusCode": 200,
-  "data": { "token": "firebase-custom-token" },
+  "data": {
+    "token": "firebase-custom-token",
+    "purpose": "VEHICLE_IMAGE",
+    "uploadPath": "vehicles/operator-id/"
+  },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-07-20T10:00:00Z" }
 }
 ```
@@ -1514,8 +1562,9 @@ terminal resolution; missing/mismatched idempotency keys use `422 IDEMPOTENCY_KE
 ### POST `/v1/bookings/{bookingId}/pending-actions/{actionId}/resolve`
 
 Auth: user JWT with role `PASSENGER`, and the caller must own the Booking. A valid JWT with any
-other role returns `403 FORBIDDEN` before Booking/action lookup. This Day-23 endpoint resolves only
-a persisted `SCHEDULE_CHANGE`; operator seat assignment remains outside this contract.
+other role returns `403 FORBIDDEN` before Booking/action lookup. This endpoint resolves a
+persisted `SCHEDULE_CHANGE` or `ROUTE_CHANGE`; operator seat assignment remains outside this
+contract.
 
 `Idempotency-Key` is required and must be UUID v4. The fingerprint includes actor, method, path,
 canonical query, and raw body. A same key + same payload request replays the stored status/body
@@ -1528,21 +1577,35 @@ Request:
 ```json
 {
   "action": "ACCEPTED",
+  "selectedStopId": "00000000-0000-4000-8000-000000000037",
+  "selectedStationId": null,
   "note": "optional"
 }
 ```
 
-The body has exactly `action: ACCEPTED|REJECTED` and optional `note`. `selectedStopId` is invalid,
-as is every other extra/request-shape field. Both route values must be UUIDs. Resolution at the
-effective cutoff is passenger-eligible; only a request strictly after the effective cutoff returns
-`BOOKING_PENDING_ACTION_EXPIRED`. For MEDIUM the cutoff is `initialDeadline`; for MAJOR it is
-`terminalDeadline` only when `initialDeadline < terminalDeadline`, otherwise `initialDeadline`.
+The body has `action: ACCEPTED|REJECTED`, nullable `selectedStopId`, nullable
+`selectedStationId`, and optional `note`. For `SCHEDULE_CHANGE`, both selected IDs are invalid and
+must be omitted or null. For `ROUTE_CHANGE`, `ACCEPTED` requires exactly one selected identity and
+it must exactly match one frozen candidate in action metadata; `REJECTED` requires neither.
+Booking never calls Trip to refresh candidates. Resolution at the effective cutoff is
+passenger-eligible; only a request strictly after the effective cutoff returns
+`BOOKING_PENDING_ACTION_EXPIRED`. For SCHEDULE_CHANGE MEDIUM the cutoff is `initialDeadline`; for
+MAJOR it is `terminalDeadline` only when `initialDeadline < terminalDeadline`, otherwise
+`initialDeadline`. ROUTE_CHANGE uses `occurredAt + 30m` for `IN_PROGRESS` and `occurredAt + 60m`
+for `SCHEDULED|BOARDING`.
 
 `ACCEPTED` atomically resolves the action and leaves the Booking `CONFIRMED`. `REJECTED` computes
-the frozen refund from immutable `Booking.totalAmount` (MEDIUM 50%, MAJOR 100%, rounded to the
-nearest VND with `MidpointRounding.AwayFromZero`), then atomically resolves the action, sets
-`refundOverride=true`, cancels the Booking with `SCHEDULE_CHANGED`, appends history, and enqueues exactly one authoritative
+the frozen refund from immutable `Booking.totalAmount` (SCHEDULE_CHANGE MEDIUM 50%, MAJOR 100%;
+ROUTE_CHANGE 100%; rounded to the nearest VND with `MidpointRounding.AwayFromZero`), then
+atomically resolves the action, sets `refundOverride=true`, cancels the Booking with
+`SCHEDULE_CHANGED` or `ROUTE_CHANGED_REFUSED`, appends history, and enqueues exactly one authoritative
 `booking.booking.cancelled` containing that `refundAmount`.
+
+ROUTE_CHANGE no-response expiry is different from explicit `REJECTED`: only a scheduler pass with
+`deadline < now` resolves `AUTO_FALLBACK_DESTINATION`. It leaves the Booking `CONFIRMED`, changes
+no pickup field, creates no refund, and retains immutable metadata
+`{originalStopId,fallbackDestinationStationId,shuttleRequired:true}` for shuttle coordination.
+The same transaction emits one `booking.booking.route_change_auto_fallback_applied`.
 
 Response `200`:
 ```json
@@ -2206,34 +2269,131 @@ Errors:
 - `409 BOOKING_SEAT_UNAVAILABLE` — lock token expired or no longer owns the seats (seat was
   released on TTL); Booking must compensate (release + cancel). `error.fields` lists the seats.
 
-### POST `/v1/operator/trips/{tripId}/cancel`
+### POST `/v1/operator/trips/{id}/cancel/preview`
 
-Auth: operator staff/admin for trip's operator. Idempotency: required.
+Auth: `OPERATOR_ADMIN` for the Trip's operator. This read-only preview does not require an
+Idempotency-Key and does not change Trip or Booking state.
+
+Request:
+```json
+{}
+```
+
+Response `200` data:
+```json
+{
+  "tripId": "00000000-0000-4000-8000-000000000033",
+  "status": "SCHEDULED",
+  "affectedBookingIds": ["00000000-0000-4000-8000-000000000034"],
+  "refundTotalBooking": 1250000,
+  "affectedParcelIds": ["00000000-0000-4000-8000-000000000035"],
+  "refundTotalParcel": 35000,
+  "grandTotal": 1285000
+}
+```
+
+The preview is available only while the Trip is `SCHEDULED` or `BOARDING`. Booking and parcel
+totals are calculated independently from immutable persisted amounts; `grandTotal` is their sum.
+Pending-payment Bookings contribute zero.
+
+Statuses: `200`, `401`, `403`, `404`, `409`, `422`.
+
+Errors:
+- `404 TRIP_NOT_FOUND` when the Trip is missing or belongs to another operator.
+- `409 TRIP_NOT_EDITABLE` when the Trip is not `SCHEDULED` or `BOARDING`.
+
+### POST `/v1/operator/trips/{id}/cancel`
+
+Auth: `OPERATOR_ADMIN` for the Trip's operator. Idempotency: required UUID-v4
+`Idempotency-Key`.
 
 Request:
 ```json
 {
-  "reason": "Vehicle issue",
-  "note": "Bus cannot depart safely"
+  "reason": "Vehicle issue"
 }
 ```
 
-Response `200`:
+`reason` is required and must be non-empty text.
+
+Response `200` data:
 ```json
 {
-  "success": true,
-  "statusCode": 200,
-  "data": {
-    "tripId": "uuid",
-    "status": "CANCELLED",
-    "affectedBookings": 42,
-    "affectedParcels": 3
-  },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "tripId": "00000000-0000-4000-8000-000000000033",
+  "status": "CANCELLED"
 }
 ```
 
-Rules: if Trip is `SCHEDULED` or `BOARDING`, transition to `CANCELLED` and trigger full refund/cancel flows. If Trip is already `IN_PROGRESS`, transition to `DISRUPTED` and use proportional refund / parcel operator-action flows.
+Only a `SCHEDULED` or `BOARDING` Trip can transition to `CANCELLED`. Trip publishes
+`trip.trip.cancelled`; Booking owns the affected Booking transitions and publishes the sole
+refund trigger, `booking.booking.cancelled`.
+
+Statuses: `200`, `401`, `403`, `404`, `409`, `422`.
+
+Errors:
+- `404 TRIP_NOT_FOUND` when the Trip is missing or belongs to another operator.
+- `409 TRIP_NOT_EDITABLE` when the Trip is not `SCHEDULED` or `BOARDING`.
+
+### POST `/v1/operator/trips/{id}/change-route`
+
+Auth: `OPERATOR_ADMIN` for the Trip's operator. Idempotency: required UUID-v4
+`Idempotency-Key`.
+
+Request:
+```json
+{
+  "alternativeRouteId": "00000000-0000-4000-8000-000000000036"
+}
+```
+
+Response `200` data:
+```json
+{
+  "tripId": "00000000-0000-4000-8000-000000000033",
+  "status": "IN_PROGRESS",
+  "alternativeRouteId": "00000000-0000-4000-8000-000000000036",
+  "affectedBookings": [
+    {
+      "bookingId": "00000000-0000-4000-8000-000000000034",
+      "candidateStops": [
+        {
+          "stopId": "00000000-0000-4000-8000-000000000037",
+          "stationId": null,
+          "stationName": "Alternative stop",
+          "sequence": 1,
+          "estimatedArrivalAt": "2026-07-23T01:45:00Z"
+        },
+        {
+          "stopId": null,
+          "stationId": "00000000-0000-4000-8000-000000000038",
+          "stationName": "Destination station",
+          "sequence": 2,
+          "estimatedArrivalAt": "2026-07-23T04:50:00Z"
+        }
+      ]
+    }
+  ]
+}
+```
+
+The AlternativeRoute must be active, belong to the Trip's Route, and belong to the same
+operator. Route change is supported for `SCHEDULED`, `BOARDING`, and `IN_PROGRESS`; other Trip
+states are not editable. `affectedBookings` is ordered by `bookingId`, and each immutable
+`candidateStops` array is ordered by `sequence`. Every candidate contains exactly
+`{stopId,stationId,stationName,sequence,estimatedArrivalAt}` with XOR identity: intermediate
+AlternativeRoute stops set only `stopId`, while the appended destination Station sets only
+`stationId`. Trip derives these snapshots locally from the selected AlternativeRoute in the
+route-change transaction; no cross-database FK or synchronous consumer lookup is permitted.
+The event adds `tripStatus` with exactly `SCHEDULED|BOARDING|IN_PROGRESS`. Neither response nor
+event contains `affectedBookingIds`.
+
+Statuses: `200`, `401`, `403`, `404`, `409`, `422`.
+
+Errors:
+- `404 TRIP_NOT_FOUND` when the Trip is missing or belongs to another operator.
+- `404 ROUTE_NOT_FOUND` when the AlternativeRoute is missing, inactive, belongs to another
+  parent Route, or belongs to another operator.
+- `409 TRIP_NOT_EDITABLE` when the Trip lifecycle does not permit a route change.
 
 ### POST `/v1/operator/trips/{tripId}/substitute-vehicle`
 
@@ -2873,6 +3033,28 @@ Response `200`:
 }
 ```
 
+### GET `/internal/v1/parcels/trips/{tripId}/cancel-impact?operatorId={operatorId}`
+
+Auth: Internal JWT. Read-only raw service-to-service projection used by Trip cancellation preview.
+
+Response `200`:
+```json
+{
+  "tripId": "uuid",
+  "affectedParcels": [
+    {
+      "parcelId": "uuid",
+      "status": "PENDING",
+      "refundAmount": 35000
+    }
+  ]
+}
+```
+
+The result is tenant-scoped by `operatorId`, ordered by `parcelId`, and contains each active
+parcel at most once. `PENDING` contributes immutable `depositAmount + additionalAmount`;
+pre-payment/review and loaded/in-transit operational rows contribute zero.
+
 ### POST `/v1/operator/parcels/{parcelId}/request-transfer`
 
 Auth: operator staff/admin for parcel's operator.
@@ -2982,6 +3164,36 @@ Response `200`:
 ```
 
 ## Payment & Wallet Service
+
+### GET `/v1/payments/vnpay-return-status`
+
+Auth: public VNPay browser return. The complete VNPay query string, including
+`vnp_TxnRef`, `vnp_TmnCode`, and `vnp_SecureHash`, is required. Payment verifies
+HMAC-SHA512 and the configured merchant before reading the persisted transaction.
+
+This endpoint is read-only. It never transitions Payment or Booking; only the signed
+VNPay IPN can move `PENDING_REDIRECT` to a terminal state and publish the corresponding
+integration event.
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "vnPayTxnRef": "VR-BOOKING-20260724-001",
+    "paymentId": "uuid",
+    "referenceType": "BOOKING",
+    "referenceId": "uuid",
+    "status": "PENDING_REDIRECT"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-24T10:00:00Z" }
+}
+```
+
+The HTTPS return bridge polls this resource while displaying a web fallback and may
+also open `vietride://payments/return?<original-signed-query>`. Errors:
+`401 PAYMENT_SIGNATURE_INVALID`, `404 PAYMENT_NOT_FOUND`, `422 VALIDATION_ERROR`.
 
 ### POST `/v1/wallet/top-up`
 
@@ -6211,6 +6423,30 @@ Producer: Booking. Consumer: Notification. Exactly one fact is emitted per resol
 `affectedField` is `PICKUP|DROPOFF`; the routing key is
 `booking.booking.stop_disabled_auto_fallback_applied`. Identity is
 `eventId == OutboxEvent.Id == RabbitMQ MessageId`.
+
+### `booking.booking.route_change_auto_fallback_applied`
+
+Producer: Booking. Consumer: Notification. Exactly one fact is emitted when an unresolved
+ROUTE_CHANGE action is processed strictly after its deadline:
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-07-23T02:00:00Z",
+  "eventType": "booking.booking.route_change_auto_fallback_applied",
+  "bookingId": "uuid",
+  "tripId": "uuid",
+  "userId": "uuid",
+  "pendingActionId": "uuid",
+  "originalStopId": "uuid",
+  "fallbackDestinationStationId": "uuid",
+  "shuttleRequired": true,
+  "resolvedAction": "AUTO_FALLBACK_DESTINATION"
+}
+```
+
+Identity is `eventId == OutboxEvent.Id == RabbitMQ MessageId`. This fact does not imply a Booking
+status transition or refund.
 
 ### `booking.booking.passenger_no_show_marked`
 

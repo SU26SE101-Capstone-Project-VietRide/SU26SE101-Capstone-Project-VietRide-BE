@@ -415,6 +415,7 @@ CREATE TABLE trips (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     operator_id UUID NOT NULL,
     route_id UUID NOT NULL REFERENCES routes (id) ON DELETE RESTRICT,
+    alternative_route_id UUID NULL REFERENCES alternative_routes (id),
     vehicle_id UUID NOT NULL REFERENCES vehicles (id) ON DELETE RESTRICT,
     driver_user_id UUID NOT NULL,    -- logical FK
     assistant_user_id UUID NULL,     -- logical FK
@@ -461,6 +462,7 @@ CREATE UNIQUE INDEX uq_trips_vehicle_departure
     WHERE status NOT IN ('CANCELLED');
 CREATE INDEX idx_trips_operator_status ON trips (operator_id, status);
 CREATE INDEX idx_trips_route_departure ON trips (route_id, departure_date_time);
+CREATE INDEX idx_trips_alternative_route_id ON trips (alternative_route_id);
 CREATE INDEX idx_trips_status_departure ON trips (status, departure_date_time);
 CREATE INDEX idx_trips_assistant_user_id ON trips (assistant_user_id) WHERE assistant_user_id IS NOT NULL;
 CREATE INDEX idx_trips_driver_schedule_id ON trips (driver_schedule_id) WHERE driver_schedule_id IS NOT NULL;

@@ -114,6 +114,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<TripTerminalSettlementService>();
         services.AddScoped<TripSettlementService>();
         services.AddScoped<IRefundRetryExecutor, WalletRefundRetryExecutor>();
+        services.AddScoped<RefundRetryService>();
         services.Configure<VnPayOptions>(options =>
         {
             configuration.GetSection(VnPayOptions.SectionName).Bind(options);

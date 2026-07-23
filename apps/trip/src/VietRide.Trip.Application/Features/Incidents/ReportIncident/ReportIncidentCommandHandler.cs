@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using MediatR;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
+using VietRide.Shared.Application.Security;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Domain.Entities;
@@ -21,17 +22,20 @@ public sealed class ReportIncidentCommandHandler
     private readonly IIncidentRepository _incidents;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IClock _clock;
+    private readonly IFirebaseStorageImageUrlValidator _firebaseUrls;
 
     public ReportIncidentCommandHandler(
         ITripRepository trips,
         IIncidentRepository incidents,
         IIntegrationEventOutbox outbox,
-        IClock clock)
+        IClock clock,
+        IFirebaseStorageImageUrlValidator firebaseUrls)
     {
         _trips = trips;
         _incidents = incidents;
         _outbox = outbox;
         _clock = clock;
+        _firebaseUrls = firebaseUrls;
     }
 
     public async Task<ReportIncidentResponse> Handle(
@@ -54,6 +58,16 @@ public sealed class ReportIncidentCommandHandler
             throw new CodedValidationException(
                 "TRIP_NOT_IN_PROGRESS",
                 "Trip must be in progress before an incident can be reported.");
+        }
+
+        var expectedPhotoPrefix =
+            $"incidents/{trip.OperatorId:D}/{request.ReporterUserId:D}/";
+        if (request.PhotoUrls?.Any(url =>
+                !_firebaseUrls.IsValidOwnedImageUrl(url, expectedPhotoPrefix)) == true)
+        {
+            throw new CodedValidationException(
+                "VALIDATION_ERROR",
+                "Each photo URL must be an owned Firebase incident photo URL.");
         }
 
         var category = Enum.Parse<IncidentCategory>(request.Category, ignoreCase: false);

@@ -2,6 +2,7 @@ import { Controller, Get, Inject, NotFoundException, Res } from '@nestjs/common'
 import type { Response } from 'express';
 import { ENV_TOKEN } from '../app/tokens';
 import type { Env } from '../config/env.schema';
+import { renderPaymentReturnPage } from './payment-return.html';
 import { renderSetPasswordFallbackPage } from './set-password-fallback.html';
 
 type AssetLinksStatement = {
@@ -29,7 +30,7 @@ export class DeeplinkController {
   // array, not the ADR 0004 envelope.
   @Get('.well-known/assetlinks.json')
   assetlinks(@Res() res: Response): void {
-    const packageName = this.env.DEEPLINK_ANDROID_PACKAGE;
+    const packageName = this.env.DEEPLINK_ANDROID_PACKAGE ?? this.env.ANDROID_PACKAGE;
     const fingerprints = (this.env.DEEPLINK_ANDROID_SHA256_FINGERPRINTS ?? '')
       .split(',')
       .map((f) => f.trim())
@@ -60,6 +61,21 @@ export class DeeplinkController {
     res.type('html').send(
       renderSetPasswordFallbackPage({
         scheme: this.env.DEEPLINK_APP_SCHEME,
+        androidStoreUrl: this.env.DEEPLINK_ANDROID_STORE_URL,
+      }),
+    );
+  }
+
+  // HTTPS bridge for VNPay browser returns. The page never marks a payment as
+  // successful; it only forwards the signed VNPay query to the Passenger app.
+  @Get('payments/return')
+  paymentReturnPage(@Res() res: Response): void {
+    const appDeepLink =
+      this.env.APP_DEEP_LINK ?? `${this.env.DEEPLINK_APP_SCHEME}://payments/return`;
+    res.setHeader('Cache-Control', 'no-store');
+    res.type('html').send(
+      renderPaymentReturnPage({
+        appDeepLink,
         androidStoreUrl: this.env.DEEPLINK_ANDROID_STORE_URL,
       }),
     );

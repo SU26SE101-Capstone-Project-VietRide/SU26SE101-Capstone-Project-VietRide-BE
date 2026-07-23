@@ -272,6 +272,20 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
         Phone = phone;
     }
 
+    public void UpdateAvatar(string? avatarUrl)
+    {
+        if (Status != UserStatus.ACTIVE)
+        {
+            throw new InvalidUserStatusTransitionException(
+                Status.ToString(),
+                UserStatus.ACTIVE.ToString());
+        }
+
+        AvatarUrl = string.IsNullOrWhiteSpace(avatarUrl)
+            ? null
+            : avatarUrl.Trim();
+    }
+
     /// <summary>
     /// Records a failed login and sets last_failed_login_at.
     /// <paramref name="failedAttemptsInWindow"/> is the Redis counter value for the

@@ -18,8 +18,8 @@ describe('buildRouteTable', () => {
     expect(firebaseRoute).toMatchObject({
       target: env.IDENTITY_BASE_URL,
       authRequired: 'user',
-      requiredRoles: ['OPERATOR_ADMIN'],
     });
+    expect(firebaseRoute?.requiredRoles).toBeUndefined();
 
     const historyRoute = matchRoute(routes, '/v1/passenger/history');
     expect(historyRoute).toMatchObject({
@@ -655,6 +655,17 @@ describe('buildRouteTable', () => {
     expect(routeDetail?.target).toBe(env.PARCEL_BASE_URL);
     expect(routeDetail?.authRequired).toBe('user');
     expect(routeDetail?.requiredRoles).toBeUndefined();
+  });
+
+  it('allows the signed VNPay return status lookup without a user token', () => {
+    const route = matchRoute(routes, '/v1/payments/vnpay-return-status');
+
+    expect(route?.target).toBe(env.PAYMENT_BASE_URL);
+    expect(route?.authRequired).toBe('mixed');
+    expect(route?.publicSubpaths).toContainEqual({
+      method: 'GET',
+      path: '/v1/payments/vnpay-return-status',
+    });
   });
 
   it('routes parcel delivery token endpoints through the longer mixed prefix', () => {

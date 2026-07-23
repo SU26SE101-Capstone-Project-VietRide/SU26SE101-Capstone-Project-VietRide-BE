@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql;
 using Npgsql.NameTranslation;
 using VietRide.Shared.Application.Outbox;
+using VietRide.Shared.Application.Security;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Shared.Persistence.Outbox;
@@ -71,6 +72,11 @@ public sealed class IncidentPersistenceIntegrationTests
                 new IntegrationEventOutbox(new OutboxStore(db, clock)),
                 clock);
             var unitOfWork = new EfUnitOfWork(db);
+            var photoPrefix = $"incidents%2F{trip.OperatorId:D}%2F{trip.AssistantUserId!.Value:D}%2F";
+            var firstPhoto =
+                $"https://firebasestorage.googleapis.com/v0/b/vietride-test.firebasestorage.app/o/{photoPrefix}incident-a.jpg?alt=media";
+            var secondPhoto =
+                $"https://firebasestorage.googleapis.com/v0/b/vietride-test.firebasestorage.app/o/{photoPrefix}incident-b.jpg?alt=media";
 
             var response = await unitOfWork.ExecuteInTransactionAsync(
                 () => handler.Handle(
@@ -79,7 +85,7 @@ public sealed class IncidentPersistenceIntegrationTests
                         trip.AssistantUserId!.Value,
                         "ACCIDENT",
                         "  Va chạm nhẹ  ",
-                        [" https://storage.example/incident-a.jpg ", "https://storage.example/incident-b.jpg"],
+                        [$" {firstPhoto} ", secondPhoto],
                         10.7731000m,
                         106.7032000m),
                     CancellationToken.None),
@@ -93,8 +99,8 @@ public sealed class IncidentPersistenceIntegrationTests
             persisted.Category.Should().Be(IncidentCategory.ACCIDENT);
             persisted.Description.Should().Be("Va chạm nhẹ");
             persisted.PhotoUrls.Should().Equal(
-                "https://storage.example/incident-a.jpg",
-                "https://storage.example/incident-b.jpg");
+                firstPhoto,
+                secondPhoto);
             persisted.Latitude.Should().Be(10.7731000m);
             persisted.Longitude.Should().Be(106.7032000m);
             persisted.ReportedAt.Should().Be(Now);
@@ -158,7 +164,12 @@ public sealed class IncidentPersistenceIntegrationTests
         TripDbContext db,
         IIntegrationEventOutbox outbox,
         IClock clock)
-        => new(CreateTripRepository(db), CreateIncidentRepository(db), outbox, clock);
+        => new(
+            CreateTripRepository(db),
+            CreateIncidentRepository(db),
+            outbox,
+            clock,
+            new FirebaseStorageImageUrlValidator("vietride-test.firebasestorage.app"));
 
     private static ITripRepository CreateTripRepository(TripDbContext db)
         => CreateRepository<ITripRepository>(

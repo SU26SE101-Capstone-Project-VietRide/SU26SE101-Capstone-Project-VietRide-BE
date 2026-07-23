@@ -8,7 +8,7 @@ namespace VietRide.Identity.UnitTests.Infrastructure;
 public sealed class FirebaseAuthServiceTests
 {
     [Fact]
-    public async Task CreateOperatorCustomToken_ContainsUidScopeRoleAndOneHourLifetime()
+    public async Task CreateCustomToken_ContainsUidRolePurposeAndOneHourLifetime()
     {
         using var rsa = RSA.Create(2048);
         var options = new FirebaseAuthOptions
@@ -21,9 +21,11 @@ public sealed class FirebaseAuthServiceTests
         var userId = Guid.NewGuid();
         var operatorId = Guid.NewGuid();
 
-        var token = await service.CreateOperatorCustomTokenAsync(
+        var token = await service.CreateCustomTokenAsync(
             userId,
+            "OPERATOR_ADMIN",
             operatorId,
+            "VEHICLE_IMAGE",
             CancellationToken.None);
 
         using var payload = JsonDocument.Parse(DecodeJwtSegment(token.Split('.')[1]));
@@ -32,6 +34,7 @@ public sealed class FirebaseAuthServiceTests
         var claims = root.GetProperty("claims");
         claims.GetProperty("operatorId").GetString().Should().Be(operatorId.ToString("D"));
         claims.GetProperty("role").GetString().Should().Be("OPERATOR_ADMIN");
+        claims.GetProperty("uploadPurpose").GetString().Should().Be("VEHICLE_IMAGE");
         var lifetimeSeconds = root.GetProperty("exp").GetInt64() - root.GetProperty("iat").GetInt64();
         lifetimeSeconds.Should().Be(3600);
     }

@@ -31,7 +31,8 @@ builder.Services.AddVietRideDbContext<ParcelDbContext>(
     builder.Configuration,
     configureDataSource: ParcelDbContext.ConfigurePostgresTypes);
 builder.Services.AddSingleton(new ParcelImageOptions(
-    builder.Configuration["FIREBASE_STORAGE_BUCKET"]
+    builder.Configuration["FIREBASE_WEB_STORAGE_BUCKET"]
+        ?? builder.Configuration["FIREBASE_STORAGE_BUCKET"]
         ?? Environment.GetEnvironmentVariable("FIREBASE_STORAGE_BUCKET")));
 builder.Services.AddVietRideIntegrationInbox<ParcelDbContext>();
 builder.Services.AddVietRideMediatRBehaviors(

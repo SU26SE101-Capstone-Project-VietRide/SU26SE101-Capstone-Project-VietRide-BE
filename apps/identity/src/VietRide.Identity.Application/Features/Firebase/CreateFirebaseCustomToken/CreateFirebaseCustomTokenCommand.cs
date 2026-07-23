@@ -5,4 +5,5 @@ namespace VietRide.Identity.Application.Features.Firebase.CreateFirebaseCustomTo
 public sealed record CreateFirebaseCustomTokenCommand(
     Guid UserId,
     string CallerRole,
-    Guid? ClaimedOperatorId) : IRequest<FirebaseCustomTokenResponse>;
+    Guid? ClaimedOperatorId,
+    string? Purpose = null) : IRequest<FirebaseCustomTokenResponse>;

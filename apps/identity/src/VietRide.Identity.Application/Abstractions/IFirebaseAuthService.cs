@@ -2,9 +2,11 @@ namespace VietRide.Identity.Application.Abstractions;
 
 public interface IFirebaseAuthService
 {
-    Task<string> CreateOperatorCustomTokenAsync(
+    Task<string> CreateCustomTokenAsync(
         Guid userId,
-        Guid operatorId,
+        string role,
+        Guid? operatorId,
+        string uploadPurpose,
         CancellationToken cancellationToken = default);
 
     Task RevokeRefreshTokensAsync(
