@@ -9,13 +9,14 @@ import {
 } from '../../../../apps/tracking/src/app/tokens';
 import type { UserJwtVerifier } from '../../../../apps/tracking/src/auth/user-jwt.verifier';
 import type { TrackingAuthorizationAdapter } from '../../../../apps/tracking/src/authorization/tracking-authorization.adapter';
-import {
-  TRACKING_SOCKET_PATH,
-  trackingGpsBufferKey,
-  trackingLatestKey,
-} from '../../../../apps/tracking/src/location/location.constants';
+import { ApproachingAlertService } from '../../../../apps/tracking/src/approaching-alert/approaching-alert.service';
+import { EtaService } from '../../../../apps/tracking/src/eta/eta.service';
+import { TRACKING_SOCKET_PATH } from '../../../../apps/tracking/src/location/location.constants';
 import { LocationGateway } from '../../../../apps/tracking/src/location/location.gateway';
 import { LocationService } from '../../../../apps/tracking/src/location/location.service';
+import { OffRouteService } from '../../../../apps/tracking/src/off-route/off-route.service';
+import { ShuttleService } from '../../../../apps/tracking/src/shuttle/shuttle.service';
+import { TripDelayService } from '../../../../apps/tracking/src/trip-delay/trip-delay.service';
 /* eslint-enable @nx/enforce-module-boundaries */
 
 const TRIP_ID = '11111111-1111-4111-8111-111111111111';
@@ -24,7 +25,7 @@ describe('Tracking Socket.IO MVP (e2e)', () => {
   let app: INestApplication;
   let port: number;
   let redisClient: {
-    multi: jest.Mock;
+    eval: jest.Mock;
   };
   const sockets: Socket[] = [];
 
@@ -38,6 +39,14 @@ describe('Tracking Socket.IO MVP (e2e)', () => {
         { provide: RedisService, useValue: { getClient: () => redisClient } },
         { provide: TRACKING_JWT_VERIFIER, useValue: createJwtVerifier() },
         { provide: TRACKING_AUTHORIZATION_ADAPTER, useValue: createAuthorizationAdapter() },
+        { provide: EtaService, useValue: { handleGpsUpdate: jest.fn(async () => null) } },
+        {
+          provide: ApproachingAlertService,
+          useValue: { handleEtaUpdate: jest.fn(async () => undefined) },
+        },
+        { provide: OffRouteService, useValue: { handleGpsUpdate: jest.fn(async () => undefined) } },
+        { provide: TripDelayService, useValue: { handleEtaUpdate: jest.fn() } },
+        { provide: ShuttleService, useValue: {} },
       ],
     })
       .compile();
@@ -103,7 +112,7 @@ describe('Tracking Socket.IO MVP (e2e)', () => {
 
     await expect(received).resolves.toMatchObject(payload);
     expect(ack).toEqual({ success: true });
-    expect(redisClient.multi).toHaveBeenCalledWith();
+    expect(redisClient.eval).toHaveBeenCalledTimes(1);
   });
 
   async function connectSocket(token?: string): Promise<Socket> {
@@ -147,30 +156,7 @@ function createAuthorizationAdapter(): TrackingAuthorizationAdapter {
 
 function createRedisClient() {
   return {
-    multi: jest.fn(() => {
-      interface RedisMultiChain {
-        set: jest.Mock<RedisMultiChain, [string, string, string, number]>;
-        rpush: jest.Mock<RedisMultiChain, [string, string]>;
-        sadd: jest.Mock<RedisMultiChain, [string, string]>;
-        exec: jest.Mock<Promise<never[]>, []>;
-      }
-
-      const chain: RedisMultiChain = {
-        /* eslint-disable @typescript-eslint/no-unused-vars */
-        set: jest.fn((key: string, _value: string, _mode: string, _ttl: number): RedisMultiChain => {
-          expect(key).toBe(trackingLatestKey(TRIP_ID));
-          return chain;
-        }),
-        rpush: jest.fn((key: string, _value: string): RedisMultiChain => {
-          expect(key).toBe(trackingGpsBufferKey(TRIP_ID));
-          return chain;
-        }),
-        sadd: jest.fn((_key: string, _value: string): RedisMultiChain => chain),
-        /* eslint-enable @typescript-eslint/no-unused-vars */
-        exec: jest.fn(async () => []),
-      };
-      return chain;
-    }),
+    eval: jest.fn(async () => 1),
   };
 }
 

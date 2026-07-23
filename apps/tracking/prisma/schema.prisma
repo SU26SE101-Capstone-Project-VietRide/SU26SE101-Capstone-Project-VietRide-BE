@@ -29,7 +29,7 @@ model GpsTrail {
   recordedAt DateTime @map("recorded_at") @db.Timestamptz(6)
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  @@index([tripId, recordedAt], map: "idx_gps_trails_trip_id_recorded_at")
+  @@unique([tripId, recordedAt], map: "uq_gps_trails_trip_recorded_at")
   @@index([recordedAt], map: "idx_gps_trails_recorded_at")
   @@map("gps_trails")
   @@schema("vietride_tracking")
