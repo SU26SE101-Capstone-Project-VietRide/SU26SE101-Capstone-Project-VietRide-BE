@@ -526,6 +526,7 @@ CREATE TABLE processed_integration_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     consumer VARCHAR(150) NOT NULL,
     event_id UUID NOT NULL,
+    payload_hash CHAR(64) NULL,
     processed_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

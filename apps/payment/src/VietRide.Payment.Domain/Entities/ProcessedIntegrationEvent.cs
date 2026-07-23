@@ -8,12 +8,14 @@ public sealed class ProcessedIntegrationEvent : BaseEntity<Guid>
 
     public string Consumer { get; private set; } = string.Empty;
     public Guid EventId { get; private set; }
+    public string? PayloadHash { get; private set; }
     public DateTimeOffset ProcessedAt { get; private set; }
 
     public static ProcessedIntegrationEvent Create(
         string consumer,
         Guid eventId,
-        DateTimeOffset processedAt)
+        DateTimeOffset processedAt,
+        string? payloadHash = null)
     {
         if (string.IsNullOrWhiteSpace(consumer))
             throw new ArgumentException("Consumer is required.", nameof(consumer));
@@ -25,6 +27,7 @@ public sealed class ProcessedIntegrationEvent : BaseEntity<Guid>
             Id = Guid.NewGuid(),
             Consumer = consumer,
             EventId = eventId,
+            PayloadHash = payloadHash,
             ProcessedAt = processedAt,
         };
     }

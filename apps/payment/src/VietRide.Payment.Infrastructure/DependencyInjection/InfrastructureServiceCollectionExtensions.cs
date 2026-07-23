@@ -27,6 +27,7 @@ using VietRide.Payment.Infrastructure.Messaging;
 using VietRide.Payment.Infrastructure.Persistence.Repositories;
 using VietRide.Payment.Infrastructure.Refunds;
 using VietRide.Payment.Infrastructure.VnPay;
+using VietRide.Shared.Application.Inbox;
 using VietRide.Shared.Application.Reporting;
 using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Kernel.Abstractions;
@@ -108,6 +109,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IOperatorLedgerEntryRepository, OperatorLedgerEntryRepository>();
         services.AddScoped<IOperatorTripSettlementRepository, OperatorTripSettlementRepository>();
         services.AddScoped<IProcessedIntegrationEventRepository, ProcessedIntegrationEventRepository>();
+        services.AddScoped<IIntegrationEventInbox, PaymentIntegrationEventInbox>();
         services.AddScoped<IRevenueLedgerWriter, RevenueLedgerWriter>();
         services.AddScoped<TripTerminalSettlementService>();
         services.AddScoped<TripSettlementService>();

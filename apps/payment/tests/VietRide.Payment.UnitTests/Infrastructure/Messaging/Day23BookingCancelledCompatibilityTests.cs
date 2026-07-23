@@ -25,7 +25,7 @@ public sealed class Day23BookingCancelledCompatibilityTests
         await handler.HandleAsync(Deserialize(LegacyJson(bookingId)), CancellationToken.None);
 
         var keys = sender.Requests.Cast<RefundToWalletCommand>().Select(command => command.IdempotencyKey);
-        keys.Should().Equal($"booking-refund-{eventId:N}", $"booking-refund-{bookingId:N}");
+        keys.Should().Equal(eventId.ToString("D"), bookingId.ToString("D"));
     }
 
     [Theory]
