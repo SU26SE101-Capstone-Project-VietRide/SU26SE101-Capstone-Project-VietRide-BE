@@ -93,12 +93,9 @@ public sealed class HandleTripCancelledCommandHandler(
             throw new ArgumentException("Trip-cancelled timestamps are invalid.");
         }
 
-        if (!string.Equals(
-                request.CancelReason,
-                DriverScheduleDayRemovedReason,
-                StringComparison.Ordinal))
+        if (string.IsNullOrWhiteSpace(request.CancelReason))
         {
-            throw new ArgumentException("Trip cancellation reason is not the Day-22 schedule-day removal reason.");
+            throw new ArgumentException("Trip cancellation reason is required.");
         }
     }
 }
