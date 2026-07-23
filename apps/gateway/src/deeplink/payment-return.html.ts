@@ -7,8 +7,9 @@ export interface PaymentReturnOptions {
 
 /**
  * Public HTTPS bridge used as VNPay's browser Return URL. VNPay query parameters
- * are never rendered server-side; the browser forwards the current query string
- * to the Passenger app, which then polls the authenticated booking/payment view.
+ * are never rendered server-side. The browser forwards the signed query string
+ * to the read-only Payment status endpoint and to the Passenger custom deep link.
+ * Only the VNPay IPN is allowed to mutate Payment state.
  */
 export function renderPaymentReturnPage(opts: PaymentReturnOptions): string {
   const deepLinkJson = JSON.stringify(opts.appDeepLink);
@@ -40,8 +41,8 @@ export function renderPaymentReturnPage(opts: PaymentReturnOptions): string {
 </head>
 <body>
 <div class="card">
-  <h1>Đang xác nhận thanh toán</h1>
-  <p>VietRide sẽ mở ứng dụng Passenger để kiểm tra trạng thái giao dịch. Kết quả trong ứng dụng được xác nhận từ IPN của VNPay.</p>
+  <h1 id="status-title">Đang xác nhận thanh toán</h1>
+  <p id="status-message">VietRide đang chờ trạng thái được xác nhận từ IPN của VNPay.</p>
   <a id="open-app" class="btn btn-primary" href="#">Mở VietRide Passenger</a>
   ${storeSection}
   <p class="muted">Bạn không cần thanh toán lại nếu trạng thái đang được xử lý.</p>
@@ -50,7 +51,47 @@ export function renderPaymentReturnPage(opts: PaymentReturnOptions): string {
   (function () {
     var target = ${deepLinkJson} + window.location.search;
     var button = document.getElementById('open-app');
+    var title = document.getElementById('status-title');
+    var message = document.getElementById('status-message');
+    var attempts = 0;
     button.setAttribute('href', target);
+
+    function showStatus(status) {
+      if (status === 'SUCCEEDED') {
+        title.textContent = 'Thanh toán thành công';
+        message.textContent = 'Giao dịch đã được VNPay xác nhận. Bạn có thể mở ứng dụng để xem booking.';
+      } else if (status === 'FAILED' || status === 'EXPIRED') {
+        title.textContent = 'Thanh toán chưa thành công';
+        message.textContent = 'Giao dịch không thành công hoặc đã hết hạn. Vui lòng quay lại ứng dụng để thử lại.';
+      } else if (status === 'REFUNDED') {
+        title.textContent = 'Giao dịch đã hoàn tiền';
+        message.textContent = 'Khoản thanh toán này đã được hoàn tiền.';
+      } else {
+        title.textContent = 'Đang xác nhận thanh toán';
+        message.textContent = 'VNPay đã chuyển bạn về VietRide; hệ thống vẫn đang chờ IPN xác nhận.';
+      }
+    }
+
+    async function pollStatus() {
+      attempts += 1;
+      try {
+        var response = await fetch('/v1/payments/vnpay-return-status' + window.location.search, {
+          cache: 'no-store',
+          credentials: 'omit'
+        });
+        if (response.ok) {
+          var body = await response.json();
+          var status = body && body.data && body.data.status;
+          showStatus(status);
+          if (status && status !== 'PENDING_REDIRECT') return;
+        }
+      } catch (_) {
+        // Keep the web fallback usable when polling is temporarily unavailable.
+      }
+      if (attempts < 20) window.setTimeout(pollStatus, 1500);
+    }
+
+    pollStatus();
     if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
       window.setTimeout(function () { window.location.href = target; }, 150);
     }

@@ -2,6 +2,8 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Payment.Application.Features.Payments.DispatchVnPayIpn;
+using VietRide.Payment.Application.Features.Payments.GetVnPayReturnStatus;
+using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Payment.Api.Controllers;
@@ -31,6 +33,22 @@ public sealed class VnPayBookingIpnController : ControllerBase
         var result = await _sender.Send(new DispatchVnPayIpnCommand(parameters), ct);
 
         return new JsonResult(result) { StatusCode = StatusCodes.Status200OK };
+    }
+
+    /// <summary>
+    /// Read-only status used by the HTTPS VNPay return bridge. Signed VNPay query parameters
+    /// authenticate the lookup; this endpoint never changes Payment state.
+    /// </summary>
+    [HttpGet("vnpay-return-status")]
+    [ProducesResponseType(typeof(ApiResponse<VnPayReturnStatusResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> GetReturnStatus(CancellationToken ct)
+    {
+        var parameters = await ReadVnPayParametersAsync(ct);
+        var result = await _sender.Send(new GetVnPayReturnStatusQuery(parameters), ct);
+        return Ok(result);
     }
 
     private async Task<IReadOnlyDictionary<string, string>> ReadVnPayParametersAsync(CancellationToken ct)

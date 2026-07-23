@@ -140,6 +140,8 @@ describe('DeeplinkController', () => {
       expect(res.headers['Cache-Control']).toBe('no-store');
       expect(res.type).toHaveBeenCalledWith('html');
       expect(res.body).toContain('vietride://payments/return');
+      expect(res.body).toContain('/v1/payments/vnpay-return-status');
+      expect(res.body).toContain('PENDING_REDIRECT');
       expect(res.body).toContain('window.location.search');
       expect(res.body).toContain('IPN');
     });

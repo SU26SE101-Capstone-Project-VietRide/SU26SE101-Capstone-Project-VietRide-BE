@@ -102,6 +102,103 @@ public sealed class CreateFirebaseCustomTokenCommandHandlerTests
     }
 
     [Fact]
+    public async Task ActiveAdminOfApprovedOperator_ReceivesOperatorLogoScopedToken()
+    {
+        var operatorEntity = ApprovedOperator();
+        var user = ActiveOperatorAdmin(operatorEntity.Id);
+        var users = Substitute.For<IUserRepository>();
+        var operators = Substitute.For<IOperatorRepository>();
+        var firebase = Substitute.For<IFirebaseAuthService>();
+        users.GetByIdAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
+        operators.GetByIdNoTrackingAsync(operatorEntity.Id, Arg.Any<CancellationToken>())
+            .Returns(operatorEntity);
+        firebase.CreateCustomTokenAsync(
+                user.Id,
+                UserRole.OPERATOR_ADMIN.ToString(),
+                operatorEntity.Id,
+                FirebaseUploadPurpose.OPERATOR_LOGO.ToString(),
+                Arg.Any<CancellationToken>())
+            .Returns("logo-token");
+        var handler = new CreateFirebaseCustomTokenCommandHandler(users, operators, firebase);
+
+        var result = await handler.Handle(
+            new CreateFirebaseCustomTokenCommand(
+                user.Id,
+                UserRole.OPERATOR_ADMIN.ToString(),
+                operatorEntity.Id,
+                FirebaseUploadPurpose.OPERATOR_LOGO.ToString()),
+            CancellationToken.None);
+
+        result.Token.Should().Be("logo-token");
+        result.UploadPath.Should().Be($"operators/{operatorEntity.Id:D}/logo/");
+    }
+
+    [Theory]
+    [InlineData(UserRole.DRIVER)]
+    [InlineData(UserRole.ASSISTANT)]
+    public async Task ActiveDriverOrAssistant_ReceivesIncidentPhotoScopedToken(UserRole role)
+    {
+        var operatorEntity = ApprovedOperator();
+        var user = ActiveOperatorMember(operatorEntity.Id, role);
+        var users = Substitute.For<IUserRepository>();
+        var operators = Substitute.For<IOperatorRepository>();
+        var firebase = Substitute.For<IFirebaseAuthService>();
+        users.GetByIdAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
+        operators.GetByIdNoTrackingAsync(operatorEntity.Id, Arg.Any<CancellationToken>())
+            .Returns(operatorEntity);
+        firebase.CreateCustomTokenAsync(
+                user.Id,
+                role.ToString(),
+                operatorEntity.Id,
+                FirebaseUploadPurpose.INCIDENT_PHOTO.ToString(),
+                Arg.Any<CancellationToken>())
+            .Returns("incident-token");
+        var handler = new CreateFirebaseCustomTokenCommandHandler(users, operators, firebase);
+
+        var result = await handler.Handle(
+            new CreateFirebaseCustomTokenCommand(
+                user.Id,
+                role.ToString(),
+                operatorEntity.Id,
+                FirebaseUploadPurpose.INCIDENT_PHOTO.ToString()),
+            CancellationToken.None);
+
+        result.Token.Should().Be("incident-token");
+        result.UploadPath.Should().Be($"incidents/{operatorEntity.Id:D}/{user.Id:D}/");
+    }
+
+    [Fact]
+    public async Task ActivePassenger_ReceivesOwnAvatarScopedToken()
+    {
+        var user = ActivePassenger();
+        var users = Substitute.For<IUserRepository>();
+        var firebase = Substitute.For<IFirebaseAuthService>();
+        users.GetByIdAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
+        firebase.CreateCustomTokenAsync(
+                user.Id,
+                UserRole.PASSENGER.ToString(),
+                null,
+                FirebaseUploadPurpose.USER_AVATAR.ToString(),
+                Arg.Any<CancellationToken>())
+            .Returns("avatar-token");
+        var handler = new CreateFirebaseCustomTokenCommandHandler(
+            users,
+            Substitute.For<IOperatorRepository>(),
+            firebase);
+
+        var result = await handler.Handle(
+            new CreateFirebaseCustomTokenCommand(
+                user.Id,
+                UserRole.PASSENGER.ToString(),
+                null,
+                FirebaseUploadPurpose.USER_AVATAR.ToString()),
+            CancellationToken.None);
+
+        result.Token.Should().Be("avatar-token");
+        result.UploadPath.Should().Be($"avatars/{user.Id:D}/");
+    }
+
+    [Fact]
     public async Task LockedUser_IsRejectedBeforeFirebaseCall()
     {
         var operatorEntity = ApprovedOperator();
@@ -189,6 +286,18 @@ public sealed class CreateFirebaseCustomTokenCommandHandlerTests
             "hash",
             "Passenger");
         user.VerifyEmail();
+        return user;
+    }
+
+    private static User ActiveOperatorMember(Guid operatorId, UserRole role)
+    {
+        var user = User.CreateOperatorScopedPendingPassword(
+            $"{role.ToString().ToLowerInvariant()}@example.com",
+            PhoneNumber.Parse(role == UserRole.DRIVER ? "+84901234570" : "+84901234571"),
+            role.ToString(),
+            role,
+            operatorId);
+        user.SetInitialPassword("hash");
         return user;
     }
 }

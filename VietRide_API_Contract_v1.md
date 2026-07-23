@@ -3165,6 +3165,36 @@ Response `200`:
 
 ## Payment & Wallet Service
 
+### GET `/v1/payments/vnpay-return-status`
+
+Auth: public VNPay browser return. The complete VNPay query string, including
+`vnp_TxnRef`, `vnp_TmnCode`, and `vnp_SecureHash`, is required. Payment verifies
+HMAC-SHA512 and the configured merchant before reading the persisted transaction.
+
+This endpoint is read-only. It never transitions Payment or Booking; only the signed
+VNPay IPN can move `PENDING_REDIRECT` to a terminal state and publish the corresponding
+integration event.
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "vnPayTxnRef": "VR-BOOKING-20260724-001",
+    "paymentId": "uuid",
+    "referenceType": "BOOKING",
+    "referenceId": "uuid",
+    "status": "PENDING_REDIRECT"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-24T10:00:00Z" }
+}
+```
+
+The HTTPS return bridge polls this resource while displaying a web fallback and may
+also open `vietride://payments/return?<original-signed-query>`. Errors:
+`401 PAYMENT_SIGNATURE_INVALID`, `404 PAYMENT_NOT_FOUND`, `422 VALIDATION_ERROR`.
+
 ### POST `/v1/wallet/top-up`
 
 Auth: required. Idempotency: required.
