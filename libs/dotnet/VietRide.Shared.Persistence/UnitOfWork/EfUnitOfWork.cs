@@ -27,10 +27,11 @@ public sealed class EfUnitOfWork : IUnitOfWork
     {
         ArgumentNullException.ThrowIfNull(operation);
 
-        if (_transaction is not null)
+        if (_transaction is not null || _db.Database.CurrentTransaction is not null)
         {
-            throw new InvalidOperationException(
-                "ExecuteInTransactionAsync cannot run while an explicit transaction is active.");
+            var joinedResult = await operation().ConfigureAwait(false);
+            await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return joinedResult;
         }
 
         var strategy = _db.Database.CreateExecutionStrategy();
