@@ -26,6 +26,10 @@ internal sealed class TripConfiguration : IEntityTypeConfiguration<Domain.Entiti
 
         builder.Property(trip => trip.OperatorId).HasColumnName("operator_id");
         builder.Property(trip => trip.RouteId).HasColumnName("route_id");
+        builder.Property(trip => trip.AlternativeRouteId)
+            .HasColumnName("alternative_route_id")
+            .HasColumnType("uuid")
+            .IsRequired(false);
         builder.Property(trip => trip.VehicleId).HasColumnName("vehicle_id");
         builder.Property(trip => trip.DriverUserId).HasColumnName("driver_user_id");
         builder.Property(trip => trip.AssistantUserId).HasColumnName("assistant_user_id");
@@ -105,6 +109,7 @@ internal sealed class TripConfiguration : IEntityTypeConfiguration<Domain.Entiti
             .HasFilter("status NOT IN ('CANCELLED')");
         builder.HasIndex(trip => new { trip.OperatorId, trip.Status }).HasDatabaseName("idx_trips_operator_status");
         builder.HasIndex(trip => new { trip.RouteId, trip.DepartureDateTime }).HasDatabaseName("idx_trips_route_departure");
+        builder.HasIndex(trip => trip.AlternativeRouteId).HasDatabaseName("idx_trips_alternative_route_id");
         builder.HasIndex(trip => new { trip.Status, trip.DepartureDateTime }).HasDatabaseName("idx_trips_status_departure");
         builder.HasIndex(trip => trip.AssistantUserId)
             .HasDatabaseName("idx_trips_assistant_user_id")
@@ -120,6 +125,10 @@ internal sealed class TripConfiguration : IEntityTypeConfiguration<Domain.Entiti
             .WithMany()
             .HasForeignKey(trip => trip.RouteId)
             .OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AlternativeRoute>()
+            .WithMany()
+            .HasForeignKey(trip => trip.AlternativeRouteId)
+            .OnDelete(DeleteBehavior.NoAction);
         builder.HasOne<Vehicle>()
             .WithMany()
             .HasForeignKey(trip => trip.VehicleId)

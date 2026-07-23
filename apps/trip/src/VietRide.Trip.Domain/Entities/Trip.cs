@@ -12,6 +12,7 @@ public sealed class Trip : BaseEntity<Guid>
 
     public Guid OperatorId { get; private set; }
     public Guid RouteId { get; private set; }
+    public Guid? AlternativeRouteId { get; private set; }
     public Guid VehicleId { get; private set; }
     public Guid DriverUserId { get; private set; }
     public Guid? AssistantUserId { get; private set; }

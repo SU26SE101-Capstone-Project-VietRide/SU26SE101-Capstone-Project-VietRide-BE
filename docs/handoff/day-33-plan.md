@@ -138,12 +138,12 @@ $owned=@('apps/booking/src/VietRide.Booking.Infrastructure/Messaging/TripRouteCh
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
 | 33.0 | done | APPROVE | 2026-07-23 | Ratified cancellation contract, event consumer registry, and trip alternative-route schema; DOCS verification passed after two review patch rounds. |
-| 33.1-33.6 | todo | - | - | - |
+| 33.1 | done | APPROVE | 2026-07-23 | Added nullable alternative_route_id migration with reversible lifecycle; Docker-backed apply/rollback/reapply and focused migration checks passed. |
+| 33.2-33.6 | todo | - | - | - |
 
 ## Open questions
 
 None.
-
 
 
 
