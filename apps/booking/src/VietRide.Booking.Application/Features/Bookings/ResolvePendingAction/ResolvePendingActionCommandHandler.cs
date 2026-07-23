@@ -54,58 +54,57 @@ public sealed class ResolvePendingActionCommandHandler(
 
             ThrowIfTerminal(pendingAction);
 
-            if (pendingAction.Reason != BookingPendingActionReason.SCHEDULE_CHANGE
-                || pendingAction.Severity is null
-                || booking.Status != BookingStatus.CONFIRMED)
+            if (booking.Status != BookingStatus.CONFIRMED)
             {
                 throw NotResolvable();
             }
 
-            var frozen = ParseFrozenMetadata(pendingAction, booking.TotalAmount);
-            var effectiveCutoff = GetEffectiveCutoff(pendingAction, frozen.InitialDeadline, frozen.TerminalDeadline);
-            if (now > effectiveCutoff)
-            {
-                throw new CodedConflictException(
-                    "BOOKING_PENDING_ACTION_EXPIRED",
-                    "Booking pending action has expired.");
-            }
-
             var resolvedAction = Enum.Parse<BookingPendingActionResolved>(request.Action!, ignoreCase: false);
-            pendingAction.ResolveScheduleChange(resolvedAction, now, effectiveCutoff);
-            pendingActions.Update(pendingAction);
-
-            if (resolvedAction == BookingPendingActionResolved.REJECTED)
+            if (pendingAction.Reason == BookingPendingActionReason.ROUTE_CHANGE)
             {
-                booking.Cancel(BookingCancellationReason.SCHEDULE_CHANGED, now, refundOverride: true);
-                bookings.Update(booking);
-                await statusHistory.AddAsync(
-                    BookingStatusHistory.Create(
-                        booking.Id,
-                        BookingStatus.CANCELLED,
-                        now,
-                        BookingStatusHistorySource.CancelBooking,
-                        actorUserId: null,
-                        BookingCancellationReason.SCHEDULE_CHANGED.ToString()),
-                    cancellationToken);
-
-                var eventId = Guid.NewGuid();
-                var cancelled = new BookingCancelledIntegrationEvent(
-                    eventId,
+                await ResolveRouteChangeAsync(
+                    request,
+                    pendingAction,
+                    booking,
+                    resolvedAction,
                     now,
-                    booking.Id,
-                    booking.BookingCode.Value,
-                    booking.PassengerUserId,
-                    frozen.RefundAmount.Amount,
-                    true,
-                    BookingCancellationReason.SCHEDULE_CHANGED.ToString(),
-                    booking.Tickets.Select(ticket => ticket.TicketCode.Value).Order(StringComparer.Ordinal).ToArray(),
-                    booking.Tickets.Count);
-                await outbox.EnqueueAsync(
-                    eventId,
-                    BookingCancelledIntegrationEvent.EventTypeValue,
-                    JsonSerializer.Serialize(cancelled, JsonOptions),
                     cancellationToken);
             }
+            else if (pendingAction.Reason == BookingPendingActionReason.SCHEDULE_CHANGE
+                && pendingAction.Severity is not null)
+            {
+                if (request.SelectedStopId.HasValue || request.SelectedStationId.HasValue)
+                {
+                    throw InvalidSelection("Schedule-change actions do not accept a selected candidate.");
+                }
+
+                var frozen = ParseFrozenMetadata(pendingAction, booking.TotalAmount);
+                var effectiveCutoff = GetEffectiveCutoff(
+                    pendingAction,
+                    frozen.InitialDeadline,
+                    frozen.TerminalDeadline);
+                if (now > effectiveCutoff)
+                {
+                    throw Expired();
+                }
+
+                pendingAction.ResolveScheduleChange(resolvedAction, now, effectiveCutoff);
+                if (resolvedAction == BookingPendingActionResolved.REJECTED)
+                {
+                    await CancelAndPublishAsync(
+                        booking,
+                        BookingCancellationReason.SCHEDULE_CHANGED,
+                        frozen.RefundAmount.Amount,
+                        now,
+                        cancellationToken);
+                }
+            }
+            else
+            {
+                throw NotResolvable();
+            }
+
+            pendingActions.Update(pendingAction);
 
             return new ResolvePendingActionResult(
                 booking.Id,
@@ -113,6 +112,156 @@ public sealed class ResolvePendingActionCommandHandler(
                 resolvedAction.ToString(),
                 now);
         }, cancellationToken);
+
+    private async Task ResolveRouteChangeAsync(
+        ResolvePendingActionCommand request,
+        BookingPendingAction pendingAction,
+        VietRide.Booking.Domain.Entities.Booking booking,
+        BookingPendingActionResolved resolvedAction,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        if (now > pendingAction.Deadline)
+        {
+            throw Expired();
+        }
+
+        var candidates = ParseRouteCandidates(pendingAction);
+        if (resolvedAction == BookingPendingActionResolved.ACCEPTED)
+        {
+            if (request.SelectedStopId.HasValue == request.SelectedStationId.HasValue)
+            {
+                throw InvalidSelection("ACCEPTED requires exactly one selected candidate identity.");
+            }
+
+            var matched = candidates.Count(candidate =>
+                candidate.StopId == request.SelectedStopId
+                && candidate.StationId == request.SelectedStationId);
+            if (matched != 1)
+            {
+                throw InvalidSelection("Selected route-change candidate is not present in frozen metadata.");
+            }
+
+            booking.ChangePickup(request.SelectedStationId, request.SelectedStopId);
+            bookings.Update(booking);
+        }
+        else
+        {
+            if (request.SelectedStopId.HasValue || request.SelectedStationId.HasValue)
+            {
+                throw InvalidSelection("REJECTED does not accept a selected candidate.");
+            }
+        }
+
+        pendingAction.ResolveRouteChange(resolvedAction, now);
+        if (resolvedAction == BookingPendingActionResolved.REJECTED)
+        {
+            await CancelAndPublishAsync(
+                booking,
+                BookingCancellationReason.ROUTE_CHANGED_REFUSED,
+                booking.TotalAmount.Amount,
+                now,
+                cancellationToken);
+        }
+    }
+
+    private async Task CancelAndPublishAsync(
+        VietRide.Booking.Domain.Entities.Booking booking,
+        BookingCancellationReason reason,
+        long refundAmount,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        booking.Cancel(reason, now, refundOverride: true);
+        bookings.Update(booking);
+        await statusHistory.AddAsync(
+            BookingStatusHistory.Create(
+                booking.Id,
+                BookingStatus.CANCELLED,
+                now,
+                BookingStatusHistorySource.CancelBooking,
+                actorUserId: null,
+                reason.ToString()),
+            cancellationToken);
+
+        var eventId = Guid.NewGuid();
+        var cancelled = new BookingCancelledIntegrationEvent(
+            eventId,
+            now,
+            booking.Id,
+            booking.BookingCode.Value,
+            booking.PassengerUserId,
+            refundAmount,
+            true,
+            reason.ToString(),
+            booking.Tickets.Select(ticket => ticket.TicketCode.Value).Order(StringComparer.Ordinal).ToArray(),
+            booking.Tickets.Count);
+        await outbox.EnqueueAsync(
+            eventId,
+            BookingCancelledIntegrationEvent.EventTypeValue,
+            JsonSerializer.Serialize(cancelled, JsonOptions),
+            cancellationToken);
+    }
+
+    private static IReadOnlyList<(Guid? StopId, Guid? StationId)> ParseRouteCandidates(
+        BookingPendingAction action)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(action.Metadata ?? string.Empty);
+            var root = document.RootElement;
+            var expected = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "sourceEventId", "tripId", "operatorId", "tripStatus", "alternativeRouteId",
+                "deadline", "candidateStops",
+            };
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.EnumerateObject().Select(property => property.Name)
+                    .ToHashSet(StringComparer.Ordinal).SetEquals(expected)
+                || root.GetProperty("deadline").GetDateTimeOffset() != action.Deadline)
+            {
+                throw new InvalidOperationException();
+            }
+
+            var candidates = new List<(Guid?, Guid?)>();
+            var previousSequence = 0;
+            foreach (var candidate in root.GetProperty("candidateStops").EnumerateArray())
+            {
+                var fields = candidate.EnumerateObject().Select(property => property.Name)
+                    .ToHashSet(StringComparer.Ordinal);
+                if (!fields.SetEquals(
+                    ["stopId", "stationId", "stationName", "sequence", "estimatedArrivalAt"]))
+                {
+                    throw new InvalidOperationException();
+                }
+
+                var stop = ReadNullableGuid(candidate.GetProperty("stopId"));
+                var station = ReadNullableGuid(candidate.GetProperty("stationId"));
+                var sequence = candidate.GetProperty("sequence").GetInt32();
+                if (stop.HasValue == station.HasValue
+                    || sequence <= previousSequence
+                    || string.IsNullOrWhiteSpace(candidate.GetProperty("stationName").GetString())
+                    || candidate.GetProperty("estimatedArrivalAt").GetDateTimeOffset() == default)
+                {
+                    throw new InvalidOperationException();
+                }
+
+                previousSequence = sequence;
+                candidates.Add((stop, station));
+            }
+
+            return candidates.Count > 0 ? candidates : throw new InvalidOperationException();
+        }
+        catch (Exception exception) when (exception is JsonException
+            or InvalidOperationException
+            or FormatException)
+        {
+            throw NotResolvable();
+        }
+    }
+
+    private static Guid? ReadNullableGuid(JsonElement value)
+        => value.ValueKind == JsonValueKind.Null ? null : value.GetGuid();
 
     private static DateTimeOffset GetEffectiveCutoff(
         BookingPendingAction action,
@@ -214,5 +363,16 @@ public sealed class ResolvePendingActionCommandHandler(
         => new(
             "BOOKING_PENDING_ACTION_NOT_RESOLVABLE",
             "Booking pending action cannot be resolved by this endpoint.");
+
+    private static CodedConflictException Expired()
+        => new(
+            "BOOKING_PENDING_ACTION_EXPIRED",
+            "Booking pending action has expired.");
+
+    private static CodedValidationException InvalidSelection(string message)
+        => new(
+            "VALIDATION_ERROR",
+            message,
+            [new ValidationError("selectedStopId", message)]);
 
 }

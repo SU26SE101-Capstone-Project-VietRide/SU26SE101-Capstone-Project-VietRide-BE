@@ -11,4 +11,6 @@ public sealed record ResolvePendingActionCommand(
     string IdempotencyKey,
     string? Action,
     string? Note,
-    IReadOnlyCollection<string> ExtraFields) : IRequest<ResolvePendingActionResult>;
+    IReadOnlyCollection<string> ExtraFields,
+    Guid? SelectedStopId = null,
+    Guid? SelectedStationId = null) : IRequest<ResolvePendingActionResult>;

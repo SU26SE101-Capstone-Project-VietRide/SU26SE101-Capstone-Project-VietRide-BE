@@ -6,6 +6,8 @@ namespace VietRide.Booking.Api.Controllers.Requests;
 public sealed class ResolvePendingActionRequest
 {
     public string? Action { get; init; }
+    public Guid? SelectedStopId { get; init; }
+    public Guid? SelectedStationId { get; init; }
     public string? Note { get; init; }
 
     [JsonExtensionData]
