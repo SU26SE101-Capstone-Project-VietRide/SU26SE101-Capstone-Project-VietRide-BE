@@ -267,7 +267,6 @@ services:
       Payment__BaseUrl: http://payment:5004
       Booking__BaseUrl: http://booking:5003
       Identity__BaseUrl: http://identity:5001
-      FIREBASE_STORAGE_BUCKET: ${FIREBASE_STORAGE_BUCKET:?FIREBASE_STORAGE_BUCKET is required in production}
     healthcheck:
       test:
         ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:5005/health || exit 1']
