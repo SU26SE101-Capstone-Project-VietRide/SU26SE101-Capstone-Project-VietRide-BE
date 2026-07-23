@@ -8,6 +8,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
@@ -255,7 +256,9 @@ public sealed class PlatformBookingReportWebApplicationFactory
                     provider.GetRequiredService<NpgsqlDataSource>(),
                     npgsql => npgsql.MigrationsHistoryTable(
                         "__ef_migrations_history",
-                        BookingDbContext.SchemaName)));
+                        BookingDbContext.SchemaName))
+                    .ConfigureWarnings(warnings =>
+                        warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning)));
             services.AddScoped<VietRideDbContextBase>(
                 provider => provider.GetRequiredService<BookingDbContext>());
             services.AddSingleton<IConnectionMultiplexer>(InMemoryIdempotencyRedis.Create());
