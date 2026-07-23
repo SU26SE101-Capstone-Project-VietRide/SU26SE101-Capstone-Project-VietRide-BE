@@ -34,6 +34,7 @@ public sealed class RouteChangePendingActionTests
             var booking = CreateConfirmedBooking(occurredAt);
             var sourceEventId = Guid.NewGuid();
             var candidateStopId = Guid.NewGuid();
+            var destinationStationId = Guid.NewGuid();
             var scheduler = Substitute.For<IRouteChangeExpiryScheduler>();
 
             await using (var db = Day22EventDatabase.CreateDbContext(dataSource, occurredAt))
@@ -63,6 +64,12 @@ public sealed class RouteChangePendingActionTests
                                     "Frozen stop",
                                     1,
                                     occurredAt.AddMinutes(10)),
+                                new RouteChangeCandidateStop(
+                                    null,
+                                    destinationStationId,
+                                    "Destination",
+                                    2,
+                                    occurredAt.AddMinutes(20)),
                             ]),
                     ]), CancellationToken.None)).Should().Be(1);
             }
@@ -189,7 +196,7 @@ public sealed class RouteChangePendingActionTests
             Guid.NewGuid(),
             null,
             Guid.NewGuid(),
-            null,
+            Guid.NewGuid(),
             null,
             Money.FromRaw(100_000),
             Money.Zero,

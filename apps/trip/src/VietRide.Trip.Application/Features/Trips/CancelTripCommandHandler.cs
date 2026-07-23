@@ -34,8 +34,7 @@ public sealed class CancelTripCommandHandler : IRequestHandler<CancelTripCommand
         CancelTripCommand request,
         CancellationToken cancellationToken)
     {
-        await unitOfWork.BeginTransactionAsync(cancellationToken);
-        try
+        return await unitOfWork.ExecuteInTransactionAsync(async () =>
         {
             var trip = await trips.GetForUpdateAsync(request.TripId, cancellationToken);
             if (trip is null || trip.OperatorId != request.OperatorId)
@@ -55,14 +54,7 @@ public sealed class CancelTripCommandHandler : IRequestHandler<CancelTripCommand
                 evt.EventType,
                 JsonSerializer.Serialize(evt, JsonOptions),
                 cancellationToken);
-            await unitOfWork.SaveChangesAsync(cancellationToken);
-            await unitOfWork.CommitAsync(cancellationToken);
             return new CancelTripResponse(trip.Id, trip.Status.ToString());
-        }
-        catch
-        {
-            await unitOfWork.RollbackAsync(cancellationToken);
-            throw;
-        }
+        }, cancellationToken);
     }
 }

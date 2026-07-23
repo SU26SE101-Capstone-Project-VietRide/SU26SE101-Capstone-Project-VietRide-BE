@@ -100,7 +100,6 @@ public sealed class Day23ResolveScheduleActionIdempotencyTests
     }
 
     [Theory]
-    [InlineData("{\"action\":\"ACCEPTED\",\"selectedStopId\":\"11111111-1111-4111-8111-111111111111\"}")]
     [InlineData("{\"action\":\"ACCEPTED\",\"unexpected\":true}")]
     public async Task ExtraRequestFieldsReturnValidationError(string body)
     {

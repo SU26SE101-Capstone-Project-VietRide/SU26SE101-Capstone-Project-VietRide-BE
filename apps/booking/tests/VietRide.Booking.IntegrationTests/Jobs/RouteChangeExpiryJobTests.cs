@@ -17,7 +17,7 @@ namespace VietRide.Booking.IntegrationTests.Jobs;
 public sealed class RouteChangeExpiryJobTests
 {
     [Fact]
-    public async Task StrictlyAfterDeadlineCancelsOnceAndPublishesCanonicalEvent()
+    public async Task StrictlyAfterDeadlineAppliesFallbackOnceAndKeepsBookingConfirmed()
     {
         var databaseName = $"vr_d33_route_expiry_{Guid.NewGuid():N}";
         var connectionString = Day22EventDatabase.CreateConnectionString(databaseName);
@@ -33,6 +33,8 @@ public sealed class RouteChangeExpiryJobTests
                 confirmed: true,
                 100_001,
                 deadline.AddHours(2));
+            var originalStopId = Guid.NewGuid();
+            var fallbackDestinationStationId = Guid.NewGuid();
             var action = BookingPendingAction.Create(
                 booking.Id,
                 BookingPendingActionReason.ROUTE_CHANGE,
@@ -45,6 +47,9 @@ public sealed class RouteChangeExpiryJobTests
                     tripStatus = "IN_PROGRESS",
                     alternativeRouteId = Guid.NewGuid(),
                     deadline,
+                    originalStopId,
+                    fallbackDestinationStationId,
+                    shuttleRequired = true,
                     candidateStops = new[]
                     {
                         new
@@ -83,30 +88,36 @@ public sealed class RouteChangeExpiryJobTests
                 .SingleAsync(row => row.Id == booking.Id);
             var persistedAction = await verify.BookingPendingActions.AsNoTracking()
                 .SingleAsync(row => row.Id == action.Id);
-            persistedBooking.Status.Should().Be(BookingStatus.CANCELLED);
-            persistedBooking.CancellationReason.Should().Be(BookingCancellationReason.ROUTE_CHANGED_REFUSED);
-            persistedBooking.RefundOverride.Should().BeTrue();
-            persistedAction.ResolvedAction.Should().Be(BookingPendingActionResolved.REJECTED);
+            persistedBooking.Status.Should().Be(BookingStatus.CONFIRMED);
+            persistedBooking.CancellationReason.Should().BeNull();
+            persistedBooking.RefundOverride.Should().BeFalse();
+            persistedAction.ResolvedAction.Should()
+                .Be(BookingPendingActionResolved.AUTO_FALLBACK_DESTINATION);
             persistedAction.ResolvedAt.Should().Be(strictlyAfter);
             (await verify.BookingStatusHistories.CountAsync(row => row.BookingId == booking.Id))
-                .Should().Be(1);
+                .Should().Be(0);
 
             var outbox = await verify.OutboxEvents.AsNoTracking().SingleAsync();
-            outbox.EventType.Should().Be(BookingCancelledIntegrationEvent.EventTypeValue);
+            outbox.EventType.Should()
+                .Be(BookingRouteChangeAutoFallbackAppliedIntegrationEvent.EventTypeValue);
             outbox.Status.Should().Be(OutboxEventStatus.PENDING);
             outbox.PublishedAt.Should().BeNull();
             using var payload = JsonDocument.Parse(outbox.Payload);
             payload.RootElement.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo(
                 [
-                    "eventId", "occurredAt", "bookingId", "bookingCode", "userId", "refundAmount",
-                    "refundOverride", "cancellationReason", "ticketCodes", "ticketCount",
+                    "eventId", "occurredAt", "eventType", "bookingId", "tripId", "userId",
+                    "pendingActionId", "originalStopId", "fallbackDestinationStationId",
+                    "shuttleRequired", "resolvedAction",
                 ]);
             payload.RootElement.GetProperty("eventId").GetGuid().Should().Be(outbox.Id);
             payload.RootElement.GetProperty("bookingId").GetGuid().Should().Be(booking.Id);
-            payload.RootElement.GetProperty("refundAmount").GetInt64().Should().Be(100_001);
-            payload.RootElement.GetProperty("refundOverride").GetBoolean().Should().BeTrue();
-            payload.RootElement.GetProperty("cancellationReason").GetString()
-                .Should().Be("ROUTE_CHANGED_REFUSED");
+            payload.RootElement.GetProperty("originalStopId").GetGuid()
+                .Should().Be(originalStopId);
+            payload.RootElement.GetProperty("fallbackDestinationStationId").GetGuid()
+                .Should().Be(fallbackDestinationStationId);
+            payload.RootElement.GetProperty("shuttleRequired").GetBoolean().Should().BeTrue();
+            payload.RootElement.GetProperty("resolvedAction").GetString()
+                .Should().Be("AUTO_FALLBACK_DESTINATION");
             (await verify.OutboxEvents.CountAsync()).Should().Be(1);
 
             var method = typeof(RouteChangeExpiryJob).GetMethod(nameof(RouteChangeExpiryJob.ExecuteAsync))!;
@@ -129,7 +140,6 @@ public sealed class RouteChangeExpiryJobTests
         var job = new RouteChangeExpiryJob(
             Day22EventDatabase.CreatePendingActionRepository(db),
             Day22EventDatabase.CreateBookingRepository(db),
-            Day22EventDatabase.CreateStatusHistoryRepository(db),
             new IntegrationEventOutbox(new OutboxStore(db, clock)),
             new EfUnitOfWork(db),
             clock);

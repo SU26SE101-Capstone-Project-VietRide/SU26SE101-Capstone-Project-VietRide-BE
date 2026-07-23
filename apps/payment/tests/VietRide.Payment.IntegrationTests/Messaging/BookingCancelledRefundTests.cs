@@ -14,7 +14,7 @@ namespace VietRide.Payment.IntegrationTests.Messaging;
 public sealed class BookingCancelledRefundTests
 {
     [Fact]
-    public async Task RefundsOnlyCanonicalEvent()
+    public async Task CanonicalAndLegacyEventsConvergeOnOneRefundEffect()
     {
         var sender = new Sender();
         var handler = new BookingCancelledIntegrationEventHandler(sender, NullLogger<BookingCancelledIntegrationEventHandler>.Instance);
@@ -29,12 +29,12 @@ public sealed class BookingCancelledRefundTests
             CancellationReason = Event().CancellationReason,
         }, CancellationToken.None);
 
-        sender.Requests.Should().ContainSingle();
+        sender.Requests.Should().HaveCount(2);
         sender.Effects.Should().Be(1);
     }
 
     [Fact]
-    public async Task RetriesFiveTimesThenExhaustsAndLeavesTripCancelled()
+    public async Task InitialFailureIsPersistedForRecurringRetryAndLeavesTripCancelled()
     {
         var sender = new Sender(new InvalidOperationException("wallet unavailable"));
         var failures = new Failures();
@@ -47,9 +47,10 @@ public sealed class BookingCancelledRefundTests
 
         await service.ExecuteBookingRefundAsync(Event(), CancellationToken.None);
 
-        sender.Attempts.Should().Be(5);
+        sender.Attempts.Should().Be(1);
         failures.Items.Should().ContainSingle();
-        failures.Items[0].RetryCount.Should().Be(5);
+        failures.Items[0].RetryCount.Should().Be(0);
+        failures.Items[0].CanRetry.Should().BeTrue();
     }
 
     [Fact]
@@ -97,7 +98,7 @@ public sealed class BookingCancelledRefundTests
     private sealed class Sender : ISender
     {
         private readonly Exception? _failure;
-        private readonly HashSet<string> _appliedKeys = [];
+        private readonly HashSet<string> _appliedReferences = [];
         public Sender(Exception? failure = null) => _failure = failure;
         public int Attempts { get; private set; }
         public int Effects { get; private set; }
@@ -108,7 +109,7 @@ public sealed class BookingCancelledRefundTests
             Requests.Add(request);
             if (_failure is not null) throw _failure;
             if (request is RefundToWalletCommand refund
-                && _appliedKeys.Add(refund.IdempotencyKey ?? string.Empty))
+                && _appliedReferences.Add($"{refund.ReferenceType}:{refund.ReferenceId:D}"))
             {
                 Effects++;
             }

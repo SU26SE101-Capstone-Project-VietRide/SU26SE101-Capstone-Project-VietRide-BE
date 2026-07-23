@@ -140,6 +140,14 @@ public static class InfrastructureServiceCollectionExtensions
             })
             .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
             .AddHttpMessageHandler<InternalJwtDelegatingHandler>();
+        services.AddHttpClient<IParcelImpactClient, ParcelImpactClient>(client =>
+            {
+                client.BaseAddress = new Uri(
+                    configuration["PARCEL_BASE_URL"] ?? "http://parcel:5005",
+                    UriKind.Absolute);
+            })
+            .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
+            .AddHttpMessageHandler<InternalJwtDelegatingHandler>();
 
         return services;
     }

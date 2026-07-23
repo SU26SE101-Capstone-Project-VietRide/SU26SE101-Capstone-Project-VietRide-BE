@@ -1601,6 +1601,12 @@ atomically resolves the action, sets `refundOverride=true`, cancels the Booking 
 `SCHEDULE_CHANGED` or `ROUTE_CHANGED_REFUSED`, appends history, and enqueues exactly one authoritative
 `booking.booking.cancelled` containing that `refundAmount`.
 
+ROUTE_CHANGE no-response expiry is different from explicit `REJECTED`: only a scheduler pass with
+`deadline < now` resolves `AUTO_FALLBACK_DESTINATION`. It leaves the Booking `CONFIRMED`, changes
+no pickup field, creates no refund, and retains immutable metadata
+`{originalStopId,fallbackDestinationStationId,shuttleRequired:true}` for shuttle coordination.
+The same transaction emits one `booking.booking.route_change_auto_fallback_applied`.
+
 Response `200`:
 ```json
 {
@@ -3016,6 +3022,28 @@ Response `200`:
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
+
+### GET `/internal/v1/parcels/trips/{tripId}/cancel-impact?operatorId={operatorId}`
+
+Auth: Internal JWT. Read-only raw service-to-service projection used by Trip cancellation preview.
+
+Response `200`:
+```json
+{
+  "tripId": "uuid",
+  "affectedParcels": [
+    {
+      "parcelId": "uuid",
+      "status": "PENDING",
+      "refundAmount": 35000
+    }
+  ]
+}
+```
+
+The result is tenant-scoped by `operatorId`, ordered by `parcelId`, and contains each active
+parcel at most once. `PENDING` contributes immutable `depositAmount + additionalAmount`;
+pre-payment/review and loaded/in-transit operational rows contribute zero.
 
 ### POST `/v1/operator/parcels/{parcelId}/request-transfer`
 
@@ -6355,6 +6383,30 @@ Producer: Booking. Consumer: Notification. Exactly one fact is emitted per resol
 `affectedField` is `PICKUP|DROPOFF`; the routing key is
 `booking.booking.stop_disabled_auto_fallback_applied`. Identity is
 `eventId == OutboxEvent.Id == RabbitMQ MessageId`.
+
+### `booking.booking.route_change_auto_fallback_applied`
+
+Producer: Booking. Consumer: Notification. Exactly one fact is emitted when an unresolved
+ROUTE_CHANGE action is processed strictly after its deadline:
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-07-23T02:00:00Z",
+  "eventType": "booking.booking.route_change_auto_fallback_applied",
+  "bookingId": "uuid",
+  "tripId": "uuid",
+  "userId": "uuid",
+  "pendingActionId": "uuid",
+  "originalStopId": "uuid",
+  "fallbackDestinationStationId": "uuid",
+  "shuttleRequired": true,
+  "resolvedAction": "AUTO_FALLBACK_DESTINATION"
+}
+```
+
+Identity is `eventId == OutboxEvent.Id == RabbitMQ MessageId`. This fact does not imply a Booking
+status transition or refund.
 
 ### `booking.booking.passenger_no_show_marked`
 

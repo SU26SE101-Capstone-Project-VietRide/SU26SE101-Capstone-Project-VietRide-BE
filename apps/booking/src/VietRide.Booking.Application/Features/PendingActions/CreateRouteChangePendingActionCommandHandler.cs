@@ -78,6 +78,17 @@ public sealed class CreateRouteChangePendingActionCommandHandler(
                         candidate.EstimatedArrivalAt,
                     })
                     .ToArray();
+                var fallbackDestinationStationId = orderedCandidates
+                    .Where(candidate => candidate.StationId.HasValue)
+                    .OrderBy(candidate => candidate.Sequence)
+                    .Select(candidate => candidate.StationId!.Value)
+                    .LastOrDefault();
+                if (!booking.PickupStopId.HasValue || fallbackDestinationStationId == Guid.Empty)
+                {
+                    throw new ArgumentException(
+                        "Route-change fallback metadata requires the original pickup stop and alternative destination.");
+                }
+
                 var metadata = JsonSerializer.Serialize(new
                 {
                     sourceEventId = request.EventId,
@@ -86,6 +97,9 @@ public sealed class CreateRouteChangePendingActionCommandHandler(
                     request.TripStatus,
                     request.AlternativeRouteId,
                     deadline,
+                    originalStopId = booking.PickupStopId.Value,
+                    fallbackDestinationStationId,
+                    shuttleRequired = true,
                     candidateStops = orderedCandidates,
                 }, JsonOptions);
                 var action = BookingPendingAction.Create(

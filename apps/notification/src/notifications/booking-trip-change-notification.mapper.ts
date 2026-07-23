@@ -1,16 +1,19 @@
 import {
   BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY,
   BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY,
+  BOOKING_ROUTE_CHANGE_AUTO_FALLBACK_APPLIED_ROUTING_KEY,
   BOOKING_SCHEDULE_CHANGE_INFORMATIONAL_ROUTING_KEY,
   BOOKING_SCHEDULE_CHANGE_REQUIRED_ROUTING_KEY,
   BOOKING_SEAT_REASSIGNMENT_REQUIRED_ROUTING_KEY,
   BookingPendingActionAutoResolvedEventSchema,
   BookingPendingActionRealertedEventSchema,
+  BookingRouteChangeAutoFallbackAppliedEventSchema,
   BookingScheduleChangeInformationalEventSchema,
   BookingScheduleChangeRequiredEventSchema,
   BookingSeatReassignmentRequiredEventSchema,
   type BookingPendingActionAutoResolvedEvent,
   type BookingPendingActionRealertedEvent,
+  type BookingRouteChangeAutoFallbackAppliedEvent,
   type BookingScheduleChangeInformationalEvent,
   type BookingScheduleChangeRequiredEvent,
   type BookingSeatReassignmentRequiredEvent,
@@ -23,7 +26,8 @@ export type BookingTripChangeRoutingKey =
   | typeof BOOKING_SCHEDULE_CHANGE_INFORMATIONAL_ROUTING_KEY
   | typeof BOOKING_SCHEDULE_CHANGE_REQUIRED_ROUTING_KEY
   | typeof BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY
-  | typeof BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY;
+  | typeof BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY
+  | typeof BOOKING_ROUTE_CHANGE_AUTO_FALLBACK_APPLIED_ROUTING_KEY;
 
 export function mapBookingTripChangeToNotification(
   routingKey: BookingTripChangeRoutingKey,
@@ -44,7 +48,25 @@ export function mapBookingTripChangeToNotification(
       return mapPendingActionAutoResolved(
         BookingPendingActionAutoResolvedEventSchema.parse(payload),
       );
+    case BOOKING_ROUTE_CHANGE_AUTO_FALLBACK_APPLIED_ROUTING_KEY:
+      return mapRouteChangeAutoFallback(
+        BookingRouteChangeAutoFallbackAppliedEventSchema.parse(payload),
+      );
   }
+}
+
+function mapRouteChangeAutoFallback(
+  payload: BookingRouteChangeAutoFallbackAppliedEvent,
+): CreateNotificationDto {
+  return {
+    userId: payload.userId,
+    type: NotificationType.TRIP_ROUTE_CHANGED,
+    title: 'Da tu dong chuyen diem den',
+    body:
+      `Vi ban chua phan hoi, xe se dua ban den terminal ${payload.fallbackDestinationStationId}; ` +
+      'nha xe se bo tri shuttle dua ban ve diem dung ban dau.',
+    data: bookingEventData(payload),
+  };
 }
 
 function mapPendingActionAutoResolved(

@@ -213,6 +213,11 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     Task<IReadOnlyList<ParcelEventSnapshot>> TryCancelPendingByTripIdAsync(
         Guid tripId, DateTimeOffset now, CancellationToken ct);
 
+    Task<IReadOnlyList<TripCancellationParcelImpact>> GetTripCancellationImpactAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct);
+
     Task<ParcelPaymentTransitionSnapshot?> TryManualCancelAsync(
         Guid parcelId,
         Guid operatorId,

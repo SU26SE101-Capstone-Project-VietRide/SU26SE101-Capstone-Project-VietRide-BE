@@ -2,8 +2,6 @@ using System.Text.Json;
 using Hangfire;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Events;
-using VietRide.Booking.Domain.Constants;
-using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
@@ -14,7 +12,6 @@ namespace VietRide.Booking.Infrastructure.Jobs;
 public sealed class RouteChangeExpiryJob(
     IBookingPendingActionRepository pendingActions,
     IBookingRepository bookings,
-    IBookingStatusHistoryRepository statusHistory,
     IIntegrationEventOutbox outbox,
     IUnitOfWork unitOfWork,
     IClock clock)
@@ -43,36 +40,56 @@ public sealed class RouteChangeExpiryJob(
             }
 
             var now = clock.UtcNow;
-            action.ExpireRouteChange(now);
+            var fallback = ParseFallbackMetadata(action.Metadata);
+            action.AutoFallbackRouteChange(now);
             pendingActions.Update(action);
-            booking.Cancel(BookingCancellationReason.ROUTE_CHANGED_REFUSED, now, refundOverride: true);
-            bookings.Update(booking);
-            await statusHistory.AddAsync(BookingStatusHistory.Create(
-                booking.Id,
-                BookingStatus.CANCELLED,
-                now,
-                BookingStatusHistorySource.CancelBooking,
-                actorUserId: null,
-                BookingCancellationReason.ROUTE_CHANGED_REFUSED.ToString()), cancellationToken);
 
             var eventId = Guid.NewGuid();
-            var cancelled = new BookingCancelledIntegrationEvent(
+            var applied = new BookingRouteChangeAutoFallbackAppliedIntegrationEvent(
                 eventId,
                 now,
                 booking.Id,
-                booking.BookingCode.Value,
+                booking.TripId,
                 booking.PassengerUserId,
-                booking.TotalAmount.Amount,
-                true,
-                BookingCancellationReason.ROUTE_CHANGED_REFUSED.ToString(),
-                booking.Tickets.Select(ticket => ticket.TicketCode.Value).Order(StringComparer.Ordinal).ToArray(),
-                booking.Tickets.Count);
+                action.Id,
+                fallback.OriginalStopId,
+                fallback.FallbackDestinationStationId);
             await outbox.EnqueueAsync(
                 eventId,
-                BookingCancelledIntegrationEvent.EventTypeValue,
-                JsonSerializer.Serialize(cancelled, JsonOptions),
+                BookingRouteChangeAutoFallbackAppliedIntegrationEvent.EventTypeValue,
+                JsonSerializer.Serialize(applied, JsonOptions),
                 cancellationToken);
             return true;
         }, cancellationToken);
+    }
+
+    private static (Guid OriginalStopId, Guid FallbackDestinationStationId)
+        ParseFallbackMetadata(string? metadata)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(metadata ?? string.Empty);
+            var root = document.RootElement;
+            var originalStopId = root.GetProperty("originalStopId").GetGuid();
+            var fallbackDestinationStationId =
+                root.GetProperty("fallbackDestinationStationId").GetGuid();
+            if (originalStopId == Guid.Empty
+                || fallbackDestinationStationId == Guid.Empty
+                || !root.GetProperty("shuttleRequired").GetBoolean())
+            {
+                throw new InvalidOperationException();
+            }
+
+            return (originalStopId, fallbackDestinationStationId);
+        }
+        catch (Exception exception) when (exception is JsonException
+            or InvalidOperationException
+            or FormatException
+            or KeyNotFoundException)
+        {
+            throw new InvalidOperationException(
+                "Route-change fallback metadata is invalid.",
+                exception);
+        }
     }
 }

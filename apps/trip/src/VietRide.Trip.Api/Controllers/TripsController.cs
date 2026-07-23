@@ -70,6 +70,7 @@ public sealed class TripsController : ControllerBase
     }
 
     [HttpPost("/v1/operator/trips/{tripId:guid}/cancel/preview")]
+    [SkipIdempotency("This POST is a read-only cancellation impact preview.")]
     [Authorize(Roles = "OPERATOR_ADMIN")]
     [ProducesResponseType(typeof(ApiResponse<CancelTripPreviewResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]

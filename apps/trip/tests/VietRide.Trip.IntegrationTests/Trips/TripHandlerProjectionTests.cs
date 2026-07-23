@@ -5,6 +5,7 @@ using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Features.Trips;
 using VietRide.Trip.Application.Features.Trips.GetTripDetail;
 using VietRide.Trip.Application.Features.Trips.GetTripSeatMap;
 using VietRide.Trip.Application.Features.Trips.SearchTrips;
@@ -17,6 +18,38 @@ namespace VietRide.Trip.IntegrationTests.Trips;
 
 public sealed class TripHandlerProjectionTests
 {
+    [Fact]
+    public async Task CancelPreview_AggregatesConfirmedBookingAndParcelRefunds()
+    {
+        var operatorId = Guid.NewGuid();
+        var trip = CreateTrip(operatorId, Guid.NewGuid(), DateTimeOffset.UtcNow.AddDays(1));
+        var confirmedBookingId = Guid.NewGuid();
+        var pendingBookingId = Guid.NewGuid();
+        var parcelId = Guid.NewGuid();
+        var handler = new CancelTripPreviewQueryHandler(
+            new InMemoryTripRepository([trip]),
+            new FakeBookingImpactClient(new TripBookingImpactProjection(
+                trip.Id,
+                2,
+                [
+                    new TripBookingImpactProjection.ActiveBooking(confirmedBookingId, "CONFIRMED", ["A01"], 250_000),
+                    new TripBookingImpactProjection.ActiveBooking(pendingBookingId, "PENDING_PAYMENT", ["A02"], 400_000),
+                ])),
+            new FakeParcelImpactClient(new TripParcelCancellationImpactProjection(
+                trip.Id,
+                [new TripParcelCancellationImpactProjection.AffectedParcel(parcelId, "PENDING", 75_000)])));
+
+        var result = await handler.Handle(
+            new CancelTripPreviewQuery(trip.Id, operatorId),
+            CancellationToken.None);
+
+        result.AffectedBookingIds.Should().BeEquivalentTo([confirmedBookingId, pendingBookingId]);
+        result.RefundTotalBooking.Should().Be(250_000);
+        result.AffectedParcelIds.Should().Equal(parcelId);
+        result.RefundTotalParcel.Should().Be(75_000);
+        result.GrandTotal.Should().Be(325_000);
+    }
+
     [Fact]
     public async Task Search_IncludesScheduledAndBoardingTrips()
     {
@@ -282,6 +315,24 @@ public sealed class TripHandlerProjectionTests
             Task.FromResult(operatorNames.TryGetValue(operatorId, out var name)
                 ? IdentityOperatorLookupResult.Success(operatorId, name)
                 : IdentityOperatorLookupResult.ValidationFailure($"Operator '{operatorId}' was not found in Identity."));
+    }
+
+    private sealed class FakeBookingImpactClient(TripBookingImpactProjection projection) : IBookingImpactClient
+    {
+        public Task<TripBookingImpactProjection> GetTripEditImpactAsync(
+            Guid tripId,
+            Guid operatorId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(projection);
+    }
+
+    private sealed class FakeParcelImpactClient(TripParcelCancellationImpactProjection projection) : IParcelImpactClient
+    {
+        public Task<TripParcelCancellationImpactProjection> GetTripCancellationImpactAsync(
+            Guid tripId,
+            Guid operatorId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(projection);
     }
 
     private abstract class InMemoryRepository<TEntity, TId> : IRepository<TEntity, TId>

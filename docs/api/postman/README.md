@@ -299,6 +299,22 @@ npm run e2e:day30
 That runner owns fixture creation, runtime credentials, deterministic verification, and cleanup;
 the Postman folder does not replace it.
 
+## Day 33 - Trip cancellation and alternative route
+
+The cumulative collection contains a Gateway-only Day-33 folder for cancellation preview/confirm,
+alternative-route change, and a same-key/different-body idempotency adversarial case. Run it with
+isolated local fixtures and runtime credentials using:
+
+```powershell
+npm run postman:day33:local
+```
+
+The runner seeds two Trips, confirmed Bookings, one paid Parcel, and an AlternativeRoute; mints a
+short-lived operator JWT; runs only the cumulative Day-33 folder with Newman; then proves Trip and
+Booking Outbox propagation, full Booking + Parcel Wallet refunds, frozen route-change fallback
+metadata, and one-event idempotency. Its `finally` path removes its exact DB and Redis fixtures and
+restores the platform Wallet baseline. Tokens are never printed or committed.
+
 ## Notes
 
 - Requests hit the **Gateway** (`:3000`) using the real resource-prefixed routes

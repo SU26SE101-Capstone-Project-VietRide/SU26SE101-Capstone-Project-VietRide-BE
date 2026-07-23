@@ -13,6 +13,7 @@ export * from './events/booking-pending-action-realerted.event';
 export * from './events/booking-pending-action-auto-resolved.event';
 export * from './events/booking-stop-disabled-affected.event';
 export * from './events/booking-stop-disabled-auto-fallback-applied.event';
+export * from './events/booking-route-change-auto-fallback-applied.event';
 export * from './events/booking-passenger-no-show-marked.event';
 export * from './events/trip-stop-departed-with-pending.event';
 export * from './events/day24-stop-no-show-events';

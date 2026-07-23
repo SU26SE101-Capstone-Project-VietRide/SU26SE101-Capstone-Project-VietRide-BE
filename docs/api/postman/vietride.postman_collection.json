@@ -9063,6 +9063,224 @@
           }
         }
       ]
+    },
+    {
+      "name": "Day 33 - Trip cancellation and alternative route",
+      "description": "Gateway-only Day-33 flow. Use npm run postman:day33:local for isolated fixtures, runtime JWTs, DB/Outbox assertions, and cleanup.",
+      "item": [
+        {
+          "name": "1. Preview cancellation without idempotency key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Preview returns real immutable refund impact', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.data.tripId).to.equal(pm.variables.get('day33CancelTripId'));",
+                  "  pm.expect(body.data.status).to.equal('SCHEDULED');",
+                  "  pm.expect(body.data.affectedBookingIds).to.include(pm.variables.get('day33CancelBookingId'));",
+                  "  pm.expect(body.data.refundTotalBooking).to.equal(100000);",
+                  "  pm.expect(body.data.affectedParcelIds).to.include(pm.variables.get('day33ParcelId'));",
+                  "  pm.expect(body.data.refundTotalParcel).to.equal(25000);",
+                  "  pm.expect(body.data.grandTotal).to.equal(125000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day33OperatorAdminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/trips/{{day33CancelTripId}}/cancel/preview",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "operator",
+                "trips",
+                "{{day33CancelTripId}}",
+                "cancel",
+                "preview"
+              ]
+            }
+          }
+        },
+        {
+          "name": "2. Confirm cancellation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Cancellation commits before downstream refunds', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.data.tripId).to.equal(pm.variables.get('day33CancelTripId'));",
+                  "  pm.expect(body.data.status).to.equal('CANCELLED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day33OperatorAdminToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day33CancelKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"reason\":\"OPERATOR_CANCELLED\"}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/trips/{{day33CancelTripId}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "operator",
+                "trips",
+                "{{day33CancelTripId}}",
+                "cancel"
+              ]
+            }
+          }
+        },
+        {
+          "name": "3. Change to an owned alternative route",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Route change returns frozen affected-booking candidates', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.data.tripId).to.equal(pm.variables.get('day33RouteTripId'));",
+                  "  pm.expect(body.data.alternativeRouteId).to.equal(pm.variables.get('day33AlternativeRouteId'));",
+                  "  pm.expect(body.data.affectedBookings).to.be.an('array').with.lengthOf(1);",
+                  "  pm.expect(body.data.affectedBookings[0].bookingId).to.equal(pm.variables.get('day33RouteBookingId'));",
+                  "  pm.expect(body.data.affectedBookings[0].candidateStops).to.be.an('array').that.is.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day33OperatorAdminToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day33RouteKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"alternativeRouteId\":\"{{day33AlternativeRouteId}}\"}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/trips/{{day33RouteTripId}}/change-route",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "operator",
+                "trips",
+                "{{day33RouteTripId}}",
+                "change-route"
+              ]
+            }
+          }
+        },
+        {
+          "name": "4. Same-key route body mismatch is rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Idempotency fingerprint rejects a different route body', () => {",
+                  "  pm.response.to.have.status(422);",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.error.code).to.equal('IDEMPOTENCY_KEY_MISMATCH');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day33OperatorAdminToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day33RouteKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"alternativeRouteId\":\"{{day33DifferentAlternativeRouteId}}\"}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/trips/{{day33RouteTripId}}/change-route",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "operator",
+                "trips",
+                "{{day33RouteTripId}}",
+                "change-route"
+              ]
+            }
+          }
+        }
+      ]
     }
   ]
 }

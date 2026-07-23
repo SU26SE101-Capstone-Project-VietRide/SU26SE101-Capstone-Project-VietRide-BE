@@ -1,8 +1,10 @@
 using MediatR;
+using VietRide.Shared.Application.Behaviors;
 using VietRide.Trip.Application.Events;
 
 namespace VietRide.Trip.Application.Features.Trips;
 
+[SkipTransaction]
 public sealed record ChangeTripRouteCommand(
     Guid TripId,
     Guid OperatorId,

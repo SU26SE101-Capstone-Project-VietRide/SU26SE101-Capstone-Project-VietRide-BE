@@ -101,7 +101,7 @@ public sealed class BookingPendingAction : BaseEntity<Guid>
         ResolvedAction = resolvedAction;
     }
 
-    public void ExpireRouteChange(DateTimeOffset resolvedAt)
+    public void AutoFallbackRouteChange(DateTimeOffset resolvedAt)
     {
         if (Reason != BookingPendingActionReason.ROUTE_CHANGE
             || ResolvedAt.HasValue
@@ -111,7 +111,7 @@ public sealed class BookingPendingAction : BaseEntity<Guid>
         }
 
         ResolvedAt = resolvedAt;
-        ResolvedAction = BookingPendingActionResolved.REJECTED;
+        ResolvedAction = BookingPendingActionResolved.AUTO_FALLBACK_DESTINATION;
     }
 
     public void AutoAcceptScheduleChange(DateTimeOffset resolvedAt, DateTimeOffset effectiveCutoff)

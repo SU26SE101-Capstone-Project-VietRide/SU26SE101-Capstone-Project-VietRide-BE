@@ -84,6 +84,10 @@ internal sealed class PlatformWalletRepository : IPlatformWalletRepository
         if (amount.Amount <= 0)
             throw new ArgumentOutOfRangeException(nameof(amount), "Platform wallet transaction amount must be positive.");
 
+        await _db.Database.ExecuteSqlRawAsync(
+            "SELECT pg_advisory_xact_lock(hashtext('payment:platform-wallet')::bigint)",
+            cancellationToken);
+
         var wallet = await GetSingletonAsync(cancellationToken);
         var balanceBefore = wallet.Balance;
         var balanceAfterAmount = type == PlatformWalletTransactionType.CREDIT

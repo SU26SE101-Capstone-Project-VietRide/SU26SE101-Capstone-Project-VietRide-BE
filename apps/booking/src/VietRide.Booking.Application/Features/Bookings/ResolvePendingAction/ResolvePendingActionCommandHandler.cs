@@ -1,6 +1,7 @@
 using System.Text.Json;
 using MediatR;
 using VietRide.Booking.Application.Abstractions.Repositories;
+using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Application.Events;
 using VietRide.Booking.Domain.Constants;
 using VietRide.Booking.Domain.Entities;
@@ -20,7 +21,9 @@ public sealed class ResolvePendingActionCommandHandler(
     IBookingStatusHistoryRepository statusHistory,
     IIntegrationEventOutbox outbox,
     IUnitOfWork unitOfWork,
-    IClock clock) : IRequestHandler<ResolvePendingActionCommand, ResolvePendingActionResult>
+    IClock clock,
+    IBookingStationCanonicalizer? stationCanonicalizer = null)
+    : IRequestHandler<ResolvePendingActionCommand, ResolvePendingActionResult>
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -134,15 +137,33 @@ public sealed class ResolvePendingActionCommandHandler(
                 throw InvalidSelection("ACCEPTED requires exactly one selected candidate identity.");
             }
 
+            var selectedStationId = request.SelectedStationId;
+            StationCanonicalizationResult? canonicalization = null;
+            if (selectedStationId.HasValue)
+            {
+                if (stationCanonicalizer is null)
+                {
+                    throw new InvalidOperationException(
+                        "Booking Station canonicalization is required for a route-change station selection.");
+                }
+
+                canonicalization = await stationCanonicalizer.LockAndResolveAsync(
+                    BookingStationCanonicalization.Collect(
+                        [selectedStationId, .. candidates.Select(candidate => candidate.StationId)]),
+                    cancellationToken);
+                selectedStationId = canonicalization.Resolve(selectedStationId);
+            }
+
             var matched = candidates.Count(candidate =>
                 candidate.StopId == request.SelectedStopId
-                && candidate.StationId == request.SelectedStationId);
+                && (canonicalization?.Resolve(candidate.StationId) ?? candidate.StationId)
+                    == selectedStationId);
             if (matched != 1)
             {
                 throw InvalidSelection("Selected route-change candidate is not present in frozen metadata.");
             }
 
-            booking.ChangePickup(request.SelectedStationId, request.SelectedStopId);
+            booking.ChangePickup(selectedStationId, request.SelectedStopId);
             bookings.Update(booking);
         }
         else
@@ -213,12 +234,16 @@ public sealed class ResolvePendingActionCommandHandler(
             var expected = new HashSet<string>(StringComparer.Ordinal)
             {
                 "sourceEventId", "tripId", "operatorId", "tripStatus", "alternativeRouteId",
-                "deadline", "candidateStops",
+                "deadline", "originalStopId", "fallbackDestinationStationId", "shuttleRequired",
+                "candidateStops",
             };
             if (root.ValueKind != JsonValueKind.Object
                 || !root.EnumerateObject().Select(property => property.Name)
                     .ToHashSet(StringComparer.Ordinal).SetEquals(expected)
-                || root.GetProperty("deadline").GetDateTimeOffset() != action.Deadline)
+                || root.GetProperty("deadline").GetDateTimeOffset() != action.Deadline
+                || root.GetProperty("originalStopId").GetGuid() == Guid.Empty
+                || root.GetProperty("fallbackDestinationStationId").GetGuid() == Guid.Empty
+                || !root.GetProperty("shuttleRequired").GetBoolean())
             {
                 throw new InvalidOperationException();
             }

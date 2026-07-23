@@ -1,6 +1,6 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.42.0
+> **Phiên bản:** 1.43.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
 > **Cập nhật lần cuối:** 2026-07-23
 > **Capstone:** SU26SE101 — SU26
@@ -2059,6 +2059,7 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `trip.station.normalized` | Trip | Identity | `{ eventId, occurredAt, eventType, actorUserId, ipAddress?, userAgent?, stationId, before, after }`; snapshots omit contact phone/email |
 | `booking.stop_disabled.affected` | Booking | Notification | Exact `{ eventId, occurredAt, eventType, stopId, replacedByStopId?, recipientUserIds[], affectedBookingCount }`; explicit deduped recipients; identity equals Outbox/Rabbit MessageId. |
 | `booking.booking.stop_disabled_auto_fallback_applied` | Booking | Notification | Exact `{ eventId, occurredAt, eventType, bookingId, tripId, userId, pendingActionId, disabledStopId, affectedField, fallbackStationId, resolvedAction }`; `affectedField=PICKUP|DROPOFF`, `resolvedAction=AUTO_FALLBACK_DESTINATION`; one fact per action. |
+| `booking.booking.route_change_auto_fallback_applied` | Booking | Notification | Exact `{ eventId, occurredAt, eventType, bookingId, tripId, userId, pendingActionId, originalStopId, fallbackDestinationStationId, shuttleRequired, resolvedAction }`; `shuttleRequired=true`, `resolvedAction=AUTO_FALLBACK_DESTINATION`; one fact per timed-out ROUTE_CHANGE action. |
 | `booking.booking.passenger_no_show_marked` | Booking | Notification | Exact `{ eventId, occurredAt, eventType, bookingId, tripId, userId, bookingStatus, newlyNoShowPassengerIds[], triggerType, pickupStopId? }`; status `NO_SHOW|PARTIAL_NO_SHOW`, trigger `ALONG_ROUTE|TERMINAL`; one fact per Booking transition. |
 | `trip.stop.departed_with_pending` | Trip | Notification (Driver App boarding warning) | `{ eventId: Guid, occurredAt: DateTime (UTC), eventType: "trip.stop.departed_with_pending", tripId: Guid, stopId: Guid, stopName: string, pendingPassengerCount: int (> 0), driverUserId: Guid, assistantUserId: Guid?, departedAt: DateTimeOffset (UTC ISO-8601) }` |
 | `trip.stop.arrived` | Trip | Parcel, Notification | `{ eventId, occurredAt, eventType, tripId, stopId, operatorId, actorUserId, actualArrivalTime }`; Trip và TripStop lock theo thứ tự, `PENDING -> ARRIVED`, static ETA không đổi, business row + Outbox commit atomic |
@@ -2106,6 +2107,12 @@ only the complete canonical shape in the registry or the exact legacy shape with
 fields absent, reject partial/malformed/extra fields, and fall back to `bookingId` only for that
 exact legacy payload. Optional `bookingCode`, `ticketCodes`, and `ticketCount` enrich
 notifications but do not alter refund authority.
+
+Payment attempts a positive Booking refund once while consuming the cancellation fact. On failure,
+it acknowledges only after persisting one unresolved `RefundFailureLog` with `retryCount=0`; the
+recurring `RefundFailureRetryJob` then owns at most five attempts at the §10.1 ten-minute cadence.
+An exhausted row remains unresolved for Admin handling. Refund failure never rolls back the
+already-committed Trip or Booking cancellation.
 
 **Day-22 ownership:** For Day-22 vehicle swap, schedule change, and schedule-day-removal
 cancellation only, Trip emits domain facts while Booking owns passenger-impact state and passenger-
@@ -2650,12 +2657,17 @@ PENDING_HOLD ─→ ELIGIBLE ─→ SETTLED
 
 For `ROUTE_CHANGE`, Booking consumes only its matching element from the frozen
 `trip.trip.route_changed.affectedBookings` array and persists its `candidateStops`, `tripStatus`,
-`sourceEventId`, and deadline in immutable action metadata. Deadline is `occurredAt + 30m` for
+`sourceEventId`, `originalStopId`, `fallbackDestinationStationId`, `shuttleRequired=true`, and
+deadline in immutable action metadata. Deadline is `occurredAt + 30m` for
 `IN_PROGRESS` and `occurredAt + 60m` for `SCHEDULED|BOARDING`. Acceptance must match exactly one
 candidate identity from that metadata (`stopId` XOR `stationId`); it never calls Trip to refresh
-the candidates. Rejection or expiry cancels with `ROUTE_CHANGED_REFUSED`, freezes a 100% refund
-from `Booking.totalAmount`, and emits only authoritative `booking.booking.cancelled`. Duplicate
-delivery is idempotent and creates no duplicate ID source or active action.
+the candidates. Explicit passenger rejection cancels with `ROUTE_CHANGED_REFUSED`, freezes a 100%
+refund from `Booking.totalAmount`, and emits only authoritative `booking.booking.cancelled`.
+Strictly after the deadline, no-response expiry instead resolves
+`AUTO_FALLBACK_DESTINATION`, leaves Booking `CONFIRMED`, changes no pickup field, creates no refund,
+and emits one `booking.booking.route_change_auto_fallback_applied` fact for Notification and
+shuttle coordination. Duplicate delivery/job execution is idempotent and creates no duplicate
+ID source, active action, refund, or event.
 
 Day-22 vehicle swap creates `PENDING_SEAT_ASSIGNMENT` only for an incompatible BOOKED seat on a
 `SCHEDULED` Trip when `deadline = min(event.occurredAt + 4h, departureDateTime - 30m)` is strictly
@@ -3518,6 +3530,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.43.0** | 2026-07-23 | BE lead (Vũ) | **MINOR** - Align Day-33 ROUTE_CHANGE timeout with technical context §6.4: persist frozen shuttle-fallback metadata, keep Booking CONFIRMED without automatic refund, publish `booking.booking.route_change_auto_fallback_applied` for Notification, and preserve the recurring five-attempt `RefundFailureRetryJob` lifecycle by persisting the initial consumer failure at `retryCount=0`. |
 | **1.42.0** | 2026-07-23 | BE lead (Vũ) | **MINOR** - Correct the Day-33 `trip.trip.route_changed` contract to carry lifecycle status and immutable per-booking candidate-stop snapshots, remove duplicate `affectedBookingIds`, and freeze Booking ROUTE_CHANGE creation/resolution without synchronous Trip lookup. |
 | **1.41.0** | 2026-07-23 | BE lead (Vũ) | **MINOR** — Complete VNPay HTTPS return bridge and Passenger deep-link/App Links configuration; keep IPN as the only payment state transition source with probe/signature diagnostics; expand Firebase client-token purposes and owner-scoped Storage Rules to vehicle, operator logo, parcel, incident, and avatar uploads; add avatar persistence endpoint and Firebase URL ownership validation. |
 | **1.40.0** | 2026-07-23 | BE lead (Vũ) | **MINOR** - Day-33 ratifies operator Trip cancellation preview/confirm and AlternativeRoute disruption contracts, completes the `trip.trip.route_changed` event identity and producer/consumer registry, and documents nullable Trip-to-AlternativeRoute storage. Payment refunds remain driven only by `booking.booking.cancelled`. |

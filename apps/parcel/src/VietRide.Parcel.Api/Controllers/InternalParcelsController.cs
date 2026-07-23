@@ -7,6 +7,7 @@ using VietRide.Parcel.Application.Features.Parcels.AccessCheck;
 using VietRide.Parcel.Application.Features.Parcels.InternalDetail;
 using VietRide.Parcel.Application.Features.Parcels.MarkLoaded;
 using VietRide.Parcel.Application.Features.Parcels.OperationalRecovery;
+using VietRide.Parcel.Application.Features.Parcels.TripCancellationImpact;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Authentication;
 
@@ -118,6 +119,21 @@ public sealed class InternalParcelsController : ControllerBase
             new GetParcelAccessCheckQuery(parcelId, userId, operatorId),
             cancellationToken);
 
+        return Ok(result);
+    }
+
+    [HttpGet("trips/{tripId:guid}/cancel-impact")]
+    [ProducesResponseType(typeof(ApiResponse<TripCancellationImpactResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<TripCancellationImpactResponse>> GetTripCancellationImpactAsync(
+        Guid tripId,
+        [FromQuery] Guid operatorId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(
+            new GetTripCancellationImpactQuery(tripId, operatorId),
+            cancellationToken);
         return Ok(result);
     }
 }

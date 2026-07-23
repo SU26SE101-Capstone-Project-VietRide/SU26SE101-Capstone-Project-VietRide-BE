@@ -10,12 +10,10 @@ using VietRide.Shared.Kernel.Abstractions;
 namespace VietRide.Payment.Infrastructure.Refunds;
 
 /// <summary>
-/// Executes the canonical booking refund and persists an exhausted retry for Hangfire.
+/// Executes the first canonical booking-refund attempt and persists a retriable failure for Hangfire.
 /// </summary>
 public sealed class RefundRetryService
 {
-    public const int MaxAttempts = 5;
-
     private readonly ISender _sender;
     private readonly IRefundFailureLogRepository? _failures;
     private readonly IUnitOfWork? _unitOfWork;
@@ -36,7 +34,7 @@ public sealed class RefundRetryService
         _logger = logger;
     }
 
-    public async Task ExecuteBookingRefundAsync(
+    public async Task<bool> ExecuteBookingRefundAsync(
         BookingCancelledIntegrationEvent integrationEvent,
         CancellationToken cancellationToken)
     {
@@ -45,59 +43,42 @@ public sealed class RefundRetryService
             integrationEvent.RefundAmount!.Value,
             "BOOKING_REFUND",
             integrationEvent.BookingId!.Value,
-            integrationEvent.EventId!.Value.ToString("D"));
+            (integrationEvent.EventId ?? integrationEvent.BookingId)!.Value.ToString("D"));
 
-        Exception? lastException = null;
-        for (var attempt = 1; attempt <= MaxAttempts; attempt++)
+        try
         {
-            try
-            {
-                await _sender.Send(command, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            await _sender.Send(command, cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            if (_failures is null || _unitOfWork is null || _clock is null)
             {
                 throw;
             }
-            catch (Exception ex)
-            {
-                lastException = ex;
-                if (attempt < MaxAttempts)
-                {
-                    _logger.LogWarning(
-                        ex,
-                        "Wallet refund attempt {Attempt} failed for booking {BookingId}; retrying.",
-                        attempt,
-                        integrationEvent.BookingId);
-                }
-            }
-        }
 
-        if (_failures is null || _unitOfWork is null || _clock is null)
-        {
-            throw lastException ?? new InvalidOperationException("Wallet refund failed.");
-        }
+            var reason = exception.Message;
+            var now = _clock.UtcNow;
+            var failure = RefundFailureLog.CreateForBookingRefund(
+                integrationEvent.BookingId!.Value,
+                integrationEvent.UserId!.Value,
+                integrationEvent.RefundAmount!.Value,
+                BookingCancelledIntegrationEvent.EventType,
+                reason,
+                now);
 
-        var reason = lastException?.Message ?? "Wallet refund failed.";
-        var now = _clock.UtcNow;
-        var failure = RefundFailureLog.CreateForBookingRefund(
-            integrationEvent.BookingId!.Value,
-            integrationEvent.UserId!.Value,
-            integrationEvent.RefundAmount!.Value,
-            BookingCancelledIntegrationEvent.EventType,
-            reason,
-            now);
-        for (var attempt = 0; attempt < RefundRetryService.MaxAttempts; attempt++)
-        {
-            failure.RecordRetryFailure(now, reason);
+            await _failures.AddAsync(failure, cancellationToken).ConfigureAwait(false);
+            await _unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            _logger.LogWarning(
+                exception,
+                "Initial refund failed for booking {BookingId}; persisted retriable failure log {FailureId}.",
+                integrationEvent.BookingId,
+                failure.Id);
+            return false;
         }
-
-        await _failures.AddAsync(failure, cancellationToken).ConfigureAwait(false);
-        await _unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        _logger.LogError(
-            lastException,
-            "Refund retries exhausted for booking {BookingId}; persisted failure log {FailureId}.",
-            integrationEvent.BookingId,
-            failure.Id);
     }
 }

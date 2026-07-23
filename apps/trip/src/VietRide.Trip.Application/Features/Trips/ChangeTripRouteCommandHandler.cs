@@ -56,8 +56,7 @@ public sealed class ChangeTripRouteCommandHandler : IRequestHandler<ChangeTripRo
             .OrderBy(id => id)
             .ToArray();
 
-        await unitOfWork.BeginTransactionAsync(cancellationToken);
-        try
+        return await unitOfWork.ExecuteInTransactionAsync(async () =>
         {
             var lockedTrip = await trips.AcquireForRouteChangeAsync(request.TripId, cancellationToken);
             if (lockedTrip is null || lockedTrip.OperatorId != request.OperatorId)
@@ -80,7 +79,6 @@ public sealed class ChangeTripRouteCommandHandler : IRequestHandler<ChangeTripRo
                 .ToArray();
             if (!lockedTrip.ChangeAlternativeRoute(request.AlternativeRouteId))
             {
-                await unitOfWork.CommitAsync(cancellationToken);
                 return new ChangeTripRouteResponse(
                     lockedTrip.Id,
                     lockedTrip.Status.ToString(),
@@ -100,19 +98,12 @@ public sealed class ChangeTripRouteCommandHandler : IRequestHandler<ChangeTripRo
                 evt.EventType,
                 JsonSerializer.Serialize(evt, JsonOptions),
                 cancellationToken);
-            await unitOfWork.SaveChangesAsync(cancellationToken);
-            await unitOfWork.CommitAsync(cancellationToken);
             return new ChangeTripRouteResponse(
                 lockedTrip.Id,
                 lockedTrip.Status.ToString(),
                 request.AlternativeRouteId,
                 affectedBookings);
-        }
-        catch
-        {
-            await unitOfWork.RollbackAsync(cancellationToken);
-            throw;
-        }
+        }, cancellationToken);
     }
 
     private static void EnsureRouteChangeAllowed(Domain.Entities.Trip trip)

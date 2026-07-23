@@ -90,6 +90,7 @@ public sealed class RouteChangeResolverTests
         {
             Booking = CreateConfirmedBooking(totalAmount);
             CandidateStopId = Guid.NewGuid();
+            var fallbackDestinationStationId = Guid.NewGuid();
             Action = BookingPendingAction.Create(
                 Booking.Id,
                 BookingPendingActionReason.ROUTE_CHANGE,
@@ -102,6 +103,9 @@ public sealed class RouteChangeResolverTests
                     tripStatus = "IN_PROGRESS",
                     alternativeRouteId = Guid.NewGuid(),
                     deadline = Now.AddMinutes(20),
+                    originalStopId = Booking.PickupStopId!.Value,
+                    fallbackDestinationStationId,
+                    shuttleRequired = true,
                     candidateStops = new[]
                     {
                         new
@@ -111,6 +115,14 @@ public sealed class RouteChangeResolverTests
                             stationName = "Alternative stop",
                             sequence = 1,
                             estimatedArrivalAt = Now.AddMinutes(15),
+                        },
+                        new
+                        {
+                            stopId = (Guid?)null,
+                            stationId = (Guid?)fallbackDestinationStationId,
+                            stationName = "Alternative destination",
+                            sequence = 2,
+                            estimatedArrivalAt = Now.AddMinutes(30),
                         },
                     },
                 }));
@@ -169,7 +181,7 @@ public sealed class RouteChangeResolverTests
                 Guid.NewGuid(),
                 null,
                 Guid.NewGuid(),
-                null,
+                Guid.NewGuid(),
                 null,
                 Money.FromRaw(amount),
                 Money.Zero,

@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import {
   BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY,
   BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY,
+  BOOKING_ROUTE_CHANGE_AUTO_FALLBACK_APPLIED_ROUTING_KEY,
   BOOKING_SCHEDULE_CHANGE_INFORMATIONAL_ROUTING_KEY,
   BOOKING_SCHEDULE_CHANGE_REQUIRED_ROUTING_KEY,
   BOOKING_SEAT_REASSIGNMENT_REQUIRED_ROUTING_KEY,
@@ -38,6 +39,10 @@ export const BOOKING_TRIP_CHANGE_QUEUE_BINDINGS = [
   {
     queue: 'notification:booking-pending-action-auto-resolved',
     routingKey: BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:booking-route-change-auto-fallback-applied',
+    routingKey: BOOKING_ROUTE_CHANGE_AUTO_FALLBACK_APPLIED_ROUTING_KEY,
   },
 ] as const;
 

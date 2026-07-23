@@ -61,18 +61,17 @@ public sealed class RefundToWalletCommandHandler : IRequestHandler<RefundToWalle
             return ToResult(existing);
         }
 
-        var originalPayment = await FindOriginalPaymentAsync(
+        var context = await FindTrustedRefundContextAsync(
             referenceType,
             request.ReferenceId,
             cancellationToken).ConfigureAwait(false);
-        if (originalPayment is null || PaymentContextCodec.IsMissing(originalPayment.Context))
+        if (context is null)
         {
             throw new CodedValidationException(
                 "PAYMENT_CONTEXT_INVALID",
                 "The original payment has no trusted refund context.");
         }
 
-        var context = PaymentContextCodec.DeserializeTrusted(originalPayment.Context);
         var allocation = context.Allocations.SingleOrDefault(item => item.ReferenceId == request.ReferenceId)
             ?? throw new CodedValidationException(
                 "PAYMENT_CONTEXT_INVALID",
@@ -155,28 +154,98 @@ public sealed class RefundToWalletCommandHandler : IRequestHandler<RefundToWalle
             .ConfigureAwait(false);
     }
 
-    private async Task<VietRide.Payment.Domain.Entities.Payment?> FindOriginalPaymentAsync(
+    private async Task<PaymentContextV1?> FindTrustedRefundContextAsync(
         WalletTransactionRef refundReferenceType,
         Guid allocationReferenceId,
         CancellationToken cancellationToken)
     {
-        var paymentReferenceType = refundReferenceType == WalletTransactionRef.PARCEL_REFUND
-            ? PaymentReferenceType.PARCEL
-            : PaymentReferenceType.BOOKING;
+        if (refundReferenceType == WalletTransactionRef.PARCEL_REFUND)
+        {
+            return await FindParcelRefundContextAsync(
+                allocationReferenceId,
+                cancellationToken).ConfigureAwait(false);
+        }
+
         var payment = await _payments.FindByReferenceAsync(
-            paymentReferenceType,
+            PaymentReferenceType.BOOKING,
             allocationReferenceId,
             cancellationToken).ConfigureAwait(false);
-        if (payment is not null || paymentReferenceType != PaymentReferenceType.BOOKING)
-            return payment;
+        if (payment is not null)
+            return DeserializeContext(payment);
 
         var allocationId = allocationReferenceId.ToString("D");
-        return await _payments.Query()
+        var containedAllocation = JsonSerializer.Serialize(new
+        {
+            allocations = new[] { new { referenceId = allocationId } },
+        });
+        payment = await _payments.Query()
             .Where(candidate => candidate.ReferenceType == PaymentReferenceType.BOOKING_GROUP
-                && candidate.Context.Contains(allocationId))
+                && EF.Functions.JsonContains(candidate.Context, containedAllocation))
             .OrderByDescending(candidate => candidate.SucceededAt)
             .FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
+        return payment is null ? null : DeserializeContext(payment);
     }
+
+    private async Task<PaymentContextV1?> FindParcelRefundContextAsync(
+        Guid parcelId,
+        CancellationToken cancellationToken)
+    {
+        var originalPayment = await _payments.FindByReferenceAsync(
+            PaymentReferenceType.PARCEL,
+            parcelId,
+            cancellationToken).ConfigureAwait(false);
+        if (originalPayment is null)
+            return null;
+
+        var payments = new List<VietRide.Payment.Domain.Entities.Payment> { originalPayment };
+        var additionalPayment = await _payments.FindByReferenceAsync(
+            PaymentReferenceType.PARCEL_ADDITIONAL,
+            parcelId,
+            cancellationToken).ConfigureAwait(false);
+        if (additionalPayment is not null)
+            payments.Add(additionalPayment);
+
+        var allocations = payments
+            .Select(DeserializeContext)
+            .SelectMany(context => context.Allocations)
+            .Where(allocation => allocation.ReferenceId == parcelId
+                && allocation.ReferenceType is "PARCEL" or "PARCEL_ADDITIONAL")
+            .ToArray();
+        if (allocations.Length != payments.Count)
+        {
+            throw new CodedValidationException(
+                "PAYMENT_CONTEXT_INVALID",
+                "Parcel payment context does not match the refund reference.");
+        }
+
+        var first = allocations[0];
+        if (allocations.Any(allocation =>
+            allocation.OperatorId != first.OperatorId || allocation.TripId != first.TripId))
+        {
+            throw new CodedValidationException(
+                "PAYMENT_CONTEXT_INVALID",
+                "Parcel payment contexts disagree on operator or trip ownership.");
+        }
+
+        return new PaymentContextV1(1,
+        [
+            new PaymentAllocationV1(
+                parcelId,
+                "PARCEL",
+                first.OperatorId,
+                first.TripId,
+                allocations.Sum(allocation => checked(allocation.GrossAmount)),
+                allocations.Sum(allocation => checked(allocation.VoucherVietRideFundedAmount)),
+                allocations.Sum(allocation => checked(allocation.VoucherOperatorFundedAmount))),
+        ]);
+    }
+
+    private static PaymentContextV1 DeserializeContext(VietRide.Payment.Domain.Entities.Payment payment)
+        => PaymentContextCodec.IsMissing(payment.Context)
+            ? throw new CodedValidationException(
+                "PAYMENT_CONTEXT_INVALID",
+                "The original payment has no trusted refund context.")
+            : PaymentContextCodec.DeserializeTrusted(payment.Context);
 
     private static RefundToWalletResult ToResult(WalletTransaction transaction)
         => new(transaction.Id, transaction.BalanceAfter.Amount);

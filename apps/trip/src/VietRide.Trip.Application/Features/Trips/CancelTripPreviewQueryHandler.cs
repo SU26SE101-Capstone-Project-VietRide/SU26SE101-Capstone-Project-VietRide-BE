@@ -11,11 +11,16 @@ public sealed class CancelTripPreviewQueryHandler
 {
     private readonly ITripRepository trips;
     private readonly IBookingImpactClient bookingImpact;
+    private readonly IParcelImpactClient parcelImpact;
 
-    public CancelTripPreviewQueryHandler(ITripRepository trips, IBookingImpactClient bookingImpact)
+    public CancelTripPreviewQueryHandler(
+        ITripRepository trips,
+        IBookingImpactClient bookingImpact,
+        IParcelImpactClient parcelImpact)
     {
         this.trips = trips;
         this.bookingImpact = bookingImpact;
+        this.parcelImpact = parcelImpact;
     }
 
     public async Task<CancelTripPreviewResponse> Handle(
@@ -36,15 +41,28 @@ public sealed class CancelTripPreviewQueryHandler
             .Distinct()
             .OrderBy(id => id)
             .ToArray();
+        var refundTotalBooking = projection.ActiveBookings
+            .Where(booking => booking.Status == "CONFIRMED")
+            .Sum(booking => booking.TotalAmount);
+        var parcels = await parcelImpact.GetTripCancellationImpactAsync(
+            trip.Id,
+            request.OperatorId,
+            cancellationToken);
+        var affectedParcelIds = parcels.AffectedParcels
+            .Select(parcel => parcel.ParcelId)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToArray();
+        var refundTotalParcel = parcels.AffectedParcels.Sum(parcel => parcel.RefundAmount);
 
         return new CancelTripPreviewResponse(
             trip.Id,
             trip.Status.ToString(),
             affected,
-            0,
-            Array.Empty<Guid>(),
-            0,
-            0);
+            refundTotalBooking,
+            affectedParcelIds,
+            refundTotalParcel,
+            checked(refundTotalBooking + refundTotalParcel));
     }
 
     internal static void EnsureEditable(TripStatus status)
