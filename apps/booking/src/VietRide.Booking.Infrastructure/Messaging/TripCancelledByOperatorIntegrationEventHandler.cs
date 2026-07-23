@@ -18,7 +18,8 @@ internal sealed class TripCancelledByOperatorIntegrationEventHandler(IMediator m
             integrationEvent.TripId,
             integrationEvent.OperatorId,
             integrationEvent.CancelledAt,
-            integrationEvent.CancelReason), cancellationToken);
+            integrationEvent.CancelReason,
+            AllowOperatorReason: true), cancellationToken);
     }
 
     private static void Validate(TripCancelledByOperatorIntegrationEvent integrationEvent)

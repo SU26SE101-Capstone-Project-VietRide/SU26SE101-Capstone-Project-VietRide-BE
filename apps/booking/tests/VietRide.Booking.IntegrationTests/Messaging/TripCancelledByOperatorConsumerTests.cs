@@ -163,7 +163,7 @@ public sealed class TripCancelledByOperatorConsumerTests
             TripId = tripId,
             OperatorId = operatorId,
             CancelledAt = CancelledAt,
-            CancelReason = HandleTripCancelledCommandHandler.DriverScheduleDayRemovedReason,
+            CancelReason = "Vehicle issue",
         };
 
     private static HandleTripCancelledCommand ToCommand(
@@ -174,7 +174,8 @@ public sealed class TripCancelledByOperatorConsumerTests
             integrationEvent.TripId,
             integrationEvent.OperatorId,
             integrationEvent.CancelledAt,
-            integrationEvent.CancelReason);
+            integrationEvent.CancelReason,
+            AllowOperatorReason: true);
 
     private static IIntegrationEventHandler<TripCancelledByOperatorIntegrationEvent>
         CreateDatabaseBackedHandler(BookingDbContext db)
