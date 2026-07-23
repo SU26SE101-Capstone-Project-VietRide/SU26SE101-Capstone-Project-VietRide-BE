@@ -1,49 +1,584 @@
 {
-  "version": 2,
-  "policy": "runtime-metadata-aligned-openapi",
+  "version": 3,
+  "policy": "system-wide-idempotency-contract",
   "services": {
     "identity": {
       "stack": "dotnet",
       "servicePrefix": "identity",
-      "requireAllMutations": false,
+      "requireAllMutations": true,
       "expectedMutationCount": 34,
-      "expectedRequiredCount": 6,
-      "metadataAttributes": {
-        "RequireIdempotency": "libs/dotnet/VietRide.Shared.Web/Idempotency/RequireIdempotencyAttribute.cs",
-        "IdempotencyOpenApi": "libs/dotnet/VietRide.Shared.Web/Idempotency/IdempotencyOpenApiAttribute.cs"
-      }
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/admin/operators",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/admin/operators/{operatorId:guid}/approve",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/admin/operators/{operatorId:guid}/reject",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/admin/operators/{operatorId:guid}/suspend",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/admin/subscription-plans",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/admin/subscription-plans/{planId:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/admin/users",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/admin/users/{userId:guid}/lock",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/admin/users/{userId:guid}/unlock",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/auth/register",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/auth/verify-email",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/auth/resend-verification-email",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/auth/forgot-password",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/auth/reset-password",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/auth/set-initial-password",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/auth/login",
+          "policy": "exempt",
+          "reason": "Login returns credentials and is protected by the native authentication lockout policy."
+        },
+        {
+          "method": "POST",
+          "path": "/v1/auth/google",
+          "policy": "exempt",
+          "reason": "Google login returns credentials and is protected by provider-token validation."
+        },
+        {
+          "method": "POST",
+          "path": "/v1/auth/refresh",
+          "policy": "exempt",
+          "reason": "Refresh rotates credentials and is protected by refresh-token family replay detection."
+        },
+        {
+          "method": "POST",
+          "path": "/v1/auth/logout",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/auth/device-token",
+          "policy": "required"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/auth/device-token",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/firebase/custom-token",
+          "policy": "exempt",
+          "reason": "Firebase custom-token responses contain credentials and must not be cached in Redis."
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/operators/summaries/batch",
+          "policy": "exempt",
+          "reason": "Operator summary batching is a read-only query exposed as POST for bounded request payloads."
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/operators/{operatorId:guid}/usage/increment",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/operators/{operatorId:guid}/quota-allocations",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/operators/{operatorId:guid}/quota-allocations/{allocationId:guid}/release",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/users/{userId:guid}/device-tokens/deactivate",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/operator/profile",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operators/register",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/subscription/upgrade",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/subscription/upgrade/{upgradeAttemptId:guid}/retry-payment",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/users",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/users/{userId:guid}/resend-initial-password",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/users/me/complete-profile",
+          "policy": "required"
+        }
+      ]
     },
     "trip": {
       "stack": "dotnet",
       "servicePrefix": "trip",
-      "requireAllMutations": false,
+      "requireAllMutations": true,
       "expectedMutationCount": 50,
-      "expectedRequiredCount": 28,
-      "metadataAttributes": {
-        "RequireIdempotency": "libs/dotnet/VietRide.Shared.Web/Idempotency/RequireIdempotencyAttribute.cs",
-        "RequireIdempotencyKey": "apps/trip/src/VietRide.Trip.Api/Filters/RequireIdempotencyKeyAttribute.cs",
-        "IdempotencyOpenApi": "libs/dotnet/VietRide.Shared.Web/Idempotency/IdempotencyOpenApiAttribute.cs"
-      }
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/admin/locations",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/admin/locations/{id:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/admin/locations/{id:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/admin/stations/{id:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/admin/stations/{primaryStationId:guid}/merge",
+          "policy": "required"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/admin/stations/{id:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/admin/stops/{id:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/admin/stops/{id:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/driver/trips/{tripId}/start",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/driver/trips/{tripId}/complete",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/driver/trips/{tripId}/incident",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/driver/trips/{tripId:guid}/stops/{stopId:guid}/arrive",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/driver/trips/{tripId:guid}/stops/{stopId:guid}/depart",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/driver/trips/{tripId}/stops/{stopId}/depart",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/driver/trips/{tripId:guid}/destination/arrive",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/trips/{tripId:guid}/lock-seats",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/trips/{tripId:guid}/release-seats",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/trips/round-trip/book-seats",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/trips/{tripId:guid}/book-seats",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/trips/{tripId:guid}/cargo/reserve",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/trips/{tripId:guid}/cargo/remeasure",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/trips/{tripId:guid}/cargo/load",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/trips/{tripId:guid}/cargo/release",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/trips/round-trip/lock-seats",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/operator/alternative-routes/{id:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/operator/alternative-routes/{id:guid}/geometry",
+          "policy": "required"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/operator/alternative-routes/{id:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/driver-schedules",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/operator/driver-schedules/{id:guid}/activate",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/operator/driver-schedules/{id:guid}/crew",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/operator/driver-schedules/{id:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/routes",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/operator/routes/{id:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/operator/routes/{id:guid}/geometry",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/routes/{id:guid}/stops",
+          "policy": "required"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/operator/routes/{id:guid}/stops/{stopId:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/routes/{id:guid}/fare-templates",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/routes/{id:guid}/alternative-routes",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/shuttle-trips",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/stations",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/operator/stations/{stationId:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/operator/stations/{stationId:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/stops",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/operator/stops/{id:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/operator/stops/{id:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/operator/trips/{tripId:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/trips/{tripId:guid}/substitute-vehicle",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/trips/{tripId:guid}/disrupt-no-substitution",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/vehicles",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/operator/vehicles/{id:guid}",
+          "policy": "required"
+        }
+      ]
     },
     "booking": {
       "stack": "dotnet",
       "servicePrefix": "booking",
       "requireAllMutations": true,
       "expectedMutationCount": 26,
-      "controllers": [
-        "AdminVouchersController",
-        "BookingsController",
-        "BoardingController",
-        "InternalVouchersController",
-        "AdminCampaignsController",
-        "OperatorVouchersController",
-        "OperatorVoucherConsentsController"
-      ],
-      "exemptions": [
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/admin/campaigns",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/admin/campaigns/{campaignId:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/admin/campaigns/{campaignId:guid}/activate",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/admin/campaigns/{campaignId:guid}/deactivate",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/admin/vouchers",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/admin/vouchers/{id:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/admin/vouchers/{id:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/bookings/trips/{tripId:guid}/boarding/passenger/{passengerRecordId:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/bookings/trips/{tripId:guid}/boarding/qr-scan",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/bookings",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/bookings/round-trip",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/bookings/{bookingId:guid}/edit-pickup",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/bookings/{bookingId:guid}/edit-dropoff",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/bookings/{bookingId:guid}/cancel",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/bookings/{bookingId:guid}/pending-action/{actionId:guid}/accept-fallback",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/bookings/{bookingId}/pending-actions/{actionId}/resolve",
+          "policy": "required"
+        },
         {
           "method": "POST",
           "path": "/internal/v1/vouchers/validate",
+          "policy": "exempt",
           "reason": "Voucher validation is read-only and does not create a usage record."
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/vouchers/usages",
+          "policy": "required"
+        },
+        {
+          "method": "DELETE",
+          "path": "/internal/v1/vouchers/usages/by-reference",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/voucher-consents/{id:guid}/accept",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/voucher-consents/{id:guid}/reject",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/vouchers",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/operator/vouchers/{id:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/operator/vouchers/{id:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/vouchers/{id:guid}/activate",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/vouchers/{id:guid}/deactivate",
+          "policy": "required"
         }
       ]
     },
@@ -52,29 +587,79 @@
       "servicePrefix": "payment",
       "requireAllMutations": true,
       "expectedMutationCount": 14,
-      "controllers": [
-        "WalletController",
-        "InternalWalletController",
-        "InternalPaymentsController",
-        "AdminFinancialController",
-        "AdminInvoicesController",
-        "Day38E2eJobsController"
-      ],
-      "exemptions": [
+      "endpoints": [
         {
           "method": "POST",
-          "path": "/v1/payments/vnpay-topup-ipn",
-          "reason": "VNPay IPN is authenticated and deduplicated by the provider transaction reference."
+          "path": "/v1/admin/trip-settlements/{settlementId:guid}/settle",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/admin/platform-wallet/adjust",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/admin/operators/{operatorId:guid}/wallet/adjust",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/admin/invoices/{invoiceId:guid}/retry",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/e2e/day38/jobs/{jobName}",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/payments/batch-charge",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/payments/charge",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/payments/subscription",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/payments/{paymentId:guid}/expire-subscription",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/wallet/refund",
+          "policy": "required"
         },
         {
           "method": "POST",
           "path": "/v1/payments/vnpay-ipn",
+          "policy": "exempt",
+          "reason": "VNPay IPN is authenticated and deduplicated by the provider transaction reference."
+        },
+        {
+          "method": "POST",
+          "path": "/v1/payments/vnpay-topup-ipn",
+          "policy": "exempt",
           "reason": "VNPay IPN is authenticated and deduplicated by the provider transaction reference."
         },
         {
           "method": "POST",
           "path": "/v1/payments/subscription-vnpay-ipn",
+          "policy": "exempt",
           "reason": "VNPay IPN is authenticated and deduplicated by the provider transaction reference."
+        },
+        {
+          "method": "POST",
+          "path": "/v1/wallet/top-up",
+          "policy": "required"
         }
       ]
     },
@@ -83,15 +668,113 @@
       "servicePrefix": "parcel",
       "requireAllMutations": true,
       "expectedMutationCount": 21,
-      "controllers": [
-        "AssistantParcelsController",
-        "InternalParcelsController",
-        "OperatorParcelRouteFaresController",
-        "OperatorParcelsController",
-        "ParcelsController",
-        "ParcelDeliveryController"
-      ],
-      "exemptions": []
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/assistant/parcels/{parcelId:guid}/load",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/assistant/parcels/{parcelId:guid}/reweigh",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/assistant/parcels/{parcelId:guid}/confirm-delivery",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/assistant/parcels/{parcelId:guid}/unload",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/assistant/parcels/{parcelId:guid}/deliver",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/parcels/{parcelId:guid}/mark-loaded",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/parcels/{parcelId:guid}/confirm-transfer",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/parcel-route-fares",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/operator/parcel-route-fares/{routeId:guid}/{sizeCategory}",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/operator/parcels/{parcelId:guid}/review",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/parcels/{parcelId:guid}/request-transfer",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/parcels/{parcelId:guid}/return",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/parcels/{parcelId:guid}/cancel",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/parcels/{parcelId:guid}/confirm-refund",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/parcels/{parcelId:guid}/override-capacity",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/parcels/{parcelId:guid}/confirm-delivery",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/operator/parcels/{parcelId:guid}/status",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/parcels/delivery/confirm",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/parcels/delivery/reject",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/parcels/delivery/undo-reject",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/parcels",
+          "policy": "required"
+        }
+      ]
     },
     "notification": {
       "stack": "nestjs",
@@ -99,7 +782,92 @@
       "requiredDecorator": "ApiIdempotencyRequired",
       "decoratorFile": "apps/notification/src/swagger/idempotency.swagger.ts",
       "expectedMutationCount": 3,
-      "expectedRequiredCount": 1
+      "expectedRequiredCount": 3,
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/internal/v1/emails",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/notifications/:notificationId/read",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/notifications",
+          "policy": "required"
+        }
+      ]
+    },
+    "rag": {
+      "stack": "nestjs",
+      "sourceDirectory": "apps/rag/src",
+      "requiredDecorator": "ApiIdempotencyRequired",
+      "decoratorFile": "apps/rag/src/swagger/idempotency.swagger.ts",
+      "expectedMutationCount": 7,
+      "expectedRequiredCount": 6,
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/rag/chat",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/rag/messages/:messageId/feedback",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/rag/documents",
+          "policy": "required"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/rag/documents/:documentId/approve",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/admin/rag-config/:key",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/admin/rag-config/:key/rollback",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/admin/rag-config/reload",
+          "policy": "exempt",
+          "reason": "Runtime-config reload only invalidates an in-memory cache and is naturally repeatable."
+        }
+      ]
     }
+  },
+  "socketOperations": [
+    {
+      "service": "tracking",
+      "event": "gps:update",
+      "policy": "required"
+    },
+    {
+      "service": "tracking",
+      "event": "shuttle:gps:update",
+      "policy": "required"
+    }
+  ],
+  "coverage": {
+    "dotnetRabbitMqRegistrations": 37,
+    "notificationRabbitMqSubscriptions": 12,
+    "dotnetOutboundHttpMutations": 18,
+    "dotnetOutboundHttpExemptions": [
+      "apps/payment/src/VietRide.Payment.Infrastructure/Http/IdentityOperatorSummaryClient.cs",
+      "apps/booking/src/VietRide.Booking.Infrastructure/Http/IdentityPlatformReportClient.cs"
+    ],
+    "gatewayRouteTable": "apps/gateway/src/config/routes.ts"
   }
 }

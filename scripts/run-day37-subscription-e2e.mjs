@@ -6,15 +6,34 @@ import { SignJWT, importPKCS8 } from 'jose';
 
 const root = process.cwd();
 const useDevelopmentStack = process.env.DAY37_E2E_USE_DEV_STACK === '1';
-const gatewayBaseUrl = process.env.DAY37_GATEWAY_BASE_URL
-  || (useDevelopmentStack ? 'http://localhost:3000' : 'http://localhost:55300');
+const gatewayBaseUrl =
+  process.env.DAY37_GATEWAY_BASE_URL ||
+  (useDevelopmentStack ? 'http://localhost:3000' : 'http://localhost:55300');
 const compose = [
   'compose',
-  '--env-file', '.env',
-  '-f', 'infra/docker/docker-compose.yml',
-  '-f', 'infra/docker/docker-compose.day37-e2e.yml',
-  '--profile', 'app',
+  '--env-file',
+  '.env',
+  '-f',
+  'infra/docker/docker-compose.yml',
+  '-f',
+  'infra/docker/docker-compose.day37-e2e.yml',
+  '--profile',
+  'app',
 ];
+const e2eEnv = useDevelopmentStack
+  ? {}
+  : {
+      POSTGRES_PORT: '55437',
+      REDIS_PORT: '56379',
+      RABBITMQ_PORT: '55672',
+      RABBITMQ_MGMT_PORT: '55673',
+      IDENTITY_PORT: '55001',
+      TRIP_PORT: '55002',
+      BOOKING_PORT: '55003',
+      PAYMENT_PORT: '55004',
+      PARCEL_PORT: '55005',
+      GATEWAY_PORT: '55300',
+    };
 const postgresContainer = useDevelopmentStack ? 'vietride_postgres' : 'day37-e2e-postgres';
 const operatorId = '37000000-0000-4000-8000-000000000001';
 const starterPlanId = '37000000-0000-4000-8000-000000000011';
@@ -43,10 +62,33 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function scalar(value) {
+  return String(value).split(/\r?\n/).filter(Boolean).at(-1)?.trim() ?? '';
+}
+
+function poll(label, probe, predicate, timeoutMs = 120000) {
+  const deadline = Date.now() + timeoutMs;
+  let last;
+  while (Date.now() < deadline) {
+    last = probe();
+    if (predicate(last)) return last;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+  }
+  throw new Error(`${label} timed out; last=${last}`);
+}
+
 function sql(statement, database = 'vietride_identity') {
   return run('docker', [
-    'exec', postgresContainer, 'psql', '-v', 'ON_ERROR_STOP=1', '-U',
-    process.env.POSTGRES_USER || 'vietride', '-d', database, '-Atc',
+    'exec',
+    postgresContainer,
+    'psql',
+    '-v',
+    'ON_ERROR_STOP=1',
+    '-U',
+    process.env.POSTGRES_USER || 'vietride',
+    '-d',
+    database,
+    '-Atc',
     `SET search_path TO ${database === 'vietride_identity' ? 'vietride_identity' : 'vietride_payment'},public; ${statement}`,
   ]);
 }
@@ -54,10 +96,14 @@ function sql(statement, database = 'vietride_identity') {
 function waitFor(url, timeoutMs = 180000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const probe = spawnSync('node', ['-e', `fetch('${url}').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))`], {
-      cwd: root,
-      stdio: 'ignore',
-    });
+    const probe = spawnSync(
+      'node',
+      ['-e', `fetch('${url}').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))`],
+      {
+        cwd: root,
+        stdio: 'ignore',
+      },
+    );
     if (probe.status === 0) return;
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
   }
@@ -87,12 +133,12 @@ function seedIdentity() {
     ON CONFLICT (id) DO UPDATE SET registration_status = 'APPROVED', is_active = true, deleted_at = NULL;
 
     INSERT INTO operator_subscriptions
-      (id, operator_id, plan_id, status, started_at, expires_at, current_vehicles,
+      (id, operator_id, active_plan_id, status, started_at, expires_at, current_vehicles,
        current_routes, current_trips_this_month, last_reset_at)
     VALUES
       ('${subscriptionId}', '${operatorId}', '${starterPlanId}', 'ACTIVE', now(), now() + interval '30 days', 0, 0, 0, now())
     ON CONFLICT (operator_id) DO UPDATE SET
-      plan_id = EXCLUDED.plan_id, previous_active_plan_id = NULL, status = 'ACTIVE',
+      active_plan_id = EXCLUDED.active_plan_id, status = 'ACTIVE',
       started_at = EXCLUDED.started_at, expires_at = EXCLUDED.expires_at,
       current_vehicles = 0, current_routes = 0, current_trips_this_month = 0,
       updated_at = now();
@@ -100,11 +146,16 @@ function seedIdentity() {
 }
 
 async function operatorToken() {
-  const app = JSON.parse(fs.readFileSync(
-    path.join(root, 'apps/identity/src/VietRide.Identity.Api/appsettings.Development.json'),
-    'utf8',
-  ));
-  const key = await importPKCS8(process.env.USER_JWT_PRIVATE_KEY || app.IdentityJwt.PrivateKey, 'RS256');
+  const app = JSON.parse(
+    fs.readFileSync(
+      path.join(root, 'apps/identity/src/VietRide.Identity.Api/appsettings.Development.json'),
+      'utf8',
+    ),
+  );
+  const key = await importPKCS8(
+    process.env.USER_JWT_PRIVATE_KEY || app.IdentityJwt.PrivateKey,
+    'RS256',
+  );
   return new SignJWT({
     role: 'OPERATOR_ADMIN',
     email: 'day37-e2e@example.test',
@@ -144,64 +195,231 @@ function signVnPay(parameters) {
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
     .join('&');
-  if (!process.env.VNPAY_HASH_SECRET) throw new Error('VNPAY_HASH_SECRET is required for the VNPay E2E harness.');
-  return createHmac('sha512', process.env.VNPAY_HASH_SECRET)
-    .update(canonical)
-    .digest('hex');
+  if (!process.env.VNPAY_HASH_SECRET)
+    throw new Error('VNPAY_HASH_SECRET is required for the VNPay E2E harness.');
+  return createHmac('sha512', process.env.VNPAY_HASH_SECRET).update(canonical).digest('hex');
+}
+
+function createIpn(paymentRedirectUrl, responseCode, transactionNo) {
+  const redirect = new URL(paymentRedirectUrl);
+  const ipn = {
+    vnp_Amount: redirect.searchParams.get('vnp_Amount'),
+    vnp_ResponseCode: responseCode,
+    vnp_TmnCode: redirect.searchParams.get('vnp_TmnCode'),
+    vnp_TransactionNo: transactionNo,
+    vnp_TxnRef: redirect.searchParams.get('vnp_TxnRef'),
+  };
+  ipn.vnp_SecureHash = signVnPay(ipn);
+  return ipn;
+}
+
+async function sendSubscriptionIpn(paymentRedirectUrl, responseCode, transactionNo) {
+  const ipn = createIpn(paymentRedirectUrl, responseCode, transactionNo);
+  const response = await api(
+    'POST',
+    `/v1/payments/subscription-vnpay-ipn?${new URLSearchParams(ipn).toString()}`,
+  );
+  assert(response.status === 200, `subscription IPN failed: ${JSON.stringify(response)}`);
+  return ipn;
 }
 
 async function runHarness() {
   if (!useDevelopmentStack) {
-    run('docker', [...compose, 'down', '-v', '--remove-orphans']);
-    run('docker', [...compose, '--parallel', '1', 'up', '-d', '--build', 'gateway']);
+    run('docker', [...compose, 'down', '-v', '--remove-orphans'], { env: e2eEnv });
+    run('docker', [...compose, '--parallel', '1', 'up', '-d', '--build', 'gateway'], {
+      env: e2eEnv,
+    });
   }
   waitFor(`${gatewayBaseUrl}/health`);
   waitFor(`${gatewayBaseUrl}/ready`);
-  record(useDevelopmentStack ? 'development compose health' : 'isolated compose health', true, gatewayBaseUrl);
+  record(
+    useDevelopmentStack ? 'development compose health' : 'isolated compose health',
+    true,
+    gatewayBaseUrl,
+  );
 
   seedIdentity();
   const token = await operatorToken();
   const current = await api('GET', '/v1/operator/subscription', token);
-  assert(current.status === 200 && current.json?.data?.status === 'ACTIVE', `subscription read failed: ${JSON.stringify(current)}`);
+  assert(
+    current.status === 200 && current.json?.data?.status === 'ACTIVE',
+    `subscription read failed: ${JSON.stringify(current)}`,
+  );
   record('trial approval fixture is readable', true, `plan=${current.json.data.planId}`);
 
   const idempotencyKey = crypto.randomUUID();
-  const upgradeRequest = { planId: premiumPlanId, billingPeriod: 'YEARLY', returnUrl: 'https://e2e.vietride.test/return' };
-  const firstUpgrade = await api('POST', '/v1/operator/subscription/upgrade', token, upgradeRequest, idempotencyKey);
-  assert(firstUpgrade.status === 202 && firstUpgrade.json?.data?.paymentId, `upgrade failed: ${JSON.stringify(firstUpgrade)}`);
-  const replayUpgrade = await api('POST', '/v1/operator/subscription/upgrade', token, upgradeRequest, idempotencyKey);
-  assert(replayUpgrade.status === 202 && replayUpgrade.json?.data?.paymentId === firstUpgrade.json.data.paymentId,
-    `upgrade replay failed: ${JSON.stringify(replayUpgrade)}`);
+  const upgradeRequest = {
+    planId: premiumPlanId,
+    billingPeriod: 'YEARLY',
+    paymentMethod: 'VNPAY',
+    returnUrl: 'https://e2e.vietride.test/return',
+  };
+  const firstUpgrade = await api(
+    'POST',
+    '/v1/operator/subscription/upgrade',
+    token,
+    upgradeRequest,
+    idempotencyKey,
+  );
+  assert(
+    firstUpgrade.status === 202 && firstUpgrade.json?.data?.paymentId,
+    `upgrade failed: ${JSON.stringify(firstUpgrade)}`,
+  );
+  const replayUpgrade = await api(
+    'POST',
+    '/v1/operator/subscription/upgrade',
+    token,
+    upgradeRequest,
+    idempotencyKey,
+  );
+  assert(
+    replayUpgrade.status === 202 &&
+      replayUpgrade.json?.data?.paymentId === firstUpgrade.json.data.paymentId,
+    `upgrade replay failed: ${JSON.stringify(replayUpgrade)}`,
+  );
   record('upgrade idempotency', true, `payment=${firstUpgrade.json.data.paymentId}`);
 
-  const redirect = new URL(firstUpgrade.json.data.paymentRedirectUrl);
-  const ipn = {
-    vnp_Amount: redirect.searchParams.get('vnp_Amount'),
-    vnp_ResponseCode: '00',
-    vnp_TmnCode: redirect.searchParams.get('vnp_TmnCode'),
-    vnp_TransactionNo: '3700000001',
-    vnp_TxnRef: redirect.searchParams.get('vnp_TxnRef'),
-  };
-  ipn.vnp_SecureHash = signVnPay(ipn);
-  const ipnQuery = new URLSearchParams(ipn).toString();
-  const ipnFirst = await api('POST', `/v1/payments/subscription-vnpay-ipn?${ipnQuery}`);
-  assert(ipnFirst.status === 200, `subscription IPN failed: ${JSON.stringify(ipnFirst)}`);
-  const ipnReplay = await api('POST', `/v1/payments/subscription-vnpay-ipn?${ipnQuery}`);
-  assert(ipnReplay.status === 200, `subscription IPN replay failed: ${JSON.stringify(ipnReplay)}`);
-  record('VNPay IPN replay', true, `txnRef=${ipn.vnp_TxnRef}`);
+  const upgradeAttemptId = firstUpgrade.json.data.upgradeAttemptId;
+  const failedIpn = await sendSubscriptionIpn(
+    firstUpgrade.json.data.paymentRedirectUrl,
+    '24',
+    '3700000001',
+  );
+  poll(
+    'Identity payment-failed event consumption',
+    () =>
+      scalar(
+        sql(
+          `SELECT latest_payment_status::text FROM subscription_upgrade_attempts WHERE id='${upgradeAttemptId}'`,
+        ),
+      ),
+    (status) => status === 'FAILED',
+  );
 
-  const paymentCount = sql(`SELECT count(*) FROM payments WHERE id = '${firstUpgrade.json.data.paymentId}'`, 'vietride_payment');
+  const retryKey = crypto.randomUUID();
+  const retryPath = `/v1/operator/subscription/upgrade/${upgradeAttemptId}/retry-payment`;
+  const firstRetry = await api('POST', retryPath, token, undefined, retryKey);
+  assert(
+    firstRetry.status === 202 && firstRetry.json?.data?.paymentId,
+    `subscription retry failed: ${JSON.stringify(firstRetry)}`,
+  );
+  const replayRetry = await api('POST', retryPath, token, undefined, retryKey);
+  assert(
+    replayRetry.status === 202 &&
+      replayRetry.json?.data?.paymentId === firstRetry.json.data.paymentId,
+    `subscription retry replay failed: ${JSON.stringify(replayRetry)}`,
+  );
+  const retryPaymentCount = scalar(
+    sql(
+      `SELECT count(*)||':'||count(DISTINCT idempotency_key) FROM payments WHERE reference_type='SUBSCRIPTION' AND reference_id='${upgradeAttemptId}'`,
+      'vietride_payment',
+    ),
+  );
+  assert(retryPaymentCount === '2:2', `retry created duplicate payment rows: ${retryPaymentCount}`);
+  record(
+    'retry-payment idempotency',
+    true,
+    `attempt=${upgradeAttemptId} payment=${firstRetry.json.data.paymentId}`,
+  );
+
+  sql(
+    `UPDATE subscription_upgrade_attempts SET due_at=now()-interval '1 minute' WHERE id='${upgradeAttemptId}'`,
+  );
+  poll(
+    'Identity lifecycle expiry',
+    () =>
+      [
+        scalar(
+          sql(
+            `SELECT status::text FROM subscription_upgrade_attempts WHERE id='${upgradeAttemptId}'`,
+          ),
+        ),
+        scalar(
+          sql(
+            `SELECT status::text FROM payments WHERE id='${firstRetry.json.data.paymentId}'`,
+            'vietride_payment',
+          ),
+        ),
+        scalar(
+          sql(
+            `SELECT count(*) FROM payments WHERE reference_type='SUBSCRIPTION' AND reference_id='${upgradeAttemptId}'`,
+            'vietride_payment',
+          ),
+        ),
+      ].join(':'),
+    (state) => state === 'EXPIRED:EXPIRED:2',
+    180000,
+  );
+  record('lifecycle expiry idempotency', true, `attempt=${upgradeAttemptId} paymentRows=2`);
+
+  const successKey = crypto.randomUUID();
+  const successUpgrade = await api(
+    'POST',
+    '/v1/operator/subscription/upgrade',
+    token,
+    upgradeRequest,
+    successKey,
+  );
+  assert(
+    successUpgrade.status === 202 && successUpgrade.json?.data?.paymentId,
+    `success upgrade failed: ${JSON.stringify(successUpgrade)}`,
+  );
+  const successIpn = await sendSubscriptionIpn(
+    successUpgrade.json.data.paymentRedirectUrl,
+    '00',
+    '3700000002',
+  );
+  const successIpnReplay = await api(
+    'POST',
+    `/v1/payments/subscription-vnpay-ipn?${new URLSearchParams(successIpn).toString()}`,
+  );
+  assert(
+    successIpnReplay.status === 200,
+    `subscription IPN replay failed: ${JSON.stringify(successIpnReplay)}`,
+  );
+  record('VNPay IPN replay', true, `txnRef=${successIpn.vnp_TxnRef}`);
+
+  const paymentCount = sql(
+    `SELECT count(*) FROM payments WHERE id = '${successUpgrade.json.data.paymentId}'`,
+    'vietride_payment',
+  );
   assert(paymentCount.endsWith('1'), `payment persistence assertion failed: ${paymentCount}`);
-  const outboxCount = sql("SELECT count(*) FROM outbox_events WHERE event_type = 'payment.subscription.payment_succeeded'", 'vietride_payment');
-  assert(Number(outboxCount.split('\n').at(-1)) >= 1, `payment outbox assertion failed: ${outboxCount}`);
-  record('Payment and outbox persistence', true, `paymentRows=${paymentCount.split('\n').at(-1)} outbox=${outboxCount.split('\n').at(-1)}`);
+  const outboxCount = sql(
+    "SELECT count(*) FROM outbox_events WHERE event_type = 'payment.subscription.payment_succeeded'",
+    'vietride_payment',
+  );
+  assert(
+    Number(outboxCount.split('\n').at(-1)) >= 1,
+    `payment outbox assertion failed: ${outboxCount}`,
+  );
+  record(
+    'Payment and outbox persistence',
+    true,
+    `paymentRows=${paymentCount.split('\n').at(-1)} outbox=${outboxCount.split('\n').at(-1)}`,
+  );
 }
 
+let failed;
 try {
   await runHarness();
 } catch (error) {
+  failed = error;
   record('harness', false, error instanceof Error ? error.message : String(error));
+} finally {
+  if (!useDevelopmentStack) {
+    try {
+      run('docker', [...compose, 'down', '-v', '--remove-orphans'], { env: e2eEnv });
+      record('isolated compose cleanup', true, 'containers and volumes removed');
+    } catch (error) {
+      failed ??= error;
+      record(
+        'isolated compose cleanup',
+        false,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
 }
 
 console.log(JSON.stringify({ suite: 'day37-subscription-e2e', results }, null, 2));
-process.exitCode = results.every((result) => result.passed) ? 0 : 1;
+process.exitCode = failed || results.some((result) => !result.passed) ? 1 : 0;
