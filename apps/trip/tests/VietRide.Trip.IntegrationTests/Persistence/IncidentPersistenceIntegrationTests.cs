@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql;
 using Npgsql.NameTranslation;
 using VietRide.Shared.Application.Outbox;
+using VietRide.Shared.Application.Security;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Shared.Persistence.Outbox;
@@ -158,7 +159,12 @@ public sealed class IncidentPersistenceIntegrationTests
         TripDbContext db,
         IIntegrationEventOutbox outbox,
         IClock clock)
-        => new(CreateTripRepository(db), CreateIncidentRepository(db), outbox, clock);
+        => new(
+            CreateTripRepository(db),
+            CreateIncidentRepository(db),
+            outbox,
+            clock,
+            new FirebaseStorageImageUrlValidator("vietride-test.firebasestorage.app"));
 
     private static ITripRepository CreateTripRepository(TripDbContext db)
         => CreateRepository<ITripRepository>(

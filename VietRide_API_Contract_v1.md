@@ -502,6 +502,35 @@ Error `401` — missing or invalid token:
 }
 ```
 
+### PATCH `/v1/users/me/avatar`
+
+Auth: User Access Token (RS256). Idempotency-Key: required.
+
+The client first uploads the image using the Firebase custom token flow, then sends the
+Firebase Storage download URL here. Identity accepts only an HTTPS URL in the configured
+Firebase bucket under `avatars/{callerUserId}/`; the URL is never accepted for another user
+or an unrelated path.
+
+Request:
+```json
+{
+  "avatarUrl": "https://firebasestorage.googleapis.com/v0/b/vietride.firebasestorage.app/o/avatars%2Fuser-id%2Favatar.webp?alt=media"
+}
+```
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": { "avatarUrl": "https://firebasestorage.googleapis.com/..." },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-23T10:00:00Z" }
+}
+```
+
+Errors: `401 AUTH_TOKEN_INVALID`, `404 USER_NOT_FOUND`, and `422 VALIDATION_ERROR` for a
+missing, malformed, or caller-unowned Firebase URL.
+
 ### GET `/v1/passenger/me`
 
 Auth: User Access Token (RS256). Idempotency-Key: not required (read endpoint).
@@ -710,19 +739,38 @@ Error `422` — invalid device token payload:
 
 ### POST `/v1/firebase/custom-token`
 
-Auth: `OPERATOR_ADMIN`. Body: empty. Idempotency-Key: not required.
+Auth: User Access Token (RS256). Body is optional for backward compatibility; an empty body
+defaults to `VEHICLE_IMAGE`. Idempotency-Key: not required.
 
-Identity revalidates the persisted caller before minting a token: the User must still be
-`ACTIVE`, have role `OPERATOR_ADMIN`, have a non-null `operatorId`, and belong to an active
-Operator whose registration status is `APPROVED`. Firebase UID is the VietRide `userId` and the
-custom claims are `{ operatorId, role: "OPERATOR_ADMIN" }`.
+Optional request:
+```json
+{ "purpose": "VEHICLE_IMAGE" }
+```
+
+Allowed purposes and claims:
+
+| Purpose | Allowed role(s) | Upload prefix |
+|---|---|---|
+| `VEHICLE_IMAGE` | `OPERATOR_ADMIN` | `vehicles/{operatorId}/` |
+| `OPERATOR_LOGO` | `OPERATOR_ADMIN` | `operators/{operatorId}/logo/` |
+| `PARCEL_PHOTO` | `PASSENGER` | `parcels/{userId}/` |
+| `INCIDENT_PHOTO` | `DRIVER`, `ASSISTANT` | `incidents/{operatorId}/{userId}/` |
+| `USER_AVATAR` | any active user | `avatars/{userId}/` |
+
+Identity revalidates the persisted caller before minting a token. Operator-scoped users must
+still belong to an active, `APPROVED` Operator. Firebase UID is the VietRide `userId`; claims
+include `role`, `uploadPurpose`, and `operatorId` when applicable.
 
 Response `200`:
 ```json
 {
   "success": true,
   "statusCode": 200,
-  "data": { "token": "firebase-custom-token" },
+  "data": {
+    "token": "firebase-custom-token",
+    "purpose": "VEHICLE_IMAGE",
+    "uploadPath": "vehicles/operator-id/"
+  },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-07-20T10:00:00Z" }
 }
 ```

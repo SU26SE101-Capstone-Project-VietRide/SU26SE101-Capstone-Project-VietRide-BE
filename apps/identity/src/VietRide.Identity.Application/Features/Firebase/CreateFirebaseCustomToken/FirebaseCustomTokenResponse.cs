@@ -1,3 +1,6 @@
 namespace VietRide.Identity.Application.Features.Firebase.CreateFirebaseCustomToken;
 
-public sealed record FirebaseCustomTokenResponse(string Token);
+public sealed record FirebaseCustomTokenResponse(
+    string Token,
+    string Purpose,
+    string UploadPath);

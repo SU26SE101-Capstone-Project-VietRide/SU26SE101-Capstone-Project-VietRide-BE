@@ -18,18 +18,22 @@ public sealed class FirebaseAuthService : IFirebaseAuthService
         _auth = new Lazy<FirebaseAuth>(CreateAuth, LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
-    public async Task<string> CreateOperatorCustomTokenAsync(
+    public async Task<string> CreateCustomTokenAsync(
         Guid userId,
-        Guid operatorId,
+        string role,
+        Guid? operatorId,
+        string uploadPurpose,
         CancellationToken cancellationToken = default)
     {
         try
         {
             var claims = new Dictionary<string, object>(StringComparer.Ordinal)
             {
-                ["operatorId"] = operatorId.ToString("D"),
-                ["role"] = UserRole.OPERATOR_ADMIN.ToString(),
+                ["role"] = role,
+                ["uploadPurpose"] = uploadPurpose,
             };
+            if (operatorId.HasValue)
+                claims["operatorId"] = operatorId.Value.ToString("D");
 
             return await _auth.Value.CreateCustomTokenAsync(
                 userId.ToString("D"),

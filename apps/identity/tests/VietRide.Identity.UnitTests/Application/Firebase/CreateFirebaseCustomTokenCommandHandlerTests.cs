@@ -13,6 +13,57 @@ namespace VietRide.Identity.UnitTests.Application.Firebase;
 public sealed class CreateFirebaseCustomTokenCommandHandlerTests
 {
     [Fact]
+    public async Task ActivePassenger_ReceivesParcelPhotoScopedToken()
+    {
+        var user = ActivePassenger();
+        var users = Substitute.For<IUserRepository>();
+        var operators = Substitute.For<IOperatorRepository>();
+        var firebase = Substitute.For<IFirebaseAuthService>();
+        users.GetByIdAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
+        firebase.CreateCustomTokenAsync(
+                user.Id,
+                UserRole.PASSENGER.ToString(),
+                null,
+                FirebaseUploadPurpose.PARCEL_PHOTO.ToString(),
+                Arg.Any<CancellationToken>())
+            .Returns("passenger-token");
+        var handler = new CreateFirebaseCustomTokenCommandHandler(users, operators, firebase);
+
+        var result = await handler.Handle(
+            new CreateFirebaseCustomTokenCommand(
+                user.Id,
+                UserRole.PASSENGER.ToString(),
+                null,
+                FirebaseUploadPurpose.PARCEL_PHOTO.ToString()),
+            CancellationToken.None);
+
+        result.Token.Should().Be("passenger-token");
+        result.UploadPath.Should().Be($"parcels/{user.Id:D}/");
+    }
+
+    [Fact]
+    public async Task Passenger_RequestingVehicleImage_IsForbidden()
+    {
+        var user = ActivePassenger();
+        var users = Substitute.For<IUserRepository>();
+        users.GetByIdAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
+        var handler = new CreateFirebaseCustomTokenCommandHandler(
+            users,
+            Substitute.For<IOperatorRepository>(),
+            Substitute.For<IFirebaseAuthService>());
+
+        var action = () => handler.Handle(
+            new CreateFirebaseCustomTokenCommand(
+                user.Id,
+                UserRole.PASSENGER.ToString(),
+                null,
+                FirebaseUploadPurpose.VEHICLE_IMAGE.ToString()),
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<ForbiddenException>();
+    }
+
+    [Fact]
     public async Task ActiveAdminOfApprovedOperator_ReceivesTokenUsingPersistedScope()
     {
         var operatorEntity = ApprovedOperator();
@@ -23,7 +74,12 @@ public sealed class CreateFirebaseCustomTokenCommandHandlerTests
         users.GetByIdAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
         operators.GetByIdNoTrackingAsync(operatorEntity.Id, Arg.Any<CancellationToken>())
             .Returns(operatorEntity);
-        firebase.CreateOperatorCustomTokenAsync(user.Id, operatorEntity.Id, Arg.Any<CancellationToken>())
+        firebase.CreateCustomTokenAsync(
+                user.Id,
+                UserRole.OPERATOR_ADMIN.ToString(),
+                operatorEntity.Id,
+                FirebaseUploadPurpose.VEHICLE_IMAGE.ToString(),
+                Arg.Any<CancellationToken>())
             .Returns("custom-token");
         var handler = new CreateFirebaseCustomTokenCommandHandler(users, operators, firebase);
 
@@ -35,9 +91,13 @@ public sealed class CreateFirebaseCustomTokenCommandHandlerTests
             CancellationToken.None);
 
         result.Token.Should().Be("custom-token");
-        await firebase.Received(1).CreateOperatorCustomTokenAsync(
+        result.Purpose.Should().Be("VEHICLE_IMAGE");
+        result.UploadPath.Should().Be($"vehicles/{operatorEntity.Id:D}/");
+        await firebase.Received(1).CreateCustomTokenAsync(
             user.Id,
+            UserRole.OPERATOR_ADMIN.ToString(),
             operatorEntity.Id,
+            FirebaseUploadPurpose.VEHICLE_IMAGE.ToString(),
             Arg.Any<CancellationToken>());
     }
 
@@ -61,9 +121,11 @@ public sealed class CreateFirebaseCustomTokenCommandHandlerTests
             CancellationToken.None);
 
         await action.Should().ThrowAsync<ForbiddenException>();
-        await firebase.DidNotReceive().CreateOperatorCustomTokenAsync(
+        await firebase.DidNotReceive().CreateCustomTokenAsync(
             Arg.Any<Guid>(),
-            Arg.Any<Guid>(),
+            Arg.Any<string>(),
+            Arg.Any<Guid?>(),
+            Arg.Any<string>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -89,9 +151,11 @@ public sealed class CreateFirebaseCustomTokenCommandHandlerTests
             CancellationToken.None);
 
         await action.Should().ThrowAsync<ForbiddenException>();
-        await firebase.DidNotReceive().CreateOperatorCustomTokenAsync(
+        await firebase.DidNotReceive().CreateCustomTokenAsync(
             Arg.Any<Guid>(),
-            Arg.Any<Guid>(),
+            Arg.Any<string>(),
+            Arg.Any<Guid?>(),
+            Arg.Any<string>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -113,6 +177,17 @@ public sealed class CreateFirebaseCustomTokenCommandHandlerTests
             "hash",
             "Operator Admin",
             operatorId);
+        user.VerifyEmail();
+        return user;
+    }
+
+    private static User ActivePassenger()
+    {
+        var user = User.CreatePassenger(
+            "passenger.firebase@example.com",
+            PhoneNumber.Parse("+84901234569"),
+            "hash",
+            "Passenger");
         user.VerifyEmail();
         return user;
     }

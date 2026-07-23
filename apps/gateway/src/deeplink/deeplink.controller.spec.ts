@@ -51,6 +51,24 @@ describe('DeeplinkController', () => {
       expect(() => controller.assetlinks(makeRes())).toThrow(NotFoundException);
     });
 
+    it('accepts ANDROID_PACKAGE as the Passenger app alias', () => {
+      const controller = new DeeplinkController(
+        makeEnv({
+          ANDROID_PACKAGE: 'com.vietride.passenger',
+          DEEPLINK_ANDROID_SHA256_FINGERPRINTS: 'AA:BB',
+        }),
+      );
+      const res = makeRes();
+
+      controller.assetlinks(res);
+
+      expect(res.jsonBody).toEqual([
+        expect.objectContaining({
+          target: expect.objectContaining({ package_name: 'com.vietride.passenger' }),
+        }),
+      ]);
+    });
+
     it('sends the RAW Digital Asset Links statement (no ADR 0004 envelope), splitting fingerprints on commas', () => {
       const controller = new DeeplinkController(
         makeEnv({
@@ -107,6 +125,23 @@ describe('DeeplinkController', () => {
       const withoutStore = makeRes();
       new DeeplinkController(makeEnv()).setPasswordPage(withoutStore);
       expect(withoutStore.body).not.toContain('play.google.com');
+    });
+  });
+
+  describe('GET /payments/return bridge', () => {
+    it('serves a no-store page that forwards the VNPay query to the configured deep link', () => {
+      const controller = new DeeplinkController(
+        makeEnv({ APP_DEEP_LINK: 'vietride://payments/return' }),
+      );
+      const res = makeRes();
+
+      controller.paymentReturnPage(res);
+
+      expect(res.headers['Cache-Control']).toBe('no-store');
+      expect(res.type).toHaveBeenCalledWith('html');
+      expect(res.body).toContain('vietride://payments/return');
+      expect(res.body).toContain('window.location.search');
+      expect(res.body).toContain('IPN');
     });
   });
 });

@@ -15,6 +15,7 @@ using VietRide.Identity.Infrastructure.Messaging;
 using VietRide.Identity.Infrastructure.Persistence.Repositories;
 using VietRide.Identity.Infrastructure.Security;
 using VietRide.Identity.Infrastructure.Seed;
+using VietRide.Shared.Application.Security;
 using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Http.Resilience;
 using VietRide.Shared.Kernel.Abstractions;
@@ -105,6 +106,10 @@ public static class InfrastructureServiceCollectionExtensions
         }
         services.AddSingleton(firebaseOptions);
         services.AddSingleton<IFirebaseAuthService, FirebaseAuthService>();
+        services.AddSingleton<IFirebaseStorageImageUrlValidator>(_ =>
+            new FirebaseStorageImageUrlValidator(
+                configuration["FIREBASE_WEB_STORAGE_BUCKET"]
+                ?? configuration["FIREBASE_STORAGE_BUCKET"]));
 
         // ------------------------------------------------------------------
         // Repositories

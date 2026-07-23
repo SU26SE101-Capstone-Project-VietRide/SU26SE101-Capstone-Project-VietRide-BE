@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
+using VietRide.Shared.Application.Security;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Trip.Application.Abstractions.Repositories;
@@ -15,6 +16,7 @@ public sealed class ReportIncidentTests
     private static readonly Guid OperatorId = Guid.Parse("39000000-0000-4000-8000-000000000001");
     private static readonly Guid DriverId = Guid.Parse("39000000-0000-4000-8000-000000000002");
     private static readonly Guid AssistantId = Guid.Parse("39000000-0000-4000-8000-000000000003");
+    private const string FirebaseBucket = "vietride-test.firebasestorage.app";
 
     [Fact]
     public async Task Handle_AssignedAssistantOnInProgressTrip_CreatesIncidentAndCanonicalOutbox()
@@ -30,7 +32,7 @@ public sealed class ReportIncidentTests
                 AssistantId,
                 "TRAFFIC_JAM",
                 "  Kẹt xe tại nút giao  ",
-                [" https://storage.example/incident.jpg "],
+                [$" https://firebasestorage.googleapis.com/v0/b/{FirebaseBucket}/o/incidents%2F{OperatorId:D}%2F{AssistantId:D}%2Fincident.jpg?alt=media "],
                 10.7731m,
                 106.7032m),
             CancellationToken.None);
@@ -40,7 +42,8 @@ public sealed class ReportIncidentTests
         persisted.TripId.Should().Be(trip.Id);
         persisted.ReportedByUserId.Should().Be(AssistantId);
         persisted.Description.Should().Be("Kẹt xe tại nút giao");
-        persisted.PhotoUrls.Should().Equal("https://storage.example/incident.jpg");
+        persisted.PhotoUrls.Should().Equal(
+            $"https://firebasestorage.googleapis.com/v0/b/{FirebaseBucket}/o/incidents%2F{OperatorId:D}%2F{AssistantId:D}%2Fincident.jpg?alt=media");
         persisted.ReportedAt.Should().Be(now);
         trip.Status.Should().Be(originalStatus);
         response.IncidentId.Should().Be(persisted.Id);
@@ -195,7 +198,12 @@ public sealed class ReportIncidentTests
             Trips = new FakeTripRepository(trip);
             Incidents = new RecordingIncidentRepository();
             Outbox = new RecordingOutbox();
-            Handler = new ReportIncidentCommandHandler(Trips, Incidents, Outbox, new FrozenClock(now));
+            Handler = new ReportIncidentCommandHandler(
+                Trips,
+                Incidents,
+                Outbox,
+                new FrozenClock(now),
+                new FirebaseStorageImageUrlValidator(FirebaseBucket));
         }
 
         public FakeTripRepository Trips { get; }

@@ -150,6 +150,7 @@ services:
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
       FIREBASE_CLIENT_EMAIL: ${FIREBASE_CLIENT_EMAIL:-}
       FIREBASE_PRIVATE_KEY: ${FIREBASE_PRIVATE_KEY:-}
+      FIREBASE_WEB_STORAGE_BUCKET: ${FIREBASE_WEB_STORAGE_BUCKET:-}
       ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_identity;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev};Maximum Pool Size=10;Minimum Pool Size=0;Connection Idle Lifetime=15'
       # Outbox publisher must reach the broker by its compose hostname, not localhost
       # (appsettings RabbitMq:HostName defaults to localhost for host-run dev).
@@ -178,6 +179,7 @@ services:
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_trip;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev};Maximum Pool Size=10;Minimum Pool Size=0;Connection Idle Lifetime=15'
       REDIS_URL: 'redis:6379,abortConnect=false'
+      FIREBASE_WEB_STORAGE_BUCKET: ${FIREBASE_WEB_STORAGE_BUCKET:-}
       Identity__BaseUrl: http://identity:5001
       IDENTITY_SERVICE_BASE_URL: http://identity:5001
       BOOKING_BASE_URL: http://booking:5003
@@ -293,6 +295,7 @@ services:
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_parcel;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD:-vietride_dev};Maximum Pool Size=10;Minimum Pool Size=0;Connection Idle Lifetime=15'
       REDIS_URL: redis:6379
+      FIREBASE_WEB_STORAGE_BUCKET: ${FIREBASE_WEB_STORAGE_BUCKET:-}
       Trip__BaseUrl: http://trip:5002
       Payment__BaseUrl: http://payment:5004
       Booking__BaseUrl: http://booking:5003
@@ -335,6 +338,8 @@ services:
       REDIS_HOST: redis
       # Deep link (Android App Links) — optional; empty = endpoints return 404.
       DEEPLINK_ANDROID_PACKAGE: ${DEEPLINK_ANDROID_PACKAGE:-}
+      APP_DEEP_LINK: ${APP_DEEP_LINK:-vietride://payments/return}
+      ANDROID_PACKAGE: ${ANDROID_PACKAGE:-com.vietride.passenger}
       DEEPLINK_ANDROID_SHA256_FINGERPRINTS: ${DEEPLINK_ANDROID_SHA256_FINGERPRINTS:-}
       DEEPLINK_APP_SCHEME: ${DEEPLINK_APP_SCHEME:-vietride}
       DEEPLINK_ANDROID_STORE_URL: ${DEEPLINK_ANDROID_STORE_URL:-}

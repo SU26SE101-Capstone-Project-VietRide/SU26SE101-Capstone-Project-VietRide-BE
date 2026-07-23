@@ -67,7 +67,6 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       pathPattern: /^\/v1\/firebase\/custom-token$/,
       target: env.IDENTITY_BASE_URL,
       authRequired: 'user',
-      requiredRoles: ['OPERATOR_ADMIN'],
     },
     {
       prefix: '/v1/passenger/history',

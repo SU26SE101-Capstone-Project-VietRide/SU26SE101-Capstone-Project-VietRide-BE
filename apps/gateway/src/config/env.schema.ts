@@ -37,6 +37,11 @@ export const envSchema = z.object({
 
   // Deep link (Android App Links) — served on the apex domain by DeeplinkController.
   // All optional: assetlinks.json returns 404 until package + fingerprints are set.
+  APP_DEEP_LINK: z.preprocess(
+    emptyToUndefined,
+    z.string().regex(/^[a-z][a-z0-9+.-]*:\/\/.+/i).optional(),
+  ),
+  ANDROID_PACKAGE: z.preprocess(emptyToUndefined, z.string().optional()),
   DEEPLINK_ANDROID_PACKAGE: z.preprocess(emptyToUndefined, z.string().optional()),
   DEEPLINK_ANDROID_SHA256_FINGERPRINTS: z.preprocess(emptyToUndefined, z.string().optional()),
   DEEPLINK_APP_SCHEME: z.preprocess(emptyToUndefined, z.string().default('vietride')),

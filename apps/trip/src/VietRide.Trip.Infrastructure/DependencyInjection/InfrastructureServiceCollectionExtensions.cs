@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using StackExchange.Redis;
 using VietRide.Shared.Application.Reporting;
+using VietRide.Shared.Application.Security;
 using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Http.Resilience;
 using VietRide.Shared.Kernel.Abstractions;
@@ -37,6 +38,10 @@ public static class InfrastructureServiceCollectionExtensions
         bool backgroundWorkersEnabled)
     {
         services.AddSingleton<IExcelReportWriter, ClosedXmlExcelReportWriter>();
+        services.AddSingleton<IFirebaseStorageImageUrlValidator>(_ =>
+            new FirebaseStorageImageUrlValidator(
+                configuration["FIREBASE_WEB_STORAGE_BUCKET"]
+                ?? configuration["FIREBASE_STORAGE_BUCKET"]));
         services.AddScoped<ILocationRepository, LocationRepository>();
         services.AddScoped<IStationRepository, StationRepository>();
         services.AddScoped<IOperatorStationRepository, OperatorStationRepository>();

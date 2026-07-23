@@ -52,4 +52,9 @@ public interface IUserRepository : IRepository<User, Guid>
         Guid operatorId,
         CancellationToken ct = default)
         => ListActiveOperatorAdminIdsAsync(operatorId, ct);
+
+    Task<IReadOnlyList<Guid>> ListOperatorScopedUserIdsAsync(
+        Guid operatorId,
+        CancellationToken ct = default)
+        => ListOperatorAdminIdsAsync(operatorId, ct);
 }

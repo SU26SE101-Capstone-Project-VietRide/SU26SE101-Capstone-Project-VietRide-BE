@@ -1,12 +1,13 @@
 using System.Text.Json;
 using FluentValidation;
+using VietRide.Shared.Application.Security;
 using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Identity.Application.Features.Operators;
 
 public sealed class UpdateOperatorProfileValidator : AbstractValidator<UpdateOperatorProfileCommand>
 {
-    public UpdateOperatorProfileValidator()
+    public UpdateOperatorProfileValidator(IFirebaseStorageImageUrlValidator firebaseUrls)
     {
         RuleFor(command => command.OperatorId).NotEmpty();
         RuleFor(command => command.CallerRole).NotEmpty();
@@ -16,7 +17,12 @@ public sealed class UpdateOperatorProfileValidator : AbstractValidator<UpdateOpe
             .MaximumLength(20)
             .Must(BeValidPhone)
             .WithMessage("Phone number must be a Vietnamese number in +84xxxxxxxxx or 0xxxxxxxxx format.");
-        RuleFor(command => command.LogoUrl).MaximumLength(2048);
+        RuleFor(command => command.LogoUrl)
+            .MaximumLength(2048)
+            .Must((command, logoUrl) => logoUrl is null || firebaseUrls.IsValidOwnedImageUrl(
+                logoUrl,
+                $"operators/{command.OperatorId:D}/logo/"))
+            .WithMessage("LogoUrl must be an owned Firebase operator logo URL.");
         RuleFor(command => command.AddressStreet).NotEmpty().MaximumLength(255);
         RuleFor(command => command.AddressWard).NotEmpty().MaximumLength(100);
         RuleFor(command => command.AddressDistrict).NotEmpty().MaximumLength(100);

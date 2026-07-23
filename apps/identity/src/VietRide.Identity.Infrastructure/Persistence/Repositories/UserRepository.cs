@@ -156,6 +156,16 @@ internal sealed class UserRepository : IUserRepository
             .Select(u => u.Id)
             .ToListAsync(ct);
 
+    public async Task<IReadOnlyList<Guid>> ListOperatorScopedUserIdsAsync(
+        Guid operatorId,
+        CancellationToken ct = default)
+        => await _db.Users
+            .AsNoTracking()
+            .Where(u => u.OperatorId == operatorId)
+            .OrderBy(u => u.Id)
+            .Select(u => u.Id)
+            .ToListAsync(ct);
+
     public async Task<User> AddAsync(User entity, CancellationToken ct)
     {
         await _db.Users.AddAsync(entity, ct);

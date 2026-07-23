@@ -3097,6 +3097,9 @@ USER_JWT_JWKS_URL=http://identity:5001/v1/.well-known/jwks.json
 USER_JWT_JWKS_CACHE_TTL_SECONDS=3600
 INTERNAL_JWT_SECRET=...
 RATE_LIMIT_DEFAULT_PER_MIN=120
+APP_DEEP_LINK=vietride://payments/return
+ANDROID_PACKAGE=com.vietride.passenger
+DEEPLINK_ANDROID_SHA256_FINGERPRINTS=       # release fingerprint; blank until Passenger signs release
 
 IDENTITY_BASE_URL=http://identity:5001
 BOOKING_BASE_URL=http://booking:5003
@@ -3125,6 +3128,7 @@ GOOGLE_OAUTH_CLIENT_SECRET=...
 FIREBASE_PROJECT_ID=...
 FIREBASE_CLIENT_EMAIL=...
 FIREBASE_PRIVATE_KEY=...                  # PEM; literal \n accepted and normalized in-process
+FIREBASE_WEB_STORAGE_BUCKET=...           # exact Firebase Storage bucket used by client URLs
 EMAIL_SERVICE_BASE_URL=http://notification:3002
 PASSWORD_HASH_COST=12
 PUBLIC_APP_URL=https://app.vietride.app
@@ -3155,6 +3159,7 @@ GOOGLE_DIRECTIONS_API_KEY=...
 HANGFIRE_DASHBOARD_USER=admin
 HANGFIRE_DASHBOARD_PASSWORD=...
 IDENTITY_BASE_URL=http://identity:5001
+FIREBASE_WEB_STORAGE_BUCKET=...
 ```
 
 #### Payment & Wallet
@@ -3186,6 +3191,7 @@ TRIP_BASE_URL=http://trip:5002
 PAYMENT_BASE_URL=http://payment:5004
 IDENTITY_BASE_URL=http://identity:5001
 NOTIFICATION_BASE_URL=http://notification:3002
+FIREBASE_WEB_STORAGE_BUCKET=...
 ```
 
 #### Tracking
@@ -3458,6 +3464,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.41.0** | 2026-07-23 | BE lead (Vũ) | **MINOR** — Complete VNPay HTTPS return bridge and Passenger deep-link/App Links configuration; keep IPN as the only payment state transition source with probe/signature diagnostics; expand Firebase client-token purposes and owner-scoped Storage Rules to vehicle, operator logo, parcel, incident, and avatar uploads; add avatar persistence endpoint and Firebase URL ownership validation. |
 | **1.40.0** | 2026-07-23 | BE lead (Vũ) | **MINOR** - Day-33 ratifies operator Trip cancellation preview/confirm and AlternativeRoute disruption contracts, completes the `trip.trip.route_changed` event identity and producer/consumer registry, and documents nullable Trip-to-AlternativeRoute storage. Payment refunds remain driven only by `booking.booking.cancelled`. |
 | **1.39.0** | 2026-07-22 | BE lead (Vũ) | **MINOR** — Day-29 freezes the assistant Parcel load HTTP contract, registers `trip.cargo.threshold_crossed`, and reconciles Parcel `loaded` direct recipients plus `auto_rejected` sender identity. No schema or migration change. |
 | **1.38.1** | 2026-07-21 | Codex | **PATCH** - Expose persisted TripStop `status`/`actualArrivalTime` and Trip `destinationArrivedAt` through the protected public Trip detail projection; no schema, event, Gateway, or lifecycle change. |

@@ -420,21 +420,25 @@ Streaming LLM response qua SSE, gọi vector DB, tích hợp nhiều external AP
 | **Google Maps Directions API** | Tính ETA từ vị trí xe đến điểm dừng | **KHÔNG gọi mỗi GPS packet** — xem ETA strategy bên dưới |
 | **VNPay** | Cổng thanh toán, nạp ví | Redirect-based, HMAC-SHA512 signature verify |
 | **Firebase FCM** | Push notification mobile | Firebase Admin SDK |
-| **Firebase Storage** | File storage — avatar, tài liệu RAG, ảnh xe | 5GB free, signed URL |
+| **Firebase Storage** | Client upload ảnh vehicle/logo/parcel/incident/avatar | 5GB free; RAG và invoice vẫn server-owned |
 | **LLM API** | Generate câu trả lời RAG | Claude API (`claude-sonnet-4-6` — model string `claude-sonnet-4-6`) hoặc GPT-4o, streaming SSE |
 | **OpenAI Embedding API** | Embed chunks cho RAG retrieval | Model `text-embedding-3-small` — 1536 dims, rẻ hơn ada-002 ~5x, cùng dimension nên drop-in replacement |
 | **pgvector** | Vector similarity search cho RAG | PostgreSQL extension — thay thế Elasticsearch |
 | **SendGrid / SMTP** | Email — OTP đăng ký, parcel delivery link | Free tier 100 email/ngày |
 
-**Firebase Storage upload ảnh xe:** VietRide User Access Token không được dùng trực tiếp với
-Firebase. `OPERATOR_ADMIN` gọi `POST /v1/firebase/custom-token`; Identity revalidate User/Operator
-hiện tại rồi tạo Firebase Custom Token có UID = VietRide `userId` và claims
-`{ operatorId, role: OPERATOR_ADMIN }`. FE exchange bằng `signInWithCustomToken()`, upload đúng
-`vehicles/{operatorId}/{uuid-v4}.{ext}`, lấy download URL, gửi URL vào Vehicle API, sau đó
-`signOut()` (và cũng sign-out khi logout VietRide). Storage public-read riêng path ảnh xe; write
-chỉ đúng operator, MIME JPEG/PNG/WebP, kích thước lớn hơn 0 và nhỏ hơn 5 MiB; path khác default
-deny. User lock hoặc Operator suspend phát Outbox revoke request để Identity gọi Firebase
-`RevokeRefreshTokensAsync`. ID token đã phát có residual window tối đa khoảng một giờ.
+**Firebase client uploads:** VietRide User Access Token không được dùng trực tiếp với Firebase.
+Client gọi `POST /v1/firebase/custom-token` với `purpose` (body rỗng vẫn mặc định
+`VEHICLE_IMAGE`), Identity revalidate User và Operator hiện tại rồi tạo Firebase Custom Token
+có UID = VietRide `userId`, claims `role`, `uploadPurpose` và `operatorId` khi có. Các prefix
+được cấp là `vehicles/{operatorId}/` (OPERATOR_ADMIN), `operators/{operatorId}/logo/`
+(OPERATOR_ADMIN), `parcels/{userId}/` (PASSENGER), `incidents/{operatorId}/{userId}/`
+(DRIVER/ASSISTANT), và `avatars/{userId}/` (mọi user ACTIVE). FE exchange bằng
+`signInWithCustomToken()`, upload MIME JPEG/PNG/WebP dưới 5 MiB, lấy download URL rồi gửi
+URL về API resource tương ứng; API kiểm tra lại bucket, prefix và owner trước khi lưu. Sau đó
+client `signOut()` (và cũng sign-out khi logout VietRide). RAG documents tiếp tục upload
+server-side qua Cloudinary; Invoice PDF tiếp tục backend-owned storage. User lock hoặc Operator
+suspend phát Outbox revoke request để Identity gọi Firebase `RevokeRefreshTokensAsync`; ID token
+đã phát có residual window tối đa khoảng một giờ.
 
 > **⚠️ Google Maps ETA — gọi có điều kiện, không gọi mỗi GPS packet:**
 > GPS update mỗi 3–5 giây × N active trips đồng thời → nếu gọi Maps API mỗi packet sẽ rất tốn kém (ví dụ 10 trips đang chạy = ~2 call/giây = >100k call/ngày, vượt free tier ngay ngày đầu).
@@ -3526,9 +3530,11 @@ Booking flow chạm nhiều service (Booking, Trip-Route-Vehicle, Payment, Walle
     → Return {"RspCode":"00","Message":"Confirm Success"} cho VNPay (bắt buộc theo VNPay spec)
     → Idempotent: nếu Payment đã SUCCEEDED, return {"RspCode":"00","Message":"Confirm Success"} luôn
 
-4b. Browser redirect về GET /v1/payments/vnpay-return?vnp_ResponseCode=00&...
-    → Payment Service query Payment status hiện tại (KHÔNG xử lý business logic ở đây)
-    → Return kết quả cho client hiển thị success/fail screen
+4b. Browser redirect về HTTPS `https://app.vietride.online/payments/return?vnp_ResponseCode=00&...`
+    → HTTPS bridge giữ nguyên query, polling Payment status hiện tại (KHÔNG xử lý business logic)
+    → trên Passenger App mở `vietride://payments/return?...`; nếu không mở được thì hiển thị
+      success/fail fallback trên web
+    → Operator subscription vẫn truyền HTTPS `returnUrl` của Operator Web, không mở app
     → Lưu ý: user có thể tắt browser trước khi redirect xảy ra — đây là lý do IPN (4a) mới là
       nơi xử lý business logic thực sự
 ```

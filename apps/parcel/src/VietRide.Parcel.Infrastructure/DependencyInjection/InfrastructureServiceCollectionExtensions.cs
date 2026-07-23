@@ -14,6 +14,7 @@ using VietRide.Parcel.Infrastructure.Jobs;
 using VietRide.Parcel.Infrastructure.Messaging;
 using VietRide.Parcel.Infrastructure.Persistence.Repositories;
 using VietRide.Shared.Application.Reporting;
+using VietRide.Shared.Application.Security;
 using VietRide.Shared.Http.Handlers;
 using VietRide.Shared.Http.Resilience;
 using VietRide.Shared.Kernel.Abstractions;
@@ -62,6 +63,10 @@ public static class InfrastructureServiceCollectionExtensions
         IHostEnvironment hostEnvironment,
         bool registerConsumers = true)
     {
+        services.AddSingleton<IFirebaseStorageImageUrlValidator>(_ =>
+            new FirebaseStorageImageUrlValidator(
+                configuration["FIREBASE_WEB_STORAGE_BUCKET"]
+                ?? configuration["FIREBASE_STORAGE_BUCKET"]));
         var redisUrl = configuration["REDIS_URL"]
             ?? Environment.GetEnvironmentVariable("REDIS_URL")
             ?? "localhost:6379";

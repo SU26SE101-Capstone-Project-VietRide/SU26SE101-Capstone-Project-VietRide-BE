@@ -18,8 +18,8 @@ describe('buildRouteTable', () => {
     expect(firebaseRoute).toMatchObject({
       target: env.IDENTITY_BASE_URL,
       authRequired: 'user',
-      requiredRoles: ['OPERATOR_ADMIN'],
     });
+    expect(firebaseRoute?.requiredRoles).toBeUndefined();
 
     const historyRoute = matchRoute(routes, '/v1/passenger/history');
     expect(historyRoute).toMatchObject({

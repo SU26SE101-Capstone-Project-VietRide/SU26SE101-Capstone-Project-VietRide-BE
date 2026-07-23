@@ -50,10 +50,10 @@ public sealed class SuspendOperatorCommandHandler : IRequestHandler<SuspendOpera
             JsonSerializer.Serialize(integrationEvent),
             cancellationToken);
 
-        var operatorAdminIds = await _users.ListOperatorAdminIdsAsync(
+        var operatorUserIds = await _users.ListOperatorScopedUserIdsAsync(
             operatorEntity.Id,
             cancellationToken);
-        foreach (var userId in operatorAdminIds)
+        foreach (var userId in operatorUserIds)
         {
             var firebaseEvent = new FirebaseSessionRevocationRequestedIntegrationEvent(
                 Guid.NewGuid(),
