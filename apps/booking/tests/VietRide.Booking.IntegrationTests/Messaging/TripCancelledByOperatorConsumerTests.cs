@@ -163,7 +163,7 @@ public sealed class TripCancelledByOperatorConsumerTests
             TripId = tripId,
             OperatorId = operatorId,
             CancelledAt = CancelledAt,
-            CancelReason = "Vehicle issue",
+            CancelReason = HandleTripCancelledCommandHandler.DriverScheduleDayRemovedReason,
         };
 
     private static HandleTripCancelledCommand ToCommand(
