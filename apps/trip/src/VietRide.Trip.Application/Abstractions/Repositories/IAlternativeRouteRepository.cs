@@ -1,4 +1,5 @@
 using VietRide.Shared.Application.Repositories;
+using VietRide.Trip.Application.Events;
 using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Application.Abstractions.Repositories;
@@ -20,6 +21,12 @@ public interface IAlternativeRouteRepository : IRepository<AlternativeRoute, Gui
     Task<bool> ExistsStopOrderIndexAsync(Guid alternativeRouteId, int orderIndex, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<AlternativeRouteStop>> ListStopsAsync(Guid alternativeRouteId, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<TripRouteChangedCandidateStop>> ListCandidateStopsAsync(
+        Guid alternativeRouteId,
+        DateTimeOffset estimatedArrivalBase,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("Route-change candidate snapshots are not supported by this repository implementation.");
 
     Task ReplaceStopsAsync(Guid alternativeRouteId, IReadOnlyCollection<AlternativeRouteStop> stops, CancellationToken cancellationToken);
 

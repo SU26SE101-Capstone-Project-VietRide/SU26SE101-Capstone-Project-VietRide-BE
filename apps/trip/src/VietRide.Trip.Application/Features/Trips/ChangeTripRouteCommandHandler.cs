@@ -50,7 +50,7 @@ public sealed class ChangeTripRouteCommandHandler : IRequestHandler<ChangeTripRo
 
         var projection = await bookingImpact.GetTripEditImpactAsync(
             trip.Id, request.OperatorId, cancellationToken);
-        var affected = projection.ActiveBookings
+        var affectedBookingIds = projection.ActiveBookings
             .Select(booking => booking.BookingId)
             .Distinct()
             .OrderBy(id => id)
@@ -71,17 +71,29 @@ public sealed class ChangeTripRouteCommandHandler : IRequestHandler<ChangeTripRo
             {
                 throw new CodedNotFoundException("ROUTE_NOT_FOUND", "Alternative route was not found.");
             }
+            var candidateStops = await alternativeRoutes.ListCandidateStopsAsync(
+                lockedAlternative.Id,
+                lockedTrip.ActualDepartureTime ?? lockedTrip.DepartureDateTime,
+                cancellationToken);
+            var affectedBookings = affectedBookingIds
+                .Select(bookingId => new TripRouteChangedAffectedBooking(bookingId, candidateStops))
+                .ToArray();
             if (!lockedTrip.ChangeAlternativeRoute(request.AlternativeRouteId))
             {
                 await unitOfWork.CommitAsync(cancellationToken);
-                return new ChangeTripRouteResponse(lockedTrip.Id, lockedTrip.Status.ToString(), request.AlternativeRouteId, affected);
+                return new ChangeTripRouteResponse(
+                    lockedTrip.Id,
+                    lockedTrip.Status.ToString(),
+                    request.AlternativeRouteId,
+                    affectedBookings);
             }
 
             var evt = new TripRouteChangedIntegrationEvent(
                 lockedTrip.Id,
                 lockedTrip.OperatorId,
+                lockedTrip.Status.ToString(),
                 request.AlternativeRouteId,
-                affected,
+                affectedBookings,
                 clock.UtcNow);
             await outbox.EnqueueAsync(
                 evt.EventId,
@@ -90,7 +102,11 @@ public sealed class ChangeTripRouteCommandHandler : IRequestHandler<ChangeTripRo
                 cancellationToken);
             await unitOfWork.SaveChangesAsync(cancellationToken);
             await unitOfWork.CommitAsync(cancellationToken);
-            return new ChangeTripRouteResponse(lockedTrip.Id, lockedTrip.Status.ToString(), request.AlternativeRouteId, affected);
+            return new ChangeTripRouteResponse(
+                lockedTrip.Id,
+                lockedTrip.Status.ToString(),
+                request.AlternativeRouteId,
+                affectedBookings);
         }
         catch
         {

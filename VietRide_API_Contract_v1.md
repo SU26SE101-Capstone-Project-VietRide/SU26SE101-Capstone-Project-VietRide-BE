@@ -1562,8 +1562,9 @@ terminal resolution; missing/mismatched idempotency keys use `422 IDEMPOTENCY_KE
 ### POST `/v1/bookings/{bookingId}/pending-actions/{actionId}/resolve`
 
 Auth: user JWT with role `PASSENGER`, and the caller must own the Booking. A valid JWT with any
-other role returns `403 FORBIDDEN` before Booking/action lookup. This Day-23 endpoint resolves only
-a persisted `SCHEDULE_CHANGE`; operator seat assignment remains outside this contract.
+other role returns `403 FORBIDDEN` before Booking/action lookup. This endpoint resolves a
+persisted `SCHEDULE_CHANGE` or `ROUTE_CHANGE`; operator seat assignment remains outside this
+contract.
 
 `Idempotency-Key` is required and must be UUID v4. The fingerprint includes actor, method, path,
 canonical query, and raw body. A same key + same payload request replays the stored status/body
@@ -1576,20 +1577,28 @@ Request:
 ```json
 {
   "action": "ACCEPTED",
+  "selectedStopId": "00000000-0000-4000-8000-000000000037",
+  "selectedStationId": null,
   "note": "optional"
 }
 ```
 
-The body has exactly `action: ACCEPTED|REJECTED` and optional `note`. `selectedStopId` is invalid,
-as is every other extra/request-shape field. Both route values must be UUIDs. Resolution at the
-effective cutoff is passenger-eligible; only a request strictly after the effective cutoff returns
-`BOOKING_PENDING_ACTION_EXPIRED`. For MEDIUM the cutoff is `initialDeadline`; for MAJOR it is
-`terminalDeadline` only when `initialDeadline < terminalDeadline`, otherwise `initialDeadline`.
+The body has `action: ACCEPTED|REJECTED`, nullable `selectedStopId`, nullable
+`selectedStationId`, and optional `note`. For `SCHEDULE_CHANGE`, both selected IDs are invalid and
+must be omitted or null. For `ROUTE_CHANGE`, `ACCEPTED` requires exactly one selected identity and
+it must exactly match one frozen candidate in action metadata; `REJECTED` requires neither.
+Booking never calls Trip to refresh candidates. Resolution at the effective cutoff is
+passenger-eligible; only a request strictly after the effective cutoff returns
+`BOOKING_PENDING_ACTION_EXPIRED`. For SCHEDULE_CHANGE MEDIUM the cutoff is `initialDeadline`; for
+MAJOR it is `terminalDeadline` only when `initialDeadline < terminalDeadline`, otherwise
+`initialDeadline`. ROUTE_CHANGE uses `occurredAt + 30m` for `IN_PROGRESS` and `occurredAt + 60m`
+for `SCHEDULED|BOARDING`.
 
 `ACCEPTED` atomically resolves the action and leaves the Booking `CONFIRMED`. `REJECTED` computes
-the frozen refund from immutable `Booking.totalAmount` (MEDIUM 50%, MAJOR 100%, rounded to the
-nearest VND with `MidpointRounding.AwayFromZero`), then atomically resolves the action, sets
-`refundOverride=true`, cancels the Booking with `SCHEDULE_CHANGED`, appends history, and enqueues exactly one authoritative
+the frozen refund from immutable `Booking.totalAmount` (SCHEDULE_CHANGE MEDIUM 50%, MAJOR 100%;
+ROUTE_CHANGE 100%; rounded to the nearest VND with `MidpointRounding.AwayFromZero`), then
+atomically resolves the action, sets `refundOverride=true`, cancels the Booking with
+`SCHEDULE_CHANGED` or `ROUTE_CHANGED_REFUSED`, appends history, and enqueues exactly one authoritative
 `booking.booking.cancelled` containing that `refundAmount`.
 
 Response `200`:
@@ -2337,14 +2346,40 @@ Response `200` data:
   "tripId": "00000000-0000-4000-8000-000000000033",
   "status": "IN_PROGRESS",
   "alternativeRouteId": "00000000-0000-4000-8000-000000000036",
-  "affectedBookingIds": []
+  "affectedBookings": [
+    {
+      "bookingId": "00000000-0000-4000-8000-000000000034",
+      "candidateStops": [
+        {
+          "stopId": "00000000-0000-4000-8000-000000000037",
+          "stationId": null,
+          "stationName": "Alternative stop",
+          "sequence": 1,
+          "estimatedArrivalAt": "2026-07-23T01:45:00Z"
+        },
+        {
+          "stopId": null,
+          "stationId": "00000000-0000-4000-8000-000000000038",
+          "stationName": "Destination station",
+          "sequence": 2,
+          "estimatedArrivalAt": "2026-07-23T04:50:00Z"
+        }
+      ]
+    }
+  ]
 }
 ```
 
 The AlternativeRoute must be active, belong to the Trip's Route, and belong to the same
 operator. Route change is supported for `SCHEDULED`, `BOARDING`, and `IN_PROGRESS`; other Trip
-states are not editable. The response freezes the Booking impact used by
-`trip.trip.route_changed`.
+states are not editable. `affectedBookings` is ordered by `bookingId`, and each immutable
+`candidateStops` array is ordered by `sequence`. Every candidate contains exactly
+`{stopId,stationId,stationName,sequence,estimatedArrivalAt}` with XOR identity: intermediate
+AlternativeRoute stops set only `stopId`, while the appended destination Station sets only
+`stationId`. Trip derives these snapshots locally from the selected AlternativeRoute in the
+route-change transaction; no cross-database FK or synchronous consumer lookup is permitted.
+The event adds `tripStatus` with exactly `SCHEDULED|BOARDING|IN_PROGRESS`. Neither response nor
+event contains `affectedBookingIds`.
 
 Statuses: `200`, `401`, `403`, `404`, `409`, `422`.
 

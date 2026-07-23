@@ -1,4 +1,5 @@
 using MediatR;
+using VietRide.Trip.Application.Events;
 
 namespace VietRide.Trip.Application.Features.Trips;
 
@@ -12,4 +13,4 @@ public sealed record ChangeTripRouteResponse(
     Guid TripId,
     string Status,
     Guid AlternativeRouteId,
-    IReadOnlyList<Guid> AffectedBookingIds);
+    IReadOnlyList<TripRouteChangedAffectedBooking> AffectedBookings);

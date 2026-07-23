@@ -16,6 +16,7 @@ using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Web.Idempotency;
 using VietRide.Trip.Api.Controllers;
 using VietRide.Trip.Api.Filters;
+using VietRide.Trip.Application.Events;
 using VietRide.Trip.Application.Features.Trips;
 using Xunit;
 
@@ -39,11 +40,17 @@ public sealed class ChangeTripRouteEndpointTests
         var tripId = Guid.NewGuid();
         var alternativeRouteId = Guid.NewGuid();
         var affectedBookingId = Guid.NewGuid();
+        var candidateStop = new TripRouteChangedCandidateStop(
+            Guid.NewGuid(),
+            null,
+            "Candidate stop",
+            1,
+            DateTimeOffset.Parse("2026-07-23T01:45:00Z"));
         var mediator = new StubMediator(_ => new ChangeTripRouteResponse(
             tripId,
             "SCHEDULED",
             alternativeRouteId,
-            [affectedBookingId]));
+            [new TripRouteChangedAffectedBooking(affectedBookingId, [candidateStop])]));
         using var factory = new RouteFactory(mediator);
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/v1/operator/trips/{tripId}/change-route");
         request.Headers.TryAddWithoutValidation("X-Internal-Auth", "Bearer " + Jwt("OPERATOR_ADMIN"));
@@ -63,11 +70,24 @@ public sealed class ChangeTripRouteEndpointTests
             .Select(property => property.Name).Should().BeEquivalentTo("traceId", "timestamp");
         var data = document.RootElement.GetProperty("data");
         data.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo(
-            ["tripId", "status", "alternativeRouteId", "affectedBookingIds"]);
+            ["tripId", "status", "alternativeRouteId", "affectedBookings"]);
         data.GetProperty("tripId").GetGuid().Should().Be(tripId);
         data.GetProperty("status").GetString().Should().Be("SCHEDULED");
         data.GetProperty("alternativeRouteId").GetGuid().Should().Be(alternativeRouteId);
-        data.GetProperty("affectedBookingIds")[0].GetGuid().Should().Be(affectedBookingId);
+        var affectedBooking = data.GetProperty("affectedBookings")[0];
+        affectedBooking.EnumerateObject().Select(property => property.Name)
+            .Should().BeEquivalentTo("bookingId", "candidateStops");
+        affectedBooking.GetProperty("bookingId").GetGuid().Should().Be(affectedBookingId);
+        var serializedCandidate = affectedBooking.GetProperty("candidateStops")[0];
+        serializedCandidate.EnumerateObject().Select(property => property.Name)
+            .Should().BeEquivalentTo(
+                "stopId",
+                "stationId",
+                "stationName",
+                "sequence",
+                "estimatedArrivalAt");
+        serializedCandidate.GetProperty("stopId").GetGuid().Should().Be(candidateStop.StopId!.Value);
+        serializedCandidate.GetProperty("stationId").ValueKind.Should().Be(JsonValueKind.Null);
         mediator.SendCount.Should().Be(1);
     }
 
@@ -125,6 +145,12 @@ public sealed class ChangeTripRouteEndpointTests
         var operatorId = Guid.NewGuid();
         var alternativeRouteId = Guid.NewGuid();
         var affectedBookingId = Guid.NewGuid();
+        var candidateStop = new TripRouteChangedCandidateStop(
+            null,
+            Guid.NewGuid(),
+            "Destination station",
+            1,
+            DateTimeOffset.Parse("2026-07-23T05:00:00Z"));
         var mediator = new StubMediator(request =>
         {
             var command = request.Should().BeOfType<ChangeTripRouteCommand>().Subject;
@@ -134,7 +160,7 @@ public sealed class ChangeTripRouteEndpointTests
                 command.TripId,
                 "SCHEDULED",
                 alternativeRouteId,
-                [affectedBookingId]);
+                [new TripRouteChangedAffectedBooking(affectedBookingId, [candidateStop])]);
         });
         using var factory = new RouteFactory(mediator);
         using var client = factory.CreateClient();
@@ -147,8 +173,8 @@ public sealed class ChangeTripRouteEndpointTests
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        document.RootElement.GetProperty("data").GetProperty("affectedBookingIds")[0]
-            .GetGuid().Should().Be(affectedBookingId);
+        document.RootElement.GetProperty("data").GetProperty("affectedBookings")[0]
+            .GetProperty("bookingId").GetGuid().Should().Be(affectedBookingId);
         mediator.SendCount.Should().Be(1);
     }
     [Fact] public void ThinControllerDispatchesMediatR() => typeof(TripsController).GetField("mediator", BindingFlags.Instance | BindingFlags.NonPublic).Should().NotBeNull();

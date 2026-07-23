@@ -30,15 +30,22 @@ public sealed class TripRouteChangedIntegrationEventTests
             var seed = await Day29CargoNearFullOutboxIntegrationTests.SeedTripAsync(db);
             var trip = await db.Trips.SingleAsync(item => item.Id == seed.TripId);
             var route = await db.Routes.SingleAsync(item => item.Id == trip.RouteId);
-            trip.MarkBoarding(DateTimeOffset.UtcNow);
-            trip.Start(DateTimeOffset.UtcNow);
+            var routeChangeBase = new DateTimeOffset(2026, 7, 23, 1, 0, 0, TimeSpan.Zero);
+            trip.MarkBoarding(routeChangeBase);
+            trip.Start(routeChangeBase);
             var alternative = AlternativeRoute.Create(
                 route.Id,
                 "Day 33 route change",
                 route.DestinationStationId,
                 950m,
                 230);
+            var firstStop = Stop.Create(seed.OperatorId, "First candidate", 10.1m, 106.1m);
+            var secondStop = Stop.Create(seed.OperatorId, "Second candidate", 10.2m, 106.2m);
             db.AlternativeRoutes.Add(alternative);
+            db.Stops.AddRange(firstStop, secondStop);
+            db.AlternativeRouteStops.AddRange(
+                AlternativeRouteStop.Create(alternative.Id, secondStop.Id, 2, 90, null),
+                AlternativeRouteStop.Create(alternative.Id, firstStop.Id, 1, 45, null));
             await db.SaveChangesAsync();
             db.ChangeTracker.Clear();
 
@@ -69,12 +76,52 @@ public sealed class TripRouteChangedIntegrationEventTests
             row.EventType.Should().Be("trip.trip.route_changed");
 
             using var payload = JsonDocument.Parse(row.Payload);
+            payload.RootElement.EnumerateObject().Select(property => property.Name)
+                .Should().BeEquivalentTo(
+                    "eventId",
+                    "occurredAt",
+                    "tripId",
+                    "operatorId",
+                    "tripStatus",
+                    "alternativeRouteId",
+                    "affectedBookings");
             payload.RootElement.GetProperty("eventId").GetGuid().Should().Be(row.Id);
             payload.RootElement.GetProperty("tripId").GetGuid().Should().Be(seed.TripId);
             payload.RootElement.GetProperty("operatorId").GetGuid().Should().Be(seed.OperatorId);
+            payload.RootElement.GetProperty("tripStatus").GetString().Should().Be("IN_PROGRESS");
             payload.RootElement.GetProperty("alternativeRouteId").GetGuid().Should().Be(alternative.Id);
-            payload.RootElement.GetProperty("affectedBookingIds").EnumerateArray()
-                .Select(item => item.GetGuid()).Should().Equal(affectedBookingIds.OrderBy(id => id));
+            payload.RootElement.TryGetProperty("affectedBookingIds", out _).Should().BeFalse();
+            var affectedBookings = payload.RootElement.GetProperty("affectedBookings")
+                .EnumerateArray().ToArray();
+            affectedBookings.Select(item => item.GetProperty("bookingId").GetGuid())
+                .Should().Equal(affectedBookingIds.OrderBy(id => id));
+            foreach (var affectedBooking in affectedBookings)
+            {
+                affectedBooking.EnumerateObject().Select(property => property.Name)
+                    .Should().BeEquivalentTo("bookingId", "candidateStops");
+                var candidates = affectedBooking.GetProperty("candidateStops")
+                    .EnumerateArray().ToArray();
+                candidates.Should().HaveCount(3);
+                candidates.Select(item => item.GetProperty("sequence").GetInt32())
+                    .Should().Equal(1, 2, 3);
+                candidates.Select(item => item.EnumerateObject().Select(property => property.Name))
+                    .Should().OnlyContain(fields => fields.ToHashSet().SetEquals(
+                        new[] { "stopId", "stationId", "stationName", "sequence", "estimatedArrivalAt" }));
+                candidates[0].GetProperty("stopId").GetGuid().Should().Be(firstStop.Id);
+                candidates[0].GetProperty("stationId").ValueKind.Should().Be(JsonValueKind.Null);
+                candidates[0].GetProperty("stationName").GetString().Should().Be(firstStop.Name);
+                candidates[0].GetProperty("estimatedArrivalAt").GetDateTimeOffset()
+                    .Should().Be(routeChangeBase.AddMinutes(45));
+                candidates[1].GetProperty("stopId").GetGuid().Should().Be(secondStop.Id);
+                candidates[1].GetProperty("stationId").ValueKind.Should().Be(JsonValueKind.Null);
+                candidates[1].GetProperty("estimatedArrivalAt").GetDateTimeOffset()
+                    .Should().Be(routeChangeBase.AddMinutes(90));
+                candidates[2].GetProperty("stopId").ValueKind.Should().Be(JsonValueKind.Null);
+                candidates[2].GetProperty("stationId").GetGuid()
+                    .Should().Be(route.DestinationStationId);
+                candidates[2].GetProperty("estimatedArrivalAt").GetDateTimeOffset()
+                    .Should().Be(routeChangeBase.AddMinutes(230));
+            }
 
             var broker = new RecordingPublisher();
             var firstRestartStore = new OutboxStore(
@@ -138,7 +185,12 @@ public sealed class TripRouteChangedIntegrationEventTests
     [Fact]
     public void PayloadUsesExactRegistryFields()
     {
-        var evt = new TripRouteChangedIntegrationEvent(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), []);
+        var evt = new TripRouteChangedIntegrationEvent(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "SCHEDULED",
+            Guid.NewGuid(),
+            []);
         typeof(TripRouteChangedIntegrationEvent).GetProperties()
             .Where(property => property.Name != nameof(evt.EventId)
                 && property.Name != nameof(evt.OccurredAt)
@@ -147,8 +199,11 @@ public sealed class TripRouteChangedIntegrationEventTests
             .Should().Equal(
                 nameof(evt.TripId),
                 nameof(evt.OperatorId),
+                nameof(evt.TripStatus),
                 nameof(evt.AlternativeRouteId),
-                nameof(evt.AffectedBookingIds));
+                nameof(evt.AffectedBookings));
+        typeof(TripRouteChangedIntegrationEvent).GetProperty("AffectedBookingIds")
+            .Should().BeNull();
     }
 
     private static TRepository CreateRepository<TRepository>(TripDbContext db, string typeName)
