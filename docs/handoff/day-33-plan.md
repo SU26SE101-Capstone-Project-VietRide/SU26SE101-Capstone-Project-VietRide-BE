@@ -140,12 +140,12 @@ $owned=@('apps/booking/src/VietRide.Booking.Infrastructure/Messaging/TripRouteCh
 | 33.0 | done | APPROVE | 2026-07-23 | Ratified cancellation contract, event consumer registry, and trip alternative-route schema; DOCS verification passed after two review patch rounds. |
 | 33.1 | done | APPROVE | 2026-07-23 | Added nullable alternative_route_id migration with reversible lifecycle; Docker-backed apply/rollback/reapply and focused migration checks passed. |
 | 33.2 | done | APPROVE | 2026-07-23 | Implemented Trip cancellation preview/confirm, producer-supplied Outbox identity, and executable HTTP/Postgres integration coverage after review patches. |
-| 33.3-33.6 | todo | - | - | - |
+| 33.3 | done | APPROVE | 2026-07-23 | Added Booking cancellation consumer with canonical event emission and four focused integration checks; corrected the TRX results locator. |
+| 33.4-33.6 | todo | - | - | - |
 
 ## Open questions
 
 None.
-
 
 
 
