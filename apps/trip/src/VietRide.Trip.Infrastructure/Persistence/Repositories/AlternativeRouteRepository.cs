@@ -39,14 +39,47 @@ internal sealed class AlternativeRouteRepository : IAlternativeRouteRepository
         Guid alternativeRouteId,
         CancellationToken cancellationToken)
         => dbContext.AlternativeRoutes
+            .AsNoTracking()
             .Join(
-                dbContext.Routes,
+                dbContext.Routes.AsNoTracking(),
                 alternativeRoute => alternativeRoute.RouteId,
                 route => route.Id,
                 (alternativeRoute, route) => new { alternativeRoute, route })
             .Where(x => x.alternativeRoute.Id == alternativeRouteId && x.route.OperatorId == operatorId)
             .Select(x => x.alternativeRoute)
             .FirstOrDefaultAsync(cancellationToken);
+
+    public async Task<AlternativeRoute?> AcquireOwnedByIdAsync(
+        Guid operatorId,
+        Guid alternativeRouteId,
+        CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException(
+                "A caller-owned transaction is required for alternative-route acquisition.");
+        }
+
+        await dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT 1 FROM vietride_trip.alternative_routes WHERE id = {alternativeRouteId} FOR UPDATE",
+            cancellationToken);
+
+        var alternativeRoute = await dbContext.AlternativeRoutes
+            .SingleOrDefaultAsync(item => item.Id == alternativeRouteId, cancellationToken);
+        if (alternativeRoute is null)
+        {
+            return null;
+        }
+
+        await dbContext.Entry(alternativeRoute).ReloadAsync(cancellationToken);
+        var belongsToOperator = await dbContext.Routes
+            .AsNoTracking()
+            .AnyAsync(
+                route => route.Id == alternativeRoute.RouteId
+                    && route.OperatorId == operatorId,
+                cancellationToken);
+        return belongsToOperator ? alternativeRoute : null;
+    }
 
     public Task<int> CountActiveByRouteAsync(Guid routeId, CancellationToken cancellationToken)
         => dbContext.AlternativeRoutes.CountAsync(

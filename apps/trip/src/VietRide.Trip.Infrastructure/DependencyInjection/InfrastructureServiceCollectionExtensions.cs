@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using VietRide.Shared.Application.Reporting;
 using VietRide.Shared.Application.Security;
@@ -15,6 +16,7 @@ using VietRide.Trip.Application.Abstractions.SeatLock;
 using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Services;
 using VietRide.Trip.Infrastructure.ExternalClients;
+using VietRide.Trip.Infrastructure.Http;
 using VietRide.Trip.Infrastructure.Jobs;
 using VietRide.Trip.Infrastructure.Messaging;
 using VietRide.Trip.Infrastructure.Persistence.Repositories;
@@ -37,6 +39,8 @@ public static class InfrastructureServiceCollectionExtensions
         IConfiguration configuration,
         bool backgroundWorkersEnabled)
     {
+        services.Configure<BookingImpactClientOptions>(
+            configuration.GetSection(BookingImpactClientOptions.SectionName));
         services.AddSingleton<IExcelReportWriter, ClosedXmlExcelReportWriter>();
         services.AddSingleton<IFirebaseStorageImageUrlValidator>(_ =>
             new FirebaseStorageImageUrlValidator(
@@ -130,10 +134,9 @@ public static class InfrastructureServiceCollectionExtensions
             .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
         services.AddScoped<ISubscriptionQuotaClient>(serviceProvider =>
             (ISubscriptionQuotaClient)serviceProvider.GetRequiredService<IIdentityInternalClient>());
-        services.AddHttpClient<IBookingImpactClient, BookingImpactClient>(client =>
+        services.AddHttpClient<IBookingImpactClient, VietRide.Trip.Infrastructure.Http.BookingImpactClient>(client =>
             {
                 client.BaseAddress = new Uri(configuration["BOOKING_BASE_URL"] ?? "http://booking:5003", UriKind.Absolute);
-                client.Timeout = TimeSpan.FromSeconds(5);
             })
             .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
             .AddHttpMessageHandler<InternalJwtDelegatingHandler>();

@@ -7,6 +7,12 @@ public interface IAlternativeRouteRepository : IRepository<AlternativeRoute, Gui
 {
     Task<AlternativeRoute?> GetOwnedByIdAsync(Guid operatorId, Guid alternativeRouteId, CancellationToken cancellationToken);
 
+    Task<AlternativeRoute?> AcquireOwnedByIdAsync(
+        Guid operatorId,
+        Guid alternativeRouteId,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("Alternative-route locking is not supported by this repository implementation.");
+
     Task<int> CountActiveByRouteAsync(Guid routeId, CancellationToken cancellationToken);
 
     Task<bool> ExistsStopAsync(Guid alternativeRouteId, Guid stopId, CancellationToken cancellationToken);

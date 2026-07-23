@@ -75,6 +75,7 @@ public sealed class TripsController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<CancelTripPreviewResponse>> CancelPreviewAsync(
         Guid tripId,
         CancellationToken cancellationToken)
@@ -102,6 +103,29 @@ public sealed class TripsController : ControllerBase
                 GetRequiredOperatorId(),
                 CurrentUserClaims.GetUserId(User),
                 request.Reason),
+            cancellationToken));
+    }
+
+    [HttpPost("/v1/operator/trips/{tripId:guid}/change-route")]
+    [RequireIdempotencyKey]
+    [Authorize(Roles = "OPERATOR_ADMIN")]
+    [ProducesResponseType(typeof(ApiResponse<ChangeTripRouteResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ChangeTripRouteResponse>> ChangeRouteAsync(
+        Guid tripId,
+        [FromBody] ChangeTripRouteRequest request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await mediator.Send(
+            new ChangeTripRouteCommand(
+                tripId,
+                GetRequiredOperatorId(),
+                CurrentUserClaims.GetUserId(User),
+                request.AlternativeRouteId),
             cancellationToken));
     }
 
