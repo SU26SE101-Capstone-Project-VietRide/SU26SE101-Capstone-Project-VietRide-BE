@@ -55,6 +55,7 @@ export class Day24StopDisabledAutoFallbackEventsConsumer implements OnModuleInit
     const processingState = await this.idempotency.begin(
       BOOKING_STOP_DISABLED_AUTO_FALLBACK_APPLIED_ROUTING_KEY,
       eventId,
+      raw.content,
     );
     if (processingState === 'duplicate') return;
     if (processingState === 'locked') {

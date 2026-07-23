@@ -51,6 +51,7 @@ export class Day24DepartedPendingEventsConsumer implements OnModuleInit {
     const processingState = await this.idempotency.begin(
       TRIP_STOP_DEPARTED_WITH_PENDING_ROUTING_KEY,
       eventId,
+      raw.content,
     );
     if (processingState === 'duplicate') return;
     if (processingState === 'locked') {

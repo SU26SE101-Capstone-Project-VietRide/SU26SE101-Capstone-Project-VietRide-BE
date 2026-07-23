@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Headers,
   HttpCode,
   Param,
   Post,
@@ -34,6 +35,8 @@ import {
   successEnvelopeSchema,
 } from '../swagger/api-response.schemas';
 import { NotificationsService, type PagedNotificationsDto } from './notifications.service';
+import { ApiIdempotencyRequired } from '../swagger/idempotency.swagger';
+import { requireUuidV4IdempotencyKey } from '../swagger/idempotency-key';
 
 @ApiTags('Notifications')
 @ApiBearerAuth()
@@ -79,6 +82,7 @@ export class NotificationsController {
   }
 
   @Post(':notificationId/read')
+  @ApiIdempotencyRequired()
   @HttpCode(204)
   @ApiOperation({ summary: 'Mark a notification as read for current user' })
   @ApiParam({ name: 'notificationId', type: String, format: 'uuid' })
@@ -115,7 +119,9 @@ export class NotificationsController {
   async markRead(
     @Param(new ZodValidationPipe(NotificationIdParamSchema)) params: NotificationIdParamDto,
     @Req() request: RequestWithNotificationUser,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
   ): Promise<void> {
+    requireUuidV4IdempotencyKey(idempotencyKey);
     await this.notificationsService.markRead(params.notificationId, this.readUserId(request));
   }
 

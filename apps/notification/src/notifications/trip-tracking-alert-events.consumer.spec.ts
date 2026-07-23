@@ -249,7 +249,11 @@ describe('TripTrackingAlertEventsConsumer subscribes all phase 5 routing keys', 
       createMessage(MESSAGE_ID),
     );
 
-    expect(idempotency.begin).toHaveBeenCalledWith(TRIP_INCIDENT_REPORTED_ROUTING_KEY, EVENT_ID);
+    expect(idempotency.begin).toHaveBeenCalledWith(
+      TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+      EVENT_ID,
+      undefined,
+    );
     expect(operatorRecipients.resolveOperatorRecipientUserIds).toHaveBeenCalledWith(OPERATOR_ID);
     expect(notificationsService.createNotification).toHaveBeenCalledTimes(2);
     expect(notificationsService.createNotification).toHaveBeenCalledWith(
@@ -292,7 +296,11 @@ describe('TripTrackingAlertEventsConsumer subscribes all phase 5 routing keys', 
       createMessage(MESSAGE_ID),
     );
 
-    expect(idempotency.begin).toHaveBeenCalledWith(TRIP_INCIDENT_REPORTED_ROUTING_KEY, MESSAGE_ID);
+    expect(idempotency.begin).toHaveBeenCalledWith(
+      TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+      MESSAGE_ID,
+      undefined,
+    );
     expect(idempotency.markProcessed).toHaveBeenCalledWith(
       TRIP_INCIDENT_REPORTED_ROUTING_KEY,
       MESSAGE_ID,

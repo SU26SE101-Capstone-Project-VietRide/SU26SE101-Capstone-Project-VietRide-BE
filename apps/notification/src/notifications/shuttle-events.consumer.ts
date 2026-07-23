@@ -80,7 +80,7 @@ export class ShuttleEventsConsumer implements OnModuleInit {
   async handle(routingKey: string, payload: unknown, raw: ConsumeMessage): Promise<void> {
     const messageId = raw.properties.messageId ?? raw.properties.correlationId;
     if (!messageId) throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
-    const state = await this.idempotency.begin(routingKey, messageId);
+    const state = await this.idempotency.begin(routingKey, messageId, raw.content);
     if (state === 'duplicate') return;
     if (state === 'locked') throw new Error(`MESSAGE_LOCKED_${routingKey}_${messageId}`);
     try {
