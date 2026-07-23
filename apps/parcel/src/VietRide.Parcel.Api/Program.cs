@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Serilog;
 using VietRide.Parcel.Application;
+using VietRide.Parcel.Application.Features.Parcels.Create;
 using VietRide.Parcel.Infrastructure;
 using VietRide.Parcel.Infrastructure.DependencyInjection;
 using VietRide.Parcel.Infrastructure.Jobs;
@@ -29,6 +30,9 @@ builder.Services.AddVietRideSharedWeb(builder.Configuration, ServiceName);
 builder.Services.AddVietRideDbContext<ParcelDbContext>(
     builder.Configuration,
     configureDataSource: ParcelDbContext.ConfigurePostgresTypes);
+builder.Services.AddSingleton(new ParcelImageOptions(
+    builder.Configuration["FIREBASE_STORAGE_BUCKET"]
+        ?? Environment.GetEnvironmentVariable("FIREBASE_STORAGE_BUCKET")));
 builder.Services.AddVietRideIntegrationInbox<ParcelDbContext>();
 builder.Services.AddVietRideMediatRBehaviors(
     handlerAssemblies: [typeof(ApplicationAssemblyMarker).Assembly]);

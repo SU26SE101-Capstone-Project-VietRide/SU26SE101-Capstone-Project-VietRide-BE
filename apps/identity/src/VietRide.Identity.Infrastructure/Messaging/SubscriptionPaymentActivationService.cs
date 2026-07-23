@@ -24,93 +24,86 @@ public sealed class SubscriptionPaymentActivationService
         _logger = logger;
     }
 
-    public async Task<bool> ActivateAsync(
+    public Task<bool> ActivateAsync(
+        SubscriptionPaymentActivationContext context,
+        CancellationToken cancellationToken)
+        => _unitOfWork.ExecuteInTransactionAsync(
+            () => ActivateWithinTransactionAsync(context, cancellationToken),
+            cancellationToken);
+
+    private async Task<bool> ActivateWithinTransactionAsync(
         SubscriptionPaymentActivationContext context,
         CancellationToken cancellationToken)
     {
-        await _unitOfWork.BeginTransactionAsync(cancellationToken);
-        try
+        var subscription = await _subscriptions.GetByIdForUpdateAsync(
+            context.OperatorSubscriptionId,
+            cancellationToken);
+        var attempt = await _attempts.GetByIdForUpdateAsync(context.UpgradeAttemptId, cancellationToken);
+
+        if (attempt is null
+            || subscription is null
+            || attempt.OperatorId != context.OperatorId
+            || attempt.SubscriptionId != context.OperatorSubscriptionId
+            || attempt.TargetPlanId != context.TargetPlanId
+            || attempt.Amount.Amount != context.Amount
+            || !string.Equals(attempt.BillingPeriod.ToString(), context.BillingPeriod, StringComparison.Ordinal)
+            || !Enum.TryParse<SubscriptionPaymentMethod>(context.Method, false, out var paymentMethod)
+            || context.PeriodTo != (attempt.BillingPeriod == SubscriptionBillingPeriod.MONTHLY
+                ? context.PeriodFrom.AddMonths(1)
+                : context.PeriodFrom.AddYears(1)))
         {
-            var subscription = await _subscriptions.GetByIdForUpdateAsync(
-                context.OperatorSubscriptionId,
-                cancellationToken);
-            var attempt = await _attempts.GetByIdForUpdateAsync(context.UpgradeAttemptId, cancellationToken);
+            return Quarantine(context, "context mismatch");
+        }
 
-            if (attempt is null
-                || subscription is null
-                || attempt.OperatorId != context.OperatorId
-                || attempt.SubscriptionId != context.OperatorSubscriptionId
-                || attempt.TargetPlanId != context.TargetPlanId
-                || attempt.Amount.Amount != context.Amount
-                || !string.Equals(attempt.BillingPeriod.ToString(), context.BillingPeriod, StringComparison.Ordinal)
-                || !Enum.TryParse<SubscriptionPaymentMethod>(context.Method, false, out var paymentMethod)
-                || context.PeriodTo != (attempt.BillingPeriod == SubscriptionBillingPeriod.MONTHLY
-                    ? context.PeriodFrom.AddMonths(1)
-                    : context.PeriodFrom.AddYears(1)))
-            {
-                await QuarantineAsync(context, "context mismatch", cancellationToken);
-                return false;
-            }
-
-            if (attempt.Status == SubscriptionUpgradeAttemptStatus.SUCCEEDED)
-            {
-                await _unitOfWork.CommitAsync(cancellationToken);
-                return true;
-            }
-
-            if (context.SucceededAt >= attempt.DueAt
-                || attempt.Status is SubscriptionUpgradeAttemptStatus.EXPIRED or SubscriptionUpgradeAttemptStatus.FAILED)
-            {
-                await QuarantineAsync(context, "payment succeeded after attempt deadline or terminal state", cancellationToken);
-                return false;
-            }
-
-            if (attempt.Status is not (SubscriptionUpgradeAttemptStatus.INITIATED
-                or SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING))
-            {
-                await QuarantineAsync(context, $"attempt status {attempt.Status}", cancellationToken);
-                return false;
-            }
-
-            if (attempt.PaymentId.HasValue && attempt.PaymentId != context.PaymentId
-                && attempt.LatestPaymentStatus == SubscriptionPaymentSessionStatus.PENDING)
-            {
-                await QuarantineAsync(context, "another payment session is pending", cancellationToken);
-                return false;
-            }
-
-            attempt.BindPendingPayment(context.PaymentId);
-            if (subscription.Status is SubscriptionStatus.ACTIVE or SubscriptionStatus.EXPIRED)
-                subscription.MoveToPendingPayment(paymentMethod);
-            else if (subscription.Status != SubscriptionStatus.PENDING_PAYMENT)
-            {
-                await QuarantineAsync(context, $"subscription status {subscription.Status}", cancellationToken);
-                return false;
-            }
-
-            subscription.ActivatePaid(
-                attempt.TargetPlanId,
-                attempt.BillingPeriod,
-                paymentMethod,
-                context.PeriodFrom,
-                context.PeriodTo);
-            attempt.MarkSucceeded(context.PaymentId);
-            _subscriptions.Update(subscription);
-            _attempts.Update(attempt);
-            await _unitOfWork.CommitAsync(cancellationToken);
+        if (attempt.Status == SubscriptionUpgradeAttemptStatus.SUCCEEDED)
+        {
             return true;
         }
-        catch
+
+        if (context.SucceededAt >= attempt.DueAt
+            || attempt.Status is SubscriptionUpgradeAttemptStatus.EXPIRED or SubscriptionUpgradeAttemptStatus.FAILED)
         {
-            await _unitOfWork.RollbackAsync(cancellationToken);
-            throw;
+            return Quarantine(context, "payment succeeded after attempt deadline or terminal state");
         }
+
+        if (attempt.Status is not (SubscriptionUpgradeAttemptStatus.INITIATED
+            or SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING))
+        {
+            return Quarantine(context, $"attempt status {attempt.Status}");
+        }
+
+        if (attempt.PaymentId.HasValue && attempt.PaymentId != context.PaymentId
+            && attempt.LatestPaymentStatus == SubscriptionPaymentSessionStatus.PENDING)
+        {
+            return Quarantine(context, "another payment session is pending");
+        }
+
+        if (subscription.Status is not (SubscriptionStatus.ACTIVE
+            or SubscriptionStatus.EXPIRED
+            or SubscriptionStatus.PENDING_PAYMENT))
+        {
+            return Quarantine(context, $"subscription status {subscription.Status}");
+        }
+
+        attempt.BindPendingPayment(context.PaymentId);
+        if (subscription.Status is SubscriptionStatus.ACTIVE or SubscriptionStatus.EXPIRED)
+            subscription.MoveToPendingPayment(paymentMethod);
+
+        subscription.ActivatePaid(
+            attempt.TargetPlanId,
+            attempt.BillingPeriod,
+            paymentMethod,
+            context.PeriodFrom,
+            context.PeriodTo);
+        attempt.MarkSucceeded(context.PaymentId);
+        _subscriptions.Update(subscription);
+        _attempts.Update(attempt);
+        return true;
     }
 
-    private async Task QuarantineAsync(
+    private bool Quarantine(
         SubscriptionPaymentActivationContext context,
-        string reason,
-        CancellationToken cancellationToken)
+        string reason)
     {
         _logger.LogWarning(
             "Quarantining subscription activation for event {EventId}, payment {PaymentId}, attempt {UpgradeAttemptId}: {Reason}.",
@@ -118,6 +111,6 @@ public sealed class SubscriptionPaymentActivationService
             context.PaymentId,
             context.UpgradeAttemptId,
             reason);
-        await _unitOfWork.RollbackAsync(cancellationToken);
+        return false;
     }
 }

@@ -177,6 +177,10 @@ public sealed class UpgradeSubscriptionCommandHandlerTests
         var attempts = Substitute.For<ISubscriptionUpgradeAttemptRepository>();
         var subscriptions = Substitute.For<IOperatorSubscriptionRepository>();
         var unitOfWork = Substitute.For<IUnitOfWork>();
+        unitOfWork.ExecuteInTransactionAsync(
+                Arg.Any<Func<Task<bool>>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<Task<bool>>>()());
         attempts.GetByIdForUpdateAsync(attempt.Id, Arg.Any<CancellationToken>()).Returns(attempt);
         subscriptions.GetByIdForUpdateAsync(subscription.Id, Arg.Any<CancellationToken>()).Returns(subscription);
         var activation = new SubscriptionPaymentActivationService(
@@ -218,7 +222,9 @@ public sealed class UpgradeSubscriptionCommandHandlerTests
         subscription.ExpiresAt.Should().Be(Now.AddMonths(1));
         attempt.Status.Should().Be(SubscriptionUpgradeAttemptStatus.SUCCEEDED);
         attempt.PaymentId.Should().Be(paymentId);
-        await unitOfWork.Received(1).CommitAsync(Arg.Any<CancellationToken>());
+        await unitOfWork.Received(1).ExecuteInTransactionAsync(
+            Arg.Any<Func<Task<bool>>>(),
+            Arg.Any<CancellationToken>());
 
         await handler.HandleAsync(
             new SubscriptionPaymentSucceededIntegrationEvent

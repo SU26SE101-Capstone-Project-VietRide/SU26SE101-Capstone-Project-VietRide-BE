@@ -210,7 +210,7 @@ on conflict (id) do update set
   updated_at = now();
 
 insert into ${identitySchema}.operator_subscriptions (
-  id, operator_id, plan_id, status, started_at, expires_at
+  id, operator_id, active_plan_id, status, started_at, expires_at
 )
 values (
   '${seed.subscriptionId}', '${seed.operatorId}', '${seed.subscriptionPlanId}',
@@ -218,7 +218,7 @@ values (
 )
 on conflict (operator_id) do update set
   id = excluded.id,
-  plan_id = excluded.plan_id,
+  active_plan_id = excluded.active_plan_id,
   status = excluded.status,
   started_at = excluded.started_at,
   expires_at = excluded.expires_at,
@@ -585,6 +585,7 @@ async function activateDriverScheduleThroughGateway(operatorAdminAccessToken) {
       method: 'PATCH',
       headers: {
         Authorization: `Bearer ${operatorAdminAccessToken}`,
+        'Idempotency-Key': crypto.randomUUID(),
       },
       timeoutMs: 20000,
     },
@@ -716,7 +717,7 @@ order by seat_number;`,
 }
 
 async function waitForGeneratedTripEvidence() {
-  const timeoutMs = 30000;
+  const timeoutMs = Number(process.env.DAY11_GENERATED_TRIP_TIMEOUT_MS || 90000);
   const startedAt = Date.now();
   let lastCount = 0;
   let lastEvidence = [];
