@@ -29,7 +29,7 @@ public sealed class CreateParcelTests
     private const string RecipientEmail = "a@example.com";
     private const string ItemName = "Box of goods";
     private const string Description = "Fragile";
-    private const string PhotoUrl = "https://example.com/photo.jpg";
+    private const string PhotoUrl = "https://storage.googleapis.com/vietride.appspot.com/parcels/photo.jpg";
     private const decimal WeightKg = 3.5m;
     private static readonly DateTimeOffset Departure = new(2026, 7, 15, 8, 0, 0, TimeSpan.FromHours(7));
     private static readonly DateTimeOffset EstimatedArrival = new(2026, 7, 15, 18, 0, 0, TimeSpan.FromHours(7));
@@ -73,6 +73,49 @@ public sealed class CreateParcelTests
         var result = await handler.Handle(command, CancellationToken.None);
 
         result.Status.Should().Be("PENDING_OPERATOR_REVIEW");
+    }
+
+    [Theory]
+    [InlineData("MEDIUM")]
+    [InlineData("EXTRA_LARGE")]
+    public async Task Create_PersistsTrimmedPhotoUrl_ForEveryCreatePath(string sizeCategory)
+    {
+        var (identity, booking, trip, parcelRepo, fareRepo, uow) = SetupMocks(
+            userRole: "PASSENGER",
+            userStatus: "ACTIVE",
+            tripStatus: "SCHEDULED",
+            hasBooking: false,
+            hasFare: true);
+
+        var handler = CreateHandler(identity, booking, trip, parcelRepo, fareRepo, uow);
+        var command = BuildCommand(sizeCategory: sizeCategory, photoUrl: $"  {PhotoUrl}  ");
+
+        await handler.Handle(command, CancellationToken.None);
+
+        await parcelRepo.Received(1).AddAsync(
+            Arg.Is<ParcelEntity>(parcel => parcel.PhotoUrl == PhotoUrl),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("   ")]
+    public async Task Create_NormalizesMissingPhotoUrlToNull(string? photoUrl)
+    {
+        var (identity, booking, trip, parcelRepo, fareRepo, uow) = SetupMocks(
+            userRole: "PASSENGER",
+            userStatus: "ACTIVE",
+            tripStatus: "SCHEDULED",
+            hasBooking: false,
+            hasFare: true);
+
+        var handler = CreateHandler(identity, booking, trip, parcelRepo, fareRepo, uow);
+
+        await handler.Handle(BuildCommand(photoUrl: photoUrl), CancellationToken.None);
+
+        await parcelRepo.Received(1).AddAsync(
+            Arg.Is<ParcelEntity>(parcel => parcel.PhotoUrl == null),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -394,7 +437,8 @@ public sealed class CreateParcelTests
         Guid? bookingId = null,
         string sizeCategory = "MEDIUM",
         string deliveryMethod = "TERMINAL_PICKUP",
-        string paymentMethod = "VNPAY")
+        string paymentMethod = "VNPAY",
+        string? photoUrl = PhotoUrl)
     {
         return new CreateParcelCommand(
             SenderUserId,
@@ -407,7 +451,7 @@ public sealed class CreateParcelTests
             bookingId,
             ItemName,
             Description,
-            PhotoUrl,
+            photoUrl,
             sizeCategory,
             WeightKg,
             deliveryMethod,

@@ -2633,6 +2633,14 @@ Request:
 }
 ```
 
+`photoUrl` is optional and represents at most one parcel image. The client uploads the image
+directly to Firebase Storage before creating the Parcel. When supplied, the URL is trimmed, must
+be an absolute HTTPS URL no longer than 2,048 characters, and must address the bucket configured
+by `FIREBASE_STORAGE_BUCKET` through either `firebasestorage.googleapis.com` or
+`storage.googleapis.com`. Invalid values return `422 VALIDATION_FAILED` with a `photoUrl` field
+error. Firebase Storage Rules enforce a 5 MB object limit and MIME type
+`image/jpeg | image/png | image/webp`; Parcel Service does not receive or inspect file bytes.
+
 Response `201`:
 ```json
 {
@@ -2754,7 +2762,8 @@ as an empty page. Validation failures return `422 VALIDATION_ERROR`.
 
 Auth: sender, recipient account, or authorized operator.
 
-Response `200`: parcel detail with sender, recipient, trip, payment, transfer, and delivery token state excluding raw token.
+Response `200`: parcel detail with sender, recipient, trip, payment, transfer, optional `photoUrl`,
+and delivery token state excluding raw token.
 
 ### POST `/v1/parcels/delivery/confirm`
 
@@ -2862,7 +2871,8 @@ Response `200`:
         "dropoffStopId": "uuid",
         "sizeCategory": "MEDIUM",
         "estimatedWeightKg": 12.5,
-        "description": "Gói hàng nhỏ"
+        "description": "Gói hàng nhỏ",
+        "photoUrl": "https://storage.googleapis.com/vietride.appspot.com/parcels/photo.jpg"
       }
     ],
     "page": 1,

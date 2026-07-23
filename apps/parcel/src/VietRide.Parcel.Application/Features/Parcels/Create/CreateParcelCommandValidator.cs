@@ -6,8 +6,10 @@ namespace VietRide.Parcel.Application.Features.Parcels.Create;
 
 public sealed class CreateParcelCommandValidator : AbstractValidator<CreateParcelCommand>
 {
-    public CreateParcelCommandValidator(IFirebaseStorageImageUrlValidator firebaseUrls)
+    public CreateParcelCommandValidator(ParcelImageOptions imageOptions)
     {
+        var firebaseUrls = new FirebaseStorageImageUrlValidator(imageOptions.FirebaseStorageBucket);
+
         RuleFor(x => x.SenderUserId)
             .NotEmpty();
 
@@ -57,9 +59,11 @@ public sealed class CreateParcelCommandValidator : AbstractValidator<CreateParce
             .When(x => x.Description is not null);
 
         RuleFor(x => x)
-            .Must(x => x.PhotoUrl is null || firebaseUrls.IsValidOwnedImageUrl(
+            .Must(x => string.IsNullOrWhiteSpace(x.PhotoUrl) || firebaseUrls.IsValidOwnedImageUrl(
                 x.PhotoUrl,
                 $"parcels/{x.SenderUserId:D}/"))
+            .OverridePropertyName("photoUrl")
+            .WithErrorCode("VALIDATION_FAILED")
             .WithMessage("PhotoUrl must be an owned Firebase parcel photo URL.");
     }
 }

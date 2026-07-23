@@ -63,6 +63,7 @@ public sealed class GetParcelDetailQueryHandler
             parcel.TripId,
             parcel.DropoffStopId,
             parcel.Description,
+            parcel.PhotoUrl,
             parcel.SizeCategory.ToString(),
             parcel.EstimatedWeightKg,
             parcel.ActualWeightKg,

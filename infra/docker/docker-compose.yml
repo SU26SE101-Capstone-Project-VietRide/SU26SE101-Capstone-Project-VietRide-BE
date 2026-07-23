@@ -300,6 +300,7 @@ services:
       Payment__BaseUrl: http://payment:5004
       Booking__BaseUrl: http://booking:5003
       Identity__BaseUrl: http://identity:5001
+      FIREBASE_STORAGE_BUCKET: ${FIREBASE_STORAGE_BUCKET:-}
       RabbitMq__HostName: rabbitmq
       RabbitMq__Port: '5672'
       RabbitMq__UserName: ${RABBITMQ_USER:-vietride}

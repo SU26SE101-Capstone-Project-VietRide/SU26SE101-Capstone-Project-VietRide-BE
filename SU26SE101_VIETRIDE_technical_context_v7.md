@@ -3212,7 +3212,7 @@ Nếu người nhận đổi ý trong 15 phút:
 
 **Parcel entity — business requirements:**
 
-- **Ảnh hàng:** `photoUrl` string nullable — URL Firebase Storage. Người gửi có thể upload ảnh hàng khi tạo parcel request (để phụ xe đối chiếu khi nhận hàng). Optional, không bắt buộc. Client upload trực tiếp lên Firebase Storage, BE nhận URL string.
+- **Ảnh hàng:** `photoUrl` string nullable — tối đa một URL Firebase Storage. Người gửi có thể upload ảnh hàng khi tạo parcel request (để phụ xe đối chiếu khi nhận hàng). Optional, không bắt buộc. Client upload trực tiếp lên Firebase Storage, BE nhận URL string đã trim; URL phải là HTTPS, tối đa 2.048 ký tự và thuộc bucket cấu hình qua `FIREBASE_STORAGE_BUCKET`. Firebase Storage Rules giới hạn tối đa 5 MB và MIME `image/jpeg | image/png | image/webp`; Parcel Service không nhận hoặc kiểm tra file bytes. `photoUrl` được expose trong Parcel detail và danh sách parcel của Assistant đúng chuyến, không đưa vào RabbitMQ event.
 - **Phân loại hàng:** `sizeCategory` (SMALL | MEDIUM | LARGE | EXTRA_LARGE), `estimatedWeightKg` decimal (người gửi khai báo, không cân thực tế)
 - **Thông tin người gửi:** `senderUserId` FK → User (NOT NULL — người gửi PHẢI có tài khoản VietRide, consistent với no walk-in parcel). Dùng để authorize tracking, query "hàng tôi đã gửi" (`GET /v1/parcels/sent`), và cho Tracking Service verify parcel sender khi joinTripTracking.
 - **Thông tin người nhận:** name (bắt buộc), phone (bắt buộc), email (**optional**). `recipientUserId` nullable link tới User — set khi người gửi nhập email và Identity Service lookup ra account hiện có. null = recipient không có tài khoản VietRide.

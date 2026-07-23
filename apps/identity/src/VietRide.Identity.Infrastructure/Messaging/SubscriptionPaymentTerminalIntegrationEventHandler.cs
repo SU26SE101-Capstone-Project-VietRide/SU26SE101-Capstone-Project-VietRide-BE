@@ -54,8 +54,7 @@ public sealed class SubscriptionPaymentTerminalIntegrationEventHandler
         SubscriptionPaymentSessionStatus status,
         CancellationToken cancellationToken)
     {
-        await _unitOfWork.BeginTransactionAsync(cancellationToken);
-        try
+        await _unitOfWork.ExecuteInTransactionAsync(async () =>
         {
             var attempt = await _attempts.GetByIdForUpdateAsync(attemptId, cancellationToken);
             if (attempt is null
@@ -69,8 +68,7 @@ public sealed class SubscriptionPaymentTerminalIntegrationEventHandler
                     eventId,
                     paymentId,
                     attemptId);
-                await _unitOfWork.RollbackAsync(cancellationToken);
-                return;
+                return false;
             }
 
             if (status == SubscriptionPaymentSessionStatus.FAILED)
@@ -78,12 +76,7 @@ public sealed class SubscriptionPaymentTerminalIntegrationEventHandler
             else
                 attempt.MarkPaymentExpired(paymentId);
             _attempts.Update(attempt);
-            await _unitOfWork.CommitAsync(cancellationToken);
-        }
-        catch
-        {
-            await _unitOfWork.RollbackAsync(cancellationToken);
-            throw;
-        }
+            return true;
+        }, cancellationToken);
     }
 }

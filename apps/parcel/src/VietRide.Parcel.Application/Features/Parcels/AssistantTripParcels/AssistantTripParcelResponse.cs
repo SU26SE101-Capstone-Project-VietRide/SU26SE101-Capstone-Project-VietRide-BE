@@ -9,4 +9,5 @@ public sealed record AssistantTripParcelResponse(
     Guid? DropoffStopId,
     string SizeCategory,
     decimal EstimatedWeightKg,
-    string? Description);
+    string? Description,
+    string? PhotoUrl);
