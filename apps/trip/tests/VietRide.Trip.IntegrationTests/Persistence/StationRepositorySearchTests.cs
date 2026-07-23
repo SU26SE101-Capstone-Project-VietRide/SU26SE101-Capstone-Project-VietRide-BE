@@ -73,6 +73,8 @@ public sealed class StationRepositorySearchTests
     {
         var options = new DbContextOptionsBuilder<TripDbContext>()
             .UseNpgsql(CreateConnectionString(databaseName))
+            .ConfigureWarnings(warnings => warnings.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning))
             .Options;
 
         return new TripDbContext(options, new SystemClock());

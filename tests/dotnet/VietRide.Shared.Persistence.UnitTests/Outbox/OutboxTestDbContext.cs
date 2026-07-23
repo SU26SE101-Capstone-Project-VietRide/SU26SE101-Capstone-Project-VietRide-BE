@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Persistence;
+using VietRide.Shared.Persistence.Inbox;
 
 namespace VietRide.Shared.Persistence.UnitTests.Outbox;
 
@@ -20,5 +21,6 @@ public sealed class OutboxTestDbContext : VietRideDbContextBase
     {
         modelBuilder.HasDefaultSchema("public");
         base.OnModelCreating(modelBuilder);
+        modelBuilder.AddVietRideIntegrationInbox();
     }
 }

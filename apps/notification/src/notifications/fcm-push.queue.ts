@@ -23,7 +23,10 @@ export class FcmPushQueue implements OnModuleDestroy {
       prefix: BULLMQ_QUEUE_PREFIX,
       defaultJobOptions: {
         attempts: FCM_PUSH_ATTEMPTS,
-        removeOnComplete: true,
+        removeOnComplete: {
+          age: 86_400,
+          count: 10_000,
+        },
         backoff: {
           type: 'custom',
           delay: 0,

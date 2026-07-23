@@ -28,10 +28,7 @@ import { InternalJwtAuthGuard } from '../auth/internal-jwt-auth.guard';
 import type { RequestWithRagInternalUser } from '../auth/rag-internal-user.types';
 import { CreateDocumentDto, CreateDocumentSchema } from './dto/create-document.dto';
 import { ListDocumentsQueryDto, ListDocumentsQuerySchema } from './dto/list-documents.dto';
-import {
-  RAG_DOCUMENT_FILE_FIELD,
-  RAG_DOCUMENT_UPLOAD_HARD_CAP_BYTES,
-} from './documents.constants';
+import { RAG_DOCUMENT_FILE_FIELD, RAG_DOCUMENT_UPLOAD_HARD_CAP_BYTES } from './documents.constants';
 import { DocumentsService } from './documents.service';
 import type { KnowledgeDocumentResponse, UploadedDocumentFile } from './documents.types';
 import {
@@ -39,6 +36,11 @@ import {
   pagedDataSchema,
   successEnvelopeSchema,
 } from '../swagger/api-response.schemas';
+import {
+  ApiIdempotencyRequired,
+  DeferRagMultipartIdempotency,
+} from '../swagger/idempotency.swagger';
+import { RagMultipartIdempotencyInterceptor } from '../swagger/rag-idempotency.interceptor';
 
 @ApiTags('RAG Documents')
 @ApiBearerAuth()
@@ -51,20 +53,65 @@ export class DocumentsController {
   @ApiOperation({ summary: 'List RAG knowledge documents for admin audit' })
   @ApiQuery({ name: 'page', required: false, type: Number, minimum: 1 })
   @ApiQuery({ name: 'pageSize', required: false, type: Number, minimum: 1, maximum: 100 })
-  @ApiQuery({ name: 'sortBy', required: false, enum: ['createdAt', 'updatedAt', 'title', 'status', 'ingestStatus'] })
+  @ApiQuery({
+    name: 'sortBy',
+    required: false,
+    enum: ['createdAt', 'updatedAt', 'title', 'status', 'ingestStatus'],
+  })
   @ApiQuery({ name: 'sortDir', required: false, enum: ['asc', 'desc'] })
-  @ApiQuery({ name: 'status', required: false, enum: ['PENDING_REVIEW', 'APPROVED', 'REJECTED', 'ARCHIVED'] })
-  @ApiQuery({ name: 'ingestStatus', required: false, enum: ['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED'] })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['PENDING_REVIEW', 'APPROVED', 'REJECTED', 'ARCHIVED'],
+  })
+  @ApiQuery({
+    name: 'ingestStatus',
+    required: false,
+    enum: ['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED'],
+  })
   @ApiQuery({ name: 'accessLevel', required: false, enum: ['PUBLIC', 'OPERATOR', 'ADMIN'] })
-  @ApiQuery({ name: 'category', required: false, enum: ['CUSTOMER_SUPPORT', 'OPERATOR_POLICY', 'PLATFORM_ADMIN'] })
-  @ApiQuery({ name: 'documentType', required: false, enum: ['FAQ', 'POLICY', 'SOP', 'GUIDE', 'TERMS'] })
+  @ApiQuery({
+    name: 'category',
+    required: false,
+    enum: ['CUSTOMER_SUPPORT', 'OPERATOR_POLICY', 'PLATFORM_ADMIN'],
+  })
+  @ApiQuery({
+    name: 'documentType',
+    required: false,
+    enum: ['FAQ', 'POLICY', 'SOP', 'GUIDE', 'TERMS'],
+  })
   @ApiQuery({ name: 'operatorId', required: false, type: String, format: 'uuid' })
-  @ApiQuery({ name: 'q', required: false, type: String, description: 'Search title, file name, or description' })
-  @ApiResponse({ status: 200, description: 'Paginated document list', schema: successEnvelopeSchema(200, pagedDataSchema) })
-  @ApiResponse({ status: 400, description: 'Invalid query', schema: errorEnvelopeSchema(400, 'VALIDATION_FAILED', 'Invalid query', { fields: true }) })
-  @ApiResponse({ status: 401, description: 'Missing or invalid access token', schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Missing or invalid access token') })
-  @ApiResponse({ status: 403, description: 'SYSTEM_ADMIN role is required', schema: errorEnvelopeSchema(403, 'INSUFFICIENT_ROLE', 'SYSTEM_ADMIN role is required') })
-  @ApiResponse({ status: 500, description: 'Unexpected error', schema: errorEnvelopeSchema(500, 'INTERNAL_ERROR', 'Unexpected error') })
+  @ApiQuery({
+    name: 'q',
+    required: false,
+    type: String,
+    description: 'Search title, file name, or description',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Paginated document list',
+    schema: successEnvelopeSchema(200, pagedDataSchema),
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid query',
+    schema: errorEnvelopeSchema(400, 'VALIDATION_FAILED', 'Invalid query', { fields: true }),
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Missing or invalid access token'),
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'SYSTEM_ADMIN role is required',
+    schema: errorEnvelopeSchema(403, 'INSUFFICIENT_ROLE', 'SYSTEM_ADMIN role is required'),
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Unexpected error',
+    schema: errorEnvelopeSchema(500, 'INTERNAL_ERROR', 'Unexpected error'),
+  })
   async list(
     @Query(new ZodValidationPipe(ListDocumentsQuerySchema)) query: ListDocumentsQueryDto,
     @Req() req: RequestWithRagInternalUser,
@@ -73,12 +120,17 @@ export class DocumentsController {
   }
 
   @Post()
+  @ApiIdempotencyRequired()
+  @DeferRagMultipartIdempotency()
   @UseInterceptors(
     FileInterceptor(RAG_DOCUMENT_FILE_FIELD, {
       limits: { fileSize: RAG_DOCUMENT_UPLOAD_HARD_CAP_BYTES },
     }),
+    RagMultipartIdempotencyInterceptor,
   )
-  @ApiOperation({ summary: 'Upload, auto-approve, and request ingest for a RAG knowledge document' })
+  @ApiOperation({
+    summary: 'Upload, auto-approve, and request ingest for a RAG knowledge document',
+  })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
@@ -103,30 +155,94 @@ export class DocumentsController {
       },
     },
   })
-  @ApiResponse({ status: 201, description: 'Document uploaded, approved, and queued for ingest', schema: successEnvelopeSchema(201, { type: 'object', properties: { id: { type: 'string', format: 'uuid' } } }) })
-  @ApiResponse({ status: 400, description: 'Invalid payload or file', schema: errorEnvelopeSchema(400, 'VALIDATION_FAILED', 'Invalid payload or file', { fields: true }) })
-  @ApiResponse({ status: 401, description: 'Missing or invalid access token', schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Missing or invalid access token') })
-  @ApiResponse({ status: 403, description: 'SYSTEM_ADMIN role is required', schema: errorEnvelopeSchema(403, 'INSUFFICIENT_ROLE', 'SYSTEM_ADMIN role is required') })
-  @ApiResponse({ status: 500, description: 'Unexpected error', schema: errorEnvelopeSchema(500, 'INTERNAL_ERROR', 'Unexpected error') })
-  @ApiResponse({ status: 503, description: 'Storage or provider unavailable', schema: errorEnvelopeSchema(503, 'SERVICE_UNAVAILABLE', 'Storage or provider unavailable') })
+  @ApiResponse({
+    status: 201,
+    description: 'Document uploaded, approved, and queued for ingest',
+    schema: successEnvelopeSchema(201, {
+      type: 'object',
+      properties: { id: { type: 'string', format: 'uuid' } },
+    }),
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid payload or file',
+    schema: errorEnvelopeSchema(400, 'VALIDATION_FAILED', 'Invalid payload or file', {
+      fields: true,
+    }),
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Missing or invalid access token'),
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'SYSTEM_ADMIN role is required',
+    schema: errorEnvelopeSchema(403, 'INSUFFICIENT_ROLE', 'SYSTEM_ADMIN role is required'),
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Unexpected error',
+    schema: errorEnvelopeSchema(500, 'INTERNAL_ERROR', 'Unexpected error'),
+  })
+  @ApiResponse({
+    status: 503,
+    description: 'Storage or provider unavailable',
+    schema: errorEnvelopeSchema(503, 'SERVICE_UNAVAILABLE', 'Storage or provider unavailable'),
+  })
   async create(
     @Body(new ZodValidationPipe(CreateDocumentSchema)) dto: CreateDocumentDto,
     @UploadedFile() file: UploadedDocumentFile | undefined,
     @Req() req: RequestWithRagInternalUser,
   ): Promise<KnowledgeDocumentResponse> {
-    return this.documentsService.create(dto, file, req.user);
+    const header = req.headers['idempotency-key'];
+    const operationId =
+      req.idempotencyOperationId ?? (typeof header === 'string' ? header : undefined);
+    return this.documentsService.create(dto, file, req.user, operationId);
   }
 
   @Put(':documentId/approve')
+  @ApiIdempotencyRequired()
   @ApiOperation({ summary: 'Approve a pending RAG knowledge document for ingest' })
   @ApiParam({ name: 'documentId', format: 'uuid', description: 'Knowledge document ID' })
-  @ApiResponse({ status: 200, description: 'Document approved', schema: successEnvelopeSchema(200, { type: 'object', properties: { id: { type: 'string', format: 'uuid' }, status: { type: 'string' } } }) })
-  @ApiResponse({ status: 400, description: 'Invalid UUID', schema: errorEnvelopeSchema(400, 'VALIDATION_FAILED', 'Invalid UUID', { fields: true }) })
-  @ApiResponse({ status: 401, description: 'Missing or invalid access token', schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Missing or invalid access token') })
-  @ApiResponse({ status: 403, description: 'SYSTEM_ADMIN role is required', schema: errorEnvelopeSchema(403, 'INSUFFICIENT_ROLE', 'SYSTEM_ADMIN role is required') })
-  @ApiResponse({ status: 404, description: 'Document not found', schema: errorEnvelopeSchema(404, 'DOCUMENT_NOT_FOUND', 'Document not found') })
-  @ApiResponse({ status: 409, description: 'Document is not pending review', schema: errorEnvelopeSchema(409, 'DOCUMENT_NOT_PENDING', 'Document is not pending review') })
-  @ApiResponse({ status: 500, description: 'Unexpected error', schema: errorEnvelopeSchema(500, 'INTERNAL_ERROR', 'Unexpected error') })
+  @ApiResponse({
+    status: 200,
+    description: 'Document approved',
+    schema: successEnvelopeSchema(200, {
+      type: 'object',
+      properties: { id: { type: 'string', format: 'uuid' }, status: { type: 'string' } },
+    }),
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid UUID',
+    schema: errorEnvelopeSchema(400, 'VALIDATION_FAILED', 'Invalid UUID', { fields: true }),
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Missing or invalid access token'),
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'SYSTEM_ADMIN role is required',
+    schema: errorEnvelopeSchema(403, 'INSUFFICIENT_ROLE', 'SYSTEM_ADMIN role is required'),
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Document not found',
+    schema: errorEnvelopeSchema(404, 'DOCUMENT_NOT_FOUND', 'Document not found'),
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Document is not pending review',
+    schema: errorEnvelopeSchema(409, 'DOCUMENT_NOT_PENDING', 'Document is not pending review'),
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Unexpected error',
+    schema: errorEnvelopeSchema(500, 'INTERNAL_ERROR', 'Unexpected error'),
+  })
   async approve(
     @Param('documentId', new ParseUUIDPipe()) documentId: string,
     @Req() req: RequestWithRagInternalUser,

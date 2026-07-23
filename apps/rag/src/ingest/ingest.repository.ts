@@ -13,7 +13,7 @@ export class IngestRepository {
       where: {
         eventType: RAG_DOCUMENT_INGEST_REQUESTED_EVENT,
         status: {
-          in: ['PENDING', 'FAILED'],
+          in: ['PENDING', 'FAILED', 'PUBLISHING'],
         },
         retryCount: {
           lt: RAG_INGEST_MAX_RETRY,

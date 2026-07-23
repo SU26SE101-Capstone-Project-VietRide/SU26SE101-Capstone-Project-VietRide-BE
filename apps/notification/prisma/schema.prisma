@@ -171,3 +171,17 @@ model EmailDelivery {
   @@map("email_deliveries")
   @@schema("vietride_notification")
 }
+
+model ProcessedMessage {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  consumerName String   @map("consumer_name") @db.VarChar(200)
+  messageId    String   @map("message_id") @db.VarChar(100)
+  routingKey   String   @map("routing_key") @db.VarChar(200)
+  payloadHash  String   @map("payload_hash") @db.Char(64)
+  processedAt  DateTime @default(now()) @map("processed_at") @db.Timestamptz(6)
+
+  @@unique([consumerName, messageId], map: "uq_processed_messages_consumer_message")
+  @@index([processedAt], map: "idx_processed_messages_processed_at")
+  @@map("processed_messages")
+  @@schema("vietride_notification")
+}

@@ -13,6 +13,7 @@ using VietRide.Identity.Application.Features.Auth.ResetPassword;
 using VietRide.Identity.Application.Features.Auth.SetInitialPassword;
 using VietRide.Identity.Application.Features.Auth.VerifyEmail;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Identity.Api.Controllers;
 
@@ -170,6 +171,7 @@ public sealed class AuthController : ControllerBase
     /// Locked account → 403 AUTH_ACCOUNT_LOCKED.
     /// </remarks>
     [HttpPost("login")]
+    [SkipIdempotency("Login returns credentials and is protected by the native authentication lockout policy.")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(ApiResponse<TokenBundleDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
@@ -187,6 +189,7 @@ public sealed class AuthController : ControllerBase
     /// Invalid, expired, or wrong-audience Google ID token → 401 AUTH_GOOGLE_TOKEN_INVALID.
     /// </remarks>
     [HttpPost("google")]
+    [SkipIdempotency("Google login returns credentials and is protected by provider-token validation.")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(ApiResponse<TokenBundleDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
@@ -205,6 +208,7 @@ public sealed class AuthController : ControllerBase
     /// Reuse of a revoked token revokes the whole family → 401 AUTH_TOKEN_INVALID.
     /// </remarks>
     [HttpPost("refresh")]
+    [SkipIdempotency("Refresh rotates credentials and is protected by refresh-token family replay detection.")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(ApiResponse<TokenBundleDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]

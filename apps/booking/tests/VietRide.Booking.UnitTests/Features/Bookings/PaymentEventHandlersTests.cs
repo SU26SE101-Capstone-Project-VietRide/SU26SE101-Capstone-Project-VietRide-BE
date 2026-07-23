@@ -42,19 +42,10 @@ public sealed class PaymentEventHandlersTests
     }
 
     [Fact]
-    public async Task ConfirmBookingOnPayment_WhenPending_BooksSeatsConfirmsAndEmitsOnce()
+    public async Task ConfirmBookingOnPayment_WhenPending_BooksPersistedLockConfirmsAndEmitsOnce()
     {
         _bookings.GetPendingPaymentTransitionSnapshotAsync(BookingId, Arg.Any<CancellationToken>())
             .Returns(CreateSnapshot());
-        _tripClient.LockSeatsAsync(
-                TripId,
-                Arg.Is<IReadOnlyList<string>>(seats => seats.SequenceEqual(new[] { "A01" })),
-                PassengerUserId,
-                $"lock-{PassengerUserId}-{TripId}-A01",
-                600,
-                Arg.Any<CancellationToken>())
-            .Returns(new LockSeatsOutcome.Success(
-                new SeatLockResult(SeatLockToken, ["A01"], Now.AddMinutes(10))));
         _tripClient.BookSeatsAsync(
                 TripId,
                 SeatLockToken,
@@ -91,6 +82,8 @@ public sealed class PaymentEventHandlersTests
             .GetTripSnapshotAsync(default, default);
         await _tripClient.DidNotReceiveWithAnyArgs()
             .GetTripSnapshotAsync(default, default, default);
+        await _tripClient.DidNotReceiveWithAnyArgs()
+            .LockSeatsAsync(default, default!, default, default!, default, default);
         await _outbox.Received(1)
             .EnqueueAsync(
                 "booking.booking.confirmed",
@@ -148,7 +141,8 @@ public sealed class PaymentEventHandlersTests
         _tripClient.BookRoundTripSeatsAsync(
                 Arg.Any<RoundTripBookSeatsLeg>(),
                 Arg.Any<RoundTripBookSeatsLeg>(),
-                Arg.Any<CancellationToken>())
+                Arg.Any<CancellationToken>(),
+                PaymentId)
             .Returns(true);
         _bookings.TryConfirmPendingPaymentAsync(firstBooking.Id, Now, Arg.Any<CancellationToken>()).Returns(true);
         _bookings.TryConfirmPendingPaymentAsync(secondBooking.Id, Now, Arg.Any<CancellationToken>()).Returns(true);
@@ -169,7 +163,8 @@ public sealed class PaymentEventHandlersTests
         await _tripClient.Received(1).BookRoundTripSeatsAsync(
             Arg.Any<RoundTripBookSeatsLeg>(),
             Arg.Any<RoundTripBookSeatsLeg>(),
-            Arg.Any<CancellationToken>());
+            Arg.Any<CancellationToken>(),
+            PaymentId);
         await _tripClient.DidNotReceiveWithAnyArgs()
             .LockSeatsAsync(default, default!, default, default!, default, default);
         await _tripClient.DidNotReceiveWithAnyArgs()

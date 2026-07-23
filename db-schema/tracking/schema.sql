@@ -40,7 +40,7 @@ CREATE TABLE gps_trails (
     CONSTRAINT chk_gps_trails_speed_non_negative CHECK (speed_kmh IS NULL OR speed_kmh >= 0)
 );
 
-CREATE INDEX idx_gps_trails_trip_id_recorded_at
+CREATE UNIQUE INDEX uq_gps_trails_trip_recorded_at
     ON gps_trails (trip_id, recorded_at);
 CREATE INDEX idx_gps_trails_recorded_at ON gps_trails (recorded_at);
 

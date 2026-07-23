@@ -3,6 +3,7 @@ import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { ApiResponseExceptionFilter, ApiResponseInterceptor } from '@vietride/nest-common';
 import { exportSPKI, generateKeyPair, SignJWT, type KeyLike } from 'jose';
+import { randomUUID } from 'node:crypto';
 import { ENV_TOKEN, NOTIFICATION_JWT_VERIFIER } from '../app/tokens';
 import { JoseNotificationUserJwtVerifier } from '../auth/user-jwt.verifier';
 import type { Env } from '../config/env.schema';
@@ -213,6 +214,7 @@ describe('NotificationsController (e2e)', () => {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
+        'Idempotency-Key': randomUUID(),
       },
     });
   }

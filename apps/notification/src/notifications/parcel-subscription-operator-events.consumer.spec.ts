@@ -304,7 +304,11 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
       createMessage('different-outbox-row-id'),
     );
 
-    expect(idempotency.begin).toHaveBeenCalledWith(INVOICE_ISSUED_ROUTING_KEY, eventId);
+    expect(idempotency.begin).toHaveBeenCalledWith(
+      INVOICE_ISSUED_ROUTING_KEY,
+      eventId,
+      undefined,
+    );
     expect(notificationsService.createNotification).not.toHaveBeenCalled();
   });
 

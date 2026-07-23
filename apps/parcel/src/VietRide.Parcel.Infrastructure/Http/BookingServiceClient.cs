@@ -186,7 +186,7 @@ public sealed class BookingServiceClient : IBookingServiceClient
                     discountAmount,
                 }),
             };
-            request.Headers.TryAddWithoutValidation("Idempotency-Key", $"parcel-voucher-usage-{parcelId:D}");
+            request.Headers.TryAddWithoutValidation("Idempotency-Key", parcelId.ToString("D"));
 
             using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
 
@@ -215,12 +215,15 @@ public sealed class BookingServiceClient : IBookingServiceClient
         }
     }
 
-    public async Task DeleteVoucherUsageByReferenceAsync(Guid parcelId, CancellationToken cancellationToken = default)
+    public async Task DeleteVoucherUsageByReferenceAsync(
+        Guid parcelId,
+        Guid voucherUsageId,
+        CancellationToken cancellationToken = default)
     {
         using var request = new HttpRequestMessage(
             HttpMethod.Delete,
             $"/internal/v1/vouchers/usages/by-reference?referenceType=PARCEL&referenceId={parcelId:D}");
-        request.Headers.TryAddWithoutValidation("Idempotency-Key", $"parcel-voucher-usage-delete-{parcelId:D}");
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", voucherUsageId.ToString("D"));
         using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
     }
 

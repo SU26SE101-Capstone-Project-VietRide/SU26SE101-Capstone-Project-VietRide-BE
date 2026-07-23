@@ -41,7 +41,13 @@ public static class ParcelOutboxEvents
         Guid senderUserId,
         long amount,
         CancellationToken cancellationToken)
-        => EnqueueRefundAsync(outbox, parcelId, senderUserId, amount, $"parcel:refund:{parcelId:D}", cancellationToken);
+        => EnqueueRefundAsync(
+            outbox,
+            parcelId,
+            senderUserId,
+            amount,
+            parcelId.ToString("D"),
+            cancellationToken);
 
     public static Task EnqueueRefundAsync(
         IIntegrationEventOutbox outbox,

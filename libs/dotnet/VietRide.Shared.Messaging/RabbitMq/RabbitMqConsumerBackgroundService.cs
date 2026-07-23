@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -6,6 +7,7 @@ using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using RabbitMQ.Client.Exceptions;
+using VietRide.Shared.Application.Inbox;
 using VietRide.Shared.Messaging.Abstractions;
 
 namespace VietRide.Shared.Messaging.RabbitMq;
@@ -215,16 +217,34 @@ public sealed class RabbitMqConsumerBackgroundService<TEvent> : BackgroundServic
             var integrationEvent = JsonSerializer.Deserialize<TEvent>(args.Body.Span, JsonOptions)
                 ?? throw new JsonException($"RabbitMQ delivery {args.DeliveryTag} deserialized to null.");
 
+            var payloadEventId = ResolvePayloadEventId(args.Body, integrationEvent.EventId);
+            if (!Guid.TryParse(args.BasicProperties.MessageId, out var messageId)
+                || messageId == Guid.Empty
+                || messageId != payloadEventId)
+            {
+                throw new JsonException(
+                    $"RabbitMQ delivery {args.DeliveryTag} has a missing or inconsistent MessageId.");
+            }
+
+            var payloadHash = Convert.ToHexString(SHA256.HashData(args.Body.Span));
+
             using var scope = _scopes.CreateScope();
             var handler = scope.ServiceProvider.GetRequiredService<IIntegrationEventHandler<TEvent>>();
-            await handler.HandleAsync(integrationEvent, cancellationToken).ConfigureAwait(false);
+            var inbox = scope.ServiceProvider.GetRequiredService<IIntegrationEventInbox>();
+            var inboxResult = await inbox.ExecuteAsync(
+                _consumerOptions.QueueName,
+                messageId,
+                payloadHash,
+                ct => handler.HandleAsync(integrationEvent, ct),
+                cancellationToken).ConfigureAwait(false);
 
             channel.BasicAck(args.DeliveryTag, multiple: false);
             _logger.LogDebug(
-                "RabbitMQ delivery acked: queue={Queue} routingKey={RoutingKey} tag={DeliveryTag}.",
+                "RabbitMQ delivery acked: queue={Queue} routingKey={RoutingKey} tag={DeliveryTag} inbox={InboxResult}.",
                 _consumerOptions.QueueName,
                 args.RoutingKey,
-                args.DeliveryTag);
+                args.DeliveryTag,
+                inboxResult);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
@@ -236,6 +256,39 @@ public sealed class RabbitMqConsumerBackgroundService<TEvent> : BackgroundServic
                 args.RoutingKey,
                 args.DeliveryTag);
         }
+    }
+
+    private static Guid ResolvePayloadEventId(
+        ReadOnlyMemory<byte> payload,
+        Guid legacyEventId)
+    {
+        using var document = JsonDocument.Parse(payload);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            throw new JsonException("RabbitMQ integration-event payload must be a JSON object.");
+        }
+
+        var eventIdProperties = document.RootElement
+            .EnumerateObject()
+            .Where(property => string.Equals(
+                property.Name,
+                "eventId",
+                StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        if (eventIdProperties.Length == 0)
+        {
+            return legacyEventId;
+        }
+
+        if (eventIdProperties.Length > 1
+            || !eventIdProperties[0].Value.TryGetGuid(out var payloadEventId)
+            || payloadEventId == Guid.Empty)
+        {
+            throw new JsonException("RabbitMQ integration-event payload has an invalid eventId.");
+        }
+
+        return payloadEventId;
     }
 
     public override void Dispose()

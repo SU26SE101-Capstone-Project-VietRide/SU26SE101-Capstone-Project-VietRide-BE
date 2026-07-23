@@ -705,6 +705,47 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("VietRide.Shared.Persistence.Inbox.IntegrationInboxRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("ConsumerName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("consumer_name");
+
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("message_id");
+
+                    b.Property<string>("PayloadHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character(64)")
+                        .HasColumnName("payload_hash")
+                        .IsFixedLength();
+
+                    b.Property<DateTimeOffset>("ProcessedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("processed_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("Id")
+                        .HasName("pk_integration_inbox");
+
+                    b.HasIndex("ConsumerName", "MessageId")
+                        .IsUnique()
+                        .HasDatabaseName("uq_integration_inbox_consumer_message");
+
+                    b.ToTable("integration_inbox", "vietride_parcel");
+                });
+
             modelBuilder.Entity("VietRide.Shared.Persistence.Outbox.OutboxDlq", b =>
                 {
                     b.Property<Guid>("Id")

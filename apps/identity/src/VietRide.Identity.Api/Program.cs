@@ -41,6 +41,7 @@ builder.Services.AddVietRideDbContext<IdentityDbContext>(
         ? options => options.ConfigureWarnings(warnings => warnings.Ignore(
             Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning))
         : null);
+builder.Services.AddVietRideIntegrationInbox<IdentityDbContext>();
 
 // MediatR v11 pipeline behaviors (Logging → Validation → Transaction)
 // + FluentValidation validators discovered from the Application assembly.
@@ -49,7 +50,7 @@ builder.Services.AddVietRideMediatRBehaviors(
 
 // Infrastructure: repositories, security services, email stub, Redis OTP rate-limiter.
 builder.Services.AddInfrastructure(builder.Configuration, registerEventConsumer: !isTesting);
-builder.Services.AddVietRideIdempotency("identity");
+builder.Services.AddVietRideIdempotency("identity", requireAllMutations: true);
 
 var registerRecurringJobs = !isTesting;
 if (registerRecurringJobs)

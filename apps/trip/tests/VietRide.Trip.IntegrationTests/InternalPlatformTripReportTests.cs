@@ -217,7 +217,9 @@ public sealed class PlatformTripReportWebApplicationFactory : WebApplicationFact
                     provider.GetRequiredService<NpgsqlDataSource>(),
                     npgsql => npgsql.MigrationsHistoryTable(
                         "__ef_migrations_history",
-                        TripDbContext.SchemaName)));
+                        TripDbContext.SchemaName))
+                    .ConfigureWarnings(warnings => warnings.Ignore(
+                        Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning)));
             services.AddScoped<VietRideDbContextBase>(
                 provider => provider.GetRequiredService<TripDbContext>());
         });

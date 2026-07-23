@@ -86,6 +86,50 @@ public sealed class Day23ExplicitOutboxIdentityTests : IAsyncLifetime
         row.Id.Should().NotBe(Guid.Empty);
         row.EventType.Should().Be("identity.user.created");
         row.Status.Should().Be(OutboxEventStatus.PENDING);
+        using var persistedPayload = JsonDocument.Parse(row.Payload);
+        persistedPayload.RootElement.GetProperty("eventId").GetGuid().Should().Be(row.Id);
+    }
+
+    [Fact]
+    public async Task LegacyOverload_UsesPayloadIdentityAsCanonicalOutboxIdentity()
+    {
+        var eventId = Guid.NewGuid();
+
+        await using (var writeContext = _fixture.CreateContext())
+        {
+            var outbox = new IntegrationEventOutbox(_fixture.CreateStore(writeContext));
+
+            await outbox.EnqueueAsync(
+                "payment.payment.succeeded",
+                JsonSerializer.Serialize(new { eventId, paymentId = Guid.NewGuid() }),
+                CancellationToken.None);
+            await writeContext.SaveChangesAsync();
+        }
+
+        await using var readContext = _fixture.CreateContext();
+        var row = await readContext.OutboxEvents.SingleAsync();
+
+        row.Id.Should().Be(eventId);
+        using var persistedPayload = JsonDocument.Parse(row.Payload);
+        persistedPayload.RootElement.GetProperty("eventId").GetGuid().Should().Be(row.Id);
+    }
+
+    [Fact]
+    public async Task ExplicitIdentity_RejectsPayloadWithDifferentIdentity()
+    {
+        await using var context = _fixture.CreateContext();
+        var outbox = new IntegrationEventOutbox(_fixture.CreateStore(context));
+
+        var act = () => outbox.EnqueueAsync(
+            Guid.NewGuid(),
+            "payment.payment.succeeded",
+            JsonSerializer.Serialize(new { eventId = Guid.NewGuid() }),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithParameterName("payloadJson")
+            .WithMessage("*eventId does not match*");
+        context.ChangeTracker.Entries<OutboxEvent>().Should().BeEmpty();
     }
 
     [Fact]

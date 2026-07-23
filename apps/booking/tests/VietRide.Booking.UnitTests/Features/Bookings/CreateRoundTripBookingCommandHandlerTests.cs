@@ -173,7 +173,7 @@ public class CreateRoundTripBookingCommandHandlerTests
                 && items[1].ReferenceType == "BOOKING"
                 && items[1].ReferenceId != Guid.Empty
                 && items[1].Amount == 180_000),
-            "charge-round-trip-round-trip-idempotency-key",
+            "round-trip-idempotency-key",
             Arg.Any<CancellationToken>());
 
         await _tripClient.Received(1).LockRoundTripSeatsAsync(
@@ -182,7 +182,7 @@ public class CreateRoundTripBookingCommandHandlerTests
             ReturnTripId,
             Arg.Is<IReadOnlyList<string>>(seats => seats.SequenceEqual(new[] { "A01" })),
             PassengerUserId,
-            "lock-round-trip-round-trip-idempotency-key",
+            "round-trip-idempotency-key",
             600,
             Arg.Any<CancellationToken>());
         await _tripClient.DidNotReceiveWithAnyArgs()

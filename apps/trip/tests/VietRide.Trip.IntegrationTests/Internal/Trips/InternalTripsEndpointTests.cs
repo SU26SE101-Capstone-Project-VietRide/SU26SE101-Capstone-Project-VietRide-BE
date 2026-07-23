@@ -192,7 +192,7 @@ public sealed class InternalTripsEndpointTests
         using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
         using var client = factory.CreateClient();
         using var request = CreateAuthorizedRequest(HttpMethod.Post, $"/internal/v1/trips/{tripId}/lock-seats");
-        request.Headers.TryAddWithoutValidation("Idempotency-Key", Guid.NewGuid().ToString("N"));
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", Guid.NewGuid().ToString("D"));
         request.Content = JsonContent.Create(new { seatNumbers = new[] { "A01" }, holdOwnerId = Guid.NewGuid(), ttlSeconds = 60 });
 
         var response = await client.SendAsync(request);
@@ -213,7 +213,7 @@ public sealed class InternalTripsEndpointTests
         using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
         using var client = factory.CreateClient();
         using var request = CreateAuthorizedRequest(HttpMethod.Post, $"/internal/v1/trips/{Guid.NewGuid()}/lock-seats");
-        request.Headers.TryAddWithoutValidation("Idempotency-Key", Guid.NewGuid().ToString("N"));
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", Guid.NewGuid().ToString("D"));
         request.Content = JsonContent.Create(new { seatNumbers = new[] { "A01" }, holdOwnerId = Guid.NewGuid(), ttlSeconds = 60 });
 
         var response = await client.SendAsync(request);
@@ -241,7 +241,7 @@ public sealed class InternalTripsEndpointTests
         var response = await client.SendAsync(request);
 
         response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
-        await AssertErrorEnvelopeAsync(response, IdempotencyMiddleware.RequiredErrorCode, hasFields: true);
+        await AssertErrorEnvelopeAsync(response, IdempotencyMiddleware.RequiredErrorCode, hasFields: false);
         mediator.SendCount.Should().Be(0);
     }
 
@@ -249,7 +249,7 @@ public sealed class InternalTripsEndpointTests
     public async Task LockSeats_IdempotencyMiddleware_ReplaySameKeyReturnsSameSeatLockTokenWithoutSecondSend()
     {
         var redis = InMemoryRedisConnectionMultiplexer.Create();
-        var key = Guid.NewGuid().ToString("N");
+        var key = Guid.NewGuid().ToString("D");
         var firstToken = Guid.NewGuid();
         var downstreamCalls = 0;
         RequestDelegate next = async context =>
@@ -267,7 +267,7 @@ public sealed class InternalTripsEndpointTests
         var middleware = new IdempotencyMiddleware(
             next,
             redis,
-            new IdempotencyOptions { ServicePrefix = "trip" },
+            new IdempotencyOptions { ServicePrefix = "trip", RequireAllMutations = true },
             Microsoft.Extensions.Logging.Abstractions.NullLogger<IdempotencyMiddleware>.Instance);
         var body = JsonSerializer.Serialize(new { seatNumbers = new[] { "A01" }, holdOwnerId = Guid.NewGuid(), ttlSeconds = 60 });
         var firstContext = CreateIdempotencyContext(key, body);
@@ -285,7 +285,7 @@ public sealed class InternalTripsEndpointTests
     public async Task LockSeats_IdempotencyMiddleware_ReusedKeyDifferentBodyReturnsIdempotencyKeyMismatchWithoutSecondSend()
     {
         var redis = InMemoryRedisConnectionMultiplexer.Create();
-        var key = Guid.NewGuid().ToString("N");
+        var key = Guid.NewGuid().ToString("D");
         var downstreamCalls = 0;
         RequestDelegate next = async context =>
         {
@@ -296,7 +296,7 @@ public sealed class InternalTripsEndpointTests
         var middleware = new IdempotencyMiddleware(
             next,
             redis,
-            new IdempotencyOptions { ServicePrefix = "trip" },
+            new IdempotencyOptions { ServicePrefix = "trip", RequireAllMutations = true },
             Microsoft.Extensions.Logging.Abstractions.NullLogger<IdempotencyMiddleware>.Instance);
         var firstContext = CreateIdempotencyContext(key, "{\"seatNumbers\":[\"A01\"]}");
         var secondContext = CreateIdempotencyContext(key, "{\"seatNumbers\":[\"A02\"]}");
@@ -478,6 +478,7 @@ public sealed class InternalTripsEndpointTests
         using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
         using var client = factory.CreateClient();
         using var request = CreateAuthorizedRequest(HttpMethod.Post, $"/internal/v1/trips/{tripId}/release-seats");
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", Guid.NewGuid().ToString("D"));
         request.Content = JsonContent.Create(new { seatLockToken = Guid.NewGuid(), seatNumbers = new[] { "A01" } });
 
         var response = await client.SendAsync(request);
@@ -494,6 +495,7 @@ public sealed class InternalTripsEndpointTests
         using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
         using var client = factory.CreateClient();
         using var request = CreateAuthorizedRequest(HttpMethod.Post, $"/internal/v1/trips/{Guid.NewGuid()}/release-seats");
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", Guid.NewGuid().ToString("D"));
         request.Content = JsonContent.Create(new { seatLockToken = Guid.NewGuid(), seatNumbers = new[] { "Z99" } });
 
         var response = await client.SendAsync(request);
@@ -509,6 +511,7 @@ public sealed class InternalTripsEndpointTests
         using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
         using var client = factory.CreateClient();
         using var request = CreateAuthorizedRequest(HttpMethod.Post, $"/internal/v1/trips/{tripId}/book-seats");
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", Guid.NewGuid().ToString("D"));
         request.Content = JsonContent.Create(new
         {
             seatLockToken = Guid.NewGuid(),
@@ -530,6 +533,7 @@ public sealed class InternalTripsEndpointTests
         using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
         using var client = factory.CreateClient();
         using var request = CreateAuthorizedRequest(HttpMethod.Post, $"/internal/v1/trips/{Guid.NewGuid()}/book-seats");
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", Guid.NewGuid().ToString("D"));
         request.Content = JsonContent.Create(new
         {
             seatLockToken = Guid.NewGuid(),
@@ -550,6 +554,10 @@ public sealed class InternalTripsEndpointTests
         context.Request.Headers[IdempotencyMiddleware.IdempotencyKeyHeader] = idempotencyKey;
         context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(body));
         context.Response.Body = new MemoryStream();
+        context.SetEndpoint(new Endpoint(
+            _ => Task.CompletedTask,
+            new EndpointMetadataCollection(),
+            "test"));
         return context;
     }
 

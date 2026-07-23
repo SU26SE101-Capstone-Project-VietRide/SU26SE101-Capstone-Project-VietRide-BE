@@ -22,7 +22,7 @@ import { ShuttleService } from '../shuttle/shuttle.service';
 import { TRACKING_SOCKET_PATH, trackingTripRoom } from './location.constants';
 import { JoinTripTrackingSchema } from './dto/join-trip-tracking.dto';
 import { UpdateLocationSchema } from './dto/update-location.dto';
-import { LocationService } from './location.service';
+import { LocationService, type GpsUpdateEvent } from './location.service';
 
 interface TrackingSocket extends Socket {
   data: {
@@ -122,11 +122,15 @@ export class LocationGateway implements OnGatewayInit {
       if (!context.allowed || context.scope !== 'DRIVER')
         return { success: false, error: 'ACCESS_DENIED' };
       const result = await this.shuttleService.recordLocation(parsed.data, context);
+      if (result.duplicate) return { success: true };
       const room = shuttleRoom(parsed.data.shuttleTripId);
       this.server.to(room).emit('shuttle:gps:update', result.gps);
       if (result.eta) this.server.to(room).emit('shuttle:eta:update', result.eta);
       return { success: true };
     } catch (error) {
+      if ((error as Error).message === 'GPS_OPERATION_PAYLOAD_MISMATCH') {
+        return { success: false, error: 'IDEMPOTENCY_KEY_REUSED' };
+      }
       this.logger.error(`Failed shuttle GPS update: ${(error as Error).message}`);
       return { success: false, error: 'TRACKING_UNAVAILABLE' };
     }
@@ -195,15 +199,21 @@ export class LocationGateway implements OnGatewayInit {
       return { success: false, error: authorization.error ?? 'ACCESS_DENIED' };
     }
 
-    let event: Awaited<ReturnType<LocationService['recordLocation']>>;
+    let result: Awaited<ReturnType<LocationService['recordLocation']>>;
     try {
-      event = await this.locationService.recordLocation(parsed.data);
+      result = await this.locationService.recordLocation(parsed.data);
     } catch (error) {
+      if ((error as Error).message === 'GPS_OPERATION_PAYLOAD_MISMATCH') {
+        return { success: false, error: 'IDEMPOTENCY_KEY_REUSED' };
+      }
       this.logger.error(
         `Failed to record gps:update for trip ${parsed.data.tripId}: ${(error as Error).message}`,
       );
       return { success: false, error: 'TRACKING_UNAVAILABLE' };
     }
+
+    if (result.duplicate) return { success: true };
+    const event = result.event;
 
     this.server.to(trackingTripRoom(parsed.data.tripId)).emit('gps:update', event);
     void this.runDetection(event).catch((error) => {
@@ -215,9 +225,7 @@ export class LocationGateway implements OnGatewayInit {
     return { success: true };
   }
 
-  private async runDetection(
-    event: Awaited<ReturnType<LocationService['recordLocation']>>,
-  ): Promise<void> {
+  private async runDetection(event: GpsUpdateEvent): Promise<void> {
     await this.offRouteService.handleGpsUpdate(event);
     const etaUpdate = await this.etaService.handleGpsUpdate(event);
     if (etaUpdate) {

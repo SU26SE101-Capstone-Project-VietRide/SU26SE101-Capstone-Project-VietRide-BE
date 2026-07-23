@@ -88,7 +88,8 @@ public sealed class OperatorParcelsController : ControllerBase
             request.Decision,
             request.DepositAmount,
             request.Reason,
-            request.PaymentMethod), cancellationToken);
+            request.PaymentMethod,
+            Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString()), cancellationToken);
 
         return Ok(result);
     }
@@ -131,7 +132,8 @@ public sealed class OperatorParcelsController : ControllerBase
         var userId = CurrentUserClaims.GetUserId(User);
 
         var result = await _mediator.Send(
-            new ReturnParcelCommand(parcelId, operatorId, userId, request.ReturnReason),
+            new ReturnParcelCommand(
+                parcelId, operatorId, userId, request.ReturnReason, IdempotencyKey: ReadIdempotencyKey(parcelId)),
             cancellationToken);
 
         return Ok(result);
@@ -153,7 +155,8 @@ public sealed class OperatorParcelsController : ControllerBase
             ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
 
         var result = await _mediator.Send(
-            new ManualCancelParcelCommand(parcelId, operatorId, request.Reason, request.RefundChoice),
+            new ManualCancelParcelCommand(
+                parcelId, operatorId, request.Reason, request.RefundChoice, ReadIdempotencyKey(parcelId)),
             cancellationToken);
 
         return Ok(result);
@@ -206,7 +209,8 @@ public sealed class OperatorParcelsController : ControllerBase
         var userId = CurrentUserClaims.GetUserId(User);
 
         var result = await _mediator.Send(
-            new OverrideCapacityCommand(parcelId, operatorId, userId, request.Reason),
+            new OverrideCapacityCommand(
+                parcelId, operatorId, userId, request.Reason, ReadIdempotencyKey(parcelId)),
             cancellationToken);
 
         return Ok(result);
@@ -251,9 +255,22 @@ public sealed class OperatorParcelsController : ControllerBase
         var userId = CurrentUserClaims.GetUserId(User);
 
         var result = await _mediator.Send(
-            new UpdateParcelStatusCommand(parcelId, operatorId, userId, request.TargetStatus, request.Reason),
+            new UpdateParcelStatusCommand(
+                parcelId,
+                operatorId,
+                userId,
+                request.TargetStatus,
+                request.Reason,
+                ReadIdempotencyKey(parcelId)),
             cancellationToken);
 
         return Ok(result);
     }
+
+    private Guid ReadIdempotencyKey(Guid fallback)
+        => Guid.TryParse(
+            Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString(),
+            out var key)
+            ? key
+            : fallback;
 }

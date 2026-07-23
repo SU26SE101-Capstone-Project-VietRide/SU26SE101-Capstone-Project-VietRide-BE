@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Text;
 using FluentAssertions;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
@@ -48,6 +49,86 @@ public sealed class SubscriptionPaymentClientTests
         var exception = await action.Should().ThrowAsync<SubscriptionPaymentClientException>();
         exception.Which.StatusCode.Should().Be(502);
         exception.Which.ErrorCode.Should().Be("PAYMENT_SERVICE_INVALID_RESPONSE");
+    }
+
+    [Fact]
+    public async Task GetStatusesAsync_WhenPaymentReturnsRawList_ReturnsStatuses()
+    {
+        var paymentId = Guid.NewGuid();
+        var upgradeAttemptId = Guid.NewGuid();
+        var operatorId = Guid.NewGuid();
+        var subscriptionId = Guid.NewGuid();
+        var planId = Guid.NewGuid();
+        var periodFrom = DateTimeOffset.Parse("2026-07-22T09:00:00Z");
+        var dueAt = periodFrom.AddMinutes(15);
+        var client = CreateClient((request, _) =>
+        {
+            request.RequestUri!.PathAndQuery.Should().Contain($"upgradeAttemptId={upgradeAttemptId:D}");
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new[]
+                {
+                    new
+                    {
+                        paymentId,
+                        upgradeAttemptId,
+                        operatorId,
+                        operatorSubscriptionId = subscriptionId,
+                        planId,
+                        status = "SUCCEEDED",
+                        amount = 39900000L,
+                        method = "VNPAY",
+                        billingPeriod = "YEARLY",
+                        periodFrom,
+                        periodTo = periodFrom.AddYears(1),
+                        succeededAt = periodFrom.AddMinutes(5),
+                        dueAt,
+                    },
+                }),
+            });
+        });
+
+        var result = await client.GetStatusesAsync([upgradeAttemptId]);
+
+        result.Should().ContainSingle();
+        result[0].PaymentId.Should().Be(paymentId);
+        result[0].UpgradeAttemptId.Should().Be(upgradeAttemptId);
+        result[0].Status.Should().Be("SUCCEEDED");
+        result[0].DueAt.Should().Be(dueAt);
+    }
+
+    [Theory]
+    [InlineData("not-json", "text/plain")]
+    [InlineData("null", "application/json")]
+    public async Task GetStatusesAsync_WhenPaymentReturnsInvalidSuccessBody_ReturnsBadGatewayError(
+        string body,
+        string contentType)
+    {
+        var client = CreateClient((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(body, Encoding.UTF8, contentType),
+        }));
+
+        var action = () => client.GetStatusesAsync([Guid.NewGuid()]);
+
+        var exception = await action.Should().ThrowAsync<SubscriptionPaymentClientException>();
+        exception.Which.StatusCode.Should().Be(502);
+        exception.Which.ErrorCode.Should().Be("PAYMENT_SERVICE_INVALID_RESPONSE");
+    }
+
+    [Fact]
+    public async Task GetStatusesAsync_WhenPaymentReturnsError_PreservesUpstreamStatus()
+    {
+        var client = CreateClient((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+        {
+            Content = new StringContent("Payment unavailable", Encoding.UTF8, "text/plain"),
+        }));
+
+        var action = () => client.GetStatusesAsync([Guid.NewGuid()]);
+
+        var exception = await action.Should().ThrowAsync<SubscriptionPaymentClientException>();
+        exception.Which.StatusCode.Should().Be(503);
+        exception.Which.ErrorCode.Should().Be("PAYMENT_SERVICE_ERROR");
     }
 
     private static SubscriptionPaymentClient CreateClient(

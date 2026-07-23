@@ -29,6 +29,7 @@ builder.Services.AddVietRideSharedWeb(builder.Configuration, ServiceName);
 builder.Services.AddVietRideDbContext<ParcelDbContext>(
     builder.Configuration,
     configureDataSource: ParcelDbContext.ConfigurePostgresTypes);
+builder.Services.AddVietRideIntegrationInbox<ParcelDbContext>();
 builder.Services.AddVietRideMediatRBehaviors(
     handlerAssemblies: [typeof(ApplicationAssemblyMarker).Assembly]);
 var registerMessaging = !builder.Environment.IsEnvironment("Testing");

@@ -170,7 +170,7 @@ public class CreateRoundTripBookingIntegrationTests
                 userId,
                 "WALLET",
                 Arg.Any<IReadOnlyList<BatchChargeItem>>(),
-                $"charge-round-trip-{idempotencyKey}",
+                idempotencyKey,
                 Arg.Any<CancellationToken>());
         await _factory.TripClient.Received(1)
             .LockRoundTripSeatsAsync(
@@ -179,7 +179,7 @@ public class CreateRoundTripBookingIntegrationTests
                 returnTripId,
                 Arg.Any<IReadOnlyList<string>>(),
                 userId,
-                $"lock-round-trip-{idempotencyKey}",
+                idempotencyKey,
                 600,
                 Arg.Any<CancellationToken>());
         await _factory.TripClient.DidNotReceiveWithAnyArgs()

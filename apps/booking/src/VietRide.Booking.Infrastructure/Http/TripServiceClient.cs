@@ -229,7 +229,7 @@ public sealed class TripServiceClient : ITripServiceClient
                 HttpMethod.Post,
                 $"/internal/v1/trips/{tripId:D}/book-seats",
                 body,
-                idempotencyKey: null);
+                idempotencyKey: bookingId.ToString("D"));
 
             using var response = await _httpClient.SendAsync(request, cancellationToken)
                 .ConfigureAwait(false);
@@ -253,10 +253,15 @@ public sealed class TripServiceClient : ITripServiceClient
     public async Task<bool> BookRoundTripSeatsAsync(
         RoundTripBookSeatsLeg outbound,
         RoundTripBookSeatsLeg @return,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Guid? operationId = null)
     {
         var body = new BookRoundTripSeatsRequest(Map(outbound), Map(@return));
-        using var request = BuildJsonRequest(HttpMethod.Post, "/internal/v1/trips/round-trip/book-seats", body, null);
+        using var request = BuildJsonRequest(
+            HttpMethod.Post,
+            "/internal/v1/trips/round-trip/book-seats",
+            body,
+            (operationId ?? outbound.BookingId).ToString("D"));
         using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
         if (response.StatusCode == HttpStatusCode.NoContent) return true;
         if (response.StatusCode == HttpStatusCode.Conflict) return false;
@@ -282,7 +287,7 @@ public sealed class TripServiceClient : ITripServiceClient
                 HttpMethod.Post,
                 $"/internal/v1/trips/{tripId:D}/release-seats",
                 body,
-                idempotencyKey: null);
+                idempotencyKey: seatLockToken.ToString("D"));
 
             using var response = await _httpClient.SendAsync(request, cancellationToken)
                 .ConfigureAwait(false);

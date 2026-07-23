@@ -22,7 +22,7 @@ public sealed class BookingCancelledIntegrationEventHandlerTests
         command.Amount.Should().Be(integrationEvent.RefundAmount!.Value);
         command.ReferenceType.Should().Be("BOOKING_REFUND");
         command.ReferenceId.Should().Be(integrationEvent.BookingId!.Value);
-        command.IdempotencyKey.Should().Be($"booking-refund-{integrationEvent.EventId!.Value:N}");
+        command.IdempotencyKey.Should().Be(integrationEvent.EventId!.Value.ToString("D"));
     }
 
     [Fact]

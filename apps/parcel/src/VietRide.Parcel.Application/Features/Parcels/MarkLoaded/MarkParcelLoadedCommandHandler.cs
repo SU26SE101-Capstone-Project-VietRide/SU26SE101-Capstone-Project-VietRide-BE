@@ -91,6 +91,7 @@ public sealed class MarkParcelLoadedCommandHandler
                 snapshot.ParcelId,
                 parcel.ActualWeightKg ?? parcel.EstimatedWeightKg,
                 parcel.ActualVolumeM3 ?? parcel.EstimatedVolumeM3,
+                command.IdempotencyKey ?? snapshot.ParcelId,
                 cancellationToken));
 
         var eventId = Guid.NewGuid();

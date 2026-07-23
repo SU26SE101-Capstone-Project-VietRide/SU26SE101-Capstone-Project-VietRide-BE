@@ -270,3 +270,24 @@ model RuntimeConfigHistory {
   @@map("runtime_config_history")
   @@schema("vietride_rag")
 }
+
+model IdempotencyOperation {
+  operationId    String    @id @map("operation_id") @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  method         String    @db.VarChar(10)
+  path           String    @db.VarChar(500)
+  fingerprint    String    @db.Char(64)
+  ownerToken     String    @map("owner_token") @db.Uuid
+  status         String    @db.VarChar(20)
+  responseStatus Int?      @map("response_status")
+  responseHeaders Json?    @map("response_headers")
+  responseBody   String?   @map("response_body")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz(6)
+
+  @@index([userId, createdAt(sort: Desc)], map: "idx_idempotency_operations_user_created")
+  @@index([expiresAt], map: "idx_idempotency_operations_expires_at")
+  @@map("idempotency_operations")
+  @@schema("vietride_rag")
+}

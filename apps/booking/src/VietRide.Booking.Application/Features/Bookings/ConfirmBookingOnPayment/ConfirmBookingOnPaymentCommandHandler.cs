@@ -18,7 +18,6 @@ public sealed class ConfirmBookingOnPaymentCommandHandler
     private const string BookingReferenceType = "BOOKING";
     private const string BookingGroupReferenceType = "BOOKING_GROUP";
     private const string EventType = "booking.booking.confirmed";
-    private const int SeatLockTtlSeconds = 10 * 60;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -70,7 +69,11 @@ public sealed class ConfirmBookingOnPaymentCommandHandler
 
             static RoundTripBookSeatsLeg ToLeg(BookingPaymentTransitionSnapshot snapshot) => new(
                 snapshot.TripId, snapshot.SeatLockToken!.Value, snapshot.BookingId, snapshot.PassengerSeatAssignments);
-            if (!await _tripClient.BookRoundTripSeatsAsync(ToLeg(snapshots[0]), ToLeg(snapshots[1]), cancellationToken))
+            if (!await _tripClient.BookRoundTripSeatsAsync(
+                    ToLeg(snapshots[0]),
+                    ToLeg(snapshots[1]),
+                    cancellationToken,
+                    request.PaymentId))
                 throw new ConflictException("BOOKING_SEAT_UNAVAILABLE", "Round-trip seat locks expired before confirmation.");
 
             var changed = false;
@@ -109,10 +112,16 @@ public sealed class ConfirmBookingOnPaymentCommandHandler
         // re-check status and treat an already-transitioned booking as an idempotent no-op.
         try
         {
-            var seatLock = await ReplaySeatLockAsync(snapshot, cancellationToken);
+            if (!snapshot.SeatLockToken.HasValue)
+            {
+                throw new ConflictException(
+                    "BOOKING_SEAT_UNAVAILABLE",
+                    "Seat lock is no longer available for booking confirmation.");
+            }
+
             var booked = await _tripClient.BookSeatsAsync(
                 snapshot.TripId,
-                seatLock.SeatLockToken,
+                snapshot.SeatLockToken.Value,
                 snapshot.BookingId,
                 snapshot.PassengerSeatAssignments,
                 cancellationToken);
@@ -199,49 +208,4 @@ public sealed class ConfirmBookingOnPaymentCommandHandler
 
         return true;
     }
-
-    private async Task<SeatLockResult> ReplaySeatLockAsync(
-        BookingPaymentTransitionSnapshot snapshot,
-        CancellationToken cancellationToken)
-    {
-        var seatNumbers = snapshot.PassengerSeatAssignments
-            .Select(assignment => assignment.SeatNumber)
-            .Order(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        var idempotencyKey = BuildCreateBookingLockIdempotencyKey(
-            snapshot.PassengerUserId,
-            snapshot.TripId,
-            seatNumbers);
-
-        var outcome = await _tripClient.LockSeatsAsync(
-            snapshot.TripId,
-            seatNumbers,
-            snapshot.PassengerUserId,
-            idempotencyKey,
-            SeatLockTtlSeconds,
-            cancellationToken);
-
-        return outcome switch
-        {
-            LockSeatsOutcome.Success success => success.Data,
-            LockSeatsOutcome.SeatUnavailable unavailable => throw new ConflictException(
-                "BOOKING_SEAT_UNAVAILABLE",
-                $"One or more seats are unavailable: {string.Join(", ", unavailable.UnavailableSeats)}."),
-            LockSeatsOutcome.TripNotBookable notBookable => throw new ConflictException(
-                "BOOKING_TRIP_NOT_BOOKABLE",
-                notBookable.Message),
-            LockSeatsOutcome.TripNotFound => throw new CodedNotFoundException(
-                "TRIP_NOT_FOUND",
-                $"Trip '{snapshot.TripId}' not found."),
-            LockSeatsOutcome.TransportError transportError => throw new InvalidOperationException(
-                $"Seat lock replay failed: {transportError.Message}"),
-            _ => throw new InvalidOperationException("Seat lock replay failed."),
-        };
-    }
-
-    private static string BuildCreateBookingLockIdempotencyKey(
-        Guid passengerUserId,
-        Guid tripId,
-        IReadOnlyList<string> seatNumbers)
-        => $"lock-{passengerUserId}-{tripId}-{string.Join(",", seatNumbers)}";
 }

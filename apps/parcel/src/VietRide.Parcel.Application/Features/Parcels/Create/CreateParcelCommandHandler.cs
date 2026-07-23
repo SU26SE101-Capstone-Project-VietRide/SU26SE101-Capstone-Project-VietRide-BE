@@ -408,7 +408,7 @@ public sealed class CreateParcelCommandHandler
 
         if (sizeCategory != ParcelSizeCategory.EXTRA_LARGE)
         {
-            var idempotencyKey = $"parcel:deposit:{parcel.Id}";
+            var idempotencyKey = command.IdempotencyKey ?? parcel.Id.ToString("D");
             var outcome = await _paymentClient.ChargeParcelPaymentAsync(
                 "PARCEL",
                 parcel.Id,
@@ -422,7 +422,10 @@ public sealed class CreateParcelCommandHandler
             if (outcome.Kind == ChargeOutcomeKind.InsufficientFunds)
             {
                 if (parcel.VoucherUsageId.HasValue)
-                    await CompensateVoucherUsageAsync(parcel.Id, cancellationToken);
+                    await CompensateVoucherUsageAsync(
+                        parcel.Id,
+                        parcel.VoucherUsageId.Value,
+                        cancellationToken);
 
                 throw new CodedValidationException(
                     "INSUFFICIENT_FUNDS",
@@ -432,7 +435,10 @@ public sealed class CreateParcelCommandHandler
             if (outcome.Kind == ChargeOutcomeKind.TransportError)
             {
                 if (parcel.VoucherUsageId.HasValue)
-                    await CompensateVoucherUsageAsync(parcel.Id, cancellationToken);
+                    await CompensateVoucherUsageAsync(
+                        parcel.Id,
+                        parcel.VoucherUsageId.Value,
+                        cancellationToken);
 
                 throw new ParcelDependencyUnavailableException(
                     "PAYMENT_SERVICE_ERROR",
@@ -486,11 +492,17 @@ public sealed class CreateParcelCommandHandler
             "Failed to generate a unique parcel code after 3 attempts.");
     }
 
-    private async Task CompensateVoucherUsageAsync(Guid parcelId, CancellationToken cancellationToken)
+    private async Task CompensateVoucherUsageAsync(
+        Guid parcelId,
+        Guid voucherUsageId,
+        CancellationToken cancellationToken)
     {
         try
         {
-            await _bookingClient.DeleteVoucherUsageByReferenceAsync(parcelId, cancellationToken);
+            await _bookingClient.DeleteVoucherUsageByReferenceAsync(
+                parcelId,
+                voucherUsageId,
+                cancellationToken);
         }
         catch (Exception ex)
         {

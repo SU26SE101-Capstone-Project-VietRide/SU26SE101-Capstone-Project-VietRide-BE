@@ -25,6 +25,7 @@ builder.Services.AddVietRideSharedWeb(builder.Configuration, ServiceName);
 builder.Services.AddVietRideDbContext<TripDbContext>(
     builder.Configuration,
     configureDataSource: TripDbContext.ConfigurePostgresEnums);
+builder.Services.AddVietRideIntegrationInbox<TripDbContext>();
 var backgroundWorkersEnabled = AreBackgroundWorkersEnabled(
     builder.Configuration,
     builder.Environment);
@@ -35,7 +36,7 @@ if (backgroundWorkersEnabled)
 builder.Services.AddVietRideMediatRBehaviors(
     handlerAssemblies: [typeof(ApplicationAssemblyMarker).Assembly]);
 builder.Services.AddInfrastructure(builder.Configuration, backgroundWorkersEnabled);
-builder.Services.AddVietRideIdempotency("trip");
+builder.Services.AddVietRideIdempotency("trip", requireAllMutations: true);
 var app = builder.Build();
 
 if (!IsWebApplicationFactoryHost())

@@ -7,7 +7,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { extname } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import pino from 'pino';
 import { STORAGE_PROVIDER } from '../app/tokens';
 import type { RagInternalUser } from '../auth/rag-internal-user.types';
@@ -49,13 +48,14 @@ export class DocumentsService {
     dto: CreateDocumentDto,
     file: UploadedDocumentFile | undefined,
     user: RagInternalUser | undefined,
+    operationId?: string,
   ): Promise<KnowledgeDocumentResponse> {
     this.assertSystemAdmin(user);
     const runtimeConfig = await this.runtimeConfig.getSnapshot();
     const validFile = this.validateFile(file, runtimeConfig);
     this.validateTaxonomy(dto.accessLevel, dto.category, dto.operatorId);
 
-    const storagePath = this.buildStoragePath(validFile.originalname);
+    const storagePath = this.buildStoragePath(validFile.originalname, operationId);
     await this.storageProvider.uploadObject({
       storagePath,
       contentType: validFile.mimetype,
@@ -214,9 +214,15 @@ export class DocumentsService {
     });
   }
 
-  private buildStoragePath(originalFileName: string): string {
+  private buildStoragePath(originalFileName: string, operationId?: string): string {
     const extension = extname(originalFileName).toLowerCase();
-    return `${RAG_DOCUMENT_STORAGE_PREFIX}/${randomUUID()}${extension}`;
+    if (!operationId) {
+      throw new BadRequestException({
+        errorCode: 'IDEMPOTENCY_KEY_REQUIRED',
+        detail: 'Idempotency-Key is required for document upload',
+      });
+    }
+    return `${RAG_DOCUMENT_STORAGE_PREFIX}/${operationId}${extension}`;
   }
 
   private sanitizeFileName(originalFileName: string): string {

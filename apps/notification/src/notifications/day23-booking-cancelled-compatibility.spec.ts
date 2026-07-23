@@ -60,11 +60,13 @@ describe('Day 23 booking.cancelled compatibility:', () => {
       1,
       BOOKING_CANCELLED_ROUTING_KEY,
       event.eventId,
+      undefined,
     );
     expect(idempotency.begin).toHaveBeenNthCalledWith(
       2,
       BOOKING_CANCELLED_ROUTING_KEY,
       event.eventId,
+      undefined,
     );
     expect(notifications.createNotification).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -105,11 +107,13 @@ describe('Day 23 booking.cancelled compatibility:', () => {
       1,
       BOOKING_CANCELLED_ROUTING_KEY,
       event.bookingId,
+      undefined,
     );
     expect(idempotency.begin).toHaveBeenNthCalledWith(
       2,
       BOOKING_CANCELLED_ROUTING_KEY,
       event.bookingId,
+      undefined,
     );
     expect(notifications.createNotification).toHaveBeenCalledWith(
       expect.objectContaining({

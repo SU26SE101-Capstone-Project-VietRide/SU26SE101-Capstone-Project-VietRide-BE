@@ -7,4 +7,5 @@ public sealed record MarkParcelLoadedCommand(
     Guid TripId,
     string ParcelCode,
     Guid? LoadedByUserId,
-    Guid? OperatorId = null) : IRequest<MarkParcelLoadedResponse>;
+    Guid? OperatorId = null,
+    Guid? IdempotencyKey = null) : IRequest<MarkParcelLoadedResponse>;

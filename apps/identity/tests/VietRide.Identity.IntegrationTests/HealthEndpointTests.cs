@@ -23,7 +23,7 @@ public class HealthEndpointTests : IClassFixture<VietRideWebApplicationFactory>
     [Fact]
     public async Task GetHealth_Returns200_WithServiceName()
     {
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
 
         var response = await client.GetAsync("/health");
 
@@ -38,7 +38,7 @@ public class HealthEndpointTests : IClassFixture<VietRideWebApplicationFactory>
     [Fact]
     public async Task GetPing_Returns200_WithEnvelopedServiceName()
     {
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
 
         var response = await client.GetAsync("/v1/ping");
 
@@ -54,7 +54,7 @@ public class HealthEndpointTests : IClassFixture<VietRideWebApplicationFactory>
     [Fact]
     public async Task GetSwagger_Returns200_WithUniqueOperatorSummarySchemas()
     {
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
 
         var response = await client.GetAsync("/swagger/v1/swagger.json");
 
@@ -69,7 +69,7 @@ public class HealthEndpointTests : IClassFixture<VietRideWebApplicationFactory>
     [Fact]
     public async Task GetSwagger_IdempotencyContractMatchesRuntimeMetadata()
     {
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
 
         await IdempotencyOpenApiContractAssertions.AssertMatchesRuntimeMetadataAsync(client, _factory.Services);
     }

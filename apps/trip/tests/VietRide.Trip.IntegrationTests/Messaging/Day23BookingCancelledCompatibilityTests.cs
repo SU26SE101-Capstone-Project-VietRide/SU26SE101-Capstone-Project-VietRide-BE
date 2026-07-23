@@ -130,6 +130,8 @@ public sealed class Day23BookingCancelledCompatibilityTests
         var options = new DbContextOptionsBuilder<TripDbContext>()
             .UseNpgsql(builder.Build(), npgsql =>
                 npgsql.MigrationsHistoryTable("__ef_migrations_history", TripDbContext.SchemaName))
+            .ConfigureWarnings(warnings => warnings.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning))
             .Options;
         return new TripDbContext(options, new SystemClock());
     }

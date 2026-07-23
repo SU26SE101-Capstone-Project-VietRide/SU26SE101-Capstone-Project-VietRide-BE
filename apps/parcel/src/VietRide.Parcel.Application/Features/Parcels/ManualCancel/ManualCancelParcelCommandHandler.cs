@@ -89,6 +89,7 @@ public sealed class ManualCancelParcelCommandHandler
                     parcel.Id,
                     parcel.ActualWeightKg ?? parcel.EstimatedWeightKg,
                     parcel.ActualVolumeM3 ?? parcel.EstimatedVolumeM3,
+                    command.IdempotencyKey ?? parcel.Id,
                     cancellationToken));
         }
 

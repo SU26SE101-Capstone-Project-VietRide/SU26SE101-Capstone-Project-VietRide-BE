@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { RedisService } from '@vietride/nest-redis';
 import { z } from 'zod';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { ENV_TOKEN } from '../app/tokens';
 import type { TrackingUser } from '../auth/tracking-user.types';
 import { TrackingInternalJwtSigner } from '../authorization/tracking-internal-jwt.signer';
@@ -10,10 +10,12 @@ import {
   SHUTTLE_BUFFER_MAX_ITEMS,
   SHUTTLE_BUFFER_TTL_SECONDS,
   SHUTTLE_ETA_TTL_SECONDS,
+  SHUTTLE_GPS_IDEMPOTENCY_TTL_SECONDS,
   SHUTTLE_LATEST_TTL_SECONDS,
   shuttleBufferKey,
   shuttleEtaKey,
   shuttleEtaStateKey,
+  shuttleGpsIdempotencyKey,
   shuttleLatestKey,
 } from './shuttle.constants';
 import type { ShuttleGpsUpdateDto } from './shuttle.dto';
@@ -46,6 +48,24 @@ export interface ShuttleEtaEvent {
   distanceMeters: number;
   updatedAt: string;
 }
+
+const RECORD_SHUTTLE_GPS_SCRIPT = `
+local existing = redis.call('GET', KEYS[1])
+if existing then
+  if existing == ARGV[1] then return 0 end
+  return -1
+end
+redis.call('SET', KEYS[1], ARGV[1], 'EX', tonumber(ARGV[3]))
+redis.call('SET', KEYS[2], ARGV[2], 'EX', tonumber(ARGV[4]))
+redis.call('RPUSH', KEYS[3], ARGV[2])
+redis.call('LTRIM', KEYS[3], -tonumber(ARGV[5]), -1)
+redis.call('EXPIRE', KEYS[3], tonumber(ARGV[6]))
+return 1
+`;
+
+const GPS_ACCEPTED = 1;
+const GPS_DUPLICATE = 0;
+const GPS_PAYLOAD_MISMATCH = -1;
 
 @Injectable()
 export class ShuttleService {
@@ -101,19 +121,38 @@ export class ShuttleService {
   ): Promise<{
     gps: ShuttleGpsEvent;
     eta?: ShuttleEtaEvent;
+    duplicate: boolean;
   }> {
     const client = this.redis.getClient();
     const payload = JSON.stringify(dto);
     const bufferKey = shuttleBufferKey(dto.shuttleTripId);
-    await client
-      .multi()
-      .set(shuttleLatestKey(dto.shuttleTripId), payload, 'EX', SHUTTLE_LATEST_TTL_SECONDS)
-      .rpush(bufferKey, payload)
-      .ltrim(bufferKey, -SHUTTLE_BUFFER_MAX_ITEMS, -1)
-      .expire(bufferKey, SHUTTLE_BUFFER_TTL_SECONDS)
-      .exec();
+    const fingerprint = createHash('sha256').update(payload).digest('hex');
+    const result = Number(
+      await client.eval(
+        RECORD_SHUTTLE_GPS_SCRIPT,
+        3,
+        shuttleGpsIdempotencyKey(dto.shuttleTripId, dto.recordedAt),
+        shuttleLatestKey(dto.shuttleTripId),
+        bufferKey,
+        fingerprint,
+        payload,
+        String(SHUTTLE_GPS_IDEMPOTENCY_TTL_SECONDS),
+        String(SHUTTLE_LATEST_TTL_SECONDS),
+        String(SHUTTLE_BUFFER_MAX_ITEMS),
+        String(SHUTTLE_BUFFER_TTL_SECONDS),
+      ),
+    );
+    if (result === GPS_DUPLICATE) {
+      return { gps: dto, duplicate: true };
+    }
+    if (result === GPS_PAYLOAD_MISMATCH) {
+      throw new Error('GPS_OPERATION_PAYLOAD_MISMATCH');
+    }
+    if (result !== GPS_ACCEPTED) {
+      throw new Error(`Unexpected Redis idempotency result: ${result}`);
+    }
     const eta = await this.calculateEta(dto, context);
-    return eta ? { gps: dto, eta } : { gps: dto };
+    return eta ? { gps: dto, eta, duplicate: false } : { gps: dto, duplicate: false };
   }
 
   async getLatest(shuttleTripId: string): Promise<unknown> {

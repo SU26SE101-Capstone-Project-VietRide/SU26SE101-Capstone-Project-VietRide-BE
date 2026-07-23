@@ -55,8 +55,10 @@ export class IngestService {
   }
 
   async processEvent(event: RagIngestOutboxEvent): Promise<boolean> {
-    const locked = await this.repository.markEventPublishing(event.id);
-    if (!locked) return false;
+    if (event.status !== 'PUBLISHING') {
+      const locked = await this.repository.markEventPublishing(event.id);
+      if (!locked) return false;
+    }
 
     let payload: RagDocumentIngestPayload;
     try {
@@ -68,7 +70,8 @@ export class IngestService {
     }
 
     try {
-      await this.processDocument(payload.documentId);
+      const outcome = await this.processDocumentWithOutcome(payload.documentId, event.id);
+      if (outcome === 'locked') return false;
       await this.repository.markEventPublished(event.id);
       return true;
     } catch (error) {
@@ -85,19 +88,29 @@ export class IngestService {
     }
   }
 
-  async processDocument(documentId: string): Promise<boolean> {
-    const state = await this.idempotency.begin(documentId);
-    if (state !== 'acquired') {
-      this.logger.info({ documentId, state }, 'Skipping RAG document ingest');
-      return false;
+  async processDocument(documentId: string, operationId = documentId): Promise<boolean> {
+    return (await this.processDocumentWithOutcome(documentId, operationId)) === 'processed';
+  }
+
+  async processDocumentWithOutcome(
+    documentId: string,
+    operationId: string,
+  ): Promise<'processed' | 'settled' | 'locked'> {
+    const lease = await this.idempotency.begin(operationId);
+    if (lease.state !== 'acquired') {
+      this.logger.info(
+        { documentId, operationId, state: lease.state },
+        'Skipping RAG document ingest',
+      );
+      return lease.state === 'locked' ? 'locked' : 'settled';
     }
 
     try {
       const document = await this.loadProcessableDocument(documentId);
       const processing = await this.repository.markDocumentProcessing(documentId);
       if (!processing) {
-        await this.idempotency.markProcessed(documentId);
-        return false;
+        await this.idempotency.markProcessed(operationId, lease.ownerToken);
+        return 'settled';
       }
 
       try {
@@ -117,16 +130,18 @@ export class IngestService {
           this.env.OPENROUTER_EMBEDDING_MODEL,
           embeddingDimensions,
         );
-        await this.idempotency.markProcessed(documentId);
-        this.logger.info({ documentId, chunkCount: chunks.length }, 'RAG document ingest completed');
-        return true;
+        await this.idempotency.markProcessed(operationId, lease.ownerToken);
+        this.logger.info(
+          { documentId, chunkCount: chunks.length },
+          'RAG document ingest completed',
+        );
+        return 'processed';
       } catch (error) {
         await this.repository.markDocumentFailed(documentId, error);
-        await this.idempotency.release(documentId);
         throw error;
       }
     } catch (error) {
-      await this.idempotency.release(documentId);
+      await this.idempotency.release(operationId, lease.ownerToken);
       throw error;
     }
   }

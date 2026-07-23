@@ -4,7 +4,7 @@ namespace VietRide.Identity.Application.Events;
 
 /// <summary>
 /// Integration event emitted when a passenger user is created (BSOT §7.3).
-/// Serializes to camelCase keys: { userId, role, email, createdAt }.
+/// The outbox normalizes the serialized payload to include its canonical eventId.
 /// </summary>
 public sealed record UserCreatedIntegrationEvent(
     [property: JsonPropertyName("userId")] Guid UserId,

@@ -122,15 +122,73 @@ public sealed class SubscriptionPaymentClient : ISubscriptionPaymentClient
         if (upgradeAttemptIds.Count == 0)
             return Array.Empty<SubscriptionPaymentStatusResult>();
         var query = string.Join("&", upgradeAttemptIds.Select(id => $"upgradeAttemptId={id:D}"));
-        using var response = await _httpClient.GetAsync(
-            $"/internal/v1/payments/subscription-status?{query}",
-            cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        var envelope = await response.Content.ReadFromJsonAsync<ApiResponse<IReadOnlyList<SubscriptionPaymentStatusResult>>>(
-            JsonOptions,
-            cancellationToken).ConfigureAwait(false);
-        if (envelope is null || !envelope.Success || envelope.Data is null)
-            throw new SubscriptionPaymentClientException(502, "PAYMENT_SERVICE_INVALID_RESPONSE", "Payment status response is invalid.");
-        return envelope.Data;
+        HttpResponseMessage response;
+        try
+        {
+            response = await _httpClient.GetAsync(
+                $"/internal/v1/payments/subscription-status?{query}",
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException)
+        {
+            throw new SubscriptionPaymentClientException(
+                503,
+                "PAYMENT_SERVICE_UNAVAILABLE",
+                "Payment service is unavailable.",
+                exception);
+        }
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                ApiResponse? failure = null;
+                try
+                {
+                    failure = await response.Content.ReadFromJsonAsync<ApiResponse>(
+                        JsonOptions,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is JsonException or NotSupportedException)
+                {
+                    // Preserve the upstream status when Payment returns a non-ADR response.
+                }
+
+                throw new SubscriptionPaymentClientException(
+                    (int)response.StatusCode,
+                    failure?.Error.Code ?? "PAYMENT_SERVICE_ERROR",
+                    failure?.Error.Message ?? "Payment status query failed.");
+            }
+
+            IReadOnlyList<SubscriptionPaymentStatusResult>? statuses;
+            try
+            {
+                statuses = await response.Content.ReadFromJsonAsync<IReadOnlyList<SubscriptionPaymentStatusResult>>(
+                    JsonOptions,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is JsonException or NotSupportedException)
+            {
+                throw new SubscriptionPaymentClientException(
+                    502,
+                    "PAYMENT_SERVICE_INVALID_RESPONSE",
+                    "Payment service returned an invalid status response.",
+                    exception);
+            }
+
+            if (statuses is null)
+            {
+                throw new SubscriptionPaymentClientException(
+                    502,
+                    "PAYMENT_SERVICE_INVALID_RESPONSE",
+                    "Payment service returned an empty status response.");
+            }
+
+            return statuses;
+        }
     }
 }

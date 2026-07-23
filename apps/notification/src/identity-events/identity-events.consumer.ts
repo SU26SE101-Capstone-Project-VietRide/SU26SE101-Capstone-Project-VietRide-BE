@@ -101,7 +101,7 @@ export class IdentityEventsConsumer implements OnModuleInit {
       throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
     }
 
-    const processingState = await this.idempotency.begin(routingKey, messageId);
+    const processingState = await this.idempotency.begin(routingKey, messageId, raw.content);
     if (processingState === 'duplicate') {
       this.logger.log(`Skipping already handled ${routingKey} messageId=${messageId}`);
       return;
@@ -151,7 +151,7 @@ export class IdentityEventsConsumer implements OnModuleInit {
       throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
     }
 
-    const processingState = await this.idempotency.begin(routingKey, messageId);
+    const processingState = await this.idempotency.begin(routingKey, messageId, raw.content);
     if (processingState === 'duplicate') {
       this.logger.log(`Skipping already handled ${routingKey} messageId=${messageId}`);
       return;

@@ -15,6 +15,8 @@ public sealed class TripAuditLogPersistenceTests
     {
         var options = new DbContextOptionsBuilder<TripDbContext>()
             .UseNpgsql("Host=localhost;Database=unused;Username=unused;Password=unused")
+            .ConfigureWarnings(warnings => warnings.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning))
             .Options;
         using var dbContext = new TripDbContext(options, new SystemClock());
         var model = dbContext.GetService<IDesignTimeModel>().Model;

@@ -64,6 +64,7 @@ describe('DocumentsService', () => {
       },
       makeFile('faq.txt', 'text/plain'),
       ADMIN_USER,
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
     );
 
     expect(storageProvider.uploadObject).toHaveBeenCalledWith(
@@ -95,6 +96,7 @@ describe('DocumentsService', () => {
         },
         makeFile('faq.txt', 'text/plain'),
         PASSENGER_USER,
+        'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
@@ -152,6 +154,7 @@ describe('DocumentsService', () => {
         },
         makeFile('faq.pdf', 'application/pdf'),
         ADMIN_USER,
+        'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });

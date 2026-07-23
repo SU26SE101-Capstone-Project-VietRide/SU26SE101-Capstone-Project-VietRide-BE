@@ -152,6 +152,7 @@ public sealed class ConfirmPaymentForParcelCommandHandler
             snapshot.ParcelId,
             cargo.WeightKg,
             cargo.VolumeM3,
+            paymentId,
             cancellationToken);
 
         outcome ??= await _tripClient.ReserveCargoAsync(

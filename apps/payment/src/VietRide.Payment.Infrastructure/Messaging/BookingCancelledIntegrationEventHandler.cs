@@ -44,7 +44,7 @@ public sealed class BookingCancelledIntegrationEventHandler
             integrationEvent.RefundAmount.Value,
             BookingRefundReferenceType,
             integrationEvent.BookingId!.Value,
-            $"booking-refund-{(integrationEvent.EventId ?? integrationEvent.BookingId):N}");
+            (integrationEvent.EventId ?? integrationEvent.BookingId)!.Value.ToString("D"));
 
         for (var attempt = 1; attempt <= MaxAttempts; attempt++)
         {

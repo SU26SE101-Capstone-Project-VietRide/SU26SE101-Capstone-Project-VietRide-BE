@@ -64,6 +64,7 @@ public sealed class HandleTripCancelledCommandHandler
                     parcel.ParcelId,
                     0m,
                     0.0001m,
+                    parcel.ParcelId,
                     cancellationToken));
 
             var refundAmount = await ParcelRefundAmountCalculator.CalculateRefundAsync(

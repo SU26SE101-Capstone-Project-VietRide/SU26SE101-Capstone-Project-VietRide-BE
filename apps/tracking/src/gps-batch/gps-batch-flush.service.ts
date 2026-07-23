@@ -23,6 +23,7 @@ import {
  */
 const ATOMIC_RENAME_SCRIPT = `
 if redis.call('EXISTS', KEYS[2]) == 1 then return {-1} end
+if redis.call('EXISTS', KEYS[1]) == 0 then return {0} end
 local renamed = redis.call('RENAMENX', KEYS[1], KEYS[2])
 if renamed == 0 then return {0} end
 return redis.call('LRANGE', KEYS[2], 0, -1)
@@ -80,7 +81,7 @@ export class GpsBatchFlushService {
       }
 
       try {
-        await this.prisma.gpsTrail.createMany({
+        const result = await this.prisma.gpsTrail.createMany({
           data: parsedRows.map((row) => ({
             tripId: row.tripId,
             latitude: row.latitude,
@@ -89,13 +90,16 @@ export class GpsBatchFlushService {
             ...(row.speedKmh !== undefined ? { speedKmh: row.speedKmh } : {}),
             ...(row.headingDeg !== undefined ? { headingDeg: row.headingDeg } : {}),
           })),
+          skipDuplicates: true,
         });
 
         await client.del(processingKey);
-        inserted += parsedRows.length;
+        inserted += result.count;
       } catch (err) {
         // Processing key preserved — next flush cycle will retry it
-        this.logger.error(`DB insert failed for trip ${tripId}, processing key retained: ${(err as Error).message}`);
+        this.logger.error(
+          `DB insert failed for trip ${tripId}, processing key retained: ${(err as Error).message}`,
+        );
         continue;
       }
     }
@@ -109,7 +113,9 @@ export class GpsBatchFlushService {
     bufferKey: string,
     processingKey: string,
   ): Promise<string[]> {
-    const result = (await client.eval(ATOMIC_RENAME_SCRIPT, 2, bufferKey, processingKey)) as number[] | string[];
+    const result = (await client.eval(ATOMIC_RENAME_SCRIPT, 2, bufferKey, processingKey)) as
+      | number[]
+      | string[];
 
     if (result.length === 1 && result[0] === PROCESSING_BUSY) {
       // Stale processing key exists — retry its data first

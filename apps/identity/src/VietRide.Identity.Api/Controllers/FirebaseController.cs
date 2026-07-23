@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc.ModelBinding;
 using VietRide.Identity.Api.Controllers.Requests;
 using VietRide.Identity.Application.Features.Firebase.CreateFirebaseCustomToken;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Identity.Api.Controllers;
 
@@ -21,6 +22,7 @@ public sealed class FirebaseController : ControllerBase
     }
 
     [HttpPost("custom-token")]
+    [SkipIdempotency("Firebase custom-token responses contain credentials and must not be cached in Redis.")]
     [ProducesResponseType(typeof(ApiResponse<FirebaseCustomTokenResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]

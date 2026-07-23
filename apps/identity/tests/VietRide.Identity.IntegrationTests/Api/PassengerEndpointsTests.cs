@@ -97,7 +97,7 @@ public sealed class PassengerEndpointsTests : IClassFixture<AuthWebApplicationFa
                 services.RemoveAll<IMediator>();
                 services.AddSingleton(sender);
             });
-        }).CreateClient();
+        }).CreateIdempotentClient();
     }
 
     private static void AssertSuccessEnvelope(JsonDocument doc, int expectedStatusCode)

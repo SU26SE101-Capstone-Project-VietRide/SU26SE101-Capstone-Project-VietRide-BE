@@ -5,11 +5,13 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { RedisService } from '@vietride/nest-redis';
+import { createHash, randomUUID } from 'node:crypto';
 import { NotificationType } from '../generated/notification-prisma-client';
 import type { CreateOperatorAnnouncementDto } from './dto/create-operator-announcement.dto';
 import { IdentityOperatorRecipientProvider } from './identity-operator-recipient.provider';
 import { NotificationsService } from './notifications.service';
 import { TripAnnouncementRecipientProvider } from './trip-announcement-recipient.provider';
+import { requireUuidV4IdempotencyKey } from '../swagger/idempotency-key';
 
 export interface OperatorAnnouncementResult {
   announcementId: string;
@@ -18,6 +20,13 @@ export interface OperatorAnnouncementResult {
 
 @Injectable()
 export class OperatorAnnouncementService {
+  private static readonly RELEASE_LOCK_SCRIPT = `
+    if redis.call('GET', KEYS[1]) == ARGV[1] then
+      return redis.call('DEL', KEYS[1])
+    end
+    return 0
+  `;
+
   constructor(
     private readonly notificationsService: NotificationsService,
     private readonly identityRecipients: IdentityOperatorRecipientProvider,
@@ -31,17 +40,19 @@ export class OperatorAnnouncementService {
     idempotencyKey: string | undefined,
     dto: CreateOperatorAnnouncementDto,
   ): Promise<OperatorAnnouncementResult> {
-    if (!idempotencyKey?.trim()) {
-      throw new BadRequestException({
-        errorCode: 'IDEMPOTENCY_KEY_REQUIRED',
-        detail: 'Idempotency-Key header is required',
-      });
-    }
-    const responseKey = `notification:operator-announcement:${actorUserId}:${idempotencyKey.trim()}`;
+    const normalizedKey = requireUuidV4IdempotencyKey(idempotencyKey);
+    const fingerprint = createHash('sha256')
+      .update(JSON.stringify({ actorUserId, operatorId, dto }))
+      .digest('hex')
+      .toUpperCase();
+    const responseKey = `notification:operator-announcement:${actorUserId}:${normalizedKey}`;
     const existing = await this.redis.get(responseKey);
-    if (existing) return JSON.parse(existing) as OperatorAnnouncementResult;
+    if (existing) return this.parseStoredResponse(existing, fingerprint);
     const lockKey = `${responseKey}:lock`;
-    const lockAcquired = await this.redis.getClient().set(lockKey, '1', 'EX', 60, 'NX');
+    const ownerToken = randomUUID();
+    const lockAcquired = await this.redis
+      .getClient()
+      .set(lockKey, ownerToken, 'EX', 60, 'NX');
     if (!lockAcquired) {
       const completed = await this.waitForCompletedResponse(responseKey);
       if (completed) return completed;
@@ -72,7 +83,7 @@ export class OperatorAnnouncementService {
             title: dto.title,
             body: dto.body,
             data: { scope: dto.scope, operatorId, ...(dto.tripId ? { tripId: dto.tripId } : {}) },
-            dedupeKey: `operator-announcement:${actorUserId}:${idempotencyKey.trim()}:${userId}`,
+            dedupeKey: `operator-announcement:${actorUserId}:${normalizedKey}:${userId}`,
           }),
         ),
       );
@@ -80,10 +91,12 @@ export class OperatorAnnouncementService {
         announcementId: notifications[0]!.id,
         recipientCount: uniqueRecipients.length,
       };
-      await this.redis.set(responseKey, JSON.stringify(result), 86_400);
+      await this.redis.set(responseKey, JSON.stringify({ fingerprint, result }), 86_400);
       return result;
     } finally {
-      await this.redis.getClient().del(lockKey);
+      await this.redis
+        .getClient()
+        .eval(OperatorAnnouncementService.RELEASE_LOCK_SCRIPT, 1, lockKey, ownerToken);
     }
   }
 
@@ -93,8 +106,34 @@ export class OperatorAnnouncementService {
     for (let attempt = 0; attempt < 20; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 100));
       const response = await this.redis.get(responseKey);
-      if (response) return JSON.parse(response) as OperatorAnnouncementResult;
+      if (response) {
+        const stored = JSON.parse(response) as {
+          result?: OperatorAnnouncementResult;
+          announcementId?: string;
+          recipientCount?: number;
+        };
+        return stored.result ?? (stored as OperatorAnnouncementResult);
+      }
     }
     return null;
+  }
+
+  private parseStoredResponse(
+    value: string,
+    fingerprint: string,
+  ): OperatorAnnouncementResult {
+    const stored = JSON.parse(value) as {
+      fingerprint?: string;
+      result?: OperatorAnnouncementResult;
+      announcementId?: string;
+      recipientCount?: number;
+    };
+    if (stored.fingerprint && stored.fingerprint !== fingerprint) {
+      throw new BadRequestException({
+        errorCode: 'IDEMPOTENCY_KEY_MISMATCH',
+        detail: 'The Idempotency-Key was reused with a different request',
+      });
+    }
+    return stored.result ?? (stored as OperatorAnnouncementResult);
   }
 }

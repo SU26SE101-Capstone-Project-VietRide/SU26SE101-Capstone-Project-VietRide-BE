@@ -11,4 +11,5 @@ public sealed record ReviewParcelCommand(
     string Decision,
     long? DepositAmount,
     string? Reason,
-    string? PaymentMethod) : IRequest<ReviewParcelResponse>;
+    string? PaymentMethod,
+    string? IdempotencyKey = null) : IRequest<ReviewParcelResponse>;

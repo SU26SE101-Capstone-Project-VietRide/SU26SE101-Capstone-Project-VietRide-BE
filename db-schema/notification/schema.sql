@@ -173,6 +173,20 @@ CREATE UNIQUE INDEX email_deliveries_dedupe_key_key
 -- TRIGGERS
 -- =============================================================================
 
+CREATE TABLE processed_messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    consumer_name VARCHAR(200) NOT NULL,
+    message_id VARCHAR(100) NOT NULL,
+    routing_key VARCHAR(200) NOT NULL,
+    payload_hash CHAR(64) NOT NULL,
+    processed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX uq_processed_messages_consumer_message
+    ON processed_messages (consumer_name, message_id);
+CREATE INDEX idx_processed_messages_processed_at
+    ON processed_messages (processed_at);
+
 CREATE OR REPLACE FUNCTION trg_set_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN NEW.updated_at = now(); RETURN NEW; END;

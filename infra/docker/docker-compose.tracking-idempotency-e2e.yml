@@ -1,0 +1,59 @@
+name: tracking-idempotency-e2e
+
+services:
+  postgres:
+    container_name: tracking-idempotency-e2e-postgres
+    ports:
+      - '55461:5432'
+    healthcheck: &fast-healthcheck
+      interval: 2s
+      timeout: 5s
+      retries: 90
+      start_period: 5s
+  redis:
+    container_name: tracking-idempotency-e2e-redis
+    ports:
+      - '56391:6379'
+    healthcheck: *fast-healthcheck
+  rabbitmq:
+    container_name: tracking-idempotency-e2e-rabbitmq
+    ports:
+      - '55691:5672'
+      - '55692:15672'
+  tracking:
+    container_name: tracking-idempotency-e2e-tracking
+    environment:
+      NODE_ENV: test
+      PORT: 3001
+      GATEWAY_URL: http://host.docker.internal:56121
+      INTERNAL_JWT_SECRET: tracking-idempotency-e2e-secret-32-chars
+      DATABASE_URL: postgresql://vietride:vietride_dev@postgres:5432/vietride_tracking
+      TRACKING_DATABASE_URL: postgresql://vietride:vietride_dev@postgres:5432/vietride_tracking
+      REDIS_URL: redis://redis:6379
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      RABBITMQ_URL: amqp://vietride:vietride_dev@rabbitmq:5672
+      RABBITMQ_EXCHANGE: vietride.events
+      JWT_PUBLIC_KEY_URL: http://host.docker.internal:56131/jwks
+      USER_JWT_PUBLIC_KEY: ${TRACKING_E2E_PUBLIC_KEY:-}
+      TRIP_SERVICE_BASE_URL: http://host.docker.internal:56131
+      BOOKING_SERVICE_BASE_URL: http://host.docker.internal:56131
+      PARCEL_SERVICE_BASE_URL: http://host.docker.internal:56131
+      TRACKING_AUTH_HTTP_TIMEOUT_MS: 2000
+      TRACKING_DATA_PROVIDER_TIMEOUT_MS: 2000
+      TRACKING_GPS_FLUSH_ENABLED: 'true'
+      TRACKING_GPS_FLUSH_INTERVAL_MS: 15000
+      TRACKING_TRIP_DELAY_ENABLED: 'false'
+      TRACKING_OUTBOX_PUBLISH_ENABLED: 'false'
+      TRACKING_CORS_ORIGIN: '*'
+      TRACKING_SWAGGER_ENABLED: 'false'
+      LOG_LEVEL: warn
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    ports:
+      - '56121:3001'
+    healthcheck: *fast-healthcheck
+
+networks:
+  default:
+    name: tracking-idempotency-e2e-net
