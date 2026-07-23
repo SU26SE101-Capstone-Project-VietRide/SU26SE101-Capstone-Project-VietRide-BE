@@ -30,7 +30,7 @@ public sealed class TripDbContext : VietRideDbContextBase
         builder.MapEnum<TripStopStatus>($"{SchemaName}.trip_stop_status", PostgresEnumNameTranslator);
         builder.MapEnum<TripStopFareSource>($"{SchemaName}.trip_stop_fare_source", PostgresEnumNameTranslator);
         builder.MapEnum<TripGenerationSkipReason>($"{SchemaName}.trip_generation_skip_reason", PostgresEnumNameTranslator);
-        builder.MapEnum<VehicleStatus>($"{SchemaName}.vehicle_status", PostgresEnumNameTranslator);
+        builder.MapEnum<VehicleStatus>("public.vehicle_status", PostgresEnumNameTranslator);
         builder.MapEnum<IncidentCategory>($"{SchemaName}.incident_category", PostgresEnumNameTranslator);
     }
 
