@@ -33,6 +33,7 @@ public interface IBookingServiceClient
 
     Task DeleteVoucherUsageByReferenceAsync(
         Guid parcelId,
+        Guid voucherUsageId,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<AvailableVoucherDto>> GetAvailableParcelVouchersAsync(

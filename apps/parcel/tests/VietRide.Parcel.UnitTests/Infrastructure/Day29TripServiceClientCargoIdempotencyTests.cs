@@ -22,11 +22,36 @@ public sealed class Day29TripServiceClientCargoIdempotencyTests
         await client.LoadCargoAsync(tripId, parcelId, 12.5m, 0.25m);
 
         handler.Requests.Should().HaveCount(2);
-        var expectedIdentity = $"parcel:cargo:load:{parcelId:D}";
+        var expectedIdentity = parcelId.ToString("D");
         handler.Requests.Should().OnlyContain(request =>
             request.IdempotencyKey == expectedIdentity
             && request.BodyIdempotencyKey == expectedIdentity
             && request.Path == $"/internal/v1/trips/{tripId:D}/cargo/load");
+    }
+
+    [Fact]
+    public async Task ExplicitOperationKeyIsForwardedToHeaderAndBody()
+    {
+        var tripId = Guid.NewGuid();
+        var parcelId = Guid.NewGuid();
+        var operationId = Guid.NewGuid();
+        var handler = new RecordingHandler();
+        var client = new TripServiceClient(
+            new HttpClient(handler) { BaseAddress = new Uri("http://trip-service") },
+            NullLogger<TripServiceClient>.Instance);
+
+        await client.RemeasureCargoAsync(
+            tripId,
+            parcelId,
+            12.5m,
+            0.25m,
+            allowCapacityOverflow: false,
+            operationId);
+
+        handler.Requests.Should().ContainSingle(request =>
+            request.IdempotencyKey == operationId.ToString("D")
+            && request.BodyIdempotencyKey == operationId.ToString("D")
+            && request.Path == $"/internal/v1/trips/{tripId:D}/cargo/remeasure");
     }
 
     private sealed class RecordingHandler : HttpMessageHandler

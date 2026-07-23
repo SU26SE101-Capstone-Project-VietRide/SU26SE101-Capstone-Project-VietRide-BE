@@ -96,7 +96,8 @@ public sealed class ParcelsController : ControllerBase
                 request.EstimatedWeightKg,
                 request.DeliveryMethod,
                 request.PaymentMethod,
-                request.VoucherCode),
+                request.VoucherCode,
+                Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString()),
             cancellationToken);
 
         return StatusCode(StatusCodes.Status201Created, result);

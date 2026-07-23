@@ -61,6 +61,7 @@ public sealed class OverrideCapacityCommandHandler
                 parcel.Id,
                 weightKg,
                 volumeM3,
+                command.IdempotencyKey ?? parcel.Id,
                 cancellationToken)
             : await _tripClient.RemeasureCargoAsync(
                 parcel.TripId,
@@ -68,6 +69,7 @@ public sealed class OverrideCapacityCommandHandler
                 weightKg,
                 volumeM3,
                 allowCapacityOverflow: true,
+                command.IdempotencyKey ?? parcel.Id,
                 cancellationToken);
 
         if (cargoOutcome.Kind != TripCargoOutcomeKind.Success)

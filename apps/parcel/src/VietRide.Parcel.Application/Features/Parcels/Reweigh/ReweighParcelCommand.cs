@@ -12,4 +12,5 @@ public sealed record ReweighParcelCommand(
     decimal ActualHeightCm,
     decimal ActualWeightKg,
     string ActualSizeCategory,
-    string PaymentMethod) : IRequest<ReweighParcelResponse>;
+    string PaymentMethod,
+    string? IdempotencyKey = null) : IRequest<ReweighParcelResponse>;

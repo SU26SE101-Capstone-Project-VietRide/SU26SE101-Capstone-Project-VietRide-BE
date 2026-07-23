@@ -9,4 +9,5 @@ public sealed record UpdateParcelStatusCommand(
     Guid OperatorId,
     Guid UserId,
     string Status,
-    string? Reason) : IRequest<OperationalParcelResponse>;
+    string? Reason,
+    Guid? IdempotencyKey = null) : IRequest<OperationalParcelResponse>;

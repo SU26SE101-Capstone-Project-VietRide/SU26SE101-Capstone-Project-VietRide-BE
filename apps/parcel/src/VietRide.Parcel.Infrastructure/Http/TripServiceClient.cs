@@ -9,7 +9,7 @@ using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Parcel.Infrastructure.Http;
 
-public sealed class TripServiceClient : ITripServiceClient
+public sealed class TripServiceClient : ITripServiceClient, IIdempotentTripServiceClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -244,7 +244,18 @@ public sealed class TripServiceClient : ITripServiceClient
         decimal weightKg,
         decimal volumeM3,
         CancellationToken cancellationToken = default)
-        => SendCargoMutationAsync("reserve", tripId, parcelId, weightKg, volumeM3, allowCapacityOverflow: false, cancellationToken);
+        => SendCargoMutationAsync(
+            "reserve", tripId, parcelId, weightKg, volumeM3, allowCapacityOverflow: false, parcelId, cancellationToken);
+
+    public Task<TripCargoOutcome> ReserveCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        decimal volumeM3,
+        Guid idempotencyKey,
+        CancellationToken cancellationToken = default)
+        => SendCargoMutationAsync(
+            "reserve", tripId, parcelId, weightKg, volumeM3, allowCapacityOverflow: false, idempotencyKey, cancellationToken);
 
     public Task<TripCargoOutcome> ReserveCargoAsync(
         Guid tripId,
@@ -259,7 +270,18 @@ public sealed class TripServiceClient : ITripServiceClient
         decimal weightKg,
         decimal volumeM3,
         CancellationToken cancellationToken = default)
-        => SendCargoMutationAsync("reserve", tripId, parcelId, weightKg, volumeM3, allowCapacityOverflow: true, cancellationToken);
+        => SendCargoMutationAsync(
+            "reserve", tripId, parcelId, weightKg, volumeM3, allowCapacityOverflow: true, parcelId, cancellationToken);
+
+    public Task<TripCargoOutcome> ReserveCargoWithOverrideAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        decimal volumeM3,
+        Guid idempotencyKey,
+        CancellationToken cancellationToken = default)
+        => SendCargoMutationAsync(
+            "reserve", tripId, parcelId, weightKg, volumeM3, allowCapacityOverflow: true, idempotencyKey, cancellationToken);
 
     public async Task<TripCargoOutcome> GetCargoCapacityAsync(
         Guid tripId,
@@ -303,7 +325,19 @@ public sealed class TripServiceClient : ITripServiceClient
         decimal volumeM3,
         bool allowCapacityOverflow = false,
         CancellationToken cancellationToken = default)
-        => SendCargoMutationAsync("remeasure", tripId, parcelId, weightKg, volumeM3, allowCapacityOverflow, cancellationToken);
+        => SendCargoMutationAsync(
+            "remeasure", tripId, parcelId, weightKg, volumeM3, allowCapacityOverflow, parcelId, cancellationToken);
+
+    public Task<TripCargoOutcome> RemeasureCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        decimal volumeM3,
+        bool allowCapacityOverflow,
+        Guid idempotencyKey,
+        CancellationToken cancellationToken = default)
+        => SendCargoMutationAsync(
+            "remeasure", tripId, parcelId, weightKg, volumeM3, allowCapacityOverflow, idempotencyKey, cancellationToken);
 
     public Task<TripCargoOutcome> LoadCargoAsync(
         Guid tripId,
@@ -311,7 +345,18 @@ public sealed class TripServiceClient : ITripServiceClient
         decimal weightKg,
         decimal volumeM3,
         CancellationToken cancellationToken = default)
-        => SendCargoMutationAsync("load", tripId, parcelId, weightKg, volumeM3, allowCapacityOverflow: false, cancellationToken);
+        => SendCargoMutationAsync(
+            "load", tripId, parcelId, weightKg, volumeM3, allowCapacityOverflow: false, parcelId, cancellationToken);
+
+    public Task<TripCargoOutcome> LoadCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        decimal volumeM3,
+        Guid idempotencyKey,
+        CancellationToken cancellationToken = default)
+        => SendCargoMutationAsync(
+            "load", tripId, parcelId, weightKg, volumeM3, allowCapacityOverflow: false, idempotencyKey, cancellationToken);
 
     public Task<TripCargoOutcome> LoadCargoAsync(
         Guid tripId,
@@ -326,7 +371,18 @@ public sealed class TripServiceClient : ITripServiceClient
         decimal weightKg,
         decimal volumeM3,
         CancellationToken cancellationToken = default)
-        => SendCargoMutationAsync("release", tripId, parcelId, weightKg, volumeM3, allowCapacityOverflow: true, cancellationToken);
+        => SendCargoMutationAsync(
+            "release", tripId, parcelId, weightKg, volumeM3, allowCapacityOverflow: true, parcelId, cancellationToken);
+
+    public Task<TripCargoOutcome> ReleaseCargoAsync(
+        Guid tripId,
+        Guid parcelId,
+        decimal weightKg,
+        decimal volumeM3,
+        Guid idempotencyKey,
+        CancellationToken cancellationToken = default)
+        => SendCargoMutationAsync(
+            "release", tripId, parcelId, weightKg, volumeM3, allowCapacityOverflow: true, idempotencyKey, cancellationToken);
 
     public Task<TripCargoOutcome> ReleaseCargoAsync(
         Guid tripId,
@@ -342,6 +398,7 @@ public sealed class TripServiceClient : ITripServiceClient
         decimal weightKg,
         decimal volumeM3,
         bool allowCapacityOverflow,
+        Guid idempotencyKey,
         CancellationToken cancellationToken)
     {
         try
@@ -356,11 +413,11 @@ public sealed class TripServiceClient : ITripServiceClient
                     weightKg,
                     volumeM3,
                     allowCapacityOverflow,
-                    idempotencyKey = $"parcel:cargo:{action}:{parcelId:D}",
+                    idempotencyKey,
                 }, options: JsonOptions),
             };
 
-            request.Headers.TryAddWithoutValidation("Idempotency-Key", $"parcel:cargo:{action}:{parcelId:D}");
+            request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey.ToString("D"));
             using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
             return response.StatusCode switch
             {

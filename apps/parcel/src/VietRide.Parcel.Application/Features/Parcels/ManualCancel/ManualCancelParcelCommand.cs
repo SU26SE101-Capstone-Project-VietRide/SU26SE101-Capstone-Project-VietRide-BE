@@ -7,4 +7,5 @@ public sealed record ManualCancelParcelCommand(
     Guid ParcelId,
     Guid OperatorId,
     string Reason,
-    string? RefundChoice) : IRequest<OperationalParcelResponse>;
+    string? RefundChoice,
+    Guid? IdempotencyKey = null) : IRequest<OperationalParcelResponse>;
