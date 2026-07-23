@@ -212,7 +212,8 @@ public interface ITripServiceClient
     Task<bool> BookRoundTripSeatsAsync(
         RoundTripBookSeatsLeg outbound,
         RoundTripBookSeatsLeg @return,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Guid? operationId = null)
         => Task.FromException<bool>(new NotSupportedException("Round-trip seat confirmation is not supported."));
 
     /// <summary>

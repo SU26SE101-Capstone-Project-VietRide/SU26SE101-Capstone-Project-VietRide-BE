@@ -134,7 +134,7 @@ public sealed class CreateBookingCommandHandler
         // 3. Lock seats (all-or-nothing)
         // -----------------------------------------------------------------------
         var seatNumbers = request.Seats.Select(s => s.SeatNumber.Trim()).ToList();
-        var lockIdempotencyKey = $"lock-{request.PassengerUserId}-{request.TripId}-{string.Join(",", seatNumbers)}";
+        var lockIdempotencyKey = request.IdempotencyKey ?? request.PassengerUserId.ToString("D");
 
         var lockOutcome = await _tripClient.LockSeatsAsync(
             request.TripId,
@@ -291,7 +291,7 @@ public sealed class CreateBookingCommandHandler
         //    Handler does NOT flip CONFIRMED unless the seam returns success.
         // -----------------------------------------------------------------------
         string? paymentRedirectUrl = null;
-        var chargeIdempotencyKey = $"charge-{booking.Id}";
+        var chargeIdempotencyKey = request.IdempotencyKey ?? booking.Id.ToString("D");
 
         ChargeOutcome chargeOutcome;
         try
