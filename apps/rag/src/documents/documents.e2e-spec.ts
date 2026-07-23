@@ -97,7 +97,10 @@ describe('DocumentsController (e2e)', () => {
 
   it('GET /v1/rag/documents returns paginated documents for SYSTEM_ADMIN', async () => {
     const response = await fetch(`${baseUrl}/v1/rag/documents?page=1&pageSize=20&status=APPROVED`, {
-      headers: { 'X-Internal-Auth': await signInternalJwt(ADMIN_USER_ID, 'SYSTEM_ADMIN') },
+      headers: {
+        'X-Internal-Auth': await signInternalJwt(ADMIN_USER_ID, 'SYSTEM_ADMIN'),
+        'Idempotency-Key': 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      },
     });
     const body = (await response.json()) as { items?: Array<{ id: string; status: string }>; totalItems?: number };
 
@@ -110,7 +113,10 @@ describe('DocumentsController (e2e)', () => {
 
   it('GET /v1/rag/documents returns 403 for non-admin caller', async () => {
     const response = await fetch(`${baseUrl}/v1/rag/documents`, {
-      headers: { 'X-Internal-Auth': await signInternalJwt(PASSENGER_USER_ID, 'PASSENGER') },
+      headers: {
+        'X-Internal-Auth': await signInternalJwt(PASSENGER_USER_ID, 'PASSENGER'),
+        'Idempotency-Key': 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      },
     });
 
     expect(response.status).toBe(403);
@@ -119,7 +125,10 @@ describe('DocumentsController (e2e)', () => {
   it('POST /v1/rag/documents auto-approves SYSTEM_ADMIN TXT upload', async () => {
     const response = await fetch(`${baseUrl}/v1/rag/documents`, {
       method: 'POST',
-      headers: { 'X-Internal-Auth': await signInternalJwt(ADMIN_USER_ID, 'SYSTEM_ADMIN') },
+      headers: {
+        'X-Internal-Auth': await signInternalJwt(ADMIN_USER_ID, 'SYSTEM_ADMIN'),
+        'Idempotency-Key': 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      },
       body: makeValidForm(),
     });
     const body = (await response.json()) as { id?: string; previewUrl?: string; status?: string };

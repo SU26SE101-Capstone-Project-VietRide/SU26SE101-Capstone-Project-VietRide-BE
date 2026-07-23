@@ -24,6 +24,7 @@ import {
   successEnvelopeSchema,
   pagedDataSchema,
 } from '../swagger/api-response.schemas';
+import { ApiIdempotencyRequired } from '../swagger/idempotency.swagger';
 
 @ApiTags('RAG Feedback')
 @ApiBearerAuth()
@@ -33,6 +34,7 @@ export class FeedbackController {
   constructor(private readonly feedbackService: FeedbackService) {}
 
   @Post('messages/:messageId/feedback')
+  @ApiIdempotencyRequired()
   @ApiOperation({ summary: 'Create or update feedback for an assistant RAG message' })
   @ApiParam({ name: 'messageId', format: 'uuid', description: 'Assistant message ID' })
   @ApiBody({

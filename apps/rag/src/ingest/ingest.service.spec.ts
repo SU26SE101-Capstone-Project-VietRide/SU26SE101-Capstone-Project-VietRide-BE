@@ -56,7 +56,7 @@ describe('IngestService', () => {
   });
 
   it('downloads approved TXT, chunks by heading, embeds, and completes document ingest', async () => {
-    idempotency.begin.mockResolvedValue('acquired');
+    idempotency.begin.mockResolvedValue({ state: 'acquired', ownerToken: 'owner-1' });
     repository.findDocumentForIngest.mockResolvedValue(makeDocument());
     repository.markDocumentProcessing.mockResolvedValue(true);
     storageProvider.downloadObject.mockResolvedValue(
@@ -75,11 +75,11 @@ describe('IngestService', () => {
       'nvidia/llama-nemotron-embed-vl-1b-v2:free',
       EMBEDDING_DIMENSIONS,
     );
-    expect(idempotency.markProcessed).toHaveBeenCalledWith(DOCUMENT_ID);
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(DOCUMENT_ID, 'owner-1');
   });
 
   it('skips duplicate ingest without inserting chunks', async () => {
-    idempotency.begin.mockResolvedValue('duplicate');
+    idempotency.begin.mockResolvedValue({ state: 'duplicate' });
 
     await expect(service.processDocument(DOCUMENT_ID)).resolves.toBe(false);
 
@@ -92,7 +92,7 @@ describe('IngestService', () => {
       errorCode: 'RAG_PROVIDER_RATE_LIMITED',
       detail: 'OpenRouter embedding provider rate limit reached',
     });
-    idempotency.begin.mockResolvedValue('acquired');
+    idempotency.begin.mockResolvedValue({ state: 'acquired', ownerToken: 'owner-2' });
     repository.findDocumentForIngest.mockResolvedValue(makeDocument());
     repository.markDocumentProcessing.mockResolvedValue(true);
     storageProvider.downloadObject.mockResolvedValue(Buffer.from('Nội dung kiểm thử ingest'));
@@ -101,13 +101,13 @@ describe('IngestService', () => {
     await expect(service.processDocument(DOCUMENT_ID)).rejects.toBe(providerError);
 
     expect(repository.markDocumentFailed).toHaveBeenCalledWith(DOCUMENT_ID, providerError);
-    expect(idempotency.release).toHaveBeenCalledWith(DOCUMENT_ID);
+    expect(idempotency.release).toHaveBeenCalledWith(DOCUMENT_ID, 'owner-2');
   });
 
   it('processes pending outbox event and marks it published', async () => {
     repository.findPendingEvents.mockResolvedValue([makeOutboxEvent()]);
     repository.markEventPublishing.mockResolvedValue(true);
-    idempotency.begin.mockResolvedValue('duplicate');
+    idempotency.begin.mockResolvedValue({ state: 'duplicate' });
 
     await expect(service.processPendingOnce(1)).resolves.toBe(1);
 
@@ -117,7 +117,9 @@ describe('IngestService', () => {
   it('discards malformed outbox event payload without retrying', async () => {
     repository.markEventPublishing.mockResolvedValue(true);
 
-    await expect(service.processEvent(makeOutboxEvent({ payload: { bad: true } }))).resolves.toBe(false);
+    await expect(service.processEvent(makeOutboxEvent({ payload: { bad: true } }))).resolves.toBe(
+      false,
+    );
 
     expect(repository.markEventDiscarded).toHaveBeenCalledWith(EVENT_ID, expect.any(Error));
     expect(repository.markEventFailed).not.toHaveBeenCalled();
@@ -126,7 +128,7 @@ describe('IngestService', () => {
   it('discards outbox event when document ingest reaches max retry', async () => {
     const ingestError = new Error('provider unavailable');
     repository.markEventPublishing.mockResolvedValue(true);
-    jest.spyOn(service, 'processDocument').mockRejectedValueOnce(ingestError);
+    jest.spyOn(service, 'processDocumentWithOutcome').mockRejectedValueOnce(ingestError);
 
     await expect(service.processEvent(makeOutboxEvent({ retryCount: 4 }))).resolves.toBe(false);
 
@@ -137,12 +139,34 @@ describe('IngestService', () => {
   it('marks outbox event failed when document ingest can still retry', async () => {
     const ingestError = new Error('provider unavailable');
     repository.markEventPublishing.mockResolvedValue(true);
-    jest.spyOn(service, 'processDocument').mockRejectedValueOnce(ingestError);
+    jest.spyOn(service, 'processDocumentWithOutcome').mockRejectedValueOnce(ingestError);
 
     await expect(service.processEvent(makeOutboxEvent({ retryCount: 3 }))).resolves.toBe(false);
 
     expect(repository.markEventFailed).toHaveBeenCalledWith(EVENT_ID, ingestError);
     expect(repository.markEventDiscarded).not.toHaveBeenCalled();
+  });
+
+  it('settles a recovered publishing event without acquiring the outbox row again', async () => {
+    jest.spyOn(service, 'processDocumentWithOutcome').mockResolvedValueOnce('settled');
+
+    await expect(service.processEvent(makeOutboxEvent({ status: 'PUBLISHING' }))).resolves.toBe(
+      true,
+    );
+
+    expect(repository.markEventPublishing).not.toHaveBeenCalled();
+    expect(repository.markEventPublished).toHaveBeenCalledWith(EVENT_ID);
+  });
+
+  it('leaves a publishing event untouched while its Redis processing lease is owned', async () => {
+    jest.spyOn(service, 'processDocumentWithOutcome').mockResolvedValueOnce('locked');
+
+    await expect(service.processEvent(makeOutboxEvent({ status: 'PUBLISHING' }))).resolves.toBe(
+      false,
+    );
+
+    expect(repository.markEventPublishing).not.toHaveBeenCalled();
+    expect(repository.markEventPublished).not.toHaveBeenCalled();
   });
 });
 
@@ -228,7 +252,9 @@ export function makeDocument(overrides: Partial<KnowledgeDocument> = {}): Knowle
   };
 }
 
-export function makeOutboxEvent(overrides: Partial<RagIngestOutboxEvent> = {}): RagIngestOutboxEvent {
+export function makeOutboxEvent(
+  overrides: Partial<RagIngestOutboxEvent> = {},
+): RagIngestOutboxEvent {
   return { ...makeOutboxEventBase(), ...overrides };
 }
 

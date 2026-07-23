@@ -22,6 +22,8 @@ import { HealthController } from './health.controller';
 import { RagSentryExceptionFilter } from './rag-sentry-exception.filter';
 import { ReadyController } from './ready.controller';
 import { ReadinessService } from './readiness.service';
+import { RagIdempotencyInterceptor } from '../swagger/rag-idempotency.interceptor';
+import { RagIdempotencyModule } from '../swagger/rag-idempotency.module';
 
 const env = loadEnv();
 
@@ -43,6 +45,7 @@ const env = loadEnv();
     IngestModule,
     ChatModule,
     RuntimeConfigAdminModule,
+    RagIdempotencyModule,
   ],
   controllers: [HealthController, ReadyController],
   providers: [
@@ -51,6 +54,7 @@ const env = loadEnv();
     { provide: APP_FILTER, useClass: RagSentryExceptionFilter },
     { provide: APP_INTERCEPTOR, useValue: new LoggingInterceptor() },
     { provide: APP_INTERCEPTOR, useValue: new ApiResponseInterceptor() },
+    { provide: APP_INTERCEPTOR, useClass: RagIdempotencyInterceptor },
   ],
 })
 export class AppModule {}

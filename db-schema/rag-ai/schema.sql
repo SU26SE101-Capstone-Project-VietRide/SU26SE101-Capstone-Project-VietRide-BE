@@ -229,6 +229,27 @@ CREATE INDEX idx_message_feedback_conversation_created_at
 CREATE INDEX idx_message_feedback_user_created_at
     ON message_feedback (user_id, created_at DESC);
 
+CREATE TABLE idempotency_operations (
+    operation_id UUID PRIMARY KEY,
+    user_id UUID NOT NULL,
+    method VARCHAR(10) NOT NULL,
+    path VARCHAR(500) NOT NULL,
+    fingerprint CHAR(64) NOT NULL,
+    owner_token UUID NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    response_status INTEGER NULL,
+    response_headers JSONB NULL,
+    response_body TEXT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX idx_idempotency_operations_user_created
+    ON idempotency_operations (user_id, created_at DESC);
+CREATE INDEX idx_idempotency_operations_expires_at
+    ON idempotency_operations (expires_at);
+
 CREATE TABLE outbox_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     event_type VARCHAR(100) NOT NULL,

@@ -32,7 +32,7 @@ describe('IngestRepository', () => {
       expect.objectContaining({
         where: expect.objectContaining({
           eventType: RAG_DOCUMENT_INGEST_REQUESTED_EVENT,
-          status: { in: ['PENDING', 'FAILED'] },
+          status: { in: ['PENDING', 'FAILED', 'PUBLISHING'] },
           retryCount: { lt: RAG_INGEST_MAX_RETRY },
         }),
         take: 5,

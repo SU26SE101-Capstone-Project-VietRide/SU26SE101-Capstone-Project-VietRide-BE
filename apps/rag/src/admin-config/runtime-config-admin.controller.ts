@@ -16,6 +16,10 @@ import {
   errorEnvelopeSchema,
   successEnvelopeSchema,
 } from '../swagger/api-response.schemas';
+import {
+  ApiIdempotencyExempt,
+  ApiIdempotencyRequired,
+} from '../swagger/idempotency.swagger';
 
 @ApiTags('RAG Runtime Config')
 @ApiBearerAuth()
@@ -35,6 +39,9 @@ export class RuntimeConfigAdminController {
   }
 
   @Post('reload')
+  @ApiIdempotencyExempt(
+    'Runtime-config reload only invalidates an in-memory cache and is naturally repeatable.',
+  )
   @ApiOperation({ summary: 'Reload RAG runtime config cache manually' })
   @ApiResponse({ status: 201, description: 'Runtime config cache reloaded', schema: successEnvelopeSchema(201, { type: 'object', properties: { reloaded: { type: 'boolean', example: true } } }) })
   @ApiResponse({ status: 401, description: 'Missing or invalid access token', schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Missing or invalid access token') })
@@ -60,6 +67,7 @@ export class RuntimeConfigAdminController {
   }
 
   @Patch(':key')
+  @ApiIdempotencyRequired()
   @ApiOperation({ summary: 'Update one RAG runtime config key' })
   @ApiParam({ name: 'key', description: 'Runtime config key' })
   @ApiBody({
@@ -109,6 +117,7 @@ export class RuntimeConfigAdminController {
   }
 
   @Post(':key/rollback')
+  @ApiIdempotencyRequired()
   @ApiOperation({ summary: 'Rollback one RAG runtime config key to a history entry' })
   @ApiParam({ name: 'key', description: 'Runtime config key' })
   @ApiBody({
