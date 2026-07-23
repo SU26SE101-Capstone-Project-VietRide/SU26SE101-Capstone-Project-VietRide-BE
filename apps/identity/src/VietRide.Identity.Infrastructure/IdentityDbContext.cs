@@ -6,6 +6,7 @@ using VietRide.Identity.Domain.Enums;
 using VietRide.Identity.Infrastructure.Persistence.Configurations;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Persistence;
+using VietRide.Shared.Persistence.Inbox;
 using VietRide.Shared.Persistence.Outbox;
 
 namespace VietRide.Identity.Infrastructure;
@@ -78,6 +79,7 @@ public sealed class IdentityDbContext : VietRideDbContextBase
 
         // Apply all IEntityTypeConfiguration<T> defined in this assembly.
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(IdentityDbContext).Assembly);
+        modelBuilder.AddVietRideIntegrationInbox();
 
         // Base applies snake_case naming + OutboxEvents mapping.
         base.OnModelCreating(modelBuilder);

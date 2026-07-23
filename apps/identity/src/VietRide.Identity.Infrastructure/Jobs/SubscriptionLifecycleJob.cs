@@ -170,7 +170,10 @@ public sealed class SubscriptionLifecycleJob
                 continue;
 
             if (payment?.Status == "PENDING_REDIRECT")
-                await _payments.ExpireAsync(payment.PaymentId, $"subscription-reconcile-expire:{attempt.Id:N}", cancellationToken);
+                await _payments.ExpireAsync(
+                    payment.PaymentId,
+                    payment.PaymentId.ToString("D"),
+                    cancellationToken);
 
             var subscription = await _subscriptions.GetByIdAsync(attempt.SubscriptionId, cancellationToken);
             if (subscription?.Status == SubscriptionStatus.PENDING_PAYMENT)

@@ -460,6 +460,20 @@ CREATE TABLE operator_wallet_backfill_markers (
 -- -----------------------------------------------------------------------------
 -- outbox_events and terminal outbox_dlq
 -- -----------------------------------------------------------------------------
+-- -----------------------------------------------------------------------------
+-- integration_inbox (durable RabbitMQ consumer idempotency)
+-- -----------------------------------------------------------------------------
+CREATE TABLE integration_inbox (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    consumer_name VARCHAR(200) NOT NULL,
+    message_id UUID NOT NULL,
+    payload_hash CHAR(64) NOT NULL,
+    processed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX uq_integration_inbox_consumer_message
+    ON integration_inbox (consumer_name, message_id);
+
 CREATE TABLE outbox_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     event_type VARCHAR(100) NOT NULL,

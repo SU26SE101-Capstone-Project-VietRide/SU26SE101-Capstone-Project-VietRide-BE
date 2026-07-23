@@ -143,7 +143,7 @@ public sealed class ActivityLogImmutabilityTests
         AdminUsersEndpointsTests.DbBackedAdminUsersFactory factory,
         Fixture fixture)
     {
-        using var client = factory.CreateClient();
+        using var client = factory.CreateIdempotentClient();
         var from = Uri.EscapeDataString(fixture.From.ToString("O"));
         var to = Uri.EscapeDataString(fixture.To.ToString("O"));
         using var activityRequest = CreateInternalJwtRequest(

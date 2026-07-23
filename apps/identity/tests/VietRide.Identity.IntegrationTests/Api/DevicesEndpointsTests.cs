@@ -270,7 +270,7 @@ public sealed class DevicesEndpointsTests : IClassFixture<AuthWebApplicationFact
                 services.AddScoped<IUnitOfWork>(sp => new EfUnitOfWork(sp.GetRequiredService<VietRideDbContextBase>()));
             });
         });
-        var client = _dbBackedFactory.CreateClient();
+        var client = _dbBackedFactory.CreateIdempotentClient();
 
         if (addAuthHeader)
         {

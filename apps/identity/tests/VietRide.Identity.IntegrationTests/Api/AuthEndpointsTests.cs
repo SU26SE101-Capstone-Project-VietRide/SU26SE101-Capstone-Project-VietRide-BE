@@ -68,7 +68,7 @@ public sealed class AuthEndpointsTests :
     [Fact]
     public async Task GetJwks_Returns200_WithRsaKeyShape()
     {
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
 
         var response = await client.GetAsync("/v1/.well-known/jwks.json");
 
@@ -242,7 +242,7 @@ public sealed class AuthEndpointsTests :
         await _dbFactory.ResetAsync();
         var email = UniqueEmail("passenger-pending-login");
         const string Password = "Password123!";
-        using var client = _dbFactory.CreateClient();
+        using var client = _dbFactory.CreateIdempotentClient();
 
         var registerResponse = await client.PostAsJsonAsync("/v1/auth/register", new
         {
@@ -299,7 +299,7 @@ public sealed class AuthEndpointsTests :
         await _dbFactory.SeedSystemAdminAsync(SystemAdminId);
         var email = UniqueEmail("operator-self-register-login");
         const string Password = "Password123!";
-        using var client = _dbFactory.CreateClient();
+        using var client = _dbFactory.CreateIdempotentClient();
 
         var registerResponse = await client.PostAsJsonAsync("/v1/operators/register", ValidOperatorRegisterPayload(email, Password));
 
@@ -342,7 +342,7 @@ public sealed class AuthEndpointsTests :
         await _dbFactory.SeedSystemAdminAsync(SystemAdminId);
         var email = UniqueEmail("operator-admin-create-login");
         const string Password = "Password123!";
-        using var client = _dbFactory.CreateClient();
+        using var client = _dbFactory.CreateIdempotentClient();
         using var createRequest = AuthorizedPost("/v1/admin/operators", ValidAdminCreatePayload(email));
 
         var createResponse = await client.SendAsync(createRequest);
@@ -382,7 +382,7 @@ public sealed class AuthEndpointsTests :
     {
         await _dbFactory.ResetAsync();
         var email = UniqueEmail("passenger-outbox");
-        using var client = _dbFactory.CreateClient();
+        using var client = _dbFactory.CreateIdempotentClient();
 
         var response = await client.PostAsJsonAsync("/v1/auth/register", new
         {
@@ -408,9 +408,10 @@ public sealed class AuthEndpointsTests :
         userCreatedPayload.RootElement.GetProperty("userId").GetGuid().Should().Be(userId);
         userCreatedPayload.RootElement.GetProperty("role").GetString().Should().Be(UserRole.PASSENGER.ToString());
         userCreatedPayload.RootElement.GetProperty("email").GetString().Should().Be(email);
+        userCreatedPayload.RootElement.GetProperty("eventId").GetGuid().Should().Be(userCreatedEvent.Id);
         userCreatedPayload.RootElement.TryGetProperty("createdAt", out _).Should().BeTrue();
         userCreatedPayload.RootElement.EnumerateObject().Select(p => p.Name)
-            .Should().BeEquivalentTo(["userId", "role", "email", "createdAt"]);
+            .Should().BeEquivalentTo(["userId", "role", "email", "eventId", "createdAt"]);
 
         var otpEvent = await db.Set<OutboxEvent>().SingleAsync(x => x.EventType == "identity.otp.requested");
         otpEvent.Status.Should().Be(OutboxEventStatus.PENDING);
@@ -430,7 +431,7 @@ public sealed class AuthEndpointsTests :
     {
         await _dbFactory.ResetAsync();
         var email = UniqueEmail("passenger-otp-outbox");
-        using var client = _dbFactory.CreateClient();
+        using var client = _dbFactory.CreateIdempotentClient();
 
         var response = await client.PostAsJsonAsync("/v1/auth/register", new
         {
@@ -462,7 +463,7 @@ public sealed class AuthEndpointsTests :
     {
         await _dbFactory.ResetAsync();
         var email = UniqueEmail("passenger-resend");
-        using var client = _dbFactory.CreateClient();
+        using var client = _dbFactory.CreateIdempotentClient();
 
         var registerResponse = await client.PostAsJsonAsync("/v1/auth/register", new
         {
@@ -535,7 +536,7 @@ public sealed class AuthEndpointsTests :
         const string OldPassword = "OldPassword123!";
         const string NewPassword = "NewPassword123!";
         await _dbFactory.SeedActivePasswordUserAsync(email, role, OldPassword);
-        using var client = _dbFactory.CreateClient();
+        using var client = _dbFactory.CreateIdempotentClient();
 
         var oldLoginResponse = await client.PostAsJsonAsync("/v1/auth/login", new
         {
@@ -591,7 +592,7 @@ public sealed class AuthEndpointsTests :
     public async Task ForgotPassword_UnknownEmail_ReturnsGenericSuccessWithoutPasswordResetOtp()
     {
         await _dbFactory.ResetAsync();
-        using var client = _dbFactory.CreateClient();
+        using var client = _dbFactory.CreateIdempotentClient();
 
         var response = await client.PostAsJsonAsync("/v1/auth/forgot-password", new
         {
@@ -671,7 +672,7 @@ public sealed class AuthEndpointsTests :
     [Fact]
     public async Task PostRegister_MissingEmail_ReturnsClientError()
     {
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
 
         var response = await client.PostAsJsonAsync("/v1/auth/register", new
         {
@@ -723,7 +724,7 @@ public sealed class AuthEndpointsTests :
     [Fact]
     public async Task PostVerifyEmail_MissingCode_ReturnsClientError()
     {
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
 
         var response = await client.PostAsJsonAsync("/v1/auth/verify-email", new
         {
@@ -748,7 +749,7 @@ public sealed class AuthEndpointsTests :
     [Fact]
     public async Task PostLogin_MissingPassword_ReturnsClientError()
     {
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
 
         var response = await client.PostAsJsonAsync("/v1/auth/login", new
         {
@@ -817,7 +818,7 @@ public sealed class AuthEndpointsTests :
     [Fact]
     public async Task PostSetInitialPassword_BlankPassword_Returns422ValidationError()
     {
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
 
         var response = await client.PostAsJsonAsync("/v1/auth/set-initial-password", new
         {
@@ -839,7 +840,7 @@ public sealed class AuthEndpointsTests :
     [InlineData("12345678")]
     public async Task PostSetInitialPassword_WeakPassword_Returns422ValidationError(string password)
     {
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
 
         var response = await client.PostAsJsonAsync("/v1/auth/set-initial-password", new
         {
@@ -885,7 +886,7 @@ public sealed class AuthEndpointsTests :
     [Fact]
     public async Task PostLogout_WithoutAuth_Returns401()
     {
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
 
         var response = await client.PostAsJsonAsync("/v1/auth/logout", new
         {
@@ -898,7 +899,7 @@ public sealed class AuthEndpointsTests :
     [Fact]
     public async Task PostLogout_TamperedInternalAuth_Returns401()
     {
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
         using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/auth/logout")
         {
             Content = JsonContent.Create(new
@@ -983,7 +984,7 @@ public sealed class AuthEndpointsTests :
                 services.RemoveAll<IMediator>();
                 services.AddSingleton(sender);
             });
-        }).CreateClient();
+        }).CreateIdempotentClient();
     }
 
     private static void AssertSuccessEnvelope(JsonDocument doc, int expectedStatusCode)

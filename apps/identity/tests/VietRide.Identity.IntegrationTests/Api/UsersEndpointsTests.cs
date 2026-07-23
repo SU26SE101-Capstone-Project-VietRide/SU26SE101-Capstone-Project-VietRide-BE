@@ -139,7 +139,7 @@ public sealed class UsersEndpointsTests : IClassFixture<AuthWebApplicationFactor
                 services.RemoveAll<IMediator>();
                 services.AddSingleton(sender);
             });
-        }).CreateClient();
+        }).CreateIdempotentClient();
     }
 
     private HttpClient CreateClientWithRepositories()
@@ -153,7 +153,7 @@ public sealed class UsersEndpointsTests : IClassFixture<AuthWebApplicationFactor
                 services.AddSingleton<IUserRepository>(new TestUsersRepository());
                 services.AddSingleton<IActivityLogRepository>(new TestActivityLogRepository());
             });
-        }).CreateClient();
+        }).CreateIdempotentClient();
     }
 
     private static async Task AssertErrorCodeAsync(

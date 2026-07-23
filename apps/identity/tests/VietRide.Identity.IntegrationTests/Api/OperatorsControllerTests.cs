@@ -183,7 +183,7 @@ public sealed class OperatorsControllerTests :
     [Fact]
     public async Task AdminCreate_Anonymous_Returns401UnauthorizedEnvelope()
     {
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
 
         var response = await client.PostAsJsonAsync("/v1/admin/operators", ValidAdminCreatePayload("anonymous"));
 
@@ -195,7 +195,7 @@ public sealed class OperatorsControllerTests :
     [Fact]
     public async Task AdminCreate_WithExplicitPlanId_Returns422ValidationEnvelope()
     {
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateIdempotentClient();
         using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/admin/operators")
         {
             Content = JsonContent.Create(new
@@ -232,7 +232,7 @@ public sealed class OperatorsControllerTests :
         var email = UniqueEmail("operator-register");
         var brn = $"BRN-{Guid.NewGuid():N}";
         var taxCode = $"TAX-{Guid.NewGuid():N}";
-        using var client = _dbFactory.CreateClient();
+        using var client = _dbFactory.CreateIdempotentClient();
 
         var response = await client.PostAsJsonAsync("/v1/operators/register", ValidRegisterPayload("happy", email, brn, taxCode));
 
@@ -284,7 +284,7 @@ public sealed class OperatorsControllerTests :
         var email = UniqueEmail("operator-admin-create");
         var brn = $"BRN-{Guid.NewGuid():N}";
         var taxCode = $"TAX-{Guid.NewGuid():N}";
-        using var client = _dbFactory.CreateClient();
+        using var client = _dbFactory.CreateIdempotentClient();
         using var request = CreateAuthorizedAdminCreateRequest(ValidAdminCreatePayload("happy", email, brn, taxCode));
 
         var response = await client.SendAsync(request);
@@ -340,7 +340,7 @@ public sealed class OperatorsControllerTests :
         var existingBrn = $"BRN-{Guid.NewGuid():N}";
         var existingTaxCode = $"TAX-{Guid.NewGuid():N}";
         const string ExistingAdminPhone = "+84901234568";
-        using var client = _dbFactory.CreateClient();
+        using var client = _dbFactory.CreateIdempotentClient();
 
         var created = await client.PostAsJsonAsync(
             "/v1/operators/register",
@@ -376,7 +376,7 @@ public sealed class OperatorsControllerTests :
         var existingBrn = $"BRN-{Guid.NewGuid():N}";
         var existingTaxCode = $"TAX-{Guid.NewGuid():N}";
         const string ExistingAdminPhone = "+84901234568";
-        using var client = _dbFactory.CreateClient();
+        using var client = _dbFactory.CreateIdempotentClient();
         using var createRequest = CreateAuthorizedAdminCreateRequest(
             ValidAdminCreatePayload("existing", existingEmail, existingBrn, existingTaxCode, representativePhone: ExistingAdminPhone));
 
