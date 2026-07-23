@@ -82,6 +82,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 | `uq_trips_driver_departure` | `(driver_user_id, departure_date_time)` partial | unique | Driver conflict (Hangfire idempotent) |
 | `uq_trips_vehicle_departure` | `(vehicle_id, departure_date_time)` partial | unique | Vehicle conflict |
 | `idx_trips_route_departure` | `(route_id, departure_date_time)` | B-tree | Trip search by route + date |
+| `idx_trips_alternative_route_id` | `(alternative_route_id)` | B-tree | Trip lookup by selected AlternativeRoute |
 | `idx_trips_status_departure` | `(status, departure_date_time)` | B-tree | Hangfire BOARDING/COMPLETED scans |
 | `idx_platform_trip_stats_completed_operator` | `(completed_at, operator_id)` | B-tree | Exact UTC range reconciliation |
 | `idx_trip_audit_logs_trip_occurred` | `(trip_id, occurred_at DESC)` | B-tree | Audit timeline per trip |

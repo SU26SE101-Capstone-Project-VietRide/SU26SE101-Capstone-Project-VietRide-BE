@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.38.1
+> **Phiên bản:** 1.40.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-07-21
+> **Cập nhật lần cuối:** 2026-07-23
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -2035,7 +2035,7 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `identity.operator.suspended` | Identity | Trip, Booking | `{ operatorId, suspendedAt }` |
 | `identity.firebase_session.revoke_requested` | Identity | Identity | `{ eventId, occurredAt, userId, reason }`; user lock emits one request, operator suspend emits one per scoped `OPERATOR_ADMIN`; consumer calls Firebase refresh-token revocation, treats missing Firebase users as no-op, and lets transient failures retry/DLQ |
 | `booking.booking.confirmed` | Booking | Notification, Payment (settle hold), Booking (BookingStats counter), Trip (shuttle fan-out) | `{ bookingId, tripId, totalAmount, userId, voucherUsageId?, bookingCode?, tickets?: [{ ticketId, passengerUserId? }], ticketCodes?, ticketCount?, shuttlePickup?: { address, latitude, longitude } }` |
-| `booking.booking.cancelled` | Booking | Notification, Trip (release seats), Payment (refund), Booking (BookingStats counter) | Canonical producer requires fresh UUID-v4 `eventId` and producer-captured offset-date-time `occurredAt`: `{ eventId, occurredAt, bookingId, userId, refundAmount, refundOverride, cancellationReason, bookingCode?, ticketCodes?, ticketCount? }`; one-release consumers accept only this complete canonical shape or the exact legacy shape with both identity fields absent, reject partial/malformed/extra fields, and fallback to `bookingId` only for that exact legacy payload |
+| `booking.booking.cancelled` | Booking | Notification, Trip, Payment, Booking | { eventId, occurredAt, bookingId, userId, refundAmount, refundOverride, cancellationReason, bookingCode?, ticketCodes?, ticketCount? } |
 | `booking.booking.refunded` | Booking | Notification, Booking (BookingStats counter) | `{ bookingId, userId, amount, bookingCode?, ticketCodes?, ticketCount? }` |
 | `booking.booking.seat_reassignment_required` | Booking | Notification | `{ eventId, occurredAt, bookingId, tripId, userId, pendingActionId, deadline, seatNumbers, reason: SEAT_REMOVED\|SEAT_DISABLED\|SEAT_TYPE_DOWNGRADED }` |
 | `booking.booking.schedule_change_informational` | Booking | Notification | For `CONFIRMED` Bookings only; exact MINOR-only `{ eventId, occurredAt, bookingId, tripId, userId, oldDeparture, newDeparture, severity: MINOR }`; no pending-action fields |
@@ -2050,9 +2050,9 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `trip.trip.started` | Trip | Parcel (block new parcel), Tracking | `{ tripId, actualDepartureTime }` |
 | `trip.trip.completed` | Trip | Booking, Parcel, Payment (settlement eligibility) | `{ eventId, occurredAt, tripId, operatorId, terminalAt, completedAt, hasSubstitution }`; `completedAt` equals `terminalAt` and is retained as the Booking compatibility alias |
 | `trip.trip.disrupted` | Trip | Booking, Parcel, Payment | `{ eventId, occurredAt, tripId, operatorId, terminalAt, hasSubstitution, reason? }`; `hasSubstitution` is audit-only for Payment settlement, not for other consumers |
-| `trip.trip.cancelled` | Trip | Booking, Parcel, Payment | `{ eventId, occurredAt, tripId, operatorId, cancelledAt, cancelReason }`; Day-22 day removal uses `DRIVER_SCHEDULE_DAY_REMOVED` and `cancelledAt=occurredAt`; Payment may consume the terminal fact for settlement eligibility, while refunds remain driven only by `booking.booking.cancelled` |
+| `trip.trip.cancelled` | Trip | Booking, Parcel | { eventId, occurredAt, tripId, operatorId, cancelledAt, cancelReason } |
 | `trip.trip.vehicle_swapped` | Trip | Booking, Notification (crew only) | Exact `{ eventId,occurredAt,tripId,operatorId,oldVehicleId,newVehicleId,oldVehiclePlateNumber,newVehiclePlateNumber,departureDateTime,driverUserId,assistantUserId,seatImpacts:[{bookingId,seatNumbers,reason}] }`; `assistantUserId` present nullable, reasons exactly `SEAT_REMOVED\|SEAT_DISABLED\|SEAT_TYPE_DOWNGRADED` |
-| `trip.trip.route_changed` | Trip | Booking (create BookingPendingAction), Notification | `{ tripId, alternativeRouteId, affectedBookingIds }` |
+| `trip.trip.route_changed` | Trip | Booking, Notification | { eventId, occurredAt, tripId, operatorId, alternativeRouteId, affectedBookingIds } |
 | `trip.trip.schedule_changed` | Trip | Booking | Exact `{ eventId,occurredAt,tripId,operatorId,oldDeparture,newDeparture,severity }`, severity `MINOR\|MEDIUM\|MAJOR`; Notification consumes Booking-owned facts instead |
 | `trip.stop.disabled` | Trip | Booking | Exact `{ eventId, occurredAt, eventType, stopId, operatorId, replacedByStopId? }`; `eventId == OutboxEvent.Id == RabbitMQ MessageId`. |
 | `trip.station.merged` | Trip | Booking, Identity | `{ eventId, occurredAt, eventType, actorUserId, ipAddress?, userAgent?, primaryStationId, duplicateStationId, primaryBefore, duplicateBefore, primaryAfter, relinkedCounts }`; Station snapshots omit contact phone/email |
@@ -2100,6 +2100,13 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `parcel.refund.initiated` | Parcel | Payment | `{ parcelId, refundAmount }` |
 | `rag.document.approved` | RAG AI | Notification (uploader) | `{ documentId }` |
 
+**Cancellation event compatibility:** A canonical `booking.booking.cancelled` producer creates a
+fresh UUID-v4 `eventId` and captures offset-date-time `occurredAt`. One-release consumers accept
+only the complete canonical shape in the registry or the exact legacy shape with both identity
+fields absent, reject partial/malformed/extra fields, and fall back to `bookingId` only for that
+exact legacy payload. Optional `bookingCode`, `ticketCodes`, and `ticketCount` enrich
+notifications but do not alter refund authority.
+
 **Day-22 ownership:** For Day-22 vehicle swap, schedule change, and schedule-day-removal
 cancellation only, Trip emits domain facts while Booking owns passenger-impact state and passenger-
 notification facts. This scoped rule does not replace or alter the existing
@@ -2115,6 +2122,11 @@ preventing double refunds. Parcel independently consumes Trip cancellation. Day 
 publication, pending-action creation, and T+2h re-alert. Day 23 owns passenger accept/reject and
 scheduled resolution: passenger rejection may refund by severity, while timeout only auto-accepts
 and never cancels or refunds.
+
+Day-22 schedule-day removal sets `trip.trip.cancelled.cancelReason` to
+`DRIVER_SCHEDULE_DAY_REMOVED` and `cancelledAt=occurredAt`. Payment does not consume the terminal
+Trip cancellation fact directly; all Booking refunds remain driven only by
+`booking.booking.cancelled`.
 
 **Day-23 schedule-change ownership:** PATCH
 `/v1/operator/driver-schedules/{scheduleId}?applyTo=FUTURE_ONLY|ALL_PENDING` remains the sole
@@ -3446,6 +3458,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.40.0** | 2026-07-23 | BE lead (Vũ) | **MINOR** - Day-33 ratifies operator Trip cancellation preview/confirm and AlternativeRoute disruption contracts, completes the `trip.trip.route_changed` event identity and producer/consumer registry, and documents nullable Trip-to-AlternativeRoute storage. Payment refunds remain driven only by `booking.booking.cancelled`. |
 | **1.39.0** | 2026-07-22 | BE lead (Vũ) | **MINOR** — Day-29 freezes the assistant Parcel load HTTP contract, registers `trip.cargo.threshold_crossed`, and reconciles Parcel `loaded` direct recipients plus `auto_rejected` sender identity. No schema or migration change. |
 | **1.38.1** | 2026-07-21 | Codex | **PATCH** - Expose persisted TripStop `status`/`actualArrivalTime` and Trip `destinationArrivedAt` through the protected public Trip detail projection; no schema, event, Gateway, or lifecycle change. |
 | **1.38.0** | 2026-07-20 | BE lead (Vũ) | **MINOR** — Add Identity-owned Firebase Custom Token issuance for active `OPERATOR_ADMIN` users under active approved operators, transactional lock/suspend Firebase-session revocation, vehicle-image Storage Rules and credential registry; add owner-scoped Booking history with Ticket summaries, sender-only Parcel history, and the branch-selective Parcel-owned `GET /v1/passenger/history?type=TICKET\|PARCEL` facade. No schema or migration change. |

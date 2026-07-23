@@ -2206,34 +2206,105 @@ Errors:
 - `409 BOOKING_SEAT_UNAVAILABLE` — lock token expired or no longer owns the seats (seat was
   released on TTL); Booking must compensate (release + cancel). `error.fields` lists the seats.
 
-### POST `/v1/operator/trips/{tripId}/cancel`
+### POST `/v1/operator/trips/{id}/cancel/preview`
 
-Auth: operator staff/admin for trip's operator. Idempotency: required.
+Auth: `OPERATOR_ADMIN` for the Trip's operator. This read-only preview does not require an
+Idempotency-Key and does not change Trip or Booking state.
+
+Request:
+```json
+{}
+```
+
+Response `200` data:
+```json
+{
+  "tripId": "00000000-0000-4000-8000-000000000033",
+  "status": "SCHEDULED",
+  "affectedBookingIds": ["00000000-0000-4000-8000-000000000034"],
+  "refundTotalBooking": 1250000,
+  "affectedParcelIds": ["00000000-0000-4000-8000-000000000035"],
+  "refundTotalParcel": 35000,
+  "grandTotal": 1285000
+}
+```
+
+The preview is available only while the Trip is `SCHEDULED` or `BOARDING`. Booking and parcel
+totals are calculated independently from immutable persisted amounts; `grandTotal` is their sum.
+Pending-payment Bookings contribute zero.
+
+Statuses: `200`, `401`, `403`, `404`, `409`, `422`.
+
+Errors:
+- `404 TRIP_NOT_FOUND` when the Trip is missing or belongs to another operator.
+- `409 TRIP_NOT_EDITABLE` when the Trip is not `SCHEDULED` or `BOARDING`.
+
+### POST `/v1/operator/trips/{id}/cancel`
+
+Auth: `OPERATOR_ADMIN` for the Trip's operator. Idempotency: required UUID-v4
+`Idempotency-Key`.
 
 Request:
 ```json
 {
-  "reason": "Vehicle issue",
-  "note": "Bus cannot depart safely"
+  "reason": "Vehicle issue"
 }
 ```
 
-Response `200`:
+`reason` is required and must be non-empty text.
+
+Response `200` data:
 ```json
 {
-  "success": true,
-  "statusCode": 200,
-  "data": {
-    "tripId": "uuid",
-    "status": "CANCELLED",
-    "affectedBookings": 42,
-    "affectedParcels": 3
-  },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "tripId": "00000000-0000-4000-8000-000000000033",
+  "status": "CANCELLED"
 }
 ```
 
-Rules: if Trip is `SCHEDULED` or `BOARDING`, transition to `CANCELLED` and trigger full refund/cancel flows. If Trip is already `IN_PROGRESS`, transition to `DISRUPTED` and use proportional refund / parcel operator-action flows.
+Only a `SCHEDULED` or `BOARDING` Trip can transition to `CANCELLED`. Trip publishes
+`trip.trip.cancelled`; Booking owns the affected Booking transitions and publishes the sole
+refund trigger, `booking.booking.cancelled`.
+
+Statuses: `200`, `401`, `403`, `404`, `409`, `422`.
+
+Errors:
+- `404 TRIP_NOT_FOUND` when the Trip is missing or belongs to another operator.
+- `409 TRIP_NOT_EDITABLE` when the Trip is not `SCHEDULED` or `BOARDING`.
+
+### POST `/v1/operator/trips/{id}/change-route`
+
+Auth: `OPERATOR_ADMIN` for the Trip's operator. Idempotency: required UUID-v4
+`Idempotency-Key`.
+
+Request:
+```json
+{
+  "alternativeRouteId": "00000000-0000-4000-8000-000000000036"
+}
+```
+
+Response `200` data:
+```json
+{
+  "tripId": "00000000-0000-4000-8000-000000000033",
+  "status": "IN_PROGRESS",
+  "alternativeRouteId": "00000000-0000-4000-8000-000000000036",
+  "affectedBookingIds": []
+}
+```
+
+The AlternativeRoute must be active, belong to the Trip's Route, and belong to the same
+operator. Route change is supported for `SCHEDULED`, `BOARDING`, and `IN_PROGRESS`; other Trip
+states are not editable. The response freezes the Booking impact used by
+`trip.trip.route_changed`.
+
+Statuses: `200`, `401`, `403`, `404`, `409`, `422`.
+
+Errors:
+- `404 TRIP_NOT_FOUND` when the Trip is missing or belongs to another operator.
+- `404 ROUTE_NOT_FOUND` when the AlternativeRoute is missing, inactive, belongs to another
+  parent Route, or belongs to another operator.
+- `409 TRIP_NOT_EDITABLE` when the Trip lifecycle does not permit a route change.
 
 ### POST `/v1/operator/trips/{tripId}/substitute-vehicle`
 
