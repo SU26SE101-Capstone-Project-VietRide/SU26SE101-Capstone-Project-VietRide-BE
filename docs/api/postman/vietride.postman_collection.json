@@ -7548,75 +7548,260 @@
       "item": [
         {
           "name": "1. Same-value Trip PATCH is a no-op",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-            "const body = pm.response.json(); pm.test('Trip no-op returns ADR-0004 success', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.tripId).to.eql(pm.environment.get('day22TripId')); pm.expect(body.data.notes).to.eql(null); pm.expect(body.meta.traceId).to.be.a('string'); });"
-          ] }}],
-          "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day22TripNoOpKey}}" }], "url": "{{baseUrl}}/v1/operator/trips/{{day22TripId}}", "body": { "mode": "raw", "raw": "{\n  \"notes\": null\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Trip no-op returns ADR-0004 success', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.tripId).to.eql(pm.environment.get('day22TripId')); pm.expect(body.data.notes).to.eql(null); pm.expect(body.meta.traceId).to.be.a('string'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day22TripNoOpKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/operator/trips/{{day22TripId}}",
+            "body": { "mode": "raw", "raw": "{\n  \"notes\": null\n}" }
+          }
         },
         {
           "name": "2. Trip PATCH persists exact-dong fare and trimmed notes",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-            "const body = pm.response.json(); pm.test('Canonical Trip edit returns the exact values', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.tripId).to.eql(pm.environment.get('day22TripId')); pm.expect(body.data.baseFare).to.eql(211111); pm.expect(body.data.notes).to.eql('Day 22 verified'); });"
-          ] }}],
-          "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day22TripEditKey}}" }], "url": "{{baseUrl}}/v1/operator/trips/{{day22TripId}}", "body": { "mode": "raw", "raw": "{\n  \"baseFare\": 211111,\n  \"notes\": \"  Day 22 verified  \"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Canonical Trip edit returns the exact values', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.tripId).to.eql(pm.environment.get('day22TripId')); pm.expect(body.data.baseFare).to.eql(211111); pm.expect(body.data.notes).to.eql('Day 22 verified'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day22TripEditKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/operator/trips/{{day22TripId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"baseFare\": 211111,\n  \"notes\": \"  Day 22 verified  \"\n}"
+            }
+          }
         },
         {
           "name": "3. Trip PATCH rejects departureDateTime",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-            "const body = pm.response.json(); pm.test('Unknown Trip field is reserved MVC 422', () => { pm.response.to.have.status(422); pm.expect(body.success).to.eql(false); pm.expect(body.error.code).to.eql('VALIDATION_ERROR'); pm.expect(body.meta.traceId).to.be.a('string'); });",
-            "pm.environment.set('day22Reserved422Body', JSON.stringify(body));"
-          ] }}],
-          "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day22TripInvalidKey}}" }], "url": "{{baseUrl}}/v1/operator/trips/{{day22TripId}}", "body": { "mode": "raw", "raw": "{\n  \"departureDateTime\": \"2030-01-01T00:00:00Z\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Unknown Trip field is reserved MVC 422', () => { pm.response.to.have.status(422); pm.expect(body.success).to.eql(false); pm.expect(body.error.code).to.eql('VALIDATION_ERROR'); pm.expect(body.meta.traceId).to.be.a('string'); });",
+                  "pm.environment.set('day22Reserved422Body', JSON.stringify(body));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day22TripInvalidKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/operator/trips/{{day22TripId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"departureDateTime\": \"2030-01-01T00:00:00Z\"\n}"
+            }
+          }
         },
         {
           "name": "4. Reserved MVC 422 replays with the same key",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-            "const body = pm.response.json(); pm.test('Reserved 422 is replayed', () => { pm.response.to.have.status(422); pm.expect(body.error.code).to.eql('VALIDATION_ERROR'); pm.expect(JSON.stringify(body)).to.eql(pm.environment.get('day22Reserved422Body')); });"
-          ] }}],
-          "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day22TripInvalidKey}}" }], "url": "{{baseUrl}}/v1/operator/trips/{{day22TripId}}", "body": { "mode": "raw", "raw": "{\n  \"departureDateTime\": \"2030-01-01T00:00:00Z\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Reserved 422 is replayed', () => { pm.response.to.have.status(422); pm.expect(body.error.code).to.eql('VALIDATION_ERROR'); pm.expect(JSON.stringify(body)).to.eql(pm.environment.get('day22Reserved422Body')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day22TripInvalidKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/operator/trips/{{day22TripId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"departureDateTime\": \"2030-01-01T00:00:00Z\"\n}"
+            }
+          }
         },
         {
           "name": "5. Changed invalid body mismatches before MVC",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-            "const body = pm.response.json(); pm.test('Changed body uses idempotency mismatch', () => { pm.response.to.have.status(422); pm.expect(body.error.code).to.eql('IDEMPOTENCY_KEY_MISMATCH'); });"
-          ] }}],
-          "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day22TripInvalidKey}}" }], "url": "{{baseUrl}}/v1/operator/trips/{{day22TripId}}", "body": { "mode": "raw", "raw": "{\n  \"departureDateTime\": \"2031-01-01T00:00:00Z\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Changed body uses idempotency mismatch', () => { pm.response.to.have.status(422); pm.expect(body.error.code).to.eql('IDEMPOTENCY_KEY_MISMATCH'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day22TripInvalidKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/operator/trips/{{day22TripId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"departureDateTime\": \"2031-01-01T00:00:00Z\"\n}"
+            }
+          }
         },
         {
           "name": "6. DriverSchedule FUTURE_ONLY same-value PATCH is a no-op",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-            "const body = pm.response.json(); pm.test('Schedule no-op returns ADR-0004 success', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.id).to.eql(pm.environment.get('day22DriverScheduleId')); });",
-            "pm.environment.set('day22ScheduleNoOpBody', JSON.stringify(body));"
-          ] }}],
-          "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day22ScheduleNoOpKey}}" }], "url": "{{baseUrl}}/v1/operator/driver-schedules/{{day22DriverScheduleId}}?probe=x&applyTo=FUTURE_ONLY", "body": { "mode": "raw", "raw": "{\n  \"departureTime\": \"08:30:00\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Schedule no-op returns ADR-0004 success', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.id).to.eql(pm.environment.get('day22DriverScheduleId')); });",
+                  "pm.environment.set('day22ScheduleNoOpBody', JSON.stringify(body));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day22ScheduleNoOpKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/operator/driver-schedules/{{day22DriverScheduleId}}?probe=x&applyTo=FUTURE_ONLY",
+            "body": { "mode": "raw", "raw": "{\n  \"departureTime\": \"08:30:00\"\n}" }
+          }
         },
         {
           "name": "7. DriverSchedule query-key reorder replays",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-            "const body = pm.response.json(); pm.test('Query key order is canonical', () => { pm.response.to.have.status(200); pm.expect(JSON.stringify(body)).to.eql(pm.environment.get('day22ScheduleNoOpBody')); });"
-          ] }}],
-          "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day22ScheduleNoOpKey}}" }], "url": "{{baseUrl}}/v1/operator/driver-schedules/{{day22DriverScheduleId}}?applyTo=FUTURE_ONLY&probe=x", "body": { "mode": "raw", "raw": "{\n  \"departureTime\": \"08:30:00\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Query key order is canonical', () => { pm.response.to.have.status(200); pm.expect(JSON.stringify(body)).to.eql(pm.environment.get('day22ScheduleNoOpBody')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day22ScheduleNoOpKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/operator/driver-schedules/{{day22DriverScheduleId}}?applyTo=FUTURE_ONLY&probe=x",
+            "body": { "mode": "raw", "raw": "{\n  \"departureTime\": \"08:30:00\"\n}" }
+          }
         },
         {
           "name": "8. Changed applyTo mismatches",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-            "const body = pm.response.json(); pm.test('Changed applyTo uses idempotency mismatch', () => { pm.response.to.have.status(422); pm.expect(body.error.code).to.eql('IDEMPOTENCY_KEY_MISMATCH'); });"
-          ] }}],
-          "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day22ScheduleNoOpKey}}" }], "url": "{{baseUrl}}/v1/operator/driver-schedules/{{day22DriverScheduleId}}?applyTo=ALL_PENDING&probe=x", "body": { "mode": "raw", "raw": "{\n  \"departureTime\": \"08:30:00\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Changed applyTo uses idempotency mismatch', () => { pm.response.to.have.status(422); pm.expect(body.error.code).to.eql('IDEMPOTENCY_KEY_MISMATCH'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day22ScheduleNoOpKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/operator/driver-schedules/{{day22DriverScheduleId}}?applyTo=ALL_PENDING&probe=x",
+            "body": { "mode": "raw", "raw": "{\n  \"departureTime\": \"08:30:00\"\n}" }
+          }
         },
         {
           "name": "9. ALL_PENDING rejects null vehicle",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-            "const body = pm.response.json(); pm.test('ALL_PENDING null vehicle is invalid', () => { pm.response.to.have.status(422); pm.expect(body.error.code).to.eql('VALIDATION_ERROR'); });"
-          ] }}],
-          "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day22ScheduleInvalidKey}}" }], "url": "{{baseUrl}}/v1/operator/driver-schedules/{{day22DriverScheduleId}}?applyTo=ALL_PENDING", "body": { "mode": "raw", "raw": "{\n  \"vehicleId\": null\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('ALL_PENDING null vehicle is invalid', () => { pm.response.to.have.status(422); pm.expect(body.error.code).to.eql('VALIDATION_ERROR'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day22ScheduleInvalidKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/operator/driver-schedules/{{day22DriverScheduleId}}?applyTo=ALL_PENDING",
+            "body": { "mode": "raw", "raw": "{\n  \"vehicleId\": null\n}" }
+          }
         },
         {
           "name": "10. Deprecated crew alias delegates to ALL_PENDING",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-            "const body = pm.response.json(); pm.test('Crew alias returns the schedule DTO', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.id).to.eql(pm.environment.get('day22DriverScheduleId')); });"
-          ] }}],
-          "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day22CrewAliasKey}}" }], "url": "{{baseUrl}}/v1/operator/driver-schedules/{{day22DriverScheduleId}}/crew", "body": { "mode": "raw", "raw": "{\n  \"driverUserId\": \"{{day22DriverUserId}}\",\n  \"assistantUserId\": \"{{day22AssistantUserId}}\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Crew alias returns the schedule DTO', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.id).to.eql(pm.environment.get('day22DriverScheduleId')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day22OperatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day22CrewAliasKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/operator/driver-schedules/{{day22DriverScheduleId}}/crew",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"driverUserId\": \"{{day22DriverUserId}}\",\n  \"assistantUserId\": \"{{day22AssistantUserId}}\"\n}"
+            }
+          }
         }
       ]
     },
@@ -7626,59 +7811,155 @@
       "item": [
         {
           "name": "01. Operator bookings XLSX",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-            "pm.test('XLSX bookings response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
-          ] }}],
-          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/reports/bookings/export?from={{day41ReportFrom}}&to={{day41ReportTo}}" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('XLSX bookings response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/operator/reports/bookings/export?from={{day41ReportFrom}}&to={{day41ReportTo}}"
+          }
         },
         {
           "name": "02. Operator cancellation XLSX",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-            "pm.test('XLSX cancellation response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
-          ] }}],
-          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/reports/cancellation/export?from={{day41ReportFrom}}&to={{day41ReportTo}}" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('XLSX cancellation response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/operator/reports/cancellation/export?from={{day41ReportFrom}}&to={{day41ReportTo}}"
+          }
         },
         {
           "name": "03. Operator parcels XLSX",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-            "pm.test('XLSX parcels response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
-          ] }}],
-          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/reports/parcels/export?from={{day41ReportFrom}}&to={{day41ReportTo}}" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('XLSX parcels response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/operator/reports/parcels/export?from={{day41ReportFrom}}&to={{day41ReportTo}}"
+          }
         },
         {
           "name": "04. Operator revenue XLSX",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-            "pm.test('XLSX revenue response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
-          ] }}],
-          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/reports/revenue/export?from={{day41ReportFrom}}&to={{day41ReportTo}}" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('XLSX revenue response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/operator/reports/revenue/export?from={{day41ReportFrom}}&to={{day41ReportTo}}"
+          }
         },
         {
           "name": "05. Operator refunds XLSX",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-            "pm.test('XLSX refunds response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
-          ] }}],
-          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/reports/refunds/export?from={{day41ReportFrom}}&to={{day41ReportTo}}" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('XLSX refunds response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/operator/reports/refunds/export?from={{day41ReportFrom}}&to={{day41ReportTo}}"
+          }
         },
         {
           "name": "06. Operator occupancy XLSX",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-            "pm.test('XLSX occupancy response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
-          ] }}],
-          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/reports/occupancy/export?from={{day41ReportFrom}}&to={{day41ReportTo}}" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('XLSX occupancy response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/operator/reports/occupancy/export?from={{day41ReportFrom}}&to={{day41ReportTo}}"
+          }
         },
         {
           "name": "07. System admin platform report",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-            "const body = pm.response.json(); pm.test('Platform report envelope', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data).to.have.property('totals'); });"
-          ] }}],
-          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/admin/reports/platform?from={{day41ReportFrom}}&to={{day41ReportTo}}" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('Platform report envelope', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data).to.have.property('totals'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/admin/reports/platform?from={{day41ReportFrom}}&to={{day41ReportTo}}"
+          }
         },
         {
           "name": "08. System admin DLQ review",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-            "const body = pm.response.json(); pm.test('DLQ review envelope', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.items).to.be.an('array'); pm.expect(body.data).to.have.property('unavailableServices'); });"
-          ] }}],
-          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/admin/outbox/dlq?pageSize=50&sortDir=desc" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); pm.test('DLQ review envelope', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.data.items).to.be.an('array'); pm.expect(body.data).to.have.property('unavailableServices'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/admin/outbox/dlq?pageSize=50&sortDir=desc"
+          }
         }
       ]
     },
@@ -7688,88 +7969,418 @@
       "item": [
         {
           "name": "1. DriverSchedule ALL_PENDING is the schedule producer",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Canonical producer returns ADR-0004 success',()=>{pm.response.to.have.status(200);pm.expect(body.success).to.eql(true);pm.expect(body.meta.traceId).to.be.a('string');});"] }}],
-          "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{day23OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day23ScheduleKey}}" }], "url": "{{baseUrl}}/v1/operator/driver-schedules/{{day23DriverScheduleId}}?applyTo=ALL_PENDING", "body": { "mode": "raw", "raw": "{\n  \"departureTime\": \"{{day23DepartureTime}}\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Canonical producer returns ADR-0004 success',()=>{pm.response.to.have.status(200);pm.expect(body.success).to.eql(true);pm.expect(body.meta.traceId).to.be.a('string');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day23OperatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day23ScheduleKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/operator/driver-schedules/{{day23DriverScheduleId}}?applyTo=ALL_PENDING",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"departureTime\": \"{{day23DepartureTime}}\"\n}"
+            }
+          }
         },
         {
           "name": "2. Passenger accepts a schedule action",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('ACCEPTED keeps Booking confirmed',()=>{pm.response.to.have.status(200);pm.expect(body.data.resolvedAction).to.eql('ACCEPTED');pm.environment.set('day23ResolveReplayBody',JSON.stringify(body));});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day23ResolveKey}}" }], "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23PendingActionId}}/resolve", "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('ACCEPTED keeps Booking confirmed',()=>{pm.response.to.have.status(200);pm.expect(body.data.resolvedAction).to.eql('ACCEPTED');pm.environment.set('day23ResolveReplayBody',JSON.stringify(body));});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day23ResolveKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23PendingActionId}}/resolve",
+            "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\"\n}" }
+          }
         },
         {
           "name": "3. Same key and payload replay byte-identically",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Stored response replays byte-identically',()=>{pm.response.to.have.status(200);pm.expect(pm.response.text()).to.eql(pm.environment.get('day23ResolveReplayBody'));});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day23ResolveKey}}" }], "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23PendingActionId}}/resolve", "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Stored response replays byte-identically',()=>{pm.response.to.have.status(200);pm.expect(pm.response.text()).to.eql(pm.environment.get('day23ResolveReplayBody'));});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day23ResolveKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23PendingActionId}}/resolve",
+            "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\"\n}" }
+          }
         },
         {
           "name": "4. MEDIUM rejection freezes 50 percent refund",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('MEDIUM rejection resolves',()=>{pm.response.to.have.status(200);pm.expect(body.data.resolvedAction).to.eql('REJECTED');}); // controlled PostgreSQL evidence asserts severity=MEDIUM, refundPercent=50, exact refundAmount"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day23MediumRejectKey}}" }], "url": "{{baseUrl}}/v1/bookings/{{day23MediumBookingId}}/pending-actions/{{day23MediumActionId}}/resolve", "body": { "mode": "raw", "raw": "{\n  \"action\": \"REJECTED\",\n  \"note\": \"Postman Day 23 MEDIUM\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('MEDIUM rejection resolves',()=>{pm.response.to.have.status(200);pm.expect(body.data.resolvedAction).to.eql('REJECTED');}); // controlled PostgreSQL evidence asserts severity=MEDIUM, refundPercent=50, exact refundAmount"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day23MediumRejectKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/bookings/{{day23MediumBookingId}}/pending-actions/{{day23MediumActionId}}/resolve",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"REJECTED\",\n  \"note\": \"Postman Day 23 MEDIUM\"\n}"
+            }
+          }
         },
         {
           "name": "5. MAJOR rejection freezes 100 percent refund",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('MAJOR rejection resolves',()=>{pm.response.to.have.status(200);pm.expect(body.data.resolvedAction).to.eql('REJECTED');}); // controlled PostgreSQL evidence asserts canonical cancellation eventId/occurredAt, severity=MAJOR, refundPercent=100, refundAmount"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day23MajorRejectKey}}" }], "url": "{{baseUrl}}/v1/bookings/{{day23MajorBookingId}}/pending-actions/{{day23MajorActionId}}/resolve", "body": { "mode": "raw", "raw": "{\n  \"action\": \"REJECTED\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('MAJOR rejection resolves',()=>{pm.response.to.have.status(200);pm.expect(body.data.resolvedAction).to.eql('REJECTED');}); // controlled PostgreSQL evidence asserts canonical cancellation eventId/occurredAt, severity=MAJOR, refundPercent=100, refundAmount"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day23MajorRejectKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/bookings/{{day23MajorBookingId}}/pending-actions/{{day23MajorActionId}}/resolve",
+            "body": { "mode": "raw", "raw": "{\n  \"action\": \"REJECTED\"\n}" }
+          }
         },
         {
           "name": "6. Missing JWT is rejected",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Missing JWT',()=>{pm.response.to.have.status(401);pm.expect(body.error.code).to.eql('AUTH_TOKEN_INVALID');});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day23AuthProbeKey}}" }], "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23PendingActionId}}/resolve", "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Missing JWT',()=>{pm.response.to.have.status(401);pm.expect(body.error.code).to.eql('AUTH_TOKEN_INVALID');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day23AuthProbeKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23PendingActionId}}/resolve",
+            "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\"\n}" }
+          }
         },
         {
           "name": "7. Non-passenger is forbidden before lookup",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Role gate',()=>{pm.response.to.have.status(403);pm.expect(body.error.code).to.eql('FORBIDDEN');});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day23OperatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day23RoleProbeKey}}" }], "url": "{{baseUrl}}/v1/bookings/{{day23MissingBookingId}}/pending-actions/{{day23MissingActionId}}/resolve", "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Role gate',()=>{pm.response.to.have.status(403);pm.expect(body.error.code).to.eql('FORBIDDEN');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day23OperatorAdminAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day23RoleProbeKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/bookings/{{day23MissingBookingId}}/pending-actions/{{day23MissingActionId}}/resolve",
+            "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\"\n}" }
+          }
         },
         {
           "name": "8. Non-owner Booking is masked",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Owner masking',()=>{pm.response.to.have.status(404);pm.expect(body.error.code).to.eql('BOOKING_NOT_FOUND');});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day23OtherPassengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day23MaskProbeKey}}" }], "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23PendingActionId}}/resolve", "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Owner masking',()=>{pm.response.to.have.status(404);pm.expect(body.error.code).to.eql('BOOKING_NOT_FOUND');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day23OtherPassengerAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day23MaskProbeKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23PendingActionId}}/resolve",
+            "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\"\n}" }
+          }
         },
         {
           "name": "9. Missing action under owned Booking",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Missing action',()=>{pm.response.to.have.status(404);pm.expect(body.error.code).to.eql('BOOKING_PENDING_ACTION_NOT_FOUND');});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day23MissingProbeKey}}" }], "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23MissingActionId}}/resolve", "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Missing action',()=>{pm.response.to.have.status(404);pm.expect(body.error.code).to.eql('BOOKING_PENDING_ACTION_NOT_FOUND');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day23MissingProbeKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23MissingActionId}}/resolve",
+            "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\"\n}" }
+          }
         },
         {
           "name": "10. Active action is not resolvable",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Reason/state gate',()=>{pm.response.to.have.status(409);pm.expect(body.error.code).to.eql('BOOKING_PENDING_ACTION_NOT_RESOLVABLE');});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day23NotResolvableKey}}" }], "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23NotResolvableActionId}}/resolve", "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Reason/state gate',()=>{pm.response.to.have.status(409);pm.expect(body.error.code).to.eql('BOOKING_PENDING_ACTION_NOT_RESOLVABLE');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day23NotResolvableKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23NotResolvableActionId}}/resolve",
+            "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\"\n}" }
+          }
         },
         {
           "name": "11. New key sees superseded conflict",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Superseded conflict',()=>{pm.response.to.have.status(409);pm.expect(body.error.code).to.eql('BOOKING_PENDING_ACTION_SUPERSEDED');});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day23SupersededKey}}" }], "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23SupersededActionId}}/resolve", "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Superseded conflict',()=>{pm.response.to.have.status(409);pm.expect(body.error.code).to.eql('BOOKING_PENDING_ACTION_SUPERSEDED');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day23SupersededKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23SupersededActionId}}/resolve",
+            "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\"\n}" }
+          }
         },
         {
           "name": "12. New key sees already-resolved conflict",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Terminal conflict',()=>{pm.response.to.have.status(409);pm.expect(body.error.code).to.eql('BOOKING_PENDING_ACTION_ALREADY_RESOLVED');});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day23AlreadyResolvedKey}}" }], "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23ResolvedActionId}}/resolve", "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Terminal conflict',()=>{pm.response.to.have.status(409);pm.expect(body.error.code).to.eql('BOOKING_PENDING_ACTION_ALREADY_RESOLVED');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day23AlreadyResolvedKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23ResolvedActionId}}/resolve",
+            "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\"\n}" }
+          }
         },
         {
           "name": "13. Strictly-after cutoff is expired",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Timeout owns strict-after',()=>{pm.response.to.have.status(409);pm.expect(body.error.code).to.eql('BOOKING_PENDING_ACTION_EXPIRED');});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day23ExpiredKey}}" }], "url": "{{baseUrl}}/v1/bookings/{{day23ExpiredBookingId}}/pending-actions/{{day23ExpiredActionId}}/resolve", "body": { "mode": "raw", "raw": "{\n  \"action\": \"REJECTED\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Timeout owns strict-after',()=>{pm.response.to.have.status(409);pm.expect(body.error.code).to.eql('BOOKING_PENDING_ACTION_EXPIRED');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day23ExpiredKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/bookings/{{day23ExpiredBookingId}}/pending-actions/{{day23ExpiredActionId}}/resolve",
+            "body": { "mode": "raw", "raw": "{\n  \"action\": \"REJECTED\"\n}" }
+          }
         },
         {
           "name": "14. Missing idempotency key",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Key required',()=>{pm.response.to.have.status(422);pm.expect(body.error.code).to.eql('IDEMPOTENCY_KEY_REQUIRED');});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }], "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23PendingActionId}}/resolve", "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Key required',()=>{pm.response.to.have.status(422);pm.expect(body.error.code).to.eql('IDEMPOTENCY_KEY_REQUIRED');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23PendingActionId}}/resolve",
+            "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\"\n}" }
+          }
         },
         {
           "name": "15. Changed body mismatches the replay key",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Fingerprint mismatch',()=>{pm.response.to.have.status(422);pm.expect(body.error.code).to.eql('IDEMPOTENCY_KEY_MISMATCH');});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day23ResolveKey}}" }], "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23PendingActionId}}/resolve", "body": { "mode": "raw", "raw": "{\n  \"action\": \"REJECTED\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Fingerprint mismatch',()=>{pm.response.to.have.status(422);pm.expect(body.error.code).to.eql('IDEMPOTENCY_KEY_MISMATCH');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day23ResolveKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23PendingActionId}}/resolve",
+            "body": { "mode": "raw", "raw": "{\n  \"action\": \"REJECTED\"\n}" }
+          }
         },
         {
           "name": "16. selectedStopId is invalid request shape",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Exact DTO only',()=>{pm.response.to.have.status(422);pm.expect(body.error.code).to.eql('VALIDATION_ERROR');});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "not-a-v4-key" }], "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23PendingActionId}}/resolve", "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\",\n  \"selectedStopId\": \"{{day23MissingActionId}}\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Exact DTO only',()=>{pm.response.to.have.status(422);pm.expect(body.error.code).to.eql('VALIDATION_ERROR');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "not-a-v4-key" }
+            ],
+            "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23PendingActionId}}/resolve",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"ACCEPTED\",\n  \"selectedStopId\": \"{{day23MissingActionId}}\"\n}"
+            }
+          }
         },
         {
           "name": "17. In-flight duplicate is pending",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Concurrent owner',()=>{pm.response.to.have.status(409);pm.expect(body.error.code).to.eql('IDEMPOTENCY_REQUEST_PENDING');});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day23PendingProbeKey}}" }], "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23PendingActionId}}/resolve", "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Concurrent owner',()=>{pm.response.to.have.status(409);pm.expect(body.error.code).to.eql('IDEMPOTENCY_REQUEST_PENDING');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day23PassengerAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day23PendingProbeKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/bookings/{{day23BookingId}}/pending-actions/{{day23PendingActionId}}/resolve",
+            "body": { "mode": "raw", "raw": "{\n  \"action\": \"ACCEPTED\"\n}" }
+          }
         }
       ]
     },
@@ -7779,98 +8390,677 @@
       "item": [
         {
           "name": "1. Operator disables a stop through the sole DELETE route",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Public stop disable uses ADR-0004 success',()=>{pm.response.to.have.status(200);pm.expect(body.success).to.eql(true);pm.expect(body.statusCode).to.eql(200);pm.expect(body.meta.traceId).to.be.a('string');pm.expect(body.data).to.have.all.keys('stop','warning');pm.environment.set('day24DisableReplayBody',pm.response.text());});"] }}],
-          "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{day24OperatorAdminAccessToken}}" }, { "key": "Idempotency-Key", "value": "{{day24DisableKey}}" }], "url": "{{baseUrl}}/v1/operator/stops/{{day24StopId}}?replacedByStopId={{day24ReplacementStopId}}" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Public stop disable uses ADR-0004 success',()=>{pm.response.to.have.status(200);pm.expect(body.success).to.eql(true);pm.expect(body.statusCode).to.eql(200);pm.expect(body.meta.traceId).to.be.a('string');pm.expect(body.data).to.have.all.keys('stop','warning');pm.environment.set('day24DisableReplayBody',pm.response.text());});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day24OperatorAdminAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day24DisableKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/operator/stops/{{day24StopId}}?replacedByStopId={{day24ReplacementStopId}}"
+          }
         },
         {
           "name": "2. Stop disable same key and fingerprint replays byte-identically",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Disable replay is byte-identical',()=>{pm.response.to.have.status(200);pm.expect(pm.response.text()).to.eql(pm.environment.get('day24DisableReplayBody'));});"] }}],
-          "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{day24OperatorAdminAccessToken}}" }, { "key": "Idempotency-Key", "value": "{{day24DisableKey}}" }], "url": "{{baseUrl}}/v1/operator/stops/{{day24StopId}}?replacedByStopId={{day24ReplacementStopId}}" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Disable replay is byte-identical',()=>{pm.response.to.have.status(200);pm.expect(pm.response.text()).to.eql(pm.environment.get('day24DisableReplayBody'));});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day24OperatorAdminAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day24DisableKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/operator/stops/{{day24StopId}}?replacedByStopId={{day24ReplacementStopId}}"
+          }
         },
         {
           "name": "3. Stop disable changed replacement mismatches the replay key",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Disable fingerprint mismatch',()=>{pm.response.to.have.status(422);pm.expect(body.error.code).to.eql('IDEMPOTENCY_KEY_MISMATCH');});"] }}],
-          "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{day24OperatorAdminAccessToken}}" }, { "key": "Idempotency-Key", "value": "{{day24DisableKey}}" }], "url": "{{baseUrl}}/v1/operator/stops/{{day24StopId}}?replacedByStopId={{day24AlternateReplacementStopId}}" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Disable fingerprint mismatch',()=>{pm.response.to.have.status(422);pm.expect(body.error.code).to.eql('IDEMPOTENCY_KEY_MISMATCH');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day24OperatorAdminAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day24DisableKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/operator/stops/{{day24StopId}}?replacedByStopId={{day24AlternateReplacementStopId}}"
+          }
         },
         {
           "name": "4. Stop disable new key with another replacement is terminal",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Disabled stop rejects another replacement',()=>{pm.response.to.have.status(409);pm.expect(body.error.code).to.eql('STOP_ALREADY_DISABLED');});"] }}],
-          "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{day24OperatorAdminAccessToken}}" }, { "key": "Idempotency-Key", "value": "{{day24DisableTerminalKey}}" }], "url": "{{baseUrl}}/v1/operator/stops/{{day24StopId}}?replacedByStopId={{day24AlternateReplacementStopId}}" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Disabled stop rejects another replacement',()=>{pm.response.to.have.status(409);pm.expect(body.error.code).to.eql('STOP_ALREADY_DISABLED');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day24OperatorAdminAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day24DisableTerminalKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/operator/stops/{{day24StopId}}?replacedByStopId={{day24AlternateReplacementStopId}}"
+          }
         },
         {
           "name": "5. Passenger replaces the disabled pickup",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Pickup replacement resolves the action',()=>{pm.response.to.have.status(200);pm.expect(body.success).to.eql(true);pm.expect(body.meta.traceId).to.be.a('string');pm.environment.set('day24ChoiceReplayBody',pm.response.text());});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day24PassengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day24ChoiceKey}}" }], "url": "{{baseUrl}}/v1/bookings/{{day24BookingId}}/edit-pickup", "body": { "mode": "raw", "raw": "{\n  \"pickup\": { \"stationId\": \"{{day24FallbackStationId}}\", \"stopId\": null },\n  \"paymentMethod\": \"WALLET\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Pickup replacement resolves the action',()=>{pm.response.to.have.status(200);pm.expect(body.success).to.eql(true);pm.expect(body.meta.traceId).to.be.a('string');pm.environment.set('day24ChoiceReplayBody',pm.response.text());});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day24PassengerAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day24ChoiceKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/bookings/{{day24BookingId}}/edit-pickup",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickup\": { \"stationId\": \"{{day24FallbackStationId}}\", \"stopId\": null },\n  \"paymentMethod\": \"WALLET\"\n}"
+            }
+          }
         },
         {
           "name": "6. Passenger choice same key and payload replays byte-identically",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Choice replay is byte-identical',()=>{pm.response.to.have.status(200);pm.expect(pm.response.text()).to.eql(pm.environment.get('day24ChoiceReplayBody'));});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day24PassengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day24ChoiceKey}}" }], "url": "{{baseUrl}}/v1/bookings/{{day24BookingId}}/edit-pickup", "body": { "mode": "raw", "raw": "{\n  \"pickup\": { \"stationId\": \"{{day24FallbackStationId}}\", \"stopId\": null },\n  \"paymentMethod\": \"WALLET\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Choice replay is byte-identical',()=>{pm.response.to.have.status(200);pm.expect(pm.response.text()).to.eql(pm.environment.get('day24ChoiceReplayBody'));});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day24PassengerAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day24ChoiceKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/bookings/{{day24BookingId}}/edit-pickup",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickup\": { \"stationId\": \"{{day24FallbackStationId}}\", \"stopId\": null },\n  \"paymentMethod\": \"WALLET\"\n}"
+            }
+          }
         },
         {
           "name": "7. Passenger choice changed body mismatches the replay key",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Choice fingerprint mismatch',()=>{pm.response.to.have.status(422);pm.expect(body.error.code).to.eql('IDEMPOTENCY_KEY_MISMATCH');});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day24PassengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day24ChoiceKey}}" }], "url": "{{baseUrl}}/v1/bookings/{{day24BookingId}}/edit-pickup", "body": { "mode": "raw", "raw": "{\n  \"pickup\": { \"stationId\": \"{{day24AlternateReplacementStopId}}\", \"stopId\": null },\n  \"paymentMethod\": \"WALLET\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Choice fingerprint mismatch',()=>{pm.response.to.have.status(422);pm.expect(body.error.code).to.eql('IDEMPOTENCY_KEY_MISMATCH');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day24PassengerAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day24ChoiceKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/bookings/{{day24BookingId}}/edit-pickup",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickup\": { \"stationId\": \"{{day24AlternateReplacementStopId}}\", \"stopId\": null },\n  \"paymentMethod\": \"WALLET\"\n}"
+            }
+          }
         },
         {
           "name": "8. Passenger choice new key sees terminal action",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Terminal action conflict',()=>{pm.response.to.have.status(409);pm.expect(body.error.code).to.eql('BOOKING_PENDING_ACTION_ALREADY_RESOLVED');});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day24PassengerAccessToken}}" }, { "key": "Idempotency-Key", "value": "{{day24ChoiceTerminalKey}}" }], "url": "{{baseUrl}}/v1/bookings/{{day24BookingId}}/pending-action/{{day24PendingActionId}}/accept-fallback" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Terminal action conflict',()=>{pm.response.to.have.status(409);pm.expect(body.error.code).to.eql('BOOKING_PENDING_ACTION_ALREADY_RESOLVED');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day24PassengerAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day24ChoiceTerminalKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/bookings/{{day24BookingId}}/pending-action/{{day24PendingActionId}}/accept-fallback"
+          }
         },
         {
           "name": "9. Passenger refuses a stop-disabled action",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Refusal uses existing cancellation response',()=>{pm.response.to.have.status(200);pm.expect(body.success).to.eql(true);pm.expect(body.data).to.have.property('refundAmount');});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day24PassengerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{day24CancelKey}}" }], "url": "{{baseUrl}}/v1/bookings/{{day24RefusalBookingId}}/cancel", "body": { "mode": "raw", "raw": "{\n  \"reason\": \"STOP_DISABLED_REFUSED\"\n}" } }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Refusal uses existing cancellation response',()=>{pm.response.to.have.status(200);pm.expect(body.success).to.eql(true);pm.expect(body.data).to.have.property('refundAmount');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day24PassengerAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day24CancelKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/bookings/{{day24RefusalBookingId}}/cancel",
+            "body": { "mode": "raw", "raw": "{\n  \"reason\": \"STOP_DISABLED_REFUSED\"\n}" }
+          }
         },
         {
           "name": "10. Assigned crew departs an arrived stop",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Public depart uses exact ADR-0004 data',()=>{pm.response.to.have.status(200);pm.expect(body.success).to.eql(true);pm.expect(body.statusCode).to.eql(200);pm.expect(body.data).to.have.all.keys('tripId','stopId','departedAt','pendingPassengerCount','eventEmitted');pm.expect(body.meta.traceId).to.be.a('string');pm.environment.set('day24DepartReplayBody',pm.response.text());});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day24DriverAccessToken}}" }, { "key": "Idempotency-Key", "value": "{{day24DepartKey}}" }], "url": "{{baseUrl}}/v1/driver/trips/{{day24TripId}}/stops/{{day24TripStopId}}/depart" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Public depart uses exact ADR-0004 data',()=>{pm.response.to.have.status(200);pm.expect(body.success).to.eql(true);pm.expect(body.statusCode).to.eql(200);pm.expect(body.data).to.have.all.keys('tripId','stopId','departedAt','pendingPassengerCount','eventEmitted');pm.expect(body.meta.traceId).to.be.a('string');pm.environment.set('day24DepartReplayBody',pm.response.text());});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day24DriverAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day24DepartKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/driver/trips/{{day24TripId}}/stops/{{day24TripStopId}}/depart"
+          }
         },
         {
           "name": "11. Depart same key and fingerprint replays byte-identically",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Depart replay is byte-identical',()=>{pm.response.to.have.status(200);pm.expect(pm.response.text()).to.eql(pm.environment.get('day24DepartReplayBody'));});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day24DriverAccessToken}}" }, { "key": "Idempotency-Key", "value": "{{day24DepartKey}}" }], "url": "{{baseUrl}}/v1/driver/trips/{{day24TripId}}/stops/{{day24TripStopId}}/depart" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Depart replay is byte-identical',()=>{pm.response.to.have.status(200);pm.expect(pm.response.text()).to.eql(pm.environment.get('day24DepartReplayBody'));});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day24DriverAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day24DepartKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/driver/trips/{{day24TripId}}/stops/{{day24TripStopId}}/depart"
+          }
         },
         {
           "name": "12. Depart changed fingerprint mismatches the replay key",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Depart fingerprint mismatch',()=>{pm.response.to.have.status(422);pm.expect(body.error.code).to.eql('IDEMPOTENCY_KEY_MISMATCH');});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day24DriverAccessToken}}" }, { "key": "Idempotency-Key", "value": "{{day24DepartKey}}" }], "url": "{{baseUrl}}/v1/driver/trips/{{day24TripId}}/stops/{{day24AlternateTripStopId}}/depart" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Depart fingerprint mismatch',()=>{pm.response.to.have.status(422);pm.expect(body.error.code).to.eql('IDEMPOTENCY_KEY_MISMATCH');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day24DriverAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day24DepartKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/driver/trips/{{day24TripId}}/stops/{{day24AlternateTripStopId}}/depart"
+          }
         },
         {
           "name": "13. Depart new key sees durable terminal state",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Already departed conflict',()=>{pm.response.to.have.status(409);pm.expect(body.error.code).to.eql('TRIP_STOP_ALREADY_DEPARTED');});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day24DriverAccessToken}}" }, { "key": "Idempotency-Key", "value": "{{day24DepartTerminalKey}}" }], "url": "{{baseUrl}}/v1/driver/trips/{{day24TripId}}/stops/{{day24TripStopId}}/depart" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Already departed conflict',()=>{pm.response.to.have.status(409);pm.expect(body.error.code).to.eql('TRIP_STOP_ALREADY_DEPARTED');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day24DriverAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day24DepartTerminalKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/driver/trips/{{day24TripId}}/stops/{{day24TripStopId}}/depart"
+          }
         },
         {
           "name": "14. Pending stop cannot depart",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Stop lifecycle gate',()=>{pm.response.to.have.status(422);pm.expect(body.error.code).to.eql('TRIP_STOP_NOT_ARRIVED');});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day24DriverAccessToken}}" }, { "key": "Idempotency-Key", "value": "{{day24DepartPendingKey}}" }], "url": "{{baseUrl}}/v1/driver/trips/{{day24PendingTripId}}/stops/{{day24PendingTripStopId}}/depart" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Stop lifecycle gate',()=>{pm.response.to.have.status(422);pm.expect(body.error.code).to.eql('TRIP_STOP_NOT_ARRIVED');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day24DriverAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day24DepartPendingKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/driver/trips/{{day24PendingTripId}}/stops/{{day24PendingTripStopId}}/depart"
+          }
         },
         {
           "name": "15. Missing user JWT is rejected at Gateway",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Missing user JWT',()=>{pm.response.to.have.status(401);pm.expect(body.error.code).to.eql('AUTH_TOKEN_INVALID');});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Idempotency-Key", "value": "{{day24AuthProbeKey}}" }], "url": "{{baseUrl}}/v1/driver/trips/{{day24TripId}}/stops/{{day24TripStopId}}/depart" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Missing user JWT',()=>{pm.response.to.have.status(401);pm.expect(body.error.code).to.eql('AUTH_TOKEN_INVALID');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Idempotency-Key", "value": "{{day24AuthProbeKey}}" }],
+            "url": "{{baseUrl}}/v1/driver/trips/{{day24TripId}}/stops/{{day24TripStopId}}/depart"
+          }
         },
         {
           "name": "16. Internal JWT cannot authenticate a public Gateway route",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Internal JWT rejected as user JWT',()=>{pm.response.to.have.status(401);pm.expect(body.error.code).to.eql('AUTH_TOKEN_INVALID');});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day24InternalJwt}}" }, { "key": "Idempotency-Key", "value": "{{day24InternalAsUserProbeKey}}" }], "url": "{{baseUrl}}/v1/driver/trips/{{day24TripId}}/stops/{{day24TripStopId}}/depart" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Internal JWT rejected as user JWT',()=>{pm.response.to.have.status(401);pm.expect(body.error.code).to.eql('AUTH_TOKEN_INVALID');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day24InternalJwt}}" },
+              { "key": "Idempotency-Key", "value": "{{day24InternalAsUserProbeKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/driver/trips/{{day24TripId}}/stops/{{day24TripStopId}}/depart"
+          }
         },
         {
           "name": "17. Malformed public depart identifiers use validation envelope",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Malformed Guid is validation, not routing 404',()=>{pm.response.to.have.status(422);pm.expect(body.error.code).to.eql('VALIDATION_ERROR');pm.expect(body.success).to.eql(false);pm.expect(body.meta.traceId).to.be.a('string');});"] }}],
-          "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{day24DriverAccessToken}}" }, { "key": "Idempotency-Key", "value": "{{day24MalformedProbeKey}}" }], "url": "{{baseUrl}}/v1/driver/trips/not-a-guid/stops/{{day24TripStopId}}/depart" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Malformed Guid is validation, not routing 404',()=>{pm.response.to.have.status(422);pm.expect(body.error.code).to.eql('VALIDATION_ERROR');pm.expect(body.success).to.eql(false);pm.expect(body.meta.traceId).to.be.a('string');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day24DriverAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{day24MalformedProbeKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/driver/trips/not-a-guid/stops/{{day24TripStopId}}/depart"
+          }
         },
         {
           "name": "18. Raw internal pending-passenger count has no ADR-0004 envelope",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('Raw pending count shape is exact',()=>{pm.response.to.have.status(200);pm.expect(body).to.have.all.keys('tripId','stopId','pendingPassengerCount');pm.expect(body).not.to.have.property('success');pm.expect(body.tripId).to.eql(pm.environment.get('day24TripId'));pm.expect(body.stopId).to.eql(pm.environment.get('day24TripStopId'));pm.expect(body.pendingPassengerCount).to.be.a('number');});"] }}],
-          "request": { "method": "GET", "header": [{ "key": "X-Internal-Auth", "value": "Bearer {{day24InternalJwt}}" }], "url": "{{bookingBaseUrl}}/internal/v1/bookings/trips/{{day24TripId}}/stops/{{day24TripStopId}}/pending-passenger-count?operatorId={{day24OperatorId}}" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('Raw pending count shape is exact',()=>{pm.response.to.have.status(200);pm.expect(body).to.have.all.keys('tripId','stopId','pendingPassengerCount');pm.expect(body).not.to.have.property('success');pm.expect(body.tripId).to.eql(pm.environment.get('day24TripId'));pm.expect(body.stopId).to.eql(pm.environment.get('day24TripStopId'));pm.expect(body.pendingPassengerCount).to.be.a('number');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Internal-Auth", "value": "Bearer {{day24InternalJwt}}" }],
+            "url": "{{bookingBaseUrl}}/internal/v1/bookings/trips/{{day24TripId}}/stops/{{day24TripStopId}}/pending-passenger-count?operatorId={{day24OperatorId}}"
+          }
         },
         {
           "name": "19. User JWT cannot authenticate the raw internal route",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body=pm.response.json(); pm.test('User JWT rejected as Internal JWT',()=>{pm.response.to.have.status(401);pm.expect(body.error.code).to.eql('AUTH_TOKEN_INVALID');});"] }}],
-          "request": { "method": "GET", "header": [{ "key": "X-Internal-Auth", "value": "Bearer {{day24DriverAccessToken}}" }], "url": "{{bookingBaseUrl}}/internal/v1/bookings/trips/{{day24TripId}}/stops/{{day24TripStopId}}/pending-passenger-count?operatorId={{day24OperatorId}}" }
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json(); pm.test('User JWT rejected as Internal JWT',()=>{pm.response.to.have.status(401);pm.expect(body.error.code).to.eql('AUTH_TOKEN_INVALID');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Internal-Auth", "value": "Bearer {{day24DriverAccessToken}}" }],
+            "url": "{{bookingBaseUrl}}/internal/v1/bookings/trips/{{day24TripId}}/stops/{{day24TripStopId}}/pending-passenger-count?operatorId={{day24OperatorId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Day 30 - Sprint 4 demo",
+      "description": "Manual/importable companion for the Sprint-4 schedule, Trip lifecycle, and Parcel flow. Supply only local runtime tokens and fixture identifiers through the environment. npm run e2e:day30 is the authoritative self-seeding run.",
+      "item": [
+        {
+          "name": "1. Operator creates an active driver schedule",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('DriverSchedule create uses the ADR-0004 envelope', () => {",
+                  "pm.response.to.have.status(201);",
+                  "pm.expect(body.success).to.equal(true);",
+                  "pm.expect(body.statusCode).to.equal(201);",
+                  "pm.expect(body.data).to.have.property('id').that.is.a('string').and.is.not.empty;",
+                  "pm.expect(body.meta).to.have.property('traceId');",
+                  "});",
+                  "pm.environment.set('day30DriverScheduleId', body.data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day30OperatorAdminAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"routeId\": \"{{day30RouteId}}\",\n  \"vehicleId\": \"{{day30VehicleId}}\",\n  \"driverUserId\": \"{{day30DriverUserId}}\",\n  \"assistantUserId\": \"{{day30AssistantUserId}}\",\n  \"dayOfWeek\": [1, 3, 5],\n  \"departureTime\": \"08:00:00\",\n  \"validFrom\": \"2026-08-01\",\n  \"validUntil\": null,\n  \"isActive\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/driver-schedules"
+            }
+          }
+        },
+        {
+          "name": "2. Assigned assistant loads a Parcel",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Parcel load uses the ADR-0004 envelope', () => {",
+                  "pm.response.to.have.status(200);",
+                  "pm.expect(body.success).to.equal(true);",
+                  "pm.expect(body.statusCode).to.equal(200);",
+                  "pm.expect(body.data).to.have.property('parcelId').that.is.a('string').and.is.not.empty;",
+                  "pm.expect(body.data).to.have.property('status', 'LOADED');",
+                  "pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day30AssistantAccessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tripId\": \"{{day30TripId}}\",\n  \"parcelCode\": \"{{day30ParcelCode}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/assistant/parcels/{{day30ParcelId}}/load"
+            }
+          }
+        },
+        {
+          "name": "3. Assigned driver starts the Trip",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Trip start uses the ADR-0004 envelope', () => {",
+                  "pm.response.to.have.status(200);",
+                  "pm.expect(body.success).to.equal(true);",
+                  "pm.expect(body.statusCode).to.equal(200);",
+                  "pm.expect(body.data).to.have.property('tripId').that.is.a('string').and.is.not.empty;",
+                  "pm.expect(body.data).to.have.property('status', 'IN_PROGRESS');",
+                  "pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day30DriverAccessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/driver/trips/{{day30TripId}}/start"
+            }
+          }
+        },
+        {
+          "name": "4. Assigned driver marks the TripStop arrived",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('TripStop arrival uses the ADR-0004 envelope', () => {",
+                  "pm.response.to.have.status(200);",
+                  "pm.expect(body.success).to.equal(true);",
+                  "pm.expect(body.statusCode).to.equal(200);",
+                  "pm.expect(body.data).to.have.property('tripId').that.is.a('string').and.is.not.empty;",
+                  "pm.expect(body.data).to.have.property('stopId').that.is.a('string').and.is.not.empty;",
+                  "pm.expect(body.data).to.have.property('status', 'ARRIVED');",
+                  "pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day30DriverAccessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/driver/trips/{{day30TripId}}/stops/{{day30StopId}}/arrive"
+            }
+          }
+        },
+        {
+          "name": "5. Assigned assistant unloads the Parcel",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Parcel unload uses the ADR-0004 envelope', () => {",
+                  "pm.response.to.have.status(200);",
+                  "pm.expect(body.success).to.equal(true);",
+                  "pm.expect(body.statusCode).to.equal(200);",
+                  "pm.expect(body.data).to.have.property('parcelId').that.is.a('string').and.is.not.empty;",
+                  "pm.expect(body.data).to.have.property('status', 'UNLOADED');",
+                  "pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day30AssistantAccessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/assistant/parcels/{{day30ParcelId}}/unload"
+            }
+          }
+        },
+        {
+          "name": "6. Assigned driver completes the Trip",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Trip complete uses the ADR-0004 envelope', () => {",
+                  "pm.response.to.have.status(200);",
+                  "pm.expect(body.success).to.equal(true);",
+                  "pm.expect(body.statusCode).to.equal(200);",
+                  "pm.expect(body.data).to.have.property('tripId').that.is.a('string').and.is.not.empty;",
+                  "pm.expect(body.data).to.have.property('status', 'COMPLETED');",
+                  "pm.expect(body.data).to.have.property('completedByUserId').that.is.a('string').and.is.not.empty;",
+                  "pm.expect(body.meta).to.have.property('traceId');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day30DriverAccessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/driver/trips/{{day30TripId}}/complete"
+            }
+          }
         }
       ]
     }
