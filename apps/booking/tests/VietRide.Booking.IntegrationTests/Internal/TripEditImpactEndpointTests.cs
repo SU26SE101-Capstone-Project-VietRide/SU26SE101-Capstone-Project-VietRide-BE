@@ -8,11 +8,13 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using NSubstitute;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Features.Internal.Bookings;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Booking.Infrastructure;
+using VietRide.Shared.Application.UnitOfWork;
 
 namespace VietRide.Booking.IntegrationTests.Internal;
 
@@ -174,6 +176,7 @@ public sealed class TripEditImpactWebApplicationFactory : WebApplicationFactory<
 
         builder.ConfigureTestServices(services =>
         {
+            services.RemoveAll<IUnitOfWork>();
             services.AddSingleton(BookingRepository);
         });
     }
