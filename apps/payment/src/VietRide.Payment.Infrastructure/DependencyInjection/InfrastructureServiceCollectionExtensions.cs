@@ -123,6 +123,7 @@ public static class InfrastructureServiceCollectionExtensions
             options.BaseUrl = configuration["VNPAY_BASE_URL"] ?? options.BaseUrl;
             options.ReturnUrl = configuration["VNPAY_RETURN_URL"] ?? options.ReturnUrl;
             options.IpnUrl = configuration["VNPAY_IPN_URL"] ?? options.IpnUrl;
+            options.BankCode = configuration["VNPAY_BANK_CODE"] ?? options.BankCode;
             if (int.TryParse(configuration["VNPAY_PAYMENT_TIMEOUT_MINUTES"], out var timeoutMinutes))
             {
                 options.PaymentTimeoutMinutes = timeoutMinutes;
@@ -135,6 +136,8 @@ public static class InfrastructureServiceCollectionExtensions
         });
         services.AddOptions<VnPayOptions>()
             .Validate(options => options.PaymentTimeoutMinutes > 0, "VNPay payment timeout must be positive.")
+            .Validate(options => IsValidVnPayBankCode(options.BankCode),
+                "VNPay bank code must contain 3-20 uppercase ASCII letters or digits.")
             .Validate(options => IsAbsoluteHttpsUrl(options.BaseUrl)
                 && IsAllowedReturnUrl(options.ReturnUrl)
                 && IsAbsoluteHttpsUrl(options.IpnUrl), "VNPay URLs must be absolute HTTPS URLs.")
@@ -287,6 +290,11 @@ public static class InfrastructureServiceCollectionExtensions
 
     private static bool IsAbsoluteHttpsUrl(string? value)
         => Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps;
+
+    private static bool IsValidVnPayBankCode(string? value)
+        => string.IsNullOrWhiteSpace(value)
+            || (value.Length is >= 3 and <= 20
+                && value.All(character => character is >= 'A' and <= 'Z' or >= '0' and <= '9'));
 
     private static bool IsAllowedReturnUrl(string? value)
         => Uri.TryCreate(value, UriKind.Absolute, out var uri)

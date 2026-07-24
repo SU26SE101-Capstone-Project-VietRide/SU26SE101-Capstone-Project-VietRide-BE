@@ -103,6 +103,9 @@ public sealed class VnPayClient : IVnPayClient
             ["vnp_ExpireDate"] = FormatVnPayDate(expiresAt ?? createdAt.AddMinutes(_options.PaymentTimeoutMinutes)),
         };
 
+        if (!string.IsNullOrWhiteSpace(_options.BankCode))
+            parameters["vnp_BankCode"] = _options.BankCode;
+
         var hashData = BuildQuery(parameters);
         var secureHash = Sign(hashData, _options.HashSecret);
         parameters["vnp_SecureHash"] = secureHash;

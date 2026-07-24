@@ -97,6 +97,7 @@ VNPAY_HASH_SECRET=...
 VNPAY_BASE_URL=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
 VNPAY_RETURN_URL=https://app.vietride.online/payments/return
 VNPAY_IPN_URL=https://api.vietride.online/v1/payments/vnpay-ipn
+VNPAY_BANK_CODE=NCB
 VNPAY_PAYMENT_TIMEOUT_MINUTES=10
 ```
 

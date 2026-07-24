@@ -3239,6 +3239,7 @@ VNPAY_HASH_SECRET=...
 VNPAY_BASE_URL=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
 VNPAY_RETURN_URL=https://app.vietride.online/payments/return
 VNPAY_IPN_URL=https://api.vietride.online/v1/payments/vnpay-ipn
+VNPAY_BANK_CODE=NCB              # force the sandbox NCB route; included before HMACSHA512 signing
 VNPAY_PAYMENT_TIMEOUT_MINUTES=10
 SUBSCRIPTION_TRIAL_DAYS=30
 SETTLEMENT_HOLD_DAYS=7
@@ -3531,6 +3532,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.43.2** | 2026-07-24 | BE lead (Vũ) | **PATCH** - Add deploy-configured `VNPAY_BANK_CODE=NCB`; Payment includes `vnp_BankCode` in every VNPay redirect before HMACSHA512 signing so the sandbox routes directly to NCB instead of its failing generic bank-selection path. |
 | **1.43.1** | 2026-07-24 | BE lead (Vũ) | **PATCH** - Register the signed, read-only `GET /v1/payments/vnpay-return-status` browser-return poll endpoint. The HTTPS bridge can display persisted Payment status and open the Passenger deep link, while VNPay IPN remains the only source allowed to mutate Payment and publish downstream confirmation events. |
 | **1.43.0** | 2026-07-23 | BE lead (Vũ) | **MINOR** - Align Day-33 ROUTE_CHANGE timeout with technical context §6.4: persist frozen shuttle-fallback metadata, keep Booking CONFIRMED without automatic refund, publish `booking.booking.route_change_auto_fallback_applied` for Notification, and preserve the recurring five-attempt `RefundFailureRetryJob` lifecycle by persisting the initial consumer failure at `retryCount=0`. |
 | **1.42.0** | 2026-07-23 | BE lead (Vũ) | **MINOR** - Correct the Day-33 `trip.trip.route_changed` contract to carry lifecycle status and immutable per-booking candidate-stop snapshots, remove duplicate `affectedBookingIds`, and freeze Booking ROUTE_CHANGE creation/resolution without synchronous Trip lookup. |
