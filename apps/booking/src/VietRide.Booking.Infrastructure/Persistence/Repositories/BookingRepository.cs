@@ -260,6 +260,82 @@ internal sealed class BookingRepository : IBookingRepository
     }
 
     /// <inheritdoc/>
+    public async Task<VehicleSubstitutionImpactDto> GetVehicleSubstitutionImpactAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct = default)
+    {
+        if (tripId == Guid.Empty)
+        {
+            throw new ArgumentException("Trip id must be non-empty.", nameof(tripId));
+        }
+
+        if (operatorId == Guid.Empty)
+        {
+            throw new ArgumentException("Operator id must be non-empty.", nameof(operatorId));
+        }
+
+        var eligibleBookings = await _db.Bookings
+            .AsNoTracking()
+            .Where(booking => booking.TripId == tripId && booking.OperatorId == operatorId)
+            .Where(booking => booking.Status == BookingStatus.CONFIRMED
+                || booking.Status == BookingStatus.PARTIAL_NO_SHOW)
+            .OrderBy(booking => booking.Id)
+            .Select(booking => new
+            {
+                BookingId = booking.Id,
+                booking.Status,
+            })
+            .ToListAsync(ct);
+
+        if (eligibleBookings.Count == 0)
+        {
+            return new VehicleSubstitutionImpactDto(tripId, operatorId, []);
+        }
+
+        var bookingIds = eligibleBookings
+            .Select(booking => booking.BookingId)
+            .ToArray();
+        var eligiblePassengers = await _db.Passengers
+            .AsNoTracking()
+            .Where(passenger => bookingIds.Contains(passenger.BookingId))
+            .Where(passenger => passenger.BoardingStatus == PassengerBoardingStatus.BOARDED
+                || passenger.BoardingStatus == PassengerBoardingStatus.PENDING)
+            .OrderBy(passenger => passenger.BookingId)
+            .ThenBy(passenger => passenger.Id)
+            .Select(passenger => new
+            {
+                passenger.BookingId,
+                PassengerId = passenger.Id,
+                passenger.BoardingStatus,
+                OriginalSeatNumber = passenger.SeatNumber ?? string.Empty,
+            })
+            .ToListAsync(ct);
+
+        var passengersByBooking = eligiblePassengers
+            .GroupBy(row => row.BookingId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<VehicleSubstitutionImpactDto.PassengerImpact>)group
+                    .Select(row => new VehicleSubstitutionImpactDto.PassengerImpact(
+                        row.PassengerId,
+                        row.BoardingStatus.ToString(),
+                        string.IsNullOrEmpty(row.OriginalSeatNumber)
+                            ? null
+                            : row.OriginalSeatNumber))
+                    .ToArray());
+
+        var bookingImpacts = eligibleBookings
+            .Select(booking => new VehicleSubstitutionImpactDto.BookingImpact(
+                booking.BookingId,
+                booking.Status.ToString(),
+                passengersByBooking.GetValueOrDefault(booking.BookingId, [])))
+            .ToArray();
+
+        return new VehicleSubstitutionImpactDto(tripId, operatorId, bookingImpacts);
+    }
+
+    /// <inheritdoc/>
     public Task<int> GetPendingPassengerCountAsync(
         Guid tripId,
         Guid stopId,
