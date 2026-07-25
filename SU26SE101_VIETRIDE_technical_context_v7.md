@@ -3936,207 +3936,77 @@ Trip cascade dùng `DRIVER_SCHEDULE_CASCADE_APPLIED`; metadata chuẩn
 
 ### 6.12 Trip DISRUPTED — Vehicle Substitution (substitute vehicle, KHÔNG ghép chuyến)
 
-Khi xe hỏng giữa đường hoặc Trip không thể tiếp tục, Operator **gửi xe mới thay thế** và chuyển toàn bộ booking + parcel sang **chuyến thay thế (substitute vehicle)**. KHÔNG ghép passenger vào chuyến khác đã có khách sẵn.
+> **Day-34 approved contract freeze (2026-07-25):** Nội dung normative dưới đây supersede toàn bộ
+> proposal legacy đã đóng bên dưới. Vehicle Substitution luôn tạo một Trip thay thế dành riêng;
+> Parcel transfer/count/behavior được defer sang Day 35.
 
-> **Rule:** Khi Trip DISRUPTED, operator luôn tạo `Trip_new` mới với vehicle thay thế. KHÔNG có hành vi "chuyển passenger sang một Trip đã có khách sẵn". Lý do: chuyến có sẵn có thể đầy ghế, khác loại xe, khác stop sequence — không phù hợp passenger gốc. Vehicle Substitution = tạo Trip mới dành riêng cho passenger Trip_old.
+**Lifecycle và recovery timeline**
 
-**TripStatus bổ sung: `DISRUPTED`**
-```
-TripStatus: SCHEDULED → BOARDING → IN_PROGRESS → COMPLETED
-            SCHEDULED → CANCELLED   (operator hủy trước BOARDING)
-            BOARDING  → CANCELLED   (operator hủy sau khi mở boarding nhưng trước IN_PROGRESS)
-            IN_PROGRESS → DISRUPTED (xe hỏng / operator cancel in-progress)
-```
-`CANCELLED` là trạng thái terminal cho hủy trước khi Trip vào `IN_PROGRESS` (bao gồm cả `BOARDING`). `DISRUPTED` là trạng thái terminal của Trip gốc khi xe đã `IN_PROGRESS` nhưng không thể tiếp tục.
+- Trip cũ phải `IN_PROGRESS`; mọi trạng thái khác trả substitution-only
+  `TRIP_NOT_SUBSTITUTABLE` (`409`). Existing `TRIP_NOT_IN_PROGRESS` (`422`) được preserved cho depart-stop,
+  arrival, incident và mọi pre-Day-34 lifecycle context khác.
+- Handler lock/reload Trip cũ, capture đúng một `disruptedAt`, và yêu cầu
+  `estimatedRecoveryDepartureAt` strictly later than `disruptedAt`. Bằng hoặc sớm hơn trả
+  `422 VALIDATION_ERROR` với exact field error
+  `fields.estimatedRecoveryDepartureAt = ["must be later than disruptedAt"]`; không ghi Trip child,
+  audit hoặc Outbox.
+- Trip cũ chuyển terminal `DISRUPTED`, `hasSubstitution=true`. Trip mới có
+  `status = BOARDING`, `source=VEHICLE_SUBSTITUTION`, và
+  `departureDateTime=estimatedRecoveryDepartureAt`. Existing assigned-driver start flow chuyển
+  `BOARDING -> IN_PROGRESS` và capture `actualDepartureTime`; không thêm Trip status.
+- `recoveryDelay = estimatedRecoveryDepartureAt - disruptedAt`. Replacement destination ETA và
+  mỗi copied old `PENDING` TripStop `estimatedArrivalTime` bằng old baseline tương ứng +
+  `recoveryDelay`; không copy stop non-`PENDING`.
 
-**Vehicle Substitution flow:**
+**HTTP và ownership**
 
-```
-Operator bấm "Báo xe hỏng" trên dashboard:
-  1. Chọn Trip đang DISRUPTED
-  2. Chọn xe thay thế (Vehicle còn ACTIVE, không bị assign trip khác cùng thời điểm)
-  3. Hệ thống tạo Trip mới (Trip_new):
-       routeId, driverId, assistantId = copy từ Trip_old
-       vehicleId = xe thay thế mới
-       departureDateTime = now + thời gian ước tính xe đến vị trí hiện tại
-       status = IN_PROGRESS (bắt đầu ngay, không qua SCHEDULED/BOARDING)
-       source = VEHICLE_SUBSTITUTION
-  4. Generate TripSeat mới dựa trên seatLayoutJson của xe thay thế
-  5. Generate TripStop mới copy từ TripStop_old còn PENDING (các stop chưa qua)
-  6. SET Trip_old.hasSubstitution = true (để phân biệt với operator-cancel-in-progress trong reporting)
-```
+`POST /v1/operator/trips/{tripId}/substitute-vehicle` là `OPERATOR_ADMIN`-only, UUID-v4
+idempotent, strict body đúng
+`{replacementVehicleId,estimatedRecoveryDepartureAt,reason,notifyPassengers,replacementCrew}`.
+Crew absent/null copy old driver/assistant; crew present đúng `{driverId,assistantId}` và phải qua
+active-role, operator-ownership, Trip-conflict validation. Unknown/legacy fields bị reject.
+Success đúng
+`{substitutionId,oldTripId,oldTripStatus,newTripId,newTripStatus,newTripDepartureDateTime,transferStatus,affectedBookingCount,affectedPassengerCount,pendingSeatAssignmentCount}`;
+statuses là `DISRUPTED`/`BOARDING`, transfer `QUEUED`, và không có Parcel count.
 
-**Endpoint spec:**
+Booking sở hữu Internal-JWT-only raw impact seam, với exact success
+`{oldTripId,operatorId,bookings:[{bookingId,bookingStatus,passengers:[{passengerId,boardingStatus,originalSeatNumber,seatType}]}]}`.
+Chỉ Booking `CONFIRMED|PARTIAL_NO_SHOW` và Passenger `BOARDED|PENDING`; sort `bookingId` rồi
+`passengerId`; empty `200 {bookings:[]}`. `originalSeatNumber` nullable nên chained substitution
+vẫn eligible. Trip sở hữu replacement layout, TripSeat và mapping; không service nào ghi DB khác.
 
-```
-POST /v1/operator/trips/{tripId}/substitute-vehicle
-Auth: OPERATOR_ADMIN (decision có business impact, không cho OPERATOR_STAFF)
-Path: {tripId} = Trip_old.id
-Body: {
-  newVehicleId: UUID,                    // xe thay thế (phải ACTIVE, không conflict timing)
-  estimatedArrivalMinutes: number,       // ước tính bao lâu xe đến vị trí Trip_old hiện tại
-  reason: string (max 500),              // lý do (xe hỏng, accident, etc.)
-  notifyPassengers: boolean (default true)
-}
+**Facts, transfer persistence và confirmation**
 
-Preconditions:
-  - Trip_old.status = IN_PROGRESS (không cho substitute Trip chưa khởi hành — dùng Vehicle Swap thay thế)
-  - newVehicleId: Vehicle.status = ACTIVE, không assign cho Trip khác cùng departureDateTime window
-  - Caller phải thuộc operatorId của Trip_old
+Trip emit exactly one `trip.trip.vehicle_substituted` với exact payload
+`{eventId,occurredAt,substitutionId,disruptedAt,operatorId,oldTripId,oldTripStatus,oldVehicleId,newTripId,newTripStatus,newVehicleId,newVehiclePlateNumber,newTripDepartureDateTime,actorUserId,reason,notifyPassengers,mappings:[{bookingId,passengerId,originalSeatNumber,newSeatNumber,originalBoardingStatus}]}`.
+`occurredAt=disruptedAt`, `substitutionId=eventId`, both seat values nullable,
+`originalBoardingStatus=BOARDED|PENDING`. Cùng Trip-local transaction emit canonical
+`trip.trip.disrupted {hasSubstitution:true}` với EventId khác. Mỗi fact giữ
+`payload.eventId == Outbox row id == RabbitMQ MessageId`; retry/restart giữ identity/routing key.
 
-Response 200: {
-  oldTripId, newTripId, newTripDepartureDateTime,
-  bookingTransferCount,      // số Booking đã chuyển sang Trip_new
-  pendingSeatAssignmentCount, // số Booking flagged PENDING_SEAT_ASSIGNMENT (xe mới ít ghế hơn)
-  parcelTransferCount        // số Parcel ở PENDING_TRANSFER_CONFIRM trên xe mới
-}
+`passengers.seat_number` và cả hai BookingTransfer seat-history values nullable. Confirmation enum
+đúng `PENDING_CONFIRM|CONFIRMED|NOT_REQUIRED`; transfer có non-null `confirmation_status`, nullable
+`confirmed_at`, logical nullable `confirmed_by_user_id`, unique
+`(passenger_id,original_trip_id,new_trip_id)`. Mapped old `BOARDED` tạo `PENDING_CONFIRM`; mapped old
+`PENDING` tạo `NOT_REQUIRED`; `NO_SHOW` không có mapping/transfer. Booking giữ nguyên
+`CONFIRMED|PARTIAL_NO_SHOW`; duplicate delivery không tạo effect.
 
-Errors:
-  400 VALIDATION_ERROR
-  403 FORBIDDEN (caller không thuộc operatorId)
-  404 TRIP_NOT_FOUND
-  409 TRIP_NOT_IN_PROGRESS (Trip chưa khởi hành — gợi ý dùng Vehicle Swap thay thế qua PATCH /v1/operator/trips/{id})
-  409 TRIP_VEHICLE_CONFLICT (newVehicleId đang chạy Trip khác cùng giờ)
-  422 VEHICLE_NOT_ACTIVE
-```
+Migration `Down()` backfill null Passenger seat bằng recent non-null `new_seat_number`, otherwise
+recent non-null `original_seat_number`, ordered by `transferred_at DESC, id DESC`;
+fail `Down()` nếu còn null trước `SET NOT NULL` và không invent sentinel.
 
-Audit log: `{ action: VEHICLE_SUBSTITUTION_TRIGGERED, metadata: { oldTripId, newTripId, oldVehicleId, newVehicleId, reason }, userId }`.
+Bodyless confirmation endpoint dành cho assigned `DRIVER|ASSISTANT`, UUID-v4 idempotent. Matching
+active transfer phải có non-null `newSeatNumber`; first confirmation chỉ set row đó `CONFIRMED`,
+replay/already-confirmed trả persisted `200`, không sửa Passenger boarding history/Ticket usage.
+Errors: `404 BOOKING_TRANSFER_NOT_FOUND`, `409 BOOKING_TRANSFER_SEAT_PENDING`,
+`422 VALIDATION_ERROR`, `403 FORBIDDEN`.
 
-**BookingTransfer — tracking chuyển vé:**
-
-Cần entity riêng track việc chuyển 1 booking từ Trip cũ sang Trip thay thế (audit trail + UI hiển thị lịch sử). Requirements: link originalTripId + newTripId, bookingId, originalSeatNumber + newSeatNumber (nullable cho case chưa assign), transferredAt, transferredByUserId, note nullable. Xem entity summary ở cuối section.
-
-**Booking transfer logic:**
-```
-FOR EACH Booking WHERE tripId = Trip_old.id AND status = CONFIRMED:
-  1. FOR EACH Passenger thuộc Booking đó:
-       Tìm ghế trống trên Trip_new (cùng loại ghế nếu có, fallback ghế bất kỳ)
-       Assign ghế mới: TripSeat (newTripId, newSeatNumber) → BOOKED
-       UPDATE Passenger.seatNumber = newSeatNumber
-       INSERT BookingTransfer { bookingId, passengerId, originalTripId, newTripId,
-                                originalSeatNumber, newSeatNumber (nullable nếu chưa assign),
-                                transferredAt, transferredByUserId, note }
-       seatNumber nằm trên Passenger entity, không phải Booking — Booking có 1–5 Passenger
-        mỗi người có ghế riêng. 1 BookingTransfer record per Passenger (composite logical scope
-        bookingId + passengerId) để track đầy đủ seat history của từng người trong vehicle substitution.
-  2. UPDATE Booking.tripId = newTripId
-  3. Publish event BookingTransferred → Notification Service:
-       Push đến passenger: "Xe của bạn gặp sự cố — đã được chuyển sang xe XX.
-       Số ghế mới: [newSeatNumber]. Vui lòng xác nhận."
-
-Edge case — xe thay thế ít ghế hơn (không đủ chỗ):
-→ Booking không assign được ghế → status vẫn CONFIRMED nhưng flagged
-→ Operator nhận alert: "X booking chưa được assign ghế trên xe thay thế"
-→ Notify passenger: "Ghế của bạn đang được sắp xếp lại, chúng tôi sẽ thông báo khi có ghế mới."
-→ INSERT BookingPendingAction {
-    reason   = PENDING_SEAT_ASSIGNMENT,
-    deadline = min(now + 4h, Trip_new.departureDateTime - 30 phút)
-  }
-
-T+2h (nếu chưa resolve):
-  → Hangfire re-alert operator (không đổi status)
-
-Khi deadline đến (T+4h hoặc sát giờ khởi hành — whichever is sooner):
-  → AUTO-CANCEL booking + hoàn 100% về Ví VietRide
-  → BookingPendingAction.resolvedAt = now, resolvedAction = AUTO_CANCELLED_NO_SEAT
-  → Notify passenger: "Chuyến của bạn đã bị hủy do không còn ghế phù hợp.
-                        Hoàn 100% về Ví VietRide."
-
-Nếu operator resolve trước deadline (assign TripSeat mới):
-  → BookingPendingAction.resolvedAt = now, resolvedAction = OPERATOR_RESOLVED
-  → Notify passenger: "Ghế mới của bạn: [seatNumber]"
-  → Booking vẫn CONFIRMED, tiếp tục bình thường
-
-Lý do chọn auto-cancel (không block chuyến): chuyến có thể có 30 passenger khác
-cần xuất phát đúng giờ — không nên delay trip vì 1-2 booking có vấn đề ghế.
-4 giờ đủ để operator xử lý trong giờ hành chính (xe khách thường biết thay xe trước vài giờ).
-```
-
-**Parcel behavior khi Vehicle Substitution:**
-
-Khi Trip_old DISRUPTED do vehicle substitution, các Parcel đã nằm trên xe cũ
-(`LOADED` hoặc `IN_TRANSIT`) cần được xác nhận chuyển hàng vật lý sang xe mới bởi
-Driver/Assistant của Trip_new. Operator chỉ khởi tạo chuyển chuyến; không được tự
-mark hàng đã lên xe mới nếu chưa có xác nhận vật lý.
-
-Flow:
-  Parcel Service consume VehicleSubstituted event:
-    → UPDATE Parcel SET status = PENDING_TRANSFER_CONFIRM
-      WHERE tripId = Trip_old.id AND status IN (LOADED, IN_TRANSIT)
-      metadata/fields: transferTargetTripId = Trip_new.id,
-                       transferRequestedAt = now
-
-  Driver/Assistant của Trip_new thấy danh sách hàng "chờ nhận từ xe cũ" trong Driver App
-    → Scan QR parcel hoặc bấm explicit confirm "Đã nhận hàng lên xe mới" per parcel:
-        Parcel.tripId = Trip_new.id
-        Parcel.status = LOADED
-        transferConfirmedAt = now
-        transferConfirmedByUserId = driver/assistant userId
-        // Capacity counter updates:
-        Trip_old.reservedParcelWeightKg -= parcel.estimatedWeightKg   // release reserved Trip_old
-        Trip_old.totalLoadedWeightKg -= parcel.estimatedWeightKg      // release physical Trip_old
-        Trip_new.reservedParcelWeightKg += parcel.estimatedWeightKg   // reserve Trip_new
-        Trip_new.totalLoadedWeightKg += parcel.estimatedWeightKg      // physical Trip_new
-        → Parcel tiếp tục lifecycle bình thường trên Trip_new
-
-Escalation — Hangfire job (check mỗi 5 phút):
-  SELECT Parcel WHERE status = PENDING_TRANSFER_CONFIRM
-    AND updatedAt < now - interval '30 minutes'
-  → UPDATE Parcel SET status = TRANSFER_ESCALATED
-  → Alert operator: "X kiện hàng chưa được xác nhận chuyển sang xe mới sau 30 phút"
-  → Operator xử lý thủ công (liên hệ phụ xe/driver). Operator có thể reassign target trip
-    hoặc mark RETURNED nếu hàng trả lại người gửi, nhưng nếu chuyển sang Trip_new thì vẫn
-    PHẢI chờ Driver/Assistant Trip_new xác nhận bằng QR/explicit confirm.
-
-Parcel với status khác khi VehicleSubstituted:
-  - PENDING_PAYMENT / PENDING / PENDING_OPERATOR_REVIEW: giữ nguyên status,
-    UPDATE Parcel.tripId = Trip_new.id (hàng chưa lên xe, sẽ load lên xe mới)
-  - DELIVERED_PENDING_CONFIRM / DELIVERY_CONFIRMED / DELIVERY_REJECTED: không thay đổi
-    (hàng đã giao, không liên quan xe)
-
-**Edge case — Trip_new (xe thay thế) bị CANCELLED hoặc DISRUPTED trong khi Parcel đang PENDING_TRANSFER_CONFIRM hoặc đã LOADED lên Trip_new:**
-
-```
-Parcel Service consume TripCancelledEvent { tripId } HOẶC TripDisrupted { tripId, hasSubstitution: false }
-  → Tìm Parcel WHERE (tripId = :tripId) OR (transferTargetTripId = :tripId AND status = PENDING_TRANSFER_CONFIRM):
-
-  Case 1: Parcel.status = PENDING_TRANSFER_CONFIRM (chưa confirm lên Trip_new):
-    Hàng vẫn còn vật lý trên Trip_old (hoặc tại bến trung gian sau khi rời Trip_old).
-    → status = PENDING_OPERATOR_ACTION
-    → metadata: { previousTripId: Trip_old.id, failedTransferTripId: Trip_new.id, reason }
-    → Alert operator: "Chuyến thay thế [Trip_new] bị hủy/gián đoạn. [N] kiện hàng đang chờ
-                      chuyển sang xe mới — cần xử lý lại (chọn trip khác hoặc trả hàng)."
-    → Operator dùng flow PENDING_OPERATOR_ACTION đã có (chuyển trip khác hoặc trả hàng).
-
-  Case 2: Parcel.status = LOADED (đã confirm trên Trip_new, xe mới chưa đi):
-    Áp dụng flow Trip CANCELLED bình thường (xem section 6.6 phần "Parcel behavior khi Trip CANCELLED"):
-    → status = PENDING_OPERATOR_ACTION
-    → Operator xử lý (trả hàng tại bến hoặc chuyển sang trip khác)
-
-  Case 3: Parcel.status = IN_TRANSIT trên Trip_new (xe mới đang chạy, bị DISRUPTED):
-    Giống flow DISRUPTED no-substitution thường (6.12.1):
-    → status = PENDING_OPERATOR_ACTION
-    → Trả hàng tại bến gần nhất / dispatch xe thay thế khác (operator quyết)
-```
-
-Lý do: vehicle substitution là chuỗi 2 trip nối tiếp; nếu Trip_new fail giữa chừng, Parcel
-phải "rollback" về trạng thái cần operator can thiệp — không có auto-cascade infinitely.
-
-**Hành khách NO_SHOW trên Trip_old:**
-- Booking đã bị NO_SHOW trước khi sự cố → **không** chuyển sang Trip_new (hành khách đã tự forfeit)
-
-**Seat type downgrade khi xe thay thế không có loại ghế tương đương:**
-```
-Ví dụ: passenger đặt SLEEPER_LOWER trên xe giường nằm, xe thay thế là xe thường (chỉ STANDARD):
-  → Assign ghế STANDARD tốt nhất còn trống (ưu tiên window seat, phía trước)
-  → Push notification thêm thông tin: "Ghế thay thế có loại khác do thay xe sự cố.
-     Nếu không hài lòng, bạn có quyền hủy và hoàn 100%."
-  → BookingTransfer.note = "Seat type downgraded: SLEEPER_LOWER → STANDARD"
-
-Không có partial refund cho seat type downgrade trong v1 — chỉ option hủy + hoàn 100%.
-```
-
-> **Entity requirements:** `BookingTransfer` track việc chuyển từng Passenger của 1 Booking từ Trip cũ sang Trip thay thế. **1 record per Passenger** (vì mỗi passenger có seatNumber riêng). Fields cần có: bookingId FK, passengerId FK, originalTripId + newTripId, originalSeatNumber + newSeatNumber (nullable — null = chưa assign ghế trên Trip_new), transferredAt, transferredByUserId (operator nào thực hiện), note nullable (ghi lý do downgrade nếu có). Index trên (bookingId), (originalTripId), (newTripId). Trip-Route-Vehicle Service quản lý Trip mới + TripStop mới. Booking Service consume `VehicleSubstituted` event → cập nhật Booking + tạo N BookingTransfer record (N = số Passenger của Booking).
+Booking emit exactly one `booking.booking.transferred` per eligible Booking per substitution, kể cả
+`notifyPassengers=false`, với exact payload
+`{eventId,occurredAt,sourceSubstitutionEventId,bookingId,recipientUserId,operatorId,oldTripId,newTripId,newVehicleId,newVehiclePlateNumber,newTripDepartureDateTime,notifyPassengers,transfers:[{passengerId,originalSeatNumber,newSeatNumber,confirmationStatus}]}`.
+Recipient đúng `Booking.passengerUserId`, không Passenger PII/alternate recipient. Notification
+dedupe by MessageId/EventId: true tạo đúng một Booking-owner `VEHICLE_SUBSTITUTED`; false không tạo
+notification/push.
 
 #### 6.12.1 Trip DISRUPTED không substitute — Operator hủy IN_PROGRESS
 

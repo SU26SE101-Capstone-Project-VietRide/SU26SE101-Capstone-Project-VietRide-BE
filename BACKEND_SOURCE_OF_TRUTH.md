@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.43.1
+> **Phiên bản:** 1.44.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-07-24
+> **Cập nhật lần cuối:** 2026-07-25
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1293,6 +1293,8 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | 29 | `DELETE /v1/operator/stops/{id}?replacedByStopId=` | Trip |
 | 30 | `POST /v1/bookings/{bookingId}/pending-action/{actionId}/accept-fallback` | Booking |
 | 31 | `POST /v1/driver/trips/{tripId}/stops/{stopId}/depart` | Trip |
+| 32 | `POST /v1/operator/trips/{tripId}/substitute-vehicle` | Trip |
+| 33 | `POST /v1/bookings/trips/{newTripId}/transfers/passengers/{passengerId}/confirm` | Booking |
 
 Day-24 mutations use the same v2 fingerprint/replay contract: UUID-v4 key, actor/method/path/
 canonical-query/raw-body fingerprint, byte-identical replay before current-state lookup, and
@@ -1476,6 +1478,8 @@ updates the column.
 | | `BOOKING_NOT_FOR_THIS_TRIP` | 422 | QR scan booking hoặc boarding-tick passenger khác trip |
 | | `BOOKING_PASSENGER_ALREADY_BOARDED` | 409 | Tick lại passenger đã BOARDED |
 | | `BOOKING_ROUND_TRIP_INVALID` | 422 | Return trip không hợp lệ |
+| | `BOOKING_TRANSFER_NOT_FOUND` | 404 | Missing/inactive BookingTransfer for the Passenger and replacement Trip |
+| | `BOOKING_TRANSFER_SEAT_PENDING` | 409 | Physical confirmation requested while replacement `newSeatNumber` is null |
 | **Shuttle** | `SHUTTLE_STATION_NOT_SUPPORTED` | 422 | Shuttle intent không dùng origin Station hỗ trợ shuttle hoặc Station thiếu tọa độ |
 | | `SHUTTLE_REQUEST_CUTOFF_PASSED` | 409 | Tạo shuttle intent/dispatch tại hoặc sau hard cutoff T-30 |
 | | `SHUTTLE_PICKUP_LOCKED` | 409 | Edit pickup khi Booking còn shuttle intent active |
@@ -1507,12 +1511,14 @@ updates the column.
 | **Trip** | `TRIP_NOT_FOUND` | 404 | |
 | | `TRIP_INVALID_TRANSITION` | 409 | Day-21 start/complete lifecycle precondition fails; do not introduce or use `INVALID_TRIP_STATUS` |
 | | `TRIP_NOT_IN_PROGRESS` | 422 | Incident/arrival chỉ hợp lệ khi Trip đang `IN_PROGRESS` |
+| | `TRIP_NOT_SUBSTITUTABLE` | 409 | Vehicle substitution requires an `IN_PROGRESS` old Trip |
 | | `TRIP_STOP_NOT_FOUND` | 404 | TripStop không tồn tại trong Trip được chỉ định |
 | | `TRIP_STOP_ALREADY_FINALIZED` | 409 | TripStop đã `ARRIVED` hoặc `SKIPPED` |
 | | `TRIP_STOP_NOT_ARRIVED` | 422 | Day-24 departure requires TripStop.status = ARRIVED |
 | | `TRIP_STOP_ALREADY_DEPARTED` | 409 | A new idempotency key targets a TripStop with actualDepartureTime already set |
 | | `TRIP_DESTINATION_ALREADY_ARRIVED` | 409 | Destination-terminal anchor đã được ghi trước đó |
 | | `VEHICLE_NOT_FOUND` | 404 | Vehicle không tồn tại, đã soft-delete, hoặc không thuộc operator caller |
+| | `VEHICLE_NOT_ACTIVE` | 422 | Replacement Vehicle exists but is not active |
 | | `VEHICLE_TYPE_NOT_FOUND` | 404 | VehicleType không tồn tại hoặc không active |
 | | `TRIP_NOT_EDITABLE` | 409 | Requested Trip field is not editable in the current lifecycle state |
 | | `TRIP_ALREADY_TERMINAL` | 409 | Manual complete/fallback/disruption race already produced a terminal state |
@@ -1614,6 +1620,11 @@ response byte-identical before terminal lookup; only a new key evaluates the cur
 > Day-21 carry-over: the only current out-of-scope `INVALID_TRIP_STATUS` usage is
 > `ArriveTripStopCommandHandler.cs:49`; Day-21 lifecycle code must use
 > `TRIP_INVALID_TRANSITION` and must not copy that stale code.
+
+> Day-34 preservation rule: `TRIP_NOT_SUBSTITUTABLE` is additive and substitution-only.
+> `TRIP_NOT_IN_PROGRESS` remains HTTP 422 with its existing meaning for depart-stop, arrival,
+> incident, and every other pre-Day-34 lifecycle contract; do not rewrite those endpoints to the
+> new substitution code.
 
 ### 5.10 Data access pattern (Repository + optional Service)
 
@@ -1972,6 +1983,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | `GET /internal/v1/bookings/{id}` | Tracking, Payment, Parcel | Lookup booking snapshot, including active ticket count for parcel attach |
 | `GET /internal/v1/bookings/history?userId=&status=&from=&to=&page=&pageSize=` | Parcel | Owner-scoped Booking history for the passenger facade; pages Booking aggregates, includes Ticket summaries, uses `[from,to)` over `created_at`, and orders `created_at DESC, id DESC` |
 | `GET /internal/v1/bookings/trips/{tripId}/edit-impact?operatorId=` | Trip | Required trusted `operatorId`; every query predicates `trip_id` and `operator_id`, active is exactly `PENDING_PAYMENT|CONFIRMED`, raw PII-free `{tripId,activeBookingCount,activeBookings:[{bookingId,status,seatNumbers}]}`, empty is `200`. |
+| `GET /internal/v1/bookings/trips/{tripId}/vehicle-substitution-impact?operatorId={operatorId}` | Trip | Internal-JWT-only raw exact `{oldTripId,operatorId,bookings:[{bookingId,bookingStatus,passengers:[{passengerId,boardingStatus,originalSeatNumber,seatType}]}]}`. Eligibility is `CONFIRMED\|PARTIAL_NO_SHOW` Booking and `BOARDED\|PENDING` Passenger; `originalSeatNumber` is nullable for chained substitutions. Every query uses the `tripId` and `operatorId` predicate, results use bookingId then passengerId order, empty is `200` with `bookings:[]`, and no PII is returned. Invalid JWT is `401 AUTH_TOKEN_INVALID`; invalid input is `422 VALIDATION_ERROR`. |
 | `GET /internal/v1/bookings/trips/{tripId}/stops/{stopId}/pending-passenger-count?operatorId=` | Trip | Raw exact `{tripId,stopId,pendingPassengerCount}`. Predicate is `Booking.status=CONFIRMED AND Passenger.boardingStatus=PENDING AND Booking.tripId=:tripId AND Booking.pickupStopId=:stopId AND Booking.operatorId=:operatorId`. Valid Internal JWT only; malformed/all-zero UUID → `422 VALIDATION_ERROR`, invalid JWT → `401 AUTH_TOKEN_INVALID`; no Trip/Stop lookup, tenant claim, or absent-reference `403`/`404`. |
 | `GET /internal/v1/bookings/{id}/access-check?userId=` | Tracking | Verify Socket.IO joinTripTracking authz |
 | `GET /internal/v1/vouchers/by-code/{code}` | Booking (own service); also exposed for admin reports |
@@ -2043,6 +2055,7 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `booking.booking.schedule_change_required` | Booking | Notification | For `CONFIRMED` Bookings only; MEDIUM/MAJOR-only `{ eventId, occurredAt, bookingId, tripId, userId, pendingActionId, deadline, oldDeparture, newDeparture, severity: MEDIUM\|MAJOR }` |
 | `booking.booking.pending_action_realerted` | Booking | Notification | Common `{ eventId, occurredAt, bookingId, tripId, userId, pendingActionId, deadline }` plus either `{ reason: PENDING_SEAT_ASSIGNMENT, seatNumbers, seatImpactReason }` or `{ reason: SCHEDULE_CHANGE, oldDeparture, newDeparture, severity: MEDIUM\|MAJOR }` |
 | `booking.booking.pending_action_auto_resolved` | Booking | Notification | Exact `{ eventId, occurredAt, bookingId, tripId, userId, pendingActionId, resolvedAction, severity, oldDeparture, newDeparture }`; `resolvedAction=ACCEPTED` |
+| `booking.booking.transferred` | Booking | Notification | Exact `{eventId,occurredAt,sourceSubstitutionEventId,bookingId,recipientUserId,operatorId,oldTripId,newTripId,newVehicleId,newVehiclePlateNumber,newTripDepartureDateTime,notifyPassengers,transfers:[{passengerId,originalSeatNumber,newSeatNumber,confirmationStatus}]}`; exactly one fact per eligible Booking per substitution, including when `notifyPassengers=false`; `sourceSubstitutionEventId` equals the consumed `trip.trip.vehicle_substituted` eventId; `recipientUserId` is exactly `Booking.passengerUserId`; both `originalSeatNumber` and `newSeatNumber` are nullable; `confirmationStatus=PENDING_CONFIRM\|CONFIRMED\|NOT_REQUIRED`; `payload.eventId == Outbox row id == RabbitMQ MessageId`. `notifyPassengers=false` still emits the fact. Notification dedupes by MessageId/EventId: true creates exactly one Booking-owner `VEHICLE_SUBSTITUTED` notification; false creates no notification or push. |
 | `booking.voucher.consent_accepted` | Booking | Notification | `{ voucherId, operatorId }` |
 | `booking.voucher.consent_rejected` | Booking | Notification | `{ voucherId, operatorId, reason? }` |
 | `trip.trip.boarding_started` | Trip | Notification | `{ tripId, boardingStartedAt }` |
@@ -2053,6 +2066,7 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `trip.trip.disrupted` | Trip | Booking, Parcel, Payment | `{ eventId, occurredAt, tripId, operatorId, terminalAt, hasSubstitution, reason? }`; `hasSubstitution` is audit-only for Payment settlement, not for other consumers |
 | `trip.trip.cancelled` | Trip | Booking, Parcel | { eventId, occurredAt, tripId, operatorId, cancelledAt, cancelReason } |
 | `trip.trip.vehicle_swapped` | Trip | Booking, Notification (crew only) | Exact `{ eventId,occurredAt,tripId,operatorId,oldVehicleId,newVehicleId,oldVehiclePlateNumber,newVehiclePlateNumber,departureDateTime,driverUserId,assistantUserId,seatImpacts:[{bookingId,seatNumbers,reason}] }`; `assistantUserId` present nullable, reasons exactly `SEAT_REMOVED\|SEAT_DISABLED\|SEAT_TYPE_DOWNGRADED` |
+| `trip.trip.vehicle_substituted` | Trip | Booking, Parcel (Day 35) | Exact `{eventId,occurredAt,substitutionId,disruptedAt,operatorId,oldTripId,oldTripStatus,oldVehicleId,newTripId,newTripStatus,newVehicleId,newVehiclePlateNumber,newTripDepartureDateTime,actorUserId,reason,notifyPassengers,mappings:[{bookingId,passengerId,originalSeatNumber,newSeatNumber,originalBoardingStatus}]}`; exactly one fact per substitution; `occurredAt = disruptedAt`; `substitutionId = eventId`; `oldTripStatus=DISRUPTED`; `newTripStatus=BOARDING`; both `originalSeatNumber` and `newSeatNumber` are nullable; `originalBoardingStatus=BOARDED\|PENDING`; `payload.eventId == Outbox row id == RabbitMQ MessageId`. |
 | `trip.trip.route_changed` | Trip | Booking, Notification | { eventId, occurredAt, tripId, operatorId, tripStatus, alternativeRouteId, affectedBookings } |
 | `trip.trip.schedule_changed` | Trip | Booking | Exact `{ eventId,occurredAt,tripId,operatorId,oldDeparture,newDeparture,severity }`, severity `MINOR\|MEDIUM\|MAJOR`; Notification consumes Booking-owned facts instead |
 | `trip.stop.disabled` | Trip | Booking | Exact `{ eventId, occurredAt, eventType, stopId, operatorId, replacedByStopId? }`; `eventId == OutboxEvent.Id == RabbitMQ MessageId`. |
@@ -2236,6 +2250,14 @@ A Day-24 crash/restart after local commit reuses the persisted Outbox id and pay
 retry never allocates a new EventId. Consumers dedupe by RabbitMQ MessageId/EventId before state or
 notification side effects, so redelivery/restart creates no duplicate action, transition,
 event-derived notification, or refund.
+
+Day-34 Trip substitution writes the old/replacement Trip, replacement seats/stops, audit, canonical
+`trip.trip.vehicle_substituted`, and canonical `trip.trip.disrupted {hasSubstitution:true}` rows in
+one Trip-local transaction. The two facts have distinct EventIds. Booking applies each substitution
+in one Booking-local transaction, updates eligible Bookings/Passengers, creates transfer rows, and
+enqueues one `booking.booking.transferred` per eligible Booking. For every Day-34 fact independently,
+`payload.eventId == outbox_events.id == RabbitMQ MessageId`; publisher retry/restart preserves both
+that identity and the exact routing key.
 
 **Publisher flow:**
 
@@ -2425,6 +2447,11 @@ PENDING_PAYMENT ─┬─→ CONFIRMED ─┬─→ COMPLETED
   bookings are unchanged. Missing/stale raw anchors fail closed.
 - `CANCELLED → REFUNDED`: Booking Service consume `payment.wallet.credited`.
 - `DISRUPTED`: Booking Service consume `trip.trip.disrupted { hasSubstitution: false }`.
+- Vehicle substitution does not change eligible Booking status: `CONFIRMED|PARTIAL_NO_SHOW` is
+  retained. Mapped old `BOARDED` Passengers receive the nullable mapped seat plus one
+  `PENDING_CONFIRM` transfer; mapped old `PENDING` Passengers receive the nullable mapped seat plus
+  one `NOT_REQUIRED` transfer. `NO_SHOW` Passengers are not mapped. Duplicate delivery has no state,
+  transfer, or Outbox effect.
 - `cancellationReason` enum: `USER_INITIATED | OPERATOR_CANCELLED_TRIP | OPERATOR_DISRUPTED_IN_PROGRESS | SCHEDULE_CHANGED | ROUTE_CHANGED_REFUSED | VEHICLE_SUBSTITUTION_DOWNGRADE | VEHICLE_SUBSTITUTION_NO_SEAT | STOP_DISABLED_REFUSED`.
 
 #### Authoritative Booking status timeline (Day 19)
@@ -2481,6 +2508,10 @@ SCHEDULED ─┬─→ BOARDING ─→ IN_PROGRESS ─┬─→ COMPLETED
 - `DISRUPTED`: 2 case — phân biệt qua presence của `BookingTransfer`:
   - Case 1: Vehicle Substitution → Trip_old DISRUPTED, BookingTransfer created, KHÔNG refund.
   - Case 2: Operator hủy IN_PROGRESS bất khả kháng → Trip DISRUPTED, KHÔNG BookingTransfer, auto-refund proportional theo `distanceFromOriginKm`.
+- Day-34 Vehicle Substitution requires old Trip `IN_PROGRESS`, terminalizes it as `DISRUPTED` with
+  `hasSubstitution=true`, and creates one dedicated replacement as `BOARDING` with
+  `source=VEHICLE_SUBSTITUTION`. The existing assigned-driver start flow alone performs
+  `BOARDING -> IN_PROGRESS`; no new Trip status is introduced.
 - `Trip.source` enum: `MANUAL | AUTO_FROM_SCHEDULE | VEHICLE_SUBSTITUTION` (VEHICLE_SUBSTITUTION exempt subscription `maxTripsPerMonth` counter).
 - `DELAYED` là overlay flag (Redis), KHÔNG phải status riêng.
 
@@ -3531,6 +3562,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.44.0** | 2026-07-25 | BE lead (Vũ) | **MINOR** — Day-34 / SCV-114 freezes Vehicle Substitution: adds substitution-only `409 TRIP_NOT_SUBSTITUTABLE` while preserving existing `422 TRIP_NOT_IN_PROGRESS`, both public HTTP contracts and the internal Booking impact seam, canonical Trip/Booking event payloads and Outbox identity, nullable seat history plus BookingTransfer confirmation persistence, and Notification recipient/suppression rules. Parcel transfer behavior remains deferred to Day 35. |
 | **1.43.1** | 2026-07-24 | BE lead (Vũ) | **PATCH** - Register the signed, read-only `GET /v1/payments/vnpay-return-status` browser-return poll endpoint. The HTTPS bridge can display persisted Payment status and open the Passenger deep link, while VNPay IPN remains the only source allowed to mutate Payment and publish downstream confirmation events. |
 | **1.43.0** | 2026-07-23 | BE lead (Vũ) | **MINOR** - Align Day-33 ROUTE_CHANGE timeout with technical context §6.4: persist frozen shuttle-fallback metadata, keep Booking CONFIRMED without automatic refund, publish `booking.booking.route_change_auto_fallback_applied` for Notification, and preserve the recurring five-attempt `RefundFailureRetryJob` lifecycle by persisting the initial consumer failure at `retryCount=0`. |
 | **1.42.0** | 2026-07-23 | BE lead (Vũ) | **MINOR** - Correct the Day-33 `trip.trip.route_changed` contract to carry lifecycle status and immutable per-booking candidate-stop snapshots, remove duplicate `affectedBookingIds`, and freeze Booking ROUTE_CHANGE creation/resolution without synchronous Trip lookup. |

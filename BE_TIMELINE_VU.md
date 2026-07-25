@@ -369,13 +369,13 @@
 - **Review**: refund failure retry; partial refund-failure doesn't block trip CANCELLED status
 
 ### Day 34 — Thu 2026-07-09 — Vehicle Substitution + BookingTransfer ([SCV-114](https://hoangvutran088.atlassian.net/browse/SCV-114))
-- `POST /operator/trips/{id}/substitute-vehicle` for IN_PROGRESS trips
-- Creates Trip_new (status BOARDING, source VEHICLE_SUBSTITUTION) with new vehicle
-- Trip_old → DISRUPTED hasSubstitution=true
-- BookingTransfer entity: 1 row per Passenger record in Booking, status PENDING_CONFIRM
-- Driver/Assistant on Trip_new confirms physical transfer per passenger
-- **DoD**: substitution creates new trip + transfer records; passengers can be confirmed individually
-- **Review**: partial substitution (3/5 passengers on new vehicle) tracked correctly
+- `POST /v1/operator/trips/{tripId}/substitute-vehicle` is `OPERATOR_ADMIN`-only and UUID-v4 idempotent. It locks an `IN_PROGRESS` Trip, captures `disruptedAt`, requires `estimatedRecoveryDepartureAt` strictly later than that value, and returns substitution-only `TRIP_NOT_SUBSTITUTABLE` (`409`); existing `TRIP_NOT_IN_PROGRESS` (`422`) remains preserved for depart-stop, arrival, incident, and all prior lifecycle contracts.
+- Creates one dedicated Trip_new with `status=BOARDING`, `source=VEHICLE_SUBSTITUTION`, and `departureDateTime=estimatedRecoveryDepartureAt`; the existing assigned-driver start flow later moves it to `IN_PROGRESS`. Trip_old becomes terminal `DISRUPTED` with `hasSubstitution=true`.
+- Booking impact includes `CONFIRMED|PARTIAL_NO_SHOW` Bookings and their `BOARDED|PENDING` Passengers. `originalSeatNumber` is nullable for chained substitutions; `NO_SHOW` Passengers are excluded.
+- `BookingTransfer` is one immutable row per Passenger and substitution trip pair. `BOARDED` creates `PENDING_CONFIRM`; `PENDING` creates `NOT_REQUIRED`. Driver/Assistant assigned to Trip_new confirms physical transfer per Passenger without changing sibling rows.
+- Trip emits `trip.trip.vehicle_substituted`; Booking emits exactly one `booking.booking.transferred` fact per eligible Booking. Business writes and Outbox rows are atomic and preserve EventId/MessageId identity.
+- **DoD**: substitution creates the dedicated replacement + transfer records; passengers can be confirmed individually; partial substitution (3/5 passengers) persists exactly three `CONFIRMED` and two `PENDING_CONFIRM`.
+- **Review**: tenant isolation, replay dedupe, nullable seat history, notification recipient/suppression, and atomic Outbox identity are verified. Day 35 explicitly owns deferred Parcel transfer/count/behavior.
 
 ### Day 35 — Fri 2026-07-10 — Parcel transfer in substitution + Disrupted no-substitution
 - Parcel transfer: LOADED/IN_TRANSIT → PENDING_TRANSFER_CONFIRM on Trip_new
