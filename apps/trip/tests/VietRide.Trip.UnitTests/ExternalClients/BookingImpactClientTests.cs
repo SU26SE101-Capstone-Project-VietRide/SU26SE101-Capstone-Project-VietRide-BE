@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using FluentAssertions;
+using Microsoft.Extensions.Options;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Infrastructure.ExternalClients;
 
@@ -11,6 +12,64 @@ public sealed class BookingImpactClientTests
     private static readonly Guid TripId = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     private static readonly Guid StopId = Guid.Parse("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
     private static readonly Guid OperatorId = Guid.Parse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+
+    [Fact]
+    public async Task VehicleSubstitutionImpactUsesExactPathAndRawShape()
+    {
+        var bookingId = Guid.Parse("cccccccc-cccc-4ccc-8ccc-cccccccccccc");
+        var passengerId = Guid.Parse("dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+        var handler = new CapturingJsonResponseHandler(
+            HttpStatusCode.OK,
+            $$"""
+            {
+              "oldTripId":"{{TripId:D}}",
+              "operatorId":"{{OperatorId:D}}",
+              "bookings":[{
+                "bookingId":"{{bookingId:D}}",
+                "bookingStatus":"CONFIRMED",
+                "passengers":[{
+                  "passengerId":"{{passengerId:D}}",
+                  "boardingStatus":"BOARDED",
+                  "originalSeatNumber":null
+                }]
+              }]
+            }
+            """);
+        using var httpClient = CreateHttpClient(handler);
+        var client = new VietRide.Trip.Infrastructure.Http.BookingImpactClient(
+            httpClient,
+            Options.Create(new VietRide.Trip.Infrastructure.Http.BookingImpactClientOptions()));
+
+        var result = await client.GetVehicleSubstitutionImpactAsync(
+            TripId,
+            OperatorId,
+            CancellationToken.None);
+
+        handler.LastRequest!.RequestUri!.PathAndQuery.Should().Be(
+            $"/internal/v1/bookings/trips/{TripId:D}/vehicle-substitution-impact?operatorId={OperatorId:D}");
+        result.Should().BeEquivalentTo(new
+        {
+            OldTripId = TripId,
+            OperatorId,
+            Bookings = new[]
+            {
+                new
+                {
+                    BookingId = bookingId,
+                    BookingStatus = "CONFIRMED",
+                    Passengers = new[]
+                    {
+                        new
+                        {
+                            PassengerId = passengerId,
+                            BoardingStatus = "BOARDED",
+                            OriginalSeatNumber = (string?)null,
+                        },
+                    },
+                },
+            },
+        });
+    }
 
     [Fact]
     public async Task GetTripEditImpactAsync_UsesExactPathAndOperatorQuery_AndReturnsMultipleImpacts()

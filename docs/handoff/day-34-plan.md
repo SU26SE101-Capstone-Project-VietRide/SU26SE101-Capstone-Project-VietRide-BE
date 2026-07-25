@@ -1201,7 +1201,7 @@ No task is parallel-safe in the shared working tree: Task 34.1 owns the shared c
 | 34.0 | done | APPROVE | 2026-07-25 | Codified the contract freeze and human-approved Trip-owned seat-type derivation; plan verification bookkeeping corrected. |
 | 34.1 | done | APPROVE | 2026-07-25 | Added strict shared contracts and 4 focused parity tests; one lint-only patch, no scope expansion. |
 | 34.2 | done | APPROVE | 2026-07-25 | Added the tenant-scoped impact seam; reviewer patch added real PostgreSQL repository coverage, no scope expansion. |
-| 34.3 | todo | - | - | Replace the discovered partial substitution handler; preserve unrelated Trip flows. |
+| 34.3 | done | APPROVE | 2026-07-26 | Completed real HTTP/DB/Redis/Outbox substitution flow; two reviewer rounds replaced superficial tests and expanded guard/restart coverage. |
 | 34.4 | todo | - | - | - |
 | 34.5 | todo | - | - | Preserve the existing pre-departure `trip.trip.vehicle_swapped` consumer. |
 | 34.6 | todo | - | - | Dedicated BookingTransfer confirmation; existing boarding flow is unchanged. |
