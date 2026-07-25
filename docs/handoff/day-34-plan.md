@@ -1195,7 +1195,7 @@ No task is parallel-safe in the shared working tree: Task 34.1 owns the shared c
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
 | 34.0 | done | APPROVE | 2026-07-25 | Codified the approved contract freeze; one review round corrected the plan's PowerShell verification bookkeeping. |
-| 34.1 | todo | - | - | - |
+| 34.1 | done | APPROVE | 2026-07-25 | Added strict shared contracts and 4 focused parity tests; one lint-only patch, no scope expansion. |
 | 34.2 | todo | - | - | - |
 | 34.3 | todo | - | - | Replace the discovered partial substitution handler; preserve unrelated Trip flows. |
 | 34.4 | todo | - | - | - |
