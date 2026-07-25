@@ -602,7 +602,8 @@ $unit = 'apps/trip/tests/VietRide.Trip.UnitTests/VietRide.Trip.UnitTests.csproj'
 Invoke-DotNetTestNonZero $unit 'VietRide.Trip.UnitTests.ExternalClients.BookingImpactClientTests.VehicleSubstitutionImpactUsesExactPathAndRawShape' 'substitute-impact-client'
 function Invoke-NxJestNonZero([string]$Spec,[string]$Pattern,[string]$Tag) {
   New-Item -ItemType Directory -Force -Path 'TestResults' | Out-Null
-  $jsonPath = "TestResults/day34-$Tag-$([guid]::NewGuid()).json"
+  $resultsDir = (Resolve-Path -LiteralPath 'TestResults').Path
+  $jsonPath = Join-Path $resultsDir "day34-$Tag-$([guid]::NewGuid()).json"
   try {
     npx nx test gateway --runInBand --passWithNoTests=false --testPathPatterns=$Spec --testNamePattern=$Pattern --json --outputFile=$jsonPath
     if ($LASTEXITCODE -ne 0) { throw "Gateway spec failed: $Tag" }
@@ -967,7 +968,8 @@ Invoke-DotNetTestNonZero $project 'VietRide.Booking.IntegrationTests.BookingTran
 Invoke-DotNetTestNonZero $project 'VietRide.Booking.IntegrationTests.BookingTransfers.VehicleSubstitutionPassengerConfirmationEndpointTests.ThinControllerDispatchesMediatRAndDeclaresApiResponseAndSwashbuckleMetadata' 'confirm-controller-metadata'
 function Invoke-NxJestNonZero([string]$Spec,[string]$Pattern,[string]$Tag) {
   New-Item -ItemType Directory -Force -Path 'TestResults' | Out-Null
-  $jsonPath = "TestResults/day34-$Tag-$([guid]::NewGuid()).json"
+  $resultsDir = (Resolve-Path -LiteralPath 'TestResults').Path
+  $jsonPath = Join-Path $resultsDir "day34-$Tag-$([guid]::NewGuid()).json"
   try {
     npx nx test gateway --runInBand --passWithNoTests=false --testPathPatterns=$Spec --testNamePattern=$Pattern --json --outputFile=$jsonPath
     if ($LASTEXITCODE -ne 0) { throw "Gateway spec failed: $Tag" }
@@ -1050,7 +1052,8 @@ function Get-Day34TaskLedger([string]$TaskId,[string]$AllowedPattern) {
 }
 function Invoke-NotificationJestNonZero([string]$Spec,[string]$Pattern,[string]$Tag) {
   New-Item -ItemType Directory -Force -Path 'TestResults' | Out-Null
-  $jsonPath = "TestResults/day34-$Tag-$([guid]::NewGuid()).json"
+  $resultsDir = (Resolve-Path -LiteralPath 'TestResults').Path
+  $jsonPath = Join-Path $resultsDir "day34-$Tag-$([guid]::NewGuid()).json"
   try {
     npx nx test notification --runInBand --passWithNoTests=false --testPathPatterns=$Spec --testNamePattern=$Pattern --json --outputFile=$jsonPath
     if ($LASTEXITCODE -ne 0) { throw "Notification focused spec failed: $Tag" }
@@ -1147,7 +1150,8 @@ function Get-Day34TaskLedger([string]$TaskId,[string]$AllowedPattern) {
 }
 function Invoke-NxJestNonZero([string]$Spec,[string]$Pattern,[string]$Tag) {
   New-Item -ItemType Directory -Force -Path 'TestResults' | Out-Null
-  $jsonPath = "TestResults/day34-$Tag-$([guid]::NewGuid()).json"
+  $resultsDir = (Resolve-Path -LiteralPath 'TestResults').Path
+  $jsonPath = Join-Path $resultsDir "day34-$Tag-$([guid]::NewGuid()).json"
   try {
     npx nx test gateway --runInBand --passWithNoTests=false --testPathPatterns=$Spec --testNamePattern=$Pattern --json --outputFile=$jsonPath
     if ($LASTEXITCODE -ne 0) { throw "Gateway spec failed: $Tag" }
@@ -1202,7 +1206,7 @@ No task is parallel-safe in the shared working tree: Task 34.1 owns the shared c
 | 34.5 | todo | - | - | Preserve the existing pre-departure `trip.trip.vehicle_swapped` consumer. |
 | 34.6 | todo | - | - | Dedicated BookingTransfer confirmation; existing boarding flow is unchanged. |
 | 34.7 | todo | - | - | - |
-| 34.8 | todo | - | - | Gateway-only seam coverage for the two public Day-34 endpoints. |
+| 34.8 | done | APPROVE | 2026-07-25 | Added both endpoint Gateway seams; one review round fixed absolute Nx/Jest evidence paths, no scope expansion. |
 
 Legend: todo | in progress | done (reviewer APPROVED + targeted verification green) | done-with-carryover | blocked
 

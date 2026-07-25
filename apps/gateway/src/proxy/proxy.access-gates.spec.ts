@@ -227,6 +227,239 @@ describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', 
     createProxyMiddlewareMock.mockReset();
   });
 
+  it('enforces OPERATOR_ADMIN auth and preserves Idempotency-Key for substitute-vehicle', async () => {
+    const path =
+      '/v1/operator/trips/11111111-1111-4111-8111-111111111111/substitute-vehicle';
+    const idempotencyKey = '33333333-3333-4333-8333-333333333333';
+    const upstreamHandler = arrangeProxyPass();
+    const signer = {
+      sign: jest.fn().mockResolvedValue('internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({
+      sub: 'operator-admin-1',
+      role: 'OPERATOR_ADMIN',
+      operatorId: 'operator-1',
+    });
+    const req = makeRequest(path, {
+      authorization,
+      'idempotency-key': idempotencyKey,
+      'x-request-id': 'req-substitute-vehicle',
+    });
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(signer.sign).toHaveBeenCalledWith({
+      sub: 'operator-admin-1',
+      reqId: 'req-substitute-vehicle',
+      role: 'OPERATOR_ADMIN',
+      operatorId: 'operator-1',
+    });
+    expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+      expect.objectContaining({ target: env.TRIP_BASE_URL }),
+    );
+    expect(req.headers.authorization).toBeUndefined();
+    expect(req.headers['idempotency-key']).toBe(idempotencyKey);
+    expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
+    expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+    expect(res.status).not.toHaveBeenCalled();
+
+    createProxyMiddlewareMock.mockClear();
+    const staffSigner = { sign: jest.fn() } as unknown as InternalJwtSigner;
+    const staffHandler = createProxyHandler(env, staffSigner);
+    const staffAuthorization = await makeAuthorizationHeader({
+      sub: 'operator-staff-1',
+      role: 'OPERATOR_STAFF',
+      operatorId: 'operator-1',
+    });
+    const staffReq = makeRequest(path, {
+      authorization: staffAuthorization,
+      'idempotency-key': idempotencyKey,
+      'x-request-id': 'req-substitute-staff',
+    });
+    const staffRes = makeResponse();
+
+    await staffHandler(staffReq, staffRes, jest.fn() as NextFunction);
+
+    expect(staffRes.status).toHaveBeenCalledWith(403);
+    expect(staffRes.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 403,
+      error: { code: 'FORBIDDEN' },
+      meta: { traceId: 'req-substitute-staff' },
+    });
+    expect(staffSigner.sign).not.toHaveBeenCalled();
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+
+    const genericUpstreamHandler = arrangeProxyPass();
+    const genericSigner = {
+      sign: jest.fn().mockResolvedValue('internal-token'),
+    } as unknown as InternalJwtSigner;
+    const genericHandler = createProxyHandler(env, genericSigner);
+    const genericReq = makeRequest(
+      '/v1/operator/trips/11111111-1111-4111-8111-111111111111',
+      {
+        authorization: staffAuthorization,
+        'idempotency-key': idempotencyKey,
+        'x-request-id': 'req-generic-trip-staff',
+      },
+      'PATCH',
+    );
+    const genericRes = makeResponse();
+    const genericNext = jest.fn() as NextFunction;
+
+    await genericHandler(genericReq, genericRes, genericNext);
+
+    expect(genericSigner.sign).toHaveBeenCalledWith({
+      sub: 'operator-staff-1',
+      reqId: 'req-generic-trip-staff',
+      role: 'OPERATOR_STAFF',
+      operatorId: 'operator-1',
+    });
+    expect(genericReq.headers['idempotency-key']).toBe(idempotencyKey);
+    expect(genericUpstreamHandler).toHaveBeenCalledWith(genericReq, genericRes, genericNext);
+    expect(genericRes.status).not.toHaveBeenCalled();
+
+    createProxyMiddlewareMock.mockClear();
+    const passengerSigner = { sign: jest.fn() } as unknown as InternalJwtSigner;
+    const passengerHandler = createProxyHandler(env, passengerSigner);
+    const passengerAuthorization = await makeAuthorizationHeader({
+      sub: 'passenger-1',
+      role: 'PASSENGER',
+    });
+    const passengerReq = makeRequest(path, {
+      authorization: passengerAuthorization,
+      'idempotency-key': idempotencyKey,
+      'x-request-id': 'req-substitute-passenger',
+    });
+    const passengerRes = makeResponse();
+
+    await passengerHandler(passengerReq, passengerRes, jest.fn() as NextFunction);
+
+    expect(passengerRes.status).toHaveBeenCalledWith(403);
+    expect(passengerRes.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 403,
+      error: { code: 'FORBIDDEN' },
+      meta: { traceId: 'req-substitute-passenger' },
+    });
+    expect(passengerSigner.sign).not.toHaveBeenCalled();
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+
+    const anonymousSigner = { sign: jest.fn() } as unknown as InternalJwtSigner;
+    const anonymousHandler = createProxyHandler(env, anonymousSigner);
+    const anonymousReq = makeRequest(path, {
+      'idempotency-key': idempotencyKey,
+      'x-request-id': 'req-substitute-anonymous',
+    });
+    const anonymousRes = makeResponse();
+
+    await anonymousHandler(anonymousReq, anonymousRes, jest.fn() as NextFunction);
+
+    expect(anonymousRes.status).toHaveBeenCalledWith(401);
+    expect(anonymousRes.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 401,
+      error: { code: 'AUTH_TOKEN_INVALID' },
+      meta: { traceId: 'req-substitute-anonymous' },
+    });
+    expect(anonymousSigner.sign).not.toHaveBeenCalled();
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+  });
+
+  it('enforces DRIVER or ASSISTANT auth and preserves Idempotency-Key for passenger transfer confirmation', async () => {
+    const path =
+      '/v1/bookings/trips/11111111-1111-4111-8111-111111111111/transfers/passengers/22222222-2222-4222-8222-222222222222/confirm';
+    const idempotencyKey = '33333333-3333-4333-8333-333333333333';
+
+    for (const role of ['DRIVER', 'ASSISTANT'] as const) {
+      createProxyMiddlewareMock.mockClear();
+      const upstreamHandler = arrangeProxyPass();
+      const signer = {
+        sign: jest.fn().mockResolvedValue('internal-token'),
+      } as unknown as InternalJwtSigner;
+      const handler = createProxyHandler(env, signer);
+      const authorization = await makeAuthorizationHeader({
+        sub: `${role.toLowerCase()}-1`,
+        role,
+        operatorId: 'operator-1',
+      });
+      const requestId = `req-confirm-transfer-${role.toLowerCase()}`;
+      const req = makeRequest(path, {
+        authorization,
+        'idempotency-key': idempotencyKey,
+        'x-request-id': requestId,
+      });
+      const res = makeResponse();
+      const next = jest.fn() as NextFunction;
+
+      await handler(req, res, next);
+
+      expect(signer.sign).toHaveBeenCalledWith({
+        sub: `${role.toLowerCase()}-1`,
+        reqId: requestId,
+        role,
+        operatorId: 'operator-1',
+      });
+      expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+        expect.objectContaining({ target: env.BOOKING_BASE_URL }),
+      );
+      expect(req.headers.authorization).toBeUndefined();
+      expect(req.headers['idempotency-key']).toBe(idempotencyKey);
+      expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
+      expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+      expect(res.status).not.toHaveBeenCalled();
+    }
+
+    createProxyMiddlewareMock.mockClear();
+    const passengerSigner = { sign: jest.fn() } as unknown as InternalJwtSigner;
+    const passengerHandler = createProxyHandler(env, passengerSigner);
+    const passengerAuthorization = await makeAuthorizationHeader({
+      sub: 'passenger-1',
+      role: 'PASSENGER',
+    });
+    const passengerReq = makeRequest(path, {
+      authorization: passengerAuthorization,
+      'idempotency-key': idempotencyKey,
+      'x-request-id': 'req-confirm-transfer-passenger',
+    });
+    const passengerRes = makeResponse();
+
+    await passengerHandler(passengerReq, passengerRes, jest.fn() as NextFunction);
+
+    expect(passengerRes.status).toHaveBeenCalledWith(403);
+    expect(passengerRes.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 403,
+      error: { code: 'FORBIDDEN' },
+      meta: { traceId: 'req-confirm-transfer-passenger' },
+    });
+    expect(passengerSigner.sign).not.toHaveBeenCalled();
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+
+    const anonymousSigner = { sign: jest.fn() } as unknown as InternalJwtSigner;
+    const anonymousHandler = createProxyHandler(env, anonymousSigner);
+    const anonymousReq = makeRequest(path, {
+      'idempotency-key': idempotencyKey,
+      'x-request-id': 'req-confirm-transfer-anonymous',
+    });
+    const anonymousRes = makeResponse();
+
+    await anonymousHandler(anonymousReq, anonymousRes, jest.fn() as NextFunction);
+
+    expect(anonymousRes.status).toHaveBeenCalledWith(401);
+    expect(anonymousRes.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 401,
+      error: { code: 'AUTH_TOKEN_INVALID' },
+      meta: { traceId: 'req-confirm-transfer-anonymous' },
+    });
+    expect(anonymousSigner.sign).not.toHaveBeenCalled();
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+  });
+
   it('returns 403 FORBIDDEN for a non-admin JWT on a SYSTEM_ADMIN route', async () => {
     const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
     const handler = createProxyHandler(env, signer);

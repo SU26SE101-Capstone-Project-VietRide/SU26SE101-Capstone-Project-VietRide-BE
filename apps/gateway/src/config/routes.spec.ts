@@ -164,6 +164,44 @@ describe('buildRouteTable', () => {
     expect(route?.prefix).not.toBe('/v1/bookings');
   });
 
+  it('routes substitute-vehicle to Trip with user auth', () => {
+    const route = matchRoute(
+      routes,
+      '/v1/operator/trips/11111111-1111-4111-8111-111111111111/substitute-vehicle',
+    );
+    const genericRoute = matchRoute(
+      routes,
+      '/v1/operator/trips/11111111-1111-4111-8111-111111111111',
+    );
+
+    expect(route).toMatchObject({
+      prefix: '/v1/operator/trips/{tripId}/substitute-vehicle',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    });
+    expect(genericRoute).toMatchObject({
+      prefix: '/v1/operator/trips',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    });
+  });
+
+  it('routes passenger transfer confirmation to Booking with user auth', () => {
+    const route = matchRoute(
+      routes,
+      '/v1/bookings/trips/11111111-1111-4111-8111-111111111111/transfers/passengers/22222222-2222-4222-8222-222222222222/confirm',
+    );
+
+    expect(route).toMatchObject({
+      prefix: '/v1/bookings/trips',
+      target: env.BOOKING_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['DRIVER', 'ASSISTANT'],
+    });
+  });
+
   it('role-gates driver and assistant route families from PASSENGER users', () => {
     const driverRoute = matchRoute(routes, '/v1/driver/me/schedule');
     const assistantRoute = matchRoute(routes, '/v1/assistant/me');
