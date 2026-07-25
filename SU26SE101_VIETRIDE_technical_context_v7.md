@@ -3970,10 +3970,14 @@ Success đúng
 statuses là `DISRUPTED`/`BOARDING`, transfer `QUEUED`, và không có Parcel count.
 
 Booking sở hữu Internal-JWT-only raw impact seam, với exact success
-`{oldTripId,operatorId,bookings:[{bookingId,bookingStatus,passengers:[{passengerId,boardingStatus,originalSeatNumber,seatType}]}]}`.
+`{oldTripId,operatorId,bookings:[{bookingId,bookingStatus,passengers:[{passengerId,boardingStatus,originalSeatNumber}]}]}`.
 Chỉ Booking `CONFIRMED|PARTIAL_NO_SHOW` và Passenger `BOARDED|PENDING`; sort `bookingId` rồi
 `passengerId`; empty `200 {bookings:[]}`. `originalSeatNumber` nullable nên chained substitution
-vẫn eligible. Trip sở hữu replacement layout, TripSeat và mapping; không service nào ghi DB khác.
+vẫn eligible; Booking không trả `seatType`. Khi `originalSeatNumber` non-null, Trip lookup
+`TripSeat` của Trip cũ để lấy preferred seat type. Khi seat gốc null hoặc không có old TripSeat
+match, passenger không có preferred type và deterministic allocation fallback theo remaining
+passenger-seat order, sau đó trả null khi hết ghế. Trip sở hữu replacement layout, TripSeat và
+mapping; không service nào ghi DB khác.
 
 **Facts, transfer persistence và confirmation**
 
