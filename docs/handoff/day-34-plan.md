@@ -45,7 +45,7 @@ Immediately before dispatching each task, the orchestrator must capture the curr
 $ErrorActionPreference = 'Stop'
 $taskId = '<replace-with-34.1-through-34.8>'
 $workspace = (Get-Location).Path
-$dirtyAtDispatch = @((git diff --name-only), (git diff --cached --name-only), (git ls-files --others --exclude-standard)) |
+$dirtyAtDispatch = @(& git diff --name-only; & git diff --cached --name-only; & git ls-files --others --exclude-standard) |
   Where-Object { $_ } |
   ForEach-Object { $_.Replace('\','/') } |
   Sort-Object -Unique
@@ -378,7 +378,7 @@ function Get-Day34TaskLedger([string]$TaskId,[string]$AllowedPattern) {
   if ([IO.Path]::GetFullPath([string]$manifest.workspace) -ne [IO.Path]::GetFullPath((Get-Location).Path)) { throw 'baseline workspace mismatch' }
   $before = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
   foreach ($entry in @($manifest.entries)) { $before[[string]$entry.path] = $entry }
-  $dirtyNow = @((git diff --name-only), (git diff --cached --name-only), (git ls-files --others --exclude-standard)) |
+  $dirtyNow = @(& git diff --name-only; & git diff --cached --name-only; & git ls-files --others --exclude-standard) |
     Where-Object { $_ } |
     ForEach-Object { $_.Replace('\','/') } |
     Sort-Object -Unique
@@ -455,7 +455,7 @@ function Get-Day34TaskLedger([string]$TaskId,[string]$AllowedPattern) {
   if ([IO.Path]::GetFullPath([string]$manifest.workspace) -ne [IO.Path]::GetFullPath((Get-Location).Path)) { throw 'baseline workspace mismatch' }
   $before = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
   foreach ($entry in @($manifest.entries)) { $before[[string]$entry.path] = $entry }
-  $dirtyNow = @((git diff --name-only), (git diff --cached --name-only), (git ls-files --others --exclude-standard)) | Where-Object { $_ } | ForEach-Object { $_.Replace('\','/') } | Sort-Object -Unique
+  $dirtyNow = @(& git diff --name-only; & git diff --cached --name-only; & git ls-files --others --exclude-standard) | Where-Object { $_ } | ForEach-Object { $_.Replace('\','/') } | Sort-Object -Unique
   $dirtySet = [Collections.Generic.HashSet[string]]::new([string[]]$dirtyNow,[StringComparer]::OrdinalIgnoreCase)
   $candidates = @($dirtyNow + @($before.Keys)) | Sort-Object -Unique
   $changed = @($candidates | Where-Object {
@@ -543,7 +543,7 @@ function Get-Day34TaskLedger([string]$TaskId,[string]$AllowedPattern) {
   if ([IO.Path]::GetFullPath([string]$manifest.workspace) -ne [IO.Path]::GetFullPath((Get-Location).Path)) { throw 'baseline workspace mismatch' }
   $before = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
   foreach ($entry in @($manifest.entries)) { $before[[string]$entry.path] = $entry }
-  $dirtyNow = @((git diff --name-only), (git diff --cached --name-only), (git ls-files --others --exclude-standard)) | Where-Object { $_ } | ForEach-Object { $_.Replace('\','/') } | Sort-Object -Unique
+  $dirtyNow = @(& git diff --name-only; & git diff --cached --name-only; & git ls-files --others --exclude-standard) | Where-Object { $_ } | ForEach-Object { $_.Replace('\','/') } | Sort-Object -Unique
   $dirtySet = [Collections.Generic.HashSet[string]]::new([string[]]$dirtyNow,[StringComparer]::OrdinalIgnoreCase)
   $candidates = @($dirtyNow + @($before.Keys)) | Sort-Object -Unique
   $changed = @($candidates | Where-Object {
@@ -652,7 +652,7 @@ function Get-Day34TaskLedger([string]$TaskId,[string]$AllowedPattern) {
   if ([IO.Path]::GetFullPath([string]$manifest.workspace) -ne [IO.Path]::GetFullPath((Get-Location).Path)) { throw 'baseline workspace mismatch' }
   $before = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
   foreach ($entry in @($manifest.entries)) { $before[[string]$entry.path] = $entry }
-  $dirtyNow = @((git diff --name-only), (git diff --cached --name-only), (git ls-files --others --exclude-standard)) | Where-Object { $_ } | ForEach-Object { $_.Replace('\','/') } | Sort-Object -Unique
+  $dirtyNow = @(& git diff --name-only; & git diff --cached --name-only; & git ls-files --others --exclude-standard) | Where-Object { $_ } | ForEach-Object { $_.Replace('\','/') } | Sort-Object -Unique
   $dirtySet = [Collections.Generic.HashSet[string]]::new([string[]]$dirtyNow,[StringComparer]::OrdinalIgnoreCase)
   $candidates = @($dirtyNow + @($before.Keys)) | Sort-Object -Unique
   $changed = @($candidates | Where-Object {
@@ -828,7 +828,7 @@ function Get-Day34TaskLedger([string]$TaskId,[string]$AllowedPattern) {
   if ([IO.Path]::GetFullPath([string]$manifest.workspace) -ne [IO.Path]::GetFullPath((Get-Location).Path)) { throw 'baseline workspace mismatch' }
   $before = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
   foreach ($entry in @($manifest.entries)) { $before[[string]$entry.path] = $entry }
-  $dirtyNow = @((git diff --name-only), (git diff --cached --name-only), (git ls-files --others --exclude-standard)) | Where-Object { $_ } | ForEach-Object { $_.Replace('\','/') } | Sort-Object -Unique
+  $dirtyNow = @(& git diff --name-only; & git diff --cached --name-only; & git ls-files --others --exclude-standard) | Where-Object { $_ } | ForEach-Object { $_.Replace('\','/') } | Sort-Object -Unique
   $dirtySet = [Collections.Generic.HashSet[string]]::new([string[]]$dirtyNow,[StringComparer]::OrdinalIgnoreCase)
   $candidates = @($dirtyNow + @($before.Keys)) | Sort-Object -Unique
   $changed = @($candidates | Where-Object {
@@ -917,7 +917,7 @@ function Get-Day34TaskLedger([string]$TaskId,[string]$AllowedPattern) {
   if ([IO.Path]::GetFullPath([string]$manifest.workspace) -ne [IO.Path]::GetFullPath((Get-Location).Path)) { throw 'baseline workspace mismatch' }
   $before = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
   foreach ($entry in @($manifest.entries)) { $before[[string]$entry.path] = $entry }
-  $dirtyNow = @((git diff --name-only), (git diff --cached --name-only), (git ls-files --others --exclude-standard)) | Where-Object { $_ } | ForEach-Object { $_.Replace('\','/') } | Sort-Object -Unique
+  $dirtyNow = @(& git diff --name-only; & git diff --cached --name-only; & git ls-files --others --exclude-standard) | Where-Object { $_ } | ForEach-Object { $_.Replace('\','/') } | Sort-Object -Unique
   $dirtySet = [Collections.Generic.HashSet[string]]::new([string[]]$dirtyNow,[StringComparer]::OrdinalIgnoreCase)
   $candidates = @($dirtyNow + @($before.Keys)) | Sort-Object -Unique
   $changed = @($candidates | Where-Object {
@@ -1017,7 +1017,7 @@ function Get-Day34TaskLedger([string]$TaskId,[string]$AllowedPattern) {
   if ([IO.Path]::GetFullPath([string]$manifest.workspace) -ne [IO.Path]::GetFullPath((Get-Location).Path)) { throw 'baseline workspace mismatch' }
   $before = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
   foreach ($entry in @($manifest.entries)) { $before[[string]$entry.path] = $entry }
-  $dirtyNow = @((git diff --name-only), (git diff --cached --name-only), (git ls-files --others --exclude-standard)) | Where-Object { $_ } | ForEach-Object { $_.Replace('\','/') } | Sort-Object -Unique
+  $dirtyNow = @(& git diff --name-only; & git diff --cached --name-only; & git ls-files --others --exclude-standard) | Where-Object { $_ } | ForEach-Object { $_.Replace('\','/') } | Sort-Object -Unique
   $dirtySet = [Collections.Generic.HashSet[string]]::new([string[]]$dirtyNow,[StringComparer]::OrdinalIgnoreCase)
   $candidates = @($dirtyNow + @($before.Keys)) | Sort-Object -Unique
   $changed = @($candidates | Where-Object {
@@ -1114,7 +1114,7 @@ function Get-Day34TaskLedger([string]$TaskId,[string]$AllowedPattern) {
   if ([IO.Path]::GetFullPath([string]$manifest.workspace) -ne [IO.Path]::GetFullPath((Get-Location).Path)) { throw 'baseline workspace mismatch' }
   $before = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
   foreach ($entry in @($manifest.entries)) { $before[[string]$entry.path] = $entry }
-  $dirtyNow = @((git diff --name-only), (git diff --cached --name-only), (git ls-files --others --exclude-standard)) | Where-Object { $_ } | ForEach-Object { $_.Replace('\','/') } | Sort-Object -Unique
+  $dirtyNow = @(& git diff --name-only; & git diff --cached --name-only; & git ls-files --others --exclude-standard) | Where-Object { $_ } | ForEach-Object { $_.Replace('\','/') } | Sort-Object -Unique
   $dirtySet = [Collections.Generic.HashSet[string]]::new([string[]]$dirtyNow,[StringComparer]::OrdinalIgnoreCase)
   $candidates = @($dirtyNow + @($before.Keys)) | Sort-Object -Unique
   $changed = @($candidates | Where-Object {
