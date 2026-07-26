@@ -85,6 +85,8 @@ public sealed class BookingTransfer
             throw new InvalidOperationException("A transfer without a replacement seat cannot be confirmed.");
         if (confirmedByUserId == Guid.Empty)
             throw new ArgumentException("Confirmed-by user id is required.", nameof(confirmedByUserId));
+        if (confirmedAt == default)
+            throw new ArgumentException("Confirmation timestamp is required.", nameof(confirmedAt));
 
         ConfirmationStatus = BookingTransferConfirmationStatus.CONFIRMED;
         ConfirmedAt = confirmedAt;

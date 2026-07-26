@@ -23,6 +23,33 @@ internal sealed class BookingTransferRepository(BookingDbContext db) : IBookingT
 
     public IQueryable<BookingTransfer> QueryNoTracking() => db.BookingTransfers.AsNoTracking();
 
+    public async Task<BookingTransfer?> GetActiveForConfirmationAsync(
+        Guid passengerId,
+        Guid newTripId,
+        Guid operatorId,
+        CancellationToken ct = default)
+    {
+        var matches = await db.BookingTransfers
+            .FromSqlInterpolated($"""
+                SELECT booking_transfer.*
+                FROM vietride_booking.booking_transfers AS booking_transfer
+                INNER JOIN vietride_booking.bookings AS booking
+                    ON booking.id = booking_transfer.booking_id
+                WHERE booking_transfer.passenger_id = {passengerId}
+                    AND booking_transfer.new_trip_id = {newTripId}
+                    AND booking.trip_id = {newTripId}
+                    AND booking.operator_id = {operatorId}
+                    AND booking_transfer.confirmation_status
+                        IN ('PENDING_CONFIRM', 'CONFIRMED')
+                ORDER BY booking_transfer.transferred_at DESC, booking_transfer.id DESC
+                LIMIT 1
+                FOR UPDATE OF booking, booking_transfer
+                """)
+            .ToListAsync(ct);
+
+        return matches.SingleOrDefault();
+    }
+
     public async Task<IReadOnlyList<BookingTransfer>> GetByPassengerTripPairAsync(
         IReadOnlyCollection<Guid> passengerIds,
         Guid originalTripId,
