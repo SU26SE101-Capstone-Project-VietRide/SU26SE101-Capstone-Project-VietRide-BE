@@ -134,6 +134,7 @@ public static class InfrastructureServiceCollectionExtensions
 
         // Repositories (Task 12.3)
         services.AddScoped<IBookingRepository, BookingRepository>();
+        services.AddScoped<IBookingTransferRepository, BookingTransferRepository>();
         services.AddScoped<IBookingStatusHistoryRepository, BookingStatusHistoryRepository>();
         services.AddScoped<IBookingPendingActionRepository, BookingPendingActionRepository>();
         services.AddScoped<IBookingStationRedirectRepository, BookingStationRedirectRepository>();

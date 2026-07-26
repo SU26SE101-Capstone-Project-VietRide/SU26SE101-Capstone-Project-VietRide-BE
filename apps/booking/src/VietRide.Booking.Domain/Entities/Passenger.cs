@@ -13,7 +13,8 @@ namespace VietRide.Booking.Domain.Entities;
 public sealed class Passenger : BaseEntity<Guid>
 {
     public Guid BookingId { get; private set; }
-    public string SeatNumber { get; private set; } = string.Empty;
+    // EF permits NULL for unresolved replacement seats; newly created checkout passengers still require a seat.
+    public string? SeatNumber { get; private set; }
     public PassengerBoardingStatus BoardingStatus { get; private set; } = PassengerBoardingStatus.PENDING;
     public DateTimeOffset? BoardedAt { get; private set; }
 

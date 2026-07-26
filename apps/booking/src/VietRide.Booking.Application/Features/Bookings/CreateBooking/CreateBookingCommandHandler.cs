@@ -356,7 +356,11 @@ public sealed class CreateBookingCommandHandler
         //    (all in the same TransactionBehavior transaction)
         // -----------------------------------------------------------------------
         var passengerAssignments = booking.Passengers
-            .Select(p => new PassengerSeatAssignment(p.Id, p.SeatNumber))
+            .Select(p => new PassengerSeatAssignment(
+                p.Id,
+                p.SeatNumber
+                    ?? throw new InvalidOperationException(
+                        "A newly created checkout passenger must have a seat number.")))
             .ToList();
 
         var booked = await _tripClient.BookSeatsAsync(

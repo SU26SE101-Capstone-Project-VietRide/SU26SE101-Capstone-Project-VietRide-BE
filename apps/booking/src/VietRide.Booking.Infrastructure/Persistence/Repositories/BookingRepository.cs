@@ -244,6 +244,7 @@ internal sealed class BookingRepository : IBookingRepository
                 group => group.Key,
                 group => (IReadOnlyList<string>)group
                     .Select(row => row.SeatNumber)
+                    .OfType<string>()
                     .Distinct(StringComparer.Ordinal)
                     .Order(StringComparer.Ordinal)
                     .ToArray());
@@ -758,8 +759,19 @@ internal sealed class BookingRepository : IBookingRepository
             .AsNoTracking()
             .Where(p => p.BookingId == bookingId)
             .OrderBy(p => p.SeatNumber)
-            .Select(p => new PassengerSeatAssignment(p.Id, p.SeatNumber))
+            .Select(p => new
+            {
+                p.Id,
+                p.SeatNumber,
+            })
             .ToArrayAsync(ct);
+        var assignedPassengers = passengerSeatAssignments
+            .Select(p => new PassengerSeatAssignment(
+                p.Id,
+                p.SeatNumber
+                    ?? throw new InvalidOperationException(
+                        "A pending-payment passenger must have a seat number.")))
+            .ToArray();
 
         var voucherUsageId = await _db.VoucherUsages
             .AsNoTracking()
@@ -796,7 +808,7 @@ internal sealed class BookingRepository : IBookingRepository
             booking.SeatLockToken,
             booking.TotalAmount,
             voucherUsageId,
-            passengerSeatAssignments,
+            assignedPassengers,
             ticketCodes,
             ticketIds,
             shuttleIntent);

@@ -149,7 +149,10 @@ public sealed class Booking : BaseEntity<Guid>
         if (_passengers.Count >= 5)
             throw new InvalidOperationException("A booking cannot have more than 5 passengers.");
 
-        if (_passengers.Any(p => p.SeatNumber.Equals(seatNumber, StringComparison.OrdinalIgnoreCase)))
+        if (_passengers.Any(p => string.Equals(
+                p.SeatNumber,
+                seatNumber,
+                StringComparison.OrdinalIgnoreCase)))
             throw new ArgumentException($"Seat '{seatNumber}' is already added to this booking.");
 
         var passenger = Passenger.Create(Id, seatNumber);
@@ -165,11 +168,13 @@ public sealed class Booking : BaseEntity<Guid>
         Money paidAmount)
     {
         var passenger = AddPassenger(seatNumber);
+        var passengerSeatNumber = passenger.SeatNumber
+            ?? throw new InvalidOperationException("A newly created passenger must have a seat number.");
         var ticket = Ticket.CreatePendingPayment(
             Id,
             passenger.Id,
             ticketCode,
-            passenger.SeatNumber,
+            passengerSeatNumber,
             fareAmount,
             discountAmount,
             paidAmount);
