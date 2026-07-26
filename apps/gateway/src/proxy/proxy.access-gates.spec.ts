@@ -41,7 +41,7 @@ const isFocusedDay23ResolveRun = process.argv.some((argument) =>
   argument.includes('Day 23 resolve schedule action'),
 );
 const describeExistingAccessGates = isFocusedDay23ResolveRun
-  ? (_name: string, _suite: () => void): void => undefined
+  ? (): void => undefined
   : describe;
 
 type TestResponse = Response & { statusCodeValue?: number; jsonBody?: unknown };

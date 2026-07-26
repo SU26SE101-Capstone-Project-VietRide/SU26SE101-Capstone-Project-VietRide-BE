@@ -1,21 +1,49 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql;
 using VietRide.Booking.Infrastructure;
+using VietRide.Booking.IntegrationTests.Messaging;
 using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Booking.IntegrationTests.Migrations;
 
-public sealed class BookingTransferMigrationLifecycleTests
+public sealed class BookingTransferMigrationLifecycleTests : IAsyncLifetime
 {
     private const string PriorMigration = "20260722093941_AddIntegrationInbox";
+    private readonly string _databaseName = $"vr_b34_migration_{Guid.NewGuid():N}";
+    private string? _connectionString;
+    private NpgsqlDataSource? _dataSource;
+
+    public async Task InitializeAsync()
+    {
+        _connectionString = Day22EventDatabase.CreateConnectionString(_databaseName);
+        await Day22EventDatabase.CreateDatabaseAsync(_connectionString, _databaseName);
+        _dataSource = CreateDataSource(_connectionString);
+
+        await using var db = CreateDbContext(_dataSource);
+        await db.Database.MigrateAsync();
+    }
+
+    public async Task DisposeAsync()
+    {
+        if (_dataSource is not null)
+        {
+            await _dataSource.DisposeAsync();
+        }
+
+        if (_connectionString is not null)
+        {
+            await Day22EventDatabase.DropDatabaseAsync(_connectionString, _databaseName);
+        }
+    }
 
     [Fact]
     public async Task DownBackfillsRealNullSeatChainDeterministicallyRestoresSchemaAndDataAndRemovesOnlyDay34Objects()
     {
-        await using var dataSource = CreateDataSource();
+        var dataSource = GetDataSource();
         await using var db = CreateDbContext(dataSource);
         var migrator = db.GetService<IMigrator>();
         var currentMigration = db.Database.GetMigrations().Last();
@@ -68,7 +96,7 @@ public sealed class BookingTransferMigrationLifecycleTests
     [Fact]
     public async Task DownFailsWhenNoRecoverableSeatExistsAndNeverWritesSentinel()
     {
-        await using var dataSource = CreateDataSource();
+        var dataSource = GetDataSource();
         await using var db = CreateDbContext(dataSource);
         var migrator = db.GetService<IMigrator>();
         var bookingId = Guid.Parse("34040000-0000-4000-8000-000000000002");
@@ -97,10 +125,11 @@ public sealed class BookingTransferMigrationLifecycleTests
         }
     }
 
-    private static NpgsqlDataSource CreateDataSource()
+    private NpgsqlDataSource GetDataSource()
+        => _dataSource ?? throw new InvalidOperationException("Fixture is not initialized.");
+
+    private static NpgsqlDataSource CreateDataSource(string connectionString)
     {
-        var connectionString = Environment.GetEnvironmentVariable("BOOKING_DESIGN_CONNECTION")
-            ?? throw new InvalidOperationException("BOOKING_DESIGN_CONNECTION is required.");
         var builder = new NpgsqlDataSourceBuilder(connectionString);
         BookingDbContext.ConfigurePostgresTypes(builder);
         return builder.Build();
@@ -111,6 +140,8 @@ public sealed class BookingTransferMigrationLifecycleTests
         var options = new DbContextOptionsBuilder<BookingDbContext>()
             .UseNpgsql(dataSource, npgsql =>
                 npgsql.MigrationsHistoryTable("__ef_migrations_history", BookingDbContext.SchemaName))
+            .ConfigureWarnings(warnings =>
+                warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning))
             .Options;
         return new BookingDbContext(options, new SystemClock());
     }

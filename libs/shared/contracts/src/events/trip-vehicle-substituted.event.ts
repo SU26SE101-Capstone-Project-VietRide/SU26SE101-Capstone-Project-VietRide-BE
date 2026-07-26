@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/naming-convention -- Public Zod schemas follow contract naming. */
 import { z } from 'zod';
 
 export const TripVehicleSubstitutedBoardingStatusSchema = z.enum(['BOARDED', 'PENDING']);

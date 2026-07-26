@@ -196,6 +196,40 @@ public sealed class TripVehicleSubstitutedConsumerTests
     }
 
     [Fact]
+    public async Task LegacyPersistedBookingCodeDoesNotNackVehicleSubstitution()
+    {
+        await WithDatabaseAsync(async (dataSource, oldTripId, operatorId) =>
+        {
+            var booking = CreateConfirmedBooking(oldTripId, operatorId, "A01");
+            await SeedAsync(dataSource, booking);
+            await using (var command = dataSource.CreateCommand("""
+                UPDATE vietride_booking.bookings
+                SET booking_code = 'VR-D40-ACTIVE'
+                WHERE id = @booking_id;
+                """))
+            {
+                command.Parameters.AddWithValue("booking_id", booking.Id);
+                await command.ExecuteNonQueryAsync();
+            }
+
+            var evt = CreateEvent(
+                oldTripId,
+                operatorId,
+                booking,
+                (booking.Passengers[0], "B01", "PENDING"));
+
+            var result = await ConsumeAsync(dataSource, evt);
+
+            result.Should().Be(IntegrationEventInboxResult.Processed);
+            await using var verify = Day22EventDatabase.CreateDbContext(dataSource, OccurredAt);
+            var persisted = await verify.Bookings.AsNoTracking().SingleAsync();
+            persisted.BookingCode.Value.Should().Be("VR-D40-ACTIVE");
+            persisted.TripId.Should().Be(evt.NewTripId);
+            (await verify.BookingTransfers.CountAsync()).Should().Be(1);
+        });
+    }
+
+    [Fact]
     public async Task DuplicateAndInjectedFailureAreAtomicAcrossInboxStateTransfersAndOutbox()
     {
         await WithDatabaseAsync(async (dataSource, oldTripId, operatorId) =>

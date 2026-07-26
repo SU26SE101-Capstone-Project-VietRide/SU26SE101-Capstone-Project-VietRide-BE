@@ -1,6 +1,7 @@
 using Hangfire;
 using Hangfire.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Serilog;
 using VietRide.Booking.Application;
 using VietRide.Booking.Application.Abstractions.Jobs;
@@ -28,7 +29,15 @@ builder.Host.UseSerilog((ctx, _, lc) => lc
 builder.Services.AddVietRideSharedWeb(builder.Configuration, ServiceName);
 builder.Services.AddVietRideDbContext<BookingDbContext>(
     builder.Configuration,
-    configureDataSource: BookingDbContext.ConfigurePostgresTypes);
+    configureDataSource: BookingDbContext.ConfigurePostgresTypes,
+    configureDbContext: options =>
+    {
+        if (builder.Environment.IsEnvironment("Testing"))
+        {
+            options.ConfigureWarnings(warnings =>
+                warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning));
+        }
+    });
 builder.Services.AddVietRideIntegrationInbox<BookingDbContext>();
 builder.Services.AddVietRideMediatRBehaviors(
     handlerAssemblies: [typeof(ApplicationAssemblyMarker).Assembly]);

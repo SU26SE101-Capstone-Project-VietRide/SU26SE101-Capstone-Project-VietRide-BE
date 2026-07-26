@@ -45,6 +45,19 @@ public readonly record struct BookingCode
         return new BookingCode(value);
     }
 
+    /// <summary>
+    /// Restores an already-persisted booking code without applying the current public-input format.
+    /// This keeps legacy rows readable while <see cref="Parse"/> remains the validation boundary
+    /// for newly supplied booking codes.
+    /// </summary>
+    public static BookingCode Restore(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new ArgumentException("Persisted booking code cannot be null or whitespace.", nameof(value));
+
+        return new BookingCode(value);
+    }
+
     public override string ToString() => Value;
 
     private static string GenerateBase32(int length)
