@@ -31,6 +31,10 @@ CREATE TYPE trip_direction AS ENUM ('OUTBOUND', 'RETURN');
 
 CREATE TYPE passenger_boarding_status AS ENUM ('PENDING', 'BOARDED', 'NO_SHOW');
 
+CREATE TYPE booking_transfer_confirmation_status AS ENUM (
+    'PENDING_CONFIRM', 'CONFIRMED', 'NOT_REQUIRED'
+);
+
 CREATE TYPE ticket_status AS ENUM (
     'PENDING_PAYMENT', 'ISSUED', 'USED',
     'CANCELLED', 'REFUNDED', 'EXPIRED'
@@ -187,7 +191,7 @@ COMMENT ON COLUMN bookings.seat_lock_token IS
 CREATE TABLE passengers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     booking_id UUID NOT NULL REFERENCES bookings (id) ON DELETE CASCADE,
-    seat_number VARCHAR(20) NOT NULL,
+    seat_number VARCHAR(20) NULL,
     boarding_status passenger_boarding_status NOT NULL DEFAULT 'PENDING',
     boarded_at TIMESTAMPTZ NULL,
     boarded_at_stop_id UUID NULL,    -- logical FK to trip.stops
@@ -275,8 +279,11 @@ CREATE TABLE booking_transfers (
     ticket_id UUID NULL REFERENCES tickets (id) ON DELETE RESTRICT,
     original_trip_id UUID NOT NULL,
     new_trip_id UUID NOT NULL,
-    original_seat_number VARCHAR(20) NOT NULL,
+    original_seat_number VARCHAR(20) NULL,
     new_seat_number VARCHAR(20) NULL,
+    confirmation_status booking_transfer_confirmation_status NOT NULL,
+    confirmed_at TIMESTAMPTZ NULL,
+    confirmed_by_user_id UUID NULL, -- logical FK -> identity.users.id
     transferred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     transferred_by_user_id UUID NOT NULL,
     note TEXT NULL,
@@ -288,6 +295,11 @@ CREATE INDEX idx_booking_transfers_passenger_id ON booking_transfers (passenger_
 CREATE INDEX idx_booking_transfers_ticket_id ON booking_transfers (ticket_id);
 CREATE INDEX idx_booking_transfers_original_trip_id ON booking_transfers (original_trip_id);
 CREATE INDEX idx_booking_transfers_new_trip_id ON booking_transfers (new_trip_id);
+CREATE UNIQUE INDEX uq_booking_transfers_passenger_trip_pair
+    ON booking_transfers (passenger_id, original_trip_id, new_trip_id);
+
+COMMENT ON COLUMN booking_transfers.confirmed_by_user_id IS
+    'Nullable logical FK to identity.users.id; deliberately no cross-database constraint.';
 
 -- -----------------------------------------------------------------------------
 -- booking_stats (denormalized counter table for reporting)

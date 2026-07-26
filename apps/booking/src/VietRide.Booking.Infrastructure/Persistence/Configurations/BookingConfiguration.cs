@@ -42,7 +42,7 @@ internal sealed class BookingConfiguration : IEntityTypeConfiguration<BookingEnt
             .HasMaxLength(30)
             .HasConversion(
                 bc => bc.Value,
-                s => VietRide.Booking.Domain.ValueObjects.BookingCode.Parse(s))
+                s => VietRide.Booking.Domain.ValueObjects.BookingCode.Restore(s))
             .IsRequired();
 
         builder.Property(x => x.PassengerUserId)

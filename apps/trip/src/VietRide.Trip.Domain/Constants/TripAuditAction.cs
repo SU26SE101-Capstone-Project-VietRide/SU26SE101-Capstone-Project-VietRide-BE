@@ -7,11 +7,13 @@ public static class TripAuditAction
     public const string TripVehicleSwapped = "TRIP_VEHICLE_SWAPPED";
     public const string TripRouteChanged = "TRIP_ROUTE_CHANGED";
     public const string DriverScheduleCascadeApplied = "DRIVER_SCHEDULE_CASCADE_APPLIED";
+    public const string VehicleSubstitutionTriggered = "VEHICLE_SUBSTITUTION_TRIGGERED";
 
     public static bool IsApproved(string action) => action is
         TripCompletedManual
         or TripEdited
         or TripVehicleSwapped
         or TripRouteChanged
-        or DriverScheduleCascadeApplied;
+        or DriverScheduleCascadeApplied
+        or VehicleSubstitutionTriggered;
 }

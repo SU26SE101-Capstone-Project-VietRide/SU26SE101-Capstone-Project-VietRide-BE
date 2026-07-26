@@ -8,7 +8,10 @@ public sealed record SubstituteVehicleCommand(
     Guid TripId,
     Guid OperatorId,
     Guid ActorUserId,
-    Guid NewVehicleId,
-    Guid NewDriverUserId,
-    Guid? NewAssistantUserId,
-    string Reason) : IRequest<SubstituteVehicleResponse>;
+    Guid ReplacementVehicleId,
+    DateTimeOffset EstimatedRecoveryDepartureAt,
+    string Reason,
+    bool NotifyPassengers,
+    Guid? ReplacementDriverId,
+    Guid? ReplacementAssistantId,
+    bool ReplacementCrewSpecified) : IRequest<SubstituteVehicleResponse>;

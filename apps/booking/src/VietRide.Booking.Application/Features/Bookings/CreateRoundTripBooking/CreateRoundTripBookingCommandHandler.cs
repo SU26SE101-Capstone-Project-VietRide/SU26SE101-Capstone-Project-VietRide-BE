@@ -763,7 +763,11 @@ public sealed class CreateRoundTripBookingCommandHandler
         CancellationToken cancellationToken)
     {
         var passengerAssignments = booking.Passengers
-            .Select(p => new PassengerSeatAssignment(p.Id, p.SeatNumber))
+            .Select(p => new PassengerSeatAssignment(
+                p.Id,
+                p.SeatNumber
+                    ?? throw new InvalidOperationException(
+                        "A newly created checkout passenger must have a seat number.")))
             .ToList();
 
         var booked = await _tripClient.BookSeatsAsync(

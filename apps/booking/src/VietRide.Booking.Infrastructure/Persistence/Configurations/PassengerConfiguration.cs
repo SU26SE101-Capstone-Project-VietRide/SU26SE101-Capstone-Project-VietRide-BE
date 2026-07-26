@@ -27,7 +27,7 @@ internal sealed class PassengerConfiguration : IEntityTypeConfiguration<Passenge
         builder.Property(x => x.SeatNumber)
             .HasColumnName("seat_number")
             .HasMaxLength(20)
-            .IsRequired();
+            .IsRequired(false);
 
         builder.Property(x => x.BoardingStatus)
             .HasColumnName("boarding_status")

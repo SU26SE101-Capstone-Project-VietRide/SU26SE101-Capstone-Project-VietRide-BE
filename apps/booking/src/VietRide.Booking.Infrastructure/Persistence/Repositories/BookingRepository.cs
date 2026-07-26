@@ -244,6 +244,7 @@ internal sealed class BookingRepository : IBookingRepository
                 group => group.Key,
                 group => (IReadOnlyList<string>)group
                     .Select(row => row.SeatNumber)
+                    .OfType<string>()
                     .Distinct(StringComparer.Ordinal)
                     .Order(StringComparer.Ordinal)
                     .ToArray());
@@ -257,6 +258,115 @@ internal sealed class BookingRepository : IBookingRepository
             .ToArray();
 
         return new TripEditImpactDto(tripId, impacts.Length, impacts);
+    }
+
+    /// <inheritdoc/>
+    public async Task<VehicleSubstitutionImpactDto> GetVehicleSubstitutionImpactAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct = default)
+    {
+        if (tripId == Guid.Empty)
+        {
+            throw new ArgumentException("Trip id must be non-empty.", nameof(tripId));
+        }
+
+        if (operatorId == Guid.Empty)
+        {
+            throw new ArgumentException("Operator id must be non-empty.", nameof(operatorId));
+        }
+
+        var eligibleBookings = await _db.Bookings
+            .AsNoTracking()
+            .Where(booking => booking.TripId == tripId && booking.OperatorId == operatorId)
+            .Where(booking => booking.Status == BookingStatus.CONFIRMED
+                || booking.Status == BookingStatus.PARTIAL_NO_SHOW)
+            .OrderBy(booking => booking.Id)
+            .Select(booking => new
+            {
+                BookingId = booking.Id,
+                booking.Status,
+            })
+            .ToListAsync(ct);
+
+        if (eligibleBookings.Count == 0)
+        {
+            return new VehicleSubstitutionImpactDto(tripId, operatorId, []);
+        }
+
+        var bookingIds = eligibleBookings
+            .Select(booking => booking.BookingId)
+            .ToArray();
+        var eligiblePassengers = await _db.Passengers
+            .AsNoTracking()
+            .Where(passenger => bookingIds.Contains(passenger.BookingId))
+            .Where(passenger => passenger.BoardingStatus == PassengerBoardingStatus.BOARDED
+                || passenger.BoardingStatus == PassengerBoardingStatus.PENDING)
+            .OrderBy(passenger => passenger.BookingId)
+            .ThenBy(passenger => passenger.Id)
+            .Select(passenger => new
+            {
+                passenger.BookingId,
+                PassengerId = passenger.Id,
+                passenger.BoardingStatus,
+                OriginalSeatNumber = passenger.SeatNumber ?? string.Empty,
+            })
+            .ToListAsync(ct);
+
+        var passengersByBooking = eligiblePassengers
+            .GroupBy(row => row.BookingId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<VehicleSubstitutionImpactDto.PassengerImpact>)group
+                    .Select(row => new VehicleSubstitutionImpactDto.PassengerImpact(
+                        row.PassengerId,
+                        row.BoardingStatus.ToString(),
+                        string.IsNullOrEmpty(row.OriginalSeatNumber)
+                            ? null
+                            : row.OriginalSeatNumber))
+                    .ToArray());
+
+        var bookingImpacts = eligibleBookings
+            .Select(booking => new VehicleSubstitutionImpactDto.BookingImpact(
+                booking.BookingId,
+                booking.Status.ToString(),
+                passengersByBooking.GetValueOrDefault(booking.BookingId, [])))
+            .ToArray();
+
+        return new VehicleSubstitutionImpactDto(tripId, operatorId, bookingImpacts);
+    }
+
+    public async Task<IReadOnlyList<BookingEntity>> GetVehicleSubstitutionBookingsForUpdateAsync(
+        Guid oldTripId,
+        Guid operatorId,
+        IReadOnlyCollection<Guid> bookingIds,
+        CancellationToken ct = default)
+    {
+        if (oldTripId == Guid.Empty)
+            throw new ArgumentException("Original Trip id must be non-empty.", nameof(oldTripId));
+        if (operatorId == Guid.Empty)
+            throw new ArgumentException("Operator id must be non-empty.", nameof(operatorId));
+        if (bookingIds.Count == 0)
+            return [];
+
+        var ids = bookingIds.Distinct().ToArray();
+        return await _db.Bookings
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_booking.bookings
+                WHERE id = ANY({ids})
+                  AND trip_id = {oldTripId}
+                  AND operator_id = {operatorId}
+                  AND status IN (
+                      CAST('CONFIRMED' AS public.booking_status),
+                      CAST('PARTIAL_NO_SHOW' AS public.booking_status))
+                ORDER BY id
+                FOR UPDATE
+                """)
+            .Include(booking => booking.Passengers)
+            .Include(booking => booking.Tickets)
+            .AsSplitQuery()
+            .ToListAsync(ct);
     }
 
     /// <inheritdoc/>
@@ -682,8 +792,19 @@ internal sealed class BookingRepository : IBookingRepository
             .AsNoTracking()
             .Where(p => p.BookingId == bookingId)
             .OrderBy(p => p.SeatNumber)
-            .Select(p => new PassengerSeatAssignment(p.Id, p.SeatNumber))
+            .Select(p => new
+            {
+                p.Id,
+                p.SeatNumber,
+            })
             .ToArrayAsync(ct);
+        var assignedPassengers = passengerSeatAssignments
+            .Select(p => new PassengerSeatAssignment(
+                p.Id,
+                p.SeatNumber
+                    ?? throw new InvalidOperationException(
+                        "A pending-payment passenger must have a seat number.")))
+            .ToArray();
 
         var voucherUsageId = await _db.VoucherUsages
             .AsNoTracking()
@@ -720,7 +841,7 @@ internal sealed class BookingRepository : IBookingRepository
             booking.SeatLockToken,
             booking.TotalAmount,
             voucherUsageId,
-            passengerSeatAssignments,
+            assignedPassengers,
             ticketCodes,
             ticketIds,
             shuttleIntent);

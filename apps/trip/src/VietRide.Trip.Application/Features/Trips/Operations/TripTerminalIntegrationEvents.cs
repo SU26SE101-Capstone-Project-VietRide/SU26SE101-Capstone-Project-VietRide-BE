@@ -29,4 +29,16 @@ public sealed class TripDisruptedIntegrationEvent(
     public Guid OperatorId { get; } = operatorId;
     public DateTimeOffset TerminalAt { get; } = terminalAt;
     public bool HasSubstitution { get; } = hasSubstitution;
+
+    public TripDisruptedIntegrationEvent(
+        Guid eventId,
+        Guid tripId,
+        Guid operatorId,
+        DateTimeOffset terminalAt,
+        bool hasSubstitution)
+        : this(tripId, operatorId, terminalAt, hasSubstitution)
+    {
+        EventId = eventId;
+        OccurredAt = terminalAt.UtcDateTime;
+    }
 }

@@ -16,10 +16,10 @@ Quản lý **booking lifecycle, multi-passenger per booking, seat reference, vou
 | `Booking` | Order/giao dich mua ve. Existing legacy row below used to describe Booking as the ticket; new design separates Ticket as proof of travel. | `bookingCode` UNIQUE, booking-level amount/status, immutable trip snapshot, mutable current-departure projection, round-trip group |
 | `Ticket` | Per-seat proof of travel / QR identity. | `ticketCode` UNIQUE, `passengerId` UNIQUE, `seatNumber`, `status`, fare/discount/paid snapshot, lifecycle timestamps |
 | `Booking` | Vé của 1 buyer cho 1 trip. | `bookingCode` UNIQUE, 4 pickup/dropoff FK (exclusive), `totalAmount` immutable snapshot, 4 trip snapshot fields, `bookingGroupId`/`tripDirection` round-trip, `cancellationReason` enum, `refundOverride` |
-| `Passenger` | Sub-entity của Booking (1–5/booking). Operational-only. | `seatNumber`, `boardingStatus`, `boardedAt`, `boardedAtStopId` |
+| `Passenger` | Sub-entity của Booking (1–5/booking). Operational-only. | nullable `seatNumber`, `boardingStatus`, `boardedAt`, `boardedAtStopId` |
 | `BookingStatusHistory` | Authoritative append-only Booking lifecycle timeline for operator monitoring. | `bookingId`, `status`, `occurredAt`, nullable `reasonCode`/`actorUserId`, required `source` |
 | `BookingPendingAction` | Pending action passenger cần phản hồi. | `reason` enum, `severity` enum (MEDIUM/MAJOR), `deadline`, `metadata` JSONB; **partial unique 1 active per booking** |
-| `BookingTransfer` | Track Vehicle Substitution per Passenger. | `originalTripId`, `newTripId`, `originalSeatNumber`, `newSeatNumber` nullable, `note` |
+| `BookingTransfer` | Track Vehicle Substitution per Passenger. | `originalTripId`, `newTripId`, nullable `originalSeatNumber`/`newSeatNumber`, `confirmationStatus`, `confirmedAt`, logical `confirmedByUserId`, `note` |
 | `BookingStats` | Counter table (event-driven UPSERT). | `(operatorId, statDate, tripId)` unique; tổng booking/cancel/no_show/revenue/refunded |
 | `Voucher` | Platform-wide voucher (SYSTEM_ADMIN tạo, hoặc OPERATOR_ADMIN tự tạo operator-owned OPERATOR_FUNDED voucher). | `code` partial UNIQUE WHERE deleted_at IS NULL, `name`, `type`/`value`/`fundingType` enums, `owner_operator_id` (NULL=platform, NOT NULL=operator-owned), `applicableOperatorIds`/`applicableRouteIds` UUID[], `deleted_at` soft-delete, validity window |
 | `VoucherUsage` | 1 record per apply. | `funded_by` snapshot, `bookingGroupId` nullable cho round-trip limit |
@@ -38,11 +38,12 @@ Quản lý **booking lifecycle, multi-passenger per booking, seat reference, vou
 - **`trip_snapshot_departure` is immutable; `trip_current_departure` is the separate mutable projection.** Rollout backfills `trip_current_departure = trip_snapshot_departure`; `trip.trip.schedule_changed` advances only the current column by causal CAS (`current==old` apply, `current==new` duplicate, otherwise retry/quarantine). Consumer updates `PENDING_PAYMENT|CONFIRMED`, while only `CONFIRMED` emits schedule facts or creates one active `SCHEDULE_CHANGE`. Existing operator `date` and `sortBy=departureAt` queries use the current projection; `STOP_DISABLED` deadline calculation also uses it.
 - **`Booking.total_amount <= base_fare` CHECK** — discount không thể âm.
 - **`Booking.passenger_user_id`, `trip_id`, `operator_id`, `pickup_station_id`, `pickup_stop_id`, etc. là LOGICAL FK** — không có `REFERENCES`. Validate ở Booking Service handler khi tạo Booking (HTTP call sang Identity/Trip).
-- **`Passenger` UNIQUE `(booking_id, seat_number)`** — chống duplicate seat trong cùng booking.
+- **`Passenger.seat_number` nullable** — chained Vehicle Substitution may leave a replacement seat unresolved. UNIQUE `(booking_id, seat_number)` still rejects duplicate non-null seats while PostgreSQL permits multiple null pending assignments.
 - **`booking_pending_actions` partial unique `(booking_id) WHERE resolved_at IS NULL`** — enforce v6 rule "chỉ 1 active per booking". Action mới phát sinh → app-layer phải close action cũ với `SUPERSEDED` trước khi INSERT mới.
 - **`booking_pending_actions.severity` nullable** — chỉ set cho SCHEDULE_CHANGE (MEDIUM/MAJOR). MINOR không persist record.
 - **Day-23 `SCHEDULE_CHANGE` metadata freeze:** exact `sourceEventId`, `oldDeparture`, `newDeparture`, `severity`, `initialDeadline`, nullable `terminalDeadline`, `refundBasisAmount`, `refundPercent`, `refundAmount`. Basis là immutable `Booking.total_amount`; MEDIUM = 50%, MAJOR = 100%, làm tròn đến VND bằng `MidpointRounding.AwayFromZero`. Passenger reject atomically resolves action, cancels Booking, appends history, and emits one authoritative cancellation fact. Scheduled acceptance only resolves `ACCEPTED`; it does not cancel/refund.
-- **`booking_transfers` 1 record per Passenger** (không phải 1 per Booking) — multi-passenger booking sẽ có N record cùng `booking_id` khác `passenger_id`. UNIQUE constraint NOT enforced ở DB (1 passenger có thể transfer nhiều lần nếu Trip_new lại DISRUPTED).
+- **`booking_transfers` 1 record per Passenger per substitution trip pair** (không phải 1 per Booking) — multi-passenger Booking có N rows. `uq_booking_transfers_passenger_trip_pair (passenger_id, original_trip_id, new_trip_id)` dedupes replay while allowing a later chained substitution with a different pair. Both seat-history values are nullable and never use a sentinel.
+- **Physical transfer confirmation belongs only to `BookingTransfer`.** `confirmation_status` is exactly `PENDING_CONFIRM|CONFIRMED|NOT_REQUIRED`; nullable `confirmed_at` and logical Identity FK `confirmed_by_user_id` record only physical confirmation and never rewrite Passenger boarding history or Ticket usage.
 - **`booking_stats`** dùng surrogate UUID PK + UNIQUE composite `(operator_id, stat_date, COALESCE(trip_id, ...))` — `trip_id` nullable cho per-operator-per-day aggregate row (trip_id=NULL coalesced to zero-UUID để UNIQUE bao trùm cả 2 case).
 - **`platform_booking_stats`** là projection Day 42 theo từng Booking `COMPLETED`, được trigger đồng bộ cùng transaction và job `booking.platform-stats-backfill` rebuild idempotent từ earned live; platform report chỉ cache sau khi projection khớp live theo operator/range.
 - **`vouchers.applicable_operator_ids`/`applicable_route_ids`** dùng `UUID[]` array thay vì junction table — query với `= ANY(array)` đủ cho scale (mỗi voucher target ≤ 100 operator/route trong realistic case). Junction table phức tạp hơn không justify.
@@ -100,6 +101,7 @@ The persistence surface is insert/read only; no update/delete API or repository 
 | `idx_booking_pending_actions_deadline_unresolved` | `deadline` partial | B-tree | Hangfire timeout scan |
 | `idx_booking_transfers_booking_id` | `booking_id` | B-tree | Transfer history per booking |
 | `idx_booking_transfers_original_trip_id` | `original_trip_id` | B-tree | Audit Vehicle Substitution |
+| `uq_booking_transfers_passenger_trip_pair` | `(passenger_id, original_trip_id, new_trip_id)` | unique | One transfer effect per Passenger per substitution occurrence |
 | `uq_booking_stats_operator_date_trip` | `(operator_id, stat_date, COALESCE(trip_id, ...))` | unique | UPSERT upsert lookup |
 | `idx_platform_booking_stats_completed_operator` | `(completed_at, operator_id)` | B-tree | Exact UTC range reconciliation |
 | `uq_vouchers_code` | `code` | unique | Code redeem lookup |
@@ -115,7 +117,7 @@ The persistence surface is insert/read only; no update/delete API or repository 
 
 | Column | References | Enforcement |
 |---|---|---|
-| `Booking.passengerUserId`, `Voucher.createdByUserId`, `OperatorVoucherConsent.respondedByUserId`, `VoucherUsage.userId`, `BookingTransfer.transferredByUserId` | `identity.User.id` | app-layer validate (Internal JWT carry userId) |
+| `Booking.passengerUserId`, `Voucher.createdByUserId`, `OperatorVoucherConsent.respondedByUserId`, `VoucherUsage.userId`, `BookingTransfer.transferredByUserId/confirmedByUserId` | `identity.User.id` | app-layer validate (Internal JWT carry userId); no cross-database DB FK |
 | `BookingStatusHistory.actorUserId` | `identity.User.id` | nullable logical FK only; authenticated-human actor or NULL for automated transitions |
 | `Booking.operatorId`, `OperatorVoucherConsent.operatorId`, `BookingStats.operatorId` | `identity.Operator.id` | app-layer + tenant filter |
 | `Booking.tripId`, `BookingTransfer.originalTripId/newTripId`, `BookingStats.tripId` | `trip.Trip.id` | app-layer validate via HTTP `GET /internal/v1/trips/{id}` |
@@ -131,6 +133,7 @@ The persistence surface is insert/read only; no update/delete API or repository 
 - **Snapshot/current departure rollout:** `trip_snapshot_*` được set tại CREATE Booking và KHÔNG cập nhật khi Trip edit. Add nullable `trip_current_departure`, backfill it from `trip_snapshot_departure`, then create `idx_bookings_trip_current_departure`; new Booking writes both departure fields initially, and later schedule events mutate only the current projection.
 - **Booking status history:** add through an EF Core migration in Task 19.0c; do not backfill pre-existing bookings. The migration must create the local `ON DELETE RESTRICT` FK and `(booking_id, occurred_at, id)` index. No DDL is added by this architecture-baseline task.
 - **`booking_pending_actions.metadata` JSONB schema** linh hoạt theo reason — không enforce schema ở DB, validate ở handler.
+- **Day-34 nullable-seat Down rule:** before restoring `passengers.seat_number SET NOT NULL`, backfill each null from its most recent non-null `booking_transfers.new_seat_number`; otherwise use the most recent non-null `original_seat_number`, ordered by `transferred_at DESC, id DESC`. The migration must fail the `Down()` if any Passenger seat remains null and must never invent a sentinel.
 
 ## Open Questions
 

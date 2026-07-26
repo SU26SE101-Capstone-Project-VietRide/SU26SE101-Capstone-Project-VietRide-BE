@@ -259,6 +259,13 @@ public sealed class Trip : BaseEntity<Guid>
         HasSubstitution = hasSubstitution;
     }
 
+    public void SubstituteVehicle(DateTimeOffset disruptedAt, string reason)
+    {
+        EnsureStatus(TripStatus.IN_PROGRESS, nameof(SubstituteVehicle));
+        Disrupt(disruptedAt, reason);
+        HasSubstitution = true;
+    }
+
     public void ChangeCrew(Guid driverUserId, Guid? assistantUserId)
     {
         ValidateGuid(driverUserId, nameof(driverUserId));

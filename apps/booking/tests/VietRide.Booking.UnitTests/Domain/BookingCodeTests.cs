@@ -95,6 +95,18 @@ public class BookingCodeTests
     }
 
     [Fact]
+    public void Restore_LegacyPersistedCode_KeepsValueWithoutWeakeningParse()
+    {
+        const string legacyCode = "VR-D40-ACTIVE";
+
+        var restored = BookingCode.Restore(legacyCode);
+
+        restored.Value.Should().Be(legacyCode);
+        FluentActions.Invoking(() => BookingCode.Parse(legacyCode))
+            .Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
     public void ToString_ReturnsValue()
     {
         var code = BookingCode.Parse("VR-20260518-ABCD1234");
