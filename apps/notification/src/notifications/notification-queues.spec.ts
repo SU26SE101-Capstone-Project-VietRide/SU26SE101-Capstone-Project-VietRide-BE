@@ -32,17 +32,37 @@ describe('notification BullMQ producer retention', () => {
       createQueue();
 
       expect(IORedis).toHaveBeenCalledWith(env.REDIS_URL, { maxRetriesPerRequest: null });
-      expect(Queue).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          defaultJobOptions: expect.objectContaining({
-            removeOnComplete: {
-              age: 86_400,
-              count: 10_000,
-            },
-          }),
-        }),
-      );
+      const calls = (Queue as unknown as jest.Mock).mock.calls as unknown[][];
+      const options = calls[0]?.[1] as
+        | { defaultJobOptions?: { removeOnComplete?: unknown } }
+        | undefined;
+      expect(options?.defaultJobOptions?.removeOnComplete).toEqual({
+        age: 86_400,
+        count: 10_000,
+      });
     },
   );
+
+  it('uses notificationId as deterministic FCM jobId so replay produces one effective queue job', async () => {
+    const queue = new FcmPushQueue(env);
+    const add = (Queue as unknown as jest.Mock).mock.results[0]?.value.add as jest.Mock;
+    const notification = {
+      notificationId: '11111111-1111-4111-8111-111111111111',
+      userId: '22222222-2222-4222-8222-222222222222',
+    };
+
+    await queue.enqueue(notification);
+    await queue.enqueue(notification);
+
+    expect(add).toHaveBeenCalledTimes(2);
+    expect(add).toHaveBeenNthCalledWith(1, expect.any(String), notification, {
+      jobId: notification.notificationId,
+    });
+    expect(add).toHaveBeenNthCalledWith(2, expect.any(String), notification, {
+      jobId: notification.notificationId,
+    });
+    expect(new Set(add.mock.calls.map((call) => call[2]?.jobId))).toEqual(
+      new Set([notification.notificationId]),
+    );
+  });
 });

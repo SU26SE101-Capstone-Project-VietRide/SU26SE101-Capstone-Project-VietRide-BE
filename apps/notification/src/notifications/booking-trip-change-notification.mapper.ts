@@ -5,18 +5,21 @@ import {
   BOOKING_SCHEDULE_CHANGE_INFORMATIONAL_ROUTING_KEY,
   BOOKING_SCHEDULE_CHANGE_REQUIRED_ROUTING_KEY,
   BOOKING_SEAT_REASSIGNMENT_REQUIRED_ROUTING_KEY,
+  BOOKING_TRANSFERRED_ROUTING_KEY,
   BookingPendingActionAutoResolvedEventSchema,
   BookingPendingActionRealertedEventSchema,
   BookingRouteChangeAutoFallbackAppliedEventSchema,
   BookingScheduleChangeInformationalEventSchema,
   BookingScheduleChangeRequiredEventSchema,
   BookingSeatReassignmentRequiredEventSchema,
+  BookingTransferredEventSchema,
   type BookingPendingActionAutoResolvedEvent,
   type BookingPendingActionRealertedEvent,
   type BookingRouteChangeAutoFallbackAppliedEvent,
   type BookingScheduleChangeInformationalEvent,
   type BookingScheduleChangeRequiredEvent,
   type BookingSeatReassignmentRequiredEvent,
+  type BookingTransferredEvent,
 } from '@vietride/contracts';
 import { NotificationType } from '../generated/notification-prisma-client';
 import type { CreateNotificationDto } from './dto/create-notification.dto';
@@ -27,7 +30,8 @@ export type BookingTripChangeRoutingKey =
   | typeof BOOKING_SCHEDULE_CHANGE_REQUIRED_ROUTING_KEY
   | typeof BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY
   | typeof BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY
-  | typeof BOOKING_ROUTE_CHANGE_AUTO_FALLBACK_APPLIED_ROUTING_KEY;
+  | typeof BOOKING_ROUTE_CHANGE_AUTO_FALLBACK_APPLIED_ROUTING_KEY
+  | typeof BOOKING_TRANSFERRED_ROUTING_KEY;
 
 export function mapBookingTripChangeToNotification(
   routingKey: BookingTripChangeRoutingKey,
@@ -52,7 +56,28 @@ export function mapBookingTripChangeToNotification(
       return mapRouteChangeAutoFallback(
         BookingRouteChangeAutoFallbackAppliedEventSchema.parse(payload),
       );
+    case BOOKING_TRANSFERRED_ROUTING_KEY: {
+      const transferred = BookingTransferredEventSchema.parse(payload);
+      return mapBookingTransferred(transferred);
+    }
   }
+}
+
+function mapBookingTransferred(payload: BookingTransferredEvent): CreateNotificationDto {
+  const seatChanges = payload.transfers.map(
+    (transfer) =>
+      `${transfer.originalSeatNumber ?? 'chua xac dinh'} -> ${transfer.newSeatNumber ?? 'dang cho xep ghe'}`,
+  );
+
+  return {
+    userId: payload.recipientUserId,
+    type: NotificationType.VEHICLE_SUBSTITUTED,
+    title: 'Xe thay the da duoc sap xep',
+    body:
+      `Xe ${payload.newVehiclePlateNumber} khoi hanh luc ${payload.newTripDepartureDateTime}. ` +
+      `Cap nhat ghe: ${seatChanges.join('; ')}.`,
+    data: bookingTransferredData(payload),
+  };
 }
 
 function mapRouteChangeAutoFallback(
@@ -140,5 +165,14 @@ function mapPendingActionRealerted(payload: BookingPendingActionRealertedEvent):
 function bookingEventData<T extends { userId: string }>(payload: T): Omit<T, 'userId'> {
   const { userId, ...data } = payload;
   void userId;
+  return data;
+}
+
+function bookingTransferredData(
+  payload: BookingTransferredEvent,
+): Omit<BookingTransferredEvent, 'recipientUserId' | 'notifyPassengers'> {
+  const { recipientUserId, notifyPassengers, ...data } = payload;
+  void recipientUserId;
+  void notifyPassengers;
   return data;
 }

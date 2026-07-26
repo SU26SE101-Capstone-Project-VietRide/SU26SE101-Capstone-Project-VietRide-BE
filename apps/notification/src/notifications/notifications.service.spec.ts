@@ -123,6 +123,33 @@ describe('NotificationsService', () => {
     });
   });
 
+  it('persisted VEHICLE_SUBSTITUTED row survives enqueue failure and redelivery re-enqueues the same deduped notification without creating a second row', async () => {
+    const persisted = createNotification({ type: NotificationType.VEHICLE_SUBSTITUTED });
+    repository.create
+      .mockResolvedValueOnce({ notification: persisted, created: true })
+      .mockResolvedValueOnce({ notification: persisted, created: false });
+    fcmPushQueue.enqueue.mockRejectedValueOnce(new Error('Redis unavailable'));
+    const dto = {
+      userId: OWNER_USER_ID,
+      type: NotificationType.VEHICLE_SUBSTITUTED,
+      title: 'Xe thay the da duoc sap xep',
+      body: 'Xe 51B-123.45 da duoc sap xep.',
+      dedupeKey: 'booking.booking.transferred:event:user:VEHICLE_SUBSTITUTED',
+    };
+
+    await expect(service.createNotification(dto)).rejects.toThrow('Redis unavailable');
+    await expect(service.createNotification(dto)).resolves.toEqual(
+      expect.objectContaining({ id: NOTIFICATION_ID }),
+    );
+
+    expect(repository.create).toHaveBeenCalledTimes(2);
+    expect(fcmPushQueue.enqueue).toHaveBeenCalledTimes(2);
+    expect(fcmPushQueue.enqueue).toHaveBeenNthCalledWith(2, {
+      notificationId: NOTIFICATION_ID,
+      userId: OWNER_USER_ID,
+    });
+  });
+
   it('returns a paged notification history DTO', async () => {
     const query: ListNotificationsQueryDto = {
       unreadOnly: false,
@@ -208,26 +235,24 @@ describe('NotificationsService', () => {
       }),
     );
 
-    expect(repository.createEmailDelivery).toHaveBeenCalledWith(
-      expect.objectContaining({
-        toEmail: 'passenger@vietride.local',
-        templateKey: EmailTemplateKey.AUTH_OTP,
-        subject: 'Ma xac thuc VietRide',
-        sanitizedData: expect.objectContaining({
-          otpCode: '[REDACTED]',
-          purpose: 'dang ky',
-          ttlMinutes: 10,
-        }),
-      }),
-    );
-    expect(emailSendQueue.enqueue).toHaveBeenCalledWith({
+    const persistedEmail = repository.createEmailDelivery.mock.calls[0]?.[0];
+    expect(persistedEmail).toMatchObject({
+      toEmail: 'passenger@vietride.local',
+      templateKey: EmailTemplateKey.AUTH_OTP,
+      subject: 'Ma xac thuc VietRide',
+    });
+    expect(persistedEmail?.sanitizedData).toEqual({
+      otpCode: '[REDACTED]',
+      purpose: 'dang ky',
+      ttlMinutes: 10,
+    });
+    const queuedEmail = emailSendQueue.enqueue.mock.calls[0]?.[0];
+    expect(queuedEmail).toMatchObject({
       emailDeliveryId: '44444444-4444-4444-8444-444444444444',
       toEmail: 'passenger@vietride.local',
       templateKey: EmailTemplateKey.AUTH_OTP,
-      templateData: expect.objectContaining({
-        otpCode: '123456',
-      }),
     });
+    expect(queuedEmail?.templateData).toMatchObject({ otpCode: '123456' });
   });
 
   it('re-enqueues a pending email delivery so a failed first queue write can recover', async () => {

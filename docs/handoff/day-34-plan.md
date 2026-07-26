@@ -1205,7 +1205,7 @@ No task is parallel-safe in the shared working tree: Task 34.1 owns the shared c
 | 34.4 | done | APPROVE | 2026-07-26 | Added nullable-seat BookingTransfer persistence and reversible fail-closed migration; reviewer patch propagated truthful nullability through six direct consumers with 47 focused tests green. |
 | 34.5 | done | APPROVE | 2026-07-26 | Added atomic substitution consumer and per-Booking transfer fact; one review patch accepts canonical empty mappings as a processed inbox no-op, with 9 focused tests green. |
 | 34.6 | done | APPROVE | 2026-07-26 | Added bodyless crew confirmation endpoint; one review patch moved idempotency/body enforcement to shared middleware, locked Booking+transfer rows, and proved same-key replay with real PostgreSQL concurrency coverage. |
-| 34.7 | todo | - | - | - |
+| 34.7 | done | APPROVE | 2026-07-26 | Added BookingTransferred Notification consumption and persisted-row push recovery; one review patch synchronized all 7 bindings and required RabbitMQ MessageId for the new fact, with full consumer spec 13/13 green. |
 | 34.8 | done | APPROVE | 2026-07-25 | Added both endpoint Gateway seams; one review round fixed absolute Nx/Jest evidence paths, no scope expansion. |
 
 Legend: todo | in progress | done (reviewer APPROVED + targeted verification green) | done-with-carryover | blocked
