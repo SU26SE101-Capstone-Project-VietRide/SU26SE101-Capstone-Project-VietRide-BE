@@ -13,15 +13,18 @@ public sealed class SearchParcelAvailableTripsQueryHandler
 {
     private readonly IIdentityInternalClient _identityClient;
     private readonly IRouteRepository _routeRepository;
+    private readonly IStationRepository _stationRepository;
     private readonly ITripRepository _tripRepository;
 
     public SearchParcelAvailableTripsQueryHandler(
         IRouteRepository routeRepository,
         ITripRepository tripRepository,
+        IStationRepository stationRepository,
         IIdentityInternalClient identityClient)
     {
         _routeRepository = routeRepository;
         _tripRepository = tripRepository;
+        _stationRepository = stationRepository;
         _identityClient = identityClient;
     }
 
@@ -58,6 +61,27 @@ public sealed class SearchParcelAvailableTripsQueryHandler
                 && route.IsActive)
             .ToDictionaryAsync(route => route.Id, cancellationToken)
             .ConfigureAwait(false);
+
+        if (routes.Count == 0)
+        {
+            return PagedResult<ParcelTripAvailabilityItemDto>.Create([], page, pageSize, 0);
+        }
+
+        var stationIds = routes.Values
+            .SelectMany(route => new[] { route.OriginStationId, route.DestinationStationId })
+            .Distinct()
+            .ToArray();
+        var stations = await _stationRepository.QueryNoTracking()
+            .Where(station => stationIds.Contains(station.Id)
+                && station.IsActive
+                && station.DeletedAt == null)
+            .ToDictionaryAsync(station => station.Id, cancellationToken)
+            .ConfigureAwait(false);
+
+        routes = routes
+            .Where(pair => stations.ContainsKey(pair.Value.OriginStationId)
+                && stations.ContainsKey(pair.Value.DestinationStationId))
+            .ToDictionary(pair => pair.Key, pair => pair.Value);
 
         if (routes.Count == 0)
         {
@@ -101,7 +125,15 @@ public sealed class SearchParcelAvailableTripsQueryHandler
                 item.Trip.RouteId,
                 item.Trip.OperatorId,
                 ResolveOperatorName(operatorNames, item.Trip.OperatorId),
+                item.Trip.Status.ToString(),
+                new ParcelTripStationDto(
+                    routes[item.Trip.RouteId].OriginStationId,
+                    stations[routes[item.Trip.RouteId].OriginStationId].Name),
+                new ParcelTripStationDto(
+                    routes[item.Trip.RouteId].DestinationStationId,
+                    stations[routes[item.Trip.RouteId].DestinationStationId].Name),
                 item.Trip.DepartureDateTime,
+                item.Trip.EstimatedArrivalTime,
                 item.AvailableCargoWeightKg,
                 item.AvailableCargoVolumeM3))
             .ToList();

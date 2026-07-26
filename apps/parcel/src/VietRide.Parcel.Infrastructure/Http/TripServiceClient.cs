@@ -180,9 +180,13 @@ public sealed class TripServiceClient : ITripServiceClient, IIdempotentTripServi
                         .Select(item => new ParcelTripDto(
                             item.TripId,
                             item.RouteId,
+                            item.Status,
                             item.OperatorId,
                             item.OperatorName,
+                            new TripStationDto(item.OriginStation.Id, item.OriginStation.Name),
+                            new TripStationDto(item.DestinationStation.Id, item.DestinationStation.Name),
                             item.DepartureDateTime,
+                            item.EstimatedArrivalTime,
                             item.AvailableCargoWeightKg,
                             item.AvailableCargoVolumeM3,
                             0))

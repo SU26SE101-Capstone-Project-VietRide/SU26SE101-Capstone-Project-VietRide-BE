@@ -2588,9 +2588,15 @@ Response `200`:
       {
         "tripId": "uuid",
         "routeId": "uuid",
+        "status": "SCHEDULED",
+        "operatorId": "uuid",
         "operatorName": "VietRide Express",
+        "originStation": { "id": "uuid", "name": "Bến đi" },
+        "destinationStation": { "id": "uuid", "name": "Bến đến" },
         "departureDateTime": "2026-05-18T08:00:00+07:00",
+        "estimatedArrivalTime": "2026-05-18T16:00:00+07:00",
         "estimatedPriceVnd": 150000,
+        "depositPercent": 20,
         "estimatedDepositVnd": 30000
       }
     ],
@@ -2604,6 +2610,10 @@ Response `200`:
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
+
+`depositPercent` is the effective route/operator deposit policy used to calculate
+`estimatedDepositVnd`. The public item does not serialize `availableCargoWeightKg`,
+`availableCargoVolumeM3`, or the internal `priceVnd` alias.
 
 ### POST `/v1/parcels`
 
@@ -4789,6 +4799,21 @@ the duplicate mapping. The write and `trip.station.merged` Outbox event are one 
 Errors: `403 FORBIDDEN`, `404 STATION_NOT_FOUND`, `409 STATION_MERGE_CONFLICT`,
 `422 VALIDATION_ERROR`, `IDEMPOTENCY_KEY_REQUIRED`, `IDEMPOTENCY_KEY_MISMATCH`,
 `IDEMPOTENCY_REQUEST_PENDING`.
+
+### GET `/internal/v1/routes/{routeId}/ownership?operatorId={operatorId}`
+
+Auth: internal service authentication required (`X-Internal-Auth: Bearer <jwt>`). This endpoint
+is service-to-service only and is not exposed through Gateway.
+
+Response `200`: raw ownership DTO (successful internal response is not wrapped).
+
+```json
+{ "routeId": "uuid", "operatorId": "uuid" }
+```
+
+The route must exist, be active, not soft-deleted, and belong to `operatorId`. Missing, inactive,
+soft-deleted, and cross-operator routes all return `404 ROUTE_NOT_FOUND` in the ADR 0004 error
+envelope so tenant existence is not disclosed. Missing or invalid Internal JWT returns `401`.
 
 ### GET `/internal/v1/stations/{id}`
 

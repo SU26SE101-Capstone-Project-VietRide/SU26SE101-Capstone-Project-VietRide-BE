@@ -125,6 +125,36 @@ public class TripServiceClientInternalClientTests
     }
 
     [Fact]
+    public async Task ValidateRouteOwnershipAsync_UsesExpectedPathAndQuery_OnSuccess()
+    {
+        var routeId = Guid.NewGuid();
+        var operatorId = Guid.NewGuid();
+        var client = BuildClient(HttpStatusCode.OK, JsonSerializer.Serialize(new { routeId, operatorId }, JsonOptions));
+
+        var result = await client.ValidateRouteOwnershipAsync(routeId, operatorId);
+
+        result.Kind.Should().Be(RouteOwnershipOutcomeKind.Success);
+        _handler.LastRequest!.Method.Should().Be(HttpMethod.Get);
+        _handler.LastRequest.RequestUri!.AbsolutePath.Should().Be($"/internal/v1/routes/{routeId:D}/ownership");
+        _handler.LastRequest.RequestUri.Query.Should().Be($"?operatorId={operatorId:D}");
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound, RouteOwnershipOutcomeKind.RouteNotFound)]
+    [InlineData(HttpStatusCode.InternalServerError, RouteOwnershipOutcomeKind.TransportError)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, RouteOwnershipOutcomeKind.TransportError)]
+    public async Task ValidateRouteOwnershipAsync_MapsUpstreamStatus(
+        HttpStatusCode status,
+        RouteOwnershipOutcomeKind expected)
+    {
+        var client = BuildClient(status, "{}");
+
+        var result = await client.ValidateRouteOwnershipAsync(Guid.NewGuid(), Guid.NewGuid());
+
+        result.Kind.Should().Be(expected);
+    }
+
+    [Fact]
     public async Task SearchAvailableParcelTripsAsync_Sends_Request_With_InvariantCulture()
     {
         var body = JsonSerializer.Serialize(new
@@ -146,6 +176,60 @@ public class TripServiceClientInternalClientTests
         var query = _handler.LastRequest!.RequestUri!.Query;
         query.Should().Contain("estimatedWeightKg=5.5");
         query.Should().NotContain("estimatedWeightKg=5,5");
+    }
+
+    [Fact]
+    public async Task SearchAvailableParcelTripsAsync_DeserializesEnrichedProjection()
+    {
+        var routeId = Guid.NewGuid();
+        var operatorId = Guid.NewGuid();
+        var originId = Guid.NewGuid();
+        var destinationId = Guid.NewGuid();
+        var departure = new DateTimeOffset(2026, 7, 27, 8, 0, 0, TimeSpan.FromHours(7));
+        var arrival = departure.AddHours(8);
+        var body = JsonSerializer.Serialize(new
+        {
+            items = new[]
+            {
+                new
+                {
+                    tripId = TripId,
+                    routeId,
+                    operatorId,
+                    operatorName = "VietRide Express",
+                    status = "SCHEDULED",
+                    originStation = new { id = originId, name = "Bến đi" },
+                    destinationStation = new { id = destinationId, name = "Bến đến" },
+                    departureDateTime = departure,
+                    estimatedArrivalTime = arrival,
+                    availableCargoWeightKg = 99m,
+                    availableCargoVolumeM3 = 9.999m,
+                },
+            },
+            page = 1,
+            pageSize = 20,
+            totalItems = 1,
+        }, JsonOptions);
+        var client = BuildClient(HttpStatusCode.OK, body);
+
+        var result = await client.SearchAvailableParcelTripsAsync(
+            originId,
+            destinationId,
+            new DateOnly(2026, 7, 27),
+            1m,
+            0.001m,
+            ParcelSizeCategory.MEDIUM,
+            1,
+            20);
+
+        var trip = result.Trips.Should().ContainSingle().Which;
+        trip.Status.Should().Be("SCHEDULED");
+        trip.OperatorId.Should().Be(operatorId);
+        trip.OriginStation.Should().Be(new TripStationDto(originId, "Bến đi"));
+        trip.DestinationStation.Should().Be(new TripStationDto(destinationId, "Bến đến"));
+        trip.EstimatedArrivalTime.Should().Be(arrival);
+        trip.AvailableCargoWeightKg.Should().Be(99m);
+        trip.AvailableCargoVolumeM3.Should().Be(9.999m);
     }
 
     private TripServiceClient BuildClient(HttpStatusCode status, string body)

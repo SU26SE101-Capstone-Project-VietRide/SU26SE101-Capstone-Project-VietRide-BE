@@ -8,6 +8,10 @@ public sealed record TripAvailabilityItemDto(
     Guid RouteId,
     Guid OperatorId,
     string OperatorName,
+    string Status,
+    TripAvailabilityStationDto OriginStation,
+    TripAvailabilityStationDto DestinationStation,
     DateTimeOffset DepartureDateTime,
+    DateTimeOffset EstimatedArrivalTime,
     decimal AvailableCargoWeightKg,
     decimal AvailableCargoVolumeM3);
