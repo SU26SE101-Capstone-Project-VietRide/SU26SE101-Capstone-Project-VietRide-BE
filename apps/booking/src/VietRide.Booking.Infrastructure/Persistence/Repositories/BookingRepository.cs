@@ -336,6 +336,39 @@ internal sealed class BookingRepository : IBookingRepository
         return new VehicleSubstitutionImpactDto(tripId, operatorId, bookingImpacts);
     }
 
+    public async Task<IReadOnlyList<BookingEntity>> GetVehicleSubstitutionBookingsForUpdateAsync(
+        Guid oldTripId,
+        Guid operatorId,
+        IReadOnlyCollection<Guid> bookingIds,
+        CancellationToken ct = default)
+    {
+        if (oldTripId == Guid.Empty)
+            throw new ArgumentException("Original Trip id must be non-empty.", nameof(oldTripId));
+        if (operatorId == Guid.Empty)
+            throw new ArgumentException("Operator id must be non-empty.", nameof(operatorId));
+        if (bookingIds.Count == 0)
+            return [];
+
+        var ids = bookingIds.Distinct().ToArray();
+        return await _db.Bookings
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_booking.bookings
+                WHERE id = ANY({ids})
+                  AND trip_id = {oldTripId}
+                  AND operator_id = {operatorId}
+                  AND status IN (
+                      CAST('CONFIRMED' AS public.booking_status),
+                      CAST('PARTIAL_NO_SHOW' AS public.booking_status))
+                ORDER BY id
+                FOR UPDATE
+                """)
+            .Include(booking => booking.Passengers)
+            .Include(booking => booking.Tickets)
+            .AsSplitQuery()
+            .ToListAsync(ct);
+    }
+
     /// <inheritdoc/>
     public Task<int> GetPendingPassengerCountAsync(
         Guid tripId,

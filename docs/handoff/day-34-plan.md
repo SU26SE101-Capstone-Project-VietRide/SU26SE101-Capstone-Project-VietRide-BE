@@ -1203,7 +1203,7 @@ No task is parallel-safe in the shared working tree: Task 34.1 owns the shared c
 | 34.2 | done | APPROVE | 2026-07-25 | Added the tenant-scoped impact seam; reviewer patch added real PostgreSQL repository coverage, no scope expansion. |
 | 34.3 | done | APPROVE | 2026-07-26 | Completed real HTTP/DB/Redis/Outbox substitution flow; two reviewer rounds replaced superficial tests and expanded guard/restart coverage. |
 | 34.4 | done | APPROVE | 2026-07-26 | Added nullable-seat BookingTransfer persistence and reversible fail-closed migration; reviewer patch propagated truthful nullability through six direct consumers with 47 focused tests green. |
-| 34.5 | todo | - | - | Preserve the existing pre-departure `trip.trip.vehicle_swapped` consumer. |
+| 34.5 | done | APPROVE | 2026-07-26 | Added atomic substitution consumer and per-Booking transfer fact; one review patch accepts canonical empty mappings as a processed inbox no-op, with 9 focused tests green. |
 | 34.6 | todo | - | - | Dedicated BookingTransfer confirmation; existing boarding flow is unchanged. |
 | 34.7 | todo | - | - | - |
 | 34.8 | done | APPROVE | 2026-07-25 | Added both endpoint Gateway seams; one review round fixed absolute Nx/Jest evidence paths, no scope expansion. |

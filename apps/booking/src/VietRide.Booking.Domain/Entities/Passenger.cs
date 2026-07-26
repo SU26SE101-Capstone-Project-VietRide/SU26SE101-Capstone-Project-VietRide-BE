@@ -58,4 +58,22 @@ public sealed class Passenger : BaseEntity<Guid>
         BoardingStatus = PassengerBoardingStatus.NO_SHOW;
         return true;
     }
+
+    public void ApplyVehicleSubstitutionSeat(string? seatNumber)
+    {
+        if (BoardingStatus is not PassengerBoardingStatus.BOARDED and not PassengerBoardingStatus.PENDING)
+            throw new InvalidOperationException(
+                $"Passenger boarding status {BoardingStatus} is not eligible for vehicle substitution.");
+        if (seatNumber is not null
+            && (string.IsNullOrWhiteSpace(seatNumber)
+                || seatNumber.Length > 20
+                || !string.Equals(seatNumber, seatNumber.Trim(), StringComparison.Ordinal)))
+        {
+            throw new ArgumentException(
+                "Mapped seat number must be null or an already-normalized value of at most 20 characters.",
+                nameof(seatNumber));
+        }
+
+        SeatNumber = seatNumber;
+    }
 }

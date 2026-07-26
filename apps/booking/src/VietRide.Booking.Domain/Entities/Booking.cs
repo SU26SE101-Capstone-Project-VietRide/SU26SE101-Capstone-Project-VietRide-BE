@@ -360,4 +360,20 @@ public sealed class Booking : BaseEntity<Guid>
             : BookingStatus.PARTIAL_NO_SHOW;
         return newlyMarked;
     }
+
+    public void ApplyVehicleSubstitution(Guid originalTripId, Guid newTripId)
+    {
+        if (originalTripId == Guid.Empty)
+            throw new ArgumentException("Original Trip id is required.", nameof(originalTripId));
+        if (newTripId == Guid.Empty)
+            throw new ArgumentException("New Trip id is required.", nameof(newTripId));
+        if (originalTripId == newTripId)
+            throw new ArgumentException("Replacement Trip must differ from the original Trip.", nameof(newTripId));
+        if (TripId != originalTripId)
+            throw new InvalidOperationException("Booking is no longer assigned to the original Trip.");
+        if (Status is not BookingStatus.CONFIRMED and not BookingStatus.PARTIAL_NO_SHOW)
+            throw new InvalidOperationException($"Booking status {Status} is not eligible for vehicle substitution.");
+
+        TripId = newTripId;
+    }
 }

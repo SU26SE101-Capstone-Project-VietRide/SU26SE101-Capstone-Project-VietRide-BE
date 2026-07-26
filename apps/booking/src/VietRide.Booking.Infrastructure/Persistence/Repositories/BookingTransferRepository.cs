@@ -22,4 +22,15 @@ internal sealed class BookingTransferRepository(BookingDbContext db) : IBookingT
     public IQueryable<BookingTransfer> Query() => db.BookingTransfers;
 
     public IQueryable<BookingTransfer> QueryNoTracking() => db.BookingTransfers.AsNoTracking();
+
+    public async Task<IReadOnlyList<BookingTransfer>> GetByPassengerTripPairAsync(
+        IReadOnlyCollection<Guid> passengerIds,
+        Guid originalTripId,
+        Guid newTripId,
+        CancellationToken ct = default)
+        => await db.BookingTransfers
+            .Where(transfer => passengerIds.Contains(transfer.PassengerId)
+                && transfer.OriginalTripId == originalTripId
+                && transfer.NewTripId == newTripId)
+            .ToListAsync(ct);
 }
