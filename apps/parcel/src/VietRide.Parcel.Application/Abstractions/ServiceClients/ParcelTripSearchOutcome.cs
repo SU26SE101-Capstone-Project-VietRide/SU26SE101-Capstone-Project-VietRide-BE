@@ -13,9 +13,13 @@ public sealed record ParcelTripSearchOutcome(
 public sealed record ParcelTripDto(
     Guid TripId,
     Guid RouteId,
+    string Status,
     Guid OperatorId,
     string OperatorName,
+    TripStationDto OriginStation,
+    TripStationDto DestinationStation,
     DateTimeOffset DepartureDateTime,
+    DateTimeOffset EstimatedArrivalTime,
     decimal AvailableCargoWeightKg,
     decimal AvailableCargoVolumeM3,
     long PriceVnd = 0);

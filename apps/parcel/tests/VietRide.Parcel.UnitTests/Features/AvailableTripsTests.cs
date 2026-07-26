@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using NSubstitute;
 using VietRide.Parcel.Application.Abstractions.Repositories;
@@ -24,6 +25,7 @@ public sealed class AvailableTripsTests
     private static readonly Guid RouteId = Guid.NewGuid();
     private static readonly Guid TripId = Guid.NewGuid();
     private static readonly DateTimeOffset Departure = new(2026, 7, 15, 8, 0, 0, TimeSpan.FromHours(7));
+    private static readonly DateTimeOffset EstimatedArrival = Departure.AddHours(8);
     private static readonly DateTimeOffset Now = new(2026, 6, 29, 10, 0, 0, TimeSpan.FromHours(7));
 
     [Fact]
@@ -34,8 +36,18 @@ public sealed class AvailableTripsTests
         var fareRepo = Substitute.For<IParcelRouteFareRepository>();
 
         var tripDto = new ParcelTripDto(
-            TripId, RouteId, OperatorId, "Test Operator",
-            Departure, 50.0m, 200_000);
+            TripId,
+            RouteId,
+            "SCHEDULED",
+            OperatorId,
+            "Test Operator",
+            new TripStationDto(OriginStationId, "Bến đi"),
+            new TripStationDto(DestinationStationId, "Bến đến"),
+            Departure,
+            EstimatedArrival,
+            50.0m,
+            2.5m,
+            200_000);
 
         tripClient.SearchAvailableParcelTripsAsync(
                 OriginStationId, DestinationStationId, DepartureDate,
@@ -64,11 +76,97 @@ public sealed class AvailableTripsTests
         var item = result.Items.Single();
         item.TripId.Should().Be(TripId);
         item.RouteId.Should().Be(RouteId);
+        item.Status.Should().Be("SCHEDULED");
+        item.OperatorId.Should().Be(OperatorId);
         item.OperatorName.Should().Be("Test Operator");
+        item.OriginStation.Should().Be(new TripStationDto(OriginStationId, "Bến đi"));
+        item.DestinationStation.Should().Be(new TripStationDto(DestinationStationId, "Bến đến"));
         item.DepartureDateTime.Should().Be(Departure);
+        item.EstimatedArrivalTime.Should().Be(EstimatedArrival);
         item.AvailableCargoWeightKg.Should().Be(50.0m);
+        item.AvailableCargoVolumeM3.Should().Be(2.5m);
+        item.DepositPercent.Should().Be(20m);
         item.PriceVnd.Should().Be(150_000);
+        var json = JsonSerializer.Serialize(item, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        json.Should().NotContain("availableCargoWeightKg");
+        json.Should().NotContain("availableCargoVolumeM3");
+        json.Should().NotContain("priceVnd");
         result.TotalItems.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Handle_UsesResolvedRouteDepositPolicy_InPublicResponse()
+    {
+        var tripClient = Substitute.For<ITripServiceClient>();
+        var identityClient = Substitute.For<IIdentityServiceClient>();
+        var fareRepo = Substitute.For<IParcelRouteFareRepository>();
+        var policyRepo = Substitute.For<IParcelPricingPolicyRepository>();
+        var tripDto = CreateTripDto(TripId, RouteId, "Test Operator", Departure, 50m, 2.5m);
+
+        tripClient.SearchAvailableParcelTripsAsync(
+                OriginStationId,
+                DestinationStationId,
+                DepartureDate,
+                1m,
+                0.001m,
+                ParcelSizeCategory.MEDIUM,
+                Page,
+                PageSize,
+                Arg.Any<CancellationToken>())
+            .Returns(new ParcelTripSearchOutcome(
+                ParcelTripSearchOutcomeKind.Success,
+                [tripDto],
+                1,
+                Page,
+                PageSize,
+                null));
+        var fare = ParcelRouteFare.Create(
+            RouteId,
+            ParcelSizeCategory.MEDIUM,
+            OperatorId,
+            Money.FromRaw(150_000),
+            Now);
+        fareRepo.FindByCompositeAsync(RouteId, ParcelSizeCategory.MEDIUM, Arg.Any<CancellationToken>())
+            .Returns(fare);
+        policyRepo.GetSystemDecimalAsync(
+                "DIM_WEIGHT_FACTOR",
+                Arg.Any<decimal>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(6000m);
+        policyRepo.GetSystemDecimalAsync(
+                "DEFAULT_DEPOSIT_PERCENT",
+                Arg.Any<decimal>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(10m);
+        policyRepo.GetDepositPercentAsync(
+                OperatorId,
+                RouteId,
+                10m,
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(20m);
+
+        var handler = new AvailableTripsQueryHandler(tripClient, identityClient, fareRepo, policyRepo);
+        var result = await handler.Handle(
+            new AvailableTripsQuery(
+                OriginStationId,
+                DestinationStationId,
+                DepartureDate,
+                10m,
+                10m,
+                10m,
+                1m,
+                SizeCategory,
+                Page,
+                PageSize),
+            CancellationToken.None);
+
+        var item = result.Items.Should().ContainSingle().Which;
+        item.EstimatedPriceVnd.Should().Be(150_000);
+        item.DepositPercent.Should().Be(20m);
+        item.EstimatedDepositVnd.Should().Be(30_000);
     }
 
     [Fact]
@@ -108,10 +206,8 @@ public sealed class AvailableTripsTests
 
         var trips = new List<ParcelTripDto>
         {
-            new(Guid.NewGuid(), routeWithFare, OperatorId, "Op A",
-                Departure, 30.0m, 100_000),
-            new(Guid.NewGuid(), routeWithoutFare, OperatorId, "Op B",
-                Departure.AddHours(1), 20.0m, 80_000),
+            CreateTripDto(Guid.NewGuid(), routeWithFare, "Op A", Departure, 30m, 1m),
+            CreateTripDto(Guid.NewGuid(), routeWithoutFare, "Op B", Departure.AddHours(1), 20m, 1m),
         };
 
         tripClient.SearchAvailableParcelTripsAsync(
@@ -149,8 +245,10 @@ public sealed class AvailableTripsTests
         var fareRepo = Substitute.For<IParcelRouteFareRepository>();
 
         var tripDto = new ParcelTripDto(
-            TripId, RouteId, OperatorId, "",
-            Departure, 50.0m, 200_000);
+            TripId, RouteId, "SCHEDULED", OperatorId, "",
+            new TripStationDto(OriginStationId, "Bến đi"),
+            new TripStationDto(DestinationStationId, "Bến đến"),
+            Departure, EstimatedArrival, 50.0m, 2.5m, 200_000);
 
         tripClient.SearchAvailableParcelTripsAsync(
                 Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<DateOnly>(),
@@ -193,8 +291,10 @@ public sealed class AvailableTripsTests
         var fareRepo = Substitute.For<IParcelRouteFareRepository>();
 
         var tripDto = new ParcelTripDto(
-            TripId, RouteId, OperatorId, "",
-            Departure, 50.0m, 200_000);
+            TripId, RouteId, "SCHEDULED", OperatorId, "",
+            new TripStationDto(OriginStationId, "Bến đi"),
+            new TripStationDto(DestinationStationId, "Bến đến"),
+            Departure, EstimatedArrival, 50.0m, 2.5m, 200_000);
 
         tripClient.SearchAvailableParcelTripsAsync(
                 Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<DateOnly>(),
@@ -250,8 +350,10 @@ public sealed class AvailableTripsTests
         var fareRepo = Substitute.For<IParcelRouteFareRepository>();
 
         var tripDto = new ParcelTripDto(
-            TripId, RouteId, OperatorId, "",
-            Departure, 50.0m, 200_000);
+            TripId, RouteId, "SCHEDULED", OperatorId, "",
+            new TripStationDto(OriginStationId, "Bến đi"),
+            new TripStationDto(DestinationStationId, "Bến đến"),
+            Departure, EstimatedArrival, 50.0m, 2.5m, 200_000);
 
         tripClient.SearchAvailableParcelTripsAsync(
                 Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<DateOnly>(),
@@ -290,8 +392,10 @@ public sealed class AvailableTripsTests
         var fareRepo = Substitute.For<IParcelRouteFareRepository>();
 
         var tripDto = new ParcelTripDto(
-            TripId, RouteId, OperatorId, "",
-            Departure, 50.0m, 200_000);
+            TripId, RouteId, "SCHEDULED", OperatorId, "",
+            new TripStationDto(OriginStationId, "Bến đi"),
+            new TripStationDto(DestinationStationId, "Bến đến"),
+            Departure, EstimatedArrival, 50.0m, 2.5m, 200_000);
 
         tripClient.SearchAvailableParcelTripsAsync(
                 Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<DateOnly>(),
@@ -372,4 +476,24 @@ public sealed class AvailableTripsTests
             handler.Handle(query, CancellationToken.None));
         ex.ErrorCode.Should().Be("VALIDATION_ERROR");
     }
+
+    private static ParcelTripDto CreateTripDto(
+        Guid tripId,
+        Guid routeId,
+        string operatorName,
+        DateTimeOffset departure,
+        decimal availableWeightKg,
+        decimal availableVolumeM3)
+        => new(
+            tripId,
+            routeId,
+            "SCHEDULED",
+            OperatorId,
+            operatorName,
+            new TripStationDto(OriginStationId, "Bến đi"),
+            new TripStationDto(DestinationStationId, "Bến đến"),
+            departure,
+            departure.AddHours(8),
+            availableWeightKg,
+            availableVolumeM3);
 }

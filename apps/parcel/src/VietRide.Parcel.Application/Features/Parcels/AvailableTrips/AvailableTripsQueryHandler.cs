@@ -138,12 +138,19 @@ public sealed class AvailableTripsQueryHandler
             responseItems.Add(new AvailableTripResponse(
                 trip.TripId,
                 trip.RouteId,
+                trip.Status,
+                trip.OperatorId,
                 operatorName,
+                trip.OriginStation,
+                trip.DestinationStation,
                 trip.DepartureDateTime,
+                trip.EstimatedArrivalTime,
                 totalPrice.Amount,
+                depositPercent,
                 depositAmount.Amount)
             {
                 AvailableCargoWeightKg = trip.AvailableCargoWeightKg,
+                AvailableCargoVolumeM3 = trip.AvailableCargoVolumeM3,
             });
         }
 
