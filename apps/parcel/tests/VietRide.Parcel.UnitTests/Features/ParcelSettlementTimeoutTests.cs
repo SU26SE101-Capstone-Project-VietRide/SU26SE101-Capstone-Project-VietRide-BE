@@ -8,6 +8,7 @@ using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Parcel.Application.Features.Parcels.ExpireSettlementTimeouts;
 using VietRide.Parcel.Domain.Enums;
+using VietRide.Shared.Application.Behaviors;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
@@ -23,6 +24,15 @@ public sealed class ParcelSettlementTimeoutTests
     private static readonly Guid OperatorId = Guid.NewGuid();
     private static readonly Guid TripId = Guid.NewGuid();
     private static readonly DateTimeOffset Now = new(2026, 7, 27, 1, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void Command_SkipsPipelineTransactionBecauseHandlerOwnsPerParcelTransactions()
+    {
+        typeof(ExpireParcelSettlementTimeoutsCommand)
+            .GetCustomAttribute<SkipTransactionAttribute>()
+            .Should()
+            .NotBeNull();
+    }
 
     [Fact]
     public async Task CheckInTimeout_ForfeitsDepositAndReleasesEstimatedCargo()

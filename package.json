@@ -43,6 +43,7 @@
     "postman:day33:local": "node scripts/run-day33-trip-disruption-e2e.mjs",
     "e2e:day29": "node scripts/run-day29-sprint4-e2e.mjs",
     "e2e:parcel-route-fare-availability": "node scripts/run-parcel-route-fare-availability-e2e.mjs",
+    "e2e:parcel-settlement": "node scripts/run-parcel-settlement-e2e.mjs",
     "e2e:day30": "node scripts/run-day30-sprint4-demo.mjs",
     "lint:ts": "nx run-many -t lint --exclude=\"VietRide.*\"",
     "test:ts": "nx run-many -t test --exclude=\"VietRide.*\" --ci --passWithNoTests",

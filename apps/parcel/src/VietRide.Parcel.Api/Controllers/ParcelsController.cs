@@ -41,7 +41,7 @@ public sealed class ParcelsController : ControllerBase
         [FromQuery] decimal widthCm,
         [FromQuery] decimal heightCm,
         [FromQuery] decimal estimatedWeightKg,
-        [FromQuery] string sizeCategory,
+        [FromQuery] string? sizeCategory = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default)

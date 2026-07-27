@@ -11,7 +11,7 @@ public sealed record AvailableTripsQuery(
     decimal WidthCm,
     decimal HeightCm,
     decimal EstimatedWeightKg,
-    string SizeCategory,
+    string? SizeCategory,
     int Page = 1,
     int PageSize = 20) : IQuery<PagedResult<AvailableTripResponse>>
 {
@@ -20,7 +20,7 @@ public sealed record AvailableTripsQuery(
         Guid destinationStationId,
         DateOnly departureDate,
         decimal estimatedWeightKg,
-        string sizeCategory,
+        string? sizeCategory,
         int page = 1,
         int pageSize = 20)
         : this(

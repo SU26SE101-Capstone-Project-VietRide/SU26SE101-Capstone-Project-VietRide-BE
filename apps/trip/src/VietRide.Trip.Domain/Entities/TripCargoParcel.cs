@@ -72,6 +72,23 @@ public sealed class TripCargoParcel : BaseEntity<Guid>
         LoadedAt = now;
     }
 
+    public void RestoreReservation(decimal weightKg, decimal volumeM3)
+    {
+        if (State != ReleasedState)
+        {
+            throw new InvalidOperationException("Only released cargo can be restored.");
+        }
+
+        ValidatePositiveWeight(weightKg);
+        ValidatePositiveVolume(volumeM3);
+
+        WeightKg = weightKg;
+        VolumeM3 = volumeM3;
+        State = ReservedState;
+        LoadedAt = null;
+        ReleasedAt = null;
+    }
+
     public string Release(DateTimeOffset now)
     {
         if (State == ReleasedState)

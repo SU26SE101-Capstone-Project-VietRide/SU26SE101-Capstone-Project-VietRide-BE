@@ -20,10 +20,19 @@ public sealed class AvailableTripsQueryValidator : AbstractValidator<AvailableTr
         RuleFor(x => x.EstimatedWeightKg)
             .GreaterThan(0);
 
+        RuleFor(x => x.LengthCm)
+            .GreaterThan(0);
+
+        RuleFor(x => x.WidthCm)
+            .GreaterThan(0);
+
+        RuleFor(x => x.HeightCm)
+            .GreaterThan(0);
+
         RuleFor(x => x.SizeCategory)
-            .NotEmpty()
-            .Must(v => Enum.TryParse<ParcelSizeCategory>(v, ignoreCase: true, out _))
-            .WithMessage("SizeCategory must be a valid ParcelSizeCategory value.");
+            .Must(v => string.IsNullOrWhiteSpace(v)
+                || Enum.TryParse<ParcelSizeCategory>(v, ignoreCase: true, out _))
+            .WithMessage("SizeCategory must be a valid ParcelSizeCategory value when provided.");
 
         RuleFor(x => x.Page)
             .GreaterThanOrEqualTo(1);
