@@ -80,14 +80,11 @@ export class EmailSendWorker implements OnModuleInit, OnModuleDestroy {
       throw new Error('EMAIL_SEND_LEASE_ACTIVE');
     }
 
-    const claimToken = new Date();
-    if (
-      !(await this.notificationsRepository.markEmailDeliverySending(
-        delivery.id,
-        leaseCutoff,
-        claimToken,
-      ))
-    ) {
+    const claimToken = await this.notificationsRepository.markEmailDeliverySending(
+      delivery.id,
+      leaseCutoff,
+    );
+    if (!claimToken) {
       return;
     }
 

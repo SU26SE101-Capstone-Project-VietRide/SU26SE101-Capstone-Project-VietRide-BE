@@ -3,11 +3,16 @@ import { NotificationPrismaService } from '../prisma/notification-prisma.service
 import { NotificationsRepository } from './notifications.repository';
 
 describe('NotificationsRepository email delivery lease', () => {
+  const prisma = {
+    $queryRaw: jest.fn(),
+    $executeRaw: jest.fn(),
+  };
   const emailDelivery = {
     updateMany: jest.fn(),
     findMany: jest.fn(),
   };
   const repository = new NotificationsRepository({
+    ...prisma,
     emailDelivery,
   } as unknown as NotificationPrismaService);
 
@@ -17,39 +22,40 @@ describe('NotificationsRepository email delivery lease', () => {
 
   it('atomically claims pending/retrying rows or a stale SENDING lease', async () => {
     const leaseCutoff = new Date('2026-07-27T10:00:00.000Z');
-    const claimToken = new Date('2026-07-27T10:05:00.000Z');
-    emailDelivery.updateMany.mockResolvedValue({ count: 1 });
+    const persistedClaimToken = '2026-07-27 10:05:00.123456+00';
+    prisma.$queryRaw.mockResolvedValue([{ claimToken: persistedClaimToken }]);
 
     await expect(
       repository.markEmailDeliverySending(
         '11111111-1111-4111-8111-111111111111',
         leaseCutoff,
-        claimToken,
       ),
-    ).resolves.toBe(true);
+    ).resolves.toEqual(persistedClaimToken);
 
-    expect(emailDelivery.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: '11111111-1111-4111-8111-111111111111',
-        OR: [
-          {
-            status: {
-              in: [EmailDeliveryStatus.PENDING, EmailDeliveryStatus.RETRYING],
-            },
-          },
-          {
-            status: EmailDeliveryStatus.SENDING,
-            updatedAt: { lte: leaseCutoff },
-          },
-        ],
-      },
-      data: { status: EmailDeliveryStatus.SENDING, updatedAt: claimToken },
-    });
+    const claimQuery = prisma.$queryRaw.mock.calls[0][0];
+    expect(claimQuery.strings.join('')).toContain(
+      'RETURNING "updated_at"::text AS "claimToken"',
+    );
+    expect(claimQuery.values).toEqual([
+      '11111111-1111-4111-8111-111111111111',
+      leaseCutoff,
+    ]);
+  });
+
+  it('returns null when another worker already owns the sending lease', async () => {
+    prisma.$queryRaw.mockResolvedValue([]);
+
+    await expect(
+      repository.markEmailDeliverySending(
+        '11111111-1111-4111-8111-111111111111',
+        new Date('2026-07-27T10:00:00.000Z'),
+      ),
+    ).resolves.toBeNull();
   });
 
   it('fences the SENT transition with the exact sending claim token', async () => {
-    const claimToken = new Date('2026-07-27T10:05:00.000Z');
-    emailDelivery.updateMany.mockResolvedValue({ count: 1 });
+    const claimToken = '2026-07-27 10:05:00.123456+00';
+    prisma.$executeRaw.mockResolvedValue(1);
 
     await expect(
       repository.markEmailDeliverySent(
@@ -59,19 +65,15 @@ describe('NotificationsRepository email delivery lease', () => {
       ),
     ).resolves.toBe(true);
 
-    expect(emailDelivery.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: '11111111-1111-4111-8111-111111111111',
-        status: EmailDeliveryStatus.SENDING,
-        updatedAt: claimToken,
-      },
-      data: {
-        status: EmailDeliveryStatus.SENT,
-        providerMessageId: 'provider-message-id',
-        sentAt: expect.any(Date),
-        lastError: null,
-      },
-    });
+    const sentQuery = prisma.$executeRaw.mock.calls[0][0];
+    expect(sentQuery.strings.join('')).toContain('"updated_at" = ');
+    expect(sentQuery.strings.join('')).toContain('::timestamptz');
+    expect(sentQuery.values).toEqual([
+      'provider-message-id',
+      expect.any(Date),
+      '11111111-1111-4111-8111-111111111111',
+      claimToken,
+    ]);
   });
 
   it('selects only stale SENDING row IDs in deterministic bounded batches', async () => {

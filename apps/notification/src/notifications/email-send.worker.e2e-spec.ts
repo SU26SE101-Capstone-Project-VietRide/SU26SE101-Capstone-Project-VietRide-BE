@@ -14,12 +14,13 @@ import { NotificationsRepository } from './notifications.repository';
 
 const EMAIL_DELIVERY_ID = '11111111-1111-4111-8111-111111111111';
 const RECIPIENT_EMAIL = 'operator@vietride.local';
+const PERSISTED_CLAIM_TOKEN = '2026-06-01 10:10:00.123456+00';
 
 describe('EmailSendWorker pipeline (e2e)', () => {
   it('renders an invoice notice and sends it through provider abstraction', async () => {
     const repository = {
       findEmailDeliveryById: jest.fn(async () => createEmailDelivery()),
-      markEmailDeliverySending: jest.fn(async () => true),
+      markEmailDeliverySending: jest.fn(async () => PERSISTED_CLAIM_TOKEN),
       markEmailDeliverySent: jest.fn(async () => true),
     };
     const emailProvider: jest.Mocked<EmailProvider> = {
@@ -51,7 +52,7 @@ describe('EmailSendWorker pipeline (e2e)', () => {
     expect(repository.markEmailDeliverySent).toHaveBeenCalledWith(
       EMAIL_DELIVERY_ID,
       `sendgrid-e2e:${RECIPIENT_EMAIL}`,
-      expect.any(Date),
+      PERSISTED_CLAIM_TOKEN,
     );
 
     await moduleRef.close();

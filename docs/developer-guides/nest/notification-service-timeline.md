@@ -25,7 +25,7 @@
 - [x] Phase 7 — FCM delivery pipeline.
 - [x] Phase 8 — Email delivery pipeline.
 - [x] Phase 9 — Reliability, retention và observability nền.
-- [ ] Phase 10 — Hoàn thiện coverage v1, Unicode, recipient routing và final acceptance.
+- [x] Phase 10 — Hoàn thiện coverage v1, Unicode, recipient routing và final acceptance.
 
 ## Public API hiện hành
 

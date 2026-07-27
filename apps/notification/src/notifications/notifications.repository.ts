@@ -251,22 +251,20 @@ export class NotificationsRepository {
   async markEmailDeliverySending(
     emailDeliveryId: string,
     leaseCutoff: Date,
-    claimToken: Date,
-  ): Promise<boolean> {
-    const result = await this.prisma.emailDelivery.updateMany({
-      where: {
-        id: emailDeliveryId,
-        OR: [
-          { status: { in: [EmailDeliveryStatus.PENDING, EmailDeliveryStatus.RETRYING] } },
-          {
-            status: EmailDeliveryStatus.SENDING,
-            updatedAt: { lte: leaseCutoff },
-          },
-        ],
-      },
-      data: { status: EmailDeliveryStatus.SENDING, updatedAt: claimToken },
-    });
-    return result.count === 1;
+  ): Promise<string | null> {
+    const [claimed] = await this.prisma.$queryRaw<Array<{ claimToken: string }>>(
+      NotificationPrisma.sql`
+        UPDATE "vietride_notification"."email_deliveries"
+        SET "status" = 'SENDING'
+        WHERE "id" = ${emailDeliveryId}::uuid
+          AND (
+            "status" IN ('PENDING', 'RETRYING')
+            OR ("status" = 'SENDING' AND "updated_at" <= ${leaseCutoff})
+          )
+        RETURNING "updated_at"::text AS "claimToken"
+      `,
+    );
+    return claimed?.claimToken ?? null;
   }
 
   async listStaleSendingEmailDeliveryIds(leaseCutoff: Date, take: number): Promise<string[]> {
@@ -285,64 +283,61 @@ export class NotificationsRepository {
   async markEmailDeliverySent(
     emailDeliveryId: string,
     providerMessageId: string | null,
-    claimToken: Date,
+    claimToken: string,
   ): Promise<boolean> {
-    const result = await this.prisma.emailDelivery.updateMany({
-      where: {
-        id: emailDeliveryId,
-        status: EmailDeliveryStatus.SENDING,
-        updatedAt: claimToken,
-      },
-      data: {
-        status: EmailDeliveryStatus.SENT,
-        providerMessageId,
-        sentAt: new Date(),
-        lastError: null,
-      },
-    });
-    return result.count === 1;
+    const count = await this.prisma.$executeRaw(
+      NotificationPrisma.sql`
+        UPDATE "vietride_notification"."email_deliveries"
+        SET "status" = 'SENT',
+            "provider_message_id" = ${providerMessageId},
+            "sent_at" = ${new Date()},
+            "last_error" = NULL
+        WHERE "id" = ${emailDeliveryId}::uuid
+          AND "status" = 'SENDING'
+          AND "updated_at" = ${claimToken}::timestamptz
+      `,
+    );
+    return count === 1;
   }
 
   async markEmailDeliveryRetrying(
     emailDeliveryId: string,
     retryCount: number,
     lastError: string,
-    claimToken: Date,
+    claimToken: string,
   ): Promise<boolean> {
-    const result = await this.prisma.emailDelivery.updateMany({
-      where: {
-        id: emailDeliveryId,
-        status: EmailDeliveryStatus.SENDING,
-        updatedAt: claimToken,
-      },
-      data: {
-        status: EmailDeliveryStatus.RETRYING,
-        retryCount,
-        lastError,
-      },
-    });
-    return result.count === 1;
+    const count = await this.prisma.$executeRaw(
+      NotificationPrisma.sql`
+        UPDATE "vietride_notification"."email_deliveries"
+        SET "status" = 'RETRYING',
+            "retry_count" = ${retryCount},
+            "last_error" = ${lastError}
+        WHERE "id" = ${emailDeliveryId}::uuid
+          AND "status" = 'SENDING'
+          AND "updated_at" = ${claimToken}::timestamptz
+      `,
+    );
+    return count === 1;
   }
 
   async markEmailDeliveryFailed(
     emailDeliveryId: string,
     retryCount: number,
     lastError: string,
-    claimToken: Date,
+    claimToken: string,
   ): Promise<boolean> {
-    const result = await this.prisma.emailDelivery.updateMany({
-      where: {
-        id: emailDeliveryId,
-        status: EmailDeliveryStatus.SENDING,
-        updatedAt: claimToken,
-      },
-      data: {
-        status: EmailDeliveryStatus.FAILED,
-        retryCount,
-        lastError,
-      },
-    });
-    return result.count === 1;
+    const count = await this.prisma.$executeRaw(
+      NotificationPrisma.sql`
+        UPDATE "vietride_notification"."email_deliveries"
+        SET "status" = 'FAILED',
+            "retry_count" = ${retryCount},
+            "last_error" = ${lastError}
+        WHERE "id" = ${emailDeliveryId}::uuid
+          AND "status" = 'SENDING'
+          AND "updated_at" = ${claimToken}::timestamptz
+      `,
+    );
+    return count === 1;
   }
 }
 

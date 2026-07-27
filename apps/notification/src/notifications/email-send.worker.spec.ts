@@ -13,6 +13,7 @@ import { NotificationsRepository } from './notifications.repository';
 
 const EMAIL_DELIVERY_ID = '11111111-1111-4111-8111-111111111111';
 const RECIPIENT_EMAIL = 'passenger@vietride.local';
+const PERSISTED_CLAIM_TOKEN = '2026-06-01 10:10:00.123456+00';
 
 describe('EmailSendWorker', () => {
   let repository: jest.Mocked<NotificationsRepository>;
@@ -23,7 +24,7 @@ describe('EmailSendWorker', () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-06-01T10:10:00.000Z'));
     repository = {
       findEmailDeliveryById: jest.fn(),
-      markEmailDeliverySending: jest.fn().mockResolvedValue(true),
+      markEmailDeliverySending: jest.fn().mockResolvedValue(PERSISTED_CLAIM_TOKEN),
       markEmailDeliverySent: jest.fn().mockResolvedValue(true),
       markEmailDeliveryRetrying: jest.fn().mockResolvedValue(true),
       markEmailDeliveryFailed: jest.fn().mockResolvedValue(true),
@@ -59,7 +60,7 @@ describe('EmailSendWorker', () => {
     expect(repository.markEmailDeliverySent).toHaveBeenCalledWith(
       EMAIL_DELIVERY_ID,
       'sendgrid-message-id',
-      new Date('2026-06-01T10:10:00.000Z'),
+      PERSISTED_CLAIM_TOKEN,
     );
   });
 
@@ -73,7 +74,7 @@ describe('EmailSendWorker', () => {
       EMAIL_DELIVERY_ID,
       2,
       'sendgrid temporary outage',
-      new Date('2026-06-01T10:10:00.000Z'),
+      PERSISTED_CLAIM_TOKEN,
     );
   });
 
@@ -87,7 +88,7 @@ describe('EmailSendWorker', () => {
       EMAIL_DELIVERY_ID,
       EMAIL_SEND_ATTEMPTS,
       'sendgrid exhausted',
-      new Date('2026-06-01T10:10:00.000Z'),
+      PERSISTED_CLAIM_TOKEN,
     );
   });
 
@@ -129,13 +130,12 @@ describe('EmailSendWorker', () => {
     expect(repository.markEmailDeliverySending).toHaveBeenCalledWith(
       EMAIL_DELIVERY_ID,
       new Date(Date.now() - EMAIL_SENDING_LEASE_MS),
-      new Date('2026-06-01T10:10:00.000Z'),
     );
     expect(emailProvider.send).toHaveBeenCalledTimes(1);
     expect(repository.markEmailDeliverySent).toHaveBeenCalledWith(
       EMAIL_DELIVERY_ID,
       'recovered-message-id',
-      new Date('2026-06-01T10:10:00.000Z'),
+      PERSISTED_CLAIM_TOKEN,
     );
   });
 
@@ -150,7 +150,7 @@ describe('EmailSendWorker', () => {
       EMAIL_DELIVERY_ID,
       1,
       'late provider failure',
-      new Date('2026-06-01T10:10:00.000Z'),
+      PERSISTED_CLAIM_TOKEN,
     );
   });
 });
