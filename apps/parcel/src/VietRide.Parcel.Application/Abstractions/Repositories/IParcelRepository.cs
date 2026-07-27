@@ -340,6 +340,15 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     Task<PagedResult<ParcelEntity>> ListByTripAndOperatorAsync(
         Guid tripId, Guid operatorId, int page, int pageSize, CancellationToken ct);
 
+    Task<PagedResult<ParcelEntity>> ListByOperatorAsync(
+        Guid operatorId,
+        ParcelStatus? status,
+        Guid? tripId,
+        PendingActionType? pendingActionType,
+        int page,
+        int pageSize,
+        CancellationToken ct);
+
     // ---- Phase 7: Delivery Token ----
 
     /// <summary>

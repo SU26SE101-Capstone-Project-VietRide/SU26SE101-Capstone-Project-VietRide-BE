@@ -104,6 +104,9 @@ public sealed class ParcelEndpointTests : IClassFixture<VietRideWebApplicationFa
         var received = await anonymous.GetAsync("/v1/parcels/received");
         received.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
 
+        var operatorParcels = await anonymous.GetAsync("/v1/operator/parcels");
+        operatorParcels.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
         var detail = await anonymous.GetAsync("/v1/parcels/11111111-1111-1111-1111-111111111111");
         detail.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
 
@@ -135,6 +138,9 @@ public sealed class ParcelEndpointTests : IClassFixture<VietRideWebApplicationFa
 
         var fareList = await passenger.GetAsync("/v1/operator/parcel-route-fares");
         await AssertForbiddenEnvelope(fareList);
+
+        var parcelList = await passenger.GetAsync("/v1/operator/parcels");
+        await AssertForbiddenEnvelope(parcelList);
 
         using var patchContent = new StringContent("{}", Encoding.UTF8, "application/json");
         var fareUpdate = await passenger.PatchAsync("/v1/operator/parcel-route-fares/11111111-1111-1111-1111-111111111111/MEDIUM", patchContent);
@@ -176,6 +182,26 @@ public sealed class ParcelEndpointTests : IClassFixture<VietRideWebApplicationFa
             new { });
 
         await AssertForbiddenEnvelope(response);
+    }
+
+    [Fact]
+    public async Task OperatorParcelList_RejectsMissingOperatorScope()
+    {
+        using var op = CreateAuthenticatedClient("OPERATOR_STAFF");
+
+        var response = await op.GetAsync("/v1/operator/parcels?page=1&pageSize=20");
+
+        await AssertForbiddenEnvelope(response);
+    }
+
+    [Fact]
+    public async Task OperatorParcelList_InvalidStatus_ReturnsValidationEnvelope()
+    {
+        using var op = CreateAuthenticatedClient("OPERATOR_ADMIN", NewId.ToString());
+
+        var response = await op.GetAsync("/v1/operator/parcels?status=UNKNOWN");
+
+        await AssertValidationEnvelope(response, HttpStatusCode.UnprocessableEntity);
     }
 
     [Fact]

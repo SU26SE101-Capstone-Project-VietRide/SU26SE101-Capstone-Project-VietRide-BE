@@ -3160,6 +3160,70 @@ The result is tenant-scoped by `operatorId`, ordered by `parcelId`, and contains
 parcel at most once. Settlement v2 contributes `depositPaidVnd + balancePaidVnd - refundedAmountVnd`;
 pre-payment/review and loaded/in-transit operational rows contribute zero.
 
+### GET `/v1/operator/parcels`
+
+Auth: `OPERATOR_ADMIN|OPERATOR_STAFF`. Read-only; no `Idempotency-Key`.
+The service always scopes data by the authenticated `operatorId` claim; clients cannot override
+tenant scope with a query parameter.
+
+Optional query parameters:
+
+- `status`: case-insensitive `ParcelStatus`.
+- `tripId`: UUID.
+- `pendingActionType`: case-insensitive `PendingActionType`.
+- `page`: default `1`, minimum `1`.
+- `pageSize`: default `20`, range `1..100`.
+
+Response `200` uses the ADR 0004 paged envelope. Items are ordered by `createdAt DESC`, then
+`parcelId DESC`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [
+      {
+        "parcelId": "uuid",
+        "parcelCode": "VR-PCL-20260727-ABC123",
+        "status": "PENDING_OPERATOR_REVIEW",
+        "tripId": "uuid",
+        "senderUserId": "uuid",
+        "recipientName": "Nguyen Van A",
+        "recipientPhone": "+84900000000",
+        "estimatedSizeCategory": "EXTRA_LARGE",
+        "actualSizeCategory": null,
+        "estimatedChargeableWeightKg": 50,
+        "actualChargeableWeightKg": null,
+        "depositRequiredVnd": 10000,
+        "depositPaidVnd": 0,
+        "balanceRequiredVnd": 0,
+        "balancePaidVnd": 0,
+        "refundDueVnd": 0,
+        "forfeitedDepositVnd": 0,
+        "latestCheckInAt": "2026-07-27T09:30:00Z",
+        "loadCutoffAt": "2026-07-27T09:50:00Z",
+        "finalPaymentDeadline": null,
+        "pendingActionType": null,
+        "pendingActionReason": null,
+        "photoUrl": null,
+        "createdAt": "2026-07-27T08:00:00Z"
+      }
+    ],
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 1,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-27T08:00:00Z" }
+}
+```
+
+Errors: `403 FORBIDDEN` when `operatorId` scope is missing; `422 VALIDATION_ERROR` for invalid
+filters or pagination.
+
 ### PATCH `/v1/operator/parcels/{parcelId}/review`
 
 Auth: `OPERATOR_ADMIN|OPERATOR_STAFF` for the Parcel operator. Idempotency: required. Valid only from `PENDING_OPERATOR_REVIEW`.

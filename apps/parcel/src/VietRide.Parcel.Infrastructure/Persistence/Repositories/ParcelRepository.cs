@@ -1383,6 +1383,37 @@ internal sealed class ParcelRepository : IParcelRepository
         return PagedResult<ParcelEntity>.Create(items, page, pageSize, total);
     }
 
+    public async Task<PagedResult<ParcelEntity>> ListByOperatorAsync(
+        Guid operatorId,
+        ParcelStatus? status,
+        Guid? tripId,
+        PendingActionType? pendingActionType,
+        int page,
+        int pageSize,
+        CancellationToken ct)
+    {
+        var query = _db.Parcels
+            .AsNoTracking()
+            .Where(parcel => parcel.OperatorId == operatorId);
+
+        if (status.HasValue)
+            query = query.Where(parcel => parcel.Status == status.Value);
+        if (tripId.HasValue)
+            query = query.Where(parcel => parcel.TripId == tripId.Value);
+        if (pendingActionType.HasValue)
+            query = query.Where(parcel => parcel.PendingActionType == pendingActionType.Value);
+
+        var total = await query.LongCountAsync(ct);
+        var items = await query
+            .OrderByDescending(parcel => parcel.CreatedAt)
+            .ThenByDescending(parcel => parcel.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(ct);
+
+        return PagedResult<ParcelEntity>.Create(items, page, pageSize, total);
+    }
+
     // ---- Phase 7: Delivery Token ----
 
     public async Task<ParcelEntity?> FindByDeliveryTokenAsync(Guid token, CancellationToken ct)
