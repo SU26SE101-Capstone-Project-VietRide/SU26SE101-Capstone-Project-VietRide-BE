@@ -1,10 +1,12 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import {
   IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
+  IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY,
   IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
   IDENTITY_OTP_REQUESTED_ROUTING_KEY,
   IDENTITY_USER_CREATED_ROUTING_KEY,
   IdentityOperatorApprovedEventSchema,
+  IdentityOperatorRegistrationSubmittedEventSchema,
   IdentityOperatorSuspendedEventSchema,
   IdentityOtpRequestedEventSchema,
   IdentityUserCreatedEventSchema,
@@ -16,6 +18,7 @@ import { EmailTemplateKey, NotificationType } from '../generated/notification-pr
 import { RABBITMQ_PREFETCH_ONE } from '../notifications/core-events.constants';
 import { MessageIdempotencyService } from '../notifications/message-idempotency.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { IdentitySystemAdminRecipientProvider } from '../notifications/identity-system-admin-recipient.provider';
 import type { OperatorRecipientProvider } from '../notifications/operator-recipient.provider';
 import { OPERATOR_RECIPIENT_PROVIDER } from '../notifications/parcel-subscription-operator-events.constants';
 
@@ -35,6 +38,7 @@ export class IdentityEventsConsumer implements OnModuleInit {
     private readonly notificationsService: NotificationsService,
     @Inject(OPERATOR_RECIPIENT_PROVIDER)
     private readonly operatorRecipientProvider: OperatorRecipientProvider,
+    private readonly systemAdminRecipientProvider: IdentitySystemAdminRecipientProvider,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -47,6 +51,13 @@ export class IdentityEventsConsumer implements OnModuleInit {
           `Consumed ${IDENTITY_USER_CREATED_ROUTING_KEY} userId=${event.userId} role=${event.role}`,
         );
       },
+      { prefetch: RABBITMQ_PREFETCH_ONE, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
+    );
+
+    await this.consumer.subscribe(
+      'notification.identity.operator.registration-submitted',
+      IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY,
+      (payload, raw) => this.handleOperatorRegistrationSubmitted(payload, raw),
       { prefetch: RABBITMQ_PREFETCH_ONE, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
     );
 
@@ -83,6 +94,55 @@ export class IdentityEventsConsumer implements OnModuleInit {
     );
   }
 
+  async handleOperatorRegistrationSubmitted(
+    payload: unknown,
+    raw: ConsumeMessage,
+  ): Promise<void> {
+    const routingKey = IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY;
+    const messageId = getMessageId(raw);
+    if (!messageId) throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
+
+    const processingState = await this.idempotency.begin(routingKey, messageId, raw.content);
+    if (processingState === 'duplicate') return;
+    if (processingState === 'locked') throw new Error(`MESSAGE_LOCKED_${routingKey}_${messageId}`);
+
+    try {
+      const event = IdentityOperatorRegistrationSubmittedEventSchema.parse(payload);
+      const recipientUserIds =
+        await this.systemAdminRecipientProvider.resolveSystemAdminRecipientUserIds();
+      await Promise.all(
+        recipientUserIds.map((userId) =>
+          this.notificationsService.createNotification({
+            userId,
+            type: NotificationType.OPERATOR_REGISTRATION_SUBMITTED,
+            title: 'Đơn đăng ký nhà xe mới',
+            body: `Nhà xe ${event.companyName} vừa gửi hồ sơ đăng ký và đang chờ xét duyệt.`,
+            data: {
+              eventId: event.eventId,
+              occurredAt: event.occurredAt,
+              operatorId: event.operatorId,
+              companyName: event.companyName,
+            },
+            dedupeKey: buildNotificationDedupeKey(
+              routingKey,
+              messageId,
+              userId,
+              NotificationType.OPERATOR_REGISTRATION_SUBMITTED,
+            ),
+          }),
+        ),
+      );
+      await this.idempotency.markProcessed(routingKey, messageId);
+    } catch (error) {
+      if (error instanceof ZodError) {
+        await this.idempotency.markProcessed(routingKey, messageId);
+        return;
+      }
+      await this.idempotency.release(routingKey, messageId);
+      throw error;
+    }
+  }
+
   async handleOperatorSuspended(payload: unknown, raw: ConsumeMessage): Promise<void> {
     await this.handleOperatorLifecycle(
       IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
@@ -96,7 +156,7 @@ export class IdentityEventsConsumer implements OnModuleInit {
 
   async handleOtpRequested(payload: unknown, raw: ConsumeMessage): Promise<void> {
     const routingKey = IDENTITY_OTP_REQUESTED_ROUTING_KEY;
-    const messageId = raw.properties.messageId ?? raw.properties.correlationId;
+    const messageId = getMessageId(raw);
     if (!messageId) {
       throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
     }
@@ -146,7 +206,7 @@ export class IdentityEventsConsumer implements OnModuleInit {
     title: string,
     body: string,
   ): Promise<void> {
-    const messageId = raw.properties.messageId ?? raw.properties.correlationId;
+    const messageId = getMessageId(raw);
     if (!messageId) {
       throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
     }
@@ -225,4 +285,12 @@ function buildNotificationDedupeKey(
   type: NotificationType,
 ): string {
   return `${routingKey}:${messageId}:${userId}:${type}`;
+}
+
+function getMessageId(raw: ConsumeMessage): string | undefined {
+  const properties: unknown = raw.properties;
+  if (typeof properties !== 'object' || properties === null) return undefined;
+  const { messageId, correlationId } = properties as Record<string, unknown>;
+  if (typeof messageId === 'string') return messageId;
+  return typeof correlationId === 'string' ? correlationId : undefined;
 }

@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import {
   IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
+  IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY,
   IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
   IDENTITY_OTP_REQUESTED_ROUTING_KEY,
   IDENTITY_USER_CREATED_ROUTING_KEY,
@@ -11,6 +12,7 @@ import { EmailTemplateKey, NotificationType } from '../generated/notification-pr
 import { MessageIdempotencyService } from '../notifications/message-idempotency.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { OperatorRecipientProvider } from '../notifications/operator-recipient.provider';
+import { IdentitySystemAdminRecipientProvider } from '../notifications/identity-system-admin-recipient.provider';
 import { IdentityEventsConsumer } from './identity-events.consumer';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
@@ -24,6 +26,7 @@ describe('IdentityEventsConsumer', () => {
   let idempotency: jest.Mocked<MessageIdempotencyService>;
   let notificationsService: jest.Mocked<NotificationsService>;
   let operatorRecipientProvider: jest.Mocked<OperatorRecipientProvider>;
+  let systemAdminRecipientProvider: jest.Mocked<IdentitySystemAdminRecipientProvider>;
   let consumer: IdentityEventsConsumer;
 
   beforeEach(async () => {
@@ -46,6 +49,9 @@ describe('IdentityEventsConsumer', () => {
     operatorRecipientProvider = {
       resolveOperatorRecipientUserIds: jest.fn(),
     };
+    systemAdminRecipientProvider = {
+      resolveSystemAdminRecipientUserIds: jest.fn(),
+    } as unknown as jest.Mocked<IdentitySystemAdminRecipientProvider>;
 
     jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
@@ -55,6 +61,7 @@ describe('IdentityEventsConsumer', () => {
       idempotency,
       notificationsService,
       operatorRecipientProvider,
+      systemAdminRecipientProvider,
     );
     await consumer.onModuleInit();
   });
@@ -70,6 +77,7 @@ describe('IdentityEventsConsumer', () => {
   it('subscribes one durable queue per identity routing key', () => {
     expect(Object.keys(handlers).sort()).toEqual([
       IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
+      IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY,
       IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
       IDENTITY_OTP_REQUESTED_ROUTING_KEY,
       IDENTITY_USER_CREATED_ROUTING_KEY,
@@ -79,6 +87,60 @@ describe('IdentityEventsConsumer', () => {
       IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
       expect.any(Function),
       { prefetch: 1, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
+    );
+  });
+
+  it('notifies each System Admin when an operator registration is submitted', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    systemAdminRecipientProvider.resolveSystemAdminRecipientUserIds.mockResolvedValue([USER_ID]);
+    notificationsService.createNotification.mockResolvedValue(
+      createNotification(NotificationType.OPERATOR_REGISTRATION_SUBMITTED),
+    );
+
+    await consumer.handleOperatorRegistrationSubmitted(
+      {
+        eventId: EVENT_ID,
+        occurredAt: '2026-07-27T08:30:00+07:00',
+        operatorId: OPERATOR_ID,
+        companyName: 'Nhà xe Việt Ride',
+      },
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(systemAdminRecipientProvider.resolveSystemAdminRecipientUserIds).toHaveBeenCalled();
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.OPERATOR_REGISTRATION_SUBMITTED,
+        dedupeKey: `${IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:${NotificationType.OPERATOR_REGISTRATION_SUBMITTED}`,
+      }),
+    );
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+  });
+
+  it('releases registration lock when System Admin lookup fails', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    systemAdminRecipientProvider.resolveSystemAdminRecipientUserIds.mockRejectedValue(
+      new Error('identity unavailable'),
+    );
+
+    await expect(
+      consumer.handleOperatorRegistrationSubmitted(
+        {
+          eventId: EVENT_ID,
+          occurredAt: '2026-07-27T08:30:00+07:00',
+          operatorId: OPERATOR_ID,
+          companyName: 'Nhà xe Việt Ride',
+        },
+        createMessage(MESSAGE_ID),
+      ),
+    ).rejects.toThrow('identity unavailable');
+    expect(idempotency.release).toHaveBeenCalledWith(
+      IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY,
+      MESSAGE_ID,
     );
   });
 
@@ -400,7 +462,9 @@ function createMessage(messageId: string | undefined): ConsumeMessage {
   } as ConsumeMessage;
 }
 
-function createNotification(type: NotificationType) {
+function createNotification(
+  type: NotificationType,
+): Awaited<ReturnType<NotificationsService['createNotification']>> {
   return {
     id: '99999999-9999-4999-8999-999999999999',
     userId: USER_ID,

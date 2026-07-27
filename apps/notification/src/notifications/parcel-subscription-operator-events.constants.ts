@@ -1,3 +1,15 @@
+import {
+  PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY,
+  PARCEL_REVIEW_APPROVED_ROUTING_KEY,
+  PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY,
+} from '@vietride/contracts';
+
+export {
+  PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY,
+  PARCEL_REVIEW_APPROVED_ROUTING_KEY,
+  PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY,
+};
+
 export const OPERATOR_RECIPIENT_PROVIDER = Symbol('OPERATOR_RECIPIENT_PROVIDER');
 
 export const BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY = 'booking.voucher.consent_accepted';
@@ -67,6 +79,18 @@ export const PARCEL_SUBSCRIPTION_OPERATOR_QUEUE_BINDINGS = [
   {
     queue: 'notification:parcel-review-requested',
     routingKey: PARCEL_REVIEW_REQUESTED_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:parcel-review-approved',
+    routingKey: PARCEL_REVIEW_APPROVED_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:parcel-final-payment-requested',
+    routingKey: PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:parcel-settlement-recovered',
+    routingKey: PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY,
   },
   {
     queue: 'notification:parcel-transfer-initiated',

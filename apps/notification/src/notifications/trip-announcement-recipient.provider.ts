@@ -9,17 +9,33 @@ import {
   INTERNAL_JWT_ISSUER,
 } from './fcm-push.constants';
 
-const TripSnapshotSchema = z.object({
+const tripSnapshotSchema = z.object({
   operatorId: z.string().uuid(),
   driverUserId: z.string().uuid().nullable(),
   assistantUserId: z.string().uuid().nullable(),
 });
+
+export interface TripRecipientSnapshot {
+  operatorId: string;
+  crewUserIds: string[];
+}
 
 @Injectable()
 export class TripAnnouncementRecipientProvider {
   constructor(@Inject(ENV_TOKEN) private readonly env: Env) {}
 
   async resolveTripCrewUserIds(tripId: string, operatorId: string): Promise<string[]> {
+    const snapshot = await this.getTripRecipientSnapshot(tripId);
+    if (snapshot.operatorId !== operatorId) {
+      throw new NotFoundException({
+        errorCode: 'TRIP_NOT_FOUND',
+        detail: `Trip ${tripId} was not found`,
+      });
+    }
+    return snapshot.crewUserIds;
+  }
+
+  async getTripRecipientSnapshot(tripId: string): Promise<TripRecipientSnapshot> {
     const token = await this.signInternalJwt();
     const response = await fetch(
       new URL(`/internal/v1/trips/${tripId}`, this.env.TRIP_INTERNAL_BASE_URL),
@@ -42,16 +58,13 @@ export class TripAnnouncementRecipientProvider {
     }
     if (!response.ok) throw new Error(`TRIP_SNAPSHOT_LOOKUP_FAILED_${response.status}`);
 
-    const snapshot = TripSnapshotSchema.parse(await response.json());
-    if (snapshot.operatorId !== operatorId) {
-      throw new NotFoundException({
-        errorCode: 'TRIP_NOT_FOUND',
-        detail: `Trip ${tripId} was not found`,
-      });
-    }
-    return [snapshot.driverUserId, snapshot.assistantUserId].filter((value): value is string =>
-      Boolean(value),
-    );
+    const snapshot = tripSnapshotSchema.parse(await response.json());
+    return {
+      operatorId: snapshot.operatorId,
+      crewUserIds: [snapshot.driverUserId, snapshot.assistantUserId].filter(
+        (value): value is string => Boolean(value),
+      ),
+    };
   }
 
   private async signInternalJwt(): Promise<string> {

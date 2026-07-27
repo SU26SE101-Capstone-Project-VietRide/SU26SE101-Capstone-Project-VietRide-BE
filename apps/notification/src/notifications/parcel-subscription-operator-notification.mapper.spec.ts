@@ -8,7 +8,12 @@ import {
   PARCEL_LOADED_ROUTING_KEY,
   PARCEL_UNLOADED_ROUTING_KEY,
   PARCEL_AUTO_REJECTED_ROUTING_KEY,
+  PARCEL_DELIVERY_CONFIRMED_ROUTING_KEY,
+  PARCEL_DELIVERY_REJECTED_ROUTING_KEY,
+  PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY,
+  PARCEL_REVIEW_APPROVED_ROUTING_KEY,
   PARCEL_REVIEW_REQUESTED_ROUTING_KEY,
+  PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY,
   PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY,
   PAYOUT_FAILED_ROUTING_KEY,
   SUBSCRIPTION_PAYMENT_AUTO_REVERTED_ROUTING_KEY,
@@ -19,6 +24,7 @@ import {
   TRIP_SETTLEMENT_COMPLETED_ROUTING_KEY,
 } from './parcel-subscription-operator-events.constants';
 import { mapParcelSubscriptionOperatorEventToNotifications } from './parcel-subscription-operator-notification.mapper';
+import type { ParcelRecipientSnapshot } from './parcel-recipient.provider';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const SECOND_USER_ID = '22222222-2222-4222-8222-222222222222';
@@ -77,6 +83,143 @@ describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
     expect(loaded).toHaveLength(2);
     expect(unloaded[0]?.type).toBe(NotificationType.PARCEL_IN_TRANSIT);
     expect(rejected[0]?.type).toBe(NotificationType.PARCEL_REJECTED);
+  });
+
+  it.each([
+    ['CHECK_IN_TIMEOUT', 'không check-in đúng hạn'],
+    ['FINAL_PAYMENT_TIMEOUT', 'không thanh toán số dư đúng hạn'],
+  ] as const)('maps %s to one sender notification with forfeited deposit', async (reason, copy) => {
+    const [notification] = await mapParcelSubscriptionOperatorEventToNotifications(
+      PARCEL_AUTO_REJECTED_ROUTING_KEY,
+      {
+        eventId: '99999999-9999-4999-8999-999999999999',
+        occurredAt: '2026-07-18T03:00:00Z',
+        parcelId: PARCEL_ID,
+        parcelCode: 'PRC123',
+        operatorId: OPERATOR_ID,
+        userId: USER_ID,
+        tripId: TRIP_ID,
+        reason,
+        forfeitedDepositVnd: 150000,
+        refundAmount: 0,
+      },
+      resolveNoOperatorRecipients,
+    );
+
+    expect(notification).toEqual(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.PARCEL_REJECTED,
+        body: expect.stringContaining(copy),
+      }),
+    );
+    expect(notification?.body).toContain('150000 VND');
+  });
+
+  it('maps review approval and final payment request to dedicated sender types', async () => {
+    const approved = await mapParcelSubscriptionOperatorEventToNotifications(
+      PARCEL_REVIEW_APPROVED_ROUTING_KEY,
+      {
+        eventId: '99999999-9999-4999-8999-999999999999',
+        occurredAt: '2026-07-18T03:00:00Z',
+        parcelId: PARCEL_ID,
+        parcelCode: 'PRC123',
+        operatorId: OPERATOR_ID,
+        userId: USER_ID,
+        depositRequiredVnd: 50000,
+      },
+      resolveNoOperatorRecipients,
+    );
+    const finalPayment = await mapParcelSubscriptionOperatorEventToNotifications(
+      PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY,
+      {
+        eventId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        occurredAt: '2026-07-18T03:00:00Z',
+        parcelId: PARCEL_ID,
+        parcelCode: 'PRC123',
+        operatorId: OPERATOR_ID,
+        userId: USER_ID,
+        tripId: TRIP_ID,
+        balanceRequiredVnd: 90000,
+        balancePaidVnd: 0,
+        finalPaymentDeadline: '2026-07-18T04:00:00Z',
+      },
+      resolveNoOperatorRecipients,
+    );
+
+    expect(approved[0]).toEqual(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.PARCEL_REVIEW_APPROVED,
+        body: expect.stringContaining('50000 VND'),
+      }),
+    );
+    expect(finalPayment[0]).toEqual(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.PARCEL_FINAL_PAYMENT_REQUIRED,
+        body: expect.stringContaining('2026-07-18T04:00:00Z'),
+      }),
+    );
+  });
+
+  it.each([
+    ['READY_TO_LOAD', 'sẵn sàng lên xe'],
+    ['CANCELLED', 'Số tiền cần hoàn'],
+  ] as const)('maps settlement recovery %s as a corrective sender notification', async (status, copy) => {
+    const notifications = await mapParcelSubscriptionOperatorEventToNotifications(
+      PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY,
+      {
+        eventId: '99999999-9999-4999-8999-999999999999',
+        occurredAt: '2026-07-18T03:00:00Z',
+        parcelId: PARCEL_ID,
+        parcelCode: 'PRC123',
+        userId: USER_ID,
+        tripId: TRIP_ID,
+        recoveredStatus: status,
+        refundAmountVnd: 50000,
+      },
+      resolveNoOperatorRecipients,
+    );
+
+    expect(notifications).toEqual([
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.PARCEL_SETTLEMENT_RECOVERED,
+        body: expect.stringContaining(copy),
+      }),
+    ]);
+  });
+
+  it('uses Parcel snapshot for sender and operator policies on legacy delivery events', async () => {
+    const snapshot = async (): Promise<ParcelRecipientSnapshot> => ({
+      parcelId: PARCEL_ID,
+      tripId: TRIP_ID,
+      status: 'DELIVERED',
+      senderUserId: USER_ID,
+      recipientUserId: SECOND_USER_ID,
+      operatorId: OPERATOR_ID,
+      dropoffStopId: null,
+    });
+    const confirmed = await mapParcelSubscriptionOperatorEventToNotifications(
+      PARCEL_DELIVERY_CONFIRMED_ROUTING_KEY,
+      { parcelId: PARCEL_ID, userId: SECOND_USER_ID },
+      resolveNoOperatorRecipients,
+      snapshot,
+    );
+    const rejected = await mapParcelSubscriptionOperatorEventToNotifications(
+      PARCEL_DELIVERY_REJECTED_ROUTING_KEY,
+      { parcelId: PARCEL_ID, reason: 'Người nhận từ chối' },
+      async () => [SECOND_USER_ID],
+      snapshot,
+    );
+
+    expect(confirmed.map(({ userId }) => userId)).toEqual([USER_ID]);
+    expect(confirmed[0]?.data).not.toHaveProperty('userId');
+    expect(confirmed[0]?.data).not.toHaveProperty('senderUserId');
+    expect(confirmed[0]?.data).not.toHaveProperty('recipientUserId');
+    expect(rejected.map(({ userId }) => userId)).toEqual([SECOND_USER_ID]);
+    expect(rejected[0]?.body).toContain('Người nhận từ chối');
   });
 
   it('rejects Sprint 4 Parcel producer-consumer schema drift before persistence', async () => {

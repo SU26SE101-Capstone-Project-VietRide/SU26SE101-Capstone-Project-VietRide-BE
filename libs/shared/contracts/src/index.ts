@@ -5,6 +5,7 @@ export * from './events/trip-completed.event';
 export * from './events/payment-succeeded.event';
 export * from './events/trip-vehicle-swapped.event';
 export * from './events/trip-schedule-changed.event';
+export * from './events/trip-route-changed.event';
 export * from './events/trip-cancelled.event';
 export * from './events/booking-seat-reassignment-required.event';
 export * from './events/booking-schedule-change-informational.event';

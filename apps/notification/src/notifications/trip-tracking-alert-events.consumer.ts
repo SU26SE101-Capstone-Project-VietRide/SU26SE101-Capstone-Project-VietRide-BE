@@ -6,12 +6,18 @@ import { ZodError } from 'zod';
 import { RABBITMQ_PREFETCH_ONE } from './core-events.constants';
 import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
+import { BookingTripRecipientProvider } from './booking-trip-recipient.provider';
+import { TripAnnouncementRecipientProvider } from './trip-announcement-recipient.provider';
 import { createNotificationLogger } from './notification-logger';
 import type { OperatorRecipientProvider } from './operator-recipient.provider';
 import { OPERATOR_RECIPIENT_PROVIDER } from './parcel-subscription-operator-events.constants';
 import {
   TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY,
   TRIP_INCIDENT_REPORTED_ROUTING_KEY,
+  TRIP_DELAYED_ROUTING_KEY,
+  TRIP_ROUTE_CHANGED_ROUTING_KEY,
+  TRIP_SCHEDULE_CHANGED_ROUTING_KEY,
+  TRACKING_GPS_OFF_ROUTE_ROUTING_KEY,
   TRIP_TRACKING_ALERT_QUEUE_BINDINGS,
 } from './trip-tracking-alert-events.constants';
 import {
@@ -19,6 +25,7 @@ import {
   mapIncidentReportedToNotifications,
   mapTripCargoThresholdCrossedToNotifications,
   mapTripTrackingAlertToNotifications,
+  parseTripRecipientResolutionRequest,
   type TripTrackingAlertRoutingKey,
 } from './trip-tracking-alert-notification.mapper';
 
@@ -32,6 +39,8 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
     private readonly notificationsService: NotificationsService,
     @Inject(OPERATOR_RECIPIENT_PROVIDER)
     private readonly operatorRecipients: OperatorRecipientProvider,
+    private readonly bookingTripRecipients: BookingTripRecipientProvider,
+    private readonly tripRecipients: TripAnnouncementRecipientProvider,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -84,7 +93,12 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
     }
 
     try {
-      const notifications = mapTripTrackingAlertToNotifications(routingKey, payload);
+      const resolvedRecipientUserIds = await this.resolveRecipientUserIds(routingKey, payload);
+      const notifications = mapTripTrackingAlertToNotifications(
+        routingKey,
+        payload,
+        resolvedRecipientUserIds,
+      );
       await Promise.all(
         notifications.map((notification) =>
           this.notificationsService.createNotification({
@@ -116,6 +130,48 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
       await this.idempotency.release(routingKey, messageId);
       throw error;
     }
+  }
+
+  private async resolveRecipientUserIds(
+    routingKey: TripTrackingAlertRoutingKey,
+    payload: unknown,
+  ): Promise<string[] | undefined> {
+    const request = parseTripRecipientResolutionRequest(routingKey, payload);
+    if (!request) return undefined;
+
+    if (routingKey === TRIP_DELAYED_ROUTING_KEY) {
+      const snapshot = await this.tripRecipients.getTripRecipientSnapshot(request.tripId);
+      const [passengers, admins] = await Promise.all([
+        this.bookingTripRecipients.resolveTripPassengerUserIds(request.tripId),
+        this.operatorRecipients.resolveOperatorRecipientUserIds(snapshot.operatorId),
+      ]);
+      return [...new Set([...passengers, ...admins])];
+    }
+
+    if (routingKey === TRACKING_GPS_OFF_ROUTE_ROUTING_KEY) {
+      const snapshot = await this.tripRecipients.getTripRecipientSnapshot(request.tripId);
+      const admins = await this.operatorRecipients.resolveOperatorRecipientUserIds(
+        snapshot.operatorId,
+      );
+      return [...new Set([...snapshot.crewUserIds, ...admins])];
+    }
+
+    if (!request.operatorId) throw new Error(`MISSING_OPERATOR_ID_${routingKey}`);
+    const crew = await this.tripRecipients.resolveTripCrewUserIds(
+      request.tripId,
+      request.operatorId,
+    );
+    if (routingKey === TRIP_SCHEDULE_CHANGED_ROUTING_KEY) return [...new Set(crew)];
+
+    if (routingKey === TRIP_ROUTE_CHANGED_ROUTING_KEY) {
+      const passengers = await this.bookingTripRecipients.resolveAffectedTripPassengerUserIds(
+        request.tripId,
+        request.affectedBookingIds,
+      );
+      return [...new Set([...crew, ...passengers])];
+    }
+
+    return undefined;
   }
 
   private async handleCargoThresholdCrossed(payload: unknown, raw: ConsumeMessage): Promise<void> {

@@ -95,6 +95,11 @@ import { IdentitySystemAdminRecipientProvider } from './identity-system-admin-re
           : new SendGridEmailProvider(env),
     },
   ],
-  exports: [NotificationsService, MessageIdempotencyService, OPERATOR_RECIPIENT_PROVIDER],
+  exports: [
+    NotificationsService,
+    MessageIdempotencyService,
+    OPERATOR_RECIPIENT_PROVIDER,
+    IdentitySystemAdminRecipientProvider,
+  ],
 })
 export class NotificationsModule {}

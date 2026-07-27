@@ -8,6 +8,7 @@ import {
   PARCEL_SUBSCRIPTION_OPERATOR_QUEUE_BINDINGS,
 } from './parcel-subscription-operator-events.constants';
 import { ParcelSubscriptionOperatorEventsConsumer } from './parcel-subscription-operator-events.consumer';
+import { ParcelRecipientProvider } from './parcel-recipient.provider';
 
 describe('ParcelSubscriptionOperatorEventsConsumer registration (e2e)', () => {
   it('registers parcel/subscription/operator subscriptions when module initializes', async () => {
@@ -25,6 +26,7 @@ describe('ParcelSubscriptionOperatorEventsConsumer registration (e2e)', () => {
         },
         { provide: NotificationsService, useValue: { createNotification: jest.fn() } },
         { provide: OPERATOR_RECIPIENT_PROVIDER, useValue: operatorRecipientProvider },
+        { provide: ParcelRecipientProvider, useValue: { getParcelSnapshot: jest.fn() } },
       ],
     }).compile();
 

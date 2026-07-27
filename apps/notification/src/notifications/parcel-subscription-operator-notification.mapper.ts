@@ -2,11 +2,19 @@
 import { z } from 'zod';
 import {
   ParcelAutoRejectedEventSchema,
+  ParcelFinalPaymentRequestedEventSchema,
   ParcelLoadedEventSchema,
+  ParcelReviewApprovedEventSchema,
+  ParcelSettlementRecoveredEventSchema,
+  type ParcelAutoRejectedEvent,
+  type ParcelFinalPaymentRequestedEvent,
   type ParcelLoadedEvent,
+  type ParcelReviewApprovedEvent,
+  type ParcelSettlementRecoveredEvent,
 } from '@vietride/contracts';
 import { NotificationType } from '../generated/notification-prisma-client';
 import type { CreateNotificationDto } from './dto/create-notification.dto';
+import type { ParcelRecipientSnapshot } from './parcel-recipient.provider';
 import {
   BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY,
   BOOKING_VOUCHER_CONSENT_REJECTED_ROUTING_KEY,
@@ -17,11 +25,14 @@ import {
   PARCEL_DELIVERED_PENDING_CONFIRM_ROUTING_KEY,
   PARCEL_DELIVERY_CONFIRMED_ROUTING_KEY,
   PARCEL_DELIVERY_REJECTED_ROUTING_KEY,
+  PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY,
   PARCEL_LOADED_ROUTING_KEY,
   PARCEL_REJECTED_ROUTING_KEY,
   PARCEL_RETURNED_ROUTING_KEY,
   PARCEL_RETURN_INITIATED_ROUTING_KEY,
   PARCEL_REVIEW_REQUESTED_ROUTING_KEY,
+  PARCEL_REVIEW_APPROVED_ROUTING_KEY,
+  PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY,
   PARCEL_PENDING_OPERATOR_ACTION_ROUTING_KEY,
   PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY,
   PARCEL_TRANSFER_ESCALATED_ROUTING_KEY,
@@ -52,7 +63,7 @@ const RecipientPayloadSchema = z.object({
   userId: z.string().uuid().optional(),
   userIds: z.array(z.string().uuid()).optional(),
   senderUserId: z.string().uuid().optional(),
-  recipientUserId: z.string().uuid().optional(),
+  recipientUserId: z.string().uuid().nullable().optional(),
   recipientUserIds: z.array(z.string().uuid()).optional(),
   operatorId: z.string().uuid().optional(),
 });
@@ -167,6 +178,9 @@ export type ParcelSubscriptionOperatorRoutingKey =
   | typeof PARCEL_RETURNED_ROUTING_KEY
   | typeof PARCEL_AUTO_REJECTED_ROUTING_KEY
   | typeof PARCEL_REVIEW_REQUESTED_ROUTING_KEY
+  | typeof PARCEL_REVIEW_APPROVED_ROUTING_KEY
+  | typeof PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY
+  | typeof PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY
   | typeof PARCEL_TRANSFER_INITIATED_ROUTING_KEY
   | typeof PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY
   | typeof PARCEL_TRANSFER_ESCALATED_ROUTING_KEY
@@ -193,6 +207,7 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
   routingKey: ParcelSubscriptionOperatorRoutingKey,
   payload: unknown,
   resolveOperatorRecipientUserIds: (operatorId: string) => Promise<string[]>,
+  resolveParcelSnapshot?: (parcelId: string) => Promise<ParcelRecipientSnapshot>,
 ): Promise<CreateNotificationDto[]> {
   switch (routingKey) {
     case BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY:
@@ -208,91 +223,101 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
         mapVoucherConsentRejected,
       );
     case PARCEL_CREATED_ROUTING_KEY:
-      return fanOut(
-        BaseParcelPayloadSchema.parse(payload),
-        resolveOperatorRecipientUserIds,
-        mapParcelCreated,
-      );
+      return mapParcelCreatedEvent(BaseParcelPayloadSchema.parse(payload));
     case PARCEL_LOADED_ROUTING_KEY:
       return (await mapParcelLoadedEvent(ParcelLoadedEventSchema.parse(payload))).map((item) => item);
     case PARCEL_UNLOADED_ROUTING_KEY:
       return mapParcelUnloadedEvent(ParcelUnloadedPayloadSchema.parse(payload));
     case PARCEL_DELIVERED_PENDING_CONFIRM_ROUTING_KEY:
-      return fanOut(
-        BaseParcelPayloadSchema.parse(payload),
-        resolveOperatorRecipientUserIds,
-        mapParcelPendingConfirm,
-      );
+      return mapParcelPendingConfirmEvent(BaseParcelPayloadSchema.parse(payload));
     case PARCEL_DELIVERY_CONFIRMED_ROUTING_KEY:
-      return fanOut(
+      return mapParcelSnapshotSenderEvent(
         BaseParcelPayloadSchema.parse(payload),
-        resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
         mapParcelDeliveryConfirmed,
       );
     case PARCEL_DELIVERY_REJECTED_ROUTING_KEY:
-      return fanOut(
+      return mapParcelOperatorEvent(
         BaseParcelPayloadSchema.parse(payload),
         resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
         mapParcelDeliveryRejected,
       );
     case PARCEL_CANCELLED_ROUTING_KEY:
-      return fanOut(
+      return mapParcelSenderEvent(
         BaseParcelPayloadSchema.parse(payload),
-        resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
         mapParcelCancelled,
       );
     case PARCEL_REJECTED_ROUTING_KEY:
-      return fanOut(
+      return mapParcelSenderEvent(
         BaseParcelPayloadSchema.parse(payload),
-        resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
         mapParcelRejected,
       );
     case PARCEL_RETURNED_ROUTING_KEY:
-      return fanOut(
+      return mapParcelSenderEvent(
         BaseParcelPayloadSchema.parse(payload),
-        resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
         mapParcelReturned,
       );
     case PARCEL_AUTO_REJECTED_ROUTING_KEY:
-      return fanOut(
+      return mapDirectParcelUser(
         ParcelAutoRejectedEventSchema.parse(payload),
-        resolveOperatorRecipientUserIds,
         mapParcelAutoRejected,
       );
     case PARCEL_REVIEW_REQUESTED_ROUTING_KEY:
-      return fanOut(
+      return mapParcelOperatorEvent(
         ParcelReviewRequestedPayloadSchema.parse(payload),
         resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
         mapParcelReviewRequested,
       );
+    case PARCEL_REVIEW_APPROVED_ROUTING_KEY:
+      return mapDirectParcelUser(
+        ParcelReviewApprovedEventSchema.parse(payload),
+        mapParcelReviewApproved,
+      );
+    case PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY:
+      return mapDirectParcelUser(
+        ParcelFinalPaymentRequestedEventSchema.parse(payload),
+        mapParcelFinalPaymentRequested,
+      );
+    case PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY:
+      return mapDirectParcelUser(
+        ParcelSettlementRecoveredEventSchema.parse(payload),
+        mapParcelSettlementRecovered,
+      );
     case PARCEL_TRANSFER_INITIATED_ROUTING_KEY:
-      return fanOut(
+      return mapParcelSenderEvent(
         ParcelTransferInitiatedPayloadSchema.parse(payload),
-        resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
         mapParcelTransferInitiated,
       );
     case PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY:
-      return fanOut(
+      return mapParcelSenderEvent(
         BaseParcelPayloadSchema.parse(payload),
-        resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
         mapParcelTransferConfirmed,
       );
     case PARCEL_TRANSFER_ESCALATED_ROUTING_KEY:
-      return fanOut(
+      return mapParcelOperatorEvent(
         BaseParcelPayloadSchema.parse(payload),
         resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
         mapParcelTransferEscalated,
       );
     case PARCEL_RETURN_INITIATED_ROUTING_KEY:
-      return fanOut(
+      return mapParcelSenderEvent(
         BaseParcelPayloadSchema.parse(payload),
-        resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
         mapParcelReturnInitiated,
       );
     case PARCEL_PENDING_OPERATOR_ACTION_ROUTING_KEY:
-      return fanOut(
+      return mapParcelOperatorEvent(
         BaseParcelPayloadSchema.parse(payload),
         resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
         mapParcelPendingOperatorAction,
       );
     case TRIP_STOP_ARRIVED_ROUTING_KEY:
@@ -408,6 +433,11 @@ function mapParcelCreated(userId: string, payload: ParcelPayload): CreateNotific
   );
 }
 
+function mapParcelCreatedEvent(payload: ParcelPayload): CreateNotificationDto[] {
+  const recipients = [payload.senderUserId, payload.recipientUserId].filter(isString);
+  return [...new Set(recipients)].map((userId) => mapParcelCreated(userId, payload));
+}
+
 function mapParcelLoaded(userId: string, payload: ParcelPayload): CreateNotificationDto {
   return buildParcelNotification(
     userId,
@@ -450,6 +480,15 @@ function mapParcelPendingConfirm(userId: string, payload: ParcelPayload): Create
     'Chờ xác nhận giao hàng',
     'đã giao tới người nhận và đang chờ xác nhận.',
   );
+}
+
+function mapParcelPendingConfirmEvent(payload: ParcelPayload): CreateNotificationDto[] {
+  const recipients = [
+    payload.userId,
+    payload.recipientUserId,
+    ...(payload.recipientUserIds ?? []),
+  ].filter(isString);
+  return [...new Set(recipients)].map((userId) => mapParcelPendingConfirm(userId, payload));
 }
 
 function mapParcelDeliveryConfirmed(userId: string, payload: ParcelPayload): CreateNotificationDto {
@@ -502,7 +541,23 @@ function mapParcelReturned(userId: string, payload: ParcelPayload): CreateNotifi
   );
 }
 
-function mapParcelAutoRejected(userId: string, payload: ParcelPayload): CreateNotificationDto {
+function mapParcelAutoRejected(
+  userId: string,
+  payload: ParcelAutoRejectedEvent,
+): CreateNotificationDto {
+  if ('reason' in payload) {
+    const timeoutText =
+      payload.reason === 'CHECK_IN_TIMEOUT'
+        ? 'không check-in đúng hạn'
+        : 'không thanh toán số dư đúng hạn';
+    return {
+      userId,
+      type: NotificationType.PARCEL_REJECTED,
+      title: 'Đơn gửi hàng bị từ chối do quá hạn',
+      body: `${formatParcelLabel(payload)} đã ${timeoutText} và bị từ chối. Số tiền cọc bị giữ: ${formatMoney(payload.forfeitedDepositVnd)} VND.`,
+      data: buildNotificationData(payload),
+    };
+  }
   const refundText = payload.refundAmount
     ? ` Số tiền hoàn: ${formatMoney(payload.refundAmount)} VND.`
     : '';
@@ -528,6 +583,55 @@ function mapParcelReviewRequested(
     type: NotificationType.PARCEL_REVIEW_REQUESTED,
     title: 'Cần xem xét đơn gửi hàng',
     body: `${formatParcelLabel(payload)} cần được nhân viên vận hành xem xét.`,
+    data: buildNotificationData(payload),
+  };
+}
+
+function mapParcelReviewApproved(
+  userId: string,
+  payload: ParcelReviewApprovedEvent,
+): CreateNotificationDto {
+  return {
+    userId,
+    type: NotificationType.PARCEL_REVIEW_APPROVED,
+    title: 'Đơn gửi hàng đã được duyệt',
+    body: `${formatParcelLabel(payload)} đã được duyệt. Vui lòng thanh toán tiền cọc ${formatMoney(payload.depositRequiredVnd)} VND.`,
+    data: buildNotificationData(payload),
+  };
+}
+
+function mapParcelFinalPaymentRequested(
+  userId: string,
+  payload: ParcelFinalPaymentRequestedEvent,
+): CreateNotificationDto {
+  return {
+    userId,
+    type: NotificationType.PARCEL_FINAL_PAYMENT_REQUIRED,
+    title: 'Cần thanh toán số dư đơn gửi hàng',
+    body: `${formatParcelLabel(payload)} cần thanh toán số dư ${formatMoney(payload.balanceRequiredVnd)} VND trước ${payload.finalPaymentDeadline}.`,
+    data: buildNotificationData(payload),
+  };
+}
+
+function mapParcelSettlementRecovered(
+  userId: string,
+  payload: ParcelSettlementRecoveredEvent,
+): CreateNotificationDto {
+  if (payload.recoveredStatus === 'READY_TO_LOAD') {
+    return {
+      userId,
+      type: NotificationType.PARCEL_SETTLEMENT_RECOVERED,
+      title: 'Đính chính trạng thái đơn gửi hàng',
+      body: `${formatParcelLabel(payload)} đã được khôi phục và hiện sẵn sàng lên xe. Thông báo quá hạn trước đó không còn hiệu lực.`,
+      data: buildNotificationData(payload),
+    };
+  }
+
+  return {
+    userId,
+    type: NotificationType.PARCEL_SETTLEMENT_RECOVERED,
+    title: 'Đính chính trạng thái đơn gửi hàng',
+    body: `${formatParcelLabel(payload)} đã được đính chính sang trạng thái đã hủy. Số tiền cần hoàn: ${formatMoney(payload.refundAmountVnd)} VND.`,
     data: buildNotificationData(payload),
   };
 }
@@ -732,6 +836,76 @@ function mapPayoutFailed(userId: string, payload: OperatorPayload): CreateNotifi
   };
 }
 
+function mapDirectParcelUser<TPayload extends { userId: string }>(
+  payload: TPayload,
+  mapper: (userId: string, payload: TPayload) => CreateNotificationDto,
+): CreateNotificationDto[] {
+  return [mapper(payload.userId, payload)];
+}
+
+async function mapParcelSenderEvent<TPayload extends ParcelPayload>(
+  payload: TPayload,
+  resolveParcelSnapshot: ((parcelId: string) => Promise<ParcelRecipientSnapshot>) | undefined,
+  mapper: (userId: string, payload: TPayload) => CreateNotificationDto,
+): Promise<CreateNotificationDto[]> {
+  const directSender = payload.userId ?? payload.senderUserId;
+  if (directSender) return [mapper(directSender, payload)];
+
+  const snapshot = await requireParcelSnapshot(payload.parcelId, resolveParcelSnapshot);
+  return [mapper(snapshot.senderUserId, enrichParcelPayload(payload, snapshot))];
+}
+
+async function mapParcelSnapshotSenderEvent<TPayload extends ParcelPayload>(
+  payload: TPayload,
+  resolveParcelSnapshot: ((parcelId: string) => Promise<ParcelRecipientSnapshot>) | undefined,
+  mapper: (userId: string, payload: TPayload) => CreateNotificationDto,
+): Promise<CreateNotificationDto[]> {
+  const snapshot = await requireParcelSnapshot(payload.parcelId, resolveParcelSnapshot);
+  return [mapper(snapshot.senderUserId, enrichParcelPayload(payload, snapshot))];
+}
+
+async function mapParcelOperatorEvent<TPayload extends ParcelPayload>(
+  payload: TPayload,
+  resolveOperatorRecipientUserIds: (operatorId: string) => Promise<string[]>,
+  resolveParcelSnapshot: ((parcelId: string) => Promise<ParcelRecipientSnapshot>) | undefined,
+  mapper: (userId: string, payload: TPayload) => CreateNotificationDto,
+): Promise<CreateNotificationDto[]> {
+  let operatorId = payload.operatorId;
+  let mappedPayload = payload;
+  if (!operatorId) {
+    const snapshot = await requireParcelSnapshot(payload.parcelId, resolveParcelSnapshot);
+    operatorId = snapshot.operatorId;
+    mappedPayload = enrichParcelPayload(payload, snapshot);
+  }
+  const recipients = await resolveOperatorRecipientUserIds(operatorId);
+  return [...new Set(recipients)].map((userId) => mapper(userId, mappedPayload));
+}
+
+async function requireParcelSnapshot(
+  parcelId: string,
+  resolveParcelSnapshot: ((parcelId: string) => Promise<ParcelRecipientSnapshot>) | undefined,
+): Promise<ParcelRecipientSnapshot> {
+  if (!resolveParcelSnapshot) throw new Error('PARCEL_RECIPIENT_PROVIDER_NOT_CONFIGURED');
+  return resolveParcelSnapshot(parcelId);
+}
+
+function enrichParcelPayload<TPayload extends ParcelPayload>(
+  payload: TPayload,
+  snapshot: ParcelRecipientSnapshot,
+): TPayload {
+  return {
+    ...payload,
+    tripId: payload.tripId ?? snapshot.tripId,
+    operatorId: payload.operatorId ?? snapshot.operatorId,
+    senderUserId: payload.senderUserId ?? snapshot.senderUserId,
+    ...(payload.recipientUserId
+      ? { recipientUserId: payload.recipientUserId }
+      : snapshot.recipientUserId
+        ? { recipientUserId: snapshot.recipientUserId }
+        : {}),
+  };
+}
+
 async function fanOut<TPayload extends RecipientPayload>(
   payload: TPayload,
   resolveOperatorRecipientUserIds: (operatorId: string) => Promise<string[]>,
@@ -800,16 +974,15 @@ function formatMoney(amount: z.infer<typeof MoneyAmountSchema>): string {
 function buildNotificationData(
   payload: RecipientPayload & Record<string, unknown>,
 ): Record<string, unknown> {
-  const { userId, userIds, recipientUserIds, ...data } = payload;
-
-  return {
-    ...data,
-    userId: userId ?? null,
-    userIds: userIds ?? null,
-    recipientUserIds: recipientUserIds ?? null,
-  };
+  const { userId, userIds, senderUserId, recipientUserId, recipientUserIds, ...data } = payload;
+  void userId;
+  void userIds;
+  void senderUserId;
+  void recipientUserId;
+  void recipientUserIds;
+  return data;
 }
 
-function isString(value: string | undefined): value is string {
+function isString(value: unknown): value is string {
   return typeof value === 'string';
 }

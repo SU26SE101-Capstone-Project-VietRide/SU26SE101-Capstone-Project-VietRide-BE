@@ -10,7 +10,7 @@ import {
 } from './fcm-push.constants';
 
 const BOOKING_LOOKUP_TIMEOUT_MS = 5_000;
-const BookingTripRecipientsSchema = z
+const bookingTripRecipientsSchema = z
   .object({
     tripId: z.string().uuid(),
     recipients: z.array(
@@ -30,6 +30,29 @@ export class BookingTripRecipientProvider {
   constructor(@Inject(ENV_TOKEN) private readonly env: Env) {}
 
   async resolveTripPassengerUserIds(tripId: string): Promise<string[]> {
+    const projection = await this.getTripRecipients(tripId);
+    return [...new Set(projection.recipients.map((recipient) => recipient.userId))];
+  }
+
+  async resolveAffectedTripPassengerUserIds(
+    tripId: string,
+    affectedBookingIds: readonly string[],
+  ): Promise<string[]> {
+    if (affectedBookingIds.length === 0) return [];
+    const affected = new Set(affectedBookingIds);
+    const projection = await this.getTripRecipients(tripId);
+    return [
+      ...new Set(
+        projection.recipients
+          .filter((recipient) => affected.has(recipient.bookingId))
+          .map((recipient) => recipient.userId),
+      ),
+    ];
+  }
+
+  private async getTripRecipients(
+    tripId: string,
+  ): Promise<z.infer<typeof bookingTripRecipientsSchema>> {
     const response = await fetch(
       new URL(
         `/internal/v1/bookings/trips/${tripId}/notification-recipients`,
@@ -48,9 +71,9 @@ export class BookingTripRecipientProvider {
     }
     if (!response.ok) throw new Error(`BOOKING_RECIPIENT_LOOKUP_FAILED_${response.status}`);
 
-    const projection = BookingTripRecipientsSchema.parse(await response.json());
+    const projection = bookingTripRecipientsSchema.parse(await response.json());
     if (projection.tripId !== tripId) throw new Error('BOOKING_RECIPIENT_TRIP_MISMATCH');
-    return [...new Set(projection.recipients.map((recipient) => recipient.userId))];
+    return projection;
   }
 
   private async signInternalJwt(): Promise<string> {

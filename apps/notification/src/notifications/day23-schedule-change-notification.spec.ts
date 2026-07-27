@@ -40,7 +40,7 @@ const commonSchedule = {
 };
 
 describe('Day 23 schedule notification:', () => {
-  it('binding keeps Booking ownership and removes direct Trip passenger bindings', () => {
+  it('keeps Booking passenger ownership and adds a separate crew-only Trip binding', () => {
     expect(BOOKING_TRIP_CHANGE_QUEUE_BINDINGS).toContainEqual({
       queue: 'notification:booking-pending-action-auto-resolved',
       routingKey: BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY,
@@ -49,7 +49,7 @@ describe('Day 23 schedule notification:', () => {
     const directTripRoutingKeys = TRIP_TRACKING_ALERT_QUEUE_BINDINGS.map(
       ({ routingKey }) => routingKey,
     );
-    expect(directTripRoutingKeys).not.toContain('trip.trip.schedule_changed');
+    expect(directTripRoutingKeys).toContain('trip.trip.schedule_changed');
     expect(directTripRoutingKeys).not.toContain('trip.trip.cancelled');
     expect(directTripRoutingKeys).toContain(TRIP_ROUTE_CHANGED_ROUTING_KEY);
     expect(directTripRoutingKeys).toContain(TRIP_CREW_CHANGED_ROUTING_KEY);
