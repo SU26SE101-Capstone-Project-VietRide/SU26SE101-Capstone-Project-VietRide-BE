@@ -47,6 +47,20 @@ public sealed class ReweighParcelIdempotencyTests
         result.BalanceRequiredVnd.Should().Be(2_800);
         result.RefundDueVnd.Should().Be(0);
         result.FinalPaymentDeadline.Should().Be(Now.AddMinutes(20));
+        fixture.Outbox.Events.Should().ContainSingle();
+        var integrationEvent = fixture.Outbox.Events.Single();
+        integrationEvent.EventType.Should().Be(ParcelOutboxEvents.FinalPaymentRequested);
+        using var payload = JsonDocument.Parse(integrationEvent.PayloadJson);
+        payload.RootElement.GetProperty("eventId").GetGuid().Should().Be(integrationEvent.EventId);
+        payload.RootElement.GetProperty("parcelId").GetGuid().Should().Be(ParcelId);
+        payload.RootElement.GetProperty("parcelCode").GetString().Should().Be("VRP-20260727-TEST0001");
+        payload.RootElement.GetProperty("operatorId").GetGuid().Should().Be(OperatorId);
+        payload.RootElement.GetProperty("userId").GetGuid().Should().Be(SenderUserId);
+        payload.RootElement.GetProperty("tripId").GetGuid().Should().Be(TripId);
+        payload.RootElement.GetProperty("balanceRequiredVnd").GetInt64().Should().Be(2_800);
+        payload.RootElement.GetProperty("balancePaidVnd").GetInt64().Should().Be(0);
+        payload.RootElement.GetProperty("finalPaymentDeadline").GetDateTimeOffset()
+            .Should().Be(Now.AddMinutes(20));
         await fixture.IdempotentTrip.Received(1).RemeasureCargoAsync(
             TripId,
             ParcelId,
@@ -290,11 +304,21 @@ public sealed class ReweighParcelIdempotencyTests
 
     private sealed class RecordingOutbox : IIntegrationEventOutbox
     {
-        public List<(string EventType, string PayloadJson)> Events { get; } = [];
+        public List<(Guid EventId, string EventType, string PayloadJson)> Events { get; } = [];
+
+        public Task EnqueueAsync(
+            Guid eventId,
+            string eventType,
+            string payloadJson,
+            CancellationToken ct = default)
+        {
+            Events.Add((eventId, eventType, payloadJson));
+            return Task.CompletedTask;
+        }
 
         public Task EnqueueAsync(string eventType, string payloadJson, CancellationToken ct = default)
         {
-            Events.Add((eventType, payloadJson));
+            Events.Add((Guid.NewGuid(), eventType, payloadJson));
             return Task.CompletedTask;
         }
     }

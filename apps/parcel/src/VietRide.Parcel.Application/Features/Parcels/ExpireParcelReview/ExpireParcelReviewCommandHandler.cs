@@ -85,6 +85,7 @@ public sealed class ExpireParcelReviewCommandHandler
                         operatorId = snapshot.OperatorId,
                         userId = snapshot.SenderUserId,
                         tripId = snapshot.TripId,
+                        reason = ParcelRejectionReasons.ReviewTimeout,
                         refundAmount = 0L,
                     }),
                     cancellationToken);

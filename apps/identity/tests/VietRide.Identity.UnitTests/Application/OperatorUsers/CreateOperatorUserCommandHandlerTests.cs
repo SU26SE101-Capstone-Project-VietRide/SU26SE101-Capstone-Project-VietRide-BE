@@ -27,7 +27,8 @@ public sealed class CreateOperatorUserCommandHandlerTests
         var operators = new FakeOperatorRepository(CreateOperator(OperatorRegistrationStatus.APPROVED));
         var subscriptions = new FakeOperatorSubscriptionRepository(true);
         var emailService = Substitute.For<IEmailService>();
-        var handler = CreateHandler(users, operators, subscriptions, emailService);
+        var usageWarnings = Substitute.For<ISubscriptionUsageWarningPublisher>();
+        var handler = CreateHandler(users, operators, subscriptions, emailService, usageWarnings: usageWarnings);
 
         var response = await handler.Handle(CreateCommand(UserRole.DRIVER), CancellationToken.None);
 
@@ -50,6 +51,13 @@ public sealed class CreateOperatorUserCommandHandlerTests
         subscriptions.CapturedActivityLog!.UserId.Should().Be(CallerUserId);
         subscriptions.CapturedActivityLog.Action.Should().Be(ActivityLogAction.SET_INITIAL_PASSWORD);
         subscriptions.CapturedActivityLog.Metadata.Should().Contain("OPERATOR_USER_CREATE");
+        await usageWarnings.Received(1).EnqueueIfThresholdCrossedAsync(
+            Arg.Any<OperatorSubscription>(),
+            Arg.Any<SubscriptionPlan>(),
+            SubscriptionUsageResource.DRIVERS,
+            1,
+            null,
+            Arg.Any<CancellationToken>());
 
         await emailService.Received(1).SendAccountCreatedLinkAsync(
             "driver@example.com",
@@ -229,7 +237,8 @@ public sealed class CreateOperatorUserCommandHandlerTests
         IOperatorRepository operators,
         IOperatorSubscriptionRepository subscriptions,
         IEmailService emailService,
-        IInitialPasswordTokenService? initialPasswordTokens = null)
+        IInitialPasswordTokenService? initialPasswordTokens = null,
+        ISubscriptionUsageWarningPublisher? usageWarnings = null)
     {
         var tokens = initialPasswordTokens ?? Substitute.For<IInitialPasswordTokenService>();
         tokens.GenerateCode().Returns("initial-code");
@@ -248,7 +257,8 @@ public sealed class CreateOperatorUserCommandHandlerTests
             subscriptions,
             tokens,
             emailService,
-            clock);
+            clock,
+            usageWarnings ?? Substitute.For<ISubscriptionUsageWarningPublisher>());
     }
 
     private static CreateOperatorUserCommand CreateCommand(UserRole role)
@@ -373,6 +383,18 @@ public sealed class CreateOperatorUserCommandHandlerTests
             CapturedToken = initialPasswordToken;
             CapturedActivityLog = activityLog;
             return Task.FromResult(_canCreate);
+        }
+
+        public Task<(OperatorSubscription Subscription, SubscriptionPlan Plan)?> GetCurrentWithPlanByOperatorIdAsync(
+            Guid operatorId,
+            CancellationToken cancellationToken = default)
+        {
+            if (!_canCreate)
+                return Task.FromResult<(OperatorSubscription, SubscriptionPlan)?>(null);
+
+            var plan = SubscriptionPlan.CreateStarter();
+            var subscription = OperatorSubscription.CreatePendingApproval(operatorId, plan.Id, Now);
+            return Task.FromResult<(OperatorSubscription, SubscriptionPlan)?>((subscription, plan));
         }
 
         public Task<OperatorSubscription?> GetCurrentByOperatorIdAsync(Guid operatorId, CancellationToken cancellationToken = default) => Task.FromResult<OperatorSubscription?>(null);

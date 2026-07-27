@@ -1,4 +1,6 @@
 using FluentAssertions;
+using NSubstitute;
+using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Application.Features.Internal.Operators.GetInternalOperator;
 using VietRide.Identity.Application.Features.Internal.Operators.GetInternalOperatorSubscription;
@@ -102,7 +104,7 @@ public sealed class InternalOperatorHandlersTests
         var updated = CreateSubscription(SubscriptionUsageResource.DRIVERS, 3);
         var plan = SubscriptionPlan.CreateStarter();
         var subscriptions = new FakeOperatorSubscriptionRepository((current, plan), (updated, plan));
-        var handler = new IncrementOperatorUsageCommandHandler(new FakeOperatorRepository(CreateOperator()), subscriptions);
+        var handler = CreateUsageHandler(subscriptions);
 
         var result = await handler.Handle(
             new IncrementOperatorUsageCommand(OperatorId, SubscriptionUsageResource.DRIVERS.ToString(), 2),
@@ -118,9 +120,7 @@ public sealed class InternalOperatorHandlersTests
     {
         var current = CreateSubscription(SubscriptionUsageResource.DRIVERS, 5);
         var plan = SubscriptionPlan.CreateStarter();
-        var handler = new IncrementOperatorUsageCommandHandler(
-            new FakeOperatorRepository(CreateOperator()),
-            new FakeOperatorSubscriptionRepository((current, plan), null));
+        var handler = CreateUsageHandler(new FakeOperatorSubscriptionRepository((current, plan), null));
 
         var act = () => handler.Handle(
             new IncrementOperatorUsageCommand(OperatorId, SubscriptionUsageResource.DRIVERS.ToString(), 1),
@@ -136,9 +136,7 @@ public sealed class InternalOperatorHandlersTests
         var current = CreateSubscription(SubscriptionUsageResource.DRIVERS, 0);
         current.MarkExpired(Now.AddDays(31));
         var plan = SubscriptionPlan.CreateStarter();
-        var handler = new IncrementOperatorUsageCommandHandler(
-            new FakeOperatorRepository(CreateOperator()),
-            new FakeOperatorSubscriptionRepository((current, plan), null));
+        var handler = CreateUsageHandler(new FakeOperatorSubscriptionRepository((current, plan), null));
 
         var act = () => handler.Handle(
             new IncrementOperatorUsageCommand(OperatorId, SubscriptionUsageResource.DRIVERS.ToString(), 1),
@@ -146,6 +144,43 @@ public sealed class InternalOperatorHandlersTests
 
         var assertion = await act.Should().ThrowAsync<IdentityDomainException>();
         assertion.Which.ErrorCode.Should().Be("SUBSCRIPTION_EXPIRED");
+    }
+
+    [Fact]
+    public async Task IncrementOperatorUsage_CrossesEightyPercent_DelegatesDurableWarningCheck()
+    {
+        var current = CreateSubscription(SubscriptionUsageResource.DRIVERS, 3);
+        var updated = CreateSubscription(SubscriptionUsageResource.DRIVERS, 4);
+        var plan = SubscriptionPlan.CreateStarter();
+        var usageWarnings = Substitute.For<ISubscriptionUsageWarningPublisher>();
+        var handler = new IncrementOperatorUsageCommandHandler(
+            new FakeOperatorRepository(CreateOperator()),
+            new FakeOperatorSubscriptionRepository((current, plan), (updated, plan)),
+            usageWarnings);
+
+        await handler.Handle(
+            new IncrementOperatorUsageCommand(
+                OperatorId,
+                SubscriptionUsageResource.DRIVERS.ToString(),
+                1),
+            CancellationToken.None);
+
+        await usageWarnings.Received(1).EnqueueIfThresholdCrossedAsync(
+            updated,
+            plan,
+            SubscriptionUsageResource.DRIVERS,
+            1,
+            null,
+            Arg.Any<CancellationToken>());
+    }
+
+    private static IncrementOperatorUsageCommandHandler CreateUsageHandler(
+        IOperatorSubscriptionRepository subscriptions)
+    {
+        return new IncrementOperatorUsageCommandHandler(
+            new FakeOperatorRepository(CreateOperator()),
+            subscriptions,
+            Substitute.For<ISubscriptionUsageWarningPublisher>());
     }
 
     private static Operator CreateOperator()

@@ -67,6 +67,22 @@ public sealed class ReviewParcelCommandHandler
                     command.ParcelId, command.ReviewedByUserId, parcel.DepositRequiredVnd, now, cancellationToken)
                     ?? throw new CodedConflictException(
                         "RACE_LOST", "Parcel was already reviewed or status changed.");
+                var eventId = Guid.NewGuid();
+                await ParcelOutboxEvents.EnqueueAsync(
+                    _outbox,
+                    eventId,
+                    ParcelOutboxEvents.ReviewApproved,
+                    new
+                    {
+                        eventId,
+                        occurredAt = now,
+                        parcelId = snapshot.ParcelId,
+                        parcelCode = snapshot.ParcelCode,
+                        operatorId = snapshot.OperatorId,
+                        userId = snapshot.SenderUserId,
+                        depositRequiredVnd = snapshot.DepositAmount,
+                    },
+                    cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
                 await _unitOfWork.CommitAsync(cancellationToken);
             }
@@ -98,18 +114,32 @@ public sealed class ReviewParcelCommandHandler
                 throw new CodedValidationException(
                     "VALIDATION_ERROR", "Reason is required for REJECTED decision.");
 
+            var rejectionReason = command.Reason.Trim();
+
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
             ParcelPaymentTransitionSnapshot snapshot;
             try
             {
                 snapshot = await _parcelRepository.TryRejectReviewAsync(
-                    command.ParcelId, command.ReviewedByUserId, command.Reason, now, cancellationToken)
+                    command.ParcelId, command.ReviewedByUserId, rejectionReason, now, cancellationToken)
                     ?? throw new CodedConflictException(
                         "RACE_LOST", "Parcel was already reviewed or status changed.");
+                var eventId = Guid.NewGuid();
                 await ParcelOutboxEvents.EnqueueAsync(
                     _outbox,
+                    eventId,
                     ParcelOutboxEvents.Rejected,
-                    new { parcelId = snapshot.ParcelId },
+                    new
+                    {
+                        eventId,
+                        occurredAt = now,
+                        parcelId = snapshot.ParcelId,
+                        parcelCode = snapshot.ParcelCode,
+                        operatorId = snapshot.OperatorId,
+                        userId = snapshot.SenderUserId,
+                        tripId = snapshot.TripId,
+                        reason = rejectionReason,
+                    },
                     cancellationToken);
                 await _statsRepository.UpsertIncrementAsync(
                     snapshot.OperatorId,

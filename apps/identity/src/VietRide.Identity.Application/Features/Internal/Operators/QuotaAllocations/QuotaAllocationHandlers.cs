@@ -1,4 +1,5 @@
 using MediatR;
+using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
@@ -11,7 +12,12 @@ public sealed class ClaimQuotaAllocationCommandHandler : IRequestHandler<ClaimQu
 {
     private readonly IOperatorSubscriptionRepository _subscriptions;
     private readonly ISubscriptionQuotaAllocationRepository _allocations;
-    public ClaimQuotaAllocationCommandHandler(IOperatorSubscriptionRepository subscriptions, ISubscriptionQuotaAllocationRepository allocations) => (_subscriptions, _allocations) = (subscriptions, allocations);
+    private readonly ISubscriptionUsageWarningPublisher _usageWarnings;
+    public ClaimQuotaAllocationCommandHandler(
+        IOperatorSubscriptionRepository subscriptions,
+        ISubscriptionQuotaAllocationRepository allocations,
+        ISubscriptionUsageWarningPublisher usageWarnings)
+        => (_subscriptions, _allocations, _usageWarnings) = (subscriptions, allocations, usageWarnings);
     public async Task<QuotaAllocationDto> Handle(ClaimQuotaAllocationCommand request, CancellationToken ct)
     {
         if (!Enum.TryParse<SubscriptionUsageResource>(request.Resource, false, out var resource)) throw new CodedValidationException("VALIDATION_ERROR", "Invalid quota resource.");
@@ -25,6 +31,13 @@ public sealed class ClaimQuotaAllocationCommandHandler : IRequestHandler<ClaimQu
         if (updated is null) throw new IdentityDomainException("SUBSCRIPTION_LIMIT_EXCEEDED", "Subscription limit exceeded.");
         var allocation = SubscriptionQuotaAllocation.Create(request.OperatorId, current.Subscription.Id, resource, request.ResourceId, request.PeriodKey);
         await _allocations.AddAsync(allocation, ct);
+        await _usageWarnings.EnqueueIfThresholdCrossedAsync(
+            updated.Value.Subscription,
+            updated.Value.Plan,
+            resource,
+            1,
+            request.PeriodKey,
+            ct);
         return new(allocation.Id, allocation.Resource.ToString(), allocation.ResourceId, allocation.PeriodKey);
     }
 }

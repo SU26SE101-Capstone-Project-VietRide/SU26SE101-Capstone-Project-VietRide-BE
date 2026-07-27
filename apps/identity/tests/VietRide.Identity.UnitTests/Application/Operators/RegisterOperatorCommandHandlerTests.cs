@@ -24,6 +24,7 @@ public sealed class RegisterOperatorCommandHandlerTests
         var command = ValidCommand();
         OperatorSubscription? capturedSubscription = null;
         var capturedEvents = new List<(string EventType, string Payload)>();
+        var capturedCanonicalEvents = new List<(Guid EventId, string EventType, string Payload)>();
 
         fixture.SubscriptionPlans.GetStarterPlanAsync(Arg.Any<CancellationToken>())
             .Returns(SubscriptionPlan.CreateStarter());
@@ -34,6 +35,19 @@ public sealed class RegisterOperatorCommandHandlerTests
             .Returns(ci =>
             {
                 capturedEvents.Add((ci.ArgAt<string>(0), ci.ArgAt<string>(1)));
+                return Task.CompletedTask;
+            });
+        fixture.Outbox.EnqueueAsync(
+                Arg.Any<Guid>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                capturedCanonicalEvents.Add((
+                    ci.ArgAt<Guid>(0),
+                    ci.ArgAt<string>(1),
+                    ci.ArgAt<string>(2)));
                 return Task.CompletedTask;
             });
 
@@ -53,6 +67,16 @@ public sealed class RegisterOperatorCommandHandlerTests
         otpRoot.GetProperty("purpose").GetString().Should().Be("REGISTRATION");
         otpRoot.GetProperty("ttlMinutes").GetInt32().Should().Be(10);
         otpRoot.GetProperty("code").GetString().Should().HaveLength(6);
+
+        var registrationEntry = capturedCanonicalEvents.Should()
+            .ContainSingle(e => e.EventType == "identity.operator.registration_submitted")
+            .Which;
+        using var registrationDoc = JsonDocument.Parse(registrationEntry.Payload);
+        var registrationRoot = registrationDoc.RootElement;
+        registrationRoot.GetProperty("eventId").GetGuid().Should().Be(registrationEntry.EventId);
+        registrationRoot.GetProperty("occurredAt").GetDateTimeOffset().Should().Be(FixedNow);
+        registrationRoot.GetProperty("operatorId").GetGuid().Should().Be(response.OperatorId);
+        registrationRoot.GetProperty("companyName").GetString().Should().Be("Operator Co");
 
         await fixture.ActivityLogs.Received(1).AddAsync(
             Arg.Is<ActivityLog>(x => x.Action == ActivityLogAction.CREATE_OPERATOR && HasCanonicalSelfRegisterMetadata(x.Metadata)),

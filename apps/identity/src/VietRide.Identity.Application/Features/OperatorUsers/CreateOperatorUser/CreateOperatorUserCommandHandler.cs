@@ -22,6 +22,7 @@ public sealed class CreateOperatorUserCommandHandler
     private readonly IInitialPasswordTokenService _initialPasswordTokens;
     private readonly IEmailService _emailService;
     private readonly IClock _clock;
+    private readonly ISubscriptionUsageWarningPublisher _usageWarnings;
 
     public CreateOperatorUserCommandHandler(
         IUserRepository users,
@@ -29,7 +30,8 @@ public sealed class CreateOperatorUserCommandHandler
         IOperatorSubscriptionRepository subscriptions,
         IInitialPasswordTokenService initialPasswordTokens,
         IEmailService emailService,
-        IClock clock)
+        IClock clock,
+        ISubscriptionUsageWarningPublisher usageWarnings)
     {
         _users = users;
         _operators = operators;
@@ -37,6 +39,7 @@ public sealed class CreateOperatorUserCommandHandler
         _initialPasswordTokens = initialPasswordTokens;
         _emailService = emailService;
         _clock = clock;
+        _usageWarnings = usageWarnings;
     }
 
     public async Task<CreateOperatorUserResponseDto> Handle(
@@ -104,6 +107,25 @@ public sealed class CreateOperatorUserCommandHandler
             throw new IdentityDomainException(
                 "SUBSCRIPTION_LIMIT_EXCEEDED",
                 "Subscription limit exceeded for this operator user role.");
+
+        var usageResource = role switch
+        {
+            UserRole.DRIVER => SubscriptionUsageResource.DRIVERS,
+            UserRole.ASSISTANT => SubscriptionUsageResource.ASSISTANTS,
+            UserRole.OPERATOR_STAFF => SubscriptionUsageResource.OPERATOR_USERS,
+            _ => throw new ArgumentOutOfRangeException(nameof(role), role, null),
+        };
+        var updatedSubscription = await _subscriptions.GetCurrentWithPlanByOperatorIdAsync(
+            request.CallerOperatorId.Value,
+            cancellationToken)
+            ?? throw new InvalidOperationException("Updated operator subscription could not be loaded.");
+        await _usageWarnings.EnqueueIfThresholdCrossedAsync(
+            updatedSubscription.Subscription,
+            updatedSubscription.Plan,
+            usageResource,
+            1,
+            null,
+            cancellationToken);
 
         var setInitialPasswordUrl = _initialPasswordTokens.BuildSetInitialPasswordUrl(code, user.Role);
         await _emailService.SendAccountCreatedLinkAsync(

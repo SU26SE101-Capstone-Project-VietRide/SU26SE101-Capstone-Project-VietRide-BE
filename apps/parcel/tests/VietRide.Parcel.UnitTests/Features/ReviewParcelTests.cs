@@ -1,6 +1,8 @@
+using System.Text.Json;
 using FluentAssertions;
 using NSubstitute;
 using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Parcel.Application.Features.Parcels.Review;
 using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
@@ -39,12 +41,23 @@ public sealed class ReviewParcelTests
             .Returns(new ParcelPaymentTransitionSnapshot(ParcelId, "VRP-001", ParcelStatus.PENDING_PAYMENT,
                 200_000, 0, OperatorId, TripId, null, SenderUserId, ParcelSizeCategory.EXTRA_LARGE, null));
 
-        var handler = new ReviewParcelCommandHandler(repo, UnitOfWork(), Outbox(), Stats());
+        var outbox = new RecordingOutbox();
+        var handler = new ReviewParcelCommandHandler(repo, UnitOfWork(), outbox, Stats());
         var result = await handler.Handle(new ReviewParcelCommand(
             ParcelId, OperatorId, OperatorId, "APPROVED", null), default);
 
         result.Status.Should().Be("PENDING_PAYMENT");
         result.DepositAmount.Should().Be(200_000);
+        outbox.Events.Should().ContainSingle();
+        var integrationEvent = outbox.Events.Single();
+        integrationEvent.EventType.Should().Be(ParcelOutboxEvents.ReviewApproved);
+        using var payload = JsonDocument.Parse(integrationEvent.PayloadJson);
+        payload.RootElement.GetProperty("eventId").GetGuid().Should().Be(integrationEvent.EventId);
+        payload.RootElement.GetProperty("parcelId").GetGuid().Should().Be(ParcelId);
+        payload.RootElement.GetProperty("parcelCode").GetString().Should().Be("VRP-001");
+        payload.RootElement.GetProperty("operatorId").GetGuid().Should().Be(OperatorId);
+        payload.RootElement.GetProperty("userId").GetGuid().Should().Be(SenderUserId);
+        payload.RootElement.GetProperty("depositRequiredVnd").GetInt64().Should().Be(200_000);
     }
 
     [Fact]
@@ -57,11 +70,28 @@ public sealed class ReviewParcelTests
             .Returns(new ParcelPaymentTransitionSnapshot(ParcelId, "VRP-001", ParcelStatus.REJECTED,
                 0, 0, OperatorId, TripId, null, SenderUserId, ParcelSizeCategory.EXTRA_LARGE, null));
 
-        var handler = new ReviewParcelCommandHandler(repo, UnitOfWork(), Outbox(), Stats());
+        var outbox = new RecordingOutbox();
+        var handler = new ReviewParcelCommandHandler(repo, UnitOfWork(), outbox, Stats());
         var result = await handler.Handle(new ReviewParcelCommand(
-            ParcelId, OperatorId, OperatorId, "REJECTED", "Overweight"), default);
+            ParcelId, OperatorId, OperatorId, "REJECTED", "  Overweight  "), default);
 
         result.Status.Should().Be("REJECTED");
+        outbox.Events.Should().ContainSingle();
+        var integrationEvent = outbox.Events.Single();
+        integrationEvent.EventType.Should().Be(ParcelOutboxEvents.Rejected);
+        using var payload = JsonDocument.Parse(integrationEvent.PayloadJson);
+        payload.RootElement.GetProperty("eventId").GetGuid().Should().Be(integrationEvent.EventId);
+        payload.RootElement.GetProperty("parcelId").GetGuid().Should().Be(ParcelId);
+        payload.RootElement.GetProperty("operatorId").GetGuid().Should().Be(OperatorId);
+        payload.RootElement.GetProperty("userId").GetGuid().Should().Be(SenderUserId);
+        payload.RootElement.GetProperty("tripId").GetGuid().Should().Be(TripId);
+        payload.RootElement.GetProperty("reason").GetString().Should().Be("Overweight");
+        await repo.Received(1).TryRejectReviewAsync(
+            ParcelId,
+            OperatorId,
+            "Overweight",
+            Arg.Any<DateTimeOffset>(),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -86,4 +116,25 @@ public sealed class ReviewParcelTests
 
     private static IParcelStatsRepository Stats()
         => Substitute.For<IParcelStatsRepository>();
+
+    private sealed class RecordingOutbox : IIntegrationEventOutbox
+    {
+        public List<(Guid EventId, string EventType, string PayloadJson)> Events { get; } = [];
+
+        public Task EnqueueAsync(
+            Guid eventId,
+            string eventType,
+            string payloadJson,
+            CancellationToken ct = default)
+        {
+            Events.Add((eventId, eventType, payloadJson));
+            return Task.CompletedTask;
+        }
+
+        public Task EnqueueAsync(string eventType, string payloadJson, CancellationToken ct = default)
+        {
+            Events.Add((Guid.NewGuid(), eventType, payloadJson));
+            return Task.CompletedTask;
+        }
+    }
 }

@@ -449,6 +449,19 @@ CREATE TABLE subscription_quota_allocations (
 CREATE INDEX idx_subscription_quota_allocations_subscription_resource
     ON subscription_quota_allocations (subscription_id, resource, released_at);
 
+-- Durable marker ensuring the 80% warning is emitted once per resource/period.
+CREATE TABLE subscription_usage_warning_markers (
+    id UUID PRIMARY KEY,
+    subscription_id UUID NOT NULL REFERENCES operator_subscriptions (id) ON DELETE RESTRICT,
+    resource VARCHAR(32) NOT NULL,
+    period_key VARCHAR(64) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    row_version INT NOT NULL DEFAULT 1,
+    CONSTRAINT uq_subscription_usage_warning_markers_period
+        UNIQUE (subscription_id, resource, period_key)
+);
+
 -- Durable marker for replay-safe OperatorWallet bootstrap events.
 CREATE TABLE operator_wallet_backfill_markers (
     operator_id UUID PRIMARY KEY,
@@ -531,6 +544,8 @@ CREATE TRIGGER trg_operator_subscriptions_updated_at BEFORE UPDATE ON operator_s
 CREATE TRIGGER trg_subscription_upgrade_attempts_updated_at BEFORE UPDATE ON subscription_upgrade_attempts
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 CREATE TRIGGER trg_subscription_quota_allocations_updated_at BEFORE UPDATE ON subscription_quota_allocations
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+CREATE TRIGGER trg_subscription_usage_warning_markers_updated_at BEFORE UPDATE ON subscription_usage_warning_markers
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 CREATE TRIGGER trg_operator_wallet_backfill_markers_updated_at BEFORE UPDATE ON operator_wallet_backfill_markers
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();

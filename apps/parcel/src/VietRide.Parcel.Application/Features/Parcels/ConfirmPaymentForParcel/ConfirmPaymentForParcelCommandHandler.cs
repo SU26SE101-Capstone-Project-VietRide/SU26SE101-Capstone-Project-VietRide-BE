@@ -343,6 +343,24 @@ public sealed class ConfirmPaymentForParcelCommandHandler
                 cancellationToken);
         }
 
+        var recoveredEventId = Guid.NewGuid();
+        await ParcelOutboxEvents.EnqueueAsync(
+            _outbox,
+            recoveredEventId,
+            ParcelOutboxEvents.SettlementRecovered,
+            new
+            {
+                eventId = recoveredEventId,
+                occurredAt = now,
+                parcelId = snapshot.ParcelId,
+                parcelCode = snapshot.ParcelCode,
+                userId = snapshot.SenderUserId,
+                tripId = snapshot.TripId,
+                recoveredStatus = snapshot.Status.ToString(),
+                refundAmountVnd = refundAmount,
+            },
+            cancellationToken);
+
         await _statsRepository.UpsertIncrementAsync(
             snapshot.OperatorId,
             DateOnly.FromDateTime(now.UtcDateTime),

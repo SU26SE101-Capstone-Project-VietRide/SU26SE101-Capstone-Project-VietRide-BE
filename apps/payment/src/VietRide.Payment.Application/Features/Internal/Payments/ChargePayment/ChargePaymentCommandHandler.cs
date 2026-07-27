@@ -17,6 +17,7 @@ namespace VietRide.Payment.Application.Features.Internal.Payments.ChargePayment;
 
 public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentCommand, ChargePaymentResult>
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const string WalletMethod = "WALLET";
     private const string VnPayMethod = "VNPAY";
 
@@ -110,7 +111,7 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
         payment.AttachContext(contextJson);
 
         var (walletRef, platformRef) = MapChargeRefs(referenceType);
-        await _payments.DebitWalletPaymentAsync(
+        var walletTransaction = await _payments.DebitWalletPaymentAsync(
                 request.UserId,
                 request.ReferenceId,
                 amount,
@@ -125,6 +126,7 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
                 cancellationToken)
             .ConfigureAwait(false);
         await _payments.AddAsync(payment, cancellationToken).ConfigureAwait(false);
+        await EnqueueWalletDebitedAsync(walletTransaction, now, cancellationToken).ConfigureAwait(false);
         await RecordRevenueAndEnqueuePaymentSucceededAsync(payment, cancellationToken).ConfigureAwait(false);
 
         return ToResult(payment);
@@ -194,6 +196,27 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
             cancellationToken).ConfigureAwait(false);
         var payload = JsonSerializer.Serialize(evt, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         await _outbox.EnqueueAsync(evt.EventType, payload, cancellationToken).ConfigureAwait(false);
+    }
+
+    private Task EnqueueWalletDebitedAsync(
+        WalletTransaction transaction,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken)
+    {
+        var evt = new WalletDebitedIntegrationEvent(
+            Guid.NewGuid(),
+            occurredAt,
+            transaction.UserId,
+            transaction.Id,
+            transaction.Amount.Amount,
+            transaction.BalanceAfter.Amount,
+            transaction.ReferenceType.ToString(),
+            transaction.ReferenceId!.Value);
+        return _outbox.EnqueueAsync(
+            evt.EventId,
+            evt.EventType,
+            JsonSerializer.Serialize(evt, JsonOptions),
+            cancellationToken);
     }
 
     private static ChargePaymentResult ToResult(PaymentEntity payment)

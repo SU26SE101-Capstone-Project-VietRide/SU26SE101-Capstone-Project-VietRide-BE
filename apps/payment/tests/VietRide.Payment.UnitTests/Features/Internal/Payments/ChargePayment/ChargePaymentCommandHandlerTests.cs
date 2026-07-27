@@ -47,6 +47,17 @@ public sealed class ChargePaymentCommandHandlerTests
         payload.RootElement.GetProperty("referenceType").GetString().Should().Be("BOOKING");
         payload.RootElement.GetProperty("referenceId").GetGuid().Should().Be(bookingId);
         payload.RootElement.GetProperty("amount").GetInt64().Should().Be(250_000);
+        var walletDebit = outbox.CanonicalEvents.Should()
+            .ContainSingle(evt => evt.EventType == "payment.wallet.debited")
+            .Which;
+        using var debitPayload = JsonDocument.Parse(walletDebit.PayloadJson);
+        var debitRoot = debitPayload.RootElement;
+        debitRoot.GetProperty("eventId").GetGuid().Should().Be(walletDebit.EventId);
+        debitRoot.GetProperty("userId").GetGuid().Should().Be(userId);
+        debitRoot.GetProperty("amount").GetInt64().Should().Be(250_000);
+        debitRoot.GetProperty("balanceAfter").GetInt64().Should().Be(100_000);
+        debitRoot.GetProperty("referenceType").GetString().Should().Be("BOOKING_PAYMENT");
+        debitRoot.GetProperty("referenceId").GetGuid().Should().Be(bookingId);
     }
 
     [Fact]
@@ -437,6 +448,17 @@ public sealed class ChargePaymentCommandHandlerTests
     private sealed class FakeIntegrationEventOutbox : IIntegrationEventOutbox
     {
         public List<(string EventType, string PayloadJson)> Events { get; } = [];
+        public List<(Guid EventId, string EventType, string PayloadJson)> CanonicalEvents { get; } = [];
+
+        public Task EnqueueAsync(
+            Guid eventId,
+            string eventType,
+            string payloadJson,
+            CancellationToken ct = default)
+        {
+            CanonicalEvents.Add((eventId, eventType, payloadJson));
+            return Task.CompletedTask;
+        }
 
         public Task EnqueueAsync(string eventType, string payloadJson, CancellationToken ct = default)
         {

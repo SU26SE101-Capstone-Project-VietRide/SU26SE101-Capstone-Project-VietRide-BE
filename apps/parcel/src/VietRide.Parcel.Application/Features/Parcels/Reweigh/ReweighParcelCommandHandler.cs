@@ -171,6 +171,29 @@ public sealed class ReweighParcelCommandHandler
                     cancellationToken);
             }
 
+            if (capacityAccepted && balanceRequired.Amount > 0 && finalPaymentDeadline.HasValue)
+            {
+                var eventId = Guid.NewGuid();
+                await ParcelOutboxEvents.EnqueueAsync(
+                    _outbox,
+                    eventId,
+                    ParcelOutboxEvents.FinalPaymentRequested,
+                    new
+                    {
+                        eventId,
+                        occurredAt = now,
+                        parcelId = snapshot.ParcelId,
+                        parcelCode = snapshot.ParcelCode,
+                        operatorId = snapshot.OperatorId,
+                        userId = snapshot.SenderUserId,
+                        tripId = snapshot.TripId,
+                        balanceRequiredVnd = balanceRequired.Amount,
+                        balancePaidVnd = parcel.BalancePaidVnd.Amount,
+                        finalPaymentDeadline = finalPaymentDeadline.Value,
+                    },
+                    cancellationToken);
+            }
+
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await _unitOfWork.CommitAsync(cancellationToken);
         }

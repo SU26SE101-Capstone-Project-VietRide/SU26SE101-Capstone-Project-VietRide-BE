@@ -193,7 +193,12 @@ public sealed class ParcelTimeoutJobTests
         await repo.Received(2).TryAutoRejectReviewAsync(
             ParcelId, "OPERATOR_REVIEW_TIMEOUT", Now, Arg.Any<CancellationToken>());
         await outbox.Received(1).EnqueueAsync(
-            Arg.Any<Guid>(), ParcelOutboxEvents.Cancelled, Arg.Any<string>(), Arg.Any<CancellationToken>());
+            Arg.Any<Guid>(),
+            ParcelOutboxEvents.Cancelled,
+            Arg.Is<string>(payload => payload.Contains(
+                "\"reason\":\"OPERATOR_REVIEW_TIMEOUT\"",
+                StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
         await outbox.DidNotReceiveWithAnyArgs().EnqueueAsync(default!, default!, default);
         await stats.Received(1).UpsertIncrementAsync(
             OperatorId,

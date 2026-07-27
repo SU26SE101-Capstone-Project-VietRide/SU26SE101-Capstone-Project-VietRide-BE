@@ -163,7 +163,17 @@ public sealed class ParcelFinalPaymentTests
             CancellationToken.None);
 
         handled.Should().BeTrue();
-        fixture.Outbox.Events.Should().BeEmpty();
+        fixture.Outbox.Events.Should().ContainSingle();
+        var integrationEvent = fixture.Outbox.Events.Single();
+        integrationEvent.EventType.Should().Be(ParcelOutboxEvents.SettlementRecovered);
+        using var payload = JsonDocument.Parse(integrationEvent.PayloadJson);
+        payload.RootElement.GetProperty("eventId").GetGuid().Should().Be(integrationEvent.EventId);
+        payload.RootElement.GetProperty("parcelId").GetGuid().Should().Be(ParcelId);
+        payload.RootElement.GetProperty("parcelCode").GetString().Should().Be("VRP-20260727-FINAL001");
+        payload.RootElement.GetProperty("userId").GetGuid().Should().Be(SenderUserId);
+        payload.RootElement.GetProperty("tripId").GetGuid().Should().Be(TripId);
+        payload.RootElement.GetProperty("recoveredStatus").GetString().Should().Be("READY_TO_LOAD");
+        payload.RootElement.GetProperty("refundAmountVnd").GetInt64().Should().Be(0);
         await fixture.IdempotentTrip.Received(1).ReserveCargoAsync(
             TripId,
             ParcelId,
@@ -206,11 +216,17 @@ public sealed class ParcelFinalPaymentTests
             CancellationToken.None);
 
         handled.Should().BeTrue();
-        fixture.Outbox.Events.Should().ContainSingle();
-        using var payload = JsonDocument.Parse(fixture.Outbox.Events.Single().PayloadJson);
-        payload.RootElement.GetProperty("amount").GetInt64().Should().Be(10_000);
-        payload.RootElement.GetProperty("idempotencyKey").GetString()
+        fixture.Outbox.Events.Should().HaveCount(2);
+        var refundEvent = fixture.Outbox.Events.Single(evt => evt.EventType == ParcelOutboxEvents.RefundInitiated);
+        using var refundPayload = JsonDocument.Parse(refundEvent.PayloadJson);
+        refundPayload.RootElement.GetProperty("amount").GetInt64().Should().Be(10_000);
+        refundPayload.RootElement.GetProperty("idempotencyKey").GetString()
             .Should().Be($"{ParcelId:D}:PAYMENT_CALLBACK_DELAY_CANNOT_SERVE");
+        var recoveredEvent = fixture.Outbox.Events.Single(evt => evt.EventType == ParcelOutboxEvents.SettlementRecovered);
+        using var recoveredPayload = JsonDocument.Parse(recoveredEvent.PayloadJson);
+        recoveredPayload.RootElement.GetProperty("eventId").GetGuid().Should().Be(recoveredEvent.EventId);
+        recoveredPayload.RootElement.GetProperty("recoveredStatus").GetString().Should().Be("CANCELLED");
+        recoveredPayload.RootElement.GetProperty("refundAmountVnd").GetInt64().Should().Be(10_000);
     }
 
     private static CallbackFixture CreateCallbackFixture(ParcelEntity parcel)
@@ -348,11 +364,21 @@ public sealed class ParcelFinalPaymentTests
 
     private sealed class RecordingOutbox : IIntegrationEventOutbox
     {
-        public List<(string EventType, string PayloadJson)> Events { get; } = [];
+        public List<(Guid EventId, string EventType, string PayloadJson)> Events { get; } = [];
+
+        public Task EnqueueAsync(
+            Guid eventId,
+            string eventType,
+            string payloadJson,
+            CancellationToken ct = default)
+        {
+            Events.Add((eventId, eventType, payloadJson));
+            return Task.CompletedTask;
+        }
 
         public Task EnqueueAsync(string eventType, string payloadJson, CancellationToken ct = default)
         {
-            Events.Add((eventType, payloadJson));
+            Events.Add((Guid.NewGuid(), eventType, payloadJson));
             return Task.CompletedTask;
         }
     }

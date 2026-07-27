@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
@@ -6,6 +7,7 @@ using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Application.Features.Vouchers.CreateVoucher;
 using VietRide.Booking.Domain.Entities;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Booking.UnitTests.Features.Vouchers;
@@ -26,11 +28,13 @@ public class CreateVoucherCommandHandlerTests
     private readonly IVoucherRepository _vouchers = Substitute.For<IVoucherRepository>();
     private readonly IVoucherCodeGenerator _codeGenerator = Substitute.For<IVoucherCodeGenerator>();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly IIntegrationEventOutbox _outbox = Substitute.For<IIntegrationEventOutbox>();
 
     private CreateVoucherCommandHandler BuildSut() => new(
         _vouchers,
         _codeGenerator,
         _clock,
+        _outbox,
         NullLogger<CreateVoucherCommandHandler>.Instance);
 
     private static CreateVoucherCommand BuildVietrideFundedCommand(string? code = "PROMO2024") =>
@@ -117,6 +121,17 @@ public class CreateVoucherCommandHandlerTests
             .Returns(args => args.Arg<Voucher>());
         _vouchers.AddConsentAsync(Arg.Any<OperatorVoucherConsent>(), Arg.Any<CancellationToken>())
             .Returns(Task.CompletedTask);
+        var events = new List<(Guid EventId, string Payload)>();
+        _outbox.EnqueueAsync(
+                Arg.Any<Guid>(),
+                "booking.voucher.consent_requested",
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                events.Add((call.ArgAt<Guid>(0), call.ArgAt<string>(2)));
+                return Task.CompletedTask;
+            });
 
         var sut = BuildSut();
         var command = BuildOperatorFundedCommand([OperatorId1, OperatorId2]);
@@ -131,6 +146,18 @@ public class CreateVoucherCommandHandlerTests
         // 2 consent rows fanned out — one per operator
         await _vouchers.Received(2)
             .AddConsentAsync(Arg.Any<OperatorVoucherConsent>(), Arg.Any<CancellationToken>());
+        events.Should().HaveCount(2);
+        events.Select(item =>
+        {
+            using var document = JsonDocument.Parse(item.Payload);
+            var root = document.RootElement;
+            root.GetProperty("eventId").GetGuid().Should().Be(item.EventId);
+            root.GetProperty("voucherId").GetGuid().Should().Be(result.Id);
+            root.GetProperty("voucherCode").GetString().Should().Be("OPFUND01");
+            root.GetProperty("voucherType").GetString().Should().Be("FIXED_AMOUNT");
+            root.GetProperty("voucherValue").GetInt64().Should().Be(20_000);
+            return root.GetProperty("operatorId").GetGuid();
+        }).Should().BeEquivalentTo([OperatorId1, OperatorId2]);
     }
 
     // -----------------------------------------------------------------------
