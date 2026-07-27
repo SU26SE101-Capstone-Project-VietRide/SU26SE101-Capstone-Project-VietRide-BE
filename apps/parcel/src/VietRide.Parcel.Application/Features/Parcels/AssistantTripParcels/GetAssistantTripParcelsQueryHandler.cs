@@ -59,7 +59,13 @@ public sealed class GetAssistantTripParcelsQueryHandler
             parcel.RecipientPhone.ToString(),
             parcel.DropoffStopId,
             parcel.SizeCategory.ToString(),
+            parcel.EstimatedSizeCategory.ToString(),
+            parcel.ActualSizeCategory?.ToString(),
             parcel.EstimatedWeightKg,
+            parcel.ActualWeightKg,
+            parcel.BalanceRequiredVnd.Amount,
+            parcel.BalancePaidVnd.Amount,
+            parcel.FinalPaymentDeadline,
             parcel.Description,
             parcel.PhotoUrl)).ToList();
 

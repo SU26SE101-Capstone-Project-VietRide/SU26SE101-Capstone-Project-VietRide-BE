@@ -86,9 +86,7 @@ public sealed class OperatorParcelsController : ControllerBase
             operatorId,
             userId,
             request.Decision,
-            request.DepositAmount,
             request.Reason,
-            request.PaymentMethod,
             Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString()), cancellationToken);
 
         return Ok(result);

@@ -117,6 +117,19 @@ public sealed class OverrideCapacityCommandHandler
                 },
                 cancellationToken);
 
+            if (actionType == PendingActionType.CAPACITY_EXCEEDED
+                && parcel.PendingActionResumeStatus == ParcelStatus.READY_TO_LOAD
+                && parcel.RefundDueVnd.Amount > 0)
+            {
+                await ParcelOutboxEvents.EnqueueRefundAsync(
+                    _outbox,
+                    parcel.Id,
+                    parcel.SenderUserId,
+                    parcel.RefundDueVnd.Amount,
+                    $"{parcel.Id:D}:SETTLEMENT_PRICE_DECREASE",
+                    cancellationToken);
+            }
+
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await _unitOfWork.CommitAsync(cancellationToken);
         }

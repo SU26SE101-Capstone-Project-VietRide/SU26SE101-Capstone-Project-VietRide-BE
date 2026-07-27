@@ -2043,6 +2043,7 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `booking.booking.schedule_change_required` | Booking | Notification | For `CONFIRMED` Bookings only; MEDIUM/MAJOR-only `{ eventId, occurredAt, bookingId, tripId, userId, pendingActionId, deadline, oldDeparture, newDeparture, severity: MEDIUM\|MAJOR }` |
 | `booking.booking.pending_action_realerted` | Booking | Notification | Common `{ eventId, occurredAt, bookingId, tripId, userId, pendingActionId, deadline }` plus either `{ reason: PENDING_SEAT_ASSIGNMENT, seatNumbers, seatImpactReason }` or `{ reason: SCHEDULE_CHANGE, oldDeparture, newDeparture, severity: MEDIUM\|MAJOR }` |
 | `booking.booking.pending_action_auto_resolved` | Booking | Notification | Exact `{ eventId, occurredAt, bookingId, tripId, userId, pendingActionId, resolvedAction, severity, oldDeparture, newDeparture }`; `resolvedAction=ACCEPTED` |
+| `booking.voucher.consent_requested` | Booking | Notification (operator) | `{ eventId, occurredAt, voucherId, operatorId, voucherCode, voucherType, voucherValue }`; one fact per newly-created consent for an admin-created `OPERATOR_FUNDED` voucher; operator-owned self-consented vouchers emit none |
 | `booking.voucher.consent_accepted` | Booking | Notification | `{ voucherId, operatorId }` |
 | `booking.voucher.consent_rejected` | Booking | Notification | `{ voucherId, operatorId, reason? }` |
 | `trip.trip.boarding_started` | Trip | Notification | `{ tripId, boardingStartedAt }` |
@@ -2054,7 +2055,7 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `trip.trip.cancelled` | Trip | Booking, Parcel | { eventId, occurredAt, tripId, operatorId, cancelledAt, cancelReason } |
 | `trip.trip.vehicle_swapped` | Trip | Booking, Notification (crew only) | Exact `{ eventId,occurredAt,tripId,operatorId,oldVehicleId,newVehicleId,oldVehiclePlateNumber,newVehiclePlateNumber,departureDateTime,driverUserId,assistantUserId,seatImpacts:[{bookingId,seatNumbers,reason}] }`; `assistantUserId` present nullable, reasons exactly `SEAT_REMOVED\|SEAT_DISABLED\|SEAT_TYPE_DOWNGRADED` |
 | `trip.trip.route_changed` | Trip | Booking, Notification | { eventId, occurredAt, tripId, operatorId, tripStatus, alternativeRouteId, affectedBookings } |
-| `trip.trip.schedule_changed` | Trip | Booking | Exact `{ eventId,occurredAt,tripId,operatorId,oldDeparture,newDeparture,severity }`, severity `MINOR\|MEDIUM\|MAJOR`; Notification consumes Booking-owned facts instead |
+| `trip.trip.schedule_changed` | Trip | Booking, Notification (crew only) | Exact `{ eventId,occurredAt,tripId,operatorId,oldDeparture,newDeparture,severity }`, severity `MINOR\|MEDIUM\|MAJOR`; Booking owns passenger facts while Notification resolves current Trip crew only |
 | `trip.stop.disabled` | Trip | Booking | Exact `{ eventId, occurredAt, eventType, stopId, operatorId, replacedByStopId? }`; `eventId == OutboxEvent.Id == RabbitMQ MessageId`. |
 | `trip.station.merged` | Trip | Booking, Identity | `{ eventId, occurredAt, eventType, actorUserId, ipAddress?, userAgent?, primaryStationId, duplicateStationId, primaryBefore, duplicateBefore, primaryAfter, relinkedCounts }`; Station snapshots omit contact phone/email |
 | `trip.station.normalized` | Trip | Identity | `{ eventId, occurredAt, eventType, actorUserId, ipAddress?, userAgent?, stationId, before, after }`; snapshots omit contact phone/email |
@@ -2065,31 +2066,32 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `trip.stop.departed_with_pending` | Trip | Notification (Driver App boarding warning) | `{ eventId: Guid, occurredAt: DateTime (UTC), eventType: "trip.stop.departed_with_pending", tripId: Guid, stopId: Guid, stopName: string, pendingPassengerCount: int (> 0), driverUserId: Guid, assistantUserId: Guid?, departedAt: DateTimeOffset (UTC ISO-8601) }` |
 | `trip.stop.arrived` | Trip | Parcel, Notification | `{ eventId, occurredAt, eventType, tripId, stopId, operatorId, actorUserId, actualArrivalTime }`; Trip và TripStop lock theo thứ tự, `PENDING -> ARRIVED`, static ETA không đổi, business row + Outbox commit atomic |
 | `trip.destination.arrived` | Trip | Parcel | `{ eventId, occurredAt, eventType, tripId, destinationStationId, operatorId, actorUserId, actualArrivalTime }`; destination Station derive từ Route, anchor độc lập `completedAt`, express Trip zero-stop vẫn hợp lệ |
-| `trip.trip.delayed` | Trip (Tracking publishes via Trip outbox proxy hoặc Tracking outbox) | Notification | `{ tripId, delayMinutes, etaNew }` |
+| `trip.trip.delayed` | Tracking | Notification | `{ eventId, occurredAt, tripId, stopId, stopName, delayMinutes, etaNew }`; Notification resolves active passengers and operator admins |
 | `trip.incident.reported` | Trip | Notification | `{ eventId, occurredAt, incidentId, tripId, operatorId, reporterUserId, category, description?, photoUrls?, latitude?, longitude?, reportedAt }`; optional fields được omit khi null; Notification resolve active `OPERATOR_ADMIN` theo `operatorId` |
 | `trip.cargo.threshold_crossed` | Trip | Notification | Exact `{ eventId, occurredAt, tripId, operatorId, loadedWeightKg, maxCargoWeightKg, percentFull }`; `eventId == OutboxEvent.id == RabbitMQ MessageId` |
 | `trip.shuttle.assigned` | Trip | Notification | `{ shuttleTripId, mainTripId, bookingId, passengerUserId, ticketIds, pickupOrder, scheduledDepartureTime, scheduledEndTime, driver: { userId, displayName, phone }, vehicle: { id, licensePlate } }` |
 | `trip.shuttle.warning_issued` | Trip | Notification | `{ mainTripId, operatorId, alertType: WARNING_120|WARNING_60, pendingBookingCount, pendingPassengerCount, hardCutoffAt }` |
 | `trip.shuttle.unfulfilled` | Trip | Notification | `{ mainTripId, bookingId, passengerUserId, stationId, reason: AUTO_UNFULFILLED_CUTOFF }` |
-| `tracking.gps.off_route` | Tracking | Notification | `{ tripId, durationSeconds }` |
+| `tracking.gps.off_route` | Tracking | Notification | `{ eventId, occurredAt, tripId, durationSeconds }`; Notification resolves assigned driver, assistant, and operator admins |
 | `tracking.gps.approaching_stop` | Tracking | Notification | `{ tripId, stopId, bookingIds, wave, etaMinutes }` |
-| `payment.payment.succeeded` | Payment | Booking, Parcel | `{ eventId, occurredAt, paymentId, referenceType, referenceId, amount, method, context }`; context is the immutable server snapshot and may contain multiple allocations |
+| `payment.payment.succeeded` | Payment | Booking, Parcel | `{ eventId, occurredAt, paymentId, referenceType, referenceId, amount, method, paidAt, dueAt?, context }`; `paidAt` is authoritative `Payment.succeededAt`, not publish/consume time; context is the immutable server snapshot and may contain multiple allocations |
 | `payment.payment.refunded` | Payment | Booking, Parcel | `{ eventId, occurredAt, paymentId, referenceType, referenceId, amount, context }` |
 | `payment.payment.failed` | Payment | Booking, Parcel | `{ paymentId, referenceType, referenceId, reason }` |
 | `payment.payment.expired` | Payment | Booking, Parcel | `{ paymentId, referenceType, referenceId }` |
 | `payment.wallet.credited` | Payment | Booking (mark REFUNDED), Parcel (mark REFUNDED), Notification | `{ userId, amount, referenceType, referenceId }` |
-| `payment.wallet.debited` | Payment | Notification | `{ userId, amount, referenceType, referenceId }` |
+| `payment.wallet.debited` | Payment | Notification | `{ eventId, occurredAt, userId, walletTransactionId?, amount, balanceAfter?, referenceType, referenceId }`; one fact per committed wallet ledger item |
 | `payment.subscription.payment_succeeded` | Payment | Identity, Payment Invoice pipeline | `{ eventId, occurredAt, paymentId, upgradeAttemptId, operatorId, operatorSubscriptionId, planId, amount, method, planName, billingPeriod, periodFrom, periodTo, succeededAt, buyerSnapshot }`; WALLET and VNPay use one schema |
 | `payment.subscription.payment_failed` | Payment | Identity | `{ eventId, occurredAt, paymentId, upgradeAttemptId, operatorId, operatorSubscriptionId, responseCode }`; đóng session, attempt còn retry được trước dueAt |
 | `payment.subscription.payment_expired` | Payment | Identity | `{ eventId, occurredAt, paymentId, upgradeAttemptId, operatorId, operatorSubscriptionId }`; đóng session, không kéo dài attempt dueAt |
-| `identity.subscription.usage_warning` | Identity | Notification | `{ subscriptionId, operatorId, resource, usage, limit, periodKey, occurredAt }` |
+| `identity.operator.registration_submitted` | Identity | Notification (System Admin) | `{ eventId, occurredAt, operatorId, companyName }` |
+| `identity.subscription.usage_warning` | Identity | Notification | `{ eventId, occurredAt, subscriptionId, operatorId, resource, periodKey, used, limit, usagePercent }`; emit once when crossing from below 80% to at least 80% per resource and period |
 | `identity.subscription.trial_expiring` | Identity | Notification | `{ subscriptionId, operatorId, expiresAt, daysRemaining, occurredAt }` |
 | `identity.subscription.expired` | Identity | Notification | `{ subscriptionId, operatorId, expiredAt, occurredAt }` |
 | `identity.subscription.payment_auto_reverted` | Identity | Notification | `{ subscriptionId, operatorId, previousPlanId, restoredPlanId, occurredAt }` |
 | `subscription.limit.trip_skipped` | Trip | Notification | `{ operatorId, driverScheduleId, skippedDate, periodKey, occurredAt }` |
 | `payment.invoice.issued` | Payment | Notification | `{ eventId, occurredAt, invoiceId, invoiceNumber, operatorId, amount, invoiceWebUrl, downloadApiUrl }`; neither URL is a Firebase signed URL |
 | `payment.trip_settlement.completed` | Payment | Notification (operator) | `{ eventId, occurredAt, settlementId, tripId, operatorId, netAmount, settlementMethod, settledAt }` |
-| `parcel.parcel.created` | Parcel | Notification, Trip (cargo counter reserve) | `{ parcelId, tripId, senderUserId, recipientUserId? }` |
+| `parcel.parcel.created` | Parcel | Notification | `{ parcelId, tripId, senderUserId, recipientUserId? }`; cargo soft hold is an idempotent synchronous Trip mutation when deposit payment starts |
 | `parcel.parcel.loaded` | Parcel | Notification, Trip (counter update) | Exact `{ eventId, occurredAt, parcelId, tripId, actualWeightKg, userIds[] }`; direct `userIds[]` contains the sender and recipient account when present; `eventId == OutboxEvent.id == RabbitMQ MessageId` |
 | `parcel.parcel.unloaded` | Parcel | Notification | `{ parcelId, tripId, userIds[] }`; chỉ CAS `IN_TRANSIT -> UNLOADED` thắng mới enqueue, `userIds` distinct gồm sender và recipient account nếu có |
 | `parcel.parcel.delivered_pending_confirm` | Parcel | Notification | `{ parcelId, parcelCode, operatorId, tripId, userId?, recipientUserIds[]?, deliveryToken, expiresAt }`; optional recipient fields bị omit khi không có account |
@@ -2099,8 +2101,7 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `parcel.parcel.auto_rejected` | Parcel | Notification, Trip (counter), Payment (refund) | Exact `{ eventId, occurredAt, parcelId, parcelCode, operatorId, userId, tripId, refundAmount }`; `userId` is the persisted sender for late-load, additional-payment-timeout, and review-timeout facts; `eventId == OutboxEvent.id == RabbitMQ MessageId` |
 | `parcel.parcel.review_requested` | Parcel (EXTRA_LARGE) | Notification (operator) | `{ parcelId, operatorId }` |
 | `parcel.parcel.transfer_initiated` | Parcel | Notification | `{ parcelId, originalTripId, newTripId }` |
-| `parcel.refund.initiated` | Parcel | Payment | `{ parcelId, refundAmount }` |
-| `rag.document.approved` | RAG AI | Notification (uploader) | `{ documentId }` |
+| `parcel.refund.initiated` | Parcel | Payment | `{ parcelId, senderUserId, amount, referenceType, referenceId, reason, idempotencyKey }`; idempotency identity distinguishes Parcel and settlement reason |
 
 **Cancellation event compatibility:** A canonical `booking.booking.cancelled` producer creates a
 fresh UUID-v4 `eventId` and captures offset-date-time `occurredAt`. One-release consumers accept
@@ -2118,9 +2119,10 @@ already-committed Trip or Booking cancellation.
 **Day-22 ownership:** For Day-22 vehicle swap, schedule change, and schedule-day-removal
 cancellation only, Trip emits domain facts while Booking owns passenger-impact state and passenger-
 notification facts. This scoped rule does not replace or alter the existing
-`trip.trip.route_changed` registry/consumer behavior. Notification never consumes
-`trip.trip.schedule_changed` or `trip.trip.cancelled` directly; the vehicle-swapped Trip fact
-targets crew only. For schedule changes, only `CONFIRMED` Bookings emit a Booking schedule fact:
+`trip.trip.route_changed` registry/consumer behavior. Notification consumes
+`trip.trip.schedule_changed` only to notify current crew and never uses that Trip fact for
+passengers; it still does not consume `trip.trip.cancelled` directly. The vehicle-swapped Trip fact
+targets crew only. For passenger schedule changes, only `CONFIRMED` Bookings emit a Booking schedule fact:
 MINOR emits `booking.booking.schedule_change_informational`, MEDIUM/MAJOR emit
 `booking.booking.schedule_change_required`, and every other Booking status emits neither. On
 Day-22 day-removal cancellation, Booking cancels active rows and emits existing
@@ -2544,10 +2546,12 @@ Trip, and cancellation/refund uses persisted `totalAmount`.
 ### 8.3 ParcelStatus
 
 ```
-PENDING_OPERATOR_REVIEW (EXTRA_LARGE only) ──→ PENDING_PAYMENT | REJECTED
-PENDING_PAYMENT ──→ PENDING | EXPIRED
-PENDING ──→ LOADED | REJECTED | CANCELLED | PENDING_OPERATOR_ACTION | PENDING_ADDITIONAL_PAYMENT
-PENDING_ADDITIONAL_PAYMENT ──→ PENDING | REJECTED
+PENDING_OPERATOR_REVIEW (EXTRA_LARGE only) ──→ PENDING_PAYMENT | REJECTED | CANCELLED(review timeout)
+PENDING_PAYMENT ──→ RESERVED | EXPIRED | CANCELLED
+RESERVED ──→ CHECKED_IN | REJECTED(check-in timeout) | CANCELLED | PENDING_OPERATOR_ACTION
+CHECKED_IN ──→ PENDING_FINAL_PAYMENT | READY_TO_LOAD | PENDING_OPERATOR_ACTION
+PENDING_FINAL_PAYMENT ──→ READY_TO_LOAD | REJECTED(final-payment timeout) | CANCELLED
+READY_TO_LOAD ──→ LOADED | CANCELLED
 LOADED ──→ IN_TRANSIT | PENDING_TRANSFER_CONFIRM | PENDING_OPERATOR_ACTION
 IN_TRANSIT ──→ UNLOADED | PENDING_TRANSFER_CONFIRM | PENDING_OPERATOR_ACTION
 PENDING_TRANSFER_CONFIRM ──→ LOADED (target trip) | TRANSFER_ESCALATED
@@ -2555,10 +2559,12 @@ TRANSFER_ESCALATED ──→ PENDING_TRANSFER_CONFIRM | RETURNED
 UNLOADED ──→ DELIVERED_PENDING_CONFIRM
 DELIVERED_PENDING_CONFIRM ──→ DELIVERY_CONFIRMED | DELIVERY_REJECTED
 DELIVERY_REJECTED ──→ RETURN_INITIATED  (Hangfire sau 15 phút undo window)
-PENDING_OPERATOR_ACTION ──→ PENDING | RETURNED
+PENDING_OPERATOR_ACTION ──→ pendingActionResumeStatus | RETURNED
 ```
 
 **Terminal:** `DELIVERY_CONFIRMED`, `RETURN_INITIATED`, `CANCELLED`, `EXPIRED`, `REJECTED`, `RETURNED`.
+
+**Settlement v2 invariants:** pricing uses exact decimal chargeable weight and rounds fractional VND to the nearest đồng with `MidpointRounding.AwayFromZero`; it never ceilings kg or floors money to 1,000 VND. Voucher discount is clamped independently against estimated/final gross. Deposit is 20% of estimated total. Only `READY_TO_LOAD` can load. A Payment success is judged by authoritative `paidAt`, not webhook delivery time. If final-payment timeout wins before an on-time callback, the callback cancels forfeiture and restores `READY_TO_LOAD` when the trip can still serve; otherwise the Parcel becomes `CANCELLED` and all collected money is refunded.
 
 **Canonical two-step delivery (Day 39):**
 
@@ -3077,9 +3083,8 @@ permitted.
 | Job | Type | Trigger | Notes |
 |---|---|---|---|
 | `UndoRejectWindowJob` | Scheduled (per Parcel) | DELIVERY_REJECTED + 15 phút | DELIVERY_REJECTED → RETURN_INITIATED |
-| `AutoRejectExtraLargeJob` | Scheduled (per Parcel) | PENDING_OPERATOR_REVIEW + 24h | Auto-reject + refund |
-| `AutoRejectPendingOnTripStartJob` | Scheduled (per Parcel) | Trip IN_PROGRESS + 30 phút | Auto-reject PENDING parcel chưa LOADED |
-| `AutoRejectAdditionalPaymentJob` | Recurring | Every 5 phút | Auto-reject PENDING_ADDITIONAL_PAYMENT khi quá `additionalPaymentDeadline` |
+| `AutoRejectExtraLargeJob` | Scheduled (per Parcel) | PENDING_OPERATOR_REVIEW + 24h | `CANCELLED`, reason `OPERATOR_REVIEW_TIMEOUT`; chưa có tiền để refund |
+| `ParcelSettlementTimeoutJob` | Recurring | Every 5 phút | Xử lý cả `RESERVED → REJECTED` khi quá `latestCheckInAt` và `PENDING_FINAL_PAYMENT → REJECTED` khi `finalPaymentDeadline <= now`; forfeiture toàn bộ cọc + release cargo; callback on-time đến sau phải recovery theo invariant §8.3 |
 | `PendingTransferConfirmEscalationJob` | Scheduled (per Parcel) | PENDING_TRANSFER_CONFIRM + 30 phút | → TRANSFER_ESCALATED |
 | `PendingOperatorActionReAlertJob` | Scheduled (per Parcel) | PENDING_OPERATOR_ACTION + 2h | Re-alert operator |
 

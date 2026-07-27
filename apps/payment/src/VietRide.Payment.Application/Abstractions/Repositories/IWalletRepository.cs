@@ -56,6 +56,12 @@ public interface IWalletRepository : IRepository<Wallet, Guid>
         CancellationToken cancellationToken)
         => throw new NotSupportedException("This wallet repository does not support wallet transaction reference lookups.");
 
+    Task<long> GetTotalRefundedByReferenceAsync(
+        WalletTransactionRef referenceType,
+        Guid referenceId,
+        CancellationToken cancellationToken)
+        => Task.FromResult(0L);
+
     Task<WalletTransaction> CreditRefundAsync(
         Guid userId,
         Money amount,

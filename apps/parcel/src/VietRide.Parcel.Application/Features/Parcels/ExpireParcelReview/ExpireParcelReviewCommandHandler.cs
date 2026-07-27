@@ -75,7 +75,7 @@ public sealed class ExpireParcelReviewCommandHandler
                 var eventId = Guid.NewGuid();
                 await _outbox.EnqueueAsync(
                     eventId,
-                    ParcelOutboxEvents.AutoRejected,
+                    ParcelOutboxEvents.Cancelled,
                     JsonSerializer.Serialize(new
                     {
                         eventId,

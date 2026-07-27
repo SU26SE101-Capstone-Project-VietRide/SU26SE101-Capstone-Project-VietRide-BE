@@ -10,6 +10,7 @@ using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 using ParcelEntity = VietRide.Parcel.Domain.Entities.Parcel;
 
@@ -54,7 +55,8 @@ public sealed class CreateParcelTests
         result.PaymentRedirectUrl.Should().BeNull();
         result.ParcelId.Should().NotBeEmpty();
         result.ParcelCode.Should().NotBeNullOrEmpty();
-        result.TotalAmount.Should().Be(150_000);
+        result.DepositRequiredVnd.Should().Be(30_000);
+        result.EstimatedTotalPriceVnd.Should().Be(150_000);
     }
 
     [Fact]
@@ -426,7 +428,7 @@ public sealed class CreateParcelTests
         result.Status.Should().Be("PENDING_PAYMENT");
         result.ParcelId.Should().NotBeEmpty();
         result.ParcelCode.Should().NotBeNullOrEmpty();
-        result.TotalAmount.Should().Be(150_000);
+        result.DepositRequiredVnd.Should().Be(30_000);
 
         captured.Should().NotBeNull();
         captured!.BookingId.Should().Be(BookingId);
@@ -518,6 +520,8 @@ public sealed class CreateParcelTests
         IPaymentServiceClient? payment = null)
     {
         payment ??= CreatePaymentClient();
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(Now);
         return new CreateParcelCommandHandler(
             identity,
             booking,
@@ -525,10 +529,12 @@ public sealed class CreateParcelTests
             payment,
             parcelRepo,
             fareRepo,
+            policyRepository: null,
             uow,
             Outbox(),
             Stats(),
-            NullLogger<CreateParcelCommandHandler>.Instance);
+            NullLogger<CreateParcelCommandHandler>.Instance,
+            clock);
     }
 
     private static IPaymentServiceClient CreatePaymentClient()

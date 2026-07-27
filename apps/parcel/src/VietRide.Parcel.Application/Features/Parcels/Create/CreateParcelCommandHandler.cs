@@ -8,6 +8,7 @@ using VietRide.Parcel.Domain.Helpers;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 using ParcelEntity = VietRide.Parcel.Domain.Entities.Parcel;
 
@@ -27,6 +28,7 @@ public sealed class CreateParcelCommandHandler
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IParcelStatsRepository _statsRepository;
     private readonly ILogger<CreateParcelCommandHandler> _logger;
+    private readonly IClock _clock;
 
     public CreateParcelCommandHandler(
         IIdentityServiceClient identityClient,
@@ -39,7 +41,8 @@ public sealed class CreateParcelCommandHandler
         IUnitOfWork unitOfWork,
         IIntegrationEventOutbox outbox,
         IParcelStatsRepository statsRepository,
-        ILogger<CreateParcelCommandHandler> logger)
+        ILogger<CreateParcelCommandHandler> logger,
+        IClock clock)
     {
         _identityClient = identityClient;
         _bookingClient = bookingClient;
@@ -52,6 +55,7 @@ public sealed class CreateParcelCommandHandler
         _outbox = outbox;
         _statsRepository = statsRepository;
         _logger = logger;
+        _clock = clock;
     }
 
     public CreateParcelCommandHandler(
@@ -76,7 +80,8 @@ public sealed class CreateParcelCommandHandler
             unitOfWork,
             outbox,
             statsRepository,
-            logger)
+            logger,
+            new SystemClock())
     {
     }
 
@@ -186,11 +191,6 @@ public sealed class CreateParcelCommandHandler
                     $"Drop-off stop '{command.DropoffStopId}' does not allow drop-off.");
         }
 
-        if (!Enum.TryParse<ParcelSizeCategory>(command.SizeCategory, ignoreCase: true, out var sizeCategory))
-            throw new CodedValidationException(
-                "INVALID_SIZE_CATEGORY",
-                $"'{command.SizeCategory}' is not a valid ParcelSizeCategory.");
-
         var parcelCode = await GenerateParcelCodeAsync(cancellationToken);
 
         var finalDescription = command.ItemName is not null
@@ -206,7 +206,7 @@ public sealed class CreateParcelCommandHandler
 
         var recipientPhone = PhoneNumber.Normalize(command.RecipientPhone);
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _clock.UtcNow;
         var dimFactor = _policyRepository is null
             ? ParcelCargoCalculator.DefaultDimWeightFactor
             : await _policyRepository.GetSystemDecimalAsync(
@@ -220,6 +220,15 @@ public sealed class CreateParcelCommandHandler
             command.HeightCm,
             command.EstimatedWeightKg,
             dimFactor);
+        var sizeCategory = _policyRepository is null
+            && Enum.TryParse<ParcelSizeCategory>(command.SizeCategory, ignoreCase: true, out var legacySizeCategory)
+                ? legacySizeCategory
+                : ParcelCargoCalculator.DeriveSizeCategory(cargoEstimate.ChargeableWeightKg);
+        var deadlines = ParcelCargoCalculator.CalculateSettlementDeadlines(trip.DepartureDateTime);
+        if (now >= deadlines.LatestCheckInAt)
+            throw new CodedConflictException(
+                "PARCEL_CHECK_IN_CLOSED",
+                "The trip no longer has enough time for parcel check-in and final settlement.");
 
         var fare = await _fareRepository.FindByCompositeAsync(trip.RouteId, sizeCategory, cancellationToken);
         if (fare is null && (_policyRepository is not null || sizeCategory != ParcelSizeCategory.EXTRA_LARGE))
@@ -227,7 +236,7 @@ public sealed class CreateParcelCommandHandler
                 "FARE_NOT_CONFIGURED",
                 $"No fare configured for route '{trip.RouteId}' and size category '{command.SizeCategory}'.");
 
-        var totalPrice = fare is null
+        var estimatedGrossPrice = fare is null
             ? Money.Zero
             : _policyRepository is null
                 ? fare.PriceVnd
@@ -235,34 +244,17 @@ public sealed class CreateParcelCommandHandler
                     cargoEstimate.ChargeableWeightKg,
                     fare.PricePerChargeableKgVnd.Amount > 0 ? fare.PricePerChargeableKgVnd : fare.PriceVnd,
                     fare.MinimumPriceVnd);
-        var defaultDepositPercent = _policyRepository is null
-            ? 100m
-            : await _policyRepository.GetSystemDecimalAsync(
-                "DEFAULT_DEPOSIT_PERCENT",
-                ParcelCargoCalculator.DefaultDepositPercent,
-                now,
-                cancellationToken);
-        var depositPercent = _policyRepository is null
-            ? defaultDepositPercent
-            : await _policyRepository.GetDepositPercentAsync(
-                trip.OperatorId,
-                trip.RouteId,
-                defaultDepositPercent,
-                now,
-                cancellationToken);
-        var priceVnd = ParcelCargoCalculator.CalculatePercent(totalPrice, depositPercent);
-        var originalDepositAmount = priceVnd;
+        var depositPercent = ParcelCargoCalculator.DefaultDepositPercent;
         var discountAmount = Money.Zero;
-        Guid? validatedVoucherId = null;
 
-        if (sizeCategory != ParcelSizeCategory.EXTRA_LARGE && !string.IsNullOrWhiteSpace(command.VoucherCode))
+        if (!string.IsNullOrWhiteSpace(command.VoucherCode))
         {
             var voucherOutcome = await _bookingClient.ValidateVoucherAsync(
                 command.VoucherCode,
                 trip.OperatorId,
                 trip.RouteId,
                 command.SenderUserId,
-                originalDepositAmount.Amount,
+                estimatedGrossPrice.Amount,
                 command.PaymentMethod,
                 cancellationToken);
 
@@ -276,10 +268,15 @@ public sealed class CreateParcelCommandHandler
                     "VOUCHER_NOT_APPLICABLE",
                     voucherOutcome.ErrorMessage ?? "Voucher is not applicable to this parcel.");
 
-            validatedVoucherId = voucherOutcome.VoucherId.Value;
             discountAmount = Money.FromRaw(voucherOutcome.DiscountAmount);
-            priceVnd = originalDepositAmount - discountAmount;
         }
+
+        var estimatedTotalPrice = ParcelCargoCalculator.CalculateDiscountedTotal(
+            estimatedGrossPrice,
+            discountAmount);
+        var depositRequired = ParcelCargoCalculator.CalculatePercent(
+            estimatedTotalPrice,
+            depositPercent);
 
         var parcel = sizeCategory == ParcelSizeCategory.EXTRA_LARGE
             ? ParcelEntity.CreatePendingOperatorReview(
@@ -304,12 +301,12 @@ public sealed class CreateParcelCommandHandler
                 cargoEstimate.DimWeightKg,
                 cargoEstimate.ChargeableWeightKg,
                 deliveryMethod,
-                totalPrice,
+                estimatedTotalPrice,
                 depositPercent,
-                priceVnd,
-                originalDepositAmount,
+                depositRequired,
+                depositRequired,
                 discountAmount,
-                null,
+                command.VoucherCode,
                 null)
             : ParcelEntity.CreatePendingPayment(
                 parcelCode,
@@ -333,40 +330,33 @@ public sealed class CreateParcelCommandHandler
                 cargoEstimate.DimWeightKg,
                 cargoEstimate.ChargeableWeightKg,
                 deliveryMethod,
-                totalPrice,
+                estimatedTotalPrice,
                 depositPercent,
-                priceVnd,
-                originalDepositAmount,
+                depositRequired,
+                depositRequired,
                 discountAmount,
                 command.VoucherCode,
                 null);
+
+        parcel.ConfigureSettlementV2(
+            sizeCategory,
+            estimatedGrossPrice,
+            discountAmount,
+            estimatedTotalPrice,
+            depositPercent,
+            depositRequired,
+            fare?.PricePerChargeableKgVnd.Amount > 0
+                ? fare.PricePerChargeableKgVnd
+                : fare?.PriceVnd ?? Money.Zero,
+            fare?.MinimumPriceVnd ?? Money.Zero,
+            dimFactor,
+            deadlines.LoadCutoffAt,
+            deadlines.LatestCheckInAt);
 
         await _unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {
             await _parcelRepository.AddAsync(parcel, cancellationToken);
-
-            if (validatedVoucherId.HasValue)
-            {
-                var usageOutcome = await _bookingClient.RecordVoucherUsageAsync(
-                    validatedVoucherId.Value,
-                    command.SenderUserId,
-                    parcel.Id,
-                    discountAmount.Amount,
-                    cancellationToken);
-
-                if (usageOutcome.Kind == VoucherUsageOutcomeKind.TransportError)
-                    throw new ParcelDependencyUnavailableException(
-                        "BOOKING_SERVICE_UNAVAILABLE",
-                        usageOutcome.ErrorMessage ?? "Booking service unavailable.");
-
-                if (usageOutcome.Kind == VoucherUsageOutcomeKind.Invalid || !usageOutcome.UsageId.HasValue)
-                    throw new CodedValidationException(
-                        "VOUCHER_USAGE_REJECTED",
-                        usageOutcome.ErrorMessage ?? "Voucher usage was rejected.");
-
-                parcel.AttachVoucherUsage(usageOutcome.UsageId.Value);
-            }
 
             await ParcelOutboxEvents.EnqueueAsync(
                 _outbox,
@@ -385,7 +375,7 @@ public sealed class CreateParcelCommandHandler
 
             await _statsRepository.UpsertIncrementAsync(
                 parcel.OperatorId,
-                DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime),
+                DateOnly.FromDateTime(now.UtcDateTime),
                 totalParcels: 1,
                 totalLoaded: 0,
                 totalDelivered: 0,
@@ -404,59 +394,19 @@ public sealed class CreateParcelCommandHandler
             throw;
         }
 
-        string? paymentRedirectUrl = null;
-
-        if (sizeCategory != ParcelSizeCategory.EXTRA_LARGE)
-        {
-            var idempotencyKey = command.IdempotencyKey ?? parcel.Id.ToString("D");
-            var outcome = await _paymentClient.ChargeParcelPaymentAsync(
-                "PARCEL",
-                parcel.Id,
-                command.SenderUserId,
-                priceVnd.Amount,
-                command.PaymentMethod,
-                idempotencyKey,
-                cancellationToken,
-                CreatePaymentContext(parcel, "PARCEL", priceVnd.Amount));
-
-            if (outcome.Kind == ChargeOutcomeKind.InsufficientFunds)
-            {
-                if (parcel.VoucherUsageId.HasValue)
-                    await CompensateVoucherUsageAsync(
-                        parcel.Id,
-                        parcel.VoucherUsageId.Value,
-                        cancellationToken);
-
-                throw new CodedValidationException(
-                    "INSUFFICIENT_FUNDS",
-                    outcome.ErrorMessage ?? "Insufficient wallet balance.");
-            }
-
-            if (outcome.Kind == ChargeOutcomeKind.TransportError)
-            {
-                if (parcel.VoucherUsageId.HasValue)
-                    await CompensateVoucherUsageAsync(
-                        parcel.Id,
-                        parcel.VoucherUsageId.Value,
-                        cancellationToken);
-
-                throw new ParcelDependencyUnavailableException(
-                    "PAYMENT_SERVICE_ERROR",
-                    outcome.ErrorMessage ?? "Payment service unavailable.");
-            }
-
-            paymentRedirectUrl = outcome.Result?.PaymentRedirectUrl;
-        }
-
         return new CreateParcelResponse(
             parcel.Id,
             parcel.ParcelCode,
             parcel.Status.ToString(),
-            priceVnd.Amount,
-            originalDepositAmount.Amount,
+            parcel.EstimatedSizeCategory.ToString(),
+            estimatedGrossPrice.Amount,
             discountAmount.Amount,
+            estimatedTotalPrice.Amount,
+            depositPercent,
+            depositRequired.Amount,
+            0,
             parcel.VoucherCode,
-            paymentRedirectUrl);
+            ParcelCargoCalculator.SettlementPolicyVersion);
     }
 
     private static PaymentContextSnapshot CreatePaymentContext(
@@ -479,7 +429,7 @@ public sealed class CreateParcelCommandHandler
     {
         for (var attempt = 0; attempt < 3; attempt++)
         {
-            var code = ParcelCodeGenerator.Generate(DateTimeOffset.UtcNow);
+            var code = ParcelCodeGenerator.Generate(_clock.UtcNow);
             var existing = await _parcelRepository.FindByParcelCodeAsync(code, cancellationToken);
             if (existing is null)
             {

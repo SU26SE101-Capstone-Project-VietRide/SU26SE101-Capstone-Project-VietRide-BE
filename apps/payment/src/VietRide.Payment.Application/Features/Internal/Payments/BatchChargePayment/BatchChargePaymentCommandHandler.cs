@@ -128,7 +128,9 @@ public sealed class BatchChargePaymentCommandHandler
             payment.ReferenceId,
             payment.Amount.Amount,
             payment.Method,
-            context);
+            context,
+            payment.SucceededAt!.Value,
+            payment.DueAt);
         await _revenueLedger.RecordPaymentSucceededAsync(
             evt.EventId,
             context,

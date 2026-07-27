@@ -66,7 +66,7 @@ public sealed class MarkParcelLoadedCommandHandler
                 "PARCEL_NOT_FOUND",
                 $"Parcel with id '{command.ParcelId}' not found.");
 
-        if (parcel.Status != ParcelStatus.PENDING)
+        if (parcel.Status != ParcelStatus.READY_TO_LOAD)
             throw new CodedConflictException(
                 "INVALID_STATUS",
                 $"Parcel '{command.ParcelId}' is in status '{parcel.Status}' and cannot be loaded.");

@@ -363,7 +363,7 @@ Streaming LLM response qua SSE, gọi vector DB, tích hợp nhiều external AP
 > Services dùng Hangfire (business scheduled jobs) và lý do:
 > - **Booking Service:** seat release khi VNPay timeout 15 phút (EXPIRED), schedule-change confirmation auto-accept khi quá deadline, PENDING_SEAT_ASSIGNMENT escalation (T+2h re-alert) + auto-cancel/refund 100% nếu unresolved tại `departure - 30 phút` (job interval 15 phút)
 > - **Trip-Route-Vehicle Service:** auto-generate Trip từ DriverSchedule (2 trigger: immediate on-create + weekly CN 23:00), auto-BOARDING 30 phút trước departure, auto-COMPLETED fallback sau estimatedArrivalTime + 30 phút
-> - **Parcel Service:** undo-reject window 15 phút (DELIVERY_REJECTED → RETURN_INITIATED), auto-reject EXTRA_LARGE sau 24h, auto-reject PENDING parcel sau 30 phút khi trip IN_PROGRESS, auto-reject PENDING_ADDITIONAL_PAYMENT khi quá `additionalPaymentDeadline` (interval 5 phút), PENDING_TRANSFER_CONFIRM escalation 30 phút, PENDING_OPERATOR_ACTION re-alert 2h
+> - **Parcel Service:** undo-reject window 15 phút (DELIVERY_REJECTED → RETURN_INITIATED), cancel EXTRA_LARGE review timeout sau 24h, reject/forfeit `RESERVED` quá `latestCheckInAt`, reject/forfeit `PENDING_FINAL_PAYMENT` quá `finalPaymentDeadline` (interval 5 phút), PENDING_TRANSFER_CONFIRM escalation 30 phút, PENDING_OPERATOR_ACTION re-alert 2h
 > - **Payment Service:** Payment PENDING_REDIRECT EXPIRED sau 15 phút cho Booking/Parcel VNPay, TopUpRequest EXPIRED sau 15 phút
 >
 > **Outbox polling KHÔNG dùng Hangfire** — dùng `BackgroundService`/`IHostedService` (xem Decisions section).
@@ -598,7 +598,7 @@ Cùng codebase NextJS với Operator Web, phân biệt qua role SYSTEM_ADMIN. Na
 
 > **Operator registration flow (self-registration + Admin approval):**
 > Có 2 path để Operator tồn tại trong hệ thống:
-> - **Path A — Self-registration (primary):** Nhà xe đăng ký qua form trên web (`POST /v1/operators/register` — public endpoint, không cần auth). Body gồm: `{ name, contactEmail, contactPhone, businessRegistrationNumber, taxCode, addressStreet, addressWard, addressDistrict, addressProvince, representativeName, representativePhone }`. System validate `businessRegistrationNumber` + `taxCode` không trùng operator hiện có (return `OPERATOR_DUPLICATE_REGISTRATION` / `OPERATOR_DUPLICATE_TAX_CODE` nếu trùng). Tạo `Operator { registrationStatus = PENDING }` + 1 User `{ role = OPERATOR_ADMIN, status = PENDING_EMAIL_VERIFICATION, phone = representativePhone }` cho người đại diện (email = contact email). **Auto-assign default `SubscriptionPlan` "Starter (Free Trial)" tới `OperatorSubscription` (status=PENDING_APPROVAL, startedAt/expiresAt=NULL — trial KHÔNG tick cho đến khi Admin APPROVE).** Gửi OTP verify email. Sau khi verify, tài khoản OPERATOR_ADMIN ở trạng thái chờ duyệt — chưa login được vào dashboard (Gateway block role OPERATOR_ADMIN nếu `Operator.registrationStatus != APPROVED`). System Admin nhận notification "Đơn đăng ký mới từ [tên công ty]" → duyệt → atomic transaction: `Operator.registrationStatus = APPROVED` + `OperatorSubscription { status=ACTIVE, startedAt=approvedAt, expiresAt=approvedAt+30 days }` + publish event `identity.operator.approved` → OPERATOR_ADMIN nhận email "Đã duyệt, có thể đăng nhập".
+> - **Path A — Self-registration (primary):** Nhà xe đăng ký qua form trên web (`POST /v1/operators/register` — public endpoint, không cần auth). Body gồm: `{ name, contactEmail, contactPhone, businessRegistrationNumber, taxCode, addressStreet, addressWard, addressDistrict, addressProvince, representativeName, representativePhone }`. System validate `businessRegistrationNumber` + `taxCode` không trùng operator hiện có (return `OPERATOR_DUPLICATE_REGISTRATION` / `OPERATOR_DUPLICATE_TAX_CODE` nếu trùng). Tạo `Operator { registrationStatus = PENDING }` + 1 User `{ role = OPERATOR_ADMIN, status = PENDING_EMAIL_VERIFICATION, phone = representativePhone }` cho người đại diện (email = contact email). **Auto-assign default `SubscriptionPlan` "Starter (Free Trial)" tới `OperatorSubscription` (status=PENDING_APPROVAL, startedAt/expiresAt=NULL — trial KHÔNG tick cho đến khi Admin APPROVE).** Gửi OTP verify email. Sau khi verify, tài khoản OPERATOR_ADMIN ở trạng thái chờ duyệt — chưa login được vào dashboard (Gateway block role OPERATOR_ADMIN nếu `Operator.registrationStatus != APPROVED`). Cùng transaction đăng ký, Identity ghi Outbox fact `identity.operator.registration_submitted { eventId, occurredAt, operatorId, companyName }`; Notification resolve active `SYSTEM_ADMIN` và gửi "Đơn đăng ký nhà xe mới". System Admin duyệt → atomic transaction: `Operator.registrationStatus = APPROVED` + `OperatorSubscription { status=ACTIVE, startedAt=approvedAt, expiresAt=approvedAt+30 days }` + publish event `identity.operator.approved` → OPERATOR_ADMIN nhận email "Đã duyệt, có thể đăng nhập".
 >
 > Khi Admin reject → atomic transaction:
 > ```
@@ -655,8 +655,8 @@ Cùng codebase NextJS với Operator Web, phân biệt qua role SYSTEM_ADMIN. Na
   > - Voucher **CHỈ active cho operator đã opt-in/consent**.
   > - Flow opt-in:
   >   1. Admin tạo Voucher `{ fundingType: OPERATOR_FUNDED, applicableOperatorIds: [op1, op2, ...] }`.
-  >   2. System Identity Service INSERT 1 `OperatorVoucherConsent` record per operator targeted với `status=PENDING`.
-  >   3. Push notification mỗi OPERATOR_ADMIN: "VietRide đề xuất voucher [code] giảm X% cho chuyến của bạn. Bạn đồng ý áp dụng?"
+  >   2. Booking Service INSERT 1 `OperatorVoucherConsent` record per operator targeted với `status=PENDING` và ghi cùng transaction một Outbox fact `booking.voucher.consent_requested { eventId, occurredAt, voucherId, operatorId, voucherCode, voucherType, voucherValue }` cho mỗi consent mới.
+  >   3. Notification consume fact và push mỗi OPERATOR_ADMIN: "VietRide đề xuất voucher [code] giảm X% cho chuyến của bạn. Bạn đồng ý áp dụng?"
   >   4. Operator vào dashboard "Voucher đề xuất" → bấm ACCEPT/REJECT → UPDATE `OperatorVoucherConsent.status`.
   >   5. Voucher chỉ active cho operator có `status=ACCEPTED`. Operator REJECTED → Booking thuộc operator đó KHÔNG apply được voucher (error `VOUCHER_NOT_APPLICABLE`).
   >   6. Operator có thể REJECT sau khi đã ACCEPT (revoke consent) → voucher inactive cho operator đó từ thời điểm đó (booking đã CONFIRMED giữ nguyên discount).
@@ -2739,29 +2739,46 @@ Operator có thể tạo custom type (vd "Bus 45 chỗ VIP") nhưng KHÔNG xóa 
 - Nếu sau đó operator đổi `Operator.luggagePolicy` hoặc `VehicleType.estimatedPassengerLuggageKgPerSeat` → **Trip đã tồn tại giữ snapshot cũ**. Trip mới generate sau update dùng giá trị mới.
 - Nếu Vehicle Substitution (xe khác thay thế): tính lại `Trip_new.estimatedPassengerLuggageKg` theo vehicle mới.
 
-**b) Deposit bắt buộc trước khi đặt parcel:**
-- Khi user submit parcel request: user **ước lượng cân nặng** → hệ thống tính phí ban đầu (deposit) theo size category.
-- User **thanh toán deposit ngay khi đặt parcel** (không phải khi mang hàng ra bến).
-- Sau khi deposit thành công (PaymentSucceeded) → hệ thống **trừ capacity khoang tạm thời** (tăng `Trip.reservedParcelWeightKg`).
-- **No-show parcel** (user không mang hàng ra trong window cho phép): deposit có thể bị giữ một phần hoặc toàn bộ theo policy của operator (configurable). Capacity được release lại.
+**b) Báo giá, cọc và giữ tải — Settlement policy v2:**
 
-**c) Cân lại khi nhận hàng (Staff/Assistant tại bến):**
-- Staff/Assistant cân hàng thực tế tại bến trước khi load lên xe.
-- Cân ≤ ước lượng: **OK** → parcel chuyển status LOADED, capacity giữ nguyên (ước lượng cao hơn thực tế là buffer cho operator).
-- Cân > ước lượng: **WARNING** → parcel chuyển status `PENDING_ADDITIONAL_PAYMENT`. Yêu cầu user trả thêm phần chênh lệch trước khi hàng được load.
-  - Endpoint: `POST /v1/parcels/{parcelId}/additional-charge` (role STAFF/ASSISTANT, body: `{ actualWeightKg, additionalAmount, reason }`). Set `additionalPaymentDeadline = min(now + Operator.parcelNoShowPolicy.additionalPaymentTimeoutMinutes, Trip.departureDateTime)` để Hangfire timeout job dùng.
-  - Notification gửi sender: "Hàng của bạn cân lại được [actualWeightKg]kg (vượt ước lượng [estimatedWeightKg]kg). Vui lòng thanh toán thêm [additionalAmount] VND trước [deadline] để hàng được load lên xe."
-  - User thanh toán additional charge qua Wallet hoặc VNPay → status quay về PENDING → Staff load lên xe → LOADED.
-  - **Auto-reject khi quá hạn — Hangfire job (Parcel Service, interval 5 phút):**
-    ```
-    SELECT Parcel WHERE status = PENDING_ADDITIONAL_PAYMENT
-      AND additionalPaymentDeadline < now
-    → UPDATE Parcel status = REJECTED, rejectionReason = 'Không thanh toán phụ phí cân lại đúng hạn'
-    → Refund deposit theo Operator.parcelNoShowPolicy.noShowFeePercent (giống flow no-show ở 6.6)
-    → Release capacity (Trip.reservedParcelWeightKg -= estimatedWeightKg)
-    → Publish ParcelAutoRejected event → Notification Service alert sender
-    ```
-- Field thêm trên Parcel: `actualWeightKg` decimal nullable (set bởi staff khi cân lại), `additionalAmount` BIGINT nullable, `additionalPaymentId` FK nullable.
+```text
+dimWeightKg = lengthCm × widthCm × heightCm / 6000
+chargeableWeightKg = max(weightKg, dimWeightKg)
+grossPriceVnd = max(minimumPriceVnd,
+                    round(chargeableWeightKg × pricePerKgVnd,
+                          MidpointRounding.AwayFromZero))
+
+estimatedTotalPriceVnd = estimatedGrossPriceVnd
+                       - min(discountAmountVnd, estimatedGrossPriceVnd)
+depositRequiredVnd = round(estimatedTotalPriceVnd × 20%,
+                           MidpointRounding.AwayFromZero)
+```
+
+- Không làm tròn kg và không floor/ceil số tiền theo 1.000 đồng. Ví dụ `3,2 kg × 1.000đ/kg = 3.200đ`.
+- Operator cấu hình `pricePerKgVnd` và `minimumPriceVnd`; Passenger/Assistant không được nhập giá.
+- Parcel thường được tạo ở `PENDING_PAYMENT`. `EXTRA_LARGE` vào `PENDING_OPERATOR_REVIEW`; chỉ sau khi duyệt mới vào `PENDING_PAYMENT`.
+- `POST /v1/parcels/{parcelId}/deposit-payment` tạo payment và giữ mềm cargo theo số đo ước tính trong 15 phút. Payment hết hạn chuyển `EXPIRED`, release hold và không consume voucher.
+- Payment cọc có `paidAt < dueAt` luôn được công nhận dù callback đến sau event timeout. Nếu chuyến không còn phục vụ được thì Parcel chuyển `CANCELLED` và hoàn toàn bộ khoản đã thu.
+- Cọc v2 cố định 20%. Nếu Passenger không check-in trước `latestCheckInAt`, Parcel chuyển `REJECTED`, mất toàn bộ cọc và release cargo.
+
+**c) Check-in, cân thực tế và thanh toán số dư:**
+
+- Assistant đúng trip/operator check-in trước `latestCheckInAt`, chuyển `RESERVED → CHECKED_IN`, sau đó nhập kích thước và cân nặng thực tế.
+- Backend tự derive size và tính lại `finalGrossPriceVnd`; không nhận size hay giá cuối authoritative từ client.
+- Voucher được clamp lần nữa ở giá cuối:
+
+```text
+finalTotalPriceVnd = finalGrossPriceVnd
+                   - min(discountAmountVnd, finalGrossPriceVnd)
+balanceRequiredVnd = max(0, finalTotalPriceVnd - depositPaidVnd)
+refundDueVnd = max(0, depositPaidVnd - finalTotalPriceVnd)
+```
+
+- Tolerance không miễn thanh toán. Nếu `balanceRequiredVnd > 0`, Parcel vào `PENDING_FINAL_PAYMENT`; nếu đã đủ tiền, Parcel vào `READY_TO_LOAD`.
+- Khi `refundDueVnd > 0`, Parcel vẫn vào `READY_TO_LOAD` và enqueue refund idempotent qua Outbox; refund không chặn load.
+- `finalPaymentDeadline = min(reweighedAt + finalPaymentTimeoutMinutes, loadCutoffAt)`. Payment chỉ hợp lệ khi `paidAt < finalPaymentDeadline`.
+- Timeout số dư chuyển `PENDING_FINAL_PAYMENT → REJECTED`, ghi `forfeitedDepositVnd = depositPaidVnd` và release cargo. Nếu callback đến sau timeout nhưng chứng minh đã trả đúng hạn, hệ thống hủy forfeiture và chuyển `READY_TO_LOAD` nếu còn phục vụ được; nếu không còn phục vụ được thì `CANCELLED` và hoàn toàn bộ tiền đã thu.
+- Chỉ `READY_TO_LOAD` được chuyển sang `LOADED`.
 
 **d) Delivery — giao tại bến hoặc Stop dọc tuyến:**
 - Parcel giao đến **bến đích (destination station)** hoặc **Stop dọc tuyến** thuộc RouteStop của trip. KHÔNG trung chuyển parcel đến địa chỉ nhà.
@@ -2769,13 +2786,13 @@ Operator có thể tạo custom type (vd "Bus 45 chỗ VIP") nhưng KHÔNG xóa 
 - **Sender chọn `dropoffStopId` khi tạo parcel** — null = giao tại destination station mặc định; not null = giao tại Stop đó (phải thuộc RouteStop của trip). UX: tương tự Booking dropoff (single source of truth = RouteStop).
 - Cùng giá `ParcelRouteFare {routeId, sizeCategory}` cho mọi điểm xuống (giống dropoff passenger free at any stop).
 
-**e) Trip cargo capacity counters — lifecycle:**
+**e) Trip cargo capacity — ownership theo settlement v2:**
 
 Trip có 2 counter cargo phân biệt rõ vai trò:
 
 | Counter | Ý nghĩa | Add | Remove |
 |---|---|---|---|
-| `Trip.reservedParcelWeightKg` | Tổng weight các parcel "đã commit" vào trip này (đã deposit / đang chờ load / đã load). Dùng tính **available capacity cho parcel mới** trước khi trip IN_PROGRESS | Khi parcel **join** trip (deposit success hoặc transfer vào) | Khi parcel **rời** trip (terminal status hoặc transferred out) |
+| `Trip.reservedParcelWeightKg` | Tổng weight cargo đang được giữ cho Parcel chưa load. Dùng tính **available capacity cho parcel mới** | Khi deposit payment tạo soft hold; sau deposit success giữ nguyên reservation | Khi payment expire/fail, check-in/final-payment timeout, terminal status hoặc transfer out |
 | `Trip.totalLoadedWeightKg` | Tổng weight parcel **đang vật lý trên xe**. Dùng alert "khoang gần đầy ≥80%" cho operator | Khi parcel LOADED (vật lý lên xe) | Khi parcel UNLOADED hoặc RETURN_INITIATED (vật lý rời xe) |
 
 **Available capacity formula** (dùng khi user tạo parcel mới hoặc khi xem `GET /parcels/available-trips`):
@@ -2785,41 +2802,44 @@ availableCargo = Vehicle.maxCargoWeightKg
                  - Trip.reservedParcelWeightKg
 ```
 
-Tất cả transition phải update 2 counter atomic trong cùng DB transaction với status change.
+Parcel và Trip là hai database độc lập nên không có transaction cross-service. Mỗi service phải CAS/idempotent trong database của mình; Parcel dùng stable `Idempotency-Key` cho mutation cargo và lưu trạng thái recovery khi mutation Trip thất bại.
 
 **`reservedParcelWeightKg` events:**
 
 ```
-ADD reservedParcelWeightKg += parcel.estimatedWeightKg khi:
-  1. PaymentSucceeded(referenceType=PARCEL) → PENDING_PAYMENT chuyển PENDING
-     (deposit confirmed, parcel commit vào trip)
-  2. PENDING_OPERATOR_ACTION → PENDING với Parcel.tripId = newTripId
+ADD reservedParcelWeightKg/Volume theo cargo ước tính khi:
+  1. Bắt đầu deposit payment → soft hold trong 15 phút.
+     Payment success chuyển PENDING_PAYMENT → RESERVED nhưng không cộng lần hai.
+  2. PENDING_OPERATOR_ACTION → RESERVED với Parcel.tripId = newTripId
      (operator transfer parcel sang trip mới sau khi trip cũ cancelled/disrupted)
      → ADD vào newTripId
   3. PENDING_TRANSFER_CONFIRM → LOADED trên Trip_new (Vehicle Substitution confirm)
      → ADD vào Trip_new.reservedParcelWeightKg (cùng lúc với totalLoadedWeightKg)
 
-REMOVE reservedParcelWeightKg -= parcel.estimatedWeightKg khi:
-  1. PENDING → CANCELLED (trip cancelled trước IN_PROGRESS, parcel chưa LOADED)
-  2. PENDING → REJECTED (auto-reject 30 phút sau IN_PROGRESS, hàng không kịp load)
-  3. PENDING_ADDITIONAL_PAYMENT → REJECTED (timeout không thanh toán phụ phí)
+REMEASURE reservation ước tính → thực tế khi:
+  - CHECKED_IN được cân lại. Task settlement sở hữu mutation này.
+  - Capacity fail → PENDING_OPERATOR_ACTION + pendingActionResumeStatus;
+    operator override thành công mới resume settlement.
+
+REMOVE reservation theo giá trị hiện đang giữ khi:
+  1. PENDING_PAYMENT → EXPIRED (deposit payment fail/expire)
+  2. RESERVED → REJECTED (quá latestCheckInAt)
+  3. PENDING_FINAL_PAYMENT → REJECTED (quá finalPaymentDeadline)
+  4. Parcel → CANCELLED trước khi load
   4. PENDING_OPERATOR_ACTION → RETURNED (operator trả hàng tại bến)
-  5. PENDING_OPERATOR_ACTION → PENDING (newTripId) — REMOVE từ oldTripId
+  5. PENDING_OPERATOR_ACTION → RESERVED (newTripId) — REMOVE từ oldTripId
      (operator chuyển sang trip khác; ADD vào newTripId song song)
   6. PENDING_TRANSFER_CONFIRM → LOADED trên Trip_new — REMOVE từ Trip_old
   7. TRANSFER_ESCALATED → RETURNED — REMOVE từ Trip_old
   8. IN_TRANSIT → UNLOADED (parcel vật lý rời xe, capacity freed)
      (kể cả khi flow normal — về clean state, không nợ counter)
-  9. PENDING_PAYMENT → EXPIRED (payment timeout, deposit chưa thành công)
-     → Lưu ý: trường hợp này KHÔNG cần release vì counter chưa được ADD
-     (chỉ ADD ở step 1 sau PaymentSucceeded)
 ```
 
 **`totalLoadedWeightKg` events (giữ nguyên, không đổi):**
 
 ```
-ADD totalLoadedWeightKg += parcel.estimatedWeightKg khi:
-  - PENDING → LOADED (Assistant scan QR / explicit confirm tại bến)
+ADD totalLoadedWeightKg/Volume theo cargo thực tế khi:
+  - READY_TO_LOAD → LOADED (Assistant scan QR / explicit confirm tại bến)
   - PENDING_TRANSFER_CONFIRM → LOADED trên Trip_new
 
 REMOVE totalLoadedWeightKg -= parcel.estimatedWeightKg khi:
@@ -2830,7 +2850,7 @@ REMOVE totalLoadedWeightKg -= parcel.estimatedWeightKg khi:
     Đề xuất: REMOVE khi PENDING_OPERATOR_ACTION → RETURNED (chính thức rời) hoặc PENDING_OPERATOR_ACTION → PENDING (transfer sang trip khác).
 ```
 
-> **Idempotency lưu ý:** mọi update counter phải atomic với status transition. Dùng `UPDATE ... WHERE status = :expectedOldStatus` trong cùng query — nếu status đã thay đổi (race condition) thì query không match row → không update counter sai.
+> **Ranh giới ownership:** Task check-in/reweigh chỉ sở hữu estimated reservation → actual reservation. Task load chỉ sở hữu actual reservation → loaded cargo. Cả hai dùng CAS ở Parcel và mutation idempotent ở Trip để retry không cộng counter hai lần.
 
 **Use cases (cách parcel được tạo):**
 
@@ -2893,7 +2913,7 @@ Operator (cả OPERATOR_STAFF và OPERATOR_ADMIN) xem được **full contact in
 
 > **⚠️ Scoping note — bỏ walk-in parcel:** Người gửi BẮT BUỘC phải có Passenger account VietRide để tạo parcel request. Người gửi vãng lai không app → từ chối nhận hàng (tham khảo người gửi cài app + tạo account). Nhất quán với quyết định bỏ walk-in booking ở mục 4.3.
 
-**Thông tin parcel request gồm:** tên/mô tả hàng, **size category**, trọng lượng ước tính (kg), thông tin người gửi (tên, SĐT), thông tin người nhận (tên, SĐT, email), chuyến đi được gán, và **phương thức nhận hàng (delivery method)**. Parcel Service generate `parcelCode` khi tạo parcel; client KHÔNG tự gửi code.
+**Thông tin parcel request gồm:** tên/mô tả hàng, kích thước ba chiều, trọng lượng ước tính (kg), thông tin người gửi (tên, SĐT), thông tin người nhận (tên, SĐT, email), chuyến đi được gán, voucher optional và **phương thức nhận hàng (delivery method)**. Parcel Service generate `parcelCode`, derive `estimatedSizeCategory` và tính giá; client KHÔNG tự gửi code, size hay giá authoritative.
 
 **QR code spec — hàng ký gửi:**
 ```
@@ -2917,16 +2937,16 @@ Lý do dùng parcelCode thay vì parcelId UUID: dễ đọc khi support/manual s
 không expose UUID nội bộ, và nhất quán với booking QR dùng plain bookingCode.
 ```
 
-> **Lý do chọn size category thay dimensions:** Xe khách liên tỉnh Việt Nam không có hệ thống cân hành lý như sân bay — phụ xe nhận hàng thủ công tại bến bằng mắt. Hệ thống track tổng kg để alert khi khoang gần đầy, nhưng việc phân loại dùng category cho phù hợp thực tế vận hành.
+**Size category derive từ chargeable weight — 4 mức:**
 
-**Size category — 4 mức:**
-
-| Category | Mô tả thực tế | Estimated weight |
+| Category | Mô tả thực tế | `chargeableWeightKg` |
 |---|---|---|
 | `SMALL` | Túi xách, hộp nhỏ — vừa để chân hoặc khoang trên | ≤ 5 kg |
 | `MEDIUM` | Thùng carton vừa, vali nhỏ | ≤ 15 kg |
 | `LARGE` | Thùng lớn, vali to | ≤ 30 kg |
 | `EXTRA_LARGE` | Đồ cồng kềnh — cần operator review thủ công trước khi nhận (xem flow bên dưới) | > 30 kg |
+
+`chargeableWeightKg = max(weightKg, lengthCm × widthCm × heightCm / 6000)`. Passenger và Assistant nhập số đo; backend derive category. Các field request `sizeCategory`/`actualSizeCategory` cũ chỉ được chấp nhận tạm thời để tương thích client và không được dùng làm nguồn authoritative.
 
 > **`transportCompanyId`** không cần là field riêng trên Parcel — nhà xe đã được xác định **implicit qua `tripId`** (trip thuộc operator nào thì parcel cũng thuộc operator đó). Agent không cần tạo foreign key riêng.
 
@@ -2937,28 +2957,39 @@ không expose UUID nội bộ, và nhất quán với booking QR dùng plain boo
   ("Chuyến xe đã khởi hành. Vui lòng chọn chuyến khác.")
 - `Trip.status = COMPLETED | DISRUPTED | CANCELLED` → block với `BOOKING_TRIP_NOT_BOOKABLE`
 
-**Timer auto-reject 30 phút tính từ `Trip.actualDepartureTime` (không phải `Parcel.createdAt`):**
-Parcel PENDING hợp lệ khi `Trip.status` chuyển IN_PROGRESS (edge case: parcel tạo lúc BOARDING,
-trip vào IN_PROGRESS ngay sau đó — parcel có thể chưa LOADED). Hangfire job dùng
-`Trip.actualDepartureTime` vì đó là thời điểm xe thực sự rời đi, không phải lúc tạo parcel.
-Parcel tạo lúc `Trip.status = BOARDING` rồi trip vào IN_PROGRESS → có 30 phút kể từ
-`actualDepartureTime` trước khi auto-reject. Đây là logic đã đúng tại line 1611 (`trip.actualDepartureTime < now - interval '30 minutes'`).
+**Deadline trước giờ đóng tải:**
+
+```text
+depositPaymentTimeoutMinutes = 15
+checkInCloseMinutes = 30
+finalPaymentTimeoutMinutes = 30
+minimumFinalPaymentWindowMinutes = 10
+loadCutoffMinutes = 10
+
+loadCutoffAt = departureAt - loadCutoffMinutes
+latestCheckInAt = min(departureAt - checkInCloseMinutes,
+                      loadCutoffAt - minimumFinalPaymentWindowMinutes)
+finalPaymentDeadline = min(reweighedAt + finalPaymentTimeoutMinutes,
+                           loadCutoffAt)
+```
+
+Boundary là strict: check-in/payment phải xảy ra trước deadline. `settlementPolicyVersion` đã được dùng là immutable; thay đổi policy phải tạo version mới.
 
 **EXTRA_LARGE approval flow:**
 
 ```
-Passenger tạo parcel với sizeCategory = EXTRA_LARGE
-  → Parcel status = PENDING_OPERATOR_REVIEW (chưa chuyển PENDING_PAYMENT/PENDING)
+Backend derive estimatedSizeCategory = EXTRA_LARGE
+  → Parcel status = PENDING_OPERATOR_REVIEW (chưa chuyển PENDING_PAYMENT/RESERVED)
   → Chưa charge phí, chưa khóa khoang hàng
   → Publish event ParcelReviewRequested → Notification Service alert operator
   → Operator dashboard hiển thị queue "Parcel chờ review"
 
 Operator review trên dashboard:
-  - APPROVE → Parcel status = PENDING_PAYMENT, bắt đầu payment flow Wallet/VNPay, alert passenger "Đã duyệt — vui lòng thanh toán"
+  - APPROVE → Parcel status = PENDING_PAYMENT, alert passenger "Đã duyệt — vui lòng thanh toán"; Passenger gọi deposit-payment để chọn Wallet/VNPay và tạo soft hold
   - REJECT → Parcel status = REJECTED, ghi rejectionReason, alert passenger "Bị từ chối: <lý do>", không charge
 
 Timeout 24 giờ không review:
-  → Auto-reject với reason "Operator không phản hồi trong 24h"
+  → CANCELLED với reason OPERATOR_REVIEW_TIMEOUT
   → Passenger có thể tạo lại request mới hoặc liên hệ operator
 ```
 
@@ -2967,7 +2998,7 @@ Timeout 24 giờ không review:
 - `reviewedByUserId` FK nullable — operator nào duyệt
 - `reviewDecision` enum: PENDING | APPROVED | REJECTED (chỉ dùng khi sizeCategory = EXTRA_LARGE)
 
-Size khác (SMALL/MEDIUM/LARGE) **bỏ qua** flow review, vào `PENDING_PAYMENT` trước; chỉ chuyển `PENDING` sau khi PaymentSucceeded.
+Size khác (SMALL/MEDIUM/LARGE) **bỏ qua** flow review, vào `PENDING_PAYMENT`; deposit success đúng hạn chuyển `RESERVED`.
 
 **LOADED → IN_TRANSIT trigger:**
 ```
@@ -3007,12 +3038,12 @@ Trigger: Parcel Service consume TripCancelledEvent { tripId }
   (Event-driven — KHÔNG dùng Hangfire polling làm primary trigger)
 
 Parcel PENDING_PAYMENT (chưa thanh toán xong) hoặc PENDING_OPERATOR_REVIEW:
-  → status = REJECTED
-  → rejectionReason = "Chuyến bị hủy bởi nhà xe"
+  → status = CANCELLED
+  → cancellationReason = "Chuyến bị hủy bởi nhà xe"
   → Không refund (chưa charge)
   → Push notification người gửi: "Chuyến bị hủy — yêu cầu gửi hàng đã bị từ chối"
 
-Parcel đã thanh toán, chưa LOADED (status = PENDING — PaymentSucceeded đã xảy ra):
+Parcel đã thanh toán, chưa LOADED (RESERVED, CHECKED_IN, PENDING_FINAL_PAYMENT hoặc READY_TO_LOAD):
   → status = CANCELLED
   → cancellationReason = "Chuyến bị hủy bởi nhà xe"
   → **Release capacity: Trip.reservedParcelWeightKg -= estimatedWeightKg**
@@ -3035,7 +3066,7 @@ Parcel LOADED (đã nhận hàng vật lý tại bến, xe chưa khởi hành):
             Release physical OLD trip: oldTrip.totalLoadedWeightKg -= estimatedWeightKg (nếu trước đó LOADED)
             Add vào NEW trip: newTrip.reservedParcelWeightKg += estimatedWeightKg
             Parcel.tripId = newTripId
-            status = PENDING (chờ load lên xe mới)
+            status = RESERVED (chờ check-in/load trên chuyến mới theo recovery policy)
             Push notification người gửi: "Hàng của bạn đã được chuyển sang chuyến [Y]"
 
 Hangfire escalation job (check mỗi 15 phút):
@@ -3044,27 +3075,22 @@ Hangfire escalation job (check mỗi 15 phút):
   → Re-alert operator (không auto-change status)
   → Log escalation count để operator biết đã nhắc mấy lần
 
-**Parcel PENDING khi trip đã IN_PROGRESS — auto-reject sau 30 phút:**
+**Parcel chưa check-in hoặc chưa thanh toán số dư đúng hạn:**
 ```
-Parcel Service consume TripStarted:
-  → IN_TRANSIT các parcel LOADED (xem trên)
-  → Parcel PENDING giữ nguyên, KHÔNG auto-chuyển ngay
-
 Hangfire job (chạy mỗi 5 phút):
-  SELECT Parcel WHERE status = PENDING
-    AND trip.status = IN_PROGRESS
-    AND trip.actualDepartureTime < now - interval '30 minutes'
-  → UPDATE Parcel status = REJECTED, rejectionReason = 'Xe đã xuất phát, hàng không được load kịp'
-  → Refund **theo Operator.parcelNoShowPolicy** (xem 6.6 phần (b)):
-      refundAmount = paidAmount × (100 - noShowFeePercent) / 100, làm tròn đến đồng gần nhất (BSOT v1.11.0 — không floor 1000)
-      Default policy nếu operator chưa config: noShowFeePercent = 0 (hoàn 100%)
-  → Publish event ParcelAutoRejected → Notification Service alert người gửi (kèm số tiền hoàn + lý do giữ phần phí nếu có)
+  - RESERVED và latestCheckInAt <= now
+      → REJECTED/CHECK_IN_TIMEOUT
+      → forfeitedDepositVnd = depositPaidVnd
+      → release cargo
+  - PENDING_FINAL_PAYMENT và finalPaymentDeadline <= now
+      → REJECTED/FINAL_PAYMENT_TIMEOUT
+      → forfeitedDepositVnd = depositPaidVnd
+      → release cargo
 
-Lý do 30 phút: xe vừa khởi hành có thể vẫn còn ở bến 10–15 phút. Window 30 phút cho phép
-phụ xe nhận hàng muộn tại bến trước khi xe thực sự rời đi. Sau đó auto-reject.
+Payment có paidAt trước deadline luôn thắng về nghiệp vụ. Nếu callback đến sau timeout, Parcel hủy
+forfeiture rồi READY_TO_LOAD khi trip vẫn SCHEDULED/BOARDING, chưa qua loadCutoffAt và reserve cargo
+thành công; nếu không còn phục vụ được thì CANCELLED và refund toàn bộ tiền đã thu.
 ```
-
-> **`Operator.parcelNoShowPolicy` (mới):** JSONB nullable trên Operator entity, shape `{ noShowFeePercent: number, additionalPaymentTimeoutMinutes: number }`. Default khi null: `{ noShowFeePercent: 0, additionalPaymentTimeoutMinutes: 30 }` (hoàn 100%, timeout 30 phút). Operator config trên Operator Web cùng UI với cancellationPolicy. Áp dụng cho cả PENDING auto-reject (mục này) và PENDING_ADDITIONAL_PAYMENT timeout (xem dưới).
 
 **Delivery method — chỉ 1 loại:**
 
@@ -3213,7 +3239,11 @@ Nếu người nhận đổi ý trong 15 phút:
 **Parcel entity — business requirements:**
 
 - **Ảnh hàng:** `photoUrl` string nullable — tối đa một URL Firebase Storage. Người gửi có thể upload ảnh hàng khi tạo parcel request (để phụ xe đối chiếu khi nhận hàng). Optional, không bắt buộc. Client upload trực tiếp lên Firebase Storage, BE nhận URL string đã trim; URL phải là HTTPS, tối đa 2.048 ký tự và thuộc bucket cấu hình qua `FIREBASE_STORAGE_BUCKET`. Firebase Storage Rules giới hạn tối đa 5 MB và MIME `image/jpeg | image/png | image/webp`; Parcel Service không nhận hoặc kiểm tra file bytes. `photoUrl` được expose trong Parcel detail và danh sách parcel của Assistant đúng chuyến, không đưa vào RabbitMQ event.
-- **Phân loại hàng:** `sizeCategory` (SMALL | MEDIUM | LARGE | EXTRA_LARGE), `estimatedWeightKg` decimal (người gửi khai báo, không cân thực tế)
+- **Phân loại hàng:** `estimatedSizeCategory` và `actualSizeCategory` (SMALL | MEDIUM | LARGE | EXTRA_LARGE) do backend derive từ chargeable weight; lưu riêng estimated/actual dimensions, weight, volume, dim weight và chargeable weight.
+- **Tiền settlement v2:** `estimatedGrossPriceVnd`, `finalGrossPriceVnd`, `discountAmountVnd`, `estimatedTotalPriceVnd`, `finalTotalPriceVnd`, `depositPercent`, `depositRequiredVnd`, `depositPaidVnd`, `balanceRequiredVnd`, `balancePaidVnd`, `refundDueVnd`, `refundedAmountVnd`, `forfeitedDepositVnd`. Tất cả tiền là BIGINT VND; fractional calculation làm tròn gần nhất với `MidpointRounding.AwayFromZero`.
+- **Payment/deadline:** `depositPaymentId`, `balancePaymentId`, `finalPaymentDeadline`, `checkedInAt`, `checkedInByUserId`, `reweighedAt`, `reweighedByUserId`. Deposit expiry authoritative theo `Payment.dueAt`; không cần duplicate deadline cọc trên Parcel.
+- **Snapshot:** `pricePerKgVnd`, `minimumPriceVnd`, `dimWeightFactor`, `settlementPolicyVersion`. Version đã được sử dụng không được update; policy mới phải tạo version mới.
+- **Operational recovery:** `pendingActionResumeStatus` xác định state cần resume sau capacity override/recovery; không tạo status column thứ hai.
 - **Thông tin người gửi:** `senderUserId` FK → User (NOT NULL — người gửi PHẢI có tài khoản VietRide, consistent với no walk-in parcel). Dùng để authorize tracking, query "hàng tôi đã gửi" (`GET /v1/parcels/sent`), và cho Tracking Service verify parcel sender khi joinTripTracking.
 - **Thông tin người nhận:** name (bắt buộc), phone (bắt buộc), email (**optional**). `recipientUserId` nullable link tới User — set khi người gửi nhập email và Identity Service lookup ra account hiện có. null = recipient không có tài khoản VietRide.
 - **Điểm xuống hàng:** `dropoffStopId` nullable FK → Stop. Null = giao tại destination station mặc định (terminal). Not null = giao tại Stop dọc tuyến. Validation:
@@ -3276,16 +3306,16 @@ Parcel có tính phí. Operator define bảng giá theo route + size category. C
 
 > >
 > **Revenue entries (Parcel earning revenue):**
-> Payment Service consume `payment.payment.succeeded { referenceType=PARCEL }`:
-> → INSERT PlatformWalletTransaction { type=CREDIT, referenceType=PARCEL_PAYMENT_HOLD, amount=Parcel.depositAmount, referenceId=parcelId } atomic với UPDATE PlatformWallet balance (optimistic lock — xem 4.6).
-> → INSERT OperatorLedgerEntry { entryType=PARCEL_REVENUE, tripId=Parcel.tripId, amount=+Parcel.depositAmount, referenceType=PARCEL, referenceId=parcelId, ... } — audit-only, KHÔNG credit OperatorWallet ngay (xem wallet + settlement model ở 4.6).
-> → Khi additional payment success (cân lại > ước lượng — Parcel.additionalPaymentId SUCCEEDED): INSERT thêm PlatformWalletTransaction CREDIT + OperatorLedgerEntry { entryType=PARCEL_REVENUE, tripId, amount=+additionalAmount, referenceType=PARCEL, referenceId=parcelId, note="Additional payment after reweigh" } — cùng pattern hold + audit-only.
+> Payment Service consume `payment.payment.succeeded` cho deposit/final payment:
+> → INSERT PlatformWalletTransaction CREDIT đúng số tiền Payment đã thu và OperatorLedgerEntry audit tương ứng. Parcel chỉ cộng `depositPaidVnd` hoặc `balancePaidVnd` khi `paidAt` nằm trước deadline của purpose đó.
+> → Balance capture quá hạn không được cộng vào Parcel; Payment Service sở hữu ledger và refund khoản late capture.
 >
 > **Refund entries (cross-ref đầy đủ cho mọi refund path):**
 >
 > Payment Service consume các event refund parcel:
-> - `parcel.parcel.auto_rejected` (Hangfire auto-reject PENDING khi quá 30 phút, hoặc PENDING_ADDITIONAL_PAYMENT timeout): INSERT PlatformWalletTransaction DEBIT + OperatorLedgerEntry { entryType=PARCEL_REFUND, tripId, amount = -refundAmount (theo `Operator.parcelNoShowPolicy.noShowFeePercent`), note="Auto-rejected: late load" } atomic với Wallet credit user.
-> - Trip CANCELLED → Parcel PENDING → CANCELLED: INSERT PlatformWalletTransaction DEBIT + OperatorLedgerEntry { entryType=PARCEL_REFUND, tripId, amount = -depositAmount, note="Trip cancelled by operator, parcel not loaded yet" } atomic với Wallet credit.
+> - Giá cuối giảm: `parcel.refund.initiated` với `amount=refundDueVnd`; refund không block `READY_TO_LOAD`.
+> - Trip/system CANCELLED trước load: refund toàn bộ `depositPaidVnd + balancePaidVnd - refundedAmountVnd`.
+> - CHECK_IN_TIMEOUT/FINAL_PAYMENT_TIMEOUT: không refund cọc; ghi `forfeitedDepositVnd=depositPaidVnd`, không cộng forfeiture lần hai vào collected amount.
 > - PENDING_OPERATOR_ACTION → RETURNED (operator trả hàng tại bến): INSERT PlatformWalletTransaction DEBIT + OperatorLedgerEntry { entryType=PARCEL_REFUND, tripId, amount = -depositAmount, note="Parcel returned at terminal after trip cancel/disrupt" } atomic với Wallet credit.
 > - TRANSFER_ESCALATED → RETURNED: cùng pattern (refund 100% nếu parcel rời khỏi VietRide custody).
 > - DELIVERY_REJECTED → RETURN_INITIATED (recipient từ chối + 15p undo): refund logic phụ thuộc operator (out of scope ledger v1 — operator settle thủ công với sender; có thể adjust ledger qua System Admin endpoint nếu cần).
@@ -3415,9 +3445,13 @@ Passenger không query được tài liệu OPERATOR/ADMIN. Driver/Assistant kh�
 2. System Admin review và approve (hoặc auto-approve nếu System Admin tự upload)
    → PUT /rag/documents/{id}/approve
    → UPDATE KnowledgeDocument status = APPROVED
-   → Publish event DocumentApproved { documentId }
+   → Ghi local work item `rag.document.ingest_requested` trong cùng RAG database transaction
 
-3. Background ingest worker (BullMQ job trong RAG Service, triggered by DocumentApproved):
+   `rag.document.ingest_requested` là lệnh xử lý nội bộ của RAG, không publish lên RabbitMQ và
+   không tạo Notification. v1 không có `rag.document.approved` integration event vì chỉ
+   System Admin quản lý tài liệu và không cần tự nhận thông báo cho thao tác duyệt.
+
+3. Background ingest worker trong RAG Service, triggered by local `rag.document.ingest_requested`:
    a. Download file từ Firebase Storage
    b. Extract text:
         PDF → pdf-parse library (Node.js)
@@ -4571,7 +4605,7 @@ IP/user-agent ở cột audit; missing actor retry/DLQ, không tạo fake User.
 - Booking source: `COMPLETED`, anchor `completedAt`, count + `SUM(totalAmount)`.
 - Trip source: `COMPLETED`, anchor `completedAt`, count.
 - Parcel source: `DELIVERY_CONFIRMED`, anchor `confirmedAt`, count + signed
-  `SUM(depositAmount + additionalAmount - refundAmount)`.
+  `SUM(depositPaidVnd + balancePaidVnd - refundedAmountVnd)`; forfeited deposit được báo cáo riêng và không cộng hai lần.
 
 Ba source HTTP call chạy song song, timeout 5 giây. `SUM(BIGINT)` PostgreSQL là NUMERIC và phải
 checked-convert group/total về Int64; Payment checked mọi phép cộng. Overflow trả
@@ -4696,10 +4730,12 @@ PaymentStatus:
                      (v2 feature).
 
 ParcelStatus:
-                   PENDING_OPERATOR_REVIEW    → PENDING_PAYMENT | REJECTED   (chỉ EXTRA_LARGE)
-                   PENDING_PAYMENT            → PENDING | EXPIRED            (Wallet/VNPay parcel payment)
-                   PENDING                    → LOADED | REJECTED | CANCELLED | PENDING_OPERATOR_ACTION | PENDING_ADDITIONAL_PAYMENT
-                   PENDING_ADDITIONAL_PAYMENT → PENDING | REJECTED            (user thanh toán phụ phí cân lại / timeout)
+                   PENDING_OPERATOR_REVIEW    → PENDING_PAYMENT | REJECTED | CANCELLED
+                   PENDING_PAYMENT            → RESERVED | EXPIRED | CANCELLED
+                   RESERVED                   → CHECKED_IN | REJECTED | CANCELLED | PENDING_OPERATOR_ACTION
+                   CHECKED_IN                 → PENDING_FINAL_PAYMENT | READY_TO_LOAD | PENDING_OPERATOR_ACTION
+                   PENDING_FINAL_PAYMENT      → READY_TO_LOAD | REJECTED | CANCELLED
+                   READY_TO_LOAD              → LOADED | CANCELLED
                    LOADED                     → IN_TRANSIT | PENDING_TRANSFER_CONFIRM | PENDING_OPERATOR_ACTION
                    IN_TRANSIT                 → UNLOADED | PENDING_TRANSFER_CONFIRM | PENDING_OPERATOR_ACTION
                    PENDING_TRANSFER_CONFIRM   → LOADED | TRANSFER_ESCALATED   (Driver/Assistant target trip confirm / 30 phút timeout)
@@ -4707,7 +4743,7 @@ ParcelStatus:
                    UNLOADED                   → DELIVERED_PENDING_CONFIRM
                    DELIVERED_PENDING_CONFIRM  → DELIVERY_CONFIRMED | DELIVERY_REJECTED
                    DELIVERY_REJECTED          → RETURN_INITIATED              (Hangfire sau 15 phút undo window)
-                   PENDING_OPERATOR_ACTION    → PENDING | RETURNED            (operator giữ hàng chờ chuyến khác / trả hàng)
+                   PENDING_OPERATOR_ACTION    → pendingActionResumeStatus | RETURNED
 
                    Terminal: DELIVERY_CONFIRMED, RETURN_INITIATED, CANCELLED, EXPIRED, REJECTED, RETURNED.
 
@@ -4796,7 +4832,7 @@ Role:              PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_AD
 | **DriverSchedule** | `dayOfWeek` JSON array + `departureTime TIME`. Hangfire generate Trip 14 ngày kế tiếp qua 2 trigger: (1) immediate on-create/activate, (2) weekly job CN 23:00. Idempotent check (driverId + departureDateTime). Không cho 2 schedule active cùng driverId overlap giờ. Vehicle conflict cũng check. |
 | **Alternative Route** | Tối đa 2 per Route chính. Stop sequence riêng hoàn toàn — không reuse `RouteStop`. Quan hệ: `Route → AlternativeRoute → AlternativeRouteStop → Stop`. |
 | **Stop độc lập** | Một Stop có thể thuộc nhiều Route. Canonical disable là bodyless `DELETE /v1/operator/stops/{stopId}?replacedByStopId=` cho `OPERATOR_ADMIN`, required UUID-v4 `Idempotency-Key`; set `isActive=false`, giữ `deletedAt`, không xóa RouteStop, và publish `trip.stop.disabled`. `replacedByStopId` nullable self-FK phải active/cùng operator/non-self/cycle-free. Retained PATCH là details-update-only, không đổi `isActive`/`deletedAt` và không emit disable event. Async `booking.stop_disabled.affected` là sole impact source; không có synchronous count/warning seam. Auto-suggest geo proximity defer v2. |
-| **Trip cargo counters** | `Trip.totalLoadedWeightKg` (denormalized — parcel **vật lý đang trên xe**): ADD khi LOADED; REMOVE khi UNLOADED, RETURN_INITIATED, PENDING_OPERATOR_ACTION→RETURNED/PENDING(transfer), PENDING_TRANSFER_CONFIRM→LOADED Trip_new (release Trip_old). `Trip.reservedParcelWeightKg` (parcel "đã commit vào trip" — bao gồm cả deposit chưa load lẫn đã load): ADD khi PaymentSucceeded(PARCEL)→PENDING, khi parcel transfer **vào** trip; REMOVE khi PENDING→CANCELLED, PENDING→REJECTED, PENDING_ADDITIONAL_PAYMENT→REJECTED, PENDING_OPERATOR_ACTION→RETURNED, PENDING_OPERATOR_ACTION→PENDING(transfer out), PENDING_TRANSFER_CONFIRM→LOADED Trip_new (release Trip_old), TRANSFER_ESCALATED→RETURNED, IN_TRANSIT→UNLOADED. `Trip.estimatedPassengerLuggageKg` (config từ operator policy hoặc tính theo số ghế booked). **Available capacity formula = `Vehicle.maxCargoWeightKg - estimatedPassengerLuggageKg - reservedParcelWeightKg`** (dùng cho parcel mới). Alert khi `totalLoadedWeightKg ≥ 80% maxCargoWeightKg`. Counter update PHẢI atomic với status transition trong cùng DB transaction. |
+| **Trip cargo counters** | `Trip.totalLoadedWeightKg/VolumeM3` là cargo vật lý trên xe: Task load chuyển actual reservation → loaded cargo; unload/recovery release như flow hiện hữu. `Trip.reservedParcelWeightKg/VolumeM3` giữ mềm estimated cargo khi deposit payment bắt đầu, giữ qua `RESERVED`, rồi Task reweigh chuyển estimated → actual; payment/check-in/final-payment timeout hoặc terminal trước load release. **Available capacity = Vehicle max - estimated passenger luggage - reserved parcel cargo - loaded cargo**. Parcel/Trip dùng local transaction + CAS/idempotent internal mutation, không có cross-DB transaction. |
 | **TripStop** | `{tripId, stopId, orderIndex, estimatedArrivalTime (static planned baseline), actualArrivalTime nullable, actualDepartureTime nullable, status PENDING\|ARRIVED\|SKIPPED, distanceFromOriginKm nullable}`. `actualDepartureTime` is the durable Day-24 stop-departure anchor; arrival/status remain authoritative for no-show. Approved pre-departure Route edit hoặc DriverSchedule `ALL_PENDING` cascade có thể recompute baseline; GPS/Tracking dynamic ETA không bao giờ update field này. Copy `distanceFromOriginKm` từ RouteStop khi generate — dùng cho DISRUPTED refund mà không cần join ngược. |
 | **Trip.source** | `MANUAL \| AUTO_FROM_SCHEDULE \| VEHICLE_SUBSTITUTION`. Manual create: Operator nhập form → hệ thống generate TripSeat + TripStop; Day 22 không copy fare-template thành TripStopFare mới. Initial status: SCHEDULED nếu departure > 30 phút; BOARDING ngay nếu ≤ 30 phút (publish TripBoardingStarted ngay, không đợi Hangfire). Reject nếu departure trong quá khứ. **VEHICLE_SUBSTITUTION**: Trip_new tạo từ 6.12 Vehicle Substitution flow — Trip Service set source = VEHICLE_SUBSTITUTION explicitly khi INSERT; counter check `maxTripsPerMonth` skip + `currentTripsThisMonth` không increment (xem 4.5 c.0). |
 | **RouteStopFareTemplate** | `{routeId, stopId, fareFromThisStop BIGINT, effectiveFrom datetime, effectiveUntil datetime nullable}` — **Exception override** cho stop có giá khác `Route.baseFare`. Operator chỉ tạo entry cho stop muốn config giá riêng — stop không có entry dùng baseFare. Day 22 không tạo `TEMPLATE_SNAPSHOT` khi Hangfire/manual generate Trip; legacy snapshot chỉ còn readable ở request không có `pricingAt`. Chỉ explicit operator per-Trip fare override tạo `MANUAL_OVERRIDE`. Với một handler-start `pricingAt`, precedence là `MANUAL_OVERRIDE` → active template half-open window → `Trip.baseFare`. Trip DB dùng `btree_gist` exclusion guard để không có overlapping window cùng `(routeId,stopId)`. |
@@ -4825,7 +4861,7 @@ Role:              PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_AD
 |---|---|
 | Booking | Seat release khi VNPay timeout · schedule-change auto-accept · PENDING_SEAT_ASSIGNMENT escalation (interval 15 phút) |
 | Trip-Route-Vehicle | Auto-BOARDING 30 phút trước departure · COMPLETED fallback +30 phút sau ETA · Generate Trip từ DriverSchedule (CN 23:00) |
-| Parcel | Undo-reject 15 phút · auto-reject EXTRA_LARGE 24h · auto-reject PENDING 30 phút khi IN_PROGRESS · auto-reject PENDING_ADDITIONAL_PAYMENT khi quá `additionalPaymentDeadline` (interval 5 phút) · PENDING_TRANSFER_CONFIRM escalation 30 phút · PENDING_OPERATOR_ACTION re-alert 2h |
+| Parcel | Undo-reject 15 phút · cancel EXTRA_LARGE review timeout 24h · reject/forfeit RESERVED quá `latestCheckInAt` · reject/forfeit PENDING_FINAL_PAYMENT quá `finalPaymentDeadline` (interval 5 phút) · PENDING_TRANSFER_CONFIRM escalation 30 phút · PENDING_OPERATOR_ACTION re-alert 2h |
 | Payment | PENDING_REDIRECT expired 15 phút · TopUpRequest expired 15 phút · **Trip settlement eligibility flag (daily 02:00)** — set `OperatorTripSettlement.status=ELIGIBLE` khi `eligibleAt <= now` · **Trip settlement weekly auto-settle (Monday 09:00 weekly)** — debit PlatformWallet + credit OperatorWallet cho mọi settlement ELIGIBLE · Subscription trial expire check (daily 00:30) · Trial expiring T-3 days warn (daily 09:00) · Subscription upgrade attempt hết hạn sau 15 phút và reconciliation chạy mỗi phút · Subscription paid invoice generation post-payment-success (event-driven, không phải scheduled — nhưng retry via Hangfire nếu PDF gen fail) |
 | Identity | OTP expired cleanup (optional) · FCM token stale cleanup (weekly) |
 
@@ -5026,8 +5062,8 @@ Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → 
 
 #### Parcel Service
 
-- **`Parcel`** — Hàng ký gửi. `parcelCode` UNIQUE. `senderUserId` NOT NULL (bắt buộc có account); `recipientUserId` nullable. `dropoffStopId` nullable (Stop dọc tuyến hoặc null = terminal). sizeCategory + estimatedWeightKg + actualWeightKg (sau cân lại). deposit + additionalAmount (phụ phí cân lại). deliveryToken cho email link confirm. Transfer fields cho Vehicle Substitution. Return fields cho RETURNED status. Review fields cho EXTRA_LARGE flow.
-- **`ParcelRouteFare`** — Operator config giá per route per sizeCategory.
+- **`Parcel`** — Hàng ký gửi. `parcelCode` UNIQUE. `senderUserId` NOT NULL; `recipientUserId` nullable; `dropoffStopId` nullable. Lưu estimated/actual cargo + size derived, canonical settlement fields, payment/deadline/check-in snapshots, `pendingActionResumeStatus`, delivery/transfer/return/review fields.
+- **`ParcelRouteFare`** — Operator config `pricePerKgVnd` + `minimumPriceVnd` per route/derived size category và effective window.
 - **`ParcelStats`** — Counter table per (operatorId, date) cho reporting.
 - **`OutboxEvent`**.
 

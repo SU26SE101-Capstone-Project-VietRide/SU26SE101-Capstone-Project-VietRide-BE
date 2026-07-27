@@ -20,6 +20,7 @@ public sealed class ExpirePaymentForParcelCommandHandler
     private readonly IParcelStatsRepository _statsRepository;
     private readonly IClock _clock;
     private readonly ILogger<ExpirePaymentForParcelCommandHandler> _logger;
+    private readonly ITripServiceClient? _tripClient;
 
     public ExpirePaymentForParcelCommandHandler(
         IParcelRepository parcelRepository,
@@ -27,7 +28,8 @@ public sealed class ExpirePaymentForParcelCommandHandler
         IIntegrationEventOutbox outbox,
         IParcelStatsRepository statsRepository,
         IClock clock,
-        ILogger<ExpirePaymentForParcelCommandHandler> logger)
+        ILogger<ExpirePaymentForParcelCommandHandler> logger,
+        ITripServiceClient? tripClient = null)
     {
         _parcelRepository = parcelRepository;
         _identityClient = identityClient;
@@ -35,12 +37,16 @@ public sealed class ExpirePaymentForParcelCommandHandler
         _statsRepository = statsRepository;
         _clock = clock;
         _logger = logger;
+        _tripClient = tripClient;
     }
 
     public async Task<bool> Handle(ExpirePaymentForParcelCommand request, CancellationToken cancellationToken)
     {
         if (string.Equals(request.ReferenceType, ParcelReferenceType, StringComparison.OrdinalIgnoreCase))
         {
+            var parcel = _tripClient is null
+                ? null
+                : await _parcelRepository.GetByIdAsync(request.ReferenceId, cancellationToken);
             var snapshot = await _parcelRepository.TryMarkDepositExpiredAsync(
                 request.ReferenceId, _clock.UtcNow, cancellationToken);
             if (snapshot is null)
@@ -50,6 +56,7 @@ public sealed class ExpirePaymentForParcelCommandHandler
                     request.PaymentId, request.ReferenceId);
                 return false;
             }
+            await ReleaseDepositHoldAsync(parcel, request.PaymentId, cancellationToken);
             return true;
         }
 
@@ -87,5 +94,26 @@ public sealed class ExpirePaymentForParcelCommandHandler
         }
 
         return false;
+    }
+
+    private async Task ReleaseDepositHoldAsync(
+        Domain.Entities.Parcel? parcel,
+        Guid paymentId,
+        CancellationToken cancellationToken)
+    {
+        if (_tripClient is null || parcel is null)
+            return;
+        var result = await _tripClient.ReleaseCargoAsync(
+            parcel.TripId,
+            parcel.Id,
+            parcel.EstimatedWeightKg,
+            parcel.EstimatedVolumeM3,
+            paymentId,
+            cancellationToken);
+        if (result.Kind != TripCargoOutcomeKind.Success)
+            _logger.LogWarning(
+                "Failed to release expired deposit cargo hold for parcel {ParcelId}: {Reason}",
+                parcel.Id,
+                result.ErrorMessage);
     }
 }

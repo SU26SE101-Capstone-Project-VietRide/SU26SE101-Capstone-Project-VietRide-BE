@@ -23,6 +23,8 @@ public sealed class Parcel : BaseEntity<Guid>
     public string? Description { get; private set; }
     public string? PhotoUrl { get; private set; }
     public ParcelSizeCategory SizeCategory { get; private set; }
+    public ParcelSizeCategory EstimatedSizeCategory { get; private set; }
+    public ParcelSizeCategory? ActualSizeCategory { get; private set; }
     public decimal EstimatedLengthCm { get; private set; }
     public decimal EstimatedWidthCm { get; private set; }
     public decimal EstimatedHeightCm { get; private set; }
@@ -51,8 +53,35 @@ public sealed class Parcel : BaseEntity<Guid>
     public Guid? AdditionalPaymentId { get; private set; }
     public DateTimeOffset? AdditionalPaymentDeadline { get; private set; }
 
+    public Money EstimatedGrossPriceVnd { get; private set; }
+    public Money FinalGrossPriceVnd { get; private set; }
+    public Money DiscountAmountVnd { get; private set; }
+    public Money EstimatedTotalPriceVnd { get; private set; }
+    public Money FinalTotalPriceVnd { get; private set; }
+    public Money DepositRequiredVnd { get; private set; }
+    public Money DepositPaidVnd { get; private set; }
+    public Money BalanceRequiredVnd { get; private set; }
+    public Money BalancePaidVnd { get; private set; }
+    public Money RefundDueVnd { get; private set; }
+    public Money RefundedAmountVnd { get; private set; }
+    public Money ForfeitedDepositVnd { get; private set; }
+    public Guid? DepositPaymentId { get; private set; }
+    public Guid? BalancePaymentId { get; private set; }
+    public DateTimeOffset? FinalPaymentDeadline { get; private set; }
+    public DateTimeOffset? LoadCutoffAt { get; private set; }
+    public DateTimeOffset? LatestCheckInAt { get; private set; }
+    public DateTimeOffset? CheckedInAt { get; private set; }
+    public Guid? CheckedInByUserId { get; private set; }
+    public DateTimeOffset? ReweighedAt { get; private set; }
+    public Guid? ReweighedByUserId { get; private set; }
+    public Money PricePerKgVnd { get; private set; }
+    public Money MinimumPriceVnd { get; private set; }
+    public decimal DimWeightFactor { get; private set; }
+    public int SettlementPolicyVersion { get; private set; }
+
     public ParcelStatus Status { get; private set; }
     public PendingActionType? PendingActionType { get; private set; }
+    public ParcelStatus? PendingActionResumeStatus { get; private set; }
     public string? PendingActionReason { get; private set; }
     public string? RejectionReason { get; private set; }
     public string? CancellationReason { get; private set; }
@@ -189,6 +218,7 @@ public sealed class Parcel : BaseEntity<Guid>
             Description = description,
             PhotoUrl = NormalizeOptional(photoUrl),
             SizeCategory = sizeCategory,
+            EstimatedSizeCategory = sizeCategory,
             EstimatedLengthCm = estimatedLengthCm,
             EstimatedWidthCm = estimatedWidthCm,
             EstimatedHeightCm = estimatedHeightCm,
@@ -206,6 +236,22 @@ public sealed class Parcel : BaseEntity<Guid>
             VoucherUsageId = voucherUsageId,
             AdditionalAmount = Money.Zero,
             RefundAmount = Money.Zero,
+            EstimatedGrossPriceVnd = totalPrice,
+            FinalGrossPriceVnd = Money.Zero,
+            DiscountAmountVnd = discountAmount ?? Money.Zero,
+            EstimatedTotalPriceVnd = totalPrice,
+            FinalTotalPriceVnd = Money.Zero,
+            DepositRequiredVnd = depositAmount,
+            DepositPaidVnd = Money.Zero,
+            BalanceRequiredVnd = Money.Zero,
+            BalancePaidVnd = Money.Zero,
+            RefundDueVnd = Money.Zero,
+            RefundedAmountVnd = Money.Zero,
+            ForfeitedDepositVnd = Money.Zero,
+            PricePerKgVnd = Money.Zero,
+            MinimumPriceVnd = Money.Zero,
+            DimWeightFactor = 6000m,
+            SettlementPolicyVersion = 1,
             Status = ParcelStatus.PENDING_PAYMENT,
             ReviewDecision = ParcelReviewDecision.PENDING,
         };
@@ -308,6 +354,7 @@ public sealed class Parcel : BaseEntity<Guid>
             Description = description,
             PhotoUrl = NormalizeOptional(photoUrl),
             SizeCategory = sizeCategory,
+            EstimatedSizeCategory = sizeCategory,
             EstimatedLengthCm = estimatedLengthCm,
             EstimatedWidthCm = estimatedWidthCm,
             EstimatedHeightCm = estimatedHeightCm,
@@ -325,6 +372,22 @@ public sealed class Parcel : BaseEntity<Guid>
             VoucherUsageId = voucherUsageId,
             AdditionalAmount = Money.Zero,
             RefundAmount = Money.Zero,
+            EstimatedGrossPriceVnd = totalPrice,
+            FinalGrossPriceVnd = Money.Zero,
+            DiscountAmountVnd = discountAmount ?? Money.Zero,
+            EstimatedTotalPriceVnd = totalPrice,
+            FinalTotalPriceVnd = Money.Zero,
+            DepositRequiredVnd = depositAmount,
+            DepositPaidVnd = Money.Zero,
+            BalanceRequiredVnd = Money.Zero,
+            BalancePaidVnd = Money.Zero,
+            RefundDueVnd = Money.Zero,
+            RefundedAmountVnd = Money.Zero,
+            ForfeitedDepositVnd = Money.Zero,
+            PricePerKgVnd = Money.Zero,
+            MinimumPriceVnd = Money.Zero,
+            DimWeightFactor = 6000m,
+            SettlementPolicyVersion = 1,
             Status = ParcelStatus.PENDING_OPERATOR_REVIEW,
             ReviewDecision = ParcelReviewDecision.PENDING,
         };
@@ -333,6 +396,48 @@ public sealed class Parcel : BaseEntity<Guid>
     public void AttachVoucherUsage(Guid voucherUsageId)
     {
         VoucherUsageId = voucherUsageId;
+    }
+
+    public void ConfigureSettlementV2(
+        ParcelSizeCategory estimatedSizeCategory,
+        Money estimatedGrossPrice,
+        Money discountAmount,
+        Money estimatedTotalPrice,
+        decimal depositPercent,
+        Money depositRequired,
+        Money pricePerKg,
+        Money minimumPrice,
+        decimal dimWeightFactor,
+        DateTimeOffset loadCutoffAt,
+        DateTimeOffset latestCheckInAt)
+    {
+        if (Status is not (ParcelStatus.PENDING_PAYMENT or ParcelStatus.PENDING_OPERATOR_REVIEW))
+            throw new InvalidOperationException("Settlement can only be configured before payment.");
+        if (depositPercent != 20m)
+            throw new ArgumentOutOfRangeException(nameof(depositPercent), "Settlement policy v2 requires a 20 percent deposit.");
+        if (latestCheckInAt >= loadCutoffAt)
+            throw new ArgumentException("Latest check-in must be before load cutoff.");
+
+        SizeCategory = estimatedSizeCategory;
+        EstimatedSizeCategory = estimatedSizeCategory;
+        EstimatedGrossPriceVnd = estimatedGrossPrice;
+        DiscountAmountVnd = discountAmount;
+        EstimatedTotalPriceVnd = estimatedTotalPrice;
+        DepositPercent = depositPercent;
+        DepositRequiredVnd = depositRequired;
+        DepositPaidVnd = Money.Zero;
+        PricePerKgVnd = pricePerKg;
+        MinimumPriceVnd = minimumPrice;
+        DimWeightFactor = dimWeightFactor;
+        SettlementPolicyVersion = 2;
+        LoadCutoffAt = loadCutoffAt;
+        LatestCheckInAt = latestCheckInAt;
+
+        // Legacy rollout aliases. New logic must read the canonical fields above.
+        TotalPrice = estimatedTotalPrice;
+        DepositAmount = depositRequired;
+        OriginalDepositAmount = depositRequired;
+        DiscountAmount = discountAmount;
     }
 
     private static string? NormalizeOptional(string? value)

@@ -8,6 +8,12 @@ public sealed record AssistantTripParcelResponse(
     string? RecipientPhone,
     Guid? DropoffStopId,
     string SizeCategory,
+    string EstimatedSizeCategory,
+    string? ActualSizeCategory,
     decimal EstimatedWeightKg,
+    decimal? ActualWeightKg,
+    long BalanceRequiredVnd,
+    long BalancePaidVnd,
+    DateTimeOffset? FinalPaymentDeadline,
     string? Description,
     string? PhotoUrl);

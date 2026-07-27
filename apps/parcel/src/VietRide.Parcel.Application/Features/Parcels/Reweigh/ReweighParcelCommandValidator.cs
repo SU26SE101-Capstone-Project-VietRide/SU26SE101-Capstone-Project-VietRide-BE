@@ -12,8 +12,5 @@ public sealed class ReweighParcelCommandValidator : AbstractValidator<ReweighPar
         RuleFor(x => x.ActualWidthCm).GreaterThan(0);
         RuleFor(x => x.ActualHeightCm).GreaterThan(0);
         RuleFor(x => x.ActualWeightKg).GreaterThan(0);
-        RuleFor(x => x.ActualSizeCategory).NotEmpty();
-        RuleFor(x => x.PaymentMethod).Must(m => m is "WALLET" or "VNPAY")
-            .WithMessage("PaymentMethod must be WALLET or VNPAY.");
     }
 }

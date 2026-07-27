@@ -155,6 +155,20 @@ internal sealed class WalletRepository : IWalletRepository
                     && transaction.ReferenceId == referenceId,
                 cancellationToken);
 
+    public async Task<long> GetTotalRefundedByReferenceAsync(
+        WalletTransactionRef referenceType,
+        Guid referenceId,
+        CancellationToken cancellationToken)
+    {
+        var amounts = await _db.WalletTransactions
+            .AsNoTracking()
+            .Where(transaction => transaction.ReferenceType == referenceType
+                && transaction.ReferenceId == referenceId)
+            .Select(transaction => transaction.Amount)
+            .ToListAsync(cancellationToken);
+        return amounts.Sum(amount => amount.Amount);
+    }
+
     public async Task<WalletTransaction> CreditRefundAsync(
         Guid userId,
         Money amount,

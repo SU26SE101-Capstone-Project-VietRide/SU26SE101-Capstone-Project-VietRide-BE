@@ -29,7 +29,8 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
         string method,
         string idempotencyKey,
         CancellationToken cancellationToken = default,
-        PaymentContextSnapshot? context = null)
+        PaymentContextSnapshot? context = null,
+        DateTimeOffset? dueAt = null)
     {
         try
         {
@@ -41,6 +42,7 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
                 amount,
                 method,
                 context,
+                dueAt,
             };
 
             using var request = new HttpRequestMessage(HttpMethod.Post, "/internal/v1/payments/charge")

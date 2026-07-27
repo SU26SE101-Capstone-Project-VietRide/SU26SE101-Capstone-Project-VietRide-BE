@@ -49,6 +49,7 @@ public static class InfrastructureServiceCollectionExtensions
 
         services.AddScoped<ParcelReviewTimeoutJob>();
         services.AddScoped<ParcelAdditionalPaymentTimeoutJob>();
+        services.AddScoped<ParcelSettlementTimeoutJob>();
         services.AddScoped<ParcelPendingAutoRejectJob>();
         services.AddScoped<ParcelLifecycleSweepJob>();
         services.AddScoped<ParcelDeliveryPendingConfirmReminderJob>();
@@ -103,6 +104,11 @@ public static class InfrastructureServiceCollectionExtensions
             {
                 options.QueueName = "parcel.payment-expired";
                 options.BindingKeys = [PaymentExpiredIntegrationEvent.EventType];
+            });
+            services.AddVietRideEventConsumer<WalletCreditedIntegrationEvent, WalletCreditedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "parcel.wallet-credited";
+                options.BindingKeys = [WalletCreditedIntegrationEvent.EventTypeValue];
             });
             services.AddVietRideEventConsumer<TripStartedIntegrationEvent, TripStartedIntegrationEventHandler>(options =>
             {

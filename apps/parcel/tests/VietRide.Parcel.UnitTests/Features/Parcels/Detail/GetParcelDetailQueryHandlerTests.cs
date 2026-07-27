@@ -38,6 +38,11 @@ public sealed class GetParcelDetailQueryHandlerTests
             .Handle(new GetParcelDetailQuery(parcel.Id, userId, operatorId), default);
 
         result.PhotoUrl.Should().Be(PhotoUrl);
+        result.SettlementPolicyVersion.Should().Be(2);
+        result.EstimatedSizeCategory.Should().Be("SMALL");
+        result.EstimatedGrossPriceVnd.Should().Be(50_000);
+        result.EstimatedTotalPriceVnd.Should().Be(50_000);
+        result.DepositRequiredVnd.Should().Be(10_000);
     }
 
     [Fact]
@@ -56,7 +61,8 @@ public sealed class GetParcelDetailQueryHandlerTests
     }
 
     private static ParcelEntity CreateParcel()
-        => ParcelEntity.CreatePendingPayment(
+    {
+        var parcel = ParcelEntity.CreatePendingPayment(
             "VR-PCL-DETAIL",
             Guid.NewGuid(),
             Guid.NewGuid(),
@@ -73,4 +79,18 @@ public sealed class GetParcelDetailQueryHandlerTests
             1m,
             ParcelDeliveryMethod.TERMINAL_PICKUP,
             Money.FromRaw(50_000));
+        parcel.ConfigureSettlementV2(
+            ParcelSizeCategory.SMALL,
+            Money.FromRaw(50_000),
+            Money.Zero,
+            Money.FromRaw(50_000),
+            20m,
+            Money.FromRaw(10_000),
+            Money.FromRaw(50_000),
+            Money.Zero,
+            6000m,
+            DateTimeOffset.UtcNow.AddHours(2),
+            DateTimeOffset.UtcNow.AddHours(1));
+        return parcel;
+    }
 }

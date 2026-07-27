@@ -11,4 +11,5 @@ public sealed record ChargePaymentCommand(
     string Method,
     PaymentContextV1? Context,
     string? IdempotencyKey,
-    string ClientIpAddress) : IRequest<ChargePaymentResult>;
+    string ClientIpAddress,
+    DateTimeOffset? DueAt = null) : IRequest<ChargePaymentResult>;

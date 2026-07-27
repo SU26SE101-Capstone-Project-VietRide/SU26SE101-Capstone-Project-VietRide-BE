@@ -25,7 +25,7 @@ namespace VietRide.Parcel.Infrastructure.Migrations
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_parcel", "parcel_delivery_method", new[] { "TERMINAL_PICKUP" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_parcel", "parcel_review_decision", new[] { "PENDING", "APPROVED", "REJECTED" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_parcel", "parcel_size_category", new[] { "SMALL", "MEDIUM", "LARGE", "EXTRA_LARGE" });
-            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_parcel", "parcel_status", new[] { "PENDING_OPERATOR_REVIEW", "PENDING_PAYMENT", "PENDING", "PENDING_ADDITIONAL_PAYMENT", "LOADED", "IN_TRANSIT", "PENDING_TRANSFER_CONFIRM", "TRANSFER_ESCALATED", "UNLOADED", "DELIVERED_PENDING_CONFIRM", "DELIVERY_CONFIRMED", "DELIVERY_REJECTED", "RETURN_INITIATED", "RETURNED", "PENDING_OPERATOR_ACTION", "CANCELLED", "REJECTED", "EXPIRED" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_parcel", "parcel_status", new[] { "PENDING_OPERATOR_REVIEW", "PENDING_PAYMENT", "PENDING", "PENDING_ADDITIONAL_PAYMENT", "RESERVED", "CHECKED_IN", "PENDING_FINAL_PAYMENT", "READY_TO_LOAD", "LOADED", "IN_TRANSIT", "PENDING_TRANSFER_CONFIRM", "TRANSFER_ESCALATED", "UNLOADED", "DELIVERED_PENDING_CONFIRM", "DELIVERY_CONFIRMED", "DELIVERY_REJECTED", "RETURN_INITIATED", "RETURNED", "PENDING_OPERATOR_ACTION", "CANCELLED", "REJECTED", "EXPIRED" });
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("VietRide.Parcel.Domain.Entities.OperatorDepositPolicy", b =>
@@ -110,6 +110,10 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasColumnType("decimal(8,2)")
                         .HasColumnName("actual_length_cm");
 
+                    b.Property<int?>("ActualSizeCategory")
+                        .HasColumnType("vietride_parcel.parcel_size_category")
+                        .HasColumnName("actual_size_category");
+
                     b.Property<decimal?>("ActualVolumeM3")
                         .HasColumnType("decimal(10,4)")
                         .HasColumnName("actual_volume_m3");
@@ -136,6 +140,22 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("additional_payment_id");
 
+                    b.Property<long>("BalancePaidVnd")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("balance_paid_vnd")
+                        .HasDefaultValueSql("0");
+
+                    b.Property<Guid?>("BalancePaymentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("balance_payment_id");
+
+                    b.Property<long>("BalanceRequiredVnd")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("balance_required_vnd")
+                        .HasDefaultValueSql("0");
+
                     b.Property<Guid?>("BookingId")
                         .HasColumnType("uuid")
                         .HasColumnName("booking_id");
@@ -143,6 +163,14 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                     b.Property<string>("CancellationReason")
                         .HasColumnType("text")
                         .HasColumnName("cancellation_reason");
+
+                    b.Property<DateTimeOffset?>("CheckedInAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("checked_in_at");
+
+                    b.Property<Guid?>("CheckedInByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("checked_in_by_user_id");
 
                     b.Property<string>("ConfirmNote")
                         .HasColumnType("text")
@@ -193,20 +221,48 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("deposit_amount");
 
+                    b.Property<long>("DepositPaidVnd")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("deposit_paid_vnd")
+                        .HasDefaultValueSql("0");
+
+                    b.Property<Guid?>("DepositPaymentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("deposit_payment_id");
+
                     b.Property<decimal>("DepositPercent")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("decimal(5,2)")
                         .HasDefaultValue(100m)
                         .HasColumnName("deposit_percent");
 
+                    b.Property<long>("DepositRequiredVnd")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("deposit_required_vnd")
+                        .HasDefaultValueSql("0");
+
                     b.Property<string>("Description")
                         .HasColumnType("text")
                         .HasColumnName("description");
+
+                    b.Property<decimal>("DimWeightFactor")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(10,2)")
+                        .HasDefaultValue(6000m)
+                        .HasColumnName("dim_weight_factor");
 
                     b.Property<long>("DiscountAmount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bigint")
                         .HasColumnName("discount_amount")
+                        .HasDefaultValueSql("0");
+
+                    b.Property<long>("DiscountAmountVnd")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("discount_amount_vnd")
                         .HasDefaultValueSql("0");
 
                     b.Property<Guid?>("DropoffStopId")
@@ -225,6 +281,12 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasDefaultValue(0.01m)
                         .HasColumnName("estimated_dim_weight_kg");
 
+                    b.Property<long>("EstimatedGrossPriceVnd")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("estimated_gross_price_vnd")
+                        .HasDefaultValueSql("0");
+
                     b.Property<decimal>("EstimatedHeightCm")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("decimal(8,2)")
@@ -236,6 +298,16 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasColumnType("decimal(8,2)")
                         .HasDefaultValue(1m)
                         .HasColumnName("estimated_length_cm");
+
+                    b.Property<int>("EstimatedSizeCategory")
+                        .HasColumnType("vietride_parcel.parcel_size_category")
+                        .HasColumnName("estimated_size_category");
+
+                    b.Property<long>("EstimatedTotalPriceVnd")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("estimated_total_price_vnd")
+                        .HasDefaultValueSql("0");
 
                     b.Property<decimal>("EstimatedVolumeM3")
                         .ValueGeneratedOnAdd()
@@ -253,9 +325,39 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasDefaultValue(1m)
                         .HasColumnName("estimated_width_cm");
 
+                    b.Property<long>("FinalGrossPriceVnd")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("final_gross_price_vnd")
+                        .HasDefaultValueSql("0");
+
+                    b.Property<DateTimeOffset?>("FinalPaymentDeadline")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("final_payment_deadline");
+
+                    b.Property<long>("FinalTotalPriceVnd")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("final_total_price_vnd")
+                        .HasDefaultValueSql("0");
+
+                    b.Property<long>("ForfeitedDepositVnd")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("forfeited_deposit_vnd")
+                        .HasDefaultValueSql("0");
+
                     b.Property<DateTimeOffset?>("LastReminderAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_reminder_at");
+
+                    b.Property<DateTimeOffset?>("LatestCheckInAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("latest_check_in_at");
+
+                    b.Property<DateTimeOffset?>("LoadCutoffAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("load_cutoff_at");
 
                     b.Property<DateTimeOffset?>("LoadedAt")
                         .HasColumnType("timestamp with time zone")
@@ -264,6 +366,12 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                     b.Property<Guid?>("LoadedByUserId")
                         .HasColumnType("uuid")
                         .HasColumnName("loaded_by_user_id");
+
+                    b.Property<long>("MinimumPriceVnd")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("minimum_price_vnd")
+                        .HasDefaultValueSql("0");
 
                     b.Property<Guid>("OperatorId")
                         .HasColumnType("uuid")
@@ -283,6 +391,10 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("pending_action_reason");
 
+                    b.Property<int?>("PendingActionResumeStatus")
+                        .HasColumnType("vietride_parcel.parcel_status")
+                        .HasColumnName("pending_action_resume_status");
+
                     b.Property<string>("PendingActionType")
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)")
@@ -291,6 +403,12 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                     b.Property<string>("PhotoUrl")
                         .HasColumnType("text")
                         .HasColumnName("photo_url");
+
+                    b.Property<long>("PricePerKgVnd")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("price_per_kg_vnd")
+                        .HasDefaultValueSql("0");
 
                     b.Property<string>("RecipientEmail")
                         .HasMaxLength(255)
@@ -317,6 +435,18 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bigint")
                         .HasColumnName("refund_amount")
+                        .HasDefaultValueSql("0");
+
+                    b.Property<long>("RefundDueVnd")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("refund_due_vnd")
+                        .HasDefaultValueSql("0");
+
+                    b.Property<long>("RefundedAmountVnd")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("refunded_amount_vnd")
                         .HasDefaultValueSql("0");
 
                     b.Property<DateTimeOffset?>("RejectedAt")
@@ -351,9 +481,23 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("reviewed_by_user_id");
 
+                    b.Property<DateTimeOffset?>("ReweighedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("reweighed_at");
+
+                    b.Property<Guid?>("ReweighedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("reweighed_by_user_id");
+
                     b.Property<Guid>("SenderUserId")
                         .HasColumnType("uuid")
                         .HasColumnName("sender_user_id");
+
+                    b.Property<int>("SettlementPolicyVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1)
+                        .HasColumnName("settlement_policy_version");
 
                     b.Property<int>("SizeCategory")
                         .HasColumnType("vietride_parcel.parcel_size_category")
@@ -419,6 +563,10 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasDatabaseName("idx_parcels_additional_payment_id")
                         .HasFilter("additional_payment_id IS NOT NULL");
 
+                    b.HasIndex("BalancePaymentId")
+                        .HasDatabaseName("idx_parcels_balance_payment_id")
+                        .HasFilter("balance_payment_id IS NOT NULL");
+
                     b.HasIndex("ConfirmedByUserId")
                         .HasDatabaseName("idx_parcels_confirmed_by_user_id")
                         .HasFilter("confirmed_by_user_id IS NOT NULL");
@@ -427,6 +575,18 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .IsUnique()
                         .HasDatabaseName("uq_parcels_delivery_token")
                         .HasFilter("delivery_token IS NOT NULL");
+
+                    b.HasIndex("DepositPaymentId")
+                        .HasDatabaseName("idx_parcels_deposit_payment_id")
+                        .HasFilter("deposit_payment_id IS NOT NULL");
+
+                    b.HasIndex("FinalPaymentDeadline")
+                        .HasDatabaseName("idx_parcels_final_payment_deadline")
+                        .HasFilter("status = 'PENDING_FINAL_PAYMENT'::vietride_parcel.parcel_status AND final_payment_deadline IS NOT NULL");
+
+                    b.HasIndex("LatestCheckInAt")
+                        .HasDatabaseName("idx_parcels_latest_check_in_at")
+                        .HasFilter("status = 'RESERVED'::vietride_parcel.parcel_status AND latest_check_in_at IS NOT NULL");
 
                     b.HasIndex("LoadedByUserId")
                         .HasDatabaseName("idx_parcels_loaded_by_user_id")
@@ -474,7 +634,7 @@ namespace VietRide.Parcel.Infrastructure.Migrations
 
                     b.HasIndex("Status", "UpdatedAt")
                         .HasDatabaseName("idx_parcels_status_updated_at")
-                        .HasFilter("status IN ('PENDING'::vietride_parcel.parcel_status, 'PENDING_ADDITIONAL_PAYMENT'::vietride_parcel.parcel_status, 'PENDING_OPERATOR_REVIEW'::vietride_parcel.parcel_status, 'PENDING_OPERATOR_ACTION'::vietride_parcel.parcel_status, 'PENDING_TRANSFER_CONFIRM'::vietride_parcel.parcel_status, 'DELIVERED_PENDING_CONFIRM'::vietride_parcel.parcel_status, 'DELIVERY_REJECTED'::vietride_parcel.parcel_status, 'TRANSFER_ESCALATED'::vietride_parcel.parcel_status)");
+                        .HasFilter("status IN ('PENDING_PAYMENT'::vietride_parcel.parcel_status, 'RESERVED'::vietride_parcel.parcel_status, 'CHECKED_IN'::vietride_parcel.parcel_status, 'PENDING_FINAL_PAYMENT'::vietride_parcel.parcel_status, 'READY_TO_LOAD'::vietride_parcel.parcel_status, 'PENDING_OPERATOR_REVIEW'::vietride_parcel.parcel_status, 'PENDING_OPERATOR_ACTION'::vietride_parcel.parcel_status, 'PENDING_TRANSFER_CONFIRM'::vietride_parcel.parcel_status, 'DELIVERED_PENDING_CONFIRM'::vietride_parcel.parcel_status, 'DELIVERY_REJECTED'::vietride_parcel.parcel_status, 'TRANSFER_ESCALATED'::vietride_parcel.parcel_status)");
 
                     b.HasIndex("TripId", "Status")
                         .HasDatabaseName("idx_parcels_trip_id_status");
@@ -488,6 +648,10 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                             t.HasCheckConstraint("chk_parcels_amounts_non_negative", "deposit_amount >= 0 AND additional_amount >= 0");
 
                             t.HasCheckConstraint("chk_parcels_dimensions_positive", "estimated_length_cm > 0 AND estimated_width_cm > 0 AND estimated_height_cm > 0");
+
+                            t.HasCheckConstraint("chk_parcels_settlement_amounts_non_negative", "estimated_gross_price_vnd >= 0 AND final_gross_price_vnd >= 0 AND discount_amount_vnd >= 0 AND estimated_total_price_vnd >= 0 AND final_total_price_vnd >= 0 AND deposit_required_vnd >= 0 AND deposit_paid_vnd >= 0 AND balance_required_vnd >= 0 AND balance_paid_vnd >= 0 AND refund_due_vnd >= 0 AND refunded_amount_vnd >= 0 AND forfeited_deposit_vnd >= 0");
+
+                            t.HasCheckConstraint("chk_parcels_settlement_policy_version_positive", "settlement_policy_version > 0");
 
                             t.HasCheckConstraint("chk_parcels_volume_positive", "estimated_volume_m3 > 0");
 

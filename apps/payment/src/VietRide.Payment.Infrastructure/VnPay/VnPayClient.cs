@@ -60,6 +60,22 @@ public sealed class VnPayClient : IVnPayClient
             createdAt,
             $"VietRide booking payment {bookingId} for user {userId}");
 
+    public string CreateBookingPaymentRedirectUrl(
+        Guid bookingId,
+        Guid userId,
+        Money amount,
+        string vnPayTxnRef,
+        string clientIpAddress,
+        DateTimeOffset createdAt,
+        DateTimeOffset? expiresAt)
+        => BuildRedirectUrl(
+            amount,
+            vnPayTxnRef,
+            clientIpAddress,
+            createdAt,
+            $"VietRide booking payment {bookingId} for user {userId}",
+            expiresAt);
+
     public string CreateSubscriptionPaymentRedirectUrl(
         Guid upgradeAttemptId,
         Guid operatorId,
