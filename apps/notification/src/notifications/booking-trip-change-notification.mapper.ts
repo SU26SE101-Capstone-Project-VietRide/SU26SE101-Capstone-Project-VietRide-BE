@@ -61,10 +61,10 @@ function mapRouteChangeAutoFallback(
   return {
     userId: payload.userId,
     type: NotificationType.TRIP_ROUTE_CHANGED,
-    title: 'Da tu dong chuyen diem den',
+    title: 'Đã tự động chuyển điểm đến',
     body:
-      `Vi ban chua phan hoi, xe se dua ban den terminal ${payload.fallbackDestinationStationId}; ` +
-      'nha xe se bo tri shuttle dua ban ve diem dung ban dau.',
+      `Vì bạn chưa phản hồi, xe sẽ đưa bạn đến bến ${payload.fallbackDestinationStationId}; ` +
+      'nhà xe sẽ bố trí xe trung chuyển đưa bạn về điểm dừng ban đầu.',
     data: bookingEventData(payload),
   };
 }
@@ -75,8 +75,8 @@ function mapPendingActionAutoResolved(
   return {
     userId: payload.userId,
     type: NotificationType.TRIP_SCHEDULE_CHANGED,
-    title: 'Da chap nhan lich chuyen moi',
-    body: `Lich chuyen ${payload.tripId} da duoc tu dong chap nhan.`,
+    title: 'Đã chấp nhận lịch chuyến mới',
+    body: `Lịch chuyến ${payload.tripId} đã được tự động chấp nhận.`,
     data: bookingEventData(payload),
   };
 }
@@ -87,8 +87,8 @@ function mapSeatReassignmentRequired(
   return {
     userId: payload.userId,
     type: NotificationType.VEHICLE_SUBSTITUTED,
-    title: 'Can chon lai ghe',
-    body: `Ghe ${payload.seatNumbers.join(', ')} cua ban tren chuyen ${payload.tripId} can duoc chon lai.`,
+    title: 'Cần chọn lại ghế',
+    body: `Ghế ${payload.seatNumbers.join(', ')} của bạn trên chuyến ${payload.tripId} cần được chọn lại.`,
     data: bookingEventData(payload),
   };
 }
@@ -99,8 +99,8 @@ function mapScheduleChangeInformational(
   return {
     userId: payload.userId,
     type: NotificationType.TRIP_SCHEDULE_CHANGED,
-    title: 'Lich chuyen xe da thay doi',
-    body: `Gio khoi hanh chuyen ${payload.tripId} da thay doi. Vui long kiem tra lich moi.`,
+    title: 'Lịch chuyến xe đã thay đổi',
+    body: `Giờ khởi hành chuyến ${payload.tripId} đã thay đổi. Vui lòng kiểm tra lịch mới.`,
     data: bookingEventData(payload),
   };
 }
@@ -111,8 +111,8 @@ function mapScheduleChangeRequired(
   return {
     userId: payload.userId,
     type: NotificationType.TRIP_SCHEDULE_CHANGED,
-    title: 'Can xac nhan lich chuyen moi',
-    body: `Lich chuyen ${payload.tripId} da thay doi. Vui long phan hoi truoc ${payload.deadline}.`,
+    title: 'Cần xác nhận lịch chuyến mới',
+    body: `Lịch chuyến ${payload.tripId} đã thay đổi. Vui lòng phản hồi trước ${payload.deadline}.`,
     data: bookingEventData(payload),
   };
 }
@@ -122,8 +122,8 @@ function mapPendingActionRealerted(payload: BookingPendingActionRealertedEvent):
     return {
       userId: payload.userId,
       type: NotificationType.VEHICLE_SUBSTITUTED,
-      title: 'Nhac lai: can chon lai ghe',
-      body: `Ban van can chon lai ghe ${payload.seatNumbers.join(', ')} truoc ${payload.deadline}.`,
+      title: 'Nhắc lại: cần chọn lại ghế',
+      body: `Bạn vẫn cần chọn lại ghế ${payload.seatNumbers.join(', ')} trước ${payload.deadline}.`,
       data: bookingEventData(payload),
     };
   }
@@ -131,8 +131,8 @@ function mapPendingActionRealerted(payload: BookingPendingActionRealertedEvent):
   return {
     userId: payload.userId,
     type: NotificationType.TRIP_SCHEDULE_CHANGED,
-    title: 'Nhac lai: can xac nhan lich chuyen moi',
-    body: `Ban van can phan hoi ve lich chuyen ${payload.tripId} truoc ${payload.deadline}.`,
+    title: 'Nhắc lại: cần xác nhận lịch chuyến mới',
+    body: `Bạn vẫn cần phản hồi về lịch chuyến ${payload.tripId} trước ${payload.deadline}.`,
     data: bookingEventData(payload),
   };
 }

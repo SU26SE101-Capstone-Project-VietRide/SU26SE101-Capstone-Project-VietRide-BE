@@ -28,15 +28,15 @@ export class EmailTemplateRenderer {
     const otpCode = this.requiredString(data, 'otpCode', 'code');
     const ttlMinutes = this.optionalString(data, 'ttlMinutes') ?? '10';
     const purpose = this.resolveOtpPurpose(this.optionalString(data, 'purpose'));
-    const subject = 'Ma xac thuc VietRide';
-    const text = `Ma ${purpose} cua ban la ${otpCode}. Ma co hieu luc trong ${ttlMinutes} phut.`;
+    const subject = 'Mã xác thực VietRide';
+    const text = `Mã ${purpose} của bạn là ${otpCode}. Mã có hiệu lực trong ${ttlMinutes} phút.`;
 
     return {
       subject,
       text,
       html: this.paragraphs(subject, [
-        `Ma ${this.escapeHtml(purpose)} cua ban la <strong>${this.escapeHtml(otpCode)}</strong>.`,
-        `Ma co hieu luc trong ${this.escapeHtml(ttlMinutes)} phut.`,
+        `Mã ${this.escapeHtml(purpose)} của bạn là <strong>${this.escapeHtml(otpCode)}</strong>.`,
+        `Mã có hiệu lực trong ${this.escapeHtml(ttlMinutes)} phút.`,
       ]),
     };
   }
@@ -44,42 +44,42 @@ export class EmailTemplateRenderer {
   private renderSetInitialPassword(data: EmailTemplateData): RenderedEmail {
     // Identity posts `setInitialPasswordUrl`; older callers use `setPasswordUrl`.
     const setPasswordUrl = this.requiredString(data, 'setPasswordUrl', 'setInitialPasswordUrl');
-    const subject = 'Thiet lap mat khau VietRide';
-    const text = `Tai khoan VietRide cua ban da duoc tao. Thiet lap mat khau tai: ${setPasswordUrl}`;
+    const subject = 'Thiết lập mật khẩu VietRide';
+    const text = `Tài khoản VietRide của bạn đã được tạo. Thiết lập mật khẩu tại: ${setPasswordUrl}`;
 
     return {
       subject,
       text,
       html: this.paragraphs(subject, [
-        'Tai khoan VietRide cua ban da duoc tao.',
-        `<a href="${this.escapeHtml(setPasswordUrl)}">Thiet lap mat khau</a>`,
+        'Tài khoản VietRide của bạn đã được tạo.',
+        `<a href="${this.escapeHtml(setPasswordUrl)}">Thiết lập mật khẩu</a>`,
       ]),
     };
   }
 
   private renderParcelDeliveryLink(data: EmailTemplateData): RenderedEmail {
     const deliveryUrl = this.requiredString(data, 'deliveryUrl');
-    const parcelCode = this.optionalString(data, 'parcelCode') ?? 'kien hang';
-    const subject = 'Xac nhan giao hang VietRide';
-    const text = `Vui long xac nhan giao ${parcelCode} tai: ${deliveryUrl}`;
+    const parcelCode = this.optionalString(data, 'parcelCode') ?? 'kiện hàng';
+    const subject = 'Xác nhận giao hàng VietRide';
+    const text = `Vui lòng xác nhận giao ${parcelCode} tại: ${deliveryUrl}`;
 
     return {
       subject,
       text,
       html: this.paragraphs(subject, [
-        `Vui long xac nhan giao ${this.escapeHtml(parcelCode)}.`,
-        `<a href="${this.escapeHtml(deliveryUrl)}">Mo lien ket xac nhan</a>`,
+        `Vui lòng xác nhận giao ${this.escapeHtml(parcelCode)}.`,
+        `<a href="${this.escapeHtml(deliveryUrl)}">Mở liên kết xác nhận</a>`,
       ]),
     };
   }
 
   private renderOperatorSubscriptionNotice(data: EmailTemplateData): RenderedEmail {
     const message = this.requiredString(data, 'message');
-    const title = this.optionalString(data, 'title') ?? 'Thong bao goi dich vu VietRide';
+    const title = this.optionalString(data, 'title') ?? 'Thông báo gói dịch vụ VietRide';
     const actionUrl = this.optionalString(data, 'actionUrl');
     const paragraphs = [this.escapeHtml(message)];
     if (actionUrl) {
-      paragraphs.push(`<a href="${this.escapeHtml(actionUrl)}">Xem chi tiet</a>`);
+      paragraphs.push(`<a href="${this.escapeHtml(actionUrl)}">Xem chi tiết</a>`);
     }
 
     return {
@@ -90,14 +90,14 @@ export class EmailTemplateRenderer {
   }
 
   private renderInvoiceNotice(data: EmailTemplateData): RenderedEmail {
-    const invoiceNumber = this.optionalString(data, 'invoiceNumber') ?? 'hoa don moi';
+    const invoiceNumber = this.optionalString(data, 'invoiceNumber') ?? 'hóa đơn mới';
     const amountVnd = this.optionalString(data, 'amountVnd');
     const invoiceUrl = this.optionalString(data, 'invoiceUrl');
-    const subject = `Hoa don VietRide ${invoiceNumber}`;
-    const firstLine = `Hoa don ${invoiceNumber} da san sang.`;
+    const subject = `Hóa đơn VietRide ${invoiceNumber}`;
+    const firstLine = `Hóa đơn ${invoiceNumber} đã sẵn sàng.`;
     const lines = [firstLine];
     if (amountVnd) {
-      lines.push(`So tien: ${amountVnd} VND.`);
+      lines.push(`Số tiền: ${amountVnd} VND.`);
     }
     if (invoiceUrl) {
       lines.push(invoiceUrl);
@@ -108,16 +108,16 @@ export class EmailTemplateRenderer {
       text: lines.join('\n'),
       html: this.paragraphs(subject, [
         this.escapeHtml(firstLine),
-        ...(amountVnd ? [this.escapeHtml(`So tien: ${amountVnd} VND.`)] : []),
+        ...(amountVnd ? [this.escapeHtml(`Số tiền: ${amountVnd} VND.`)] : []),
         ...(invoiceUrl
-          ? [`<a href="${this.escapeHtml(invoiceUrl)}">Xem chi tiet hoa don</a>`]
+          ? [`<a href="${this.escapeHtml(invoiceUrl)}">Xem chi tiết hóa đơn</a>`]
           : []),
       ]),
     };
   }
 
   private renderGenericNotice(data: EmailTemplateData): RenderedEmail {
-    const subject = this.optionalString(data, 'title') ?? 'Thong bao VietRide';
+    const subject = this.optionalString(data, 'title') ?? 'Thông báo VietRide';
     const body = this.optionalString(data, 'message') ?? DEFAULT_TEXT;
 
     return {
@@ -135,11 +135,11 @@ export class EmailTemplateRenderer {
   private resolveOtpPurpose(rawPurpose: string | null): string {
     switch (rawPurpose) {
       case 'REGISTRATION':
-        return 'dang ky';
+        return 'đăng ký';
       case 'PASSWORD_RESET':
-        return 'dat lai mat khau';
+        return 'đặt lại mật khẩu';
       default:
-        return rawPurpose ?? 'xac thuc';
+        return rawPurpose ?? 'xác thực';
     }
   }
 

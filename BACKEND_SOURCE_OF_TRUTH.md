@@ -1991,7 +1991,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 
 | Method + Path | Caller | Mục đích |
 |---|---|---|
-| `GET /internal/v1/parcels/{id}` | Tracking | Verify Socket.IO joinTripTracking (parcel sender/recipient) |
+| `GET /internal/v1/parcels/{id}` | Tracking, Notification | Verify Socket.IO joinTripTracking hoặc resolve recipient policy từ snapshot `{ parcelId, tripId, status, senderUserId, recipientUserId?, operatorId, dropoffStopId? }`; trả ADR 0004 envelope và vẫn đọc được terminal rows |
 | `GET /internal/v1/parcels/{id}/access-check?userId=` | Tracking | Same |
 | `GET /internal/v1/reports/platform/parcels?from=&to=` | Payment | Raw delivery-confirmed count/signed net revenue grouped by operator; `confirmed_at` in UTC `[from,to)` |
 
@@ -2097,9 +2097,12 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `parcel.parcel.delivered_pending_confirm` | Parcel | Notification | `{ parcelId, parcelCode, operatorId, tripId, userId?, recipientUserIds[]?, deliveryToken, expiresAt }`; optional recipient fields bị omit khi không có account |
 | `parcel.parcel.delivery_confirmed` | Parcel | Notification | `{ parcelId }` |
 | `parcel.parcel.delivery_rejected` | Parcel | Notification | `{ parcelId, reason }` |
-| `parcel.parcel.cancelled` · `rejected` · `returned` | Parcel | Notification, Trip (counter), Payment (refund) | `{ parcelId, refundAmount? }` |
-| `parcel.parcel.auto_rejected` | Parcel | Notification, Trip (counter), Payment (refund) | Exact `{ eventId, occurredAt, parcelId, parcelCode, operatorId, userId, tripId, refundAmount }`; `userId` is the persisted sender for late-load, additional-payment-timeout, and review-timeout facts; `eventId == OutboxEvent.id == RabbitMQ MessageId` |
+| `parcel.parcel.cancelled` · `rejected` · `returned` | Parcel | Notification, Trip (counter), Payment (refund) | Legacy `{ parcelId, refundAmount? }`; review reject/timeout facts additionally snapshot `eventId`, `occurredAt`, `parcelCode`, sender `userId`, `operatorId` and `reason` so Notification does not read mutable rejection copy later |
+| `parcel.parcel.auto_rejected` | Parcel | Notification, Trip (counter), Payment (refund) | Legacy exact `{ eventId, occurredAt, parcelId, parcelCode, operatorId, userId, tripId, refundAmount }` remains accepted for late-load/additional-payment producers. Settlement v2 exact variant adds `reason: CHECK_IN_TIMEOUT\|FINAL_PAYMENT_TIMEOUT` and `forfeitedDepositVnd`; `userId` is always the persisted sender and `eventId == OutboxEvent.id == RabbitMQ MessageId` |
 | `parcel.parcel.review_requested` | Parcel (EXTRA_LARGE) | Notification (operator) | `{ parcelId, operatorId }` |
+| `parcel.parcel.review_approved` | Parcel (EXTRA_LARGE) | Notification (sender) | Exact `{ eventId, occurredAt, parcelId, parcelCode, operatorId, userId, depositRequiredVnd }`; enqueue trong cùng transaction chuyển sang `PENDING_PAYMENT` |
+| `parcel.parcel.final_payment_requested` | Parcel | Notification (sender) | Exact `{ eventId, occurredAt, parcelId, parcelCode, operatorId, userId, tripId, balanceRequiredVnd, balancePaidVnd, finalPaymentDeadline }`; enqueue trong cùng transaction cân lại chuyển sang `PENDING_FINAL_PAYMENT` |
+| `parcel.parcel.settlement_recovered` | Parcel | Notification (sender) | Exact `{ eventId, occurredAt, parcelId, parcelCode, userId, tripId, recoveredStatus: READY_TO_LOAD\|CANCELLED, refundAmountVnd }`; corrective fact khi callback có `paidAt` đúng hạn thắng timeout đã phát trước đó |
 | `parcel.parcel.transfer_initiated` | Parcel | Notification | `{ parcelId, originalTripId, newTripId }` |
 | `parcel.refund.initiated` | Parcel | Payment | `{ parcelId, senderUserId, amount, referenceType, referenceId, reason, idempotencyKey }`; idempotency identity distinguishes Parcel and settlement reason |
 

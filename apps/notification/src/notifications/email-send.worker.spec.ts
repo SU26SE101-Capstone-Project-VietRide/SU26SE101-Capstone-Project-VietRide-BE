@@ -47,7 +47,7 @@ describe('EmailSendWorker', () => {
     expect(emailProvider.send).toHaveBeenCalledWith(
       expect.objectContaining({
         toEmail: RECIPIENT_EMAIL,
-        subject: 'Ma xac thuc VietRide',
+        subject: 'Mã xác thực VietRide',
         text: expect.stringContaining('123456'),
       }),
     );
@@ -131,7 +131,7 @@ function createEmailDelivery(overrides: Partial<EmailDelivery> = {}): EmailDeliv
     dedupeKey: null,
     toEmail: RECIPIENT_EMAIL,
     templateKey: EmailTemplateKey.AUTH_OTP,
-    subject: 'Ma xac thuc VietRide',
+    subject: 'Mã xác thực VietRide',
     sanitizedData: { otpCode: '[REDACTED]' },
     status: EmailDeliveryStatus.PENDING,
     retryCount: 0,

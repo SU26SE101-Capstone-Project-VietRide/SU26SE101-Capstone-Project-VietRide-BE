@@ -14,6 +14,8 @@ import {
   SUBSCRIPTION_PAYMENT_AUTO_REVERTED_ROUTING_KEY,
   SUBSCRIPTION_PAYMENT_PENDING_WARN_ROUTING_KEY,
   SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY,
+  SUBSCRIPTION_EXPIRED_ROUTING_KEY,
+  SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY,
   TRIP_SETTLEMENT_COMPLETED_ROUTING_KEY,
 } from './parcel-subscription-operator-events.constants';
 import { mapParcelSubscriptionOperatorEventToNotifications } from './parcel-subscription-operator-notification.mapper';
@@ -30,6 +32,16 @@ const VOUCHER_ID = '99999999-9999-4999-8999-999999999999';
 const PLAN_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
 describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
+  it('uses the canonical Identity subscription lifecycle routing keys', () => {
+    expect(SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY).toBe(
+      'identity.subscription.trial_expiring',
+    );
+    expect(SUBSCRIPTION_EXPIRED_ROUTING_KEY).toBe('identity.subscription.expired');
+    expect(SUBSCRIPTION_PAYMENT_AUTO_REVERTED_ROUTING_KEY).toBe(
+      'identity.subscription.payment_auto_reverted',
+    );
+  });
+
   it('maps Sprint 4 Parcel facts to tenant-scoped notifications', async () => {
     const loaded = await mapParcelSubscriptionOperatorEventToNotifications(
       PARCEL_LOADED_ROUTING_KEY,
@@ -103,8 +115,8 @@ describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
       {
         userId: USER_ID,
         type: NotificationType.PARCEL_LOADED,
-        title: 'Hang da duoc len xe',
-        body: `Don gui hang ${PARCEL_ID} da duoc tai len xe.`,
+        title: 'Hàng đã được lên xe',
+        body: `Đơn gửi hàng ${PARCEL_ID} đã được tải lên xe.`,
         data: expect.objectContaining({
           parcelId: PARCEL_ID,
           tripId: TRIP_ID,
@@ -155,7 +167,7 @@ describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.PARCEL_IN_TRANSIT,
-        title: 'Da xac nhan chuyen chuyen xe',
+        title: 'Đã xác nhận chuyển chuyến xe',
       }),
     ]);
   });
@@ -179,7 +191,7 @@ describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.SUBSCRIPTION_LIMIT_EXCEEDED,
-        title: 'Vuot gioi han goi dich vu',
+        title: 'Vượt giới hạn gói dịch vụ',
       }),
     ]);
   });
@@ -201,7 +213,7 @@ describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.VOUCHER_CONSENT_ACCEPTED,
-        title: 'Da chap nhan voucher',
+        title: 'Đã chấp nhận voucher',
       }),
     ]);
   });
@@ -284,7 +296,7 @@ describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.INVOICE_ISSUED,
-        title: 'Hoa don moi da duoc phat hanh',
+        title: 'Hóa đơn mới đã được phát hành',
         data: expect.objectContaining({
           invoiceWebUrl: `https://operator.vietride.vn/invoices/${INVOICE_ID}`,
         }),

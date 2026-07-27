@@ -3056,6 +3056,34 @@ Day-29 E2E setup uses an isolated operator-owned Trip graph fixture with its ass
 vehicle cargo snapshot, and three Parcels. The fixture is created out of band; this contract does
 not expose a public/manual Trip-create endpoint.
 
+### GET `/internal/v1/parcels/{parcelId}`
+
+Auth: valid Internal JWT only. Callers: Tracking and Notification. Never exposed through Gateway.
+The endpoint returns terminal as well as active Parcel rows. Notification uses it only as a
+fail-closed recipient snapshot when an older event does not carry immutable recipient fields.
+
+Response `200` uses the ADR 0004 envelope:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "parcelId": "uuid",
+    "tripId": "uuid",
+    "status": "REJECTED",
+    "senderUserId": "uuid",
+    "recipientUserId": "uuid-or-null",
+    "operatorId": "uuid",
+    "dropoffStopId": "uuid-or-null"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-27T10:00:00Z" }
+}
+```
+
+Errors: `401 AUTH_TOKEN_INVALID`; `404 PARCEL_NOT_FOUND`. Timeout, auth failure, 5xx or malformed
+response is a dependency failure for Notification and must not be interpreted as an empty recipient list.
+
 ### POST `/internal/v1/parcels/{parcelId}/mark-loaded`
 
 Auth: Internal JWT or Driver/Assistant through Driver App facade.

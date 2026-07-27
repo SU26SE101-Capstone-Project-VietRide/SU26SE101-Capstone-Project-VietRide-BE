@@ -44,7 +44,7 @@ describe('EmailSendWorker pipeline (e2e)', () => {
     expect(emailProvider.send).toHaveBeenCalledWith(
       expect.objectContaining({
         toEmail: RECIPIENT_EMAIL,
-        subject: 'Hoa don VietRide VR-INV-202606-000001',
+        subject: 'Hóa đơn VietRide VR-INV-202606-000001',
         text: expect.stringContaining('VR-INV-202606-000001'),
       }),
     );
@@ -80,7 +80,7 @@ function createEmailDelivery(): EmailDelivery {
     dedupeKey: null,
     toEmail: RECIPIENT_EMAIL,
     templateKey: EmailTemplateKey.INVOICE_NOTICE,
-    subject: 'Hoa don VietRide VR-INV-202606-000001',
+    subject: 'Hóa đơn VietRide VR-INV-202606-000001',
     sanitizedData: {
       invoiceNumber: 'VR-INV-202606-000001',
       amountVnd: 500000,

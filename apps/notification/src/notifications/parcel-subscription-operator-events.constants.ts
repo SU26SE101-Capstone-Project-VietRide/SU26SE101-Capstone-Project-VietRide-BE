@@ -24,13 +24,13 @@ export const TRIP_STOP_ARRIVED_ROUTING_KEY = 'trip.stop.arrived';
 export const TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY = 'trip.vehicle_substituted';
 
 export const SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY = 'subscription.limit.trip_skipped';
-export const SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY = 'subscription.subscription.trial_expiring';
-export const SUBSCRIPTION_EXPIRED_ROUTING_KEY = 'subscription.subscription.expired';
+export const SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY = 'identity.subscription.trial_expiring';
+export const SUBSCRIPTION_EXPIRED_ROUTING_KEY = 'identity.subscription.expired';
 export const SUBSCRIPTION_APPROVED_ROUTING_KEY = 'subscription.subscription.approved';
 export const SUBSCRIPTION_PAYMENT_PENDING_WARN_ROUTING_KEY =
   'payment.subscription.payment_pending_warn';
 export const SUBSCRIPTION_PAYMENT_AUTO_REVERTED_ROUTING_KEY =
-  'payment.subscription.payment_auto_reverted';
+  'identity.subscription.payment_auto_reverted';
 export const INVOICE_ISSUED_ROUTING_KEY = 'payment.invoice.issued';
 export const TRIP_SETTLEMENT_COMPLETED_ROUTING_KEY = 'payment.trip_settlement.completed';
 export const PAYOUT_PROCESSED_ROUTING_KEY = 'payment.payout.processed';

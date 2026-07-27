@@ -2985,11 +2985,12 @@ Backend derive estimatedSizeCategory = EXTRA_LARGE
   → Operator dashboard hiển thị queue "Parcel chờ review"
 
 Operator review trên dashboard:
-  - APPROVE → Parcel status = PENDING_PAYMENT, alert passenger "Đã duyệt — vui lòng thanh toán"; Passenger gọi deposit-payment để chọn Wallet/VNPay và tạo soft hold
-  - REJECT → Parcel status = REJECTED, ghi rejectionReason, alert passenger "Bị từ chối: <lý do>", không charge
+  - APPROVE → Parcel status = PENDING_PAYMENT, publish `parcel.parcel.review_approved`, alert passenger "Đã duyệt — vui lòng thanh toán"; Passenger gọi deposit-payment để chọn Wallet/VNPay và tạo soft hold
+  - REJECT → Parcel status = REJECTED, ghi rejectionReason, publish `parcel.parcel.rejected` với sender + immutable reason, alert passenger "Bị từ chối: <lý do>", không charge
 
 Timeout 24 giờ không review:
   → CANCELLED với reason OPERATOR_REVIEW_TIMEOUT
+  → Publish `parcel.parcel.cancelled` cho sender; không dùng `parcel.parcel.auto_rejected`
   → Passenger có thể tạo lại request mới hoặc liên hệ operator
 ```
 
@@ -3087,9 +3088,14 @@ Hangfire job (chạy mỗi 5 phút):
       → forfeitedDepositVnd = depositPaidVnd
       → release cargo
 
+Khi cân lại tạo `PENDING_FINAL_PAYMENT`, Parcel publish `parcel.parcel.final_payment_requested`
+trong cùng transaction để sender nhận số dư phải trả và deadline authoritative.
+
 Payment có paidAt trước deadline luôn thắng về nghiệp vụ. Nếu callback đến sau timeout, Parcel hủy
 forfeiture rồi READY_TO_LOAD khi trip vẫn SCHEDULED/BOARDING, chưa qua loadCutoffAt và reserve cargo
 thành công; nếu không còn phục vụ được thì CANCELLED và refund toàn bộ tiền đã thu.
+Sau recovery, Parcel publish `parcel.parcel.settlement_recovered` để đính chính notification timeout
+đã có thể được gửi trước đó; payload nêu trạng thái phục hồi và số tiền hoàn nếu kết quả là CANCELLED.
 ```
 
 **Delivery method — chỉ 1 loại:**

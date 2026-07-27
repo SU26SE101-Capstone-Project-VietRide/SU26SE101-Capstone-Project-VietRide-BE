@@ -377,8 +377,8 @@ function mapVoucherConsentAccepted(
   return {
     userId,
     type: NotificationType.VOUCHER_CONSENT_ACCEPTED,
-    title: 'Da chap nhan voucher',
-    body: `${formatOperatorLabel(payload)} da chap nhan voucher ${payload.voucherId}.`,
+    title: 'Đã chấp nhận voucher',
+    body: `${formatOperatorLabel(payload)} đã chấp nhận voucher ${payload.voucherId}.`,
     data: buildNotificationData(payload),
   };
 }
@@ -390,9 +390,9 @@ function mapVoucherConsentRejected(
   return {
     userId,
     type: NotificationType.VOUCHER_CONSENT_REJECTED,
-    title: 'Da tu choi voucher',
-    body: `${formatOperatorLabel(payload)} da tu choi voucher ${payload.voucherId}.${
-      payload.reason ? ` Ly do: ${payload.reason}.` : ''
+    title: 'Đã từ chối voucher',
+    body: `${formatOperatorLabel(payload)} đã từ chối voucher ${payload.voucherId}.${
+      payload.reason ? ` Lý do: ${payload.reason}.` : ''
     }`,
     data: buildNotificationData(payload),
   };
@@ -403,8 +403,8 @@ function mapParcelCreated(userId: string, payload: ParcelPayload): CreateNotific
     userId,
     payload,
     NotificationType.PARCEL_IN_TRANSIT,
-    'Don gui hang da duoc tao',
-    'da duoc tao.',
+    'Đơn gửi hàng đã được tạo',
+    'đã được tạo.',
   );
 }
 
@@ -413,8 +413,8 @@ function mapParcelLoaded(userId: string, payload: ParcelPayload): CreateNotifica
     userId,
     payload,
     NotificationType.PARCEL_LOADED,
-    'Hang da duoc len xe',
-    'da duoc tai len xe.',
+    'Hàng đã được lên xe',
+    'đã được tải lên xe.',
   );
 }
 
@@ -437,8 +437,8 @@ function mapParcelUnloaded(userId: string, payload: ParcelPayload): CreateNotifi
     userId,
     payload,
     NotificationType.PARCEL_IN_TRANSIT,
-    'Hang da roi xe',
-    'da duoc do khoi xe.',
+    'Hàng đã rời xe',
+    'đã được dỡ khỏi xe.',
   );
 }
 
@@ -447,8 +447,8 @@ function mapParcelPendingConfirm(userId: string, payload: ParcelPayload): Create
     userId,
     payload,
     NotificationType.PARCEL_DELIVERED_PENDING_CONFIRM,
-    'Cho xac nhan giao hang',
-    'da giao toi nguoi nhan va dang cho xac nhan.',
+    'Chờ xác nhận giao hàng',
+    'đã giao tới người nhận và đang chờ xác nhận.',
   );
 }
 
@@ -457,8 +457,8 @@ function mapParcelDeliveryConfirmed(userId: string, payload: ParcelPayload): Cre
     userId,
     payload,
     NotificationType.PARCEL_IN_TRANSIT,
-    'Giao hang thanh cong',
-    'da duoc xac nhan giao thanh cong.',
+    'Giao hàng thành công',
+    'đã được xác nhận giao thành công.',
   );
 }
 
@@ -467,8 +467,8 @@ function mapParcelDeliveryRejected(userId: string, payload: ParcelPayload): Crea
     userId,
     payload,
     NotificationType.PARCEL_REJECTED,
-    'Nguoi nhan tu choi hang',
-    'bi tu choi khi giao.',
+    'Người nhận từ chối hàng',
+    'bị từ chối khi giao.',
   );
 }
 
@@ -477,8 +477,8 @@ function mapParcelCancelled(userId: string, payload: ParcelPayload): CreateNotif
     userId,
     payload,
     NotificationType.PARCEL_REJECTED,
-    'Don gui hang da bi huy',
-    'da bi huy.',
+    'Đơn gửi hàng đã bị hủy',
+    'đã bị hủy.',
   );
 }
 
@@ -487,8 +487,8 @@ function mapParcelRejected(userId: string, payload: ParcelPayload): CreateNotifi
     userId,
     payload,
     NotificationType.PARCEL_REJECTED,
-    'Don gui hang bi tu choi',
-    'da bi tu choi.',
+    'Đơn gửi hàng bị từ chối',
+    'đã bị từ chối.',
   );
 }
 
@@ -497,14 +497,14 @@ function mapParcelReturned(userId: string, payload: ParcelPayload): CreateNotifi
     userId,
     payload,
     NotificationType.PARCEL_RETURNED,
-    'Hang dang duoc hoan tra',
-    'dang duoc hoan tra.',
+    'Hàng đang được hoàn trả',
+    'đang được hoàn trả.',
   );
 }
 
 function mapParcelAutoRejected(userId: string, payload: ParcelPayload): CreateNotificationDto {
   const refundText = payload.refundAmount
-    ? ` So tien hoan: ${formatMoney(payload.refundAmount)} VND.`
+    ? ` Số tiền hoàn: ${formatMoney(payload.refundAmount)} VND.`
     : '';
 
   return {
@@ -512,10 +512,10 @@ function mapParcelAutoRejected(userId: string, payload: ParcelPayload): CreateNo
       userId,
       payload,
       NotificationType.PARCEL_REJECTED,
-      'Don gui hang tu dong bi tu choi',
-      'da qua thoi gian xu ly va bi tu choi.',
+      'Đơn gửi hàng tự động bị từ chối',
+      'đã quá thời gian xử lý và bị từ chối.',
     ),
-    body: `${formatParcelLabel(payload)} da qua thoi gian xu ly va bi tu choi.${refundText}`,
+    body: `${formatParcelLabel(payload)} đã quá thời gian xử lý và bị từ chối.${refundText}`,
   };
 }
 
@@ -526,8 +526,8 @@ function mapParcelReviewRequested(
   return {
     userId,
     type: NotificationType.PARCEL_REVIEW_REQUESTED,
-    title: 'Can xem xet don gui hang',
-    body: `${formatParcelLabel(payload)} can duoc nhan vien van hanh xem xet.`,
+    title: 'Cần xem xét đơn gửi hàng',
+    body: `${formatParcelLabel(payload)} cần được nhân viên vận hành xem xét.`,
     data: buildNotificationData(payload),
   };
 }
@@ -539,8 +539,8 @@ function mapParcelTransferInitiated(
   return {
     userId,
     type: NotificationType.PARCEL_IN_TRANSIT,
-    title: 'Don gui hang duoc chuyen chuyen xe',
-    body: `${formatParcelLabel(payload)} dang duoc chuyen sang chuyen xe phu hop hon.`,
+    title: 'Đơn gửi hàng được chuyển chuyến xe',
+    body: `${formatParcelLabel(payload)} đang được chuyển sang chuyến xe phù hợp hơn.`,
     data: buildNotificationData(payload),
   };
 }
@@ -550,8 +550,8 @@ function mapParcelTransferConfirmed(userId: string, payload: ParcelPayload): Cre
     userId,
     payload,
     NotificationType.PARCEL_IN_TRANSIT,
-    'Da xac nhan chuyen chuyen xe',
-    'da duoc xac nhan chuyen sang chuyen xe moi.',
+    'Đã xác nhận chuyển chuyến xe',
+    'đã được xác nhận chuyển sang chuyến xe mới.',
   );
 }
 
@@ -560,8 +560,8 @@ function mapParcelTransferEscalated(userId: string, payload: ParcelPayload): Cre
     userId,
     payload,
     NotificationType.PARCEL_IN_TRANSIT,
-    'Can xu ly chuyen chuyen xe',
-    'qua thoi gian xac nhan chuyen chuyen xe va can van hanh xu ly.',
+    'Cần xử lý chuyển chuyến xe',
+    'quá thời gian xác nhận chuyển chuyến xe và cần vận hành xử lý.',
   );
 }
 
@@ -570,8 +570,8 @@ function mapParcelReturnInitiated(userId: string, payload: ParcelPayload): Creat
     userId,
     payload,
     NotificationType.PARCEL_RETURNED,
-    'Bat dau hoan tra hang',
-    'da bat dau quy trinh hoan tra.',
+    'Bắt đầu hoàn trả hàng',
+    'đã bắt đầu quy trình hoàn trả.',
   );
 }
 
@@ -583,8 +583,8 @@ function mapParcelPendingOperatorAction(
     userId,
     payload,
     NotificationType.PARCEL_IN_TRANSIT,
-    'Can van hanh xu ly don gui hang',
-    'can nha xe xu ly thu cong.',
+    'Cần vận hành xử lý đơn gửi hàng',
+    'cần nhà xe xử lý thủ công.',
   );
 }
 
@@ -592,8 +592,8 @@ function mapTripStopArrived(userId: string, payload: OperatorPayload): CreateNot
   return {
     userId,
     type: NotificationType.TRIP_VEHICLE_APPROACHING,
-    title: 'Xe da den diem dung',
-    body: `Chuyen ${payload.tripId ?? 'xe'} da ghi nhan den diem dung.`,
+    title: 'Xe đã đến điểm dừng',
+    body: `Chuyến ${payload.tripId ?? 'xe'} đã ghi nhận đến điểm dừng.`,
     data: buildNotificationData(payload),
   };
 }
@@ -605,8 +605,8 @@ function mapTripVehicleSubstituted(
   return {
     userId,
     type: NotificationType.VEHICLE_SUBSTITUTED,
-    title: 'Da thay xe cho chuyen',
-    body: `Chuyen ${payload.tripId ?? 'xe'} da duoc gan xe thay the.${payload.reason ? ` Ly do: ${payload.reason}.` : ''}`,
+    title: 'Đã thay xe cho chuyến',
+    body: `Chuyến ${payload.tripId ?? 'xe'} đã được gán xe thay thế.${payload.reason ? ` Lý do: ${payload.reason}.` : ''}`,
     data: buildNotificationData(payload),
   };
 }
@@ -618,8 +618,8 @@ function mapSubscriptionLimit(
   return {
     userId,
     type: NotificationType.SUBSCRIPTION_LIMIT_EXCEEDED,
-    title: 'Vuot gioi han goi dich vu',
-    body: `${formatOperatorLabel(payload)} da cham gioi han goi${payload.planName ? ` ${payload.planName}` : ''}.`,
+    title: 'Vượt giới hạn gói dịch vụ',
+    body: `${formatOperatorLabel(payload)} đã chạm giới hạn gói${payload.planName ? ` ${payload.planName}` : ''}.`,
     data: buildNotificationData(payload),
   };
 }
@@ -628,8 +628,8 @@ function mapSubscriptionTrial(userId: string, payload: OperatorPayload): CreateN
   return {
     userId,
     type: NotificationType.SUBSCRIPTION_TRIAL_EXPIRING,
-    title: 'Goi dung thu sap het han',
-    body: `${formatOperatorLabel(payload)} sap het thoi gian dung thu.`,
+    title: 'Gói dùng thử sắp hết hạn',
+    body: `${formatOperatorLabel(payload)} sắp hết thời gian dùng thử.`,
     data: buildNotificationData(payload),
   };
 }
@@ -638,8 +638,8 @@ function mapSubscriptionExpired(userId: string, payload: OperatorPayload): Creat
   return {
     userId,
     type: NotificationType.SUBSCRIPTION_EXPIRED,
-    title: 'Goi dich vu da het han',
-    body: `${formatOperatorLabel(payload)} da het han goi dich vu.`,
+    title: 'Gói dịch vụ đã hết hạn',
+    body: `${formatOperatorLabel(payload)} đã hết hạn gói dịch vụ.`,
     data: buildNotificationData(payload),
   };
 }
@@ -648,8 +648,8 @@ function mapSubscriptionApproved(userId: string, payload: OperatorPayload): Crea
   return {
     userId,
     type: NotificationType.SUBSCRIPTION_APPROVED,
-    title: 'Goi dich vu da duoc duyet',
-    body: `${formatOperatorLabel(payload)} da duoc kich hoat goi dich vu.`,
+    title: 'Gói dịch vụ đã được duyệt',
+    body: `${formatOperatorLabel(payload)} đã được kích hoạt gói dịch vụ.`,
     data: buildNotificationData(payload),
   };
 }
@@ -661,8 +661,8 @@ function mapSubscriptionPaymentPendingWarn(
   return {
     userId,
     type: NotificationType.SUBSCRIPTION_PAYMENT_PENDING_WARN,
-    title: 'Can thanh toan goi dich vu',
-    body: `${formatOperatorLabel(payload)} co thanh toan goi dich vu sap den han${payload.dueDate ? ` vao ${payload.dueDate}` : ''}.`,
+    title: 'Cần thanh toán gói dịch vụ',
+    body: `${formatOperatorLabel(payload)} có thanh toán gói dịch vụ sắp đến hạn${payload.dueDate ? ` vào ${payload.dueDate}` : ''}.`,
     data: buildNotificationData(payload),
   };
 }
@@ -674,8 +674,8 @@ function mapSubscriptionPaymentAutoReverted(
   return {
     userId,
     type: NotificationType.SUBSCRIPTION_PAYMENT_AUTO_REVERTED,
-    title: 'Goi dich vu da duoc hoan ve',
-    body: `${formatOperatorLabel(payload)} da duoc hoan ve goi truoc do.`,
+    title: 'Gói dịch vụ đã được hoàn về',
+    body: `${formatOperatorLabel(payload)} đã được hoàn về gói trước đó.`,
     data: buildNotificationData(payload),
   };
 }
@@ -687,8 +687,8 @@ function mapInvoiceIssued(
   return {
     userId,
     type: NotificationType.INVOICE_ISSUED,
-    title: 'Hoa don moi da duoc phat hanh',
-    body: `Hoa don ${payload.invoiceNumber} da san sang.`,
+    title: 'Hóa đơn mới đã được phát hành',
+    body: `Hóa đơn ${payload.invoiceNumber} đã sẵn sàng.`,
     data: {
       invoiceId: payload.invoiceId,
       invoiceNumber: payload.invoiceNumber,
@@ -706,8 +706,8 @@ function mapTripSettlementCompleted(
   return {
     userId,
     type: NotificationType.WALLET_CREDITED,
-    title: 'Da tat toan doanh thu chuyen',
-    body: `Da tat toan ${formatMoney(payload.netAmount)} VND tu chuyen ${payload.tripId} vao vi nha xe.`,
+    title: 'Đã tất toán doanh thu chuyến',
+    body: `Đã tất toán ${formatMoney(payload.netAmount)} VND từ chuyến ${payload.tripId} vào ví nhà xe.`,
     data: buildNotificationData(payload),
   };
 }
@@ -716,8 +716,8 @@ function mapPayoutProcessed(userId: string, payload: OperatorPayload): CreateNot
   return {
     userId,
     type: NotificationType.PAYOUT_PROCESSED,
-    title: 'Lenh chi tra da xu ly',
-    body: `Lenh chi tra ${payload.payoutId ?? ''} da duoc xu ly thanh cong.`,
+    title: 'Lệnh chi trả đã xử lý',
+    body: `Lệnh chi trả ${payload.payoutId ?? ''} đã được xử lý thành công.`,
     data: buildNotificationData(payload),
   };
 }
@@ -726,8 +726,8 @@ function mapPayoutFailed(userId: string, payload: OperatorPayload): CreateNotifi
   return {
     userId,
     type: NotificationType.PAYOUT_FAILED,
-    title: 'Lenh chi tra that bai',
-    body: `Lenh chi tra ${payload.payoutId ?? ''} xu ly that bai.${payload.reason ? ` Ly do: ${payload.reason}.` : ''}`,
+    title: 'Lệnh chi trả thất bại',
+    body: `Lệnh chi trả ${payload.payoutId ?? ''} xử lý thất bại.${payload.reason ? ` Lý do: ${payload.reason}.` : ''}`,
     data: buildNotificationData(payload),
   };
 }
@@ -780,17 +780,17 @@ function buildParcelNotification(
     userId,
     type,
     title,
-    body: `${formatParcelLabel(payload)} ${actionText}${payload.reason ? ` Ly do: ${payload.reason}.` : ''}`,
+    body: `${formatParcelLabel(payload)} ${actionText}${payload.reason ? ` Lý do: ${payload.reason}.` : ''}`,
     data: buildNotificationData(payload),
   };
 }
 
 function formatParcelLabel(payload: ParcelPayload): string {
-  return payload.parcelCode ? `Don ${payload.parcelCode}` : `Don gui hang ${payload.parcelId}`;
+  return payload.parcelCode ? `Đơn ${payload.parcelCode}` : `Đơn gửi hàng ${payload.parcelId}`;
 }
 
 function formatOperatorLabel(payload: OperatorPayload): string {
-  return payload.operatorName ? `Nha xe ${payload.operatorName}` : `Nha xe ${payload.operatorId}`;
+  return payload.operatorName ? `Nhà xe ${payload.operatorName}` : `Nhà xe ${payload.operatorId}`;
 }
 
 function formatMoney(amount: z.infer<typeof MoneyAmountSchema>): string {

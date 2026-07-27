@@ -212,7 +212,7 @@ describe('NotificationsService', () => {
       expect.objectContaining({
         toEmail: 'passenger@vietride.local',
         templateKey: EmailTemplateKey.AUTH_OTP,
-        subject: 'Ma xac thuc VietRide',
+        subject: 'Mã xác thực VietRide',
         sanitizedData: expect.objectContaining({
           otpCode: '[REDACTED]',
           purpose: 'dang ky',
@@ -292,7 +292,7 @@ function createEmailDelivery(overrides: Partial<EmailDelivery> = {}): EmailDeliv
     dedupeKey: null,
     toEmail: 'passenger@vietride.local',
     templateKey: EmailTemplateKey.AUTH_OTP,
-    subject: 'Ma xac thuc VietRide',
+    subject: 'Mã xác thực VietRide',
     sanitizedData: { otpCode: '[REDACTED]' },
     status: EmailDeliveryStatus.PENDING,
     retryCount: 0,

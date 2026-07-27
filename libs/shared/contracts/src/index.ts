@@ -22,6 +22,7 @@ export * from './events/parcel-sprint4-events';
 export * from './events/subscription-payment-succeeded.event';
 export * from './events/invoice-issued.event';
 export * from './events/trip-settlement-completed.event';
+export * from './events/notification-v1-events';
 export * from './dtos/api-response';
 export * from './dtos/error-envelope';
 export * from './dtos/page-result';

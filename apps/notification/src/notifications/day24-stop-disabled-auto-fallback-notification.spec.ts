@@ -46,8 +46,8 @@ describe('Day 24 fallback notification:', () => {
     expect(mapStopDisabledAutoFallbackToNotification(canonicalPayload())).toEqual({
       userId: USER_ID,
       type: NotificationType.STOP_DISABLED,
-      title: 'Da tu dong chuyen ve ben',
-      body: `Vi ban khong phan hoi, ve ${BOOKING_ID} da duoc chuyen ve ben ${FALLBACK_STATION_ID}.`,
+      title: 'Đã tự động chuyển về bến',
+      body: `Vì bạn không phản hồi, vé ${BOOKING_ID} đã được chuyển về bến ${FALLBACK_STATION_ID}.`,
       data: {
         eventId: EVENT_ID,
         occurredAt: '2026-07-18T10:00:00+07:00',

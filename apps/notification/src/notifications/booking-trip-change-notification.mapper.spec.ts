@@ -41,8 +41,8 @@ describe('mapBookingTripChangeToNotification Day 24 auto-resolved compatibility'
     ).toEqual({
       userId: USER_ID,
       type: NotificationType.VEHICLE_SUBSTITUTED,
-      title: 'Can chon lai ghe',
-      body: `Ghe A01, A02 cua ban tren chuyen ${TRIP_ID} can duoc chon lai.`,
+      title: 'Cần chọn lại ghế',
+      body: `Ghế A01, A02 của bạn trên chuyến ${TRIP_ID} cần được chọn lại.`,
       data: {
         eventId: EVENT_ID,
         occurredAt: OCCURRED_AT,

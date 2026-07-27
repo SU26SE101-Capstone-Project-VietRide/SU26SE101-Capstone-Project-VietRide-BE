@@ -12,10 +12,10 @@ describe('EmailTemplateRenderer', () => {
         ttlMinutes: 5,
       });
 
-      expect(result.subject).toBe('Ma xac thuc VietRide');
+      expect(result.subject).toBe('Mã xác thực VietRide');
       expect(result.text).toContain('123456');
-      expect(result.text).toContain('dang ky');
-      expect(result.text).toContain('5 phut');
+      expect(result.text).toContain('đăng ký');
+      expect(result.text).toContain('5 phút');
       expect(result.html).toContain('<strong>123456</strong>');
     });
 
@@ -26,7 +26,7 @@ describe('EmailTemplateRenderer', () => {
         ttlMinutes: 5,
       });
 
-      expect(result.text).toContain('dat lai mat khau');
+      expect(result.text).toContain('đặt lại mật khẩu');
     });
 
     it('still accepts the legacy `otpCode` field', () => {
@@ -54,7 +54,7 @@ describe('EmailTemplateRenderer', () => {
         expiresAt: '2026-06-23T10:00:00.000Z',
       });
 
-      expect(result.subject).toBe('Thiet lap mat khau VietRide');
+      expect(result.subject).toBe('Thiết lập mật khẩu VietRide');
       expect(result.text).toContain('https://app.vietride.app/auth/set-password?token=abc');
       expect(result.html).toContain('href="https://app.vietride.app/auth/set-password?token=abc"');
     });

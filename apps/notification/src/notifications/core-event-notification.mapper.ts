@@ -71,8 +71,8 @@ function mapBookingConfirmed(
   return {
     userId: payload.userId,
     type: NotificationType.BOOKING_CONFIRMED,
-    title: 'Dat ve thanh cong',
-    body: `Ve ${formatBookingLabel(payload)} da duoc xac nhan.`,
+    title: 'Đặt vé thành công',
+    body: `Vé ${formatBookingLabel(payload)} đã được xác nhận.`,
     data: buildBookingData(payload),
   };
 }
@@ -81,8 +81,8 @@ function mapBookingCancelled(payload: BookingCancelledConsumerEvent): CreateNoti
   return {
     userId: payload.userId,
     type: NotificationType.BOOKING_CANCELLED,
-    title: 'Ve da bi huy',
-    body: `Ve ${formatBookingLabel(payload)} da bi huy. Ly do: ${payload.cancellationReason}.`,
+    title: 'Vé đã bị hủy',
+    body: `Vé ${formatBookingLabel(payload)} đã bị hủy. Lý do: ${payload.cancellationReason}.`,
     data: buildBookingData(payload),
   };
 }
@@ -91,14 +91,14 @@ function mapBookingRefunded(
   payload: z.infer<typeof bookingEventPayloadSchema>,
 ): CreateNotificationDto {
   const refundText = payload.refundAmount
-    ? ` So tien hoan: ${formatMoney(payload.refundAmount)} VND.`
+    ? ` Số tiền hoàn: ${formatMoney(payload.refundAmount)} VND.`
     : '';
 
   return {
     userId: payload.userId,
     type: NotificationType.BOOKING_REFUNDED,
-    title: 'Hoan tien ve thanh cong',
-    body: `Khoan hoan tien cho ve ${formatBookingLabel(payload)} da duoc ghi nhan.${refundText}`,
+    title: 'Hoàn tiền vé thành công',
+    body: `Khoản hoàn tiền cho vé ${formatBookingLabel(payload)} đã được ghi nhận.${refundText}`,
     data: buildBookingData(payload),
   };
 }
@@ -109,8 +109,8 @@ function mapWalletCredited(
   return {
     userId: payload.userId,
     type: NotificationType.WALLET_CREDITED,
-    title: 'Vi da duoc cong tien',
-    body: `Vi VietRide cua ban vua duoc cong ${formatMoney(payload.amount)} VND.`,
+    title: 'Ví đã được cộng tiền',
+    body: `Ví VietRide của bạn vừa được cộng ${formatMoney(payload.amount)} VND.`,
     data: buildWalletData(payload),
   };
 }
@@ -121,8 +121,8 @@ function mapWalletDebited(
   return {
     userId: payload.userId,
     type: NotificationType.WALLET_DEBITED,
-    title: 'Vi da bi tru tien',
-    body: `Vi VietRide cua ban vua bi tru ${formatMoney(payload.amount)} VND.`,
+    title: 'Ví đã bị trừ tiền',
+    body: `Ví VietRide của bạn vừa bị trừ ${formatMoney(payload.amount)} VND.`,
     data: buildWalletData(payload),
   };
 }

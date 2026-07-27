@@ -15,8 +15,8 @@ function mapParsedFallback(
   return {
     userId: payload.userId,
     type: NotificationType.STOP_DISABLED,
-    title: 'Da tu dong chuyen ve ben',
-    body: `Vi ban khong phan hoi, ve ${payload.bookingId} da duoc chuyen ve ben ${payload.fallbackStationId}.`,
+    title: 'Đã tự động chuyển về bến',
+    body: `Vì bạn không phản hồi, vé ${payload.bookingId} đã được chuyển về bến ${payload.fallbackStationId}.`,
     data: {
       eventId: payload.eventId,
       occurredAt: payload.occurredAt,

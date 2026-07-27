@@ -78,8 +78,8 @@ export class IdentityEventsConsumer implements OnModuleInit {
       payload,
       raw,
       NotificationType.OPERATOR_APPROVED,
-      'Nha xe da duoc duyet',
-      'Nha xe cua ban da duoc duyet. Ban co the dang nhap va bat dau van hanh.',
+      'Nhà xe đã được duyệt',
+      'Nhà xe của bạn đã được duyệt. Bạn có thể đăng nhập và bắt đầu vận hành.',
     );
   }
 
@@ -89,8 +89,8 @@ export class IdentityEventsConsumer implements OnModuleInit {
       payload,
       raw,
       NotificationType.OPERATOR_SUSPENDED,
-      'Nha xe bi tam ngung',
-      'Nha xe cua ban da bi tam ngung. Vui long lien he quan tri he thong de duoc ho tro.',
+      'Nhà xe bị tạm ngưng',
+      'Nhà xe của bạn đã bị tạm ngưng. Vui lòng liên hệ quản trị hệ thống để được hỗ trợ.',
     );
   }
 
