@@ -51,6 +51,8 @@ function createEnv(): Env {
     DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/vietride_notification',
     LOG_LEVEL: 'info',
     TRIP_INTERNAL_BASE_URL: 'http://trip.test',
+    BOOKING_INTERNAL_BASE_URL: 'http://booking.test',
+    PARCEL_INTERNAL_BASE_URL: 'http://parcel.test',
     IDENTITY_INTERNAL_BASE_URL: 'http://identity.test',
     FCM_DRY_RUN: false,
     FCM_DRY_RUN_TOPIC: 'vietride-e2e-validation',

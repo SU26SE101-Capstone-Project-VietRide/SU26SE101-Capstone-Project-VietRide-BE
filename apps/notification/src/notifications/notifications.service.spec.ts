@@ -86,7 +86,7 @@ describe('NotificationsService', () => {
     });
   });
 
-  it('does not enqueue a duplicate non-invoice push when the dedupe key resolves an existing notification', async () => {
+  it('re-enqueues any existing notification so a failed first queue write can recover', async () => {
     repository.create.mockResolvedValue({
       notification: createNotification({ type: NotificationType.SHUTTLE_ASSIGNED }),
       created: false,
@@ -98,23 +98,6 @@ describe('NotificationsService', () => {
       title: 'Shuttle assigned',
       body: 'Driver is on the way.',
       dedupeKey: 'trip.shuttle.assigned:booking-id',
-    });
-
-    expect(fcmPushQueue.enqueue).not.toHaveBeenCalled();
-  });
-
-  it('re-enqueues an existing invoice push so a failed first queue write can recover', async () => {
-    repository.create.mockResolvedValue({
-      notification: createNotification({ type: NotificationType.INVOICE_ISSUED }),
-      created: false,
-    });
-
-    await service.createNotification({
-      userId: OWNER_USER_ID,
-      type: NotificationType.INVOICE_ISSUED,
-      title: 'Invoice issued',
-      body: 'Invoice is ready.',
-      dedupeKey: 'payment.invoice.issued:event:user:INVOICE_ISSUED',
     });
 
     expect(fcmPushQueue.enqueue).toHaveBeenCalledWith({
@@ -267,6 +250,26 @@ describe('NotificationsService', () => {
     });
 
     expect(emailSendQueue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('re-enqueues an uncertain SENDING email so its lease can be reclaimed', async () => {
+    repository.createEmailDelivery.mockResolvedValue({
+      delivery: createEmailDelivery({ status: EmailDeliveryStatus.SENDING }),
+      created: false,
+    });
+
+    await service.enqueueEmail({
+      dedupeKey: 'identity.otp.requested:message:email',
+      toEmail: 'passenger@vietride.local',
+      templateKey: EmailTemplateKey.AUTH_OTP,
+      templateData: { code: '123456', purpose: 'REGISTRATION', ttlMinutes: 5 },
+    });
+
+    expect(emailSendQueue.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        emailDeliveryId: '44444444-4444-4444-8444-444444444444',
+      }),
+    );
   });
 });
 

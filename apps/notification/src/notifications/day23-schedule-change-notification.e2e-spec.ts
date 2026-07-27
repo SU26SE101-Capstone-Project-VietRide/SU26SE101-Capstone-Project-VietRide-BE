@@ -20,7 +20,7 @@ describe('Day 23 schedule notification e2e:', () => {
     const channels = new Map<string, jest.Mocked<Channel>>();
     const consumeHandlers = new Map<string, (message: ConsumeMessage | null) => Promise<void>>();
     const connection = {
-      createChannel: jest.fn(async () => createChannel(channels, consumeHandlers)),
+      createConfirmChannel: jest.fn(async () => createChannel(channels, consumeHandlers)),
     } as unknown as jest.Mocked<ChannelModel>;
     const rabbitConsumer = new RabbitMqConsumer(connection, {
       url: 'amqp://localhost',
@@ -51,7 +51,9 @@ describe('Day 23 schedule notification e2e:', () => {
 
     await moduleRef.init();
 
-    expect(connection.createChannel).toHaveBeenCalledTimes(BOOKING_TRIP_CHANGE_QUEUE_BINDINGS.length);
+    expect(connection.createConfirmChannel).toHaveBeenCalledTimes(
+      BOOKING_TRIP_CHANGE_QUEUE_BINDINGS.length,
+    );
     const autoResolvedChannel = channels.get(AUTO_RESOLVED_QUEUE);
     expect(autoResolvedChannel).toBeDefined();
     expect(autoResolvedChannel?.assertExchange).toHaveBeenCalledWith('vietride.events', 'topic', {

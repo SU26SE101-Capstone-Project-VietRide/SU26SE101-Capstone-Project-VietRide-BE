@@ -175,6 +175,7 @@ export class IdentityEventsConsumer implements OnModuleInit {
       const emailDomain = event.email.split('@')[1] ?? 'unknown';
 
       await this.notificationsService.enqueueEmail({
+        dedupeKey: `${routingKey}:${messageId}:email`,
         toEmail: event.email,
         templateKey: EmailTemplateKey.AUTH_OTP,
         templateData: { code: event.code, purpose: event.purpose, ttlMinutes: event.ttlMinutes },

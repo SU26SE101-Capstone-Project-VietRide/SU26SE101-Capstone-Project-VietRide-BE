@@ -87,6 +87,16 @@ export class FcmPushWorker implements OnModuleInit, OnModuleDestroy {
         continue;
       }
 
+      if (await this.isTokenBlacklisted(delivery.fcmToken)) {
+        await this.deviceTokenProvider.deactivateDeviceToken(job.data.userId, delivery.fcmToken);
+        await this.notificationsRepository.markDeliveryFailed(
+          delivery.id,
+          currentAttempt,
+          'FCM_TOKEN_BLACKLISTED',
+        );
+        continue;
+      }
+
       const result = await this.sendDelivery(notification, delivery.fcmToken);
       if (typeof result !== 'string' && !result.invalidToken) {
         if (result.dryRun) {
@@ -152,15 +162,16 @@ export class FcmPushWorker implements OnModuleInit, OnModuleDestroy {
   ): Promise<DeviceTokenSnapshot[]> {
     const deliverableTokens = [];
     for (const deviceToken of deviceTokens) {
-      const isBlacklisted = await this.redis.get(
-        `${FCM_TOKEN_BLACKLIST_PREFIX}${deviceToken.fcmToken}`,
-      );
-      if (!isBlacklisted) {
+      if (!(await this.isTokenBlacklisted(deviceToken.fcmToken))) {
         deliverableTokens.push(deviceToken);
       }
     }
 
     return deliverableTokens;
+  }
+
+  private async isTokenBlacklisted(token: string): Promise<boolean> {
+    return Boolean(await this.redis.get(`${FCM_TOKEN_BLACKLIST_PREFIX}${token}`));
   }
 
   private async sendDelivery(

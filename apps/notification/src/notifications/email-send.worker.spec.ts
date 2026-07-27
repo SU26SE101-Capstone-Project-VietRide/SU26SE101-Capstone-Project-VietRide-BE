@@ -5,7 +5,7 @@ import {
   EmailTemplateKey,
   type EmailDelivery,
 } from '../generated/notification-prisma-client';
-import { EMAIL_SEND_ATTEMPTS } from './email-send.constants';
+import { EMAIL_SENDING_LEASE_MS, EMAIL_SEND_ATTEMPTS } from './email-send.constants';
 import type { EmailProvider, EmailSendJobData } from './email-send.types';
 import { EmailSendWorker } from './email-send.worker';
 import { EmailTemplateRenderer } from './email-template.renderer';
@@ -20,12 +20,13 @@ describe('EmailSendWorker', () => {
   let worker: EmailSendWorker;
 
   beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-01T10:10:00.000Z'));
     repository = {
       findEmailDeliveryById: jest.fn(),
       markEmailDeliverySending: jest.fn().mockResolvedValue(true),
-      markEmailDeliverySent: jest.fn(),
-      markEmailDeliveryRetrying: jest.fn(),
-      markEmailDeliveryFailed: jest.fn(),
+      markEmailDeliverySent: jest.fn().mockResolvedValue(true),
+      markEmailDeliveryRetrying: jest.fn().mockResolvedValue(true),
+      markEmailDeliveryFailed: jest.fn().mockResolvedValue(true),
     } as unknown as jest.Mocked<NotificationsRepository>;
     emailProvider = {
       send: jest.fn(),
@@ -36,6 +37,10 @@ describe('EmailSendWorker', () => {
       new EmailTemplateRenderer(),
       repository,
     );
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   it('renders AUTH_OTP and marks delivery as SENT without reading secrets from audit data', async () => {
@@ -54,6 +59,7 @@ describe('EmailSendWorker', () => {
     expect(repository.markEmailDeliverySent).toHaveBeenCalledWith(
       EMAIL_DELIVERY_ID,
       'sendgrid-message-id',
+      new Date('2026-06-01T10:10:00.000Z'),
     );
   });
 
@@ -67,6 +73,7 @@ describe('EmailSendWorker', () => {
       EMAIL_DELIVERY_ID,
       2,
       'sendgrid temporary outage',
+      new Date('2026-06-01T10:10:00.000Z'),
     );
   });
 
@@ -80,6 +87,7 @@ describe('EmailSendWorker', () => {
       EMAIL_DELIVERY_ID,
       EMAIL_SEND_ATTEMPTS,
       'sendgrid exhausted',
+      new Date('2026-06-01T10:10:00.000Z'),
     );
   });
 
@@ -93,18 +101,57 @@ describe('EmailSendWorker', () => {
     expect(emailProvider.send).not.toHaveBeenCalled();
   });
 
-  it('does not call the provider again when send succeeded but SENT persistence was uncertain', async () => {
-    repository.findEmailDeliveryById
-      .mockResolvedValueOnce(createEmailDelivery())
-      .mockResolvedValueOnce(createEmailDelivery({ status: EmailDeliveryStatus.SENDING }));
-    repository.markEmailDeliverySent.mockRejectedValueOnce(new Error('database unavailable'));
-    emailProvider.send.mockResolvedValue({ messageId: 'accepted-message-id' });
+  it('keeps a fresh SENDING lease retryable without calling the provider', async () => {
+    repository.findEmailDeliveryById.mockResolvedValue(
+      createEmailDelivery({
+        status: EmailDeliveryStatus.SENDING,
+        updatedAt: new Date(Date.now() - EMAIL_SENDING_LEASE_MS + 1),
+      }),
+    );
 
-    await expect(worker.process(createJob(0))).rejects.toThrow('EMAIL_SEND_STATUS_UNCERTAIN');
-    await expect(worker.process(createJob(1))).resolves.toBeUndefined();
+    await expect(worker.process(createJob(1))).rejects.toThrow('EMAIL_SEND_LEASE_ACTIVE');
 
+    expect(repository.markEmailDeliverySending).not.toHaveBeenCalled();
+    expect(emailProvider.send).not.toHaveBeenCalled();
+  });
+
+  it('reclaims a stale SENDING lease and resends with at-least-once semantics', async () => {
+    repository.findEmailDeliveryById.mockResolvedValue(
+      createEmailDelivery({
+        status: EmailDeliveryStatus.SENDING,
+        updatedAt: new Date(Date.now() - EMAIL_SENDING_LEASE_MS),
+      }),
+    );
+    emailProvider.send.mockResolvedValue({ messageId: 'recovered-message-id' });
+
+    await worker.process(createJob(EMAIL_SEND_ATTEMPTS - 1));
+
+    expect(repository.markEmailDeliverySending).toHaveBeenCalledWith(
+      EMAIL_DELIVERY_ID,
+      new Date(Date.now() - EMAIL_SENDING_LEASE_MS),
+      new Date('2026-06-01T10:10:00.000Z'),
+    );
     expect(emailProvider.send).toHaveBeenCalledTimes(1);
-    expect(repository.markEmailDeliveryRetrying).not.toHaveBeenCalled();
+    expect(repository.markEmailDeliverySent).toHaveBeenCalledWith(
+      EMAIL_DELIVERY_ID,
+      'recovered-message-id',
+      new Date('2026-06-01T10:10:00.000Z'),
+    );
+  });
+
+  it('does not let an expired worker overwrite a newer lease after provider failure', async () => {
+    repository.findEmailDeliveryById.mockResolvedValue(createEmailDelivery());
+    repository.markEmailDeliveryRetrying.mockResolvedValue(false);
+    emailProvider.send.mockRejectedValue(new Error('late provider failure'));
+
+    await expect(worker.process(createJob(0))).resolves.toBeUndefined();
+
+    expect(repository.markEmailDeliveryRetrying).toHaveBeenCalledWith(
+      EMAIL_DELIVERY_ID,
+      1,
+      'late provider failure',
+      new Date('2026-06-01T10:10:00.000Z'),
+    );
   });
 });
 
@@ -162,6 +209,8 @@ function createEnv(): Env {
     DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/vietride_notification',
     LOG_LEVEL: 'info',
     TRIP_INTERNAL_BASE_URL: 'http://trip.test',
+    BOOKING_INTERNAL_BASE_URL: 'http://booking.test',
+    PARCEL_INTERNAL_BASE_URL: 'http://parcel.test',
     IDENTITY_INTERNAL_BASE_URL: 'http://identity.test',
     FCM_DRY_RUN: false,
     FCM_DRY_RUN_TOPIC: 'vietride-e2e-validation',

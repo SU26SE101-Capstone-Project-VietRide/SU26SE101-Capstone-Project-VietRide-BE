@@ -37,9 +37,31 @@ export class FcmPushQueue implements OnModuleDestroy {
   }
 
   async enqueue(data: FcmPushJobData): Promise<void> {
-    await this.queue.add(FCM_PUSH_JOB_NAME, data, {
-      jobId: data.notificationId,
-    });
+    const existingJob = await this.queue.getJob(data.notificationId);
+    if (!existingJob) {
+      await this.add(data);
+      return;
+    }
+
+    const state = await existingJob.getState();
+    switch (state) {
+      case 'waiting':
+      case 'delayed':
+      case 'active':
+      case 'prioritized':
+      case 'waiting-children':
+      case 'completed':
+        return;
+      case 'failed':
+        await existingJob.retry('failed', { resetAttemptsMade: true });
+        return;
+      default:
+        throw new Error(`NOTIFICATION_QUEUE_JOB_STATE_UNKNOWN:${state}`);
+    }
+  }
+
+  private async add(data: FcmPushJobData): Promise<void> {
+    await this.queue.add(FCM_PUSH_JOB_NAME, data, { jobId: data.notificationId });
   }
 
   async onModuleDestroy(): Promise<void> {

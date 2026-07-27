@@ -13,6 +13,7 @@ import { UserJwtAuthGuard } from '../auth/user-jwt-auth.guard';
 import { CoreEventsConsumer } from './core-events.consumer';
 import { EmailSendQueue } from './email-send.queue';
 import { EmailSendWorker } from './email-send.worker';
+import { EmailDeliveryRecoveryService } from './email-delivery-recovery.service';
 import { EmailTemplateRenderer } from './email-template.renderer';
 import { FcmPushQueue } from './fcm-push.queue';
 import { FcmPushWorker } from './fcm-push.worker';
@@ -59,6 +60,7 @@ import { IdentitySystemAdminRecipientProvider } from './identity-system-admin-re
     FcmPushWorker,
     EmailSendQueue,
     EmailSendWorker,
+    EmailDeliveryRecoveryService,
     EmailTemplateRenderer,
     MessageIdempotencyService,
     CoreEventsConsumer,

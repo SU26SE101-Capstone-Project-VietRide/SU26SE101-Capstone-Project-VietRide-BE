@@ -20,7 +20,7 @@ describe('EmailSendWorker pipeline (e2e)', () => {
     const repository = {
       findEmailDeliveryById: jest.fn(async () => createEmailDelivery()),
       markEmailDeliverySending: jest.fn(async () => true),
-      markEmailDeliverySent: jest.fn(),
+      markEmailDeliverySent: jest.fn(async () => true),
     };
     const emailProvider: jest.Mocked<EmailProvider> = {
       send: jest.fn(async (payload: Parameters<EmailProvider['send']>[0]) => ({
@@ -51,6 +51,7 @@ describe('EmailSendWorker pipeline (e2e)', () => {
     expect(repository.markEmailDeliverySent).toHaveBeenCalledWith(
       EMAIL_DELIVERY_ID,
       `sendgrid-e2e:${RECIPIENT_EMAIL}`,
+      expect.any(Date),
     );
 
     await moduleRef.close();
@@ -115,6 +116,8 @@ function createEnv(): Env {
     LOG_LEVEL: 'info',
     IDENTITY_INTERNAL_BASE_URL: 'http://identity.test',
     TRIP_INTERNAL_BASE_URL: 'http://trip.test',
+    BOOKING_INTERNAL_BASE_URL: 'http://booking.test',
+    PARCEL_INTERNAL_BASE_URL: 'http://parcel.test',
     FCM_DRY_RUN: false,
     FCM_DRY_RUN_TOPIC: 'vietride-notification-e2e',
     SENDGRID_API_KEY: undefined,

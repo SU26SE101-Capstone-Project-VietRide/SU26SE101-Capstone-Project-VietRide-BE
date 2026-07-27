@@ -266,6 +266,8 @@ function createTestEnv(publicKeyPem: string): Env {
     USER_JWT_PUBLIC_KEY: publicKeyPem,
     IDENTITY_INTERNAL_BASE_URL: 'http://identity.test',
     TRIP_INTERNAL_BASE_URL: 'http://trip.test',
+    BOOKING_INTERNAL_BASE_URL: 'http://booking.test',
+    PARCEL_INTERNAL_BASE_URL: 'http://parcel.test',
     FCM_PROJECT_ID: undefined,
     FCM_CLIENT_EMAIL: undefined,
     FCM_PRIVATE_KEY: undefined,

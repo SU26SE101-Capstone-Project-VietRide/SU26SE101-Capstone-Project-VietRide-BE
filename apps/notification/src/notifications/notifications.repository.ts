@@ -248,23 +248,51 @@ export class NotificationsRepository {
     });
   }
 
-  async markEmailDeliverySending(emailDeliveryId: string): Promise<boolean> {
+  async markEmailDeliverySending(
+    emailDeliveryId: string,
+    leaseCutoff: Date,
+    claimToken: Date,
+  ): Promise<boolean> {
     const result = await this.prisma.emailDelivery.updateMany({
       where: {
         id: emailDeliveryId,
-        status: { in: [EmailDeliveryStatus.PENDING, EmailDeliveryStatus.RETRYING] },
+        OR: [
+          { status: { in: [EmailDeliveryStatus.PENDING, EmailDeliveryStatus.RETRYING] } },
+          {
+            status: EmailDeliveryStatus.SENDING,
+            updatedAt: { lte: leaseCutoff },
+          },
+        ],
       },
-      data: { status: EmailDeliveryStatus.SENDING },
+      data: { status: EmailDeliveryStatus.SENDING, updatedAt: claimToken },
     });
     return result.count === 1;
+  }
+
+  async listStaleSendingEmailDeliveryIds(leaseCutoff: Date, take: number): Promise<string[]> {
+    const deliveries = await this.prisma.emailDelivery.findMany({
+      where: {
+        status: EmailDeliveryStatus.SENDING,
+        updatedAt: { lte: leaseCutoff },
+      },
+      orderBy: { updatedAt: 'asc' },
+      take,
+      select: { id: true },
+    });
+    return deliveries.map(({ id }) => id);
   }
 
   async markEmailDeliverySent(
     emailDeliveryId: string,
     providerMessageId: string | null,
-  ): Promise<EmailDelivery> {
-    return this.prisma.emailDelivery.update({
-      where: { id: emailDeliveryId },
+    claimToken: Date,
+  ): Promise<boolean> {
+    const result = await this.prisma.emailDelivery.updateMany({
+      where: {
+        id: emailDeliveryId,
+        status: EmailDeliveryStatus.SENDING,
+        updatedAt: claimToken,
+      },
       data: {
         status: EmailDeliveryStatus.SENT,
         providerMessageId,
@@ -272,36 +300,49 @@ export class NotificationsRepository {
         lastError: null,
       },
     });
+    return result.count === 1;
   }
 
   async markEmailDeliveryRetrying(
     emailDeliveryId: string,
     retryCount: number,
     lastError: string,
-  ): Promise<EmailDelivery> {
-    return this.prisma.emailDelivery.update({
-      where: { id: emailDeliveryId },
+    claimToken: Date,
+  ): Promise<boolean> {
+    const result = await this.prisma.emailDelivery.updateMany({
+      where: {
+        id: emailDeliveryId,
+        status: EmailDeliveryStatus.SENDING,
+        updatedAt: claimToken,
+      },
       data: {
         status: EmailDeliveryStatus.RETRYING,
         retryCount,
         lastError,
       },
     });
+    return result.count === 1;
   }
 
   async markEmailDeliveryFailed(
     emailDeliveryId: string,
     retryCount: number,
     lastError: string,
-  ): Promise<EmailDelivery> {
-    return this.prisma.emailDelivery.update({
-      where: { id: emailDeliveryId },
+    claimToken: Date,
+  ): Promise<boolean> {
+    const result = await this.prisma.emailDelivery.updateMany({
+      where: {
+        id: emailDeliveryId,
+        status: EmailDeliveryStatus.SENDING,
+        updatedAt: claimToken,
+      },
       data: {
         status: EmailDeliveryStatus.FAILED,
         retryCount,
         lastError,
       },
     });
+    return result.count === 1;
   }
 }
 

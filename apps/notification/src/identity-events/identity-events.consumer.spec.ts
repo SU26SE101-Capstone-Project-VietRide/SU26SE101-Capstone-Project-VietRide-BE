@@ -339,6 +339,7 @@ describe('IdentityEventsConsumer', () => {
     );
 
     expect(notificationsService.enqueueEmail).toHaveBeenCalledWith({
+      dedupeKey: `${IDENTITY_OTP_REQUESTED_ROUTING_KEY}:${MESSAGE_ID}:email`,
       toEmail: 'rider@example.com',
       templateKey: EmailTemplateKey.AUTH_OTP,
       templateData: { code: '123456', purpose: 'REGISTRATION', ttlMinutes: 5 },
