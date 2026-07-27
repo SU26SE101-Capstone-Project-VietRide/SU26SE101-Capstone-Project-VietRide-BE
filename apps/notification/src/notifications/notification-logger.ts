@@ -1,4 +1,5 @@
 import pino, { type DestinationStream, type Logger } from 'pino';
+import { redactSensitiveValue } from './sensitive-data-redaction';
 
 const PII_REDACTION_PATHS = [
   'email',
@@ -29,6 +30,12 @@ export function createNotificationLogger(name: string, destination?: Destination
       redact: {
         paths: [...PII_REDACTION_PATHS],
         censor: '[REDACTED]',
+      },
+      hooks: {
+        logMethod(args, method) {
+          const safeArgs = args.map((value) => redactSensitiveValue(value));
+          method.apply(this, safeArgs as Parameters<typeof method>);
+        },
       },
     },
     destination,

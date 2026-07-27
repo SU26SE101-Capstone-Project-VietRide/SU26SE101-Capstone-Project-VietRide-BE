@@ -1,8 +1,9 @@
-import './bootstrap-env';
+import './instrument';
 
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import * as Sentry from '@sentry/nestjs';
 import { AppModule } from './app/app.module';
 import { loadEnv } from './config/env.schema';
 
@@ -23,7 +24,9 @@ async function bootstrap(): Promise<void> {
   Logger.log(`Application is running on: http://localhost:${port}`);
 }
 
-bootstrap().catch((error) => {
-  Logger.error(error, 'NotificationBootstrap');
+bootstrap().catch(async (error) => {
+  Sentry.captureException(error);
+  await Sentry.flush(2_000);
+  Logger.error('Notification bootstrap failed', undefined, 'NotificationBootstrap');
   process.exit(1);
 });
