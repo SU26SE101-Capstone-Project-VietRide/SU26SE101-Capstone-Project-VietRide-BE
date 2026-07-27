@@ -4,11 +4,13 @@ import {
   IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY,
   IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
   IDENTITY_OTP_REQUESTED_ROUTING_KEY,
+  IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
   IDENTITY_USER_CREATED_ROUTING_KEY,
   IdentityOperatorApprovedEventSchema,
   IdentityOperatorRegistrationSubmittedEventSchema,
   IdentityOperatorSuspendedEventSchema,
   IdentityOtpRequestedEventSchema,
+  IdentitySubscriptionUsageWarningEventSchema,
   IdentityUserCreatedEventSchema,
 } from '@vietride/contracts';
 import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
@@ -72,6 +74,13 @@ export class IdentityEventsConsumer implements OnModuleInit {
       'notification.identity.operator.suspended',
       IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
       (payload, raw) => this.handleOperatorSuspended(payload, raw),
+      { prefetch: RABBITMQ_PREFETCH_ONE, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
+    );
+
+    await this.consumer.subscribe(
+      'notification.identity.subscription.usage-warning',
+      IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
+      (payload, raw) => this.handleSubscriptionUsageWarning(payload, raw),
       { prefetch: RABBITMQ_PREFETCH_ONE, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
     );
 
@@ -152,6 +161,57 @@ export class IdentityEventsConsumer implements OnModuleInit {
       'Nhà xe bị tạm ngưng',
       'Nhà xe của bạn đã bị tạm ngưng. Vui lòng liên hệ quản trị hệ thống để được hỗ trợ.',
     );
+  }
+
+  async handleSubscriptionUsageWarning(payload: unknown, raw: ConsumeMessage): Promise<void> {
+    const routingKey = IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY;
+    const messageId = getMessageId(raw);
+    if (!messageId) throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
+
+    const processingState = await this.idempotency.begin(routingKey, messageId, raw.content);
+    if (processingState === 'duplicate') return;
+    if (processingState === 'locked') throw new Error(`MESSAGE_LOCKED_${routingKey}_${messageId}`);
+
+    try {
+      const event = IdentitySubscriptionUsageWarningEventSchema.parse(payload);
+      const recipientUserIds =
+        await this.operatorRecipientProvider.resolveOperatorRecipientUserIds(event.operatorId);
+      if (recipientUserIds.length === 0) {
+        this.logger.warn(
+          `No active operator admin recipients for ${routingKey} operatorId=${event.operatorId} messageId=${messageId}`,
+        );
+        await this.idempotency.markProcessed(routingKey, messageId);
+        return;
+      }
+
+      await Promise.all(
+        [...new Set(recipientUserIds)].map((userId) =>
+          this.notificationsService.createNotification({
+            userId,
+            type: NotificationType.SUBSCRIPTION_USAGE_WARNING,
+            title: 'Sắp đạt giới hạn gói dịch vụ',
+            body: `Nhà xe đã sử dụng ${event.used}/${event.limit} hạn mức ${formatSubscriptionResource(event.resource)} trong kỳ ${event.periodKey} (${event.usagePercent}%).`,
+            data: event,
+            dedupeKey: buildNotificationDedupeKey(
+              routingKey,
+              messageId,
+              userId,
+              NotificationType.SUBSCRIPTION_USAGE_WARNING,
+            ),
+          }),
+        ),
+      );
+      await this.idempotency.markProcessed(routingKey, messageId);
+    } catch (error) {
+      if (error instanceof ZodError) {
+        this.logger.warn(`Dropping malformed ${routingKey} messageId=${messageId}`);
+        await this.idempotency.markProcessed(routingKey, messageId);
+        return;
+      }
+
+      await this.idempotency.release(routingKey, messageId);
+      throw error;
+    }
   }
 
   async handleOtpRequested(payload: unknown, raw: ConsumeMessage): Promise<void> {
@@ -277,6 +337,25 @@ function buildOperatorLifecycleData(
   }
 
   return { operatorId, suspendedAt: event.suspendedAt ?? '' };
+}
+
+function formatSubscriptionResource(resource: string): string {
+  switch (resource) {
+    case 'VEHICLES':
+      return 'phương tiện';
+    case 'DRIVERS':
+      return 'tài xế';
+    case 'ASSISTANTS':
+      return 'phụ xe';
+    case 'OPERATOR_USERS':
+      return 'người dùng nhà xe';
+    case 'ROUTES':
+      return 'tuyến đường';
+    case 'TRIPS_THIS_MONTH':
+      return 'chuyến xe trong tháng';
+    default:
+      return resource;
+  }
 }
 
 function buildNotificationDedupeKey(

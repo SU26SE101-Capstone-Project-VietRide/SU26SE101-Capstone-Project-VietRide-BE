@@ -15,13 +15,13 @@ NestJS service xử lý **in-app notification history + FCM push outbound**. **C
 
 | Entity | Purpose | Key business fields |
 |---|---|---|
-| `Notification` | In-app history per user. | `type` enum (53 values), `title`, `body`, `data` JSONB, `readAt` |
+| `Notification` | In-app history per user. | `type` enum (54 values), `title`, `body`, `data` JSONB, `readAt` |
 | `NotificationDelivery` | FCM push attempt audit. | `fcmToken` snapshot, `status` enum, `retryCount`, `lastError` |
 
 ## Design Decisions
 
 - **NO `OutboxEvent` table** — v6 Section 8 spec rõ: "Notification Service không có OutboxEvent (chỉ consume)". Trade-off: nếu Notification Service down giữa lúc consume từ RabbitMQ, RabbitMQ at-least-once redelivery + BullMQ enqueue đủ đảm bảo (xem v6 Section 6.7 "Durability strategy").
-- **`Notification.type` enum với 53 giá trị** — toàn bộ loại thông báo theo thứ tự canonical:
+- **`Notification.type` enum với 54 giá trị** — toàn bộ loại thông báo theo thứ tự canonical:
 
   ```text
   BOOKING_CONFIRMED
@@ -58,6 +58,7 @@ NestJS service xử lý **in-app notification history + FCM push outbound**. **C
   VOUCHER_CONSENT_ACCEPTED
   VOUCHER_CONSENT_REJECTED
   SUBSCRIPTION_LIMIT_EXCEEDED
+  SUBSCRIPTION_USAGE_WARNING
   SUBSCRIPTION_TRIAL_EXPIRING
   SUBSCRIPTION_EXPIRED
   SUBSCRIPTION_APPROVED

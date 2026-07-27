@@ -8,6 +8,7 @@ import { ParcelRecipientProvider } from './parcel-recipient.provider';
 import {
   OPERATOR_RECIPIENT_PROVIDER,
   BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY,
+  BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY,
   INVOICE_ISSUED_ROUTING_KEY,
   PARCEL_LOADED_ROUTING_KEY,
   PARCEL_DELIVERY_CONFIRMED_ROUTING_KEY,
@@ -97,6 +98,7 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
         expect.objectContaining({ routingKey: PARCEL_REVIEW_APPROVED_ROUTING_KEY }),
         expect.objectContaining({ routingKey: PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY }),
         expect.objectContaining({ routingKey: PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY }),
+        expect.objectContaining({ routingKey: BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY }),
       ]),
     );
   });
@@ -224,6 +226,46 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
           `${BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY}:` +
           `${MESSAGE_ID}:${USER_ID}:${NotificationType.VOUCHER_CONSENT_ACCEPTED}`,
       }),
+    );
+  });
+
+  it('creates deduplicated voucher consent request for operator admins', async () => {
+    const eventId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([USER_ID]);
+    notificationsService.createNotification.mockResolvedValue(
+      createNotification(NotificationType.VOUCHER_CONSENT_REQUESTED),
+    );
+
+    await consumer.handle(
+      BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY,
+      {
+        eventId,
+        occurredAt: '2026-07-27T08:30:00+07:00',
+        voucherId: VOUCHER_ID,
+        operatorId: OPERATOR_ID,
+        voucherCode: 'SUMMER26',
+        voucherType: 'PERCENT_OFF',
+        voucherValue: 15,
+      },
+      createMessage('transport-message-id'),
+    );
+
+    expect(idempotency.begin).toHaveBeenCalledWith(
+      BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY,
+      eventId,
+      undefined,
+    );
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.VOUCHER_CONSENT_REQUESTED,
+        dedupeKey: `${BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY}:${eventId}:${USER_ID}:${NotificationType.VOUCHER_CONSENT_REQUESTED}`,
+      }),
+    );
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY,
+      eventId,
     );
   });
 

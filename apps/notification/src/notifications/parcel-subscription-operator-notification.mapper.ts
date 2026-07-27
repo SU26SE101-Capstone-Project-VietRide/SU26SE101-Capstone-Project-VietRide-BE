@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- existing event schema exports follow contract naming. */
 import { z } from 'zod';
 import {
+  BookingVoucherConsentRequestedEventSchema,
   ParcelAutoRejectedEventSchema,
   ParcelFinalPaymentRequestedEventSchema,
   ParcelLoadedEventSchema,
@@ -17,6 +18,7 @@ import type { CreateNotificationDto } from './dto/create-notification.dto';
 import type { ParcelRecipientSnapshot } from './parcel-recipient.provider';
 import {
   BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY,
+  BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY,
   BOOKING_VOUCHER_CONSENT_REJECTED_ROUTING_KEY,
   INVOICE_ISSUED_ROUTING_KEY,
   PARCEL_AUTO_REJECTED_ROUTING_KEY,
@@ -165,6 +167,7 @@ const TripSettlementCompletedPayloadSchema = z.object({
 });
 
 export type ParcelSubscriptionOperatorRoutingKey =
+  | typeof BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY
   | typeof BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY
   | typeof BOOKING_VOUCHER_CONSENT_REJECTED_ROUTING_KEY
   | typeof PARCEL_CREATED_ROUTING_KEY
@@ -210,6 +213,12 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
   resolveParcelSnapshot?: (parcelId: string) => Promise<ParcelRecipientSnapshot>,
 ): Promise<CreateNotificationDto[]> {
   switch (routingKey) {
+    case BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY:
+      return fanOut(
+        BookingVoucherConsentRequestedEventSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapVoucherConsentRequested,
+      );
     case BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY:
       return fanOut(
         VoucherConsentPayloadSchema.parse(payload),
@@ -393,6 +402,23 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
         mapPayoutFailed,
       );
   }
+}
+
+function mapVoucherConsentRequested(
+  userId: string,
+  payload: z.infer<typeof BookingVoucherConsentRequestedEventSchema>,
+): CreateNotificationDto {
+  const discount =
+    payload.voucherType === 'PERCENT_OFF'
+      ? `${payload.voucherValue}%`
+      : `${payload.voucherValue} VND`;
+  return {
+    userId,
+    type: NotificationType.VOUCHER_CONSENT_REQUESTED,
+    title: 'Đề xuất voucher mới',
+    body: `VietRide đề xuất voucher ${payload.voucherCode} giảm ${discount} cho chuyến của nhà xe. Đề xuất đang chờ bạn xác nhận áp dụng.`,
+    data: buildNotificationData(payload),
+  };
 }
 
 function mapVoucherConsentAccepted(

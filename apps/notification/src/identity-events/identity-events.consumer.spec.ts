@@ -4,6 +4,7 @@ import {
   IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY,
   IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
   IDENTITY_OTP_REQUESTED_ROUTING_KEY,
+  IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
   IDENTITY_USER_CREATED_ROUTING_KEY,
 } from '@vietride/contracts';
 import type { RabbitMqConsumer, RabbitMqHandler } from '@vietride/nest-rabbitmq';
@@ -80,11 +81,18 @@ describe('IdentityEventsConsumer', () => {
       IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY,
       IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
       IDENTITY_OTP_REQUESTED_ROUTING_KEY,
+      IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
       IDENTITY_USER_CREATED_ROUTING_KEY,
     ]);
     expect(rabbitConsumer.subscribe).toHaveBeenCalledWith(
       'notification.identity.operator.approved',
       IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
+      expect.any(Function),
+      { prefetch: 1, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
+    );
+    expect(rabbitConsumer.subscribe).toHaveBeenCalledWith(
+      'notification.identity.subscription.usage-warning',
+      IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
       expect.any(Function),
       { prefetch: 1, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
     );
@@ -142,6 +150,91 @@ describe('IdentityEventsConsumer', () => {
       IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY,
       MESSAGE_ID,
     );
+  });
+
+  it('notifies each operator admin when subscription usage crosses the warning threshold', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([USER_ID]);
+    notificationsService.createNotification.mockResolvedValue(
+      createNotification(NotificationType.SUBSCRIPTION_USAGE_WARNING),
+    );
+
+    await consumer.handleSubscriptionUsageWarning(
+      subscriptionUsageWarningPayload(),
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(operatorRecipientProvider.resolveOperatorRecipientUserIds).toHaveBeenCalledWith(
+      OPERATOR_ID,
+    );
+    expect(notificationsService.createNotification).toHaveBeenCalledWith({
+      userId: USER_ID,
+      type: NotificationType.SUBSCRIPTION_USAGE_WARNING,
+      title: 'Sắp đạt giới hạn gói dịch vụ',
+      body: 'Nhà xe đã sử dụng 8/10 hạn mức tài xế trong kỳ 2026-07 (80%).',
+      data: subscriptionUsageWarningPayload(),
+      dedupeKey: `${IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:${NotificationType.SUBSCRIPTION_USAGE_WARNING}`,
+    });
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+  });
+
+  it('marks subscription usage warning with no active operator admin as processed', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([]);
+
+    await expect(
+      consumer.handleSubscriptionUsageWarning(
+        subscriptionUsageWarningPayload(),
+        createMessage(MESSAGE_ID),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(notificationsService.createNotification).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+    expect(idempotency.release).not.toHaveBeenCalled();
+  });
+
+  it('releases subscription usage warning lock when operator lookup fails', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockRejectedValue(
+      new Error('identity unavailable'),
+    );
+
+    await expect(
+      consumer.handleSubscriptionUsageWarning(
+        subscriptionUsageWarningPayload(),
+        createMessage(MESSAGE_ID),
+      ),
+    ).rejects.toThrow('identity unavailable');
+    expect(idempotency.release).toHaveBeenCalledWith(
+      IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+  });
+
+  it('drops malformed subscription usage warning after marking it processed', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+
+    await expect(
+      consumer.handleSubscriptionUsageWarning(
+        { ...subscriptionUsageWarningPayload(), limit: 0 },
+        createMessage(MESSAGE_ID),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(operatorRecipientProvider.resolveOperatorRecipientUserIds).not.toHaveBeenCalled();
+    expect(notificationsService.createNotification).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+    expect(idempotency.release).not.toHaveBeenCalled();
   });
 
   it('validates and logs identity.user.created without creating notification', () => {
@@ -461,6 +554,20 @@ function createMessage(messageId: string | undefined): ConsumeMessage {
       correlationId: undefined,
     },
   } as ConsumeMessage;
+}
+
+function subscriptionUsageWarningPayload(): Record<string, unknown> {
+  return {
+    eventId: EVENT_ID,
+    occurredAt: '2026-07-27T08:30:00+07:00',
+    subscriptionId: '44444444-4444-4444-8444-444444444444',
+    operatorId: OPERATOR_ID,
+    resource: 'DRIVERS',
+    periodKey: '2026-07',
+    used: 8,
+    limit: 10,
+    usagePercent: 80,
+  };
 }
 
 function createNotification(

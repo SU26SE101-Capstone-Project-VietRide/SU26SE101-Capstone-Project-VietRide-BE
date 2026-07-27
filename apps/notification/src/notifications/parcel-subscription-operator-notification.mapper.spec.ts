@@ -3,6 +3,7 @@ import { ZodError } from 'zod';
 import { NotificationType } from '../generated/notification-prisma-client';
 import {
   BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY,
+  BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY,
   BOOKING_VOUCHER_CONSENT_REJECTED_ROUTING_KEY,
   INVOICE_ISSUED_ROUTING_KEY,
   PARCEL_LOADED_ROUTING_KEY,
@@ -359,6 +360,71 @@ describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
         title: 'Đã chấp nhận voucher',
       }),
     ]);
+  });
+
+  it.each([
+    ['PERCENT_OFF', 15, 'giảm 15%'],
+    ['FIXED_AMOUNT', 50000, 'giảm 50000 VND'],
+  ] as const)(
+    'maps requested %s voucher to operator admins with canonical content',
+    async (voucherType, voucherValue, discountText) => {
+      const resolveOperatorRecipients = jest.fn(async () => [USER_ID]);
+
+      await expect(
+        mapParcelSubscriptionOperatorEventToNotifications(
+          BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY,
+          {
+            eventId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            occurredAt: '2026-07-27T08:30:00+07:00',
+            voucherId: VOUCHER_ID,
+            operatorId: OPERATOR_ID,
+            voucherCode: 'SUMMER26',
+            voucherType,
+            voucherValue,
+            userId: SECOND_USER_ID,
+          },
+          resolveOperatorRecipients,
+        ),
+      ).resolves.toEqual([
+        {
+          userId: USER_ID,
+          type: NotificationType.VOUCHER_CONSENT_REQUESTED,
+          title: 'Đề xuất voucher mới',
+          body: `VietRide đề xuất voucher SUMMER26 ${discountText} cho chuyến của nhà xe. Đề xuất đang chờ bạn xác nhận áp dụng.`,
+          data: {
+            eventId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            occurredAt: '2026-07-27T08:30:00+07:00',
+            voucherId: VOUCHER_ID,
+            operatorId: OPERATOR_ID,
+            voucherCode: 'SUMMER26',
+            voucherType,
+            voucherValue,
+          },
+        },
+      ]);
+      expect(resolveOperatorRecipients).toHaveBeenCalledWith(OPERATOR_ID);
+    },
+  );
+
+  it('rejects malformed voucher consent request before recipient lookup', async () => {
+    const resolveOperatorRecipients = jest.fn(async () => [USER_ID]);
+
+    await expect(
+      mapParcelSubscriptionOperatorEventToNotifications(
+        BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY,
+        {
+          eventId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          occurredAt: '2026-07-27T08:30:00+07:00',
+          voucherId: VOUCHER_ID,
+          operatorId: OPERATOR_ID,
+          voucherCode: 'SUMMER26',
+          voucherType: 'UNKNOWN',
+          voucherValue: 15,
+        },
+        resolveOperatorRecipients,
+      ),
+    ).rejects.toThrow(ZodError);
+    expect(resolveOperatorRecipients).not.toHaveBeenCalled();
   });
 
   it('maps voucher consent rejected with reason', async () => {
