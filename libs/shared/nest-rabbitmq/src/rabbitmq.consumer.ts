@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
-import type { Channel, ChannelModel, ConsumeMessage } from 'amqplib';
+import type { ChannelModel, ConfirmChannel, ConsumeMessage } from 'amqplib';
 import { RABBITMQ_CONNECTION, RABBITMQ_OPTIONS, type NestRabbitMqOptions } from './rabbitmq.tokens';
 
 export type RabbitMqHandler<T = unknown> = (payload: T, raw: ConsumeMessage) => Promise<void> | void;
@@ -22,7 +22,7 @@ const DEFAULT_RETRY_DELAY_MS = 10_000;
 @Injectable()
 export class RabbitMqConsumer implements OnModuleDestroy {
   private readonly logger = new Logger('RabbitMqConsumer');
-  private readonly channels: Channel[] = [];
+  private readonly channels: ConfirmChannel[] = [];
 
   constructor(
     @Inject(RABBITMQ_CONNECTION) private readonly conn: ChannelModel,
@@ -40,7 +40,7 @@ export class RabbitMqConsumer implements OnModuleDestroy {
     handler: RabbitMqHandler<T>,
     options: RabbitMqSubscribeOptions = {},
   ): Promise<void> {
-    const ch = await this.conn.createChannel();
+    const ch = await this.conn.createConfirmChannel();
     await ch.assertExchange(this.opts.exchange, this.opts.exchangeType ?? 'topic', { durable: true });
     if (options.deadLetter) {
       await this.assertRetryTopology(ch, queue, routingKey, options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS);
@@ -72,7 +72,20 @@ export class RabbitMqConsumer implements OnModuleDestroy {
       } catch (err) {
         this.logger.error(`Handler failed on queue=${queue} rk=${routingKey}: ${(err as Error).message}`);
         if (options.deadLetter) {
-          this.retryOrPark(ch, queue, routingKey, msg, options.maxRetries ?? DEFAULT_MAX_RETRIES);
+          try {
+            await this.retryOrPark(
+              ch,
+              queue,
+              routingKey,
+              msg,
+              options.maxRetries ?? DEFAULT_MAX_RETRIES,
+            );
+          } catch (publishError) {
+            this.logger.error(
+              `DLQ publish confirm failed on queue=${queue} rk=${routingKey}: ${(publishError as Error).message}`,
+            );
+            ch.nack(msg, false, false);
+          }
           return;
         }
 
@@ -84,7 +97,7 @@ export class RabbitMqConsumer implements OnModuleDestroy {
   }
 
   private async assertRetryTopology(
-    ch: Channel,
+    ch: ConfirmChannel,
     queue: string,
     routingKey: string,
     retryDelayMs: number,
@@ -110,13 +123,13 @@ export class RabbitMqConsumer implements OnModuleDestroy {
     await ch.bindQueue(dlqQueue, dlqExchange, routingKey);
   }
 
-  private retryOrPark(
-    ch: Channel,
+  private async retryOrPark(
+    ch: ConfirmChannel,
     queue: string,
     routingKey: string,
     msg: ConsumeMessage,
     maxRetries: number,
-  ): void {
+  ): Promise<void> {
     const rejectedCount = readXDeathCount(msg, queue, 'rejected');
     if (rejectedCount < maxRetries) {
       ch.nack(msg, false, false);
@@ -129,12 +142,20 @@ export class RabbitMqConsumer implements OnModuleDestroy {
       'x-vietride-retry-count': rejectedCount,
     };
 
-    ch.publish(this.dlqExchangeName(), routingKey, msg.content, {
-      contentType: msg.properties.contentType,
-      persistent: true,
-      headers,
-      messageId: msg.properties.messageId,
-      correlationId: msg.properties.correlationId,
+    await new Promise<void>((resolve, reject) => {
+      ch.publish(
+        this.dlqExchangeName(),
+        routingKey,
+        msg.content,
+        {
+          contentType: msg.properties.contentType,
+          persistent: true,
+          headers,
+          messageId: msg.properties.messageId,
+          correlationId: msg.properties.correlationId,
+        },
+        (error) => (error ? reject(error) : resolve()),
+      );
     });
     ch.ack(msg);
     this.logger.warn(`Parked message on queue=${queue} rk=${routingKey} after retries=${rejectedCount}`);
