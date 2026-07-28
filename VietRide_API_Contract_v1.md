@@ -3006,11 +3006,58 @@ caller is not the assigned Assistant, has no operator scope, or the trip is unav
 `422 VALIDATION_FAILED` for invalid pagination; `503 TRIP_SERVICE_UNAVAILABLE` when
 assignment verification cannot reach Trip service.
 
+### POST `/v1/assistant/trips/{tripId}/parcels/qr-scan`
+
+Auth: `ASSISTANT`. The authenticated JWT `sub` and `operatorId` must identify the Assistant
+currently assigned to `tripId`. This POST is a read-only QR resolver and is explicitly exempt
+from `Idempotency-Key`; it does not change Parcel status, cargo capacity, statistics, or Outbox.
+
+The Passenger App renders a QR image whose complete plain-text payload is the `parcelCode`
+returned by Parcel creation. Parcel Service does not generate, decode, or persist QR image data.
+The Assistant App decodes the image locally and sends only that plain code:
+
+```json
+{
+  "parcelCode": "VR-PCL-20260728-ABCDEFGH"
+}
+```
+
+Current codes must match `^VR-PCL-\d{8}-[A-HJ-NP-Z2-9]{8}$`. The legacy
+`VRP-yyyyMMdd-XXXXXXXX` shape remains accepted for existing Parcel rows.
+
+Response `200` in the ADR 0004 envelope:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "parcelId": "uuid",
+    "parcelCode": "VR-PCL-20260728-ABCDEFGH",
+    "status": "READY_TO_LOAD",
+    "tripId": "uuid",
+    "recipientName": "Nguyen Van A",
+    "sizeCategory": "SMALL",
+    "photoUrl": "https://storage.googleapis.com/vietride.appspot.com/parcels/photo.jpg"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-28T10:00:00Z" }
+}
+```
+
+The response status lets the Assistant App choose the next explicit operation. Check-in,
+reweigh, load, unload, and delivery remain separate mutation endpoints with their existing
+status, assignment, capacity, deadline, and idempotency guards.
+
+Errors: `401 UNAUTHORIZED`; `403 FORBIDDEN` when the caller is not the assigned Assistant or
+has no operator scope; `404 PARCEL_NOT_FOUND` when the code is unknown or belongs to another
+trip/operator; `422 VALIDATION_ERROR` for a malformed code; `503 TRIP_SERVICE_UNAVAILABLE` when
+assignment verification cannot reach Trip service.
+
 ### POST `/v1/assistant/parcels/{parcelId}/check-in`
 
 Auth: assigned `ASSISTANT` under the same operator. Idempotency: required.
 
-Request: `{ "tripId": "uuid", "parcelCode": "VRP-20260722-ABCDEFGH" }`.
+Request: `{ "tripId": "uuid", "parcelCode": "VR-PCL-20260722-ABCDEFGH" }`.
 
 Only `RESERVED` may be checked in and the request must arrive strictly before `latestCheckInAt = min(departureAt - 30 minutes, loadCutoffAt - 10 minutes)`. Response `200` data contains `parcelId`, `parcelCode`, `status: "CHECKED_IN"`, `checkedInAt`, and `latestCheckInAt`. A foreign trip/code is hidden as `404 PARCEL_NOT_FOUND`; a late request returns `409 PARCEL_CHECK_IN_CLOSED`.
 
@@ -3072,7 +3119,7 @@ Request:
 ```json
 {
   "tripId": "uuid",
-  "parcelCode": "VRP-20260722-ABCDEFGH"
+  "parcelCode": "VR-PCL-20260722-ABCDEFGH"
 }
 ```
 
@@ -3083,7 +3130,7 @@ Response `200` (`ApiResponse`):
   "statusCode": 200,
   "data": {
     "parcelId": "uuid",
-    "parcelCode": "VRP-20260722-ABCDEFGH",
+    "parcelCode": "VR-PCL-20260722-ABCDEFGH",
     "status": "LOADED"
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-07-22T10:00:00Z" }
