@@ -48,6 +48,7 @@ public sealed class IdentityDbContext : VietRideDbContextBase
     public DbSet<OperatorSubscription> OperatorSubscriptions => Set<OperatorSubscription>();
     public DbSet<SubscriptionUpgradeAttempt> SubscriptionUpgradeAttempts => Set<SubscriptionUpgradeAttempt>();
     public DbSet<SubscriptionQuotaAllocation> SubscriptionQuotaAllocations => Set<SubscriptionQuotaAllocation>();
+    public DbSet<SubscriptionUsageWarningMarker> SubscriptionUsageWarningMarkers => Set<SubscriptionUsageWarningMarker>();
 
     public DbSet<User> Users => Set<User>();
     public DbSet<OAuthIdentity> OAuthIdentities => Set<OAuthIdentity>();

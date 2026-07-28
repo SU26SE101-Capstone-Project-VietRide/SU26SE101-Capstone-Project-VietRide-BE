@@ -27,8 +27,8 @@ describe('mapCoreEventToNotification', () => {
     ).toEqual({
       userId: USER_ID,
       type: NotificationType.BOOKING_CONFIRMED,
-      title: 'Dat ve thanh cong',
-      body: 'Ve #VR123 da duoc xac nhan.',
+      title: 'Đặt vé thành công',
+      body: 'Vé #VR123 đã được xác nhận.',
       data: {
         bookingId: BOOKING_ID,
         tripId: TRIP_ID,
@@ -72,8 +72,8 @@ describe('mapCoreEventToNotification', () => {
     ).toEqual(
       expect.objectContaining({
         type: NotificationType.BOOKING_CANCELLED,
-        title: 'Ve da bi huy',
-        body: `Ve ${BOOKING_ID} da bi huy. Ly do: Passenger cancelled.`,
+        title: 'Vé đã bị hủy',
+        body: `Vé ${BOOKING_ID} đã bị hủy. Lý do: Passenger cancelled.`,
       }),
     );
   });
@@ -106,8 +106,8 @@ describe('mapCoreEventToNotification', () => {
     ).toEqual(
       expect.objectContaining({
         type: NotificationType.BOOKING_REFUNDED,
-        title: 'Hoan tien ve thanh cong',
-        body: `Khoan hoan tien cho ve ${BOOKING_ID} da duoc ghi nhan. So tien hoan: 120000 VND.`,
+        title: 'Hoàn tiền vé thành công',
+        body: `Khoản hoàn tiền cho vé ${BOOKING_ID} đã được ghi nhận. Số tiền hoàn: 120000 VND.`,
       }),
     );
   });
@@ -125,8 +125,8 @@ describe('mapCoreEventToNotification', () => {
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.WALLET_CREDITED,
-        title: 'Vi da duoc cong tien',
-        body: 'Vi VietRide cua ban vua duoc cong 50000 VND.',
+        title: 'Ví đã được cộng tiền',
+        body: 'Ví VietRide của bạn vừa được cộng 50000 VND.',
       }),
     );
     expect(notification.data).toMatchObject({
@@ -147,8 +147,8 @@ describe('mapCoreEventToNotification', () => {
     expect(notification).toEqual(
       expect.objectContaining({
         type: NotificationType.WALLET_DEBITED,
-        title: 'Vi da bi tru tien',
-        body: 'Vi VietRide cua ban vua bi tru 75000 VND.',
+        title: 'Ví đã bị trừ tiền',
+        body: 'Ví VietRide của bạn vừa bị trừ 75000 VND.',
       }),
     );
     expect(notification.data).toMatchObject({

@@ -75,7 +75,7 @@ public sealed class ExpireParcelReviewCommandHandler
                 var eventId = Guid.NewGuid();
                 await _outbox.EnqueueAsync(
                     eventId,
-                    ParcelOutboxEvents.AutoRejected,
+                    ParcelOutboxEvents.Cancelled,
                     JsonSerializer.Serialize(new
                     {
                         eventId,
@@ -85,6 +85,7 @@ public sealed class ExpireParcelReviewCommandHandler
                         operatorId = snapshot.OperatorId,
                         userId = snapshot.SenderUserId,
                         tripId = snapshot.TripId,
+                        reason = ParcelRejectionReasons.ReviewTimeout,
                         refundAmount = 0L,
                     }),
                     cancellationToken);

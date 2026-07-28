@@ -4,11 +4,17 @@ import { EmailTemplateKey, NotificationType } from '../generated/notification-pr
 import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
 import type { OperatorRecipientProvider } from './operator-recipient.provider';
+import { ParcelRecipientProvider } from './parcel-recipient.provider';
 import {
   OPERATOR_RECIPIENT_PROVIDER,
   BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY,
+  BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY,
   INVOICE_ISSUED_ROUTING_KEY,
   PARCEL_LOADED_ROUTING_KEY,
+  PARCEL_DELIVERY_CONFIRMED_ROUTING_KEY,
+  PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY,
+  PARCEL_REVIEW_APPROVED_ROUTING_KEY,
+  PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY,
   PARCEL_SUBSCRIPTION_OPERATOR_QUEUE_BINDINGS,
   SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY,
 } from './parcel-subscription-operator-events.constants';
@@ -29,6 +35,7 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
   let idempotency: jest.Mocked<MessageIdempotencyService>;
   let notificationsService: jest.Mocked<NotificationsService>;
   let operatorRecipientProvider: jest.Mocked<OperatorRecipientProvider>;
+  let parcelRecipientProvider: jest.Mocked<ParcelRecipientProvider>;
   let consumer: ParcelSubscriptionOperatorEventsConsumer;
 
   beforeEach(() => {
@@ -48,11 +55,15 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
       resolveOperatorRecipientUserIds: jest.fn(),
       resolveOperatorRecipientEmails: jest.fn(),
     };
+    parcelRecipientProvider = {
+      getParcelSnapshot: jest.fn(),
+    } as unknown as jest.Mocked<ParcelRecipientProvider>;
     consumer = new ParcelSubscriptionOperatorEventsConsumer(
       rabbitConsumer,
       idempotency,
       notificationsService,
       operatorRecipientProvider,
+      parcelRecipientProvider,
     );
   });
 
@@ -82,6 +93,60 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
         { prefetch: 1, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
       );
     }
+    expect(PARCEL_SUBSCRIPTION_OPERATOR_QUEUE_BINDINGS).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ routingKey: PARCEL_REVIEW_APPROVED_ROUTING_KEY }),
+        expect.objectContaining({ routingKey: PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY }),
+        expect.objectContaining({ routingKey: PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY }),
+        expect.objectContaining({ routingKey: BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY }),
+      ]),
+    );
+  });
+
+  it('resolves a legacy delivery-confirmed event to the sender and deduplicates it', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    parcelRecipientProvider.getParcelSnapshot.mockResolvedValue({
+      parcelId: PARCEL_ID,
+      tripId: TRIP_ID,
+      status: 'DELIVERED',
+      senderUserId: USER_ID,
+      recipientUserId: null,
+      operatorId: OPERATOR_ID,
+      dropoffStopId: null,
+    });
+
+    await consumer.handle(
+      PARCEL_DELIVERY_CONFIRMED_ROUTING_KEY,
+      { parcelId: PARCEL_ID },
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(parcelRecipientProvider.getParcelSnapshot).toHaveBeenCalledWith(PARCEL_ID);
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: USER_ID }),
+    );
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      PARCEL_DELIVERY_CONFIRMED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+  });
+
+  it('releases the lock when Parcel recipient lookup fails', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    parcelRecipientProvider.getParcelSnapshot.mockRejectedValue(new Error('parcel unavailable'));
+
+    await expect(
+      consumer.handle(
+        PARCEL_DELIVERY_CONFIRMED_ROUTING_KEY,
+        { parcelId: PARCEL_ID },
+        createMessage(MESSAGE_ID),
+      ),
+    ).rejects.toThrow('parcel unavailable');
+    expect(idempotency.release).toHaveBeenCalledWith(
+      PARCEL_DELIVERY_CONFIRMED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+    expect(idempotency.markProcessed).not.toHaveBeenCalled();
   });
 
   it('creates parcel notification for a new valid message', async () => {
@@ -161,6 +226,46 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
           `${BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY}:` +
           `${MESSAGE_ID}:${USER_ID}:${NotificationType.VOUCHER_CONSENT_ACCEPTED}`,
       }),
+    );
+  });
+
+  it('creates deduplicated voucher consent request for operator admins', async () => {
+    const eventId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([USER_ID]);
+    notificationsService.createNotification.mockResolvedValue(
+      createNotification(NotificationType.VOUCHER_CONSENT_REQUESTED),
+    );
+
+    await consumer.handle(
+      BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY,
+      {
+        eventId,
+        occurredAt: '2026-07-27T08:30:00+07:00',
+        voucherId: VOUCHER_ID,
+        operatorId: OPERATOR_ID,
+        voucherCode: 'SUMMER26',
+        voucherType: 'PERCENT_OFF',
+        voucherValue: 15,
+      },
+      createMessage('transport-message-id'),
+    );
+
+    expect(idempotency.begin).toHaveBeenCalledWith(
+      BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY,
+      eventId,
+      undefined,
+    );
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.VOUCHER_CONSENT_REQUESTED,
+        dedupeKey: `${BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY}:${eventId}:${USER_ID}:${NotificationType.VOUCHER_CONSENT_REQUESTED}`,
+      }),
+    );
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY,
+      eventId,
     );
   });
 

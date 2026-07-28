@@ -1,3 +1,17 @@
+import {
+  BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY,
+  PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY,
+  PARCEL_REVIEW_APPROVED_ROUTING_KEY,
+  PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY,
+} from '@vietride/contracts';
+
+export {
+  BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY,
+  PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY,
+  PARCEL_REVIEW_APPROVED_ROUTING_KEY,
+  PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY,
+};
+
 export const OPERATOR_RECIPIENT_PROVIDER = Symbol('OPERATOR_RECIPIENT_PROVIDER');
 
 export const BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY = 'booking.voucher.consent_accepted';
@@ -24,19 +38,23 @@ export const TRIP_STOP_ARRIVED_ROUTING_KEY = 'trip.stop.arrived';
 export const TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY = 'trip.vehicle_substituted';
 
 export const SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY = 'subscription.limit.trip_skipped';
-export const SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY = 'subscription.subscription.trial_expiring';
-export const SUBSCRIPTION_EXPIRED_ROUTING_KEY = 'subscription.subscription.expired';
+export const SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY = 'identity.subscription.trial_expiring';
+export const SUBSCRIPTION_EXPIRED_ROUTING_KEY = 'identity.subscription.expired';
 export const SUBSCRIPTION_APPROVED_ROUTING_KEY = 'subscription.subscription.approved';
 export const SUBSCRIPTION_PAYMENT_PENDING_WARN_ROUTING_KEY =
   'payment.subscription.payment_pending_warn';
 export const SUBSCRIPTION_PAYMENT_AUTO_REVERTED_ROUTING_KEY =
-  'payment.subscription.payment_auto_reverted';
+  'identity.subscription.payment_auto_reverted';
 export const INVOICE_ISSUED_ROUTING_KEY = 'payment.invoice.issued';
 export const TRIP_SETTLEMENT_COMPLETED_ROUTING_KEY = 'payment.trip_settlement.completed';
 export const PAYOUT_PROCESSED_ROUTING_KEY = 'payment.payout.processed';
 export const PAYOUT_FAILED_ROUTING_KEY = 'payment.payout.failed';
 
 export const PARCEL_SUBSCRIPTION_OPERATOR_QUEUE_BINDINGS = [
+  {
+    queue: 'notification:booking-voucher-consent-requested',
+    routingKey: BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY,
+  },
   {
     queue: 'notification:booking-voucher-consent-accepted',
     routingKey: BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY,
@@ -67,6 +85,18 @@ export const PARCEL_SUBSCRIPTION_OPERATOR_QUEUE_BINDINGS = [
   {
     queue: 'notification:parcel-review-requested',
     routingKey: PARCEL_REVIEW_REQUESTED_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:parcel-review-approved',
+    routingKey: PARCEL_REVIEW_APPROVED_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:parcel-final-payment-requested',
+    routingKey: PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:parcel-settlement-recovered',
+    routingKey: PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY,
   },
   {
     queue: 'notification:parcel-transfer-initiated',

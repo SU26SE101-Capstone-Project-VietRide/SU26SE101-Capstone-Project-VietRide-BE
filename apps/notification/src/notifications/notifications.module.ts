@@ -13,6 +13,7 @@ import { UserJwtAuthGuard } from '../auth/user-jwt-auth.guard';
 import { CoreEventsConsumer } from './core-events.consumer';
 import { EmailSendQueue } from './email-send.queue';
 import { EmailSendWorker } from './email-send.worker';
+import { EmailDeliveryRecoveryService } from './email-delivery-recovery.service';
 import { EmailTemplateRenderer } from './email-template.renderer';
 import { FcmPushQueue } from './fcm-push.queue';
 import { FcmPushWorker } from './fcm-push.worker';
@@ -39,6 +40,9 @@ import { BookingTripChangeEventsConsumer } from './booking-trip-change-events.co
 import { Day24DepartedPendingEventsConsumer } from './day24-departed-pending-events.consumer';
 import { Day24NoShowEventsConsumer } from './day24-no-show-events.consumer';
 import { Day24StopDisabledAutoFallbackEventsConsumer } from './day24-stop-disabled-auto-fallback-events.consumer';
+import { BookingTripRecipientProvider } from './booking-trip-recipient.provider';
+import { ParcelRecipientProvider } from './parcel-recipient.provider';
+import { IdentitySystemAdminRecipientProvider } from './identity-system-admin-recipient.provider';
 
 @Module({
   controllers: [NotificationsController, OperatorNotificationsController, InternalEmailsController],
@@ -48,11 +52,15 @@ import { Day24StopDisabledAutoFallbackEventsConsumer } from './day24-stop-disabl
     NotificationRetentionService,
     OperatorAnnouncementService,
     TripAnnouncementRecipientProvider,
+    BookingTripRecipientProvider,
+    ParcelRecipientProvider,
     IdentityOperatorRecipientProvider,
+    IdentitySystemAdminRecipientProvider,
     FcmPushQueue,
     FcmPushWorker,
     EmailSendQueue,
     EmailSendWorker,
+    EmailDeliveryRecoveryService,
     EmailTemplateRenderer,
     MessageIdempotencyService,
     CoreEventsConsumer,
@@ -89,6 +97,11 @@ import { Day24StopDisabledAutoFallbackEventsConsumer } from './day24-stop-disabl
           : new SendGridEmailProvider(env),
     },
   ],
-  exports: [NotificationsService, MessageIdempotencyService, OPERATOR_RECIPIENT_PROVIDER],
+  exports: [
+    NotificationsService,
+    MessageIdempotencyService,
+    OPERATOR_RECIPIENT_PROVIDER,
+    IdentitySystemAdminRecipientProvider,
+  ],
 })
 export class NotificationsModule {}

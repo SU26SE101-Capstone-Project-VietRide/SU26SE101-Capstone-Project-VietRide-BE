@@ -1,426 +1,101 @@
-# Notification Service - Timeline Production
-
-> **Quy tac cho AI**: Khi nhan task lien quan Notification Service, AI PHAI doc file nay truoc,
-> xac dinh Phase hien tai (Phase chua `[x]` dau tien), chi lam dung scope Phase do,
-> verify xong moi bao done. TUYET DOI khong tu chuyen sang Phase tiep theo.
-
-## Tom Tat
-
-Notification Service la NestJS worker cho in-app notification history, FCM push delivery,
-va email delivery. Service nay chi consume RabbitMQ events, khong publish event va khong co
-OutboxEvent table.
-
-Production direction:
-
-- KHONG co Outbox trong Notification Service.
-- RabbitMQ la input boundary; BullMQ la internal retry queue cho FCM/email.
-- Moi RabbitMQ consumer bat buoc co Redis idempotency.
-- In-app history persist vao PostgreSQL schema `vietride_notification` bang Prisma client rieng.
-- REST API verify Identity User Access Token bang RS256/JWKS, issuer `vietride-identity`,
-  audience `vietride-api`.
-- Push provider va email provider phai di qua abstraction; chi them dependency that khi USER approve.
-
-Moi phase phai test doc lap bang unit/e2e theo huong production. Neu dependency that chua san sang,
-giu provider interface va fake adapter trong test, nhung khong goi do la production integration verify.
-
-## Phase Progress
-
-- [x] Phase 1 - Production Foundation Va Prisma
-- [x] Phase 2 - Identity-backed REST Auth Va In-app API
-- [x] Phase 3 - Notification Write Core
-- [x] Phase 4 - Core Booking/Payment Consumers
-- [x] Phase 5 - Trip/Tracking Alert Consumers
-- [x] Phase 6 - Parcel/Subscription/Operator Consumers
-- [x] Phase 7 - Push Delivery Pipeline
-- [x] Phase 8 - Email Delivery Pipeline
-- [x] Phase 9 - Reliability, Retention, Observability
-- [ ] Phase 10 - Hardening Va Final Acceptance
-
----
-
-## Phase 1 - Production Foundation Va Prisma
-
-**Thoi luong:** 1 ngay
-**Muc tieu:** Notification co nen NestJS production-shaped, Prisma client rieng, Redis/RabbitMQ wiring,
-va verify target day du.
-
-### Scope
-
-- Tao Notification timeline production file nay.
-- Chuan hoa AppModule:
-  - `NestCommonModule`.
-  - `NestRedisModule.forRoot({ url: env.REDIS_URL })`.
-  - `NestRabbitMqModule.forRoot({ url, exchange: vietride.events, exchangeType: topic })`.
-  - `ApiResponseExceptionFilter`, `LoggingInterceptor`, `ApiResponseInterceptor`.
-- Them config:
-  - `apps/notification/src/config/env.schema.ts`.
-  - `apps/notification/src/config/notification-config.module.ts`.
-  - `ENV_TOKEN`.
-- Them Prisma:
-  - `apps/notification/prisma/schema.prisma`.
-  - `apps/notification/src/prisma/notification-prisma.service.ts`.
-  - `apps/notification/src/prisma/prisma.module.ts`.
-  - generator output `../src/generated/notification-prisma-client`.
-  - datasource schemas `["vietride_notification"]`.
-  - model/enum gan `@@schema("vietride_notification")`.
-- Them health/ready nen:
-  - `/health` liveness.
-  - `/ready` readiness co response co ban; dependency checks chi harden o Phase 10.
-- Them Nx targets:
-  - `notification:generate`.
-  - `notification:test:e2e`.
-- Them e2e nen cho health/ready.
-
-### Output hoan thanh
-
-- Notification build duoc voi Prisma client rieng.
-- App boot duoc voi config env production-shaped.
-- Chua implement REST business endpoint, RabbitMQ consumer, FCM, SendGrid.
-
-### Verify
-
-```bash
-npx nx run notification:lint
-npx nx run notification:test
-npx nx run notification:test:e2e
-npx nx run notification:build
-```
-
----
-
-## Phase 2 - Identity-backed REST Auth Va In-app API
-
-**Thoi luong:** 1-2 ngay
-**Muc tieu:** FE co the doc notification history va mark read bang Identity access token that.
-
-### Scope
-
-- Implement Identity JWT verifier bang `jose`:
-  - issuer `vietride-identity`.
-  - audience `vietride-api`.
-  - JWKS tu `JWT_PUBLIC_KEY_URL`.
-  - `USER_JWT_PUBLIC_KEY` chi la RSA public key override cho local/test.
-- Protected REST:
-  - `GET /api/v1/notifications?unreadOnly&page&pageSize&sortBy&sortDir`.
-  - `POST /api/v1/notifications/:notificationId/read`.
-- Owner check:
-  - user chi doc va mark read notification cua minh.
-- QueryOptions:
-  - `pageSize` max 100.
-  - sort whitelist.
-- E2E:
-  - missing/invalid auth -> 401 envelope.
-  - validation query sai -> 400 envelope.
-  - owner happy path -> 200/204 dung contract.
-- Script verify:
-  - `scripts/test-notification-phase2.js`.
-
-### Verify
-
-```bash
-npx nx run notification:lint
-npx nx run notification:test
-npx nx run notification:test:e2e
-npx nx run notification:build
-```
-
----
-
-## Phase 3 - Notification Write Core
-
-**Thoi luong:** 1 ngay
-**Muc tieu:** Co core service/repository tao in-app notification an toan cho cac consumer va API.
-
-### Scope
-
-- Them `notifications` module:
-  - controller/service/repository/dto.
-  - mapper chuan hoa `Notification.type`, title, body, data JSON.
-- Repository chi dung `NotificationPrismaService`.
-- Service chi goi repository.
-- Helper:
-  - create notification.
-  - list notification.
-  - mark read idempotent.
-  - optional unread count helper neu API can.
-- Unit tests:
-  - create maps data dung.
-  - mark read cua owner thanh cong.
-  - mark read cua user khac -> 404/403 theo contract phase.
-
-### Verify
-
-```bash
-npx nx run notification:lint
-npx nx run notification:test
-npx nx run notification:test:e2e
-npx nx run notification:build
-```
-
----
-
-## Phase 4 - Core Booking/Payment Consumers
-
-**Thoi luong:** 1-2 ngay
-**Muc tieu:** Notification consume nhom event cot loi cua booking va wallet/payment.
-
-### Scope
-
-- Consume:
-  - `booking.booking.confirmed`.
-  - `booking.booking.cancelled`.
-  - `booking.booking.refunded`.
-  - `payment.wallet.credited`.
-  - `payment.wallet.debited`.
-- Redis idempotency:
-  - TTL 24h.
-  - key theo routing key + messageId/correlationId.
-- Validate payload bang Zod.
-- Malformed payload bi drop co log, khong requeue loop.
-- Persist in-app notification bang core service.
-- Chua bat buoc push FCM that; enqueue push se vao Phase 7.
-
-### Verify
-
-```bash
-npx nx run notification:lint
-npx nx run notification:test
-npx nx run notification:test:e2e
-npx nx run notification:build
-```
-
----
-
-## Phase 5 - Trip/Tracking Alert Consumers
-
-**Thoi luong:** 2 ngay
-**Muc tieu:** Notification nhan cac alert tu Trip va Tracking.
-
-### Scope
-
-- Consume:
-  - `trip.trip.boarding_started`.
-  - `trip.trip.route_changed`.
-  - `trip.trip.schedule_changed`.
-  - `trip.trip.cancelled`.
-  - `trip.trip.delayed`.
-  - `trip.incident.reported`.
-  - `tracking.gps.off_route`.
-  - `tracking.gps.approaching_stop`.
-- Map notification types:
-  - `TRIP_BOARDING_REMINDER`.
-  - `TRIP_ROUTE_CHANGED`.
-  - `TRIP_SCHEDULE_CHANGED`.
-  - `TRIP_CANCELLED`.
-  - `TRIP_DELAYED`.
-  - `INCIDENT_REPORTED`.
-  - `OFF_ROUTE_ALERT`.
-  - `TRIP_VEHICLE_APPROACHING`.
-- E2E/unit:
-  - approaching wave 1/2 title/body dung.
-  - delayed/off-route dedupe theo message id.
-
-### Verify
-
-```bash
-npx nx run notification:lint
-npx nx run notification:test
-npx nx run notification:test:e2e
-npx nx run notification:build
-```
-
----
-
-## Phase 6 - Parcel/Subscription/Operator Consumers
-
-**Thoi luong:** 2 ngay
-**Muc tieu:** Hoan thien nhom event con lai cho parcel, subscription, payout/operator alert.
-
-### Scope
-
-- Consume parcel lifecycle:
-  - created/loaded/unloaded/delivered_pending_confirm/delivery_confirmed/delivery_rejected.
-  - cancelled/rejected/returned/auto_rejected/review_requested/transfer_initiated.
-- Consume subscription/payment operator events:
-  - subscription limit/trial/expired/approved.
-  - invoice issued.
-  - trip settlement completed.
-  - payout processed/failed.
-- Persist in-app notification theo recipient trong payload.
-- Neu payload chi co `operatorId`, dung provider interface de resolve recipients o phase sau neu endpoint chua san sang.
-
-### Verify
-
-```bash
-npx nx run notification:lint
-npx nx run notification:test
-npx nx run notification:test:e2e
-npx nx run notification:build
-```
-
----
-
-## Phase 7 - Push Delivery Pipeline
-
-**Thoi luong:** 2-3 ngay
-**Muc tieu:** NotificationDelivery audit va FCM push retry qua BullMQ.
-
-### Scope
-
-- BullMQ queue `notification:fcm-push`.
-- Device-token provider:
-  - production: `GET /internal/v1/users/{userId}/device-tokens`.
-  - internal auth theo convention HS256 `X-Internal-Auth`.
-- Tao `NotificationDelivery` cho tung token snapshot.
-- FCM provider abstraction:
-  - interface trong app.
-  - fake/no-op provider cho test.
-  - provider that chi khi USER approve `firebase-admin`.
-- Retry/backoff:
-  - 5s -> 30s -> 5m -> exhausted/DLQ behavior.
-- Invalid token:
-  - blacklist Redis `notification:fcm_token_blacklist:{token}` TTL 1 ngay.
-
-### Verify
-
-```bash
-npx nx run notification:lint
-npx nx run notification:test
-npx nx run notification:test:e2e
-npx nx run notification:build
-```
-
----
-
-## Phase 8 - Email Delivery Pipeline
-
-**Thoi luong:** 2 ngay
-**Muc tieu:** Email delivery qua BullMQ voi provider abstraction va retry.
-
-### Scope
-
-- BullMQ queue `notification:email-send`.
-- Email provider abstraction:
-  - fake/no-op provider cho test.
-  - SendGrid provider that chi khi USER approve `@sendgrid/mail`.
-- Template categories:
-  - AUTH_OTP.
-  - SET_INITIAL_PASSWORD.
-  - parcel delivery link.
-  - operator/subscription/invoice notices.
-- Khong log OTP/token/link day du.
-- Retry/backoff tuong tu push.
-
-### Verify
-
-```bash
-npx nx run notification:lint
-npx nx run notification:test
-npx nx run notification:test:e2e
-npx nx run notification:build
-```
-
----
-
-## Phase 9 - Reliability, Retention, Observability
-
-**Thoi luong:** 1-2 ngay
-**Muc tieu:** Hardening van hanh truoc final acceptance.
-
-### Scope
-
-- Retention job:
-  - xoa notifications cu hon 90 ngay, delivery cascade.
-  - env configurable.
-- Readiness dependency checks:
-  - Prisma.
-  - Redis.
-  - RabbitMQ.
-- Pino structured logs cho business layer.
-- Sentry-safe error logging:
-  - khong log token, OTP, deliveryToken, email body nhay cam.
-- Review retry constants, Redis TTL constants, queue names.
-
-### Verify
-
-```bash
-npx nx run notification:lint
-npx nx run notification:test
-npx nx run notification:test:e2e
-npx nx run notification:build
-```
-
----
-
-## Phase 10 - Hardening Va Final Acceptance
-
-**Thoi luong:** 1 ngay
-**Muc tieu:** Full Notification Service production-ready va verify end-to-end voi dependency that khi co config.
-
-### Scope
-
-- Cleanup skeleton neu can:
-  - `/api` hello endpoint khong anh huong route production.
-- Full env review:
-  - `JWT_PUBLIC_KEY_URL`.
-  - `USER_JWT_PUBLIC_KEY` chi local/test.
-  - `DATABASE_URL`.
-  - `REDIS_URL`.
-  - `RABBITMQ_URL`.
-  - FCM/SendGrid env neu da approve provider that.
-- Production integration verify:
-  - Postgres.
-  - Redis.
-  - RabbitMQ.
-  - Identity internal device-token endpoint.
-  - FCM/SendGrid config neu enabled.
-- Script verify for user-facing API/delivery behavior.
-- Full repo TS verification.
-
-### Verify
-
-```bash
-npx nx run notification:lint
-npx nx run notification:test
-npx nx run notification:test:e2e
-npx nx run notification:build
-npm run lint:ts
-npm run test:ts
-npm run build:ts
-```
-
----
-
-## Public Interfaces / Events Can Hoan Thanh
-
-- REST:
-  - `GET /api/v1/notifications`
-  - `POST /api/v1/notifications/:notificationId/read`
-- RabbitMQ:
-  - Exchange `vietride.events`
-  - Notification consumes only; no outbox.
-- BullMQ:
-  - `notification:fcm-push`
-  - `notification:email-send`
-- Redis:
-  - `notification:fcm_token_blacklist:{token}`
-  - idempotency keys for RabbitMQ consumers.
-- Internal HTTP:
-  - `GET /internal/v1/users/{userId}/device-tokens`
-
-## Ghi chú đồng bộ production sau Phase 10
-
-- `IdentityDeviceTokenProvider` không còn là placeholder: Identity Service đã có endpoint thật `GET /internal/v1/users/{userId}/device-tokens`. Notification phải tiếp tục dùng endpoint này với `X-Internal-Auth: Bearer <internal-jwt>`, `IDENTITY_INTERNAL_BASE_URL` thật và `INTERNAL_JWT_SECRET` dùng chung.
-- `NoopOperatorRecipientProvider` vẫn là placeholder. Khi event chỉ có `operatorId`, Notification không thể gửi trực tiếp vì bảng `notifications.user_id` cần `userId`; phải resolve `operatorId -> userId[]` qua Identity/Operator API nội bộ thật rồi mới tạo notification cho `OPERATOR_ADMIN`/`OPERATOR_STAFF` phù hợp.
-- Nếu payload event đã có `userId`, `userIds`, `passengerUserId`, `senderUserId` hoặc `recipientUserId`, Notification được tạo trực tiếp cho các user đó, không cần operator recipient provider.
-- FCM chỉ production-ready khi Firebase credential thật được cấu hình đầy đủ: `FCM_PROJECT_ID`, `FCM_CLIENT_EMAIL`, `FCM_PRIVATE_KEY` hoặc application default credentials hợp lệ.
-- SendGrid chỉ production-ready khi `SENDGRID_API_KEY`, `SENDGRID_FROM_EMAIL` và sender domain thật đã cấu hình đúng. Nếu thiếu credential, email job sẽ retry/fail theo audit, không được gọi là production delivery verify.
-- Redis của Notification là state vận hành cho BullMQ, RabbitMQ idempotency và FCM token blacklist. Deploy production phải cấu hình Redis ổn định; không coi Redis chỉ là cache có thể mất tùy ý.
-
-## Assumptions
-
-- Identity Service la source of truth cho User Access Token.
-- Identity internal device-token endpoint da ton tai theo BSOT registry, nhung production verify chi pass khi endpoint chay that.
-- Notification Service khong publish event.
-- Khong them `firebase-admin` hoac `@sendgrid/mail` neu USER chua approve.
-- Khong xoa/rename/move file neu khong co lenh ro rang tu USER.
+# Notification Service — tiến độ production
+
+> Tài liệu này ghi trạng thái triển khai và tiêu chí nghiệm thu của Notification Service.
+> Nguồn nghiệp vụ và wire contract vẫn là technical context, API contract và BSOT.
+
+## Nguyên tắc
+
+- Notification là NestJS consumer-only; không có integration Outbox.
+- RabbitMQ vietride.events là biên nhận sự kiện; mọi consumer dùng idempotency, manual ACK, retry và DLQ.
+- PostgreSQL schema vietride_notification lưu lịch sử in-app và trạng thái delivery.
+- BullMQ quản lý retry nội bộ cho FCM và email.
+- Public API xác thực User Access Token RS256 của Identity.
+- Internal HTTP dùng X-Internal-Auth với Internal JWT.
+- Nội dung hệ thống phải là tiếng Việt Unicode đầy đủ dấu; nội dung do operator nhập được giữ nguyên.
+- Observability v1 chỉ gồm pino, Sentry và UptimeRobot.
+
+## Tiến độ phase
+
+- [x] Phase 1 — Nền tảng NestJS, Prisma, Redis, RabbitMQ và health/readiness.
+- [x] Phase 2 — REST auth, danh sách thông báo và đánh dấu đã đọc.
+- [x] Phase 3 — Notification write core và database dedupe.
+- [x] Phase 4 — Booking/Payment core consumers.
+- [x] Phase 5 — Trip/Tracking alert consumers.
+- [x] Phase 6 — Parcel/Subscription/Operator consumers.
+- [x] Phase 7 — FCM delivery pipeline.
+- [x] Phase 8 — Email delivery pipeline.
+- [x] Phase 9 — Reliability, retention và observability nền.
+- [x] Phase 10 — Hoàn thiện coverage v1, Unicode, recipient routing và final acceptance.
+
+## Public API hiện hành
+
+- GET /v1/notifications: owner đọc lịch sử, hỗ trợ unreadOnly và phân trang.
+- POST /v1/notifications/{notificationId}/read: owner-only, trả 204.
+- POST /v1/operator/notifications: OPERATOR_ADMIN hoặc OPERATOR_STAFF, tenant-scoped, yêu cầu Idempotency-Key; title/body là nội dung do operator nhập nên không được tự sửa.
+- Các endpoint internal recipient/snapshot không có Gateway route.
+
+## Phase 10 — phạm vi bắt buộc
+
+### Contract và routing
+
+- Canonical Subscription keys dùng identity.subscription.*.
+- Giữ identity.subscription.usage_warning và phát đúng một lần khi crossing 80% theo resource/kỳ.
+- Bổ sung identity.operator.registration_submitted, payment.wallet.debited và booking.voucher.consent_requested.
+- Không có rag.document.approved Notification event; RAG ingest_requested là local work item.
+- Trip route change gửi crew và affected passengers; schedule change từ Trip chỉ gửi crew.
+- Parcel dùng recipient policy riêng cho từng routing key, không fan-out blanket sender + recipient.
+- Parcel Settlement v2 hỗ trợ exact legacy/v2 `auto_rejected` payload và ba fact sender-only:
+  `parcel.parcel.review_approved`, `parcel.parcel.final_payment_requested`,
+  `parcel.parcel.settlement_recovered`.
+- Review timeout dùng `parcel.parcel.cancelled`; check-in/final-payment timeout dùng
+  `parcel.parcel.auto_rejected` với reason và số cọc bị giữ.
+
+### Nội dung
+
+- Tất cả title, body, email subject, text và HTML do hệ thống tạo phải có dấu đầy đủ.
+- Placeholder động như ID, mã vé, biển số, tên tuyến và thời gian phải được giữ nguyên.
+- Không backfill dữ liệu lịch sử; database môi trường sẽ được clear/reset.
+
+### Recipient resolution
+
+- Booking cung cấp raw trip notification-recipient projection.
+- Trip snapshot cung cấp crew và stop context.
+- Parcel snapshot ADR envelope cung cấp status, sender, registered recipient, operator và trip;
+  terminal rows vẫn resolve được và dependency failure luôn fail closed.
+- Identity cung cấp operator recipients, System Admin recipients và device tokens.
+- Timeout, 401/403, 5xx hoặc response malformed không được coi là danh sách recipient rỗng hợp lệ.
+
+### Delivery reliability
+
+- Persist thành công nhưng queue add thất bại phải phục hồi bằng replay/reconciliation trên cùng database row.
+- FCM phải kiểm tra blacklist ngay trước mỗi lần gửi.
+- Email OTP dùng durable dedupe key; SENDING quá lease được reclaim theo at-least-once policy.
+- BullMQ xử lý rõ các trạng thái absent, waiting, delayed, active, failed và completed.
+- Khi hết RabbitMQ retry, chỉ ACK original sau khi DLQ publish được broker confirm.
+- Sentry và log không được chứa JWT, FCM token, email, signed URL hoặc raw payload nhạy cảm.
+
+## Kiểm thử
+
+- Unit/snapshot test bao phủ toàn bộ mapper, template, routing key và payload schema.
+- Component E2E bao phủ consumer idempotency, repository, BullMQ worker và controller.
+- Real-stack E2E chỉ chọn các biên rủi ro cao: passenger route/delay, crew/operator fan-out,
+  Parcel review + settlement timeout/recovery, producer mới, retry→DLQ, DB→queue recovery,
+  Gateway Unicode và message redelivery.
+
+## Verification bắt buộc
+
+- npx nx run notification:lint
+- npx nx run notification:test -- --runInBand
+- npx nx run notification:test:e2e -- --runInBand
+- npx nx run notification:build
+- npx nx run notification-e2e:e2e
+- npx nx run gateway-e2e:e2e
+- git diff --check
+
+## Điều kiện hoàn thành
+
+- Mọi event Notification trong registry được phân loại implemented, intentionally no-notification hoặc reserved/out-of-scope.
+- Không thiếu producer/consumer/resolver bắt buộc của v1.
+- Không gửi sai người nhận, không mất hoặc tạo trùng thông báo khi replay.
+- Gateway trả nguyên vẹn Unicode đã persist.
+- Targeted verification và E2E chọn lọc đều xanh.

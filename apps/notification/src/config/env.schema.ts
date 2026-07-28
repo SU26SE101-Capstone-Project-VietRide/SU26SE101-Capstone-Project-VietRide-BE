@@ -22,6 +22,8 @@ export const envSchema = baseEnvSchema
       JWT_PUBLIC_KEY_URL: z.string().url().default('http://identity:5001/v1/.well-known/jwks.json'),
       USER_JWT_PUBLIC_KEY: z.string().optional(),
       IDENTITY_INTERNAL_BASE_URL: z.string().url().default('http://identity:5001'),
+      BOOKING_INTERNAL_BASE_URL: z.string().url().default('http://booking:5003'),
+      PARCEL_INTERNAL_BASE_URL: z.string().url().default('http://parcel:5005'),
       FCM_PROJECT_ID: z.string().optional(),
       TRIP_INTERNAL_BASE_URL: z.string().url().default('http://trip:5002'),
       FCM_CLIENT_EMAIL: z.string().email().optional(),
@@ -121,6 +123,8 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
 
   return envSchema.parse({
     ...normalizedRaw,
+    BOOKING_INTERNAL_BASE_URL: raw.BOOKING_INTERNAL_BASE_URL ?? raw.BOOKING_BASE_URL,
+    PARCEL_INTERNAL_BASE_URL: raw.PARCEL_INTERNAL_BASE_URL ?? raw.PARCEL_BASE_URL,
     DATABASE_URL: databaseUrl,
     REDIS_URL: redisUrl,
     RABBITMQ_URL: rabbitMqUrl,

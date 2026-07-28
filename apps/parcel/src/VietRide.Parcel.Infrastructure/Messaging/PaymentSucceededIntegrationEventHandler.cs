@@ -23,7 +23,10 @@ internal sealed class PaymentSucceededIntegrationEventHandler
                 integrationEvent.PaymentId,
                 integrationEvent.ReferenceType,
                 integrationEvent.ReferenceId,
-                integrationEvent.Amount),
+                integrationEvent.Amount,
+                integrationEvent.Method,
+                integrationEvent.PaidAt,
+                integrationEvent.DueAt),
             cancellationToken);
     }
 }

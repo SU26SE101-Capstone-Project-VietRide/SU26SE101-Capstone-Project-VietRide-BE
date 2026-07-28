@@ -110,6 +110,44 @@ public sealed class RefundToWalletCommandHandlerTests
     }
 
     [Fact]
+    public async Task Handle_ParcelRefundsWithDifferentReasons_CreditsCumulativeAmountWithoutCollapsing()
+    {
+        var userId = Guid.NewGuid();
+        var parcelId = Guid.NewGuid();
+        var wallets = new FakeWalletRepository(userId, Money.FromRaw(1_000_000));
+        var platformWallets = new FakePlatformWalletRepository(Money.FromRaw(500_000));
+        var outbox = new FakeIntegrationEventOutbox();
+        var handler = CreateHandler(
+            wallets,
+            platformWallets,
+            outbox,
+            parcelId,
+            PaymentReferenceType.PARCEL);
+
+        await handler.Handle(
+            new RefundToWalletCommand(
+                userId,
+                50_000,
+                "PARCEL_REFUND",
+                parcelId,
+                $"{parcelId:D}:SETTLEMENT_PRICE_DECREASE"),
+            CancellationToken.None);
+        await handler.Handle(
+            new RefundToWalletCommand(
+                userId,
+                125_000,
+                "PARCEL_REFUND",
+                parcelId,
+                $"{parcelId:D}:TRIP_CANCELLED"),
+            CancellationToken.None);
+
+        wallets.Transactions.Should().HaveCount(2);
+        wallets.Transactions.Sum(transaction => transaction.Amount.Amount).Should().Be(175_000);
+        platformWallets.Transactions.Should().HaveCount(2);
+        outbox.Events.Should().HaveCount(2);
+    }
+
+    [Fact]
     public async Task Handle_WhenReferenceWasAlreadyRefunded_ReturnsExistingTransactionWithoutDoubleCredit()
     {
         var userId = Guid.NewGuid();
@@ -224,6 +262,15 @@ public sealed class RefundToWalletCommandHandlerTests
             CancellationToken cancellationToken)
             => Task.FromResult(_transactions.FirstOrDefault(transaction =>
                 transaction.ReferenceType == referenceType && transaction.ReferenceId == referenceId));
+
+        public Task<long> GetTotalRefundedByReferenceAsync(
+            WalletTransactionRef referenceType,
+            Guid referenceId,
+            CancellationToken cancellationToken)
+            => Task.FromResult(_transactions
+                .Where(transaction => transaction.ReferenceType == referenceType
+                    && transaction.ReferenceId == referenceId)
+                .Sum(transaction => transaction.Amount.Amount));
 
         public Task<WalletTransaction> CreditBookingRefundAsync(
             Guid userId,

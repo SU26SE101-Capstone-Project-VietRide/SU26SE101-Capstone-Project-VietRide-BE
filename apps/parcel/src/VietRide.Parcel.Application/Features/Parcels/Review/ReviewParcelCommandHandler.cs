@@ -15,20 +15,17 @@ public sealed class ReviewParcelCommandHandler
     : IRequestHandler<ReviewParcelCommand, ReviewParcelResponse>
 {
     private readonly IParcelRepository _parcelRepository;
-    private readonly IPaymentServiceClient _paymentClient;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IParcelStatsRepository _statsRepository;
 
     public ReviewParcelCommandHandler(
         IParcelRepository parcelRepository,
-        IPaymentServiceClient paymentClient,
         IUnitOfWork unitOfWork,
         IIntegrationEventOutbox outbox,
         IParcelStatsRepository statsRepository)
     {
         _parcelRepository = parcelRepository;
-        _paymentClient = paymentClient;
         _unitOfWork = unitOfWork;
         _outbox = outbox;
         _statsRepository = statsRepository;
@@ -62,23 +59,30 @@ public sealed class ReviewParcelCommandHandler
                     "ALREADY_REVIEWED",
                     $"Parcel has already been reviewed with decision '{parcel.ReviewDecision}'.");
 
-            if (!command.DepositAmount.HasValue || command.DepositAmount.Value <= 0)
-                throw new CodedValidationException(
-                    "VALIDATION_ERROR", "Deposit amount is required and must be positive for APPROVED decision.");
-
-            if (command.PaymentMethod is not ("WALLET" or "VNPAY"))
-                throw new CodedValidationException(
-                    "VALIDATION_ERROR", "PaymentMethod must be WALLET or VNPAY.");
-
-            var depositAmount = Money.FromRaw(command.DepositAmount.Value);
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
             ParcelPaymentTransitionSnapshot snapshot;
             try
             {
                 snapshot = await _parcelRepository.TryApproveReviewAsync(
-                    command.ParcelId, command.ReviewedByUserId, depositAmount, now, cancellationToken)
+                    command.ParcelId, command.ReviewedByUserId, parcel.DepositRequiredVnd, now, cancellationToken)
                     ?? throw new CodedConflictException(
                         "RACE_LOST", "Parcel was already reviewed or status changed.");
+                var eventId = Guid.NewGuid();
+                await ParcelOutboxEvents.EnqueueAsync(
+                    _outbox,
+                    eventId,
+                    ParcelOutboxEvents.ReviewApproved,
+                    new
+                    {
+                        eventId,
+                        occurredAt = now,
+                        parcelId = snapshot.ParcelId,
+                        parcelCode = snapshot.ParcelCode,
+                        operatorId = snapshot.OperatorId,
+                        userId = snapshot.SenderUserId,
+                        depositRequiredVnd = snapshot.DepositAmount,
+                    },
+                    cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
                 await _unitOfWork.CommitAsync(cancellationToken);
             }
@@ -88,38 +92,11 @@ public sealed class ReviewParcelCommandHandler
                 throw;
             }
 
-            // Initiate payment after atomic status transition
-            var idempotencyKey = command.IdempotencyKey ?? command.ParcelId.ToString("D");
-            var outcome = await _paymentClient.ChargeParcelPaymentAsync(
-                "PARCEL",
-                command.ParcelId,
-                parcel.SenderUserId,
-                depositAmount.Amount,
-                command.PaymentMethod,
-                idempotencyKey,
-                cancellationToken,
-                CreatePaymentContext(parcel, depositAmount.Amount));
-
-            if (outcome.Kind == ChargeOutcomeKind.InsufficientFunds)
-            {
-                throw new CodedValidationException(
-                    "INSUFFICIENT_FUNDS",
-                    outcome.ErrorMessage ?? "Insufficient wallet balance.");
-            }
-
-            if (outcome.Kind == ChargeOutcomeKind.TransportError)
-            {
-                throw new ParcelDependencyUnavailableException(
-                    "PAYMENT_SERVICE_ERROR",
-                    outcome.ErrorMessage ?? "Payment service unavailable.");
-            }
-
             return new ReviewParcelResponse(
                 command.ParcelId,
                 snapshot.ParcelCode,
                 ParcelStatus.PENDING_PAYMENT.ToString(),
-                depositAmount.Amount,
-                outcome.Result?.PaymentRedirectUrl);
+                parcel.DepositRequiredVnd.Amount);
         }
         else // REJECTED
         {
@@ -137,18 +114,32 @@ public sealed class ReviewParcelCommandHandler
                 throw new CodedValidationException(
                     "VALIDATION_ERROR", "Reason is required for REJECTED decision.");
 
+            var rejectionReason = command.Reason.Trim();
+
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
             ParcelPaymentTransitionSnapshot snapshot;
             try
             {
                 snapshot = await _parcelRepository.TryRejectReviewAsync(
-                    command.ParcelId, command.ReviewedByUserId, command.Reason, now, cancellationToken)
+                    command.ParcelId, command.ReviewedByUserId, rejectionReason, now, cancellationToken)
                     ?? throw new CodedConflictException(
                         "RACE_LOST", "Parcel was already reviewed or status changed.");
+                var eventId = Guid.NewGuid();
                 await ParcelOutboxEvents.EnqueueAsync(
                     _outbox,
+                    eventId,
                     ParcelOutboxEvents.Rejected,
-                    new { parcelId = snapshot.ParcelId },
+                    new
+                    {
+                        eventId,
+                        occurredAt = now,
+                        parcelId = snapshot.ParcelId,
+                        parcelCode = snapshot.ParcelCode,
+                        operatorId = snapshot.OperatorId,
+                        userId = snapshot.SenderUserId,
+                        tripId = snapshot.TripId,
+                        reason = rejectionReason,
+                    },
                     cancellationToken);
                 await _statsRepository.UpsertIncrementAsync(
                     snapshot.OperatorId,
@@ -168,22 +159,8 @@ public sealed class ReviewParcelCommandHandler
                 command.ParcelId,
                 snapshot.ParcelCode,
                 ParcelStatus.REJECTED.ToString(),
-                null, null);
+                null);
         }
     }
 
-    private static PaymentContextSnapshot CreatePaymentContext(
-        VietRide.Parcel.Domain.Entities.Parcel parcel,
-        long amount)
-        => new(1,
-        [
-            new PaymentAllocationSnapshot(
-                parcel.Id,
-                "PARCEL",
-                parcel.OperatorId,
-                parcel.TripId,
-                amount,
-                0,
-                0),
-        ]);
 }

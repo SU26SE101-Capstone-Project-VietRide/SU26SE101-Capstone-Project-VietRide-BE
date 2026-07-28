@@ -1,14 +1,24 @@
 /* eslint-disable @typescript-eslint/naming-convention -- existing event schema exports follow contract naming. */
 import { z } from 'zod';
 import {
+  BookingVoucherConsentRequestedEventSchema,
   ParcelAutoRejectedEventSchema,
+  ParcelFinalPaymentRequestedEventSchema,
   ParcelLoadedEventSchema,
+  ParcelReviewApprovedEventSchema,
+  ParcelSettlementRecoveredEventSchema,
+  type ParcelAutoRejectedEvent,
+  type ParcelFinalPaymentRequestedEvent,
   type ParcelLoadedEvent,
+  type ParcelReviewApprovedEvent,
+  type ParcelSettlementRecoveredEvent,
 } from '@vietride/contracts';
 import { NotificationType } from '../generated/notification-prisma-client';
 import type { CreateNotificationDto } from './dto/create-notification.dto';
+import type { ParcelRecipientSnapshot } from './parcel-recipient.provider';
 import {
   BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY,
+  BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY,
   BOOKING_VOUCHER_CONSENT_REJECTED_ROUTING_KEY,
   INVOICE_ISSUED_ROUTING_KEY,
   PARCEL_AUTO_REJECTED_ROUTING_KEY,
@@ -17,11 +27,14 @@ import {
   PARCEL_DELIVERED_PENDING_CONFIRM_ROUTING_KEY,
   PARCEL_DELIVERY_CONFIRMED_ROUTING_KEY,
   PARCEL_DELIVERY_REJECTED_ROUTING_KEY,
+  PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY,
   PARCEL_LOADED_ROUTING_KEY,
   PARCEL_REJECTED_ROUTING_KEY,
   PARCEL_RETURNED_ROUTING_KEY,
   PARCEL_RETURN_INITIATED_ROUTING_KEY,
   PARCEL_REVIEW_REQUESTED_ROUTING_KEY,
+  PARCEL_REVIEW_APPROVED_ROUTING_KEY,
+  PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY,
   PARCEL_PENDING_OPERATOR_ACTION_ROUTING_KEY,
   PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY,
   PARCEL_TRANSFER_ESCALATED_ROUTING_KEY,
@@ -52,7 +65,7 @@ const RecipientPayloadSchema = z.object({
   userId: z.string().uuid().optional(),
   userIds: z.array(z.string().uuid()).optional(),
   senderUserId: z.string().uuid().optional(),
-  recipientUserId: z.string().uuid().optional(),
+  recipientUserId: z.string().uuid().nullable().optional(),
   recipientUserIds: z.array(z.string().uuid()).optional(),
   operatorId: z.string().uuid().optional(),
 });
@@ -154,6 +167,7 @@ const TripSettlementCompletedPayloadSchema = z.object({
 });
 
 export type ParcelSubscriptionOperatorRoutingKey =
+  | typeof BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY
   | typeof BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY
   | typeof BOOKING_VOUCHER_CONSENT_REJECTED_ROUTING_KEY
   | typeof PARCEL_CREATED_ROUTING_KEY
@@ -167,6 +181,9 @@ export type ParcelSubscriptionOperatorRoutingKey =
   | typeof PARCEL_RETURNED_ROUTING_KEY
   | typeof PARCEL_AUTO_REJECTED_ROUTING_KEY
   | typeof PARCEL_REVIEW_REQUESTED_ROUTING_KEY
+  | typeof PARCEL_REVIEW_APPROVED_ROUTING_KEY
+  | typeof PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY
+  | typeof PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY
   | typeof PARCEL_TRANSFER_INITIATED_ROUTING_KEY
   | typeof PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY
   | typeof PARCEL_TRANSFER_ESCALATED_ROUTING_KEY
@@ -193,8 +210,15 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
   routingKey: ParcelSubscriptionOperatorRoutingKey,
   payload: unknown,
   resolveOperatorRecipientUserIds: (operatorId: string) => Promise<string[]>,
+  resolveParcelSnapshot?: (parcelId: string) => Promise<ParcelRecipientSnapshot>,
 ): Promise<CreateNotificationDto[]> {
   switch (routingKey) {
+    case BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY:
+      return fanOut(
+        BookingVoucherConsentRequestedEventSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        mapVoucherConsentRequested,
+      );
     case BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY:
       return fanOut(
         VoucherConsentPayloadSchema.parse(payload),
@@ -208,91 +232,101 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
         mapVoucherConsentRejected,
       );
     case PARCEL_CREATED_ROUTING_KEY:
-      return fanOut(
-        BaseParcelPayloadSchema.parse(payload),
-        resolveOperatorRecipientUserIds,
-        mapParcelCreated,
-      );
+      return mapParcelCreatedEvent(BaseParcelPayloadSchema.parse(payload));
     case PARCEL_LOADED_ROUTING_KEY:
       return (await mapParcelLoadedEvent(ParcelLoadedEventSchema.parse(payload))).map((item) => item);
     case PARCEL_UNLOADED_ROUTING_KEY:
       return mapParcelUnloadedEvent(ParcelUnloadedPayloadSchema.parse(payload));
     case PARCEL_DELIVERED_PENDING_CONFIRM_ROUTING_KEY:
-      return fanOut(
-        BaseParcelPayloadSchema.parse(payload),
-        resolveOperatorRecipientUserIds,
-        mapParcelPendingConfirm,
-      );
+      return mapParcelPendingConfirmEvent(BaseParcelPayloadSchema.parse(payload));
     case PARCEL_DELIVERY_CONFIRMED_ROUTING_KEY:
-      return fanOut(
+      return mapParcelSnapshotSenderEvent(
         BaseParcelPayloadSchema.parse(payload),
-        resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
         mapParcelDeliveryConfirmed,
       );
     case PARCEL_DELIVERY_REJECTED_ROUTING_KEY:
-      return fanOut(
+      return mapParcelOperatorEvent(
         BaseParcelPayloadSchema.parse(payload),
         resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
         mapParcelDeliveryRejected,
       );
     case PARCEL_CANCELLED_ROUTING_KEY:
-      return fanOut(
+      return mapParcelSenderEvent(
         BaseParcelPayloadSchema.parse(payload),
-        resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
         mapParcelCancelled,
       );
     case PARCEL_REJECTED_ROUTING_KEY:
-      return fanOut(
+      return mapParcelSenderEvent(
         BaseParcelPayloadSchema.parse(payload),
-        resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
         mapParcelRejected,
       );
     case PARCEL_RETURNED_ROUTING_KEY:
-      return fanOut(
+      return mapParcelSenderEvent(
         BaseParcelPayloadSchema.parse(payload),
-        resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
         mapParcelReturned,
       );
     case PARCEL_AUTO_REJECTED_ROUTING_KEY:
-      return fanOut(
+      return mapDirectParcelUser(
         ParcelAutoRejectedEventSchema.parse(payload),
-        resolveOperatorRecipientUserIds,
         mapParcelAutoRejected,
       );
     case PARCEL_REVIEW_REQUESTED_ROUTING_KEY:
-      return fanOut(
+      return mapParcelOperatorEvent(
         ParcelReviewRequestedPayloadSchema.parse(payload),
         resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
         mapParcelReviewRequested,
       );
+    case PARCEL_REVIEW_APPROVED_ROUTING_KEY:
+      return mapDirectParcelUser(
+        ParcelReviewApprovedEventSchema.parse(payload),
+        mapParcelReviewApproved,
+      );
+    case PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY:
+      return mapDirectParcelUser(
+        ParcelFinalPaymentRequestedEventSchema.parse(payload),
+        mapParcelFinalPaymentRequested,
+      );
+    case PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY:
+      return mapDirectParcelUser(
+        ParcelSettlementRecoveredEventSchema.parse(payload),
+        mapParcelSettlementRecovered,
+      );
     case PARCEL_TRANSFER_INITIATED_ROUTING_KEY:
-      return fanOut(
+      return mapParcelSenderEvent(
         ParcelTransferInitiatedPayloadSchema.parse(payload),
-        resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
         mapParcelTransferInitiated,
       );
     case PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY:
-      return fanOut(
+      return mapParcelSenderEvent(
         BaseParcelPayloadSchema.parse(payload),
-        resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
         mapParcelTransferConfirmed,
       );
     case PARCEL_TRANSFER_ESCALATED_ROUTING_KEY:
-      return fanOut(
+      return mapParcelOperatorEvent(
         BaseParcelPayloadSchema.parse(payload),
         resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
         mapParcelTransferEscalated,
       );
     case PARCEL_RETURN_INITIATED_ROUTING_KEY:
-      return fanOut(
+      return mapParcelSenderEvent(
         BaseParcelPayloadSchema.parse(payload),
-        resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
         mapParcelReturnInitiated,
       );
     case PARCEL_PENDING_OPERATOR_ACTION_ROUTING_KEY:
-      return fanOut(
+      return mapParcelOperatorEvent(
         BaseParcelPayloadSchema.parse(payload),
         resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
         mapParcelPendingOperatorAction,
       );
     case TRIP_STOP_ARRIVED_ROUTING_KEY:
@@ -370,6 +404,23 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
   }
 }
 
+function mapVoucherConsentRequested(
+  userId: string,
+  payload: z.infer<typeof BookingVoucherConsentRequestedEventSchema>,
+): CreateNotificationDto {
+  const discount =
+    payload.voucherType === 'PERCENT_OFF'
+      ? `${payload.voucherValue}%`
+      : `${payload.voucherValue} VND`;
+  return {
+    userId,
+    type: NotificationType.VOUCHER_CONSENT_REQUESTED,
+    title: 'Đề xuất voucher mới',
+    body: `VietRide đề xuất voucher ${payload.voucherCode} giảm ${discount} cho chuyến của nhà xe. Đề xuất đang chờ bạn xác nhận áp dụng.`,
+    data: buildNotificationData(payload),
+  };
+}
+
 function mapVoucherConsentAccepted(
   userId: string,
   payload: z.infer<typeof VoucherConsentPayloadSchema>,
@@ -377,8 +428,8 @@ function mapVoucherConsentAccepted(
   return {
     userId,
     type: NotificationType.VOUCHER_CONSENT_ACCEPTED,
-    title: 'Da chap nhan voucher',
-    body: `${formatOperatorLabel(payload)} da chap nhan voucher ${payload.voucherId}.`,
+    title: 'Đã chấp nhận voucher',
+    body: `${formatOperatorLabel(payload)} đã chấp nhận voucher ${payload.voucherId}.`,
     data: buildNotificationData(payload),
   };
 }
@@ -390,9 +441,9 @@ function mapVoucherConsentRejected(
   return {
     userId,
     type: NotificationType.VOUCHER_CONSENT_REJECTED,
-    title: 'Da tu choi voucher',
-    body: `${formatOperatorLabel(payload)} da tu choi voucher ${payload.voucherId}.${
-      payload.reason ? ` Ly do: ${payload.reason}.` : ''
+    title: 'Đã từ chối voucher',
+    body: `${formatOperatorLabel(payload)} đã từ chối voucher ${payload.voucherId}.${
+      payload.reason ? ` Lý do: ${payload.reason}.` : ''
     }`,
     data: buildNotificationData(payload),
   };
@@ -403,9 +454,14 @@ function mapParcelCreated(userId: string, payload: ParcelPayload): CreateNotific
     userId,
     payload,
     NotificationType.PARCEL_IN_TRANSIT,
-    'Don gui hang da duoc tao',
-    'da duoc tao.',
+    'Đơn gửi hàng đã được tạo',
+    'đã được tạo.',
   );
+}
+
+function mapParcelCreatedEvent(payload: ParcelPayload): CreateNotificationDto[] {
+  const recipients = [payload.senderUserId, payload.recipientUserId].filter(isString);
+  return [...new Set(recipients)].map((userId) => mapParcelCreated(userId, payload));
 }
 
 function mapParcelLoaded(userId: string, payload: ParcelPayload): CreateNotificationDto {
@@ -413,8 +469,8 @@ function mapParcelLoaded(userId: string, payload: ParcelPayload): CreateNotifica
     userId,
     payload,
     NotificationType.PARCEL_LOADED,
-    'Hang da duoc len xe',
-    'da duoc tai len xe.',
+    'Hàng đã được lên xe',
+    'đã được tải lên xe.',
   );
 }
 
@@ -437,8 +493,8 @@ function mapParcelUnloaded(userId: string, payload: ParcelPayload): CreateNotifi
     userId,
     payload,
     NotificationType.PARCEL_IN_TRANSIT,
-    'Hang da roi xe',
-    'da duoc do khoi xe.',
+    'Hàng đã rời xe',
+    'đã được dỡ khỏi xe.',
   );
 }
 
@@ -447,9 +503,18 @@ function mapParcelPendingConfirm(userId: string, payload: ParcelPayload): Create
     userId,
     payload,
     NotificationType.PARCEL_DELIVERED_PENDING_CONFIRM,
-    'Cho xac nhan giao hang',
-    'da giao toi nguoi nhan va dang cho xac nhan.',
+    'Chờ xác nhận giao hàng',
+    'đã giao tới người nhận và đang chờ xác nhận.',
   );
+}
+
+function mapParcelPendingConfirmEvent(payload: ParcelPayload): CreateNotificationDto[] {
+  const recipients = [
+    payload.userId,
+    payload.recipientUserId,
+    ...(payload.recipientUserIds ?? []),
+  ].filter(isString);
+  return [...new Set(recipients)].map((userId) => mapParcelPendingConfirm(userId, payload));
 }
 
 function mapParcelDeliveryConfirmed(userId: string, payload: ParcelPayload): CreateNotificationDto {
@@ -457,8 +522,8 @@ function mapParcelDeliveryConfirmed(userId: string, payload: ParcelPayload): Cre
     userId,
     payload,
     NotificationType.PARCEL_IN_TRANSIT,
-    'Giao hang thanh cong',
-    'da duoc xac nhan giao thanh cong.',
+    'Giao hàng thành công',
+    'đã được xác nhận giao thành công.',
   );
 }
 
@@ -467,8 +532,8 @@ function mapParcelDeliveryRejected(userId: string, payload: ParcelPayload): Crea
     userId,
     payload,
     NotificationType.PARCEL_REJECTED,
-    'Nguoi nhan tu choi hang',
-    'bi tu choi khi giao.',
+    'Người nhận từ chối hàng',
+    'bị từ chối khi giao.',
   );
 }
 
@@ -477,8 +542,8 @@ function mapParcelCancelled(userId: string, payload: ParcelPayload): CreateNotif
     userId,
     payload,
     NotificationType.PARCEL_REJECTED,
-    'Don gui hang da bi huy',
-    'da bi huy.',
+    'Đơn gửi hàng đã bị hủy',
+    'đã bị hủy.',
   );
 }
 
@@ -487,8 +552,8 @@ function mapParcelRejected(userId: string, payload: ParcelPayload): CreateNotifi
     userId,
     payload,
     NotificationType.PARCEL_REJECTED,
-    'Don gui hang bi tu choi',
-    'da bi tu choi.',
+    'Đơn gửi hàng bị từ chối',
+    'đã bị từ chối.',
   );
 }
 
@@ -497,14 +562,30 @@ function mapParcelReturned(userId: string, payload: ParcelPayload): CreateNotifi
     userId,
     payload,
     NotificationType.PARCEL_RETURNED,
-    'Hang dang duoc hoan tra',
-    'dang duoc hoan tra.',
+    'Hàng đang được hoàn trả',
+    'đang được hoàn trả.',
   );
 }
 
-function mapParcelAutoRejected(userId: string, payload: ParcelPayload): CreateNotificationDto {
+function mapParcelAutoRejected(
+  userId: string,
+  payload: ParcelAutoRejectedEvent,
+): CreateNotificationDto {
+  if ('reason' in payload) {
+    const timeoutText =
+      payload.reason === 'CHECK_IN_TIMEOUT'
+        ? 'không check-in đúng hạn'
+        : 'không thanh toán số dư đúng hạn';
+    return {
+      userId,
+      type: NotificationType.PARCEL_REJECTED,
+      title: 'Đơn gửi hàng bị từ chối do quá hạn',
+      body: `${formatParcelLabel(payload)} đã ${timeoutText} và bị từ chối. Số tiền cọc bị giữ: ${formatMoney(payload.forfeitedDepositVnd)} VND.`,
+      data: buildNotificationData(payload),
+    };
+  }
   const refundText = payload.refundAmount
-    ? ` So tien hoan: ${formatMoney(payload.refundAmount)} VND.`
+    ? ` Số tiền hoàn: ${formatMoney(payload.refundAmount)} VND.`
     : '';
 
   return {
@@ -512,10 +593,10 @@ function mapParcelAutoRejected(userId: string, payload: ParcelPayload): CreateNo
       userId,
       payload,
       NotificationType.PARCEL_REJECTED,
-      'Don gui hang tu dong bi tu choi',
-      'da qua thoi gian xu ly va bi tu choi.',
+      'Đơn gửi hàng tự động bị từ chối',
+      'đã quá thời gian xử lý và bị từ chối.',
     ),
-    body: `${formatParcelLabel(payload)} da qua thoi gian xu ly va bi tu choi.${refundText}`,
+    body: `${formatParcelLabel(payload)} đã quá thời gian xử lý và bị từ chối.${refundText}`,
   };
 }
 
@@ -526,8 +607,57 @@ function mapParcelReviewRequested(
   return {
     userId,
     type: NotificationType.PARCEL_REVIEW_REQUESTED,
-    title: 'Can xem xet don gui hang',
-    body: `${formatParcelLabel(payload)} can duoc nhan vien van hanh xem xet.`,
+    title: 'Cần xem xét đơn gửi hàng',
+    body: `${formatParcelLabel(payload)} cần được nhân viên vận hành xem xét.`,
+    data: buildNotificationData(payload),
+  };
+}
+
+function mapParcelReviewApproved(
+  userId: string,
+  payload: ParcelReviewApprovedEvent,
+): CreateNotificationDto {
+  return {
+    userId,
+    type: NotificationType.PARCEL_REVIEW_APPROVED,
+    title: 'Đơn gửi hàng đã được duyệt',
+    body: `${formatParcelLabel(payload)} đã được duyệt. Vui lòng thanh toán tiền cọc ${formatMoney(payload.depositRequiredVnd)} VND.`,
+    data: buildNotificationData(payload),
+  };
+}
+
+function mapParcelFinalPaymentRequested(
+  userId: string,
+  payload: ParcelFinalPaymentRequestedEvent,
+): CreateNotificationDto {
+  return {
+    userId,
+    type: NotificationType.PARCEL_FINAL_PAYMENT_REQUIRED,
+    title: 'Cần thanh toán số dư đơn gửi hàng',
+    body: `${formatParcelLabel(payload)} cần thanh toán số dư ${formatMoney(payload.balanceRequiredVnd)} VND trước ${payload.finalPaymentDeadline}.`,
+    data: buildNotificationData(payload),
+  };
+}
+
+function mapParcelSettlementRecovered(
+  userId: string,
+  payload: ParcelSettlementRecoveredEvent,
+): CreateNotificationDto {
+  if (payload.recoveredStatus === 'READY_TO_LOAD') {
+    return {
+      userId,
+      type: NotificationType.PARCEL_SETTLEMENT_RECOVERED,
+      title: 'Đính chính trạng thái đơn gửi hàng',
+      body: `${formatParcelLabel(payload)} đã được khôi phục và hiện sẵn sàng lên xe. Thông báo quá hạn trước đó không còn hiệu lực.`,
+      data: buildNotificationData(payload),
+    };
+  }
+
+  return {
+    userId,
+    type: NotificationType.PARCEL_SETTLEMENT_RECOVERED,
+    title: 'Đính chính trạng thái đơn gửi hàng',
+    body: `${formatParcelLabel(payload)} đã được đính chính sang trạng thái đã hủy. Số tiền cần hoàn: ${formatMoney(payload.refundAmountVnd)} VND.`,
     data: buildNotificationData(payload),
   };
 }
@@ -539,8 +669,8 @@ function mapParcelTransferInitiated(
   return {
     userId,
     type: NotificationType.PARCEL_IN_TRANSIT,
-    title: 'Don gui hang duoc chuyen chuyen xe',
-    body: `${formatParcelLabel(payload)} dang duoc chuyen sang chuyen xe phu hop hon.`,
+    title: 'Đơn gửi hàng được chuyển chuyến xe',
+    body: `${formatParcelLabel(payload)} đang được chuyển sang chuyến xe phù hợp hơn.`,
     data: buildNotificationData(payload),
   };
 }
@@ -550,8 +680,8 @@ function mapParcelTransferConfirmed(userId: string, payload: ParcelPayload): Cre
     userId,
     payload,
     NotificationType.PARCEL_IN_TRANSIT,
-    'Da xac nhan chuyen chuyen xe',
-    'da duoc xac nhan chuyen sang chuyen xe moi.',
+    'Đã xác nhận chuyển chuyến xe',
+    'đã được xác nhận chuyển sang chuyến xe mới.',
   );
 }
 
@@ -560,8 +690,8 @@ function mapParcelTransferEscalated(userId: string, payload: ParcelPayload): Cre
     userId,
     payload,
     NotificationType.PARCEL_IN_TRANSIT,
-    'Can xu ly chuyen chuyen xe',
-    'qua thoi gian xac nhan chuyen chuyen xe va can van hanh xu ly.',
+    'Cần xử lý chuyển chuyến xe',
+    'quá thời gian xác nhận chuyển chuyến xe và cần vận hành xử lý.',
   );
 }
 
@@ -570,8 +700,8 @@ function mapParcelReturnInitiated(userId: string, payload: ParcelPayload): Creat
     userId,
     payload,
     NotificationType.PARCEL_RETURNED,
-    'Bat dau hoan tra hang',
-    'da bat dau quy trinh hoan tra.',
+    'Bắt đầu hoàn trả hàng',
+    'đã bắt đầu quy trình hoàn trả.',
   );
 }
 
@@ -583,8 +713,8 @@ function mapParcelPendingOperatorAction(
     userId,
     payload,
     NotificationType.PARCEL_IN_TRANSIT,
-    'Can van hanh xu ly don gui hang',
-    'can nha xe xu ly thu cong.',
+    'Cần vận hành xử lý đơn gửi hàng',
+    'cần nhà xe xử lý thủ công.',
   );
 }
 
@@ -592,8 +722,8 @@ function mapTripStopArrived(userId: string, payload: OperatorPayload): CreateNot
   return {
     userId,
     type: NotificationType.TRIP_VEHICLE_APPROACHING,
-    title: 'Xe da den diem dung',
-    body: `Chuyen ${payload.tripId ?? 'xe'} da ghi nhan den diem dung.`,
+    title: 'Xe đã đến điểm dừng',
+    body: `Chuyến ${payload.tripId ?? 'xe'} đã ghi nhận đến điểm dừng.`,
     data: buildNotificationData(payload),
   };
 }
@@ -605,8 +735,8 @@ function mapTripVehicleSubstituted(
   return {
     userId,
     type: NotificationType.VEHICLE_SUBSTITUTED,
-    title: 'Da thay xe cho chuyen',
-    body: `Chuyen ${payload.tripId ?? 'xe'} da duoc gan xe thay the.${payload.reason ? ` Ly do: ${payload.reason}.` : ''}`,
+    title: 'Đã thay xe cho chuyến',
+    body: `Chuyến ${payload.tripId ?? 'xe'} đã được gán xe thay thế.${payload.reason ? ` Lý do: ${payload.reason}.` : ''}`,
     data: buildNotificationData(payload),
   };
 }
@@ -618,8 +748,8 @@ function mapSubscriptionLimit(
   return {
     userId,
     type: NotificationType.SUBSCRIPTION_LIMIT_EXCEEDED,
-    title: 'Vuot gioi han goi dich vu',
-    body: `${formatOperatorLabel(payload)} da cham gioi han goi${payload.planName ? ` ${payload.planName}` : ''}.`,
+    title: 'Vượt giới hạn gói dịch vụ',
+    body: `${formatOperatorLabel(payload)} đã chạm giới hạn gói${payload.planName ? ` ${payload.planName}` : ''}.`,
     data: buildNotificationData(payload),
   };
 }
@@ -628,8 +758,8 @@ function mapSubscriptionTrial(userId: string, payload: OperatorPayload): CreateN
   return {
     userId,
     type: NotificationType.SUBSCRIPTION_TRIAL_EXPIRING,
-    title: 'Goi dung thu sap het han',
-    body: `${formatOperatorLabel(payload)} sap het thoi gian dung thu.`,
+    title: 'Gói dùng thử sắp hết hạn',
+    body: `${formatOperatorLabel(payload)} sắp hết thời gian dùng thử.`,
     data: buildNotificationData(payload),
   };
 }
@@ -638,8 +768,8 @@ function mapSubscriptionExpired(userId: string, payload: OperatorPayload): Creat
   return {
     userId,
     type: NotificationType.SUBSCRIPTION_EXPIRED,
-    title: 'Goi dich vu da het han',
-    body: `${formatOperatorLabel(payload)} da het han goi dich vu.`,
+    title: 'Gói dịch vụ đã hết hạn',
+    body: `${formatOperatorLabel(payload)} đã hết hạn gói dịch vụ.`,
     data: buildNotificationData(payload),
   };
 }
@@ -648,8 +778,8 @@ function mapSubscriptionApproved(userId: string, payload: OperatorPayload): Crea
   return {
     userId,
     type: NotificationType.SUBSCRIPTION_APPROVED,
-    title: 'Goi dich vu da duoc duyet',
-    body: `${formatOperatorLabel(payload)} da duoc kich hoat goi dich vu.`,
+    title: 'Gói dịch vụ đã được duyệt',
+    body: `${formatOperatorLabel(payload)} đã được kích hoạt gói dịch vụ.`,
     data: buildNotificationData(payload),
   };
 }
@@ -661,8 +791,8 @@ function mapSubscriptionPaymentPendingWarn(
   return {
     userId,
     type: NotificationType.SUBSCRIPTION_PAYMENT_PENDING_WARN,
-    title: 'Can thanh toan goi dich vu',
-    body: `${formatOperatorLabel(payload)} co thanh toan goi dich vu sap den han${payload.dueDate ? ` vao ${payload.dueDate}` : ''}.`,
+    title: 'Cần thanh toán gói dịch vụ',
+    body: `${formatOperatorLabel(payload)} có thanh toán gói dịch vụ sắp đến hạn${payload.dueDate ? ` vào ${payload.dueDate}` : ''}.`,
     data: buildNotificationData(payload),
   };
 }
@@ -674,8 +804,8 @@ function mapSubscriptionPaymentAutoReverted(
   return {
     userId,
     type: NotificationType.SUBSCRIPTION_PAYMENT_AUTO_REVERTED,
-    title: 'Goi dich vu da duoc hoan ve',
-    body: `${formatOperatorLabel(payload)} da duoc hoan ve goi truoc do.`,
+    title: 'Gói dịch vụ đã được hoàn về',
+    body: `${formatOperatorLabel(payload)} đã được hoàn về gói trước đó.`,
     data: buildNotificationData(payload),
   };
 }
@@ -687,8 +817,8 @@ function mapInvoiceIssued(
   return {
     userId,
     type: NotificationType.INVOICE_ISSUED,
-    title: 'Hoa don moi da duoc phat hanh',
-    body: `Hoa don ${payload.invoiceNumber} da san sang.`,
+    title: 'Hóa đơn mới đã được phát hành',
+    body: `Hóa đơn ${payload.invoiceNumber} đã sẵn sàng.`,
     data: {
       invoiceId: payload.invoiceId,
       invoiceNumber: payload.invoiceNumber,
@@ -706,8 +836,8 @@ function mapTripSettlementCompleted(
   return {
     userId,
     type: NotificationType.WALLET_CREDITED,
-    title: 'Da tat toan doanh thu chuyen',
-    body: `Da tat toan ${formatMoney(payload.netAmount)} VND tu chuyen ${payload.tripId} vao vi nha xe.`,
+    title: 'Đã tất toán doanh thu chuyến',
+    body: `Đã tất toán ${formatMoney(payload.netAmount)} VND từ chuyến ${payload.tripId} vào ví nhà xe.`,
     data: buildNotificationData(payload),
   };
 }
@@ -716,8 +846,8 @@ function mapPayoutProcessed(userId: string, payload: OperatorPayload): CreateNot
   return {
     userId,
     type: NotificationType.PAYOUT_PROCESSED,
-    title: 'Lenh chi tra da xu ly',
-    body: `Lenh chi tra ${payload.payoutId ?? ''} da duoc xu ly thanh cong.`,
+    title: 'Lệnh chi trả đã xử lý',
+    body: `Lệnh chi trả ${payload.payoutId ?? ''} đã được xử lý thành công.`,
     data: buildNotificationData(payload),
   };
 }
@@ -726,9 +856,79 @@ function mapPayoutFailed(userId: string, payload: OperatorPayload): CreateNotifi
   return {
     userId,
     type: NotificationType.PAYOUT_FAILED,
-    title: 'Lenh chi tra that bai',
-    body: `Lenh chi tra ${payload.payoutId ?? ''} xu ly that bai.${payload.reason ? ` Ly do: ${payload.reason}.` : ''}`,
+    title: 'Lệnh chi trả thất bại',
+    body: `Lệnh chi trả ${payload.payoutId ?? ''} xử lý thất bại.${payload.reason ? ` Lý do: ${payload.reason}.` : ''}`,
     data: buildNotificationData(payload),
+  };
+}
+
+function mapDirectParcelUser<TPayload extends { userId: string }>(
+  payload: TPayload,
+  mapper: (userId: string, payload: TPayload) => CreateNotificationDto,
+): CreateNotificationDto[] {
+  return [mapper(payload.userId, payload)];
+}
+
+async function mapParcelSenderEvent<TPayload extends ParcelPayload>(
+  payload: TPayload,
+  resolveParcelSnapshot: ((parcelId: string) => Promise<ParcelRecipientSnapshot>) | undefined,
+  mapper: (userId: string, payload: TPayload) => CreateNotificationDto,
+): Promise<CreateNotificationDto[]> {
+  const directSender = payload.userId ?? payload.senderUserId;
+  if (directSender) return [mapper(directSender, payload)];
+
+  const snapshot = await requireParcelSnapshot(payload.parcelId, resolveParcelSnapshot);
+  return [mapper(snapshot.senderUserId, enrichParcelPayload(payload, snapshot))];
+}
+
+async function mapParcelSnapshotSenderEvent<TPayload extends ParcelPayload>(
+  payload: TPayload,
+  resolveParcelSnapshot: ((parcelId: string) => Promise<ParcelRecipientSnapshot>) | undefined,
+  mapper: (userId: string, payload: TPayload) => CreateNotificationDto,
+): Promise<CreateNotificationDto[]> {
+  const snapshot = await requireParcelSnapshot(payload.parcelId, resolveParcelSnapshot);
+  return [mapper(snapshot.senderUserId, enrichParcelPayload(payload, snapshot))];
+}
+
+async function mapParcelOperatorEvent<TPayload extends ParcelPayload>(
+  payload: TPayload,
+  resolveOperatorRecipientUserIds: (operatorId: string) => Promise<string[]>,
+  resolveParcelSnapshot: ((parcelId: string) => Promise<ParcelRecipientSnapshot>) | undefined,
+  mapper: (userId: string, payload: TPayload) => CreateNotificationDto,
+): Promise<CreateNotificationDto[]> {
+  let operatorId = payload.operatorId;
+  let mappedPayload = payload;
+  if (!operatorId) {
+    const snapshot = await requireParcelSnapshot(payload.parcelId, resolveParcelSnapshot);
+    operatorId = snapshot.operatorId;
+    mappedPayload = enrichParcelPayload(payload, snapshot);
+  }
+  const recipients = await resolveOperatorRecipientUserIds(operatorId);
+  return [...new Set(recipients)].map((userId) => mapper(userId, mappedPayload));
+}
+
+async function requireParcelSnapshot(
+  parcelId: string,
+  resolveParcelSnapshot: ((parcelId: string) => Promise<ParcelRecipientSnapshot>) | undefined,
+): Promise<ParcelRecipientSnapshot> {
+  if (!resolveParcelSnapshot) throw new Error('PARCEL_RECIPIENT_PROVIDER_NOT_CONFIGURED');
+  return resolveParcelSnapshot(parcelId);
+}
+
+function enrichParcelPayload<TPayload extends ParcelPayload>(
+  payload: TPayload,
+  snapshot: ParcelRecipientSnapshot,
+): TPayload {
+  return {
+    ...payload,
+    tripId: payload.tripId ?? snapshot.tripId,
+    operatorId: payload.operatorId ?? snapshot.operatorId,
+    senderUserId: payload.senderUserId ?? snapshot.senderUserId,
+    ...(payload.recipientUserId
+      ? { recipientUserId: payload.recipientUserId }
+      : snapshot.recipientUserId
+        ? { recipientUserId: snapshot.recipientUserId }
+        : {}),
   };
 }
 
@@ -780,17 +980,17 @@ function buildParcelNotification(
     userId,
     type,
     title,
-    body: `${formatParcelLabel(payload)} ${actionText}${payload.reason ? ` Ly do: ${payload.reason}.` : ''}`,
+    body: `${formatParcelLabel(payload)} ${actionText}${payload.reason ? ` Lý do: ${payload.reason}.` : ''}`,
     data: buildNotificationData(payload),
   };
 }
 
 function formatParcelLabel(payload: ParcelPayload): string {
-  return payload.parcelCode ? `Don ${payload.parcelCode}` : `Don gui hang ${payload.parcelId}`;
+  return payload.parcelCode ? `Đơn ${payload.parcelCode}` : `Đơn gửi hàng ${payload.parcelId}`;
 }
 
 function formatOperatorLabel(payload: OperatorPayload): string {
-  return payload.operatorName ? `Nha xe ${payload.operatorName}` : `Nha xe ${payload.operatorId}`;
+  return payload.operatorName ? `Nhà xe ${payload.operatorName}` : `Nhà xe ${payload.operatorId}`;
 }
 
 function formatMoney(amount: z.infer<typeof MoneyAmountSchema>): string {
@@ -800,16 +1000,15 @@ function formatMoney(amount: z.infer<typeof MoneyAmountSchema>): string {
 function buildNotificationData(
   payload: RecipientPayload & Record<string, unknown>,
 ): Record<string, unknown> {
-  const { userId, userIds, recipientUserIds, ...data } = payload;
-
-  return {
-    ...data,
-    userId: userId ?? null,
-    userIds: userIds ?? null,
-    recipientUserIds: recipientUserIds ?? null,
-  };
+  const { userId, userIds, senderUserId, recipientUserId, recipientUserIds, ...data } = payload;
+  void userId;
+  void userIds;
+  void senderUserId;
+  void recipientUserId;
+  void recipientUserIds;
+  return data;
 }
 
-function isString(value: string | undefined): value is string {
+function isString(value: unknown): value is string {
   return typeof value === 'string';
 }

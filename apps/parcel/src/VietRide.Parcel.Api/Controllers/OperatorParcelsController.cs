@@ -8,6 +8,7 @@ using VietRide.Parcel.Application.Features.Parcels.ManualCancel;
 using VietRide.Parcel.Application.Features.Parcels.ManualConfirmDelivery;
 using VietRide.Parcel.Application.Features.Parcels.OperationalRecovery;
 using VietRide.Parcel.Application.Features.Parcels.OperatorActions;
+using VietRide.Parcel.Application.Features.Parcels.OperatorList;
 using VietRide.Parcel.Application.Features.Parcels.Reports;
 using VietRide.Parcel.Application.Features.Parcels.Review;
 using VietRide.Shared.Application.Exceptions;
@@ -25,6 +26,32 @@ public sealed class OperatorParcelsController : ControllerBase
     public OperatorParcelsController(IMediator mediator)
     {
         _mediator = mediator;
+    }
+
+    [HttpGet]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<OperatorParcelListItemResponse>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<PagedResult<OperatorParcelListItemResponse>>> GetParcelsAsync(
+        [FromQuery] string? status,
+        [FromQuery] Guid? tripId,
+        [FromQuery] string? pendingActionType,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        var result = await _mediator.Send(
+            new GetOperatorParcelsQuery(
+                operatorId,
+                status,
+                tripId,
+                pendingActionType,
+                page,
+                pageSize),
+            cancellationToken);
+        return Ok(result);
     }
 
     [HttpGet("reports/summary")]
@@ -86,9 +113,7 @@ public sealed class OperatorParcelsController : ControllerBase
             operatorId,
             userId,
             request.Decision,
-            request.DepositAmount,
             request.Reason,
-            request.PaymentMethod,
             Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString()), cancellationToken);
 
         return Ok(result);

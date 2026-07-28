@@ -1,5 +1,4 @@
 import { TRIP_STOP_DEPARTED_WITH_PENDING_ROUTING_KEY } from '@vietride/contracts';
-import { ZodError } from 'zod';
 import { NotificationType } from '../generated/notification-prisma-client';
 import {
   TRACKING_GPS_APPROACHING_STOP_ROUTING_KEY,
@@ -167,8 +166,8 @@ describe('mapTripTrackingAlertToNotifications maps stop disabled event for expli
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.TRIP_VEHICLE_APPROACHING,
-        title: 'Xe sap den diem don',
-        body: 'Xe cua ban se den Ben xe Da Lat trong khoang 30 phut.',
+        title: 'Xe sắp đến điểm đón',
+        body: 'Xe của bạn sẽ đến Ben xe Da Lat trong khoảng 30 phút.',
       }),
     ]);
   });
@@ -187,26 +186,25 @@ describe('mapTripTrackingAlertToNotifications maps stop disabled event for expli
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.TRIP_VEHICLE_APPROACHING,
-        title: 'Xe dang den rat gan',
-        body: 'Xe cua ban sap den Ben xe Da Lat! Vui long ra diem don.',
+        title: 'Xe đang đến rất gần',
+        body: 'Xe của bạn sắp đến Ben xe Da Lat! Vui lòng ra điểm đón.',
       }),
     ]);
   });
 
   it('maps delayed event for each recipient', () => {
     expect(
-      mapTripTrackingAlertToNotifications(TRIP_DELAYED_ROUTING_KEY, {
-        userIds: [USER_ID, SECOND_USER_ID],
-        tripId: TRIP_ID,
-        routeName: 'Sai Gon - Da Lat',
-        delayMinutes: 20,
-      }),
+      mapTripTrackingAlertToNotifications(
+        TRIP_DELAYED_ROUTING_KEY,
+        canonicalDelayedPayload(),
+        [USER_ID, SECOND_USER_ID],
+      ),
     ).toEqual([
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.TRIP_DELAYED,
-        title: 'Chuyen xe bi tre',
-        body: 'Chuyen Sai Gon - Da Lat dang bi tre. Du kien tre 20 phut.',
+        title: 'Chuyến xe bị trễ',
+        body: `Chuyến ${TRIP_ID} đang bị trễ. Dự kiến trễ 20 phút.`,
       }),
       expect.objectContaining({
         userId: SECOND_USER_ID,
@@ -216,15 +214,15 @@ describe('mapTripTrackingAlertToNotifications maps stop disabled event for expli
   });
 
   it('maps off-route alert', () => {
-    const notifications = mapTripTrackingAlertToNotifications(TRACKING_GPS_OFF_ROUTE_ROUTING_KEY, {
-      recipientUserIds: [USER_ID],
-      tripId: TRIP_ID,
-      durationSeconds: 180,
-    });
+    const notifications = mapTripTrackingAlertToNotifications(
+      TRACKING_GPS_OFF_ROUTE_ROUTING_KEY,
+      canonicalOffRoutePayload(),
+      [USER_ID],
+    );
 
     expect(notifications).toHaveLength(1);
     expect(notifications[0]?.type).toBe(NotificationType.OFF_ROUTE_ALERT);
-    expect(notifications[0]?.title).toBe('Canh bao xe lech lo trinh');
+    expect(notifications[0]?.title).toBe('Cảnh báo xe lệch lộ trình');
     expect(notifications[0]?.data).toMatchObject({ tripId: TRIP_ID, durationSeconds: 180 });
   });
 
@@ -280,7 +278,7 @@ describe('mapTripTrackingAlertToNotifications maps stop disabled event for expli
     expect(notifications).toHaveLength(2);
     expect(notifications[0]?.userId).toBe(USER_ID);
     expect(notifications[0]?.type).toBe(NotificationType.STOP_DISABLED);
-    expect(notifications[0]?.title).toBe('Diem dung tam ngung phuc vu');
+    expect(notifications[0]?.title).toBe('Điểm dừng tạm ngưng phục vụ');
     expect(notifications[0]?.body).toContain(STOP_ID);
     expect(notifications[0]?.data).toMatchObject({
       stopId: STOP_ID,
@@ -343,15 +341,39 @@ describe('mapTripTrackingAlertToNotifications maps stop disabled event for expli
     ]);
   });
 
-  it('rejects payload without recipient user id', () => {
-    expect(() =>
-      mapTripTrackingAlertToNotifications(TRIP_DELAYED_ROUTING_KEY, {
-        tripId: TRIP_ID,
-        delayMinutes: 20,
-      }),
-    ).toThrow(ZodError);
+  it('maps resolver-supplied recipients without requiring or persisting recipient ids in payload', () => {
+    const notifications = mapTripTrackingAlertToNotifications(
+      TRIP_DELAYED_ROUTING_KEY,
+      canonicalDelayedPayload(),
+      [USER_ID],
+    );
+    expect(notifications).toEqual([
+      expect.objectContaining({ userId: USER_ID, type: NotificationType.TRIP_DELAYED }),
+    ]);
+    expect(notifications[0]?.data).not.toHaveProperty('userIds');
   });
 });
+
+function canonicalDelayedPayload(): Record<string, unknown> {
+  return {
+    eventId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    occurredAt: '2026-07-16T03:00:00Z',
+    tripId: TRIP_ID,
+    stopId: STOP_ID,
+    stopName: 'Bến xe Đà Lạt',
+    delayMinutes: 20,
+    etaNew: '2026-07-16T04:00:00Z',
+  };
+}
+
+function canonicalOffRoutePayload(): Record<string, unknown> {
+  return {
+    eventId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    occurredAt: '2026-07-16T03:00:00Z',
+    tripId: TRIP_ID,
+    durationSeconds: 180,
+  };
+}
 
 function canonicalIncidentPayload(
   overrides: Record<string, unknown> = {},

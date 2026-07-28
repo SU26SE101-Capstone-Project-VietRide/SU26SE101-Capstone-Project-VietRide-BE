@@ -28,6 +28,22 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     Task<ParcelPaymentTransitionSnapshot?> TryMarkDepositSucceededAsync(
         Guid parcelId, long depositAmount, DateTimeOffset now, CancellationToken ct);
 
+    Task<bool> TryAssignDepositPaymentIdAsync(
+        Guid parcelId, Guid paymentId, DateTimeOffset now, CancellationToken ct);
+
+    Task<ParcelPaymentTransitionSnapshot?> TryActivateZeroDepositAsync(
+        Guid parcelId, DateTimeOffset now, CancellationToken ct);
+
+    Task<ParcelPaymentTransitionSnapshot?> TryReconcileExpiredDepositAsync(
+        Guid parcelId,
+        Guid paymentId,
+        long amount,
+        bool canStillServe,
+        Money refundDue,
+        string cancellationReason,
+        DateTimeOffset now,
+        CancellationToken ct);
+
     Task<ParcelPaymentTransitionSnapshot?> GetPaymentTransitionSnapshotAsync(
         Guid parcelId, CancellationToken ct);
 
@@ -74,6 +90,68 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     Task<ParcelPaymentTransitionSnapshot?> TryRejectReviewAsync(
         Guid parcelId, Guid reviewedByUserId, string reason, DateTimeOffset now, CancellationToken ct);
 
+    Task<ParcelPaymentTransitionSnapshot?> TryCheckInAsync(
+        Guid parcelId,
+        Guid tripId,
+        string parcelCode,
+        Guid checkedInByUserId,
+        DateTimeOffset now,
+        CancellationToken ct);
+
+    Task<ParcelPaymentTransitionSnapshot?> TrySettleReweighAsync(
+        Guid parcelId,
+        Guid reweighedByUserId,
+        decimal actualLengthCm,
+        decimal actualWidthCm,
+        decimal actualHeightCm,
+        decimal actualWeightKg,
+        decimal actualVolumeM3,
+        decimal actualDimWeightKg,
+        decimal actualChargeableWeightKg,
+        ParcelSizeCategory actualSizeCategory,
+        Money finalGrossPrice,
+        Money finalTotalPrice,
+        Money balanceRequired,
+        Money refundDue,
+        DateTimeOffset? finalPaymentDeadline,
+        ParcelStatus resumeStatus,
+        bool capacityAccepted,
+        string? capacityReason,
+        DateTimeOffset now,
+        CancellationToken ct);
+
+    Task<bool> TryAssignBalancePaymentIdAsync(
+        Guid parcelId,
+        Guid paymentId,
+        DateTimeOffset now,
+        CancellationToken ct);
+
+    Task<ParcelPaymentTransitionSnapshot?> TryMarkBalanceSucceededAsync(
+        Guid parcelId,
+        Guid paymentId,
+        long amount,
+        DateTimeOffset paidAt,
+        DateTimeOffset now,
+        CancellationToken ct);
+
+    Task<ParcelPaymentTransitionSnapshot?> TryReconcileTimedOutBalanceAsync(
+        Guid parcelId,
+        Guid paymentId,
+        long amount,
+        DateTimeOffset paidAt,
+        bool canStillServe,
+        Money refundDue,
+        string cancellationReason,
+        DateTimeOffset now,
+        CancellationToken ct);
+
+    Task<bool> TryRecordRefundedAmountAsync(
+        Guid parcelId,
+        Money expectedCurrentAmount,
+        Money newRefundedAmount,
+        DateTimeOffset now,
+        CancellationToken ct);
+
     // Reweigh transition (PENDING)
     Task<ParcelPaymentTransitionSnapshot?> TryReweighNoFeeAsync(
         Guid parcelId,
@@ -117,6 +195,12 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     Task<IReadOnlyList<Guid>> ListAdditionalPaymentTimedOutIdsAsync(
         DateTimeOffset now, int maxBatch, CancellationToken ct);
 
+    Task<IReadOnlyList<Guid>> ListCheckInTimedOutIdsAsync(
+        DateTimeOffset now, int maxBatch, CancellationToken ct);
+
+    Task<IReadOnlyList<Guid>> ListFinalPaymentTimedOutIdsAsync(
+        DateTimeOffset now, int maxBatch, CancellationToken ct);
+
     Task<IReadOnlyList<PendingParcelTripRef>> ListPendingForLoadCheckAsync(
         int maxBatch, CancellationToken ct);
 
@@ -126,6 +210,12 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     /// Auto-reject review (no human reviewer). Guards Status==PENDING_OPERATOR_REVIEW &amp;&amp; ReviewDecision==PENDING.
     /// </summary>
     Task<ParcelPaymentTransitionSnapshot?> TryAutoRejectReviewAsync(
+        Guid parcelId, string reason, DateTimeOffset now, CancellationToken ct);
+
+    Task<ParcelPaymentTransitionSnapshot?> TryRejectCheckInTimedOutAsync(
+        Guid parcelId, string reason, DateTimeOffset now, CancellationToken ct);
+
+    Task<ParcelPaymentTransitionSnapshot?> TryRejectFinalPaymentTimedOutAsync(
         Guid parcelId, string reason, DateTimeOffset now, CancellationToken ct);
 
     /// <summary>
@@ -160,7 +250,7 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     // ---- Phase 6: Loading / Unloading ----
 
     /// <summary>
-    /// Atomic: PENDING -> LOADED. Guards Status==PENDING, TripId, ParcelCode.
+    /// Atomic: READY_TO_LOAD -> LOADED. Guards status, TripId, and ParcelCode.
     /// </summary>
     Task<ParcelPaymentTransitionSnapshot?> TryMarkLoadedAsync(
         Guid parcelId, Guid tripId, string parcelCode, Guid? loadedByUserId, DateTimeOffset now, CancellationToken ct);
@@ -249,6 +339,15 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     /// </summary>
     Task<PagedResult<ParcelEntity>> ListByTripAndOperatorAsync(
         Guid tripId, Guid operatorId, int page, int pageSize, CancellationToken ct);
+
+    Task<PagedResult<ParcelEntity>> ListByOperatorAsync(
+        Guid operatorId,
+        ParcelStatus? status,
+        Guid? tripId,
+        PendingActionType? pendingActionType,
+        int page,
+        int pageSize,
+        CancellationToken ct);
 
     // ---- Phase 7: Delivery Token ----
 

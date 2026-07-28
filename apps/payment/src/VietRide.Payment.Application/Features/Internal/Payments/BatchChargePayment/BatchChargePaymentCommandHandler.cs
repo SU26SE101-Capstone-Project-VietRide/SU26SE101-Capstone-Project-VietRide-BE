@@ -28,6 +28,7 @@ public interface IBatchChargePaymentDbContext
 public sealed class BatchChargePaymentCommandHandler
     : IRequestHandler<BatchChargePaymentCommand, BatchChargePaymentResult>
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const string WalletMethod = "WALLET";
     private const string BookingReferenceType = "BOOKING";
 
@@ -97,6 +98,7 @@ public sealed class BatchChargePaymentCommandHandler
 
             _db.AddPayment(payment);
             _db.AddWalletTransaction(transaction);
+            await EnqueueWalletDebitedAsync(transaction, now, cancellationToken).ConfigureAwait(false);
             await _platformWallets.CreditAsync(
                 amount,
                 PlatformWalletTransactionRef.BOOKING_PAYMENT_HOLD,
@@ -128,13 +130,36 @@ public sealed class BatchChargePaymentCommandHandler
             payment.ReferenceId,
             payment.Amount.Amount,
             payment.Method,
-            context);
+            context,
+            payment.SucceededAt!.Value,
+            payment.DueAt);
         await _revenueLedger.RecordPaymentSucceededAsync(
             evt.EventId,
             context,
             cancellationToken).ConfigureAwait(false);
         var payload = JsonSerializer.Serialize(evt, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         await _outbox.EnqueueAsync(evt.EventType, payload, cancellationToken).ConfigureAwait(false);
+    }
+
+    private Task EnqueueWalletDebitedAsync(
+        WalletTransaction transaction,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken)
+    {
+        var evt = new WalletDebitedIntegrationEvent(
+            Guid.NewGuid(),
+            occurredAt,
+            transaction.UserId,
+            transaction.Id,
+            transaction.Amount.Amount,
+            transaction.BalanceAfter.Amount,
+            transaction.ReferenceType.ToString(),
+            transaction.ReferenceId!.Value);
+        return _outbox.EnqueueAsync(
+            evt.EventId,
+            evt.EventType,
+            JsonSerializer.Serialize(evt, JsonOptions),
+            cancellationToken);
     }
 
     private static void GuardSupportedRequest(BatchChargePaymentCommand request)

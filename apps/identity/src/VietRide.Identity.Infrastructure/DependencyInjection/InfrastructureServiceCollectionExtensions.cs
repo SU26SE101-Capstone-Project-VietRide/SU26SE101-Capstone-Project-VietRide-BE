@@ -8,6 +8,7 @@ using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
 using VietRide.Identity.Application.Abstractions.Http;
 using VietRide.Identity.Application.Abstractions.Repositories;
+using VietRide.Identity.Application.Features.Internal.Operators.IncrementOperatorUsage;
 using VietRide.Identity.Infrastructure.ExternalClients;
 using VietRide.Identity.Infrastructure.Http;
 using VietRide.Identity.Infrastructure.Jobs;
@@ -127,6 +128,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ISubscriptionPlanRepository, SubscriptionPlanRepository>();
         services.AddScoped<ISubscriptionUpgradeAttemptRepository, SubscriptionUpgradeAttemptRepository>();
         services.AddScoped<ISubscriptionQuotaAllocationRepository, SubscriptionQuotaAllocationRepository>();
+        services.AddScoped<ISubscriptionUsageWarningMarkerRepository, SubscriptionUsageWarningMarkerRepository>();
+        services.AddScoped<ISubscriptionUsageWarningPublisher, SubscriptionUsageWarningPublisher>();
         services.AddScoped<SubscriptionPaymentActivationService>();
 
         AddSubscriptionPaymentClient(services, configuration);

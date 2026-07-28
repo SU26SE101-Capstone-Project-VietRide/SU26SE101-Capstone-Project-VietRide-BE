@@ -9,6 +9,45 @@ namespace VietRide.Trip.IntegrationTests.Internal.Trips;
 public sealed class Day29TripCargoRepositoryTests
 {
     [Fact]
+    public async Task ReserveReleasedCargo_RestoresLedgerAndCountersBeforeLoad()
+    {
+        var databaseName = $"{Day29CargoNearFullOutboxIntegrationTests.ScratchDatabasePrefix}{Guid.NewGuid():N}";
+        await using var db = Day29CargoNearFullOutboxIntegrationTests.CreateDbContext(databaseName);
+        try
+        {
+            await db.Database.MigrateAsync();
+            var seed = await Day29CargoNearFullOutboxIntegrationTests.SeedTripAsync(db);
+            var handler = Day29CargoNearFullOutboxIntegrationTests.CreateHandler(
+                db,
+                new IntegrationEventOutbox(new OutboxStore(db, new Day29CargoNearFullOutboxIntegrationTests.FixedClock())));
+            var parcelId = Guid.NewGuid();
+
+            await handler.Handle(new CargoMutationCommand(seed.TripId, parcelId, 20m, 1m, false, "reserve"), CancellationToken.None);
+            await handler.Handle(new CargoMutationCommand(seed.TripId, parcelId, 20m, 1m, true, "release"), CancellationToken.None);
+            var restored = await handler.Handle(
+                new CargoMutationCommand(seed.TripId, parcelId, 25m, 1.5m, false, "reserve"),
+                CancellationToken.None);
+            var loaded = await handler.Handle(
+                new CargoMutationCommand(seed.TripId, parcelId, 25m, 1.5m, false, "load"),
+                CancellationToken.None);
+
+            restored.ReservedWeightKg.Should().Be(25m);
+            loaded.ReservedWeightKg.Should().Be(0m);
+            loaded.LoadedWeightKg.Should().Be(25m);
+            await using var assertionDb = Day29CargoNearFullOutboxIntegrationTests.CreateDbContext(databaseName);
+            var ledger = await assertionDb.TripCargoParcels.AsNoTracking()
+                .SingleAsync(item => item.TripId == seed.TripId && item.ParcelId == parcelId);
+            ledger.State.Should().Be(TripCargoParcel.LoadedState);
+            ledger.WeightKg.Should().Be(25m);
+            ledger.VolumeM3.Should().Be(1.5m);
+        }
+        finally
+        {
+            await Day29CargoNearFullOutboxIntegrationTests.DeleteScratchDatabaseAsync(db, databaseName);
+        }
+    }
+
+    [Fact]
     public async Task RepeatedLoadForSameTripParcel_IsBehaviorIdempotentWithoutCounterLedgerDrift()
     {
         var databaseName = $"{Day29CargoNearFullOutboxIntegrationTests.ScratchDatabasePrefix}{Guid.NewGuid():N}";

@@ -27,15 +27,57 @@ export class EmailSendQueue implements OnModuleDestroy {
           age: 86_400,
           count: 10_000,
         },
+        backoff: {
+          type: 'custom',
+          delay: 0,
+        },
         removeOnFail: { age: 7 * 24 * 60 * 60, count: 1000 },
       },
     });
   }
 
   async enqueue(data: EmailSendJobData): Promise<void> {
-    await this.queue.add(EMAIL_SEND_JOB_NAME, data, {
-      jobId: data.emailDeliveryId,
-    });
+    const existingJob = await this.queue.getJob(data.emailDeliveryId);
+    if (!existingJob) {
+      await this.add(data);
+      return;
+    }
+
+    await this.ensureRunnable(existingJob);
+  }
+
+  async retryRetained(emailDeliveryId: string): Promise<boolean> {
+    const existingJob = await this.queue.getJob(emailDeliveryId);
+    if (!existingJob) return false;
+
+    await this.ensureRunnable(existingJob);
+    return true;
+  }
+
+  private async ensureRunnable(
+    job: NonNullable<Awaited<ReturnType<Queue<EmailSendJobData>['getJob']>>>,
+  ): Promise<void> {
+    const state = await job.getState();
+    switch (state) {
+      case 'waiting':
+      case 'delayed':
+      case 'active':
+      case 'prioritized':
+      case 'waiting-children':
+        return;
+      case 'failed':
+        await job.retry('failed', { resetAttemptsMade: true });
+        return;
+      case 'completed':
+        await job.retry('completed', { resetAttemptsMade: true });
+        return;
+      default:
+        throw new Error(`NOTIFICATION_QUEUE_JOB_STATE_UNKNOWN:${state}`);
+    }
+  }
+
+  private async add(data: EmailSendJobData): Promise<void> {
+    await this.queue.add(EMAIL_SEND_JOB_NAME, data, { jobId: data.emailDeliveryId });
   }
 
   async onModuleDestroy(): Promise<void> {

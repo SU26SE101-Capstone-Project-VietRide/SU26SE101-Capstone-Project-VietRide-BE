@@ -819,6 +819,57 @@ namespace VietRide.Identity.Infrastructure.Migrations
                     b.ToTable("subscription_quota_allocations", "vietride_identity");
                 });
 
+            modelBuilder.Entity("VietRide.Identity.Domain.Entities.SubscriptionUsageWarningMarker", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("PeriodKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("period_key");
+
+                    b.Property<string>("Resource")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("resource");
+
+                    b.Property<int>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("row_version")
+                        .HasDefaultValue(1);
+
+                    b.Property<Guid>("SubscriptionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("subscription_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("Id")
+                        .HasName("pk_subscription_usage_warning_markers");
+
+                    b.HasIndex("SubscriptionId", "Resource", "PeriodKey")
+                        .IsUnique()
+                        .HasDatabaseName("uq_subscription_usage_warning_markers_period");
+
+                    b.ToTable("subscription_usage_warning_markers", "vietride_identity");
+                });
+
             modelBuilder.Entity("VietRide.Identity.Domain.Entities.SubscriptionUpgradeAttempt", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1328,6 +1379,16 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_subscription_quota_allocations_subscription_id");
+                });
+
+            modelBuilder.Entity("VietRide.Identity.Domain.Entities.SubscriptionUsageWarningMarker", b =>
+                {
+                    b.HasOne("VietRide.Identity.Domain.Entities.OperatorSubscription", null)
+                        .WithMany()
+                        .HasForeignKey("SubscriptionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_subscription_usage_warning_markers_subscription_id");
                 });
 
             modelBuilder.Entity("VietRide.Identity.Domain.Entities.SubscriptionUpgradeAttempt", b =>

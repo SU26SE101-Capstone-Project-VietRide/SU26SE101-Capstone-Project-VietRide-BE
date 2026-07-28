@@ -20,6 +20,9 @@ public static class ParcelOutboxEvents
     public const string Returned = "parcel.parcel.returned";
     public const string AutoRejected = "parcel.parcel.auto_rejected";
     public const string ReviewRequested = "parcel.parcel.review_requested";
+    public const string ReviewApproved = "parcel.parcel.review_approved";
+    public const string FinalPaymentRequested = "parcel.parcel.final_payment_requested";
+    public const string SettlementRecovered = "parcel.parcel.settlement_recovered";
     public const string TransferInitiated = "parcel.parcel.transfer_initiated";
     public const string TransferConfirmed = "parcel.parcel.transfer_confirmed";
     public const string TransferEscalated = "parcel.parcel.transfer_escalated";
@@ -34,6 +37,18 @@ public static class ParcelOutboxEvents
         object payload,
         CancellationToken cancellationToken)
         => outbox.EnqueueAsync(eventType, JsonSerializer.Serialize(payload, JsonOptions), cancellationToken);
+
+    public static Task EnqueueAsync(
+        IIntegrationEventOutbox outbox,
+        Guid eventId,
+        string eventType,
+        object payload,
+        CancellationToken cancellationToken)
+        => outbox.EnqueueAsync(
+            eventId,
+            eventType,
+            JsonSerializer.Serialize(payload, JsonOptions),
+            cancellationToken);
 
     public static Task EnqueueRefundAsync(
         IIntegrationEventOutbox outbox,

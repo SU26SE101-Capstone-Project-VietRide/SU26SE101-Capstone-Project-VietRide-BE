@@ -9,7 +9,5 @@ public sealed record ReviewParcelCommand(
     Guid OperatorId,
     Guid ReviewedByUserId,
     string Decision,
-    long? DepositAmount,
     string? Reason,
-    string? PaymentMethod,
     string? IdempotencyKey = null) : IRequest<ReviewParcelResponse>;

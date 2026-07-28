@@ -14,13 +14,14 @@ import { NotificationsRepository } from './notifications.repository';
 
 const EMAIL_DELIVERY_ID = '11111111-1111-4111-8111-111111111111';
 const RECIPIENT_EMAIL = 'operator@vietride.local';
+const PERSISTED_CLAIM_TOKEN = '2026-06-01 10:10:00.123456+00';
 
 describe('EmailSendWorker pipeline (e2e)', () => {
   it('renders an invoice notice and sends it through provider abstraction', async () => {
     const repository = {
       findEmailDeliveryById: jest.fn(async () => createEmailDelivery()),
-      markEmailDeliverySending: jest.fn(async () => true),
-      markEmailDeliverySent: jest.fn(),
+      markEmailDeliverySending: jest.fn(async () => PERSISTED_CLAIM_TOKEN),
+      markEmailDeliverySent: jest.fn(async () => true),
     };
     const emailProvider: jest.Mocked<EmailProvider> = {
       send: jest.fn(async (payload: Parameters<EmailProvider['send']>[0]) => ({
@@ -44,13 +45,14 @@ describe('EmailSendWorker pipeline (e2e)', () => {
     expect(emailProvider.send).toHaveBeenCalledWith(
       expect.objectContaining({
         toEmail: RECIPIENT_EMAIL,
-        subject: 'Hoa don VietRide VR-INV-202606-000001',
+        subject: 'Hóa đơn VietRide VR-INV-202606-000001',
         text: expect.stringContaining('VR-INV-202606-000001'),
       }),
     );
     expect(repository.markEmailDeliverySent).toHaveBeenCalledWith(
       EMAIL_DELIVERY_ID,
       `sendgrid-e2e:${RECIPIENT_EMAIL}`,
+      PERSISTED_CLAIM_TOKEN,
     );
 
     await moduleRef.close();
@@ -80,7 +82,7 @@ function createEmailDelivery(): EmailDelivery {
     dedupeKey: null,
     toEmail: RECIPIENT_EMAIL,
     templateKey: EmailTemplateKey.INVOICE_NOTICE,
-    subject: 'Hoa don VietRide VR-INV-202606-000001',
+    subject: 'Hóa đơn VietRide VR-INV-202606-000001',
     sanitizedData: {
       invoiceNumber: 'VR-INV-202606-000001',
       amountVnd: 500000,
@@ -115,6 +117,8 @@ function createEnv(): Env {
     LOG_LEVEL: 'info',
     IDENTITY_INTERNAL_BASE_URL: 'http://identity.test',
     TRIP_INTERNAL_BASE_URL: 'http://trip.test',
+    BOOKING_INTERNAL_BASE_URL: 'http://booking.test',
+    PARCEL_INTERNAL_BASE_URL: 'http://parcel.test',
     FCM_DRY_RUN: false,
     FCM_DRY_RUN_TOPIC: 'vietride-notification-e2e',
     SENDGRID_API_KEY: undefined,

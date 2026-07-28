@@ -95,6 +95,10 @@ if (registerMessaging)
         ParcelAdditionalPaymentTimeoutJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
         "*/5 * * * *");
+    recurringJobs.AddOrUpdate<ParcelSettlementTimeoutJob>(
+        ParcelSettlementTimeoutJob.RecurringJobId,
+        job => job.RunAsync(CancellationToken.None),
+        "*/5 * * * *");
     recurringJobs.AddOrUpdate<ParcelPendingAutoRejectJob>(
         ParcelPendingAutoRejectJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),

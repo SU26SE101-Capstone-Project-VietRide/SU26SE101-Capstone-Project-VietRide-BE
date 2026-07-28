@@ -106,6 +106,22 @@ describe('FcmPushWorker', () => {
     expect(repository.markDeliveryFailed).toHaveBeenCalledWith(DELIVERY_ID, 1, 'FCM_TOKEN_INVALID');
   });
 
+  it('does not send and terminalizes an existing delivery blacklisted after snapshot creation', async () => {
+    repository.findById.mockResolvedValue(createNotification());
+    repository.listDeliveriesByNotificationId.mockResolvedValue([createDelivery()]);
+    redis.get.mockResolvedValue('1');
+
+    await worker.process(createJob(1));
+
+    expect(fcmPushProvider.send).not.toHaveBeenCalled();
+    expect(deviceTokenProvider.deactivateDeviceToken).toHaveBeenCalledWith(USER_ID, FCM_TOKEN);
+    expect(repository.markDeliveryFailed).toHaveBeenCalledWith(
+      DELIVERY_ID,
+      2,
+      'FCM_TOKEN_BLACKLISTED',
+    );
+  });
+
   it('marks retryable failures as RETRYING before BullMQ retries the job', async () => {
     repository.findById.mockResolvedValue(createNotification());
     repository.listDeliveriesByNotificationId.mockResolvedValue([createDelivery()]);
@@ -195,6 +211,8 @@ function createEnv(): Env {
     DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/vietride_notification',
     LOG_LEVEL: 'info',
     TRIP_INTERNAL_BASE_URL: 'http://trip.test',
+    BOOKING_INTERNAL_BASE_URL: 'http://booking.test',
+    PARCEL_INTERNAL_BASE_URL: 'http://parcel.test',
     IDENTITY_INTERNAL_BASE_URL: 'http://identity.test',
     FCM_PROJECT_ID: undefined,
     FCM_CLIENT_EMAIL: undefined,

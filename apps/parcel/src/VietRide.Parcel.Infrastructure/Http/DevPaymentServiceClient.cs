@@ -20,7 +20,8 @@ public sealed class DevPaymentServiceClient : IPaymentServiceClient
         string method,
         string idempotencyKey,
         CancellationToken cancellationToken = default,
-        PaymentContextSnapshot? context = null)
+        PaymentContextSnapshot? context = null,
+        DateTimeOffset? dueAt = null)
     {
         if (string.Equals(method, "WALLET", StringComparison.OrdinalIgnoreCase))
         {
@@ -30,7 +31,7 @@ public sealed class DevPaymentServiceClient : IPaymentServiceClient
 
             return Task.FromResult(new ChargeOutcome(
                 ChargeOutcomeKind.Success,
-                new ChargeResult(Guid.NewGuid(), "SUCCEEDED", null),
+                new ChargeResult(Guid.NewGuid(), "SUCCEEDED", null, dueAt),
                 null));
         }
 
@@ -43,7 +44,7 @@ public sealed class DevPaymentServiceClient : IPaymentServiceClient
             return Task.FromResult(new ChargeOutcome(
                 ChargeOutcomeKind.Success,
                 new ChargeResult(Guid.NewGuid(), "PENDING",
-                    $"https://sandbox.vnpay.vn/paymentv2/vpcpay.html?referenceId={referenceId:N}"),
+                    $"https://sandbox.vnpay.vn/paymentv2/vpcpay.html?referenceId={referenceId:N}", dueAt),
                 null));
         }
 

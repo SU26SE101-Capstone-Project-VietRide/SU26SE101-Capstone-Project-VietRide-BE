@@ -10,8 +10,11 @@ describe('Gateway /health', () => {
     const res = await axios.get(`/health`);
 
     expect(res.status).toBe(200);
-    expect(res.data).toHaveProperty('status', 'ok');
-    expect(res.data).toHaveProperty('service', 'Gateway');
+    expect(res.data).toMatchObject({
+      success: true,
+      statusCode: 200,
+      data: { status: 'ok', service: 'Gateway' },
+    });
   });
 
   it('exposes /ready readiness probe', async () => {

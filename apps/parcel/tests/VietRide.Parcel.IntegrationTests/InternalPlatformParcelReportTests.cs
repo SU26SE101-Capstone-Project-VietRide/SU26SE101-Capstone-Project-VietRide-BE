@@ -333,12 +333,13 @@ public sealed class PlatformParcelReportWebApplicationFactory : WebApplicationFa
         await db.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO vietride_parcel.parcels (
                 id, parcel_code, sender_user_id, recipient_name, recipient_phone,
-                operator_id, trip_id, size_category, estimated_weight_kg,
+                operator_id, trip_id, size_category, estimated_size_category, estimated_weight_kg,
                 total_price_vnd, deposit_amount, original_deposit_amount,
                 additional_amount, refund_amount, status, confirmed_at)
             VALUES (
                 {id}, {code}, {Guid.NewGuid()}, 'Recipient', '+84901234567',
                 {operatorId}, {Guid.NewGuid()},
+                'SMALL'::vietride_parcel.parcel_size_category,
                 'SMALL'::vietride_parcel.parcel_size_category, 1,
                 {deposit}, {deposit}, {deposit},
                 {additional}, {refund},
@@ -393,7 +394,7 @@ public sealed class PlatformParcelReportWebApplicationFactory : WebApplicationFa
             """
             INSERT INTO vietride_parcel.parcels (
                 id, parcel_code, sender_user_id, recipient_name, recipient_phone,
-                operator_id, trip_id, size_category, estimated_weight_kg,
+                operator_id, trip_id, size_category, estimated_size_category, estimated_weight_kg,
                 total_price_vnd, deposit_amount, original_deposit_amount,
                 additional_amount, refund_amount, status, confirmed_at)
             SELECT gen_random_uuid(),
@@ -403,6 +404,7 @@ public sealed class PlatformParcelReportWebApplicationFactory : WebApplicationFa
                    '+84901234567',
                    '40000000-0000-0000-0000-000000000099'::uuid,
                    gen_random_uuid(),
+                   'SMALL'::vietride_parcel.parcel_size_category,
                    'SMALL'::vietride_parcel.parcel_size_category,
                    1,
                    100000,

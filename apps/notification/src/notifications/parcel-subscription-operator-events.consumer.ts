@@ -8,6 +8,7 @@ import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
 import { createNotificationLogger } from './notification-logger';
 import type { OperatorRecipientProvider } from './operator-recipient.provider';
+import { ParcelRecipientProvider } from './parcel-recipient.provider';
 import {
   OPERATOR_RECIPIENT_PROVIDER,
   INVOICE_ISSUED_ROUTING_KEY,
@@ -30,6 +31,7 @@ export class ParcelSubscriptionOperatorEventsConsumer implements OnModuleInit {
     private readonly notificationsService: NotificationsService,
     @Inject(OPERATOR_RECIPIENT_PROVIDER)
     private readonly operatorRecipientProvider: OperatorRecipientProvider,
+    private readonly parcelRecipientProvider: ParcelRecipientProvider,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -55,7 +57,7 @@ export class ParcelSubscriptionOperatorEventsConsumer implements OnModuleInit {
     payload: unknown,
     raw: ConsumeMessage,
   ): Promise<void> {
-    const transportMessageId = raw.properties.messageId ?? raw.properties.correlationId;
+    const transportMessageId = getTransportMessageId(raw);
     const messageId = getCanonicalMessageId(payload) ?? transportMessageId;
     if (!messageId) {
       this.logger.warn(
@@ -82,6 +84,7 @@ export class ParcelSubscriptionOperatorEventsConsumer implements OnModuleInit {
         routingKey,
         payload,
         (operatorId) => this.operatorRecipientProvider.resolveOperatorRecipientUserIds(operatorId),
+        (parcelId) => this.parcelRecipientProvider.getParcelSnapshot(parcelId),
       );
       let invoice: InvoiceIssuedPayload | null = null;
       let invoiceEmailByUserId: ReadonlyMap<string, string> = new Map();
@@ -184,6 +187,14 @@ function getCanonicalMessageId(payload: unknown): string | undefined {
   if (typeof payload !== 'object' || payload === null || !('eventId' in payload)) return undefined;
   const eventId = (payload as { eventId?: unknown }).eventId;
   return typeof eventId === 'string' && eventId.trim().length > 0 ? eventId.trim() : undefined;
+}
+
+function getTransportMessageId(raw: ConsumeMessage): string | undefined {
+  const properties: unknown = raw.properties;
+  if (typeof properties !== 'object' || properties === null) return undefined;
+  const { messageId, correlationId } = properties as Record<string, unknown>;
+  if (typeof messageId === 'string') return messageId;
+  return typeof correlationId === 'string' ? correlationId : undefined;
 }
 
 function buildNotificationDedupeKey(

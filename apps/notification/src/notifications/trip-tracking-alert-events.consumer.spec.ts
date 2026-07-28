@@ -4,12 +4,16 @@ import { NotificationType } from '../generated/notification-prisma-client';
 import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
 import type { OperatorRecipientProvider } from './operator-recipient.provider';
+import { BookingTripRecipientProvider } from './booking-trip-recipient.provider';
+import { TripAnnouncementRecipientProvider } from './trip-announcement-recipient.provider';
 import {
   TRACKING_GPS_OFF_ROUTE_ROUTING_KEY,
   TRIP_DELAYED_ROUTING_KEY,
   TRIP_INCIDENT_REPORTED_ROUTING_KEY,
   TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY,
   TRIP_STOP_DISABLED_ROUTING_KEY,
+  TRIP_ROUTE_CHANGED_ROUTING_KEY,
+  TRIP_SCHEDULE_CHANGED_ROUTING_KEY,
   TRIP_TRACKING_ALERT_QUEUE_BINDINGS,
   TRIP_VEHICLE_SWAPPED_ROUTING_KEY,
 } from './trip-tracking-alert-events.constants';
@@ -29,6 +33,8 @@ describe('TripTrackingAlertEventsConsumer subscribes all phase 5 routing keys', 
   let idempotency: jest.Mocked<MessageIdempotencyService>;
   let notificationsService: jest.Mocked<NotificationsService>;
   let operatorRecipients: jest.Mocked<OperatorRecipientProvider>;
+  let bookingTripRecipients: jest.Mocked<BookingTripRecipientProvider>;
+  let tripRecipients: jest.Mocked<TripAnnouncementRecipientProvider>;
   let consumer: TripTrackingAlertEventsConsumer;
 
   beforeEach(() => {
@@ -46,11 +52,21 @@ describe('TripTrackingAlertEventsConsumer subscribes all phase 5 routing keys', 
     operatorRecipients = {
       resolveOperatorRecipientUserIds: jest.fn(),
     } as jest.Mocked<OperatorRecipientProvider>;
+    bookingTripRecipients = {
+      resolveTripPassengerUserIds: jest.fn(),
+      resolveAffectedTripPassengerUserIds: jest.fn(),
+    } as unknown as jest.Mocked<BookingTripRecipientProvider>;
+    tripRecipients = {
+      getTripRecipientSnapshot: jest.fn(),
+      resolveTripCrewUserIds: jest.fn(),
+    } as unknown as jest.Mocked<TripAnnouncementRecipientProvider>;
     consumer = new TripTrackingAlertEventsConsumer(
       rabbitConsumer,
       idempotency,
       notificationsService,
       operatorRecipients,
+      bookingTripRecipients,
+      tripRecipients,
     );
   });
 
@@ -79,11 +95,12 @@ describe('TripTrackingAlertEventsConsumer subscribes all phase 5 routing keys', 
       queue: 'notification:trip-vehicle-swapped-crew',
       routingKey: TRIP_VEHICLE_SWAPPED_ROUTING_KEY,
     });
+    expect(TRIP_TRACKING_ALERT_QUEUE_BINDINGS).toContainEqual({
+      queue: 'notification:trip-schedule-changed-crew',
+      routingKey: TRIP_SCHEDULE_CHANGED_ROUTING_KEY,
+    });
     expect(TRIP_TRACKING_ALERT_QUEUE_BINDINGS).not.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ routingKey: 'trip.trip.schedule_changed' }),
-        expect.objectContaining({ routingKey: 'trip.trip.cancelled' }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ routingKey: 'trip.trip.cancelled' })]),
     );
 
     idempotency.begin.mockResolvedValueOnce('acquired').mockResolvedValueOnce('duplicate');
@@ -118,11 +135,17 @@ describe('TripTrackingAlertEventsConsumer subscribes all phase 5 routing keys', 
 
   it('creates delayed notification for a new valid message', async () => {
     idempotency.begin.mockResolvedValue('acquired');
+    tripRecipients.getTripRecipientSnapshot.mockResolvedValue({
+      operatorId: OPERATOR_ID,
+      crewUserIds: [],
+    });
+    bookingTripRecipients.resolveTripPassengerUserIds.mockResolvedValue([USER_ID]);
+    operatorRecipients.resolveOperatorRecipientUserIds.mockResolvedValue([]);
     notificationsService.createNotification.mockResolvedValue({
       id: '66666666-6666-4666-8666-666666666666',
       userId: USER_ID,
       type: NotificationType.TRIP_DELAYED,
-      title: 'Chuyen xe bi tre',
+      title: 'Chuyến xe bị trễ',
       body: 'Chuyen xe bi tre',
       data: { tripId: TRIP_ID },
       readAt: null,
@@ -131,11 +154,7 @@ describe('TripTrackingAlertEventsConsumer subscribes all phase 5 routing keys', 
 
     await consumer.handle(
       TRIP_DELAYED_ROUTING_KEY,
-      {
-        userId: USER_ID,
-        tripId: TRIP_ID,
-        delayMinutes: 15,
-      },
+      legacyDelayedPayload(15),
       createMessage(MESSAGE_ID),
     );
 
@@ -147,6 +166,101 @@ describe('TripTrackingAlertEventsConsumer subscribes all phase 5 routing keys', 
       }),
     );
     expect(idempotency.markProcessed).toHaveBeenCalledWith(TRIP_DELAYED_ROUTING_KEY, MESSAGE_ID);
+  });
+
+  it('resolves delayed recipients as active passengers plus operator admins', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    tripRecipients.getTripRecipientSnapshot.mockResolvedValue({
+      operatorId: OPERATOR_ID,
+      crewUserIds: [],
+    });
+    bookingTripRecipients.resolveTripPassengerUserIds.mockResolvedValue([USER_ID]);
+    operatorRecipients.resolveOperatorRecipientUserIds.mockResolvedValue([
+      SECOND_USER_ID,
+      USER_ID,
+    ]);
+
+    await consumer.handle(
+      TRIP_DELAYED_ROUTING_KEY,
+      legacyDelayedPayload(20),
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(notificationsService.createNotification).toHaveBeenCalledTimes(2);
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: USER_ID, type: NotificationType.TRIP_DELAYED }),
+    );
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SECOND_USER_ID, type: NotificationType.TRIP_DELAYED }),
+    );
+  });
+
+  it('resolves off-route recipients as current crew plus operator admins', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    tripRecipients.getTripRecipientSnapshot.mockResolvedValue({
+      operatorId: OPERATOR_ID,
+      crewUserIds: [USER_ID],
+    });
+    operatorRecipients.resolveOperatorRecipientUserIds.mockResolvedValue([SECOND_USER_ID]);
+
+    await consumer.handle(
+      TRACKING_GPS_OFF_ROUTE_ROUTING_KEY,
+      legacyOffRoutePayload(),
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(notificationsService.createNotification).toHaveBeenCalledTimes(2);
+    expect(bookingTripRecipients.resolveTripPassengerUserIds).not.toHaveBeenCalled();
+  });
+
+  it('notifies only current crew for schedule changes', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    tripRecipients.resolveTripCrewUserIds.mockResolvedValue([USER_ID]);
+
+    await consumer.handle(
+      TRIP_SCHEDULE_CHANGED_ROUTING_KEY,
+      {
+        eventId: EVENT_ID,
+        occurredAt: '2026-07-27T03:00:00Z',
+        tripId: TRIP_ID,
+        operatorId: OPERATOR_ID,
+        oldDeparture: '2026-07-28T03:00:00Z',
+        newDeparture: '2026-07-28T04:00:00Z',
+        severity: 'MEDIUM',
+      },
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(tripRecipients.resolveTripCrewUserIds).toHaveBeenCalledWith(TRIP_ID, OPERATOR_ID);
+    expect(bookingTripRecipients.resolveTripPassengerUserIds).not.toHaveBeenCalled();
+    expect(operatorRecipients.resolveOperatorRecipientUserIds).not.toHaveBeenCalled();
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.TRIP_SCHEDULE_CHANGED,
+      }),
+    );
+  });
+
+  it('notifies current crew and only affected passengers for route changes', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    tripRecipients.resolveTripCrewUserIds.mockResolvedValue([USER_ID]);
+    bookingTripRecipients.resolveAffectedTripPassengerUserIds.mockResolvedValue([
+      SECOND_USER_ID,
+    ]);
+    const bookingId = '88888888-8888-4888-8888-888888888888';
+
+    await consumer.handle(
+      TRIP_ROUTE_CHANGED_ROUTING_KEY,
+      canonicalRouteChangedPayload(bookingId),
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(bookingTripRecipients.resolveAffectedTripPassengerUserIds).toHaveBeenCalledWith(
+      TRIP_ID,
+      [bookingId],
+    );
+    expect(notificationsService.createNotification).toHaveBeenCalledTimes(2);
   });
 
   it('deduplicates duplicate cargo delivery by message id', async () => {
@@ -224,7 +338,7 @@ describe('TripTrackingAlertEventsConsumer subscribes all phase 5 routing keys', 
       consumer.handle(
         TRIP_DELAYED_ROUTING_KEY,
         {
-          tripId: TRIP_ID,
+          tripId: 'not-a-uuid',
           delayMinutes: 15,
         },
         createMessage(MESSAGE_ID),
@@ -232,6 +346,23 @@ describe('TripTrackingAlertEventsConsumer subscribes all phase 5 routing keys', 
     ).resolves.toBeUndefined();
     expect(notificationsService.createNotification).not.toHaveBeenCalled();
     expect(idempotency.markProcessed).toHaveBeenCalledWith(TRIP_DELAYED_ROUTING_KEY, MESSAGE_ID);
+  });
+
+  it.each([
+    TRIP_DELAYED_ROUTING_KEY,
+    TRACKING_GPS_OFF_ROUTE_ROUTING_KEY,
+  ] as const)('does not resolve recipients for an incomplete %s fact', async (routingKey) => {
+    idempotency.begin.mockResolvedValue('acquired');
+
+    await expect(
+      consumer.handle(routingKey, { tripId: TRIP_ID }, createMessage(MESSAGE_ID)),
+    ).resolves.toBeUndefined();
+
+    expect(tripRecipients.getTripRecipientSnapshot).not.toHaveBeenCalled();
+    expect(bookingTripRecipients.resolveTripPassengerUserIds).not.toHaveBeenCalled();
+    expect(operatorRecipients.resolveOperatorRecipientUserIds).not.toHaveBeenCalled();
+    expect(notificationsService.createNotification).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(routingKey, MESSAGE_ID);
   });
 
   it('resolves and deduplicates operator admins using payload event id', async () => {
@@ -394,5 +525,53 @@ function cargoPayload(): Record<string, unknown> {
     loadedWeightKg: 80,
     maxCargoWeightKg: 100,
     percentFull: 80,
+  };
+}
+
+function legacyDelayedPayload(delayMinutes: number): Record<string, unknown> {
+  return {
+    tripId: TRIP_ID,
+    stopId: '88888888-8888-4888-8888-888888888888',
+    staticEstimatedArrivalTime: '2026-07-27T03:00:00Z',
+    dynamicEstimatedArrivalTime: '2026-07-27T04:00:00Z',
+    etaNew: '2026-07-27T04:00:00Z',
+    delayMinutes,
+    detectedAt: '2026-07-27T02:30:00Z',
+  };
+}
+
+function legacyOffRoutePayload(): Record<string, unknown> {
+  return {
+    tripId: TRIP_ID,
+    latitude: 10.7769,
+    longitude: 106.7009,
+    distanceMeters: 250,
+    durationSeconds: 120,
+    detectedAt: '2026-07-27T03:00:00Z',
+  };
+}
+
+function canonicalRouteChangedPayload(bookingId: string): Record<string, unknown> {
+  return {
+    eventId: EVENT_ID,
+    occurredAt: '2026-07-27T03:00:00Z',
+    tripId: TRIP_ID,
+    operatorId: OPERATOR_ID,
+    tripStatus: 'IN_PROGRESS',
+    alternativeRouteId: '99999999-9999-4999-8999-999999999999',
+    affectedBookings: [
+      {
+        bookingId,
+        candidateStops: [
+          {
+            stopId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            stationId: null,
+            stationName: 'Điểm dừng thay thế',
+            sequence: 1,
+            estimatedArrivalAt: '2026-07-27T04:00:00Z',
+          },
+        ],
+      },
+    ],
   };
 }

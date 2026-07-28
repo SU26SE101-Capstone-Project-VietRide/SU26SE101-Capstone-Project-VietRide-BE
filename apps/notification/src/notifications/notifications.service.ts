@@ -1,9 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import {
-  EmailDeliveryStatus,
-  NotificationType,
-  type Notification,
-} from '../generated/notification-prisma-client';
+import { EmailDeliveryStatus, type Notification } from '../generated/notification-prisma-client';
 import {
   CreateNotificationSchema,
   type CreateNotificationDto,
@@ -57,16 +53,10 @@ export class NotificationsService {
   async createNotification(dto: CreateNotificationDto): Promise<NotificationItemDto> {
     const result = await this.notificationsRepository.create(CreateNotificationSchema.parse(dto));
     const notification = result.notification;
-    if (
-      result.created ||
-      notification.type === NotificationType.INVOICE_ISSUED ||
-      notification.type === NotificationType.VEHICLE_SUBSTITUTED
-    ) {
-      await this.fcmPushQueue.enqueue({
-        notificationId: notification.id,
-        userId: notification.userId,
-      });
-    }
+    await this.fcmPushQueue.enqueue({
+      notificationId: notification.id,
+      userId: notification.userId,
+    });
 
     return this.toDto(notification);
   }
@@ -122,7 +112,8 @@ export class NotificationsService {
     if (
       result.created ||
       emailDelivery.status === EmailDeliveryStatus.PENDING ||
-      emailDelivery.status === EmailDeliveryStatus.RETRYING
+      emailDelivery.status === EmailDeliveryStatus.RETRYING ||
+      emailDelivery.status === EmailDeliveryStatus.SENDING
     ) {
       await this.emailSendQueue.enqueue({
         emailDeliveryId: emailDelivery.id,

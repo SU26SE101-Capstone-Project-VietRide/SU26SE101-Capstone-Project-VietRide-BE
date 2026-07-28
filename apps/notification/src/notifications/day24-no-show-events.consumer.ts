@@ -97,8 +97,8 @@ function mapParsedPassengerNoShow(
   return {
     userId: payload.userId,
     type: NotificationType.PASSENGER_NO_SHOW,
-    title: 'Ban da lo chuyen xe',
-    body: 'Ban da khong len xe dung gio. Ve khong duoc hoan tien theo chinh sach.',
+    title: 'Bạn đã lỡ chuyến xe',
+    body: 'Bạn đã không lên xe đúng giờ. Vé không được hoàn tiền theo chính sách.',
     data: {
       eventId: payload.eventId,
       occurredAt: payload.occurredAt,

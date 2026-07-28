@@ -20,6 +20,22 @@ public interface IVnPayClient
         DateTimeOffset createdAt)
         => throw new NotSupportedException("This VNPay client does not support booking-payment redirect URLs.");
 
+    string CreateBookingPaymentRedirectUrl(
+        Guid bookingId,
+        Guid userId,
+        Money amount,
+        string vnPayTxnRef,
+        string clientIpAddress,
+        DateTimeOffset createdAt,
+        DateTimeOffset? expiresAt)
+        => CreateBookingPaymentRedirectUrl(
+            bookingId,
+            userId,
+            amount,
+            vnPayTxnRef,
+            clientIpAddress,
+            createdAt);
+
     string CreateSubscriptionPaymentRedirectUrl(
         Guid upgradeAttemptId,
         Guid operatorId,

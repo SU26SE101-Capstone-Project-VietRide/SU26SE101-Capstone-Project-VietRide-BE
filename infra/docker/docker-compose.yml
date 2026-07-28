@@ -415,7 +415,10 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 3002
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      SENTRY_DSN: ${SENTRY_DSN:-}
       TRIP_INTERNAL_BASE_URL: http://trip:5002
+      BOOKING_INTERNAL_BASE_URL: http://booking:5003
+      PARCEL_INTERNAL_BASE_URL: http://parcel:5005
       # SendGrid delivery (apps/notification). Without these the email-send worker
       # degrades to SENDGRID_NOT_CONFIGURED and marks deliveries FAILED.
       SENDGRID_API_KEY: ${SENDGRID_API_KEY}

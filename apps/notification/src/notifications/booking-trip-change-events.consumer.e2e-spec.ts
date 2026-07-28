@@ -35,7 +35,7 @@ describe('BookingTripChangeEventsConsumer registers the Booking-owned passenger 
 
     await moduleRef.init();
 
-    expect(subscribe).toHaveBeenCalledTimes(5);
+    expect(subscribe).toHaveBeenCalledTimes(BOOKING_TRIP_CHANGE_QUEUE_BINDINGS.length);
     for (const binding of BOOKING_TRIP_CHANGE_QUEUE_BINDINGS) {
       expect(subscribe).toHaveBeenCalledWith(
         binding.queue,

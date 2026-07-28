@@ -9,7 +9,8 @@ public sealed record ChargePaymentRequest(
     Guid UserId,
     long Amount,
     string Method,
-    PaymentContextV1? Context)
+    PaymentContextV1? Context,
+    DateTimeOffset? DueAt = null)
 {
     public ChargePaymentCommand ToCommand(string? idempotencyKey, string clientIpAddress)
         => new(
@@ -20,5 +21,6 @@ public sealed record ChargePaymentRequest(
             Method,
             Context,
             idempotencyKey,
-            clientIpAddress);
+            clientIpAddress,
+            DueAt);
 }

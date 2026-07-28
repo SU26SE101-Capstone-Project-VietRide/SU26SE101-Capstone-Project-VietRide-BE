@@ -1,4 +1,4 @@
-import type { Channel, ChannelModel, ConsumeMessage } from 'amqplib';
+import type { ChannelModel, ConfirmChannel, ConsumeMessage } from 'amqplib';
 import { Logger } from '@nestjs/common';
 import { RabbitMqConsumer, type RabbitMqHandler } from './rabbitmq.consumer';
 import type { NestRabbitMqOptions } from './rabbitmq.tokens';
@@ -11,7 +11,7 @@ describe('RabbitMqConsumer', () => {
   const dlqExchange = `${exchange}.dlq`;
   const retryReturnRoutingKey = `__retry__.${queue}`;
 
-  let channel: jest.Mocked<Channel>;
+  let channel: jest.Mocked<ConfirmChannel>;
   let connection: jest.Mocked<ChannelModel>;
   let consumeHandler: ((msg: ConsumeMessage | null) => Promise<void>) | undefined;
 
@@ -25,7 +25,7 @@ describe('RabbitMqConsumer', () => {
       return { consumerTag: 'consumer-1' };
     });
     connection = {
-      createChannel: jest.fn(async () => channel),
+      createConfirmChannel: jest.fn(async () => channel),
     } as unknown as jest.Mocked<ChannelModel>;
   });
 
@@ -90,10 +90,56 @@ describe('RabbitMqConsumer', () => {
     expect(channel.ack).not.toHaveBeenCalled();
   });
 
-  it('parks failed messages in the dlq exchange once max retry count is reached', async () => {
+  it('acks only after the broker confirms the dlq publish', async () => {
     const consumer = createConsumer(connection);
     const handler: RabbitMqHandler = jest.fn(async () => {
       throw new Error('handler failed');
+    });
+    let confirmPublish: ((error: Error | null) => void) | undefined;
+    channel.publish.mockImplementation((...args: unknown[]) => {
+      confirmPublish = args.at(-1) as (error: Error | null) => void;
+      return true;
+    });
+
+    await consumer.subscribe(queue, routingKey, handler, {
+      deadLetter: true,
+      maxRetries: 5,
+    });
+
+    const msg = createMessage({ rejectedCount: 5 });
+    const handling = consumeHandler?.(msg);
+    await Promise.resolve();
+
+    expect(channel.nack).not.toHaveBeenCalled();
+    expect(channel.publish).toHaveBeenCalledWith(
+      dlqExchange,
+      routingKey,
+      msg.content,
+      expect.objectContaining({
+        contentType: 'application/json',
+        persistent: true,
+        messageId: 'message-1',
+        correlationId: 'correlation-1',
+      }),
+      expect.any(Function),
+    );
+    expect(channel.ack).not.toHaveBeenCalled();
+
+    confirmPublish?.(null);
+    await handling;
+
+    expect(channel.ack).toHaveBeenCalledWith(msg);
+  });
+
+  it('returns the original message to delayed retry when dlq publish confirm fails', async () => {
+    const consumer = createConsumer(connection);
+    const handler: RabbitMqHandler = jest.fn(async () => {
+      throw new Error('handler failed');
+    });
+    channel.publish.mockImplementation((...args: unknown[]) => {
+      const confirm = args.at(-1) as (error: Error | null) => void;
+      confirm(new Error('broker rejected dlq publish'));
+      return true;
     });
 
     await consumer.subscribe(queue, routingKey, handler, {
@@ -104,24 +150,8 @@ describe('RabbitMqConsumer', () => {
     const msg = createMessage({ rejectedCount: 5 });
     await consumeHandler?.(msg);
 
-    expect(channel.nack).not.toHaveBeenCalled();
-    expect(channel.publish).toHaveBeenCalledWith(dlqExchange, routingKey, msg.content, {
-      contentType: 'application/json',
-      persistent: true,
-      headers: {
-        traceId: 'trace-1',
-        'x-death': [
-          { queue, reason: 'rejected', count: 5 },
-          { queue, reason: 'expired', count: 5 },
-          { queue: 'other.queue', reason: 'rejected', count: 99 },
-        ],
-        'x-vietride-dlq-reason': 'max-retries-exceeded',
-        'x-vietride-retry-count': 5,
-      },
-      messageId: 'message-1',
-      correlationId: 'correlation-1',
-    });
-    expect(channel.ack).toHaveBeenCalledWith(msg);
+    expect(channel.ack).not.toHaveBeenCalled();
+    expect(channel.nack).toHaveBeenCalledWith(msg, false, false);
   });
 
   it('acks messages after successful json parse and handler completion', async () => {
@@ -149,7 +179,7 @@ function createConsumer(connection: ChannelModel): RabbitMqConsumer {
   return new RabbitMqConsumer(connection, options);
 }
 
-function createChannelMock(): jest.Mocked<Channel> {
+function createChannelMock(): jest.Mocked<ConfirmChannel> {
   return {
     assertExchange: jest.fn(),
     assertQueue: jest.fn(),
@@ -160,7 +190,7 @@ function createChannelMock(): jest.Mocked<Channel> {
     nack: jest.fn(),
     publish: jest.fn(),
     close: jest.fn(),
-  } as unknown as jest.Mocked<Channel>;
+  } as unknown as jest.Mocked<ConfirmChannel>;
 }
 
 function createMessage({

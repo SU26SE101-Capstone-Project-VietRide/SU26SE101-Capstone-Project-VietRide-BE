@@ -47,7 +47,7 @@ public sealed class Phase67ParcelTests
     [Fact]
     public async Task MarkLoaded_HappyPath_UsesAtomicRepositoryTransition()
     {
-        var parcel = CreateParcel(ParcelStatus.PENDING);
+        var parcel = CreateParcel(ParcelStatus.READY_TO_LOAD);
         var repo = Substitute.For<IParcelRepository>();
         repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
         repo.TryMarkLoadedAsync(ParcelId, TripId, "VRP-001", null, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())

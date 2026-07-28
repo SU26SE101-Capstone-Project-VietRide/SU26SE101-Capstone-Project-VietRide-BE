@@ -1,10 +1,13 @@
+using System.Text.Json;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.Services;
+using VietRide.Booking.Application.Events;
 using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 
@@ -26,20 +29,24 @@ namespace VietRide.Booking.Application.Features.Vouchers.CreateVoucher;
 public sealed class CreateVoucherCommandHandler
     : IRequestHandler<CreateVoucherCommand, CreateVoucherResult>
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly IVoucherRepository _vouchers;
     private readonly IVoucherCodeGenerator _codeGenerator;
     private readonly IClock _clock;
     private readonly ILogger<CreateVoucherCommandHandler> _logger;
+    private readonly IIntegrationEventOutbox _outbox;
 
     public CreateVoucherCommandHandler(
         IVoucherRepository vouchers,
         IVoucherCodeGenerator codeGenerator,
         IClock clock,
+        IIntegrationEventOutbox outbox,
         ILogger<CreateVoucherCommandHandler> logger)
     {
         _vouchers = vouchers;
         _codeGenerator = codeGenerator;
         _clock = clock;
+        _outbox = outbox;
         _logger = logger;
     }
 
@@ -121,6 +128,20 @@ public sealed class CreateVoucherCommandHandler
                     requestedAt: requestedAt);
 
                 await _vouchers.AddConsentAsync(consent, cancellationToken);
+
+                var consentRequested = new VoucherConsentRequestedIntegrationEvent(
+                    Guid.NewGuid(),
+                    requestedAt,
+                    voucher.Id,
+                    operatorId,
+                    voucher.Code,
+                    voucher.Type.ToString(),
+                    voucher.Value);
+                await _outbox.EnqueueAsync(
+                    consentRequested.EventId,
+                    consentRequested.EventType,
+                    JsonSerializer.Serialize(consentRequested, JsonOptions),
+                    cancellationToken);
             }
 
             _logger.LogInformation(

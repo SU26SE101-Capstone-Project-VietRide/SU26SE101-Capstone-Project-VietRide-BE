@@ -17,6 +17,7 @@ namespace VietRide.Identity.Application.Features.Operators.RegisterOperator;
 
 public sealed class RegisterOperatorCommandHandler : IRequestHandler<RegisterOperatorCommand, RegisterOperatorResponseDto>
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const int OtpExpiresInMinutes = 10;
     private const int OtpMaxRetries = 3;
 
@@ -123,6 +124,17 @@ public sealed class RegisterOperatorCommandHandler : IRequestHandler<RegisterOpe
         await _outbox.EnqueueAsync(
             OtpRequestedIntegrationEvent.EventType,
             JsonSerializer.Serialize(otpEvent),
+            cancellationToken);
+
+        var registrationEvent = new OperatorRegistrationSubmittedIntegrationEvent(
+            Guid.NewGuid(),
+            now,
+            operatorEntity.Id,
+            operatorEntity.Name);
+        await _outbox.EnqueueAsync(
+            registrationEvent.EventId,
+            registrationEvent.EventType,
+            JsonSerializer.Serialize(registrationEvent, JsonOptions),
             cancellationToken);
 
         _logger.LogDebug(

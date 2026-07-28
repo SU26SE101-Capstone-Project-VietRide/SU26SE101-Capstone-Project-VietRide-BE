@@ -37,11 +37,6 @@ public sealed class AvailableTripsQueryHandler
         if (request.PageSize is < 1 or > 100)
             throw new CodedValidationException("VALIDATION_ERROR", "PageSize must be between 1 and 100.");
 
-        if (!Enum.TryParse<ParcelSizeCategory>(request.SizeCategory, ignoreCase: true, out var sizeCategory))
-            throw new CodedValidationException(
-                "INVALID_SIZE_CATEGORY",
-                $"'{request.SizeCategory}' is not a valid ParcelSizeCategory.");
-
         var now = DateTimeOffset.UtcNow;
         var dimFactor = _policyRepository is null
             ? ParcelCargoCalculator.DefaultDimWeightFactor
@@ -56,6 +51,7 @@ public sealed class AvailableTripsQueryHandler
             request.HeightCm,
             request.EstimatedWeightKg,
             dimFactor);
+        var sizeCategory = ParcelCargoCalculator.DeriveSizeCategory(estimate.ChargeableWeightKg);
 
         var searchOutcome = _policyRepository is null
             ? await _tripClient.SearchAvailableParcelTripsAsync(

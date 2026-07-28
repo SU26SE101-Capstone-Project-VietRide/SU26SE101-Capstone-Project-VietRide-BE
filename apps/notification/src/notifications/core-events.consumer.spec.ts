@@ -62,7 +62,7 @@ describe('CoreEventsConsumer', () => {
       id: '33333333-3333-4333-8333-333333333333',
       userId: USER_ID,
       type: NotificationType.BOOKING_CONFIRMED,
-      title: 'Dat ve thanh cong',
+      title: 'Đặt vé thành công',
       body: 'Ve #VR123 da duoc xac nhan.',
       data: { bookingId: BOOKING_ID },
       readAt: null,
@@ -88,7 +88,7 @@ describe('CoreEventsConsumer', () => {
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.BOOKING_CONFIRMED,
-        title: 'Dat ve thanh cong',
+        title: 'Đặt vé thành công',
         dedupeKey: `${BOOKING_CONFIRMED_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:${NotificationType.BOOKING_CONFIRMED}`,
       }),
     );

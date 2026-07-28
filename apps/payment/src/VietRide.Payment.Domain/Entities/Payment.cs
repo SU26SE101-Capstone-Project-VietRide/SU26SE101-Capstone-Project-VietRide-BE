@@ -61,7 +61,8 @@ public sealed class Payment : BaseEntity<Guid>
         Guid? operatorId = null,
         string? vnPayTxnRef = null,
         string? idempotencyKey = null,
-        string? paymentRedirectUrl = null)
+        string? paymentRedirectUrl = null,
+        DateTimeOffset? dueAt = null)
     {
         if (referenceId == Guid.Empty)
             throw new ArgumentException("Reference id cannot be empty.", nameof(referenceId));
@@ -83,6 +84,7 @@ public sealed class Payment : BaseEntity<Guid>
             VnPayTxnRef = vnPayTxnRef,
             IdempotencyKey = idempotencyKey,
             PaymentRedirectUrl = paymentRedirectUrl,
+            DueAt = dueAt,
         };
     }
 

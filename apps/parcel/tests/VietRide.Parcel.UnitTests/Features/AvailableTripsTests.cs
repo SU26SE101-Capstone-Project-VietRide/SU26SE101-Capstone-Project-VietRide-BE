@@ -109,7 +109,7 @@ public sealed class AvailableTripsTests
                 DepartureDate,
                 1m,
                 0.001m,
-                ParcelSizeCategory.MEDIUM,
+                ParcelSizeCategory.SMALL,
                 Page,
                 PageSize,
                 Arg.Any<CancellationToken>())
@@ -122,11 +122,11 @@ public sealed class AvailableTripsTests
                 null));
         var fare = ParcelRouteFare.Create(
             RouteId,
-            ParcelSizeCategory.MEDIUM,
+            ParcelSizeCategory.SMALL,
             OperatorId,
             Money.FromRaw(150_000),
             Now);
-        fareRepo.FindByCompositeAsync(RouteId, ParcelSizeCategory.MEDIUM, Arg.Any<CancellationToken>())
+        fareRepo.FindByCompositeAsync(RouteId, ParcelSizeCategory.SMALL, Arg.Any<CancellationToken>())
             .Returns(fare);
         policyRepo.GetSystemDecimalAsync(
                 "DIM_WEIGHT_FACTOR",
@@ -326,20 +326,23 @@ public sealed class AvailableTripsTests
     }
 
     [Fact]
-    public async Task Handle_InvalidSizeCategory_ThrowsValidationError()
+    public void Validator_AllowsMissingLegacySizeCategoryHint()
     {
-        var tripClient = Substitute.For<ITripServiceClient>();
-        var identityClient = Substitute.For<IIdentityServiceClient>();
-        var fareRepo = Substitute.For<IParcelRouteFareRepository>();
-
-        var handler = new AvailableTripsQueryHandler(tripClient, identityClient, fareRepo);
         var query = new AvailableTripsQuery(
-            OriginStationId, DestinationStationId, DepartureDate,
-            WeightKg, "TINY", Page, PageSize);
+            OriginStationId,
+            DestinationStationId,
+            DepartureDate,
+            10m,
+            10m,
+            10m,
+            WeightKg,
+            null,
+            Page,
+            PageSize);
 
-        var ex = await Assert.ThrowsAsync<CodedValidationException>(() =>
-            handler.Handle(query, CancellationToken.None));
-        ex.ErrorCode.Should().Be("INVALID_SIZE_CATEGORY");
+        var result = new AvailableTripsQueryValidator().Validate(query);
+
+        result.IsValid.Should().BeTrue();
     }
 
     [Fact]

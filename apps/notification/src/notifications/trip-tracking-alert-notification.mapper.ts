@@ -3,6 +3,8 @@ import {
   BookingStopDisabledAffectedEventSchema,
   TRIP_STOP_DEPARTED_WITH_PENDING_ROUTING_KEY,
   TripCargoThresholdCrossedEventSchema,
+  TripRouteChangedEventSchema,
+  TripScheduleChangedEventSchema,
   TripStopDepartedWithPendingEventSchema,
   TripVehicleSwappedEventSchema,
   type BookingStopDisabledAffectedEvent,
@@ -20,6 +22,7 @@ import {
   TRIP_DELAYED_ROUTING_KEY,
   TRIP_INCIDENT_REPORTED_ROUTING_KEY,
   TRIP_ROUTE_CHANGED_ROUTING_KEY,
+  TRIP_SCHEDULE_CHANGED_ROUTING_KEY,
   TRIP_STOP_DISABLED_ROUTING_KEY,
   TRIP_VEHICLE_SWAPPED_ROUTING_KEY,
 } from './trip-tracking-alert-events.constants';
@@ -35,14 +38,16 @@ const recipientPayloadSchema = z.object({
   recipientUserIds: z.array(z.string().uuid()).optional(),
 });
 
-const baseTripAlertPayloadSchema = z
+const baseTripFieldsSchema = z
   .object({
     tripId: z.string().uuid(),
     routeName: z.string().trim().min(1).optional(),
     reason: z.string().trim().min(1).optional(),
   })
+  .passthrough();
+
+const baseTripAlertPayloadSchema = baseTripFieldsSchema
   .merge(recipientPayloadSchema)
-  .passthrough()
   .superRefine((payload, ctx) => {
     if (!payload.userId && !payload.userIds?.length && !payload.recipientUserIds?.length) {
       ctx.addIssue({
@@ -77,19 +82,35 @@ const boardingStartedPayloadSchema = baseTripAlertPayloadSchema.and(
   z.object({ boardingStartedAt: z.string().datetime().optional() }),
 );
 
-const routeChangedPayloadSchema = baseTripAlertPayloadSchema.and(
-  z.object({
-    alternativeRouteId: z.string().uuid().optional(),
-    affectedBookingIds: z.array(z.string().uuid()).optional(),
-  }),
-);
+const canonicalTripDelayedPayloadSchema = z
+  .object({
+    eventId: z.string().uuid(),
+    occurredAt: z.string().datetime({ offset: true }),
+    tripId: z.string().uuid(),
+    stopId: z.string().uuid(),
+    stopName: z.string().trim().min(1),
+    delayMinutes: z.number().int().positive(),
+    etaNew: z.string().datetime({ offset: true }),
+  })
+  .strict();
 
-const tripDelayedPayloadSchema = baseTripAlertPayloadSchema.and(
-  z.object({
-    delayMinutes: z.number().int().nonnegative().optional(),
-    etaNew: z.string().datetime().optional(),
-  }),
-);
+const legacyTripDelayedPayloadSchema = z
+  .object({
+    tripId: z.string().uuid(),
+    stopId: z.string().uuid(),
+    userIds: z.array(z.string().uuid()).optional(),
+    staticEstimatedArrivalTime: z.string().datetime({ offset: true }),
+    dynamicEstimatedArrivalTime: z.string().datetime({ offset: true }),
+    etaNew: z.string().datetime({ offset: true }),
+    delayMinutes: z.number().int().positive(),
+    detectedAt: z.string().datetime({ offset: true }),
+  })
+  .strict();
+
+const tripDelayedPayloadSchema = z.union([
+  canonicalTripDelayedPayloadSchema,
+  legacyTripDelayedPayloadSchema,
+]);
 
 const incidentReportedPayloadSchema = z
   .object({
@@ -121,9 +142,31 @@ const incidentReportedPayloadSchema = z
     }
   });
 
-const offRoutePayloadSchema = baseTripAlertPayloadSchema.and(
-  z.object({ durationSeconds: z.number().int().nonnegative().optional() }),
-);
+const canonicalOffRoutePayloadSchema = z
+  .object({
+    eventId: z.string().uuid(),
+    occurredAt: z.string().datetime({ offset: true }),
+    tripId: z.string().uuid(),
+    durationSeconds: z.number().int().positive(),
+  })
+  .strict();
+
+const legacyOffRoutePayloadSchema = z
+  .object({
+    tripId: z.string().uuid(),
+    userIds: z.array(z.string().uuid()).optional(),
+    latitude: z.number().min(-90).max(90),
+    longitude: z.number().min(-180).max(180),
+    distanceMeters: z.number().nonnegative(),
+    durationSeconds: z.number().int().positive(),
+    detectedAt: z.string().datetime({ offset: true }),
+  })
+  .strict();
+
+const offRoutePayloadSchema = z.union([
+  canonicalOffRoutePayloadSchema,
+  legacyOffRoutePayloadSchema,
+]);
 
 const approachingStopPayloadSchema = baseTripAlertPayloadSchema.and(
   z.object({
@@ -151,6 +194,7 @@ export type TripTrackingAlertRoutingKey =
   | typeof TRIP_CREW_CHANGED_ROUTING_KEY
   | typeof TRIP_BOARDING_STARTED_ROUTING_KEY
   | typeof TRIP_ROUTE_CHANGED_ROUTING_KEY
+  | typeof TRIP_SCHEDULE_CHANGED_ROUTING_KEY
   | typeof TRIP_VEHICLE_SWAPPED_ROUTING_KEY
   | typeof TRIP_DELAYED_ROUTING_KEY
   | typeof TRIP_INCIDENT_REPORTED_ROUTING_KEY
@@ -162,6 +206,7 @@ export type TripTrackingAlertRoutingKey =
 export function mapTripTrackingAlertToNotifications(
   routingKey: TripTrackingAlertRoutingKey,
   payload: unknown,
+  resolvedRecipientUserIds?: string[],
 ): CreateNotificationDto[] {
   switch (routingKey) {
     case TRIP_ASSIGNED_ROUTING_KEY:
@@ -176,11 +221,25 @@ export function mapTripTrackingAlertToNotifications(
     case TRIP_BOARDING_STARTED_ROUTING_KEY:
       return fanOut(boardingStartedPayloadSchema.parse(payload), mapBoardingStarted);
     case TRIP_ROUTE_CHANGED_ROUTING_KEY:
-      return fanOut(routeChangedPayloadSchema.parse(payload), mapRouteChanged);
+      return fanOutResolved(
+        TripRouteChangedEventSchema.parse(payload),
+        resolvedRecipientUserIds,
+        mapRouteChanged,
+      );
+    case TRIP_SCHEDULE_CHANGED_ROUTING_KEY:
+      return fanOutResolved(
+        TripScheduleChangedEventSchema.parse(payload),
+        resolvedRecipientUserIds,
+        mapScheduleChanged,
+      );
     case TRIP_VEHICLE_SWAPPED_ROUTING_KEY:
       return mapTripVehicleSwapped(TripVehicleSwappedEventSchema.parse(payload));
     case TRIP_DELAYED_ROUTING_KEY:
-      return fanOut(tripDelayedPayloadSchema.parse(payload), mapTripDelayed);
+      return fanOutResolved(
+        tripDelayedPayloadSchema.parse(payload),
+        resolvedRecipientUserIds,
+        mapTripDelayed,
+      );
     case TRIP_INCIDENT_REPORTED_ROUTING_KEY: {
       const incident = incidentReportedPayloadSchema.parse(payload);
       const recipients = recipientPayloadSchema.parse(payload);
@@ -191,9 +250,45 @@ export function mapTripTrackingAlertToNotifications(
     case TRIP_STOP_DEPARTED_WITH_PENDING_ROUTING_KEY:
       return mapDepartedWithPending(TripStopDepartedWithPendingEventSchema.parse(payload));
     case TRACKING_GPS_OFF_ROUTE_ROUTING_KEY:
-      return fanOut(offRoutePayloadSchema.parse(payload), mapOffRoute);
+      return fanOutResolved(
+        offRoutePayloadSchema.parse(payload),
+        resolvedRecipientUserIds,
+        mapOffRoute,
+      );
     case TRACKING_GPS_APPROACHING_STOP_ROUTING_KEY:
       return fanOut(approachingStopPayloadSchema.parse(payload), mapApproachingStop);
+  }
+}
+
+export interface TripRecipientResolutionRequest {
+  tripId: string;
+  operatorId?: string;
+  affectedBookingIds: string[];
+}
+
+export function parseTripRecipientResolutionRequest(
+  routingKey: TripTrackingAlertRoutingKey,
+  payload: unknown,
+): TripRecipientResolutionRequest | null {
+  switch (routingKey) {
+    case TRIP_DELAYED_ROUTING_KEY:
+      return { tripId: tripDelayedPayloadSchema.parse(payload).tripId, affectedBookingIds: [] };
+    case TRACKING_GPS_OFF_ROUTE_ROUTING_KEY:
+      return { tripId: offRoutePayloadSchema.parse(payload).tripId, affectedBookingIds: [] };
+    case TRIP_SCHEDULE_CHANGED_ROUTING_KEY: {
+      const event = TripScheduleChangedEventSchema.parse(payload);
+      return { tripId: event.tripId, operatorId: event.operatorId, affectedBookingIds: [] };
+    }
+    case TRIP_ROUTE_CHANGED_ROUTING_KEY: {
+      const event = TripRouteChangedEventSchema.parse(payload);
+      return {
+        tripId: event.tripId,
+        operatorId: event.operatorId,
+        affectedBookingIds: event.affectedBookings.map((booking) => booking.bookingId),
+      };
+    }
+    default:
+      return null;
   }
 }
 
@@ -212,8 +307,8 @@ function mapTripCargoThresholdCrossed(
   return [...new Set(recipientUserIds)].map((userId) => ({
     userId,
     type: NotificationType.CARGO_NEAR_FULL_ALERT,
-    title: 'Khoang hang gan day',
-    body: `Chuyen ${payload.tripId} da su dung ${payload.percentFull}% suc chua khoang hang (${payload.loadedWeightKg}/${payload.maxCargoWeightKg} kg).`,
+    title: 'Khoang hàng gần đầy',
+    body: `Chuyến ${payload.tripId} đã sử dụng ${payload.percentFull}% sức chứa khoang hàng (${payload.loadedWeightKg}/${payload.maxCargoWeightKg} kg).`,
     data: {
       eventId: payload.eventId,
       occurredAt: payload.occurredAt,
@@ -232,8 +327,8 @@ function mapTripAssigned(payload: TripAssignedPayload): CreateNotificationDto[] 
     .map((userId) => ({
       userId,
       type: NotificationType.TRIP_ASSIGNED,
-      title: 'Ph?n c?ng chuy?n m?i',
-      body: `B?n ???c ph?n c?ng chuy?n ${payload.routeName} (${payload.vehiclePlateNumber}).`,
+      title: 'Phân công chuyến mới',
+      body: `Bạn được phân công chuyến ${payload.routeName} (${payload.vehiclePlateNumber}).`,
       data: {
         tripId: payload.tripId,
         operatorId: payload.operatorId,
@@ -291,22 +386,43 @@ function mapBoardingStarted(
   return {
     userId,
     type: NotificationType.TRIP_BOARDING_REMINDER,
-    title: 'Chuyen xe bat dau don khach',
-    body: `${formatTripLabel(payload)} da bat dau len xe. Vui long san sang tai diem don.`,
+    title: 'Chuyến xe bắt đầu đón khách',
+    body: `${formatTripLabel(payload)} đã bắt đầu lên xe. Vui lòng sẵn sàng tại điểm đón.`,
     data: buildTripData(payload),
   };
 }
 
 function mapRouteChanged(
   userId: string,
-  payload: z.infer<typeof routeChangedPayloadSchema>,
+  payload: z.infer<typeof TripRouteChangedEventSchema>,
 ): CreateNotificationDto {
   return {
     userId,
     type: NotificationType.TRIP_ROUTE_CHANGED,
-    title: 'Lo trinh chuyen xe da thay doi',
-    body: `${formatTripLabel(payload)} co dieu chinh lo trinh. Vui long kiem tra thong tin moi.`,
+    title: 'Lộ trình chuyến xe đã thay đổi',
+    body: `${formatTripLabel(payload)} có điều chỉnh lộ trình. Vui lòng kiểm tra thông tin mới.`,
     data: buildTripData(payload),
+  };
+}
+
+function mapScheduleChanged(
+  userId: string,
+  payload: z.infer<typeof TripScheduleChangedEventSchema>,
+): CreateNotificationDto {
+  return {
+    userId,
+    type: NotificationType.TRIP_SCHEDULE_CHANGED,
+    title: 'Lịch làm việc của chuyến xe đã thay đổi',
+    body: `Giờ khởi hành chuyến ${payload.tripId} đã đổi sang ${payload.newDeparture}.`,
+    data: {
+      eventId: payload.eventId,
+      occurredAt: payload.occurredAt,
+      tripId: payload.tripId,
+      operatorId: payload.operatorId,
+      oldDeparture: payload.oldDeparture,
+      newDeparture: payload.newDeparture,
+      severity: payload.severity,
+    },
   };
 }
 
@@ -320,8 +436,8 @@ function mapTripVehicleSwapped(
   return crewUserIds.map((userId) => ({
     userId,
     type: NotificationType.VEHICLE_SWAPPED,
-    title: 'Phuong tien chuyen xe da thay doi',
-    body: `Phuong tien chuyen ${payload.tripId} da doi tu ${payload.oldVehiclePlateNumber} sang ${payload.newVehiclePlateNumber}.`,
+    title: 'Phương tiện chuyến xe đã thay đổi',
+    body: `Phương tiện chuyến ${payload.tripId} đã đổi từ ${payload.oldVehiclePlateNumber} sang ${payload.newVehiclePlateNumber}.`,
     data: {
       eventId: payload.eventId,
       occurredAt: payload.occurredAt,
@@ -343,13 +459,13 @@ function mapTripDelayed(
   userId: string,
   payload: z.infer<typeof tripDelayedPayloadSchema>,
 ): CreateNotificationDto {
-  const delayText = payload.delayMinutes ? ` Du kien tre ${payload.delayMinutes} phut.` : '';
+  const delayText = payload.delayMinutes ? ` Dự kiến trễ ${payload.delayMinutes} phút.` : '';
 
   return {
     userId,
     type: NotificationType.TRIP_DELAYED,
-    title: 'Chuyen xe bi tre',
-    body: `${formatTripLabel(payload)} dang bi tre.${delayText}`,
+    title: 'Chuyến xe bị trễ',
+    body: `${formatTripLabel(payload)} đang bị trễ.${delayText}`,
     data: buildTripData(payload),
   };
 }
@@ -381,8 +497,8 @@ function mapOffRoute(
   return {
     userId,
     type: NotificationType.OFF_ROUTE_ALERT,
-    title: 'Canh bao xe lech lo trinh',
-    body: `${formatTripLabel(payload)} dang co dau hieu lech lo trinh.`,
+    title: 'Cảnh báo xe lệch lộ trình',
+    body: `${formatTripLabel(payload)} đang có dấu hiệu lệch lộ trình.`,
     data: buildTripData(payload),
   };
 }
@@ -391,7 +507,7 @@ function mapApproachingStop(
   userId: string,
   payload: ApproachingStopPayload,
 ): CreateNotificationDto {
-  const stopLabel = payload.stopName ?? 'diem don';
+  const stopLabel = payload.stopName ?? 'điểm đón';
   const etaMinutes =
     payload.etaMinutes ??
     (payload.wave === APPROACHING_WAVE_ONE
@@ -401,26 +517,26 @@ function mapApproachingStop(
   return {
     userId,
     type: NotificationType.TRIP_VEHICLE_APPROACHING,
-    title: payload.wave === APPROACHING_WAVE_ONE ? 'Xe sap den diem don' : 'Xe dang den rat gan',
+    title: payload.wave === APPROACHING_WAVE_ONE ? 'Xe sắp đến điểm đón' : 'Xe đang đến rất gần',
     body:
       payload.wave === APPROACHING_WAVE_ONE
-        ? `Xe cua ban se den ${stopLabel} trong khoang ${etaMinutes} phut.`
-        : `Xe cua ban sap den ${stopLabel}! Vui long ra diem don.`,
+        ? `Xe của bạn sẽ đến ${stopLabel} trong khoảng ${etaMinutes} phút.`
+        : `Xe của bạn sắp đến ${stopLabel}! Vui lòng ra điểm đón.`,
     data: buildTripData(payload),
   };
 }
 
 function mapStopDisabled(payload: BookingStopDisabledAffectedEvent): CreateNotificationDto[] {
-  const stopLabel = `diem dung ${payload.stopId}`;
+  const stopLabel = `điểm dừng ${payload.stopId}`;
   const replacementText = payload.replacedByStopId
-    ? ` Diem dung thay the: ${payload.replacedByStopId}.`
+    ? ` Điểm dừng thay thế: ${payload.replacedByStopId}.`
     : '';
 
   return payload.recipientUserIds.map((userId) => ({
     userId: userId,
     type: NotificationType.STOP_DISABLED,
-    title: 'Diem dung tam ngung phuc vu',
-    body: `${stopLabel} tam ngung phuc vu.${replacementText}`,
+    title: 'Điểm dừng tạm ngưng phục vụ',
+    body: `${stopLabel} tạm ngưng phục vụ.${replacementText}`,
     data: {
       eventId: payload.eventId,
       occurredAt: payload.occurredAt,
@@ -442,8 +558,8 @@ function mapDepartedWithPending(
   return crewUserIds.map((userId) => ({
     userId,
     type: NotificationType.DRIVER_STOP_DEPARTED_WITH_PENDING,
-    title: 'Canh bao hanh khach chua len xe',
-    body: `Xe da roi ${payload.stopName} khi con ${payload.pendingPassengerCount} hanh khach chua len xe.`,
+    title: 'Cảnh báo hành khách chưa lên xe',
+    body: `Xe đã rời ${payload.stopName} khi còn ${payload.pendingPassengerCount} hành khách chưa lên xe.`,
     data: {
       eventId: payload.eventId,
       occurredAt: payload.occurredAt,
@@ -466,6 +582,17 @@ function fanOut<TPayload extends RecipientPayload>(
   return collectRecipientUserIds(payload).map((userId) => mapper(userId, payload));
 }
 
+function fanOutResolved<TPayload extends object>(
+  payload: TPayload,
+  resolvedRecipientUserIds: string[] | undefined,
+  mapper: (userId: string, payload: TPayload) => CreateNotificationDto,
+): CreateNotificationDto[] {
+  const recipients =
+    resolvedRecipientUserIds ??
+    collectRecipientUserIds(recipientPayloadSchema.parse(payload));
+  return [...new Set(recipients)].map((userId) => mapper(userId, payload));
+}
+
 function collectRecipientUserIds(payload: RecipientPayload): string[] {
   return [
     ...new Set(
@@ -481,16 +608,13 @@ function isString(value: unknown): value is string {
 }
 
 function formatTripLabel(payload: BaseTripAlertPayload): string {
-  return payload.routeName ? `Chuyen ${payload.routeName}` : `Chuyen ${payload.tripId}`;
+  return payload.routeName ? `Chuyến ${payload.routeName}` : `Chuyến ${payload.tripId}`;
 }
 
 function buildTripData(payload: BaseTripAlertPayload): Record<string, unknown> {
   const { userId, userIds, recipientUserIds, ...data } = payload;
-
-  return {
-    ...data,
-    userId: userId ?? null,
-    userIds: userIds ?? null,
-    recipientUserIds: recipientUserIds ?? null,
-  };
+  void userId;
+  void userIds;
+  void recipientUserIds;
+  return data;
 }

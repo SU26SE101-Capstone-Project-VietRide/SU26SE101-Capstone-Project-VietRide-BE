@@ -5,6 +5,8 @@ import { NotificationsService } from './notifications.service';
 import { OPERATOR_RECIPIENT_PROVIDER } from './parcel-subscription-operator-events.constants';
 import { TRIP_TRACKING_ALERT_QUEUE_BINDINGS } from './trip-tracking-alert-events.constants';
 import { TripTrackingAlertEventsConsumer } from './trip-tracking-alert-events.consumer';
+import { BookingTripRecipientProvider } from './booking-trip-recipient.provider';
+import { TripAnnouncementRecipientProvider } from './trip-announcement-recipient.provider';
 
 describe('TripTrackingAlertEventsConsumer registration (e2e)', () => {
   it('registers trip/tracking alert subscriptions when module initializes', async () => {
@@ -22,14 +24,25 @@ describe('TripTrackingAlertEventsConsumer registration (e2e)', () => {
           provide: OPERATOR_RECIPIENT_PROVIDER,
           useValue: { resolveOperatorRecipientUserIds: jest.fn() },
         },
+        {
+          provide: BookingTripRecipientProvider,
+          useValue: {
+            resolveTripPassengerUserIds: jest.fn(),
+            resolveAffectedTripPassengerUserIds: jest.fn(),
+          },
+        },
+        {
+          provide: TripAnnouncementRecipientProvider,
+          useValue: { getTripRecipientSnapshot: jest.fn(), resolveTripCrewUserIds: jest.fn() },
+        },
       ],
     }).compile();
 
     await moduleRef.init();
 
     expect(subscribe).toHaveBeenCalledTimes(TRIP_TRACKING_ALERT_QUEUE_BINDINGS.length);
-    expect(subscribe).not.toHaveBeenCalledWith(
-      expect.any(String),
+    expect(subscribe).toHaveBeenCalledWith(
+      'notification:trip-schedule-changed-crew',
       'trip.trip.schedule_changed',
       expect.any(Function),
       expect.any(Object),

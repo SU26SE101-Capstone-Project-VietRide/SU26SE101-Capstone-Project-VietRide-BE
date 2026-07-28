@@ -128,6 +128,8 @@ function createEnv(): Env {
     LOG_LEVEL: 'info',
     IDENTITY_INTERNAL_BASE_URL: 'http://identity.test',
     TRIP_INTERNAL_BASE_URL: 'http://trip.test',
+    BOOKING_INTERNAL_BASE_URL: 'http://booking.test',
+    PARCEL_INTERNAL_BASE_URL: 'http://parcel.test',
     FCM_DRY_RUN: false,
     FCM_DRY_RUN_TOPIC: 'vietride-notification-e2e',
     SENDGRID_API_KEY: undefined,

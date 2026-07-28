@@ -1448,6 +1448,32 @@ response contains no user/contact PII. Missing/empty `operatorId` is
 `422 VALIDATION_ERROR`; invalid internal authentication is `401`; no cross-tenant row contributes
 to either the count or list.
 
+### GET `/internal/v1/bookings/trips/{tripId}/notification-recipients`
+
+Auth: valid Internal JWT only. Caller: Notification Service. Never exposed through Gateway.
+Booking resolves the passenger ownership projection for trip-wide notifications without exposing
+contact PII or requiring a cross-database query.
+
+Response `200` is a raw DTO without an `ApiResponse` success envelope:
+
+```json
+{
+  "tripId": "uuid",
+  "recipients": [
+    {
+      "bookingId": "uuid",
+      "userId": "uuid",
+      "status": "CONFIRMED"
+    }
+  ]
+}
+```
+
+Only `CONFIRMED` and `PARTIAL_NO_SHOW` bookings are returned. Rows are distinct and ordered by
+`bookingId`, then `userId`, to keep retries deterministic. A trip with no eligible booking returns
+raw `200` with `recipients: []`. Invalid Internal JWT returns `401`; malformed/all-zero `tripId`
+returns `422 VALIDATION_ERROR`. The endpoint has no Gateway route.
+
 ### POST `/v1/bookings/{bookingId}/cancel`
 
 Auth: booking owner. Idempotency: required.
@@ -2064,7 +2090,7 @@ match is still raw `200` with zero.
 
 ### GET `/internal/v1/trips/{tripId}?pricingAt={iso8601}`
 
-Auth: valid Internal JWT only. Callers: Booking, Parcel, Tracking, Payment (BSOT §7.2). This
+Auth: valid Internal JWT only. Callers: Booking, Parcel, Tracking, Payment, Notification (BSOT §7.2). This
 endpoint adds no tenant authorization; invalid Internal JWT returns `401 AUTH_TOKEN_INVALID`. Trip snapshot
 that Booking reads for checkout fare calc + pickup/dropoff validation. `pricingAt` is optional;
 when present it must be an ISO-8601 datetime with offset. Returns a **raw DTO**
@@ -2615,13 +2641,18 @@ Parcel cargo policy:
 - Weight/DIM/chargeable precision: `decimal(8,2)` kg.
 - Money is VND `BIGINT` persisted to the đồng. `Money.FromRaw` is pass-through; a fractional
   calculation rounds to the nearest đồng with `MidpointRounding.AwayFromZero`.
-- `PENDING_OPERATOR_ACTION` is disambiguated by `pendingActionType`: `CAPACITY_EXCEEDED`, `RESERVE_FAILED`, `REFUND_CONFIRMATION`.
+- `dimWeightKg = lengthCm × widthCm × heightCm / 6000` and `chargeableWeightKg = max(weightKg, dimWeightKg)`.
+- `grossPriceVnd = max(minimumPriceVnd, round(chargeableWeightKg × pricePerKgVnd))`; rounding is to the nearest đồng with `MidpointRounding.AwayFromZero`. There is no kg ceiling and no 1,000-VND floor.
+- Size is derived from chargeable weight: `SMALL <= 5`, `MEDIUM <= 15`, `LARGE <= 30`, `EXTRA_LARGE > 30` kg. Client size fields are compatibility hints only.
+- `estimatedTotalPriceVnd = estimatedGrossPriceVnd - min(discountAmountVnd, estimatedGrossPriceVnd)`; final total uses the same clamp against final gross.
+- Settlement v2 deposit is 20% of estimated total. Only `READY_TO_LOAD` may transition to `LOADED`.
+- `PENDING_OPERATOR_ACTION` is disambiguated by `pendingActionType`; `pendingActionResumeStatus` records the settlement state to resume after recovery.
 
 ### GET `/v1/parcels/available-trips`
 
 Auth: `PASSENGER`.
 
-Query: `originStationId`, `destinationStationId`, `departureDate`, `lengthCm`, `widthCm`, `heightCm`, `estimatedWeightKg`, `sizeCategory`.
+Query: `originStationId`, `destinationStationId`, `departureDate`, `lengthCm`, `widthCm`, `heightCm`, `estimatedWeightKg`; legacy `sizeCategory` is optional and non-authoritative.
 
 Backend calculates `volumeM3`, `dimWeightKg`, and `chargeableWeightKg = max(estimatedWeightKg, dimWeightKg)`.
 Customer response must not expose raw remaining cargo capacity. Trips that cannot accept both estimated volume and estimated weight are filtered out.
@@ -2659,8 +2690,7 @@ Response `200`:
 }
 ```
 
-`depositPercent` is the effective route/operator deposit policy used to calculate
-`estimatedDepositVnd`. The public item does not serialize `availableCargoWeightKg`,
+`depositPercent` is `20` under settlement policy v2 and is snapshotted on creation. The public item does not serialize `availableCargoWeightKg`,
 `availableCargoVolumeM3`, or the internal `priceVnd` alias.
 
 ### POST `/v1/parcels`
@@ -2675,7 +2705,6 @@ Request:
   "bookingId": "uuid",
   "itemName": "Thùng quà",
   "description": "Hàng dễ vỡ",
-  "sizeCategory": "MEDIUM",
   "lengthCm": 60,
   "widthCm": 40,
   "heightCm": 35,
@@ -2687,7 +2716,7 @@ Request:
     "email": "recipient@example.com"
   },
   "deliveryMethod": "TERMINAL_PICKUP",
-  "paymentMethod": "VNPAY"
+  "voucherCode": null
 }
 ```
 
@@ -2708,15 +2737,39 @@ Response `201`:
     "parcelId": "uuid",
     "parcelCode": "VR-PCL-20260518-P7K3D9Q2",
     "status": "PENDING_PAYMENT",
-    "totalAmount": 30000,
-    "originalTotalAmount": 30000,
-    "discountAmount": 0,
+    "estimatedSizeCategory": "MEDIUM",
+    "estimatedGrossPriceVnd": 150000,
+    "discountAmountVnd": 0,
+    "estimatedTotalPriceVnd": 150000,
+    "depositPercent": 20,
+    "depositRequiredVnd": 30000,
+    "depositPaidVnd": 0,
     "voucherCode": null,
-    "paymentRedirectUrl": "https://vnpay.vn/..."
+    "settlementPolicyVersion": 2
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
+
+The server derives `estimatedSizeCategory`; old clients may still send `sizeCategory`, but it does not override calculated size or price. `EXTRA_LARGE` is returned as `PENDING_OPERATOR_REVIEW`; all other sizes return `PENDING_PAYMENT`. Create does not reserve cargo or create a payment.
+
+### POST `/v1/parcels/{parcelId}/deposit-payment`
+
+Auth: owning `PASSENGER`. Idempotency: required.
+
+Request: `{ "paymentMethod": "WALLET|VNPAY" }`.
+
+The mutation first creates an idempotent soft cargo hold using estimated weight/volume, then creates a Payment whose `dueAt = min(paymentStartedAt + 15 minutes, latestCheckInAt)`. If no positive payment window remains, it does not create a Payment or hold. A zero deposit consumes the validated voucher, keeps the reservation, and moves directly to `RESERVED` without creating a zero-value Payment.
+
+Response `200` data contains `parcelId`, `status`, `depositPaymentId?`, `depositRequiredVnd`, `depositPaidVnd`, `paymentDueAt?`, and `paymentRedirectUrl?`. Payment success is valid only when authoritative `paidAt < paymentDueAt`; fail/expiry moves the Parcel to `EXPIRED`, releases cargo, and does not consume the voucher.
+
+### POST `/v1/parcels/{parcelId}/final-payment`
+
+Auth: owning `PASSENGER`. Idempotency: required. Allowed only in `PENDING_FINAL_PAYMENT` and before `finalPaymentDeadline`.
+
+Request: `{ "paymentMethod": "WALLET|VNPAY" }`.
+
+The charged amount is server-derived `max(0, balanceRequiredVnd - balancePaidVnd)`. Response data contains `parcelId`, `status`, `balancePaymentId?`, `balanceRequiredVnd`, `balancePaidVnd`, `finalPaymentDeadline`, and `paymentRedirectUrl?`. A payment with `paidAt >= finalPaymentDeadline` is not added to `balancePaidVnd`; Payment Service owns capture/refund tracking for that late payment.
 
 ### GET `/v1/parcels/received`
 
@@ -2820,8 +2873,7 @@ as an empty page. Validation failures return `422 VALIDATION_ERROR`.
 
 Auth: sender, recipient account, or authorized operator.
 
-Response `200`: parcel detail with sender, recipient, trip, payment, transfer, optional `photoUrl`,
-and delivery token state excluding raw token.
+Response `200`: parcel detail with sender, recipient, trip, transfer, optional `photoUrl`, delivery token state excluding raw token, estimated/actual cargo snapshots, and the canonical settlement fields: `estimatedGrossPriceVnd`, `finalGrossPriceVnd`, `discountAmountVnd`, `estimatedTotalPriceVnd`, `finalTotalPriceVnd`, `depositPercent`, `depositRequiredVnd`, `depositPaidVnd`, `balanceRequiredVnd`, `balancePaidVnd`, `refundDueVnd`, `refundedAmountVnd`, `forfeitedDepositVnd`, payment IDs, `finalPaymentDeadline`, check-in/reweigh timestamps, fare snapshots, and `settlementPolicyVersion`.
 
 ### POST `/v1/parcels/delivery/confirm`
 
@@ -2927,8 +2979,13 @@ Response `200`:
         "recipientName": "Nguyen Van A",
         "recipientPhone": "0900000000",
         "dropoffStopId": "uuid",
-        "sizeCategory": "MEDIUM",
+        "estimatedSizeCategory": "MEDIUM",
+        "actualSizeCategory": "MEDIUM",
         "estimatedWeightKg": 12.5,
+        "actualWeightKg": 13.2,
+        "balanceRequiredVnd": 24000,
+        "balancePaidVnd": 24000,
+        "finalPaymentDeadline": "2026-05-18T07:50:00+07:00",
         "description": "Gói hàng nhỏ",
         "photoUrl": "https://storage.googleapis.com/vietride.appspot.com/parcels/photo.jpg"
       }
@@ -2949,6 +3006,14 @@ caller is not the assigned Assistant, has no operator scope, or the trip is unav
 `422 VALIDATION_FAILED` for invalid pagination; `503 TRIP_SERVICE_UNAVAILABLE` when
 assignment verification cannot reach Trip service.
 
+### POST `/v1/assistant/parcels/{parcelId}/check-in`
+
+Auth: assigned `ASSISTANT` under the same operator. Idempotency: required.
+
+Request: `{ "tripId": "uuid", "parcelCode": "VRP-20260722-ABCDEFGH" }`.
+
+Only `RESERVED` may be checked in and the request must arrive strictly before `latestCheckInAt = min(departureAt - 30 minutes, loadCutoffAt - 10 minutes)`. Response `200` data contains `parcelId`, `parcelCode`, `status: "CHECKED_IN"`, `checkedInAt`, and `latestCheckInAt`. A foreign trip/code is hidden as `404 PARCEL_NOT_FOUND`; a late request returns `409 PARCEL_CHECK_IN_CLOSED`.
+
 ### POST `/v1/assistant/parcels/{parcelId}/reweigh`
 
 Auth: `ASSISTANT`. Idempotency: required.
@@ -2959,9 +3024,7 @@ Request:
   "actualLengthCm": 62,
   "actualWidthCm": 42,
   "actualHeightCm": 36,
-  "actualWeightKg": 13.2,
-  "actualSizeCategory": "MEDIUM",
-  "paymentMethod": "VNPAY"
+  "actualWeightKg": 13.2
 }
 ```
 
@@ -2973,22 +3036,26 @@ Response `200`:
   "data": {
     "parcelId": "uuid",
     "parcelCode": "VR-PCL-20260518-P7K3D9Q2",
-    "status": "PENDING_ADDITIONAL_PAYMENT",
+    "status": "PENDING_FINAL_PAYMENT",
+    "actualSizeCategory": "MEDIUM",
     "actualChargeableWeightKg": 15.62,
-    "totalPriceVnd": 180000,
-    "additionalAmount": 30000,
-    "refundAmount": 0,
-    "paymentRedirectUrl": "https://vnpay.vn/..."
+    "finalGrossPriceVnd": 180000,
+    "discountAmountVnd": 0,
+    "finalTotalPriceVnd": 180000,
+    "depositPaidVnd": 30000,
+    "balanceRequiredVnd": 150000,
+    "refundDueVnd": 0,
+    "finalPaymentDeadline": "2026-05-18T07:50:00+07:00"
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
 
 Decision notes:
-- Capacity is resolved before pricing.
-- If actual cargo exceeds trip capacity beyond auto-overflow, status becomes `PENDING_OPERATOR_ACTION` with pending action type `CAPACITY_EXCEEDED`.
-- If actual price is lower outside tolerance, status becomes `PENDING_OPERATOR_ACTION` with pending action type `REFUND_CONFIRMATION`.
-- If actual price is higher outside tolerance, status becomes `PENDING_ADDITIONAL_PAYMENT`.
+- Reweigh is allowed only from `CHECKED_IN`; backend derives actual size and all money values.
+- Task reweigh owns estimated reservation → actual reservation. If capacity cannot be updated, status becomes `PENDING_OPERATOR_ACTION` with `pendingActionType=CAPACITY_EXCEEDED` and a `pendingActionResumeStatus`.
+- Tolerance never waives settlement. A positive balance produces `PENDING_FINAL_PAYMENT`; otherwise the Parcel becomes `READY_TO_LOAD`.
+- A positive `refundDueVnd` enqueues an idempotent Outbox refund but does not block `READY_TO_LOAD`.
 
 ### POST `/v1/assistant/parcels/{parcelId}/load`
 
@@ -3029,13 +3096,41 @@ Errors:
   tenant does not match.
 - `404 PARCEL_NOT_FOUND` when the addressed Parcel is hidden, `tripId` does not match, or the
   scanned `parcelCode` does not match. These cases do not disclose a foreign Parcel.
-- `409 INVALID_STATUS` when the Parcel is not `PENDING` or this request loses the transition race.
+- `409 INVALID_STATUS` when the Parcel is not `READY_TO_LOAD` or this request loses the transition race.
 - `422 IDEMPOTENCY_KEY_MISMATCH` for same-key/different-payload reuse under the shared idempotency
   contract.
 
 Day-29 E2E setup uses an isolated operator-owned Trip graph fixture with its assigned assistant,
 vehicle cargo snapshot, and three Parcels. The fixture is created out of band; this contract does
 not expose a public/manual Trip-create endpoint.
+
+### GET `/internal/v1/parcels/{parcelId}`
+
+Auth: valid Internal JWT only. Callers: Tracking and Notification. Never exposed through Gateway.
+The endpoint returns terminal as well as active Parcel rows. Notification uses it only as a
+fail-closed recipient snapshot when an older event does not carry immutable recipient fields.
+
+Response `200` uses the ADR 0004 envelope:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "parcelId": "uuid",
+    "tripId": "uuid",
+    "status": "REJECTED",
+    "senderUserId": "uuid",
+    "recipientUserId": "uuid-or-null",
+    "operatorId": "uuid",
+    "dropoffStopId": "uuid-or-null"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-27T10:00:00Z" }
+}
+```
+
+Errors: `401 AUTH_TOKEN_INVALID`; `404 PARCEL_NOT_FOUND`. Timeout, auth failure, 5xx or malformed
+response is a dependency failure for Notification and must not be interpreted as an empty recipient list.
 
 ### POST `/internal/v1/parcels/{parcelId}/mark-loaded`
 
@@ -3102,16 +3197,88 @@ Response `200`:
   "affectedParcels": [
     {
       "parcelId": "uuid",
-      "status": "PENDING",
-      "refundAmount": 35000
+      "status": "RESERVED",
+      "refundAmountVnd": 35000
     }
   ]
 }
 ```
 
 The result is tenant-scoped by `operatorId`, ordered by `parcelId`, and contains each active
-parcel at most once. `PENDING` contributes immutable `depositAmount + additionalAmount`;
+parcel at most once. Settlement v2 contributes `depositPaidVnd + balancePaidVnd - refundedAmountVnd`;
 pre-payment/review and loaded/in-transit operational rows contribute zero.
+
+### GET `/v1/operator/parcels`
+
+Auth: `OPERATOR_ADMIN|OPERATOR_STAFF`. Read-only; no `Idempotency-Key`.
+The service always scopes data by the authenticated `operatorId` claim; clients cannot override
+tenant scope with a query parameter.
+
+Optional query parameters:
+
+- `status`: case-insensitive `ParcelStatus`.
+- `tripId`: UUID.
+- `pendingActionType`: case-insensitive `PendingActionType`.
+- `page`: default `1`, minimum `1`.
+- `pageSize`: default `20`, range `1..100`.
+
+Response `200` uses the ADR 0004 paged envelope. Items are ordered by `createdAt DESC`, then
+`parcelId DESC`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "items": [
+      {
+        "parcelId": "uuid",
+        "parcelCode": "VR-PCL-20260727-ABC123",
+        "status": "PENDING_OPERATOR_REVIEW",
+        "tripId": "uuid",
+        "senderUserId": "uuid",
+        "recipientName": "Nguyen Van A",
+        "recipientPhone": "+84900000000",
+        "estimatedSizeCategory": "EXTRA_LARGE",
+        "actualSizeCategory": null,
+        "estimatedChargeableWeightKg": 50,
+        "actualChargeableWeightKg": null,
+        "depositRequiredVnd": 10000,
+        "depositPaidVnd": 0,
+        "balanceRequiredVnd": 0,
+        "balancePaidVnd": 0,
+        "refundDueVnd": 0,
+        "forfeitedDepositVnd": 0,
+        "latestCheckInAt": "2026-07-27T09:30:00Z",
+        "loadCutoffAt": "2026-07-27T09:50:00Z",
+        "finalPaymentDeadline": null,
+        "pendingActionType": null,
+        "pendingActionReason": null,
+        "photoUrl": null,
+        "createdAt": "2026-07-27T08:00:00Z"
+      }
+    ],
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 1,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-27T08:00:00Z" }
+}
+```
+
+Errors: `403 FORBIDDEN` when `operatorId` scope is missing; `422 VALIDATION_ERROR` for invalid
+filters or pagination.
+
+### PATCH `/v1/operator/parcels/{parcelId}/review`
+
+Auth: `OPERATOR_ADMIN|OPERATOR_STAFF` for the Parcel operator. Idempotency: required. Valid only from `PENDING_OPERATOR_REVIEW`.
+
+Request: `{ "decision": "APPROVE|REJECT", "reason": "optional for approve, required for reject" }`. Price, deposit and payment method are not accepted from Operator input.
+
+`APPROVE` moves to `PENDING_PAYMENT`; the Passenger then calls deposit-payment. `REJECT` moves to `REJECTED`. An unresolved review after 24 hours moves to `CANCELLED` with reason `OPERATOR_REVIEW_TIMEOUT`; no payment or refund exists in either reject/timeout branch.
 
 ### POST `/v1/operator/parcels/{parcelId}/request-transfer`
 
@@ -3144,6 +3311,8 @@ Response `200`:
 Auth: `OPERATOR_ADMIN` or `OPERATOR_STAFF` for parcel's operator. Idempotency: required.
 
 Valid only when parcel status is `PENDING_OPERATOR_ACTION` and pending action type is `REFUND_CONFIRMATION`.
+
+This endpoint is legacy-policy-v1 compatibility only. Settlement policy v2 never creates `REFUND_CONFIRMATION`: a lower final price writes `refundDueVnd`, enqueues an idempotent refund, and moves directly to `READY_TO_LOAD`.
 
 Request:
 ```json
@@ -3905,7 +4074,7 @@ Auth: Internal JWT only. Raw success payload:
 ```
 
 Only Parcel rows with `status=DELIVERY_CONFIRMED` and `confirmedAt` in UTC `[from,to)` contribute.
-Revenue is signed `depositAmount + additionalAmount - refundAmount` and is never clamped.
+Parcel collected amount is signed `depositPaidVnd + balancePaidVnd - refundedAmountVnd` and is never clamped. `forfeitedDepositVnd` is reported separately and is not added a second time.
 
 All three source endpoints validate RFC 3339 UTC half-open ranges. PostgreSQL `SUM(BIGINT)` is
 read as NUMERIC and checked per group and total before mapping to Int64. Overflow returns an ADR
@@ -4360,6 +4529,21 @@ Response `200`:
 `operatorId`, `avatarUrl` và `phone` có thể null. Trip DriverSchedule validation yêu cầu `operatorId` khớp operator caller cho `DRIVER`/`ASSISTANT`; Shuttle dispatch còn yêu cầu driver active có `displayName` và `phone` để snapshot vào assignment event.
 
 Error `404` — `RESOURCE_NOT_FOUND`.
+
+### GET `/internal/v1/users/system-admin-recipient-ids`
+
+Auth: valid Internal JWT only. Caller: Notification Service. Never exposed through Gateway.
+Identity returns the distinct IDs of non-soft-deleted users whose role is `SYSTEM_ADMIN` and whose
+status is `ACTIVE`.
+
+Response `200` is a raw JSON array without an `ApiResponse` success envelope:
+
+```json
+["uuid", "uuid"]
+```
+
+No active System Admin is a valid raw `200 []`. Ordering is deterministic by user ID. Invalid
+Internal JWT returns `401`. No email, phone, name, token, or other PII is returned.
 
 ### GET `/internal/v1/users/by-phone?phone={normalizedE164}`
 

@@ -1,8 +1,10 @@
 import { Logger } from '@nestjs/common';
 import {
   IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
+  IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY,
   IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
   IDENTITY_OTP_REQUESTED_ROUTING_KEY,
+  IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
   IDENTITY_USER_CREATED_ROUTING_KEY,
 } from '@vietride/contracts';
 import type { RabbitMqConsumer, RabbitMqHandler } from '@vietride/nest-rabbitmq';
@@ -11,6 +13,7 @@ import { EmailTemplateKey, NotificationType } from '../generated/notification-pr
 import { MessageIdempotencyService } from '../notifications/message-idempotency.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { OperatorRecipientProvider } from '../notifications/operator-recipient.provider';
+import { IdentitySystemAdminRecipientProvider } from '../notifications/identity-system-admin-recipient.provider';
 import { IdentityEventsConsumer } from './identity-events.consumer';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
@@ -24,6 +27,7 @@ describe('IdentityEventsConsumer', () => {
   let idempotency: jest.Mocked<MessageIdempotencyService>;
   let notificationsService: jest.Mocked<NotificationsService>;
   let operatorRecipientProvider: jest.Mocked<OperatorRecipientProvider>;
+  let systemAdminRecipientProvider: jest.Mocked<IdentitySystemAdminRecipientProvider>;
   let consumer: IdentityEventsConsumer;
 
   beforeEach(async () => {
@@ -46,6 +50,9 @@ describe('IdentityEventsConsumer', () => {
     operatorRecipientProvider = {
       resolveOperatorRecipientUserIds: jest.fn(),
     };
+    systemAdminRecipientProvider = {
+      resolveSystemAdminRecipientUserIds: jest.fn(),
+    } as unknown as jest.Mocked<IdentitySystemAdminRecipientProvider>;
 
     jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
@@ -55,6 +62,7 @@ describe('IdentityEventsConsumer', () => {
       idempotency,
       notificationsService,
       operatorRecipientProvider,
+      systemAdminRecipientProvider,
     );
     await consumer.onModuleInit();
   });
@@ -70,8 +78,10 @@ describe('IdentityEventsConsumer', () => {
   it('subscribes one durable queue per identity routing key', () => {
     expect(Object.keys(handlers).sort()).toEqual([
       IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
+      IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY,
       IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
       IDENTITY_OTP_REQUESTED_ROUTING_KEY,
+      IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
       IDENTITY_USER_CREATED_ROUTING_KEY,
     ]);
     expect(rabbitConsumer.subscribe).toHaveBeenCalledWith(
@@ -80,6 +90,151 @@ describe('IdentityEventsConsumer', () => {
       expect.any(Function),
       { prefetch: 1, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
     );
+    expect(rabbitConsumer.subscribe).toHaveBeenCalledWith(
+      'notification.identity.subscription.usage-warning',
+      IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
+      expect.any(Function),
+      { prefetch: 1, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
+    );
+  });
+
+  it('notifies each System Admin when an operator registration is submitted', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    systemAdminRecipientProvider.resolveSystemAdminRecipientUserIds.mockResolvedValue([USER_ID]);
+    notificationsService.createNotification.mockResolvedValue(
+      createNotification(NotificationType.OPERATOR_REGISTRATION_SUBMITTED),
+    );
+
+    await consumer.handleOperatorRegistrationSubmitted(
+      {
+        eventId: EVENT_ID,
+        occurredAt: '2026-07-27T08:30:00+07:00',
+        operatorId: OPERATOR_ID,
+        companyName: 'Nhà xe Việt Ride',
+      },
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(systemAdminRecipientProvider.resolveSystemAdminRecipientUserIds).toHaveBeenCalled();
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.OPERATOR_REGISTRATION_SUBMITTED,
+        dedupeKey: `${IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:${NotificationType.OPERATOR_REGISTRATION_SUBMITTED}`,
+      }),
+    );
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+  });
+
+  it('releases registration lock when System Admin lookup fails', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    systemAdminRecipientProvider.resolveSystemAdminRecipientUserIds.mockRejectedValue(
+      new Error('identity unavailable'),
+    );
+
+    await expect(
+      consumer.handleOperatorRegistrationSubmitted(
+        {
+          eventId: EVENT_ID,
+          occurredAt: '2026-07-27T08:30:00+07:00',
+          operatorId: OPERATOR_ID,
+          companyName: 'Nhà xe Việt Ride',
+        },
+        createMessage(MESSAGE_ID),
+      ),
+    ).rejects.toThrow('identity unavailable');
+    expect(idempotency.release).toHaveBeenCalledWith(
+      IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+  });
+
+  it('notifies each operator admin when subscription usage crosses the warning threshold', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([USER_ID]);
+    notificationsService.createNotification.mockResolvedValue(
+      createNotification(NotificationType.SUBSCRIPTION_USAGE_WARNING),
+    );
+
+    await consumer.handleSubscriptionUsageWarning(
+      subscriptionUsageWarningPayload(),
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(operatorRecipientProvider.resolveOperatorRecipientUserIds).toHaveBeenCalledWith(
+      OPERATOR_ID,
+    );
+    expect(notificationsService.createNotification).toHaveBeenCalledWith({
+      userId: USER_ID,
+      type: NotificationType.SUBSCRIPTION_USAGE_WARNING,
+      title: 'Sắp đạt giới hạn gói dịch vụ',
+      body: 'Nhà xe đã sử dụng 8/10 hạn mức tài xế trong kỳ 2026-07 (80%).',
+      data: subscriptionUsageWarningPayload(),
+      dedupeKey: `${IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:${NotificationType.SUBSCRIPTION_USAGE_WARNING}`,
+    });
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+  });
+
+  it('marks subscription usage warning with no active operator admin as processed', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([]);
+
+    await expect(
+      consumer.handleSubscriptionUsageWarning(
+        subscriptionUsageWarningPayload(),
+        createMessage(MESSAGE_ID),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(notificationsService.createNotification).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+    expect(idempotency.release).not.toHaveBeenCalled();
+  });
+
+  it('releases subscription usage warning lock when operator lookup fails', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockRejectedValue(
+      new Error('identity unavailable'),
+    );
+
+    await expect(
+      consumer.handleSubscriptionUsageWarning(
+        subscriptionUsageWarningPayload(),
+        createMessage(MESSAGE_ID),
+      ),
+    ).rejects.toThrow('identity unavailable');
+    expect(idempotency.release).toHaveBeenCalledWith(
+      IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+  });
+
+  it('drops malformed subscription usage warning after marking it processed', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+
+    await expect(
+      consumer.handleSubscriptionUsageWarning(
+        { ...subscriptionUsageWarningPayload(), limit: 0 },
+        createMessage(MESSAGE_ID),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(operatorRecipientProvider.resolveOperatorRecipientUserIds).not.toHaveBeenCalled();
+    expect(notificationsService.createNotification).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+    expect(idempotency.release).not.toHaveBeenCalled();
   });
 
   it('validates and logs identity.user.created without creating notification', () => {
@@ -277,6 +432,7 @@ describe('IdentityEventsConsumer', () => {
     );
 
     expect(notificationsService.enqueueEmail).toHaveBeenCalledWith({
+      dedupeKey: `${IDENTITY_OTP_REQUESTED_ROUTING_KEY}:${MESSAGE_ID}:email`,
       toEmail: 'rider@example.com',
       templateKey: EmailTemplateKey.AUTH_OTP,
       templateData: { code: '123456', purpose: 'REGISTRATION', ttlMinutes: 5 },
@@ -400,7 +556,23 @@ function createMessage(messageId: string | undefined): ConsumeMessage {
   } as ConsumeMessage;
 }
 
-function createNotification(type: NotificationType) {
+function subscriptionUsageWarningPayload(): Record<string, unknown> {
+  return {
+    eventId: EVENT_ID,
+    occurredAt: '2026-07-27T08:30:00+07:00',
+    subscriptionId: '44444444-4444-4444-8444-444444444444',
+    operatorId: OPERATOR_ID,
+    resource: 'DRIVERS',
+    periodKey: '2026-07',
+    used: 8,
+    limit: 10,
+    usagePercent: 80,
+  };
+}
+
+function createNotification(
+  type: NotificationType,
+): Awaited<ReturnType<NotificationsService['createNotification']>> {
   return {
     id: '99999999-9999-4999-8999-999999999999',
     userId: USER_ID,

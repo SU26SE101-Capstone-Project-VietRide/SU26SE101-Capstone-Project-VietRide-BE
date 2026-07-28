@@ -407,6 +407,27 @@ internal sealed class TripRepository : ITripRepository
                 .FirstOrDefaultAsync(cargo => cargo.TripId == tripId && cargo.ParcelId == parcelId, cancellationToken);
             if (existing is not null)
             {
+                if (existing.State == TripCargoParcel.ReleasedState)
+                {
+                    ValidatePositiveCargo(weightKg, volumeM3);
+                    var restoredReservedWeight = trip.ReservedParcelWeightKg + weightKg;
+                    var restoredReservedVolume = trip.ReservedParcelVolumeM3 + volumeM3;
+                    EnsureCapacity(
+                        trip,
+                        restoredReservedWeight,
+                        restoredReservedVolume,
+                        trip.TotalLoadedWeightKg,
+                        trip.TotalLoadedVolumeM3,
+                        allowCapacityOverflow);
+                    existing.RestoreReservation(weightKg, volumeM3);
+                    trip.UpdateCargoCounters(
+                        restoredReservedWeight,
+                        restoredReservedVolume,
+                        trip.TotalLoadedWeightKg,
+                        trip.TotalLoadedVolumeM3);
+                    trip.UpdatedAt = now;
+                }
+
                 return BuildCargoResult(trip, wasNearFullBefore: IsNearFull(trip.TotalLoadedWeightKg, trip.MaxCargoWeightKg));
             }
 

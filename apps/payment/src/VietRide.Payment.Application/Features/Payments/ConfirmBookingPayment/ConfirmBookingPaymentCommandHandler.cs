@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using MediatR;
 using Microsoft.Extensions.Logging;
@@ -21,6 +22,7 @@ public sealed class ConfirmBookingPaymentCommandHandler
     private const string VnPayResponseCodeKey = "vnp_ResponseCode";
     private const string VnPayAmountKey = "vnp_Amount";
     private const string VnPayTransactionStatusKey = "vnp_TransactionStatus";
+    private const string VnPayPayDateKey = "vnp_PayDate";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -138,7 +140,7 @@ public sealed class ConfirmBookingPaymentCommandHandler
                 return ConfirmSuccess();
             }
 
-            payment.MarkSucceeded(responseCode, _clock.UtcNow);
+            payment.MarkSucceeded(responseCode, ResolvePaidAt(request.Parameters, _clock.UtcNow));
             _payments.Update(payment);
 
             var platformRef = MapHoldRef(payment.ReferenceType);
@@ -161,6 +163,7 @@ public sealed class ConfirmBookingPaymentCommandHandler
             else
             {
                 await EnqueuePaymentSucceededAsync(payment, cancellationToken).ConfigureAwait(false);
+                await EnqueueLateParcelRefundIfNeededAsync(payment, cancellationToken).ConfigureAwait(false);
             }
 
             _logger.LogInformation(
@@ -224,7 +227,9 @@ public sealed class ConfirmBookingPaymentCommandHandler
             payment.ReferenceId,
             payment.Amount.Amount,
             payment.Method,
-            context);
+            context,
+            payment.SucceededAt!.Value,
+            payment.DueAt);
         await _revenueLedger.RecordPaymentSucceededAsync(
             evt.EventId,
             context,
@@ -247,6 +252,32 @@ public sealed class ConfirmBookingPaymentCommandHandler
         await _outbox.EnqueueAsync(evt.EventType, payload, cancellationToken).ConfigureAwait(false);
     }
 
+    private async Task EnqueueLateParcelRefundIfNeededAsync(
+        VietRide.Payment.Domain.Entities.Payment payment,
+        CancellationToken cancellationToken)
+    {
+        if (payment.ReferenceType is not (PaymentReferenceType.PARCEL or PaymentReferenceType.PARCEL_ADDITIONAL)
+            || !payment.DueAt.HasValue
+            || !payment.SucceededAt.HasValue
+            || payment.SucceededAt.Value < payment.DueAt.Value
+            || !payment.UserId.HasValue)
+        {
+            return;
+        }
+
+        var evt = new ParcelRefundInitiatedIntegrationEvent
+        {
+            ParcelId = payment.ReferenceId,
+            SenderUserId = payment.UserId.Value,
+            Amount = payment.Amount.Amount,
+            ReferenceType = "PARCEL_REFUND",
+            ReferenceId = payment.ReferenceId,
+            IdempotencyKey = $"{payment.Id:D}:LATE_PAYMENT",
+        };
+        var payload = JsonSerializer.Serialize(evt, JsonOptions);
+        await _outbox.EnqueueAsync(evt.EventType, payload, cancellationToken).ConfigureAwait(false);
+    }
+
     private static bool IsSignedAmountValid(IReadOnlyDictionary<string, string> parameters, long paymentAmount)
     {
         if (!parameters.TryGetValue(VnPayAmountKey, out var signedAmount)
@@ -263,6 +294,26 @@ public sealed class ConfirmBookingPaymentCommandHandler
         {
             return false;
         }
+    }
+
+    private static DateTimeOffset ResolvePaidAt(
+        IReadOnlyDictionary<string, string> parameters,
+        DateTimeOffset fallback)
+    {
+        if (!parameters.TryGetValue(VnPayPayDateKey, out var payDate)
+            || !DateTime.TryParseExact(
+                payDate,
+                "yyyyMMddHHmmss",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var localPaidAt))
+        {
+            return fallback;
+        }
+
+        return new DateTimeOffset(
+            DateTime.SpecifyKind(localPaidAt, DateTimeKind.Unspecified),
+            TimeSpan.FromHours(7));
     }
 
     private static ConfirmBookingPaymentResult ConfirmSuccess()

@@ -51,11 +51,13 @@ public sealed class RefundToWalletCommandHandler : IRequestHandler<RefundToWalle
                 cancellationToken)
             .ConfigureAwait(false);
 
-        var existing = await _wallets.FindTransactionByReferenceAsync(
-                referenceType,
-                request.ReferenceId,
-                cancellationToken)
-            .ConfigureAwait(false);
+        var existing = referenceType == WalletTransactionRef.BOOKING_REFUND
+            ? await _wallets.FindTransactionByReferenceAsync(
+                    referenceType,
+                    request.ReferenceId,
+                    cancellationToken)
+                .ConfigureAwait(false)
+            : null;
         if (existing is not null)
         {
             return ToResult(existing);
@@ -80,7 +82,17 @@ public sealed class RefundToWalletCommandHandler : IRequestHandler<RefundToWalle
             allocation.GrossAmount
             - allocation.VoucherVietRideFundedAmount
             - allocation.VoucherOperatorFundedAmount);
-        if (request.Amount > paidAmount)
+        var alreadyRefunded = 0L;
+        if (referenceType == WalletTransactionRef.PARCEL_REFUND)
+        {
+            alreadyRefunded = await _wallets.GetTotalRefundedByReferenceAsync(
+                    WalletTransactionRef.PARCEL_REFUND,
+                    request.ReferenceId,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (checked(alreadyRefunded + request.Amount) > paidAmount)
         {
             throw new CodedValidationException(
                 "REFUND_AMOUNT_EXCEEDS_PAYMENT",

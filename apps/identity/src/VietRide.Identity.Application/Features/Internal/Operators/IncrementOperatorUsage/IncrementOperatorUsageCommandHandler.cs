@@ -1,4 +1,5 @@
 using MediatR;
+using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Application.Features.Internal.Operators.GetInternalOperatorSubscription;
 using VietRide.Identity.Domain.Entities;
@@ -13,13 +14,16 @@ public sealed class IncrementOperatorUsageCommandHandler
 {
     private readonly IOperatorRepository _operators;
     private readonly IOperatorSubscriptionRepository _operatorSubscriptions;
+    private readonly ISubscriptionUsageWarningPublisher _usageWarnings;
 
     public IncrementOperatorUsageCommandHandler(
         IOperatorRepository operators,
-        IOperatorSubscriptionRepository operatorSubscriptions)
+        IOperatorSubscriptionRepository operatorSubscriptions,
+        ISubscriptionUsageWarningPublisher usageWarnings)
     {
         _operators = operators;
         _operatorSubscriptions = operatorSubscriptions;
+        _usageWarnings = usageWarnings;
     }
 
     public async Task<InternalOperatorSubscriptionDto> Handle(
@@ -47,6 +51,14 @@ public sealed class IncrementOperatorUsageCommandHandler
             throw new IdentityDomainException(
                 "SUBSCRIPTION_LIMIT_EXCEEDED",
                 "Subscription limit exceeded for the requested usage resource.");
+
+        await _usageWarnings.EnqueueIfThresholdCrossedAsync(
+            updated.Value.Subscription,
+            updated.Value.Plan,
+            resource,
+            request.Delta,
+            null,
+            cancellationToken);
 
         return InternalOperatorSubscriptionMapper.ToDto(updated.Value.Subscription, updated.Value.Plan);
     }

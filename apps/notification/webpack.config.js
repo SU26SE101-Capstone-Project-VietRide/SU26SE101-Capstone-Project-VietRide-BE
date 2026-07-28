@@ -19,6 +19,8 @@ const EXTERNAL_DEPENDENCIES = [
   '@nestjs/swagger',
   '@nestjs/websockets',
   '@nestjs/mapped-types',
+  '@sentry/nestjs',
+  '@sentry/nestjs/setup',
   'amqplib',
   'class-transformer',
   'class-transformer/storage',

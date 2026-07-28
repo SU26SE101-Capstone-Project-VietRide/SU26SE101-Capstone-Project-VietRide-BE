@@ -7,6 +7,9 @@ import { ParcelSubscriptionOperatorEventsConsumer } from './parcel-subscription-
 import { PARCEL_SUBSCRIPTION_OPERATOR_QUEUE_BINDINGS } from './parcel-subscription-operator-events.constants';
 import { TRIP_TRACKING_ALERT_QUEUE_BINDINGS } from './trip-tracking-alert-events.constants';
 import { TripTrackingAlertEventsConsumer } from './trip-tracking-alert-events.consumer';
+import { BookingTripRecipientProvider } from './booking-trip-recipient.provider';
+import { ParcelRecipientProvider } from './parcel-recipient.provider';
+import { TripAnnouncementRecipientProvider } from './trip-announcement-recipient.provider';
 
 describe('Day 29 Sprint 4 notification subscriptions (e2e)', () => {
   it('registers every Day 29 Sprint 4 Trip and Parcel routing key', async () => {
@@ -25,6 +28,18 @@ describe('Day 29 Sprint 4 notification subscriptions (e2e)', () => {
           provide: OPERATOR_RECIPIENT_PROVIDER,
           useValue: { resolveOperatorRecipientUserIds: jest.fn() },
         },
+        {
+          provide: BookingTripRecipientProvider,
+          useValue: {
+            resolveTripPassengerUserIds: jest.fn(),
+            resolveAffectedTripPassengerUserIds: jest.fn(),
+          },
+        },
+        {
+          provide: TripAnnouncementRecipientProvider,
+          useValue: { getTripRecipientSnapshot: jest.fn(), resolveTripCrewUserIds: jest.fn() },
+        },
+        { provide: ParcelRecipientProvider, useValue: { getParcelSnapshot: jest.fn() } },
       ],
     }).compile();
 
@@ -43,6 +58,9 @@ describe('Day 29 Sprint 4 notification subscriptions (e2e)', () => {
     expect(routingKeys).toContain('parcel.parcel.loaded');
     expect(routingKeys).toContain('parcel.parcel.unloaded');
     expect(routingKeys).toContain('parcel.parcel.review_requested');
+    expect(routingKeys).toContain('parcel.parcel.review_approved');
+    expect(routingKeys).toContain('parcel.parcel.final_payment_requested');
+    expect(routingKeys).toContain('parcel.parcel.settlement_recovered');
     expect(routingKeys).toContain('parcel.parcel.auto_rejected');
     expect(routingKeys).not.toContain(`trip.cargo_${'near_full'}`);
 

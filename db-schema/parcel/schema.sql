@@ -15,6 +15,10 @@ CREATE TYPE parcel_status AS ENUM (
     'PENDING_PAYMENT',
     'PENDING',
     'PENDING_ADDITIONAL_PAYMENT',
+    'RESERVED',
+    'CHECKED_IN',
+    'PENDING_FINAL_PAYMENT',
+    'READY_TO_LOAD',
     'LOADED',
     'IN_TRANSIT',
     'PENDING_TRANSFER_CONFIRM',
@@ -68,6 +72,8 @@ CREATE TABLE parcels (
     description TEXT NULL,
     photo_url TEXT NULL,
     size_category parcel_size_category NOT NULL,
+    estimated_size_category parcel_size_category NOT NULL,
+    actual_size_category parcel_size_category NULL,
     estimated_length_cm DECIMAL(8,2) NOT NULL DEFAULT 1,
     estimated_width_cm DECIMAL(8,2) NOT NULL DEFAULT 1,
     estimated_height_cm DECIMAL(8,2) NOT NULL DEFAULT 1,
@@ -95,9 +101,36 @@ CREATE TABLE parcels (
     refund_amount BIGINT NOT NULL DEFAULT 0,
     additional_payment_id UUID NULL,    -- logical FK payment.payments
     additional_payment_deadline TIMESTAMPTZ NULL,
+    -- settlement v2 canonical fields (legacy pricing columns above remain for rollout)
+    estimated_gross_price_vnd BIGINT NOT NULL DEFAULT 0,
+    final_gross_price_vnd BIGINT NOT NULL DEFAULT 0,
+    discount_amount_vnd BIGINT NOT NULL DEFAULT 0,
+    estimated_total_price_vnd BIGINT NOT NULL DEFAULT 0,
+    final_total_price_vnd BIGINT NOT NULL DEFAULT 0,
+    deposit_required_vnd BIGINT NOT NULL DEFAULT 0,
+    deposit_paid_vnd BIGINT NOT NULL DEFAULT 0,
+    balance_required_vnd BIGINT NOT NULL DEFAULT 0,
+    balance_paid_vnd BIGINT NOT NULL DEFAULT 0,
+    refund_due_vnd BIGINT NOT NULL DEFAULT 0,
+    refunded_amount_vnd BIGINT NOT NULL DEFAULT 0,
+    forfeited_deposit_vnd BIGINT NOT NULL DEFAULT 0,
+    deposit_payment_id UUID NULL,
+    balance_payment_id UUID NULL,
+    final_payment_deadline TIMESTAMPTZ NULL,
+    load_cutoff_at TIMESTAMPTZ NULL,
+    latest_check_in_at TIMESTAMPTZ NULL,
+    checked_in_at TIMESTAMPTZ NULL,
+    checked_in_by_user_id UUID NULL,
+    reweighed_at TIMESTAMPTZ NULL,
+    reweighed_by_user_id UUID NULL,
+    price_per_kg_vnd BIGINT NOT NULL DEFAULT 0,
+    minimum_price_vnd BIGINT NOT NULL DEFAULT 0,
+    dim_weight_factor DECIMAL(10,2) NOT NULL DEFAULT 6000,
+    settlement_policy_version INT NOT NULL DEFAULT 1,
     -- status
     status parcel_status NOT NULL,
     pending_action_type VARCHAR(40) NULL,
+    pending_action_resume_status parcel_status NULL,
     pending_action_reason TEXT NULL,
     rejection_reason TEXT NULL,
     cancellation_reason TEXT NULL,
@@ -133,6 +166,10 @@ CREATE TABLE parcels (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_parcels_amounts_non_negative
         CHECK (total_price_vnd >= 0 AND deposit_amount >= 0 AND original_deposit_amount >= 0 AND discount_amount >= 0 AND additional_amount >= 0 AND refund_amount >= 0),
+    CONSTRAINT chk_parcels_settlement_amounts_non_negative
+        CHECK (estimated_gross_price_vnd >= 0 AND final_gross_price_vnd >= 0 AND discount_amount_vnd >= 0 AND estimated_total_price_vnd >= 0 AND final_total_price_vnd >= 0 AND deposit_required_vnd >= 0 AND deposit_paid_vnd >= 0 AND balance_required_vnd >= 0 AND balance_paid_vnd >= 0 AND refund_due_vnd >= 0 AND refunded_amount_vnd >= 0 AND forfeited_deposit_vnd >= 0),
+    CONSTRAINT chk_parcels_settlement_policy_version_positive
+        CHECK (settlement_policy_version > 0),
     CONSTRAINT chk_parcels_dimensions_positive
         CHECK (estimated_length_cm > 0 AND estimated_width_cm > 0 AND estimated_height_cm > 0),
     CONSTRAINT chk_parcels_actual_dimensions_positive
@@ -158,13 +195,24 @@ CREATE INDEX idx_parcels_trip_id_status ON parcels (trip_id, status);
 CREATE INDEX idx_parcels_operator_id_status ON parcels (operator_id, status);
 CREATE INDEX idx_parcels_status_updated_at ON parcels (status, updated_at)
     WHERE status IN (
-        'PENDING', 'PENDING_ADDITIONAL_PAYMENT', 'PENDING_OPERATOR_REVIEW',
+        'PENDING_PAYMENT', 'RESERVED', 'CHECKED_IN', 'PENDING_FINAL_PAYMENT',
+        'READY_TO_LOAD', 'PENDING_OPERATOR_REVIEW',
         'PENDING_OPERATOR_ACTION', 'PENDING_TRANSFER_CONFIRM', 'DELIVERED_PENDING_CONFIRM',
         'DELIVERY_REJECTED', 'TRANSFER_ESCALATED'
     );
 CREATE INDEX idx_parcels_additional_payment_deadline
     ON parcels (additional_payment_deadline)
     WHERE status = 'PENDING_ADDITIONAL_PAYMENT';
+CREATE INDEX idx_parcels_latest_check_in_at
+    ON parcels (latest_check_in_at)
+    WHERE status = 'RESERVED' AND latest_check_in_at IS NOT NULL;
+CREATE INDEX idx_parcels_final_payment_deadline
+    ON parcels (final_payment_deadline)
+    WHERE status = 'PENDING_FINAL_PAYMENT' AND final_payment_deadline IS NOT NULL;
+CREATE INDEX idx_parcels_deposit_payment_id
+    ON parcels (deposit_payment_id) WHERE deposit_payment_id IS NOT NULL;
+CREATE INDEX idx_parcels_balance_payment_id
+    ON parcels (balance_payment_id) WHERE balance_payment_id IS NOT NULL;
 CREATE INDEX idx_parcels_transfer_target_trip_id
     ON parcels (transfer_target_trip_id)
     WHERE transfer_target_trip_id IS NOT NULL;

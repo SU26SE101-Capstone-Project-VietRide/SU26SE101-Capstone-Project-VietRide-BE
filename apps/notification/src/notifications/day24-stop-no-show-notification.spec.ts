@@ -42,8 +42,8 @@ describe('Day 24 no-show notification:', () => {
     expect(mapPassengerNoShowToNotification(canonicalPayload())).toEqual({
       userId: USER_ID,
       type: NotificationType.PASSENGER_NO_SHOW,
-      title: 'Ban da lo chuyen xe',
-      body: 'Ban da khong len xe dung gio. Ve khong duoc hoan tien theo chinh sach.',
+      title: 'Bạn đã lỡ chuyến xe',
+      body: 'Bạn đã không lên xe đúng giờ. Vé không được hoàn tiền theo chính sách.',
       data: {
         eventId: EVENT_ID,
         occurredAt: '2026-07-18T10:00:00+07:00',

@@ -10,7 +10,8 @@ public interface IPaymentServiceClient
         string method,
         string idempotencyKey,
         CancellationToken cancellationToken = default,
-        PaymentContextSnapshot? context = null);
+        PaymentContextSnapshot? context = null,
+        DateTimeOffset? dueAt = null);
 
     Task<RefundOutcome> RefundParcelPaymentAsync(
         Guid userId,

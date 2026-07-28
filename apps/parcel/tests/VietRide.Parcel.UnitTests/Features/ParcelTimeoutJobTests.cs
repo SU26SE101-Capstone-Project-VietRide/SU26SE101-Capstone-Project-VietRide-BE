@@ -182,8 +182,8 @@ public sealed class ParcelTimeoutJobTests
         clock.UtcNow.Returns(Now);
         repo.ListReviewTimedOutIdsAsync(Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new[] { ParcelId });
-        repo.TryAutoRejectReviewAsync(ParcelId, "PARCEL_REVIEW_TIMEOUT", Now, Arg.Any<CancellationToken>())
-            .Returns(Snapshot(ParcelStatus.REJECTED), (ParcelPaymentTransitionSnapshot?)null);
+        repo.TryAutoRejectReviewAsync(ParcelId, "OPERATOR_REVIEW_TIMEOUT", Now, Arg.Any<CancellationToken>())
+            .Returns(Snapshot(ParcelStatus.CANCELLED), (ParcelPaymentTransitionSnapshot?)null);
         var handler = new ExpireParcelReviewCommandHandler(repo, clock, unitOfWork, outbox, stats,
             Substitute.For<ILogger<ExpireParcelReviewCommandHandler>>());
 
@@ -191,9 +191,14 @@ public sealed class ParcelTimeoutJobTests
         (await handler.Handle(new ExpireParcelReviewCommand(), default)).Should().Be(0);
 
         await repo.Received(2).TryAutoRejectReviewAsync(
-            ParcelId, "PARCEL_REVIEW_TIMEOUT", Now, Arg.Any<CancellationToken>());
+            ParcelId, "OPERATOR_REVIEW_TIMEOUT", Now, Arg.Any<CancellationToken>());
         await outbox.Received(1).EnqueueAsync(
-            Arg.Any<Guid>(), ParcelOutboxEvents.AutoRejected, Arg.Any<string>(), Arg.Any<CancellationToken>());
+            Arg.Any<Guid>(),
+            ParcelOutboxEvents.Cancelled,
+            Arg.Is<string>(payload => payload.Contains(
+                "\"reason\":\"OPERATOR_REVIEW_TIMEOUT\"",
+                StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
         await outbox.DidNotReceiveWithAnyArgs().EnqueueAsync(default!, default!, default);
         await stats.Received(1).UpsertIncrementAsync(
             OperatorId,
@@ -284,8 +289,8 @@ public sealed class ParcelTimeoutJobTests
         repo.ListReviewTimedOutIdsAsync(Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new List<Guid> { ParcelId });
 
-        repo.TryAutoRejectReviewAsync(ParcelId, "PARCEL_REVIEW_TIMEOUT", Now, Arg.Any<CancellationToken>())
-            .Returns(Snapshot(ParcelStatus.REJECTED));
+        repo.TryAutoRejectReviewAsync(ParcelId, "OPERATOR_REVIEW_TIMEOUT", Now, Arg.Any<CancellationToken>())
+            .Returns(Snapshot(ParcelStatus.CANCELLED));
 
         var handler = CreateReviewHandler(repo, clock);
         var result = await handler.Handle(new ExpireParcelReviewCommand(), default);
@@ -303,7 +308,7 @@ public sealed class ParcelTimeoutJobTests
         repo.ListReviewTimedOutIdsAsync(Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new List<Guid> { ParcelId });
 
-        repo.TryAutoRejectReviewAsync(ParcelId, "PARCEL_REVIEW_TIMEOUT", Now, Arg.Any<CancellationToken>())
+        repo.TryAutoRejectReviewAsync(ParcelId, "OPERATOR_REVIEW_TIMEOUT", Now, Arg.Any<CancellationToken>())
             .Returns((ParcelPaymentTransitionSnapshot?)null);
 
         var handler = CreateReviewHandler(repo, clock);
@@ -324,8 +329,8 @@ public sealed class ParcelTimeoutJobTests
         repo.ListReviewTimedOutIdsAsync(exactlyAtCutoff, Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new List<Guid> { ParcelId });
 
-        repo.TryAutoRejectReviewAsync(ParcelId, "PARCEL_REVIEW_TIMEOUT", Now, Arg.Any<CancellationToken>())
-            .Returns(Snapshot(ParcelStatus.REJECTED));
+        repo.TryAutoRejectReviewAsync(ParcelId, "OPERATOR_REVIEW_TIMEOUT", Now, Arg.Any<CancellationToken>())
+            .Returns(Snapshot(ParcelStatus.CANCELLED));
 
         var handler = CreateReviewHandler(repo, clock);
         var result = await handler.Handle(new ExpireParcelReviewCommand(), default);

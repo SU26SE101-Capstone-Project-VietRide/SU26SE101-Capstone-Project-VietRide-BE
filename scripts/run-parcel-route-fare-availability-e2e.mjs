@@ -421,7 +421,7 @@ async function runJourney() {
     fareTrace,
     {
       routeId: activeRoute.id,
-      sizeCategory: 'MEDIUM',
+      sizeCategory: 'SMALL',
       priceVnd: 150000,
       effectiveFrom,
       effectiveUntil,
@@ -497,7 +497,7 @@ async function runJourney() {
       traceId,
       {
         routeId,
-        sizeCategory: 'MEDIUM',
+        sizeCategory: 'SMALL',
         priceVnd: 150000,
         effectiveFrom,
         effectiveUntil,

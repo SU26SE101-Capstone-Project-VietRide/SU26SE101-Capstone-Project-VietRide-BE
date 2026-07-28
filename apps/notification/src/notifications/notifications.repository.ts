@@ -248,60 +248,96 @@ export class NotificationsRepository {
     });
   }
 
-  async markEmailDeliverySending(emailDeliveryId: string): Promise<boolean> {
-    const result = await this.prisma.emailDelivery.updateMany({
+  async markEmailDeliverySending(
+    emailDeliveryId: string,
+    leaseCutoff: Date,
+  ): Promise<string | null> {
+    const [claimed] = await this.prisma.$queryRaw<Array<{ claimToken: string }>>(
+      NotificationPrisma.sql`
+        UPDATE "vietride_notification"."email_deliveries"
+        SET "status" = 'SENDING'
+        WHERE "id" = ${emailDeliveryId}::uuid
+          AND (
+            "status" IN ('PENDING', 'RETRYING')
+            OR ("status" = 'SENDING' AND "updated_at" <= ${leaseCutoff})
+          )
+        RETURNING "updated_at"::text AS "claimToken"
+      `,
+    );
+    return claimed?.claimToken ?? null;
+  }
+
+  async listStaleSendingEmailDeliveryIds(leaseCutoff: Date, take: number): Promise<string[]> {
+    const deliveries = await this.prisma.emailDelivery.findMany({
       where: {
-        id: emailDeliveryId,
-        status: { in: [EmailDeliveryStatus.PENDING, EmailDeliveryStatus.RETRYING] },
+        status: EmailDeliveryStatus.SENDING,
+        updatedAt: { lte: leaseCutoff },
       },
-      data: { status: EmailDeliveryStatus.SENDING },
+      orderBy: { updatedAt: 'asc' },
+      take,
+      select: { id: true },
     });
-    return result.count === 1;
+    return deliveries.map(({ id }) => id);
   }
 
   async markEmailDeliverySent(
     emailDeliveryId: string,
     providerMessageId: string | null,
-  ): Promise<EmailDelivery> {
-    return this.prisma.emailDelivery.update({
-      where: { id: emailDeliveryId },
-      data: {
-        status: EmailDeliveryStatus.SENT,
-        providerMessageId,
-        sentAt: new Date(),
-        lastError: null,
-      },
-    });
+    claimToken: string,
+  ): Promise<boolean> {
+    const count = await this.prisma.$executeRaw(
+      NotificationPrisma.sql`
+        UPDATE "vietride_notification"."email_deliveries"
+        SET "status" = 'SENT',
+            "provider_message_id" = ${providerMessageId},
+            "sent_at" = ${new Date()},
+            "last_error" = NULL
+        WHERE "id" = ${emailDeliveryId}::uuid
+          AND "status" = 'SENDING'
+          AND "updated_at" = ${claimToken}::timestamptz
+      `,
+    );
+    return count === 1;
   }
 
   async markEmailDeliveryRetrying(
     emailDeliveryId: string,
     retryCount: number,
     lastError: string,
-  ): Promise<EmailDelivery> {
-    return this.prisma.emailDelivery.update({
-      where: { id: emailDeliveryId },
-      data: {
-        status: EmailDeliveryStatus.RETRYING,
-        retryCount,
-        lastError,
-      },
-    });
+    claimToken: string,
+  ): Promise<boolean> {
+    const count = await this.prisma.$executeRaw(
+      NotificationPrisma.sql`
+        UPDATE "vietride_notification"."email_deliveries"
+        SET "status" = 'RETRYING',
+            "retry_count" = ${retryCount},
+            "last_error" = ${lastError}
+        WHERE "id" = ${emailDeliveryId}::uuid
+          AND "status" = 'SENDING'
+          AND "updated_at" = ${claimToken}::timestamptz
+      `,
+    );
+    return count === 1;
   }
 
   async markEmailDeliveryFailed(
     emailDeliveryId: string,
     retryCount: number,
     lastError: string,
-  ): Promise<EmailDelivery> {
-    return this.prisma.emailDelivery.update({
-      where: { id: emailDeliveryId },
-      data: {
-        status: EmailDeliveryStatus.FAILED,
-        retryCount,
-        lastError,
-      },
-    });
+    claimToken: string,
+  ): Promise<boolean> {
+    const count = await this.prisma.$executeRaw(
+      NotificationPrisma.sql`
+        UPDATE "vietride_notification"."email_deliveries"
+        SET "status" = 'FAILED',
+            "retry_count" = ${retryCount},
+            "last_error" = ${lastError}
+        WHERE "id" = ${emailDeliveryId}::uuid
+          AND "status" = 'SENDING'
+          AND "updated_at" = ${claimToken}::timestamptz
+      `,
+    );
+    return count === 1;
   }
 }
 

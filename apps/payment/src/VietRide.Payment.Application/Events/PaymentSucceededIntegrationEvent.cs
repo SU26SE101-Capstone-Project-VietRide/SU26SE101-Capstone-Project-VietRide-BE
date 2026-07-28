@@ -10,7 +10,9 @@ public sealed class PaymentSucceededIntegrationEvent(
     Guid referenceId,
     long amount,
     PaymentMethod method,
-    PaymentContextV1 context) : IntegrationEventBase
+    PaymentContextV1 context,
+    DateTimeOffset paidAt,
+    DateTimeOffset? dueAt) : IntegrationEventBase
 {
     public override string EventType => "payment.payment.succeeded";
 
@@ -20,4 +22,6 @@ public sealed class PaymentSucceededIntegrationEvent(
     public long Amount { get; } = amount;
     public string Method { get; } = method.ToString();
     public PaymentContextV1 Context { get; } = context;
+    public DateTimeOffset PaidAt { get; } = paidAt;
+    public DateTimeOffset? DueAt { get; } = dueAt;
 }

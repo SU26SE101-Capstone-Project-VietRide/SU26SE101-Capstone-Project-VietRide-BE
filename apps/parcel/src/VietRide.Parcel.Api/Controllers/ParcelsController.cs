@@ -7,7 +7,9 @@ using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Features.History;
 using VietRide.Parcel.Application.Features.Parcels.AvailableTrips;
 using VietRide.Parcel.Application.Features.Parcels.Create;
+using VietRide.Parcel.Application.Features.Parcels.DepositPayment;
 using VietRide.Parcel.Application.Features.Parcels.Detail;
+using VietRide.Parcel.Application.Features.Parcels.FinalPayment;
 using VietRide.Parcel.Application.Features.Parcels.Received;
 using VietRide.Parcel.Application.Features.Parcels.Sent;
 using VietRide.Parcel.Application.Features.Vouchers;
@@ -39,7 +41,7 @@ public sealed class ParcelsController : ControllerBase
         [FromQuery] decimal widthCm,
         [FromQuery] decimal heightCm,
         [FromQuery] decimal estimatedWeightKg,
-        [FromQuery] string sizeCategory,
+        [FromQuery] string? sizeCategory = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default)
@@ -101,6 +103,54 @@ public sealed class ParcelsController : ControllerBase
             cancellationToken);
 
         return StatusCode(StatusCodes.Status201Created, result);
+    }
+
+    [HttpPost("{parcelId:guid}/deposit-payment")]
+    [Authorize(Roles = "PASSENGER")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<ParcelDepositPaymentResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<ParcelDepositPaymentResponse>> StartDepositPaymentAsync(
+        Guid parcelId,
+        [FromBody] StartParcelPaymentRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(
+            new StartParcelDepositPaymentCommand(
+                parcelId,
+                CurrentUserClaims.GetUserId(User),
+                request.PaymentMethod,
+                Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString()),
+            cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpPost("{parcelId:guid}/final-payment")]
+    [Authorize(Roles = "PASSENGER")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<ParcelFinalPaymentResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<ParcelFinalPaymentResponse>> StartFinalPaymentAsync(
+        Guid parcelId,
+        [FromBody] StartParcelPaymentRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(
+            new StartParcelFinalPaymentCommand(
+                parcelId,
+                CurrentUserClaims.GetUserId(User),
+                request.PaymentMethod,
+                Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString()),
+            cancellationToken);
+        return Ok(result);
     }
 
     [HttpGet("vouchers/available")]

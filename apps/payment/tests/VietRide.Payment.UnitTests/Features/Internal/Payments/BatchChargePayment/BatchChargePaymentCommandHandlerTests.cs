@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Application.Abstractions.Services;
@@ -25,7 +26,8 @@ public sealed class BatchChargePaymentCommandHandlerTests
         var outboundBookingId = Guid.NewGuid();
         var returnBookingId = Guid.NewGuid();
         var db = new FakeDbContext(new Wallet(userId, Money.FromRaw(250_000)));
-        var handler = CreateHandler(db);
+        var outbox = new FakeIntegrationEventOutbox();
+        var handler = CreateHandler(db, outbox);
         var command = CreateCommand(userId, outboundBookingId, returnBookingId, 80_000, 120_000);
 
         var result = await handler.Handle(command, CancellationToken.None);
@@ -42,6 +44,23 @@ public sealed class BatchChargePaymentCommandHandlerTests
         db.WalletTransactions.Select(x => x.ReferenceType.ToString()).Should().OnlyContain(x => x == "BOOKING_PAYMENT");
         db.Wallet!.Balance.Amount.Should().Be(50_000);
         db.SaveChangesCount.Should().Be(1);
+        outbox.CanonicalEvents.Should().HaveCount(2);
+        var debitFacts = outbox.CanonicalEvents.Select(item =>
+        {
+            using var document = JsonDocument.Parse(item.PayloadJson);
+            var root = document.RootElement;
+            root.GetProperty("eventId").GetGuid().Should().Be(item.EventId);
+            root.GetProperty("userId").GetGuid().Should().Be(userId);
+            root.GetProperty("referenceType").GetString().Should().Be("BOOKING_PAYMENT");
+            return (
+                ReferenceId: root.GetProperty("referenceId").GetGuid(),
+                Amount: root.GetProperty("amount").GetInt64(),
+                BalanceAfter: root.GetProperty("balanceAfter").GetInt64());
+        });
+        debitFacts.Should().BeEquivalentTo([
+            (outboundBookingId, 80_000L, 170_000L),
+            (returnBookingId, 120_000L, 50_000L),
+        ]);
     }
 
     [Fact]
@@ -121,13 +140,15 @@ public sealed class BatchChargePaymentCommandHandlerTests
         db.SaveChangesCount.Should().Be(0);
     }
 
-    private static BatchChargePaymentCommandHandler CreateHandler(FakeDbContext db)
+    private static BatchChargePaymentCommandHandler CreateHandler(
+        FakeDbContext db,
+        FakeIntegrationEventOutbox? outbox = null)
     {
         var clock = new FrozenClock(Now);
         return new BatchChargePaymentCommandHandler(
             db,
             clock,
-            new FakeIntegrationEventOutbox(),
+            outbox ?? new FakeIntegrationEventOutbox(),
             new NoOpRevenueLedgerWriter(),
             db.PlatformWallets);
     }
@@ -261,6 +282,18 @@ public sealed class BatchChargePaymentCommandHandlerTests
 
     private sealed class FakeIntegrationEventOutbox : IIntegrationEventOutbox
     {
+        public List<(Guid EventId, string EventType, string PayloadJson)> CanonicalEvents { get; } = [];
+
+        public Task EnqueueAsync(
+            Guid eventId,
+            string eventType,
+            string payloadJson,
+            CancellationToken ct = default)
+        {
+            CanonicalEvents.Add((eventId, eventType, payloadJson));
+            return Task.CompletedTask;
+        }
+
         public Task EnqueueAsync(string eventType, string payloadJson, CancellationToken ct = default)
             => Task.CompletedTask;
     }

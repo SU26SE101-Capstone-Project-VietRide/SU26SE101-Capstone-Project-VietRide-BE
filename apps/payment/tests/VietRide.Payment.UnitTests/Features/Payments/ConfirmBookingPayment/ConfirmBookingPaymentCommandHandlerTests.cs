@@ -94,6 +94,49 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
     }
 
     [Fact]
+    public async Task Handle_LateParcelPayment_UsesSignedPayDateAndEnqueuesRefund()
+    {
+        var userId = Guid.NewGuid();
+        var parcelId = Guid.NewGuid();
+        var dueAt = Now.AddMinutes(-1);
+        var payment = CreatePendingParcelPayment(
+            userId,
+            parcelId,
+            "parcel-txn",
+            80_000,
+            dueAt);
+        var payments = new FakePaymentRepository(payment);
+        var platformWallets = new FakePlatformWalletRepository(Money.FromRaw(1_000_000));
+        var outbox = new FakeIntegrationEventOutbox();
+        var handler = CreateHandler(
+            new FakeVnPayClient(isSignatureValid: true),
+            payments,
+            platformWallets,
+            outbox);
+
+        await handler.Handle(
+            CreateCommand(
+                "parcel-txn",
+                "00",
+                "8000000",
+                payDate: "20260624170100"),
+            CancellationToken.None);
+
+        payment.SucceededAt.Should().Be(new DateTimeOffset(2026, 6, 24, 17, 1, 0, TimeSpan.FromHours(7)));
+        outbox.Events.Should().ContainSingle(evt => evt.EventType == "payment.payment.succeeded");
+        outbox.Events.Should().ContainSingle(evt => evt.EventType == "parcel.refund.initiated");
+        using var succeeded = JsonDocument.Parse(
+            outbox.Events.Single(evt => evt.EventType == "payment.payment.succeeded").Payload);
+        succeeded.RootElement.GetProperty("paidAt").GetDateTimeOffset().Should().Be(payment.SucceededAt);
+        succeeded.RootElement.GetProperty("dueAt").GetDateTimeOffset().Should().Be(dueAt);
+        using var refund = JsonDocument.Parse(
+            outbox.Events.Single(evt => evt.EventType == "parcel.refund.initiated").Payload);
+        refund.RootElement.GetProperty("amount").GetInt64().Should().Be(80_000);
+        refund.RootElement.GetProperty("idempotencyKey").GetString()
+            .Should().Be($"{payment.Id:D}:LATE_PAYMENT");
+    }
+
+    [Fact]
     public async Task Handle_WhenVnPayResponseCodeFails_MarksFailedAndEnqueuesFailedEvent()
     {
         var userId = Guid.NewGuid();
@@ -134,15 +177,21 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
         string txnRef,
         string responseCode,
         string signedAmount,
-        string transactionStatus = "00")
-        => new(new Dictionary<string, string>
+        string transactionStatus = "00",
+        string? payDate = null)
+    {
+        var parameters = new Dictionary<string, string>
         {
             ["vnp_TxnRef"] = txnRef,
             ["vnp_ResponseCode"] = responseCode,
             ["vnp_Amount"] = signedAmount,
             ["vnp_TransactionStatus"] = transactionStatus,
             ["vnp_SecureHash"] = "valid",
-        });
+        };
+        if (payDate is not null)
+            parameters["vnp_PayDate"] = payDate;
+        return new ConfirmBookingPaymentCommand(parameters);
+    }
 
     private static PaymentEntity CreatePendingPayment(Guid userId, Guid bookingId, string txnRef, long amount)
     {
@@ -167,6 +216,40 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
             ]),
             "BOOKING",
             bookingId,
+            amount));
+        return payment;
+    }
+
+    private static PaymentEntity CreatePendingParcelPayment(
+        Guid userId,
+        Guid parcelId,
+        string txnRef,
+        long amount,
+        DateTimeOffset dueAt)
+    {
+        var payment = PaymentEntity.CreatePendingRedirectVnPay(
+            PaymentReferenceType.PARCEL_ADDITIONAL,
+            parcelId,
+            userId,
+            Money.FromRaw(amount),
+            txnRef,
+            $"idem-{txnRef}",
+            "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html",
+            dueAt);
+        payment.AttachContext(PaymentContextCodec.ValidateAndSerialize(
+            new PaymentContextV1(1,
+            [
+                new PaymentAllocationV1(
+                    parcelId,
+                    "PARCEL_ADDITIONAL",
+                    Guid.NewGuid(),
+                    Guid.NewGuid(),
+                    amount,
+                    0,
+                    0),
+            ]),
+            "PARCEL_ADDITIONAL",
+            parcelId,
             amount));
         return payment;
     }

@@ -6,6 +6,7 @@ import type { Env } from '../config/env.schema';
 import { EmailDeliveryStatus } from '../generated/notification-prisma-client';
 import {
   EMAIL_LAST_ERROR_MAX_LENGTH,
+  EMAIL_SENDING_LEASE_MS,
   EMAIL_SEND_ATTEMPTS,
   EMAIL_SEND_BACKOFF_DELAYS_MS,
   EMAIL_SEND_QUEUE_NAME,
@@ -66,19 +67,24 @@ export class EmailSendWorker implements OnModuleInit, OnModuleDestroy {
 
     if (
       delivery.status === EmailDeliveryStatus.SENT ||
-      delivery.status === EmailDeliveryStatus.FAILED ||
-      delivery.status === EmailDeliveryStatus.SENDING
+      delivery.status === EmailDeliveryStatus.FAILED
     ) {
-      if (delivery.status === EmailDeliveryStatus.SENDING) {
-        this.logger.warn(
-          { emailDeliveryId: delivery.id },
-          'Skipping email delivery with an uncertain provider result',
-        );
-      }
       return;
     }
 
-    if (!(await this.notificationsRepository.markEmailDeliverySending(delivery.id))) {
+    const leaseCutoff = new Date(Date.now() - EMAIL_SENDING_LEASE_MS);
+    if (
+      delivery.status === EmailDeliveryStatus.SENDING &&
+      delivery.updatedAt.getTime() > leaseCutoff.getTime()
+    ) {
+      throw new Error('EMAIL_SEND_LEASE_ACTIVE');
+    }
+
+    const claimToken = await this.notificationsRepository.markEmailDeliverySending(
+      delivery.id,
+      leaseCutoff,
+    );
+    if (!claimToken) {
       return;
     }
 
@@ -102,20 +108,33 @@ export class EmailSendWorker implements OnModuleInit, OnModuleDestroy {
           delivery.id,
           currentAttempt,
           lastError,
+          claimToken,
         );
         return;
       }
 
-      await this.notificationsRepository.markEmailDeliveryRetrying(
+      const transitioned = await this.notificationsRepository.markEmailDeliveryRetrying(
         delivery.id,
         currentAttempt,
         lastError,
+        claimToken,
       );
-      throw new Error('EMAIL_SEND_RETRYABLE_FAILURE');
+      if (transitioned) throw new Error('EMAIL_SEND_RETRYABLE_FAILURE');
+      return;
     }
 
     try {
-      await this.notificationsRepository.markEmailDeliverySent(delivery.id, providerMessageId);
+      const transitioned = await this.notificationsRepository.markEmailDeliverySent(
+        delivery.id,
+        providerMessageId,
+        claimToken,
+      );
+      if (!transitioned) {
+        this.logger.warn(
+          { emailDeliveryId: delivery.id },
+          'Email delivery result ignored because the sending lease changed',
+        );
+      }
     } catch (error) {
       this.logger.error(
         { emailDeliveryId: delivery.id, error: this.normalizeError(error) },

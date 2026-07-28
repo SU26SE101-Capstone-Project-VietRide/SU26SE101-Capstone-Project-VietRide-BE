@@ -17,6 +17,7 @@ namespace VietRide.Payment.Application.Features.Internal.Payments.ChargePayment;
 
 public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentCommand, ChargePaymentResult>
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const string WalletMethod = "WALLET";
     private const string VnPayMethod = "VNPAY";
 
@@ -49,6 +50,10 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
     {
         var referenceType = ParseReferenceType(request.ReferenceType);
         var method = ParseMethod(request.Method);
+        var now = _clock.UtcNow;
+        var dueAt = request.DueAt ?? now.AddMinutes(15);
+        if (dueAt <= now)
+            throw new CodedValidationException("PAYMENT_DEADLINE_PASSED", "Payment dueAt must be in the future.");
         if (referenceType == PaymentReferenceType.BOOKING_GROUP && method != PaymentMethod.VNPAY)
         {
             throw new CodedValidationException(
@@ -81,14 +86,15 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
         }
 
         return method == PaymentMethod.WALLET
-            ? await ChargeWalletAsync(request, amount, contextJson, cancellationToken).ConfigureAwait(false)
-            : await CreateVnPayPendingRedirectAsync(request, amount, contextJson, cancellationToken).ConfigureAwait(false);
+            ? await ChargeWalletAsync(request, amount, contextJson, dueAt, cancellationToken).ConfigureAwait(false)
+            : await CreateVnPayPendingRedirectAsync(request, amount, contextJson, dueAt, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<ChargePaymentResult> ChargeWalletAsync(
         ChargePaymentCommand request,
         Money amount,
         string contextJson,
+        DateTimeOffset dueAt,
         CancellationToken cancellationToken)
     {
         var referenceType = ParseReferenceType(request.ReferenceType);
@@ -99,12 +105,13 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
             amount,
             PaymentMethod.WALLET,
             userId: request.UserId,
-            idempotencyKey: request.IdempotencyKey);
+            idempotencyKey: request.IdempotencyKey,
+            dueAt: dueAt);
         payment.MarkSucceeded(null, now);
         payment.AttachContext(contextJson);
 
         var (walletRef, platformRef) = MapChargeRefs(referenceType);
-        await _payments.DebitWalletPaymentAsync(
+        var walletTransaction = await _payments.DebitWalletPaymentAsync(
                 request.UserId,
                 request.ReferenceId,
                 amount,
@@ -119,6 +126,7 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
                 cancellationToken)
             .ConfigureAwait(false);
         await _payments.AddAsync(payment, cancellationToken).ConfigureAwait(false);
+        await EnqueueWalletDebitedAsync(walletTransaction, now, cancellationToken).ConfigureAwait(false);
         await RecordRevenueAndEnqueuePaymentSucceededAsync(payment, cancellationToken).ConfigureAwait(false);
 
         return ToResult(payment);
@@ -128,6 +136,7 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
         ChargePaymentCommand request,
         Money amount,
         string contextJson,
+        DateTimeOffset dueAt,
         CancellationToken cancellationToken)
     {
         var referenceType = ParseReferenceType(request.ReferenceType);
@@ -139,7 +148,8 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
             amount,
             vnPayTxnRef,
             request.ClientIpAddress,
-            now);
+            now,
+            dueAt);
 
         var payment = PaymentEntity.CreatePendingRedirectVnPay(
             referenceType,
@@ -148,7 +158,8 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
             amount,
             vnPayTxnRef,
             request.IdempotencyKey!,
-            redirectUrl);
+            redirectUrl,
+            dueAt);
         payment.AttachContext(contextJson);
 
         await _payments.AddAsync(payment, cancellationToken).ConfigureAwait(false);
@@ -176,7 +187,9 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
             payment.ReferenceId,
             payment.Amount.Amount,
             payment.Method,
-            context);
+            context,
+            payment.SucceededAt!.Value,
+            payment.DueAt);
         await _revenueLedger.RecordPaymentSucceededAsync(
             evt.EventId,
             context,
@@ -185,8 +198,29 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
         await _outbox.EnqueueAsync(evt.EventType, payload, cancellationToken).ConfigureAwait(false);
     }
 
+    private Task EnqueueWalletDebitedAsync(
+        WalletTransaction transaction,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken)
+    {
+        var evt = new WalletDebitedIntegrationEvent(
+            Guid.NewGuid(),
+            occurredAt,
+            transaction.UserId,
+            transaction.Id,
+            transaction.Amount.Amount,
+            transaction.BalanceAfter.Amount,
+            transaction.ReferenceType.ToString(),
+            transaction.ReferenceId!.Value);
+        return _outbox.EnqueueAsync(
+            evt.EventId,
+            evt.EventType,
+            JsonSerializer.Serialize(evt, JsonOptions),
+            cancellationToken);
+    }
+
     private static ChargePaymentResult ToResult(PaymentEntity payment)
-        => new(payment.Id, payment.Status.ToString(), payment.PaymentRedirectUrl);
+        => new(payment.Id, payment.Status.ToString(), payment.PaymentRedirectUrl, payment.DueAt);
 
     private static PaymentReferenceType ParseReferenceType(string value)
         => Enum.TryParse<PaymentReferenceType>(value, ignoreCase: false, out var referenceType)

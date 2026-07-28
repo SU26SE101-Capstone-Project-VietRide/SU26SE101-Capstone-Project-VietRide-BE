@@ -45,7 +45,7 @@ public sealed class Day29AssistantLoadEndpointTests
     [Fact]
     public async Task SuccessfulLoad_CommitsTransitionAndPendingLoadedOutboxAtomically()
     {
-        var fixture = await ResetAndSeedAsync(ParcelStatus.PENDING);
+        var fixture = await ResetAndSeedAsync(ParcelStatus.READY_TO_LOAD);
         using var client = factory.CreateAssistantClient(fixture.AssistantUserId, fixture.OperatorId);
 
         var response = await PostLoadAsync(client, fixture, Guid.NewGuid());
@@ -58,33 +58,33 @@ public sealed class Day29AssistantLoadEndpointTests
     [Fact]
     public async Task DownstreamCargoFailure_RollsBackTransitionAndLoadedOutbox()
     {
-        var fixture = await ResetAndSeedAsync(ParcelStatus.PENDING);
+        var fixture = await ResetAndSeedAsync(ParcelStatus.READY_TO_LOAD);
         factory.Scenario.CargoFailure = true;
         using var client = factory.CreateAssistantClient(fixture.AssistantUserId, fixture.OperatorId);
 
         var response = await PostLoadAsync(client, fixture, Guid.NewGuid());
 
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
-        await factory.AssertPersistedAsync(fixture, ParcelStatus.PENDING, expectedWrites: 0);
+        await factory.AssertPersistedAsync(fixture, ParcelStatus.READY_TO_LOAD, expectedWrites: 0);
     }
 
     [Fact]
     public async Task CommitFailure_RollsBackTransitionAndLoadedOutbox()
     {
-        var fixture = await ResetAndSeedAsync(ParcelStatus.PENDING);
+        var fixture = await ResetAndSeedAsync(ParcelStatus.READY_TO_LOAD);
         factory.Scenario.FailNextCommit = true;
         using var client = factory.CreateAssistantClient(fixture.AssistantUserId, fixture.OperatorId);
 
         var response = await PostLoadAsync(client, fixture, Guid.NewGuid());
 
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
-        await factory.AssertPersistedAsync(fixture, ParcelStatus.PENDING, expectedWrites: 0);
+        await factory.AssertPersistedAsync(fixture, ParcelStatus.READY_TO_LOAD, expectedWrites: 0);
     }
 
     [Fact]
     public async Task MissingOrMalformedIdempotencyKey_IsRejectedWithoutWrites()
     {
-        var fixture = await ResetAndSeedAsync(ParcelStatus.PENDING);
+        var fixture = await ResetAndSeedAsync(ParcelStatus.READY_TO_LOAD);
         using var client = factory.CreateAssistantClient(fixture.AssistantUserId, fixture.OperatorId);
 
         var missing = await client.PostAsJsonAsync(
@@ -101,13 +101,13 @@ public sealed class Day29AssistantLoadEndpointTests
         (await ReadErrorCodeAsync(missing)).Should().Be("IDEMPOTENCY_KEY_REQUIRED");
         malformed.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
         (await ReadErrorCodeAsync(malformed)).Should().Be("VALIDATION_ERROR");
-        await factory.AssertPersistedAsync(fixture, ParcelStatus.PENDING, expectedWrites: 0);
+        await factory.AssertPersistedAsync(fixture, ParcelStatus.READY_TO_LOAD, expectedWrites: 0);
     }
 
     [Fact]
     public async Task NonAssistantIdentity_ReturnsForbiddenWithoutWrites()
     {
-        var fixture = await ResetAndSeedAsync(ParcelStatus.PENDING);
+        var fixture = await ResetAndSeedAsync(ParcelStatus.READY_TO_LOAD);
         using var client = factory.CreateUserClient(
             "PASSENGER",
             fixture.AssistantUserId,
@@ -116,13 +116,13 @@ public sealed class Day29AssistantLoadEndpointTests
         var response = await PostLoadAsync(client, fixture, Guid.NewGuid());
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        await factory.AssertPersistedAsync(fixture, ParcelStatus.PENDING, expectedWrites: 0);
+        await factory.AssertPersistedAsync(fixture, ParcelStatus.READY_TO_LOAD, expectedWrites: 0);
     }
 
     [Fact]
     public async Task ForeignAssistantOrTenant_ReturnsForbiddenWithoutParcelDisclosure()
     {
-        var fixture = await ResetAndSeedAsync(ParcelStatus.PENDING);
+        var fixture = await ResetAndSeedAsync(ParcelStatus.READY_TO_LOAD);
         using var foreignTenant = factory.CreateAssistantClient(
             fixture.AssistantUserId,
             Guid.NewGuid());
@@ -140,13 +140,13 @@ public sealed class Day29AssistantLoadEndpointTests
 
         crewResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await ReadErrorCodeAsync(crewResponse)).Should().Be("FORBIDDEN");
-        await factory.AssertPersistedAsync(fixture, ParcelStatus.PENDING, expectedWrites: 0);
+        await factory.AssertPersistedAsync(fixture, ParcelStatus.READY_TO_LOAD, expectedWrites: 0);
     }
 
     [Fact]
     public async Task HiddenTripOrParcelCodeMismatch_ReturnsParcelNotFoundWithoutWrites()
     {
-        var fixture = await ResetAndSeedAsync(ParcelStatus.PENDING);
+        var fixture = await ResetAndSeedAsync(ParcelStatus.READY_TO_LOAD);
         using var client = factory.CreateAssistantClient(fixture.AssistantUserId, fixture.OperatorId);
 
         var wrongTrip = await PostLoadAsync(
@@ -162,13 +162,13 @@ public sealed class Day29AssistantLoadEndpointTests
         wrongCode.StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await ReadErrorCodeAsync(wrongTrip)).Should().Be("PARCEL_NOT_FOUND");
         (await ReadErrorCodeAsync(wrongCode)).Should().Be("PARCEL_NOT_FOUND");
-        await factory.AssertPersistedAsync(fixture, ParcelStatus.PENDING, expectedWrites: 0);
+        await factory.AssertPersistedAsync(fixture, ParcelStatus.READY_TO_LOAD, expectedWrites: 0);
     }
 
     [Fact]
     public async Task InvalidStatusOrConcurrentRaceLoser_ReturnsInvalidStatusWithoutWrites()
     {
-        var fixture = await ResetAndSeedAsync(ParcelStatus.PENDING);
+        var fixture = await ResetAndSeedAsync(ParcelStatus.READY_TO_LOAD);
         using var firstClient = factory.CreateAssistantClient(fixture.AssistantUserId, fixture.OperatorId);
         using var secondClient = factory.CreateAssistantClient(fixture.AssistantUserId, fixture.OperatorId);
 
@@ -186,7 +186,7 @@ public sealed class Day29AssistantLoadEndpointTests
     [Fact]
     public async Task SameKeySamePayload_ReplaysOriginalResponseWithoutDuplicateWrites()
     {
-        var fixture = await ResetAndSeedAsync(ParcelStatus.PENDING);
+        var fixture = await ResetAndSeedAsync(ParcelStatus.READY_TO_LOAD);
         var key = Guid.NewGuid();
         using var client = factory.CreateAssistantClient(fixture.AssistantUserId, fixture.OperatorId);
 
@@ -205,7 +205,7 @@ public sealed class Day29AssistantLoadEndpointTests
     [Fact]
     public async Task SameKeyDifferentPayload_ReturnsIdempotencyKeyMismatchWithoutWrites()
     {
-        var fixture = await ResetAndSeedAsync(ParcelStatus.PENDING);
+        var fixture = await ResetAndSeedAsync(ParcelStatus.READY_TO_LOAD);
         var key = Guid.NewGuid();
         using var client = factory.CreateAssistantClient(fixture.AssistantUserId, fixture.OperatorId);
 
@@ -225,13 +225,13 @@ public sealed class Day29AssistantLoadEndpointTests
     [Fact]
     public async Task RemoteTripSuccessThenParcelCommitFailure_SameKeyRetryConvergesExactlyOnce()
     {
-        var fixture = await ResetAndSeedAsync(ParcelStatus.PENDING);
+        var fixture = await ResetAndSeedAsync(ParcelStatus.READY_TO_LOAD);
         var key = Guid.NewGuid();
         factory.Scenario.FailNextCommit = true;
         using var client = factory.CreateAssistantClient(fixture.AssistantUserId, fixture.OperatorId);
 
         var failed = await PostLoadAsync(client, fixture, key);
-        await factory.AssertPersistedAsync(fixture, ParcelStatus.PENDING, expectedWrites: 0);
+        await factory.AssertPersistedAsync(fixture, ParcelStatus.READY_TO_LOAD, expectedWrites: 0);
         var retried = await PostLoadAsync(client, fixture, key);
 
         failed.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
@@ -401,12 +401,13 @@ public sealed class Day29AssistantLoadWebApplicationFactory : WebApplicationFact
             INSERT INTO vietride_parcel.parcels (
                 id, parcel_code, sender_user_id, recipient_user_id,
                 recipient_name, recipient_phone, operator_id, trip_id,
-                size_category, estimated_weight_kg, estimated_volume_m3,
+                size_category, estimated_size_category, estimated_weight_kg, estimated_volume_m3,
                 total_price_vnd, deposit_amount, original_deposit_amount, status)
             VALUES (
                 {fixture.ParcelId}, {fixture.ParcelCode}, {fixture.SenderUserId},
                 {fixture.RecipientUserId}, 'Recipient', '+84901234567',
                 {fixture.OperatorId}, {fixture.TripId},
+                'MEDIUM'::vietride_parcel.parcel_size_category,
                 'MEDIUM'::vietride_parcel.parcel_size_category, 12.5, 0.25,
                 100000, 100000, 100000,
                 CAST({status.ToString()} AS vietride_parcel.parcel_status));

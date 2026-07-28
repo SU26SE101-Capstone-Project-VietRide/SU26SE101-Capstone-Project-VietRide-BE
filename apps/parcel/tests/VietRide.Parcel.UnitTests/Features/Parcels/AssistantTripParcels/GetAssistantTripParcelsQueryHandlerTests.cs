@@ -41,7 +41,13 @@ public sealed class GetAssistantTripParcelsQueryHandlerTests
             parcel.RecipientPhone.ToString(),
             parcel.DropoffStopId,
             parcel.SizeCategory.ToString(),
+            parcel.EstimatedSizeCategory.ToString(),
+            parcel.ActualSizeCategory?.ToString(),
             parcel.EstimatedWeightKg,
+            parcel.ActualWeightKg,
+            parcel.BalanceRequiredVnd.Amount,
+            parcel.BalancePaidVnd.Amount,
+            parcel.FinalPaymentDeadline,
             parcel.Description,
             parcel.PhotoUrl));
         await repository.Received(1).ListByTripAndOperatorAsync(TripId, OperatorId, 1, 20, Arg.Any<CancellationToken>());

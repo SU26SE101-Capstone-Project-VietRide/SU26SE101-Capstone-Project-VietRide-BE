@@ -19,6 +19,8 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
         builder.ToTable("parcels", table =>
         {
             table.HasCheckConstraint("chk_parcels_amounts_non_negative", "deposit_amount >= 0 AND additional_amount >= 0");
+            table.HasCheckConstraint("chk_parcels_settlement_amounts_non_negative", "estimated_gross_price_vnd >= 0 AND final_gross_price_vnd >= 0 AND discount_amount_vnd >= 0 AND estimated_total_price_vnd >= 0 AND final_total_price_vnd >= 0 AND deposit_required_vnd >= 0 AND deposit_paid_vnd >= 0 AND balance_required_vnd >= 0 AND balance_paid_vnd >= 0 AND refund_due_vnd >= 0 AND refunded_amount_vnd >= 0 AND forfeited_deposit_vnd >= 0");
+            table.HasCheckConstraint("chk_parcels_settlement_policy_version_positive", "settlement_policy_version > 0");
             table.HasCheckConstraint("chk_parcels_weight_positive", "estimated_weight_kg > 0");
             table.HasCheckConstraint("chk_parcels_dimensions_positive", "estimated_length_cm > 0 AND estimated_width_cm > 0 AND estimated_height_cm > 0");
             table.HasCheckConstraint("chk_parcels_volume_positive", "estimated_volume_m3 > 0");
@@ -98,6 +100,16 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
             .HasColumnName("size_category")
             .HasColumnType(ParcelSizeCategoryType)
             .IsRequired();
+
+        builder.Property(x => x.EstimatedSizeCategory)
+            .HasColumnName("estimated_size_category")
+            .HasColumnType(ParcelSizeCategoryType)
+            .IsRequired();
+
+        builder.Property(x => x.ActualSizeCategory)
+            .HasColumnName("actual_size_category")
+            .HasColumnType(ParcelSizeCategoryType)
+            .IsRequired(false);
 
         builder.Property(x => x.EstimatedLengthCm)
             .HasColumnName("estimated_length_cm")
@@ -225,6 +237,62 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
             .HasColumnName("additional_payment_deadline")
             .IsRequired(false);
 
+        ConfigureMoney(builder, x => x.EstimatedGrossPriceVnd, "estimated_gross_price_vnd");
+        ConfigureMoney(builder, x => x.FinalGrossPriceVnd, "final_gross_price_vnd");
+        ConfigureMoney(builder, x => x.DiscountAmountVnd, "discount_amount_vnd");
+        ConfigureMoney(builder, x => x.EstimatedTotalPriceVnd, "estimated_total_price_vnd");
+        ConfigureMoney(builder, x => x.FinalTotalPriceVnd, "final_total_price_vnd");
+        ConfigureMoney(builder, x => x.DepositRequiredVnd, "deposit_required_vnd");
+        ConfigureMoney(builder, x => x.DepositPaidVnd, "deposit_paid_vnd");
+        ConfigureMoney(builder, x => x.BalanceRequiredVnd, "balance_required_vnd");
+        ConfigureMoney(builder, x => x.BalancePaidVnd, "balance_paid_vnd");
+        ConfigureMoney(builder, x => x.RefundDueVnd, "refund_due_vnd");
+        ConfigureMoney(builder, x => x.RefundedAmountVnd, "refunded_amount_vnd");
+        ConfigureMoney(builder, x => x.ForfeitedDepositVnd, "forfeited_deposit_vnd");
+
+        builder.Property(x => x.DepositPaymentId)
+            .HasColumnName("deposit_payment_id")
+            .HasColumnType("uuid")
+            .IsRequired(false);
+        builder.Property(x => x.BalancePaymentId)
+            .HasColumnName("balance_payment_id")
+            .HasColumnType("uuid")
+            .IsRequired(false);
+        builder.Property(x => x.FinalPaymentDeadline)
+            .HasColumnName("final_payment_deadline")
+            .IsRequired(false);
+        builder.Property(x => x.LoadCutoffAt)
+            .HasColumnName("load_cutoff_at")
+            .IsRequired(false);
+        builder.Property(x => x.LatestCheckInAt)
+            .HasColumnName("latest_check_in_at")
+            .IsRequired(false);
+        builder.Property(x => x.CheckedInAt)
+            .HasColumnName("checked_in_at")
+            .IsRequired(false);
+        builder.Property(x => x.CheckedInByUserId)
+            .HasColumnName("checked_in_by_user_id")
+            .HasColumnType("uuid")
+            .IsRequired(false);
+        builder.Property(x => x.ReweighedAt)
+            .HasColumnName("reweighed_at")
+            .IsRequired(false);
+        builder.Property(x => x.ReweighedByUserId)
+            .HasColumnName("reweighed_by_user_id")
+            .HasColumnType("uuid")
+            .IsRequired(false);
+        ConfigureMoney(builder, x => x.PricePerKgVnd, "price_per_kg_vnd");
+        ConfigureMoney(builder, x => x.MinimumPriceVnd, "minimum_price_vnd");
+        builder.Property(x => x.DimWeightFactor)
+            .HasColumnName("dim_weight_factor")
+            .HasColumnType("decimal(10,2)")
+            .HasDefaultValue(6000m)
+            .IsRequired();
+        builder.Property(x => x.SettlementPolicyVersion)
+            .HasColumnName("settlement_policy_version")
+            .HasDefaultValue(1)
+            .IsRequired();
+
         builder.Property(x => x.Status)
             .HasColumnName("status")
             .HasColumnType(ParcelStatusType)
@@ -233,6 +301,10 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
             .HasColumnName("pending_action_type")
             .HasConversion<string>()
             .HasMaxLength(40)
+            .IsRequired(false);
+        builder.Property(x => x.PendingActionResumeStatus)
+            .HasColumnName("pending_action_resume_status")
+            .HasColumnType(ParcelStatusType)
             .IsRequired(false);
         builder.Property(x => x.PendingActionReason)
             .HasColumnName("pending_action_reason")
@@ -345,11 +417,27 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
 
         builder.HasIndex(x => new { x.Status, x.UpdatedAt })
             .HasDatabaseName("idx_parcels_status_updated_at")
-            .HasFilter($"status IN ('PENDING'::{ParcelStatusType}, 'PENDING_ADDITIONAL_PAYMENT'::{ParcelStatusType}, 'PENDING_OPERATOR_REVIEW'::{ParcelStatusType}, 'PENDING_OPERATOR_ACTION'::{ParcelStatusType}, 'PENDING_TRANSFER_CONFIRM'::{ParcelStatusType}, 'DELIVERED_PENDING_CONFIRM'::{ParcelStatusType}, 'DELIVERY_REJECTED'::{ParcelStatusType}, 'TRANSFER_ESCALATED'::{ParcelStatusType})");
+            .HasFilter($"status IN ('PENDING_PAYMENT'::{ParcelStatusType}, 'RESERVED'::{ParcelStatusType}, 'CHECKED_IN'::{ParcelStatusType}, 'PENDING_FINAL_PAYMENT'::{ParcelStatusType}, 'READY_TO_LOAD'::{ParcelStatusType}, 'PENDING_OPERATOR_REVIEW'::{ParcelStatusType}, 'PENDING_OPERATOR_ACTION'::{ParcelStatusType}, 'PENDING_TRANSFER_CONFIRM'::{ParcelStatusType}, 'DELIVERED_PENDING_CONFIRM'::{ParcelStatusType}, 'DELIVERY_REJECTED'::{ParcelStatusType}, 'TRANSFER_ESCALATED'::{ParcelStatusType})");
 
         builder.HasIndex(x => x.AdditionalPaymentDeadline)
             .HasDatabaseName("idx_parcels_additional_payment_deadline")
             .HasFilter($"status = 'PENDING_ADDITIONAL_PAYMENT'::{ParcelStatusType}");
+
+        builder.HasIndex(x => x.LatestCheckInAt)
+            .HasDatabaseName("idx_parcels_latest_check_in_at")
+            .HasFilter($"status = 'RESERVED'::{ParcelStatusType} AND latest_check_in_at IS NOT NULL");
+
+        builder.HasIndex(x => x.FinalPaymentDeadline)
+            .HasDatabaseName("idx_parcels_final_payment_deadline")
+            .HasFilter($"status = 'PENDING_FINAL_PAYMENT'::{ParcelStatusType} AND final_payment_deadline IS NOT NULL");
+
+        builder.HasIndex(x => x.DepositPaymentId)
+            .HasDatabaseName("idx_parcels_deposit_payment_id")
+            .HasFilter("deposit_payment_id IS NOT NULL");
+
+        builder.HasIndex(x => x.BalancePaymentId)
+            .HasDatabaseName("idx_parcels_balance_payment_id")
+            .HasFilter("balance_payment_id IS NOT NULL");
 
         builder.HasIndex(x => x.TransferTargetTripId)
             .HasDatabaseName("idx_parcels_transfer_target_trip_id")
@@ -386,5 +474,18 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
         builder.HasIndex(x => new { x.ConfirmedAt, x.OperatorId })
             .HasDatabaseName("idx_parcels_confirmed_report")
             .HasFilter($"status = 'DELIVERY_CONFIRMED'::{ParcelStatusType} AND confirmed_at IS NOT NULL");
+    }
+
+    private static void ConfigureMoney(
+        EntityTypeBuilder<ParcelEntity> builder,
+        System.Linq.Expressions.Expression<Func<ParcelEntity, Money>> property,
+        string columnName)
+    {
+        builder.Property(property)
+            .HasColumnName(columnName)
+            .HasColumnType("bigint")
+            .HasConversion(m => m.Amount, amount => Money.FromRaw(amount))
+            .HasDefaultValueSql("0")
+            .IsRequired();
     }
 }
