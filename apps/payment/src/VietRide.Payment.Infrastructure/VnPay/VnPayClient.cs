@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
@@ -17,15 +19,22 @@ public sealed class VnPayClient : IVnPayClient
     private const string CurrencyCode = "VND";
     private const string Locale = "vn";
     private const string DefaultOrderType = "other";
-    private static readonly TimeSpan IpnDedupeTtl = TimeSpan.FromHours(24);
+    // Redis is only a short-lived concurrency lease. PostgreSQL payment/top-up status is the
+    // durable idempotency source, so a crashed or rolled-back callback must become retryable soon.
+    private static readonly TimeSpan IpnReservationTtl = TimeSpan.FromMinutes(1);
 
     private readonly VnPayOptions _options;
     private readonly IConnectionMultiplexer? _redis;
+    private readonly ILogger<VnPayClient> _logger;
 
-    public VnPayClient(IOptions<VnPayOptions> options, IConnectionMultiplexer? redis = null)
+    public VnPayClient(
+        IOptions<VnPayOptions> options,
+        IConnectionMultiplexer? redis = null,
+        ILogger<VnPayClient>? logger = null)
     {
         _options = options.Value;
         _redis = redis;
+        _logger = logger ?? NullLogger<VnPayClient>.Instance;
     }
 
     public string CreateTopUpRedirectUrl(
@@ -161,7 +170,7 @@ public sealed class VnPayClient : IVnPayClient
         return await db.StringSetAsync(
             BuildIpnDedupeKey(vnPayTxnRef),
             "1",
-            IpnDedupeTtl,
+            IpnReservationTtl,
             When.NotExists,
             CommandFlags.None);
     }
@@ -176,12 +185,22 @@ public sealed class VnPayClient : IVnPayClient
         if (_redis is null)
             return;
 
-        var db = _redis.GetDatabase();
-        await db.KeyDeleteAsync(BuildIpnDedupeKey(vnPayTxnRef), CommandFlags.None);
+        try
+        {
+            var db = _redis.GetDatabase();
+            await db.KeyDeleteAsync(BuildIpnDedupeKey(vnPayTxnRef), CommandFlags.None);
+        }
+        catch (RedisException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to release VNPay IPN reservation for transaction {VnPayTxnRef}; the short TTL will recover it.",
+                vnPayTxnRef);
+        }
     }
 
     private static string BuildIpnDedupeKey(string vnPayTxnRef)
-        => $"payment:vnpay_ipn:{vnPayTxnRef}";
+        => $"payment:vnpay_ipn:v2:{vnPayTxnRef}";
 
     private string BuildPaymentUrl(SortedDictionary<string, string> parameters)
     {

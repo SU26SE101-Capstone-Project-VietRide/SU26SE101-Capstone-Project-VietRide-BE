@@ -122,6 +122,37 @@ public sealed class CreateSubscriptionPaymentCommandHandlerTests
         payload.RootElement.GetProperty("method").GetString().Should().Be("VNPAY");
         payload.RootElement.GetProperty("billingPeriod").GetString().Should().Be("MONTHLY");
         payload.RootElement.GetProperty("periodFrom").GetDateTimeOffset().Should().Be(Now);
+        fixture.VnPay.ReleasedTxnRefs.Should().ContainSingle().Which.Should().Be(payment.VnPayTxnRef);
+    }
+
+    [Fact]
+    public async Task Handle_VnPayConfirmationWhileReservationIsHeld_ReturnsRetryableFailure()
+    {
+        var fixture = new Fixture(700_000);
+        await fixture.Handler.Handle(fixture.Command("VNPAY"), CancellationToken.None);
+        var payment = fixture.Payments.Items.Single();
+        fixture.VnPay.Reserve(payment.VnPayTxnRef!);
+        var confirm = new ConfirmSubscriptionPaymentCommandHandler(
+            fixture.VnPay,
+            fixture.Payments,
+            fixture.PlatformWallets,
+            fixture.Outbox,
+            new FrozenClock(Now));
+
+        var result = await confirm.Handle(
+            new ConfirmSubscriptionPaymentCommand(new Dictionary<string, string>
+            {
+                ["vnp_TxnRef"] = payment.VnPayTxnRef!,
+                ["vnp_ResponseCode"] = "00",
+                ["vnp_Amount"] = "50000000",
+            }),
+            CancellationToken.None);
+
+        result.RspCode.Should().Be("99");
+        payment.Status.Should().Be(PaymentStatus.PENDING_REDIRECT);
+        fixture.PlatformWallets.Transactions.Should().BeEmpty();
+        fixture.Outbox.Events.Should().BeEmpty();
+        fixture.VnPay.ReleasedTxnRefs.Should().BeEmpty();
     }
 
     [Fact]
@@ -278,9 +309,24 @@ public sealed class CreateSubscriptionPaymentCommandHandlerTests
 
     private sealed class FakeVnPayClient : IVnPayClient
     {
+        private readonly HashSet<string> _reserved = new(StringComparer.Ordinal);
+
+        public List<string> ReleasedTxnRefs { get; } = [];
+
+        public void Reserve(string vnPayTxnRef) => _reserved.Add(vnPayTxnRef);
+
         public string CreateTopUpRedirectUrl(Guid userId, Money amount, string reference, string ip, DateTimeOffset at) => throw new NotSupportedException();
         public string CreateSubscriptionPaymentRedirectUrl(Guid attemptId, Guid operatorId, Money amount, string reference, string ip, DateTimeOffset at) => $"https://sandbox.vnpay.test/pay?ref={reference}";
         public bool VerifySignature(IReadOnlyDictionary<string, string> parameters) => true;
+        public Task<bool> TryReserveIpnAsync(string vnPayTxnRef, CancellationToken cancellationToken)
+            => Task.FromResult(_reserved.Add(vnPayTxnRef));
+
+        public Task ReleaseIpnReservationAsync(string vnPayTxnRef, CancellationToken cancellationToken)
+        {
+            ReleasedTxnRefs.Add(vnPayTxnRef);
+            _reserved.Remove(vnPayTxnRef);
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FakeOutbox : IIntegrationEventOutbox

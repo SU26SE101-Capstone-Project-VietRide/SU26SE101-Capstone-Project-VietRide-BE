@@ -63,10 +63,14 @@ public sealed class ConfirmTopUpCommandHandler : IRequestHandler<ConfirmTopUpCom
         if (!reservationAcquired)
         {
             _logger.LogInformation("Skipping duplicate VNPay top-up IPN for transaction {VnPayTxnRef}.", vnPayTxnRef);
-            return ConfirmSuccess();
-        }
+            var currentTopUp = await _topUpRequests.FindByVnPayTxnRefAsync(vnPayTxnRef, cancellationToken);
+            if (currentTopUp is null)
+                return new ConfirmTopUpResult("01", "Order Not Found", 200);
 
-        var shouldReleaseReservation = true;
+            return currentTopUp.Status == TopUpRequestStatus.PENDING
+                ? ConfirmFailure()
+                : ConfirmSuccess();
+        }
 
         try
         {
@@ -145,15 +149,11 @@ public sealed class ConfirmTopUpCommandHandler : IRequestHandler<ConfirmTopUpCom
                 topUpRequest.UserId,
                 topUpRequest.Amount.Amount);
 
-            shouldReleaseReservation = false;
             return ConfirmSuccess();
         }
         finally
         {
-            if (shouldReleaseReservation)
-            {
-                await _vnPayClient.ReleaseIpnReservationAsync(vnPayTxnRef, cancellationToken);
-            }
+            await _vnPayClient.ReleaseIpnReservationAsync(vnPayTxnRef, CancellationToken.None);
         }
     }
 

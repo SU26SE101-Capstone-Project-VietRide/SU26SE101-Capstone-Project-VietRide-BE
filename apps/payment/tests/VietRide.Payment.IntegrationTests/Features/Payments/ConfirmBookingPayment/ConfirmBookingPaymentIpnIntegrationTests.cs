@@ -44,7 +44,7 @@ public sealed class ConfirmBookingPaymentIpnIntegrationTests
             && tx.ReferenceId == factory.BookingId);
         factory.Outbox.Events.Should().ContainSingle(evt => evt.EventType == "payment.payment.succeeded");
         factory.VnPay.ReservedTxnRefs.Should().HaveCount(2);
-        factory.VnPay.ReleasedTxnRefs.Should().BeEmpty();
+        factory.VnPay.ReleasedTxnRefs.Should().HaveCount(2);
     }
 
     private static FormUrlEncodedContent CreateForm(string txnRef)

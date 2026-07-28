@@ -77,10 +77,14 @@ public sealed class ConfirmBookingPaymentCommandHandler
         if (!reservationAcquired)
         {
             _logger.LogInformation("Skipping duplicate VNPay booking payment IPN for transaction {VnPayTxnRef}.", vnPayTxnRef);
-            return AlreadyProcessed();
-        }
+            var currentPayment = FindBookingVnPayPayment(vnPayTxnRef, pendingOnly: false);
+            if (currentPayment is null)
+                return OrderNotFound();
 
-        var shouldReleaseReservation = true;
+            return currentPayment.Status == PaymentStatus.PENDING_REDIRECT
+                ? ConfirmFailure()
+                : AlreadyProcessed();
+        }
 
         try
         {
@@ -117,7 +121,6 @@ public sealed class ConfirmBookingPaymentCommandHandler
             {
                 await MarkFailedAsync(payment, responseCode, responseCode ?? "VNPay payment failed.", cancellationToken)
                     .ConfigureAwait(false);
-                shouldReleaseReservation = false;
                 return ConfirmSuccess();
             }
 
@@ -136,7 +139,6 @@ public sealed class ConfirmBookingPaymentCommandHandler
             {
                 await MarkFailedAsync(payment, transactionStatus, transactionStatus ?? "MISSING_TRANSACTION_STATUS", cancellationToken)
                     .ConfigureAwait(false);
-                shouldReleaseReservation = false;
                 return ConfirmSuccess();
             }
 
@@ -173,16 +175,12 @@ public sealed class ConfirmBookingPaymentCommandHandler
                 payment.ReferenceId,
                 payment.Amount.Amount);
 
-            shouldReleaseReservation = false;
             return ConfirmSuccess();
         }
         finally
         {
-            if (shouldReleaseReservation)
-            {
-                await _vnPayClient.ReleaseIpnReservationAsync(vnPayTxnRef, cancellationToken)
-                    .ConfigureAwait(false);
-            }
+            await _vnPayClient.ReleaseIpnReservationAsync(vnPayTxnRef, CancellationToken.None)
+                .ConfigureAwait(false);
         }
     }
 
@@ -312,8 +310,9 @@ public sealed class ConfirmBookingPaymentCommandHandler
         }
 
         return new DateTimeOffset(
-            DateTime.SpecifyKind(localPaidAt, DateTimeKind.Unspecified),
-            TimeSpan.FromHours(7));
+                DateTime.SpecifyKind(localPaidAt, DateTimeKind.Unspecified),
+                TimeSpan.FromHours(7))
+            .ToUniversalTime();
     }
 
     private static ConfirmBookingPaymentResult ConfirmSuccess()
