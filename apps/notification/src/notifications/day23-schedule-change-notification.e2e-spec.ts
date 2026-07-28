@@ -109,6 +109,7 @@ function createChannel(
     nack: jest.fn(),
     publish: jest.fn(),
     close: jest.fn(),
+    on: jest.fn(),
   } as unknown as jest.Mocked<Channel>;
 
   return channel;

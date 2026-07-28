@@ -154,6 +154,40 @@ describe('RabbitMqConsumer', () => {
     expect(channel.nack).toHaveBeenCalledWith(msg, false, false);
   });
 
+  it('registers a channel error listener so broker-closed channels do not crash the process', async () => {
+    const consumer = createConsumer(connection);
+
+    await consumer.subscribe(queue, routingKey, jest.fn());
+
+    const errorListener = channel.on.mock.calls.find(([event]) => event === 'error')?.[1] as
+      | ((err: Error) => void)
+      | undefined;
+    expect(errorListener).toBeDefined();
+    expect(() => errorListener?.(new Error('channel closed by server'))).not.toThrow();
+  });
+
+  it('logs the conflicting queue and resolves when the broker rejects the queue declaration', async () => {
+    const consumer = createConsumer(connection);
+    const errorSpy = jest.spyOn(Logger.prototype, 'error');
+    channel.assertQueue.mockRejectedValue(
+      new Error(
+        `PRECONDITION_FAILED - inequivalent arg 'x-dead-letter-routing-key' for queue '${queue}' in vhost '/'`,
+      ),
+    );
+
+    await expect(
+      consumer.subscribe(queue, routingKey, jest.fn(), { deadLetter: true }),
+    ).resolves.toBeUndefined();
+
+    expect(channel.consume).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining(queue),
+    );
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('PRECONDITION_FAILED'),
+    );
+  });
+
   it('acks messages after successful json parse and handler completion', async () => {
     const consumer = createConsumer(connection);
     const handler: RabbitMqHandler<{ hello: string }> = jest.fn();
@@ -190,6 +224,7 @@ function createChannelMock(): jest.Mocked<ConfirmChannel> {
     nack: jest.fn(),
     publish: jest.fn(),
     close: jest.fn(),
+    on: jest.fn(),
   } as unknown as jest.Mocked<ConfirmChannel>;
 }
 

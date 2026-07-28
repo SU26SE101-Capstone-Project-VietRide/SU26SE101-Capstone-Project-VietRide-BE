@@ -1,4 +1,4 @@
-import { DynamicModule, Global, Module, Provider } from '@nestjs/common';
+import { DynamicModule, Global, Logger, Module, Provider } from '@nestjs/common';
 import * as amqplib from 'amqplib';
 import type { ChannelModel } from 'amqplib';
 import { RabbitMqConsumer } from './rabbitmq.consumer';
@@ -12,7 +12,11 @@ export class NestRabbitMqModule {
     const connectionProvider: Provider = {
       provide: RABBITMQ_CONNECTION,
       useFactory: async (): Promise<ChannelModel> => {
-        return amqplib.connect(opts.url);
+        const connection = await amqplib.connect(opts.url);
+        connection.on('error', (err: Error) => {
+          new Logger('NestRabbitMqModule').error(`RabbitMQ connection error: ${err.message}`);
+        });
+        return connection;
       },
     };
     const optionsProvider: Provider = { provide: RABBITMQ_OPTIONS, useValue: opts };

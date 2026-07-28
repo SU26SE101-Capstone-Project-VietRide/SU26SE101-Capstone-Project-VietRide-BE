@@ -41,27 +41,42 @@ export class RabbitMqConsumer implements OnModuleDestroy {
     options: RabbitMqSubscribeOptions = {},
   ): Promise<void> {
     const ch = await this.conn.createConfirmChannel();
-    await ch.assertExchange(this.opts.exchange, this.opts.exchangeType ?? 'topic', { durable: true });
-    if (options.deadLetter) {
-      await this.assertRetryTopology(ch, queue, routingKey, options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS);
-    }
-
-    await ch.assertQueue(queue, {
-      durable: true,
-      ...(options.deadLetter
-        ? {
-            arguments: {
-              'x-dead-letter-exchange': this.retryExchangeName(),
-              'x-dead-letter-routing-key': routingKey,
-            },
-          }
-        : {}),
+    ch.on('error', (err: Error) => {
+      this.logger.error(`Channel error on queue=${queue} rk=${routingKey}: ${err.message}`);
     });
-    await ch.bindQueue(queue, this.opts.exchange, routingKey);
-    if (options.deadLetter) {
-      await ch.bindQueue(queue, this.opts.exchange, this.retryReturnRoutingKey(queue));
+
+    try {
+      await ch.assertExchange(this.opts.exchange, this.opts.exchangeType ?? 'topic', { durable: true });
+      if (options.deadLetter) {
+        await this.assertRetryTopology(ch, queue, routingKey, options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS);
+      }
+
+      await ch.assertQueue(queue, {
+        durable: true,
+        ...(options.deadLetter
+          ? {
+              arguments: {
+                'x-dead-letter-exchange': this.retryExchangeName(),
+                'x-dead-letter-routing-key': routingKey,
+              },
+            }
+          : {}),
+      });
+      await ch.bindQueue(queue, this.opts.exchange, routingKey);
+      if (options.deadLetter) {
+        await ch.bindQueue(queue, this.opts.exchange, this.retryReturnRoutingKey(queue));
+      }
+      if (options.prefetch) await ch.prefetch(options.prefetch);
+    } catch (err) {
+      // Broker rejected the topology (e.g. 406 inequivalent args on an existing durable
+      // queue after a routing-key rename). Keep the service alive without this consumer;
+      // the stale queue must be deleted on the broker so it can be redeclared.
+      this.logger.error(
+        `Topology assertion failed on queue=${queue} rk=${routingKey}: ${(err as Error).message}. ` +
+          `Consumer NOT started; delete the stale queue on the broker so it can be redeclared, then restart.`,
+      );
+      return;
     }
-    if (options.prefetch) await ch.prefetch(options.prefetch);
 
     await ch.consume(queue, async (msg) => {
       if (!msg) return;
