@@ -217,7 +217,8 @@ public sealed class Day29ParcelAutoRejectedProducerIntegrationTests
         autoRejected.PublishedAt.Should().BeNull();
         using var json = JsonDocument.Parse(autoRejected.Payload);
         var root = json.RootElement;
-        root.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo(
+        var expectedPayloadProperties = new List<string>
+        {
             "eventId",
             "occurredAt",
             "parcelId",
@@ -225,7 +226,13 @@ public sealed class Day29ParcelAutoRejectedProducerIntegrationTests
             "operatorId",
             "userId",
             "tripId",
-            "refundAmount");
+            "refundAmount",
+        };
+        if (source == TimeoutSource.Review)
+            expectedPayloadProperties.Add("reason");
+
+        root.EnumerateObject().Select(property => property.Name)
+            .Should().BeEquivalentTo(expectedPayloadProperties);
         root.GetProperty("eventId").GetGuid().Should().Be(autoRejected.Id);
         root.GetProperty("occurredAt").GetDateTimeOffset().Should().Be(Now);
         root.GetProperty("parcelId").GetGuid().Should().Be(parcelId);
@@ -234,6 +241,8 @@ public sealed class Day29ParcelAutoRejectedProducerIntegrationTests
         root.GetProperty("userId").GetGuid().Should().Be(senderUserId);
         root.GetProperty("tripId").GetGuid().Should().Be(tripId);
         root.GetProperty("refundAmount").GetInt64().Should().Be(refundAmount);
+        if (source == TimeoutSource.Review)
+            root.GetProperty("reason").GetString().Should().Be(ExpectedReason(source));
 
         var refundRows = outboxRows.Where(row => row.EventType == "parcel.refund.initiated").ToList();
         if (source == TimeoutSource.Review)
