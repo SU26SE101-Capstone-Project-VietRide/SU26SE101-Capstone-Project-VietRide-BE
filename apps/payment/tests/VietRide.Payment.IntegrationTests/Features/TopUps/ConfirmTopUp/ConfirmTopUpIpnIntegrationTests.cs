@@ -59,7 +59,7 @@ public sealed class ConfirmTopUpIpnIntegrationTests
             && tx.ReferenceType == WalletTransactionRef.TOP_UP);
         factory.Outbox.Events.Should().ContainSingle(evt => evt.EventType == "payment.wallet.credited");
         factory.VnPay.ReservedTxnRefs.Should().HaveCount(2);
-        factory.VnPay.ReleasedTxnRefs.Should().BeEmpty();
+        factory.VnPay.ReleasedTxnRefs.Should().HaveCount(2);
     }
 
     private sealed class ConfirmTopUpWebApplicationFactory : WebApplicationFactory<Program>

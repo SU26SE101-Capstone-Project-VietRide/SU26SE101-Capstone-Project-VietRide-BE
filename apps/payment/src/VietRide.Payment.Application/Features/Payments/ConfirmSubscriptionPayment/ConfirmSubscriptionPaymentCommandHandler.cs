@@ -52,84 +52,99 @@ public sealed class ConfirmSubscriptionPaymentCommandHandler
             return OrderNotFound();
 
         if (!await _vnPayClient.TryReserveIpnAsync(txnRef, cancellationToken).ConfigureAwait(false))
-            return ConfirmSuccess();
-
-        var payment = _payments.Query().FirstOrDefault(candidate =>
-            candidate.ReferenceType == PaymentReferenceType.SUBSCRIPTION
-            && candidate.Method == PaymentMethod.VNPAY
-            && candidate.VnPayTxnRef == txnRef);
-        if (payment is null)
         {
-            await _vnPayClient.ReleaseIpnReservationAsync(txnRef, cancellationToken).ConfigureAwait(false);
-            return OrderNotFound();
+            var currentPayment = _payments.Query().FirstOrDefault(candidate =>
+                candidate.ReferenceType == PaymentReferenceType.SUBSCRIPTION
+                && candidate.Method == PaymentMethod.VNPAY
+                && candidate.VnPayTxnRef == txnRef);
+            if (currentPayment is null)
+                return OrderNotFound();
+
+            return currentPayment.Status == PaymentStatus.PENDING_REDIRECT
+                ? ConfirmFailure()
+                : ConfirmSuccess();
         }
-        if (payment.Status != PaymentStatus.PENDING_REDIRECT)
-            return ConfirmSuccess();
 
-        await _payments.AcquirePaymentReferenceLockAsync(payment.ReferenceType, payment.ReferenceId, cancellationToken)
-            .ConfigureAwait(false);
-        payment = _payments.Query().FirstOrDefault(candidate =>
-            candidate.Id == payment.Id && candidate.Status == PaymentStatus.PENDING_REDIRECT);
-        if (payment is null)
-            return ConfirmSuccess();
-
-        var responseCode = request.Parameters.TryGetValue("vnp_ResponseCode", out var value) ? value : null;
-        var transactionSucceeded = !request.Parameters.TryGetValue("vnp_TransactionStatus", out var transactionStatus)
-            || string.Equals(transactionStatus, SuccessCode, StringComparison.Ordinal);
-        if (!string.Equals(responseCode, SuccessCode, StringComparison.Ordinal)
-            || !transactionSucceeded
-            || !IsSignedAmountValid(request.Parameters, payment.Amount.Amount))
+        try
         {
-            payment.MarkFailed(responseCode, _clock.UtcNow);
+            var payment = _payments.Query().FirstOrDefault(candidate =>
+                candidate.ReferenceType == PaymentReferenceType.SUBSCRIPTION
+                && candidate.Method == PaymentMethod.VNPAY
+                && candidate.VnPayTxnRef == txnRef);
+            if (payment is null)
+                return OrderNotFound();
+            if (payment.Status != PaymentStatus.PENDING_REDIRECT)
+                return ConfirmSuccess();
+
+            await _payments.AcquirePaymentReferenceLockAsync(payment.ReferenceType, payment.ReferenceId, cancellationToken)
+                .ConfigureAwait(false);
+            payment = _payments.Query().FirstOrDefault(candidate =>
+                candidate.Id == payment.Id && candidate.Status == PaymentStatus.PENDING_REDIRECT);
+            if (payment is null)
+                return ConfirmSuccess();
+
+            var responseCode = request.Parameters.TryGetValue("vnp_ResponseCode", out var value) ? value : null;
+            var transactionSucceeded = !request.Parameters.TryGetValue("vnp_TransactionStatus", out var transactionStatus)
+                || string.Equals(transactionStatus, SuccessCode, StringComparison.Ordinal);
+            if (!string.Equals(responseCode, SuccessCode, StringComparison.Ordinal)
+                || !transactionSucceeded
+                || !IsSignedAmountValid(request.Parameters, payment.Amount.Amount))
+            {
+                payment.MarkFailed(responseCode, _clock.UtcNow);
+                _payments.Update(payment);
+                await EnqueueFailedAsync(payment, responseCode, cancellationToken).ConfigureAwait(false);
+                _logger?.LogWarning(
+                    "Subscription VNPay session {PaymentId} for attempt {UpgradeAttemptId} failed with response {ResponseCode}.",
+                    payment.Id,
+                    payment.ReferenceId,
+                    responseCode);
+                return ConfirmSuccess();
+            }
+
+            var context = SubscriptionPaymentContextCodec.DeserializeTrusted(payment.Context);
+
+            if (payment.DueAt.HasValue && _clock.UtcNow >= payment.DueAt.Value)
+            {
+                payment.MarkExpired(_clock.UtcNow);
+                _payments.Update(payment);
+                await EnqueueExpiredAsync(payment, context, cancellationToken).ConfigureAwait(false);
+                _logger?.LogWarning(
+                    "Rejected late subscription VNPay success for payment {PaymentId}, attempt {UpgradeAttemptId}, due at {DueAt}.",
+                    payment.Id,
+                    payment.ReferenceId,
+                    payment.DueAt);
+                return ConfirmSuccess();
+            }
+
+            payment.MarkSucceeded(responseCode, _clock.UtcNow);
             _payments.Update(payment);
-            await EnqueueFailedAsync(payment, responseCode, cancellationToken).ConfigureAwait(false);
-            _logger?.LogWarning(
-                "Subscription VNPay session {PaymentId} for attempt {UpgradeAttemptId} failed with response {ResponseCode}.",
+            await _platformWallets.CreditAsync(
+                payment.Amount,
+                PlatformWalletTransactionRef.SUBSCRIPTION_PAYMENT,
+                payment.Id,
+                "Subscription VNPay payment",
+                cancellationToken).ConfigureAwait(false);
+            var evt = new SubscriptionPaymentSucceededIntegrationEvent(
                 payment.Id,
                 payment.ReferenceId,
-                responseCode);
-            return ConfirmSuccess();
-        }
-
-        var context = SubscriptionPaymentContextCodec.DeserializeTrusted(payment.Context);
-
-        if (payment.DueAt.HasValue && _clock.UtcNow >= payment.DueAt.Value)
-        {
-            payment.MarkExpired(_clock.UtcNow);
-            _payments.Update(payment);
-            await EnqueueExpiredAsync(payment, context, cancellationToken).ConfigureAwait(false);
-            _logger?.LogWarning(
-                "Rejected late subscription VNPay success for payment {PaymentId}, attempt {UpgradeAttemptId}, due at {DueAt}.",
+                payment.OperatorId ?? Guid.Empty,
+                context.OperatorSubscriptionId,
+                payment.Amount.Amount,
+                payment.Method.ToString(),
+                payment.SucceededAt ?? _clock.UtcNow,
+                context);
+            await _outbox.EnqueueAsync(evt.EventType, JsonSerializer.Serialize(evt, JsonOptions), cancellationToken).ConfigureAwait(false);
+            _logger?.LogInformation(
+                "Confirmed subscription VNPay payment {PaymentId} for attempt {UpgradeAttemptId}; event {EventId} queued.",
                 payment.Id,
                 payment.ReferenceId,
-                payment.DueAt);
+                evt.EventId);
             return ConfirmSuccess();
         }
-
-        payment.MarkSucceeded(responseCode, _clock.UtcNow);
-        _payments.Update(payment);
-        await _platformWallets.CreditAsync(
-            payment.Amount,
-            PlatformWalletTransactionRef.SUBSCRIPTION_PAYMENT,
-            payment.Id,
-            "Subscription VNPay payment",
-            cancellationToken).ConfigureAwait(false);
-        var evt = new SubscriptionPaymentSucceededIntegrationEvent(
-            payment.Id,
-            payment.ReferenceId,
-            payment.OperatorId ?? Guid.Empty,
-            context.OperatorSubscriptionId,
-            payment.Amount.Amount,
-            payment.Method.ToString(),
-            payment.SucceededAt ?? _clock.UtcNow,
-            context);
-        await _outbox.EnqueueAsync(evt.EventType, JsonSerializer.Serialize(evt, JsonOptions), cancellationToken).ConfigureAwait(false);
-        _logger?.LogInformation(
-            "Confirmed subscription VNPay payment {PaymentId} for attempt {UpgradeAttemptId}; event {EventId} queued.",
-            payment.Id,
-            payment.ReferenceId,
-            evt.EventId);
-        return ConfirmSuccess();
+        finally
+        {
+            await _vnPayClient.ReleaseIpnReservationAsync(txnRef, CancellationToken.None).ConfigureAwait(false);
+        }
     }
 
     private Task EnqueueFailedAsync(
@@ -166,5 +181,6 @@ public sealed class ConfirmSubscriptionPaymentCommandHandler
             && parsed == checked(amount * 100);
 
     private static ConfirmBookingPaymentResult ConfirmSuccess() => new(SuccessCode, "Confirm Success", 200);
+    private static ConfirmBookingPaymentResult ConfirmFailure() => new("99", "Confirm Failed", 200);
     private static ConfirmBookingPaymentResult OrderNotFound() => new("01", "Order Not Found", 200);
 }

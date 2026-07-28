@@ -21,7 +21,8 @@ public sealed class ConfirmTopUpCommandHandlerTests
         var topUps = new FakeTopUpRequestRepository(topUp);
         var wallets = new FakeWalletRepository(userId, Money.FromRaw(25_000));
         var outbox = new FakeIntegrationEventOutbox();
-        var handler = CreateHandler(new FakeVnPayClient(isSignatureValid: true), topUps, wallets, outbox);
+        var vnPay = new FakeVnPayClient(isSignatureValid: true);
+        var handler = CreateHandler(vnPay, topUps, wallets, outbox);
 
         var result = await handler.Handle(CreateCommand("txn-1", "00"), CancellationToken.None);
 
@@ -41,6 +42,7 @@ public sealed class ConfirmTopUpCommandHandlerTests
             && evt.Payload.Contains("\"amount\":100000", StringComparison.Ordinal)
             && evt.Payload.Contains("\"referenceType\":\"TOP_UP\"", StringComparison.Ordinal)
             && evt.Payload.Contains(topUp.Id.ToString(), StringComparison.OrdinalIgnoreCase));
+        vnPay.ReleasedTxnRefs.Should().ContainSingle().Which.Should().Be("txn-1");
     }
 
     [Fact]
@@ -61,7 +63,7 @@ public sealed class ConfirmTopUpCommandHandlerTests
         wallets.Wallet!.Balance.Should().Be(Money.FromRaw(125_000));
         outbox.Events.Should().ContainSingle();
         vnPay.ReservedTxnRefs.Should().HaveCount(2);
-        vnPay.ReleasedTxnRefs.Should().BeEmpty();
+        vnPay.ReleasedTxnRefs.Should().HaveCount(2);
     }
 
     [Fact]
@@ -77,7 +79,7 @@ public sealed class ConfirmTopUpCommandHandlerTests
         var result = await handler.Handle(CreateCommand("txn-1", "00"), CancellationToken.None);
 
         result.StatusCode.Should().Be(200);
-        result.RspCode.Should().Be("00");
+        result.RspCode.Should().Be("99");
         wallets.CreditCount.Should().Be(0);
         outbox.Events.Should().BeEmpty();
         topUp.Status.Should().Be(TopUpRequestStatus.PENDING);

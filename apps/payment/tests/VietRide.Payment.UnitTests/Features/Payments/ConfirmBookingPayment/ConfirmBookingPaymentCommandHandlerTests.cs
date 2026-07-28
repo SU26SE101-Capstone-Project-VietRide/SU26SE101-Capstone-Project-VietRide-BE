@@ -28,7 +28,8 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
         var payments = new FakePaymentRepository(payment);
         var platformWallets = new FakePlatformWalletRepository(Money.FromRaw(1_000_000));
         var outbox = new FakeIntegrationEventOutbox();
-        var handler = CreateHandler(new FakeVnPayClient(isSignatureValid: true), payments, platformWallets, outbox);
+        var vnPay = new FakeVnPayClient(isSignatureValid: true);
+        var handler = CreateHandler(vnPay, payments, platformWallets, outbox);
 
         var result = await handler.Handle(CreateCommand("txn-1", "00", "25000000"), CancellationToken.None);
 
@@ -46,6 +47,7 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
         payload.RootElement.GetProperty("referenceType").GetString().Should().Be("BOOKING");
         payload.RootElement.GetProperty("referenceId").GetGuid().Should().Be(bookingId);
         payload.RootElement.GetProperty("amount").GetInt64().Should().Be(250_000);
+        vnPay.ReleasedTxnRefs.Should().ContainSingle().Which.Should().Be("txn-1");
     }
 
     [Fact]
@@ -69,6 +71,33 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
         platformWallets.Balance.Should().Be(Money.FromRaw(1_250_000));
         outbox.Events.Should().ContainSingle(evt => evt.EventType == "payment.payment.succeeded");
         vnPay.ReservedTxnRefs.Should().HaveCount(2);
+        vnPay.ReleasedTxnRefs.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task Handle_WhenAnotherCallbackHoldsReservationAndPaymentIsPending_ReturnsRetryableFailure()
+    {
+        var userId = Guid.NewGuid();
+        var bookingId = Guid.NewGuid();
+        var payment = CreatePendingPayment(userId, bookingId, "txn-1", 250_000);
+        var platformWallets = new FakePlatformWalletRepository(Money.FromRaw(1_000_000));
+        var outbox = new FakeIntegrationEventOutbox();
+        var vnPay = new FakeVnPayClient(isSignatureValid: true, reservedTxnRefs: ["txn-1"]);
+        var handler = CreateHandler(
+            vnPay,
+            new FakePaymentRepository(payment),
+            platformWallets,
+            outbox);
+
+        var result = await handler.Handle(
+            CreateCommand("txn-1", "00", "25000000"),
+            CancellationToken.None);
+
+        result.RspCode.Should().Be("99");
+        result.Message.Should().Be("Confirm Failed");
+        payment.Status.Should().Be(PaymentStatus.PENDING_REDIRECT);
+        platformWallets.Transactions.Should().BeEmpty();
+        outbox.Events.Should().BeEmpty();
         vnPay.ReleasedTxnRefs.Should().BeEmpty();
     }
 
@@ -122,7 +151,8 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
                 payDate: "20260624170100"),
             CancellationToken.None);
 
-        payment.SucceededAt.Should().Be(new DateTimeOffset(2026, 6, 24, 17, 1, 0, TimeSpan.FromHours(7)));
+        payment.SucceededAt.Should().Be(new DateTimeOffset(2026, 6, 24, 10, 1, 0, TimeSpan.Zero));
+        payment.SucceededAt!.Value.Offset.Should().Be(TimeSpan.Zero);
         outbox.Events.Should().ContainSingle(evt => evt.EventType == "payment.payment.succeeded");
         outbox.Events.Should().ContainSingle(evt => evt.EventType == "parcel.refund.initiated");
         using var succeeded = JsonDocument.Parse(
@@ -291,9 +321,16 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
         private readonly bool _isSignatureValid;
         private readonly HashSet<string> _reserved = new(StringComparer.Ordinal);
 
-        public FakeVnPayClient(bool isSignatureValid)
+        public FakeVnPayClient(bool isSignatureValid, IEnumerable<string>? reservedTxnRefs = null)
         {
             _isSignatureValid = isSignatureValid;
+            if (reservedTxnRefs is not null)
+            {
+                foreach (var txnRef in reservedTxnRefs)
+                {
+                    _reserved.Add(txnRef);
+                }
+            }
         }
 
         public List<string> ReservedTxnRefs { get; } = [];
