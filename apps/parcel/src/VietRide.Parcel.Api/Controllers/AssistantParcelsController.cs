@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using VietRide.Parcel.Api.Controllers.Requests;
 using VietRide.Parcel.Api.Filters;
 using VietRide.Parcel.Application.Features.Parcels.AssistantTripParcels;
@@ -8,6 +9,7 @@ using VietRide.Parcel.Application.Features.Parcels.CheckIn;
 using VietRide.Parcel.Application.Features.Parcels.Deliver;
 using VietRide.Parcel.Application.Features.Parcels.ManualConfirmDelivery;
 using VietRide.Parcel.Application.Features.Parcels.MarkLoaded;
+using VietRide.Parcel.Application.Features.Parcels.QrScan;
 using VietRide.Parcel.Application.Features.Parcels.Reweigh;
 using VietRide.Parcel.Application.Features.Parcels.Unload;
 using VietRide.Shared.Application.Exceptions;
@@ -46,6 +48,33 @@ public sealed class AssistantParcelsController : ControllerBase
 
         var result = await _mediator.Send(
             new GetAssistantTripParcelsQuery(tripId, userId, operatorId, page, pageSize),
+            cancellationToken);
+
+        return Ok(result);
+    }
+
+    [HttpPost("~/v1/assistant/trips/{tripId:guid}/parcels/qr-scan")]
+    [SkipIdempotency("QR scan resolves a parcel code without mutating state.")]
+    [ProducesResponseType(typeof(ApiResponse<ScanParcelCodeForTripResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<ScanParcelCodeForTripResult>> ScanQrAsync(
+        Guid tripId,
+        [FromBody] ScanParcelCodeForTripRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+
+        var result = await _mediator.Send(
+            new ScanParcelCodeForTripQuery(
+                tripId,
+                request.ParcelCode,
+                CurrentUserClaims.GetUserId(User),
+                operatorId),
             cancellationToken);
 
         return Ok(result);
@@ -101,6 +130,7 @@ public sealed class AssistantParcelsController : ControllerBase
                 parcelId,
                 request.TripId,
                 request.ParcelCode,
+                request.PhotoUrls,
                 CurrentUserClaims.GetUserId(User),
                 operatorId),
             cancellationToken);
@@ -194,6 +224,7 @@ public sealed class AssistantParcelsController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<DeliverParcelResponse>> DeliverAsync(
         Guid parcelId,
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] DeliverParcelRequest? request,
         CancellationToken cancellationToken)
     {
         var operatorId = CurrentUserClaims.GetOperatorId(User)
@@ -201,7 +232,7 @@ public sealed class AssistantParcelsController : ControllerBase
         var userId = CurrentUserClaims.GetUserId(User);
 
         var result = await _mediator.Send(
-            new DeliverParcelCommand(parcelId, userId, operatorId),
+            new DeliverParcelCommand(parcelId, userId, operatorId, request?.PhotoUrls),
             cancellationToken);
 
         return Ok(result);

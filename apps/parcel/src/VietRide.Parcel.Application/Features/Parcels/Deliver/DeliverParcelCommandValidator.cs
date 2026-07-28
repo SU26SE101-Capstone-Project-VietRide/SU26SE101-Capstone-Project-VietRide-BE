@@ -2,18 +2,16 @@ using FluentValidation;
 using VietRide.Parcel.Application.Features.Parcels.Create;
 using VietRide.Shared.Application.Security;
 
-namespace VietRide.Parcel.Application.Features.Parcels.CheckIn;
+namespace VietRide.Parcel.Application.Features.Parcels.Deliver;
 
-public sealed class CheckInParcelCommandValidator : AbstractValidator<CheckInParcelCommand>
+public sealed class DeliverParcelCommandValidator : AbstractValidator<DeliverParcelCommand>
 {
-    public CheckInParcelCommandValidator(ParcelImageOptions imageOptions)
+    public DeliverParcelCommandValidator(ParcelImageOptions imageOptions)
     {
         var firebaseUrls = new FirebaseStorageImageUrlValidator(imageOptions.FirebaseStorageBucket);
 
         RuleFor(x => x.ParcelId).NotEmpty();
-        RuleFor(x => x.TripId).NotEmpty();
-        RuleFor(x => x.ParcelCode).NotEmpty();
-        RuleFor(x => x.AssistantUserId).NotEmpty();
+        RuleFor(x => x.ActorUserId).NotEmpty();
         RuleFor(x => x.OperatorId).NotEmpty();
         RuleFor(x => x.PhotoUrls)
             .Must(photoUrls => photoUrls is null
@@ -25,7 +23,7 @@ public sealed class CheckInParcelCommandValidator : AbstractValidator<CheckInPar
                 photoUrl,
                 ParcelEvidencePhotoRules.ExpectedObjectPrefix(
                     command.OperatorId,
-                    command.AssistantUserId,
+                    command.ActorUserId,
                     command.ParcelId)))
             .OverridePropertyName("photoUrls")
             .WithErrorCode("VALIDATION_FAILED")

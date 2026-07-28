@@ -2,6 +2,9 @@ using System.Security.Cryptography;
 
 namespace VietRide.Parcel.Domain.Helpers;
 
+/// <summary>
+/// Generates the plain parcel code encoded directly by the client-rendered QR image.
+/// </summary>
 public static class ParcelCodeGenerator
 {
     private const string Alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";

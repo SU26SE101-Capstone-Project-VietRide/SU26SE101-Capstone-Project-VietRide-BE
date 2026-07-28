@@ -71,6 +71,8 @@ CREATE TABLE parcels (
     -- parcel info
     description TEXT NULL,
     photo_url TEXT NULL,
+    check_in_photo_urls JSONB NULL,
+    delivery_photo_urls JSONB NULL,
     size_category parcel_size_category NOT NULL,
     estimated_size_category parcel_size_category NOT NULL,
     actual_size_category parcel_size_category NULL,
@@ -179,7 +181,11 @@ CREATE TABLE parcels (
     CONSTRAINT chk_parcels_weight_positive
         CHECK (estimated_weight_kg > 0),
     CONSTRAINT chk_parcels_actual_weight_positive
-        CHECK (actual_weight_kg IS NULL OR actual_weight_kg > 0)
+        CHECK (actual_weight_kg IS NULL OR actual_weight_kg > 0),
+    CONSTRAINT chk_parcels_check_in_photo_urls_max_three
+        CHECK (check_in_photo_urls IS NULL OR (jsonb_typeof(check_in_photo_urls) = 'array' AND jsonb_array_length(check_in_photo_urls) <= 3)),
+    CONSTRAINT chk_parcels_delivery_photo_urls_max_three
+        CHECK (delivery_photo_urls IS NULL OR (jsonb_typeof(delivery_photo_urls) = 'array' AND jsonb_array_length(delivery_photo_urls) <= 3))
 );
 
 CREATE UNIQUE INDEX uq_parcels_parcel_code ON parcels (parcel_code);

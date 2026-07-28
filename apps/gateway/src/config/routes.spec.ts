@@ -658,10 +658,14 @@ describe('buildRouteTable', () => {
     });
   });
 
-  it('routes the Assistant trip parcel list to Parcel without capturing other Assistant paths', () => {
+  it('routes the Assistant trip parcel list and QR scan to Parcel without capturing other Assistant paths', () => {
     const parcelListRoute = matchRoute(
       routes,
       '/v1/assistant/trips/11111111-1111-4111-8111-111111111111/parcels',
+    );
+    const parcelQrScanRoute = matchRoute(
+      routes,
+      '/v1/assistant/trips/11111111-1111-4111-8111-111111111111/parcels/qr-scan',
     );
     const otherAssistantRoute = matchRoute(
       routes,
@@ -669,6 +673,12 @@ describe('buildRouteTable', () => {
     );
 
     expect(parcelListRoute).toMatchObject({
+      prefix: '/v1/assistant/trips/{tripId}/parcels',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['ASSISTANT'],
+    });
+    expect(parcelQrScanRoute).toMatchObject({
       prefix: '/v1/assistant/trips/{tripId}/parcels',
       target: env.PARCEL_BASE_URL,
       authRequired: 'user',

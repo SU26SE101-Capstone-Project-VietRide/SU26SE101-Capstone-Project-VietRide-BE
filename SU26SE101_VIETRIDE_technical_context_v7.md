@@ -1644,7 +1644,7 @@ Lý do dùng plain bookingCode:
   - Dễ đọc khi support/manual lookup
   - Driver App có sẵn danh sách booking của trip qua API → match nhanh
   - Không cần lưu thêm field QR nào trong DB — generate động từ bookingCode
-  - Nhất quán với parcel QR (VRP-yyyyMMdd-XXXXXXXX) — cùng pattern, prefix khác để
+  - Nhất quán với parcel QR (VR-PCL-yyyyMMdd-XXXXXXXX) — cùng pattern, prefix khác để
     phân biệt loại
 ```
 
@@ -2917,21 +2917,24 @@ Operator (cả OPERATOR_STAFF và OPERATOR_ADMIN) xem được **full contact in
 
 **QR code spec — hàng ký gửi:**
 ```
-Parcel QR encode: plain string = parcelCode (ví dụ "VRP-20260518-P7K3D9Q2")
+Parcel QR encode: plain string = parcelCode (ví dụ "VR-PCL-20260728-P7K3D9Q2")
   → KHÔNG encode parcelId UUID, JSON, token, hay encrypted payload
-  → `parcelCode` format: VRP-yyyyMMdd-XXXXXXXX
-     - VRP = VietRide Parcel prefix, tách biệt với bookingCode
+  → `parcelCode` format hiện tại: VR-PCL-yyyyMMdd-XXXXXXXX
+     - VR-PCL = VietRide Parcel prefix, tách biệt với bookingCode/ticketCode
      - yyyyMMdd = ngày tạo parcel theo Asia/Bangkok
      - XXXXXXXX = 8 ký tự uppercase random/base32, unique trong DB
+  → Backend vẫn nhận legacy VRP-yyyyMMdd-XXXXXXXX khi resolve QR cho dữ liệu cũ
   → Parcel Service lưu `parcelCode` string unique + indexed
   → Passenger App/email render QR động từ parcelCode, KHÔNG lưu ảnh QR trong DB
-  → Driver App scan QR → decode ra parcelCode
-  → Driver App match parcelCode với danh sách parcel của trip đang thao tác
-  → Confirm LOADED hoặc UNLOADED theo đúng status transition hiện tại
+  → Assistant App scan QR, decode ra parcelCode và gọi
+    POST /v1/assistant/trips/{tripId}/parcels/qr-scan
+  → Parcel Service kiểm tra Assistant assignment + operator tenant trước khi resolve
+  → QR scan chỉ đọc và trả parcelId/current status; KHÔNG tự check-in/load/unload/deliver
+  → Assistant App gọi mutation endpoint tương ứng sau bước xác nhận của người dùng
 
-Nếu scan ra code không thuộc trip hiện tại hoặc parcel không ở status hợp lệ:
+Nếu scan ra code không thuộc trip/operator hiện tại:
   → không update status
-  → trả lỗi `PARCEL_NOT_FOUND` hoặc `VALIDATION_ERROR` tùy case
+  → trả `PARCEL_NOT_FOUND`; mã sai format trả `VALIDATION_ERROR`
 
 Lý do dùng parcelCode thay vì parcelId UUID: dễ đọc khi support/manual search,
 không expose UUID nội bộ, và nhất quán với booking QR dùng plain bookingCode.
@@ -3245,6 +3248,7 @@ Nếu người nhận đổi ý trong 15 phút:
 **Parcel entity — business requirements:**
 
 - **Ảnh hàng:** `photoUrl` string nullable — tối đa một URL Firebase Storage. Người gửi có thể upload ảnh hàng khi tạo parcel request (để phụ xe đối chiếu khi nhận hàng). Optional, không bắt buộc. Client upload trực tiếp lên Firebase Storage, BE nhận URL string đã trim; URL phải là HTTPS, tối đa 2.048 ký tự và thuộc bucket cấu hình qua `FIREBASE_STORAGE_BUCKET`. Firebase Storage Rules giới hạn tối đa 5 MB và MIME `image/jpeg | image/png | image/webp`; Parcel Service không nhận hoặc kiểm tra file bytes. `photoUrl` được expose trong Parcel detail và danh sách parcel của Assistant đúng chuyến, không đưa vào RabbitMQ event.
+- **Ảnh bằng chứng vận hành:** `checkInPhotoUrls` và `deliveryPhotoUrls` là hai mảng JSONB nullable, mỗi mảng tối đa 3 URL. Assistant dùng upload purpose `PARCEL_EVIDENCE_PHOTO`, upload trực tiếp vào `parcel-ops/{operatorId}/{assistantUserId}/{parcelId}/...`; Parcel validate HTTPS, bucket và owned path rồi lưu ảnh atomically cùng transition check-in/deliver. Body ảnh optional để giữ tương thích v1; ảnh chỉ expose qua Parcel detail cho caller đã có quyền xem Parcel và không đưa vào RabbitMQ event.
 - **Phân loại hàng:** `estimatedSizeCategory` và `actualSizeCategory` (SMALL | MEDIUM | LARGE | EXTRA_LARGE) do backend derive từ chargeable weight; lưu riêng estimated/actual dimensions, weight, volume, dim weight và chargeable weight.
 - **Tiền settlement v2:** `estimatedGrossPriceVnd`, `finalGrossPriceVnd`, `discountAmountVnd`, `estimatedTotalPriceVnd`, `finalTotalPriceVnd`, `depositPercent`, `depositRequiredVnd`, `depositPaidVnd`, `balanceRequiredVnd`, `balancePaidVnd`, `refundDueVnd`, `refundedAmountVnd`, `forfeitedDepositVnd`. Tất cả tiền là BIGINT VND; fractional calculation làm tròn gần nhất với `MidpointRounding.AwayFromZero`.
 - **Payment/deadline:** `depositPaymentId`, `balancePaymentId`, `finalPaymentDeadline`, `checkedInAt`, `checkedInByUserId`, `reweighedAt`, `reweighedByUserId`. Deposit expiry authoritative theo `Payment.dueAt`; không cần duplicate deadline cọc trên Parcel.

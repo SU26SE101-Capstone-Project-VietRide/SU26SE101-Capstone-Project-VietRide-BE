@@ -119,6 +119,11 @@ public sealed class ParcelEndpointTests : IClassFixture<VietRideWebApplicationFa
             "/v1/assistant/trips/11111111-1111-1111-1111-111111111111/parcels");
         assistantTripParcels.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
 
+        var assistantParcelQrScan = await anonymous.PostAsJsonAsync(
+            "/v1/assistant/trips/11111111-1111-1111-1111-111111111111/parcels/qr-scan",
+            new { parcelCode = "VR-PCL-20260728-ABCDEFGH" });
+        assistantParcelQrScan.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
         var internalMarkLoaded = await anonymous.PostAsJsonAsync(
             "/internal/v1/parcels/11111111-1111-1111-1111-111111111111/mark-loaded",
             new { tripId = NewId, parcelCode = "VRP-001" });
@@ -224,6 +229,42 @@ public sealed class ParcelEndpointTests : IClassFixture<VietRideWebApplicationFa
             "/v1/assistant/trips/11111111-1111-1111-1111-111111111111/parcels?page=1&pageSize=20");
 
         await AssertForbiddenEnvelope(response);
+    }
+
+    [Fact]
+    public async Task AssistantParcelQrScan_RejectsPassengerRole()
+    {
+        using var passenger = CreateAuthenticatedClient("PASSENGER");
+
+        var response = await passenger.PostAsJsonAsync(
+            "/v1/assistant/trips/11111111-1111-1111-1111-111111111111/parcels/qr-scan",
+            new { parcelCode = "VR-PCL-20260728-ABCDEFGH" });
+
+        await AssertForbiddenEnvelope(response);
+    }
+
+    [Fact]
+    public async Task AssistantParcelQrScan_RejectsAssistantWithoutOperatorScope()
+    {
+        using var assistant = CreateAuthenticatedClient("ASSISTANT");
+
+        var response = await assistant.PostAsJsonAsync(
+            "/v1/assistant/trips/11111111-1111-1111-1111-111111111111/parcels/qr-scan",
+            new { parcelCode = "VR-PCL-20260728-ABCDEFGH" });
+
+        await AssertForbiddenEnvelope(response);
+    }
+
+    [Fact]
+    public async Task AssistantParcelQrScan_InvalidCode_ReturnsValidationEnvelope()
+    {
+        using var assistant = CreateAuthenticatedClient("ASSISTANT", NewId.ToString());
+
+        var response = await assistant.PostAsJsonAsync(
+            "/v1/assistant/trips/11111111-1111-1111-1111-111111111111/parcels/qr-scan",
+            new { parcelCode = "NOT-A-PARCEL-CODE" });
+
+        await AssertValidationEnvelope(response, HttpStatusCode.UnprocessableEntity);
     }
 
     [Fact]

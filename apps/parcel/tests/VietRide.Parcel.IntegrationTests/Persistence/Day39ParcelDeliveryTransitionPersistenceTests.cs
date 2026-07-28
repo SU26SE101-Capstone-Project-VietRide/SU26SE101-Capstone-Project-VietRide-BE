@@ -74,10 +74,12 @@ public sealed class Day39ParcelDeliveryTransitionPersistenceTests
             {
                 new DeliveryAttempt(
                     Guid.NewGuid(),
-                    new DateTimeOffset(2026, 7, 15, 9, 0, 0, TimeSpan.Zero)),
+                    new DateTimeOffset(2026, 7, 15, 9, 0, 0, TimeSpan.Zero),
+                    new[] { "https://storage.googleapis.com/test/delivery-1.webp" }),
                 new DeliveryAttempt(
                     Guid.NewGuid(),
-                    new DateTimeOffset(2026, 7, 15, 9, 0, 1, TimeSpan.Zero)),
+                    new DateTimeOffset(2026, 7, 15, 9, 0, 1, TimeSpan.Zero),
+                    new[] { "https://storage.googleapis.com/test/delivery-2.webp" }),
             };
             var deliveryResults = await RunConcurrentAsync(
                 dataSource,
@@ -85,6 +87,7 @@ public sealed class Day39ParcelDeliveryTransitionPersistenceTests
                     deliverParcel.Id,
                     deliveryAttempts[index].Token,
                     deliveryAttempts[index].DeliveredAt.AddHours(48),
+                    deliveryAttempts[index].PhotoUrls,
                     deliveryAttempts[index].DeliveredAt,
                     CancellationToken.None));
 
@@ -102,6 +105,7 @@ public sealed class Day39ParcelDeliveryTransitionPersistenceTests
                 persisted.DeliveredPendingConfirmAt.Should().Be(winningAttempt.DeliveredAt);
                 persisted.DeliveryTokenExpiresAt.Should().Be(winningAttempt.DeliveredAt.AddHours(48));
                 persisted.DeliveryTokenRevokedAt.Should().BeNull();
+                persisted.DeliveryPhotoUrls.Should().Equal(winningAttempt.PhotoUrls);
                 persistedToken = persisted.DeliveryToken!.Value;
             }
 
@@ -239,5 +243,8 @@ public sealed class Day39ParcelDeliveryTransitionPersistenceTests
         await command.ExecuteNonQueryAsync();
     }
 
-    private sealed record DeliveryAttempt(Guid Token, DateTimeOffset DeliveredAt);
+    private sealed record DeliveryAttempt(
+        Guid Token,
+        DateTimeOffset DeliveredAt,
+        IReadOnlyCollection<string> PhotoUrls);
 }

@@ -26,6 +26,8 @@ public sealed class Day39UnloadDeliverTests
     private static readonly Guid TripId = Guid.NewGuid();
     private static readonly Guid AssistantUserId = Guid.NewGuid();
     private static readonly Guid DropoffStopId = Guid.NewGuid();
+    private static readonly string DeliveryPhotoUrl =
+        $"https://storage.googleapis.com/vietride.appspot.com/parcel-ops/{OperatorId:D}/{AssistantUserId:D}/{ParcelId:D}/delivery.webp";
 
     [Fact]
     public async Task Unload_UnassignedAssistant_ReturnsForbiddenBeforeTransition()
@@ -276,6 +278,8 @@ public sealed class Day39UnloadDeliverTests
                 ParcelId,
                 Arg.Any<Guid>(),
                 Arg.Any<DateTimeOffset>(),
+                Arg.Is<IReadOnlyCollection<string>?>(urls =>
+                    urls != null && urls.SequenceEqual(new[] { DeliveryPhotoUrl })),
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<CancellationToken>())
             .Returns(Snapshot(ParcelStatus.DELIVERED_PENDING_CONFIRM));
@@ -287,7 +291,11 @@ public sealed class Day39UnloadDeliverTests
             unitOfWork);
 
         var response = await handler.Handle(
-            new DeliverParcelCommand(ParcelId, AssistantUserId, OperatorId),
+            new DeliverParcelCommand(
+                ParcelId,
+                AssistantUserId,
+                OperatorId,
+                new[] { $"  {DeliveryPhotoUrl}  " }),
             CancellationToken.None);
 
         response.Status.Should().Be("DELIVERED_PENDING_CONFIRM");
@@ -322,7 +330,7 @@ public sealed class Day39UnloadDeliverTests
             Substitute.For<IUnitOfWork>());
 
         var action = () => handler.Handle(
-            new DeliverParcelCommand(ParcelId, AssistantUserId, OperatorId),
+            new DeliverParcelCommand(ParcelId, AssistantUserId, OperatorId, null),
             CancellationToken.None);
 
         var exception = (await action.Should().ThrowAsync<CodedConflictException>()).Which;
@@ -331,6 +339,7 @@ public sealed class Day39UnloadDeliverTests
             Arg.Any<Guid>(),
             Arg.Any<Guid>(),
             Arg.Any<DateTimeOffset>(),
+            Arg.Any<IReadOnlyCollection<string>?>(),
             Arg.Any<DateTimeOffset>(),
             Arg.Any<CancellationToken>());
     }
@@ -346,6 +355,7 @@ public sealed class Day39UnloadDeliverTests
                 ParcelId,
                 Arg.Any<Guid>(),
                 Arg.Any<DateTimeOffset>(),
+                Arg.Any<IReadOnlyCollection<string>?>(),
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<CancellationToken>())
             .Returns((ParcelPaymentTransitionSnapshot?)null);
@@ -357,7 +367,7 @@ public sealed class Day39UnloadDeliverTests
             Substitute.For<IUnitOfWork>());
 
         var action = () => handler.Handle(
-            new DeliverParcelCommand(ParcelId, AssistantUserId, OperatorId),
+            new DeliverParcelCommand(ParcelId, AssistantUserId, OperatorId, null),
             CancellationToken.None);
 
         var exception = (await action.Should().ThrowAsync<CodedConflictException>()).Which;

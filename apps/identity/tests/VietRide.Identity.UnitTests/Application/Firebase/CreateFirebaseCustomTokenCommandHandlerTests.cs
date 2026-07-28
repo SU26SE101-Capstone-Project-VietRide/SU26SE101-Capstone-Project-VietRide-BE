@@ -168,6 +168,39 @@ public sealed class CreateFirebaseCustomTokenCommandHandlerTests
     }
 
     [Fact]
+    public async Task ActiveAssistant_ReceivesParcelEvidencePhotoScopedToken()
+    {
+        var operatorEntity = ApprovedOperator();
+        var user = ActiveOperatorMember(operatorEntity.Id, UserRole.ASSISTANT);
+        var users = Substitute.For<IUserRepository>();
+        var operators = Substitute.For<IOperatorRepository>();
+        var firebase = Substitute.For<IFirebaseAuthService>();
+        users.GetByIdAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
+        operators.GetByIdNoTrackingAsync(operatorEntity.Id, Arg.Any<CancellationToken>())
+            .Returns(operatorEntity);
+        firebase.CreateCustomTokenAsync(
+                user.Id,
+                UserRole.ASSISTANT.ToString(),
+                operatorEntity.Id,
+                FirebaseUploadPurpose.PARCEL_EVIDENCE_PHOTO.ToString(),
+                Arg.Any<CancellationToken>())
+            .Returns("parcel-evidence-token");
+        var handler = new CreateFirebaseCustomTokenCommandHandler(users, operators, firebase);
+
+        var result = await handler.Handle(
+            new CreateFirebaseCustomTokenCommand(
+                user.Id,
+                UserRole.ASSISTANT.ToString(),
+                operatorEntity.Id,
+                FirebaseUploadPurpose.PARCEL_EVIDENCE_PHOTO.ToString()),
+            CancellationToken.None);
+
+        result.Token.Should().Be("parcel-evidence-token");
+        result.Purpose.Should().Be("PARCEL_EVIDENCE_PHOTO");
+        result.UploadPath.Should().Be($"parcel-ops/{operatorEntity.Id:D}/{user.Id:D}/");
+    }
+
+    [Fact]
     public async Task ActivePassenger_ReceivesOwnAvatarScopedToken()
     {
         var user = ActivePassenger();

@@ -95,6 +95,7 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
         Guid tripId,
         string parcelCode,
         Guid checkedInByUserId,
+        IReadOnlyCollection<string>? checkInPhotoUrls,
         DateTimeOffset now,
         CancellationToken ct);
 
@@ -265,7 +266,12 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     /// Atomic: UNLOADED -> DELIVERED_PENDING_CONFIRM with token generation.
     /// </summary>
     Task<ParcelPaymentTransitionSnapshot?> TryMarkDeliveredPendingConfirmAsync(
-        Guid parcelId, Guid deliveryToken, DateTimeOffset deliveryTokenExpiresAt, DateTimeOffset now, CancellationToken ct);
+        Guid parcelId,
+        Guid deliveryToken,
+        DateTimeOffset deliveryTokenExpiresAt,
+        IReadOnlyCollection<string>? deliveryPhotoUrls,
+        DateTimeOffset now,
+        CancellationToken ct);
 
     /// <summary>
     /// Bulk: LOADED -> IN_TRANSIT for all parcels on a trip (trip.started).

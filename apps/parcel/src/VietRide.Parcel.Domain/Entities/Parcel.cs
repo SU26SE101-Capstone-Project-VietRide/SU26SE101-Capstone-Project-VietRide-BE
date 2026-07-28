@@ -22,6 +22,8 @@ public sealed class Parcel : BaseEntity<Guid>
 
     public string? Description { get; private set; }
     public string? PhotoUrl { get; private set; }
+    public IReadOnlyCollection<string>? CheckInPhotoUrls { get; private set; }
+    public IReadOnlyCollection<string>? DeliveryPhotoUrls { get; private set; }
     public ParcelSizeCategory SizeCategory { get; private set; }
     public ParcelSizeCategory EstimatedSizeCategory { get; private set; }
     public ParcelSizeCategory? ActualSizeCategory { get; private set; }

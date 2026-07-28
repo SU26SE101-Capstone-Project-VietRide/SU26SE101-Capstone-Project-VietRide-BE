@@ -60,6 +60,7 @@ public sealed class CheckInParcelCommandHandler
             command.TripId,
             command.ParcelCode,
             command.AssistantUserId,
+            ParcelEvidencePhotoRules.Normalize(command.PhotoUrls),
             now,
             cancellationToken)
             ?? throw new CodedConflictException("RACE_LOST", "Parcel status changed during check-in.");
