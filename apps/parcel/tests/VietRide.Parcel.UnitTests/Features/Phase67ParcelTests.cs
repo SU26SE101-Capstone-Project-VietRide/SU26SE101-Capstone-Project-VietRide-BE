@@ -121,6 +121,7 @@ public sealed class Phase67ParcelTests
             Arg.Any<Guid>(),
             Arg.Any<Guid>(),
             Arg.Any<DateTimeOffset>(),
+            Arg.Any<IReadOnlyCollection<string>?>(),
             Arg.Any<DateTimeOffset>(),
             Arg.Any<CancellationToken>());
     }

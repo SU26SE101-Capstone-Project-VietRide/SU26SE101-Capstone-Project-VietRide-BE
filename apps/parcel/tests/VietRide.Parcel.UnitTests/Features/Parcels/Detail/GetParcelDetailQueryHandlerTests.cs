@@ -1,3 +1,4 @@
+using System.Reflection;
 using FluentAssertions;
 using NSubstitute;
 using VietRide.Parcel.Application.Abstractions.Repositories;
@@ -13,6 +14,8 @@ namespace VietRide.Parcel.UnitTests.Features.Parcels.Detail;
 public sealed class GetParcelDetailQueryHandlerTests
 {
     private const string PhotoUrl = "https://storage.googleapis.com/vietride.appspot.com/parcels/photo.jpg";
+    private const string CheckInPhotoUrl = "https://storage.googleapis.com/vietride.appspot.com/check-in.jpg";
+    private const string DeliveryPhotoUrl = "https://storage.googleapis.com/vietride.appspot.com/delivery.jpg";
 
     [Theory]
     [InlineData("sender")]
@@ -38,6 +41,8 @@ public sealed class GetParcelDetailQueryHandlerTests
             .Handle(new GetParcelDetailQuery(parcel.Id, userId, operatorId), default);
 
         result.PhotoUrl.Should().Be(PhotoUrl);
+        result.CheckInPhotoUrls.Should().Equal(CheckInPhotoUrl);
+        result.DeliveryPhotoUrls.Should().Equal(DeliveryPhotoUrl);
         result.SettlementPolicyVersion.Should().Be(2);
         result.EstimatedSizeCategory.Should().Be("SMALL");
         result.EstimatedGrossPriceVnd.Should().Be(50_000);
@@ -91,6 +96,13 @@ public sealed class GetParcelDetailQueryHandlerTests
             6000m,
             DateTimeOffset.UtcNow.AddHours(2),
             DateTimeOffset.UtcNow.AddHours(1));
+        SetPrivateProperty(parcel, nameof(ParcelEntity.CheckInPhotoUrls), new[] { CheckInPhotoUrl });
+        SetPrivateProperty(parcel, nameof(ParcelEntity.DeliveryPhotoUrls), new[] { DeliveryPhotoUrl });
         return parcel;
     }
+
+    private static void SetPrivateProperty<T>(ParcelEntity parcel, string propertyName, T value)
+        => typeof(ParcelEntity)
+            .GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public)!
+            .SetValue(parcel, value);
 }

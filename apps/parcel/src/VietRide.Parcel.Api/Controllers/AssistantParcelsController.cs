@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using VietRide.Parcel.Api.Controllers.Requests;
 using VietRide.Parcel.Api.Filters;
 using VietRide.Parcel.Application.Features.Parcels.AssistantTripParcels;
@@ -129,6 +130,7 @@ public sealed class AssistantParcelsController : ControllerBase
                 parcelId,
                 request.TripId,
                 request.ParcelCode,
+                request.PhotoUrls,
                 CurrentUserClaims.GetUserId(User),
                 operatorId),
             cancellationToken);
@@ -222,6 +224,7 @@ public sealed class AssistantParcelsController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<DeliverParcelResponse>> DeliverAsync(
         Guid parcelId,
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] DeliverParcelRequest? request,
         CancellationToken cancellationToken)
     {
         var operatorId = CurrentUserClaims.GetOperatorId(User)
@@ -229,7 +232,7 @@ public sealed class AssistantParcelsController : ControllerBase
         var userId = CurrentUserClaims.GetUserId(User);
 
         var result = await _mediator.Send(
-            new DeliverParcelCommand(parcelId, userId, operatorId),
+            new DeliverParcelCommand(parcelId, userId, operatorId, request?.PhotoUrls),
             cancellationToken);
 
         return Ok(result);

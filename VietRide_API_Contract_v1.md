@@ -754,6 +754,7 @@ Allowed purposes and claims:
 | `VEHICLE_IMAGE` | `OPERATOR_ADMIN` | `vehicles/{operatorId}/` |
 | `OPERATOR_LOGO` | `OPERATOR_ADMIN` | `operators/{operatorId}/logo/` |
 | `PARCEL_PHOTO` | `PASSENGER` | `parcels/{userId}/` |
+| `PARCEL_EVIDENCE_PHOTO` | `ASSISTANT` | `parcel-ops/{operatorId}/{userId}/` |
 | `INCIDENT_PHOTO` | `DRIVER`, `ASSISTANT` | `incidents/{operatorId}/{userId}/` |
 | `USER_AVATAR` | any active user | `avatars/{userId}/` |
 
@@ -2873,7 +2874,7 @@ as an empty page. Validation failures return `422 VALIDATION_ERROR`.
 
 Auth: sender, recipient account, or authorized operator.
 
-Response `200`: parcel detail with sender, recipient, trip, transfer, optional `photoUrl`, delivery token state excluding raw token, estimated/actual cargo snapshots, and the canonical settlement fields: `estimatedGrossPriceVnd`, `finalGrossPriceVnd`, `discountAmountVnd`, `estimatedTotalPriceVnd`, `finalTotalPriceVnd`, `depositPercent`, `depositRequiredVnd`, `depositPaidVnd`, `balanceRequiredVnd`, `balancePaidVnd`, `refundDueVnd`, `refundedAmountVnd`, `forfeitedDepositVnd`, payment IDs, `finalPaymentDeadline`, check-in/reweigh timestamps, fare snapshots, and `settlementPolicyVersion`.
+Response `200`: parcel detail with sender, recipient, trip, transfer, optional sender `photoUrl`, optional `checkInPhotoUrls` and `deliveryPhotoUrls`, delivery token state excluding raw token, estimated/actual cargo snapshots, and the canonical settlement fields: `estimatedGrossPriceVnd`, `finalGrossPriceVnd`, `discountAmountVnd`, `estimatedTotalPriceVnd`, `finalTotalPriceVnd`, `depositPercent`, `depositRequiredVnd`, `depositPaidVnd`, `balanceRequiredVnd`, `balancePaidVnd`, `refundDueVnd`, `refundedAmountVnd`, `forfeitedDepositVnd`, payment IDs, `finalPaymentDeadline`, check-in/reweigh timestamps, fare snapshots, and `settlementPolicyVersion`.
 
 ### POST `/v1/parcels/delivery/confirm`
 
@@ -3057,7 +3058,21 @@ assignment verification cannot reach Trip service.
 
 Auth: assigned `ASSISTANT` under the same operator. Idempotency: required.
 
-Request: `{ "tripId": "uuid", "parcelCode": "VR-PCL-20260722-ABCDEFGH" }`.
+Request:
+```json
+{
+  "tripId": "uuid",
+  "parcelCode": "VR-PCL-20260722-ABCDEFGH",
+  "photoUrls": [
+    "https://storage.googleapis.com/{bucket}/parcel-ops/{operatorId}/{assistantUserId}/{parcelId}/check-in.webp"
+  ]
+}
+```
+
+`photoUrls` is optional with at most three entries. Each entry must be an absolute HTTPS URL in
+the configured Firebase bucket under the exact operator, Assistant uploader, and Parcel path.
+Firebase Rules enforce image MIME and the 5 MB object limit. The state transition and evidence
+URLs are persisted by the same compare-and-set update.
 
 Only `RESERVED` may be checked in and the request must arrive strictly before `latestCheckInAt = min(departureAt - 30 minutes, loadCutoffAt - 10 minutes)`. Response `200` data contains `parcelId`, `parcelCode`, `status: "CHECKED_IN"`, `checkedInAt`, and `latestCheckInAt`. A foreign trip/code is hidden as `404 PARCEL_NOT_FOUND`; a late request returns `409 PARCEL_CHECK_IN_CLOSED`.
 
@@ -3146,6 +3161,23 @@ Errors:
 - `409 INVALID_STATUS` when the Parcel is not `READY_TO_LOAD` or this request loses the transition race.
 - `422 IDEMPOTENCY_KEY_MISMATCH` for same-key/different-payload reuse under the shared idempotency
   contract.
+
+### POST `/v1/assistant/parcels/{parcelId}/deliver`
+
+Auth: assigned `ASSISTANT` under the Parcel operator. Idempotency: required. Request body is
+optional for backward compatibility. When supplied:
+
+```json
+{
+  "photoUrls": [
+    "https://storage.googleapis.com/{bucket}/parcel-ops/{operatorId}/{assistantUserId}/{parcelId}/delivery.webp"
+  ]
+}
+```
+
+`photoUrls` uses the same maximum-three, configured-bucket, and owned-path rules as check-in. Only
+`UNLOADED` may transition to `DELIVERED_PENDING_CONFIRM`; the evidence URLs, delivery token and
+transition timestamps are persisted atomically. An empty or omitted body remains valid.
 
 Day-29 E2E setup uses an isolated operator-owned Trip graph fixture with its assigned assistant,
 vehicle cargo snapshot, and three Parcels. The fixture is created out of band; this contract does

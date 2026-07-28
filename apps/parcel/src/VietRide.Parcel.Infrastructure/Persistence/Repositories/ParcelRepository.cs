@@ -426,6 +426,7 @@ internal sealed class ParcelRepository : IParcelRepository
         Guid tripId,
         string parcelCode,
         Guid checkedInByUserId,
+        IReadOnlyCollection<string>? checkInPhotoUrls,
         DateTimeOffset now,
         CancellationToken ct)
     {
@@ -440,6 +441,7 @@ internal sealed class ParcelRepository : IParcelRepository
                 .SetProperty(p => p.Status, ParcelStatus.CHECKED_IN)
                 .SetProperty(p => p.CheckedInAt, now)
                 .SetProperty(p => p.CheckedInByUserId, checkedInByUserId)
+                .SetProperty(p => p.CheckInPhotoUrls, checkInPhotoUrls)
                 .SetProperty(p => p.UpdatedAt, now), ct);
         return affected > 0
             ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct))
@@ -1037,7 +1039,12 @@ internal sealed class ParcelRepository : IParcelRepository
     }
 
     public async Task<ParcelPaymentTransitionSnapshot?> TryMarkDeliveredPendingConfirmAsync(
-        Guid parcelId, Guid deliveryToken, DateTimeOffset deliveryTokenExpiresAt, DateTimeOffset now, CancellationToken ct)
+        Guid parcelId,
+        Guid deliveryToken,
+        DateTimeOffset deliveryTokenExpiresAt,
+        IReadOnlyCollection<string>? deliveryPhotoUrls,
+        DateTimeOffset now,
+        CancellationToken ct)
     {
         var affected = await _db.Parcels
             .Where(p => p.Id == parcelId && p.Status == ParcelStatus.UNLOADED)
@@ -1047,6 +1054,7 @@ internal sealed class ParcelRepository : IParcelRepository
                 .SetProperty(p => p.DeliveryToken, deliveryToken)
                 .SetProperty(p => p.DeliveryTokenExpiresAt, deliveryTokenExpiresAt)
                 .SetProperty(p => p.DeliveryTokenRevokedAt, (DateTimeOffset?)null)
+                .SetProperty(p => p.DeliveryPhotoUrls, deliveryPhotoUrls)
                 .SetProperty(p => p.UpdatedAt, now), ct);
         return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
     }

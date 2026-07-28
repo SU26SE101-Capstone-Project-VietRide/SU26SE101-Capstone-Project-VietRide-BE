@@ -13,6 +13,8 @@ public sealed record ParcelDetailResponse(
     Guid? DropoffStopId,
     string? Description,
     string? PhotoUrl,
+    IReadOnlyCollection<string>? CheckInPhotoUrls,
+    IReadOnlyCollection<string>? DeliveryPhotoUrls,
     string SizeCategory,
     decimal EstimatedWeightKg,
     decimal? ActualWeightKg,

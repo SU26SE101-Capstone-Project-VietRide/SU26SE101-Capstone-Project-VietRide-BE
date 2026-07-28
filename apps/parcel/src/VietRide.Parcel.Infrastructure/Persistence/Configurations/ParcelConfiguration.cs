@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
@@ -26,6 +27,12 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
             table.HasCheckConstraint("chk_parcels_volume_positive", "estimated_volume_m3 > 0");
             table.HasCheckConstraint("chk_parcels_actual_weight_positive", "actual_weight_kg IS NULL OR actual_weight_kg > 0");
             table.HasCheckConstraint("chk_parcels_actual_dimensions_positive", "(actual_length_cm IS NULL AND actual_width_cm IS NULL AND actual_height_cm IS NULL) OR (actual_length_cm > 0 AND actual_width_cm > 0 AND actual_height_cm > 0)");
+            table.HasCheckConstraint(
+                "chk_parcels_check_in_photo_urls_max_three",
+                "check_in_photo_urls IS NULL OR (jsonb_typeof(check_in_photo_urls) = 'array' AND jsonb_array_length(check_in_photo_urls) <= 3)");
+            table.HasCheckConstraint(
+                "chk_parcels_delivery_photo_urls_max_three",
+                "delivery_photo_urls IS NULL OR (jsonb_typeof(delivery_photo_urls) = 'array' AND jsonb_array_length(delivery_photo_urls) <= 3)");
         });
 
         builder.HasKey(x => x.Id);
@@ -95,6 +102,9 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
             .HasColumnName("photo_url")
             .HasColumnType("text")
             .IsRequired(false);
+
+        ConfigurePhotoUrls(builder, x => x.CheckInPhotoUrls, "check_in_photo_urls");
+        ConfigurePhotoUrls(builder, x => x.DeliveryPhotoUrls, "delivery_photo_urls");
 
         builder.Property(x => x.SizeCategory)
             .HasColumnName("size_category")
@@ -487,5 +497,34 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
             .HasConversion(m => m.Amount, amount => Money.FromRaw(amount))
             .HasDefaultValueSql("0")
             .IsRequired();
+    }
+
+    private static void ConfigurePhotoUrls(
+        EntityTypeBuilder<ParcelEntity> builder,
+        System.Linq.Expressions.Expression<Func<ParcelEntity, IReadOnlyCollection<string>?>> property,
+        string columnName)
+    {
+        builder.Property(property)
+            .HasColumnName(columnName)
+            .HasColumnType("jsonb")
+            .HasConversion(
+                value => System.Text.Json.JsonSerializer.Serialize(
+                    value,
+                    (System.Text.Json.JsonSerializerOptions?)null),
+                value => System.Text.Json.JsonSerializer.Deserialize<string[]>(
+                    value,
+                    (System.Text.Json.JsonSerializerOptions?)null))
+            .Metadata.SetValueComparer(new ValueComparer<IReadOnlyCollection<string>?>(
+                (left, right) => left == null
+                    ? right == null
+                    : right != null && left.SequenceEqual(right),
+                value => value == null
+                    ? 0
+                    : value.Aggregate(
+                        0,
+                        (hash, item) => HashCode.Combine(
+                            hash,
+                            item.GetHashCode(StringComparison.Ordinal))),
+                value => value == null ? null : value.ToArray()));
     }
 }

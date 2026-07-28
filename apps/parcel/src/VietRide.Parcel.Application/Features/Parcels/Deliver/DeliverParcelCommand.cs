@@ -7,4 +7,5 @@ namespace VietRide.Parcel.Application.Features.Parcels.Deliver;
 public sealed record DeliverParcelCommand(
     Guid ParcelId,
     Guid ActorUserId,
-    Guid OperatorId) : IRequest<DeliverParcelResponse>;
+    Guid OperatorId,
+    IReadOnlyCollection<string>? PhotoUrls) : IRequest<DeliverParcelResponse>;

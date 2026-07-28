@@ -72,6 +72,7 @@ public sealed class DeliverParcelCommandHandler
                 command.ParcelId,
                 deliveryToken,
                 deliveryTokenExpiresAt,
+                ParcelEvidencePhotoRules.Normalize(command.PhotoUrls),
                 now,
                 cancellationToken)
                 ?? throw new CodedConflictException(

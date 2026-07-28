@@ -22,6 +22,8 @@ public sealed class CheckInParcelTests
     private static readonly Guid OperatorId = Guid.NewGuid();
     private static readonly Guid TripId = Guid.NewGuid();
     private static readonly DateTimeOffset Now = new(2026, 7, 27, 1, 0, 0, TimeSpan.Zero);
+    private static readonly string CheckInPhotoUrl =
+        $"https://storage.googleapis.com/vietride.appspot.com/parcel-ops/{OperatorId:D}/{AssistantUserId:D}/{ParcelId:D}/check-in.webp";
 
     [Fact]
     public async Task Handle_AssignedAssistantBeforeDeadline_ChecksInReservedParcel()
@@ -42,6 +44,8 @@ public sealed class CheckInParcelTests
                 TripId,
                 parcel.ParcelCode,
                 AssistantUserId,
+                Arg.Is<IReadOnlyCollection<string>?>(urls =>
+                    urls != null && urls.SequenceEqual(new[] { CheckInPhotoUrl })),
                 Now,
                 Arg.Any<CancellationToken>())
             .Returns(Snapshot(ParcelStatus.CHECKED_IN));
@@ -51,6 +55,7 @@ public sealed class CheckInParcelTests
                 ParcelId,
                 TripId,
                 parcel.ParcelCode,
+                new[] { $"  {CheckInPhotoUrl}  " },
                 AssistantUserId,
                 OperatorId),
             CancellationToken.None);
@@ -77,6 +82,7 @@ public sealed class CheckInParcelTests
                 ParcelId,
                 TripId,
                 "VRP-20260727-TEST0001",
+                null,
                 AssistantUserId,
                 OperatorId),
             CancellationToken.None);
@@ -87,6 +93,7 @@ public sealed class CheckInParcelTests
             Arg.Any<Guid>(),
             Arg.Any<string>(),
             Arg.Any<Guid>(),
+            Arg.Any<IReadOnlyCollection<string>?>(),
             Arg.Any<DateTimeOffset>(),
             Arg.Any<CancellationToken>());
     }
@@ -110,6 +117,7 @@ public sealed class CheckInParcelTests
                 ParcelId,
                 TripId,
                 parcel.ParcelCode,
+                null,
                 AssistantUserId,
                 OperatorId),
             CancellationToken.None);
@@ -121,6 +129,7 @@ public sealed class CheckInParcelTests
             Arg.Any<Guid>(),
             Arg.Any<string>(),
             Arg.Any<Guid>(),
+            Arg.Any<IReadOnlyCollection<string>?>(),
             Arg.Any<DateTimeOffset>(),
             Arg.Any<CancellationToken>());
     }

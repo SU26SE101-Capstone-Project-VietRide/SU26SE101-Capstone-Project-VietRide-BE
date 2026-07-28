@@ -41,6 +41,7 @@ public sealed class CreateFirebaseCustomTokenCommandHandler
         EnsurePurposeAllowed(user.Role, purpose);
         if (purpose is FirebaseUploadPurpose.VEHICLE_IMAGE
                 or FirebaseUploadPurpose.OPERATOR_LOGO
+                or FirebaseUploadPurpose.PARCEL_EVIDENCE_PHOTO
                 or FirebaseUploadPurpose.INCIDENT_PHOTO
             && !user.OperatorId.HasValue)
         {
@@ -81,7 +82,7 @@ public sealed class CreateFirebaseCustomTokenCommandHandler
         {
             throw new CodedValidationException(
                 "VALIDATION_ERROR",
-                "purpose must be VEHICLE_IMAGE, OPERATOR_LOGO, PARCEL_PHOTO, INCIDENT_PHOTO, or USER_AVATAR.");
+                "purpose must be VEHICLE_IMAGE, OPERATOR_LOGO, PARCEL_PHOTO, PARCEL_EVIDENCE_PHOTO, INCIDENT_PHOTO, or USER_AVATAR.");
         }
 
         return parsed;
@@ -94,6 +95,7 @@ public sealed class CreateFirebaseCustomTokenCommandHandler
             FirebaseUploadPurpose.VEHICLE_IMAGE or FirebaseUploadPurpose.OPERATOR_LOGO
                 => role == UserRole.OPERATOR_ADMIN,
             FirebaseUploadPurpose.PARCEL_PHOTO => role == UserRole.PASSENGER,
+            FirebaseUploadPurpose.PARCEL_EVIDENCE_PHOTO => role == UserRole.ASSISTANT,
             FirebaseUploadPurpose.INCIDENT_PHOTO => role is UserRole.DRIVER or UserRole.ASSISTANT,
             FirebaseUploadPurpose.USER_AVATAR => true,
             _ => false,
@@ -112,6 +114,8 @@ public sealed class CreateFirebaseCustomTokenCommandHandler
             FirebaseUploadPurpose.VEHICLE_IMAGE => $"vehicles/{RequireOperatorId(operatorId):D}/",
             FirebaseUploadPurpose.OPERATOR_LOGO => $"operators/{RequireOperatorId(operatorId):D}/logo/",
             FirebaseUploadPurpose.PARCEL_PHOTO => $"parcels/{userId:D}/",
+            FirebaseUploadPurpose.PARCEL_EVIDENCE_PHOTO
+                => $"parcel-ops/{RequireOperatorId(operatorId):D}/{userId:D}/",
             FirebaseUploadPurpose.INCIDENT_PHOTO => $"incidents/{RequireOperatorId(operatorId):D}/{userId:D}/",
             FirebaseUploadPurpose.USER_AVATAR => $"avatars/{userId:D}/",
             _ => throw new ArgumentOutOfRangeException(nameof(purpose)),
