@@ -95,6 +95,7 @@ public sealed class DriverScheduleAuditLogTests
                 "TRIP_EDITED",
                 "TRIP_ROUTE_CHANGED",
                 "TRIP_VEHICLE_SWAPPED",
+                "VEHICLE_SUBSTITUTION_TRIGGERED",
             },
             tripActions.OrderBy(action => action));
         Assert.Equal(new[] { "DRIVER_SCHEDULE_EDITED" }, scheduleActions);

@@ -9281,6 +9281,377 @@
           }
         }
       ]
+    },
+    {
+      "name": "Day34",
+      "description": "Gateway-only Day-34 flow. The local audit fixture supplies an IN_PROGRESS trip, five eligible passengers, runtime JWTs, UUID-v4 keys, and verifies transfer rows, null-seat history, notification suppression, and Outbox identity directly after Newman completes.",
+      "item": [
+        {
+          "name": "1. Substitute vehicle for an in-progress trip",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Substitution queues all five passengers', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.data.oldTripStatus).to.equal('DISRUPTED');",
+                  "  pm.expect(body.data.newTripStatus).to.equal('BOARDING');",
+                  "  pm.expect(body.data.transferStatus).to.equal('QUEUED');",
+                  "  pm.expect(body.data.affectedPassengerCount).to.equal(5);",
+                  "});",
+                  "pm.collectionVariables.set('day34NewTripId', body.data.newTripId);",
+                  "pm.collectionVariables.set('day34SubstitutionId', body.data.substitutionId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day34OperatorAdminToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day34SubstitutionKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"replacementVehicleId\":\"{{day34ReplacementVehicleId}}\",\"estimatedRecoveryDepartureAt\":\"{{day34RecoveryDepartureAt}}\",\"reason\":\"Day 34 safety substitution\",\"notifyPassengers\":{{day34NotifyPassengers}}}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/trips/{{day34OldTripId}}/substitute-vehicle",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "operator",
+                "trips",
+                "{{day34OldTripId}}",
+                "substitute-vehicle"
+              ]
+            }
+          }
+        },
+        {
+          "name": "2. Replay substitution returns the original replacement",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Substitution replay is byte-equivalent in identity', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(body.data.newTripId).to.equal(pm.collectionVariables.get('day34NewTripId'));",
+                  "  pm.expect(body.data.substitutionId).to.equal(pm.collectionVariables.get('day34SubstitutionId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day34OperatorAdminToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day34SubstitutionKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"replacementVehicleId\":\"{{day34ReplacementVehicleId}}\",\"estimatedRecoveryDepartureAt\":\"{{day34RecoveryDepartureAt}}\",\"reason\":\"Day 34 safety substitution\",\"notifyPassengers\":{{day34NotifyPassengers}}}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/trips/{{day34OldTripId}}/substitute-vehicle",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "operator",
+                "trips",
+                "{{day34OldTripId}}",
+                "substitute-vehicle"
+              ]
+            }
+          }
+        },
+        {
+          "name": "3. Cross-tenant substitution is masked",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Cross-tenant trip remains hidden', () => {",
+                  "  pm.response.to.have.status(404);",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.error.code).to.equal('TRIP_NOT_FOUND');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day34OtherOperatorAdminToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day34CrossTenantKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"replacementVehicleId\":\"{{day34ReplacementVehicleId}}\",\"estimatedRecoveryDepartureAt\":\"{{day34RecoveryDepartureAt}}\",\"reason\":\"Cross tenant probe\",\"notifyPassengers\":true}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/operator/trips/{{day34OldTripId}}/substitute-vehicle",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "operator",
+                "trips",
+                "{{day34OldTripId}}",
+                "substitute-vehicle"
+              ]
+            }
+          }
+        },
+        {
+          "name": "4. Driver confirms first boarded passenger",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "setTimeout(() => {}, 7000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('First transfer is confirmed', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(body.data.passengerId).to.equal(pm.variables.get('day34PassengerId1'));",
+                  "  pm.expect(body.data.confirmationStatus).to.equal('CONFIRMED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day34DriverToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day34ConfirmKey1}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/bookings/trips/{{day34NewTripId}}/transfers/passengers/{{day34PassengerId1}}/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "bookings",
+                "trips",
+                "{{day34NewTripId}}",
+                "transfers",
+                "passengers",
+                "{{day34PassengerId1}}",
+                "confirm"
+              ]
+            }
+          }
+        },
+        {
+          "name": "5. Driver confirms second boarded passenger",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Second transfer is confirmed', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(body.data.passengerId).to.equal(pm.variables.get('day34PassengerId2'));",
+                  "  pm.expect(body.data.confirmationStatus).to.equal('CONFIRMED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day34DriverToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day34ConfirmKey2}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/bookings/trips/{{day34NewTripId}}/transfers/passengers/{{day34PassengerId2}}/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "bookings",
+                "trips",
+                "{{day34NewTripId}}",
+                "transfers",
+                "passengers",
+                "{{day34PassengerId2}}",
+                "confirm"
+              ]
+            }
+          }
+        },
+        {
+          "name": "6. Driver confirms third boarded passenger",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Third transfer is confirmed', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(body.data.passengerId).to.equal(pm.variables.get('day34PassengerId3'));",
+                  "  pm.expect(body.data.confirmationStatus).to.equal('CONFIRMED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day34DriverToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day34ConfirmKey3}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/bookings/trips/{{day34NewTripId}}/transfers/passengers/{{day34PassengerId3}}/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "bookings",
+                "trips",
+                "{{day34NewTripId}}",
+                "transfers",
+                "passengers",
+                "{{day34PassengerId3}}",
+                "confirm"
+              ]
+            }
+          }
+        },
+        {
+          "name": "7. Replay first passenger confirmation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Confirmation replay preserves the original terminal result', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(body.data.passengerId).to.equal(pm.variables.get('day34PassengerId1'));",
+                  "  pm.expect(body.data.confirmationStatus).to.equal('CONFIRMED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{day34DriverToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day34ConfirmKey1}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/bookings/trips/{{day34NewTripId}}/transfers/passengers/{{day34PassengerId1}}/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "bookings",
+                "trips",
+                "{{day34NewTripId}}",
+                "transfers",
+                "passengers",
+                "{{day34PassengerId1}}",
+                "confirm"
+              ]
+            }
+          }
+        }
+      ]
     }
   ]
 }

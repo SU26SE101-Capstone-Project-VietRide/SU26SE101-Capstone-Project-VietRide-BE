@@ -63,4 +63,63 @@ public sealed class BookingImpactClient : IBookingImpactClient
             throw new HttpRequestException("Booking Trip-edit impact returned invalid data.");
         return response;
     }
+
+    public async Task<VehicleSubstitutionImpactProjection> GetVehicleSubstitutionImpactAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken cancellationToken)
+    {
+        if (tripId == Guid.Empty || operatorId == Guid.Empty)
+        {
+            throw new ArgumentException("Trip and operator ids are required.");
+        }
+
+        var path = options.VehicleSubstitutionImpactPath
+            .Replace("{tripId}", tripId.ToString("D"), StringComparison.Ordinal)
+            + $"?operatorId={operatorId:D}";
+        VehicleSubstitutionImpactProjection? response;
+        try
+        {
+            response = await httpClient.GetFromJsonAsync<VehicleSubstitutionImpactProjection>(
+                path,
+                cancellationToken);
+        }
+        catch (Exception exception) when (exception is JsonException or NotSupportedException)
+        {
+            throw new HttpRequestException(
+                "Booking vehicle-substitution impact returned malformed JSON.",
+                exception);
+        }
+
+        if (response is null
+            || response.OldTripId != tripId
+            || response.OperatorId != operatorId
+            || response.Bookings is null
+            || response.Bookings.Any(booking =>
+                booking.BookingId == Guid.Empty
+                || booking.BookingStatus is not ("CONFIRMED" or "PARTIAL_NO_SHOW")
+                || booking.Passengers is null
+                || booking.Passengers.Any(passenger =>
+                    passenger.PassengerId == Guid.Empty
+                    || passenger.BoardingStatus is not ("BOARDED" or "PENDING")))
+            || response.Bookings.Select(booking => booking.BookingId).Distinct().Count()
+                != response.Bookings.Count
+            || response.Bookings.SelectMany(booking => booking.Passengers)
+                .Select(passenger => passenger.PassengerId).Distinct().Count()
+                != response.Bookings.Sum(booking => booking.Passengers.Count))
+        {
+            throw new HttpRequestException("Booking vehicle-substitution impact returned invalid data.");
+        }
+
+        return response with
+        {
+            Bookings = response.Bookings
+                .OrderBy(booking => booking.BookingId)
+                .Select(booking => booking with
+                {
+                    Passengers = booking.Passengers.OrderBy(passenger => passenger.PassengerId).ToArray(),
+                })
+                .ToArray(),
+        };
+    }
 }

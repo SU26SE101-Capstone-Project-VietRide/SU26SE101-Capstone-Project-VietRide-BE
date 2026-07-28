@@ -31,6 +31,7 @@ namespace VietRide.Booking.Infrastructure.Migrations
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "passenger_boarding_status", new[] { "PENDING", "BOARDED", "NO_SHOW" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "public", "ticket_status", new[] { "PENDING_PAYMENT", "ISSUED", "USED", "CANCELLED", "REFUNDED", "EXPIRED" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "trip_direction", new[] { "OUTBOUND", "RETURN" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_booking", "booking_transfer_confirmation_status", new[] { "PENDING_CONFIRM", "CONFIRMED", "NOT_REQUIRED" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_booking", "outbox_event_status", new[] { "PENDING", "PUBLISHING", "PUBLISHED", "FAILED" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "voucher_funding_type", new[] { "VIETRIDE_FUNDED", "OPERATOR_FUNDED" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "voucher_type", new[] { "PERCENT_OFF", "FIXED_AMOUNT" });
@@ -550,6 +551,101 @@ namespace VietRide.Booking.Infrastructure.Migrations
                     b.ToTable("booking_status_history", "vietride_booking");
                 });
 
+            modelBuilder.Entity("VietRide.Booking.Domain.Entities.BookingTransfer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid>("BookingId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("booking_id");
+
+                    b.Property<int>("ConfirmationStatus")
+                        .HasColumnType("vietride_booking.booking_transfer_confirmation_status")
+                        .HasColumnName("confirmation_status");
+
+                    b.Property<DateTimeOffset?>("ConfirmedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("confirmed_at");
+
+                    b.Property<Guid?>("ConfirmedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("confirmed_by_user_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("NewSeatNumber")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("new_seat_number");
+
+                    b.Property<Guid>("NewTripId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("new_trip_id");
+
+                    b.Property<string>("Note")
+                        .HasColumnType("text")
+                        .HasColumnName("note");
+
+                    b.Property<string>("OriginalSeatNumber")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("original_seat_number");
+
+                    b.Property<Guid>("OriginalTripId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("original_trip_id");
+
+                    b.Property<Guid>("PassengerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("passenger_id");
+
+                    b.Property<Guid?>("TicketId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("ticket_id");
+
+                    b.Property<DateTimeOffset>("TransferredAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("transferred_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid>("TransferredByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("transferred_by_user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_booking_transfers");
+
+                    b.HasIndex("BookingId")
+                        .HasDatabaseName("idx_booking_transfers_booking_id");
+
+                    b.HasIndex("NewTripId")
+                        .HasDatabaseName("idx_booking_transfers_new_trip_id");
+
+                    b.HasIndex("OriginalTripId")
+                        .HasDatabaseName("idx_booking_transfers_original_trip_id");
+
+                    b.HasIndex("PassengerId")
+                        .HasDatabaseName("idx_booking_transfers_passenger_id");
+
+                    b.HasIndex("TicketId")
+                        .HasDatabaseName("idx_booking_transfers_ticket_id");
+
+                    b.HasIndex("PassengerId", "OriginalTripId", "NewTripId")
+                        .IsUnique()
+                        .HasDatabaseName("uq_booking_transfers_passenger_trip_pair");
+
+                    b.ToTable("booking_transfers", "vietride_booking");
+                });
+
             modelBuilder.Entity("VietRide.Booking.Domain.Entities.Campaign", b =>
                 {
                     b.Property<Guid>("Id")
@@ -761,7 +857,6 @@ namespace VietRide.Booking.Infrastructure.Migrations
                         .HasDefaultValueSql("now()");
 
                     b.Property<string>("SeatNumber")
-                        .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)")
                         .HasColumnName("seat_number");
@@ -1283,6 +1378,29 @@ namespace VietRide.Booking.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_booking_status_history_bookings_booking_id");
+                });
+
+            modelBuilder.Entity("VietRide.Booking.Domain.Entities.BookingTransfer", b =>
+                {
+                    b.HasOne("VietRide.Booking.Domain.Entities.Booking", null)
+                        .WithMany()
+                        .HasForeignKey("BookingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_booking_transfers_bookings_booking_id");
+
+                    b.HasOne("VietRide.Booking.Domain.Entities.Passenger", null)
+                        .WithMany()
+                        .HasForeignKey("PassengerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_booking_transfers_passengers_passenger_id");
+
+                    b.HasOne("VietRide.Booking.Domain.Entities.Ticket", null)
+                        .WithMany()
+                        .HasForeignKey("TicketId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_booking_transfers_tickets_ticket_id");
                 });
 
             modelBuilder.Entity("VietRide.Booking.Domain.Entities.CampaignVoucher", b =>

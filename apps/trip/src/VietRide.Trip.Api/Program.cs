@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Serilog;
 using VietRide.Shared.Application.DependencyInjection;
 using VietRide.Shared.Messaging.DependencyInjection;
@@ -24,7 +25,15 @@ builder.Host.UseSerilog((ctx, _, lc) => lc
 builder.Services.AddVietRideSharedWeb(builder.Configuration, ServiceName);
 builder.Services.AddVietRideDbContext<TripDbContext>(
     builder.Configuration,
-    configureDataSource: TripDbContext.ConfigurePostgresEnums);
+    configureDataSource: TripDbContext.ConfigurePostgresEnums,
+    configureDbContext: options =>
+    {
+        if (builder.Environment.IsEnvironment("Testing"))
+        {
+            options.ConfigureWarnings(warnings =>
+                warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning));
+        }
+    });
 builder.Services.AddVietRideIntegrationInbox<TripDbContext>();
 var backgroundWorkersEnabled = AreBackgroundWorkersEnabled(
     builder.Configuration,

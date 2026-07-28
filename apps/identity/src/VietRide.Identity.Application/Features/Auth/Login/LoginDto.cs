@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace VietRide.Identity.Application.Features.Auth.Login;
 
 /// <summary>Response DTO for POST /v1/auth/login (200) and POST /v1/auth/refresh (200).</summary>
@@ -14,4 +16,6 @@ public sealed record UserSummaryDto(
     string DisplayName,
     string Role,
     Guid? OperatorId,
-    string Status);
+    string Status,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? AvatarUrl = null);

@@ -134,6 +134,7 @@ public static class InfrastructureServiceCollectionExtensions
 
         // Repositories (Task 12.3)
         services.AddScoped<IBookingRepository, BookingRepository>();
+        services.AddScoped<IBookingTransferRepository, BookingTransferRepository>();
         services.AddScoped<IBookingStatusHistoryRepository, BookingStatusHistoryRepository>();
         services.AddScoped<IBookingPendingActionRepository, BookingPendingActionRepository>();
         services.AddScoped<IBookingStationRedirectRepository, BookingStationRedirectRepository>();
@@ -184,6 +185,11 @@ public static class InfrastructureServiceCollectionExtensions
             {
                 options.QueueName = "booking.trip-vehicle-swapped";
                 options.BindingKeys = [TripVehicleSwappedIntegrationEvent.EventTypeValue];
+            });
+            services.AddVietRideEventConsumer<TripVehicleSubstitutedIntegrationEvent, TripVehicleSubstitutedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "booking.trip-vehicle-substituted";
+                options.BindingKeys = [TripVehicleSubstitutedIntegrationEvent.EventTypeValue];
             });
             services.AddVietRideEventConsumer<TripScheduleChangedIntegrationEvent, TripScheduleChangedIntegrationEventHandler>(options =>
             {

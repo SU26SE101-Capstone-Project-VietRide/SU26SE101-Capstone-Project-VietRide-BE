@@ -80,6 +80,19 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
         CancellationToken ct = default)
         => throw new NotSupportedException("Trip-edit impact is not implemented by this repository.");
 
+    Task<VehicleSubstitutionImpactDto> GetVehicleSubstitutionImpactAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Vehicle-substitution impact is not implemented by this repository.");
+
+    Task<IReadOnlyList<BookingEntity>> GetVehicleSubstitutionBookingsForUpdateAsync(
+        Guid oldTripId,
+        Guid operatorId,
+        IReadOnlyCollection<Guid> bookingIds,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Vehicle-substitution booking application is not implemented by this repository.");
+
     Task<int> GetPendingPassengerCountAsync(
         Guid tripId,
         Guid stopId,

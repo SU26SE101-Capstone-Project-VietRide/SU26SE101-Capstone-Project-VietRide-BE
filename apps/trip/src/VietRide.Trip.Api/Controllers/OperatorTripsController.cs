@@ -79,12 +79,13 @@ public sealed class OperatorTripsController : ControllerBase
     }
 
     [HttpPost("{tripId:guid}/substitute-vehicle")]
-    [RequireIdempotencyKey]
+    [RequireIdempotency]
     [Authorize(Roles = OperatorWriteRoles)]
     [ProducesResponseType(typeof(ApiResponse<SubstituteVehicleResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<SubstituteVehicleResponse>> SubstituteVehicleAsync(
         Guid tripId,
         [FromBody] SubstituteVehicleRequest request,
@@ -95,10 +96,13 @@ public sealed class OperatorTripsController : ControllerBase
                 tripId,
                 GetRequiredOperatorId(),
                 CurrentUserClaims.GetUserId(User),
-                request.NewVehicleId,
-                request.NewDriverUserId,
-                request.NewAssistantUserId,
-                request.Reason),
+                request.ReplacementVehicleId,
+                request.EstimatedRecoveryDepartureAt,
+                request.Reason,
+                request.NotifyPassengers,
+                request.ReplacementCrew?.DriverId,
+                request.ReplacementCrew?.AssistantId,
+                request.ReplacementCrew is not null),
             cancellationToken));
     }
 

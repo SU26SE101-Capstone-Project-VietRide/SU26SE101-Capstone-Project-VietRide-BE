@@ -6,6 +6,8 @@ import {
   BOOKING_SCHEDULE_CHANGE_INFORMATIONAL_ROUTING_KEY,
   BOOKING_SCHEDULE_CHANGE_REQUIRED_ROUTING_KEY,
   BOOKING_SEAT_REASSIGNMENT_REQUIRED_ROUTING_KEY,
+  BOOKING_TRANSFERRED_ROUTING_KEY,
+  BookingTransferredEventSchema,
 } from '@vietride/contracts';
 import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
 import type { ConsumeMessage } from 'amqplib';
@@ -44,6 +46,10 @@ export const BOOKING_TRIP_CHANGE_QUEUE_BINDINGS = [
     queue: 'notification:booking-route-change-auto-fallback-applied',
     routingKey: BOOKING_ROUTE_CHANGE_AUTO_FALLBACK_APPLIED_ROUTING_KEY,
   },
+  {
+    queue: 'notification:booking-transferred',
+    routingKey: BOOKING_TRANSFERRED_ROUTING_KEY,
+  },
 ] as const;
 
 @Injectable()
@@ -79,7 +85,7 @@ export class BookingTripChangeEventsConsumer implements OnModuleInit {
     payload: unknown,
     raw: ConsumeMessage,
   ): Promise<void> {
-    const messageId = getMessageId(raw);
+    const messageId = getMessageId(raw, routingKey === BOOKING_TRANSFERRED_ROUTING_KEY);
     if (!messageId) {
       throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
     }
@@ -97,6 +103,14 @@ export class BookingTripChangeEventsConsumer implements OnModuleInit {
     }
 
     try {
+      if (routingKey === BOOKING_TRANSFERRED_ROUTING_KEY) {
+        const transferred = BookingTransferredEventSchema.parse(payload);
+        if (!transferred.notifyPassengers) {
+          await this.idempotency.markProcessed(routingKey, messageId);
+          return;
+        }
+      }
+
       const notification = mapBookingTripChangeToNotification(routingKey, payload);
       await this.notificationsService.createNotification({
         ...notification,
@@ -123,11 +137,12 @@ export class BookingTripChangeEventsConsumer implements OnModuleInit {
   }
 }
 
-function getMessageId(raw: ConsumeMessage): string | undefined {
+function getMessageId(raw: ConsumeMessage, requireMessageId = false): string | undefined {
   const properties: unknown = raw.properties;
   if (typeof properties !== 'object' || properties === null) return undefined;
 
   const { messageId, correlationId } = properties as Record<string, unknown>;
   if (typeof messageId === 'string') return messageId;
+  if (requireMessageId) return undefined;
   return typeof correlationId === 'string' ? correlationId : undefined;
 }

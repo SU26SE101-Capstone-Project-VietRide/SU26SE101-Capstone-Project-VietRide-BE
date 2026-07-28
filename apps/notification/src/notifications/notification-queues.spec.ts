@@ -66,8 +66,10 @@ describe('notification BullMQ producers', () => {
   ])('adds an absent %s job after its database row was persisted', async (_, createQueue, data) => {
     await createQueue().enqueue(data as never);
 
+    const jobId = 'notificationId' in data ? data.notificationId : data.emailDeliveryId;
+
     expect(mockAdd).toHaveBeenCalledWith(expect.any(String), data, {
-      jobId: expect.any(String),
+      jobId,
     });
   });
 

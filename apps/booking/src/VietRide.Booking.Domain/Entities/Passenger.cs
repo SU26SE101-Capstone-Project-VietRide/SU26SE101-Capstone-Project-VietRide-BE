@@ -13,7 +13,8 @@ namespace VietRide.Booking.Domain.Entities;
 public sealed class Passenger : BaseEntity<Guid>
 {
     public Guid BookingId { get; private set; }
-    public string SeatNumber { get; private set; } = string.Empty;
+    // EF permits NULL for unresolved replacement seats; newly created checkout passengers still require a seat.
+    public string? SeatNumber { get; private set; }
     public PassengerBoardingStatus BoardingStatus { get; private set; } = PassengerBoardingStatus.PENDING;
     public DateTimeOffset? BoardedAt { get; private set; }
 
@@ -56,5 +57,23 @@ public sealed class Passenger : BaseEntity<Guid>
 
         BoardingStatus = PassengerBoardingStatus.NO_SHOW;
         return true;
+    }
+
+    public void ApplyVehicleSubstitutionSeat(string? seatNumber)
+    {
+        if (BoardingStatus is not PassengerBoardingStatus.BOARDED and not PassengerBoardingStatus.PENDING)
+            throw new InvalidOperationException(
+                $"Passenger boarding status {BoardingStatus} is not eligible for vehicle substitution.");
+        if (seatNumber is not null
+            && (string.IsNullOrWhiteSpace(seatNumber)
+                || seatNumber.Length > 20
+                || !string.Equals(seatNumber, seatNumber.Trim(), StringComparison.Ordinal)))
+        {
+            throw new ArgumentException(
+                "Mapped seat number must be null or an already-normalized value of at most 20 characters.",
+                nameof(seatNumber));
+        }
+
+        SeatNumber = seatNumber;
     }
 }

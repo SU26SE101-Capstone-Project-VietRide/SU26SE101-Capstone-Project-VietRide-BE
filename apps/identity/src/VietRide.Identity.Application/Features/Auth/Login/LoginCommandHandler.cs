@@ -125,7 +125,8 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
                 DisplayName: authenticatedUser.DisplayName,
                 Role: authenticatedUser.Role.ToString(),
                 OperatorId: authenticatedUser.OperatorId,
-                Status: authenticatedUser.Status.ToString()));
+                Status: authenticatedUser.Status.ToString(),
+                AvatarUrl: authenticatedUser.AvatarUrl));
     }
 
     private static bool RequiresApprovedOperator(User user)

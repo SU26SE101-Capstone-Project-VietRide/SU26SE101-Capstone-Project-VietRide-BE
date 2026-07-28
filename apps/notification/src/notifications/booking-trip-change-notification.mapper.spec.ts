@@ -5,6 +5,7 @@ import {
   BOOKING_SCHEDULE_CHANGE_INFORMATIONAL_ROUTING_KEY,
   BOOKING_SCHEDULE_CHANGE_REQUIRED_ROUTING_KEY,
   BOOKING_SEAT_REASSIGNMENT_REQUIRED_ROUTING_KEY,
+  BOOKING_TRANSFERRED_ROUTING_KEY,
 } from '@vietride/contracts';
 import { ZodError } from 'zod';
 import { NotificationType } from '../generated/notification-prisma-client';
@@ -248,5 +249,71 @@ describe('mapBookingTripChangeToNotification Day 24 auto-resolved compatibility'
       shuttleRequired: true,
       resolvedAction: 'AUTO_FALLBACK_DESTINATION',
     });
+  });
+});
+
+describe('mapBookingTripChangeToNotification vehicle substitution', () => {
+  it('maps nullable original and new seats without Passenger PII or alternate recipients', () => {
+    const notification = mapBookingTripChangeToNotification(BOOKING_TRANSFERRED_ROUTING_KEY, {
+      eventId: EVENT_ID,
+      occurredAt: OCCURRED_AT,
+      sourceSubstitutionEventId: '66666666-6666-4666-8666-666666666666',
+      bookingId: BOOKING_ID,
+      recipientUserId: USER_ID,
+      operatorId: '77777777-7777-4777-8777-777777777777',
+      oldTripId: TRIP_ID,
+      newTripId: '88888888-8888-4888-8888-888888888888',
+      newVehicleId: '99999999-9999-4999-8999-999999999999',
+      newVehiclePlateNumber: '51B-123.45',
+      newTripDepartureDateTime: NEW_DEPARTURE,
+      notifyPassengers: true,
+      transfers: [
+        {
+          passengerId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          originalSeatNumber: null,
+          newSeatNumber: 'B02',
+          confirmationStatus: 'PENDING_CONFIRM',
+        },
+        {
+          passengerId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+          originalSeatNumber: 'A02',
+          newSeatNumber: null,
+          confirmationStatus: 'PENDING_CONFIRM',
+        },
+      ],
+    });
+
+    expect(notification).toEqual(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.VEHICLE_SUBSTITUTED,
+        title: 'Xe thay thế đã được sắp xếp',
+      }),
+    );
+    expect(notification.body).toContain('51B-123.45');
+    expect(notification.body).toContain(NEW_DEPARTURE);
+    expect(notification.body).toContain('chưa xác định -> B02');
+    expect(notification.body).toContain('A02 -> đang chờ xếp ghế');
+    expect(notification.data).toMatchObject({
+      eventId: EVENT_ID,
+      bookingId: BOOKING_ID,
+      transfers: [
+        {
+          passengerId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          originalSeatNumber: null,
+          newSeatNumber: 'B02',
+        },
+        {
+          passengerId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+          originalSeatNumber: 'A02',
+          newSeatNumber: null,
+        },
+      ],
+    });
+    expect(notification.data).not.toHaveProperty('recipientUserId');
+    expect(notification.data).not.toHaveProperty('notifyPassengers');
+    expect(notification.data).not.toHaveProperty('passengerName');
+    expect(notification.data).not.toHaveProperty('recipientEmail');
+    expect(notification.data).not.toHaveProperty('recipientPhone');
   });
 });

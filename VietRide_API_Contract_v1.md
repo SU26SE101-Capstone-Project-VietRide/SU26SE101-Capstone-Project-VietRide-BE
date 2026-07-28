@@ -2423,32 +2423,80 @@ Errors:
 
 ### POST `/v1/operator/trips/{tripId}/substitute-vehicle`
 
-Auth: operator staff/admin for trip's operator. Idempotency: required.
+Auth: `OPERATOR_ADMIN`-only for the Trip's operator. `Idempotency-Key` is required UUID v4.
 
-Request:
-```json
+Request is exactly:
+```jsonc
 {
   "replacementVehicleId": "uuid",
-  "driverId": "uuid",
-  "assistantId": "uuid",
-  "reason": "Vehicle breakdown"
+  "estimatedRecoveryDepartureAt": "2026-07-25T08:30:00Z",
+  "reason": "Vehicle breakdown",
+  "notifyPassengers": true,
+  "replacementCrew": {
+    "driverId": "uuid",
+    "assistantId": null
+  }
 }
 ```
 
+`replacementVehicleId` is a required UUID. `estimatedRecoveryDepartureAt` is a required absolute UTC timestamp.
+`reason` is required, trimmed, and at most 500 characters. `notifyPassengers` is optional and defaults to `true`.
+`replacementCrew` is optional and nullable; when absent or null it
+copies the old driver and assistant. When present it is exactly `{driverId,assistantId}`:
+`driverId` is a required UUID and `assistantId` is a nullable UUID. Both crew values are validated
+for active role, operator ownership, and existing Trip conflict rules.
+
+Unknown fields are rejected, including legacy top-level `newVehicleId`,
+`estimatedArrivalMinutes`, top-level `driverId`, and top-level `assistantId`.
+
+The service locks and reloads the old Trip, captures one `disruptedAt`, and requires
+`estimatedRecoveryDepartureAt` to be strictly later than the locked `disruptedAt`. Equality or an
+earlier value returns `422 VALIDATION_ERROR` with
+`fields.estimatedRecoveryDepartureAt = ["must be later than disruptedAt"]`; no Trip child, audit,
+or Outbox row is written. The old Trip must be `IN_PROGRESS`, otherwise this substitution-only
+endpoint returns `409 TRIP_NOT_SUBSTITUTABLE`.
+
+On success the old Trip is `DISRUPTED` with `hasSubstitution=true`. The dedicated replacement Trip
+is `BOARDING`, has `source=VEHICLE_SUBSTITUTION`, and
+`departureDateTime=estimatedRecoveryDepartureAt`. The existing assigned-driver start flow moves
+the replacement `BOARDING -> IN_PROGRESS` and captures `actualDepartureTime`.
+
 Response `200`:
-```json
+```jsonc
 {
   "success": true,
   "statusCode": 200,
   "data": {
+    "substitutionId": "uuid-v4",
     "oldTripId": "uuid",
     "oldTripStatus": "DISRUPTED",
     "newTripId": "uuid",
-    "transferStatus": "PENDING_PASSENGER_CONFIRMATION"
+    "newTripStatus": "BOARDING",
+    "newTripDepartureDateTime": "2026-07-25T08:30:00Z",
+    "transferStatus": "QUEUED",
+    "affectedBookingCount": 2,
+    "affectedPassengerCount": 5,
+    "pendingSeatAssignmentCount": 1
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-25T08:00:00Z" }
 }
 ```
+
+`substitutionId` equals the canonical `trip.trip.vehicle_substituted` eventId.
+`affectedBookingCount` counts eligible Booking entries represented in the mapping,
+`affectedPassengerCount` counts mapped `BOARDED|PENDING` Passengers, and
+`pendingSeatAssignmentCount` counts mapped Passengers whose `newSeatNumber` is null. No Parcel
+count is returned. A same-key replay returns the persisted response as idempotent `200`.
+
+Statuses: `200`, `401`, `403`, `404`, `409`, `422`.
+
+- `401 AUTH_TOKEN_INVALID`
+- `403 FORBIDDEN`
+- `404 TRIP_NOT_FOUND`
+- `409 TRIP_NOT_SUBSTITUTABLE`
+- `409 TRIP_VEHICLE_CONFLICT`
+- `422 VEHICLE_NOT_ACTIVE`
+- `422 VALIDATION_ERROR`
 
 ## Day 22 — Trip edit, pricing snapshot, and cascade contracts
 
@@ -6262,6 +6310,44 @@ Error responses use the ADR 0004 envelope:
 - `409 TICKET_NOT_BOARDABLE`: linked ticket is not `ISSUED`.
 - `422 BOOKING_NOT_FOR_THIS_TRIP`: passenger exists but belongs to another trip.
 - `422 VALIDATION_ERROR`: route parameters are invalid.
+
+### POST `/v1/bookings/trips/{newTripId}/transfers/passengers/{passengerId}/confirm`
+
+Auth: `DRIVER` or `ASSISTANT`. The caller must be assigned to the replacement Trip. This endpoint
+is bodyless and requires an `Idempotency-Key` that is required UUID v4.
+
+The active matching transfer is the row for the Passenger whose Booking currently points to
+`newTripId`; it must have a non-null `newSeatNumber`. The first confirmation updates only that
+BookingTransfer to `CONFIRMED` and persists `confirmedAt` plus `confirmedByUserId`. It never
+rewrites Passenger boarding history or Ticket usage and never changes sibling transfer rows.
+
+Response `200`:
+```jsonc
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "bookingTransferId": "uuid",
+    "passengerId": "uuid",
+    "newTripId": "uuid",
+    "confirmationStatus": "CONFIRMED",
+    "confirmedAt": "2026-07-25T09:00:00Z",
+    "confirmedByUserId": "uuid"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-25T09:00:00Z" }
+}
+```
+
+A same-key replay returns the persisted confirmation values as idempotent `200`. An
+already-confirmed request also returns the persisted confirmation values as idempotent `200`.
+
+Statuses: `200`, `401`, `403`, `404`, `409`, `422`.
+
+- `401 AUTH_TOKEN_INVALID`
+- `403 FORBIDDEN`: caller is not assigned to the replacement Trip.
+- `404 BOOKING_TRANSFER_NOT_FOUND`: matching active transfer is absent.
+- `409 BOOKING_TRANSFER_SEAT_PENDING`: `newSeatNumber` is null.
+- `422 VALIDATION_ERROR`: route input is invalid.
 
 ### POST `/v1/bookings/trips/{tripId}/boarding/qr-scan`
 

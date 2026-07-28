@@ -155,7 +155,7 @@ public sealed class CancelBookingCommandHandler : IRequestHandler<CancelBookingC
             await _tripClient.ReleaseSeatsAsync(
                 booking.TripId,
                 booking.SeatLockToken.Value,
-                booking.Passengers.Select(p => p.SeatNumber).ToArray(),
+                booking.Passengers.Select(p => p.SeatNumber).OfType<string>().ToArray(),
                 cancellationToken);
         }
         else
