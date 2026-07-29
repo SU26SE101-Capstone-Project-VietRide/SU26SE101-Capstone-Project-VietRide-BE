@@ -14,6 +14,11 @@ public interface ITripServiceClient
         Guid tripId,
         CancellationToken cancellationToken = default);
 
+    Task<TripSummaryBatchOutcome> GetTripSummariesAsync(
+        IReadOnlyCollection<Guid> tripIds,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Trip summary batch lookup is not implemented by this client.");
+
     Task<RouteOwnershipOutcome> ValidateRouteOwnershipAsync(
         Guid routeId,
         Guid operatorId,

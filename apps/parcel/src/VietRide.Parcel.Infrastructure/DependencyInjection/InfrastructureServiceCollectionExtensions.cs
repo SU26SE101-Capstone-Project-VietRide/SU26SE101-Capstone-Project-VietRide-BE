@@ -54,6 +54,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ParcelLifecycleSweepJob>();
         services.AddScoped<ParcelDeliveryPendingConfirmReminderJob>();
         services.AddScoped<PlatformParcelStatsBackfillJob>();
+        services.AddScoped<ParcelTripDisplaySnapshotBackfillJob>();
 
         return services;
     }

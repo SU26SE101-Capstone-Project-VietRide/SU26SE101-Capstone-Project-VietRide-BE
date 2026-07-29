@@ -276,6 +276,31 @@ public sealed class CreateParcelCommandHandler
             estimatedTotalPrice,
             depositPercent);
 
+        var summaryOutcome = await _tripClient.GetTripSummariesAsync(
+            [command.TripId],
+            cancellationToken);
+        if (summaryOutcome.Kind != TripSummaryBatchOutcomeKind.Success)
+        {
+            throw new ParcelDependencyUnavailableException(
+                "TRIP_SERVICE_UNAVAILABLE",
+                summaryOutcome.ErrorMessage ?? "Trip summary is unavailable.");
+        }
+
+        var matchingTripSummaries = summaryOutcome.Summaries
+            .Where(summary => summary.TripId == command.TripId)
+            .Take(2)
+            .ToArray();
+        if (matchingTripSummaries.Length != 1
+            || matchingTripSummaries[0].Route.RouteId != trip.RouteId
+            || matchingTripSummaries[0].Vehicle.VehicleId != trip.VehicleId)
+        {
+            throw new ParcelDependencyUnavailableException(
+                "TRIP_SERVICE_UNAVAILABLE",
+                "Trip summary is missing or inconsistent with the validated trip snapshot.");
+        }
+
+        var tripSummary = matchingTripSummaries[0];
+
         var parcel = ParcelEntity.CreatePendingPayment(
             parcelCode,
             command.SenderUserId,
@@ -305,6 +330,14 @@ public sealed class CreateParcelCommandHandler
             discountAmount,
             command.VoucherCode,
             null);
+
+        parcel.CaptureTripDisplaySnapshot(
+            tripSummary.Route.RouteId,
+            tripSummary.Route.Name,
+            tripSummary.Route.OriginName,
+            tripSummary.Route.DestinationName,
+            tripSummary.Vehicle.VehicleId,
+            tripSummary.Vehicle.LicensePlate);
 
         parcel.ConfigureSettlementV2(
             sizeCategory,

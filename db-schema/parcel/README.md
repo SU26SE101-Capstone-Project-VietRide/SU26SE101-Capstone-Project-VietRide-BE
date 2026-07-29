@@ -31,6 +31,7 @@ Quản lý **parcel lifecycle full**: tạo request, deposit + re-weigh + additi
 - **`parcels.sender_user_id NOT NULL`** — spec yêu cầu sender phải có account (no walk-in).
 - **`parcels.recipient_email` nullable** — hỗ trợ hybrid delivery confirmation (email link nếu có email; manual confirm bởi staff nếu không).
 - **`parcels.dropoff_stop_id` nullable** — null = terminal, not null = along-route Stop (validate `allowDropoff=true` app-layer).
+- **Sáu `trip_snapshot_*` nullable** — lưu cố định route, tên bến và xe tại lúc tạo Parcel để UI hiển thị ổn định khi dữ liệu Trip/Route/Vehicle về sau đổi hoặc bị soft-delete. Migration không gọi Trip; job `parcel.trip-display-snapshot-backfill` xử lý tối đa 100 Parcel mỗi lần bằng một batch API, ghi nguyên tuple với CAS và không bịa dữ liệu khi Trip thiếu.
 - **`parcels.status` enum** với 18 value đầy đủ theo v6 Section 8 ParcelStatus machine. Mọi transition validate ở handler.
 - **`parcels` 1 mega-table thay vì split** — query "parcel detail page" lấy 1 row đủ; tránh N+1.
 - **2 CHECK constraints** cho weight: `estimated_weight_kg > 0` (bắt buộc), `actual_weight_kg > 0 OR NULL`.
@@ -52,6 +53,7 @@ Quản lý **parcel lifecycle full**: tạo request, deposit + re-weigh + additi
 | `idx_parcels_recipient_user_id_created_at` | `(recipient_user_id, created_at DESC)` partial | B-tree | "My received parcels" |
 | `idx_parcels_trip_id_status` | `(trip_id, status)` | B-tree | Trip detail page (parcels of trip) |
 | `idx_parcels_operator_id_status` | `(operator_id, status)` | B-tree | Operator dashboard list |
+| `idx_parcels_trip_snapshot_backfill` | `(created_at, id)` partial khi bất kỳ snapshot còn null | B-tree | Bounded application backfill không full scan |
 | `idx_parcels_status_updated_at` | `(status, updated_at)` partial | B-tree | Hangfire scan all transient states |
 | `idx_parcels_additional_payment_deadline` | `additional_payment_deadline` partial | B-tree | 5m timeout job |
 | `idx_parcels_transfer_target_trip_id` | partial | B-tree | "Parcels awaiting confirm on this trip" |

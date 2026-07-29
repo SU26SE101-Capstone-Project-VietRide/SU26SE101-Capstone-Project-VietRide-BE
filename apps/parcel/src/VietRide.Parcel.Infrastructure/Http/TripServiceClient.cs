@@ -114,6 +114,74 @@ public sealed class TripServiceClient : ITripServiceClient, IIdempotentTripServi
         }
     }
 
+    public async Task<TripSummaryBatchOutcome> GetTripSummariesAsync(
+        IReadOnlyCollection<Guid> tripIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (tripIds.Any(tripId => tripId == Guid.Empty))
+            throw new ArgumentException("Trip ids cannot contain an empty UUID.", nameof(tripIds));
+
+        var distinctTripIds = tripIds
+            .Distinct()
+            .ToArray();
+        if (distinctTripIds.Length == 0)
+            return TripSummaryBatchOutcome.Success([]);
+        if (distinctTripIds.Length > 100)
+            throw new ArgumentOutOfRangeException(nameof(tripIds), "At most 100 distinct trip ids are allowed.");
+
+        try
+        {
+            using var response = await _httpClient
+                .PostAsJsonAsync(
+                    "/internal/v1/trips/summaries/batch",
+                    new { tripIds = distinctTripIds },
+                    JsonOptions,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                return TripSummaryBatchOutcome.TransportFailure(
+                    $"Trip summary batch returned status {(int)response.StatusCode}.");
+            }
+
+            var summaries = await response.Content
+                .ReadFromJsonAsync<IReadOnlyList<TripSummarySnapshot>>(JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+            if (summaries is null)
+                return TripSummaryBatchOutcome.TransportFailure("Trip summary batch returned a null body.");
+            if (summaries.Any(summary => summary is null))
+                return TripSummaryBatchOutcome.TransportFailure("Trip summary batch returned an invalid payload.");
+
+            var requestedIds = distinctTripIds.ToHashSet();
+            var responseIds = summaries.Select(summary => summary.TripId).ToArray();
+            var malformed = responseIds.Distinct().Count() != responseIds.Length
+                || summaries.Any(summary =>
+                    !requestedIds.Contains(summary.TripId)
+                    || summary.Route is null
+                    || summary.Route.RouteId == Guid.Empty
+                    || string.IsNullOrWhiteSpace(summary.Route.Name)
+                    || string.IsNullOrWhiteSpace(summary.Route.OriginName)
+                    || string.IsNullOrWhiteSpace(summary.Route.DestinationName)
+                    || summary.Vehicle is null
+                    || summary.Vehicle.VehicleId == Guid.Empty
+                    || string.IsNullOrWhiteSpace(summary.Vehicle.LicensePlate));
+            return malformed
+                ? TripSummaryBatchOutcome.TransportFailure("Trip summary batch returned an invalid payload.")
+                : TripSummaryBatchOutcome.Success(summaries);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "TripServiceClient.GetTripSummariesAsync failed.");
+            return TripSummaryBatchOutcome.TransportFailure(
+                $"Trip summary batch transport failure: {ex.Message}");
+        }
+    }
+
     public async Task<RouteOwnershipOutcome> ValidateRouteOwnershipAsync(
         Guid routeId,
         Guid operatorId,

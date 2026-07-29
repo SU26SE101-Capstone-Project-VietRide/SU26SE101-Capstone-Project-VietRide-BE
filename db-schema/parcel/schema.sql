@@ -66,6 +66,12 @@ CREATE TABLE parcels (
     -- trip context (logical FKs)
     operator_id UUID NOT NULL,
     trip_id UUID NOT NULL,
+    trip_snapshot_route_id UUID NULL,
+    trip_snapshot_route_name VARCHAR(255) NULL,
+    trip_snapshot_origin_station_name VARCHAR(255) NULL,
+    trip_snapshot_destination_station_name VARCHAR(255) NULL,
+    trip_snapshot_vehicle_id UUID NULL,
+    trip_snapshot_vehicle_license_plate VARCHAR(20) NULL,
     dropoff_stop_id UUID NULL,    -- null = destination station terminal; not null = along-route Stop
     booking_id UUID NULL,         -- logical FK booking.bookings; null = parcel-only
     -- parcel info
@@ -199,6 +205,13 @@ CREATE INDEX idx_parcels_recipient_user_id_created_at
     ON parcels (recipient_user_id, created_at DESC) WHERE recipient_user_id IS NOT NULL;
 CREATE INDEX idx_parcels_trip_id_status ON parcels (trip_id, status);
 CREATE INDEX idx_parcels_operator_id_status ON parcels (operator_id, status);
+CREATE INDEX idx_parcels_trip_snapshot_backfill ON parcels (created_at, id)
+    WHERE trip_snapshot_route_id IS NULL
+       OR trip_snapshot_route_name IS NULL
+       OR trip_snapshot_origin_station_name IS NULL
+       OR trip_snapshot_destination_station_name IS NULL
+       OR trip_snapshot_vehicle_id IS NULL
+       OR trip_snapshot_vehicle_license_plate IS NULL;
 CREATE INDEX idx_parcels_status_updated_at ON parcels (status, updated_at)
     WHERE status IN (
         'PENDING_PAYMENT', 'RESERVED', 'CHECKED_IN', 'PENDING_FINAL_PAYMENT',

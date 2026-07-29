@@ -111,6 +111,10 @@ if (registerMessaging)
         PlatformParcelStatsBackfillJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
         "*/5 * * * *");
+    recurringJobs.AddOrUpdate<ParcelTripDisplaySnapshotBackfillJob>(
+        ParcelTripDisplaySnapshotBackfillJob.RecurringJobId,
+        job => job.RunAsync(CancellationToken.None),
+        "*/5 * * * *");
     recurringJobs.AddOrUpdate<ParcelDeliveryPendingConfirmReminderJob>(
         ParcelDeliveryPendingConfirmReminderJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),

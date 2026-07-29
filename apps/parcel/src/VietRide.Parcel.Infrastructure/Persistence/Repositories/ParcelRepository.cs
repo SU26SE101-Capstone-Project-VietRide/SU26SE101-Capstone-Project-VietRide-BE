@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Features.Internal.Reports.PlatformParcels;
+using VietRide.Parcel.Application.Features.Parcels.DisplaySnapshots;
 using VietRide.Parcel.Application.Features.Parcels.Reports;
 using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
@@ -30,6 +31,119 @@ internal sealed class ParcelRepository : IParcelRepository
     {
         _db = db;
         _logger = logger;
+    }
+
+    public async Task<IReadOnlyList<ParcelTripDisplaySnapshotCandidate>> ListTripDisplaySnapshotBackfillCandidatesAsync(
+        int batchSize,
+        CancellationToken ct = default)
+        => await _db.Parcels
+            .AsNoTracking()
+            .Where(parcel => parcel.TripSnapshotRouteId == null
+                || parcel.TripSnapshotRouteName == null
+                || parcel.TripSnapshotOriginStationName == null
+                || parcel.TripSnapshotDestinationStationName == null
+                || parcel.TripSnapshotVehicleId == null
+                || parcel.TripSnapshotVehicleLicensePlate == null)
+            .OrderBy(parcel => parcel.CreatedAt)
+            .ThenBy(parcel => parcel.Id)
+            .Take(Math.Clamp(batchSize, 1, 100))
+            .Select(parcel => new ParcelTripDisplaySnapshotCandidate(parcel.Id, parcel.TripId))
+            .ToArrayAsync(ct);
+
+    public async Task<int> ApplyTripDisplaySnapshotBackfillAsync(
+        IReadOnlyCollection<ParcelTripDisplaySnapshotUpdate> updates,
+        CancellationToken ct = default)
+    {
+        if (updates.Count == 0)
+            return 0;
+
+        var normalized = updates
+            .ToDictionary(update => update.ParcelId)
+            .Values
+            .Select(update =>
+            {
+                if (update.Summary.TripId != update.ExpectedTripId)
+                {
+                    throw new ArgumentException(
+                        "Trip summary id must match the expected Parcel trip id.",
+                        nameof(updates));
+                }
+                if (update.Summary.Route.RouteId == Guid.Empty
+                    || update.Summary.Vehicle.VehicleId == Guid.Empty)
+                {
+                    throw new ArgumentException(
+                        "Trip summary route and vehicle ids are required.",
+                        nameof(updates));
+                }
+
+                return update with
+                {
+                    Summary = update.Summary with
+                    {
+                        Route = update.Summary.Route with
+                        {
+                            Name = NormalizeRequired(update.Summary.Route.Name),
+                            OriginName = NormalizeRequired(update.Summary.Route.OriginName),
+                            DestinationName = NormalizeRequired(update.Summary.Route.DestinationName),
+                        },
+                        Vehicle = update.Summary.Vehicle with
+                        {
+                            LicensePlate = NormalizeRequired(update.Summary.Vehicle.LicensePlate),
+                        },
+                    },
+                };
+            })
+            .ToArray();
+
+        var parcelIds = normalized.Select(update => update.ParcelId).ToArray();
+        var tripIds = normalized.Select(update => update.ExpectedTripId).ToArray();
+        var routeIds = normalized.Select(update => update.Summary.Route.RouteId).ToArray();
+        var routeNames = normalized.Select(update => update.Summary.Route.Name).ToArray();
+        var originNames = normalized.Select(update => update.Summary.Route.OriginName).ToArray();
+        var destinationNames = normalized.Select(update => update.Summary.Route.DestinationName).ToArray();
+        var vehicleIds = normalized.Select(update => update.Summary.Vehicle.VehicleId).ToArray();
+        var licensePlates = normalized.Select(update => update.Summary.Vehicle.LicensePlate).ToArray();
+
+        return await _db.Database.ExecuteSqlInterpolatedAsync($"""
+            WITH snapshot_updates (
+                parcel_id,
+                trip_id,
+                route_id,
+                route_name,
+                origin_name,
+                destination_name,
+                vehicle_id,
+                license_plate) AS (
+                SELECT *
+                FROM unnest(
+                    {parcelIds}::uuid[],
+                    {tripIds}::uuid[],
+                    {routeIds}::uuid[],
+                    {routeNames}::text[],
+                    {originNames}::text[],
+                    {destinationNames}::text[],
+                    {vehicleIds}::uuid[],
+                    {licensePlates}::text[])
+            )
+            UPDATE vietride_parcel.parcels AS parcel
+            SET trip_snapshot_route_id = snapshot.route_id,
+                trip_snapshot_route_name = snapshot.route_name,
+                trip_snapshot_origin_station_name = snapshot.origin_name,
+                trip_snapshot_destination_station_name = snapshot.destination_name,
+                trip_snapshot_vehicle_id = snapshot.vehicle_id,
+                trip_snapshot_vehicle_license_plate = snapshot.license_plate,
+                updated_at = CURRENT_TIMESTAMP
+            FROM snapshot_updates AS snapshot
+            WHERE parcel.id = snapshot.parcel_id
+              AND parcel.trip_id = snapshot.trip_id
+              AND (
+                   parcel.trip_snapshot_route_id IS NULL
+                OR parcel.trip_snapshot_route_name IS NULL
+                OR parcel.trip_snapshot_origin_station_name IS NULL
+                OR parcel.trip_snapshot_destination_station_name IS NULL
+                OR parcel.trip_snapshot_vehicle_id IS NULL
+                OR parcel.trip_snapshot_vehicle_license_plate IS NULL)
+            """, ct);
     }
 
     public async IAsyncEnumerable<ParcelOperatorReportRow> StreamOperatorReportRowsAsync(
@@ -1546,5 +1660,13 @@ internal sealed class ParcelRepository : IParcelRepository
         parameter.ParameterName = name;
         parameter.Value = value;
         command.Parameters.Add(parameter);
+    }
+
+    private static string NormalizeRequired(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new ArgumentException("Snapshot display value is required.", nameof(value));
+
+        return value.Trim();
     }
 }

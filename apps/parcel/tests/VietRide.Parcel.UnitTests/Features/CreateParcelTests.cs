@@ -23,6 +23,7 @@ public sealed class CreateParcelTests
     private static readonly Guid OperatorId = Guid.NewGuid();
     private static readonly Guid RouteId = Guid.NewGuid();
     private static readonly Guid TripId = Guid.NewGuid();
+    private static readonly Guid VehicleId = Guid.NewGuid();
     private static readonly Guid DropoffStopId = Guid.NewGuid();
     private static readonly Guid BookingId = Guid.NewGuid();
     private static readonly Guid RecipientUserId = Guid.NewGuid();
@@ -36,6 +37,55 @@ public sealed class CreateParcelTests
     private static readonly DateTimeOffset Departure = new(2026, 7, 15, 8, 0, 0, TimeSpan.FromHours(7));
     private static readonly DateTimeOffset EstimatedArrival = new(2026, 7, 15, 18, 0, 0, TimeSpan.FromHours(7));
     private static readonly DateTimeOffset Now = new(2026, 6, 29, 10, 0, 0, TimeSpan.FromHours(7));
+
+    [Fact]
+    public async Task Create_PersistsStableTripDisplaySnapshot()
+    {
+        var (identity, booking, trip, parcelRepo, fareRepo, uow) = SetupMocks(
+            userRole: "PASSENGER",
+            userStatus: "ACTIVE",
+            tripStatus: "SCHEDULED",
+            hasBooking: false,
+            hasFare: true);
+
+        var handler = CreateHandler(identity, booking, trip, parcelRepo, fareRepo, uow);
+
+        await handler.Handle(BuildCommand(), CancellationToken.None);
+
+        await parcelRepo.Received(1).AddAsync(
+            Arg.Is<ParcelEntity>(parcel =>
+                parcel.TripSnapshotRouteId == RouteId
+                && parcel.TripSnapshotRouteName == "HCM - Da Lat"
+                && parcel.TripSnapshotOriginStationName == "Mien Dong"
+                && parcel.TripSnapshotDestinationStationName == "Da Lat"
+                && parcel.TripSnapshotVehicleId == VehicleId
+                && parcel.TripSnapshotVehicleLicensePlate == "51B-12345"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Create_WhenTripDisplaySummaryUnavailable_FailsBeforePersistence()
+    {
+        var (identity, booking, trip, parcelRepo, fareRepo, uow) = SetupMocks(
+            userRole: "PASSENGER",
+            userStatus: "ACTIVE",
+            tripStatus: "SCHEDULED",
+            hasBooking: false,
+            hasFare: true);
+        trip.GetTripSummariesAsync(
+                Arg.Any<IReadOnlyCollection<Guid>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(TripSummaryBatchOutcome.TransportFailure("trip summary unavailable"));
+        var handler = CreateHandler(identity, booking, trip, parcelRepo, fareRepo, uow);
+
+        var exception = await Assert.ThrowsAsync<ParcelDependencyUnavailableException>(() =>
+            handler.Handle(BuildCommand(), CancellationToken.None));
+
+        exception.ErrorCode.Should().Be("TRIP_SERVICE_UNAVAILABLE");
+        await parcelRepo.DidNotReceive().AddAsync(
+            Arg.Any<ParcelEntity>(),
+            Arg.Any<CancellationToken>());
+    }
 
     [Fact]
     public async Task Create_ParcelOnly_NormalSize_ReturnsPendingPayment()
@@ -406,6 +456,19 @@ public sealed class CreateParcelTests
         trip.GetTripParcelSnapshotAsync(TripId, Arg.Any<CancellationToken>())
             .Returns(new TripSnapshotOutcome(TripSnapshotOutcomeKind.Success,
                 CreateTripSnapshot("SCHEDULED"), null));
+        trip.GetTripSummariesAsync(
+                Arg.Any<IReadOnlyCollection<Guid>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(TripSummaryBatchOutcome.Success(
+            [
+                new TripSummarySnapshot(
+                    TripId,
+                    "SCHEDULED",
+                    Departure,
+                    EstimatedArrival,
+                    new TripRouteSummarySnapshot(RouteId, "HCM - Da Lat", "Mien Dong", "Da Lat"),
+                    new TripVehicleSummarySnapshot(VehicleId, "51B-12345", "ACTIVE")),
+            ]));
 
         var fare = ParcelRouteFare.Create(RouteId, ParcelSizeCategory.MEDIUM, OperatorId,
             Money.FromRaw(150_000), Now);
@@ -452,6 +515,19 @@ public sealed class CreateParcelTests
         trip.GetTripParcelSnapshotAsync(TripId, Arg.Any<CancellationToken>())
             .Returns(new TripSnapshotOutcome(TripSnapshotOutcomeKind.Success,
                 CreateTripSnapshot("SCHEDULED"), null));
+        trip.GetTripSummariesAsync(
+                Arg.Any<IReadOnlyCollection<Guid>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(TripSummaryBatchOutcome.Success(
+            [
+                new TripSummarySnapshot(
+                    TripId,
+                    "SCHEDULED",
+                    Departure,
+                    EstimatedArrival,
+                    new TripRouteSummarySnapshot(RouteId, "HCM - Da Lat", "Mien Dong", "Da Lat"),
+                    new TripVehicleSummarySnapshot(VehicleId, "51B-12345", "ACTIVE")),
+            ]));
 
         var fare = ParcelRouteFare.Create(RouteId, ParcelSizeCategory.MEDIUM, OperatorId,
             Money.FromRaw(150_000), Now);
@@ -535,6 +611,19 @@ public sealed class CreateParcelTests
             trip.GetTripParcelSnapshotAsync(TripId, Arg.Any<CancellationToken>())
                 .Returns(new TripSnapshotOutcome(TripSnapshotOutcomeKind.Success,
                     CreateTripSnapshot(tripStatus), null));
+            trip.GetTripSummariesAsync(
+                    Arg.Any<IReadOnlyCollection<Guid>>(),
+                    Arg.Any<CancellationToken>())
+                .Returns(TripSummaryBatchOutcome.Success(
+                [
+                    new TripSummarySnapshot(
+                        TripId,
+                        tripStatus,
+                        Departure,
+                        EstimatedArrival,
+                        new TripRouteSummarySnapshot(RouteId, "HCM - Da Lat", "Mien Dong", "Da Lat"),
+                        new TripVehicleSummarySnapshot(VehicleId, "51B-12345", "ACTIVE")),
+                ]));
         }
 
         if (hasFare)
@@ -617,7 +706,7 @@ public sealed class CreateParcelTests
     {
         var station = new TripStationDto(Guid.NewGuid(), "Station");
         return new TripParcelSnapshot(
-            TripId, OperatorId, RouteId, Guid.NewGuid(), status,
+            TripId, OperatorId, RouteId, VehicleId, status,
             Departure, EstimatedArrival, 100_000,
             station, station,
             new List<TripStopDto>
