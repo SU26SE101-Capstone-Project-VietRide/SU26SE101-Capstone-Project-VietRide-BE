@@ -166,6 +166,20 @@ internal sealed class UserRepository : IUserRepository
             .Select(u => u.Id)
             .ToListAsync(ct);
 
+    public async Task<IReadOnlyList<User>> ListByIdsIncludingDeletedAsync(
+        IReadOnlyCollection<Guid> userIds,
+        CancellationToken ct = default)
+    {
+        if (userIds.Count == 0)
+            return [];
+
+        return await _db.Users
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(user => userIds.Contains(user.Id))
+            .ToListAsync(ct);
+    }
+
     public async Task<User> AddAsync(User entity, CancellationToken ct)
     {
         await _db.Users.AddAsync(entity, ct);
