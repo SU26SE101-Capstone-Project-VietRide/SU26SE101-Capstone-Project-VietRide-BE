@@ -2644,7 +2644,7 @@ Parcel cargo policy:
   calculation rounds to the nearest đồng with `MidpointRounding.AwayFromZero`.
 - `dimWeightKg = lengthCm × widthCm × heightCm / 6000` and `chargeableWeightKg = max(weightKg, dimWeightKg)`.
 - `grossPriceVnd = max(minimumPriceVnd, round(chargeableWeightKg × pricePerKgVnd))`; rounding is to the nearest đồng with `MidpointRounding.AwayFromZero`. There is no kg ceiling and no 1,000-VND floor.
-- Size is derived from chargeable weight: `SMALL <= 5`, `MEDIUM <= 15`, `LARGE <= 30`, `EXTRA_LARGE > 30` kg. Client size fields are compatibility hints only.
+- Size is derived from chargeable weight: `SMALL <= 5`, `MEDIUM <= 15`, `LARGE <= 30`, `EXTRA_LARGE > 30` kg. Client size fields are compatibility hints only. All sizes require a configured route fare and new Parcels start at `PENDING_PAYMENT`; `EXTRA_LARGE` does not require operator pre-review.
 - `estimatedTotalPriceVnd = estimatedGrossPriceVnd - min(discountAmountVnd, estimatedGrossPriceVnd)`; final total uses the same clamp against final gross.
 - Settlement v2 deposit is 20% of estimated total. Only `READY_TO_LOAD` may transition to `LOADED`.
 - `PENDING_OPERATOR_ACTION` is disambiguated by `pendingActionType`; `pendingActionResumeStatus` records the settlement state to resume after recovery.
@@ -2752,7 +2752,7 @@ Response `201`:
 }
 ```
 
-The server derives `estimatedSizeCategory`; old clients may still send `sizeCategory`, but it does not override calculated size or price. `EXTRA_LARGE` is returned as `PENDING_OPERATOR_REVIEW`; all other sizes return `PENDING_PAYMENT`. Create does not reserve cargo or create a payment.
+The server derives `estimatedSizeCategory`; old clients may still send `sizeCategory`, but it does not override calculated size or price. Every size, including `EXTRA_LARGE`, returns `PENDING_PAYMENT`. A fare for the derived route/size is required; otherwise the server returns `422 FARE_NOT_CONFIGURED` without writes. Create does not reserve cargo or create a payment. Capacity is enforced when the deposit soft hold starts and again when the Assistant records actual measurements.
 
 ### POST `/v1/parcels/{parcelId}/deposit-payment`
 
@@ -3313,7 +3313,7 @@ Response `200` uses the ADR 0004 paged envelope. Items are ordered by `createdAt
       {
         "parcelId": "uuid",
         "parcelCode": "VR-PCL-20260727-ABC123",
-        "status": "PENDING_OPERATOR_REVIEW",
+        "status": "PENDING_PAYMENT",
         "tripId": "uuid",
         "senderUserId": "uuid",
         "recipientName": "Nguyen Van A",
@@ -3351,13 +3351,13 @@ Response `200` uses the ADR 0004 paged envelope. Items are ordered by `createdAt
 Errors: `403 FORBIDDEN` when `operatorId` scope is missing; `422 VALIDATION_ERROR` for invalid
 filters or pagination.
 
-### PATCH `/v1/operator/parcels/{parcelId}/review`
+### PATCH `/v1/operator/parcels/{parcelId}/review` (legacy compatibility)
 
-Auth: `OPERATOR_ADMIN|OPERATOR_STAFF` for the Parcel operator. Idempotency: required. Valid only from `PENDING_OPERATOR_REVIEW`.
+Auth: `OPERATOR_ADMIN|OPERATOR_STAFF` for the Parcel operator. Idempotency: required. Valid only for legacy records still in `PENDING_OPERATOR_REVIEW`; new Parcels never enter this state.
 
 Request: `{ "decision": "APPROVE|REJECT", "reason": "optional for approve, required for reject" }`. Price, deposit and payment method are not accepted from Operator input.
 
-`APPROVE` moves to `PENDING_PAYMENT`; the Passenger then calls deposit-payment. `REJECT` moves to `REJECTED`. An unresolved review after 24 hours moves to `CANCELLED` with reason `OPERATOR_REVIEW_TIMEOUT`; no payment or refund exists in either reject/timeout branch.
+`APPROVE` moves a legacy record with a valid fare snapshot to `PENDING_PAYMENT`; a missing or invalid snapshot returns `422 FARE_NOT_CONFIGURED`. The Passenger then calls deposit-payment. `REJECT` moves to `REJECTED`. An unresolved legacy review after 24 hours moves to `CANCELLED` with reason `OPERATOR_REVIEW_TIMEOUT`; no payment or refund exists in either reject/timeout branch.
 
 ### POST `/v1/operator/parcels/{parcelId}/request-transfer`
 

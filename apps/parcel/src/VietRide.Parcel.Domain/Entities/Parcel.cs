@@ -255,7 +255,7 @@ public sealed class Parcel : BaseEntity<Guid>
             DimWeightFactor = 6000m,
             SettlementPolicyVersion = 1,
             Status = ParcelStatus.PENDING_PAYMENT,
-            ReviewDecision = ParcelReviewDecision.PENDING,
+            ReviewDecision = null,
         };
     }
 

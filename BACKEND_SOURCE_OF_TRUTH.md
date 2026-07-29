@@ -1541,7 +1541,7 @@ updates the column.
 | | `PARCEL_DELIVERY_TOKEN_EXPIRED` | 401 | Quá 48h |
 | | `PARCEL_NOT_TRANSFERABLE` | 409 | Status sai khi confirm transfer |
 | | `PARCEL_ADDITIONAL_PAYMENT_REQUIRED` | 402 | Cân lại > ước lượng |
-| | `PARCEL_REVIEW_TIMEOUT` | 409 | EXTRA_LARGE auto-reject 24h |
+| | `PARCEL_REVIEW_TIMEOUT` | 409 | Timeout review 24h cho record legacy `PENDING_OPERATOR_REVIEW` |
 | **Stop / Route** | `STOP_NOT_FOUND` | 404 | Day-7 Trip Stop handlers use coded 404 path; cross-tenant DELETE is masked here |
 | | `STOP_REPLACEMENT_INVALID` | 422 | Replacement Stop missing, inactive, cross-operator, or self-reference |
 | | `STOP_REPLACEMENT_CYCLE` | 422 | Replacement chain would create a cycle |
@@ -2113,8 +2113,8 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `parcel.parcel.delivery_rejected` | Parcel | Notification | `{ parcelId, reason }` |
 | `parcel.parcel.cancelled` · `rejected` · `returned` | Parcel | Notification, Trip (counter), Payment (refund) | Legacy `{ parcelId, refundAmount? }`; review reject/timeout facts additionally snapshot `eventId`, `occurredAt`, `parcelCode`, sender `userId`, `operatorId` and `reason` so Notification does not read mutable rejection copy later |
 | `parcel.parcel.auto_rejected` | Parcel | Notification, Trip (counter), Payment (refund) | Legacy exact `{ eventId, occurredAt, parcelId, parcelCode, operatorId, userId, tripId, refundAmount }` remains accepted for late-load/additional-payment producers. Settlement v2 exact variant adds `reason: CHECK_IN_TIMEOUT\|FINAL_PAYMENT_TIMEOUT` and `forfeitedDepositVnd`; `userId` is always the persisted sender and `eventId == OutboxEvent.id == RabbitMQ MessageId` |
-| `parcel.parcel.review_requested` | Parcel (EXTRA_LARGE) | Notification (operator) | `{ parcelId, operatorId }` |
-| `parcel.parcel.review_approved` | Parcel (EXTRA_LARGE) | Notification (sender) | Exact `{ eventId, occurredAt, parcelId, parcelCode, operatorId, userId, depositRequiredVnd }`; enqueue trong cùng transaction chuyển sang `PENDING_PAYMENT` |
+| `parcel.parcel.review_requested` | Parcel legacy | Notification (operator) | `{ parcelId, operatorId }`; không phát cho Parcel mới, kể cả `EXTRA_LARGE` |
+| `parcel.parcel.review_approved` | Parcel legacy | Notification (sender) | Exact `{ eventId, occurredAt, parcelId, parcelCode, operatorId, userId, depositRequiredVnd }`; enqueue trong cùng transaction chuyển record legacy sang `PENDING_PAYMENT` |
 | `parcel.parcel.final_payment_requested` | Parcel | Notification (sender) | Exact `{ eventId, occurredAt, parcelId, parcelCode, operatorId, userId, tripId, balanceRequiredVnd, balancePaidVnd, finalPaymentDeadline }`; enqueue trong cùng transaction cân lại chuyển sang `PENDING_FINAL_PAYMENT` |
 | `parcel.parcel.settlement_recovered` | Parcel | Notification (sender) | Exact `{ eventId, occurredAt, parcelId, parcelCode, userId, tripId, recoveredStatus: READY_TO_LOAD\|CANCELLED, refundAmountVnd }`; corrective fact khi callback có `paidAt` đúng hạn thắng timeout đã phát trước đó |
 | `parcel.parcel.transfer_initiated` | Parcel | Notification | `{ parcelId, originalTripId, newTripId }` |
@@ -2580,7 +2580,7 @@ Trip, and cancellation/refund uses persisted `totalAmount`.
 ### 8.3 ParcelStatus
 
 ```
-PENDING_OPERATOR_REVIEW (EXTRA_LARGE only) ──→ PENDING_PAYMENT | REJECTED | CANCELLED(review timeout)
+PENDING_OPERATOR_REVIEW (legacy only) ──→ PENDING_PAYMENT | REJECTED | CANCELLED(review timeout)
 PENDING_PAYMENT ──→ RESERVED | EXPIRED | CANCELLED
 RESERVED ──→ CHECKED_IN | REJECTED(check-in timeout) | CANCELLED | PENDING_OPERATOR_ACTION
 CHECKED_IN ──→ PENDING_FINAL_PAYMENT | READY_TO_LOAD | PENDING_OPERATOR_ACTION
@@ -2598,7 +2598,7 @@ PENDING_OPERATOR_ACTION ──→ pendingActionResumeStatus | RETURNED
 
 **Terminal:** `DELIVERY_CONFIRMED`, `RETURN_INITIATED`, `CANCELLED`, `EXPIRED`, `REJECTED`, `RETURNED`.
 
-**Settlement v2 invariants:** pricing uses exact decimal chargeable weight and rounds fractional VND to the nearest đồng with `MidpointRounding.AwayFromZero`; it never ceilings kg or floors money to 1,000 VND. Voucher discount is clamped independently against estimated/final gross. Deposit is 20% of estimated total. Only `READY_TO_LOAD` can load. A Payment success is judged by authoritative `paidAt`, not webhook delivery time. If final-payment timeout wins before an on-time callback, the callback cancels forfeiture and restores `READY_TO_LOAD` when the trip can still serve; otherwise the Parcel becomes `CANCELLED` and all collected money is refunded.
+**Settlement v2 invariants:** pricing uses exact decimal chargeable weight and rounds fractional VND to the nearest đồng with `MidpointRounding.AwayFromZero`; it never ceilings kg or floors money to 1,000 VND. Voucher discount is clamped independently against estimated/final gross. Deposit is 20% of estimated total. Every derived size, including `EXTRA_LARGE`, requires a configured fare and starts at `PENDING_PAYMENT`; capacity is enforced at deposit hold and reweigh. `PENDING_OPERATOR_REVIEW` is legacy-only. Only `READY_TO_LOAD` can load. A Payment success is judged by authoritative `paidAt`, not webhook delivery time. If final-payment timeout wins before an on-time callback, the callback cancels forfeiture and restores `READY_TO_LOAD` when the trip can still serve; otherwise the Parcel becomes `CANCELLED` and all collected money is refunded.
 
 **Canonical two-step delivery (Day 39):**
 
@@ -3117,7 +3117,7 @@ permitted.
 | Job | Type | Trigger | Notes |
 |---|---|---|---|
 | `UndoRejectWindowJob` | Scheduled (per Parcel) | DELIVERY_REJECTED + 15 phút | DELIVERY_REJECTED → RETURN_INITIATED |
-| `AutoRejectExtraLargeJob` | Scheduled (per Parcel) | PENDING_OPERATOR_REVIEW + 24h | `CANCELLED`, reason `OPERATOR_REVIEW_TIMEOUT`; chưa có tiền để refund |
+| `AutoRejectExtraLargeJob` | Scheduled (legacy records) | PENDING_OPERATOR_REVIEW + 24h | `CANCELLED`, reason `OPERATOR_REVIEW_TIMEOUT`; không áp dụng cho Parcel mới |
 | `ParcelSettlementTimeoutJob` | Recurring | Every 5 phút | Xử lý cả `RESERVED → REJECTED` khi quá `latestCheckInAt` và `PENDING_FINAL_PAYMENT → REJECTED` khi `finalPaymentDeadline <= now`; forfeiture toàn bộ cọc + release cargo; callback on-time đến sau phải recovery theo invariant §8.3 |
 | `PendingTransferConfirmEscalationJob` | Scheduled (per Parcel) | PENDING_TRANSFER_CONFIRM + 30 phút | → TRANSFER_ESCALATED |
 | `PendingOperatorActionReAlertJob` | Scheduled (per Parcel) | PENDING_OPERATOR_ACTION + 2h | Re-alert operator |

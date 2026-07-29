@@ -4,6 +4,7 @@ using NSubstitute;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Exceptions;
+using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Parcel.Application.Features.Parcels.Create;
 using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
@@ -60,7 +61,7 @@ public sealed class CreateParcelTests
     }
 
     [Fact]
-    public async Task Create_ExtraLarge_ReturnsPendingOperatorReview()
+    public async Task Create_ExtraLarge_ReturnsPendingPayment_WithoutReviewRequest()
     {
         var (identity, booking, trip, parcelRepo, fareRepo, uow) = SetupMocks(
             userRole: "PASSENGER",
@@ -69,12 +70,20 @@ public sealed class CreateParcelTests
             hasBooking: false,
             hasFare: true);
 
-        var handler = CreateHandler(identity, booking, trip, parcelRepo, fareRepo, uow);
+        var outbox = Substitute.For<IIntegrationEventOutbox>();
+        var handler = CreateHandler(identity, booking, trip, parcelRepo, fareRepo, uow, outbox: outbox);
         var command = BuildCommand(sizeCategory: "EXTRA_LARGE", deliveryMethod: "TERMINAL_PICKUP");
 
         var result = await handler.Handle(command, CancellationToken.None);
 
-        result.Status.Should().Be("PENDING_OPERATOR_REVIEW");
+        result.Status.Should().Be("PENDING_PAYMENT");
+        await parcelRepo.Received(1).AddAsync(
+            Arg.Is<ParcelEntity>(parcel => parcel.ReviewDecision == null),
+            Arg.Any<CancellationToken>());
+        await outbox.DidNotReceive().EnqueueAsync(
+            ParcelOutboxEvents.ReviewRequested,
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
     }
 
     [Theory]
@@ -271,6 +280,48 @@ public sealed class CreateParcelTests
         var ex = await Assert.ThrowsAsync<CodedValidationException>(() =>
             handler.Handle(command, CancellationToken.None));
         ex.ErrorCode.Should().Be("FARE_NOT_CONFIGURED");
+    }
+
+    [Fact]
+    public async Task Create_ExtraLargeWithoutFare_ReturnsFareNotConfigured_WithoutWrites()
+    {
+        var (identity, booking, trip, parcelRepo, fareRepo, uow) = SetupMocks(
+            userRole: "PASSENGER",
+            userStatus: "ACTIVE",
+            tripStatus: "SCHEDULED",
+            hasBooking: false,
+            hasFare: false);
+        var outbox = Substitute.For<IIntegrationEventOutbox>();
+        var stats = Substitute.For<IParcelStatsRepository>();
+        var handler = CreateHandler(
+            identity, booking, trip, parcelRepo, fareRepo, uow,
+            outbox: outbox,
+            stats: stats);
+
+        var act = () => handler.Handle(
+            BuildCommand(sizeCategory: "EXTRA_LARGE"),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<CodedValidationException>()
+            .Where(exception => exception.ErrorCode == "FARE_NOT_CONFIGURED");
+        await parcelRepo.DidNotReceive().AddAsync(
+            Arg.Any<ParcelEntity>(),
+            Arg.Any<CancellationToken>());
+        await outbox.DidNotReceive().EnqueueAsync(
+            Arg.Any<string>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+        await stats.DidNotReceive().UpsertIncrementAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<DateOnly>(),
+            Arg.Any<int>(),
+            Arg.Any<int>(),
+            Arg.Any<int>(),
+            Arg.Any<int>(),
+            Arg.Any<int>(),
+            Arg.Any<long>(),
+            Arg.Any<long>(),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -488,10 +539,13 @@ public sealed class CreateParcelTests
 
         if (hasFare)
         {
-            var fare = ParcelRouteFare.Create(RouteId, ParcelSizeCategory.MEDIUM, OperatorId,
-                Money.FromRaw(150_000), Now);
-            fareRepo.FindByCompositeAsync(RouteId, ParcelSizeCategory.MEDIUM, Arg.Any<CancellationToken>())
-                .Returns(fare);
+            foreach (var category in new[] { ParcelSizeCategory.MEDIUM, ParcelSizeCategory.EXTRA_LARGE })
+            {
+                var fare = ParcelRouteFare.Create(RouteId, category, OperatorId,
+                    Money.FromRaw(150_000), Now);
+                fareRepo.FindByCompositeAsync(RouteId, category, Arg.Any<CancellationToken>())
+                    .Returns(fare);
+            }
         }
 
         parcelRepo.FindByParcelCodeAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -517,9 +571,13 @@ public sealed class CreateParcelTests
         IParcelRepository parcelRepo,
         IParcelRouteFareRepository fareRepo,
         IUnitOfWork uow,
-        IPaymentServiceClient? payment = null)
+        IPaymentServiceClient? payment = null,
+        IIntegrationEventOutbox? outbox = null,
+        IParcelStatsRepository? stats = null)
     {
         payment ??= CreatePaymentClient();
+        outbox ??= Outbox();
+        stats ??= Stats();
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
         return new CreateParcelCommandHandler(
@@ -531,8 +589,8 @@ public sealed class CreateParcelTests
             fareRepo,
             policyRepository: null,
             uow,
-            Outbox(),
-            Stats(),
+            outbox,
+            stats,
             NullLogger<CreateParcelCommandHandler>.Instance,
             clock);
     }

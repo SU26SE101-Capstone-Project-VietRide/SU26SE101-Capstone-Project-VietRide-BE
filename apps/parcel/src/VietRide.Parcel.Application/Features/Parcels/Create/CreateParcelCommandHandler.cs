@@ -231,19 +231,17 @@ public sealed class CreateParcelCommandHandler
                 "The trip no longer has enough time for parcel check-in and final settlement.");
 
         var fare = await _fareRepository.FindByCompositeAsync(trip.RouteId, sizeCategory, cancellationToken);
-        if (fare is null && (_policyRepository is not null || sizeCategory != ParcelSizeCategory.EXTRA_LARGE))
+        if (fare is null)
             throw new CodedValidationException(
                 "FARE_NOT_CONFIGURED",
-                $"No fare configured for route '{trip.RouteId}' and size category '{command.SizeCategory}'.");
+                $"No fare configured for route '{trip.RouteId}' and size category '{sizeCategory}'.");
 
-        var estimatedGrossPrice = fare is null
-            ? Money.Zero
-            : _policyRepository is null
-                ? fare.PriceVnd
-                : ParcelCargoCalculator.CalculateTotalPrice(
-                    cargoEstimate.ChargeableWeightKg,
-                    fare.PricePerChargeableKgVnd.Amount > 0 ? fare.PricePerChargeableKgVnd : fare.PriceVnd,
-                    fare.MinimumPriceVnd);
+        var estimatedGrossPrice = _policyRepository is null
+            ? fare.PriceVnd
+            : ParcelCargoCalculator.CalculateTotalPrice(
+                cargoEstimate.ChargeableWeightKg,
+                fare.PricePerChargeableKgVnd.Amount > 0 ? fare.PricePerChargeableKgVnd : fare.PriceVnd,
+                fare.MinimumPriceVnd);
         var depositPercent = ParcelCargoCalculator.DefaultDepositPercent;
         var discountAmount = Money.Zero;
 
@@ -278,65 +276,35 @@ public sealed class CreateParcelCommandHandler
             estimatedTotalPrice,
             depositPercent);
 
-        var parcel = sizeCategory == ParcelSizeCategory.EXTRA_LARGE
-            ? ParcelEntity.CreatePendingOperatorReview(
-                parcelCode,
-                command.SenderUserId,
-                command.RecipientUserId,
-                command.RecipientName,
-                recipientPhone,
-                command.RecipientEmail,
-                trip.OperatorId,
-                command.TripId,
-                command.DropoffStopId,
-                command.BookingId,
-                finalDescription,
-                command.PhotoUrl,
-                sizeCategory,
-                cargoEstimate.LengthCm,
-                cargoEstimate.WidthCm,
-                cargoEstimate.HeightCm,
-                cargoEstimate.WeightKg,
-                cargoEstimate.VolumeM3,
-                cargoEstimate.DimWeightKg,
-                cargoEstimate.ChargeableWeightKg,
-                deliveryMethod,
-                estimatedTotalPrice,
-                depositPercent,
-                depositRequired,
-                depositRequired,
-                discountAmount,
-                command.VoucherCode,
-                null)
-            : ParcelEntity.CreatePendingPayment(
-                parcelCode,
-                command.SenderUserId,
-                command.RecipientUserId,
-                command.RecipientName,
-                recipientPhone,
-                command.RecipientEmail,
-                trip.OperatorId,
-                command.TripId,
-                command.DropoffStopId,
-                command.BookingId,
-                finalDescription,
-                command.PhotoUrl,
-                sizeCategory,
-                cargoEstimate.LengthCm,
-                cargoEstimate.WidthCm,
-                cargoEstimate.HeightCm,
-                cargoEstimate.WeightKg,
-                cargoEstimate.VolumeM3,
-                cargoEstimate.DimWeightKg,
-                cargoEstimate.ChargeableWeightKg,
-                deliveryMethod,
-                estimatedTotalPrice,
-                depositPercent,
-                depositRequired,
-                depositRequired,
-                discountAmount,
-                command.VoucherCode,
-                null);
+        var parcel = ParcelEntity.CreatePendingPayment(
+            parcelCode,
+            command.SenderUserId,
+            command.RecipientUserId,
+            command.RecipientName,
+            recipientPhone,
+            command.RecipientEmail,
+            trip.OperatorId,
+            command.TripId,
+            command.DropoffStopId,
+            command.BookingId,
+            finalDescription,
+            command.PhotoUrl,
+            sizeCategory,
+            cargoEstimate.LengthCm,
+            cargoEstimate.WidthCm,
+            cargoEstimate.HeightCm,
+            cargoEstimate.WeightKg,
+            cargoEstimate.VolumeM3,
+            cargoEstimate.DimWeightKg,
+            cargoEstimate.ChargeableWeightKg,
+            deliveryMethod,
+            estimatedTotalPrice,
+            depositPercent,
+            depositRequired,
+            depositRequired,
+            discountAmount,
+            command.VoucherCode,
+            null);
 
         parcel.ConfigureSettlementV2(
             sizeCategory,
@@ -345,10 +313,10 @@ public sealed class CreateParcelCommandHandler
             estimatedTotalPrice,
             depositPercent,
             depositRequired,
-            fare?.PricePerChargeableKgVnd.Amount > 0
+            fare.PricePerChargeableKgVnd.Amount > 0
                 ? fare.PricePerChargeableKgVnd
-                : fare?.PriceVnd ?? Money.Zero,
-            fare?.MinimumPriceVnd ?? Money.Zero,
+                : fare.PriceVnd,
+            fare.MinimumPriceVnd,
             dimFactor,
             deadlines.LoadCutoffAt,
             deadlines.LatestCheckInAt);
@@ -363,15 +331,6 @@ public sealed class CreateParcelCommandHandler
                 ParcelOutboxEvents.Created,
                 new { parcelId = parcel.Id, tripId = parcel.TripId, senderUserId = parcel.SenderUserId, recipientUserId = parcel.RecipientUserId, userIds = new[] { parcel.SenderUserId }.Concat(parcel.RecipientUserId.HasValue ? new[] { parcel.RecipientUserId.Value } : Array.Empty<Guid>()).Distinct().ToArray() },
                 cancellationToken);
-
-            if (sizeCategory == ParcelSizeCategory.EXTRA_LARGE)
-            {
-                await ParcelOutboxEvents.EnqueueAsync(
-                    _outbox,
-                    ParcelOutboxEvents.ReviewRequested,
-                    new { parcelId = parcel.Id, operatorId = parcel.OperatorId },
-                    cancellationToken);
-            }
 
             await _statsRepository.UpsertIncrementAsync(
                 parcel.OperatorId,
