@@ -9,6 +9,7 @@ using VietRide.Shared.Web.Idempotency;
 using VietRide.Shared.Web.Middleware;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Api.Filters;
+using VietRide.Trip.Application.Features.Internal.Trips.BatchTripSummaries;
 using VietRide.Trip.Application.Features.Internal.Trips.BookRoundTripSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.BookSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.Cargo;
@@ -40,6 +41,21 @@ public sealed class InternalTripsController : ControllerBase
     public InternalTripsController(IMediator mediator)
     {
         this.mediator = mediator;
+    }
+
+    [HttpPost("summaries/batch")]
+    [SkipIdempotency("Trip summary batching is a read-only query exposed as POST for bounded request payloads.")]
+    [ProducesResponseType(typeof(IReadOnlyList<InternalTripSummaryDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<IReadOnlyList<InternalTripSummaryDto>>> BatchSummariesAsync(
+        [FromBody] BatchTripSummariesRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await mediator.Send(
+            new BatchTripSummariesQuery(request.TripIds ?? []),
+            cancellationToken);
+        return Ok(result);
     }
 
     [HttpGet("{tripId:guid}")]

@@ -9,6 +9,7 @@ using VietRide.Shared.Kernel.Primitives;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Features.DriverTrips.GetAssignedTripRoute;
 using VietRide.Trip.Application.Features.Internal.Reports.PlatformTrips;
+using VietRide.Trip.Application.Features.Internal.Trips.BatchTripSummaries;
 using VietRide.Trip.Application.Features.OperatorReports;
 using VietRide.Trip.Application.Features.Trips.ListOperatorTrips;
 using VietRide.Trip.Domain.Entities;
@@ -35,6 +36,68 @@ internal sealed class TripRepository : ITripRepository
 
     public Task<Domain.Entities.Trip?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         _dbContext.Trips.FindAsync(new object[] { id }, cancellationToken).AsTask();
+
+    public async Task<IReadOnlyList<InternalTripSummaryDto>> ListSummariesByIdsAsync(
+        IReadOnlyCollection<Guid> tripIds,
+        CancellationToken cancellationToken)
+    {
+        var connection = _dbContext.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = _dbContext.Database.CurrentTransaction?.GetDbTransaction();
+        command.CommandText =
+            """
+            SELECT t.id,
+                   t.status::text,
+                   t.departure_date_time,
+                   t.estimated_arrival_time,
+                   r.id,
+                   r.name,
+                   origin.name,
+                   destination.name,
+                   v.id,
+                   v.license_plate,
+                   v.status::text,
+                   t.driver_user_id,
+                   t.assistant_user_id
+            FROM vietride_trip.trips AS t
+            INNER JOIN vietride_trip.routes AS r ON r.id = t.route_id
+            INNER JOIN vietride_trip.stations AS origin ON origin.id = r.origin_station_id
+            INNER JOIN vietride_trip.stations AS destination ON destination.id = r.destination_station_id
+            INNER JOIN vietride_trip.vehicles AS v ON v.id = t.vehicle_id
+            WHERE t.id = ANY(@trip_ids)
+            ORDER BY t.id;
+            """;
+        AddParameter(command, "trip_ids", tripIds.ToArray());
+
+        var summaries = new List<InternalTripSummaryDto>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            summaries.Add(new InternalTripSummaryDto(
+                reader.GetGuid(0),
+                reader.GetString(1),
+                reader.GetFieldValue<DateTimeOffset>(2),
+                reader.GetFieldValue<DateTimeOffset>(3),
+                new InternalTripRouteSummaryDto(
+                    reader.GetGuid(4),
+                    reader.GetString(5),
+                    reader.GetString(6),
+                    reader.GetString(7)),
+                new InternalTripVehicleSummaryDto(
+                    reader.GetGuid(8),
+                    reader.GetString(9),
+                    reader.GetString(10)),
+                reader.GetGuid(11),
+                reader.IsDBNull(12) ? null : reader.GetGuid(12)));
+        }
+
+        return summaries;
+    }
 
     public async Task<PagedResult<OperatorTripListRow>> ListOperatorTripsAsync(
         Guid operatorId,

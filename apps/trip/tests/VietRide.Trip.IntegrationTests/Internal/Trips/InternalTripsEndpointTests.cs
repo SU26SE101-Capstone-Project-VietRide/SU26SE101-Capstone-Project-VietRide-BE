@@ -20,6 +20,7 @@ using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Web.DependencyInjection;
 using VietRide.Shared.Web.Middleware;
 using VietRide.Trip.Application.Abstractions.SeatLock;
+using VietRide.Trip.Application.Features.Internal.Trips.BatchTripSummaries;
 using VietRide.Trip.Application.Features.Internal.Trips.BookSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.GetTripSnapshot;
 using VietRide.Trip.Application.Features.Internal.Trips.LockSeats;
@@ -31,6 +32,71 @@ namespace VietRide.Trip.IntegrationTests.Internal.Trips;
 
 public sealed class InternalTripsEndpointTests
 {
+    [Fact]
+    public async Task BatchTripSummaries_Happy_ReturnsRawArrayWithoutIdempotencyKey()
+    {
+        var tripId = Guid.NewGuid();
+        var routeId = Guid.NewGuid();
+        var vehicleId = Guid.NewGuid();
+        var driverUserId = Guid.NewGuid();
+        var summary = new InternalTripSummaryDto(
+            tripId,
+            "IN_PROGRESS",
+            DateTimeOffset.Parse("2026-07-29T01:00:00Z"),
+            DateTimeOffset.Parse("2026-07-29T08:00:00Z"),
+            new InternalTripRouteSummaryDto(routeId, "HCM - Da Lat", "HCM", "Da Lat"),
+            new InternalTripVehicleSummaryDto(vehicleId, "51B-123.45", "MAINTENANCE"),
+            driverUserId,
+            null);
+        var mediator = new StubMediator(_ => new[] { summary });
+        using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
+        using var client = factory.CreateClient();
+        using var request = CreateAuthorizedRequest(HttpMethod.Post, "/internal/v1/trips/summaries/batch");
+        request.Content = JsonContent.Create(new { tripIds = new[] { tripId } });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        document.RootElement.ValueKind.Should().Be(JsonValueKind.Array);
+        document.RootElement.GetArrayLength().Should().Be(1);
+        document.RootElement[0].GetProperty("tripId").GetGuid().Should().Be(tripId);
+        document.RootElement[0].GetProperty("route").GetProperty("routeId").GetGuid().Should().Be(routeId);
+        document.RootElement[0].GetProperty("vehicle").GetProperty("vehicleId").GetGuid().Should().Be(vehicleId);
+        document.RootElement[0].GetProperty("driverUserId").GetGuid().Should().Be(driverUserId);
+        mediator.LastRequest.Should().BeOfType<BatchTripSummariesQuery>()
+            .Which.TripIds.Should().Equal(tripId);
+    }
+
+    [Fact]
+    public async Task BatchTripSummaries_SwaggerDocumentsRawArrayAndNoIdempotencyHeader()
+    {
+        var mediator = new StubMediator(_ => Array.Empty<InternalTripSummaryDto>());
+        using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/swagger/v1/swagger.json");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var operation = document.RootElement
+            .GetProperty("paths")
+            .GetProperty("/internal/v1/trips/summaries/batch")
+            .GetProperty("post");
+        operation.TryGetProperty("parameters", out _).Should().BeFalse();
+        var responses = operation.GetProperty("responses");
+        responses.TryGetProperty("200", out _).Should().BeTrue();
+        responses.GetProperty("200")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("schema")
+            .GetProperty("type")
+            .GetString()
+            .Should().Be("array");
+        responses.TryGetProperty("401", out _).Should().BeTrue();
+        responses.TryGetProperty("422", out _).Should().BeTrue();
+    }
+
     [Fact]
     public async Task GetTrip_Happy_ReturnsRawDto()
     {
