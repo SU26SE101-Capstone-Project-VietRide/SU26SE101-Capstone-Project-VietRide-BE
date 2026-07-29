@@ -54,6 +54,11 @@ FE/mobile không nhập `X-Internal-Auth` trong Swagger và không hardcode inte
 | `GET` | `/v1/admin/policies/:policyId` | Xem chi tiết Policy cấp nền tảng. | `SYSTEM_ADMIN`. |
 | `PATCH` | `/v1/admin/policies/:policyId` | Sửa nội dung hoặc bật/tắt Policy cấp nền tảng. | `SYSTEM_ADMIN`. |
 | `DELETE` | `/v1/admin/policies/:policyId` | Soft-delete Policy cấp nền tảng. | `SYSTEM_ADMIN`. |
+| `GET` | `/v1/operator/policies` | Liệt kê và lọc Policy của nhà xe hiện tại. | `OPERATOR_ADMIN`. |
+| `POST` | `/v1/operator/policies` | Tạo Policy cho nhà xe hiện tại. | `OPERATOR_ADMIN`. |
+| `GET` | `/v1/operator/policies/:policyId` | Xem chi tiết Policy thuộc nhà xe hiện tại. | `OPERATOR_ADMIN`. |
+| `PATCH` | `/v1/operator/policies/:policyId` | Sửa nội dung hoặc bật/tắt Policy thuộc nhà xe hiện tại. | `OPERATOR_ADMIN`. |
+| `DELETE` | `/v1/operator/policies/:policyId` | Soft-delete Policy thuộc nhà xe hiện tại. | `OPERATOR_ADMIN`. |
 
 ## 4. Endpoint chi tiết
 
@@ -363,6 +368,74 @@ Lỗi chính:
 - `422 IDEMPOTENCY_KEY_REQUIRED`: mutation thiếu key.
 - `422 IDEMPOTENCY_KEY_MISMATCH`: dùng lại key với request khác.
 - `503 UPSTREAM_UNAVAILABLE`: không lấy được actor snapshot từ Identity; không có Policy/audit nào được ghi.
+
+### `/v1/operator/policies/*`
+
+- **Dùng để**: `OPERATOR_ADMIN` quản lý Policy riêng của nhà xe trong JWT. Client không gửi và không thể đổi `operatorId` qua path, query hoặc body.
+- **Header đọc dữ liệu**:
+
+```http
+Authorization: Bearer <operator_admin_access_token>
+```
+
+- **Header mutation**:
+
+```http
+Authorization: Bearer <operator_admin_access_token>
+Idempotency-Key: <uuid-v4>
+Content-Type: application/json
+```
+
+Năm endpoint Operator dùng cùng list query, create/PATCH body, versioning, pagination, response envelope, soft-delete và idempotency contract như phần Admin Policy. Khác biệt bắt buộc:
+
+- Response luôn có `operatorId` đúng với claim đã được Gateway xác thực.
+- List chỉ query tenant hiện tại; không có query `operatorId`.
+- GET/PATCH/DELETE bằng ID của tenant khác trả `404 POLICY_NOT_FOUND`, không tiết lộ tài nguyên tồn tại.
+- `OPERATOR_STAFF`, `SYSTEM_ADMIN` và mọi role khác không được dùng route Operator Policy.
+- Mỗi mutation lấy actor ID/role từ Internal JWT và display name/email từ Identity; Policy và audit được ghi trong cùng transaction.
+
+Body tạo mẫu:
+
+```json
+{
+  "title": "Quy định hành lý nhà xe",
+  "description": "Quy định áp dụng cho hành khách của nhà xe",
+  "content": "Mỗi hành khách được mang tối đa 20 kg hành lý.",
+  "policyType": "FOR_USER",
+  "category": "LUGGAGE",
+  "active": true
+}
+```
+
+Response `201` có `data.operatorId` do server gán:
+
+```json
+{
+  "id": "33333333-3333-4333-8333-333333333333",
+  "operatorId": "44444444-4444-4444-8444-444444444444",
+  "title": "Quy định hành lý nhà xe",
+  "description": "Quy định áp dụng cho hành khách của nhà xe",
+  "content": "Mỗi hành khách được mang tối đa 20 kg hành lý.",
+  "policyType": "FOR_USER",
+  "category": "LUGGAGE",
+  "version": 1,
+  "active": true,
+  "createdBy": {
+    "userId": "55555555-5555-4555-8555-555555555555",
+    "displayName": "Operator Admin",
+    "email": "operator.admin@vietride.vn"
+  },
+  "createdAt": "2026-07-30T00:00:00.000Z",
+  "updatedAt": "2026-07-30T00:00:00.000Z"
+}
+```
+
+Lỗi chính giống Admin Policy, với các điểm Operator-specific:
+
+- `401 AUTH_TOKEN_INVALID`: thiếu hoặc sai access token tại Gateway.
+- `403 FORBIDDEN`: caller không phải `OPERATOR_ADMIN` hoặc token thiếu `operatorId` hợp lệ.
+- `404 POLICY_NOT_FOUND`: ID không tồn tại, đã soft-delete hoặc thuộc tenant khác.
+- `503 UPSTREAM_UNAVAILABLE`: Identity actor lookup lỗi; transaction không ghi Policy/audit.
 
 ## 5. Luồng tích hợp
 
