@@ -2,14 +2,17 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Application.Exceptions;
+using VietRide.Payment.Application.Features.Admin.PlatformReports;
 using VietRide.Payment.Application.Features.Internal.Payments.CreateSubscriptionPayment;
 using VietRide.Payment.Application.Features.Management;
 using VietRide.Payment.Application.Features.Settlements.SettleTrip;
 using VietRide.Payment.Application.Models;
 using VietRide.Payment.Domain.Entities;
 using VietRide.Payment.Domain.Enums;
+using VietRide.Payment.Domain.ValueObjects;
 using VietRide.Payment.Infrastructure.Invoices;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Abstractions;
@@ -23,6 +26,8 @@ internal sealed class FinancialManagementService : IFinancialManagementService
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly PaymentDbContext _db;
     private readonly IPlatformWalletRepository _platformWallets;
+    private readonly IIdentityFinancialProjectionClient _identity;
+    private readonly IFinancialActorPrivacyStore _actorPrivacy;
     private readonly TripSettlementService _settlements;
     private readonly OperatorWebOptions _operatorWeb;
     private readonly InvoiceStorageOptions _invoiceStorage;
@@ -32,6 +37,8 @@ internal sealed class FinancialManagementService : IFinancialManagementService
     public FinancialManagementService(
         PaymentDbContext db,
         IPlatformWalletRepository platformWallets,
+        IIdentityFinancialProjectionClient identity,
+        IFinancialActorPrivacyStore actorPrivacy,
         TripSettlementService settlements,
         IOptions<OperatorWebOptions> operatorWeb,
         IOptions<InvoiceStorageOptions> invoiceStorage,
@@ -40,6 +47,8 @@ internal sealed class FinancialManagementService : IFinancialManagementService
     {
         _db = db;
         _platformWallets = platformWallets;
+        _identity = identity;
+        _actorPrivacy = actorPrivacy;
         _settlements = settlements;
         _operatorWeb = operatorWeb.Value;
         _invoiceStorage = invoiceStorage.Value;
@@ -174,13 +183,16 @@ internal sealed class FinancialManagementService : IFinancialManagementService
         PageOptions options, Guid? operatorId, string? status, Guid? tripId, bool stuckOnly, string? severity, CancellationToken ct)
     {
         var page = await LoadSettlementRowsAsync(options, operatorId, status, tripId, stuckOnly, severity, ct);
+        var (operators, users) = await LoadSettlementFallbacksAsync(page.Rows, ct);
         var highBefore = _clock.UtcNow.AddDays(-21);
         var items = page.Rows.Select(item => new AdminSettlementDto(item.Id, item.TripId, item.OperatorId,
             item.Status.ToString(), item.EligibleAt, item.NetAmount, item.SettlementMethod?.ToString(), item.SettledAt,
             item.CreatedAt, item.SettlementFailureCount, item.ActiveFailureCode,
             item.ActiveFailureCode is null ? null : item.SettlementFailureCount >= 3 || item.EligibleAt < highBefore
                 ? "HIGH"
-                : "WARNING")).ToList();
+                : "WARNING",
+            ToOperator(item, operators),
+            ToActor(item, users))).ToList();
         return PagedResult<AdminSettlementDto>.Create(items, options.Page, options.PageSize, page.Total);
     }
 
@@ -190,7 +202,7 @@ internal sealed class FinancialManagementService : IFinancialManagementService
         return new PlatformWalletDto(wallet.Id, wallet.Balance.Amount, wallet.UpdatedAt);
     }
 
-    public async Task<PagedResult<WalletTransactionDto>> ListPlatformTransactionsAsync(
+    public async Task<PagedResult<PlatformWalletTransactionDto>> ListPlatformTransactionsAsync(
         PageOptions options, string? type, string? referenceType, CancellationToken ct)
     {
         ValidatePage(options, ["createdAt", "amount"]);
@@ -209,15 +221,16 @@ internal sealed class FinancialManagementService : IFinancialManagementService
             _ => query.OrderByDescending(item => item.CreatedAt),
         };
         var rows = await query.Skip(Offset(options)).Take(options.PageSize).ToListAsync(ct);
-        var items = rows.Select(item => new WalletTransactionDto(item.Id, item.Type.ToString(), item.Amount.Amount,
+        var actorFallbacks = await LoadPlatformActorFallbacksAsync(rows, ct);
+        var items = rows.Select(item => new PlatformWalletTransactionDto(item.Id, item.Type.ToString(), item.Amount.Amount,
             item.BalanceBefore.Amount, item.BalanceAfter.Amount, item.ReferenceType.ToString(), item.ReferenceId,
-            item.Note, item.CreatedAt)).ToList();
-        return PagedResult<WalletTransactionDto>.Create(items, options.Page, options.PageSize, total);
+            item.Note, item.CreatedAt, item.ActorType.ToString(), ToActor(item, actorFallbacks))).ToList();
+        return PagedResult<PlatformWalletTransactionDto>.Create(items, options.Page, options.PageSize, total);
     }
 
     public Task<AdjustmentResult> AdjustPlatformWalletAsync(
         AdjustmentRequest request, Guid actorUserId, CancellationToken ct)
-        => AdjustPlatformWithRetryAsync(request, actorUserId, ct);
+        => AdjustPlatformAsUserAsync(request, actorUserId, ct);
 
     public Task<AdjustmentResult> AdjustOperatorWalletAsync(
         Guid operatorId, AdjustmentRequest request, Guid actorUserId, CancellationToken ct)
@@ -227,11 +240,18 @@ internal sealed class FinancialManagementService : IFinancialManagementService
     {
         var identity = await _db.OperatorTripSettlements.AsNoTracking()
             .Where(item => item.Id == settlementId)
-            .Select(item => new { item.TripId, item.OperatorId })
+            .Select(item => new { item.TripId, item.OperatorId, item.Status })
             .SingleOrDefaultAsync(ct)
             ?? throw NotFound("TRIP_SETTLEMENT_NOT_FOUND", "Settlement was not found.");
+        if (identity.Status is OperatorTripSettlementStatus.SETTLED or OperatorTripSettlementStatus.CANCELLED)
+            throw new ConflictException("TRIP_SETTLEMENT_ALREADY_SETTLED", "Settlement is already terminal.");
+        var actor = await LoadRequiredActorAsync(actorUserId, ct);
         var result = await _settlements.SettleAsync(
-            settlementId, OperatorTripSettlementMethod.ADMIN_MANUAL, actorUserId, true, ct)
+            settlementId,
+            OperatorTripSettlementMethod.ADMIN_MANUAL,
+            actor,
+            true,
+            ct)
             ?? throw new ConflictException("TRIP_SETTLEMENT_ALREADY_SETTLED", "Settlement is already terminal.");
         var finalMethod = await _db.OperatorTripSettlements.AsNoTracking()
             .Where(item => item.Id == settlementId)
@@ -296,16 +316,85 @@ internal sealed class FinancialManagementService : IFinancialManagementService
         return new SettlementPageRows(rows, total);
     }
 
-    private async Task<AdjustmentResult> AdjustPlatformWithRetryAsync(
-        AdjustmentRequest request, Guid actorUserId, CancellationToken ct)
+    private async Task<(IReadOnlyDictionary<Guid, IdentityFinancialOperator> Operators, IReadOnlyDictionary<Guid, IdentityFinancialUser> Users)>
+        LoadSettlementFallbacksAsync(IReadOnlyCollection<OperatorTripSettlement> rows, CancellationToken ct)
+    {
+        var operatorIds = rows
+            .Where(item => !item.OperatorSnapshotResolved)
+            .Select(item => item.OperatorId)
+            .Distinct()
+            .ToArray();
+        var userIds = rows
+            .Where(item => item.SettledByUserId.HasValue && !item.SettledBySnapshotResolved)
+            .Select(item => item.SettledByUserId!.Value)
+            .Distinct()
+            .ToArray();
+
+        var operatorTask = operatorIds.Length == 0
+            ? Task.FromResult<IReadOnlyList<IdentityFinancialOperator>>([])
+            : _identity.GetOperatorsAsync(operatorIds, ct);
+        var userTask = userIds.Length == 0
+            ? Task.FromResult<IReadOnlyList<IdentityFinancialUser>>([])
+            : _identity.GetUsersAsync(userIds, ct);
+        await Task.WhenAll(operatorTask, userTask);
+        return (
+            (await operatorTask).ToDictionary(item => item.OperatorId),
+            (await userTask).ToDictionary(item => item.UserId));
+    }
+
+    private async Task<FinancialActorSnapshot> LoadRequiredActorAsync(Guid actorUserId, CancellationToken ct)
+    {
+        var users = await _identity.GetUsersAsync([actorUserId], ct);
+        var actor = users.SingleOrDefault(item => item.UserId == actorUserId);
+        if (actor is null
+            || actor.Deleted
+            || !string.Equals(actor.Role, "SYSTEM_ADMIN", StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(actor.Email))
+        {
+            throw new UpstreamUnavailableException();
+        }
+
+        return new FinancialActorSnapshot(actor.UserId, actor.DisplayName, actor.Email, actor.Role);
+    }
+
+    private async Task<IReadOnlyDictionary<Guid, IdentityFinancialUser>> LoadPlatformActorFallbacksAsync(
+        IReadOnlyCollection<PlatformWalletTransaction> rows,
+        CancellationToken ct)
+    {
+        var userIds = rows
+            .Where(item => !item.ActorSnapshotResolved && item.ActorUserId.HasValue)
+            .Select(item => item.ActorUserId!.Value)
+            .Distinct()
+            .ToArray();
+        if (userIds.Length == 0)
+            return new Dictionary<Guid, IdentityFinancialUser>();
+
+        var users = await _identity.GetUsersAsync(userIds, ct);
+        return users.ToDictionary(item => item.UserId);
+    }
+
+    private async Task<AdjustmentResult> AdjustPlatformAsUserAsync(
+        AdjustmentRequest request,
+        Guid actorUserId,
+        CancellationToken ct)
     {
         ValidateAdjustment(request);
+        var actor = await LoadRequiredActorAsync(actorUserId, ct);
+        return await AdjustPlatformWithRetryAsync(request, actor, ct);
+    }
+
+    private async Task<AdjustmentResult> AdjustPlatformWithRetryAsync(
+        AdjustmentRequest request, FinancialActorSnapshot actor, CancellationToken ct)
+    {
         var type = Enum.Parse<PlatformWalletTransactionType>(request.Type, false);
         for (var attempt = 0; attempt < 3; attempt++)
         {
             await using var transaction = await _db.Database.BeginTransactionAsync(ct);
             try
             {
+                if (await _actorPrivacy.IsDeletedWithLockAsync(actor.UserId, ct))
+                    throw new UnauthorizedAccessException("Financial actor account is deleted.");
+
                 var amount = Money.FromRaw(request.Amount);
                 PlatformWalletTransaction movement;
                 try
@@ -318,9 +407,10 @@ internal sealed class FinancialManagementService : IFinancialManagementService
                 {
                     throw new PlatformWalletInsufficientBalanceException(exception.Message);
                 }
+                movement.AssignUserActor(actor);
                 await _db.SaveChangesAsync(ct);
                 await transaction.CommitAsync(ct);
-                _logger.LogInformation("Platform wallet adjusted by admin {ActorUserId}; type {Type}, amount {Amount}.", actorUserId, type, request.Amount);
+                _logger.LogInformation("Platform wallet adjusted by admin {ActorUserId}; type {Type}, amount {Amount}.", actor.UserId, type, request.Amount);
                 return ToAdjustment(movement, request.Note);
             }
             catch (DbUpdateConcurrencyException)
@@ -333,6 +423,77 @@ internal sealed class FinancialManagementService : IFinancialManagementService
         }
         throw new ConflictException("WALLET_CONCURRENT_UPDATE", "Wallet was updated concurrently; retry the request.");
     }
+
+    private static FinancialOperatorDto? ToOperator(
+        OperatorTripSettlement settlement,
+        IReadOnlyDictionary<Guid, IdentityFinancialOperator> fallbacks)
+    {
+        if (settlement.OperatorSnapshotResolved)
+        {
+            return string.IsNullOrWhiteSpace(settlement.OperatorName)
+                ? null
+                : new FinancialOperatorDto(
+                    settlement.OperatorId,
+                    settlement.OperatorName,
+                    settlement.OperatorLogoUrl,
+                    settlement.OperatorContactPhone);
+        }
+
+        return fallbacks.TryGetValue(settlement.OperatorId, out var item)
+            ? new FinancialOperatorDto(item.OperatorId, item.Name, item.LogoUrl, item.ContactPhone)
+            : null;
+    }
+
+    private static FinancialActorDto? ToActor(
+        OperatorTripSettlement settlement,
+        IReadOnlyDictionary<Guid, IdentityFinancialUser> fallbacks)
+    {
+        if (!settlement.SettledByUserId.HasValue)
+            return null;
+        if (settlement.SettledBySnapshotResolved)
+        {
+            return CreateActorDto(
+                settlement.SettledByUserId.Value,
+                settlement.SettledByDisplayName,
+                settlement.SettledByEmail,
+                settlement.SettledByRole);
+        }
+
+        return fallbacks.TryGetValue(settlement.SettledByUserId.Value, out var item) && !item.Deleted
+            ? CreateActorDto(item.UserId, item.DisplayName, item.Email, item.Role)
+            : null;
+    }
+
+    private static FinancialActorDto? ToActor(
+        PlatformWalletTransaction transaction,
+        IReadOnlyDictionary<Guid, IdentityFinancialUser> fallbacks)
+    {
+        if (!transaction.ActorUserId.HasValue)
+            return null;
+        if (transaction.ActorSnapshotResolved)
+        {
+            return CreateActorDto(
+                transaction.ActorUserId.Value,
+                transaction.ActorDisplayName,
+                transaction.ActorEmail,
+                transaction.ActorRole);
+        }
+
+        return fallbacks.TryGetValue(transaction.ActorUserId.Value, out var item) && !item.Deleted
+            ? CreateActorDto(item.UserId, item.DisplayName, item.Email, item.Role)
+            : null;
+    }
+
+    private static FinancialActorDto? CreateActorDto(
+        Guid userId,
+        string? displayName,
+        string? email,
+        string? role)
+        => string.IsNullOrWhiteSpace(displayName)
+            || string.IsNullOrWhiteSpace(email)
+            || string.IsNullOrWhiteSpace(role)
+            ? null
+            : new FinancialActorDto(userId, displayName, email, role);
 
     private async Task<AdjustmentResult> AdjustOperatorWithRetryAsync(
         Guid operatorId, AdjustmentRequest request, Guid actorUserId, CancellationToken ct)

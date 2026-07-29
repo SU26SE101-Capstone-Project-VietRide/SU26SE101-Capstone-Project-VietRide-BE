@@ -76,6 +76,16 @@ Service xử lý **mọi giao dịch tiền**: payment VNPay/Wallet cho Booking/
 ### Trip settlement state machine
 
 - **`operator_trip_settlements`** 1 record per Trip per Operator (UNIQUE constraint).
+- Admin financial reads expose nullable operator/settled-by snapshots. Legacy rows are filled by
+  the bounded `payment.financial-projection-backfill` job and keep a bounded Identity read fallback
+  until their resolution markers are complete. Manual settlement stores the verified SYSTEM_ADMIN
+  actor snapshot in the same local transaction; automated settlement has no user actor.
+- `platform_wallet_transactions.actor_type` is `USER` for authenticated manual writes and `SYSTEM`
+  for jobs/events. Actor display fields are nullable historical snapshots with no cross-database FK.
+- Payment consumes `identity.user.deleted`, stores a durable `deleted_financial_actor_markers`
+  tombstone, and atomically redacts settlement/platform actor PII. The consumer and manual writes
+  share a PostgreSQL advisory lock; backfill uses `snapshot_resolved = FALSE` compare-and-set so
+  deletion wins every race and replay remains idempotent.
 - **Lifecycle:**
   ```
   Trip terminal (COMPLETED / DISRUPTED) + SUM(ledger entries for trip) > 0

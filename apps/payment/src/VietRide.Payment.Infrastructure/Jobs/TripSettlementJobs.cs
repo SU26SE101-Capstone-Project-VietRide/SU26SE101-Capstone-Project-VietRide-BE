@@ -108,7 +108,7 @@ public sealed class TripSettlementWeeklyAutoSettleJob
                 await _service.SettleAsync(
                     id,
                     OperatorTripSettlementMethod.AUTO_WEEKLY,
-                    settledByUserId: null,
+                    settledBy: null,
                     conflictWhenAlreadyTerminal: false,
                     cancellationToken);
             }

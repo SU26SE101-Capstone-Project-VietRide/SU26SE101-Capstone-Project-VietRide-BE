@@ -108,6 +108,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IOperatorWalletTransactionRepository, OperatorWalletTransactionRepository>();
         services.AddScoped<IOperatorLedgerEntryRepository, OperatorLedgerEntryRepository>();
         services.AddScoped<IOperatorTripSettlementRepository, OperatorTripSettlementRepository>();
+        services.AddScoped<IFinancialActorPrivacyStore, FinancialActorPrivacyStore>();
         services.AddScoped<IProcessedIntegrationEventRepository, ProcessedIntegrationEventRepository>();
         services.AddScoped<IIntegrationEventInbox, PaymentIntegrationEventInbox>();
         services.AddScoped<IRevenueLedgerWriter, RevenueLedgerWriter>();
@@ -155,6 +156,11 @@ public static class InfrastructureServiceCollectionExtensions
             {
                 options.QueueName = "payment.wallet-bootstrap";
                 options.BindingKeys = [UserCreatedIntegrationEvent.EventType];
+            });
+            services.AddVietRideEventConsumer<IdentityUserDeletedIntegrationEvent, IdentityUserDeletedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "payment.identity-user-deleted";
+                options.BindingKeys = [IdentityUserDeletedIntegrationEvent.EventType];
             });
 
             // BSOT §8.4: Payment consumes its own canonical wallet-credit event to drive the
@@ -250,6 +256,11 @@ public static class InfrastructureServiceCollectionExtensions
                 ?? configuration["PARCEL_SERVICE_BASE_URL"]
                 ?? "http://parcel:8080");
         RegisterPlatformReportClient<IIdentityOperatorSummaryClient, IdentityOperatorSummaryClient>(
+            services,
+            configuration["Identity:BaseUrl"]
+                ?? configuration["IDENTITY_SERVICE_BASE_URL"]
+                ?? "http://identity:8080");
+        RegisterPlatformReportClient<IIdentityFinancialProjectionClient, IdentityFinancialProjectionClient>(
             services,
             configuration["Identity:BaseUrl"]
                 ?? configuration["IDENTITY_SERVICE_BASE_URL"]

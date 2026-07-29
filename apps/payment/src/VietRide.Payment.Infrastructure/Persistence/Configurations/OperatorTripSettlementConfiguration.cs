@@ -30,6 +30,14 @@ internal sealed class OperatorTripSettlementConfiguration : IEntityTypeConfigura
         builder.Property(x => x.SettlementMethod).HasColumnName("settlement_method").HasColumnType($"{PaymentDbContext.SchemaName}.operator_trip_settlement_method");
         builder.Property(x => x.SettledAt).HasColumnName("settled_at");
         builder.Property(x => x.SettledByUserId).HasColumnName("settled_by_user_id").HasColumnType("uuid");
+        builder.Property(x => x.OperatorSnapshotResolved).HasColumnName("operator_snapshot_resolved").HasDefaultValue(false).IsRequired();
+        builder.Property(x => x.OperatorName).HasColumnName("operator_name").HasMaxLength(200);
+        builder.Property(x => x.OperatorLogoUrl).HasColumnName("operator_logo_url").HasMaxLength(2048);
+        builder.Property(x => x.OperatorContactPhone).HasColumnName("operator_contact_phone").HasMaxLength(32);
+        builder.Property(x => x.SettledBySnapshotResolved).HasColumnName("settled_by_snapshot_resolved").HasDefaultValue(false).IsRequired();
+        builder.Property(x => x.SettledByDisplayName).HasColumnName("settled_by_display_name").HasMaxLength(200);
+        builder.Property(x => x.SettledByEmail).HasColumnName("settled_by_email").HasMaxLength(320);
+        builder.Property(x => x.SettledByRole).HasColumnName("settled_by_role").HasMaxLength(50);
         builder.Property(x => x.WalletTransactionId).HasColumnName("wallet_transaction_id").HasColumnType("uuid");
         builder.Property(x => x.SettlementFailureCount).HasColumnName("settlement_failure_count").HasDefaultValue(0).IsRequired();
         builder.Property(x => x.LastSettlementFailureAt).HasColumnName("last_settlement_failure_at");

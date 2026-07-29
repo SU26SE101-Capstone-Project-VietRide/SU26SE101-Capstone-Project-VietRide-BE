@@ -109,6 +109,46 @@ public sealed class PlatformReportClientsTests
     }
 
     [Fact]
+    public async Task FinancialIdentityClient_UsesBoundedUserAndOperatorBatches()
+    {
+        var operatorId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var handler = new StubHttpMessageHandler(async (request, cancellationToken) =>
+        {
+            request.Headers.GetValues("X-Internal-Auth").Single()
+                .Should().Be("Bearer internal-token");
+            if (request.Method == HttpMethod.Post)
+            {
+                request.RequestUri!.AbsolutePath.Should().Be("/internal/v1/operators/summaries/batch");
+                return await Json(HttpStatusCode.OK, $$"""
+                    [{"operatorId":"{{operatorId}}","operatorName":"Operator A","logoUrl":null,"contactPhone":"+84901234567"}]
+                    """);
+            }
+
+            request.Method.Should().Be(HttpMethod.Get);
+            request.RequestUri!.AbsolutePath.Should().Be("/internal/v1/users");
+            request.RequestUri.Query.Should().Contain($"ids={userId:D}");
+            return await Json(HttpStatusCode.OK, $$"""
+                [{"id":"{{userId}}","displayName":"System Admin","avatarUrl":null,"role":"SYSTEM_ADMIN","operatorId":null,"status":"ACTIVE","phone":null,"email":"admin@vietride.vn","deleted":false}]
+                """);
+        });
+        var client = Create<IIdentityFinancialProjectionClient>(
+            "VietRide.Payment.Infrastructure.Http.IdentityFinancialProjectionClient",
+            handler);
+
+        var operators = await client.GetOperatorsAsync([operatorId]);
+        var users = await client.GetUsersAsync([userId]);
+
+        operators.Should().ContainSingle().Which.Should().Be(
+            new IdentityFinancialOperator(operatorId, "Operator A", null, "+84901234567"));
+        users.Should().ContainSingle().Which.Should().Be(
+            new IdentityFinancialUser(userId, "System Admin", "admin@vietride.vn", "SYSTEM_ADMIN", false));
+        var tooManyUsers = () => client.GetUsersAsync(
+            Enumerable.Range(0, 101).Select(_ => Guid.NewGuid()).ToArray());
+        await tooManyUsers.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
     public async Task BookingClient_MapsTimeoutAndOtherFiveHundredToUnavailable()
     {
         var timeoutClient = Create<IBookingPlatformReportClient>(
