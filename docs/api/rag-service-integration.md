@@ -49,6 +49,11 @@ FE/mobile không nhập `X-Internal-Auth` trong Swagger và không hardcode inte
 | `PATCH` | `/v1/admin/rag-config/:key` | Cập nhật một config key. | `SYSTEM_ADMIN`. |
 | `GET` | `/v1/admin/rag-config/:key/history` | Xem lịch sử thay đổi của một config key. | `SYSTEM_ADMIN`. |
 | `POST` | `/v1/admin/rag-config/:key/rollback` | Rollback config key về một history entry. | `SYSTEM_ADMIN`. |
+| `GET` | `/v1/admin/policies` | Liệt kê và lọc Policy cấp nền tảng. | `SYSTEM_ADMIN`. |
+| `POST` | `/v1/admin/policies` | Tạo Policy cấp nền tảng. | `SYSTEM_ADMIN`. |
+| `GET` | `/v1/admin/policies/:policyId` | Xem chi tiết Policy cấp nền tảng. | `SYSTEM_ADMIN`. |
+| `PATCH` | `/v1/admin/policies/:policyId` | Sửa nội dung hoặc bật/tắt Policy cấp nền tảng. | `SYSTEM_ADMIN`. |
+| `DELETE` | `/v1/admin/policies/:policyId` | Soft-delete Policy cấp nền tảng. | `SYSTEM_ADMIN`. |
 
 ## 4. Endpoint chi tiết
 
@@ -279,6 +284,85 @@ curl -X PATCH "https://api.example.com/v1/admin/rag-config/chat.no_context_text"
   -H "Content-Type: application/json" \
   -d '{"value":"Không tìm thấy ngữ cảnh phù hợp.","reason":"Cập nhật nội dung hiển thị"}'
 ```
+
+### `/v1/admin/policies/*`
+
+- **Dùng để**: `SYSTEM_ADMIN` quản lý Policy cấp nền tảng. Policy này có `operatorId=null`, tách biệt hoàn toàn với knowledge document của RAG và các cấu hình cancellation/luggage/no-show của Operator.
+- **Header đọc dữ liệu**:
+
+```http
+Authorization: Bearer <system_admin_access_token>
+```
+
+- **Header mutation**:
+
+```http
+Authorization: Bearer <system_admin_access_token>
+Idempotency-Key: <uuid-v4>
+Content-Type: application/json
+```
+
+List hỗ trợ `policyType=FOR_OPERATOR|FOR_USER`, `category`, `active=true|false`, `search`, `page`, `pageSize`, `sortBy=updatedAt|createdAt|title|version` và `sortDir=asc|desc`. Query không nằm trong allow-list trả `422 VALIDATION_ERROR`; `pageSize` tối đa `100`.
+
+Body tạo Policy:
+
+```json
+{
+  "title": "Chính sách hoàn vé",
+  "description": "Quy định hoàn vé áp dụng toàn hệ thống",
+  "content": "Nội dung Markdown hoặc plain text",
+  "policyType": "FOR_USER",
+  "category": "REFUND",
+  "active": true
+}
+```
+
+Response `201` có `data` theo shape:
+
+```json
+{
+  "id": "11111111-1111-4111-8111-111111111111",
+  "operatorId": null,
+  "title": "Chính sách hoàn vé",
+  "description": "Quy định hoàn vé áp dụng toàn hệ thống",
+  "content": "Nội dung Markdown hoặc plain text",
+  "policyType": "FOR_USER",
+  "category": "REFUND",
+  "version": 1,
+  "active": true,
+  "createdBy": {
+    "userId": "22222222-2222-4222-8222-222222222222",
+    "displayName": "System Admin",
+    "email": "admin@vietride.vn"
+  },
+  "createdAt": "2026-07-30T00:00:00.000Z",
+  "updatedAt": "2026-07-30T00:00:00.000Z"
+}
+```
+
+PATCH bắt buộc gửi `version` hiện tại và ít nhất một field thay đổi:
+
+```json
+{
+  "version": 1,
+  "content": "Nội dung đã cập nhật",
+  "active": false
+}
+```
+
+Thay đổi `title`, `description`, `content`, `policyType` hoặc `category` tăng `version` đúng một lần. Chỉ đổi `active` không tăng version nội dung. DELETE không nhận body, thực hiện soft-delete; Policy đã xóa không còn xuất hiện trong list/detail nhưng audit vẫn được giữ bất biến.
+
+Lỗi chính:
+
+- `401 AUTH_TOKEN_INVALID`: thiếu hoặc sai access token tại Gateway.
+- `403 FORBIDDEN`: caller không phải `SYSTEM_ADMIN`.
+- `404 POLICY_NOT_FOUND`: ID không tồn tại hoặc Policy đã soft-delete.
+- `409 POLICY_VERSION_CONFLICT`: PATCH dùng version cũ.
+- `409 IDEMPOTENCY_REQUEST_PENDING`: request cùng key đang xử lý.
+- `422 VALIDATION_ERROR`: path/query/body hoặc UUID không hợp lệ.
+- `422 IDEMPOTENCY_KEY_REQUIRED`: mutation thiếu key.
+- `422 IDEMPOTENCY_KEY_MISMATCH`: dùng lại key với request khác.
+- `503 UPSTREAM_UNAVAILABLE`: không lấy được actor snapshot từ Identity; không có Policy/audit nào được ghi.
 
 ## 5. Luồng tích hợp
 
