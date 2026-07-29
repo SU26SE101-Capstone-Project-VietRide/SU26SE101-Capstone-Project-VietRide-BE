@@ -96,7 +96,7 @@ public sealed class SubstituteVehicleCommandHandler
                 throw new CodedNotFoundException("TRIP_NOT_FOUND", "Trip was not found.");
             }
 
-            if (oldTrip.Status != TripStatus.IN_PROGRESS)
+            if (!TripVehicleSubstitutionPolicy.CanSubstitute(oldTrip.Status))
             {
                 throw new CodedConflictException(
                     "TRIP_NOT_SUBSTITUTABLE",

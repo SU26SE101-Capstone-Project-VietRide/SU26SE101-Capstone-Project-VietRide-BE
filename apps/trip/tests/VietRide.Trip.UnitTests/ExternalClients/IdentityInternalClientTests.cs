@@ -225,6 +225,44 @@ public sealed class IdentityInternalClientTests
         ttlSeconds.Should().BeLessThanOrEqualTo(120);
     }
 
+    [Fact]
+    public async Task GetUsersAsync_ProjectsPhoneFromAdditiveIdentityBatchField()
+    {
+        var userId = Guid.NewGuid();
+        using var httpClient = CreateHttpClient(new JsonResponseHandler(HttpStatusCode.OK,
+            $$"""
+            [{"id":"{{userId:D}}","displayName":"Crew Member","phone":"0900000000","role":"DRIVER","operatorId":"{{OperatorId:D}}","status":"ACTIVE"}]
+            """));
+        var client = new IdentityInternalClient(httpClient);
+
+        var result = await client.GetUsersAsync([userId]);
+
+        result.Should().ContainKey(userId);
+        result[userId].Phone.Should().Be("0900000000");
+    }
+
+    [Fact]
+    public async Task GetUsersAsync_ChunksRequestsAtIdentityContractLimitWithoutDroppingIds()
+    {
+        var userIds = Enumerable.Range(0, 101).Select(_ => Guid.NewGuid()).ToArray();
+        var handler = new BatchCapturingHandler();
+        using var httpClient = CreateHttpClient(handler);
+        var client = new IdentityInternalClient(httpClient);
+
+        await client.GetUsersAsync(userIds);
+
+        handler.Paths.Should().HaveCount(2);
+        handler.Paths.Select(path => path.Split("ids=", StringSplitOptions.None).Length - 1)
+            .Should().BeEquivalentTo([100, 1]);
+        var requested = handler.Paths
+            .SelectMany(path => new Uri("http://identity.local" + path).Query
+                .TrimStart('?')
+                .Split('&', StringSplitOptions.RemoveEmptyEntries)
+                .Select(part => Guid.Parse(part["ids=".Length..])))
+            .ToArray();
+        requested.Should().BeEquivalentTo(userIds);
+    }
+
     private static HttpClient CreateHttpClient(HttpMessageHandler handler)
     {
         return new HttpClient(handler)
@@ -302,6 +340,22 @@ public sealed class IdentityInternalClientTests
             CancellationToken cancellationToken)
         {
             throw new HttpRequestException("Identity is unavailable.");
+        }
+    }
+
+    private sealed class BatchCapturingHandler : HttpMessageHandler
+    {
+        public List<string> Paths { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Paths.Add(request.RequestUri!.PathAndQuery);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("[]", Encoding.UTF8, "application/json"),
+            });
         }
     }
 }

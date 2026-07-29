@@ -147,11 +147,25 @@ public sealed class IdentityInternalClient : IIdentityInternalClient, ISubscript
         if (userIds.Count == 0)
             return new Dictionary<Guid, IdentityUserProfile>();
 
-        var query = string.Join("&", userIds.Distinct().Take(100).Select(id => $"ids={id:D}"));
-        using var response = await _httpClient.GetAsync($"/internal/v1/users?{query}", cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        var payload = await response.Content.ReadFromJsonAsync<List<JsonElement>>(JsonOptions, cancellationToken).ConfigureAwait(false) ?? [];
-        return payload.Select(ParseUserProfile).Where(profile => profile is not null).Cast<IdentityUserProfile>().ToDictionary(profile => profile.Id);
+        var profiles = new Dictionary<Guid, IdentityUserProfile>();
+        foreach (var chunk in userIds.Distinct().Chunk(100))
+        {
+            var query = string.Join("&", chunk.Select(id => $"ids={id:D}"));
+            using var response = await _httpClient.GetAsync($"/internal/v1/users?{query}", cancellationToken).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+            var payload = await response.Content.ReadFromJsonAsync<List<JsonElement>>(
+                JsonOptions,
+                cancellationToken).ConfigureAwait(false) ?? [];
+            foreach (var profile in payload
+                .Select(ParseUserProfile)
+                .Where(profile => profile is not null)
+                .Cast<IdentityUserProfile>())
+            {
+                profiles[profile.Id] = profile;
+            }
+        }
+
+        return profiles;
     }
 
     public async Task<IdentityOperatorLookupResult> GetOperatorAsync(
@@ -299,7 +313,14 @@ public sealed class IdentityInternalClient : IIdentityInternalClient, ISubscript
         var status = GetStringProperty(payload, "status");
         return id is null || string.IsNullOrWhiteSpace(displayName) || role is null || status is null
             ? null
-            : new IdentityUserProfile(id.Value, displayName, GetStringProperty(payload, "avatarUrl"), role, GetGuidProperty(payload, "operatorId"), status);
+            : new IdentityUserProfile(
+                id.Value,
+                displayName,
+                GetStringProperty(payload, "avatarUrl"),
+                role,
+                GetGuidProperty(payload, "operatorId"),
+                status,
+                GetStringProperty(payload, "phone") ?? GetStringProperty(payload, "phoneNumber"));
     }
 
     private static async Task<IdentityOperatorLookupResult> ReadOperatorAsync(

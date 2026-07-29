@@ -5,10 +5,12 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using VietRide.Shared.Kernel.Primitives;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Features.DriverTrips.GetAssignedTripRoute;
 using VietRide.Trip.Application.Features.Internal.Reports.PlatformTrips;
 using VietRide.Trip.Application.Features.OperatorReports;
+using VietRide.Trip.Application.Features.Trips.ListOperatorTrips;
 using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Infrastructure.Persistence.Repositories;
@@ -33,6 +35,147 @@ internal sealed class TripRepository : ITripRepository
 
     public Task<Domain.Entities.Trip?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         _dbContext.Trips.FindAsync(new object[] { id }, cancellationToken).AsTask();
+
+    public async Task<PagedResult<OperatorTripListRow>> ListOperatorTripsAsync(
+        Guid operatorId,
+        int page,
+        int pageSize,
+        string? routeSearch,
+        string? normalizedPlateSearch,
+        TripStatus? status,
+        DateTimeOffset? fromUtc,
+        DateTimeOffset? toUtc,
+        bool sortDescending,
+        CancellationToken cancellationToken = default)
+    {
+        var filters = new List<string>
+        {
+            "t.operator_id = @operator_id",
+            "r.operator_id = @operator_id",
+            "v.operator_id = @operator_id",
+        };
+
+        if (status.HasValue)
+        {
+            filters.Add("t.status = CAST(@status AS vietride_trip.trip_status)");
+        }
+
+        if (fromUtc.HasValue)
+        {
+            filters.Add("t.departure_date_time >= @from_utc");
+        }
+
+        if (toUtc.HasValue)
+        {
+            filters.Add("t.departure_date_time < @to_utc");
+        }
+
+        var routePattern = routeSearch is null ? null : $"%{EscapeLikePattern(routeSearch)}%";
+        var platePattern = normalizedPlateSearch is null ? null : $"%{normalizedPlateSearch}%";
+        if (routeSearch is not null || normalizedPlateSearch is not null)
+        {
+            var searchFilters = new List<string>();
+            if (routePattern is not null)
+            {
+                searchFilters.Add("r.name ILIKE @route_pattern ESCAPE '\\'");
+            }
+
+            if (platePattern is not null)
+            {
+                searchFilters.Add(
+                    "regexp_replace(v.license_plate, '[^0-9A-Za-z]', '', 'g') ILIKE @plate_pattern");
+            }
+
+            filters.Add($"({string.Join(" OR ", searchFilters)})");
+        }
+
+        var whereSql = string.Join(" AND ", filters);
+        var connection = _dbContext.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
+
+        await using var countCommand = connection.CreateCommand();
+        countCommand.Transaction = _dbContext.Database.CurrentTransaction?.GetDbTransaction();
+        countCommand.CommandText = $"""
+            SELECT COUNT(*)
+            FROM vietride_trip.trips AS t
+            INNER JOIN vietride_trip.routes AS r ON r.id = t.route_id
+            INNER JOIN vietride_trip.vehicles AS v ON v.id = t.vehicle_id
+            INNER JOIN vietride_trip.stations AS origin ON origin.id = r.origin_station_id
+            INNER JOIN vietride_trip.stations AS destination ON destination.id = r.destination_station_id
+            WHERE {whereSql};
+            """;
+        AddOperatorTripParameters(
+            countCommand,
+            operatorId,
+            routePattern,
+            platePattern,
+            status,
+            fromUtc,
+            toUtc);
+        var totalItems = Convert.ToInt64(await countCommand.ExecuteScalarAsync(cancellationToken));
+
+        var direction = sortDescending ? "DESC" : "ASC";
+        await using var itemsCommand = connection.CreateCommand();
+        itemsCommand.Transaction = _dbContext.Database.CurrentTransaction?.GetDbTransaction();
+        itemsCommand.CommandText = $"""
+            SELECT t.id,
+                   t.status::text,
+                   r.id,
+                   r.name,
+                   origin.name,
+                   destination.name,
+                   v.id,
+                   v.license_plate,
+                   v.status::text,
+                   t.driver_user_id,
+                   t.assistant_user_id,
+                   t.departure_date_time,
+                   t.estimated_arrival_time
+            FROM vietride_trip.trips AS t
+            INNER JOIN vietride_trip.routes AS r ON r.id = t.route_id
+            INNER JOIN vietride_trip.vehicles AS v ON v.id = t.vehicle_id
+            INNER JOIN vietride_trip.stations AS origin ON origin.id = r.origin_station_id
+            INNER JOIN vietride_trip.stations AS destination ON destination.id = r.destination_station_id
+            WHERE {whereSql}
+            ORDER BY t.departure_date_time {direction}, t.id {direction}
+            LIMIT @page_size OFFSET @offset;
+            """;
+        AddOperatorTripParameters(
+            itemsCommand,
+            operatorId,
+            routePattern,
+            platePattern,
+            status,
+            fromUtc,
+            toUtc);
+        AddParameter(itemsCommand, "page_size", pageSize);
+        AddParameter(itemsCommand, "offset", checked((page - 1) * pageSize));
+
+        var items = new List<OperatorTripListRow>();
+        await using var reader = await itemsCommand.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            items.Add(new OperatorTripListRow(
+                reader.GetGuid(0),
+                Enum.Parse<TripStatus>(reader.GetString(1)),
+                reader.GetGuid(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetString(5),
+                reader.GetGuid(6),
+                reader.GetString(7),
+                Enum.Parse<VehicleStatus>(reader.GetString(8)),
+                reader.GetGuid(9),
+                reader.IsDBNull(10) ? null : reader.GetGuid(10),
+                reader.GetFieldValue<DateTimeOffset>(11),
+                reader.GetFieldValue<DateTimeOffset>(12)));
+        }
+
+        return PagedResult<OperatorTripListRow>.Create(items, page, pageSize, totalItems);
+    }
 
     public async Task<IReadOnlyList<PlatformTripReportItem>> GetPlatformTripMetricsAsync(
         DateTimeOffset fromUtc,
@@ -390,6 +533,48 @@ internal sealed class TripRepository : ITripRepository
         parameter.ParameterName = name;
         parameter.Value = value;
         command.Parameters.Add(parameter);
+    }
+
+    private static string EscapeLikePattern(string value)
+        => value
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal);
+
+    private static void AddOperatorTripParameters(
+        System.Data.Common.DbCommand command,
+        Guid operatorId,
+        string? routePattern,
+        string? platePattern,
+        TripStatus? status,
+        DateTimeOffset? fromUtc,
+        DateTimeOffset? toUtc)
+    {
+        AddParameter(command, "operator_id", operatorId);
+        if (routePattern is not null)
+        {
+            AddParameter(command, "route_pattern", routePattern);
+        }
+
+        if (platePattern is not null)
+        {
+            AddParameter(command, "plate_pattern", platePattern);
+        }
+
+        if (status.HasValue)
+        {
+            AddParameter(command, "status", status.Value.ToString());
+        }
+
+        if (fromUtc.HasValue)
+        {
+            AddParameter(command, "from_utc", fromUtc.Value.ToUniversalTime());
+        }
+
+        if (toUtc.HasValue)
+        {
+            AddParameter(command, "to_utc", toUtc.Value.ToUniversalTime());
+        }
     }
 
     public async Task<TripCargoMutationResult?> ReserveCargoAsync(
