@@ -52,39 +52,41 @@ public sealed class CreateParcelRouteFareCommandHandler : IRequestHandler<Create
                 "ROUTE_NOT_FOUND",
                 $"Route with id '{command.RouteId}' not found.");
 
-        var existing = await _repository.FindByCompositeAsync(
-            command.RouteId,
-            sizeCategory,
-            cancellationToken);
-
-        if (existing is not null)
-            throw new CodedConflictException(
-                "FARE_ALREADY_EXISTS",
-                $"A fare for route '{command.RouteId}' and size '{command.SizeCategory}' already exists.");
-
         if (command.PriceVnd <= 0)
             throw new CodedValidationException("VALIDATION_ERROR", "Price must be positive.");
-        var price = Money.FromRaw(command.PriceVnd);
 
-        var fare = ParcelRouteFare.Create(
-            command.RouteId,
-            sizeCategory,
-            command.OperatorId,
-            price,
-            command.EffectiveFrom,
-            command.EffectiveUntil);
+        return await _unitOfWork.ExecuteInTransactionAsync(async () =>
+        {
+            await _repository.AcquireRouteBatchLockAsync(command.RouteId, cancellationToken);
+            var existing = await _repository.FindByCompositeAsync(
+                command.RouteId,
+                sizeCategory,
+                cancellationToken);
 
-        await _repository.AddAsync(fare, cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+            if (existing is not null)
+                throw new CodedConflictException(
+                    "FARE_ALREADY_EXISTS",
+                    $"A fare for route '{command.RouteId}' and size '{command.SizeCategory}' already exists.");
 
-        return new ParcelRouteFareResponse(
-            fare.RouteId,
-            fare.SizeCategory.ToString(),
-            fare.OperatorId,
-            fare.PriceVnd.Amount,
-            fare.EffectiveFrom,
-            fare.EffectiveUntil,
-            fare.CreatedAt,
-            fare.UpdatedAt);
+            var fare = ParcelRouteFare.Create(
+                command.RouteId,
+                sizeCategory,
+                command.OperatorId,
+                Money.FromRaw(command.PriceVnd),
+                command.EffectiveFrom,
+                command.EffectiveUntil);
+
+            await _repository.AddAsync(fare, cancellationToken);
+
+            return new ParcelRouteFareResponse(
+                fare.RouteId,
+                fare.SizeCategory.ToString(),
+                fare.OperatorId,
+                fare.PriceVnd.Amount,
+                fare.EffectiveFrom,
+                fare.EffectiveUntil,
+                fare.CreatedAt,
+                fare.UpdatedAt);
+        }, cancellationToken);
     }
 }

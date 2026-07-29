@@ -667,7 +667,7 @@
       "stack": "dotnet",
       "servicePrefix": "parcel",
       "requireAllMutations": true,
-      "expectedMutationCount": 21,
+      "expectedMutationCount": 22,
       "endpoints": [
         {
           "method": "POST",
@@ -712,6 +712,11 @@
         {
           "method": "PATCH",
           "path": "/v1/operator/parcel-route-fares/{routeId:guid}/{sizeCategory}",
+          "policy": "required"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/operator/parcel-route-fares/{routeId:guid}/batch",
           "policy": "required"
         },
         {
