@@ -84,13 +84,21 @@ if (registerMessaging)
 {
     using var scope = app.Services.CreateScope();
     var recurringJobs = scope.ServiceProvider.GetRequiredService<IRecurringJobManager>();
+    var hangfireQueueName = VietRide.Booking.Infrastructure.Jobs.HangfireServiceCollectionExtensions
+        .GetQueueName(builder.Configuration);
 #pragma warning disable CS0618
     recurringJobs.AddOrUpdate(
         PlatformBookingStatsBackfillJob.RecurringJobId,
         Job.FromExpression<PlatformBookingStatsBackfillJob>(job =>
             job.RunAsync(CancellationToken.None)),
         "*/5 * * * *",
-        new RecurringJobOptions { QueueName = "booking", TimeZone = TimeZoneInfo.Utc });
+        new RecurringJobOptions { QueueName = hangfireQueueName, TimeZone = TimeZoneInfo.Utc });
+    recurringJobs.AddOrUpdate(
+        BuyerSnapshotBackfillJob.RecurringJobId,
+        Job.FromExpression<BuyerSnapshotBackfillJob>(job =>
+            job.RunAsync(CancellationToken.None)),
+        "*/5 * * * *",
+        new RecurringJobOptions { QueueName = hangfireQueueName, TimeZone = TimeZoneInfo.Utc });
 #pragma warning restore CS0618
 }
 

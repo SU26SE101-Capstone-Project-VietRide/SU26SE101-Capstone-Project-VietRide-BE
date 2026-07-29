@@ -75,6 +75,10 @@ CREATE TABLE bookings (
     booking_code VARCHAR(30) NOT NULL,    -- "VR-yyyyMMdd-XXXXXXXX"
     -- buyer (logical FK to identity.users)
     passenger_user_id UUID NOT NULL,
+    buyer_display_name VARCHAR(255) NULL,
+    buyer_phone VARCHAR(20) NULL,
+    buyer_email VARCHAR(255) NULL,
+    buyer_avatar_url VARCHAR(2048) NULL,
     -- trip context (logical FKs)
     trip_id UUID NOT NULL,
     operator_id UUID NOT NULL,
@@ -174,6 +178,10 @@ CREATE INDEX idx_booking_status_history_booking_occurred_id
 
 COMMENT ON COLUMN bookings.booking_code IS
     'Format VR-yyyyMMdd-XXXXXXXX (8 chars base32 uppercase). Booking/order code for history and backward compatibility; ticket QR uses tickets.ticket_code.';
+COMMENT ON COLUMN bookings.passenger_user_id IS
+    'Historical field name for the Identity account that created/paid for the Booking; logical FK only.';
+COMMENT ON COLUMN bookings.buyer_display_name IS
+    'Nullable buyer display snapshot. Legacy rows are filled by the bounded application backfill; migrations never call Identity.';
 COMMENT ON COLUMN bookings.total_amount IS
     'IMMUTABLE after INSERT. Snapshot of fare at booking time. Operator fare edits do not affect existing bookings.';
 COMMENT ON COLUMN bookings.trip_snapshot_departure IS

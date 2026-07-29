@@ -8,6 +8,7 @@ using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Features.Internal.Bookings;
 using VietRide.Booking.Application.Features.Internal.Reports.PlatformBookings;
+using VietRide.Booking.Application.Features.OperatorBookings.BuyerSnapshots;
 using VietRide.Booking.Application.Features.OperatorBookings.GetOperatorBookingDetail;
 using VietRide.Booking.Application.Features.OperatorBookings.ListOperatorBookings;
 using VietRide.Booking.Application.Features.OperatorReports;
@@ -66,6 +67,104 @@ internal sealed class BookingRepository : IBookingRepository
 
     public IQueryable<BookingEntity> QueryNoTracking()
         => _db.Bookings.AsNoTracking();
+
+    public async Task<IReadOnlyList<BookingBuyerSnapshotCandidate>> ListBuyerSnapshotBackfillCandidatesAsync(
+        int batchSize,
+        CancellationToken ct = default)
+        => await _db.Bookings
+            .AsNoTracking()
+            .Where(booking => booking.BuyerDisplayName == null)
+            .OrderBy(booking => booking.CreatedAt)
+            .ThenBy(booking => booking.Id)
+            .Take(Math.Clamp(batchSize, 1, 100))
+            .Select(booking => new BookingBuyerSnapshotCandidate(
+                booking.Id,
+                booking.PassengerUserId))
+            .ToArrayAsync(ct);
+
+    public async Task<int> ApplyBuyerSnapshotBackfillAsync(
+        IReadOnlyCollection<BookingBuyerSnapshotUpdate> updates,
+        CancellationToken ct = default)
+    {
+        if (updates.Count == 0)
+        {
+            return 0;
+        }
+
+        var normalized = updates
+            .ToDictionary(update => update.BookingId)
+            .Values
+            .Select(update => update with
+            {
+                Profile = update.Profile with
+                {
+                    DisplayName = NormalizeRequired(update.Profile.DisplayName),
+                    Phone = NormalizeOptional(update.Profile.Phone),
+                    Email = NormalizeOptional(update.Profile.Email),
+                    AvatarUrl = NormalizeOptional(update.Profile.AvatarUrl),
+                },
+            })
+            .ToArray();
+        var bookingIds = normalized.Select(update => update.BookingId).ToArray();
+        var buyerUserIds = normalized.Select(update => update.Profile.UserId).ToArray();
+        var displayNames = normalized.Select(update => update.Profile.DisplayName).ToArray();
+        var phones = normalized.Select(update => update.Profile.Phone).ToArray();
+        var emails = normalized.Select(update => update.Profile.Email).ToArray();
+        var avatarUrls = normalized.Select(update => update.Profile.AvatarUrl).ToArray();
+
+        return await _db.Database.ExecuteSqlInterpolatedAsync($"""
+            WITH snapshot_updates (
+                booking_id,
+                buyer_user_id,
+                display_name,
+                phone,
+                email,
+                avatar_url) AS (
+                SELECT *
+                FROM unnest(
+                    {bookingIds}::uuid[],
+                    {buyerUserIds}::uuid[],
+                    {displayNames}::text[],
+                    {phones}::text[],
+                    {emails}::text[],
+                    {avatarUrls}::text[])
+            )
+            UPDATE vietride_booking.bookings AS booking
+            SET buyer_display_name = snapshot.display_name,
+                buyer_phone = snapshot.phone,
+                buyer_email = snapshot.email,
+                buyer_avatar_url = snapshot.avatar_url,
+                updated_at = CURRENT_TIMESTAMP
+            FROM snapshot_updates AS snapshot
+            WHERE booking.id = snapshot.booking_id
+              AND booking.passenger_user_id = snapshot.buyer_user_id
+              AND booking.buyer_display_name IS NULL
+            """, ct);
+    }
+
+    public Task<int> RedactBuyerSnapshotsAsync(
+        Guid buyerUserId,
+        CancellationToken ct = default)
+    {
+        if (buyerUserId == Guid.Empty)
+        {
+            throw new ArgumentException("Buyer user id is required.", nameof(buyerUserId));
+        }
+
+        return _db.Bookings
+            .Where(booking => booking.PassengerUserId == buyerUserId
+                && (booking.BuyerDisplayName != BookingBuyerSnapshotProfile.DeletedDisplayName
+                    || booking.BuyerPhone != null
+                    || booking.BuyerEmail != null
+                    || booking.BuyerAvatarUrl != null))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(
+                    booking => booking.BuyerDisplayName,
+                    BookingBuyerSnapshotProfile.DeletedDisplayName)
+                .SetProperty(booking => booking.BuyerPhone, (string?)null)
+                .SetProperty(booking => booking.BuyerEmail, (string?)null)
+                .SetProperty(booking => booking.BuyerAvatarUrl, (string?)null), ct);
+    }
 
     public async Task<PagedResult<BookingEntity>> ListPassengerHistoryAsync(
         Guid passengerUserId,
@@ -523,6 +622,10 @@ internal sealed class BookingRepository : IBookingRepository
                 row.Id,
                 BookingCode = row.BookingCode.Value,
                 BuyerUserId = row.PassengerUserId,
+                row.BuyerDisplayName,
+                row.BuyerPhone,
+                row.BuyerEmail,
+                row.BuyerAvatarUrl,
                 row.TripId,
                 Status = row.Status.ToString(),
                 row.TripSnapshotRouteName,
@@ -565,7 +668,13 @@ internal sealed class BookingRepository : IBookingRepository
             booking.SeatCount, booking.BaseFare,
             booking.DiscountAmount, booking.TotalAmount, booking.PickupStationId, booking.PickupStopId,
             booking.DropoffStationId, booking.DropoffStopId, booking.BookingGroupId, booking.TripDirection,
-            booking.CancellationReason, booking.CreatedAt, seats, timeline);
+            booking.CancellationReason, booking.CreatedAt, seats, timeline,
+            ToBuyerDto(
+                booking.BuyerUserId,
+                booking.BuyerDisplayName,
+                booking.BuyerPhone,
+                booking.BuyerEmail,
+                booking.BuyerAvatarUrl));
     }
 
     public Task<bool> BookingExistsAsync(Guid bookingId, CancellationToken ct = default)
@@ -622,7 +731,16 @@ internal sealed class BookingRepository : IBookingRepository
                     booking.TripCurrentDeparture),
                 booking.Passengers.Count,
                 booking.TotalAmount.Amount,
-                booking.CreatedAt))
+                booking.CreatedAt,
+                booking.BuyerDisplayName == null
+                    ? null
+                    : new OperatorBookingBuyerDto(
+                        booking.PassengerUserId,
+                        booking.BuyerDisplayName,
+                        booking.BuyerPhone,
+                        booking.BuyerEmail,
+                        booking.BuyerAvatarUrl),
+                booking.PassengerUserId))
             .ToListAsync(ct);
 
         return new OperatorBookingListPage(items, totalItems);
@@ -645,6 +763,24 @@ internal sealed class BookingRepository : IBookingRepository
             ("createdAt", false) => query.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id),
             _ => query.OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id),
         };
+
+    private static OperatorBookingBuyerDto? ToBuyerDto(
+        Guid buyerUserId,
+        string? displayName,
+        string? phone,
+        string? email,
+        string? avatarUrl)
+        => displayName is null
+            ? null
+            : new OperatorBookingBuyerDto(buyerUserId, displayName, phone, email, avatarUrl);
+
+    private static string NormalizeRequired(string value)
+        => string.IsNullOrWhiteSpace(value)
+            ? throw new ArgumentException("Buyer display name is required.", nameof(value))
+            : value.Trim();
+
+    private static string? NormalizeOptional(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     public async Task<BookingEntity?> FindByBookingCodeAsync(
         string bookingCode,

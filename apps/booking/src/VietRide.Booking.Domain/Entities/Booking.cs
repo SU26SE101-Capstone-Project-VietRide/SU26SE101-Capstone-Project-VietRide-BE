@@ -23,6 +23,10 @@ public sealed class Booking : BaseEntity<Guid>
 
     // Logical FKs — no REFERENCES at DB layer (cross-service references)
     public Guid PassengerUserId { get; private set; }
+    public string? BuyerDisplayName { get; private set; }
+    public string? BuyerPhone { get; private set; }
+    public string? BuyerEmail { get; private set; }
+    public string? BuyerAvatarUrl { get; private set; }
     public Guid TripId { get; private set; }
     public Guid OperatorId { get; private set; }
     public Guid? SeatLockToken { get; private set; }
@@ -93,7 +97,11 @@ public sealed class Booking : BaseEntity<Guid>
         Guid? bookingGroupId = null,
         Enums.TripDirection? tripDirection = null,
         Guid? seatLockToken = null,
-        DateTimeOffset? tripCurrentDeparture = null)
+        DateTimeOffset? tripCurrentDeparture = null,
+        string? buyerDisplayName = null,
+        string? buyerPhone = null,
+        string? buyerEmail = null,
+        string? buyerAvatarUrl = null)
     {
         // Pickup: exactly one must be set
         var pickupCount = (pickupStationId.HasValue ? 1 : 0) + (pickupStopId.HasValue ? 1 : 0);
@@ -114,7 +122,7 @@ public sealed class Booking : BaseEntity<Guid>
                 "Trip current departure must initially match the trip snapshot departure.",
                 nameof(tripCurrentDeparture));
 
-        return new Booking
+        var booking = new Booking
         {
             Id = Guid.NewGuid(),
             BookingCode = bookingCode,
@@ -139,6 +147,45 @@ public sealed class Booking : BaseEntity<Guid>
             BookingGroupId = bookingGroupId,
             TripDirection = tripDirection,
         };
+
+        if (buyerDisplayName is not null
+            || buyerPhone is not null
+            || buyerEmail is not null
+            || buyerAvatarUrl is not null)
+        {
+            booking.CaptureBuyerSnapshot(
+                buyerDisplayName ?? throw new ArgumentException(
+                    "Buyer display name is required when capturing a buyer snapshot.",
+                    nameof(buyerDisplayName)),
+                buyerPhone,
+                buyerEmail,
+                buyerAvatarUrl);
+        }
+
+        return booking;
+    }
+
+    public bool CaptureBuyerSnapshot(
+        string displayName,
+        string? phone,
+        string? email,
+        string? avatarUrl)
+    {
+        if (BuyerDisplayName is not null)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(displayName))
+        {
+            throw new ArgumentException("Buyer display name is required.", nameof(displayName));
+        }
+
+        BuyerDisplayName = displayName.Trim();
+        BuyerPhone = NormalizeOptional(phone);
+        BuyerEmail = NormalizeOptional(email);
+        BuyerAvatarUrl = NormalizeOptional(avatarUrl);
+        return true;
     }
 
     /// <summary>
@@ -301,6 +348,9 @@ public sealed class Booking : BaseEntity<Guid>
 
     private static int CountProvided(Guid? first, Guid? second)
         => (first.HasValue ? 1 : 0) + (second.HasValue ? 1 : 0);
+
+    private static string? NormalizeOptional(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     /// <summary>Cancels the booking with the given reason.</summary>
     public void Cancel(BookingCancellationReason reason, DateTimeOffset cancelledAt, bool refundOverride = false)

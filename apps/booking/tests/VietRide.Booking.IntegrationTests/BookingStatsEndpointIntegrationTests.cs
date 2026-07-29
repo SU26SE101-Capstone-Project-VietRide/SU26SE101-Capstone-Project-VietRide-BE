@@ -9,9 +9,13 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 using VietRide.Booking.Application.Abstractions.Repositories;
+using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Features.BookingStats.GetAdminBookingStatsAggregate;
 using VietRide.Booking.Application.Features.BookingStats.GetOperatorBookingStats;
+using VietRide.Booking.Application.Features.OperatorBookings.GetOperatorBookingDetail;
+using VietRide.Booking.Application.Features.OperatorBookings.ListOperatorBookings;
 using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Booking.IntegrationTests;
 
@@ -123,6 +127,8 @@ public sealed class BookingStatsWebApplicationFactory : WebApplicationFactory<Pr
     private const string TestSecret = "test-secret-at-least-32-chars-long-xxxxx";
 
     public IBookingStatsRepository BookingStatsRepository { get; } = Substitute.For<IBookingStatsRepository>();
+    public IBookingRepository BookingRepository { get; } = Substitute.For<IBookingRepository>();
+    public IIdentityUserServiceClient IdentityUsers { get; } = Substitute.For<IIdentityUserServiceClient>();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -136,6 +142,8 @@ public sealed class BookingStatsWebApplicationFactory : WebApplicationFactory<Pr
         builder.ConfigureTestServices(services =>
         {
             services.AddSingleton(BookingStatsRepository);
+            services.AddSingleton(BookingRepository);
+            services.AddSingleton(IdentityUsers);
 
             var mockUow = Substitute.For<IUnitOfWork>();
             mockUow.ExecuteInTransactionAsync(
@@ -154,6 +162,14 @@ public sealed class BookingStatsWebApplicationFactory : WebApplicationFactory<Pr
                     var op = ci.Arg<Func<Task<GetAdminBookingStatsAggregateResult>>>();
                     return op();
                 });
+            mockUow.ExecuteInTransactionAsync(
+                    Arg.Any<Func<Task<PagedResult<OperatorBookingListItem>>>>(),
+                    Arg.Any<CancellationToken>())
+                .Returns(ci => ci.Arg<Func<Task<PagedResult<OperatorBookingListItem>>>>()());
+            mockUow.ExecuteInTransactionAsync(
+                    Arg.Any<Func<Task<OperatorBookingDetailDto>>>(),
+                    Arg.Any<CancellationToken>())
+                .Returns(ci => ci.Arg<Func<Task<OperatorBookingDetailDto>>>()());
             services.AddSingleton(mockUow);
         });
     }

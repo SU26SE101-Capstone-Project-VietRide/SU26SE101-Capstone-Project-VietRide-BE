@@ -50,6 +50,26 @@ internal sealed class BookingConfiguration : IEntityTypeConfiguration<BookingEnt
             .HasColumnType("uuid")
             .IsRequired();
 
+        builder.Property(x => x.BuyerDisplayName)
+            .HasColumnName("buyer_display_name")
+            .HasMaxLength(255)
+            .IsRequired(false);
+
+        builder.Property(x => x.BuyerPhone)
+            .HasColumnName("buyer_phone")
+            .HasMaxLength(20)
+            .IsRequired(false);
+
+        builder.Property(x => x.BuyerEmail)
+            .HasColumnName("buyer_email")
+            .HasMaxLength(255)
+            .IsRequired(false);
+
+        builder.Property(x => x.BuyerAvatarUrl)
+            .HasColumnName("buyer_avatar_url")
+            .HasMaxLength(2048)
+            .IsRequired(false);
+
         builder.Property(x => x.TripId)
             .HasColumnName("trip_id")
             .HasColumnType("uuid")

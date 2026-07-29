@@ -181,6 +181,11 @@ public static class InfrastructureServiceCollectionExtensions
                 options.QueueName = "booking.station-merged";
                 options.BindingKeys = [StationMergedIntegrationEvent.EventType];
             });
+            services.AddVietRideEventConsumer<IdentityUserDeletedIntegrationEvent, IdentityUserDeletedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "booking.identity-user-deleted";
+                options.BindingKeys = [IdentityUserDeletedIntegrationEvent.EventType];
+            });
             services.AddVietRideEventConsumer<TripVehicleSwappedIntegrationEvent, TripVehicleSwappedIntegrationEventHandler>(options =>
             {
                 options.QueueName = "booking.trip-vehicle-swapped";
