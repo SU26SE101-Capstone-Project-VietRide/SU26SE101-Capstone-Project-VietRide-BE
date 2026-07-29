@@ -21,7 +21,12 @@ describe('ChatRateLimitService', () => {
 
     await service.assertAllowed({ sub: 'user-1', role: 'PASSENGER' });
 
-    expect(client.eval).toHaveBeenCalledWith(expect.any(String), 1, 'rag:chat:rate:user:user-1', 3600);
+    expect(client.eval).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      'rag:chat:rate:user:user-1',
+      3600,
+    );
   });
 
   it('uses operator bucket for operator-scoped callers', async () => {
@@ -33,16 +38,21 @@ describe('ChatRateLimitService', () => {
       operatorId: 'operator-1',
     });
 
-    expect(client.eval).toHaveBeenCalledWith(expect.any(String), 1, 'rag:chat:rate:operator:operator-1', 3600);
+    expect(client.eval).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      'rag:chat:rate:operator:operator-1',
+      3600,
+    );
   });
 
   it('throws 429 when limit is exceeded', async () => {
     client.eval.mockResolvedValue(21);
     const service = new ChatRateLimitService(redis, makeEnv());
 
-    await expect(service.assertAllowed({ sub: 'user-1', role: 'PASSENGER' })).rejects.toBeInstanceOf(
-      HttpException,
-    );
+    await expect(
+      service.assertAllowed({ sub: 'user-1', role: 'PASSENGER' }),
+    ).rejects.toBeInstanceOf(HttpException);
     await service.assertAllowed({ sub: 'user-1', role: 'PASSENGER' }).catch((error: unknown) => {
       expect(error).toBeInstanceOf(HttpException);
       expect((error as HttpException).getStatus()).toBe(429);
@@ -55,6 +65,7 @@ function makeEnv(): Env {
     NODE_ENV: 'test',
     PORT: 3003,
     GATEWAY_URL: 'http://gateway:3000',
+    IDENTITY_INTERNAL_BASE_URL: 'http://identity:5001',
     DATABASE_URL: 'postgresql://user:pass@localhost:5432/vietride_rag',
     REDIS_URL: 'redis://localhost:6379',
     REDIS_HOST: 'localhost',

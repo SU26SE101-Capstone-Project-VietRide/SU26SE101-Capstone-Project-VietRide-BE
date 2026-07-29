@@ -8,7 +8,7 @@ import { loadEnv } from './config/env.schema';
 
 async function bootstrap(): Promise<void> {
   const env = loadEnv();
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   app.enableShutdownHooks();
 
   const swaggerConfig = new DocumentBuilder()

@@ -71,6 +71,7 @@ function makeEnv(): Env {
     NODE_ENV: 'test',
     PORT: 3003,
     GATEWAY_URL: 'http://gateway:3000',
+    IDENTITY_INTERNAL_BASE_URL: 'http://identity:5001',
     DATABASE_URL: 'postgresql://user:pass@localhost:5432/vietride_rag',
     REDIS_URL: 'redis://localhost:6379',
     REDIS_HOST: 'localhost',

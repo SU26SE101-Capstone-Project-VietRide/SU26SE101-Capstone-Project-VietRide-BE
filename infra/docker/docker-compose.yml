@@ -465,6 +465,7 @@ services:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 3003
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      IDENTITY_INTERNAL_BASE_URL: http://identity:5001
       DATABASE_URL: 'postgresql://${POSTGRES_USER:-vietride}:${POSTGRES_PASSWORD:-vietride_dev}@postgres:5432/${RAG_DB:-vietride_rag}'
       RAG_DATABASE_URL: 'postgresql://${POSTGRES_USER:-vietride}:${POSTGRES_PASSWORD:-vietride_dev}@postgres:5432/${RAG_DB:-vietride_rag}'
       REDIS_HOST: redis

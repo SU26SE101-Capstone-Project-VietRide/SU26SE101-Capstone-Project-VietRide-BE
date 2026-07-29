@@ -517,6 +517,18 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       forwardUserAuthorization: true,
     },
     {
+      prefix: '/v1/admin/policies',
+      target: env.RAG_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
+      prefix: '/v1/operator/policies',
+      target: env.RAG_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    },
+    {
       prefix: '/v1/tracking',
       target: env.TRACKING_BASE_URL,
       authRequired: 'user',

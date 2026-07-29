@@ -18,6 +18,7 @@ import { EmbeddingModule } from '../embedding/embedding.module';
 import { IngestModule } from '../ingest/ingest.module';
 import { RagPrismaModule } from '../prisma/prisma.module';
 import { ProvidersModule } from '../providers/providers.module';
+import { PoliciesModule } from '../policies/policies.module';
 import { HealthController } from './health.controller';
 import { RagSentryExceptionFilter } from './rag-sentry-exception.filter';
 import { ReadyController } from './ready.controller';
@@ -46,6 +47,7 @@ const env = loadEnv();
     ChatModule,
     RuntimeConfigAdminModule,
     RagIdempotencyModule,
+    PoliciesModule,
   ],
   controllers: [HealthController, ReadyController],
   providers: [
@@ -53,8 +55,8 @@ const env = loadEnv();
     InternalJwtAuthGuard,
     { provide: APP_FILTER, useClass: RagSentryExceptionFilter },
     { provide: APP_INTERCEPTOR, useValue: new LoggingInterceptor() },
-    { provide: APP_INTERCEPTOR, useValue: new ApiResponseInterceptor() },
     { provide: APP_INTERCEPTOR, useClass: RagIdempotencyInterceptor },
+    { provide: APP_INTERCEPTOR, useValue: new ApiResponseInterceptor() },
   ],
 })
 export class AppModule {}

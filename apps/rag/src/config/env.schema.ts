@@ -23,9 +23,7 @@ export const envSchema = baseEnvSchema.merge(
     OPENROUTER_API_KEY: z.string().min(1),
     OPENROUTER_BASE_URL: z.string().url().default('https://openrouter.ai/api/v1'),
     OPENROUTER_CHAT_MODEL: z.string().default('nvidia/nemotron-3-ultra-550b-a55b:free'),
-    OPENROUTER_EMBEDDING_MODEL: z
-      .string()
-      .default('nvidia/llama-nemotron-embed-vl-1b-v2:free'),
+    OPENROUTER_EMBEDDING_MODEL: z.string().default('nvidia/llama-nemotron-embed-vl-1b-v2:free'),
     OPENROUTER_HTTP_REFERER: optionalNonEmptyString,
     OPENROUTER_APP_TITLE: z.string().default('VietRide RAG'),
     OPENROUTER_ALLOW_PAID_FALLBACK: booleanEnvSchema.default(false),
@@ -49,6 +47,7 @@ export const envSchema = baseEnvSchema.merge(
     CLOUDINARY_API_KEY: z.string().min(1),
     CLOUDINARY_API_SECRET: z.string().min(1),
     CLOUDINARY_RAG_FOLDER: z.string().default('rag/documents'),
+    IDENTITY_INTERNAL_BASE_URL: z.string().url().default('http://identity:5001'),
   }),
 );
 

@@ -106,6 +106,25 @@ enum OutboxEventStatus {
   @@schema("vietride_rag")
 }
 
+enum PolicyType {
+  FOR_OPERATOR
+  FOR_USER
+
+  @@map("policy_type")
+  @@schema("vietride_rag")
+}
+
+enum PolicyAuditAction {
+  CREATE
+  UPDATE
+  ACTIVATE
+  DEACTIVATE
+  DELETE
+
+  @@map("policy_audit_action")
+  @@schema("vietride_rag")
+}
+
 model KnowledgeDocument {
   id                  String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   title               String                        @db.VarChar(500)
@@ -289,5 +308,45 @@ model IdempotencyOperation {
   @@index([userId, createdAt(sort: Desc)], map: "idx_idempotency_operations_user_created")
   @@index([expiresAt], map: "idx_idempotency_operations_expires_at")
   @@map("idempotency_operations")
+  @@schema("vietride_rag")
+}
+
+model Policy {
+  id                   String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  operatorId           String?          @map("operator_id") @db.Uuid
+  title                String
+  description          String
+  content              String
+  policyType           PolicyType       @map("policy_type")
+  category             String
+  version              Int              @default(1)
+  active               Boolean          @default(true)
+  createdByUserId      String           @map("created_by_user_id") @db.Uuid
+  createdByDisplayName String           @map("created_by_display_name")
+  createdByEmail       String           @map("created_by_email")
+  rowVersion           Int              @default(0) @map("row_version")
+  createdAt            DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime         @default(now()) @map("updated_at") @db.Timestamptz(6)
+  deletedAt            DateTime?        @map("deleted_at") @db.Timestamptz(6)
+  auditLogs            PolicyAuditLog[]
+
+  @@index([operatorId, deletedAt, updatedAt(sort: Desc)], map: "idx_policies_tenant_deleted_updated")
+  @@index([operatorId, policyType, active], map: "idx_policies_tenant_type_active")
+  @@map("policies")
+  @@schema("vietride_rag")
+}
+
+model PolicyAuditLog {
+  id             String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  policyId       String            @map("policy_id") @db.Uuid
+  action         PolicyAuditAction
+  beforeSnapshot Json?             @map("before")
+  afterSnapshot  Json?             @map("after")
+  actorSnapshot  Json              @map("actor")
+  occurredAt     DateTime          @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  policy         Policy            @relation(fields: [policyId], references: [id], onDelete: Restrict)
+
+  @@index([policyId, occurredAt], map: "idx_policy_audit_logs_policy_occurred")
+  @@map("policy_audit_logs")
   @@schema("vietride_rag")
 }

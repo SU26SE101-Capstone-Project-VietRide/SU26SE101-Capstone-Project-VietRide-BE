@@ -1,6 +1,7 @@
 import {
   CallHandler,
   ExecutionContext,
+  HttpException,
   Injectable,
   NestInterceptor,
   UnprocessableEntityException,
@@ -58,16 +59,8 @@ export class RagIdempotencyInterceptor implements NestInterceptor {
       fingerprint,
     });
     if (begin.state === 'replay') {
-      response.status(begin.response.statusCode);
-      for (const [name, value] of Object.entries(begin.response.headers)) {
-        response.setHeader(name, value);
-      }
-      if (begin.response.headers['content-type']?.includes('text/event-stream')) {
-        response.write(begin.response.body);
-        response.end();
-        return of(undefined);
-      }
-      return of(begin.response.body ? JSON.parse(begin.response.body) : undefined);
+      this.writeReplay(response, begin.response);
+      return of(undefined);
     }
 
     const captured: string[] = [];
@@ -78,20 +71,31 @@ export class RagIdempotencyInterceptor implements NestInterceptor {
     }) as typeof response.write;
 
     return next.handle().pipe(
-      mergeMap((value) =>
-        from(
-          this.idempotency.complete(begin.operationId, begin.ownerToken, {
-            statusCode: response.statusCode,
-            headers: this.responseHeaders(response),
-            body: captured.length > 0 ? captured.join('') : JSON.stringify(value ?? null),
-          }),
-        ).pipe(mergeMap(() => of(value))),
-      ),
-      catchError((error: unknown) =>
-        from(this.idempotency.abandon(begin.operationId, begin.ownerToken)).pipe(
+      mergeMap((value) => {
+        const normalizedValue = this.normalizeSuccess(value, request, response);
+        const replay = {
+          statusCode: response.statusCode,
+          headers: this.responseHeaders(response, captured.length === 0),
+          body: captured.length > 0 ? captured.join('') : JSON.stringify(normalizedValue ?? null),
+        };
+        return from(this.idempotency.complete(begin.operationId, begin.ownerToken, replay)).pipe(
+          mergeMap(() => of(normalizedValue)),
+        );
+      }),
+      catchError((error: unknown) => {
+        if (error instanceof HttpException && error.getStatus() < 500) {
+          const replay = this.toClientErrorReplay(error, request);
+          return from(this.idempotency.complete(begin.operationId, begin.ownerToken, replay)).pipe(
+            mergeMap(() => {
+              this.writeReplay(response, replay);
+              return of(undefined);
+            }),
+          );
+        }
+        return from(this.idempotency.abandon(begin.operationId, begin.ownerToken)).pipe(
           mergeMap(() => throwError(() => error)),
-        ),
-      ),
+        );
+      }),
     );
   }
 
@@ -113,40 +117,143 @@ export class RagIdempotencyInterceptor implements NestInterceptor {
   }
 
   private fingerprint(request: Request, userId: string): string {
+    const ragRequest = request as RequestWithRagInternalUser;
     const upload = (
       request as Request & {
         file?: { originalname: string; mimetype: string; size: number; buffer: Buffer };
       }
     ).file;
-    return createHash('sha256')
-      .update(
-        JSON.stringify({
-          userId,
-          method: request.method,
-          path: request.path,
-          query: request.query,
-          body: request.body,
-          file: upload
-            ? {
-                originalName: upload.originalname,
-                mimeType: upload.mimetype,
-                size: upload.size,
-                sha256: createHash('sha256').update(upload.buffer).digest('hex'),
-              }
-            : null,
-        }),
-      )
-      .digest('hex')
-      .toUpperCase();
+    const body = ragRequest.rawBody
+      ? Buffer.from(ragRequest.rawBody)
+      : Buffer.from(
+          JSON.stringify(
+            upload
+              ? {
+                  body: request.body,
+                  file: {
+                    originalName: upload.originalname,
+                    mimeType: upload.mimetype,
+                    size: upload.size,
+                    sha256: createHash('sha256').update(upload.buffer).digest('hex'),
+                  },
+                }
+              : (request.body ?? null),
+          ),
+          'utf8',
+        );
+    const hash = createHash('sha256');
+    for (const part of [
+      Buffer.from(userId, 'utf8'),
+      Buffer.from(request.method.toUpperCase(), 'utf8'),
+      Buffer.from(`${request.baseUrl}${request.path}`, 'utf8'),
+      this.canonicalQuery(request),
+      body,
+    ]) {
+      const length = Buffer.allocUnsafe(4);
+      length.writeUInt32BE(part.length);
+      hash.update(length);
+      hash.update(part);
+    }
+    return hash.digest('hex').toUpperCase();
   }
 
-  private responseHeaders(response: Response): Record<string, string> {
+  private canonicalQuery(request: Request): Buffer {
+    const search = new URL(request.originalUrl, 'http://vietride.internal').searchParams;
+    const entries = [...search.entries()].sort(([leftKey, leftValue], [rightKey, rightValue]) => {
+      if (leftKey !== rightKey) return leftKey < rightKey ? -1 : 1;
+      if (leftValue === rightValue) return 0;
+      return leftValue < rightValue ? -1 : 1;
+    });
+    const parts: Buffer[] = [];
+    const count = Buffer.allocUnsafe(4);
+    count.writeUInt32BE(entries.length);
+    parts.push(count);
+    for (const [key, value] of entries) {
+      for (const item of [key, value]) {
+        const encoded = Buffer.from(item, 'utf8');
+        const length = Buffer.allocUnsafe(4);
+        length.writeUInt32BE(encoded.length);
+        parts.push(length, encoded);
+      }
+    }
+    return Buffer.concat(parts);
+  }
+
+  private responseHeaders(response: Response, defaultJson: boolean): Record<string, string> {
     const result: Record<string, string> = {};
     for (const name of ['content-type', 'cache-control']) {
       const value = response.getHeader(name);
       if (typeof value === 'string') result[name] = value;
     }
+    if (defaultJson && !result['content-type']) {
+      result['content-type'] = 'application/json; charset=utf-8';
+    }
     return result;
+  }
+
+  protected normalizeSuccess(value: unknown, _request: Request, _response: Response): unknown {
+    void _request;
+    void _response;
+    return value;
+  }
+
+  private writeReplay(
+    response: Response,
+    replay: { statusCode: number; headers: Record<string, string>; body: string },
+  ): void {
+    response.status(replay.statusCode);
+    for (const [name, value] of Object.entries(replay.headers)) response.setHeader(name, value);
+    response.end(replay.body);
+  }
+
+  private toClientErrorReplay(
+    error: HttpException,
+    request: Request,
+  ): { statusCode: number; headers: Record<string, string>; body: string } {
+    const statusCode = error.getStatus();
+    const raw = error.getResponse();
+    const object = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : undefined;
+    const code =
+      typeof object?.['errorCode'] === 'string'
+        ? object['errorCode']
+        : statusCode === 400
+          ? 'BAD_REQUEST'
+          : statusCode === 403
+            ? 'FORBIDDEN'
+            : statusCode === 404
+              ? 'NOT_FOUND'
+              : statusCode === 409
+                ? 'CONFLICT'
+                : statusCode === 422
+                  ? 'UNPROCESSABLE_ENTITY'
+                  : 'ERROR';
+    const message =
+      typeof object?.['message'] === 'string'
+        ? object['message']
+        : typeof object?.['detail'] === 'string'
+          ? object['detail']
+          : typeof raw === 'string'
+            ? raw
+            : error.message;
+    const errors = Array.isArray(object?.['errors'])
+      ? (object['errors'] as Array<Record<string, unknown>>).map((item) => ({
+          field: String(item['path'] ?? ''),
+          message: String(item['message'] ?? ''),
+        }))
+      : undefined;
+    const traceId =
+      (request.headers['x-request-id'] as string | undefined) ??
+      (request as { requestId?: string }).requestId;
+    return {
+      statusCode,
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({
+        success: false,
+        statusCode,
+        error: { code, message, ...(errors ? { fields: errors } : {}) },
+        meta: { traceId, timestamp: new Date().toISOString() },
+      }),
+    };
   }
 }
 
@@ -154,5 +261,31 @@ export class RagIdempotencyInterceptor implements NestInterceptor {
 export class RagMultipartIdempotencyInterceptor extends RagIdempotencyInterceptor {
   override intercept(context: ExecutionContext, next: CallHandler): Promise<Observable<unknown>> {
     return this.interceptRequired(context, next);
+  }
+
+  protected override normalizeSuccess(
+    value: unknown,
+    request: Request,
+    response: Response,
+  ): unknown {
+    if (
+      response.statusCode === 204 ||
+      (value !== null &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        'success' in value &&
+        'statusCode' in value)
+    ) {
+      return value;
+    }
+    const traceId =
+      (request.headers['x-request-id'] as string | undefined) ??
+      (request as { requestId?: string }).requestId;
+    return {
+      success: true,
+      statusCode: response.statusCode,
+      data: value,
+      meta: { traceId, timestamp: new Date().toISOString() },
+    };
   }
 }

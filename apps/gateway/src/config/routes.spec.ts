@@ -128,6 +128,34 @@ describe('buildRouteTable', () => {
     });
   });
 
+  it('routes generic Policy APIs to RAG with exact admin roles', () => {
+    const adminRoute = matchRoute(
+      routes,
+      '/v1/admin/policies/11111111-1111-4111-8111-111111111111',
+    );
+    const operatorRoute = matchRoute(
+      routes,
+      '/v1/operator/policies/22222222-2222-4222-8222-222222222222',
+    );
+
+    expect(adminRoute).toMatchObject({
+      prefix: '/v1/admin/policies',
+      target: env.RAG_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    });
+    expect(matchRoute(routes, '/v1/admin/policies')).toBe(adminRoute);
+    expect(adminRoute?.forwardUserAuthorization).not.toBe(true);
+    expect(operatorRoute).toMatchObject({
+      prefix: '/v1/operator/policies',
+      target: env.RAG_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    });
+    expect(matchRoute(routes, '/v1/operator/policies')).toBe(operatorRoute);
+    expect(operatorRoute?.forwardUserAuthorization).not.toBe(true);
+  });
+
   it('routes all six operator XLSX reports to their owning services with operator roles', () => {
     const expected = [
       ['/v1/operator/reports/bookings/export', env.BOOKING_BASE_URL],
