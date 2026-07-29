@@ -1295,6 +1295,13 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | 31 | `POST /v1/driver/trips/{tripId}/stops/{stopId}/depart` | Trip |
 | 32 | `POST /v1/operator/trips/{tripId}/substitute-vehicle` | Trip |
 | 33 | `POST /v1/bookings/trips/{newTripId}/transfers/passengers/{passengerId}/confirm` | Booking |
+| 34 | `POST /v1/admin/policies` | RAG |
+| 35 | `PATCH /v1/admin/policies/{policyId}` | RAG |
+| 36 | `DELETE /v1/admin/policies/{policyId}` | RAG |
+| 37 | `POST /v1/operator/policies` | RAG |
+| 38 | `PATCH /v1/operator/policies/{policyId}` | RAG |
+| 39 | `DELETE /v1/operator/policies/{policyId}` | RAG |
+| 40 | `PUT /v1/operator/parcel-route-fares/{routeId}/batch` | Parcel |
 
 Day-24 mutations use the same v2 fingerprint/replay contract: UUID-v4 key, actor/method/path/
 canonical-query/raw-body fingerprint, byte-identical replay before current-state lookup, and
@@ -1586,6 +1593,8 @@ updates the column.
 | | `TRACKING_TRIP_NOT_ACTIVE` | 409 | Trip chưa IN_PROGRESS |
 | **RAG** | `RAG_DOCUMENT_NOT_APPROVED` | 403 | Status ≠ APPROVED |
 | | `RAG_ACCESS_DENIED_FOR_ROLE` | 403 | accessLevel không match role |
+| | `POLICY_NOT_FOUND` | 404 | Generic RAG Policy is missing, soft-deleted, or outside the caller tenant |
+| | `POLICY_VERSION_CONFLICT` | 409 | PATCH version does not match the current Policy version |
 | **Validation** | `VALIDATION_ERROR` | 422 | Field-level — kèm `errors` array |
 | | `IDEMPOTENCY_KEY_REQUIRED` | 422 | Mutation contract requires the header explicitly; middleware pass-through is not acceptance |
 | | `IDEMPOTENCY_KEY_MISMATCH` | 422 | Same key, different request fingerprint (actor/method/path/query/raw body) |
@@ -1597,7 +1606,7 @@ updates the column.
 | | `RATE_LIMIT_EXCEEDED` | 429 | Per-user/per-resource Day-38 invoice download limit |
 | | `REPORT_VALUE_OVERFLOW` | 500 | Report source/orchestrator gặp count hoặc BIGINT/NUMERIC aggregate ngoài phạm vi Int64; không wrap, saturate hoặc trả partial |
 | | `REPORT_RANGE_INVALID` | 422 | Operator report range không phải ngày ICT hợp lệ, đảo chiều hoặc vượt 92 ngày inclusive |
-| | `UPSTREAM_UNAVAILABLE` | 502 | Downstream/inter-service dependency unavailable or returned an unusable/unexpected response (including Gateway connection failure) |
+| | `UPSTREAM_UNAVAILABLE` | 502/503 | Default inter-service/Gateway dependency failure is 502; the Platform Report, Admin Dashboard and Revenue facade contracts explicitly use 503 because the composite resource is temporarily unavailable |
 | | `INTERNAL_ERROR` | 500 | Unhandled exception (Sentry capture) |
 
 **Day-23 exact resolver mapping — POST
@@ -1949,6 +1958,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | Method + Path | Caller | Mục đích |
 |---|---|---|
 | `GET /internal/v1/users/{userId}` | All services | Internal-JWT-only raw user lookup `{ id, displayName, avatarUrl, role, operatorId, status, phone }` for HTTP validate logical FK. Errors use ADR 0004 envelope. Trip DriverSchedule create/activation validates role/operator; Shuttle dispatch còn yêu cầu driver active có display name/phone và snapshot hai field này vào assignment event. |
+| `GET /internal/v1/users?ids=<uuid>&ids=<uuid>` | Booking, Trip, Parcel, RAG | Read-only 1..100 user batch; raw additive display/contact/status DTO, including a redacted representation for requested soft-deleted IDs |
 | `GET /internal/v1/users/by-phone?phone={normalizedE164}` | Booking | Internal-JWT-only exact non-deleted-user phone lookup for the operator booking-monitor filter. Caller URI-escapes a prevalidated canonical E.164 value; raw success is exactly `{ userId }`, no PII. No match is ADR 0004 `404 RESOURCE_NOT_FOUND`. Booking maps only that exact response to an empty result; all other failures map to `502 UPSTREAM_UNAVAILABLE`. |
 | `GET /internal/v1/users/by-email?email=` | Parcel | Lookup recipient user khi tạo parcel |
 | `GET /internal/v1/users/{userId}/device-tokens` | Notification | Lấy FCM tokens active để push |
@@ -1957,7 +1967,8 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | `POST /internal/v1/operators/{operatorId}/usage/increment` | Trip, Booking, Parcel | Body `{resource, delta}` where resource is `VEHICLES|DRIVERS|ASSISTANTS|OPERATOR_USERS|ROUTES|TRIPS_THIS_MONTH`; atomically increment usage counter without concurrent overshoot |
 | `POST /internal/v1/operators/{operatorId}/quota-allocations` | Trip | Claim durable idempotent quota allocation by `{ resource, resourceId, periodKey? }`; no distributed transaction |
 | `POST /internal/v1/operators/{operatorId}/quota-allocations/{allocationId}/release` | Trip | Idempotently release an allocation after local persistence fails or its resource is soft-deleted |
-| `POST /internal/v1/operators/summaries/batch` | Payment | Read-only batch lookup `{ operatorIds }`, tối đa 500 distinct non-empty UUID; raw response gồm cả operator soft-deleted, sort ID tăng dần; empty input trả empty list; không yêu cầu Idempotency-Key |
+| `POST /internal/v1/operators/summaries/batch` | Booking, Payment | Read-only batch lookup `{ operatorIds }`, tối đa 500 distinct non-empty UUID; raw additive `{ operatorId, operatorName, logoUrl, contactPhone }`, gồm cả operator soft-deleted, sort ID tăng dần; empty input trả empty list; không yêu cầu Idempotency-Key |
+| `GET /internal/v1/admin/dashboard/identity-metrics?from=&to=` | Booking | Raw latest-login count for the ICT range plus current user-role counts, approved/active operator IDs and operator-status distribution; no historical status inference |
 | `POST /internal/v1/payments/subscription` | Identity | Create/replay a VNPay subscription payment from a server-side upgrade snapshot |
 | `POST /internal/v1/payments/{paymentId}/expire-subscription` | Identity | Idempotently expire a pending subscription payment during the Identity-owned auto-revert job |
 
@@ -1966,6 +1977,9 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | Method + Path | Caller | Mục đích |
 |---|---|---|
 | `GET /internal/v1/trips/{tripId}?pricingAt=` | Booking, Parcel, Tracking, Payment | Raw Trip snapshot; Day 24 appends nullable trip-level `actualDepartureTime` while preserving stop `status`/nullable `actualArrivalTime`. Valid Internal JWT only (`401 AUTH_TOKEN_INVALID`), no tenant authorization. Optional ISO-offset `pricingAt` resolves Booking fare as `MANUAL_OVERRIDE` → active half-open `RouteStopFareTemplate` → `Trip.baseFare`; omitted preserves persisted legacy snapshot semantics. No event/projection is added. |
+| `POST /internal/v1/trips/summaries/batch` | Parcel | Read-only `{ tripIds }`, 1..100 distinct UUIDs; one Trip query returns route/station/vehicle/crew/timing summaries; missing IDs are omitted |
+| `POST /internal/v1/operators/vehicle-counts/batch` | Payment | Read-only `{ operatorIds }`, 1..100 distinct UUIDs; raw current vehicle counts by operator |
+| `GET /internal/v1/operators/{operatorId}/route-performance?month=YYYY-MM` | Payment | Raw ICT-month trip/completed-trip aggregates grouped by route for the explicit operator tenant |
 | `POST /internal/v1/trips/{tripId}/lock-seats` | Booking | Lock seats trong checkout (TTL 10 phút Redis) |
 | `POST /internal/v1/trips/round-trip/lock-seats` | Booking | Lock outbound + return seats atomically in one Trip-owned Redis Lua script; if either leg fails, no seat is held |
 | `POST /internal/v1/trips/{tripId}/release-seats` | Booking | Release seat khi payment fail/timeout |
@@ -2376,7 +2390,7 @@ UTC boundary bắt buộc, `from < to`, tối đa 366 ngày, interval `[from,to)
 
 Earned live vẫn là metric anchor; không dùng payment-ledger time, non-terminal row hoặc Stats/cache
 chưa reconciliation làm nguồn trả kết quả. Source PostgreSQL đọc
-`SUM(BIGINT)` dưới dạng NUMERIC rồi checked-convert từng group và total về Int64. Payment checked
+`SUM(BIGINT)` dưới dạng NUMERIC rồi checked-convert từng group và total về Int64. Booking checked
 mọi count/revenue/totals, union operator IDs, lookup Identity theo chunk 500, giữ missing operator
 với tên null, sort net revenue giảm dần rồi operator ID. Totals phải bằng sum `byOperator`;
 `parcelRevenueVnd`/`netRevenueVnd` có thể âm và không clamp.
@@ -2417,6 +2431,48 @@ Identity owns the `SYSTEM_ADMIN` read-only aggregate facade `GET /v1/admin/outbo
 opaque composite cursor and reports unavailable source services without inventing totals. No
 replay or purge is implemented in v1. Every Hangfire-owning service exposes the internal JWT-only
 `GET /internal/jobs/status`; lag is `max(0, nowUtc - nextRunUtc)` or null when no next run exists.
+
+#### UI gap contract freeze (2026-07-29)
+
+This freeze is additive and supersedes the UI-gap backlog wherever that backlog conflicts with
+the current service ownership or schema. It does not authorize frontend work, Admin Station work,
+new dependencies, cross-database foreign keys, or enrichment of the existing public
+`GET /v1/admin/operators` response.
+
+- Booking owns Admin Dashboard and BookingStats. Payment owns Admin/Operator Revenue Analytics.
+  The Booking Dashboard facade combines Booking-local aggregates with Identity internal metrics;
+  it does not depend on the Platform Report facade.
+- RAG owns generic `Policy` and immutable `PolicyAuditLog` Prisma aggregates. They are distinct
+  from `KnowledgeDocument` and from Identity's operator cancellation/luggage/no-show JSON.
+- Trip exposes a tenant-scoped `GET /v1/operator/trips` selector for `OPERATOR_ADMIN`. Search is
+  limited to normalized vehicle plate and route name. No `tripCode`, `routeCode`, schema migration
+  or search index is authorized unless a later measured query plan establishes a separate task.
+- Parcel fare batch preserves the physical `(route_id, size_category)` key and atomically mutates
+  that current row after checking the route belongs to the JWT operator; it does not introduce
+  fare history. Existing single-size endpoints remain compatible.
+- Cross-service display snapshots are nullable schema additions. EF/Prisma migrations never call
+  another service. Historical fill is an idempotent application backfill with bounded batch calls,
+  and reads retain a bounded internal-API fallback until fill completes.
+- `parcel_status_history` is immutable and trigger-backed so EF bulk updates and raw SQL cannot
+  bypass it. The trigger fires only when `OLD.status IS DISTINCT FROM NEW.status`; legacy rows get
+  one `MIGRATION_BASELINE` record, never fabricated transitions.
+- Dashboard `activeUsers` means the account's current latest `last_login_at` falls in the requested
+  period; it is not a full login-history metric. `activeOperators` means currently
+  `APPROVED + is_active` and having at least one BookingStats booking in the period.
+- Operator ticket revenue is signed Booking ledger revenue/refund plus VietRide-funded voucher
+  credit whose reference is `BOOKING`; Parcel revenue uses the equivalent `PARCEL` entries.
+  The exact negative `ADJUSTMENT` whose reference is `BOOKING|PARCEL` and note is
+  `reverse-vietride-funded-voucher` is included in its matching category. Operator-funded voucher
+  audit entries and adjustments whose reference is `MANUAL` are excluded. Consequently
+  `totalRevenueVnd = ticketRevenueVnd + parcelRevenueVnd`.
+- Admin analytics deliberately defines `platformRevenueVnd` as completed subscription payments,
+  `paidToOperatorsVnd` as settled payouts, and `grossRevenueVnd` as their sum. These names do not
+  represent ticket/parcel gross sales.
+- For comparisons, previous zero with current positive is `UP`; both zero is `FLAT`; in both cases
+  `changePercent` is `0`. All date/month buckets use `Asia/Ho_Chi_Minh` unless an existing endpoint
+  explicitly requires UTC boundaries.
+- All UI-gap public mutations require `Idempotency-Key`; all public responses use ADR 0004. Internal APIs
+  require Internal JWT, return raw DTOs on success, and are never exposed through Gateway.
 
 ---
 
@@ -3570,6 +3626,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.45.0** | 2026-07-29 | Codex | **MINOR** — Freeze the backend UI-gap ownership, compatibility, projection/backfill, Policy audit, Parcel history, Dashboard and Revenue semantics; remove stale Admin Operator, Trip code/index and fare-history scope; correct Platform Report ownership to Booking. |
 | **1.44.0** | 2026-07-25 | BE lead (Vũ) | **MINOR** — Day-34 / SCV-114 freezes Vehicle Substitution: adds substitution-only `409 TRIP_NOT_SUBSTITUTABLE` while preserving existing `422 TRIP_NOT_IN_PROGRESS`, both public HTTP contracts and the exact Booking impact seam without `seatType` (Trip derives preferred type from the old TripSeat and deterministically falls back when absent), canonical Trip/Booking event payloads and Outbox identity, nullable seat history plus BookingTransfer confirmation persistence, and Notification recipient/suppression rules. Parcel transfer behavior remains deferred to Day 35. |
 | **1.43.1** | 2026-07-24 | BE lead (Vũ) | **PATCH** - Register the signed, read-only `GET /v1/payments/vnpay-return-status` browser-return poll endpoint. The HTTPS bridge can display persisted Payment status and open the Passenger deep link, while VNPay IPN remains the only source allowed to mutate Payment and publish downstream confirmation events. |
 | **1.43.0** | 2026-07-23 | BE lead (Vũ) | **MINOR** - Align Day-33 ROUTE_CHANGE timeout with technical context §6.4: persist frozen shuttle-fallback metadata, keep Booking CONFIRMED without automatic refund, publish `booking.booking.route_change_auto_fallback_applied` for Notification, and preserve the recurring five-attempt `RefundFailureRetryJob` lifecycle by persisting the initial consumer failure at `retryCount=0`. |
