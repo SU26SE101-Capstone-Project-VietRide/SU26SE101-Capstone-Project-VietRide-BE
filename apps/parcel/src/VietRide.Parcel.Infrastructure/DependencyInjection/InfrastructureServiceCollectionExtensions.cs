@@ -83,6 +83,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddTransient<CorrelationIdDelegatingHandler>();
 
         services.AddScoped<IParcelRepository, ParcelRepository>();
+        services.AddScoped<IOperatorParcelStatsRepository, OperatorParcelStatsRepository>();
         services.AddScoped<SentParcelHistoryReader>();
         services.AddScoped<IParcelRouteFareRepository, ParcelRouteFareRepository>();
         services.AddScoped<IParcelStatsRepository, ParcelStatsRepository>();
