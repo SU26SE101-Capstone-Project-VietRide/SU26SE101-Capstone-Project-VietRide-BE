@@ -252,6 +252,26 @@ CREATE INDEX idx_parcels_confirmed_report ON parcels (confirmed_at, operator_id)
     WHERE status = 'DELIVERY_CONFIRMED' AND confirmed_at IS NOT NULL;
 
 -- -----------------------------------------------------------------------------
+-- parcel_status_history (immutable, trigger-owned lifecycle timeline)
+-- -----------------------------------------------------------------------------
+CREATE TABLE parcel_status_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    parcel_id UUID NOT NULL REFERENCES parcels(id) ON DELETE RESTRICT,
+    status parcel_status NOT NULL,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    actor_type VARCHAR(20) NOT NULL,
+    actor_id UUID NULL, -- logical FK to identity.users; intentionally no DB FK
+    source VARCHAR(100) NOT NULL,
+    reason TEXT NULL
+);
+
+CREATE INDEX idx_parcel_status_history_parcel_occurred_id
+    ON parcel_status_history (parcel_id, occurred_at, id);
+CREATE UNIQUE INDEX uq_parcel_status_history_migration_baseline
+    ON parcel_status_history (parcel_id)
+    WHERE source = 'MIGRATION_BASELINE';
+
+-- -----------------------------------------------------------------------------
 -- platform_parcel_stats (Day 42 exact-range earned projection)
 -- -----------------------------------------------------------------------------
 CREATE TABLE platform_parcel_stats (
@@ -502,6 +522,103 @@ CREATE TRIGGER trg_parcel_route_fares_updated_at BEFORE UPDATE ON parcel_route_f
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 CREATE TRIGGER trg_parcel_stats_updated_at BEFORE UPDATE ON parcel_stats
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+
+CREATE FUNCTION capture_parcel_status_history()
+RETURNS TRIGGER AS $$
+DECLARE
+    history_actor_id UUID;
+    history_actor_type VARCHAR(20);
+    history_reason TEXT;
+BEGIN
+    IF OLD.status IS NOT DISTINCT FROM NEW.status THEN
+        RETURN NEW;
+    END IF;
+
+    history_actor_id := CASE
+        WHEN OLD.status = 'PENDING_OPERATOR_REVIEW'::vietride_parcel.parcel_status
+             AND NEW.reviewed_by_user_id IS DISTINCT FROM OLD.reviewed_by_user_id
+            THEN NEW.reviewed_by_user_id
+        WHEN NEW.status = 'CHECKED_IN'::vietride_parcel.parcel_status
+             AND NEW.checked_in_by_user_id IS DISTINCT FROM OLD.checked_in_by_user_id
+            THEN NEW.checked_in_by_user_id
+        WHEN OLD.status = 'CHECKED_IN'::vietride_parcel.parcel_status
+             AND NEW.reweighed_by_user_id IS DISTINCT FROM OLD.reweighed_by_user_id
+            THEN NEW.reweighed_by_user_id
+        WHEN OLD.status = 'READY_TO_LOAD'::vietride_parcel.parcel_status
+             AND NEW.status = 'LOADED'::vietride_parcel.parcel_status
+             AND NEW.loaded_by_user_id IS DISTINCT FROM OLD.loaded_by_user_id
+            THEN NEW.loaded_by_user_id
+        WHEN OLD.status = 'PENDING_TRANSFER_CONFIRM'::vietride_parcel.parcel_status
+             AND NEW.status = 'LOADED'::vietride_parcel.parcel_status
+             AND NEW.transfer_confirmed_by_user_id IS DISTINCT FROM OLD.transfer_confirmed_by_user_id
+            THEN NEW.transfer_confirmed_by_user_id
+        WHEN NEW.status = 'RETURNED'::vietride_parcel.parcel_status
+             AND NEW.returned_by_user_id IS DISTINCT FROM OLD.returned_by_user_id
+            THEN NEW.returned_by_user_id
+        WHEN NEW.status = 'DELIVERY_CONFIRMED'::vietride_parcel.parcel_status
+             AND NEW.confirmed_by_user_id IS DISTINCT FROM OLD.confirmed_by_user_id
+            THEN NEW.confirmed_by_user_id
+        ELSE NULL
+    END;
+
+    history_actor_type := CASE
+        WHEN history_actor_id IS NOT NULL THEN 'USER'
+        WHEN OLD.status = 'DELIVERED_PENDING_CONFIRM'::vietride_parcel.parcel_status
+             AND NEW.status = 'DELIVERY_CONFIRMED'::vietride_parcel.parcel_status
+             AND NEW.confirmed_by_user_id IS NULL
+             AND NEW.confirmed_by_ip IS NOT NULL
+            THEN 'RECIPIENT'
+        WHEN OLD.status = 'DELIVERED_PENDING_CONFIRM'::vietride_parcel.parcel_status
+             AND NEW.status = 'DELIVERY_REJECTED'::vietride_parcel.parcel_status
+            THEN 'RECIPIENT'
+        WHEN OLD.status = 'DELIVERY_REJECTED'::vietride_parcel.parcel_status
+             AND NEW.status = 'DELIVERED_PENDING_CONFIRM'::vietride_parcel.parcel_status
+            THEN 'RECIPIENT'
+        ELSE 'UNKNOWN'
+    END;
+
+    history_reason := CASE NEW.status
+        WHEN 'PENDING_OPERATOR_ACTION'::vietride_parcel.parcel_status
+            THEN NEW.pending_action_reason
+        WHEN 'CANCELLED'::vietride_parcel.parcel_status
+            THEN NEW.cancellation_reason
+        WHEN 'REJECTED'::vietride_parcel.parcel_status
+            THEN NEW.rejection_reason
+        WHEN 'DELIVERY_REJECTED'::vietride_parcel.parcel_status
+            THEN NEW.rejection_reason
+        WHEN 'RETURNED'::vietride_parcel.parcel_status
+            THEN NEW.return_reason
+        ELSE NULL
+    END;
+
+    INSERT INTO parcel_status_history
+        (parcel_id, status, occurred_at, actor_type, actor_id, source, reason)
+    VALUES
+        (NEW.id, NEW.status, clock_timestamp(), history_actor_type,
+         history_actor_id, 'STATUS_TRIGGER', history_reason);
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_parcels_status_history
+    AFTER UPDATE OF status ON parcels
+    FOR EACH ROW
+    WHEN (OLD.status IS DISTINCT FROM NEW.status)
+    EXECUTE FUNCTION capture_parcel_status_history();
+
+CREATE FUNCTION reject_parcel_status_history_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'parcel_status_history is immutable'
+        USING ERRCODE = '55000';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_parcel_status_history_immutable
+    BEFORE UPDATE OR DELETE ON parcel_status_history
+    FOR EACH ROW
+    EXECUTE FUNCTION reject_parcel_status_history_mutation();
 
 -- =============================================================================
 -- Hangfire schema (auto-created): undo-reject 15m, auto-reject EXTRA_LARGE 24h,
