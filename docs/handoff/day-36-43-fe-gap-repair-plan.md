@@ -126,7 +126,7 @@ The property is always serialized. Lookup failure or ineligibility yields `null`
 | Task | Status | Review verdict | Date | Notes |
 | --- | --- | --- | --- | --- |
 | R0 | Completed | APPROVE | 2026-07-31 | One reviewer patch round; no scope expansion |
-| R1 | Pending | Pending | - | Day 36 consumer and harness |
+| R1 | Completed | APPROVE | 2026-07-31 | Trip 5/5; Node 3/3; one Node reviewer patch |
 | R2 | Pending | Pending | - | Day 43 discovery parser |
 | R3 | Pending | Pending | - | Google avatar projection |
 | R4 | Pending | Pending | - | Booking DueAt and Payment expiry |

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { importPKCS8, SignJWT } from 'jose';
 import { io } from 'socket.io-client';
+import { day36IdempotencyKey } from './day36-idempotency-keys.mjs';
 
 const root = process.cwd();
 const useDev = process.env.DAY36_E2E_USE_DEV_STACK === '1';
@@ -100,7 +101,9 @@ async function waitFor(url, timeoutMs = 240_000) {
     try {
       const response = await fetch(url);
       if (response.ok) return;
-    } catch {}
+    } catch {
+      // The service may still be starting.
+    }
     await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
   throw new Error(`Timed out waiting for ${url}`);
@@ -300,7 +303,7 @@ async function api(method, pathname, accessToken, body, idempotencyKey) {
         headers: {
           ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
           ...(body ? { 'Content-Type': 'application/json' } : {}),
-          ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+          ...(idempotencyKey ? { 'Idempotency-Key': day36IdempotencyKey(idempotencyKey) } : {}),
         },
         body: body ? JSON.stringify(body) : undefined,
       });
