@@ -1,8 +1,8 @@
 # Day 36/43 and FE Gap Repair Plan
 
-**Plan status:** APPROVED  
-**Branch:** `codex/fix-days-36-43-fe-gaps`  
-**Approved by:** Backend lead (conversation authorization, 2026-07-31)  
+**Plan status:** APPROVED
+**Branch:** `codex/fix-days-36-43-fe-gaps`
+**Approved by:** Backend lead (conversation authorization, 2026-07-31)
 **Full regression owner:** `audit-day`
 
 ## Objective
@@ -139,9 +139,9 @@ The property is always serialized. Lookup failure or ineligibility yields `null`
 
 ## R0 - Freeze source-of-truth and configuration
 
-**Implement/review:** `worker` -> `reviewer`  
-**Verification tier:** DOCS  
-**Dependencies:** none  
+**Implement/review:** `worker` -> `reviewer`
+**Verification tier:** DOCS
+**Dependencies:** none
 **Skill:** none
 
 **Owned files**
@@ -178,9 +178,9 @@ git diff --check
 
 ## R1 - Repair Day 36
 
-**Implement/review:** `dotnet-worker` plus `worker` -> `dotnet-reviewer` plus `reviewer`  
-**Verification tier:** PROJECT  
-**Dependencies:** R0  
+**Implement/review:** `dotnet-worker` plus `worker` -> `dotnet-reviewer` plus `reviewer`
+**Verification tier:** PROJECT
+**Dependencies:** R0
 **Skill:** none
 
 **Owned files**
@@ -212,9 +212,9 @@ dotnet format apps/trip/VietRide.Trip.sln --verify-no-changes --include apps/tri
 
 ## R2 - Repair Day 43 discovery
 
-**Implement/review:** `worker` -> `reviewer`  
-**Verification tier:** FOCUSED  
-**Dependencies:** R1  
+**Implement/review:** `worker` -> `reviewer`
+**Verification tier:** FOCUSED
+**Dependencies:** R1
 **Skill:** none
 
 **Owned files**
@@ -241,9 +241,9 @@ npx prettier --check scripts/verify-idempotency-inventory.mjs scripts/verify-ide
 
 ## R3 - Return the stored Google avatar
 
-**Implement/review:** `dotnet-worker` -> `dotnet-reviewer`  
-**Verification tier:** FOCUSED  
-**Dependencies:** R0  
+**Implement/review:** `dotnet-worker` -> `dotnet-reviewer`
+**Verification tier:** FOCUSED
+**Dependencies:** R0
 **Skill:** none
 
 **Owned files**
@@ -266,9 +266,9 @@ dotnet format apps/identity/VietRide.Identity.sln --verify-no-changes --include 
 
 ## R4 - Align Booking charge deadlines and Payment expiry
 
-**Implement/review:** `dotnet-worker` -> `dotnet-reviewer`  
-**Verification tier:** PROJECT  
-**Dependencies:** R0, R3  
+**Implement/review:** `dotnet-worker` -> `dotnet-reviewer`
+**Verification tier:** PROJECT
+**Dependencies:** R0, R3
 **Skill:** none
 
 **Owned files**
@@ -299,9 +299,9 @@ dotnet format apps/payment/VietRide.Payment.sln --verify-no-changes --include ap
 
 ## R5 - Compensate captured but unfulfillable Bookings
 
-**Implement/review:** `dotnet-worker` -> `reviewer`  
-**Verification tier:** PROJECT  
-**Dependencies:** R4  
+**Implement/review:** `dotnet-worker` -> `reviewer`
+**Verification tier:** PROJECT
+**Dependencies:** R4
 **Skill:** `add-integration-event`
 
 **Owned files**
@@ -338,9 +338,9 @@ dotnet format apps/payment/VietRide.Payment.sln --verify-no-changes --include ap
 
 ## R6 - Resolve VNPay IPN/expiry races
 
-**Implement/review:** `dotnet-worker` -> `reviewer`  
-**Verification tier:** PROJECT  
-**Dependencies:** R5  
+**Implement/review:** `dotnet-worker` -> `reviewer`
+**Verification tier:** PROJECT
+**Dependencies:** R5
 **Skill:** `add-integration-event` for the existing success fact
 
 **Owned files**
@@ -369,9 +369,9 @@ dotnet format apps/payment/VietRide.Payment.sln --verify-no-changes --include ap
 
 ## R7 - Add the internal redirect-session lookup
 
-**Implement/review:** `dotnet-worker` -> `reviewer`  
-**Verification tier:** PROJECT  
-**Dependencies:** R6  
+**Implement/review:** `dotnet-worker` -> `reviewer`
+**Verification tier:** PROJECT
+**Dependencies:** R6
 **Skill:** `add-endpoint`
 
 **Owned files**
@@ -398,9 +398,9 @@ dotnet format apps/payment/VietRide.Payment.sln --verify-no-changes --include ap
 
 ## R8 - Enrich Booking History
 
-**Implement/review:** `dotnet-worker` -> `dotnet-reviewer`  
-**Verification tier:** FOCUSED  
-**Dependencies:** R7  
+**Implement/review:** `dotnet-worker` -> `dotnet-reviewer`
+**Verification tier:** FOCUSED
+**Dependencies:** R7
 **Skill:** none
 
 **Owned files**
@@ -426,9 +426,9 @@ dotnet format apps/booking/VietRide.Booking.sln --verify-no-changes --include ap
 
 ## R9 - Enrich Passenger History
 
-**Implement/review:** `dotnet-worker` -> `dotnet-reviewer`  
-**Verification tier:** FOCUSED  
-**Dependencies:** R8  
+**Implement/review:** `dotnet-worker` -> `dotnet-reviewer`
+**Verification tier:** FOCUSED
+**Dependencies:** R8
 **Skill:** none
 
 **Owned files**
@@ -457,9 +457,9 @@ dotnet format apps/parcel/VietRide.Parcel.sln --verify-no-changes --include apps
 
 ## R10 - Freeze Day 43 inventory and audit closure
 
-**Implement/review:** `worker` -> `reviewer`, then independent `audit-day` reviews  
-**Verification tier:** FULL AUDIT  
-**Dependencies:** R1-R9  
+**Implement/review:** `worker` -> `reviewer`, then independent `audit-day` reviews
+**Verification tier:** FULL AUDIT
+**Dependencies:** R1-R9
 **Skill:** `audit-day 36`, `audit-day 43`
 
 **Owned files**
