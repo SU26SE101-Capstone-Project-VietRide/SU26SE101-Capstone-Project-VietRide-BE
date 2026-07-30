@@ -247,10 +247,7 @@ public sealed class ParcelTripDisplaySnapshotPersistenceTests
 
     private static ParcelDbContext CreateDbContext(NpgsqlDataSource dataSource)
     {
-        var options = new DbContextOptionsBuilder<ParcelDbContext>()
-            .UseNpgsql(dataSource, npgsql =>
-                npgsql.MigrationsHistoryTable("__ef_migrations_history", ParcelDbContext.SchemaName))
-            .Options;
+        var options = ParcelIntegrationDbContextOptions.Create(dataSource);
         return new ParcelDbContext(options, new SystemClock());
     }
 

@@ -113,12 +113,8 @@ public sealed class OperatorParcelDetailPersistenceIntegrationTests
         NpgsqlDataSource dataSource,
         DbCommandInterceptor? interceptor = null)
     {
-        var builder = new DbContextOptionsBuilder<ParcelDbContext>()
-            .UseNpgsql(dataSource, npgsql =>
-                npgsql.MigrationsHistoryTable("__ef_migrations_history", ParcelDbContext.SchemaName));
-        if (interceptor is not null)
-            builder.AddInterceptors(interceptor);
-        return new ParcelDbContext(builder.Options, new SystemClock());
+        var options = ParcelIntegrationDbContextOptions.Create(dataSource, interceptor);
+        return new ParcelDbContext(options, new SystemClock());
     }
 
     private static string CreateConnectionString(string databaseName)

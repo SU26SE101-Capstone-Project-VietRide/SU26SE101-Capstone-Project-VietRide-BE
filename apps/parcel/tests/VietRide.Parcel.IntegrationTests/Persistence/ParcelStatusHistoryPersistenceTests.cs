@@ -33,8 +33,8 @@ public sealed class ParcelStatusHistoryPersistenceTests
             {
                 var migrator = context.GetService<IMigrator>();
                 await migrator.MigrateAsync(PreviousMigration);
-                context.Parcels.AddRange(legacyParcel, rolloutRaceParcel);
-                await context.SaveChangesAsync();
+                await InsertParcelAtPreviousMigrationAsync(dataSource, legacyParcel);
+                await InsertParcelAtPreviousMigrationAsync(dataSource, rolloutRaceParcel);
                 var (migrationStartedAt, migrationCompletedAt) =
                     await AssertRolloutLockClosesTransitionGapAsync(
                         dataSource,
@@ -58,6 +58,8 @@ public sealed class ParcelStatusHistoryPersistenceTests
                 rolloutHistory.Select(item => item.Source).Should().Equal(
                     "MIGRATION_BASELINE",
                     "STATUS_TRIGGER");
+
+                await migrator.MigrateAsync();
             }
 
             var newParcel = CreateParcel("NEW");
@@ -537,6 +539,68 @@ public sealed class ParcelStatusHistoryPersistenceTests
             ParcelDeliveryMethod.TERMINAL_PICKUP,
             Money.FromRaw(100_000));
 
+    private static async Task InsertParcelAtPreviousMigrationAsync(
+        NpgsqlDataSource dataSource,
+        ParcelEntity parcel)
+    {
+        const string sql = """
+            INSERT INTO vietride_parcel.parcels (
+                id,
+                parcel_code,
+                sender_user_id,
+                recipient_name,
+                recipient_phone,
+                operator_id,
+                trip_id,
+                description,
+                size_category,
+                estimated_size_category,
+                estimated_weight_kg,
+                delivery_method,
+                deposit_amount,
+                original_deposit_amount,
+                status)
+            VALUES (
+                @id,
+                @parcel_code,
+                @sender_user_id,
+                @recipient_name,
+                @recipient_phone,
+                @operator_id,
+                @trip_id,
+                @description,
+                @size_category::vietride_parcel.parcel_size_category,
+                @estimated_size_category::vietride_parcel.parcel_size_category,
+                @estimated_weight_kg,
+                @delivery_method::vietride_parcel.parcel_delivery_method,
+                @deposit_amount,
+                @original_deposit_amount,
+                @status::vietride_parcel.parcel_status);
+            """;
+        await using var command = dataSource.CreateCommand(sql);
+        command.Parameters.AddWithValue("id", parcel.Id);
+        command.Parameters.AddWithValue("parcel_code", parcel.ParcelCode);
+        command.Parameters.AddWithValue("sender_user_id", parcel.SenderUserId);
+        command.Parameters.AddWithValue("recipient_name", parcel.RecipientName);
+        command.Parameters.AddWithValue("recipient_phone", parcel.RecipientPhone.Value);
+        command.Parameters.AddWithValue("operator_id", parcel.OperatorId);
+        command.Parameters.AddWithValue("trip_id", parcel.TripId);
+        command.Parameters.AddWithValue("description", parcel.Description!);
+        command.Parameters.AddWithValue("size_category", parcel.SizeCategory.ToString());
+        command.Parameters.AddWithValue(
+            "estimated_size_category",
+            parcel.EstimatedSizeCategory.ToString());
+        command.Parameters.AddWithValue("estimated_weight_kg", parcel.EstimatedWeightKg);
+        command.Parameters.AddWithValue("delivery_method", parcel.DeliveryMethod.ToString());
+        command.Parameters.AddWithValue("deposit_amount", parcel.DepositAmount.Amount);
+        command.Parameters.AddWithValue(
+            "original_deposit_amount",
+            parcel.OriginalDepositAmount.Amount);
+        command.Parameters.AddWithValue("status", parcel.Status.ToString());
+
+        (await command.ExecuteNonQueryAsync()).Should().Be(1);
+    }
+
     private static NpgsqlDataSource CreateDataSource(string connectionString)
     {
         var builder = new NpgsqlDataSourceBuilder(connectionString);
@@ -546,10 +610,7 @@ public sealed class ParcelStatusHistoryPersistenceTests
 
     private static ParcelDbContext CreateDbContext(NpgsqlDataSource dataSource)
     {
-        var options = new DbContextOptionsBuilder<ParcelDbContext>()
-            .UseNpgsql(dataSource, npgsql =>
-                npgsql.MigrationsHistoryTable("__ef_migrations_history", ParcelDbContext.SchemaName))
-            .Options;
+        var options = ParcelIntegrationDbContextOptions.Create(dataSource);
         return new ParcelDbContext(options, new SystemClock());
     }
 

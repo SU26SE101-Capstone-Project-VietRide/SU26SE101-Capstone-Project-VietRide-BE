@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="VietRide.Parcel.IntegrationTests.Testing" />
   </ItemGroup>
 
   <ItemGroup>
