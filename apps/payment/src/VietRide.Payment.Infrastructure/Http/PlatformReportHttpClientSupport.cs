@@ -30,7 +30,7 @@ internal static class PlatformReportHttpClientSupport
         {
             return await client.SendAsync(
                 request,
-                HttpCompletionOption.ResponseHeadersRead,
+                HttpCompletionOption.ResponseContentRead,
                 cancellationToken);
         }
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
@@ -76,6 +76,10 @@ internal static class PlatformReportHttpClientSupport
         {
             throw new UpstreamUnavailableException(exception);
         }
+        catch (IOException exception)
+        {
+            throw new UpstreamUnavailableException(exception);
+        }
     }
 
     public static bool TryGuid(JsonElement item, string propertyName, out Guid value)
@@ -114,7 +118,7 @@ internal static class PlatformReportHttpClientSupport
                 && code.ValueKind == JsonValueKind.String
                 && code.GetString() == "REPORT_VALUE_OVERFLOW";
         }
-        catch (JsonException)
+        catch (Exception exception) when (exception is JsonException or IOException)
         {
             return false;
         }

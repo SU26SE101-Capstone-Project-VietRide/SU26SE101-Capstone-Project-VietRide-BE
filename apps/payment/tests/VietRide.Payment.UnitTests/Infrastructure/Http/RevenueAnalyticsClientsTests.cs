@@ -133,7 +133,30 @@ public sealed class RevenueAnalyticsClientsTests
         await timeout.Should().ThrowAsync<UpstreamUnavailableException>();
     }
 
-    private static TClient Create<TClient>(string typeName, HttpMessageHandler handler)
+    [Fact]
+    public async Task TripAnalyticsClient_MapsSlowResponseBodyToUpstreamUnavailableWithinClientDeadline()
+    {
+        using var safetyTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        var client = Create<ITripRevenueAnalyticsClient>(
+            "VietRide.Payment.Infrastructure.Http.TripRevenueAnalyticsClient",
+            new StubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new SlowContent(),
+            })),
+            TimeSpan.FromMilliseconds(100));
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        var act = () => client.GetVehicleCountsAsync([Guid.NewGuid()], safetyTimeout.Token);
+
+        await act.Should().ThrowAsync<UpstreamUnavailableException>();
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromMilliseconds(700));
+        safetyTimeout.IsCancellationRequested.Should().BeFalse();
+    }
+
+    private static TClient Create<TClient>(
+        string typeName,
+        HttpMessageHandler handler,
+        TimeSpan? timeout = null)
     {
         var type = typeof(VietRide.Payment.Infrastructure.PaymentDbContext).Assembly
             .GetType(typeName, throwOnError: true)!;
@@ -143,7 +166,11 @@ public sealed class RevenueAnalyticsClientsTests
             binder: null,
             args:
             [
-                new HttpClient(handler) { BaseAddress = new Uri("http://trip.test/"), Timeout = TimeSpan.FromSeconds(5) },
+                new HttpClient(handler)
+                {
+                    BaseAddress = new Uri("http://trip.test/"),
+                    Timeout = timeout ?? TimeSpan.FromSeconds(5),
+                },
                 new FakeTokenProvider(),
             ],
             culture: null)!;
@@ -172,5 +199,29 @@ public sealed class RevenueAnalyticsClientsTests
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken) => responder(request, cancellationToken);
+    }
+
+    private sealed class SlowContent : HttpContent
+    {
+        protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            await stream.WriteAsync("[]"u8.ToArray());
+        }
+
+        protected override async Task SerializeToStreamAsync(
+            Stream stream,
+            TransportContext? context,
+            CancellationToken cancellationToken)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+            await stream.WriteAsync("[]"u8.ToArray(), cancellationToken);
+        }
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
     }
 }
