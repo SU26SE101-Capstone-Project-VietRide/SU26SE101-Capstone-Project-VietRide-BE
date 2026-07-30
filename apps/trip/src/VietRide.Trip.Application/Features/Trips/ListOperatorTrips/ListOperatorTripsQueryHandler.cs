@@ -43,7 +43,7 @@ public sealed class ListOperatorTripsQueryHandler
             pageSize,
             routeSearch,
             plateSearch,
-            request.Status,
+            ToDomainStatus(request.Status),
             fromUtc,
             toUtc,
             sortDescending,
@@ -119,4 +119,17 @@ public sealed class ListOperatorTripsQueryHandler
         var local = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
         return new DateTimeOffset(local, IctOffset).ToUniversalTime();
     }
+
+    private static TripStatus? ToDomainStatus(OperatorTripStatusFilter? status)
+        => status switch
+        {
+            null => null,
+            OperatorTripStatusFilter.SCHEDULED => TripStatus.SCHEDULED,
+            OperatorTripStatusFilter.BOARDING => TripStatus.BOARDING,
+            OperatorTripStatusFilter.IN_PROGRESS => TripStatus.IN_PROGRESS,
+            OperatorTripStatusFilter.COMPLETED => TripStatus.COMPLETED,
+            OperatorTripStatusFilter.CANCELLED => TripStatus.CANCELLED,
+            OperatorTripStatusFilter.DISRUPTED => TripStatus.DISRUPTED,
+            _ => throw new ArgumentOutOfRangeException(nameof(status), status, null),
+        };
 }

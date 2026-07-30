@@ -12,7 +12,6 @@ using VietRide.Trip.Application.Features.Trips.EditTrip;
 using VietRide.Trip.Application.Features.Trips.GetTripDetail;
 using VietRide.Trip.Application.Features.Trips.ListOperatorTrips;
 using VietRide.Trip.Application.Features.Trips.Operations;
-using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Api.Controllers;
 
@@ -37,7 +36,7 @@ public sealed class OperatorTripsController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<PagedResult<OperatorTripListItemDto>>> ListAsync(
         [FromQuery] string? search,
-        [FromQuery] TripStatus? status,
+        [FromQuery] OperatorTripStatusFilter? status,
         [FromQuery] DateOnly? from,
         [FromQuery] DateOnly? to,
         [FromQuery] int? page,

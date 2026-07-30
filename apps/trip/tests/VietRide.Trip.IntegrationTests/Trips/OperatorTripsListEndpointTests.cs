@@ -68,7 +68,7 @@ public sealed class OperatorTripsListEndpointTests
         var query = (ListOperatorTripsQuery)mediator.LastRequest!;
         query.OperatorId.Should().Be(operatorId);
         query.Search.Should().Be("51B12345");
-        query.Status.Should().Be(TripStatus.IN_PROGRESS);
+        query.Status.Should().Be(OperatorTripStatusFilter.IN_PROGRESS);
         query.From.Should().Be(new DateOnly(2026, 7, 29));
         query.To.Should().Be(new DateOnly(2026, 7, 30));
         query.Page.Should().Be(1);

@@ -61,7 +61,7 @@ public sealed class ListOperatorTripsQueryHandlerTests
             new ListOperatorTripsQuery(
                 operatorId,
                 " 51B–123_45 ",
-                TripStatus.IN_PROGRESS,
+                OperatorTripStatusFilter.IN_PROGRESS,
                 new DateOnly(2026, 7, 29),
                 new DateOnly(2026, 7, 30),
                 2,
