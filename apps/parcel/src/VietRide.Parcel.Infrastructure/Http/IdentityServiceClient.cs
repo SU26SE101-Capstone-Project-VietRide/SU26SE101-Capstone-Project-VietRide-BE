@@ -212,15 +212,28 @@ public sealed class IdentityServiceClient : IIdentityServiceClient
 
     private static ParcelNoShowPolicy ReadParcelNoShowPolicy(JsonElement json)
     {
-        if (!json.TryGetProperty("parcelNoShowPolicy", out var policy) || policy.ValueKind != JsonValueKind.Object)
+        if (!json.TryGetProperty("parcelNoShowPolicy", out var policy)
+            || policy.ValueKind == JsonValueKind.Null)
+        {
             return ParcelNoShowPolicy.Default;
+        }
 
-        var noShowFeePercent = policy.TryGetProperty("noShowFeePercent", out var fee) && fee.TryGetDecimal(out var feeValue)
-            ? feeValue
-            : ParcelNoShowPolicy.Default.NoShowFeePercent;
-        var additionalPaymentTimeoutMinutes = policy.TryGetProperty("additionalPaymentTimeoutMinutes", out var timeout) && timeout.TryGetInt32(out var timeoutValue) && timeoutValue > 0
-            ? timeoutValue
-            : ParcelNoShowPolicy.Default.AdditionalPaymentTimeoutMinutes;
+        if (policy.ValueKind != JsonValueKind.Object
+            || !policy.TryGetProperty("noShowFeePercent", out var fee)
+            || fee.ValueKind != JsonValueKind.Number
+            || !fee.TryGetDecimal(out var noShowFeePercent)
+            || noShowFeePercent < 0m
+            || noShowFeePercent > 100m
+            || !policy.TryGetProperty(
+                "additionalPaymentTimeoutMinutes",
+                out var timeout)
+            || timeout.ValueKind != JsonValueKind.Number
+            || !timeout.TryGetInt32(out var additionalPaymentTimeoutMinutes)
+            || additionalPaymentTimeoutMinutes < 0)
+        {
+            throw new JsonException(
+                "Identity parcelNoShowPolicy is malformed or out of range.");
+        }
 
         return new ParcelNoShowPolicy(noShowFeePercent, additionalPaymentTimeoutMinutes);
     }

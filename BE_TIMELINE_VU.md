@@ -341,21 +341,28 @@
 **Sprint goal**: Vehicle Substitution + Trip Disruption + Shuttle + Subscription/Invoice/Settlement complete.
 
 ### Day 31 — Mon 2026-07-06 — Parcel delivery confirmation + cancel ([SCV-110](https://hoangvutran088.atlassian.net/browse/SCV-110))
-- `deliveryToken` 48h generated at parcel UNLOAD
-- Email link `/public/parcels/confirm?token=` (no JWT needed, token is proof)
-- `POST /public/parcels/confirm` recipient ACCEPT/REJECT
+- Raw `deliveryToken` UUID v4 is generated in memory at delivery, while Parcel persists only its
+  SHA-256 hash/expiry history; the link is sent through Notification internal email and expires
+  after 48h
+- Frontend email link `${PUBLIC_APP_URL}/parcels/delivery/confirm?token=` (no JWT needed, token is proof)
+- Separate public mutations:
+  `POST /v1/parcels/delivery/confirm|reject|undo-reject`; retained authenticated
+  `confirm-delivery` aliases remain compatible
 - Reject undo within 15 min
-- Manual confirm endpoint for assistant/operator if no email (with audit note)
+- Manual confirm endpoint for assigned assistant/operator when no email or when an email/token
+  expires or remains unconfirmed after out-of-band verification (with audit note)
 - Hangfire: 7-day re-alert if no confirmation; expired token does NOT auto-confirm
 - **DoD**: recipient receives email → opens link → accepts → parcel DELIVERED; resend revokes old token
 - **Review**: expired token returns 400 `PARCEL_DELIVERY_TOKEN_EXPIRED`; reject + `POST /v1/parcels/delivery/undo-reject` within 15min reverts to `DELIVERED_PENDING_CONFIRM`
 
 ### Day 32 — Tue 2026-07-07 — Parcel cancel/return/transfer flows
-- Parcel auto-cancel after Trip cancel (with refund per parcelNoShowPolicy)
-- Operator manual cancel with refund choice
+- Parcel pre-load auto-cancel after Trip cancel refunds the outstanding amount actually collected;
+  `LOADED|IN_TRANSIT` instead require operator recovery without immediate refund/release
+- Operator manual cancel supports every pre-load status with `FULL|POLICY|NO` refund choice
 - PENDING_OPERATOR_ACTION status with 2h re-alert
 - RETURNED status for failed delivery returning to sender
-- Capacity counter release on each cancel state transition
+- Capacity release occurs only when pre-load cancellation, return, or atomic cross-Trip transfer
+  actually removes cargo from the source Trip
 - **DoD**: all parcel cancellation paths refund correctly; capacity released
 - **Review**: state machine completeness test (each transition documented + tested)
 
@@ -380,9 +387,10 @@
 ### Day 35 — Fri 2026-07-10 — Parcel transfer in substitution + Disrupted no-substitution
 - Parcel transfer: LOADED/IN_TRANSIT → PENDING_TRANSFER_CONFIRM on Trip_new
 - 30-min timeout → TRANSFER_ESCALATED, operator manual handle
-- DISRUPTED no-substitution path: `POST /operator/trips/{id}/disrupt-no-substitution`
+- DISRUPTED no-substitution path:
+  `POST /v1/operator/trips/{tripId}/disrupt-no-substitution`
 - Refund proportional to traveledRatio (use TripStop.distanceFromOriginKm or fallback stop order)
-- Floor 1000 VND on refund amount
+- Round to the nearest VND with `MidpointRounding.AwayFromZero`; no 1,000-VND floor
 - **DoD**: parcels transferred or escalated correctly; no-substitution refunds proportionally
 - **Review**: edge case — Trip with NO stop arrivals refunds 100%; partial completed refunds proportional
 
@@ -474,9 +482,13 @@
 - Cache hot queries (5 min Redis TTL), cache key bao gồm exact UTC range và contract version.
 - Bổ sung occupancy/cancellation/no-show analytics hoặc Excel chỉ trong phạm vi ticket Day 42/41;
   không backport vào Day 40.
-- Performance check: report endpoints respond <2s for typical period (1 month)
+- Performance check: 29-day cold and warm report calls each respond `<2s`.
+- Extended check: 92-day report through Gateway as `SYSTEM_ADMIN` returns `200`, includes all
+  20 seeded operators, reconciles exact totals, and does not time out.
+- Add a production index only when the corrected fixture/benchmark demonstrates a measured
+  bottleneck.
 - **DoD**: admin platform report endpoint stable; perf acceptable
-- **Review**: query 3-month period without timeout
+- **Review**: preserve duration/status artifacts for both 29-day and 92-day checks
 
 ### Day 43 — Wed 2026-07-22 — Reliability hardening: Outbox + Idempotency review ([SCV-131](https://hoangvutran088.atlassian.net/browse/SCV-131))
 - Outbox dead-letter handling: events failed > 5 retries land in OutboxDLQ table for admin review

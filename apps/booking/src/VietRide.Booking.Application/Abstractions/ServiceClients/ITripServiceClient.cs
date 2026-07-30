@@ -28,7 +28,8 @@ public sealed record TripSnapshot(
     Guid? DriverUserId = null,
     Guid? AssistantUserId = null,
     DateTimeOffset? DestinationArrivedAt = null,
-    DateTimeOffset? ActualDepartureTime = null);
+    DateTimeOffset? ActualDepartureTime = null,
+    double? TotalDistanceKm = null);
 
 /// <summary>Station snapshot embedded in <see cref="TripSnapshot"/>.</summary>
 public sealed record TripStationSnapshot(
@@ -46,7 +47,7 @@ public sealed record TripStopSnapshot(
     bool AllowPickup,
     bool AllowDropoff,
     DateTimeOffset EstimatedArrivalTime,
-    double DistanceFromOriginKm,
+    double? DistanceFromOriginKm,
     long? FareFromThisStop,
     bool IsActive = true,
     string? Status = null,

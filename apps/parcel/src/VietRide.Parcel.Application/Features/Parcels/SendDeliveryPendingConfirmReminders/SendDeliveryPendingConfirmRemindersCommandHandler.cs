@@ -11,8 +11,8 @@ namespace VietRide.Parcel.Application.Features.Parcels.SendDeliveryPendingConfir
 public sealed class SendDeliveryPendingConfirmRemindersCommandHandler
     : IRequestHandler<SendDeliveryPendingConfirmRemindersCommand, int>
 {
-    private static readonly TimeSpan DeliveryPendingConfirmWindow = TimeSpan.FromDays(7);
-    private static readonly TimeSpan ReminderInterval = TimeSpan.FromHours(23);
+    private static readonly TimeSpan ExpiredTokenReminderDelay = TimeSpan.FromDays(7);
+    private static readonly TimeSpan ReminderInterval = TimeSpan.FromDays(7);
     private const int MaxBatch = 200;
 
     private readonly IParcelRepository _parcelRepository;
@@ -43,8 +43,8 @@ public sealed class SendDeliveryPendingConfirmRemindersCommandHandler
         await _unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {
-            var parcels = await _parcelRepository.TryBulkReissueDeliveryPendingConfirmRemindersAsync(
-                now.Subtract(DeliveryPendingConfirmWindow),
+            var parcels = await _parcelRepository.TryBulkClaimDeliveryConfirmationRemindersAsync(
+                now.Subtract(ExpiredTokenReminderDelay),
                 now.Subtract(ReminderInterval),
                 now,
                 MaxBatch,
@@ -52,10 +52,21 @@ public sealed class SendDeliveryPendingConfirmRemindersCommandHandler
 
             foreach (var parcel in parcels)
             {
+                var eventId = Guid.NewGuid();
                 await ParcelOutboxEvents.EnqueueAsync(
                     _outbox,
-                    ParcelOutboxEvents.DeliveredPendingConfirm,
-                    BuildReminderPayload(parcel),
+                    eventId,
+                    ParcelOutboxEvents.DeliveryConfirmationRealerted,
+                    new
+                    {
+                        eventId,
+                        occurredAt = now,
+                        parcelId = parcel.ParcelId,
+                        parcelCode = parcel.ParcelCode,
+                        operatorId = parcel.OperatorId,
+                        tripId = parcel.TripId,
+                        expiredAt = parcel.ExpiredAt,
+                    },
                     cancellationToken);
             }
 
@@ -76,26 +87,5 @@ public sealed class SendDeliveryPendingConfirmRemindersCommandHandler
             await _unitOfWork.RollbackAsync(cancellationToken);
             throw;
         }
-    }
-
-    private static Dictionary<string, object?> BuildReminderPayload(ParcelEventSnapshot parcel)
-    {
-        var payload = new Dictionary<string, object?>
-        {
-            ["parcelId"] = parcel.ParcelId,
-            ["parcelCode"] = parcel.ParcelCode,
-            ["operatorId"] = parcel.OperatorId,
-            ["tripId"] = parcel.TripId,
-            ["deliveryToken"] = parcel.DeliveryToken,
-            ["deliveryTokenExpiresAt"] = parcel.DeliveryTokenExpiresAt,
-        };
-
-        if (parcel.RecipientUserId.HasValue)
-        {
-            payload["userId"] = parcel.RecipientUserId.Value;
-            payload["recipientUserIds"] = new[] { parcel.RecipientUserId.Value };
-        }
-
-        return payload;
     }
 }

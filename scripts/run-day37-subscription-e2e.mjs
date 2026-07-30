@@ -6,6 +6,8 @@ import { SignJWT, importPKCS8 } from 'jose';
 
 const root = process.cwd();
 const useDevelopmentStack = process.env.DAY37_E2E_USE_DEV_STACK === '1';
+const manageIsolatedStack =
+  !useDevelopmentStack && process.env.DAY37_E2E_SKIP_COMPOSE !== '1';
 const gatewayBaseUrl =
   process.env.DAY37_GATEWAY_BASE_URL ||
   (useDevelopmentStack ? 'http://localhost:3000' : 'http://localhost:55300');
@@ -33,8 +35,11 @@ const e2eEnv = useDevelopmentStack
       PAYMENT_PORT: '55004',
       PARCEL_PORT: '55005',
       GATEWAY_PORT: '55300',
+      VNPAY_HASH_SECRET: 'day37-e2e-vnpay-hash-secret-not-for-production',
     };
-const postgresContainer = useDevelopmentStack ? 'vietride_postgres' : 'day37-e2e-postgres';
+const postgresContainer =
+  process.env.DAY37_POSTGRES_CONTAINER ||
+  (useDevelopmentStack ? 'vietride_postgres' : 'day37-e2e-postgres');
 const operatorId = '37000000-0000-4000-8000-000000000001';
 const starterPlanId = '37000000-0000-4000-8000-000000000011';
 const premiumPlanId = '37000000-0000-4000-8000-000000000012';
@@ -95,10 +100,11 @@ function sql(statement, database = 'vietride_identity') {
 
 function waitFor(url, timeoutMs = 180000) {
   const deadline = Date.now() + timeoutMs;
+  const curlCommand = process.platform === 'win32' ? 'curl.exe' : 'curl';
   while (Date.now() < deadline) {
     const probe = spawnSync(
-      'node',
-      ['-e', `fetch('${url}').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))`],
+      curlCommand,
+      ['--fail', '--silent', '--show-error', '--max-time', '5', url],
       {
         cwd: root,
         stdio: 'ignore',
@@ -195,9 +201,10 @@ function signVnPay(parameters) {
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
     .join('&');
-  if (!process.env.VNPAY_HASH_SECRET)
+  const secret = process.env.VNPAY_HASH_SECRET || e2eEnv.VNPAY_HASH_SECRET;
+  if (!secret)
     throw new Error('VNPAY_HASH_SECRET is required for the VNPay E2E harness.');
-  return createHmac('sha512', process.env.VNPAY_HASH_SECRET).update(canonical).digest('hex');
+  return createHmac('sha512', secret).update(canonical).digest('hex');
 }
 
 function createIpn(paymentRedirectUrl, responseCode, transactionNo) {
@@ -224,7 +231,7 @@ async function sendSubscriptionIpn(paymentRedirectUrl, responseCode, transaction
 }
 
 async function runHarness() {
-  if (!useDevelopmentStack) {
+  if (manageIsolatedStack) {
     run('docker', [...compose, 'down', '-v', '--remove-orphans'], { env: e2eEnv });
     run('docker', [...compose, '--parallel', '1', 'up', '-d', '--build', 'gateway'], {
       env: e2eEnv,
@@ -233,7 +240,11 @@ async function runHarness() {
   waitFor(`${gatewayBaseUrl}/health`);
   waitFor(`${gatewayBaseUrl}/ready`);
   record(
-    useDevelopmentStack ? 'development compose health' : 'isolated compose health',
+    useDevelopmentStack
+      ? 'development compose health'
+      : manageIsolatedStack
+        ? 'isolated compose health'
+        : 'externally managed isolated compose health',
     true,
     gatewayBaseUrl,
   );
@@ -280,7 +291,7 @@ async function runHarness() {
   record('upgrade idempotency', true, `payment=${firstUpgrade.json.data.paymentId}`);
 
   const upgradeAttemptId = firstUpgrade.json.data.upgradeAttemptId;
-  const failedIpn = await sendSubscriptionIpn(
+  await sendSubscriptionIpn(
     firstUpgrade.json.data.paymentRedirectUrl,
     '24',
     '3700000001',
@@ -406,7 +417,7 @@ try {
   failed = error;
   record('harness', false, error instanceof Error ? error.message : String(error));
 } finally {
-  if (!useDevelopmentStack) {
+  if (manageIsolatedStack) {
     try {
       run('docker', [...compose, 'down', '-v', '--remove-orphans'], { env: e2eEnv });
       record('isolated compose cleanup', true, 'containers and volumes removed');

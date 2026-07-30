@@ -68,6 +68,12 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
         CancellationToken ct = default)
         => throw new NotSupportedException("Trip-cancellation booking lookup is not implemented by this repository.");
 
+    Task<IReadOnlyList<BookingEntity>> GetDisruptionBookingsForUpdateAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Trip-disruption booking lookup is not implemented by this repository.");
+
     Task<bool> HasOutboxEventAsync(
         string eventType,
         Guid eventId,
@@ -192,7 +198,7 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
         CancellationToken ct = default);
 
     /// <summary>
-    /// Status-guarded CANCELLED -> REFUNDED transition.
+    /// Status-guarded CANCELLED/DISRUPTED -> REFUNDED transition.
     /// Returns true only when this call changed the row.
     /// </summary>
     Task<bool> TryMarkCancelledRefundedAsync(

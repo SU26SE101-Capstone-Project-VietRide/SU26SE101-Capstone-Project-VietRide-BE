@@ -31,16 +31,16 @@ Cross-checked entity counts per service against v6 Section 8 "Entity Requirement
 
 | Service | Expected (v6) | Found (schema.sql) | Status |
 |---|---|---|---|
-| identity-user | 9 (User, RefreshToken, EmailVerificationToken, OAuthIdentity, Operator, SubscriptionPlan, OperatorSubscription, ActivityLog, UserDevice) | 9 | ✅ |
-| booking | 9 (Booking, BookingPendingAction, Passenger, BookingTransfer, BookingStats, Voucher, VoucherUsage, OperatorVoucherConsent, OutboxEvent) | 9 | ✅ |
-| trip-route-vehicle | 20 (Station, OperatorStation, Stop, Route, RouteStop, RouteStopFareTemplate, AlternativeRoute, AlternativeRouteStop, VehicleType, Vehicle, Trip, TripSeat, TripStop, TripStopFare, DriverSchedule, TripGenerationSkipLog, ShuttleTrip, ShuttlePassenger, Incident, OutboxEvent) | 20 | ✅ |
-| payment-wallet | 13 (Payment, TopUpRequest, Wallet, WalletTransaction, Invoice, PlatformWallet, PlatformWalletTransaction, OperatorLedgerEntry, OperatorWallet, OperatorWalletTransaction, OperatorTripSettlement, RefundFailureLog, OutboxEvent) | 13 | ✅ |
-| parcel | 4 (Parcel, ParcelRouteFare, ParcelStats, OutboxEvent) | 4 | ✅ |
-| tracking | 2 (GpsTrail, OutboxEvent) | 2 | ✅ |
-| notification | 2 (Notification, NotificationDelivery — no OutboxEvent per spec) | 2 | ✅ |
-| rag-ai | 5 (KnowledgeDocument, KnowledgeChunk, RagConversation, RagMessage, OutboxEvent) | 5 | ✅ |
+| identity-user | 9 domain entities plus reliability/support tables | 16 | ✅ |
+| booking | 9 domain entities plus reliability/reporting support tables | 19 | ✅ |
+| trip-route-vehicle | 20 domain entities plus reliability/reporting support tables | 28 | ✅ |
+| payment-wallet | 13 domain entities plus reliability/reporting support tables | 16 | ✅ |
+| parcel | 4 original domain entities plus token, cargo-recovery, policy, reliability and reporting support tables | 11 | ✅ |
+| tracking | 2 domain entities plus reliability support | 3 | ✅ |
+| notification | 2 domain entities plus delivery/reliability support | 4 | ✅ |
+| rag-ai | 5 domain entities plus reliability/support tables | 9 | ✅ |
 
-**Total tables: 64.** Mọi entity trong v6 đều có CREATE TABLE. Không có entity invented ngoài v6. Junction tables (RouteStop, OperatorStation, RouteStopFareTemplate, AlternativeRouteStop, TripStop, TripStopFare, ParcelRouteFare, OperatorVoucherConsent) đầy đủ.
+**Total tables: 106.** Mọi domain entity trong v6 đều có `CREATE TABLE`; additional tables are accepted reliability, idempotency, history, projection, policy and operational-recovery support. Junction tables (RouteStop, OperatorStation, RouteStopFareTemplate, AlternativeRouteStop, TripStop, TripStopFare, ParcelRouteFare, OperatorVoucherConsent) đầy đủ.
 
 ### 2. Field/Column Completeness — ✅ PASS
 
@@ -53,7 +53,7 @@ Cross-checked critical fields per entity:
 - **Trip:** source enum 3 values (incl VEHICLE_SUBSTITUTION), hasSubstitution flag, 2 cargo counters (reservedParcelWeightKg + totalLoadedWeightKg), estimatedPassengerLuggageKg snapshot ✅
 - **TripStop:** allowPickup/allowDropoff snapshot, distanceFromOriginKm snapshot, estimatedArrivalTime static ✅
 - **Vehicle.seatLayoutJson JSONB:** comment reference v6 Section 6.1 contract ✅
-- **Parcel:** 40+ field — sender NOT NULL, recipient nullable, dropoffStopId nullable, 3 weight fields, deposit + additional + additionalPaymentId, delivery token triple, review fields (EXTRA_LARGE), transfer fields, return fields, full timestamps ✅
+- **Parcel:** 40+ field — sender NOT NULL, recipient nullable, dropoffStopId nullable, cargo/settlement fields, hashed `ParcelDeliveryToken` history (no plaintext token columns), dedicated durable Day-32 cargo-recovery operation, review fields (EXTRA_LARGE), durable transfer-confirmation claim, return fields, full timestamps ✅
 - **PlatformWallet / PlatformWalletTransaction / OperatorWallet / OperatorWalletTransaction / OperatorTripSettlement** (v1 wallet model): tất cả field theo v6 Section 4.6 spec ✅
 - **OperatorLedgerEntry:** đã có `trip_id` nullable, **không có** balance_before/after (đúng v6 audit-only sau wallet rewrite) ✅
 - **RAG: KnowledgeChunk.embedding vector(1536)** với IVFFlat cosine index ✅

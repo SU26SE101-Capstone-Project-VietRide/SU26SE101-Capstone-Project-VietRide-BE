@@ -10,13 +10,17 @@ import {
   BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY,
   BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY,
   INVOICE_ISSUED_ROUTING_KEY,
+  PARCEL_DELIVERED_PENDING_CONFIRM_ROUTING_KEY,
+  PARCEL_DELIVERY_CONFIRMATION_REALERTED_ROUTING_KEY,
   PARCEL_LOADED_ROUTING_KEY,
   PARCEL_DELIVERY_CONFIRMED_ROUTING_KEY,
   PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY,
+  PARCEL_PENDING_OPERATOR_ACTION_REALERTED_ROUTING_KEY,
   PARCEL_REVIEW_APPROVED_ROUTING_KEY,
   PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY,
   PARCEL_SUBSCRIPTION_OPERATOR_QUEUE_BINDINGS,
   SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY,
+  TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY,
 } from './parcel-subscription-operator-events.constants';
 import { ParcelSubscriptionOperatorEventsConsumer } from './parcel-subscription-operator-events.consumer';
 
@@ -99,7 +103,140 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
         expect.objectContaining({ routingKey: PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY }),
         expect.objectContaining({ routingKey: PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY }),
         expect.objectContaining({ routingKey: BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY }),
+        expect.objectContaining({
+          routingKey: PARCEL_DELIVERY_CONFIRMATION_REALERTED_ROUTING_KEY,
+        }),
+        expect.objectContaining({
+          routingKey: PARCEL_PENDING_OPERATOR_ACTION_REALERTED_ROUTING_KEY,
+        }),
       ]),
+    );
+    expect(TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY).toBe('trip.trip.vehicle_substituted');
+    expect(PARCEL_SUBSCRIPTION_OPERATOR_QUEUE_BINDINGS).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ routingKey: 'trip.vehicle_substituted' })]),
+    );
+  });
+
+  it('rejects delivered-pending-confirm secrets without persisting a notification', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+
+    await consumer.handle(
+      PARCEL_DELIVERED_PENDING_CONFIRM_ROUTING_KEY,
+      {
+        eventId: PARCEL_EVENT_ID,
+        occurredAt: '2026-07-30T03:00:00Z',
+        parcelId: PARCEL_ID,
+        parcelCode: 'VR-PCL-20260730-ABCDEFGH',
+        operatorId: OPERATOR_ID,
+        tripId: TRIP_ID,
+        userId: USER_ID,
+        deliveryToken: 'forbidden-secret',
+      },
+      createMessage(PARCEL_EVENT_ID),
+    );
+
+    expect(notificationsService.createNotification).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      PARCEL_DELIVERED_PENDING_CONFIRM_ROUTING_KEY,
+      PARCEL_EVENT_ID,
+    );
+  });
+
+  it('deduplicates operator re-alert replay by canonical eventId across transport ids', async () => {
+    idempotency.begin.mockResolvedValueOnce('acquired').mockResolvedValueOnce('duplicate');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([USER_ID]);
+    notificationsService.createNotification.mockResolvedValue(
+      createNotification(NotificationType.PARCEL_DELIVERED_PENDING_CONFIRM),
+    );
+    const payload = {
+      eventId: PARCEL_EVENT_ID,
+      occurredAt: '2026-07-30T03:00:00Z',
+      parcelId: PARCEL_ID,
+      parcelCode: 'VR-PCL-20260730-ABCDEFGH',
+      operatorId: OPERATOR_ID,
+      tripId: TRIP_ID,
+      expiredAt: '2026-07-23T03:00:00Z',
+    };
+
+    await consumer.handle(
+      PARCEL_DELIVERY_CONFIRMATION_REALERTED_ROUTING_KEY,
+      payload,
+      createMessage('transport-message-1'),
+    );
+    await consumer.handle(
+      PARCEL_DELIVERY_CONFIRMATION_REALERTED_ROUTING_KEY,
+      payload,
+      createMessage('transport-message-2'),
+    );
+
+    expect(idempotency.begin).toHaveBeenNthCalledWith(
+      1,
+      PARCEL_DELIVERY_CONFIRMATION_REALERTED_ROUTING_KEY,
+      PARCEL_EVENT_ID,
+      undefined,
+    );
+    expect(idempotency.begin).toHaveBeenNthCalledWith(
+      2,
+      PARCEL_DELIVERY_CONFIRMATION_REALERTED_ROUTING_KEY,
+      PARCEL_EVENT_ID,
+      undefined,
+    );
+    expect(notificationsService.createNotification).toHaveBeenCalledTimes(1);
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.PARCEL_DELIVERED_PENDING_CONFIRM,
+        dedupeKey: `${PARCEL_DELIVERY_CONFIRMATION_REALERTED_ROUTING_KEY}:${PARCEL_EVENT_ID}:${USER_ID}:${NotificationType.PARCEL_DELIVERED_PENDING_CONFIRM}`,
+      }),
+    );
+  });
+
+  it('deduplicates pending-operator-action re-alert replay by canonical eventId', async () => {
+    idempotency.begin.mockResolvedValueOnce('acquired').mockResolvedValueOnce('duplicate');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([USER_ID]);
+    notificationsService.createNotification.mockResolvedValue(
+      createNotification(NotificationType.PARCEL_IN_TRANSIT),
+    );
+    const payload = {
+      eventId: PARCEL_EVENT_ID,
+      occurredAt: '2026-07-30T03:00:00Z',
+      parcelId: PARCEL_ID,
+      parcelCode: 'VR-PCL-20260730-ABCDEFGH',
+      operatorId: OPERATOR_ID,
+      userId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      tripId: TRIP_ID,
+    };
+
+    await consumer.handle(
+      PARCEL_PENDING_OPERATOR_ACTION_REALERTED_ROUTING_KEY,
+      payload,
+      createMessage('transport-message-1'),
+    );
+    await consumer.handle(
+      PARCEL_PENDING_OPERATOR_ACTION_REALERTED_ROUTING_KEY,
+      payload,
+      createMessage('transport-message-2'),
+    );
+
+    expect(idempotency.begin).toHaveBeenNthCalledWith(
+      1,
+      PARCEL_PENDING_OPERATOR_ACTION_REALERTED_ROUTING_KEY,
+      PARCEL_EVENT_ID,
+      undefined,
+    );
+    expect(idempotency.begin).toHaveBeenNthCalledWith(
+      2,
+      PARCEL_PENDING_OPERATOR_ACTION_REALERTED_ROUTING_KEY,
+      PARCEL_EVENT_ID,
+      undefined,
+    );
+    expect(notificationsService.createNotification).toHaveBeenCalledTimes(1);
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.PARCEL_IN_TRANSIT,
+        dedupeKey: `${PARCEL_PENDING_OPERATOR_ACTION_REALERTED_ROUTING_KEY}:${PARCEL_EVENT_ID}:${USER_ID}:${NotificationType.PARCEL_IN_TRANSIT}`,
+      }),
     );
   });
 

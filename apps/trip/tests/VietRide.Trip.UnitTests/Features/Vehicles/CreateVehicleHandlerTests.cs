@@ -49,6 +49,54 @@ public sealed class CreateVehicleHandlerTests
     }
 
     [Fact]
+    public async Task Handle_WhenShuttleModuleIsDisabled_UsesGeneralSubscriptionGuard()
+    {
+        var operatorId = Guid.NewGuid();
+        var vehicleType = VehicleType.Create("STANDARD_BUS", "Standard bus", 20, 2, true);
+        bool? requireShuttleModule = null;
+        var identityClient = TestProxy<IIdentityInternalClient>.Create((method, args) =>
+        {
+            if (method.Name == nameof(IIdentityInternalClient.ValidateOperatorSubscriptionCanWriteAsync))
+            {
+                requireShuttleModule = Assert.IsType<bool>(args![1]);
+                return requireShuttleModule.Value
+                    ? new OperatorWriteEligibilityValidation(
+                        false,
+                        403,
+                        "SUBSCRIPTION_MODULE_DISABLED",
+                        "Shuttle module is disabled.")
+                    : OperatorWriteEligibilityValidation.Allowed();
+            }
+
+            return OperatorWriteEligibilityValidation.Allowed();
+        });
+        var vehicleRepository = TestProxy<IVehicleRepository>.Create((method, _) => method.Name switch
+        {
+            nameof(IVehicleRepository.LicensePlateExistsAsync) => false,
+            nameof(IVehicleRepository.TryAddAsync) => true,
+            _ => null,
+        });
+        var handler = new CreateVehicleHandler(
+            identityClient,
+            vehicleRepository,
+            VehicleTypeRepository(vehicleType));
+
+        var result = await handler.Handle(
+            new CreateVehicleCommand(
+                operatorId,
+                vehicleType.Id,
+                "51A-12345",
+                VehicleTestData.CreateSeatLayout(),
+                2,
+                null,
+                null),
+            CancellationToken.None);
+
+        Assert.Equal(operatorId, result.OperatorId);
+        Assert.Equal(false, requireShuttleModule);
+    }
+
+    [Fact]
     public async Task Handle_WhenVehicleTypeIsMissing_ThrowsExpectedCode()
     {
         var handler = new CreateVehicleHandler(

@@ -244,11 +244,7 @@ public sealed class Trip : BaseEntity<Guid>
 
     public void Disrupt(DateTimeOffset disruptedAt, string reason)
     {
-        if (Status is TripStatus.COMPLETED or TripStatus.CANCELLED)
-        {
-            throw new InvalidOperationException("Completed or cancelled trips cannot be disrupted.");
-        }
-
+        EnsureStatus(TripStatus.IN_PROGRESS, nameof(Disrupt));
         DisruptedAt = disruptedAt;
         DisruptionReason = ValidateRequired(reason, nameof(reason));
         Status = TripStatus.DISRUPTED;

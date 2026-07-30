@@ -6,7 +6,6 @@ using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Idempotency;
 using VietRide.Shared.Web.Middleware;
 using VietRide.Trip.Api.Controllers.Requests;
-using VietRide.Trip.Api.Filters;
 using VietRide.Trip.Application.Features.Internal.Trips.Cargo;
 using VietRide.Trip.Application.Features.Trips.EditTrip;
 using VietRide.Trip.Application.Features.Trips.GetTripDetail;
@@ -107,12 +106,13 @@ public sealed class OperatorTripsController : ControllerBase
     }
 
     [HttpPost("{tripId:guid}/disrupt-no-substitution")]
-    [RequireIdempotencyKey]
+    [RequireIdempotency]
     [Authorize(Roles = OperatorWriteRoles)]
     [ProducesResponseType(typeof(ApiResponse<DisruptNoSubstitutionResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<DisruptNoSubstitutionResponse>> DisruptNoSubstitutionAsync(
         Guid tripId,
         [FromBody] DisruptNoSubstitutionRequest request,

@@ -182,9 +182,15 @@ public sealed class AssistantParcelsController : ControllerBase
         var operatorId = CurrentUserClaims.GetOperatorId(User)
             ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
         var userId = CurrentUserClaims.GetUserId(User);
+        var role = CurrentUserClaims.GetRole(User);
 
         var result = await _mediator.Send(
-            new ManualConfirmDeliveryCommand(parcelId, userId, operatorId, request.Note),
+            new ManualConfirmDeliveryCommand(
+                parcelId,
+                userId,
+                operatorId,
+                request.ResolveNote(),
+                role),
             cancellationToken);
 
         return Ok(result);

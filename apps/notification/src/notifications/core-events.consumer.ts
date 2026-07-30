@@ -9,6 +9,7 @@ import {
 } from './core-event-notification.mapper';
 import {
   BOOKING_CANCELLED_ROUTING_KEY,
+  BOOKING_DISRUPTED_ROUTING_KEY,
   CORE_EVENT_QUEUE_BINDINGS,
   RABBITMQ_PREFETCH_ONE,
 } from './core-events.constants';
@@ -49,11 +50,10 @@ export class CoreEventsConsumer implements OnModuleInit {
     payload: unknown,
     raw: ConsumeMessage,
   ): Promise<void> {
-    const brokerMessageId = getMessageId(raw);
-    if (!brokerMessageId) {
+    const messageId = resolveDedupeIdentity(routingKey, payload, getMessageId(raw));
+    if (!messageId) {
       throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
     }
-    const messageId = resolveDedupeIdentity(routingKey, payload, brokerMessageId);
 
     const processingState = await this.idempotency.begin(routingKey, messageId, raw.content);
     if (processingState === 'duplicate') {
@@ -102,8 +102,12 @@ export class CoreEventsConsumer implements OnModuleInit {
 function resolveDedupeIdentity(
   routingKey: CoreEventRoutingKey,
   payload: unknown,
-  brokerMessageId: string,
-): string {
+  brokerMessageId: string | undefined,
+): string | undefined {
+  if (routingKey === BOOKING_DISRUPTED_ROUTING_KEY) {
+    return getCanonicalEventId(payload) ?? brokerMessageId;
+  }
+
   if (routingKey !== BOOKING_CANCELLED_ROUTING_KEY) {
     return brokerMessageId;
   }
@@ -112,6 +116,15 @@ function resolveDedupeIdentity(
   return 'eventId' in cancellationEvent
     ? cancellationEvent.eventId
     : cancellationEvent.bookingId;
+}
+
+function getCanonicalEventId(payload: unknown): string | undefined {
+  if (typeof payload !== 'object' || payload === null || !('eventId' in payload)) {
+    return undefined;
+  }
+
+  const eventId = (payload as { eventId?: unknown }).eventId;
+  return typeof eventId === 'string' && eventId.trim().length > 0 ? eventId.trim() : undefined;
 }
 
 function getMessageId(raw: ConsumeMessage): string | undefined {

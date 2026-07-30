@@ -40,7 +40,7 @@ public sealed class CreateRouteHandler : IRequestHandler<CreateRouteCommand, Rou
         await StopWriteEligibilityGuard.ValidateOperatorSubscriptionCanWriteAsync(
             identityInternalClient,
             request.OperatorId,
-            requireShuttleModule: true,
+            requireShuttleModule: false,
             cancellationToken);
 
         await ValidateStationExistsAsync(request.OriginStationId, cancellationToken);

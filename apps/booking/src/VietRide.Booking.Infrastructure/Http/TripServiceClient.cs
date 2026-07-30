@@ -18,6 +18,14 @@ namespace VietRide.Booking.Infrastructure.Http;
 /// </summary>
 public sealed class TripServiceClient : ITripServiceClient
 {
+    private static readonly HashSet<string> OperationalStopStatuses =
+        new(StringComparer.Ordinal)
+        {
+            "PENDING",
+            "ARRIVED",
+            "SKIPPED",
+        };
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -52,7 +60,10 @@ public sealed class TripServiceClient : ITripServiceClient
                 || snapshot.TripId != tripId
                 || string.IsNullOrWhiteSpace(snapshot.Status)
                 || snapshot.Stops is null
-                || snapshot.Stops.Any(stop => stop.StopId == Guid.Empty || string.IsNullOrWhiteSpace(stop.Status)))
+                || snapshot.Stops.Any(stop =>
+                    stop.StopId == Guid.Empty
+                    || stop.Status is null
+                    || !OperationalStopStatuses.Contains(stop.Status)))
             {
                 throw new BookingUpstreamUnavailableException("Trip operational snapshot is malformed.");
             }

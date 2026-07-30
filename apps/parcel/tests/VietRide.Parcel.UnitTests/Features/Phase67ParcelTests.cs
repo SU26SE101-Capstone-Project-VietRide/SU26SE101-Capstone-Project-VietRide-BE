@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using NSubstitute;
+using VietRide.Parcel.Application.Abstractions.Caching;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Features.Parcels;
@@ -20,12 +21,14 @@ using VietRide.Parcel.Application.Features.Parcels.RejectDelivery;
 using VietRide.Parcel.Application.Features.Parcels.TripEvents;
 using VietRide.Parcel.Application.Features.Parcels.UndoRejectDelivery;
 using VietRide.Parcel.Application.Features.Parcels.Unload;
+using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Parcel.Infrastructure.DependencyInjection;
 using VietRide.Parcel.Infrastructure.Messaging;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Shared.Messaging.Abstractions;
@@ -119,8 +122,6 @@ public sealed class Phase67ParcelTests
             Arg.Any<CancellationToken>());
         await repo.DidNotReceive().TryMarkDeliveredPendingConfirmAsync(
             Arg.Any<Guid>(),
-            Arg.Any<Guid>(),
-            Arg.Any<DateTimeOffset>(),
             Arg.Any<IReadOnlyCollection<string>?>(),
             Arg.Any<DateTimeOffset>(),
             Arg.Any<CancellationToken>());
@@ -268,9 +269,18 @@ public sealed class Phase67ParcelTests
     public async Task ConfirmDelivery_InvalidToken_Returns400Code()
     {
         var repo = Substitute.For<IParcelRepository>();
-        repo.FindByDeliveryTokenAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((ParcelEntity?)null);
+        var deliveryTokens = Substitute.For<IParcelDeliveryTokenRepository>();
+        deliveryTokens.FindByTokenHashAsync(
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>())
+            .Returns((ParcelDeliveryToken?)null);
 
-        var handler = new ConfirmDeliveryCommandHandler(repo, Outbox(), Stats());
+        var handler = new ConfirmDeliveryCommandHandler(
+            repo,
+            deliveryTokens,
+            Outbox(),
+            Stats(),
+            AllowedDeliveryRateLimiter());
         var act = () => handler.Handle(new ConfirmDeliveryCommand(Guid.NewGuid(), "127.0.0.1"), default);
 
         await act.Should().ThrowAsync<BadRequestException>()
@@ -278,14 +288,51 @@ public sealed class Phase67ParcelTests
     }
 
     [Fact]
+    public async Task ConfirmDelivery_RateLimitUsesOnlyTokenHashAndStopsBeforeLookup()
+    {
+        var rawToken = Guid.NewGuid();
+        var repo = Substitute.For<IParcelRepository>();
+        var deliveryTokens = Substitute.For<IParcelDeliveryTokenRepository>();
+        var rateLimiter = Substitute.For<IDeliveryConfirmationRateLimiter>();
+        rateLimiter.TryAcquireAsync(
+                DeliveryTokenHasher.Hash(rawToken),
+                Arg.Any<CancellationToken>())
+            .Returns(false);
+        var handler = new ConfirmDeliveryCommandHandler(
+            repo,
+            deliveryTokens,
+            Outbox(),
+            Stats(),
+            rateLimiter);
+
+        var act = () => handler.Handle(
+            new ConfirmDeliveryCommand(rawToken, "127.0.0.1"),
+            default);
+
+        await act.Should().ThrowAsync<TooManyRequestsException>()
+            .Where(e => e.ErrorCode == "RATE_LIMITED");
+        await deliveryTokens.DidNotReceive().FindByTokenHashAsync(
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task ConfirmDelivery_WrongStatus_ReturnsParcelNotPendingConfirm400Code()
     {
         var token = Guid.NewGuid();
-        var parcel = CreateParcel(ParcelStatus.PENDING, token, DateTimeOffset.UtcNow.AddHours(1));
+        var parcel = CreateParcel(ParcelStatus.PENDING);
+        var (deliveryTokens, deliveryToken) = DeliveryTokens(
+            token,
+            DateTimeOffset.UtcNow.AddHours(1));
         var repo = Substitute.For<IParcelRepository>();
-        repo.FindByDeliveryTokenAsync(token, Arg.Any<CancellationToken>()).Returns(parcel);
+        repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
 
-        var handler = new ConfirmDeliveryCommandHandler(repo, Outbox(), Stats());
+        var handler = new ConfirmDeliveryCommandHandler(
+            repo,
+            deliveryTokens,
+            Outbox(),
+            Stats(),
+            AllowedDeliveryRateLimiter());
         var act = () => handler.Handle(new ConfirmDeliveryCommand(token, "127.0.0.1"), default);
 
         await act.Should().ThrowAsync<BadRequestException>()
@@ -296,13 +343,26 @@ public sealed class Phase67ParcelTests
     public async Task ConfirmDelivery_HappyPath_ConfirmsDelivery()
     {
         var token = Guid.NewGuid();
-        var parcel = CreateParcel(ParcelStatus.DELIVERED_PENDING_CONFIRM, token, DateTimeOffset.UtcNow.AddHours(1));
+        var parcel = CreateParcel(ParcelStatus.DELIVERED_PENDING_CONFIRM);
+        var (deliveryTokens, deliveryToken) = DeliveryTokens(
+            token,
+            DateTimeOffset.UtcNow.AddHours(1));
         var repo = Substitute.For<IParcelRepository>();
-        repo.FindByDeliveryTokenAsync(token, Arg.Any<CancellationToken>()).Returns(parcel);
-        repo.TryConfirmDeliveryAsync(ParcelId, token, "127.0.0.1", Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+        repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
+        repo.TryConfirmDeliveryAsync(ParcelId, deliveryToken.Id, "127.0.0.1", Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(Snapshot(ParcelStatus.DELIVERY_CONFIRMED));
+        deliveryTokens.RevokeAsync(
+                deliveryToken.Id,
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(true);
 
-        var handler = new ConfirmDeliveryCommandHandler(repo, Outbox(), Stats());
+        var handler = new ConfirmDeliveryCommandHandler(
+            repo,
+            deliveryTokens,
+            Outbox(),
+            Stats(),
+            AllowedDeliveryRateLimiter());
         var result = await handler.Handle(new ConfirmDeliveryCommand(token, "127.0.0.1"), default);
 
         result.Status.Should().Be("DELIVERY_CONFIRMED");
@@ -313,11 +373,19 @@ public sealed class Phase67ParcelTests
     public async Task RejectDelivery_WrongStatus_ReturnsParcelNotPendingConfirm400Code()
     {
         var token = Guid.NewGuid();
-        var parcel = CreateParcel(ParcelStatus.DELIVERY_CONFIRMED, token, DateTimeOffset.UtcNow.AddHours(1));
+        var parcel = CreateParcel(ParcelStatus.DELIVERY_CONFIRMED);
+        var (deliveryTokens, _) = DeliveryTokens(
+            token,
+            DateTimeOffset.UtcNow.AddHours(1));
         var repo = Substitute.For<IParcelRepository>();
-        repo.FindByDeliveryTokenAsync(token, Arg.Any<CancellationToken>()).Returns(parcel);
+        repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
 
-        var handler = new RejectDeliveryCommandHandler(repo, Outbox(), Stats());
+        var handler = new RejectDeliveryCommandHandler(
+            repo,
+            deliveryTokens,
+            Outbox(),
+            Stats(),
+            AllowedDeliveryRateLimiter());
         var act = () => handler.Handle(new RejectDeliveryCommand(token, "damaged"), default);
 
         await act.Should().ThrowAsync<BadRequestException>()
@@ -328,14 +396,22 @@ public sealed class Phase67ParcelTests
     public async Task RejectDelivery_HappyPath_ReturnsCanUndoUntil()
     {
         var token = Guid.NewGuid();
-        var parcel = CreateParcel(ParcelStatus.DELIVERED_PENDING_CONFIRM, token, DateTimeOffset.UtcNow.AddHours(1));
+        var parcel = CreateParcel(ParcelStatus.DELIVERED_PENDING_CONFIRM);
+        var (deliveryTokens, deliveryToken) = DeliveryTokens(
+            token,
+            DateTimeOffset.UtcNow.AddHours(1));
         var repo = Substitute.For<IParcelRepository>();
-        repo.FindByDeliveryTokenAsync(token, Arg.Any<CancellationToken>()).Returns(parcel);
-        repo.TryRejectDeliveryAsync(ParcelId, token, "damaged", Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+        repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
+        repo.TryRejectDeliveryAsync(ParcelId, deliveryToken.Id, "damaged", Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(Snapshot(ParcelStatus.DELIVERY_REJECTED));
 
-        var handler = new RejectDeliveryCommandHandler(repo, Outbox(), Stats());
-        var result = await handler.Handle(new RejectDeliveryCommand(token, "damaged"), default);
+        var handler = new RejectDeliveryCommandHandler(
+            repo,
+            deliveryTokens,
+            Outbox(),
+            Stats(),
+            AllowedDeliveryRateLimiter());
+        var result = await handler.Handle(new RejectDeliveryCommand(token, "  damaged  "), default);
 
         result.Status.Should().Be("DELIVERY_REJECTED");
         result.CanUndoUntil.Should().Be(result.RejectedAt.AddMinutes(15));
@@ -345,11 +421,19 @@ public sealed class Phase67ParcelTests
     public async Task ConfirmDelivery_RejectedStatus_ReturnsParcelNotPendingConfirm400Code()
     {
         var token = Guid.NewGuid();
-        var parcel = CreateParcel(ParcelStatus.DELIVERY_REJECTED, token, DateTimeOffset.UtcNow.AddHours(1));
+        var parcel = CreateParcel(ParcelStatus.DELIVERY_REJECTED);
+        var (deliveryTokens, _) = DeliveryTokens(
+            token,
+            DateTimeOffset.UtcNow.AddHours(1));
         var repo = Substitute.For<IParcelRepository>();
-        repo.FindByDeliveryTokenAsync(token, Arg.Any<CancellationToken>()).Returns(parcel);
+        repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
 
-        var handler = new ConfirmDeliveryCommandHandler(repo, Outbox(), Stats());
+        var handler = new ConfirmDeliveryCommandHandler(
+            repo,
+            deliveryTokens,
+            Outbox(),
+            Stats(),
+            AllowedDeliveryRateLimiter());
         var act = () => handler.Handle(new ConfirmDeliveryCommand(token, "127.0.0.1"), default);
 
         await act.Should().ThrowAsync<BadRequestException>()
@@ -360,15 +444,23 @@ public sealed class Phase67ParcelTests
     public async Task UndoRejectDelivery_HappyPath_DecrementsRejectedStat()
     {
         var token = Guid.NewGuid();
-        var parcel = CreateParcel(ParcelStatus.DELIVERY_REJECTED, token, DateTimeOffset.UtcNow.AddHours(1));
+        var parcel = CreateParcel(ParcelStatus.DELIVERY_REJECTED);
+        var (deliveryTokens, deliveryToken) = DeliveryTokens(
+            token,
+            DateTimeOffset.UtcNow.AddHours(1));
         Set<DateTimeOffset?>(parcel, nameof(parcel.RejectedAt), DateTimeOffset.UtcNow.AddMinutes(-5));
         var repo = Substitute.For<IParcelRepository>();
         var stats = Stats();
-        repo.FindByDeliveryTokenAsync(token, Arg.Any<CancellationToken>()).Returns(parcel);
-        repo.TryUndoRejectDeliveryAsync(ParcelId, token, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+        repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
+        repo.TryUndoRejectDeliveryAsync(ParcelId, deliveryToken.Id, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(Snapshot(ParcelStatus.DELIVERED_PENDING_CONFIRM));
 
-        var handler = new UndoRejectDeliveryCommandHandler(repo, Outbox(), stats);
+        var handler = new UndoRejectDeliveryCommandHandler(
+            repo,
+            deliveryTokens,
+            Outbox(),
+            stats,
+            AllowedDeliveryRateLimiter());
         var result = await handler.Handle(new UndoRejectDeliveryCommand(token), default);
 
         result.Status.Should().Be("DELIVERED_PENDING_CONFIRM");
@@ -386,7 +478,12 @@ public sealed class Phase67ParcelTests
         var repo = Substitute.For<IParcelRepository>();
         repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
 
-        var handler = new ManualConfirmDeliveryCommandHandler(repo, Outbox(), Stats());
+        var handler = new ManualConfirmDeliveryCommandHandler(
+            repo,
+            Substitute.For<IParcelDeliveryTokenRepository>(),
+            Substitute.For<ITripServiceClient>(),
+            Outbox(),
+            Stats());
         var act = () => handler.Handle(new ManualConfirmDeliveryCommand(ParcelId, Guid.NewGuid(), Guid.NewGuid(), "verified"), default);
 
         await act.Should().ThrowAsync<ForbiddenException>()
@@ -404,7 +501,12 @@ public sealed class Phase67ParcelTests
         repo.TryManualConfirmDeliveryAsync(ParcelId, OperatorId, actorUserId, "verified", Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(Snapshot(ParcelStatus.DELIVERY_CONFIRMED));
 
-        var handler = new ManualConfirmDeliveryCommandHandler(repo, Outbox(), stats);
+        var handler = new ManualConfirmDeliveryCommandHandler(
+            repo,
+            Substitute.For<IParcelDeliveryTokenRepository>(),
+            Substitute.For<ITripServiceClient>(),
+            Outbox(),
+            stats);
         var result = await handler.Handle(new ManualConfirmDeliveryCommand(ParcelId, actorUserId, OperatorId, "verified"), default);
 
         result.Status.Should().Be("DELIVERY_CONFIRMED");
@@ -415,31 +517,88 @@ public sealed class Phase67ParcelTests
             Arg.Any<CancellationToken>());
     }
     [Fact]
-    public async Task StatusOverride_ReturnsParcelAndEmitsAuditEvent()
+    public async Task StatusOverride_ClaimsDurableReturnWithOverrideFlag()
     {
         var actorUserId = Guid.NewGuid();
+        var operationId = Guid.NewGuid();
         var parcel = CreateParcel(ParcelStatus.PENDING_OPERATOR_ACTION);
         var repo = Substitute.For<IParcelRepository>();
-        var identity = Substitute.For<IIdentityServiceClient>();
-        var outbox = Outbox();
         repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
-        repo.TryReturnAsync(ParcelId, OperatorId, actorUserId, "customer no-show", Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns(Snapshot(ParcelStatus.RETURNED));
-        identity.GetOperatorInfoAsync(OperatorId, Arg.Any<CancellationToken>())
-            .Returns(new OperatorLookupOutcome(
-                OperatorLookupOutcomeKind.Success,
-                new IdentityOperatorInfo(OperatorId, "Operator", ParcelNoShowPolicy.Default),
+        repo.GetActiveCargoRecoveryOperationAsync(
+                ParcelId,
+                Arg.Any<CancellationToken>())
+            .Returns((ParcelCargoRecoveryOperationSnapshot?)null);
+        repo.TryClaimCargoRecoveryReturnAsync(
+                operationId,
+                ParcelId,
+                OperatorId,
+                actorUserId,
+                "customer no-show",
+                true,
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new ParcelCargoRecoveryOperationSnapshot(
+                operationId,
+                ParcelId,
+                "VRP-001",
+                OperatorId,
+                Guid.NewGuid(),
+                ParcelCargoRecoveryOperationType.RETURN,
+                ParcelCargoRecoveryOperationStatus.PENDING,
+                TripId,
+                null,
+                null,
+                actorUserId,
+                "customer no-show",
+                0,
+                0,
+                ParcelStatus.PENDING_OPERATOR_ACTION,
+                true,
+                DateTimeOffset.UtcNow,
+                null,
+                null,
+                5m,
+                0.0001m,
+                ParcelStatus.PENDING_OPERATOR_ACTION,
+                TripId,
                 null));
+        var mediator = Substitute.For<IMediator>();
+        mediator.Send(
+                Arg.Is<ResumeCargoRecoveryOperationCommand>(
+                    command => command.OperationId == operationId),
+                Arg.Any<CancellationToken>())
+            .Returns(new OperationalParcelResponse(
+                ParcelId,
+                "VRP-001",
+                "RETURNED",
+                TripId: TripId));
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(DateTimeOffset.UtcNow);
 
-        var handler = new ReturnParcelCommandHandler(repo, identity, TripCargo(), outbox, Stats());
+        var handler = new ReturnParcelCommandHandler(
+            repo,
+            UnitOfWork(),
+            mediator,
+            clock);
         var result = await handler.Handle(
-            new ReturnParcelCommand(ParcelId, OperatorId, actorUserId, "customer no-show", IsStatusOverride: true),
+            new ReturnParcelCommand(
+                ParcelId,
+                OperatorId,
+                actorUserId,
+                "customer no-show",
+                operationId,
+                IsStatusOverride: true),
             default);
 
         result.Status.Should().Be("RETURNED");
-        await outbox.Received(1).EnqueueAsync(
-            ParcelOutboxEvents.StatusOverridden,
-            Arg.Is<string>(payload => payload.Contains("customer no-show", StringComparison.Ordinal)),
+        await repo.Received(1).TryClaimCargoRecoveryReturnAsync(
+            operationId,
+            ParcelId,
+            OperatorId,
+            actorUserId,
+            "customer no-show",
+            true,
+            Arg.Any<DateTimeOffset>(),
             Arg.Any<CancellationToken>());
     }
     [Fact]
@@ -552,10 +711,7 @@ public sealed class Phase67ParcelTests
         result.Should().Be(3);
     }
 
-    private static ParcelEntity CreateParcel(
-        ParcelStatus status,
-        Guid? deliveryToken = null,
-        DateTimeOffset? deliveryTokenExpiresAt = null)
+    private static ParcelEntity CreateParcel(ParcelStatus status)
     {
         var parcel = ParcelEntity.CreatePendingPayment(
             "VRP-001",
@@ -577,10 +733,26 @@ public sealed class Phase67ParcelTests
 
         Set(parcel, nameof(parcel.Id), ParcelId);
         Set(parcel, nameof(parcel.Status), status);
-        Set(parcel, nameof(parcel.DeliveryToken), deliveryToken);
-        Set(parcel, nameof(parcel.DeliveryTokenExpiresAt), deliveryTokenExpiresAt);
-        Set<DateTimeOffset?>(parcel, nameof(parcel.DeliveryTokenRevokedAt), null);
         return parcel;
+    }
+
+    private static (IParcelDeliveryTokenRepository Repository, ParcelDeliveryToken Token)
+        DeliveryTokens(Guid rawToken, DateTimeOffset expiresAt)
+    {
+        var issuedAt = DateTimeOffset.UtcNow.AddHours(-1);
+        var token = ParcelDeliveryToken.Issue(
+            ParcelId,
+            DeliveryTokenHasher.Hash(rawToken),
+            expiresAt,
+            AssistantUserId,
+            ParcelDeliveryTokenIssueReason.INITIAL_DELIVERY,
+            issuedAt);
+        var repository = Substitute.For<IParcelDeliveryTokenRepository>();
+        repository.FindByTokenHashAsync(
+                DeliveryTokenHasher.Hash(rawToken),
+                Arg.Any<CancellationToken>())
+            .Returns(token);
+        return (repository, token);
     }
 
     private static ParcelPaymentTransitionSnapshot Snapshot(ParcelStatus status)
@@ -646,6 +818,16 @@ public sealed class Phase67ParcelTests
 
     private static IParcelStatsRepository Stats()
         => Substitute.For<IParcelStatsRepository>();
+
+    private static IDeliveryConfirmationRateLimiter AllowedDeliveryRateLimiter()
+    {
+        var rateLimiter = Substitute.For<IDeliveryConfirmationRateLimiter>();
+        rateLimiter.TryAcquireAsync(
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>())
+            .Returns(true);
+        return rateLimiter;
+    }
 
     private static ServiceCollection CreateParcelInfrastructureServices()
     {

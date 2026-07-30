@@ -10,6 +10,15 @@ public interface ITripServiceClient
         Guid operatorId,
         CancellationToken cancellationToken = default);
 
+    Task<TripCrewAuthorizationOutcome> AuthorizeCrewForTripAsync(
+        Guid tripId,
+        Guid userId,
+        Guid operatorId,
+        string role,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(new TripCrewAuthorizationOutcome(
+            TripCrewAuthorizationOutcomeKind.Denied));
+
     Task<TripSnapshotOutcome> GetTripParcelSnapshotAsync(
         Guid tripId,
         CancellationToken cancellationToken = default);
@@ -97,4 +106,16 @@ public interface ITripServiceClient
         Guid parcelId,
         decimal weightKg,
         CancellationToken cancellationToken = default);
+
+    Task<TripCargoTransferOutcome> TransferCargoAsync(
+        Guid sourceTripId,
+        Guid parcelId,
+        Guid targetTripId,
+        string targetState,
+        bool allowCapacityOverflow,
+        Guid idempotencyKey,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(new TripCargoTransferOutcome(
+            TripCargoTransferOutcomeKind.TransportError,
+            "Atomic cargo transfer is not supported by this Trip client."));
 }

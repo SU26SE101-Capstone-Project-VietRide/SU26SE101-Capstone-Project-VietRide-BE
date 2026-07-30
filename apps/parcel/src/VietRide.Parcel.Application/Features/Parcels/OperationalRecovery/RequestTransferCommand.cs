@@ -8,4 +8,6 @@ public sealed record RequestTransferCommand(
     Guid ParcelId,
     Guid OperatorId,
     Guid TargetTripId,
-    string? Reason) : IRequest<OperationalParcelResponse>;
+    string? Reason,
+    Guid IdempotencyKey,
+    Guid ActorUserId) : IRequest<OperationalParcelResponse>;

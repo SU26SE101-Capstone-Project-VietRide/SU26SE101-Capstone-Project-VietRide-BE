@@ -33,7 +33,7 @@ public sealed class CreateVehicleHandler : IRequestHandler<CreateVehicleCommand,
         await StopWriteEligibilityGuard.ValidateOperatorSubscriptionCanWriteAsync(
             identityInternalClient,
             request.OperatorId,
-            requireShuttleModule: true,
+            requireShuttleModule: false,
             cancellationToken);
 
         var vehicleType = await vehicleTypeRepository.GetActiveByIdAsync(

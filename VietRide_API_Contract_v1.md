@@ -2110,6 +2110,7 @@ Response `200` (raw):
   "actualDepartureTime": null,
   "estimatedArrivalTime": "2026-05-18T20:00:00+07:00",
   "baseFare": 400000,
+  "totalDistanceKm": 1700.0,
   "originStation": { "id": "uuid", "name": "Bến xe Miền Đông" },
   "destinationStation": { "id": "uuid", "name": "Bến xe Mỹ Đình" },
   "stops": [
@@ -2134,7 +2135,14 @@ Response `200` (raw):
 ```
 
 Notes:
-- The serialized response fields are unchanged whether `pricingAt` is present or omitted.
+- `totalDistanceKm` and each `stops[].distanceFromOriginKm` are nullable. Day-35 proportional
+  refund uses the distance path only when the Booking pickup distance, reached-stop distance, and
+  Trip total distance needed by the formula are all present. Missing or invalid required distance
+  input falls back to the stop-order formula. When those inputs are present but
+  `totalDistanceKm - pickupDistance <= 0`, the explicit Technical Context edge rule wins:
+  `traveledRatio = 0`; this case does not enter the order fallback.
+- The same serialized response fields are returned whether `pricingAt` is present or omitted;
+  only fare selection changes.
 - With `pricingAt`, Trip resolves each pickup fare in this exact order: persisted
   `TripStopFare.source=MANUAL_OVERRIDE`; otherwise the active `RouteStopFareTemplate` whose
   half-open window satisfies `effectiveFrom <= pricingAt < effectiveUntil` (or has no upper
@@ -2149,7 +2157,9 @@ Notes:
 - `fareFromThisStop` is the resolved per-stop override when present; otherwise the caller falls
   back to `baseFare`. `null` ⇒ use `baseFare`.
 - `stops` are the along-route intermediate stops (snapshot of RouteStop into `trip_stops`),
-  ordered by `orderIndex`; `allowPickup` / `allowDropoff` drive Day-13 pickup/dropoff validation.
+  ordered by `orderIndex`; `status` is exactly `PENDING|ARRIVED|SKIPPED`;
+  `allowPickup` / `allowDropoff` drive Day-13 pickup/dropoff validation. An unknown status makes
+  the operational snapshot malformed and downstream Day-35 consumption fails closed for retry/DLQ.
 - `returnRouteId`: nullable UUID — the return-direction route linked via `Route.returnRouteId`
   self-FK. Booking uses this to validate `ROUTE_RETURN_NOT_CONFIGURED` (422) when the passenger
   requests a round-trip but the outbound route has no return route configured
@@ -2296,6 +2306,46 @@ Errors:
 - `409 BOOKING_SEAT_UNAVAILABLE` — lock token expired or no longer owns the seats (seat was
   released on TTL); Booking must compensate (release + cancel). `error.fields` lists the seats.
 
+### POST `/internal/v1/trips/{sourceTripId}/cargo/transfer`
+
+Auth: valid Internal JWT. Caller: Parcel Service. UUID-v4 `Idempotency-Key` is required.
+
+Request is exactly:
+
+```json
+{
+  "parcelId": "uuid",
+  "targetTripId": "uuid",
+  "targetState": "RESERVED",
+  "allowCapacityOverflow": false
+}
+```
+
+`targetState` is exactly `RESERVED|LOADED`. The source and target Trip must differ and belong to
+the same operator. Trip locks both rows in ascending UUID order, rechecks the source cargo ledger,
+then releases source cargo and creates/restores target cargo in one Trip-local transaction.
+`RESERVED` always enforces target capacity. `LOADED` may exceed target capacity only when
+`allowCapacityOverflow=true` and the target Trip is server-side verified as
+`source=VEHICLE_SUBSTITUTION` for the same operator; the caller flag alone is never proof. A
+same-key replay returns the original response without moving counters twice.
+
+Response `200` data:
+
+```json
+{
+  "parcelId": "uuid",
+  "sourceTripId": "uuid",
+  "targetTripId": "uuid",
+  "targetState": "LOADED",
+  "weightKg": 12.5,
+  "volumeM3": 0.08
+}
+```
+
+Errors: `401 AUTH_TOKEN_INVALID`, `404 TRIP_NOT_FOUND`, `404 PARCEL_CARGO_NOT_FOUND`,
+`409 TRIP_CARGO_TRANSFER_CONFLICT`, `422 TRIP_CARGO_CAPACITY_EXCEEDED`, and
+`422 VALIDATION_ERROR`.
+
 ### POST `/v1/operator/trips/{id}/cancel/preview`
 
 Auth: `OPERATOR_ADMIN` for the Trip's operator. This read-only preview does not require an
@@ -2319,9 +2369,13 @@ Response `200` data:
 }
 ```
 
-The preview is available only while the Trip is `SCHEDULED` or `BOARDING`. Booking and parcel
-totals are calculated independently from immutable persisted amounts; `grandTotal` is their sum.
-Pending-payment Bookings contribute zero.
+The preview is available only while the Trip is `SCHEDULED` or `BOARDING`. Booking and Parcel
+use the same classifiers later used by execution. Parcel pre-load statuses
+`PENDING_OPERATOR_REVIEW|PENDING_PAYMENT|PENDING|PENDING_ADDITIONAL_PAYMENT|RESERVED|CHECKED_IN|PENDING_FINAL_PAYMENT|READY_TO_LOAD`
+contribute `max(depositPaidVnd + balancePaidVnd - refundedAmountVnd, 0)` and will be cancelled
+with cargo release. `LOADED|IN_TRANSIT` appear in `affectedParcelIds` but contribute zero because
+they move to `PENDING_OPERATOR_ACTION` without immediate refund or release. Terminal/replayed
+rows are excluded. `grandTotal` is the Booking and Parcel refund sum.
 
 Statuses: `200`, `401`, `403`, `404`, `409`, `422`.
 
@@ -2498,6 +2552,47 @@ Statuses: `200`, `401`, `403`, `404`, `409`, `422`.
 - `409 TRIP_VEHICLE_CONFLICT`
 - `422 VEHICLE_NOT_ACTIVE`
 - `422 VALIDATION_ERROR`
+
+### POST `/v1/operator/trips/{tripId}/disrupt-no-substitution`
+
+Auth: `OPERATOR_ADMIN` for the Trip operator. UUID-v4 `Idempotency-Key` is required.
+
+Request is exactly:
+
+```json
+{
+  "reason": "Road closure with no replacement vehicle available"
+}
+```
+
+`reason` is required, trimmed, and 1–500 characters. Only an `IN_PROGRESS` Trip may transition.
+The winning transaction sets `status=DISRUPTED`, `hasSubstitution=false`, `disruptedAt=now`, and
+the reason, then writes canonical `trip.trip.disrupted` to the Outbox. It does not calculate or
+return a Trip-wide traveled ratio.
+
+Response `200`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "tripId": "uuid",
+    "status": "DISRUPTED",
+    "disruptedAt": "2026-07-30T03:00:00Z",
+    "hasSubstitution": false,
+    "reason": "Road closure with no replacement vehicle available"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-30T03:00:00Z" }
+}
+```
+
+Errors:
+
+- `404 TRIP_NOT_FOUND` for missing or cross-tenant Trip.
+- `422 TRIP_NOT_IN_PROGRESS` for `SCHEDULED|BOARDING`.
+- `409 TRIP_ALREADY_TERMINAL` for `COMPLETED|CANCELLED|DISRUPTED`.
+- `422 VALIDATION_ERROR` for an invalid reason.
 
 ## Day 22 — Trip edit, pricing snapshot, and cascade contracts
 
@@ -2876,6 +2971,35 @@ Auth: sender, recipient account, or authorized operator.
 
 Response `200`: parcel detail with sender, recipient, trip, transfer, optional sender `photoUrl`, optional `checkInPhotoUrls` and `deliveryPhotoUrls`, delivery token state excluding raw token, estimated/actual cargo snapshots, and the canonical settlement fields: `estimatedGrossPriceVnd`, `finalGrossPriceVnd`, `discountAmountVnd`, `estimatedTotalPriceVnd`, `finalTotalPriceVnd`, `depositPercent`, `depositRequiredVnd`, `depositPaidVnd`, `balanceRequiredVnd`, `balancePaidVnd`, `refundDueVnd`, `refundedAmountVnd`, `forfeitedDepositVnd`, payment IDs, `finalPaymentDeadline`, check-in/reweigh timestamps, fare snapshots, and `settlementPolicyVersion`.
 
+### POST `/internal/v1/emails`
+
+Owner: Notification. Auth: valid Internal JWT only; never routed through Gateway. UUID-v4
+`Idempotency-Key` is required.
+
+Request:
+
+```json
+{
+  "notificationId": null,
+  "dedupeKey": "parcel-delivery-token:<tokenRowId>",
+  "toEmail": "recipient@example.com",
+  "templateKey": "PARCEL_DELIVERY_LINK",
+  "templateData": {
+    "deliveryUrl": "https://app.vietride.app/parcels/delivery/confirm?token=<runtime-token>",
+    "parcelCode": "VRP-20260730-ABC123",
+    "expiresAt": "2026-08-01T03:00:00Z"
+  }
+}
+```
+
+Success is `202 Accepted` in the ADR 0004 envelope and means Notification durably accepted the
+delivery. Same-key/same-fingerprint replay returns the original acceptance; mismatch and pending
+use the shared idempotency errors. OTP, password URLs, and Parcel delivery URLs are sensitive:
+Notification redacts them completely from its audit row and encrypts queue payloads before Redis;
+plaintext exists only in request/worker memory and the outbound provider call. Errors:
+`401 AUTH_TOKEN_INVALID`, `422 VALIDATION_ERROR|IDEMPOTENCY_KEY_REQUIRED|
+IDEMPOTENCY_KEY_MISMATCH`, and `409 IDEMPOTENCY_REQUEST_PENDING`.
+
 ### POST `/v1/parcels/delivery/confirm`
 
 Auth: public token link. Idempotency: required.
@@ -2955,8 +3079,75 @@ Response `200`:
 ```
 Decision note: invalid, expired, and revoked delivery tokens return 400 with
 `PARCEL_DELIVERY_TOKEN_INVALID`, `PARCEL_DELIVERY_TOKEN_EXPIRED`, or
-`PARCEL_DELIVERY_TOKEN_REVOKED`. BSOT `401` and timeline `410` are known drift
-items to reconcile.
+`PARCEL_DELIVERY_TOKEN_REVOKED`. Parcel parses a UUID-v4 token, normalizes lowercase `D`, and
+looks up its SHA-256 hash in `parcel_delivery_tokens`; raw tokens are never persisted, logged, or
+published in an event.
+
+### POST `/v1/operator/parcels/{parcelId}/resend-delivery-email`
+
+Auth: `OPERATOR_ADMIN|OPERATOR_STAFF` for the Parcel operator. Idempotency: required. Bodyless.
+
+Valid for `DELIVERED_PENDING_CONFIRM`, or `DELIVERY_REJECTED` while the 15-minute undo window is
+still open. The latter is restored to `DELIVERED_PENDING_CONFIRM`. Parcel revokes the current
+token row, creates a new UUID-v4 token/hash with a 48-hour expiry, and calls Notification
+`POST /internal/v1/emails` using Internal JWT. The internal email uses
+`notificationId:null`, `dedupeKey:"parcel-delivery-token:<tokenRowId>"`,
+`toEmail=recipientEmail`, `templateKey=PARCEL_DELIVERY_LINK`, UUID-v4 Idempotency-Key equal to the
+token-row id, and `templateData={deliveryUrl,parcelCode,expiresAt}`. Parcel commits the
+rotation/state only after Notification returns `202`; every other response, timeout, or transport
+failure returns `503 UPSTREAM_UNAVAILABLE` without committing the new token/state. A Parcel
+without `recipientEmail` returns
+`422 PARCEL_RECIPIENT_EMAIL_REQUIRED`.
+
+Response `200` data:
+
+```json
+{
+  "parcelId": "uuid",
+  "status": "DELIVERED_PENDING_CONFIRM",
+  "expiresAt": "2026-08-01T03:00:00Z"
+}
+```
+
+Same-key replay returns the original response without another email. Concurrent different-key
+rotations use the active-token CAS/partial unique constraint: one wins and the loser returns
+`409 RESOURCE_CONFLICT`. Errors: `403 FORBIDDEN`, `404 PARCEL_NOT_FOUND`,
+`400 PARCEL_NOT_PENDING_CONFIRM`, `422 PARCEL_RECIPIENT_EMAIL_REQUIRED`, and
+`503 UPSTREAM_UNAVAILABLE`.
+
+### POST `/v1/crew/parcels/{parcelId}/resend-delivery-email`
+
+Exact behavior and response are the same as the operator endpoint. Auth is assigned
+`DRIVER|ASSISTANT` of the Parcel's current Trip. Cross-trip or unassigned callers return
+`403 FORBIDDEN`.
+
+### POST `/v1/operator/parcels/{parcelId}/manual-confirm`
+
+Auth: `OPERATOR_ADMIN|OPERATOR_STAFF` for the Parcel operator. Idempotency: required.
+
+Request:
+
+```json
+{
+  "confirmNote": "Recipient confirmed by phone at the destination station"
+}
+```
+
+`confirmNote` is trimmed and 1–500 characters. Valid from `DELIVERED_PENDING_CONFIRM`, including
+when no recipient email exists or the token has expired. Success transitions to
+`DELIVERY_CONFIRMED`, records actor/note/timestamp, and revokes the active token.
+
+Response `200` uses the existing delivery-confirmation data shape.
+
+Same-key replay returns the original response. A different-key request after confirmation is a
+behavioral no-op only when it carries the same actor/note fingerprint; otherwise it returns
+`400 PARCEL_NOT_PENDING_CONFIRM`. Errors: `403 FORBIDDEN`, `404 PARCEL_NOT_FOUND`,
+`400 PARCEL_NOT_PENDING_CONFIRM`, and `422 VALIDATION_ERROR`.
+
+### POST `/v1/crew/parcels/{parcelId}/manual-confirm`
+
+Exact body and behavior match the operator endpoint. Auth is assigned `DRIVER|ASSISTANT` of the
+Parcel's current Trip. Existing assistant/operator `confirm-delivery` aliases remain compatible.
 
 ### GET `/v1/assistant/trips/{tripId}/parcels`
 
@@ -3176,8 +3367,14 @@ optional for backward compatibility. When supplied:
 ```
 
 `photoUrls` uses the same maximum-three, configured-bucket, and owned-path rules as check-in. Only
-`UNLOADED` may transition to `DELIVERED_PENDING_CONFIRM`; the evidence URLs, delivery token and
-transition timestamps are persisted atomically. An empty or omitted body remains valid.
+`UNLOADED` may transition to `DELIVERED_PENDING_CONFIRM`. When `recipientEmail` is present, the
+handler creates a raw UUID-v4 token in memory, persists only its SHA-256 hash/expiry history, and
+queues the exact `PARCEL_DELIVERY_LINK` request above through Notification internal HTTP, using
+the token-row id for both HTTP idempotency and `parcel-delivery-token:<tokenRowId>` dedupe.
+Evidence, token hash and transition timestamps commit only after Notification returns `202`;
+dependency failure returns `503 UPSTREAM_UNAVAILABLE` with no transition. When email is absent, the
+transition commits without a token and requires manual confirmation. An empty or omitted body
+remains valid.
 
 Day-29 E2E setup uses an isolated operator-owned Trip graph fixture with its assigned assistant,
 vehicle cargo snapshot, and three Parcels. The fixture is created out of band; this contract does
@@ -3239,7 +3436,7 @@ Response `200`:
 
 ### POST `/internal/v1/parcels/{parcelId}/confirm-transfer`
 
-Auth: Internal JWT or Driver/Assistant of target trip.
+Auth: valid Internal JWT. This retained service-to-service alias is not exposed through Gateway.
 
 Request:
 ```json
@@ -3265,6 +3462,55 @@ Response `200`:
 }
 ```
 
+### POST `/v1/crew/parcels/{parcelId}/confirm-transfer`
+
+Auth: assigned `DRIVER|ASSISTANT` of the target Trip. UUID-v4 `Idempotency-Key` is required.
+
+Request:
+
+```json
+{
+  "parcelCode": "VR-PCL-20260518-P7K3D9Q2"
+}
+```
+
+Valid only from `PENDING_TRANSFER_CONFIRM`. Parcel verifies the target-Trip crew, calls
+`POST /internal/v1/trips/{sourceTripId}/cargo/transfer` with exact
+`{parcelId,targetTripId,targetState:"LOADED",allowCapacityOverflow:true}`. The `true` value is
+allowed only because the target was created by the approved Vehicle Substitution flow.
+
+Before external I/O, Parcel must durably claim confirmation:
+
+1. Require `now < transferRequestedAt + 30 minutes` (the timeout is inclusive at equality).
+2. CAS `status=PENDING_TRANSFER_CONFIRM AND transferConfirmationClaimId IS NULL`, setting
+   `transferConfirmationClaimId=<request Idempotency-Key>`, `transferConfirmationClaimedAt`, and
+   `transferConfirmationClaimedByUserId`.
+3. The timeout CAS requires the same status, `claimId IS NULL`, and
+   `now >= transferRequestedAt + 30 minutes`; therefore it can never escalate after a confirmation
+   claim wins.
+4. Call Trip with HTTP Idempotency-Key equal to the persisted claim id. On success, CAS the same
+   claim to `tripId=targetTripId,status=LOADED,transferConfirmedAt/by`.
+
+An unknown timeout/transport result keeps the claim: retry or the recurring stale-claim recovery
+replays the same Trip idempotency key, then finalizes Parcel. A definitive Trip rejection that
+guarantees no cargo mutation clears the claim and returns the mapped 4xx. Crash after Trip commit
+but before Parcel finalize is repaired by that replay; no second cargo movement occurs. An
+authorized target-Trip crew retry with a new request key resumes the persisted claim rather than
+creating another one. Same-key replay returns the persisted response.
+
+Response `200` is the same transfer-confirmation data shape above.
+
+The stale-claim recovery runs every five minutes and selects claims at least five minutes old. It
+always replays the persisted claim id and target; it never creates a replacement key. Exact
+errors: `403 FORBIDDEN` for non-target/unassigned crew; `409 PARCEL_NOT_TRANSFERABLE` for a
+non-`PENDING_TRANSFER_CONFIRM` Parcel or mismatched parcel code/target; `409
+PARCEL_TRANSFER_CONFIRMATION_DEADLINE_PASSED` when the unclaimed 30-minute deadline has won;
+mapped Trip `404 PARCEL_CARGO_NOT_FOUND`, `409 TRIP_CARGO_TRANSFER_CONFLICT`, or `422
+TRIP_CARGO_CAPACITY_EXCEEDED`; `503 TRIP_SERVICE_UNAVAILABLE` for an unknown/transport result;
+and shared `422 IDEMPOTENCY_KEY_REQUIRED|IDEMPOTENCY_KEY_MISMATCH`, `409
+IDEMPOTENCY_REQUEST_PENDING`. A deadline loser never clears or overwrites a winning persisted
+claim.
+
 ### GET `/internal/v1/parcels/trips/{tripId}/cancel-impact?operatorId={operatorId}`
 
 Auth: Internal JWT. Read-only raw service-to-service projection used by Trip cancellation preview.
@@ -3283,9 +3529,13 @@ Response `200`:
 }
 ```
 
-The result is tenant-scoped by `operatorId`, ordered by `parcelId`, and contains each active
-parcel at most once. Settlement v2 contributes `depositPaidVnd + balancePaidVnd - refundedAmountVnd`;
-pre-payment/review and loaded/in-transit operational rows contribute zero.
+The result is tenant-scoped by `operatorId`, ordered by `parcelId`, and contains each classified
+non-terminal Parcel at most once. It uses the exact execution classifier:
+
+- `PENDING_OPERATOR_REVIEW|PENDING_PAYMENT|PENDING|PENDING_ADDITIONAL_PAYMENT|RESERVED|CHECKED_IN|PENDING_FINAL_PAYMENT|READY_TO_LOAD`
+  contributes `max(depositPaidVnd + balancePaidVnd - refundedAmountVnd,0)`.
+- `LOADED|IN_TRANSIT` is included with zero refund and will become `PENDING_OPERATOR_ACTION`.
+- Terminal/replayed rows are omitted.
 
 ### GET `/v1/operator/parcels`
 
@@ -3361,7 +3611,8 @@ Request: `{ "decision": "APPROVE|REJECT", "reason": "optional for approve, requi
 
 ### POST `/v1/operator/parcels/{parcelId}/request-transfer`
 
-Auth: operator staff/admin for parcel's operator.
+Auth: `OPERATOR_ADMIN|OPERATOR_STAFF` for the Parcel operator. UUID-v4 `Idempotency-Key` is
+required.
 
 Request:
 ```json
@@ -3371,7 +3622,29 @@ Request:
 }
 ```
 
-Response `200`:
+For a cancellation/disruption recovery Parcel in `PENDING_OPERATOR_ACTION`, Parcel calls
+`POST /internal/v1/trips/{sourceTripId}/cargo/transfer` with
+`targetState=RESERVED,allowCapacityOverflow=false` and propagates the caller's UUID-v4
+Idempotency-Key unchanged to Trip. It commits `tripId=targetTripId` and
+`status=RESERVED` only after Trip has atomically released the source cargo and reserved the target
+cargo. A capacity or dependency failure leaves the Parcel and source cargo unchanged.
+
+Before that Trip call, Parcel persists a `TRANSFER` cargo-recovery operation whose id is the
+public UUID-v4 `Idempotency-Key`. Only one `PENDING` cargo-recovery operation may exist per Parcel.
+If the Trip outcome is unknown, a retry or the recurring recovery job replays the persisted
+source/target/body and the same operation id. A definitive `404|409|422` closes the operation as
+failed without changing Parcel state. Trip success is finalized with the Parcel status, operation,
+Outbox event and local stats in one Parcel transaction.
+
+Concurrent `/request-transfer` and `/return` calls for the same Parcel resolve to one durable
+claim. The loser returns `409 PARCEL_CARGO_RECOVERY_IN_PROGRESS` while the winner is still
+`PENDING`; it must not call Trip.
+
+The retained `LOADED|IN_TRANSIT` request branch remains compatible: it records the target and
+moves to `PENDING_TRANSFER_CONFIRM`; physical cargo is not moved until assigned target-Trip crew
+confirms it.
+
+Response `200` for the retained physical-transfer branch:
 ```json
 {
   "success": true,
@@ -3384,6 +3657,68 @@ Response `200`:
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
+
+For `PENDING_OPERATOR_ACTION` recovery, response data instead contains the new `tripId`,
+`status:"RESERVED"`, and `transferTargetTripId:null`.
+
+Errors: `403 FORBIDDEN`, `404 PARCEL_NOT_FOUND`, `404 TRIP_NOT_FOUND`,
+`409 INVALID_STATUS`, `409 TRIP_CARGO_TRANSFER_CONFLICT`,
+`422 TRIP_CARGO_CAPACITY_EXCEEDED`, and `503 TRIP_SERVICE_UNAVAILABLE`. Same-key replay returns
+the original result; a different-key concurrent transfer has one Trip-ledger winner.
+
+### POST `/v1/operator/parcels/{parcelId}/cancel`
+
+Auth: `OPERATOR_ADMIN|OPERATOR_STAFF` for the Parcel operator. UUID-v4 `Idempotency-Key` is
+required.
+
+Request:
+
+```json
+{
+  "reason": "Sender requested cancellation before loading",
+  "refundChoice": "POLICY"
+}
+```
+
+`reason` is required, trimmed, and 1–500 characters. `refundChoice` is exactly
+`FULL|POLICY|NO`; omitted defaults to `POLICY`. During the compatibility window the legacy input
+aliases `FULL_REFUND|POLICY_REFUND|NO_REFUND` are accepted and normalized.
+
+Every pre-load status is supported:
+`PENDING_OPERATOR_REVIEW|PENDING_PAYMENT|PENDING|PENDING_ADDITIONAL_PAYMENT|RESERVED|CHECKED_IN|PENDING_FINAL_PAYMENT|READY_TO_LOAD`.
+Every supported manual-cancel status becomes `CANCELLED`; `REJECTED` remains reserved for
+review/timeout flows. `FULL` refunds the outstanding collected amount
+`outstanding=max(depositPaidVnd + balancePaidVnd - refundedAmountVnd,0)`; `NO` refunds zero.
+`POLICY` is
+`clamp(round(outstanding * (100-noShowFeePercent)/100, AwayFromZero),0,outstanding)`, with no
+1,000-VND floor. A null policy defaults `noShowFeePercent=0`; the value must be finite and in
+`[0,100]`. Malformed/out-of-range policy returns `503 UPSTREAM_UNAVAILABLE` without cargo/state/
+refund changes. Any active cargo ledger is released before the Parcel transition commits. A
+same-key replay returns the persisted result without releasing cargo or publishing refund facts
+twice. Parcel propagates the caller's UUID-v4 key unchanged to Trip cargo release.
+
+Response `200`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "parcelId": "uuid",
+    "parcelCode": "VR-PCL-20260518-P7K3D9Q2",
+    "status": "CANCELLED",
+    "tripId": "uuid",
+    "refundChoice": "POLICY",
+    "refundAmount": 35000
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-30T03:00:00Z" }
+}
+```
+
+Errors: `403 FORBIDDEN`, `404 PARCEL_NOT_FOUND`, `409 INVALID_STATUS`,
+`409 TRIP_CARGO_TRANSFER_CONFLICT`, `422 INVALID_REFUND_CHOICE`, and
+`503 TRIP_SERVICE_UNAVAILABLE|UPSTREAM_UNAVAILABLE` (the latter is malformed or unavailable
+policy data).
 
 ### POST `/v1/operator/parcels/{parcelId}/confirm-refund`
 
@@ -3445,7 +3780,8 @@ Response `200`:
 
 ### POST `/v1/operator/parcels/{parcelId}/return`
 
-Auth: operator staff/admin for parcel's operator.
+Auth: `OPERATOR_ADMIN|OPERATOR_STAFF` for the Parcel operator. UUID-v4 `Idempotency-Key` is
+required. Valid only for `PENDING_OPERATOR_ACTION|TRANSFER_ESCALATED`.
 
 Request:
 ```json
@@ -3453,6 +3789,19 @@ Request:
   "returnReason": "Sender requested return after trip disruption"
 }
 ```
+
+Trip cargo release must succeed before Parcel commits `RETURNED`. The handler then emits exactly
+one refund for the remaining collected amount
+`max(depositPaidVnd + balancePaidVnd - refundedAmountVnd,0)`. Replay or a losing CAS does not
+release cargo or refund again. Parcel propagates the caller's UUID-v4 key unchanged to Trip.
+
+For event-driven Trip cancellation/disruption, Parcel deterministically derives one UUID with the
+UUID version/variant bits set to v4 from `(sourceEventId,parcelId,cargoAction)` and reuses it on
+every retry. Different Parcels/actions therefore never collide in Trip's idempotency store.
+
+Errors: `403 FORBIDDEN`, `404 PARCEL_NOT_FOUND`, `409 INVALID_STATUS`,
+`409 TRIP_CARGO_TRANSFER_CONFLICT`, `422 VALIDATION_ERROR`, and
+`503 TRIP_SERVICE_UNAVAILABLE`.
 
 Response `200`:
 ```json
@@ -4773,7 +5122,16 @@ Auth: `OPERATOR_ADMIN`. `Idempotency-Key` bắt buộc.
 
 Chọn một subset Booking không rỗng. Toàn bộ ticket của một Booking được gán nguyên tử, sức chứa tính theo tổng ticket. Direction và Station được suy ra từ main Trip. `scheduledEndTime` không được sau `departureDateTime - 30 phút`. Driver/vehicle phải active, cùng tenant và không overlap main Trip/ShuttleTrip. Response `201` trả ShuttleTrip cùng số passenger assigned/remaining. Replay cùng idempotency key trả cùng kết quả.
 
-Errors: `403 FORBIDDEN`; `404 TRIP_NOT_FOUND`; `404 VEHICLE_NOT_FOUND`; `404 DRIVER_NOT_FOUND`; `409 SHUTTLE_REQUEST_SET_CHANGED`; `409 SHUTTLE_CAPACITY_EXCEEDED`; `409 SHUTTLE_DRIVER_CONFLICT`; `409 SHUTTLE_VEHICLE_CONFLICT`; `409 SHUTTLE_REQUEST_CUTOFF_PASSED`; `422 VALIDATION_ERROR`.
+Before dispatch or any Trip/Booking mutation, Trip validates the operator is active/approved and
+the active subscription with `requireShuttleModule=true`. Exact guard outcomes are `402
+SUBSCRIPTION_EXPIRED`, `403 SUBSCRIPTION_MODULE_DISABLED` when `enableShuttle=false`, and `503
+UPSTREAM_UNAVAILABLE` when Identity is unavailable or returns unusable subscription data.
+
+Errors: `402 SUBSCRIPTION_EXPIRED`; `403 FORBIDDEN`; `403 SUBSCRIPTION_MODULE_DISABLED`;
+`404 TRIP_NOT_FOUND`; `404 VEHICLE_NOT_FOUND`; `404 DRIVER_NOT_FOUND`; `409
+SHUTTLE_REQUEST_SET_CHANGED`; `409 SHUTTLE_CAPACITY_EXCEEDED`; `409
+SHUTTLE_DRIVER_CONFLICT`; `409 SHUTTLE_VEHICLE_CONFLICT`; `409
+SHUTTLE_REQUEST_CUTOFF_PASSED`; `422 VALIDATION_ERROR`; `503 UPSTREAM_UNAVAILABLE`.
 
 ### Shuttle fields trong Booking
 
@@ -5215,7 +5573,11 @@ Auth: `OPERATOR_ADMIN`.
 
 Idempotency-Key: not required by BSOT §5.6.
 
-Write requires caller operator to be `APPROVED` and active; non-APPROVED or inactive operators get `403 FORBIDDEN`.
+Write requires caller operator to be `APPROVED` and active; non-APPROVED or inactive operators get
+`403 FORBIDDEN`. Before any Route validation or persistence, Trip also validates a general active
+subscription with `requireShuttleModule=false`; Route creation never depends on `enableShuttle`.
+An expired subscription returns `402 SUBSCRIPTION_EXPIRED`, and unavailable/malformed Identity
+data returns `503 UPSTREAM_UNAVAILABLE`.
 
 Request:
 ```json
@@ -5753,6 +6115,11 @@ Either failure returns `422 VALIDATION_ERROR` with `error.fields` identifying `t
 Auth: `OPERATOR_ADMIN`.
 
 Idempotency-Key: not required by BSOT §5.6.
+
+Before Vehicle validation or persistence, Trip validates the caller operator is active/approved
+and has a general active subscription with `requireShuttleModule=false`. Vehicle creation never
+depends on `enableShuttle`. Exact guard failures are `402 SUBSCRIPTION_EXPIRED`, `403 FORBIDDEN`,
+and `503 UPSTREAM_UNAVAILABLE`.
 
 Request:
 ```json
@@ -6552,6 +6919,45 @@ fields because they have distinct domain/event meanings. Booking cancels active 
 refunds only from `booking.booking.cancelled`; Payment and Notification do not consume
 `trip.trip.cancelled` directly. Parcel separately owns its cancellation reaction.
 
+`trip.trip.disrupted` — producer Trip; consumers Booking, Parcel, and Payment:
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-07-30T03:00:00Z",
+  "tripId": "uuid",
+  "operatorId": "uuid",
+  "terminalAt": "2026-07-30T03:00:00Z",
+  "hasSubstitution": false,
+  "reason": "Road closure"
+}
+```
+
+The event never carries `traveledRatio`. Booking processes only `hasSubstitution=false`, computes
+the ratio independently for each eligible Booking from the internal Trip snapshot, transitions it
+to `DISRUPTED`, and emits canonical `booking.booking.cancelled` with the frozen refund amount for
+Payment. `hasSubstitution=true` is audit/settlement-only and must not trigger a disruption refund.
+
+`booking.booking.disrupted` — producer Booking; consumer Notification only:
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-07-30T03:00:01Z",
+  "bookingId": "uuid",
+  "bookingCode": "VR-20260730-ABCDEFGH",
+  "tripId": "uuid",
+  "operatorId": "uuid",
+  "userId": "uuid",
+  "traveledRatio": 0.4,
+  "refundAmount": 300000,
+  "cancellationReason": "OPERATOR_DISRUPTED_IN_PROGRESS"
+}
+```
+
+Notification uses this fact for the passenger-facing disruption message. Payment does not bind
+it. `booking.booking.cancelled` remains the sole Booking refund trigger.
+
 Booking publishes exactly these four Day-22 passenger facts, all consumed by Notification. The
 two schedule facts are emitted only for Bookings in `CONFIRMED`: MINOR emits the informational
 fact, while MEDIUM/MAJOR emits the required fact. A Booking in any other status emits neither
@@ -6654,21 +7060,43 @@ Producer: Parcel. Consumer: Notification. Exchange: `vietride.events`.
 
 ```json
 {
+  "eventId": "uuid",
+  "occurredAt": "2026-07-15T08:05:00Z",
   "parcelId": "uuid",
   "parcelCode": "VR-PCL-20260518-P7K3D9Q2",
   "operatorId": "uuid",
   "tripId": "uuid",
   "userId": "recipient-user-uuid",
   "recipientUserIds": ["recipient-user-uuid"],
-  "deliveryToken": "uuid",
   "expiresAt": "2026-07-17T08:05:00Z"
 }
 ```
 
 The Parcel-local transaction enqueues this event only for the winning
 `UNLOADED -> DELIVERED_PENDING_CONFIRM` CAS. `userId` and `recipientUserIds` are omitted when no
-recipient account is linked. `deliveryToken` is generated only by deliver and expires after
-48 hours. A replay or CAS loser emits no event.
+recipient account is linked; `expiresAt` is omitted when no recipient email/token exists.
+`eventId` equals the Outbox row id and RabbitMQ MessageId. The event never contains a raw token or
+URL; email delivery is a direct Internal-JWT HTTP call. A replay or CAS loser emits no event.
+
+### `parcel.parcel.delivery_confirmation_realerted`
+
+Producer: Parcel. Consumer: Notification. Exchange: `vietride.events`.
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-07-24T08:05:00Z",
+  "parcelId": "uuid",
+  "parcelCode": "VR-PCL-20260518-P7K3D9Q2",
+  "operatorId": "uuid",
+  "tripId": "uuid",
+  "expiredAt": "2026-07-17T08:05:00Z"
+}
+```
+
+The daily reminder emits this operator-only fact only when the active token has been expired for
+at least seven days and the reminder claim wins. It updates `lastReminderAt` but does not rotate a
+token or transition Parcel status.
 
 ### `trip.incident.reported`
 

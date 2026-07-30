@@ -1,13 +1,16 @@
 import { z } from 'zod';
 import {
   BookingCancelledConsumerEventSchema,
+  BookingDisruptedEventSchema,
   type BookingCancelledConsumerEvent,
+  type BookingDisruptedEvent,
 } from '@vietride/contracts';
 import { NotificationType } from '../generated/notification-prisma-client';
 import type { CreateNotificationDto } from './dto/create-notification.dto';
 import {
   BOOKING_CANCELLED_ROUTING_KEY,
   BOOKING_CONFIRMED_ROUTING_KEY,
+  BOOKING_DISRUPTED_ROUTING_KEY,
   BOOKING_REFUNDED_ROUTING_KEY,
   WALLET_CREDITED_ROUTING_KEY,
   WALLET_DEBITED_ROUTING_KEY,
@@ -43,6 +46,7 @@ const walletEventPayloadSchema = z.object({
 export type CoreEventRoutingKey =
   | typeof BOOKING_CONFIRMED_ROUTING_KEY
   | typeof BOOKING_CANCELLED_ROUTING_KEY
+  | typeof BOOKING_DISRUPTED_ROUTING_KEY
   | typeof BOOKING_REFUNDED_ROUTING_KEY
   | typeof WALLET_CREDITED_ROUTING_KEY
   | typeof WALLET_DEBITED_ROUTING_KEY;
@@ -56,6 +60,8 @@ export function mapCoreEventToNotification(
       return mapBookingConfirmed(bookingEventPayloadSchema.parse(payload));
     case BOOKING_CANCELLED_ROUTING_KEY:
       return mapBookingCancelled(BookingCancelledConsumerEventSchema.parse(payload));
+    case BOOKING_DISRUPTED_ROUTING_KEY:
+      return mapBookingDisrupted(BookingDisruptedEventSchema.parse(payload));
     case BOOKING_REFUNDED_ROUTING_KEY:
       return mapBookingRefunded(bookingEventPayloadSchema.parse(payload));
     case WALLET_CREDITED_ROUTING_KEY:
@@ -84,6 +90,26 @@ function mapBookingCancelled(payload: BookingCancelledConsumerEvent): CreateNoti
     title: 'Vé đã bị hủy',
     body: `Vé ${formatBookingLabel(payload)} đã bị hủy. Lý do: ${payload.cancellationReason}.`,
     data: buildBookingData(payload),
+  };
+}
+
+function mapBookingDisrupted(payload: BookingDisruptedEvent): CreateNotificationDto {
+  return {
+    userId: payload.userId,
+    type: NotificationType.BOOKING_DISRUPTED,
+    title: 'Chuyến đi bị gián đoạn',
+    body: `Vé #${payload.bookingCode} bị gián đoạn. Số tiền hoàn dự kiến: ${formatMoney(payload.refundAmount)} VND.`,
+    data: {
+      eventId: payload.eventId,
+      occurredAt: payload.occurredAt,
+      bookingId: payload.bookingId,
+      bookingCode: payload.bookingCode,
+      tripId: payload.tripId,
+      operatorId: payload.operatorId,
+      traveledRatio: payload.traveledRatio,
+      refundAmount: payload.refundAmount,
+      cancellationReason: payload.cancellationReason,
+    },
   };
 }
 

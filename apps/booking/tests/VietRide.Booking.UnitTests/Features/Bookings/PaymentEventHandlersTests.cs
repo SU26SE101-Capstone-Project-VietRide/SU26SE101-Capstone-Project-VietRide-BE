@@ -309,6 +309,48 @@ public sealed class PaymentEventHandlersTests
     }
 
     [Fact]
+    public async Task MarkBookingRefunded_WhenDisrupted_MarksRefundedAndEmitsOnce()
+    {
+        var disrupted = CreateBookingProjection(Guid.NewGuid(), 200_000);
+        typeof(VietRide.Booking.Domain.Entities.Booking)
+            .GetProperty(nameof(VietRide.Booking.Domain.Entities.Booking.Status))!
+            .SetValue(disrupted, BookingStatus.DISRUPTED);
+        _bookings.QueryNoTracking().Returns(new[] { disrupted }.AsQueryable());
+        _bookings.TryMarkCancelledRefundedAsync(
+                disrupted.Id,
+                Now,
+                Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        var handler = new MarkBookingRefundedCommandHandler(
+            _bookings,
+            _outbox,
+            _clock,
+            NullLogger<MarkBookingRefundedCommandHandler>.Instance,
+            _statusHistory);
+
+        var transitioned = await handler.Handle(
+            new MarkBookingRefundedCommand(
+                PassengerUserId,
+                200_000,
+                "BOOKING_REFUND",
+                disrupted.Id),
+            CancellationToken.None);
+
+        transitioned.Should().BeTrue();
+        await _statusHistory.Received(1).AddAsync(
+            Arg.Is<BookingStatusHistory>(history =>
+                history.BookingId == disrupted.Id
+                && history.Status == BookingStatus.REFUNDED),
+            Arg.Any<CancellationToken>());
+        await _outbox.Received(1).EnqueueAsync(
+            "booking.booking.refunded",
+            Arg.Is<string>(json =>
+                json.Contains(disrupted.Id.ToString(), StringComparison.OrdinalIgnoreCase)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task MarkBookingRefunded_WhenNotCancelled_IsNoOpWithoutOutbox()
     {
         _bookings.TryMarkCancelledRefundedAsync(BookingId, Now, Arg.Any<CancellationToken>())

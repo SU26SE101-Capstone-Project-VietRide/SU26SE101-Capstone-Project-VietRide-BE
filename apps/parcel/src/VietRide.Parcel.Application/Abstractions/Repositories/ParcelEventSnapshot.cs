@@ -11,6 +11,4 @@ public sealed record ParcelEventSnapshot(
     long DepositAmount = 0,
     long AdditionalAmount = 0,
     Guid SenderUserId = default,
-    Guid? RecipientUserId = null,
-    Guid? DeliveryToken = null,
-    DateTimeOffset? DeliveryTokenExpiresAt = null);
+    Guid? RecipientUserId = null);

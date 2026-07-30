@@ -6,6 +6,10 @@ public sealed class ManualConfirmDeliveryCommandValidator : AbstractValidator<Ma
 {
     public ManualConfirmDeliveryCommandValidator()
     {
-        RuleFor(x => x.Note).NotEmpty().MaximumLength(500);
+        RuleFor(command => command.Note)
+            .Must(note => !string.IsNullOrWhiteSpace(note))
+            .WithMessage("Confirm note is required.")
+            .Must(note => note is null || note.Trim().Length <= 500)
+            .WithMessage("Confirm note must be at most 500 characters.");
     }
 }

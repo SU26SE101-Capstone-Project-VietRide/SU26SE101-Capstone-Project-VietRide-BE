@@ -558,7 +558,7 @@
           <mxGeometry x="230" width="120" height="30" as="geometry" />
         </mxCell>
         <mxCell id="tbl_invoice" value="Invoice" style="shape=table;startSize=30;container=1;collapsible=0;childLayout=tableLayout;fontSize=14;fontStyle=1;fillColor=#e1d5e7;strokeColor=#9673a6;align=center;" vertex="1" parent="1">
-          <mxGeometry x="840" y="340" width="350" height="480" as="geometry" />
+          <mxGeometry x="840" y="310" width="350" height="480" as="geometry" />
         </mxCell>
         <mxCell id="tbl_invoice_r1" value="" style="shape=tableRow;horizontal=0;startSize=0;swimlaneHead=0;swimlaneBody=0;strokeColor=inherit;top=0;left=0;bottom=0;right=0;collapsible=0;dropTarget=0;fillColor=none;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontSize=12;" vertex="1" parent="tbl_invoice">
           <mxGeometry y="30" width="350" height="30" as="geometry" />
@@ -1296,7 +1296,7 @@
           <mxGeometry x="230" width="120" height="30" as="geometry" />
         </mxCell>
         <mxCell id="tbl_operatorledgerentry" value="OperatorLedgerEntry" style="shape=table;startSize=30;container=1;collapsible=0;childLayout=tableLayout;fontSize=14;fontStyle=1;fillColor=#e1d5e7;strokeColor=#9673a6;align=center;" vertex="1" parent="1">
-          <mxGeometry x="840" y="880" width="350" height="300" as="geometry" />
+          <mxGeometry x="840" y="850" width="350" height="300" as="geometry" />
         </mxCell>
         <mxCell id="tbl_operatorledgerentry_r1" value="" style="shape=tableRow;horizontal=0;startSize=0;swimlaneHead=0;swimlaneBody=0;strokeColor=inherit;top=0;left=0;bottom=0;right=0;collapsible=0;dropTarget=0;fillColor=none;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontSize=12;" vertex="1" parent="tbl_operatorledgerentry">
           <mxGeometry y="30" width="350" height="30" as="geometry" />

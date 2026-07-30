@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.44.0
+> **Phiên bản:** 1.47.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-07-25
+> **Cập nhật lần cuối:** 2026-07-30
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -88,7 +88,7 @@ Khi conflict, ưu tiên theo thứ tự sau:
 | 2 | **Trip-Route-Vehicle** | .NET 8 + EF Core 8 | `vietride_trip` | ✓ | — | Station/Stop/Route/RouteStop, Vehicle + VehicleType, Trip + TripSeat + TripStop + TripStopFare, DriverSchedule + Hangfire generate, AlternativeRoute, ShuttleTrip, Incident |
 | 3 | **Booking** | .NET 8 + EF Core 8 | `vietride_booking` | ✓ | — | Booking order + per-seat Ticket + Passenger boarding record + BookingTransfer, BookingPendingAction, Voucher + VoucherUsage + OperatorVoucherConsent, BookingStats, seat lock TTL (Redis) |
 | 4 | **Payment & Wallet** | .NET 8 + EF Core 8 | `vietride_payment` | ✓ | — | Payment (BOOKING/PARCEL/TOP_UP/SUBSCRIPTION), Wallet + WalletTransaction (passenger), PlatformWallet + OperatorWallet + OperatorLedgerEntry + OperatorTripSettlement, Invoice + PDF, VNPay integration, RefundFailureLog |
-| 5 | **Parcel** | .NET 8 + EF Core 8 | `vietride_parcel` | ✓ | — | Parcel lifecycle, ParcelRouteFare, deliveryToken email-link, transfer/return flows, ParcelStats |
+| 5 | **Parcel** | .NET 8 + EF Core 8 | `vietride_parcel` | ✓ | — | Parcel lifecycle, ParcelRouteFare, hashed delivery-token history, transfer/return flows, ParcelStats |
 | 6 | **Tracking** | NestJS + Prisma | `vietride_tracking` | — | ✓ | Socket.IO GPS streaming (`/tracking`), ETA caching (Redis 60s), off-route detection, batch-write `GpsTrail` từ Redis buffer mỗi 5 phút |
 | 7 | **Notification** | NestJS + Prisma | `vietride_notification` | — | ✓ | Consume RabbitMQ events → enqueue BullMQ → FCM push + in-app `Notification` history + `NotificationDelivery` retry log + Email via SendGrid (OTP + parcel link) |
 | 8 | **RAG AI** | NestJS + Prisma | `vietride_rag` | — | ✓ | KnowledgeDocument ingest, KnowledgeChunk + pgvector embed, RagConversation + RagMessage, LLM SSE streaming |
@@ -862,6 +862,13 @@ export const ROUTE_TABLE: ProxyRoute[] = [
   { prefix: '/v1/operator',     target: 'multi'                                          /* role-based dispatch tới đúng service */ },
   { prefix: '/v1/bookings',     target: env.BOOKING_BASE_URL,      authRequired: true  },
   { prefix: '/v1/vouchers',     target: env.BOOKING_BASE_URL,      authRequired: true  },
+  { prefix: '/v1/crew/parcels', target: env.PARCEL_BASE_URL,       authRequired: true, requiredRoles: ['DRIVER', 'ASSISTANT'] },
+  { prefix: '/v1/parcels/delivery', target: env.PARCEL_BASE_URL,   authRequired: 'mixed',
+    publicSubpaths: [
+      { method: 'POST', path: '/v1/parcels/delivery/confirm' },
+      { method: 'POST', path: '/v1/parcels/delivery/reject' },
+      { method: 'POST', path: '/v1/parcels/delivery/undo-reject' },
+    ] },
   { prefix: '/v1/parcels',      target: env.PARCEL_BASE_URL,       authRequired: true  },
   { prefix: '/v1/payments',     target: env.PAYMENT_BASE_URL,      authRequired: 'mixed' /* vnpay-ipn callback public */ },
   { prefix: '/v1/wallet',       target: env.PAYMENT_BASE_URL,      authRequired: true  },
@@ -1265,7 +1272,19 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | 4 | `POST /v1/bookings/{id}/edit-pickup` | Booking |
 | 4b | `POST /v1/bookings/{id}/edit-dropoff` | Booking |
 | 5 | `POST /v1/parcels` | Parcel |
-| 6 | `POST /v1/parcels/{id}/confirm-delivery` (passenger confirm) | Parcel |
+| 5a | `POST /v1/parcels/delivery/confirm` | Parcel |
+| 5b | `POST /v1/parcels/delivery/reject` | Parcel |
+| 5c | `POST /v1/parcels/delivery/undo-reject` | Parcel |
+| 5d | `POST /v1/operator/parcels/{id}/resend-delivery-email` | Parcel |
+| 5e | `POST /v1/operator/parcels/{id}/manual-confirm` | Parcel |
+| 5f | `POST /v1/crew/parcels/{id}/resend-delivery-email` | Parcel |
+| 5g | `POST /v1/crew/parcels/{id}/manual-confirm` | Parcel |
+| 5h | `POST /v1/operator/parcels/{id}/cancel` | Parcel |
+| 5i | `POST /v1/operator/parcels/{id}/request-transfer` | Parcel |
+| 5j | `POST /v1/operator/parcels/{id}/return` | Parcel |
+| 5k | `POST /v1/crew/parcels/{id}/confirm-transfer` | Parcel |
+| 5l | `POST /v1/assistant/parcels/{id}/confirm-delivery` · `POST /v1/operator/parcels/{id}/confirm-delivery` (retained manual-confirm aliases) | Parcel |
+| 6 | `POST /internal/v1/trips/{sourceTripId}/cargo/transfer` | Trip |
 | 7 | `POST /v1/payments/wallet-charge` | Payment |
 | 7b | `POST /internal/v1/payments/batch-charge` | Payment |
 | 8 | `POST /v1/payments/vnpay-init` | Payment |
@@ -1295,6 +1314,7 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | 31 | `POST /v1/driver/trips/{tripId}/stops/{stopId}/depart` | Trip |
 | 32 | `POST /v1/operator/trips/{tripId}/substitute-vehicle` | Trip |
 | 33 | `POST /v1/bookings/trips/{newTripId}/transfers/passengers/{passengerId}/confirm` | Booking |
+| 34 | `POST /v1/operator/trips/{tripId}/disrupt-no-substitution` | Trip |
 
 Day-24 mutations use the same v2 fingerprint/replay contract: UUID-v4 key, actor/method/path/
 canonical-query/raw-body fingerprint, byte-identical replay before current-state lookup, and
@@ -1528,6 +1548,9 @@ updates the column.
 | | `TRIP_VEHICLE_SWAP_HELD_SEAT_CONFLICT` | 409 | Vehicle swap would remove/disable/downgrade an HELD seat |
 | | `TRIP_VEHICLE_SWAP_TOO_LATE` | 409 | Vehicle swap has incompatible BOOKED/BOARDING seats after the strict reassignment window |
 | | `TRIP_NOT_ACCEPTING_PARCEL` | 409 | Trip IN_PROGRESS — không nhận parcel mới |
+| | `PARCEL_CARGO_NOT_FOUND` | 404 | Source Trip không có active cargo ledger cho Parcel |
+| | `TRIP_CARGO_TRANSFER_CONFLICT` | 409 | Atomic source→target cargo transfer mất race hoặc source/target invalid |
+| | `TRIP_CARGO_CAPACITY_EXCEEDED` | 422 | Target Trip không đủ cargo capacity cho transfer |
 | | `DRIVER_SCHEDULE_EDIT_TOO_LATE` | 409 | Edit schedule quá deadline |
 | **Parcel** | `PARCEL_NOT_FOUND` | 404 | |
 | | `INVALID_STATUS` | 409 | Unload/deliver không ở đúng source status hoặc CAS thua race |
@@ -1537,9 +1560,15 @@ updates the column.
 | | `DESTINATION_TERMINAL_NOT_ARRIVED` | 422 | Parcel terminal-bound chưa có destination arrival anchor |
 | | `PARCEL_CAPACITY_EXCEEDED` | 409 | Vượt available cargo capacity |
 | | `PARCEL_PRICING_NOT_CONFIGURED` | 422 | ParcelRouteFare chưa config |
-| | `PARCEL_DELIVERY_TOKEN_INVALID` | 401 | Token không match |
-| | `PARCEL_DELIVERY_TOKEN_EXPIRED` | 401 | Quá 48h |
+| | `PARCEL_DELIVERY_TOKEN_INVALID` | 400 | Token parse/hash không match |
+| | `PARCEL_DELIVERY_TOKEN_EXPIRED` | 400 | Token row quá 48h |
+| | `PARCEL_DELIVERY_TOKEN_REVOKED` | 400 | Token row đã revoke do resend/terminal action |
+| | `PARCEL_RECIPIENT_EMAIL_REQUIRED` | 422 | Resend được yêu cầu nhưng Parcel không có recipient email |
+| | `PARCEL_NOT_PENDING_CONFIRM` | 400 | Public/manual delivery action không hợp lệ ở status hiện tại |
+| | `INVALID_REFUND_CHOICE` | 422 | Parcel manual-cancel refund choice không thuộc `FULL|POLICY|NO` hoặc compatibility aliases |
+| | `TRIP_SERVICE_UNAVAILABLE` | 503 | Parcel không thể hoàn tất cargo mutation vì Trip dependency unavailable |
 | | `PARCEL_NOT_TRANSFERABLE` | 409 | Status sai khi confirm transfer |
+| | `PARCEL_CARGO_RECOVERY_IN_PROGRESS` | 409 | Parcel already has a durable `TRANSFER|RETURN` cargo-recovery operation pending |
 | | `PARCEL_ADDITIONAL_PAYMENT_REQUIRED` | 402 | Cân lại > ước lượng |
 | | `PARCEL_REVIEW_TIMEOUT` | 409 | EXTRA_LARGE auto-reject 24h |
 | **Stop / Route** | `STOP_NOT_FOUND` | 404 | Day-7 Trip Stop handlers use coded 404 path; cross-tenant DELETE is masked here |
@@ -1590,6 +1619,7 @@ updates the column.
 | | `IDEMPOTENCY_KEY_REQUIRED` | 422 | Mutation contract requires the header explicitly; middleware pass-through is not acceptance |
 | | `IDEMPOTENCY_KEY_MISMATCH` | 422 | Same key, different request fingerprint (actor/method/path/query/raw body) |
 | | `IDEMPOTENCY_REQUEST_PENDING` | 409 | Same key is still being processed |
+| | `RESOURCE_CONFLICT` | 409 | Resource snapshot changed during a guarded mutation; caller must reload before retrying with a new key |
 | | `INVALID_SORT_FIELD` | 400 | sortBy value not in the per-aggregate whitelist |
 | **Generic** | `RESOURCE_NOT_FOUND` | 404 | Fallback |
 | | `FORBIDDEN` | 403 | RBAC reject |
@@ -1597,7 +1627,7 @@ updates the column.
 | | `RATE_LIMIT_EXCEEDED` | 429 | Per-user/per-resource Day-38 invoice download limit |
 | | `REPORT_VALUE_OVERFLOW` | 500 | Report source/orchestrator gặp count hoặc BIGINT/NUMERIC aggregate ngoài phạm vi Int64; không wrap, saturate hoặc trả partial |
 | | `REPORT_RANGE_INVALID` | 422 | Operator report range không phải ngày ICT hợp lệ, đảo chiều hoặc vượt 92 ngày inclusive |
-| | `UPSTREAM_UNAVAILABLE` | 502 | Downstream/inter-service dependency unavailable or returned an unusable/unexpected response (including Gateway connection failure) |
+| | `UPSTREAM_UNAVAILABLE` | 502 or 503 by boundary | `502` only for Gateway/proxy and legacy pass-through endpoints; `503` for an in-service fail-closed orchestration explicitly documented by its endpoint (Parcel email issuance and platform report sources). An endpoint MUST list the applicable status and never choose dynamically for the same failure class. |
 | | `INTERNAL_ERROR` | 500 | Unhandled exception (Sentry capture) |
 
 **Day-23 exact resolver mapping — POST
@@ -1872,6 +1902,15 @@ route; the operator Route endpoint remains role-isolated.
 createVehicle(@CurrentUser() user: UserContext, @Body() dto: CreateVehicleDto) { ... }
 ```
 
+**Day-37 Trip create guard:** before dispatch/persistence, `POST /v1/operator/vehicles` and
+`POST /v1/operator/routes` validate operator active/approved and the general active subscription
+with `requireShuttleModule=false`; neither endpoint depends on `enableShuttle`.
+`POST /v1/operator/shuttle-trips` performs the same operator guard and validates subscription with
+`requireShuttleModule=true` before calling the dispatch service. Stable outcomes are expired
+subscription → `402 SUBSCRIPTION_EXPIRED`, disabled Shuttle module → `403
+SUBSCRIPTION_MODULE_DISABLED` (Shuttle only), non-eligible operator/role → `403 FORBIDDEN`, and
+Identity unavailable/unusable response → `503 UPSTREAM_UNAVAILABLE`.
+
 ### 6.11 Day-40 Identity per-user serialization
 
 Mọi path đọc `User.status` rồi có thể phát token/OTP hoặc ghi auth state phải tuyến tính hóa trên
@@ -1965,7 +2004,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 
 | Method + Path | Caller | Mục đích |
 |---|---|---|
-| `GET /internal/v1/trips/{tripId}?pricingAt=` | Booking, Parcel, Tracking, Payment | Raw Trip snapshot; Day 24 appends nullable trip-level `actualDepartureTime` while preserving stop `status`/nullable `actualArrivalTime`. Valid Internal JWT only (`401 AUTH_TOKEN_INVALID`), no tenant authorization. Optional ISO-offset `pricingAt` resolves Booking fare as `MANUAL_OVERRIDE` → active half-open `RouteStopFareTemplate` → `Trip.baseFare`; omitted preserves persisted legacy snapshot semantics. No event/projection is added. |
+| `GET /internal/v1/trips/{tripId}?pricingAt=` | Booking, Parcel, Tracking, Payment | Raw Trip snapshot; includes nullable `actualDepartureTime`, nullable route `totalDistanceKm`, and stops with `status`, nullable `actualArrivalTime`, nullable `distanceFromOriginKm`, and `orderIndex`. Valid Internal JWT only (`401 AUTH_TOKEN_INVALID`), no tenant authorization. Optional ISO-offset `pricingAt` resolves Booking fare as `MANUAL_OVERRIDE` → active half-open `RouteStopFareTemplate` → `Trip.baseFare`; omitted preserves persisted legacy snapshot semantics. |
 | `POST /internal/v1/trips/{tripId}/lock-seats` | Booking | Lock seats trong checkout (TTL 10 phút Redis) |
 | `POST /internal/v1/trips/round-trip/lock-seats` | Booking | Lock outbound + return seats atomically in one Trip-owned Redis Lua script; if either leg fails, no seat is held |
 | `POST /internal/v1/trips/{tripId}/release-seats` | Booking | Release seat khi payment fail/timeout |
@@ -1973,8 +2012,9 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | `GET /internal/v1/trips/{tripId}/passengers-pending` | Booking | Cho operator dashboard |
 | `GET /internal/v1/stations/{id}` · `GET /internal/v1/stops/{id}` · `GET /internal/v1/routes/{id}` | All services | Trip internal-auth required; raw DTO lookup. Station active returns canonical resolution; merged soft-delete returns original identity plus terminal `canonicalStationId`; ordinary soft-delete/missing returns `STATION_NOT_FOUND`. Stop not found returns `STOP_NOT_FOUND`. Errors use ADR 0004 envelope. |
 | `GET /internal/v1/reports/platform/trips?from=&to=` | Payment | Raw completed-Trip earned metrics grouped by operator; `status=COMPLETED`, `completed_at` in UTC `[from,to)` |
-| `GET /internal/v1/trips/{tripId}/capacity` | Parcel | Lấy available cargo capacity |
-| `POST /internal/v1/trips/{tripId}/cargo-counter/reserve` · `release` · `load` · `unload` | Parcel | Update reservedParcelWeightKg + totalLoadedWeightKg atomic |
+| `GET /internal/v1/trips/{tripId}/cargo/capacity` | Parcel | Lấy available cargo capacity |
+| `POST /internal/v1/trips/{tripId}/cargo/reserve` · `remeasure` · `load` · `release` | Parcel | Idempotent single-Trip cargo-ledger mutation and counter update |
+| `POST /internal/v1/trips/{sourceTripId}/cargo/transfer` | Parcel | Exact `{parcelId,targetTripId,targetState:RESERVED\|LOADED,allowCapacityOverflow}`; lock source/target by ascending UUID and atomically release source plus reserve/load target in one Trip-local transaction. `RESERVED` always enforces capacity; `LOADED` permits explicit overflow only for approved substitution recovery. |
 
 #### Booking Service
 
@@ -2017,9 +2057,12 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 
 | Method + Path | Caller | Mục đích |
 |---|---|---|
-| `POST /internal/v1/emails` | Identity (OTP + account-created/set-initial-password); Payment/Parcel later | Enqueue transactional email delivery (Internal-JWT only, `202 Accepted`, ADR 0004 envelope). Body `{ notificationId?: uuid\|null, toEmail, templateKey, templateData }`. **Sensitive — OTP / set-password URL are sent in `templateData` and MUST NOT be persisted in `outbox_messages` or logged**; Notification scrubs them via the email-sensitive-data helper before audit/log. Do NOT route OTP through an Outbox event (plaintext-on-bus risk). `templateKey` ∈ `EmailTemplateKey` (Notification prisma enum). Field map per template: `AUTH_OTP` → `{ code (alias otpCode), purpose (REGISTRATION\|PASSWORD_RESET), ttlMinutes }`; `SET_INITIAL_PASSWORD` → `{ userId, displayName, setInitialPasswordUrl (alias setPasswordUrl), expiresAt }`. |
+| `POST /internal/v1/emails` | Identity, Payment, Parcel | Enqueue transactional email delivery (Internal-JWT only, UUID-v4 Idempotency-Key, `202 Accepted`, ADR 0004 envelope). General body `{ notificationId?: uuid\|null, dedupeKey?, toEmail, templateKey, templateData }`. Parcel's exact body is `{notificationId:null,dedupeKey:"parcel-delivery-token:<tokenRowId>",toEmail:recipientEmail,templateKey:"PARCEL_DELIVERY_LINK",templateData:{deliveryUrl,parcelCode,expiresAt}}`, with HTTP Idempotency-Key equal to `tokenRowId`. **Sensitive — OTP, set-password URL, and Parcel delivery URL are runtime-only and MUST NOT be persisted in `outbox_messages` or logged**; Notification scrubs them before audit/log. Do not route sensitive links through Outbox events. Parcel commits issuance only after `202`; every other response/timeout/transport failure maps to `503 UPSTREAM_UNAVAILABLE` with no token/state commit. |
 
-> Identity selects its `IEmailService` impl via `EMAIL_PROVIDER` (`SENDGRID` = real delivery through this endpoint, the container/prod default; `LOG` = log-only for local dev) and reads the base URL from `EMAIL_SERVICE_BASE_URL` (`http://notification:3002`). Identity takes NO SendGrid dependency — SendGrid stays Notification-only (§1.2 / §3.5). The outbound Internal JWT is minted by the same per-service `InternalJwtTokenFactory` + shared `InternalJwtDelegatingHandler` pattern used by Trip/Booking/Payment (§5.3).
+> Identity owns its existing provider selection. Parcel always calls this Notification endpoint
+> through `NOTIFICATION_BASE_URL` and uses `PUBLIC_APP_URL` to build the delivery link. Parcel
+> never selects `EMAIL_PROVIDER` and takes no SendGrid dependency; outbound auth uses the existing
+> Internal JWT factory/handler pattern (§5.3).
 
 #### Day-24 public Trip stop departure
 
@@ -2048,7 +2091,8 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `identity.operator.suspended` | Identity | Trip, Booking | `{ operatorId, suspendedAt }` |
 | `identity.firebase_session.revoke_requested` | Identity | Identity | `{ eventId, occurredAt, userId, reason }`; user lock emits one request, operator suspend emits one per scoped `OPERATOR_ADMIN`; consumer calls Firebase refresh-token revocation, treats missing Firebase users as no-op, and lets transient failures retry/DLQ |
 | `booking.booking.confirmed` | Booking | Notification, Payment (settle hold), Booking (BookingStats counter), Trip (shuttle fan-out) | `{ bookingId, tripId, totalAmount, userId, voucherUsageId?, bookingCode?, tickets?: [{ ticketId, passengerUserId? }], ticketCodes?, ticketCount?, shuttlePickup?: { address, latitude, longitude } }` |
-| `booking.booking.cancelled` | Booking | Notification, Trip, Payment, Booking | { eventId, occurredAt, bookingId, userId, refundAmount, refundOverride, cancellationReason, bookingCode?, ticketCodes?, ticketCount? } |
+| `booking.booking.cancelled` | Booking | Notification, Trip, Payment, Booking | `{ eventId, occurredAt, bookingId, userId, refundAmount, refundOverride, cancellationReason, bookingCode?, ticketCodes?, ticketCount? }`. When `cancellationReason=OPERATOR_DISRUPTED_IN_PROGRESS`, Notification MUST suppress the generic cancellation message; Payment/Trip/Booking still process the fact. |
+| `booking.booking.disrupted` | Booking | Notification | Exact `{ eventId, occurredAt, bookingId, bookingCode, tripId, operatorId, userId, traveledRatio, refundAmount, cancellationReason }`; sole passenger-facing notification fact for no-substitution disruption. Payment MUST NOT bind it; canonical `booking.booking.cancelled` remains the sole Booking refund trigger. Booking writes status plus both facts atomically with distinct stable EventIds, each equal to its own Outbox id/MessageId. |
 | `booking.booking.refunded` | Booking | Notification, Booking (BookingStats counter) | `{ bookingId, userId, amount, bookingCode?, ticketCodes?, ticketCount? }` |
 | `booking.booking.seat_reassignment_required` | Booking | Notification | `{ eventId, occurredAt, bookingId, tripId, userId, pendingActionId, deadline, seatNumbers, reason: SEAT_REMOVED\|SEAT_DISABLED\|SEAT_TYPE_DOWNGRADED }` |
 | `booking.booking.schedule_change_informational` | Booking | Notification | For `CONFIRMED` Bookings only; exact MINOR-only `{ eventId, occurredAt, bookingId, tripId, userId, oldDeparture, newDeparture, severity: MINOR }`; no pending-action fields |
@@ -2064,7 +2108,7 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `trip.trip.crew_changed` | Trip | Notification | `{ tripId, operatorId, oldDriverUserId, oldAssistantUserId?, driverUserId, assistantUserId?, routeName, vehiclePlateNumber?, departureDateTime }` |
 | `trip.trip.started` | Trip | Parcel (block new parcel), Tracking | `{ tripId, actualDepartureTime }` |
 | `trip.trip.completed` | Trip | Booking, Parcel, Payment (settlement eligibility) | `{ eventId, occurredAt, tripId, operatorId, terminalAt, completedAt, hasSubstitution }`; `completedAt` equals `terminalAt` and is retained as the Booking compatibility alias |
-| `trip.trip.disrupted` | Trip | Booking, Parcel, Payment | `{ eventId, occurredAt, tripId, operatorId, terminalAt, hasSubstitution, reason? }`; `hasSubstitution` is audit-only for Payment settlement, not for other consumers |
+| `trip.trip.disrupted` | Trip | Booking, Parcel, Payment | Exact `{ eventId, occurredAt, tripId, operatorId, terminalAt, hasSubstitution, reason? }`; Booking and Parcel execute disruption recovery only when `hasSubstitution=false`, while Payment records settlement eligibility for either value. The event never carries a Trip-wide traveled ratio. |
 | `trip.trip.cancelled` | Trip | Booking, Parcel | { eventId, occurredAt, tripId, operatorId, cancelledAt, cancelReason } |
 | `trip.trip.vehicle_swapped` | Trip | Booking, Notification (crew only) | Exact `{ eventId,occurredAt,tripId,operatorId,oldVehicleId,newVehicleId,oldVehiclePlateNumber,newVehiclePlateNumber,departureDateTime,driverUserId,assistantUserId,seatImpacts:[{bookingId,seatNumbers,reason}] }`; `assistantUserId` present nullable, reasons exactly `SEAT_REMOVED\|SEAT_DISABLED\|SEAT_TYPE_DOWNGRADED` |
 | `trip.trip.vehicle_substituted` | Trip | Booking, Parcel (Day 35) | Exact `{eventId,occurredAt,substitutionId,disruptedAt,operatorId,oldTripId,oldTripStatus,oldVehicleId,newTripId,newTripStatus,newVehicleId,newVehiclePlateNumber,newTripDepartureDateTime,actorUserId,reason,notifyPassengers,mappings:[{bookingId,passengerId,originalSeatNumber,newSeatNumber,originalBoardingStatus}]}`; exactly one fact per substitution; `occurredAt = disruptedAt`; `substitutionId = eventId`; `oldTripStatus=DISRUPTED`; `newTripStatus=BOARDING`; both `originalSeatNumber` and `newSeatNumber` are nullable; `originalBoardingStatus=BOARDED\|PENDING`; `payload.eventId == Outbox row id == RabbitMQ MessageId`. |
@@ -2108,17 +2152,19 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `parcel.parcel.created` | Parcel | Notification | `{ parcelId, tripId, senderUserId, recipientUserId? }`; cargo soft hold is an idempotent synchronous Trip mutation when deposit payment starts |
 | `parcel.parcel.loaded` | Parcel | Notification, Trip (counter update) | Exact `{ eventId, occurredAt, parcelId, tripId, actualWeightKg, userIds[] }`; direct `userIds[]` contains the sender and recipient account when present; `eventId == OutboxEvent.id == RabbitMQ MessageId` |
 | `parcel.parcel.unloaded` | Parcel | Notification | `{ parcelId, tripId, userIds[] }`; chỉ CAS `IN_TRANSIT -> UNLOADED` thắng mới enqueue, `userIds` distinct gồm sender và recipient account nếu có |
-| `parcel.parcel.delivered_pending_confirm` | Parcel | Notification | `{ parcelId, parcelCode, operatorId, tripId, userId?, recipientUserIds[]?, deliveryToken, expiresAt }`; optional recipient fields bị omit khi không có account |
+| `parcel.parcel.delivered_pending_confirm` | Parcel | Notification | Exact `{ eventId, occurredAt, parcelId, parcelCode, operatorId, tripId, userId?, recipientUserIds[]?, expiresAt? }`; `eventId == Outbox row id == RabbitMQ MessageId`. Recipient fields are omitted when no account is linked, and `expiresAt` is omitted when no recipient email/token exists. Raw tokens and delivery URLs are forbidden; Parcel sends the recipient email through `POST /internal/v1/emails`. |
+| `parcel.parcel.delivery_confirmation_realerted` | Parcel | Notification (operator) | Exact `{ eventId, occurredAt, parcelId, parcelCode, operatorId, tripId, expiredAt }`; emitted only after the active confirmation token has been expired for at least seven days. It does not rotate the token or change Parcel status. |
+| `parcel.parcel.pending_operator_action_realerted` | Parcel | Notification (operator) | Exact `{ eventId, occurredAt, parcelId, parcelCode, operatorId, userId, tripId }`; `userId` is always the persisted Parcel sender. The 2-hour recovery reminder is replay-safe and contains no token or mutable recipient secret. |
 | `parcel.parcel.delivery_confirmed` | Parcel | Notification | `{ parcelId }` |
 | `parcel.parcel.delivery_rejected` | Parcel | Notification | `{ parcelId, reason }` |
-| `parcel.parcel.cancelled` · `rejected` · `returned` | Parcel | Notification, Trip (counter), Payment (refund) | Legacy `{ parcelId, refundAmount? }`; review reject/timeout facts additionally snapshot `eventId`, `occurredAt`, `parcelCode`, sender `userId`, `operatorId` and `reason` so Notification does not read mutable rejection copy later |
+| `parcel.parcel.cancelled` · `parcel.parcel.rejected` · `parcel.parcel.returned` | Parcel | Notification | Canonical Day-32 terminal notification fact `{eventId,occurredAt,parcelId,parcelCode,operatorId,userId,tripId,refundAmount,reason}`. Trip cargo is mutated synchronously through its idempotent internal API; Payment MUST NOT bind these canonical facts. Exact legacy payloads without canonical identity remain accepted for one release only and normalize to the same deterministic Parcel reference identity described below. |
 | `parcel.parcel.auto_rejected` | Parcel | Notification, Trip (counter), Payment (refund) | Legacy exact `{ eventId, occurredAt, parcelId, parcelCode, operatorId, userId, tripId, refundAmount }` remains accepted for late-load/additional-payment producers. Settlement v2 exact variant adds `reason: CHECK_IN_TIMEOUT\|FINAL_PAYMENT_TIMEOUT` and `forfeitedDepositVnd`; `userId` is always the persisted sender and `eventId == OutboxEvent.id == RabbitMQ MessageId` |
 | `parcel.parcel.review_requested` | Parcel (EXTRA_LARGE) | Notification (operator) | `{ parcelId, operatorId }` |
 | `parcel.parcel.review_approved` | Parcel (EXTRA_LARGE) | Notification (sender) | Exact `{ eventId, occurredAt, parcelId, parcelCode, operatorId, userId, depositRequiredVnd }`; enqueue trong cùng transaction chuyển sang `PENDING_PAYMENT` |
 | `parcel.parcel.final_payment_requested` | Parcel | Notification (sender) | Exact `{ eventId, occurredAt, parcelId, parcelCode, operatorId, userId, tripId, balanceRequiredVnd, balancePaidVnd, finalPaymentDeadline }`; enqueue trong cùng transaction cân lại chuyển sang `PENDING_FINAL_PAYMENT` |
 | `parcel.parcel.settlement_recovered` | Parcel | Notification (sender) | Exact `{ eventId, occurredAt, parcelId, parcelCode, userId, tripId, recoveredStatus: READY_TO_LOAD\|CANCELLED, refundAmountVnd }`; corrective fact khi callback có `paidAt` đúng hạn thắng timeout đã phát trước đó |
 | `parcel.parcel.transfer_initiated` | Parcel | Notification | `{ parcelId, originalTripId, newTripId }` |
-| `parcel.refund.initiated` | Parcel | Payment | `{ parcelId, senderUserId, amount, referenceType, referenceId, reason, idempotencyKey }`; idempotency identity distinguishes Parcel and settlement reason |
+| `parcel.refund.initiated` | Parcel | Payment | Exact `{ eventId, occurredAt, parcelId, senderUserId, amount, referenceType:"PARCEL_REFUND", referenceId, reason, idempotencyKey }`; sole authoritative Day-32 refund trigger. `referenceId=parcelId`. Allowed `reason` is `TRIP_CANCELLED_PRE_LOAD`, `MANUAL_CANCEL_FULL`, `MANUAL_CANCEL_POLICY`, `OPERATOR_RETURN`, or `TRIP_DISRUPTED_PRE_LOAD`. `idempotencyKey` is the stable UUID-v4 derived once per Parcel + source event/request + refund phase and is reused on retry. Payment dedupes the one-release legacy terminal refund and this canonical fact by `(referenceType,referenceId,idempotencyKey)`, so a partial and later final refund remain distinct while the same phase can create at most one wallet credit/ledger entry. |
 
 **Cancellation event compatibility:** A canonical `booking.booking.cancelled` producer creates a
 fresh UUID-v4 `eventId` and captures offset-date-time `occurredAt`. One-release consumers accept
@@ -2429,7 +2475,8 @@ replay or purge is implemented in v1. Every Hangfire-owning service exposes the 
 ```
 PENDING_PAYMENT ─┬─→ CONFIRMED ─┬─→ COMPLETED
                  │              ├─→ NO_SHOW
-                 │              ├─→ PARTIAL_NO_SHOW ─→ COMPLETED
+                 │              ├─→ PARTIAL_NO_SHOW ─┬─→ COMPLETED
+                 │              │                    └─→ DISRUPTED ─→ REFUNDED
                  │              ├─→ CANCELLED ─→ REFUNDED   (operator hoặc user hủy)
                  │              └─→ DISRUPTED ─→ REFUNDED   (Trip DISRUPTED, no substitution)
                  │
@@ -2450,8 +2497,10 @@ PENDING_PAYMENT ─┬─→ CONFIRMED ─┬─→ COMPLETED
 - `PARTIAL_NO_SHOW`: the same locked/rechecked job marks remaining pending passengers and sets
   the Booking to `PARTIAL_NO_SHOW` when at least one passenger is already `BOARDED`; all-boarded
   bookings are unchanged. Missing/stale raw anchors fail closed.
-- `CANCELLED → REFUNDED`: Booking Service consume `payment.wallet.credited`.
-- `DISRUPTED`: Booking Service consume `trip.trip.disrupted { hasSubstitution: false }`.
+- `CANCELLED|DISRUPTED → REFUNDED`: Booking Service consumes `payment.wallet.credited` with
+  `referenceType=BOOKING_REFUND` and CASes either source status.
+- `DISRUPTED`: Booking Service consumes `trip.trip.disrupted { hasSubstitution: false }` for
+  `CONFIRMED|PARTIAL_NO_SHOW`; `NO_SHOW` and all other statuses are no-op.
 - Vehicle substitution does not change eligible Booking status: `CONFIRMED|PARTIAL_NO_SHOW` is
   retained. Mapped old `BOARDED` Passengers receive the nullable mapped seat plus one
   `PENDING_CONFIRM` transfer; mapped old `PENDING` Passengers receive the nullable mapped seat plus
@@ -2487,6 +2536,7 @@ Current writers and population rules are frozen as follows:
 | `MARK_NO_SHOW` | `NO_SHOW` or `PARTIAL_NO_SHOW` | null | null | Day-24 strict anchor job; one row only for a guarded Booking transition. |
 | `MARK_REFUNDED` | `REFUNDED` | null | null | Per writer rules below. |
 | `COMPLETE_ON_TRIP_COMPLETED` | `COMPLETED` | null | null | `occurredAt=event.completedAt`; same Booking-local transaction as the guarded status transition; guarded no-op/replay appends no row. |
+| `DISRUPT_ON_TRIP_DISRUPTED` | `DISRUPTED` | null | `OPERATOR_DISRUPTED_IN_PROGRESS` | `occurredAt=event.terminalAt`; same Booking-local transaction as the guarded `CONFIRMED\|PARTIAL_NO_SHOW -> DISRUPTED` transition, voucher-usage compensation, and both canonical Outbox facts; guarded no-op/replay appends no row. |
 
 Each writer captures `IClock.UtcNow` exactly once and reuses that value for the Booking creation/transition timestamp work and its history row; it never uses database-read time or Outbox publish time. A creation appends `PENDING_PAYMENT`, and every guarded successful transition appends exactly one row in the same local database transaction. A guarded no-op/replay appends no row. If the transaction rolls back, both state and history roll back atomically.
 
@@ -2582,6 +2632,8 @@ Trip, and cancellation/refund uses persisted `totalAmount`.
 ```
 PENDING_OPERATOR_REVIEW (EXTRA_LARGE only) ──→ PENDING_PAYMENT | REJECTED | CANCELLED(review timeout)
 PENDING_PAYMENT ──→ RESERVED | EXPIRED | CANCELLED
+PENDING (legacy paid compatibility) ──→ CANCELLED | PENDING_OPERATOR_ACTION
+PENDING_ADDITIONAL_PAYMENT (legacy compatibility) ──→ CANCELLED | PENDING_OPERATOR_ACTION | REJECTED
 RESERVED ──→ CHECKED_IN | REJECTED(check-in timeout) | CANCELLED | PENDING_OPERATOR_ACTION
 CHECKED_IN ──→ PENDING_FINAL_PAYMENT | READY_TO_LOAD | PENDING_OPERATOR_ACTION
 PENDING_FINAL_PAYMENT ──→ READY_TO_LOAD | REJECTED(final-payment timeout) | CANCELLED
@@ -2606,15 +2658,28 @@ PENDING_OPERATOR_ACTION ──→ pendingActionResumeStatus | RETURNED
   khớp ID, `allowDropoff=true` và `status=ARRIVED`. Parcel có `dropoffStopId=null` chỉ dùng
   `destinationArrivedAt`; không suy diễn từ stop trung gian cuối. Express Trip không có TripStop vẫn
   unload được sau destination arrival.
-- CAS unload thắng set duy nhất `status`, `unloadedAt`, clear toàn bộ delivery-token/pending-confirm
-  fields và enqueue đúng một `parcel.parcel.unloaded` trong cùng Parcel-local transaction. Cargo
+- CAS unload thắng set duy nhất `status`, `unloadedAt`, clear pending-confirm metadata, revoke any
+  active token-history row if present, and enqueue exactly one `parcel.parcel.unloaded` in the same
+  Parcel-local transaction. Cargo
   release chỉ chạy ở unload và không lặp lại ở deliver.
-- Deliver chỉ cho phép `UNLOADED -> DELIVERED_PENDING_CONFIRM`. CAS deliver thắng mới sinh token
-  48 giờ, set `deliveredPendingConfirmAt`/token/expiry và enqueue đúng một
-  `parcel.parcel.delivered_pending_confirm` trong cùng Parcel-local transaction. Flow recipient
-  confirm hiện hữu tiếp tục từ `DELIVERED_PENDING_CONFIRM`.
+- Deliver chỉ cho phép `UNLOADED -> DELIVERED_PENDING_CONFIRM`. The winner creates a runtime-only
+  UUID-v4 token, persists only its normalized SHA-256 hash in `parcel_delivery_tokens`, and calls
+  Notification through Internal JWT using `POST /internal/v1/emails`. The delivery link uses
+  `PUBLIC_APP_URL`; neither the raw token nor URL may enter Parcel rows, Outbox, logs, or events.
+  Token issuance, `deliveredPendingConfirmAt`, and the canonical
+  `parcel.parcel.delivered_pending_confirm` fact commit only after Notification returns `202`.
+  The existing recipient confirm flow continues from `DELIVERED_PENDING_CONFIRM` by hashing the
+  supplied token for lookup.
+- Resend revokes the active token-history row and rotates the token. When invoked during the
+  reject undo window it first restores `DELIVERED_PENDING_CONFIRM`. Manual confirmation does not
+  require a recipient email. Operator endpoints and assigned Driver/Assistant aliases enforce the
+  same tenant and Trip assignment boundaries.
+- Migration `Up` hashes normalized legacy UUID tokens, backfills history with
+  `MIGRATION_BACKFILL`, then drops plaintext columns. SHA-256 is irreversible: `Down` may restore
+  the legacy schema shape only with null raw-token values, must invalidate affected links, and
+  requires reissue after rollback; it MUST NOT claim to reconstruct plaintext tokens.
 - Replay được idempotency cache phục vụ mà không chạy handler. Hai request dùng key khác cùng race
-  thì chỉ một CAS thắng; request thua trả `409 INVALID_STATUS`, không enqueue Outbox và không gọi
+  thì chỉ một CAS thắng; request thua trả `409 RESOURCE_CONFLICT`, không enqueue Outbox và không gọi
   cargo release.
 
 **Trip cargo counter rule:** các flow reserve/load/transfer giữ nguyên theo technical context
@@ -3119,8 +3184,11 @@ permitted.
 | `UndoRejectWindowJob` | Scheduled (per Parcel) | DELIVERY_REJECTED + 15 phút | DELIVERY_REJECTED → RETURN_INITIATED |
 | `AutoRejectExtraLargeJob` | Scheduled (per Parcel) | PENDING_OPERATOR_REVIEW + 24h | `CANCELLED`, reason `OPERATOR_REVIEW_TIMEOUT`; chưa có tiền để refund |
 | `ParcelSettlementTimeoutJob` | Recurring | Every 5 phút | Xử lý cả `RESERVED → REJECTED` khi quá `latestCheckInAt` và `PENDING_FINAL_PAYMENT → REJECTED` khi `finalPaymentDeadline <= now`; forfeiture toàn bộ cọc + release cargo; callback on-time đến sau phải recovery theo invariant §8.3 |
-| `PendingTransferConfirmEscalationJob` | Scheduled (per Parcel) | PENDING_TRANSFER_CONFIRM + 30 phút | → TRANSFER_ESCALATED |
-| `PendingOperatorActionReAlertJob` | Scheduled (per Parcel) | PENDING_OPERATOR_ACTION + 2h | Re-alert operator |
+| `PendingTransferConfirmEscalationJob` | Scheduled (per Parcel) | `now >= transferRequestedAt + 30 minutes` | CAS `PENDING_TRANSFER_CONFIRM -> TRANSFER_ESCALATED` only when `transfer_confirmation_claim_id IS NULL`. Crew claim is allowed only strictly before deadline. |
+| `PendingTransferClaimRecoveryJob` | Recurring every 5 minutes | `PENDING_TRANSFER_CONFIRM`, non-null claim, `transfer_confirmation_claimed_at <= now - 5 minutes` | Replay Trip cargo transfer with the persisted claim id and persisted target; never mint a new key and never escalate a claimed row. A successful replay CAS-completes Parcel, a domain 4xx clears the claim for operator correction, and unknown/503 retains it for the next scan. |
+| `PendingCargoRecoveryOperationJob` | Recurring every 5 minutes | `parcel_cargo_recovery_operations.status=PENDING`, `claimed_at <= now - 5 minutes` | Replay Day-32 `TRANSFER|RETURN` with the persisted UUID-v4 operation id and frozen payload. Success finalizes Parcel + operation + Outbox/stats in one local transaction; definitive 4xx marks `FAILED`; unknown/503 remains `PENDING`. |
+| `PendingOperatorActionReAlertJob` | Scheduled (per Parcel) | PENDING_OPERATOR_ACTION + 2h | Emit replay-safe `parcel.parcel.pending_operator_action_realerted`; status unchanged |
+| `DeliveryConfirmationReminderJob` | Recurring | Active confirmation token expired at least 7 days | Emit `parcel.parcel.delivery_confirmation_realerted` for the operator; never rotate the token or change Parcel status |
 
 #### Payment & Wallet
 
@@ -3570,6 +3638,9 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.47.0** | 2026-07-30 | BE lead (Vũ) | **MINOR** — Closes the Day-32 Parcel recovery crash/race gate with a dedicated persistent `TRANSFER|RETURN` cargo-recovery operation, one active claim per Parcel, frozen refund/target facts, stable Trip idempotency identity, five-minute stale replay, and atomic Parcel-local finalization of state, operation, Outbox and stats. |
+| **1.46.0** | 2026-07-30 | BE lead (Vũ) | **MINOR** — Completes the implementation gate for Days 31/32/35/37/42: public Parcel delivery routing and hash-only rate limiting; encrypted Notification queue payloads; durable vehicle-transfer claim schema/recovery; exact outstanding Parcel refund identity; fail-closed per-Booking disruption snapshots; the approved `DISRUPT_ON_TRIP_DISRUPTED` timeline writer with null event actor; general-versus-Shuttle subscription guards; and exact 29/92-day report acceptance. Corrects legacy cargo formulas, status compatibility, schema/ERD inventory, error contexts, and Notification configuration ownership. |
+| **1.45.0** | 2026-07-30 | BE lead (Vũ) | **MINOR** — Reconciles Days 31/32/35 contracts: Parcel delivery confirmation stores only SHA-256 token history and sends sensitive links directly through Notification internal email; Trip cancellation and disruption use canonical routing keys plus service-local refund/cargo recovery; Trip owns an atomic source-to-target cargo-transfer API; no-substitution refunds are computed per Booking with nearest-VND `AwayFromZero`; and Parcel vehicle-substitution transfer uses crew confirmation with a replay-safe 30-minute CAS escalation. |
 | **1.44.0** | 2026-07-25 | BE lead (Vũ) | **MINOR** — Day-34 / SCV-114 freezes Vehicle Substitution: adds substitution-only `409 TRIP_NOT_SUBSTITUTABLE` while preserving existing `422 TRIP_NOT_IN_PROGRESS`, both public HTTP contracts and the exact Booking impact seam without `seatType` (Trip derives preferred type from the old TripSeat and deterministically falls back when absent), canonical Trip/Booking event payloads and Outbox identity, nullable seat history plus BookingTransfer confirmation persistence, and Notification recipient/suppression rules. Parcel transfer behavior remains deferred to Day 35. |
 | **1.43.1** | 2026-07-24 | BE lead (Vũ) | **PATCH** - Register the signed, read-only `GET /v1/payments/vnpay-return-status` browser-return poll endpoint. The HTTPS bridge can display persisted Payment status and open the Passenger deep link, while VNPay IPN remains the only source allowed to mutate Payment and publish downstream confirmation events. |
 | **1.43.0** | 2026-07-23 | BE lead (Vũ) | **MINOR** - Align Day-33 ROUTE_CHANGE timeout with technical context §6.4: persist frozen shuttle-fallback metadata, keep Booking CONFIRMED without automatic refund, publish `booking.booking.route_change_auto_fallback_applied` for Notification, and preserve the recurring five-attempt `RefundFailureRetryJob` lifecycle by persisting the initial consumer failure at `retryCount=0`. |

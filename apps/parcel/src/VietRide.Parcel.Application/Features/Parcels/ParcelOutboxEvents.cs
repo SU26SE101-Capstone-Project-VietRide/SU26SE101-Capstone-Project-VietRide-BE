@@ -28,7 +28,8 @@ public static class ParcelOutboxEvents
     public const string TransferEscalated = "parcel.parcel.transfer_escalated";
     public const string ReturnInitiated = "parcel.parcel.return_initiated";
     public const string PendingOperatorAction = "parcel.parcel.pending_operator_action";
-    public const string PendingOperatorActionRealert = "parcel.parcel.pending_operator_action_realert";
+    public const string PendingOperatorActionRealerted = "parcel.parcel.pending_operator_action_realerted";
+    public const string DeliveryConfirmationRealerted = "parcel.parcel.delivery_confirmation_realerted";
     public const string RefundInitiated = "parcel.refund.initiated";
 
     public static Task EnqueueAsync(
@@ -81,6 +82,65 @@ public static class ParcelOutboxEvents
                 amount,
                 referenceType = "PARCEL_REFUND",
                 referenceId = parcelId,
+                idempotencyKey,
+            },
+            cancellationToken);
+
+    public static Task EnqueueTerminalAsync(
+        IIntegrationEventOutbox outbox,
+        Guid eventId,
+        DateTimeOffset occurredAt,
+        string eventType,
+        Guid parcelId,
+        string parcelCode,
+        Guid operatorId,
+        Guid senderUserId,
+        Guid tripId,
+        long refundAmount,
+        string reason,
+        CancellationToken cancellationToken)
+        => EnqueueAsync(
+            outbox,
+            eventId,
+            eventType,
+            new
+            {
+                eventId,
+                occurredAt,
+                parcelId,
+                parcelCode,
+                operatorId,
+                userId = senderUserId,
+                tripId,
+                refundAmount,
+                reason,
+            },
+            cancellationToken);
+
+    public static Task EnqueueCanonicalRefundAsync(
+        IIntegrationEventOutbox outbox,
+        Guid eventId,
+        DateTimeOffset occurredAt,
+        Guid parcelId,
+        Guid senderUserId,
+        long amount,
+        string reason,
+        Guid idempotencyKey,
+        CancellationToken cancellationToken)
+        => EnqueueAsync(
+            outbox,
+            eventId,
+            RefundInitiated,
+            new
+            {
+                eventId,
+                occurredAt,
+                parcelId,
+                senderUserId,
+                amount,
+                referenceType = "PARCEL_REFUND",
+                referenceId = parcelId,
+                reason,
                 idempotencyKey,
             },
             cancellationToken);

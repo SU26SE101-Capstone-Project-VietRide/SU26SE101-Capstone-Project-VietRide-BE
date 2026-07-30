@@ -2,6 +2,7 @@ import { Queue } from 'bullmq';
 import IORedis from 'ioredis';
 import type { Env } from '../config/env.schema';
 import { EmailTemplateKey } from '../generated/notification-prisma-client';
+import { decryptEmailTemplateData } from './email-job-payload.crypto';
 import { EmailSendQueue } from './email-send.queue';
 import { FcmPushQueue } from './fcm-push.queue';
 
@@ -22,7 +23,10 @@ jest.mock('ioredis', () => ({
   default: jest.fn().mockImplementation(() => ({ quit: jest.fn() })),
 }));
 
-const env = { REDIS_URL: 'redis://localhost:6379' } as Env;
+const env = {
+  REDIS_URL: 'redis://localhost:6379',
+  INTERNAL_JWT_SECRET: 'test-secret-min-32-chars-aaaaaaaaaaaaaaaa',
+} as Env;
 const fcmData = {
   notificationId: '11111111-1111-4111-8111-111111111111',
   userId: '22222222-2222-4222-8222-222222222222',
@@ -68,9 +72,17 @@ describe('notification BullMQ producers', () => {
 
     const jobId = 'notificationId' in data ? data.notificationId : data.emailDeliveryId;
 
-    expect(mockAdd).toHaveBeenCalledWith(expect.any(String), data, {
-      jobId,
-    });
+    if ('emailDeliveryId' in data) {
+      const persistedJob = mockAdd.mock.calls[0]?.[1];
+      expect(persistedJob).not.toHaveProperty('templateData');
+      expect(JSON.stringify(persistedJob)).not.toContain('123456');
+      expect(decryptEmailTemplateData(persistedJob, env.INTERNAL_JWT_SECRET)).toEqual(
+        data.templateData,
+      );
+      expect(mockAdd).toHaveBeenCalledWith(expect.any(String), persistedJob, { jobId });
+    } else {
+      expect(mockAdd).toHaveBeenCalledWith(expect.any(String), data, { jobId });
+    }
   });
 
   it.each(['waiting', 'delayed', 'active', 'prioritized', 'waiting-children'])(

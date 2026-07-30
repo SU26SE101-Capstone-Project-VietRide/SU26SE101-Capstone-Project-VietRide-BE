@@ -46,7 +46,9 @@ public sealed class MarkBookingRefundedCommandHandler
         }
 
         var metadata = _bookings.QueryNoTracking()
-            .Where(booking => booking.Id == request.ReferenceId && booking.Status == BookingStatus.CANCELLED)
+            .Where(booking => booking.Id == request.ReferenceId
+                && (booking.Status == BookingStatus.CANCELLED
+                    || booking.Status == BookingStatus.DISRUPTED))
             .Select(booking => new
             {
                 BookingCode = booking.BookingCode.Value,
@@ -66,7 +68,7 @@ public sealed class MarkBookingRefundedCommandHandler
         if (!transitioned)
         {
             _logger.LogInformation(
-                "Wallet credited refund event ignored for booking {BookingId}; booking is not cancelled.",
+                "Wallet credited refund event ignored for booking {BookingId}; booking is not cancelled or disrupted.",
                 request.ReferenceId);
             return false;
         }

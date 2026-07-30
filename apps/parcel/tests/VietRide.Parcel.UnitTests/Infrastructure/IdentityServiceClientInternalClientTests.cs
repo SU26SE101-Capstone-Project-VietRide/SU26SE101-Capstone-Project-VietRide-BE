@@ -103,6 +103,78 @@ public class IdentityServiceClientInternalClientTests
         result.OperatorInfo.Should().NotBeNull();
         result.OperatorInfo!.Id.Should().Be(OperatorId);
         result.OperatorInfo.Name.Should().Be("Test Operator");
+        result.OperatorInfo.ParcelNoShowPolicy.Should()
+            .Be(ParcelNoShowPolicy.Default);
+    }
+
+    [Fact]
+    public async Task GetOperatorInfoAsync_NullPolicy_UsesCanonicalDefault()
+    {
+        var body = $$"""
+            {
+              "operatorId": "{{OperatorId:D}}",
+              "name": "Test Operator",
+              "parcelNoShowPolicy": null
+            }
+            """;
+        var client = BuildClient(HttpStatusCode.OK, body);
+
+        var result = await client.GetOperatorInfoAsync(OperatorId);
+
+        result.Kind.Should().Be(OperatorLookupOutcomeKind.Success);
+        result.OperatorInfo!.ParcelNoShowPolicy.Should()
+            .Be(ParcelNoShowPolicy.Default);
+    }
+
+    [Fact]
+    public async Task GetOperatorInfoAsync_ValidPolicy_PreservesBothValues()
+    {
+        var body = $$"""
+            {
+              "operatorId": "{{OperatorId:D}}",
+              "name": "Test Operator",
+              "parcelNoShowPolicy": {
+                "noShowFeePercent": 12.5,
+                "additionalPaymentTimeoutMinutes": 0
+              }
+            }
+            """;
+        var client = BuildClient(HttpStatusCode.OK, body);
+
+        var result = await client.GetOperatorInfoAsync(OperatorId);
+
+        result.Kind.Should().Be(OperatorLookupOutcomeKind.Success);
+        result.OperatorInfo!.ParcelNoShowPolicy.Should()
+            .Be(new ParcelNoShowPolicy(12.5m, 0));
+    }
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("{}")]
+    [InlineData("""{"noShowFeePercent":10}""")]
+    [InlineData("""{"additionalPaymentTimeoutMinutes":30}""")]
+    [InlineData("""{"noShowFeePercent":"10","additionalPaymentTimeoutMinutes":30}""")]
+    [InlineData("""{"noShowFeePercent":10,"additionalPaymentTimeoutMinutes":"30"}""")]
+    [InlineData("""{"noShowFeePercent":-1,"additionalPaymentTimeoutMinutes":30}""")]
+    [InlineData("""{"noShowFeePercent":101,"additionalPaymentTimeoutMinutes":30}""")]
+    [InlineData("""{"noShowFeePercent":10,"additionalPaymentTimeoutMinutes":-1}""")]
+    [InlineData("""{"noShowFeePercent":10,"additionalPaymentTimeoutMinutes":1.5}""")]
+    public async Task GetOperatorInfoAsync_MalformedPresentPolicy_FailsClosed(
+        string policyJson)
+    {
+        var body = $$"""
+            {
+              "operatorId": "{{OperatorId:D}}",
+              "name": "Test Operator",
+              "parcelNoShowPolicy": {{policyJson}}
+            }
+            """;
+        var client = BuildClient(HttpStatusCode.OK, body);
+
+        var result = await client.GetOperatorInfoAsync(OperatorId);
+
+        result.Kind.Should().Be(OperatorLookupOutcomeKind.TransportError);
+        result.OperatorInfo.Should().BeNull();
     }
 
     [Fact]

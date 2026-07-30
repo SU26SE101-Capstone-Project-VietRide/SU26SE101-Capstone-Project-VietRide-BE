@@ -10,15 +10,24 @@ public sealed class GetTripCancellationImpactQueryHandler(IParcelRepository parc
         GetTripCancellationImpactQuery request,
         CancellationToken cancellationToken)
     {
-        var impacts = await parcels.GetTripCancellationImpactAsync(
+        var candidates = await parcels.GetTripCancellationCandidatesAsync(
             request.TripId,
             request.OperatorId,
             cancellationToken);
+
+        var impacts = candidates
+            .Select(candidate => (Candidate: candidate, Classification:
+                ParcelTripCancellationClassifier.Classify(candidate)))
+            .Where(item => item.Classification.Disposition
+                is not ParcelTripCancellationDisposition.None)
+            .Select(item => new TripCancellationImpactResponse.AffectedParcel(
+                item.Candidate.ParcelId,
+                item.Candidate.Status.ToString(),
+                item.Classification.RefundAmountVnd))
+            .ToArray();
+
         return new TripCancellationImpactResponse(
             request.TripId,
-            impacts.Select(impact => new TripCancellationImpactResponse.AffectedParcel(
-                impact.ParcelId,
-                impact.Status,
-                impact.RefundAmount)).ToArray());
+            impacts);
     }
 }

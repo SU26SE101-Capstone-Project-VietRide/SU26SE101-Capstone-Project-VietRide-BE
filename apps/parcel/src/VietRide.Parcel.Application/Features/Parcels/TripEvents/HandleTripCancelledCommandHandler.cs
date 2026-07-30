@@ -2,7 +2,7 @@ using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Exceptions;
-using VietRide.Parcel.Application.Features.Parcels;
+using VietRide.Parcel.Application.Features.Parcels.TripCancellationImpact;
 using VietRide.Shared.Application.Outbox;
 
 namespace VietRide.Parcel.Application.Features.Parcels.TripEvents;
@@ -10,10 +10,12 @@ namespace VietRide.Parcel.Application.Features.Parcels.TripEvents;
 public sealed class HandleTripCancelledCommandHandler
     : IRequestHandler<HandleTripCancelledCommand, int>
 {
-    private readonly IParcelRepository _parcelRepository;
-    private readonly ITripServiceClient _tripClient;
-    private readonly IIntegrationEventOutbox _outbox;
-    private readonly IParcelStatsRepository _statsRepository;
+    private const string RefundReason = "TRIP_CANCELLED_PRE_LOAD";
+
+    private readonly IParcelRepository parcelRepository;
+    private readonly ITripServiceClient tripClient;
+    private readonly IIntegrationEventOutbox outbox;
+    private readonly IParcelStatsRepository statsRepository;
 
     public HandleTripCancelledCommandHandler(
         IParcelRepository parcelRepository,
@@ -21,10 +23,10 @@ public sealed class HandleTripCancelledCommandHandler
         IIntegrationEventOutbox outbox,
         IParcelStatsRepository statsRepository)
     {
-        _parcelRepository = parcelRepository;
-        _tripClient = tripClient;
-        _outbox = outbox;
-        _statsRepository = statsRepository;
+        this.parcelRepository = parcelRepository;
+        this.tripClient = tripClient;
+        this.outbox = outbox;
+        this.statsRepository = statsRepository;
     }
 
     public async Task<int> Handle(
@@ -32,116 +34,160 @@ public sealed class HandleTripCancelledCommandHandler
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
-        var rejected = await _parcelRepository.TryRejectPreAcceptanceByTripIdAsync(command.TripId, now, cancellationToken);
-        var cancelled = await _parcelRepository.TryCancelPendingByTripIdAsync(command.TripId, now, cancellationToken);
-        var operatorAction = await _parcelRepository.TryBulkSetPendingOperatorActionByTripIdAsync(command.TripId, now, cancellationToken);
-        var refundAmounts = new Dictionary<Guid, long>();
+        var candidates = await parcelRepository.GetTripCancellationCandidatesAsync(
+            command.TripId,
+            command.OperatorId,
+            cancellationToken);
+        var changed = new List<(
+            TripCancellationParcelCandidate Candidate,
+            long RefundAmountVnd,
+            ParcelTripCancellationDisposition Disposition)>();
 
-        foreach (var parcel in rejected)
+        foreach (var candidate in candidates)
         {
-            await ParcelOutboxEvents.EnqueueAsync(
-                _outbox,
-                ParcelOutboxEvents.Rejected,
-                new
-                {
-                    parcelId = parcel.ParcelId,
-                    parcelCode = parcel.ParcelCode,
-                    operatorId = parcel.OperatorId,
-                    userId = parcel.SenderUserId,
-                    tripId = parcel.TripId,
-                },
+            var classification = ParcelTripCancellationClassifier.Classify(candidate);
+            if (classification.Disposition == ParcelTripCancellationDisposition.None)
+            {
+                continue;
+            }
+
+            var refundDueVnd = checked(
+                candidate.RefundedAmountVnd + classification.RefundAmountVnd);
+            var won = await parcelRepository.TryApplyTripCancellationAsync(
+                candidate.ParcelId,
+                command.OperatorId,
+                candidate.Status,
+                classification.TargetStatus!.Value,
+                refundDueVnd,
+                now,
                 cancellationToken);
+            if (!won)
+            {
+                continue;
+            }
+
+            if (classification.Disposition == ParcelTripCancellationDisposition.CancelAndRefund)
+            {
+                await EnsureCargoSuccessAsync(
+                    await tripClient.ReleaseCargoAsync(
+                        candidate.TripId,
+                        candidate.ParcelId,
+                        Positive(candidate.ActualWeightKg ?? candidate.EstimatedWeightKg),
+                        Positive(candidate.ActualVolumeM3 ?? candidate.EstimatedVolumeM3),
+                        ParcelOperationId.Create(
+                            command.EventId,
+                            candidate.ParcelId,
+                            "TRIP_CANCELLED_CARGO_RELEASE"),
+                        cancellationToken));
+
+                await ParcelOutboxEvents.EnqueueTerminalAsync(
+                    outbox,
+                    ParcelOperationId.Create(
+                        command.EventId,
+                        candidate.ParcelId,
+                        "TRIP_CANCELLED_TERMINAL"),
+                    now,
+                    ParcelOutboxEvents.Cancelled,
+                    candidate.ParcelId,
+                    candidate.ParcelCode,
+                    candidate.OperatorId,
+                    candidate.SenderUserId,
+                    candidate.TripId,
+                    classification.RefundAmountVnd,
+                    RefundReason,
+                    cancellationToken);
+
+                if (classification.RefundAmountVnd > 0)
+                {
+                    var refundIdempotencyKey = ParcelOperationId.Create(
+                        command.EventId,
+                        candidate.ParcelId,
+                        "TRIP_CANCELLED_REFUND");
+                    await ParcelOutboxEvents.EnqueueCanonicalRefundAsync(
+                        outbox,
+                        ParcelOperationId.Create(
+                            command.EventId,
+                            candidate.ParcelId,
+                            "TRIP_CANCELLED_REFUND_EVENT"),
+                        now,
+                        candidate.ParcelId,
+                        candidate.SenderUserId,
+                        classification.RefundAmountVnd,
+                        RefundReason,
+                        refundIdempotencyKey,
+                        cancellationToken);
+                }
+            }
+            else
+            {
+                var eventId = ParcelOperationId.Create(
+                    command.EventId,
+                    candidate.ParcelId,
+                    "TRIP_CANCELLED_PENDING_OPERATOR_ACTION");
+                await ParcelOutboxEvents.EnqueueAsync(
+                    outbox,
+                    eventId,
+                    ParcelOutboxEvents.PendingOperatorAction,
+                    new
+                    {
+                        eventId,
+                        occurredAt = now,
+                        parcelId = candidate.ParcelId,
+                        parcelCode = candidate.ParcelCode,
+                        operatorId = candidate.OperatorId,
+                        userId = candidate.SenderUserId,
+                        tripId = candidate.TripId,
+                        reason = "TRIP_CANCELLED",
+                    },
+                    cancellationToken);
+            }
+
+            changed.Add((
+                candidate,
+                classification.RefundAmountVnd,
+                classification.Disposition));
         }
 
-        foreach (var parcel in cancelled)
+        foreach (var group in changed
+            .Where(item => item.Disposition
+                == ParcelTripCancellationDisposition.CancelAndRefund)
+            .GroupBy(item => item.Candidate.OperatorId))
         {
-            await EnsureCargoSuccessAsync(
-                await _tripClient.ReleaseCargoAsync(
-                    parcel.TripId,
-                    parcel.ParcelId,
-                    0m,
-                    0.0001m,
-                    parcel.ParcelId,
-                    cancellationToken));
-
-            // An operator-cancelled trip is not a passenger/parcel no-show.
-            // Refund every amount already collected for a pending parcel.
-            var refundAmount = checked(parcel.DepositAmount + parcel.AdditionalAmount);
-            refundAmounts[parcel.ParcelId] = refundAmount;
-            await ParcelOutboxEvents.EnqueueAsync(
-                _outbox,
-                ParcelOutboxEvents.Cancelled,
-                new
-                {
-                    parcelId = parcel.ParcelId,
-                    parcelCode = parcel.ParcelCode,
-                    operatorId = parcel.OperatorId,
-                    userId = parcel.SenderUserId,
-                    tripId = parcel.TripId,
-                    refundAmount,
-                },
-                cancellationToken);
-            await ParcelOutboxEvents.EnqueueRefundAsync(
-                _outbox,
-                parcel.ParcelId,
-                parcel.SenderUserId,
-                refundAmount,
-                cancellationToken);
-        }
-
-        foreach (var parcel in operatorAction)
-        {
-            await ParcelOutboxEvents.EnqueueAsync(
-                _outbox,
-                ParcelOutboxEvents.PendingOperatorAction,
-                new
-                {
-                    parcelId = parcel.ParcelId,
-                    parcelCode = parcel.ParcelCode,
-                    operatorId = parcel.OperatorId,
-                    userId = parcel.SenderUserId,
-                    tripId = parcel.TripId,
-                },
-                cancellationToken);
-        }
-
-        foreach (var group in rejected.GroupBy(parcel => parcel.OperatorId))
-        {
-            await _statsRepository.UpsertIncrementAsync(
+            await statsRepository.UpsertIncrementAsync(
                 group.Key,
                 DateOnly.FromDateTime(now.UtcDateTime),
-                0, 0, 0, group.Count(), 0, 0, 0,
+                0,
+                0,
+                0,
+                group.Count(),
+                0,
+                0,
+                group.Sum(item => item.RefundAmountVnd),
                 cancellationToken);
         }
 
-        foreach (var group in cancelled.GroupBy(parcel => parcel.OperatorId))
-        {
-            var totalRefunded = group.Sum(parcel => refundAmounts[parcel.ParcelId]);
-
-            await _statsRepository.UpsertIncrementAsync(
-                group.Key,
-                DateOnly.FromDateTime(now.UtcDateTime),
-                0, 0, 0, group.Count(), 0, 0, totalRefunded,
-                cancellationToken);
-        }
-
-        return rejected.Count + cancelled.Count + operatorAction.Count;
+        return changed.Count;
     }
+
+    private static decimal Positive(decimal value)
+        => value > 0 ? value : 0.0001m;
 
     private static Task EnsureCargoSuccessAsync(TripCargoOutcome outcome)
     {
         if (outcome is null)
+        {
             return Task.CompletedTask;
+        }
 
         return outcome.Kind switch
         {
             TripCargoOutcomeKind.Success => Task.CompletedTask,
             TripCargoOutcomeKind.TripNotFound => throw new ParcelDependencyUnavailableException(
-                "TRIP_NOT_FOUND",
+                "TRIP_SERVICE_UNAVAILABLE",
                 outcome.ErrorMessage ?? "Trip was not found."),
             TripCargoOutcomeKind.CapacityExceeded => throw new ParcelDependencyUnavailableException(
-                "TRIP_CARGO_CAPACITY_EXCEEDED",
-                outcome.ErrorMessage ?? "Trip cargo capacity would be exceeded."),
+                "TRIP_CARGO_TRANSFER_CONFLICT",
+                outcome.ErrorMessage ?? "Trip cargo release lost a concurrent mutation."),
             _ => throw new ParcelDependencyUnavailableException(
                 "TRIP_SERVICE_UNAVAILABLE",
                 outcome.ErrorMessage ?? "Trip service unavailable."),
