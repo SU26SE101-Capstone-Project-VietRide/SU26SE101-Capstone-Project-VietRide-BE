@@ -77,6 +77,61 @@ public sealed class IdentityServiceClient : IIdentityServiceClient
         }
     }
 
+    public async Task<IdentityUserBatchOutcome> GetUsersAsync(
+        IReadOnlyCollection<Guid> userIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (userIds.Any(userId => userId == Guid.Empty))
+            throw new ArgumentException("User ids cannot contain an empty UUID.", nameof(userIds));
+
+        var distinctUserIds = userIds.Distinct().ToArray();
+        if (distinctUserIds.Length == 0)
+            return IdentityUserBatchOutcome.Success([]);
+        if (distinctUserIds.Length > 100)
+            throw new ArgumentOutOfRangeException(nameof(userIds), "At most 100 distinct user ids are allowed.");
+
+        try
+        {
+            var query = string.Join("&", distinctUserIds.Select(userId => $"ids={userId:D}"));
+            using var response = await _httpClient
+                .GetAsync($"/internal/v1/users?{query}", cancellationToken)
+                .ConfigureAwait(false);
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                return IdentityUserBatchOutcome.TransportFailure(
+                    $"Identity user batch returned status {(int)response.StatusCode}.");
+            }
+
+            var users = await response.Content
+                .ReadFromJsonAsync<IReadOnlyList<IdentityUserSummary>>(JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+            if (users is null || users.Any(user => user is null))
+                return IdentityUserBatchOutcome.TransportFailure("Identity user batch returned an invalid payload.");
+
+            var requestedIds = distinctUserIds.ToHashSet();
+            var responseIds = users.Select(user => user.Id).ToArray();
+            var malformed = responseIds.Distinct().Count() != responseIds.Length
+                || users.Any(user =>
+                    !requestedIds.Contains(user.Id)
+                    || string.IsNullOrWhiteSpace(user.DisplayName)
+                    || string.IsNullOrWhiteSpace(user.Role)
+                    || string.IsNullOrWhiteSpace(user.Status));
+            return malformed
+                ? IdentityUserBatchOutcome.TransportFailure("Identity user batch returned an invalid payload.")
+                : IdentityUserBatchOutcome.Success(users);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "IdentityServiceClient.GetUsersAsync failed.");
+            return IdentityUserBatchOutcome.TransportFailure(
+                $"Identity user batch transport failure: {ex.Message}");
+        }
+    }
+
     public async Task<OperatorLookupOutcome> GetOperatorInfoAsync(
         Guid operatorId,
         CancellationToken cancellationToken = default)

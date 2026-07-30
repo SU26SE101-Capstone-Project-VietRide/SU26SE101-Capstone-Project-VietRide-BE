@@ -158,6 +158,9 @@ public sealed class TripServiceClient : ITripServiceClient, IIdempotentTripServi
             var malformed = responseIds.Distinct().Count() != responseIds.Length
                 || summaries.Any(summary =>
                     !requestedIds.Contains(summary.TripId)
+                    || string.IsNullOrWhiteSpace(summary.Status)
+                    || summary.DepartureAt == default
+                    || summary.ArrivalEstimate == default
                     || summary.Route is null
                     || summary.Route.RouteId == Guid.Empty
                     || string.IsNullOrWhiteSpace(summary.Route.Name)
@@ -165,7 +168,8 @@ public sealed class TripServiceClient : ITripServiceClient, IIdempotentTripServi
                     || string.IsNullOrWhiteSpace(summary.Route.DestinationName)
                     || summary.Vehicle is null
                     || summary.Vehicle.VehicleId == Guid.Empty
-                    || string.IsNullOrWhiteSpace(summary.Vehicle.LicensePlate));
+                    || string.IsNullOrWhiteSpace(summary.Vehicle.LicensePlate)
+                    || string.IsNullOrWhiteSpace(summary.Vehicle.Status));
             return malformed
                 ? TripSummaryBatchOutcome.TransportFailure("Trip summary batch returned an invalid payload.")
                 : TripSummaryBatchOutcome.Success(summaries);

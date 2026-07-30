@@ -128,6 +128,39 @@ public class TripServiceClientInternalClientTests
     }
 
     [Fact]
+    public async Task GetTripSummariesAsync_RejectsMissingCurrentTripFields()
+    {
+        var body = JsonSerializer.Serialize(new[]
+        {
+            new
+            {
+                tripId = TripId,
+                status = "",
+                departureAt = default(DateTimeOffset),
+                arrivalEstimate = default(DateTimeOffset),
+                route = new
+                {
+                    routeId = Guid.NewGuid(),
+                    name = "Route",
+                    originName = "Origin",
+                    destinationName = "Destination",
+                },
+                vehicle = new
+                {
+                    vehicleId = Guid.NewGuid(),
+                    licensePlate = "51B-12345",
+                    status = "",
+                },
+            },
+        }, JsonOptions);
+        var client = BuildClient(HttpStatusCode.OK, body);
+
+        var outcome = await client.GetTripSummariesAsync([TripId]);
+
+        outcome.Kind.Should().Be(TripSummaryBatchOutcomeKind.TransportError);
+    }
+
+    [Fact]
     public async Task GetTripParcelSnapshotAsync_Sends_Request_To_Correct_Path()
     {
         var snapshotJson = JsonSerializer.Serialize(new
