@@ -46,7 +46,12 @@ public sealed class GetOperatorRevenueAnalyticsQueryHandler
         var routes = await routesTask;
         ValidateRoutes(routes);
 
-        var tripIds = rows
+        var currentMonth = new DateOnly(period.From.Year, period.From.Month, 1);
+        var previousDate = period.From.AddMonths(-1);
+        var previousMonth = new DateOnly(previousDate.Year, previousDate.Month, 1);
+        var currentRows = rows.Where(row => row.Month == currentMonth).ToArray();
+        var previousRows = rows.Where(row => row.Month == previousMonth).ToArray();
+        var tripIds = currentRows
             .Where(row => row.TripId.HasValue)
             .Select(row => row.TripId!.Value)
             .Distinct()
@@ -57,11 +62,6 @@ public sealed class GetOperatorRevenueAnalyticsQueryHandler
             : await trip.GetTripSummariesAsync(tripIds, cancellationToken);
         var summaryByTrip = ValidateAndIndexSummaries(tripIds, summaries);
 
-        var currentMonth = new DateOnly(period.From.Year, period.From.Month, 1);
-        var previousDate = period.From.AddMonths(-1);
-        var previousMonth = new DateOnly(previousDate.Year, previousDate.Month, 1);
-        var currentRows = rows.Where(row => row.Month == currentMonth).ToArray();
-        var previousRows = rows.Where(row => row.Month == previousMonth).ToArray();
         var current = Sum(currentRows);
         var previous = Sum(previousRows);
 

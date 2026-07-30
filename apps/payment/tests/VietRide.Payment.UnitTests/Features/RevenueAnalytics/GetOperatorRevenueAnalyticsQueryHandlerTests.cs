@@ -32,7 +32,6 @@ public sealed class GetOperatorRevenueAnalyticsQueryHandlerTests
         trip.Summaries =
         [
             Summary(TripB, RouteB, "Route B", "Origin B", "Destination B"),
-            Summary(TripPrevious, RouteA, "Route A old", "Origin A", "Destination A"),
             Summary(TripA, RouteA, "Route A", "Origin A", "Destination A"),
         ];
         trip.Routes =
@@ -76,7 +75,7 @@ public sealed class GetOperatorRevenueAnalyticsQueryHandlerTests
         repository.LastTo.Should().Be(DateTimeOffset.Parse("2026-07-31T17:00:00Z"));
         trip.LastRouteOperatorId.Should().Be(OperatorId);
         trip.LastMonth.Should().Be("2026-07");
-        trip.LastTripIds.Should().BeEquivalentTo([TripA, TripB, TripPrevious]);
+        trip.LastTripIds.Should().BeEquivalentTo([TripA, TripB]);
     }
 
     [Fact]
