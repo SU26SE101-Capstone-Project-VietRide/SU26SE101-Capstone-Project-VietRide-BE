@@ -167,6 +167,7 @@ public sealed class ParcelStatusHistoryPersistenceTests
             IMigrator migrator,
             Guid parcelId)
     {
+        const long migrationGateKey = 20260730001713;
         const string lockStatement =
             "LOCK TABLE vietride_parcel.parcels IN SHARE ROW EXCLUSIVE MODE;";
         var script = migrator.GenerateScript(PreviousMigration, TargetMigration);
@@ -181,33 +182,48 @@ public sealed class ParcelStatusHistoryPersistenceTests
         baselineIndex.Should().BeGreaterThan(lockIndex);
         triggerIndex.Should().BeGreaterThan(baselineIndex);
 
-        var delayedScript = script.Replace(
+        var gatedScript = script.Replace(
             lockStatement,
-            $"{lockStatement}{Environment.NewLine}SELECT pg_sleep(1);",
+            $"{lockStatement}{Environment.NewLine}SELECT pg_advisory_xact_lock({migrationGateKey});",
             StringComparison.Ordinal);
+        await using var gateConnection = await dataSource.OpenConnectionAsync();
+        await using var acquireGateCommand = new NpgsqlCommand(
+            $"SELECT pg_advisory_lock({migrationGateKey});",
+            gateConnection);
+        await acquireGateCommand.ExecuteNonQueryAsync();
+
         var startedAt = DateTimeOffset.UtcNow;
-        await using var migrationConnection = await dataSource.OpenConnectionAsync();
-        await using var migrationCommand = new NpgsqlCommand(delayedScript, migrationConnection)
+        var gateHeld = true;
+        try
         {
-            CommandTimeout = 30,
-        };
-        var migrationTask = migrationCommand.ExecuteNonQueryAsync();
-        await WaitForRolloutLockAsync(dataSource);
+            await using var migrationConnection = await dataSource.OpenConnectionAsync();
+            await using var migrationCommand = new NpgsqlCommand(gatedScript, migrationConnection)
+            {
+                CommandTimeout = 30,
+            };
+            var migrationTask = migrationCommand.ExecuteNonQueryAsync();
+            await WaitForRolloutLockAsync(dataSource);
 
-        await using var updateContext = CreateDbContext(dataSource);
-        var updateTask = updateContext.Database.ExecuteSqlInterpolatedAsync($"""
-            UPDATE vietride_parcel.parcels
-            SET status = 'CHECKED_IN'::vietride_parcel.parcel_status
-            WHERE id = {parcelId};
-            """);
-        await Task.Delay(TimeSpan.FromMilliseconds(200));
-        updateTask.IsCompleted.Should().BeFalse(
-            "the migration lock must block status writers until the trigger is installed");
+            await using var updateContext = CreateDbContext(dataSource);
+            var updateTask = updateContext.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE vietride_parcel.parcels
+                SET status = 'CHECKED_IN'::vietride_parcel.parcel_status
+                WHERE id = {parcelId};
+                """);
+            await WaitForBlockedStatusWriterAsync(dataSource);
 
-        await migrationTask;
-        var completedAt = DateTimeOffset.UtcNow;
-        (await updateTask).Should().Be(1);
-        return (startedAt, completedAt);
+            await ReleaseMigrationGateAsync(gateConnection, migrationGateKey);
+            gateHeld = false;
+            await migrationTask;
+            var completedAt = DateTimeOffset.UtcNow;
+            (await updateTask).Should().Be(1);
+            return (startedAt, completedAt);
+        }
+        finally
+        {
+            if (gateHeld)
+                await ReleaseMigrationGateAsync(gateConnection, migrationGateKey);
+        }
     }
 
     private static async Task WaitForRolloutLockAsync(NpgsqlDataSource dataSource)
@@ -220,11 +236,13 @@ public sealed class ParcelStatusHistoryPersistenceTests
                 JOIN pg_namespace AS relation_schema ON relation_schema.oid = relation.relnamespace
                 WHERE relation_schema.nspname = 'vietride_parcel'
                   AND relation.relname = 'parcels'
+                  AND held_lock.database = (
+                      SELECT oid FROM pg_database WHERE datname = current_database())
                   AND held_lock.mode = 'ShareRowExclusiveLock'
                   AND held_lock.granted
             );
             """;
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
         while (DateTimeOffset.UtcNow < deadline)
         {
             await using var command = dataSource.CreateCommand(sql);
@@ -235,6 +253,45 @@ public sealed class ParcelStatusHistoryPersistenceTests
         }
 
         throw new TimeoutException("The Parcel migration did not acquire its rollout lock.");
+    }
+
+    private static async Task WaitForBlockedStatusWriterAsync(NpgsqlDataSource dataSource)
+    {
+        const string sql = """
+            SELECT EXISTS (
+                SELECT 1
+                FROM pg_locks AS waiting_lock
+                JOIN pg_class AS relation ON relation.oid = waiting_lock.relation
+                JOIN pg_namespace AS relation_schema ON relation_schema.oid = relation.relnamespace
+                WHERE relation_schema.nspname = 'vietride_parcel'
+                  AND relation.relname = 'parcels'
+                  AND waiting_lock.database = (
+                      SELECT oid FROM pg_database WHERE datname = current_database())
+                  AND waiting_lock.mode = 'RowExclusiveLock'
+                  AND NOT waiting_lock.granted
+            );
+            """;
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            await using var command = dataSource.CreateCommand(sql);
+            if (Convert.ToBoolean(await command.ExecuteScalarAsync()))
+                return;
+
+            await Task.Delay(TimeSpan.FromMilliseconds(20));
+        }
+
+        throw new TimeoutException("The status writer did not wait for the Parcel migration lock.");
+    }
+
+    private static async Task ReleaseMigrationGateAsync(
+        NpgsqlConnection gateConnection,
+        long migrationGateKey)
+    {
+        await using var releaseGateCommand = new NpgsqlCommand(
+            $"SELECT pg_advisory_unlock({migrationGateKey});",
+            gateConnection);
+        await releaseGateCommand.ExecuteNonQueryAsync();
     }
 
     private static async Task<int> TryRawTransitionAsync(
