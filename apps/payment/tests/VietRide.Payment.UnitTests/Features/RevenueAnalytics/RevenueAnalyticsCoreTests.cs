@@ -1,6 +1,6 @@
 using FluentAssertions;
-using VietRide.Shared.Application.Exceptions;
 using VietRide.Payment.Application.Features.RevenueAnalytics.Core;
+using VietRide.Shared.Application.Exceptions;
 
 namespace VietRide.Payment.UnitTests.Features.RevenueAnalytics;
 
