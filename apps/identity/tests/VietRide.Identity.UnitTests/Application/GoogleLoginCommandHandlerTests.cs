@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using Google.Apis.Auth;
 using NSubstitute;
@@ -45,6 +46,7 @@ public sealed class GoogleLoginCommandHandlerTests
     public async Task Handle_WhenOAuthIdentityExists_LogsInExistingLinkedUser()
     {
         var user = MakeActivePassenger("linked@example.com");
+        user.UpdateAvatar("https://cdn.example.test/custom-avatar.png");
         var googleUser = MakeGoogleUser("google-sub-1", "linked@example.com");
         var handler = CreateHandler();
 
@@ -70,8 +72,10 @@ public sealed class GoogleLoginCommandHandlerTests
                 DisplayName: user.DisplayName,
                 Role: user.Role.ToString(),
                 OperatorId: user.OperatorId,
-                Status: user.Status.ToString())));
+                Status: user.Status.ToString(),
+                AvatarUrl: "https://cdn.example.test/custom-avatar.png")));
         result.RefreshToken.Should().NotBeNullOrWhiteSpace();
+        user.AvatarUrl.Should().Be("https://cdn.example.test/custom-avatar.png");
         _accessTokenService.Received(1).IssueToken(user);
         await _users.DidNotReceiveWithAnyArgs().GetByEmailAsync(default!, default);
         await _oauthIdentities.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
@@ -81,6 +85,7 @@ public sealed class GoogleLoginCommandHandlerTests
     public async Task Handle_WhenEmailExistsWithoutOAuthIdentity_CreatesLinkAndLogsInExistingUser()
     {
         var user = MakeActivePassenger("Existing@Example.com");
+        user.UpdateAvatar("https://cdn.example.test/custom-avatar.png");
         var googleUser = MakeGoogleUser("google-sub-2", "Existing@Example.com");
         var handler = CreateHandler();
 
@@ -98,6 +103,8 @@ public sealed class GoogleLoginCommandHandlerTests
         var result = await handler.Handle(new GoogleLoginCommand("id-token"), CancellationToken.None);
 
         result.User.Id.Should().Be(user.Id);
+        result.User.AvatarUrl.Should().Be("https://cdn.example.test/custom-avatar.png");
+        user.AvatarUrl.Should().Be("https://cdn.example.test/custom-avatar.png");
         _accessTokenService.Received(1).IssueToken(user);
         await _oauthIdentities.Received(1).AddAsync(
             Arg.Is<OAuthIdentity>(identity => identity.UserId == user.Id
@@ -128,10 +135,12 @@ public sealed class GoogleLoginCommandHandlerTests
 
         result.User.Email.Should().Be("new@example.com");
         result.User.Status.Should().Be(UserStatus.ACTIVE.ToString());
+        result.User.AvatarUrl.Should().Be(googleUser.AvatarUrl);
         await _users.Received(1).AddAsync(
             Arg.Is<User>(user => user.Email == "new@example.com"
                 && user.Phone == null
-                && user.Status == UserStatus.ACTIVE),
+                && user.Status == UserStatus.ACTIVE
+                && user.AvatarUrl == googleUser.AvatarUrl),
             Arg.Any<CancellationToken>());
         await _oauthIdentities.Received(1).AddAsync(
             Arg.Is<OAuthIdentity>(identity => identity.Provider == OAuthProvider.GOOGLE
@@ -139,6 +148,29 @@ public sealed class GoogleLoginCommandHandlerTests
                 && identity.ProviderEmail == "new@example.com"),
             Arg.Any<CancellationToken>());
         _accessTokenService.Received(1).IssueToken(Arg.Is<User>(user => user.Email == "new@example.com"));
+    }
+
+    [Fact]
+    public async Task Handle_WhenStoredAvatarIsNull_OmitsAvatarFromSerializedUser()
+    {
+        var googleUser = MakeGoogleUser("google-sub-no-avatar", "no-avatar@example.com", avatarUrl: null);
+        var handler = CreateHandler();
+
+        _googleIdTokenVerifier.VerifyAsync("id-token", Arg.Any<CancellationToken>())
+            .Returns(googleUser);
+        _oauthIdentities.GetUserByProviderSubjectAsync(
+                OAuthProvider.GOOGLE,
+                googleUser.Subject,
+                Arg.Any<CancellationToken>())
+            .Returns((User?)null);
+        _users.GetByEmailAsync("no-avatar@example.com", Arg.Any<CancellationToken>())
+            .Returns((User?)null);
+
+        var result = await handler.Handle(new GoogleLoginCommand("id-token"), CancellationToken.None);
+
+        result.User.AvatarUrl.Should().BeNull();
+        var json = JsonSerializer.Serialize(result.User, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        json.Should().NotContain("\"avatarUrl\"");
     }
 
     [Fact]
@@ -209,13 +241,16 @@ public sealed class GoogleLoginCommandHandlerTests
             _clock);
     }
 
-    private static GoogleIdTokenVerificationResult MakeGoogleUser(string subject, string email)
+    private static GoogleIdTokenVerificationResult MakeGoogleUser(
+        string subject,
+        string email,
+        string? avatarUrl = "https://example.test/avatar.png")
     {
         return new GoogleIdTokenVerificationResult(
             Subject: subject,
             Email: email,
             DisplayName: "Google User",
-            AvatarUrl: "https://example.test/avatar.png");
+            AvatarUrl: avatarUrl);
     }
 
     private static User MakeActivePassenger(string email)
