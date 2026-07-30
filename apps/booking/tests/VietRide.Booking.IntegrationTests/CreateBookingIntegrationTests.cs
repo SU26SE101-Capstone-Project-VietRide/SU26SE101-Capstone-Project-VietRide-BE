@@ -459,6 +459,7 @@ public class CreateBookingWebApplicationFactory : WebApplicationFactory<Program>
 
     public ITripServiceClient TripClient { get; } = Substitute.For<ITripServiceClient>();
     public IPaymentServiceClient PaymentClient { get; } = Substitute.For<IPaymentServiceClient>();
+    public IIdentityUserServiceClient IdentityUsers { get; } = Substitute.For<IIdentityUserServiceClient>();
 
     /// <summary>
     /// Mock repository — exposed so tests can assert AddAsync was or was not called
@@ -483,6 +484,11 @@ public class CreateBookingWebApplicationFactory : WebApplicationFactory<Program>
             // Replace ITripServiceClient and IPaymentServiceClient with mocks.
             services.AddSingleton(TripClient);
             services.AddSingleton(PaymentClient);
+            IdentityUsers.GetUsersAsync(
+                    Arg.Any<IReadOnlyCollection<Guid>>(),
+                    Arg.Any<CancellationToken>())
+                .Returns(call => BuyerProfiles(call.Arg<IReadOnlyCollection<Guid>>()));
+            services.AddSingleton(IdentityUsers);
             services.AddSingleton<IBookingStationCanonicalizer>(
                 PassthroughBookingStationCanonicalizer.Instance);
 
@@ -508,6 +514,18 @@ public class CreateBookingWebApplicationFactory : WebApplicationFactory<Program>
             services.AddSingleton<IConnectionMultiplexer>(InMemoryIdempotencyRedis.Create());
         });
     }
+
+    private static IReadOnlyDictionary<Guid, BookingBuyerSnapshotProfile> BuyerProfiles(
+        IReadOnlyCollection<Guid> userIds)
+        => userIds.ToDictionary(
+            userId => userId,
+            userId => new BookingBuyerSnapshotProfile(
+                userId,
+                "Integration Test Buyer",
+                "0900000000",
+                "buyer@example.test",
+                null,
+                Deleted: false));
 
     /// <summary>
     /// Creates an <see cref="HttpClient"/> with a valid Internal JWT in
