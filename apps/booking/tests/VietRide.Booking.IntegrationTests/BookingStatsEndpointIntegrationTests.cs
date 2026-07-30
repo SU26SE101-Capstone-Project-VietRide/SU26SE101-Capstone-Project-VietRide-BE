@@ -10,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
+using VietRide.Booking.Application.Features.Admin.Dashboard;
 using VietRide.Booking.Application.Features.BookingStats.GetAdminBookingStatsAggregate;
 using VietRide.Booking.Application.Features.BookingStats.GetOperatorBookingStats;
 using VietRide.Booking.Application.Features.OperatorBookings.GetOperatorBookingDetail;
@@ -211,6 +212,8 @@ public sealed class BookingStatsWebApplicationFactory : WebApplicationFactory<Pr
     public IBookingStatsRepository BookingStatsRepository { get; } = Substitute.For<IBookingStatsRepository>();
     public IBookingRepository BookingRepository { get; } = Substitute.For<IBookingRepository>();
     public IIdentityUserServiceClient IdentityUsers { get; } = Substitute.For<IIdentityUserServiceClient>();
+    public IIdentityDashboardMetricsClient IdentityDashboard { get; } =
+        Substitute.For<IIdentityDashboardMetricsClient>();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -226,6 +229,7 @@ public sealed class BookingStatsWebApplicationFactory : WebApplicationFactory<Pr
             services.AddSingleton(BookingStatsRepository);
             services.AddSingleton(BookingRepository);
             services.AddSingleton(IdentityUsers);
+            services.AddSingleton(IdentityDashboard);
 
             var mockUow = Substitute.For<IUnitOfWork>();
             mockUow.ExecuteInTransactionAsync(
@@ -244,6 +248,10 @@ public sealed class BookingStatsWebApplicationFactory : WebApplicationFactory<Pr
                     var op = ci.Arg<Func<Task<GetAdminBookingStatsAggregateResult>>>();
                     return op();
                 });
+            mockUow.ExecuteInTransactionAsync(
+                    Arg.Any<Func<Task<AdminDashboardSummaryResponse>>>(),
+                    Arg.Any<CancellationToken>())
+                .Returns(ci => ci.Arg<Func<Task<AdminDashboardSummaryResponse>>>()());
             mockUow.ExecuteInTransactionAsync(
                     Arg.Any<Func<Task<PagedResult<OperatorBookingListItem>>>>(),
                     Arg.Any<CancellationToken>())

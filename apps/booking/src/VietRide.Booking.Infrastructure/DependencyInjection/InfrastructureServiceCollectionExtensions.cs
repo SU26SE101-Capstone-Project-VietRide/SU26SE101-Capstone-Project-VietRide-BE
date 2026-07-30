@@ -109,6 +109,20 @@ public static class InfrastructureServiceCollectionExtensions
             .AddPolicyHandler(CreateIdentityUserRetryPolicy())
             .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
 
+        services
+            .AddHttpClient<IIdentityDashboardMetricsClient, IdentityDashboardMetricsClient>(client =>
+            {
+                client.BaseAddress = new Uri(ResolveIdentityBaseUrl(configuration), UriKind.Absolute);
+                client.Timeout = TimeSpan.FromSeconds(5);
+                client.DefaultRequestHeaders.Accept.Clear();
+                client.DefaultRequestHeaders.Accept.Add(
+                    new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+            })
+            .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
+            .AddHttpMessageHandler<InternalJwtDelegatingHandler>()
+            .AddPolicyHandler(CreateIdentityUserRetryPolicy())
+            .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
+
         // Identity operator lookup client (Task 17.0).
         if (UseIdentityDevStub(configuration))
         {
