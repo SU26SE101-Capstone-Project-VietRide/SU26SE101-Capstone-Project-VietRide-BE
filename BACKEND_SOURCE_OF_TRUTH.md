@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.47.0
+> **Phiên bản:** 1.48.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-07-30
+> **Cập nhật lần cuối:** 2026-07-31
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1522,7 +1522,8 @@ updates the column.
 | | `CONSENT_ALREADY_REJECTED` | 409 | consent đã REJECTED, không thể reject lại (reject precond PENDING\|ACCEPTED — v7:674-683) |
 | **Payment** | `PAYMENT_INSUFFICIENT_WALLET` | 402 | Wallet balance < amount |
 | | `PAYMENT_VNPAY_ERROR` | 502 | VNPay trả lỗi (không 00) |
-| | `PAYMENT_TIMEOUT` | 408 | VNPay không callback trong 10 phút |
+| | `PAYMENT_TIMEOUT` | 408 | VNPay không callback trước effective deadline; legacy fallback 15 phút |
+| | `PAYMENT_DEADLINE_PASSED` | 422 | Request tạo Payment có `dueAt <= now` |
 | | `PAYMENT_ALREADY_PROCESSED` | 409 | Payment đã SUCCEEDED, callback duplicate |
 | | `PAYMENT_SIGNATURE_INVALID` | 401 | VNPay HMAC verify fail |
 | **Wallet** | `WALLET_INSUFFICIENT_BALANCE` | 402 | OperatorWallet/PassengerWallet không đủ |
@@ -1936,6 +1937,10 @@ forgot/reset password, password-reset OTP failure, failed-login persistence và 
 8. Google account chưa tồn tại dựa vào unique email/OAuth constraints cho create race; token issue
    vẫn nằm trong transaction sở hữu row mới.
 
+Password login và Google login cùng project stored `User.avatarUrl` vào `UserSummaryDto`. Google
+provider avatar chỉ seed User mới; link/re-login không overwrite avatar hiện hữu. Null giữ
+`JsonIgnore(WhenWritingNull)`.
+
 Identity thêm `users.locked_from_status user_status NULL`. Backfill User `LOCKED` cũ thành `ACTIVE`;
 check constraint chỉ nhận `ACTIVE|PENDING_EMAIL_VERIFICATION` và bắt buộc origin khác null đúng khi
 `status=LOCKED`. Manual lock chỉ cho `ACTIVE -> LOCKED`; password lockout còn cho phép
@@ -2033,9 +2038,10 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 
 | Method + Path | Caller | Mục đích |
 |---|---|---|
-| `POST /internal/v1/payments/charge` | Booking, Parcel | Wallet payment (instant SUCCEEDED) trong cùng DB transaction |
+| `POST /internal/v1/payments/charge` | Booking, Parcel | Charge WALLET/VNPAY; nullable `dueAt`, Booking VNPay truyền exact seat-lock expiry (round-trip dùng leg sớm hơn); `dueAt <= now` → `422 PAYMENT_DEADLINE_PASSED` |
 | `POST /internal/v1/payments/batch-charge` | Booking | WALLET batch charge for round-trip: per-item Payment `referenceType=BOOKING`, per-item wallet ledger `referenceType=BOOKING_PAYMENT`, all-or-nothing in one Payment DB transaction |
 | `POST /internal/v1/payments/vnpay-init` | Booking, Parcel | Tạo VNPay redirect URL |
+| `POST /internal/v1/payments/redirect-sessions/lookup` | Booking, Parcel | Read-only raw redirect lookup; Internal JWT, `[SkipIdempotency]`, `Cache-Control: no-store`, 1–100 unique references, one `AsNoTracking` query; latest attempt first then strict owner/context/VNPAY/PENDING_REDIRECT/future persisted dueAt/trusted-authority eligibility |
 | `GET /internal/v1/wallets/{userId}/balance` | Booking (preview) | Check balance UI trước checkout |
 | `POST /internal/v1/refunds` | Booking, Parcel | Trigger refund (event-driven preferred — HTTP fallback) |
 
@@ -2094,6 +2100,7 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `booking.booking.cancelled` | Booking | Notification, Trip, Payment, Booking | `{ eventId, occurredAt, bookingId, userId, refundAmount, refundOverride, cancellationReason, bookingCode?, ticketCodes?, ticketCount? }`. When `cancellationReason=OPERATOR_DISRUPTED_IN_PROGRESS`, Notification MUST suppress the generic cancellation message; Payment/Trip/Booking still process the fact. |
 | `booking.booking.disrupted` | Booking | Notification | Exact `{ eventId, occurredAt, bookingId, bookingCode, tripId, operatorId, userId, traveledRatio, refundAmount, cancellationReason }`; sole passenger-facing notification fact for no-substitution disruption. Payment MUST NOT bind it; canonical `booking.booking.cancelled` remains the sole Booking refund trigger. Booking writes status plus both facts atomically with distinct stable EventIds, each equal to its own Outbox id/MessageId. |
 | `booking.booking.refunded` | Booking | Notification, Booking (BookingStats counter) | `{ bookingId, userId, amount, bookingCode?, ticketCodes?, ticketCount? }` |
+| `booking.payment_refund.requested` | Booking | Payment | One event per Booking allocation: `{ eventId, occurredAt, paymentId, paymentReferenceType: BOOKING\|BOOKING_GROUP, paymentReferenceId, bookingId, userId, amount, reason: PAYMENT_CAPTURE_AFTER_BOOKING_EXPIRY\|SEAT_CONFIRMATION_FAILED }`. Payment ignores event `userId`/`amount` until exact captured VNPay Payment, owner, original reference and trusted-context net allocation are revalidated. |
 | `booking.booking.seat_reassignment_required` | Booking | Notification | `{ eventId, occurredAt, bookingId, tripId, userId, pendingActionId, deadline, seatNumbers, reason: SEAT_REMOVED\|SEAT_DISABLED\|SEAT_TYPE_DOWNGRADED }` |
 | `booking.booking.schedule_change_informational` | Booking | Notification | For `CONFIRMED` Bookings only; exact MINOR-only `{ eventId, occurredAt, bookingId, tripId, userId, oldDeparture, newDeparture, severity: MINOR }`; no pending-action fields |
 | `booking.booking.schedule_change_required` | Booking | Notification | For `CONFIRMED` Bookings only; MEDIUM/MAJOR-only `{ eventId, occurredAt, bookingId, tripId, userId, pendingActionId, deadline, oldDeparture, newDeparture, severity: MEDIUM\|MAJOR }` |
@@ -2327,7 +2334,7 @@ After retry_count >= 10: alert Sentry, leave FAILED for manual handle
 | Scenario | Compensation |
 |---|---|
 | Payment fail in checkout | HTTP `POST /internal/v1/trips/{id}/release-seats` (sync) |
-| VNPay timeout 10 phút | Hangfire job (Booking Service) → release seats + Booking → EXPIRED |
+| Authoritative Payment deadline | Hangfire job (Booking Service) → release seats + Booking → EXPIRED; verified capture is refund-only |
 | Refund event consume fail | `RefundFailureLog` + Hangfire retry max 5 lần · alert Admin sau exhausted |
 | Wallet credit fail | Same as above (RefundFailureLog) |
 
@@ -2464,6 +2471,33 @@ opaque composite cursor and reports unavailable source services without inventin
 replay or purge is implemented in v1. Every Hangfire-owning service exposes the internal JWT-only
 `GET /internal/jobs/status`; lag is `max(0, nowUtc - nextRunUtc)` or null when no next run exists.
 
+#### Day 36/43 payment and FE-gap repair contract
+
+- Payment expiration uses `effectiveDueAt = DueAt ?? CreatedAt + 15 minutes` and the inclusive
+  `effectiveDueAt <= now` boundary. The expiry repository performs one atomic CAS from
+  `PENDING_REDIRECT`; status and `payment.payment.expired` Outbox commit together. No new index or
+  migration is part of this repair.
+- Booking VNPay `DueAt` is the exact Trip seat-lock `ExpiresAt`; round-trip uses the earlier leg.
+  Parcel keeps its own deposit/final deadlines. The 15-minute configuration is legacy fallback and
+  never extends a 10-minute Booking seat lock.
+- VNPay IPN verifies signature, merchant, amount, transaction status and signed `vnp_PayDate`
+  before mutation, then reloads/locks the exact Payment. A capture is recorded once even if expiry
+  won first. Expired Booking is never resurrected; `paidAt >= effectiveDueAt`, already-expired
+  Booking, or definitive seat loss emits one `booking.payment_refund.requested` per allocation.
+  Transient Trip/network/5xx failures retry instead of expiring/refunding.
+- Payment revalidates captured VNPay Payment, owner, original reference and immutable trusted
+  allocation. One-way Payment becomes `REFUNDED` after exact refund. `BOOKING_GROUP` becomes
+  `REFUNDED` only when every allocation has exact matching `BOOKING_REFUND` credits; historical
+  partial refunds do not satisfy the group.
+- Redirect lookup selects latest Payment by `created_at DESC, id DESC` before eligibility and
+  never falls back. It accepts only exact owner/context/amount, `VNPAY`, `PENDING_REDIRECT`,
+  persisted `due_at > now`, and absolute credential-free HTTPS URL whose authority exactly matches
+  configured VNPay base URI. Signed URL/query/body logging is forbidden.
+- Booking/Passenger History always serialize nullable root `paymentRedirectUrl`; enrichment is
+  fail-open. Ticket forwards Booking's URL. Parcel enriches only exact deposit
+  `PENDING_PAYMENT/PARCEL` or final `PENDING_FINAL_PAYMENT/PARCEL_ADDITIONAL` candidates and does
+  not expose settlement internals through `/v1/parcels/sent`.
+
 ---
 
 ## 8. Status Machines
@@ -2480,13 +2514,14 @@ PENDING_PAYMENT ─┬─→ CONFIRMED ─┬─→ COMPLETED
                  │              ├─→ CANCELLED ─→ REFUNDED   (operator hoặc user hủy)
                  │              └─→ DISRUPTED ─→ REFUNDED   (Trip DISRUPTED, no substitution)
                  │
-                 └─→ EXPIRED   (VNPay timeout 10 phút — không refund)
+                 └─→ EXPIRED   (authoritative Payment deadline; capture sau đó được refund)
 ```
 
 **Triggers:**
 
 - `CONFIRMED`: Payment Service publish `payment.payment.succeeded` → Booking Service consume.
-- `EXPIRED`: Hangfire sau 10 phút PENDING_PAYMENT.
+- `EXPIRED`: Hangfire khi authoritative Payment deadline `<= now`; Booking không được hồi sinh sau
+  seat release.
 - `COMPLETED`: Booking Service consume `trip.trip.completed`.
 - Day-21 history source for this consumer is `COMPLETE_ON_TRIP_COMPLETED`; it appends `COMPLETED`
   with null actor/reason in the same Booking-local transaction as the guarded status transition.
@@ -3143,7 +3178,7 @@ KHÔNG dùng Prometheus/Grafana/Jaeger/Loki cho v1 (xem technical_context 3.5).
 
 | Job | Type | Trigger | Notes |
 |---|---|---|---|
-| `SeatReleaseTimeoutJob` | Scheduled (per Booking) | 10 phút sau PENDING_PAYMENT VNPay | Release seat + Booking → EXPIRED |
+| `SeatReleaseTimeoutJob` | Scheduled (per Booking) | Authoritative Payment deadline | Release seat + Booking → EXPIRED; round-trip uses earlier leg |
 | `ScheduleChangeAutoAcceptJob` | Scheduled (per BookingPendingAction) | `initialDeadline + 1s`, then optional `terminalDeadline + 1s` | MEDIUM finalizes at initial; MAJOR with `initialDeadline < terminalDeadline` may emit one distinct initial-phase re-alert then finalizes at terminal; lag/direct execution past terminal skips the optional phase; `initialDeadline >= terminalDeadline` finalizes strictly after initial; each intended phase is at most once and jobs never refund or cancel |
 | `PendingActionRealertJob` | Scheduled (logical key `pendingActionId`) | action occurrence + 2h | unchanged Day-22 scope: unresolved `PENDING_SEAT_ASSIGNMENT` plus MEDIUM/MAJOR `SCHEDULE_CHANGE`; at most once for this intended T+2 phase |
 | `StopDisabledAutoFallbackJob` | Recurring | Every 5 phút | Select only unresolved `STOP_DISABLED` actions with strict `deadline < now`; equality remains passenger-action eligible, then atomically terminal-fallback and emit one `booking.booking.stop_disabled_auto_fallback_applied` per action. |
@@ -3194,8 +3229,8 @@ permitted.
 
 | Job | Type | Trigger | Notes |
 |---|---|---|---|
-| `PaymentExpiredJob` | Scheduled (per Payment) | PENDING_REDIRECT + 10 phút | UPDATE status = EXPIRED |
-| `TopUpExpiredJob` | Scheduled (per TopUpRequest) | PENDING + 10 phút | UPDATE status = EXPIRED |
+| `PaymentExpiredJob` | Recurring scan | `PENDING_REDIRECT AND (due_at ?? created_at + 15m) <= now` | Atomic CAS to EXPIRED + Outbox; persisted future deadlines are not expired by age |
+| `TopUpExpiredJob` | Recurring scan | PENDING + 15 phút | UPDATE status = EXPIRED |
 | `TripSettlementEligibilityFlagJob` | Recurring | Daily 02:00 ICT | Set OperatorTripSettlement.status = ELIGIBLE WHERE eligibleAt <= now |
 | `TripSettlementWeeklyAutoSettleJob` | Recurring | Weekly Mon 09:00 ICT | Debit PlatformWallet + credit OperatorWallet cho mọi settlement ELIGIBLE |
 | `InvoicePdfRetryJob` | Triggered (retry) | Post-payment-success event | Generate PDF, retry max 5 nếu fail |
@@ -3346,7 +3381,7 @@ VNPAY_HASH_SECRET=...
 VNPAY_BASE_URL=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
 VNPAY_RETURN_URL=https://app.vietride.online/payments/return
 VNPAY_IPN_URL=https://api.vietride.online/v1/payments/vnpay-ipn
-VNPAY_PAYMENT_TIMEOUT_MINUTES=10
+VNPAY_PAYMENT_TIMEOUT_MINUTES=15
 SUBSCRIPTION_TRIAL_DAYS=30
 SETTLEMENT_HOLD_DAYS=7
 WALLET_TOP_UP_MIN_VND=10000
@@ -3638,6 +3673,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.48.0** | 2026-07-31 | BE lead (Vũ) | **MINOR** — Reopens Day 36/43 and ratifies the payment/history/auth repair contract: Booking VNPay deadlines follow Trip seat-lock expiry, legacy null `DueAt` falls back to 15 minutes, late capture never resurrects an expired Booking and uses idempotent allocation refund, `booking.payment_refund.requested` and `PAYMENT_DEADLINE_PASSED` are registered, internal latest-attempt redirect lookup is strict/no-store, Booking and Passenger history gain fail-open `paymentRedirectUrl`, and Google login returns stored avatar without provider overwrite. No schema migration or index. |
 | **1.47.0** | 2026-07-30 | BE lead (Vũ) | **MINOR** — Closes the Day-32 Parcel recovery crash/race gate with a dedicated persistent `TRANSFER|RETURN` cargo-recovery operation, one active claim per Parcel, frozen refund/target facts, stable Trip idempotency identity, five-minute stale replay, and atomic Parcel-local finalization of state, operation, Outbox and stats. |
 | **1.46.0** | 2026-07-30 | BE lead (Vũ) | **MINOR** — Completes the implementation gate for Days 31/32/35/37/42: public Parcel delivery routing and hash-only rate limiting; encrypted Notification queue payloads; durable vehicle-transfer claim schema/recovery; exact outstanding Parcel refund identity; fail-closed per-Booking disruption snapshots; the approved `DISRUPT_ON_TRIP_DISRUPTED` timeline writer with null event actor; general-versus-Shuttle subscription guards; and exact 29/92-day report acceptance. Corrects legacy cargo formulas, status compatibility, schema/ERD inventory, error contexts, and Notification configuration ownership. |
 | **1.45.0** | 2026-07-30 | BE lead (Vũ) | **MINOR** — Reconciles Days 31/32/35 contracts: Parcel delivery confirmation stores only SHA-256 token history and sends sensitive links directly through Notification internal email; Trip cancellation and disruption use canonical routing keys plus service-local refund/cargo recovery; Trip owns an atomic source-to-target cargo-transfer API; no-substitution refunds are computed per Booking with nearest-VND `AwayFromZero`; and Parcel vehicle-substitution transfer uses crew confirmation with a replay-safe 30-minute CAS escalation. |

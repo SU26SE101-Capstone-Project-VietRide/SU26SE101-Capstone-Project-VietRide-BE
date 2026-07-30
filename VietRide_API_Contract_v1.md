@@ -264,7 +264,8 @@ Response `200`:
       "displayName": "Nguyen Van A",
       "role": "PASSENGER",
       "operatorId": null,
-      "status": "ACTIVE"
+      "status": "ACTIVE",
+      "avatarUrl": "https://example.com/avatar.png"
     }
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
@@ -273,6 +274,7 @@ Response `200`:
 
 Passenger accounts may receive the same `200` response while `user.status = "PENDING_EMAIL_VERIFICATION"`.
 The mobile FE treats that as a restricted session and prompts email OTP verification from Profile.
+`user.avatarUrl` is the stored profile avatar and is omitted when null.
 
 Error `401` — invalid credentials:
 ```json
@@ -397,12 +399,17 @@ Response `200`:
       "displayName": "Nguyen Van A",
       "role": "PASSENGER",
       "operatorId": null,
-      "status": "ACTIVE"
+      "status": "ACTIVE",
+      "avatarUrl": "https://example.com/avatar.png"
     }
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
+
+Google login returns the same stored `UserSummaryDto.avatarUrl` as password login. The provider
+avatar seeds a newly created User only; linking or re-login never overwrites an existing stored
+avatar. The property is omitted when null.
 
 Error `401` — invalid Google ID token:
 ```json
@@ -1275,6 +1282,10 @@ Response `201`:
 }
 ```
 
+For VNPay, Booking passes the exact Trip seat-lock `expiresAt` as Payment `dueAt`. If the deadline
+has already passed during checkout, the request fails with `422 PAYMENT_DEADLINE_PASSED` and
+Booking runs its existing seat-release compensation.
+
 ### POST `/v1/bookings/round-trip`
 
 Auth: `PASSENGER`. Idempotency: required.
@@ -1322,6 +1333,7 @@ Rules:
 - `paymentMethod=VNPAY` may use a combined checkout with `referenceType=BOOKING_GROUP` and one redirect for `grandTotal`.
 - `BOOKING_GROUP` is VNPay-only for this endpoint; WALLET success remains two per-booking payments.
 - `paymentRedirectUrl` is `null` for WALLET and populated only when VNPay returns a redirect.
+- VNPay `Payment.dueAt` is the earlier exact `expiresAt` of the outbound and return seat locks.
 
 ### GET `/v1/bookings/history`
 
@@ -1361,7 +1373,8 @@ Response `200`:
             "status": "ISSUED",
             "paidAmount": 350000
           }
-        ]
+        ],
+        "paymentRedirectUrl": null
       }
     ],
     "page": 1,
@@ -1376,6 +1389,14 @@ Response `200`:
 ```
 
 Validation failures return `422 VALIDATION_ERROR`.
+
+`paymentRedirectUrl` is the final root property of every item and is always serialized. It is
+non-null only for a `PENDING_PAYMENT` Booking whose latest eligible VNPay Payment lookup matches
+the owner, reference, exact amount, trusted VNPay authority, and a persisted future `dueAt`.
+One-way uses `BOOKING/bookingId`; round-trip uses `BOOKING_GROUP/bookingGroupId` and exact
+authoritative group net total.
+Payment lookup non-200, malformed payload, or transport failure leaves the field null without
+failing the base history response.
 
 ### GET `/internal/v1/bookings/history`
 
@@ -2955,13 +2976,23 @@ Response `200` item shape:
       }
     ]
   },
-  "parcel": null
+  "parcel": null,
+  "paymentRedirectUrl": null
 }
 ```
 
 For `PARCEL`, `ticket` is null and `parcel` is
 `{ bookingId, recipientName, sizeCategory, photoUrl, deliveryMethod }`. Exactly one of `ticket` or
 `parcel` is non-null. Journey fields may be null for legacy data or unavailable Trip enrichment.
+`paymentRedirectUrl` is the final root property and is always serialized. `TICKET` forwards the
+value from Booking history without another Payment call. `PARCEL` returns only the latest eligible
+deposit/final VNPay URL for the exact owner/reference/amount/deadline: deposit requires
+`PENDING_PAYMENT`, `PARCEL/parcelId`, exact `DepositPaymentId`, exact remaining deposit, and
+`dueAt <= LatestCheckInAt`; final requires `PENDING_FINAL_PAYMENT`,
+`PARCEL_ADDITIONAL/parcelId`, exact `BalancePaymentId`, exact remaining balance, and
+`dueAt <= FinalPaymentDeadline`. `PENDING_ADDITIONAL_PAYMENT` is never eligible. Lookup failure
+yields null without failing the local history query. `GET /v1/parcels/sent` remains unchanged and
+does not expose payment identifiers or settlement deadlines.
 Booking unavailability on `TICKET` returns `502 UPSTREAM_UNAVAILABLE`; it must not be represented
 as an empty page. Validation failures return `422 VALIDATION_ERROR`.
 
@@ -3915,7 +3946,8 @@ Request:
   "referenceId": "uuid",
   "userId": "uuid",
   "amount": 350000,
-  "method": "WALLET"
+  "method": "VNPAY",
+  "dueAt": "2026-07-30T12:00:00Z"
 }
 ```
 
@@ -3926,12 +3958,66 @@ Response `200`:
   "statusCode": 200,
   "data": {
     "paymentId": "uuid",
-    "status": "SUCCEEDED",
-    "paymentRedirectUrl": null
+    "status": "PENDING_REDIRECT",
+    "paymentRedirectUrl": "https://sandbox.vnpayment.vn/..."
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
+
+The request may omit `dueAt` to use the 15-minute default. Booking VNPay supplies the exact
+one-way Trip seat-lock expiry or the earlier round-trip leg expiry. `dueAt <= now` returns
+`422 PAYMENT_DEADLINE_PASSED`. A persisted non-null deadline is authoritative; historical
+persisted-null Payment rows use the legacy `CreatedAt + 15 minutes` fallback.
+
+### POST `/internal/v1/payments/redirect-sessions/lookup`
+
+Auth: `X-Internal-Auth: Bearer <internal-jwt>`. Callers: Booking and Parcel. This read-only POST is
+never exposed through Gateway, is marked `[SkipIdempotency]`, requires no `Idempotency-Key`, and returns
+`Cache-Control: no-store`.
+
+Request:
+
+```json
+{
+  "userId": "uuid",
+  "references": [
+    {
+      "referenceType": "BOOKING",
+      "referenceId": "uuid"
+    }
+  ]
+}
+```
+
+`userId` must be non-empty. `references` contains 1–100 unique composite
+`(referenceType, referenceId)` values. Allowed case-sensitive types are exactly `BOOKING`,
+`BOOKING_GROUP`, `PARCEL`, and `PARCEL_ADDITIONAL`; validation failures return
+`422 VALIDATION_ERROR`.
+
+Response `200` is a raw list:
+
+```json
+[
+  {
+    "paymentId": "uuid",
+    "referenceType": "BOOKING",
+    "referenceId": "uuid",
+    "amount": 350000,
+    "dueAt": "2026-07-30T12:00:00Z",
+    "paymentRedirectUrl": "https://sandbox.vnpayment.vn/..."
+  }
+]
+```
+
+Payment performs one `AsNoTracking` database query. For each requested composite reference it
+selects the latest Payment by `createdAt DESC, id DESC` before eligibility checks; an ineligible
+latest attempt suppresses the item and never falls back to an older URL. Eligibility requires the
+exact owner, valid immutable trusted context, `method=VNPAY`, `status=PENDING_REDIRECT`, persisted
+non-null `dueAt > now`, and non-empty redirect URL. The URL must be absolute HTTPS, contain no
+credentials, and have the exact authority (host and port) of configured `VNPAY_BASE_URL`.
+Eligible results preserve request order; ineligible references are omitted. Signed URLs, query
+strings, and response bodies must not be logged.
 
 ### POST `/internal/v1/payments/batch-charge`
 

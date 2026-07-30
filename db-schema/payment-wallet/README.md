@@ -8,7 +8,7 @@ Service xử lý **mọi giao dịch tiền**: payment VNPay/Wallet cho Booking/
 - **Framework:** .NET Core 8 + EF Core 8
 - **Extensions:** `pgcrypto`
 - **Hangfire schema:** `hangfire.*` trong cùng DB. Jobs:
-  - VNPay PENDING_REDIRECT EXPIRED (15 phút)
+  - VNPay PENDING_REDIRECT EXPIRED tại `due_at ?? created_at + 15 phút`
   - TopUpRequest EXPIRED (15 phút)
   - **Trip settlement eligibility flag** (daily 02:00) — `PENDING_HOLD → ELIGIBLE` khi `eligible_at <= now`
   - **Trip settlement weekly auto-settle** (Monday 09:00 weekly) — batch settle mọi `ELIGIBLE` bằng PlatformWallet DEBIT + OperatorWallet CREDIT
@@ -23,7 +23,7 @@ Service xử lý **mọi giao dịch tiền**: payment VNPay/Wallet cho Booking/
 
 | Entity | Purpose | Key business fields |
 |---|---|---|
-| `Payment` | Mọi giao dịch thanh toán (Booking/Parcel/TopUp/Subscription). | `referenceType`+`referenceId` polymorphic, immutable trusted `context JSONB`, `contextReconciliationRequired`, `vnpayTxnRef` UNIQUE partial, `idempotencyKey` UNIQUE partial |
+| `Payment` | Mọi giao dịch thanh toán (Booking/Parcel/TopUp/Subscription). | `referenceType`+`referenceId` polymorphic, authoritative nullable `dueAt`, immutable trusted `context JSONB`, `contextReconciliationRequired`, `vnpayTxnRef` UNIQUE partial, `idempotencyKey` UNIQUE partial |
 | `TopUpRequest` | Passenger wallet top-up qua VNPay. | `amount` ≥ 10000, `vnpayTxnRef` UNIQUE |
 | `Wallet` | Ví hành khách (1-1 với User). | **`user_id` PK** (natural, logical FK), `balance` non-negative CHECK, `row_version` optimistic lock |
 | `WalletTransaction` | Ledger immutable (passenger wallet). | `user_id` (logical FK, no hard FK), `type` (CREDIT/DEBIT), `amount` positive, `balanceBefore`/`balanceAfter` snapshot |
@@ -39,6 +39,20 @@ Service xử lý **mọi giao dịch tiền**: payment VNPay/Wallet cho Booking/
 | `OutboxDlq` | Terminal Outbox failures for admin review. | unique `eventId`, payload, retry metadata, `terminalAt` |
 
 ## Design Decisions
+
+### Authoritative Payment deadline
+
+- `payments.due_at` áp dụng cho mọi payment session, không chỉ Subscription. Booking VNPay lưu exact
+  Trip seat-lock expiry; round-trip lưu deadline sớm hơn của hai leg. Parcel lưu deadline nghiệp vụ
+  của deposit/final flow.
+- Expiry dùng inclusive boundary `effective_due_at <= now`, với
+  `effective_due_at = due_at ?? created_at + interval '15 minutes'`. Fallback chỉ phục vụ legacy
+  rows thiếu deadline; nó không kéo dài seat lock Booking.
+- Existing indexes giữ nguyên trong repair này. `idx_payments_status_created_at` tiếp tục hỗ trợ
+  legacy fallback scan; `idx_payments_subscription_due_at` vẫn là index riêng cho Subscription.
+  Không thêm migration/index.
+- Valid VNPay capture sau local expiry vẫn phải được ghi nhận đúng một lần. Booking đã release seat
+  không được hồi sinh; captured allocation không confirm được phải refund idempotent về ví.
 
 ### Wallet PK convention — natural key, no hard cross-service FK
 
@@ -128,7 +142,7 @@ Trước đây flow check `OperatorBalance >= refundTotal` + `OPERATOR_INSUFFICI
 | `uq_payments_vnpay_txn_ref` | `vnpay_txn_ref` partial | unique | VNPay IPN dedupe |
 | `uq_payments_idempotency_key` | `idempotency_key` partial | unique | Double-charge protection |
 | `idx_payments_reference` | `(reference_type, reference_id)` | B-tree | "Payments for booking X" lookup |
-| `idx_payments_status_created_at` | `(status, created_at)` partial | B-tree | Hangfire PENDING_REDIRECT timeout scan |
+| `idx_payments_status_created_at` | `(status, created_at)` partial | B-tree | Hangfire PENDING_REDIRECT legacy fallback scan |
 | `uq_top_up_requests_vnpay_txn_ref` | `vnpay_txn_ref` | unique | Top-up dedupe |
 | `idx_top_up_requests_status_created_at` | partial PENDING | B-tree | Hangfire EXPIRED scan |
 | (none — `user_id` is PK, covers wallet lookup) | — | — | — |

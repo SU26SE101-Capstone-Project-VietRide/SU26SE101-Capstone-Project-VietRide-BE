@@ -187,6 +187,18 @@ Legend: todo / in progress / done (reviewer APPROVED + human `/verify`) / done-w
 - Mỗi service đang sở hữu Hangfire (`Identity`, `Trip`, `Booking`, `Payment`, `Parcel`) expose service-local `GET /internal/jobs/status`, chỉ Internal JWT, không qua Gateway và không mở dashboard. DTO gồm job id, status, lastRun, nextRun, lagSeconds; lag là `max(0, nowUtc - nextRunUtc)` cho job quá hạn, `null` khi chưa có next run/disabled. Endpoint không đổi schedule/readiness.
 - Chaos gate phải chứng minh RabbitMQ outage giữ Outbox trong Postgres, broker restart drain được event eligible, và event vượt threshold xuất hiện đúng một DLQ row/query được từ Identity facade.
 
+## Reopening addendum — 2026-07-31
+
+Day 43's original DLQ, job-status, idempotency middleware, and E2E delivery remain historical
+completed work. Closure is reopened because the executable idempotency inventory drifted after
+later endpoint merges. This addendum does not alter the prior tracker or audit evidence.
+
+The approved repair in `docs/handoff/day-36-43-fe-gap-repair-plan.md` first fixes discovery
+semantics for absolute action routes and `[NonAction]`, then freezes the final inventory only after
+the new internal Payment redirect lookup, Booking refund consumer, and two read-only lookup
+clients exist. The final gate reruns the inventory verifier, Day 43 reliability E2E, impacted
+regression, and writes a fresh `docs/handoff/day-43-checklist.md`.
+
 ## Open questions đã đóng
 
 Các Q1–Q4 cũ bên dưới được giữ làm lịch sử của bản draft; quyết định ở mục trên là SOT hiện hành và không còn là blocker.

@@ -110,7 +110,7 @@ CREATE TABLE payments (
     vnpay_response_code VARCHAR(10) NULL,
     idempotency_key VARCHAR(100) NULL,
     payment_redirect_url TEXT NULL,
-    due_at TIMESTAMPTZ NULL,       -- hard deadline for subscription payment sessions
+    due_at TIMESTAMPTZ NULL,       -- authoritative VNPay/payment deadline; NULL legacy fallback = created_at + 15 minutes
     succeeded_at TIMESTAMPTZ NULL,
     failed_at TIMESTAMPTZ NULL,
     expired_at TIMESTAMPTZ NULL,
@@ -142,6 +142,8 @@ COMMENT ON COLUMN payments.vnpay_txn_ref IS
     'VNPay vnp_TxnRef — unique per VNPay transaction. NULL for WALLET method.';
 COMMENT ON COLUMN payments.idempotency_key IS
     'From Idempotency-Key header. UNIQUE prevents double-charge on retry.';
+COMMENT ON COLUMN payments.due_at IS
+    'Authoritative inclusive expiry deadline for payment sessions. NULL legacy rows use created_at + 15 minutes.';
 
 -- -----------------------------------------------------------------------------
 -- top_up_requests (PASSENGER wallet top-up via VNPay)
