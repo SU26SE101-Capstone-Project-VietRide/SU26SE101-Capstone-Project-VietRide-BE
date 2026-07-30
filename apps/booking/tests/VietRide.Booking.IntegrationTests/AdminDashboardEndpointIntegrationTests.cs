@@ -5,6 +5,7 @@ using NSubstitute;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Features.Admin.Dashboard;
 using VietRide.Booking.Application.Features.BookingStats.GetAdminBookingStatsAggregate;
+using VietRide.Shared.Application.UnitOfWork;
 
 namespace VietRide.Booking.IntegrationTests;
 
@@ -23,6 +24,7 @@ public sealed class AdminDashboardEndpointIntegrationTests
     public async Task Summary_SystemAdminReturnsEnvelopeAndExactComparisonShape()
     {
         ConfigureHappyPath();
+        _factory.UnitOfWork.ClearReceivedCalls();
         using var client = _factory.CreateAuthenticatedClient("SYSTEM_ADMIN");
 
         var response = await client.GetAsync(
@@ -40,6 +42,8 @@ public sealed class AdminDashboardEndpointIntegrationTests
         data.GetProperty("bookings").GetProperty("previousValue").GetInt64().Should().Be(5);
         data.GetProperty("userDistribution")[0].GetProperty("role").GetString().Should().Be("PASSENGER");
         data.GetProperty("operatorStatusDistribution")[0].GetProperty("percent").GetDecimal().Should().Be(100m);
+        await _factory.UnitOfWork.DidNotReceiveWithAnyArgs()
+            .ExecuteInTransactionAsync<AdminDashboardSummaryResponse>(default!, default);
     }
 
     [Fact]

@@ -214,6 +214,7 @@ public sealed class BookingStatsWebApplicationFactory : WebApplicationFactory<Pr
     public IIdentityUserServiceClient IdentityUsers { get; } = Substitute.For<IIdentityUserServiceClient>();
     public IIdentityDashboardMetricsClient IdentityDashboard { get; } =
         Substitute.For<IIdentityDashboardMetricsClient>();
+    public IUnitOfWork UnitOfWork { get; } = Substitute.For<IUnitOfWork>();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -231,7 +232,7 @@ public sealed class BookingStatsWebApplicationFactory : WebApplicationFactory<Pr
             services.AddSingleton(IdentityUsers);
             services.AddSingleton(IdentityDashboard);
 
-            var mockUow = Substitute.For<IUnitOfWork>();
+            var mockUow = UnitOfWork;
             mockUow.ExecuteInTransactionAsync(
                     Arg.Any<Func<Task<GetOperatorBookingStatsResult>>>(),
                     Arg.Any<CancellationToken>())
@@ -248,10 +249,6 @@ public sealed class BookingStatsWebApplicationFactory : WebApplicationFactory<Pr
                     var op = ci.Arg<Func<Task<GetAdminBookingStatsAggregateResult>>>();
                     return op();
                 });
-            mockUow.ExecuteInTransactionAsync(
-                    Arg.Any<Func<Task<AdminDashboardSummaryResponse>>>(),
-                    Arg.Any<CancellationToken>())
-                .Returns(ci => ci.Arg<Func<Task<AdminDashboardSummaryResponse>>>()());
             mockUow.ExecuteInTransactionAsync(
                     Arg.Any<Func<Task<PagedResult<OperatorBookingListItem>>>>(),
                     Arg.Any<CancellationToken>())

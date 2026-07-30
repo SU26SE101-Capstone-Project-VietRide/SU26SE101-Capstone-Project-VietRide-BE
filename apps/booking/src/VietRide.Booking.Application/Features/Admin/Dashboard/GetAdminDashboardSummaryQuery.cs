@@ -1,7 +1,7 @@
-using MediatR;
+using VietRide.Shared.Application.Cqrs;
 
 namespace VietRide.Booking.Application.Features.Admin.Dashboard;
 
 public sealed record GetAdminDashboardSummaryQuery(
     DateOnly? From,
-    DateOnly? To) : IRequest<AdminDashboardSummaryResponse>;
+    DateOnly? To) : IQuery<AdminDashboardSummaryResponse>;
