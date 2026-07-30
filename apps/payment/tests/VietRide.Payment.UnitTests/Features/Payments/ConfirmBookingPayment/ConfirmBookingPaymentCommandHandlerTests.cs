@@ -420,8 +420,8 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
             Guid userId, Guid referenceId, Money amount, WalletTransactionRef walletRef, CancellationToken ct)
             => throw new NotSupportedException("Confirm booking payment tests do not debit user wallets.");
 
-        public Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectOlderThanAsync(
-            DateTimeOffset expiresBefore,
+        public Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectDueAsync(
+            DateTimeOffset legacyCreatedAtOrBefore,
             DateTimeOffset expiredAt,
             CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<PaymentEntity>>([]);

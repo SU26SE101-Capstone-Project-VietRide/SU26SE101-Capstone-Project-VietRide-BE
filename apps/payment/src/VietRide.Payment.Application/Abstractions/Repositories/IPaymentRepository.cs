@@ -54,8 +54,8 @@ public interface IPaymentRepository : IRepository<PaymentEntity, Guid>
         WalletTransactionRef walletRef,
         CancellationToken cancellationToken);
 
-    Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectOlderThanAsync(
-        DateTimeOffset expiresBefore,
+    Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectDueAsync(
+        DateTimeOffset legacyCreatedAtOrBefore,
         DateTimeOffset expiredAt,
         CancellationToken cancellationToken);
 

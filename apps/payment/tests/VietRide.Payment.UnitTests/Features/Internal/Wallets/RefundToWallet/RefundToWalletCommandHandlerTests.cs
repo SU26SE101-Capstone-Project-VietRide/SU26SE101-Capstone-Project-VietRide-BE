@@ -456,7 +456,7 @@ public sealed class RefundToWalletCommandHandlerTests
         public Task AcquirePaymentReferenceLockAsync(PaymentReferenceType referenceType, Guid referenceId, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<WalletTransaction> DebitWalletBookingPaymentAsync(Guid userId, Guid bookingId, Money amount, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<WalletTransaction> DebitWalletPaymentAsync(Guid userId, Guid referenceId, Money amount, WalletTransactionRef walletRef, CancellationToken ct) => throw new NotSupportedException();
-        public Task<IReadOnlyList<VietRide.Payment.Domain.Entities.Payment>> ExpirePendingRedirectOlderThanAsync(DateTimeOffset expiresBefore, DateTimeOffset expiredAt, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<IReadOnlyList<VietRide.Payment.Domain.Entities.Payment>> ExpirePendingRedirectDueAsync(DateTimeOffset expiresBefore, DateTimeOffset expiredAt, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<bool> TryMarkRefundedByReferenceAsync(PaymentReferenceType referenceType, Guid referenceId, DateTimeOffset refundedAt, CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 

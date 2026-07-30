@@ -328,8 +328,8 @@ public sealed class ChargePaymentCommandHandlerTests
             return Task.FromResult(transaction);
         }
 
-        public Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectOlderThanAsync(
-            DateTimeOffset expiresBefore,
+        public Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectDueAsync(
+            DateTimeOffset legacyCreatedAtOrBefore,
             DateTimeOffset expiredAt,
             CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<PaymentEntity>>([]);

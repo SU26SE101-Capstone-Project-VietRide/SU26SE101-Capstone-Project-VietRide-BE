@@ -172,8 +172,8 @@ public sealed class GetVnPayReturnStatusQueryHandlerTests
             CancellationToken cancellationToken)
             => throw new NotSupportedException();
 
-        public Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectOlderThanAsync(
-            DateTimeOffset expiresBefore,
+        public Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectDueAsync(
+            DateTimeOffset legacyCreatedAtOrBefore,
             DateTimeOffset expiredAt,
             CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<PaymentEntity>>([]);

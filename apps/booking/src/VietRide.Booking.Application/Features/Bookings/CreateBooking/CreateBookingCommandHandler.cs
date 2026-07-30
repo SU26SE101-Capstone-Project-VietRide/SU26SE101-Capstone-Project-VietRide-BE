@@ -146,10 +146,12 @@ public sealed class CreateBookingCommandHandler
 
         // Map lock outcome to typed exceptions — no booking created on lock failure
         Guid seatLockToken;
+        DateTimeOffset seatLockExpiresAt;
         switch (lockOutcome)
         {
             case LockSeatsOutcome.Success success:
                 seatLockToken = success.Data.SeatLockToken;
+                seatLockExpiresAt = success.Data.ExpiresAt;
                 break;
 
             case LockSeatsOutcome.SeatUnavailable unavailable:
@@ -293,6 +295,17 @@ public sealed class CreateBookingCommandHandler
         string? paymentRedirectUrl = null;
         var chargeIdempotencyKey = request.IdempotencyKey ?? booking.Id.ToString("D");
 
+        if (string.Equals(request.PaymentMethod, "VNPAY", StringComparison.OrdinalIgnoreCase)
+            && seatLockExpiresAt <= _clock.UtcNow)
+        {
+            await CompensateSeatsAndVoucherAsync(
+                request.TripId, seatLockToken, seatNumbers, booking.Id, voucherUsageId, cancellationToken);
+            throw new BookingPaymentException(
+                422,
+                "PAYMENT_DEADLINE_PASSED",
+                "The seat-lock payment deadline has passed.");
+        }
+
         ChargeOutcome chargeOutcome;
         try
         {
@@ -304,6 +317,7 @@ public sealed class CreateBookingCommandHandler
                 method: request.PaymentMethod,
                 idempotencyKey: chargeIdempotencyKey,
                 context: CreatePaymentContext(booking, baseFare.Amount, discountAmount.Amount, voucherFundingType),
+                dueAt: seatLockExpiresAt,
                 cancellationToken: cancellationToken);
         }
         catch (Exception ex)
@@ -321,6 +335,16 @@ public sealed class CreateBookingCommandHandler
             // PAYMENT_INSUFFICIENT_WALLET (BSOT §5.9 registered code, 402).
             // ConflictException maps to 409; 402 mapping is deferred to Day 15/16 payment work.
             throw new BookingPaymentException(402, "PAYMENT_INSUFFICIENT_WALLET", insuf.Message);
+        }
+
+        if (chargeOutcome is ChargeOutcome.DeadlinePassed deadlinePassed)
+        {
+            await CompensateSeatsAndVoucherAsync(
+                request.TripId, seatLockToken, seatNumbers, booking.Id, voucherUsageId, cancellationToken);
+            throw new BookingPaymentException(
+                422,
+                "PAYMENT_DEADLINE_PASSED",
+                deadlinePassed.Message);
         }
 
         if (chargeOutcome is ChargeOutcome.TransportError transportError)

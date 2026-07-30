@@ -152,8 +152,8 @@ internal sealed class PaymentRepository : IPaymentRepository
         return affected > 0;
     }
 
-    public async Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectOlderThanAsync(
-        DateTimeOffset expiresBefore,
+    public async Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectDueAsync(
+        DateTimeOffset legacyCreatedAtOrBefore,
         DateTimeOffset expiredAt,
         CancellationToken cancellationToken)
         => await _db.Payments
@@ -170,7 +170,9 @@ internal sealed class PaymentRepository : IPaymentRepository
                       'SUBSCRIPTION'::vietride_payment.payment_reference_type,
                       'PARCEL'::vietride_payment.payment_reference_type,
                       'PARCEL_ADDITIONAL'::vietride_payment.payment_reference_type)
-                  AND created_at < {expiresBefore}
+                  AND (
+                      due_at <= {expiredAt}
+                      OR (due_at IS NULL AND created_at <= {legacyCreatedAtOrBefore}))
                 RETURNING *
                 """)
             .AsNoTracking()

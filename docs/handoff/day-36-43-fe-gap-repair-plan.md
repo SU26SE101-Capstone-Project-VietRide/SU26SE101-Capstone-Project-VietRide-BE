@@ -129,7 +129,7 @@ The property is always serialized. Lookup failure or ineligibility yields `null`
 | R1 | Completed | APPROVE | 2026-07-31 | Trip 5/5; Node 3/3; one Node reviewer patch |
 | R2 | Completed | APPROVE | 2026-07-31 | Node 5/5; one reviewer patch for Nest route semantics |
 | R3 | Completed | APPROVE | 2026-07-31 | Identity focused tests 7/7; no scope expansion |
-| R4 | Pending | Pending | - | Booking DueAt and Payment expiry |
+| R4 | Completed | APPROVE | 2026-07-31 | Booking 31/31; Payment unit 4/4 + PostgreSQL 2/2 |
 | R5 | Pending | Pending | - | Booking refund compensation |
 | R6 | Pending | Pending | - | VNPay IPN/expiry race |
 | R7 | Pending | Pending | - | Internal redirect lookup |
