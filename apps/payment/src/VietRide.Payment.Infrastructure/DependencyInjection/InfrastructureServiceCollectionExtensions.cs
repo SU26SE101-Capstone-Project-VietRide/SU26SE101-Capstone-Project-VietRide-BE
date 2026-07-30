@@ -108,6 +108,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IOperatorWalletTransactionRepository, OperatorWalletTransactionRepository>();
         services.AddScoped<IOperatorLedgerEntryRepository, OperatorLedgerEntryRepository>();
         services.AddScoped<IOperatorTripSettlementRepository, OperatorTripSettlementRepository>();
+        services.AddScoped<IRevenueAnalyticsRepository, RevenueAnalyticsRepository>();
         services.AddScoped<IFinancialActorPrivacyStore, FinancialActorPrivacyStore>();
         services.AddScoped<IProcessedIntegrationEventRepository, ProcessedIntegrationEventRepository>();
         services.AddScoped<IIntegrationEventInbox, PaymentIntegrationEventInbox>();
@@ -246,6 +247,11 @@ public static class InfrastructureServiceCollectionExtensions
                 ?? configuration["BOOKING_SERVICE_BASE_URL"]
                 ?? "http://booking:8080");
         RegisterPlatformReportClient<ITripPlatformReportClient, TripPlatformReportClient>(
+            services,
+            configuration["Trip:BaseUrl"]
+                ?? configuration["TRIP_SERVICE_BASE_URL"]
+                ?? "http://trip:8080");
+        RegisterPlatformReportClient<ITripRevenueAnalyticsClient, TripRevenueAnalyticsClient>(
             services,
             configuration["Trip:BaseUrl"]
                 ?? configuration["TRIP_SERVICE_BASE_URL"]
