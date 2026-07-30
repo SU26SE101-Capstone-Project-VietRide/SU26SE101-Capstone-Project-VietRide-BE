@@ -66,7 +66,7 @@ public sealed class IdentityInternalClientTests
     }
 
     [Fact]
-    public async Task ValidateOperatorCanWriteAsync_ReturnsValidationError_WhenIdentityReturnsServerError()
+    public async Task ValidateOperatorCanWriteAsync_ReturnsServiceUnavailable_WhenIdentityReturnsServerError()
     {
         using var httpClient = CreateHttpClient(new JsonResponseHandler(HttpStatusCode.InternalServerError, "{}"));
         var client = new IdentityInternalClient(httpClient);
@@ -74,12 +74,12 @@ public sealed class IdentityInternalClientTests
         var result = await client.ValidateOperatorCanWriteAsync(OperatorId);
 
         result.IsAllowed.Should().BeFalse();
-        result.FailureStatusCode.Should().Be(422);
-        result.ErrorCode.Should().Be("VALIDATION_ERROR");
+        result.FailureStatusCode.Should().Be(503);
+        result.ErrorCode.Should().Be("UPSTREAM_UNAVAILABLE");
     }
 
     [Fact]
-    public async Task ValidateOperatorCanWriteAsync_ReturnsValidationError_WhenTransportFails()
+    public async Task ValidateOperatorCanWriteAsync_ReturnsServiceUnavailable_WhenTransportFails()
     {
         using var httpClient = CreateHttpClient(new ThrowingHandler());
         var client = new IdentityInternalClient(httpClient);
@@ -87,8 +87,112 @@ public sealed class IdentityInternalClientTests
         var result = await client.ValidateOperatorCanWriteAsync(OperatorId);
 
         result.IsAllowed.Should().BeFalse();
-        result.FailureStatusCode.Should().Be(422);
-        result.ErrorCode.Should().Be("VALIDATION_ERROR");
+        result.FailureStatusCode.Should().Be(503);
+        result.ErrorCode.Should().Be("UPSTREAM_UNAVAILABLE");
+    }
+
+    [Fact]
+    public async Task ValidateOperatorSubscriptionCanWriteAsync_AllowsGeneralWrite_WhenShuttleModuleIsDisabled()
+    {
+        using var httpClient = CreateHttpClient(new JsonResponseHandler(HttpStatusCode.OK,
+            """
+            {"status":"ACTIVE","plan":{"modules":{"enableShuttle":false}}}
+            """));
+        var client = new IdentityInternalClient(httpClient);
+
+        var result = await client.ValidateOperatorSubscriptionCanWriteAsync(
+            OperatorId,
+            requireShuttleModule: false);
+
+        result.IsAllowed.Should().BeTrue();
+        result.FailureStatusCode.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ValidateOperatorSubscriptionCanWriteAsync_AllowsPendingPaymentUsingActivePlanEntitlement()
+    {
+        using var httpClient = CreateHttpClient(new JsonResponseHandler(HttpStatusCode.OK,
+            """
+            {"status":"PENDING_PAYMENT","plan":{"modules":{"enableShuttle":true}}}
+            """));
+        var client = new IdentityInternalClient(httpClient);
+
+        var result = await client.ValidateOperatorSubscriptionCanWriteAsync(
+            OperatorId,
+            requireShuttleModule: true);
+
+        result.IsAllowed.Should().BeTrue();
+        result.FailureStatusCode.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ValidateOperatorSubscriptionCanWriteAsync_ReturnsPaymentRequired_WhenSubscriptionExpired()
+    {
+        using var httpClient = CreateHttpClient(new JsonResponseHandler(HttpStatusCode.OK,
+            """
+            {"status":"EXPIRED","plan":{"modules":{"enableShuttle":true}}}
+            """));
+        var client = new IdentityInternalClient(httpClient);
+
+        var result = await client.ValidateOperatorSubscriptionCanWriteAsync(
+            OperatorId,
+            requireShuttleModule: true);
+
+        result.IsAllowed.Should().BeFalse();
+        result.FailureStatusCode.Should().Be(402);
+        result.ErrorCode.Should().Be("SUBSCRIPTION_EXPIRED");
+    }
+
+    [Fact]
+    public async Task ValidateOperatorSubscriptionCanWriteAsync_ReturnsForbidden_WhenShuttleModuleDisabled()
+    {
+        using var httpClient = CreateHttpClient(new JsonResponseHandler(HttpStatusCode.OK,
+            """
+            {"status":"ACTIVE","plan":{"modules":{"enableShuttle":false}}}
+            """));
+        var client = new IdentityInternalClient(httpClient);
+
+        var result = await client.ValidateOperatorSubscriptionCanWriteAsync(
+            OperatorId,
+            requireShuttleModule: true);
+
+        result.IsAllowed.Should().BeFalse();
+        result.FailureStatusCode.Should().Be(403);
+        result.ErrorCode.Should().Be("SUBSCRIPTION_MODULE_DISABLED");
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    [InlineData(HttpStatusCode.BadGateway)]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    public async Task ValidateOperatorSubscriptionCanWriteAsync_ReturnsServiceUnavailable_WhenIdentityFails(
+        HttpStatusCode statusCode)
+    {
+        using var httpClient = CreateHttpClient(new JsonResponseHandler(statusCode, "{}"));
+        var client = new IdentityInternalClient(httpClient);
+
+        var result = await client.ValidateOperatorSubscriptionCanWriteAsync(
+            OperatorId,
+            requireShuttleModule: true);
+
+        result.IsAllowed.Should().BeFalse();
+        result.FailureStatusCode.Should().Be(503);
+        result.ErrorCode.Should().Be("UPSTREAM_UNAVAILABLE");
+    }
+
+    [Fact]
+    public async Task ValidateOperatorSubscriptionCanWriteAsync_ReturnsServiceUnavailable_WhenTransportFails()
+    {
+        using var httpClient = CreateHttpClient(new ThrowingHandler());
+        var client = new IdentityInternalClient(httpClient);
+
+        var result = await client.ValidateOperatorSubscriptionCanWriteAsync(
+            OperatorId,
+            requireShuttleModule: true);
+
+        result.IsAllowed.Should().BeFalse();
+        result.FailureStatusCode.Should().Be(503);
+        result.ErrorCode.Should().Be("UPSTREAM_UNAVAILABLE");
     }
 
     [Fact]

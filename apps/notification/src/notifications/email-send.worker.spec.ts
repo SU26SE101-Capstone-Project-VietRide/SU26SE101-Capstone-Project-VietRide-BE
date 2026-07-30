@@ -6,6 +6,7 @@ import {
   type EmailDelivery,
 } from '../generated/notification-prisma-client';
 import { EMAIL_SENDING_LEASE_MS, EMAIL_SEND_ATTEMPTS } from './email-send.constants';
+import { encryptEmailSendJob } from './email-job-payload.crypto';
 import type { EmailProvider, EmailSendJobData } from './email-send.types';
 import { EmailSendWorker } from './email-send.worker';
 import { EmailTemplateRenderer } from './email-template.renderer';
@@ -158,7 +159,7 @@ describe('EmailSendWorker', () => {
 function createJob(attemptsMade: number): Job<EmailSendJobData> {
   return {
     attemptsMade,
-    data: {
+    data: encryptEmailSendJob({
       emailDeliveryId: EMAIL_DELIVERY_ID,
       toEmail: RECIPIENT_EMAIL,
       templateKey: EmailTemplateKey.AUTH_OTP,
@@ -167,7 +168,7 @@ function createJob(attemptsMade: number): Job<EmailSendJobData> {
         purpose: 'dang ky',
         ttlMinutes: 10,
       },
-    },
+    }, createEnv().INTERNAL_JWT_SECRET),
   } as unknown as Job<EmailSendJobData>;
 }
 

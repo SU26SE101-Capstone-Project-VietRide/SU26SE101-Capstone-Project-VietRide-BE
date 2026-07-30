@@ -2,6 +2,7 @@ using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Exceptions;
+using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
@@ -15,18 +16,24 @@ public sealed class DeliverParcelCommandHandler
     private static readonly TimeSpan DeliveryConfirmWindow = TimeSpan.FromHours(48);
 
     private readonly IParcelRepository _parcelRepository;
+    private readonly IParcelDeliveryTokenRepository _deliveryTokenRepository;
     private readonly ITripServiceClient _tripClient;
+    private readonly IParcelDeliveryEmailClient _deliveryEmailClient;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IUnitOfWork _unitOfWork;
 
     public DeliverParcelCommandHandler(
         IParcelRepository parcelRepository,
+        IParcelDeliveryTokenRepository deliveryTokenRepository,
         ITripServiceClient tripClient,
+        IParcelDeliveryEmailClient deliveryEmailClient,
         IIntegrationEventOutbox outbox,
         IUnitOfWork unitOfWork)
     {
         _parcelRepository = parcelRepository;
+        _deliveryTokenRepository = deliveryTokenRepository;
         _tripClient = tripClient;
+        _deliveryEmailClient = deliveryEmailClient;
         _outbox = outbox;
         _unitOfWork = unitOfWork;
     }
@@ -61,8 +68,6 @@ public sealed class DeliverParcelCommandHandler
         }
 
         var now = DateTimeOffset.UtcNow;
-        var deliveryToken = Guid.NewGuid();
-        var deliveryTokenExpiresAt = now.Add(DeliveryConfirmWindow);
         ParcelPaymentTransitionSnapshot snapshot;
 
         await _unitOfWork.BeginTransactionAsync(cancellationToken);
@@ -70,8 +75,6 @@ public sealed class DeliverParcelCommandHandler
         {
             snapshot = await _parcelRepository.TryMarkDeliveredPendingConfirmAsync(
                 command.ParcelId,
-                deliveryToken,
-                deliveryTokenExpiresAt,
                 ParcelEvidencePhotoRules.Normalize(command.PhotoUrls),
                 now,
                 cancellationToken)
@@ -79,17 +82,49 @@ public sealed class DeliverParcelCommandHandler
                     "INVALID_STATUS",
                     $"Parcel '{command.ParcelId}' status changed concurrently; cannot be delivered.");
 
+            await _deliveryTokenRepository.RevokeActiveAsync(
+                parcel.Id,
+                now,
+                cancellationToken);
+
+            DateTimeOffset? expiresAt = null;
+            if (!string.IsNullOrWhiteSpace(parcel.RecipientEmail))
+            {
+                var rawToken = Guid.NewGuid();
+                expiresAt = now.Add(DeliveryConfirmWindow);
+                var deliveryToken = ParcelDeliveryToken.Issue(
+                    parcel.Id,
+                    DeliveryTokenHasher.Hash(rawToken),
+                    expiresAt.Value,
+                    command.ActorUserId,
+                    ParcelDeliveryTokenIssueReason.INITIAL_DELIVERY,
+                    now);
+                await _deliveryTokenRepository.AddAsync(deliveryToken, cancellationToken);
+
+                await _deliveryEmailClient.SendDeliveryLinkAsync(
+                    new ParcelDeliveryEmailRequest(
+                        deliveryToken.Id,
+                        parcel.RecipientEmail,
+                        rawToken,
+                        parcel.ParcelCode,
+                        expiresAt.Value),
+                    cancellationToken);
+            }
+
+            var eventId = Guid.NewGuid();
             await ParcelOutboxEvents.EnqueueAsync(
                 _outbox,
+                eventId,
                 ParcelOutboxEvents.DeliveredPendingConfirm,
                 BuildPayload(
+                    eventId,
+                    now,
                     snapshot.ParcelId,
                     snapshot.ParcelCode,
                     snapshot.OperatorId,
                     parcel.RecipientUserId,
                     snapshot.TripId,
-                    deliveryToken,
-                    deliveryTokenExpiresAt),
+                    expiresAt),
                 cancellationToken);
 
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -136,28 +171,34 @@ public sealed class DeliverParcelCommandHandler
     }
 
     private static Dictionary<string, object?> BuildPayload(
+        Guid eventId,
+        DateTimeOffset occurredAt,
         Guid parcelId,
         string parcelCode,
         Guid operatorId,
         Guid? recipientUserId,
         Guid tripId,
-        Guid deliveryToken,
-        DateTimeOffset expiresAt)
+        DateTimeOffset? expiresAt)
     {
         var payload = new Dictionary<string, object?>
         {
+            ["eventId"] = eventId,
+            ["occurredAt"] = occurredAt,
             ["parcelId"] = parcelId,
             ["parcelCode"] = parcelCode,
             ["operatorId"] = operatorId,
             ["tripId"] = tripId,
-            ["deliveryToken"] = deliveryToken,
-            ["expiresAt"] = expiresAt,
         };
 
         if (recipientUserId.HasValue)
         {
             payload["userId"] = recipientUserId.Value;
             payload["recipientUserIds"] = new[] { recipientUserId.Value };
+        }
+
+        if (expiresAt.HasValue)
+        {
+            payload["expiresAt"] = expiresAt.Value;
         }
 
         return payload;

@@ -6,4 +6,5 @@ public sealed record ManualConfirmDeliveryCommand(
     Guid ParcelId,
     Guid ActorUserId,
     Guid OperatorId,
-    string Note) : IRequest<ManualConfirmDeliveryResponse>;
+    string Note,
+    string ActorRole = "OPERATOR_STAFF") : IRequest<ManualConfirmDeliveryResponse>;

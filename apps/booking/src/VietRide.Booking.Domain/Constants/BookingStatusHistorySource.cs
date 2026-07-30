@@ -10,6 +10,7 @@ public static class BookingStatusHistorySource
     public const string MarkRefunded = "MARK_REFUNDED";
     public const string CompleteOnTripCompleted = "COMPLETE_ON_TRIP_COMPLETED";
     public const string MarkNoShow = "MARK_NO_SHOW";
+    public const string DisruptOnTripDisrupted = "DISRUPT_ON_TRIP_DISRUPTED";
 
     private static readonly HashSet<string> Allowed =
     [
@@ -21,6 +22,7 @@ public static class BookingStatusHistorySource
         MarkRefunded,
         CompleteOnTripCompleted,
         MarkNoShow,
+        DisruptOnTripDisrupted,
     ];
 
     public static bool IsDefined(string source) => Allowed.Contains(source);

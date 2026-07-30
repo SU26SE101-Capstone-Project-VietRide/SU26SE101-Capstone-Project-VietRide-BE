@@ -17,4 +17,5 @@ public sealed record InternalTripSnapshotDto(
     Guid? DriverUserId,
     Guid? AssistantUserId,
     DateTimeOffset? DestinationArrivedAt = null,
-    DateTimeOffset? ActualDepartureTime = null);
+    DateTimeOffset? ActualDepartureTime = null,
+    double? TotalDistanceKm = null);

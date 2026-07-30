@@ -281,6 +281,27 @@ internal sealed class BookingRepository : IBookingRepository
             .OrderBy(booking => booking.Id)
             .ToListAsync(ct);
 
+    public async Task<IReadOnlyList<BookingEntity>> GetDisruptionBookingsForUpdateAsync(
+        Guid tripId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => await _db.Bookings
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_booking.bookings
+                WHERE trip_id = {tripId}
+                  AND operator_id = {operatorId}
+                  AND status IN (
+                      CAST('CONFIRMED' AS public.booking_status),
+                      CAST('PARTIAL_NO_SHOW' AS public.booking_status))
+                ORDER BY id
+                FOR UPDATE
+                """)
+            .Include(booking => booking.Tickets)
+            .Include(booking => booking.ShuttleIntent)
+            .AsSplitQuery()
+            .ToListAsync(ct);
+
     public Task<bool> HasOutboxEventAsync(
         string eventType,
         Guid eventId,
@@ -1081,7 +1102,8 @@ internal sealed class BookingRepository : IBookingRepository
         CancellationToken ct = default)
     {
         var updated = await _db.Bookings
-            .Where(b => b.Id == bookingId && b.Status == BookingStatus.CANCELLED)
+            .Where(b => b.Id == bookingId
+                && (b.Status == BookingStatus.CANCELLED || b.Status == BookingStatus.DISRUPTED))
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(b => b.Status, BookingStatus.REFUNDED)
                 .SetProperty(b => b.RefundedAt, refundedAt)

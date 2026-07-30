@@ -4,7 +4,21 @@ export interface EmailSendJobData {
   emailDeliveryId: string;
   toEmail: string;
   templateKey: EmailTemplateKey;
+  encryptedTemplateData: EncryptedEmailTemplateData;
+}
+
+export interface EmailSendQueueData {
+  emailDeliveryId: string;
+  toEmail: string;
+  templateKey: EmailTemplateKey;
   templateData: EmailTemplateData;
+}
+
+export interface EncryptedEmailTemplateData {
+  version: 1;
+  iv: string;
+  authTag: string;
+  ciphertext: string;
 }
 
 export interface CreateEmailSendRequest {

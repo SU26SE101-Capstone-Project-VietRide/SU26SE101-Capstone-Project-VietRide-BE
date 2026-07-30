@@ -226,7 +226,8 @@ public sealed class SubstituteVehicleCommandHandler
                 oldTrip.Id,
                 oldTrip.OperatorId,
                 disruptedAt,
-                hasSubstitution: true);
+                hasSubstitution: true,
+                request.Reason.Trim());
             await outbox.EnqueueAsync(
                 disruptedEventId,
                 disrupted.EventType,

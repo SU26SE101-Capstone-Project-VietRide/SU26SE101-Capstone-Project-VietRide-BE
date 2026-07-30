@@ -696,6 +696,32 @@ describe('buildRouteTable', () => {
     });
   });
 
+  it('routes crew parcel actions to Parcel with assigned crew roles', () => {
+    const crewParcelRouteIndex = routes.findIndex(
+      (route) => route.prefix === '/v1/crew/parcels',
+    );
+    const publicParcelRouteIndex = routes.findIndex((route) => route.prefix === '/v1/parcels');
+
+    expect(crewParcelRouteIndex).toBeGreaterThanOrEqual(0);
+    expect(publicParcelRouteIndex).toBeGreaterThanOrEqual(0);
+    expect(crewParcelRouteIndex).toBeLessThan(publicParcelRouteIndex);
+
+    const cases = [
+      '/v1/crew/parcels/11111111-1111-4111-8111-111111111111/resend-delivery-email',
+      '/v1/crew/parcels/11111111-1111-4111-8111-111111111111/manual-confirm',
+      '/v1/crew/parcels/11111111-1111-4111-8111-111111111111/confirm-transfer',
+    ] as const;
+
+    cases.forEach((path) => {
+      expect(matchRoute(routes, path)).toMatchObject({
+        prefix: '/v1/crew/parcels',
+        target: env.PARCEL_BASE_URL,
+        authRequired: 'user',
+        requiredRoles: ['DRIVER', 'ASSISTANT'],
+      });
+    });
+  });
+
   it('routes the Assistant trip parcel list and QR scan to Parcel without capturing other Assistant paths', () => {
     const parcelListRoute = matchRoute(
       routes,

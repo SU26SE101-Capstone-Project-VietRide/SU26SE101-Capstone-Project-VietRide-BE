@@ -18,11 +18,34 @@ internal sealed class TripDisruptedIntegrationEventHandler
         TripDisruptedIntegrationEvent integrationEvent,
         CancellationToken cancellationToken)
     {
+        Validate(integrationEvent);
         await _mediator.Send(
             new HandleTripDisruptedCommand(
+                integrationEvent.EventId,
+                new DateTimeOffset(integrationEvent.OccurredAt),
                 integrationEvent.TripId,
+                integrationEvent.OperatorId,
+                integrationEvent.TerminalAt,
                 integrationEvent.HasSubstitution,
-                integrationEvent.TraveledRatio),
+                integrationEvent.Reason),
             cancellationToken);
+    }
+
+    private static void Validate(TripDisruptedIntegrationEvent integrationEvent)
+    {
+        ArgumentNullException.ThrowIfNull(integrationEvent);
+        if (integrationEvent.EventId == Guid.Empty
+            || integrationEvent.TripId == Guid.Empty
+            || integrationEvent.OperatorId == Guid.Empty)
+        {
+            throw new ArgumentException("Trip-disrupted contract contains an empty required id.");
+        }
+
+        if (integrationEvent.OccurredAt == default
+            || integrationEvent.OccurredAt.Kind != DateTimeKind.Utc
+            || integrationEvent.TerminalAt == default)
+        {
+            throw new ArgumentException("Trip-disrupted contract contains invalid required data.");
+        }
     }
 }

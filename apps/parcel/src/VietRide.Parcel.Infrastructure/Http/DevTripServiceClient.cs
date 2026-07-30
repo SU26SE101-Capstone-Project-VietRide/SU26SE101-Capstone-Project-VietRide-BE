@@ -23,6 +23,22 @@ public sealed class DevTripServiceClient : ITripServiceClient
         return Task.FromResult(new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Authorized));
     }
 
+    public Task<TripCrewAuthorizationOutcome> AuthorizeCrewForTripAsync(
+        Guid tripId,
+        Guid userId,
+        Guid operatorId,
+        string role,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation(
+            "Using dev Trip stub for AuthorizeCrewForTripAsync({TripId}, {UserId}, {Role}).",
+            tripId,
+            userId,
+            role);
+        return Task.FromResult(new TripCrewAuthorizationOutcome(
+            TripCrewAuthorizationOutcomeKind.Authorized));
+    }
+
     public Task<TripSnapshotOutcome> GetTripParcelSnapshotAsync(
         Guid tripId,
         CancellationToken cancellationToken = default)
@@ -279,4 +295,29 @@ public sealed class DevTripServiceClient : ITripServiceClient
         decimal weightKg,
         CancellationToken cancellationToken = default)
         => ReleaseCargoAsync(tripId, parcelId, weightKg, volumeM3: 0.0001m, cancellationToken);
+
+    public Task<TripCargoTransferOutcome> TransferCargoAsync(
+        Guid sourceTripId,
+        Guid parcelId,
+        Guid targetTripId,
+        string targetState,
+        bool allowCapacityOverflow,
+        Guid idempotencyKey,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation(
+            "Using dev Trip stub for TransferCargoAsync({SourceTripId}, {TargetTripId}, {ParcelId}).",
+            sourceTripId,
+            targetTripId,
+            parcelId);
+        return Task.FromResult(new TripCargoTransferOutcome(
+            TripCargoTransferOutcomeKind.Success,
+            Transfer: new TripCargoTransferSnapshot(
+                parcelId,
+                sourceTripId,
+                targetTripId,
+                targetState,
+                1m,
+                0.0001m)));
+    }
 }

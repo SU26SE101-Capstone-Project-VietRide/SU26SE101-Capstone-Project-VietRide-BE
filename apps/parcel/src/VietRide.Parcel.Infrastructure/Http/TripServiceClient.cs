@@ -27,10 +27,29 @@ public sealed class TripServiceClient : ITripServiceClient, IIdempotentTripServi
         Guid userId,
         Guid operatorId,
         CancellationToken cancellationToken = default)
+        => await AuthorizeCrewForTripAsync(
+            tripId,
+            userId,
+            operatorId,
+            "ASSISTANT",
+            cancellationToken);
+
+    public async Task<TripCrewAuthorizationOutcome> AuthorizeCrewForTripAsync(
+        Guid tripId,
+        Guid userId,
+        Guid operatorId,
+        string role,
+        CancellationToken cancellationToken = default)
     {
+        var normalizedRole = role.Trim().ToUpperInvariant();
+        if (normalizedRole is not ("DRIVER" or "ASSISTANT"))
+        {
+            return new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Denied);
+        }
+
         try
         {
-            var path = $"/internal/v1/trips/{tripId:D}/tracking-authorization?userId={userId:D}&role=ASSISTANT&operatorId={operatorId:D}";
+            var path = $"/internal/v1/trips/{tripId:D}/tracking-authorization?userId={userId:D}&role={normalizedRole}&operatorId={operatorId:D}";
             using var response = await _httpClient.GetAsync(path, cancellationToken).ConfigureAwait(false);
 
             if (response.StatusCode == HttpStatusCode.NotFound)
@@ -54,7 +73,8 @@ public sealed class TripServiceClient : ITripServiceClient, IIdempotentTripServi
                     "Trip service returned an invalid authorization response.");
             }
 
-            return envelope.Data.Allowed && envelope.Data.Scope == "ASSISTANT"
+            return envelope.Data.Allowed
+                && string.Equals(envelope.Data.Scope, normalizedRole, StringComparison.OrdinalIgnoreCase)
                 ? new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Authorized)
                 : new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Denied);
         }
@@ -64,7 +84,7 @@ public sealed class TripServiceClient : ITripServiceClient, IIdempotentTripServi
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "TripServiceClient.AuthorizeAssistantForTripAsync({TripId}) failed.", tripId);
+            _logger.LogError(ex, "TripServiceClient.AuthorizeCrewForTripAsync({TripId}) failed.", tripId);
             return new TripCrewAuthorizationOutcome(
                 TripCrewAuthorizationOutcomeKind.TransportError,
                 $"Trip service transport failure: {ex.Message}");
@@ -467,6 +487,109 @@ public sealed class TripServiceClient : ITripServiceClient, IIdempotentTripServi
         CancellationToken cancellationToken = default)
         => ReleaseCargoAsync(tripId, parcelId, weightKg, volumeM3: 0.0001m, cancellationToken);
 
+    public async Task<TripCargoTransferOutcome> TransferCargoAsync(
+        Guid sourceTripId,
+        Guid parcelId,
+        Guid targetTripId,
+        string targetState,
+        bool allowCapacityOverflow,
+        Guid idempotencyKey,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"/internal/v1/trips/{sourceTripId:D}/cargo/transfer")
+            {
+                Content = JsonContent.Create(new
+                {
+                    parcelId,
+                    targetTripId,
+                    targetState,
+                    allowCapacityOverflow,
+                }, options: JsonOptions),
+            };
+            request.Headers.TryAddWithoutValidation(
+                "Idempotency-Key",
+                idempotencyKey.ToString("D"));
+
+            using var response = await _httpClient
+                .SendAsync(request, cancellationToken)
+                .ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.OK)
+            {
+                var envelope = await response.Content
+                    .ReadFromJsonAsync<ApiResponse<TripCargoTransferSnapshot>>(
+                        JsonOptions,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                var transfer = envelope?.Data;
+                if (transfer is null
+                    || transfer.ParcelId != parcelId
+                    || transfer.SourceTripId != sourceTripId
+                    || transfer.TargetTripId != targetTripId
+                    || !string.Equals(
+                        transfer.TargetState,
+                        targetState,
+                        StringComparison.Ordinal))
+                {
+                    return new TripCargoTransferOutcome(
+                        TripCargoTransferOutcomeKind.TransportError,
+                        "Trip cargo transfer returned an invalid success payload.");
+                }
+
+                return new TripCargoTransferOutcome(
+                    TripCargoTransferOutcomeKind.Success,
+                    Transfer: transfer);
+            }
+
+            var errorCode = await ReadErrorCodeAsync(response, cancellationToken);
+            return response.StatusCode switch
+            {
+                HttpStatusCode.NotFound when errorCode == "PARCEL_CARGO_NOT_FOUND"
+                    => new TripCargoTransferOutcome(
+                        TripCargoTransferOutcomeKind.ParcelCargoNotFound,
+                        "The source Trip has no active cargo ledger for this Parcel."),
+                HttpStatusCode.NotFound => new TripCargoTransferOutcome(
+                    TripCargoTransferOutcomeKind.TripNotFound,
+                    "The source or target Trip was not found."),
+                HttpStatusCode.Conflict
+                    when errorCode == "TRIP_CARGO_TRANSFER_CONFLICT"
+                    => new TripCargoTransferOutcome(
+                    TripCargoTransferOutcomeKind.Conflict,
+                    "The Trip cargo transfer lost a concurrent mutation."),
+                HttpStatusCode.Conflict => new TripCargoTransferOutcome(
+                    TripCargoTransferOutcomeKind.TransportError,
+                    string.IsNullOrWhiteSpace(errorCode)
+                        ? "Trip cargo transfer returned an unknown conflict."
+                        : $"Trip cargo transfer returned unresolved error '{errorCode}'."),
+                HttpStatusCode.UnprocessableEntity
+                    when errorCode == "TRIP_CARGO_CAPACITY_EXCEEDED"
+                    => new TripCargoTransferOutcome(
+                        TripCargoTransferOutcomeKind.CapacityExceeded,
+                        "The target Trip does not have enough cargo capacity."),
+                _ => new TripCargoTransferOutcome(
+                    TripCargoTransferOutcomeKind.TransportError,
+                    $"Trip cargo transfer endpoint returned status {(int)response.StatusCode}."),
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "TripServiceClient.TransferCargoAsync failed for parcel {ParcelId}.",
+                parcelId);
+            return new TripCargoTransferOutcome(
+                TripCargoTransferOutcomeKind.TransportError,
+                $"Trip service transport failure: {ex.Message}");
+        }
+    }
+
     private async Task<TripCargoOutcome> SendCargoMutationAsync(
         string action,
         Guid tripId,
@@ -518,6 +641,23 @@ public sealed class TripServiceClient : ITripServiceClient, IIdempotentTripServi
             _logger.LogError(ex, "TripServiceClient cargo {Action} failed for parcel {ParcelId}.", action, parcelId);
             return new TripCargoOutcome(TripCargoOutcomeKind.TransportError,
                 $"Trip service transport failure: {ex.Message}");
+        }
+    }
+
+    private static async Task<string?> ReadErrorCodeAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var envelope = await response.Content
+                .ReadFromJsonAsync<ApiResponse>(JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+            return envelope?.Error?.Code;
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 }

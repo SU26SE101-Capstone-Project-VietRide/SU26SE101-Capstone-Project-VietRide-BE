@@ -1,0 +1,58 @@
+name: day32-e2e
+
+# Isolated Day 32 cargo-recovery acceptance overlay. The harness owns this
+# project's containers and volumes and removes them after every run.
+services:
+  postgres:
+    container_name: day32-e2e-postgres
+    ports:
+      - '55432:5432'
+
+  redis:
+    container_name: day32-e2e-redis
+    ports:
+      - '56372:6379'
+
+  rabbitmq:
+    container_name: day32-e2e-rabbitmq
+    ports:
+      - '55632:5672'
+      - '55633:15672'
+
+  identity:
+    container_name: day32-e2e-identity
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      EMAIL_PROVIDER: LOG
+    ports:
+      - '57001:5001'
+
+  trip:
+    container_name: day32-e2e-trip
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Identity__BaseUrl: http://identity:5001
+      Identity__UseDevStub: 'false'
+    ports:
+      - '57002:5002'
+
+  parcel:
+    container_name: day32-e2e-parcel
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      REDIS_URL: redis:6379
+      Trip__BaseUrl: http://trip:5002
+      Trip__UseDevStub: 'false'
+    ports:
+      - '57005:5005'
+
+  gateway:
+    container_name: day32-e2e-gateway
+    environment:
+      NODE_ENV: development
+    ports:
+      - '57680:3000'
+
+networks:
+  default:
+    name: day32-e2e-net

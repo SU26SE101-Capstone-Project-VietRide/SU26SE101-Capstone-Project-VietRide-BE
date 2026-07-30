@@ -107,6 +107,14 @@ if (registerMessaging)
         ParcelLifecycleSweepJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
         "*/5 * * * *");
+    recurringJobs.AddOrUpdate<PendingTransferClaimRecoveryJob>(
+        PendingTransferClaimRecoveryJob.RecurringJobId,
+        job => job.RunAsync(CancellationToken.None),
+        "*/5 * * * *");
+    recurringJobs.AddOrUpdate<PendingCargoRecoveryOperationJob>(
+        PendingCargoRecoveryOperationJob.RecurringJobId,
+        job => job.RunAsync(CancellationToken.None),
+        "*/5 * * * *");
     recurringJobs.AddOrUpdate<PlatformParcelStatsBackfillJob>(
         PlatformParcelStatsBackfillJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),

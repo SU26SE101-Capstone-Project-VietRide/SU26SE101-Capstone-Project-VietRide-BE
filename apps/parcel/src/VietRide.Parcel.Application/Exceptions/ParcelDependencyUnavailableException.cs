@@ -8,8 +8,11 @@ public sealed class ParcelDependencyUnavailableException : Exception, ICodedHttp
 
     public string ErrorCode { get; }
 
-    public ParcelDependencyUnavailableException(string errorCode, string message)
-        : base(message)
+    public ParcelDependencyUnavailableException(
+        string errorCode,
+        string message,
+        Exception? innerException = null)
+        : base(message, innerException)
     {
         ErrorCode = errorCode;
     }

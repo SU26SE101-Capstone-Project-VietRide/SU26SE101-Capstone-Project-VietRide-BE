@@ -4,6 +4,7 @@ import { mapCoreEventToNotification } from './core-event-notification.mapper';
 import {
   BOOKING_CANCELLED_ROUTING_KEY,
   BOOKING_CONFIRMED_ROUTING_KEY,
+  BOOKING_DISRUPTED_ROUTING_KEY,
   BOOKING_REFUNDED_ROUTING_KEY,
   WALLET_CREDITED_ROUTING_KEY,
   WALLET_DEBITED_ROUTING_KEY,
@@ -13,6 +14,8 @@ const USER_ID = '11111111-1111-4111-8111-111111111111';
 const BOOKING_ID = '22222222-2222-4222-8222-222222222222';
 const TRIP_ID = '33333333-3333-4333-8333-333333333333';
 const WALLET_TRANSACTION_ID = '44444444-4444-4444-8444-444444444444';
+const OPERATOR_ID = '55555555-5555-4555-8555-555555555555';
+const EVENT_ID = '66666666-6666-4666-8666-666666666666';
 
 describe('mapCoreEventToNotification', () => {
   it('maps booking confirmed event', () => {
@@ -94,6 +97,39 @@ describe('mapCoreEventToNotification', () => {
       }),
     );
     expect(notification.data).toMatchObject({ bookingId: BOOKING_ID, refundAmount: 0 });
+  });
+
+  it('maps booking disruption to the dedicated passenger notification type', () => {
+    expect(
+      mapCoreEventToNotification(BOOKING_DISRUPTED_ROUTING_KEY, {
+        eventId: EVENT_ID,
+        occurredAt: '2026-07-30T03:00:01Z',
+        bookingId: BOOKING_ID,
+        bookingCode: 'VR-20260730-ABCDEFGH',
+        tripId: TRIP_ID,
+        operatorId: OPERATOR_ID,
+        userId: USER_ID,
+        traveledRatio: 0.4,
+        refundAmount: 300_000,
+        cancellationReason: 'OPERATOR_DISRUPTED_IN_PROGRESS',
+      }),
+    ).toEqual({
+      userId: USER_ID,
+      type: NotificationType.BOOKING_DISRUPTED,
+      title: 'Chuyến đi bị gián đoạn',
+      body: 'Vé #VR-20260730-ABCDEFGH bị gián đoạn. Số tiền hoàn dự kiến: 300000 VND.',
+      data: {
+        eventId: EVENT_ID,
+        occurredAt: '2026-07-30T03:00:01Z',
+        bookingId: BOOKING_ID,
+        bookingCode: 'VR-20260730-ABCDEFGH',
+        tripId: TRIP_ID,
+        operatorId: OPERATOR_ID,
+        traveledRatio: 0.4,
+        refundAmount: 300_000,
+        cancellationReason: 'OPERATOR_DISRUPTED_IN_PROGRESS',
+      },
+    });
   });
 
   it('maps booking refunded event', () => {

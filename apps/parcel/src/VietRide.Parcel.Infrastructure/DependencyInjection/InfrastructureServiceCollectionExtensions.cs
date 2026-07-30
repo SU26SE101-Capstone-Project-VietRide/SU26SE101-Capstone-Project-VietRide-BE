@@ -52,6 +52,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ParcelSettlementTimeoutJob>();
         services.AddScoped<ParcelPendingAutoRejectJob>();
         services.AddScoped<ParcelLifecycleSweepJob>();
+        services.AddScoped<PendingTransferClaimRecoveryJob>();
+        services.AddScoped<PendingCargoRecoveryOperationJob>();
         services.AddScoped<ParcelDeliveryPendingConfirmReminderJob>();
         services.AddScoped<PlatformParcelStatsBackfillJob>();
         services.AddScoped<ParcelTripDisplaySnapshotBackfillJob>();
@@ -84,11 +86,13 @@ public static class InfrastructureServiceCollectionExtensions
 
         services.AddScoped<IParcelRepository, ParcelRepository>();
         services.AddScoped<IOperatorParcelStatsRepository, OperatorParcelStatsRepository>();
+        services.AddScoped<IParcelDeliveryTokenRepository, ParcelDeliveryTokenRepository>();
         services.AddScoped<SentParcelHistoryReader>();
         services.AddScoped<IParcelRouteFareRepository, ParcelRouteFareRepository>();
         services.AddScoped<IParcelStatsRepository, ParcelStatsRepository>();
         services.AddScoped<IParcelPricingPolicyRepository, ParcelPricingPolicyRepository>();
         services.AddScoped<IParcelReportCache, RedisParcelReportCache>();
+        services.AddSingleton<IDeliveryConfirmationRateLimiter, RedisDeliveryConfirmationRateLimiter>();
 
         if (registerConsumers)
         {
@@ -143,6 +147,7 @@ public static class InfrastructureServiceCollectionExtensions
         RegisterPaymentClient(services, configuration, hostEnvironment);
         RegisterBookingClient(services, configuration, hostEnvironment);
         RegisterIdentityClient(services, configuration, hostEnvironment);
+        RegisterNotificationEmailClient(services, configuration);
 
         return services;
     }
@@ -245,6 +250,49 @@ public static class InfrastructureServiceCollectionExtensions
                 .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
                 .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
         }
+    }
+
+    private static void RegisterNotificationEmailClient(
+        IServiceCollection services,
+        IConfiguration configuration)
+    {
+        var baseUrl = Environment.GetEnvironmentVariable("NOTIFICATION_SERVICE_BASE_URL")
+            ?? configuration["Notification:BaseUrl"]
+            ?? "http://notification:3002";
+        var publicAppUrl = configuration["PUBLIC_APP_URL"]
+            ?? configuration[$"{ParcelDeliveryEmailOptions.SectionName}:PublicAppUrl"]
+            ?? Environment.GetEnvironmentVariable("PUBLIC_APP_URL")
+            ?? "https://app.vietride.app";
+
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out _))
+        {
+            throw new InvalidOperationException(
+                "Notification Service base URL must be an absolute URI.");
+        }
+
+        if (!Uri.TryCreate(publicAppUrl, UriKind.Absolute, out _))
+        {
+            throw new InvalidOperationException(
+                "PUBLIC_APP_URL must be an absolute URI.");
+        }
+
+        services.Configure<ParcelDeliveryEmailOptions>(options =>
+        {
+            options.PublicAppUrl = publicAppUrl;
+        });
+        services
+            .AddHttpClient<IParcelDeliveryEmailClient, NotificationParcelDeliveryEmailClient>(client =>
+            {
+                client.BaseAddress = new Uri(baseUrl);
+                client.Timeout = TimeSpan.FromSeconds(30);
+                client.DefaultRequestHeaders.Accept.Clear();
+                client.DefaultRequestHeaders.Accept.Add(
+                    new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+            })
+            .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
+            .AddHttpMessageHandler<InternalJwtDelegatingHandler>()
+            .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
+            .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
     }
 
     private static string ResolveBaseUrl(IConfiguration configuration, string configKey, string envKey)

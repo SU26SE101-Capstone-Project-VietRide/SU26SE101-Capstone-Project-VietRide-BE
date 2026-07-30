@@ -12,6 +12,7 @@ import {
   EMAIL_SEND_QUEUE_NAME,
   LAST_EMAIL_SEND_BACKOFF_DELAY_MS,
 } from './email-send.constants';
+import { decryptEmailTemplateData } from './email-job-payload.crypto';
 import { BULLMQ_QUEUE_PREFIX } from './fcm-push.constants';
 import type { EmailProvider, EmailSendJobData } from './email-send.types';
 import { EmailTemplateRenderer } from './email-template.renderer';
@@ -93,7 +94,7 @@ export class EmailSendWorker implements OnModuleInit, OnModuleDestroy {
     try {
       const renderedEmail = this.emailTemplateRenderer.render(
         job.data.templateKey,
-        job.data.templateData,
+        decryptEmailTemplateData(job.data, this.env.INTERNAL_JWT_SECRET),
       );
       const result = await this.emailProvider.send({
         deliveryId: delivery.id,

@@ -3,13 +3,19 @@ import { z } from 'zod';
 import {
   BookingVoucherConsentRequestedEventSchema,
   ParcelAutoRejectedEventSchema,
+  ParcelDeliveredPendingConfirmEventSchema,
+  ParcelDeliveryConfirmationRealertedEventSchema,
   ParcelFinalPaymentRequestedEventSchema,
   ParcelLoadedEventSchema,
+  ParcelPendingOperatorActionRealertedEventSchema,
   ParcelReviewApprovedEventSchema,
   ParcelSettlementRecoveredEventSchema,
   type ParcelAutoRejectedEvent,
+  type ParcelDeliveredPendingConfirmEvent,
+  type ParcelDeliveryConfirmationRealertedEvent,
   type ParcelFinalPaymentRequestedEvent,
   type ParcelLoadedEvent,
+  type ParcelPendingOperatorActionRealertedEvent,
   type ParcelReviewApprovedEvent,
   type ParcelSettlementRecoveredEvent,
 } from '@vietride/contracts';
@@ -25,6 +31,7 @@ import {
   PARCEL_CANCELLED_ROUTING_KEY,
   PARCEL_CREATED_ROUTING_KEY,
   PARCEL_DELIVERED_PENDING_CONFIRM_ROUTING_KEY,
+  PARCEL_DELIVERY_CONFIRMATION_REALERTED_ROUTING_KEY,
   PARCEL_DELIVERY_CONFIRMED_ROUTING_KEY,
   PARCEL_DELIVERY_REJECTED_ROUTING_KEY,
   PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY,
@@ -36,6 +43,7 @@ import {
   PARCEL_REVIEW_APPROVED_ROUTING_KEY,
   PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY,
   PARCEL_PENDING_OPERATOR_ACTION_ROUTING_KEY,
+  PARCEL_PENDING_OPERATOR_ACTION_REALERTED_ROUTING_KEY,
   PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY,
   PARCEL_TRANSFER_ESCALATED_ROUTING_KEY,
   PARCEL_TRANSFER_INITIATED_ROUTING_KEY,
@@ -174,6 +182,7 @@ export type ParcelSubscriptionOperatorRoutingKey =
   | typeof PARCEL_LOADED_ROUTING_KEY
   | typeof PARCEL_UNLOADED_ROUTING_KEY
   | typeof PARCEL_DELIVERED_PENDING_CONFIRM_ROUTING_KEY
+  | typeof PARCEL_DELIVERY_CONFIRMATION_REALERTED_ROUTING_KEY
   | typeof PARCEL_DELIVERY_CONFIRMED_ROUTING_KEY
   | typeof PARCEL_DELIVERY_REJECTED_ROUTING_KEY
   | typeof PARCEL_CANCELLED_ROUTING_KEY
@@ -189,6 +198,7 @@ export type ParcelSubscriptionOperatorRoutingKey =
   | typeof PARCEL_TRANSFER_ESCALATED_ROUTING_KEY
   | typeof PARCEL_RETURN_INITIATED_ROUTING_KEY
   | typeof PARCEL_PENDING_OPERATOR_ACTION_ROUTING_KEY
+  | typeof PARCEL_PENDING_OPERATOR_ACTION_REALERTED_ROUTING_KEY
   | typeof TRIP_STOP_ARRIVED_ROUTING_KEY
   | typeof TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY
   | typeof SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY
@@ -238,7 +248,14 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
     case PARCEL_UNLOADED_ROUTING_KEY:
       return mapParcelUnloadedEvent(ParcelUnloadedPayloadSchema.parse(payload));
     case PARCEL_DELIVERED_PENDING_CONFIRM_ROUTING_KEY:
-      return mapParcelPendingConfirmEvent(BaseParcelPayloadSchema.parse(payload));
+      return mapParcelPendingConfirmEvent(ParcelDeliveredPendingConfirmEventSchema.parse(payload));
+    case PARCEL_DELIVERY_CONFIRMATION_REALERTED_ROUTING_KEY:
+      return mapParcelOperatorEvent(
+        ParcelDeliveryConfirmationRealertedEventSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
+        mapParcelDeliveryConfirmationRealerted,
+      );
     case PARCEL_DELIVERY_CONFIRMED_ROUTING_KEY:
       return mapParcelSnapshotSenderEvent(
         BaseParcelPayloadSchema.parse(payload),
@@ -328,6 +345,13 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
         resolveOperatorRecipientUserIds,
         resolveParcelSnapshot,
         mapParcelPendingOperatorAction,
+      );
+    case PARCEL_PENDING_OPERATOR_ACTION_REALERTED_ROUTING_KEY:
+      return mapParcelOperatorEvent(
+        ParcelPendingOperatorActionRealertedEventSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
+        mapParcelPendingOperatorActionRealerted,
       );
     case TRIP_STOP_ARRIVED_ROUTING_KEY:
       return fanOut(
@@ -498,7 +522,10 @@ function mapParcelUnloaded(userId: string, payload: ParcelPayload): CreateNotifi
   );
 }
 
-function mapParcelPendingConfirm(userId: string, payload: ParcelPayload): CreateNotificationDto {
+function mapParcelPendingConfirm(
+  userId: string,
+  payload: ParcelDeliveredPendingConfirmEvent,
+): CreateNotificationDto {
   return buildParcelNotification(
     userId,
     payload,
@@ -508,13 +535,24 @@ function mapParcelPendingConfirm(userId: string, payload: ParcelPayload): Create
   );
 }
 
-function mapParcelPendingConfirmEvent(payload: ParcelPayload): CreateNotificationDto[] {
-  const recipients = [
-    payload.userId,
-    payload.recipientUserId,
-    ...(payload.recipientUserIds ?? []),
-  ].filter(isString);
+function mapParcelPendingConfirmEvent(
+  payload: ParcelDeliveredPendingConfirmEvent,
+): CreateNotificationDto[] {
+  const recipients = [payload.userId, ...(payload.recipientUserIds ?? [])].filter(isString);
   return [...new Set(recipients)].map((userId) => mapParcelPendingConfirm(userId, payload));
+}
+
+function mapParcelDeliveryConfirmationRealerted(
+  userId: string,
+  payload: ParcelDeliveryConfirmationRealertedEvent,
+): CreateNotificationDto {
+  return {
+    userId,
+    type: NotificationType.PARCEL_DELIVERED_PENDING_CONFIRM,
+    title: 'Xác nhận giao hàng đã quá hạn',
+    body: `${formatParcelLabel(payload)} đã quá hạn xác nhận từ ${payload.expiredAt} và cần nhà xe xử lý.`,
+    data: buildNotificationData(payload),
+  };
 }
 
 function mapParcelDeliveryConfirmed(userId: string, payload: ParcelPayload): CreateNotificationDto {
@@ -716,6 +754,19 @@ function mapParcelPendingOperatorAction(
     'Cần vận hành xử lý đơn gửi hàng',
     'cần nhà xe xử lý thủ công.',
   );
+}
+
+function mapParcelPendingOperatorActionRealerted(
+  userId: string,
+  payload: ParcelPendingOperatorActionRealertedEvent,
+): CreateNotificationDto {
+  return {
+    userId,
+    type: NotificationType.PARCEL_IN_TRANSIT,
+    title: 'Nhắc xử lý đơn gửi hàng',
+    body: `${formatParcelLabel(payload)} vẫn đang chờ nhà xe xử lý thủ công.`,
+    data: buildNotificationData(payload),
+  };
 }
 
 function mapTripStopArrived(userId: string, payload: OperatorPayload): CreateNotificationDto {
@@ -985,7 +1036,7 @@ function buildParcelNotification(
   };
 }
 
-function formatParcelLabel(payload: ParcelPayload): string {
+function formatParcelLabel(payload: { parcelId: string; parcelCode?: string | undefined }): string {
   return payload.parcelCode ? `Đơn ${payload.parcelCode}` : `Đơn gửi hàng ${payload.parcelId}`;
 }
 

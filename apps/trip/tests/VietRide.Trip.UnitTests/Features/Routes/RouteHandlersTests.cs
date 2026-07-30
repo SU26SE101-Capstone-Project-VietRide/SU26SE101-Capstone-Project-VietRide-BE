@@ -49,6 +49,28 @@ public sealed class RouteHandlersTests
     }
 
     [Fact]
+    public async Task CreateRoute_CreatesRoute_WhenShuttleModuleIsDisabled()
+    {
+        var origin = CreateStation("Origin", "origin");
+        var destination = CreateStation("Destination", "destination");
+        var routeRepository = new FakeRouteRepository([]);
+        var handler = CreateHandler(
+            routeRepository,
+            new FakeStationRepository([origin, destination]),
+            new FakeOperatorStationRepository([
+                OperatorStation.Create(OperatorId, origin.Id),
+                OperatorStation.Create(OperatorId, destination.Id)]),
+            shuttleModuleEnabled: false);
+
+        var result = await handler.Handle(
+            CreateCommand(origin.Id, destination.Id),
+            CancellationToken.None);
+
+        result.OperatorId.Should().Be(OperatorId);
+        routeRepository.Entities.Should().ContainSingle(route => route.Id == result.Id);
+    }
+
+    [Fact]
     public async Task CreateRoute_ThrowsStationNotFound_BeforeOriginDestinationEqualityCheck()
     {
         var stationId = Guid.NewGuid();
@@ -385,9 +407,12 @@ public sealed class RouteHandlersTests
         FakeRouteRepository routeRepository,
         FakeStationRepository stationRepository,
         FakeOperatorStationRepository operatorStationRepository,
-        OperatorWriteEligibilityValidation? eligibility = null)
+        OperatorWriteEligibilityValidation? eligibility = null,
+        bool shuttleModuleEnabled = true)
         => new(
-            new FakeIdentityInternalClient(eligibility ?? OperatorWriteEligibilityValidation.Allowed()),
+            new FakeIdentityInternalClient(
+                eligibility ?? OperatorWriteEligibilityValidation.Allowed(),
+                shuttleModuleEnabled),
             operatorStationRepository,
             routeRepository,
             stationRepository,
@@ -545,14 +570,30 @@ public sealed class RouteHandlersTests
     private sealed class FakeIdentityInternalClient : IIdentityInternalClient
     {
         private readonly OperatorWriteEligibilityValidation eligibility;
+        private readonly bool shuttleModuleEnabled;
 
-        public FakeIdentityInternalClient(OperatorWriteEligibilityValidation eligibility)
+        public FakeIdentityInternalClient(
+            OperatorWriteEligibilityValidation eligibility,
+            bool shuttleModuleEnabled = true)
         {
             this.eligibility = eligibility;
+            this.shuttleModuleEnabled = shuttleModuleEnabled;
         }
 
         public Task<OperatorWriteEligibilityValidation> ValidateOperatorCanWriteAsync(Guid operatorId, CancellationToken cancellationToken = default)
             => Task.FromResult(eligibility);
+
+        public Task<OperatorWriteEligibilityValidation> ValidateOperatorSubscriptionCanWriteAsync(
+            Guid operatorId,
+            bool requireShuttleModule,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(requireShuttleModule && !shuttleModuleEnabled
+                ? new OperatorWriteEligibilityValidation(
+                    false,
+                    403,
+                    "SUBSCRIPTION_MODULE_DISABLED",
+                    "Shuttle module is disabled.")
+                : OperatorWriteEligibilityValidation.Allowed());
 
         public Task<IdentityUserLookupResult> GetUserAsync(Guid userId, CancellationToken cancellationToken = default)
             => Task.FromResult(IdentityUserLookupResult.ValidationFailure("Identity user lookup is not configured for this test."));

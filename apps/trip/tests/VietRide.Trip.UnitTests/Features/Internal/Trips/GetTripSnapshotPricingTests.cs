@@ -148,6 +148,19 @@ public sealed class GetTripSnapshotPricingTests
         fixture.Templates.ActiveLookupCount.Should().Be(0);
     }
 
+    [Fact]
+    public async Task Snapshot_ExposesNullableRouteTotalDistanceForPerBookingDisruptionRefunds()
+    {
+        var fixture = SnapshotFixture.Create();
+
+        var result = await fixture.Handler.Handle(
+            new GetTripSnapshotQuery(fixture.Trip.Id),
+            CancellationToken.None);
+
+        result.TotalDistanceKm.Should().Be(100d);
+        result.Stops.Should().ContainSingle().Which.DistanceFromOriginKm.Should().Be(50d);
+    }
+
     private sealed class SnapshotFixture
     {
         private SnapshotFixture(

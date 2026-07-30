@@ -58,10 +58,12 @@ public sealed class Day24NoShowOperationalSnapshotIntegrationTests
             "assistantUserId",
             "destinationArrivedAt",
             "actualDepartureTime",
+            "totalDistanceKm",
         ]);
         root.GetProperty("tripId").GetGuid().Should().Be(tripId);
         root.GetProperty("actualDepartureTime").GetDateTimeOffset().Should().Be(ActualDepartureTime);
         root.GetProperty("destinationArrivedAt").GetDateTimeOffset().Should().Be(ActualDepartureTime.AddHours(3));
+        root.GetProperty("totalDistanceKm").ValueKind.Should().Be(JsonValueKind.Null);
 
         var stop = root.GetProperty("stops").EnumerateArray().Should().ContainSingle().Which;
         stop.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo(

@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using VietRide.Shared.Messaging.Abstractions;
 
 namespace VietRide.Trip.Application.Features.Trips.Operations;
@@ -21,22 +22,26 @@ public sealed class TripDisruptedIntegrationEvent(
     Guid tripId,
     Guid operatorId,
     DateTimeOffset terminalAt,
-    bool hasSubstitution) : IntegrationEventBase
+    bool hasSubstitution,
+    string reason) : IntegrationEventBase
 {
+    [JsonIgnore]
     public override string EventType => "trip.trip.disrupted";
 
     public Guid TripId { get; } = tripId;
     public Guid OperatorId { get; } = operatorId;
     public DateTimeOffset TerminalAt { get; } = terminalAt;
     public bool HasSubstitution { get; } = hasSubstitution;
+    public string Reason { get; } = reason;
 
     public TripDisruptedIntegrationEvent(
         Guid eventId,
         Guid tripId,
         Guid operatorId,
         DateTimeOffset terminalAt,
-        bool hasSubstitution)
-        : this(tripId, operatorId, terminalAt, hasSubstitution)
+        bool hasSubstitution,
+        string reason)
+        : this(tripId, operatorId, terminalAt, hasSubstitution, reason)
     {
         EventId = eventId;
         OccurredAt = terminalAt.UtcDateTime;

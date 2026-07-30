@@ -12,7 +12,6 @@ public sealed class ParcelLifecycleSweepCommandHandler : IRequestHandler<ParcelL
 {
     private static readonly TimeSpan TransferConfirmWindow = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan DeliveryRejectedUndoWindow = TimeSpan.FromMinutes(15);
-    private static readonly TimeSpan DeliveryPendingConfirmWindow = TimeSpan.FromDays(7);
     private static readonly TimeSpan PendingPaymentWindow = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan PendingOperatorActionRealertWindow = TimeSpan.FromHours(2);
     private const int MaxBatch = 200;
@@ -51,10 +50,6 @@ public sealed class ParcelLifecycleSweepCommandHandler : IRequestHandler<ParcelL
             ParcelOutboxEvents.ReturnInitiated,
             cancellationToken);
         processed += await SweepAsync(
-            () => _parcelRepository.TryBulkSetPendingOperatorActionForExpiredConfirmationsAsync(now.Subtract(DeliveryPendingConfirmWindow), now, MaxBatch, cancellationToken),
-            ParcelOutboxEvents.PendingOperatorAction,
-            cancellationToken);
-        processed += await SweepAsync(
             () => _parcelRepository.TryBulkExpireOrphanPendingPaymentsAsync(now.Subtract(PendingPaymentWindow), now, MaxBatch, cancellationToken),
             ParcelOutboxEvents.Rejected,
             cancellationToken);
@@ -65,8 +60,9 @@ public sealed class ParcelLifecycleSweepCommandHandler : IRequestHandler<ParcelL
                 now,
                 MaxBatch,
                 cancellationToken),
-            ParcelOutboxEvents.PendingOperatorActionRealert,
-            cancellationToken);
+            ParcelOutboxEvents.PendingOperatorActionRealerted,
+            cancellationToken,
+            useCanonicalRealertPayload: true);
 
         if (processed > 0)
         {
@@ -79,7 +75,8 @@ public sealed class ParcelLifecycleSweepCommandHandler : IRequestHandler<ParcelL
     private async Task<int> SweepAsync(
         Func<Task<IReadOnlyList<ParcelEventSnapshot>>> transition,
         string eventType,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool useCanonicalRealertPayload = false)
     {
         await _unitOfWork.BeginTransactionAsync(cancellationToken);
         try
@@ -87,20 +84,40 @@ public sealed class ParcelLifecycleSweepCommandHandler : IRequestHandler<ParcelL
             var parcels = await transition();
             foreach (var parcel in parcels)
             {
-                await ParcelOutboxEvents.EnqueueAsync(
-                    _outbox,
-                    eventType,
-                    new
-                    {
-                        parcelId = parcel.ParcelId,
-                        parcelCode = parcel.ParcelCode,
-                        operatorId = parcel.OperatorId,
-                        userId = parcel.SenderUserId,
-                        tripId = parcel.TripId,
-                        deliveryToken = parcel.DeliveryToken,
-                        deliveryTokenExpiresAt = parcel.DeliveryTokenExpiresAt,
-                    },
-                    cancellationToken);
+                if (useCanonicalRealertPayload)
+                {
+                    var eventId = Guid.NewGuid();
+                    await ParcelOutboxEvents.EnqueueAsync(
+                        _outbox,
+                        eventId,
+                        eventType,
+                        new
+                        {
+                            eventId,
+                            occurredAt = _clock.UtcNow,
+                            parcelId = parcel.ParcelId,
+                            parcelCode = parcel.ParcelCode,
+                            operatorId = parcel.OperatorId,
+                            userId = parcel.SenderUserId,
+                            tripId = parcel.TripId,
+                        },
+                        cancellationToken);
+                }
+                else
+                {
+                    await ParcelOutboxEvents.EnqueueAsync(
+                        _outbox,
+                        eventType,
+                        new
+                        {
+                            parcelId = parcel.ParcelId,
+                            parcelCode = parcel.ParcelCode,
+                            operatorId = parcel.OperatorId,
+                            userId = parcel.SenderUserId,
+                            tripId = parcel.TripId,
+                        },
+                        cancellationToken);
+                }
             }
 
             await _unitOfWork.SaveChangesAsync(cancellationToken);

@@ -239,6 +239,32 @@ public sealed class InternalTripsController : ControllerBase
             cancellationToken));
     }
 
+    [HttpPost("{sourceTripId:guid}/cargo/transfer")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<CargoTransferDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ApiResponse<CargoTransferDto>>> TransferCargoAsync(
+        Guid sourceTripId,
+        [FromBody] CargoTransferRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await mediator.Send(
+            new TransferCargoCommand(
+                sourceTripId,
+                request.ParcelId,
+                request.TargetTripId,
+                request.TargetState,
+                request.AllowCapacityOverflow),
+            cancellationToken);
+
+        return Ok(ApiResponse<CargoTransferDto>.Ok(
+            result,
+            ApiMeta.Create(HttpContext.TraceIdentifier)));
+    }
+
     [HttpGet("{tripId:guid}/cargo/capacity")]
     [ProducesResponseType(typeof(ApiResponse<CargoCapacityDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]

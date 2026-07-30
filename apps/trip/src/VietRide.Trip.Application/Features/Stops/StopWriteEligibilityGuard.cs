@@ -29,6 +29,14 @@ internal static class StopWriteEligibilityGuard
                 eligibility.Message ?? "Operator is not allowed to write Trip stops.");
         }
 
+        if (eligibility.FailureStatusCode == 503)
+        {
+            throw new TripSubscriptionWriteBlockedException(
+                eligibility.FailureStatusCode.Value,
+                eligibility.ErrorCode ?? "UPSTREAM_UNAVAILABLE",
+                eligibility.Message ?? "Identity is unavailable.");
+        }
+
         if (eligibility.FailureStatusCode == 409)
             throw new CodedConflictException(
                 eligibility.ErrorCode ?? "CONFLICT",
@@ -52,10 +60,12 @@ internal static class StopWriteEligibilityGuard
         if (eligibility.IsAllowed)
             return;
 
-        if (eligibility.FailureStatusCode is 402 or 403)
+        if (eligibility.FailureStatusCode is 402 or 403 or 503)
             throw new TripSubscriptionWriteBlockedException(
                 eligibility.FailureStatusCode.Value,
-                eligibility.ErrorCode ?? "FORBIDDEN",
+                eligibility.ErrorCode ?? (eligibility.FailureStatusCode == 503
+                    ? "UPSTREAM_UNAVAILABLE"
+                    : "FORBIDDEN"),
                 eligibility.Message ?? "Operator subscription blocks this write.");
         if (eligibility.FailureStatusCode == 409)
             throw new CodedConflictException(

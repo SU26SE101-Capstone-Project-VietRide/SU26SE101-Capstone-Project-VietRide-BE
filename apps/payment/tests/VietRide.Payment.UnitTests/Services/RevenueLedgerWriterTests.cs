@@ -54,8 +54,9 @@ public sealed class RevenueLedgerWriterTests
     }
 
     [Fact]
-    public async Task RecordRefundAsync_FullRefund_ReversesPaidRevenueAndVietRideVoucherCredit()
+    public async Task RecordRefundAsync_PartialBookingRefund_ReversesFullVietRideVoucherCredit()
     {
+        var sourceEventId = Guid.NewGuid();
         var bookingId = Guid.NewGuid();
         var repository = new FakeLedgerRepository();
         var writer = new RevenueLedgerWriter(repository);
@@ -72,18 +73,89 @@ public sealed class RevenueLedgerWriterTests
         ]);
 
         await writer.RecordRefundAsync(
+            sourceEventId,
+            context,
+            bookingId,
+            75_000,
+            CancellationToken.None);
+
+        repository.Entries.Should().HaveCount(2);
+        repository.Entries.Should().ContainSingle(entry =>
+            entry.EntryType == OperatorLedgerEntryType.BOOKING_REFUND
+            && entry.Amount == -75_000);
+        repository.Entries.Should().ContainSingle(entry =>
+            entry.EntryType == OperatorLedgerEntryType.ADJUSTMENT
+            && entry.Amount == -30_000
+            && entry.Note == "reverse-vietride-funded-voucher");
+        repository.Entries.Should().OnlyContain(entry =>
+            entry.SourceEventId == sourceEventId
+            && entry.ReferenceId == bookingId);
+    }
+
+    [Fact]
+    public async Task RecordRefundAsync_OperatorFundedVoucher_DoesNotWriteMonetaryAdjustment()
+    {
+        var bookingId = Guid.NewGuid();
+        var repository = new FakeLedgerRepository();
+        var writer = new RevenueLedgerWriter(repository);
+        var context = new PaymentContextV1(1,
+        [
+            new PaymentAllocationV1(
+                bookingId,
+                "BOOKING",
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                200_000,
+                0,
+                30_000),
+        ]);
+
+        await writer.RecordRefundAsync(
             Guid.NewGuid(),
             context,
             bookingId,
-            150_000,
+            75_000,
             CancellationToken.None);
 
-        repository.Entries.Should().ContainSingle(entry =>
-            entry.EntryType == OperatorLedgerEntryType.BOOKING_REFUND
-            && entry.Amount == -150_000);
-        repository.Entries.Should().ContainSingle(entry =>
-            entry.EntryType == OperatorLedgerEntryType.ADJUSTMENT
-            && entry.Amount == -30_000);
+        repository.Entries.Should().ContainSingle()
+            .Which.Should().Match<OperatorLedgerEntry>(entry =>
+                entry.EntryType == OperatorLedgerEntryType.BOOKING_REFUND
+                && entry.Amount == -75_000);
+        repository.Entries.Should().NotContain(entry =>
+            entry.EntryType == OperatorLedgerEntryType.ADJUSTMENT);
+    }
+
+    [Fact]
+    public async Task RecordRefundAsync_NoVoucher_DoesNotWriteAdjustment()
+    {
+        var bookingId = Guid.NewGuid();
+        var repository = new FakeLedgerRepository();
+        var writer = new RevenueLedgerWriter(repository);
+        var context = new PaymentContextV1(1,
+        [
+            new PaymentAllocationV1(
+                bookingId,
+                "BOOKING",
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                200_000,
+                0,
+                0),
+        ]);
+
+        await writer.RecordRefundAsync(
+            Guid.NewGuid(),
+            context,
+            bookingId,
+            75_000,
+            CancellationToken.None);
+
+        repository.Entries.Should().ContainSingle()
+            .Which.Should().Match<OperatorLedgerEntry>(entry =>
+                entry.EntryType == OperatorLedgerEntryType.BOOKING_REFUND
+                && entry.Amount == -75_000);
+        repository.Entries.Should().NotContain(entry =>
+            entry.EntryType == OperatorLedgerEntryType.ADJUSTMENT);
     }
 
     private sealed class FakeLedgerRepository : IOperatorLedgerEntryRepository

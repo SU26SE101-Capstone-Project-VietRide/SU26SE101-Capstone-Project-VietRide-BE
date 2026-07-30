@@ -260,6 +260,11 @@ public static class InfrastructureServiceCollectionExtensions
                 options.QueueName = "booking.trip-completed";
                 options.BindingKeys = [TripCompletedIntegrationEvent.EventType];
             });
+            services.AddVietRideEventConsumer<TripDisruptedIntegrationEvent, TripDisruptedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "booking.trip-disrupted";
+                options.BindingKeys = [TripDisruptedIntegrationEvent.EventTypeValue];
+            });
         }
 
         // Payment inter-service client (real debit lands Day 15/16).

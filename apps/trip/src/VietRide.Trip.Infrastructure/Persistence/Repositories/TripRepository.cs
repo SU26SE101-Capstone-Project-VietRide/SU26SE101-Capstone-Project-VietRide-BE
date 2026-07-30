@@ -817,6 +817,171 @@ internal sealed class TripRepository : ITripRepository
         }, now, cancellationToken);
     }
 
+    public async Task<TripCargoTransferRepositoryResult> TransferCargoAsync(
+        Guid sourceTripId,
+        Guid parcelId,
+        Guid targetTripId,
+        string targetState,
+        bool allowCapacityOverflow,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        EnsureCallerTransaction("cargo transfer");
+        if (sourceTripId == targetTripId)
+        {
+            return TripCargoTransferRepositoryResult.Failed(TripCargoTransferStatus.CONFLICT);
+        }
+
+        await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+            SELECT id
+            FROM vietride_trip.trips
+            WHERE id = {sourceTripId} OR id = {targetTripId}
+            ORDER BY id
+            FOR UPDATE
+            """,
+            cancellationToken);
+
+        var trips = await _dbContext.Trips
+            .Where(trip => trip.Id == sourceTripId || trip.Id == targetTripId)
+            .ToArrayAsync(cancellationToken);
+        if (trips.Length != 2)
+        {
+            return TripCargoTransferRepositoryResult.Failed(TripCargoTransferStatus.TRIP_NOT_FOUND);
+        }
+
+        var sourceTrip = trips.Single(trip => trip.Id == sourceTripId);
+        var targetTrip = trips.Single(trip => trip.Id == targetTripId);
+        if (sourceTrip.OperatorId != targetTrip.OperatorId)
+        {
+            return TripCargoTransferRepositoryResult.Failed(TripCargoTransferStatus.CONFLICT);
+        }
+
+        if (targetState == TripCargoParcel.LoadedState
+            && allowCapacityOverflow
+            && targetTrip.Source != TripSource.VEHICLE_SUBSTITUTION)
+        {
+            return TripCargoTransferRepositoryResult.Failed(
+                TripCargoTransferStatus.OVERFLOW_NOT_ALLOWED);
+        }
+
+        var sourceCargo = await _dbContext.TripCargoParcels
+            .SingleOrDefaultAsync(
+                cargo => cargo.TripId == sourceTripId && cargo.ParcelId == parcelId,
+                cancellationToken);
+        if (sourceCargo is null)
+        {
+            return TripCargoTransferRepositoryResult.Failed(TripCargoTransferStatus.SOURCE_CARGO_NOT_FOUND);
+        }
+
+        if (sourceCargo.State == TripCargoParcel.ReleasedState)
+        {
+            return TripCargoTransferRepositoryResult.Failed(TripCargoTransferStatus.CONFLICT);
+        }
+
+        var targetCargo = await _dbContext.TripCargoParcels
+            .SingleOrDefaultAsync(
+                cargo => cargo.TripId == targetTripId && cargo.ParcelId == parcelId,
+                cancellationToken);
+        if (targetCargo is not null && targetCargo.State != TripCargoParcel.ReleasedState)
+        {
+            return TripCargoTransferRepositoryResult.Failed(TripCargoTransferStatus.CONFLICT);
+        }
+
+        var targetReservedWeight = targetTrip.ReservedParcelWeightKg;
+        var targetReservedVolume = targetTrip.ReservedParcelVolumeM3;
+        var targetLoadedWeight = targetTrip.TotalLoadedWeightKg;
+        var targetLoadedVolume = targetTrip.TotalLoadedVolumeM3;
+        if (targetState == TripCargoParcel.ReservedState)
+        {
+            targetReservedWeight += sourceCargo.WeightKg;
+            targetReservedVolume += sourceCargo.VolumeM3;
+        }
+        else
+        {
+            targetLoadedWeight += sourceCargo.WeightKg;
+            targetLoadedVolume += sourceCargo.VolumeM3;
+        }
+
+        try
+        {
+            EnsureCapacity(
+                targetTrip,
+                targetReservedWeight,
+                targetReservedVolume,
+                targetLoadedWeight,
+                targetLoadedVolume,
+                targetState == TripCargoParcel.LoadedState && allowCapacityOverflow);
+        }
+        catch (InvalidOperationException)
+        {
+            return TripCargoTransferRepositoryResult.Failed(TripCargoTransferStatus.CAPACITY_EXCEEDED);
+        }
+
+        var targetWasNearFull = IsNearFull(
+            targetTrip.TotalLoadedWeightKg,
+            targetTrip.MaxCargoWeightKg);
+        var sourcePreviousState = sourceCargo.Release(now);
+        sourceTrip.UpdateCargoCounters(
+            sourcePreviousState == TripCargoParcel.ReservedState
+                ? Math.Max(0m, sourceTrip.ReservedParcelWeightKg - sourceCargo.WeightKg)
+                : sourceTrip.ReservedParcelWeightKg,
+            sourcePreviousState == TripCargoParcel.ReservedState
+                ? Math.Max(0m, sourceTrip.ReservedParcelVolumeM3 - sourceCargo.VolumeM3)
+                : sourceTrip.ReservedParcelVolumeM3,
+            sourcePreviousState == TripCargoParcel.LoadedState
+                ? Math.Max(0m, sourceTrip.TotalLoadedWeightKg - sourceCargo.WeightKg)
+                : sourceTrip.TotalLoadedWeightKg,
+            sourcePreviousState == TripCargoParcel.LoadedState
+                ? Math.Max(0m, sourceTrip.TotalLoadedVolumeM3 - sourceCargo.VolumeM3)
+                : sourceTrip.TotalLoadedVolumeM3);
+
+        if (targetCargo is null)
+        {
+            targetCargo = TripCargoParcel.Reserve(
+                targetTripId,
+                parcelId,
+                sourceCargo.WeightKg,
+                sourceCargo.VolumeM3);
+            await _dbContext.TripCargoParcels.AddAsync(targetCargo, cancellationToken);
+        }
+        else
+        {
+            targetCargo.RestoreReservation(sourceCargo.WeightKg, sourceCargo.VolumeM3);
+        }
+
+        if (targetState == TripCargoParcel.LoadedState)
+        {
+            targetCargo.MarkLoaded(now);
+        }
+
+        targetTrip.UpdateCargoCounters(
+            targetReservedWeight,
+            targetReservedVolume,
+            targetLoadedWeight,
+            targetLoadedVolume);
+        sourceTrip.UpdatedAt = now;
+        targetTrip.UpdatedAt = now;
+
+        var targetMaxWeight = targetTrip.MaxCargoWeightKg ?? 0m;
+        var targetPercentFull = targetMaxWeight <= 0m
+            ? 0m
+            : Math.Round(targetTrip.TotalLoadedWeightKg / targetMaxWeight * 100m, 2);
+        return new TripCargoTransferRepositoryResult(
+            TripCargoTransferStatus.SUCCESS,
+            parcelId,
+            sourceTripId,
+            targetTripId,
+            targetState,
+            sourceCargo.WeightKg,
+            sourceCargo.VolumeM3,
+            !targetWasNearFull && IsNearFull(targetTrip.TotalLoadedWeightKg, targetTrip.MaxCargoWeightKg),
+            targetTrip.OperatorId,
+            targetTrip.TotalLoadedWeightKg,
+            targetMaxWeight,
+            targetPercentFull);
+    }
+
     private async Task<TripCargoMutationResult?> ExecuteCargoMutationAsync(
         Guid tripId,
         Func<Domain.Entities.Trip, Task<TripCargoMutationResult>> mutate,
@@ -918,7 +1083,8 @@ internal sealed class TripRepository : ITripRepository
             return;
         }
 
-        if (trip.MaxCargoWeightKg.HasValue && reservedWeightKg + loadedWeightKg > trip.MaxCargoWeightKg.Value)
+        if (trip.MaxCargoWeightKg.HasValue
+            && trip.EstimatedPassengerLuggageKg + reservedWeightKg + loadedWeightKg > trip.MaxCargoWeightKg.Value)
         {
             throw new InvalidOperationException("Trip cargo weight capacity would be exceeded.");
         }

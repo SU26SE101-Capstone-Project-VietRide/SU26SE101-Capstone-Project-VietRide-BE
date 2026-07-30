@@ -67,6 +67,29 @@ public sealed class BookingCancelledIntegrationEventHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsync_WhenBookingWasDisrupted_UsesCanonicalRefundReferenceAndFrozenAmount()
+    {
+        var sender = new CapturingSender();
+        var handler = CreateHandler(sender);
+        var integrationEvent = CreateEvent() with
+        {
+            RefundAmount = 171_765,
+            RefundOverride = true,
+            CancellationReason = "OPERATOR_DISRUPTED_IN_PROGRESS",
+        };
+
+        await handler.HandleAsync(integrationEvent, CancellationToken.None);
+        await handler.HandleAsync(integrationEvent, CancellationToken.None);
+
+        sender.Requests.Cast<RefundToWalletCommand>().Should().HaveCount(2)
+            .And.OnlyContain(command =>
+                command.Amount == 171_765
+                && command.ReferenceType == "BOOKING_REFUND"
+                && command.ReferenceId == integrationEvent.BookingId
+                && command.IdempotencyKey == integrationEvent.EventId!.Value.ToString("D"));
+    }
+
+    [Fact]
     public async Task HandleAsync_WhenTransientRefundUseCaseFailureOccurs_RetriesBeforeAck()
     {
         var sender = new CapturingSender(

@@ -22,6 +22,7 @@ using VietRide.Shared.Web.Middleware;
 using VietRide.Trip.Application.Abstractions.SeatLock;
 using VietRide.Trip.Application.Features.Internal.Trips.BatchTripSummaries;
 using VietRide.Trip.Application.Features.Internal.Trips.BookSeats;
+using VietRide.Trip.Application.Features.Internal.Trips.Cargo;
 using VietRide.Trip.Application.Features.Internal.Trips.GetTripSnapshot;
 using VietRide.Trip.Application.Features.Internal.Trips.LockSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.ReleaseSeats;
@@ -53,7 +54,6 @@ public sealed class InternalTripsEndpointTests
         using var client = factory.CreateClient();
         using var request = CreateAuthorizedRequest(HttpMethod.Post, "/internal/v1/trips/summaries/batch");
         request.Content = JsonContent.Create(new { tripIds = new[] { tripId } });
-
         var response = await client.SendAsync(request);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -95,6 +95,185 @@ public sealed class InternalTripsEndpointTests
             .Should().Be("array");
         responses.TryGetProperty("401", out _).Should().BeTrue();
         responses.TryGetProperty("422", out _).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task CargoTransfer_Happy_ReturnsEnvelopeAndDispatchesExactCommand()
+    {
+        var sourceTripId = Guid.NewGuid();
+        var targetTripId = Guid.NewGuid();
+        var parcelId = Guid.NewGuid();
+        var result = new CargoTransferDto(
+            parcelId,
+            sourceTripId,
+            targetTripId,
+            "LOADED",
+            12.5m,
+            0.08m);
+        var mediator = new StubMediator(_ => result);
+        using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
+        using var client = factory.CreateClient();
+        using var request = CreateAuthorizedRequest(
+            HttpMethod.Post,
+            $"/internal/v1/trips/{sourceTripId}/cargo/transfer");
+        request.Headers.TryAddWithoutValidation(
+            IdempotencyMiddleware.IdempotencyKeyHeader,
+            Guid.NewGuid().ToString("D"));
+        request.Content = JsonContent.Create(new
+        {
+            parcelId,
+            targetTripId,
+            targetState = "LOADED",
+            allowCapacityOverflow = true,
+        });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        document.RootElement.GetProperty("success").GetBoolean().Should().BeTrue();
+        var data = document.RootElement.GetProperty("data");
+        data.GetProperty("parcelId").GetGuid().Should().Be(parcelId);
+        data.GetProperty("sourceTripId").GetGuid().Should().Be(sourceTripId);
+        data.GetProperty("targetTripId").GetGuid().Should().Be(targetTripId);
+        data.GetProperty("targetState").GetString().Should().Be("LOADED");
+        mediator.LastRequest.Should().Be(new TransferCargoCommand(
+            sourceTripId,
+            parcelId,
+            targetTripId,
+            "LOADED",
+            AllowCapacityOverflow: true));
+    }
+
+    [Fact]
+    public async Task CargoTransfer_WithUnknownProperty_Returns422WithoutDispatch()
+    {
+        var mediator = new StubMediator(_ =>
+            throw new InvalidOperationException("Mediator must not be called."));
+        using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
+        using var client = factory.CreateClient();
+        using var request = CreateAuthorizedRequest(
+            HttpMethod.Post,
+            $"/internal/v1/trips/{Guid.NewGuid()}/cargo/transfer");
+        request.Headers.TryAddWithoutValidation(
+            IdempotencyMiddleware.IdempotencyKeyHeader,
+            Guid.NewGuid().ToString("D"));
+        request.Content = JsonContent.Create(new
+        {
+            parcelId = Guid.NewGuid(),
+            targetTripId = Guid.NewGuid(),
+            targetState = "RESERVED",
+            allowCapacityOverflow = false,
+            legacyTargetTrip = Guid.NewGuid(),
+        });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        await AssertErrorEnvelopeAsync(response, "VALIDATION_ERROR", hasFields: true);
+        mediator.SendCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task CargoTransfer_WithoutInternalJwt_Returns401WithoutDispatch()
+    {
+        var mediator = new StubMediator(_ =>
+            throw new InvalidOperationException("Mediator must not be called."));
+        using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
+        using var client = factory.CreateClient();
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/internal/v1/trips/{Guid.NewGuid()}/cargo/transfer");
+        request.Headers.TryAddWithoutValidation(
+            IdempotencyMiddleware.IdempotencyKeyHeader,
+            Guid.NewGuid().ToString("D"));
+        request.Content = JsonContent.Create(new
+        {
+            parcelId = Guid.NewGuid(),
+            targetTripId = Guid.NewGuid(),
+            targetState = "RESERVED",
+            allowCapacityOverflow = false,
+        });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        await AssertErrorEnvelopeAsync(response, "AUTH_TOKEN_INVALID", hasFields: false);
+        mediator.SendCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task CargoTransfer_MissingIdempotencyKey_Returns422WithoutDispatch()
+    {
+        var mediator = new StubMediator(_ =>
+            throw new InvalidOperationException("Mediator must not be called."));
+        using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
+        using var client = factory.CreateClient();
+        using var request = CreateAuthorizedRequest(
+            HttpMethod.Post,
+            $"/internal/v1/trips/{Guid.NewGuid()}/cargo/transfer");
+        request.Content = JsonContent.Create(new
+        {
+            parcelId = Guid.NewGuid(),
+            targetTripId = Guid.NewGuid(),
+            targetState = "RESERVED",
+            allowCapacityOverflow = false,
+        });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        await AssertErrorEnvelopeAsync(
+            response,
+            IdempotencyMiddleware.RequiredErrorCode,
+            hasFields: false);
+        mediator.SendCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task CargoTransfer_IdempotencyReplay_ExecutesCargoMutationOnlyOnce()
+    {
+        var redis = InMemoryRedisConnectionMultiplexer.Create();
+        var key = Guid.NewGuid().ToString("D");
+        var cargoMutationCalls = 0;
+        RequestDelegate next = async context =>
+        {
+            cargoMutationCalls++;
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsJsonAsync(new
+            {
+                success = true,
+                statusCode = 200,
+                data = new
+                {
+                    parcelId = Guid.NewGuid(),
+                    sourceTripId = Guid.NewGuid(),
+                    targetTripId = Guid.NewGuid(),
+                    targetState = "RESERVED",
+                },
+            });
+        };
+        var middleware = new IdempotencyMiddleware(
+            next,
+            redis,
+            new IdempotencyOptions
+            {
+                ServicePrefix = "trip",
+                RequireAllMutations = true,
+            },
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<IdempotencyMiddleware>.Instance);
+        const string body =
+            """{"parcelId":"00000000-0000-4000-8000-000000000032","targetTripId":"00000000-0000-4000-8000-000000000033","targetState":"RESERVED","allowCapacityOverflow":false}""";
+        var firstContext = CreateIdempotencyContext(key, body);
+        var replayContext = CreateIdempotencyContext(key, body);
+
+        await middleware.InvokeAsync(firstContext);
+        await middleware.InvokeAsync(replayContext);
+
+        cargoMutationCalls.Should().Be(1);
+        ((MemoryStream)firstContext.Response.Body).ToArray()
+            .Should().Equal(((MemoryStream)replayContext.Response.Body).ToArray());
     }
 
     [Fact]

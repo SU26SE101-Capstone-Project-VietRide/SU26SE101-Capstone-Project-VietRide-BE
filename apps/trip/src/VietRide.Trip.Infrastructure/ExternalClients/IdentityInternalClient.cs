@@ -36,7 +36,10 @@ public sealed class IdentityInternalClient : IIdentityInternalClient, ISubscript
                     "Operator is not approved or not active in Identity."),
                 HttpStatusCode.NotFound => OperatorWriteEligibilityValidation.ValidationFailure(
                     $"Operator '{operatorId}' was not found in Identity."),
-                >= HttpStatusCode.InternalServerError => OperatorWriteEligibilityValidation.ValidationFailure(
+                >= HttpStatusCode.InternalServerError => new OperatorWriteEligibilityValidation(
+                    false,
+                    503,
+                    "UPSTREAM_UNAVAILABLE",
                     "Identity validation failed due to an upstream server error."),
                 _ => OperatorWriteEligibilityValidation.ValidationFailure(
                     $"Identity returned unexpected status code {(int)response.StatusCode}.")
@@ -48,7 +51,10 @@ public sealed class IdentityInternalClient : IIdentityInternalClient, ISubscript
         }
         catch (Exception)
         {
-            return OperatorWriteEligibilityValidation.ValidationFailure(
+            return new OperatorWriteEligibilityValidation(
+                false,
+                503,
+                "UPSTREAM_UNAVAILABLE",
                 "Identity validation failed due to transport or circuit-breaker failure.");
         }
     }
@@ -72,7 +78,7 @@ public sealed class IdentityInternalClient : IIdentityInternalClient, ISubscript
             if (!response.IsSuccessStatusCode)
             {
                 return new OperatorWriteEligibilityValidation(
-                    false, (int)response.StatusCode, "UPSTREAM_UNAVAILABLE", "Identity subscription lookup failed.");
+                    false, 503, "UPSTREAM_UNAVAILABLE", "Identity subscription lookup failed.");
             }
 
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions, cancellationToken)
