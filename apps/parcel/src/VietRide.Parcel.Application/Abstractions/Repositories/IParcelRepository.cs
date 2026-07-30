@@ -232,11 +232,12 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkInitiateReturnForRejectedDeliveriesAsync(
         DateTimeOffset cutoff, DateTimeOffset now, int maxBatch, CancellationToken ct);
 
-    Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkSetPendingOperatorActionForExpiredConfirmationsAsync(
-        DateTimeOffset cutoff, DateTimeOffset now, int maxBatch, CancellationToken ct);
-
-    Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkReissueDeliveryPendingConfirmRemindersAsync(
-        DateTimeOffset expiryCutoff, DateTimeOffset reminderCutoff, DateTimeOffset now, int maxBatch, CancellationToken ct);
+    Task<IReadOnlyList<ParcelDeliveryReminderSnapshot>> TryBulkClaimDeliveryConfirmationRemindersAsync(
+        DateTimeOffset expiredAtCutoff,
+        DateTimeOffset reminderCutoff,
+        DateTimeOffset now,
+        int maxBatch,
+        CancellationToken ct);
 
     Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkExpireOrphanPendingPaymentsAsync(
         DateTimeOffset cutoff, DateTimeOffset now, int maxBatch, CancellationToken ct);
@@ -257,18 +258,16 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
         Guid parcelId, Guid tripId, string parcelCode, Guid? loadedByUserId, DateTimeOffset now, CancellationToken ct);
 
     /// <summary>
-    /// Atomic: IN_TRANSIT -> UNLOADED. Clears delivery-token fields.
+    /// Atomic: IN_TRANSIT -> UNLOADED.
     /// </summary>
     Task<ParcelPaymentTransitionSnapshot?> TryMarkUnloadedAsync(
         Guid parcelId, DateTimeOffset now, CancellationToken ct);
 
     /// <summary>
-    /// Atomic: UNLOADED -> DELIVERED_PENDING_CONFIRM with token generation.
+    /// Atomic: UNLOADED -> DELIVERED_PENDING_CONFIRM.
     /// </summary>
     Task<ParcelPaymentTransitionSnapshot?> TryMarkDeliveredPendingConfirmAsync(
         Guid parcelId,
-        Guid deliveryToken,
-        DateTimeOffset deliveryTokenExpiresAt,
         IReadOnlyCollection<string>? deliveryPhotoUrls,
         DateTimeOffset now,
         CancellationToken ct);
@@ -289,6 +288,7 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkRequestTransferByTripIdAsync(
         Guid oldTripId,
         Guid newTripId,
+        Guid operatorId,
         DateTimeOffset now,
         CancellationToken ct);
 
@@ -297,21 +297,119 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     Task<ParcelPaymentTransitionSnapshot?> TryRequestTransferAsync(
         Guid parcelId, Guid operatorId, Guid targetTripId, DateTimeOffset now, CancellationToken ct);
 
-    Task<ParcelPaymentTransitionSnapshot?> TryConfirmTransferAsync(
-        Guid parcelId, Guid targetTripId, string parcelCode, Guid confirmedByUserId, DateTimeOffset now, CancellationToken ct);
+    Task<ParcelTransferConfirmationSnapshot?> GetTransferConfirmationSnapshotAsync(
+        Guid parcelId,
+        CancellationToken ct);
+
+    Task<ParcelTransferConfirmationSnapshot?> TryClaimTransferConfirmationAsync(
+        Guid parcelId,
+        string parcelCode,
+        Guid sourceTripId,
+        Guid targetTripId,
+        Guid claimId,
+        Guid claimedByUserId,
+        DateTimeOffset now,
+        CancellationToken ct);
+
+    Task<ParcelTransferConfirmationSnapshot?> TryCompleteTransferConfirmationAsync(
+        Guid parcelId,
+        Guid sourceTripId,
+        Guid targetTripId,
+        Guid claimId,
+        Guid confirmedByUserId,
+        DateTimeOffset now,
+        CancellationToken ct);
+
+    Task<bool> TryClearTransferConfirmationClaimAsync(
+        Guid parcelId,
+        Guid claimId,
+        DateTimeOffset now,
+        CancellationToken ct);
+
+    Task<IReadOnlyList<ParcelTransferConfirmationSnapshot>> GetStaleTransferConfirmationClaimsAsync(
+        DateTimeOffset claimedAtCutoff,
+        int maxBatch,
+        CancellationToken ct);
+
+    Task<ParcelCargoRecoveryOperationSnapshot?> GetCargoRecoveryOperationAsync(
+        Guid operationId,
+        CancellationToken ct);
+
+    Task<ParcelCargoRecoveryOperationSnapshot?> GetActiveCargoRecoveryOperationAsync(
+        Guid parcelId,
+        CancellationToken ct);
+
+    Task<ParcelCargoRecoveryOperationSnapshot?> TryClaimCargoRecoveryTransferAsync(
+        Guid operationId,
+        Guid parcelId,
+        Guid operatorId,
+        Guid targetTripId,
+        Guid actorUserId,
+        string reason,
+        DateTimeOffset now,
+        CancellationToken ct);
+
+    Task<ParcelCargoRecoveryOperationSnapshot?> TryClaimCargoRecoveryReturnAsync(
+        Guid operationId,
+        Guid parcelId,
+        Guid operatorId,
+        Guid actorUserId,
+        string reason,
+        bool isStatusOverride,
+        DateTimeOffset now,
+        CancellationToken ct);
+
+    Task<ParcelPaymentTransitionSnapshot?> TryCompleteCargoRecoveryTransferAsync(
+        Guid operationId,
+        DateTimeOffset now,
+        CancellationToken ct);
+
+    Task<ParcelPaymentTransitionSnapshot?> TryCompleteCargoRecoveryReturnAsync(
+        Guid operationId,
+        DateTimeOffset now,
+        CancellationToken ct);
+
+    Task<bool> TryFailCargoRecoveryOperationAsync(
+        Guid operationId,
+        string failureCode,
+        DateTimeOffset now,
+        CancellationToken ct);
+
+    Task<IReadOnlyList<ParcelCargoRecoveryOperationSnapshot>>
+        GetStaleCargoRecoveryOperationsAsync(
+            DateTimeOffset claimedAtCutoff,
+            int maxBatch,
+            CancellationToken ct);
 
     Task<ParcelPaymentTransitionSnapshot?> TryReturnAsync(
-        Guid parcelId, Guid operatorId, Guid returnedByUserId, string reason, DateTimeOffset now, CancellationToken ct);
+        Guid parcelId,
+        Guid operatorId,
+        Guid returnedByUserId,
+        string reason,
+        long refundDueVnd,
+        DateTimeOffset now,
+        CancellationToken ct);
 
-    Task<IReadOnlyList<ParcelEventSnapshot>> TryRejectPreAcceptanceByTripIdAsync(
-        Guid tripId, DateTimeOffset now, CancellationToken ct);
-
-    Task<IReadOnlyList<ParcelEventSnapshot>> TryCancelPendingByTripIdAsync(
-        Guid tripId, DateTimeOffset now, CancellationToken ct);
-
-    Task<IReadOnlyList<TripCancellationParcelImpact>> GetTripCancellationImpactAsync(
+    Task<IReadOnlyList<TripCancellationParcelCandidate>> GetTripCancellationCandidatesAsync(
         Guid tripId,
         Guid operatorId,
+        CancellationToken ct);
+
+    Task<bool> TryApplyTripCancellationAsync(
+        Guid parcelId,
+        Guid operatorId,
+        ParcelStatus expectedStatus,
+        ParcelStatus targetStatus,
+        long refundDueVnd,
+        DateTimeOffset now,
+        CancellationToken ct);
+
+    Task<ParcelPaymentTransitionSnapshot?> TryCompleteRecoveryTransferAsync(
+        Guid parcelId,
+        Guid operatorId,
+        Guid sourceTripId,
+        Guid targetTripId,
+        DateTimeOffset now,
         CancellationToken ct);
 
     Task<ParcelPaymentTransitionSnapshot?> TryManualCancelAsync(
@@ -319,6 +417,7 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
         Guid operatorId,
         ParcelStatus targetStatus,
         string reason,
+        long refundDueVnd,
         DateTimeOffset now,
         CancellationToken ct);
 
@@ -358,32 +457,42 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     // ---- Phase 7: Delivery Token ----
 
     /// <summary>
-    /// Find a parcel by its delivery token (non-revoked, non-expired check is done in handler).
-    /// </summary>
-    Task<ParcelEntity?> FindByDeliveryTokenAsync(Guid token, CancellationToken ct);
-
-    /// <summary>
     /// Atomic: DELIVERED_PENDING_CONFIRM -> DELIVERY_CONFIRMED.
-    /// Guards Status, DeliveryToken, DeliveryTokenRevokedAt==null.
+    /// Guards status and an active, unexpired token-history row.
     /// </summary>
     Task<ParcelPaymentTransitionSnapshot?> TryConfirmDeliveryAsync(
-        Guid parcelId, Guid token, string ip, DateTimeOffset now, CancellationToken ct);
+        Guid parcelId, Guid deliveryTokenId, string ip, DateTimeOffset now, CancellationToken ct);
 
     /// <summary>
     /// Atomic: DELIVERED_PENDING_CONFIRM -> DELIVERY_REJECTED.
     /// </summary>
     Task<ParcelPaymentTransitionSnapshot?> TryRejectDeliveryAsync(
-        Guid parcelId, Guid token, string reason, DateTimeOffset now, CancellationToken ct);
+        Guid parcelId, Guid deliveryTokenId, string reason, DateTimeOffset now, CancellationToken ct);
 
     /// <summary>
     /// Atomic: DELIVERY_REJECTED -> DELIVERED_PENDING_CONFIRM within undo window.
     /// </summary>
     Task<ParcelPaymentTransitionSnapshot?> TryUndoRejectDeliveryAsync(
-        Guid parcelId, Guid token, DateTimeOffset now, CancellationToken ct);
+        Guid parcelId, Guid deliveryTokenId, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
+    /// Atomically keeps pending confirmation pending, or restores a delivery rejection
+    /// during its undo window, before a resend rotates the active token.
+    /// </summary>
+    Task<ParcelPaymentTransitionSnapshot?> TryPrepareDeliveryResendAsync(
+        Guid parcelId,
+        ParcelStatus expectedStatus,
+        Guid expectedActiveTokenId,
+        DateTimeOffset now,
+        CancellationToken ct);
 
     /// <summary>
     /// Atomic: DELIVERED_PENDING_CONFIRM -> DELIVERY_CONFIRMED by operator/assistant.
     /// </summary>
     Task<ParcelPaymentTransitionSnapshot?> TryManualConfirmDeliveryAsync(
         Guid parcelId, Guid operatorId, Guid actorUserId, string note, DateTimeOffset now, CancellationToken ct);
+
+    Task<ParcelManualConfirmationSnapshot?> GetManualConfirmationSnapshotAsync(
+        Guid parcelId,
+        CancellationToken ct);
 }

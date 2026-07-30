@@ -304,7 +304,7 @@ async function internalJwt() {
     .sign(new TextEncoder().encode(secret));
 }
 
-async function api(method, pathname, { token, body, key } = {}) {
+async function api(method, pathname, { token, body, key, signal } = {}) {
   let response;
   const maxAttempts = method === 'GET' ? 3 : 1;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -317,9 +317,11 @@ async function api(method, pathname, { token, body, key } = {}) {
           ...(key ? { 'Idempotency-Key': key } : {}),
         },
         body: body === undefined ? undefined : JSON.stringify(body),
+        signal,
       });
       break;
     } catch (error) {
+      if (signal?.aborted) throw error;
       if (attempt < maxAttempts) {
         console.warn(`${method} ${pathname} transport retry ${attempt}/${maxAttempts - 1}`);
         await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
@@ -367,6 +369,23 @@ function reportDateRange(daysBack) {
     from: new Date(now - daysBack * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
     to: new Date(now + 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
   };
+}
+
+function assertPlatformReportPeriod(result, expectedRange, label) {
+  const period = result.json?.data?.period;
+  assert(
+    period?.from === expectedRange.from,
+    `${label} period.from mismatch: expected ${expectedRange.from}, got ${period?.from}`,
+  );
+  assert(
+    period?.to === expectedRange.to,
+    `${label} period.to mismatch: expected ${expectedRange.to}, got ${period?.to}`,
+  );
+  assert(
+    period?.timezone === 'UTC',
+    `${label} period.timezone mismatch: expected UTC, got ${period?.timezone}`,
+  );
+  return { from: period.from, to: period.to, timezone: period.timezone };
 }
 
 function reportPath(name, range) {
@@ -489,11 +508,18 @@ function seed() {
            now()-interval '90 minutes',now()-interval '30 minutes',now()-interval '1 hour',now()
     FROM generate_series(1,90000) AS g
     ON CONFLICT (id) DO NOTHING;
-    INSERT INTO bookings (id,booking_code,passenger_user_id,trip_id,operator_id,pickup_station_id,dropoff_station_id,base_fare,discount_amount,total_amount,status,cancellation_reason,cancelled_at,created_at,updated_at)
+    INSERT INTO bookings (id,booking_code,passenger_user_id,trip_id,operator_id,pickup_station_id,dropoff_station_id,base_fare,discount_amount,total_amount,status,cancellation_reason,confirmed_at,cancelled_at,created_at,updated_at)
     SELECT ('41430000-0000-4000-8003-' || lpad(g::text,12,'0'))::uuid,
-           'VR-20260718-' || lpad((g + 200000)::text,8,'0'),'${passenger}','${baseTrip}','${operatorA}','${stationOrigin}','${stationDestination}',100000,0,100000,'CANCELLED','USER_INITIATED',now()-interval '45 minutes',now()-interval '40 minutes',now()
+           'VR-20260718-' || lpad((g + 200000)::text,8,'0'),'${passenger}','${baseTrip}','${operatorA}','${stationOrigin}','${stationDestination}',100000,0,100000,'CANCELLED','USER_INITIATED',
+           now()-interval '31 days 2 minutes',now()-interval '31 days',now()-interval '32 days',now()-interval '31 days'
     FROM generate_series(1,10000) AS g
-    ON CONFLICT (id) DO NOTHING;
+    ON CONFLICT (id) DO UPDATE SET
+      status=EXCLUDED.status,
+      cancellation_reason=EXCLUDED.cancellation_reason,
+      confirmed_at=EXCLUDED.confirmed_at,
+      cancelled_at=EXCLUDED.cancelled_at,
+      created_at=EXCLUDED.created_at,
+      updated_at=EXCLUDED.updated_at;
     INSERT INTO passengers (id,booking_id,seat_number,boarding_status)
     SELECT gen_random_uuid(), b.id, 'D01', 'PENDING'
     FROM bookings b
@@ -502,16 +528,16 @@ function seed() {
   `);
 
   parcelSql(`
-    INSERT INTO parcels (id,parcel_code,sender_user_id,recipient_name,recipient_phone,operator_id,trip_id,size_category,estimated_weight_kg,delivery_method,total_price_vnd,deposit_percent,deposit_amount,original_deposit_amount,discount_amount,additional_amount,refund_amount,status,confirmed_at,created_at,updated_at)
+    INSERT INTO parcels (id,parcel_code,sender_user_id,recipient_name,recipient_phone,operator_id,trip_id,size_category,estimated_size_category,estimated_weight_kg,delivery_method,total_price_vnd,deposit_percent,deposit_amount,original_deposit_amount,discount_amount,additional_amount,refund_amount,status,confirmed_at,created_at,updated_at)
     SELECT ('41430000-0000-4000-8004-' || lpad(g::text,12,'0'))::uuid,
-           'VRP4143-' || lpad(g::text,6,'0'),'${passenger}','Recipient ' || g,'+84910041430','${operatorA}','${baseTrip}','SMALL',1,'TERMINAL_PICKUP',60000,100,60000,60000,0,0,0,'DELIVERY_CONFIRMED',now()-interval '45 minutes',now()-interval '1 hour',now()
+           'VRP4143-' || lpad(g::text,6,'0'),'${passenger}','Recipient ' || g,'+84910041430','${operatorA}','${baseTrip}','SMALL','SMALL',1,'TERMINAL_PICKUP',60000,100,60000,60000,0,0,0,'DELIVERY_CONFIRMED',now()-interval '45 minutes',now()-interval '1 hour',now()
     FROM generate_series(1,10000) AS g
     ON CONFLICT (id) DO NOTHING;
-    INSERT INTO parcels (id,parcel_code,sender_user_id,recipient_name,recipient_phone,operator_id,trip_id,size_category,estimated_weight_kg,delivery_method,total_price_vnd,deposit_percent,deposit_amount,original_deposit_amount,discount_amount,additional_amount,refund_amount,status,confirmed_at,created_at,updated_at)
+    INSERT INTO parcels (id,parcel_code,sender_user_id,recipient_name,recipient_phone,operator_id,trip_id,size_category,estimated_size_category,estimated_weight_kg,delivery_method,total_price_vnd,deposit_percent,deposit_amount,original_deposit_amount,discount_amount,additional_amount,refund_amount,status,confirmed_at,created_at,updated_at)
     SELECT ('41430000-0000-4000-8021-' || lpad(g::text,12,'0'))::uuid,
            'VRP4143-BM-' || lpad(g::text,6,'0'),'${passenger}','Benchmark Recipient ' || g,'+84910041430',
            ('41430000-0000-4000-8000-' || lpad(((g - 1) % 20 + 1)::text,12,'0'))::uuid,
-           '${baseTrip}','SMALL',1,'TERMINAL_PICKUP',60000,100,60000,60000,0,0,0,
+           '${baseTrip}','SMALL','SMALL',1,'TERMINAL_PICKUP',60000,100,60000,60000,0,0,0,
            'DELIVERY_CONFIRMED',now()-interval '45 minutes',now()-interval '1 hour',now()
     FROM generate_series(1,40000) AS g
     ON CONFLICT (id) DO NOTHING;
@@ -550,8 +576,19 @@ function seed() {
            'Day 42 benchmark parcel revenue',now()-interval '30 minutes'
     FROM generate_series(1,40000) AS g
     ON CONFLICT (source_event_id,entry_type,reference_id) DO NOTHING;
+    DELETE FROM operator_ledger_entries
+    WHERE source_event_id::text LIKE '41430000-0000-4000-8007-%';
     INSERT INTO operator_ledger_entries (id,operator_id,trip_id,entry_type,amount,reference_type,reference_id,source_event_id,note,created_at)
-    SELECT gen_random_uuid(),'${operatorA}','${baseTrip}','BOOKING_REFUND',-1000,'BOOKING',('41430000-0000-4000-8002-' || lpad(g::text,12,'0'))::uuid,('41430000-0000-4000-8007-' || lpad(g::text,12,'0'))::uuid,'Day 41-43 booking refund',now()-interval '31 days'
+    SELECT gen_random_uuid(),'${operatorA}','${baseTrip}','BOOKING_REVENUE',100000,'BOOKING',('41430000-0000-4000-8003-' || lpad(g::text,12,'0'))::uuid,('41430000-0000-4000-8027-' || lpad(g::text,12,'0'))::uuid,'Day 42 cancelled-booking revenue',now()-interval '31 days 1 minute'
+    FROM generate_series(1,10000) AS g
+    ON CONFLICT (source_event_id,entry_type,reference_id) DO UPDATE SET
+      operator_id=EXCLUDED.operator_id,
+      trip_id=EXCLUDED.trip_id,
+      amount=EXCLUDED.amount,
+      note=EXCLUDED.note,
+      created_at=EXCLUDED.created_at;
+    INSERT INTO operator_ledger_entries (id,operator_id,trip_id,entry_type,amount,reference_type,reference_id,source_event_id,note,created_at)
+    SELECT gen_random_uuid(),'${operatorA}','${baseTrip}','BOOKING_REFUND',-100000,'BOOKING',('41430000-0000-4000-8003-' || lpad(g::text,12,'0'))::uuid,('41430000-0000-4000-8007-' || lpad(g::text,12,'0'))::uuid,'Day 42 cancelled-booking refund',now()-interval '31 days'
     FROM generate_series(1,10000) AS g
     ON CONFLICT (source_event_id,entry_type,reference_id) DO NOTHING;
   `);
@@ -649,6 +686,11 @@ async function runPlatformScenario() {
   const warmupPathname = `/v1/admin/reports/platform?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(warmupTo)}`;
   const warmup = await api('GET', warmupPathname, { token: tokens.systemAdmin });
   assert(warmup.response.status === 200, `Platform report warm-up failed: ${warmup.text}`);
+  assertPlatformReportPeriod(
+    warmup,
+    { from: range.from, to: warmupTo },
+    'Platform report warm-up',
+  );
   for (const key of redis('--scan', '--pattern', 'platform-report:v1:*').split(/\r?\n/).filter(Boolean)) {
     redis('DEL', key);
   }
@@ -657,6 +699,7 @@ async function runPlatformScenario() {
   const first = await api('GET', pathname, { token: tokens.systemAdmin });
   const coldDurationMs = Math.round(performance.now() - coldStartedAt);
   assert(first.response.status === 200 && first.json?.success === true, `Platform report failed: ${first.text}`);
+  assertPlatformReportPeriod(first, range, 'Cold 29-day platform report');
   assert(first.json.data.byOperator.length === 20, `Platform benchmark operator union drifted: ${first.text}`);
   assert(first.json.data.totals.netRevenueVnd === 13_000_000_000, `Ledger total mismatch: ${first.text}`);
   assert(coldDurationMs < 2000, `Cold platform report exceeded 2s SLO: ${coldDurationMs}ms`);
@@ -667,10 +710,12 @@ async function runPlatformScenario() {
   const cached = await api('GET', pathname, { token: tokens.systemAdmin });
   const warmDurationMs = Math.round(performance.now() - warmStartedAt);
   assert(cached.response.status === 200, `Warm platform cache failed: ${cached.text}`);
+  assertPlatformReportPeriod(cached, range, 'Warm 29-day platform report');
   assert(warmDurationMs < 2000, `Warm platform report exceeded 2s SLO: ${warmDurationMs}ms`);
   composeRun(['--profile', 'app', 'stop', 'parcel']);
   const warm = await api('GET', pathname, { token: tokens.systemAdmin });
   assert(warm.response.status === 200, `Warm cache did not survive parcel outage: ${warm.text}`);
+  assertPlatformReportPeriod(warm, range, 'Warm outage 29-day platform report');
   for (const key of keys) redis('DEL', key);
   const cold = await api('GET', pathname, { token: tokens.systemAdmin });
   expectError(cold, [503], 'UPSTREAM_UNAVAILABLE');
@@ -689,6 +734,7 @@ async function runPlatformScenario() {
   paymentSql(`DELETE FROM operator_ledger_entries WHERE source_event_id='${mismatchEventId}';`);
   const recovered = await api('GET', pathname, { token: tokens.systemAdmin });
   assert(recovered.response.status === 200, `Platform report did not recover after reconciliation repair: ${recovered.text}`);
+  assertPlatformReportPeriod(recovered, range, 'Recovered 29-day platform report');
 
   const projectionChecks = [
     {
@@ -739,6 +785,62 @@ async function runPlatformScenario() {
       projectionRecovered.response.status === 200,
       `${check.service} projection did not recover after backfill: ${projectionRecovered.text}`,
     );
+    assertPlatformReportPeriod(
+      projectionRecovered,
+      range,
+      `${check.service} projection-recovered 29-day platform report`,
+    );
+  }
+
+  for (const key of redis('--scan', '--pattern', 'platform-report:v1:*').split(/\r?\n/).filter(Boolean)) {
+    redis('DEL', key);
+  }
+  const threeMonthRange = reportDateRange(91);
+  const threeMonthRangeDays = (
+    Date.parse(threeMonthRange.to) - Date.parse(threeMonthRange.from)
+  ) / (24 * 60 * 60 * 1000);
+  assert(threeMonthRangeDays === 92, `Three-month platform range drifted: ${threeMonthRangeDays} days`);
+  const threeMonthPathname = `/v1/admin/reports/platform?from=${encodeURIComponent(threeMonthRange.from)}&to=${encodeURIComponent(threeMonthRange.to)}`;
+  const threeMonthStartedAt = performance.now();
+  const threeMonth = await api('GET', threeMonthPathname, {
+    token: tokens.systemAdmin,
+    signal: AbortSignal.timeout(10_000),
+  });
+  const threeMonthDurationMs = Math.round(performance.now() - threeMonthStartedAt);
+  assert(
+    threeMonth.response.status === 200 && threeMonth.json?.success === true,
+    `Three-month platform report timed out or failed: ${threeMonth.text}`,
+  );
+  const threeMonthPeriod = assertPlatformReportPeriod(
+    threeMonth,
+    threeMonthRange,
+    'Three-month platform report',
+  );
+  assert(
+    threeMonth.json.data.byOperator.length === 20,
+    `Three-month platform operator union drifted: ${threeMonth.text}`,
+  );
+  const expectedThreeMonthTotals = {
+    completedBookingCount: 100_000,
+    completedTripCount: 10_001,
+    deliveredParcelCount: 50_000,
+    bookingRevenueVnd: 10_000_000_000,
+    parcelRevenueVnd: 3_000_000_000,
+    netRevenueVnd: 13_000_000_000,
+  };
+  for (const [metric, expected] of Object.entries(expectedThreeMonthTotals)) {
+    assert(
+      threeMonth.json.data.totals[metric] === expected,
+      `Three-month platform ${metric} mismatch: ${threeMonth.text}`,
+    );
+    const reconciled = threeMonth.json.data.byOperator.reduce(
+      (total, operator) => total + operator[metric],
+      0,
+    );
+    assert(
+      reconciled === expected,
+      `Three-month platform ${metric} did not reconcile by operator: ${threeMonth.text}`,
+    );
   }
 
   const artifactDirectory = path.join(root, 'artifacts', 'day41-43');
@@ -750,6 +852,9 @@ async function runPlatformScenario() {
       fixture: { operators: 20, bookings: 100000, payments: 100000, parcels: 50000, trips: 10000 },
       coldDurationMs,
       warmDurationMs,
+      threeMonthRange: threeMonthPeriod,
+      threeMonthDurationMs,
+      threeMonthStatus: threeMonth.response.status,
       sampledMemoryBytes: {
         booking: sampleContainerMemoryBytes('booking'),
         payment: sampleContainerMemoryBytes('payment'),

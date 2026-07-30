@@ -1,3 +1,7 @@
+import { BOOKING_DISRUPTED_ROUTING_KEY } from '@vietride/contracts';
+
+export { BOOKING_DISRUPTED_ROUTING_KEY };
+
 export const RABBITMQ_IDEMPOTENCY_TTL_SECONDS = 86_400;
 export const RABBITMQ_PROCESSING_LOCK_TTL_SECONDS = 300;
 export const RABBITMQ_PREFETCH_ONE = 1;
@@ -16,6 +20,10 @@ export const CORE_EVENT_QUEUE_BINDINGS = [
   {
     queue: 'notification:booking-cancelled',
     routingKey: BOOKING_CANCELLED_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:booking-disrupted',
+    routingKey: BOOKING_DISRUPTED_ROUTING_KEY,
   },
   {
     queue: 'notification:booking-refunded',

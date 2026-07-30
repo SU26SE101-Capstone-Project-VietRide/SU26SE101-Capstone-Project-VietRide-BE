@@ -852,14 +852,19 @@ internal sealed class ParcelRepository : IParcelRepository
                 WHERE status = CAST(@source_status AS vietride_parcel.parcel_status)
                   AND transfer_requested_at IS NOT NULL
                   AND transfer_requested_at <= @cutoff
+                  AND transfer_confirmation_claim_id IS NULL
                 ORDER BY transfer_requested_at
                 LIMIT @max_batch
+                FOR UPDATE SKIP LOCKED
             )
             UPDATE vietride_parcel.parcels p
             SET status = CAST(@target_status AS vietride_parcel.parcel_status),
                 updated_at = @now
             FROM candidates
             WHERE p.id = candidates.id
+              AND p.status = CAST(@source_status AS vietride_parcel.parcel_status)
+              AND p.transfer_requested_at <= @cutoff
+              AND p.transfer_confirmation_claim_id IS NULL
             RETURNING p.id, p.parcel_code, p.operator_id, p.trip_id, p.status::text, p.deposit_amount, p.additional_amount, p.sender_user_id, p.recipient_user_id;
             """,
             command =>
@@ -886,6 +891,14 @@ internal sealed class ParcelRepository : IParcelRepository
                   AND rejected_at <= @cutoff
                 ORDER BY rejected_at
                 LIMIT @max_batch
+            ),
+            revoked_tokens AS (
+                UPDATE vietride_parcel.parcel_delivery_tokens token
+                SET revoked_at = @now,
+                    updated_at = @now
+                FROM candidates
+                WHERE token.parcel_id = candidates.id
+                  AND token.revoked_at IS NULL
             )
             UPDATE vietride_parcel.parcels p
             SET status = CAST(@target_status AS vietride_parcel.parcel_status),
@@ -905,36 +918,62 @@ internal sealed class ParcelRepository : IParcelRepository
             ct);
     }
 
-    public async Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkSetPendingOperatorActionForExpiredConfirmationsAsync(
-        DateTimeOffset cutoff, DateTimeOffset now, int maxBatch, CancellationToken ct)
+    public async Task<IReadOnlyList<ParcelDeliveryReminderSnapshot>> TryBulkClaimDeliveryConfirmationRemindersAsync(
+        DateTimeOffset expiredAtCutoff,
+        DateTimeOffset reminderCutoff,
+        DateTimeOffset now,
+        int maxBatch,
+        CancellationToken ct)
     {
-        return await ExecuteBulkReturningAsync(
+        var connection = _db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync(ct);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
             """
             WITH candidates AS (
-                SELECT id
-                FROM vietride_parcel.parcels
-                WHERE status = CAST(@source_status AS vietride_parcel.parcel_status)
-                  AND delivered_pending_confirm_at IS NOT NULL
-                  AND delivered_pending_confirm_at <= @cutoff
-                ORDER BY delivered_pending_confirm_at
+                SELECT parcel.id, token.expires_at
+                FROM vietride_parcel.parcels parcel
+                JOIN vietride_parcel.parcel_delivery_tokens token
+                  ON token.parcel_id = parcel.id
+                 AND token.revoked_at IS NULL
+                WHERE parcel.status = CAST(@status AS vietride_parcel.parcel_status)
+                  AND token.expires_at <= @expired_at_cutoff
+                  AND (parcel.last_reminder_at IS NULL OR parcel.last_reminder_at <= @reminder_cutoff)
+                ORDER BY token.expires_at, parcel.id
                 LIMIT @max_batch
+                FOR UPDATE OF parcel SKIP LOCKED
             )
             UPDATE vietride_parcel.parcels p
-            SET status = CAST(@target_status AS vietride_parcel.parcel_status),
+            SET last_reminder_at = @now,
                 updated_at = @now
             FROM candidates
             WHERE p.id = candidates.id
-            RETURNING p.id, p.parcel_code, p.operator_id, p.trip_id, p.status::text, p.deposit_amount, p.additional_amount, p.sender_user_id, p.recipient_user_id;
-            """,
-            command =>
-            {
-                AddParameter(command, "source_status", ParcelStatus.DELIVERED_PENDING_CONFIRM.ToString());
-                AddParameter(command, "target_status", ParcelStatus.PENDING_OPERATOR_ACTION.ToString());
-                AddParameter(command, "cutoff", cutoff);
-                AddParameter(command, "now", now);
-                AddParameter(command, "max_batch", maxBatch);
-            },
-            ct);
+            RETURNING p.id, p.parcel_code, p.operator_id, p.trip_id, candidates.expires_at;
+            """;
+        command.Transaction = _db.Database.CurrentTransaction?.GetDbTransaction();
+        AddParameter(command, "status", ParcelStatus.DELIVERED_PENDING_CONFIRM.ToString());
+        AddParameter(command, "expired_at_cutoff", expiredAtCutoff);
+        AddParameter(command, "reminder_cutoff", reminderCutoff);
+        AddParameter(command, "now", now);
+        AddParameter(command, "max_batch", maxBatch);
+
+        var snapshots = new List<ParcelDeliveryReminderSnapshot>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            snapshots.Add(new ParcelDeliveryReminderSnapshot(
+                reader.GetGuid(0),
+                reader.GetString(1),
+                reader.GetGuid(2),
+                reader.GetGuid(3),
+                reader.GetFieldValue<DateTimeOffset>(4)));
+        }
+
+        return snapshots;
     }
 
     public async Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkExpireOrphanPendingPaymentsAsync(
@@ -968,42 +1007,6 @@ internal sealed class ParcelRepository : IParcelRepository
             ct);
     }
 
-    public async Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkReissueDeliveryPendingConfirmRemindersAsync(
-        DateTimeOffset expiryCutoff, DateTimeOffset reminderCutoff, DateTimeOffset now, int maxBatch, CancellationToken ct)
-    {
-        return await ExecuteBulkReturningAsync(
-            """
-            WITH candidates AS (
-                SELECT id
-                FROM vietride_parcel.parcels
-                WHERE status = CAST(@status AS vietride_parcel.parcel_status)
-                  AND delivered_pending_confirm_at IS NOT NULL
-                  AND delivered_pending_confirm_at > @expiry_cutoff
-                  AND (last_reminder_at IS NULL OR last_reminder_at <= @reminder_cutoff)
-                ORDER BY delivered_pending_confirm_at
-                LIMIT @max_batch
-            )
-            UPDATE vietride_parcel.parcels p
-            SET delivery_token = gen_random_uuid(),
-                delivery_token_expires_at = @now + INTERVAL '48 hours',
-                delivery_token_revoked_at = NULL,
-                last_reminder_at = @now,
-                updated_at = @now
-            FROM candidates
-            WHERE p.id = candidates.id
-            RETURNING p.id, p.parcel_code, p.operator_id, p.trip_id, p.status::text, p.deposit_amount, p.additional_amount, p.sender_user_id, p.recipient_user_id, p.delivery_token, p.delivery_token_expires_at;
-            """,
-            command =>
-            {
-                AddParameter(command, "status", ParcelStatus.DELIVERED_PENDING_CONFIRM.ToString());
-                AddParameter(command, "expiry_cutoff", expiryCutoff);
-                AddParameter(command, "reminder_cutoff", reminderCutoff);
-                AddParameter(command, "now", now);
-                AddParameter(command, "max_batch", maxBatch);
-            },
-            ct);
-    }
-
     // ---- Phase 6: Loading / Unloading ----
 
     public async Task<ParcelPaymentTransitionSnapshot?> TryMarkLoadedAsync(
@@ -1031,17 +1034,12 @@ internal sealed class ParcelRepository : IParcelRepository
                 .SetProperty(p => p.Status, ParcelStatus.UNLOADED)
                 .SetProperty(p => p.UnloadedAt, now)
                 .SetProperty(p => p.DeliveredPendingConfirmAt, (DateTimeOffset?)null)
-                .SetProperty(p => p.DeliveryToken, (Guid?)null)
-                .SetProperty(p => p.DeliveryTokenExpiresAt, (DateTimeOffset?)null)
-                .SetProperty(p => p.DeliveryTokenRevokedAt, (DateTimeOffset?)null)
                 .SetProperty(p => p.UpdatedAt, now), ct);
         return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
     }
 
     public async Task<ParcelPaymentTransitionSnapshot?> TryMarkDeliveredPendingConfirmAsync(
         Guid parcelId,
-        Guid deliveryToken,
-        DateTimeOffset deliveryTokenExpiresAt,
         IReadOnlyCollection<string>? deliveryPhotoUrls,
         DateTimeOffset now,
         CancellationToken ct)
@@ -1051,9 +1049,6 @@ internal sealed class ParcelRepository : IParcelRepository
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(p => p.Status, ParcelStatus.DELIVERED_PENDING_CONFIRM)
                 .SetProperty(p => p.DeliveredPendingConfirmAt, now)
-                .SetProperty(p => p.DeliveryToken, deliveryToken)
-                .SetProperty(p => p.DeliveryTokenExpiresAt, deliveryTokenExpiresAt)
-                .SetProperty(p => p.DeliveryTokenRevokedAt, (DateTimeOffset?)null)
                 .SetProperty(p => p.DeliveryPhotoUrls, deliveryPhotoUrls)
                 .SetProperty(p => p.UpdatedAt, now), ct);
         return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
@@ -1124,27 +1119,430 @@ internal sealed class ParcelRepository : IParcelRepository
         return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
     }
 
-    public async Task<ParcelPaymentTransitionSnapshot?> TryConfirmTransferAsync(
-        Guid parcelId, Guid targetTripId, string parcelCode, Guid confirmedByUserId, DateTimeOffset now, CancellationToken ct)
+    public async Task<ParcelPaymentTransitionSnapshot?> TryCompleteRecoveryTransferAsync(
+        Guid parcelId,
+        Guid operatorId,
+        Guid sourceTripId,
+        Guid targetTripId,
+        DateTimeOffset now,
+        CancellationToken ct)
     {
         var affected = await _db.Parcels
             .Where(p => p.Id == parcelId
-                && p.Status == ParcelStatus.PENDING_TRANSFER_CONFIRM
-                && p.TransferTargetTripId == targetTripId
-                && p.ParcelCode == parcelCode)
+                && p.OperatorId == operatorId
+                && p.TripId == sourceTripId
+                && p.TripId != targetTripId
+                && p.Status == ParcelStatus.PENDING_OPERATOR_ACTION)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(p => p.TripId, targetTripId)
-                .SetProperty(p => p.Status, ParcelStatus.LOADED)
-                .SetProperty(p => p.TransferConfirmedAt, now)
-                .SetProperty(p => p.TransferConfirmedByUserId, confirmedByUserId)
-                .SetProperty(p => p.LoadedAt, now)
+                .SetProperty(p => p.Status, ParcelStatus.RESERVED)
+                .SetProperty(p => p.PendingActionType, (PendingActionType?)null)
+                .SetProperty(p => p.PendingActionResumeStatus, (ParcelStatus?)null)
+                .SetProperty(p => p.PendingActionReason, (string?)null)
+                .SetProperty(p => p.TransferTargetTripId, (Guid?)null)
+                .SetProperty(p => p.TransferRequestedAt, (DateTimeOffset?)null)
                 .SetProperty(p => p.UpdatedAt, now), ct);
 
-        return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
+        return affected > 0
+            ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct))
+            : null;
     }
 
+    public async Task<ParcelTransferConfirmationSnapshot?> GetTransferConfirmationSnapshotAsync(
+        Guid parcelId,
+        CancellationToken ct)
+        => await _db.Parcels
+            .AsNoTracking()
+            .Where(parcel => parcel.Id == parcelId)
+            .Select(parcel => new ParcelTransferConfirmationSnapshot(
+                parcel.Id,
+                parcel.ParcelCode,
+                parcel.OperatorId,
+                parcel.TripId,
+                parcel.Status,
+                parcel.TransferTargetTripId,
+                parcel.TransferRequestedAt,
+                parcel.TransferConfirmationClaimId,
+                parcel.TransferConfirmationClaimedAt,
+                parcel.TransferConfirmationClaimedByUserId,
+                parcel.TransferConfirmedAt,
+                parcel.TransferConfirmedByUserId,
+                parcel.SenderUserId))
+            .SingleOrDefaultAsync(ct);
+
+    public async Task<ParcelTransferConfirmationSnapshot?> TryClaimTransferConfirmationAsync(
+        Guid parcelId,
+        string parcelCode,
+        Guid sourceTripId,
+        Guid targetTripId,
+        Guid claimId,
+        Guid claimedByUserId,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        var requestedAfter = now.Subtract(TimeSpan.FromMinutes(30));
+        var affected = await _db.Parcels
+            .Where(parcel => parcel.Id == parcelId
+                && parcel.Status == ParcelStatus.PENDING_TRANSFER_CONFIRM
+                && parcel.TripId == sourceTripId
+                && parcel.TransferTargetTripId == targetTripId
+                && parcel.ParcelCode == parcelCode
+                && parcel.TransferRequestedAt != null
+                && parcel.TransferRequestedAt > requestedAfter
+                && parcel.TransferConfirmationClaimId == null)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(parcel => parcel.TransferConfirmationClaimId, claimId)
+                .SetProperty(parcel => parcel.TransferConfirmationClaimedAt, now)
+                .SetProperty(parcel => parcel.TransferConfirmationClaimedByUserId, claimedByUserId)
+                .SetProperty(parcel => parcel.UpdatedAt, now), ct);
+
+        return affected > 0
+            ? await GetTransferConfirmationSnapshotAsync(parcelId, ct)
+            : null;
+    }
+
+    public async Task<ParcelTransferConfirmationSnapshot?> TryCompleteTransferConfirmationAsync(
+        Guid parcelId,
+        Guid sourceTripId,
+        Guid targetTripId,
+        Guid claimId,
+        Guid confirmedByUserId,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        var affected = await _db.Parcels
+            .Where(parcel => parcel.Id == parcelId
+                && parcel.Status == ParcelStatus.PENDING_TRANSFER_CONFIRM
+                && parcel.TripId == sourceTripId
+                && parcel.TransferTargetTripId == targetTripId
+                && parcel.TransferConfirmationClaimId == claimId
+                && parcel.TransferConfirmationClaimedByUserId == confirmedByUserId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(parcel => parcel.TripId, targetTripId)
+                .SetProperty(parcel => parcel.Status, ParcelStatus.LOADED)
+                .SetProperty(parcel => parcel.TransferConfirmedAt, now)
+                .SetProperty(parcel => parcel.TransferConfirmedByUserId, confirmedByUserId)
+                .SetProperty(parcel => parcel.LoadedAt, now)
+                .SetProperty(parcel => parcel.UpdatedAt, now), ct);
+
+        return affected > 0
+            ? await GetTransferConfirmationSnapshotAsync(parcelId, ct)
+            : null;
+    }
+
+    public async Task<bool> TryClearTransferConfirmationClaimAsync(
+        Guid parcelId,
+        Guid claimId,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        var affected = await _db.Parcels
+            .Where(parcel => parcel.Id == parcelId
+                && parcel.Status == ParcelStatus.PENDING_TRANSFER_CONFIRM
+                && parcel.TransferConfirmationClaimId == claimId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(parcel => parcel.TransferConfirmationClaimId, (Guid?)null)
+                .SetProperty(parcel => parcel.TransferConfirmationClaimedAt, (DateTimeOffset?)null)
+                .SetProperty(parcel => parcel.TransferConfirmationClaimedByUserId, (Guid?)null)
+                .SetProperty(parcel => parcel.UpdatedAt, now), ct);
+
+        return affected > 0;
+    }
+
+    public async Task<IReadOnlyList<ParcelTransferConfirmationSnapshot>> GetStaleTransferConfirmationClaimsAsync(
+        DateTimeOffset claimedAtCutoff,
+        int maxBatch,
+        CancellationToken ct)
+        => await _db.Parcels
+            .AsNoTracking()
+            .Where(parcel =>
+                parcel.Status == ParcelStatus.PENDING_TRANSFER_CONFIRM
+                && parcel.TransferConfirmationClaimId != null
+                && parcel.TransferConfirmationClaimedAt != null
+                && parcel.TransferConfirmationClaimedAt <= claimedAtCutoff)
+            .OrderBy(parcel => parcel.TransferConfirmationClaimedAt)
+            .ThenBy(parcel => parcel.Id)
+            .Take(maxBatch)
+            .Select(parcel => new ParcelTransferConfirmationSnapshot(
+                parcel.Id,
+                parcel.ParcelCode,
+                parcel.OperatorId,
+                parcel.TripId,
+                parcel.Status,
+                parcel.TransferTargetTripId,
+                parcel.TransferRequestedAt,
+                parcel.TransferConfirmationClaimId,
+                parcel.TransferConfirmationClaimedAt,
+                parcel.TransferConfirmationClaimedByUserId,
+                parcel.TransferConfirmedAt,
+                parcel.TransferConfirmedByUserId,
+                parcel.SenderUserId))
+            .ToListAsync(ct);
+
+    public Task<ParcelCargoRecoveryOperationSnapshot?> GetCargoRecoveryOperationAsync(
+        Guid operationId,
+        CancellationToken ct)
+        => ProjectCargoRecoveryOperations(
+                _db.ParcelCargoRecoveryOperations
+                    .AsNoTracking()
+                    .Where(operation => operation.Id == operationId))
+            .SingleOrDefaultAsync(ct);
+
+    public Task<ParcelCargoRecoveryOperationSnapshot?> GetActiveCargoRecoveryOperationAsync(
+        Guid parcelId,
+        CancellationToken ct)
+        => ProjectCargoRecoveryOperations(
+                _db.ParcelCargoRecoveryOperations
+                    .AsNoTracking()
+                    .Where(operation =>
+                        operation.ParcelId == parcelId
+                        && operation.Status
+                            == ParcelCargoRecoveryOperationStatus.PENDING))
+            .SingleOrDefaultAsync(ct);
+
+    public async Task<ParcelCargoRecoveryOperationSnapshot?> TryClaimCargoRecoveryTransferAsync(
+        Guid operationId,
+        Guid parcelId,
+        Guid operatorId,
+        Guid targetTripId,
+        Guid actorUserId,
+        string reason,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        var affected = await _db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO vietride_parcel.parcel_cargo_recovery_operations
+                (id, parcel_id, operator_id, operation_type, status, source_trip_id,
+                 target_trip_id, target_state, actor_user_id, reason, refund_amount_vnd,
+                 refund_due_vnd, source_status, is_status_override, claimed_at, created_at,
+                 updated_at)
+            SELECT {operationId}, parcel.id, parcel.operator_id, 'TRANSFER', 'PENDING',
+                   parcel.trip_id, {targetTripId}, 'RESERVED', {actorUserId}, {reason},
+                   0, 0, parcel.status::text, FALSE, {now}, {now}, {now}
+            FROM vietride_parcel.parcels AS parcel
+            WHERE parcel.id = {parcelId}
+              AND parcel.operator_id = {operatorId}
+              AND parcel.status = 'PENDING_OPERATOR_ACTION'::vietride_parcel.parcel_status
+              AND parcel.trip_id <> {targetTripId}
+            ON CONFLICT DO NOTHING;
+            """, ct);
+
+        return affected > 0
+            ? await GetCargoRecoveryOperationAsync(operationId, ct)
+            : null;
+    }
+
+    public async Task<ParcelCargoRecoveryOperationSnapshot?> TryClaimCargoRecoveryReturnAsync(
+        Guid operationId,
+        Guid parcelId,
+        Guid operatorId,
+        Guid actorUserId,
+        string reason,
+        bool isStatusOverride,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        var affected = await _db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO vietride_parcel.parcel_cargo_recovery_operations
+                (id, parcel_id, operator_id, operation_type, status, source_trip_id,
+                 target_trip_id, target_state, actor_user_id, reason, refund_amount_vnd,
+                 refund_due_vnd, source_status, is_status_override, claimed_at, created_at,
+                 updated_at)
+            SELECT {operationId}, parcel.id, parcel.operator_id, 'RETURN', 'PENDING',
+                   parcel.trip_id, NULL, NULL, {actorUserId}, {reason},
+                   GREATEST(
+                       parcel.deposit_paid_vnd
+                       + parcel.balance_paid_vnd
+                       - parcel.refunded_amount_vnd,
+                       0),
+                   GREATEST(
+                       parcel.refund_due_vnd,
+                       parcel.refunded_amount_vnd
+                       + GREATEST(
+                           parcel.deposit_paid_vnd
+                           + parcel.balance_paid_vnd
+                           - parcel.refunded_amount_vnd,
+                           0)),
+                   parcel.status::text, {isStatusOverride}, {now}, {now}, {now}
+            FROM vietride_parcel.parcels AS parcel
+            WHERE parcel.id = {parcelId}
+              AND parcel.operator_id = {operatorId}
+              AND parcel.status IN (
+                  'PENDING_OPERATOR_ACTION'::vietride_parcel.parcel_status,
+                  'TRANSFER_ESCALATED'::vietride_parcel.parcel_status)
+            ON CONFLICT DO NOTHING;
+            """, ct);
+
+        return affected > 0
+            ? await GetCargoRecoveryOperationAsync(operationId, ct)
+            : null;
+    }
+
+    public async Task<ParcelPaymentTransitionSnapshot?> TryCompleteCargoRecoveryTransferAsync(
+        Guid operationId,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        var operation = await _db.ParcelCargoRecoveryOperations
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item =>
+                item.Id == operationId
+                && item.OperationType == ParcelCargoRecoveryOperationType.TRANSFER
+                && item.Status == ParcelCargoRecoveryOperationStatus.PENDING,
+                ct);
+        if (operation?.TargetTripId is null)
+        {
+            return null;
+        }
+
+        var affected = await _db.Parcels
+            .Where(parcel =>
+                parcel.Id == operation.ParcelId
+                && parcel.OperatorId == operation.OperatorId
+                && parcel.TripId == operation.SourceTripId
+                && parcel.Status == ParcelStatus.PENDING_OPERATOR_ACTION)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(parcel => parcel.TripId, operation.TargetTripId.Value)
+                .SetProperty(parcel => parcel.Status, ParcelStatus.RESERVED)
+                .SetProperty(parcel => parcel.PendingActionType, (PendingActionType?)null)
+                .SetProperty(parcel => parcel.PendingActionResumeStatus, (ParcelStatus?)null)
+                .SetProperty(parcel => parcel.PendingActionReason, (string?)null)
+                .SetProperty(parcel => parcel.TransferTargetTripId, (Guid?)null)
+                .SetProperty(parcel => parcel.TransferRequestedAt, (DateTimeOffset?)null)
+                .SetProperty(parcel => parcel.UpdatedAt, now),
+                ct);
+        if (affected == 0)
+        {
+            return null;
+        }
+
+        var completed = await _db.ParcelCargoRecoveryOperations
+            .Where(item =>
+                item.Id == operationId
+                && item.Status == ParcelCargoRecoveryOperationStatus.PENDING)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(
+                    item => item.Status,
+                    ParcelCargoRecoveryOperationStatus.COMPLETED)
+                .SetProperty(item => item.CompletedAt, now)
+                .SetProperty(item => item.UpdatedAt, now),
+                ct);
+        if (completed == 0)
+        {
+            return null;
+        }
+
+        return BuildSnapshot(await _db.Parcels
+            .AsNoTracking()
+            .SingleAsync(parcel => parcel.Id == operation.ParcelId, ct));
+    }
+
+    public async Task<ParcelPaymentTransitionSnapshot?> TryCompleteCargoRecoveryReturnAsync(
+        Guid operationId,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        var operation = await _db.ParcelCargoRecoveryOperations
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item =>
+                item.Id == operationId
+                && item.OperationType == ParcelCargoRecoveryOperationType.RETURN
+                && item.Status == ParcelCargoRecoveryOperationStatus.PENDING,
+                ct);
+        if (operation is null)
+        {
+            return null;
+        }
+
+        var affected = await _db.Parcels
+            .Where(parcel =>
+                parcel.Id == operation.ParcelId
+                && parcel.OperatorId == operation.OperatorId
+                && parcel.TripId == operation.SourceTripId
+                && (parcel.Status == ParcelStatus.PENDING_OPERATOR_ACTION
+                    || parcel.Status == ParcelStatus.TRANSFER_ESCALATED))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(parcel => parcel.Status, ParcelStatus.RETURNED)
+                .SetProperty(parcel => parcel.ReturnReason, operation.Reason)
+                .SetProperty(parcel => parcel.ReturnedAt, now)
+                .SetProperty(parcel => parcel.ReturnedByUserId, operation.ActorUserId)
+                .SetProperty(
+                    parcel => parcel.RefundDueVnd,
+                    Money.FromRaw(operation.RefundDueVnd))
+                .SetProperty(parcel => parcel.UpdatedAt, now),
+                ct);
+        if (affected == 0)
+        {
+            return null;
+        }
+
+        var completed = await _db.ParcelCargoRecoveryOperations
+            .Where(item =>
+                item.Id == operationId
+                && item.Status == ParcelCargoRecoveryOperationStatus.PENDING)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(
+                    item => item.Status,
+                    ParcelCargoRecoveryOperationStatus.COMPLETED)
+                .SetProperty(item => item.CompletedAt, now)
+                .SetProperty(item => item.UpdatedAt, now),
+                ct);
+        if (completed == 0)
+        {
+            return null;
+        }
+
+        return BuildSnapshot(await _db.Parcels
+            .AsNoTracking()
+            .SingleAsync(parcel => parcel.Id == operation.ParcelId, ct));
+    }
+
+    public async Task<bool> TryFailCargoRecoveryOperationAsync(
+        Guid operationId,
+        string failureCode,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        var affected = await _db.ParcelCargoRecoveryOperations
+            .Where(operation =>
+                operation.Id == operationId
+                && operation.Status == ParcelCargoRecoveryOperationStatus.PENDING)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(
+                    operation => operation.Status,
+                    ParcelCargoRecoveryOperationStatus.FAILED)
+                .SetProperty(operation => operation.CompletedAt, now)
+                .SetProperty(operation => operation.FailureCode, failureCode)
+                .SetProperty(operation => operation.UpdatedAt, now),
+                ct);
+        return affected > 0;
+    }
+
+    public async Task<IReadOnlyList<ParcelCargoRecoveryOperationSnapshot>>
+        GetStaleCargoRecoveryOperationsAsync(
+            DateTimeOffset claimedAtCutoff,
+            int maxBatch,
+            CancellationToken ct)
+        => await ProjectCargoRecoveryOperations(
+                _db.ParcelCargoRecoveryOperations
+                    .AsNoTracking()
+                    .Where(operation =>
+                        operation.Status
+                            == ParcelCargoRecoveryOperationStatus.PENDING
+                        && operation.ClaimedAt <= claimedAtCutoff))
+            .OrderBy(operation => operation.ClaimedAt)
+            .ThenBy(operation => operation.Id)
+            .Take(maxBatch)
+            .ToListAsync(ct);
+
     public async Task<ParcelPaymentTransitionSnapshot?> TryReturnAsync(
-        Guid parcelId, Guid operatorId, Guid returnedByUserId, string reason, DateTimeOffset now, CancellationToken ct)
+        Guid parcelId,
+        Guid operatorId,
+        Guid returnedByUserId,
+        string reason,
+        long refundDueVnd,
+        DateTimeOffset now,
+        CancellationToken ct)
     {
         var affected = await _db.Parcels
             .Where(p => p.Id == parcelId
@@ -1155,87 +1553,112 @@ internal sealed class ParcelRepository : IParcelRepository
                 .SetProperty(p => p.ReturnReason, reason)
                 .SetProperty(p => p.ReturnedAt, now)
                 .SetProperty(p => p.ReturnedByUserId, returnedByUserId)
+                .SetProperty(p => p.RefundDueVnd, Money.FromRaw(refundDueVnd))
                 .SetProperty(p => p.UpdatedAt, now), ct);
 
         return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
     }
 
-    public async Task<IReadOnlyList<ParcelEventSnapshot>> TryRejectPreAcceptanceByTripIdAsync(
-        Guid tripId, DateTimeOffset now, CancellationToken ct)
-    {
-        return await ExecuteBulkReturningAsync(
-            """
-            UPDATE vietride_parcel.parcels
-            SET status = CAST(@target_status AS vietride_parcel.parcel_status),
-                rejection_reason = @reason,
-                rejected_at = @now,
-                updated_at = @now
-            WHERE trip_id = @trip_id
-              AND status IN (
-                  CAST(@pending_payment_status AS vietride_parcel.parcel_status),
-                  CAST(@pending_review_status AS vietride_parcel.parcel_status))
-            RETURNING id, parcel_code, operator_id, trip_id, status::text, deposit_amount, additional_amount, sender_user_id, recipient_user_id;
-            """,
-            command =>
-            {
-                AddParameter(command, "target_status", ParcelStatus.REJECTED.ToString());
-                AddParameter(command, "pending_payment_status", ParcelStatus.PENDING_PAYMENT.ToString());
-                AddParameter(command, "pending_review_status", ParcelStatus.PENDING_OPERATOR_REVIEW.ToString());
-                AddParameter(command, "trip_id", tripId);
-                AddParameter(command, "reason", "TRIP_CANCELLED");
-                AddParameter(command, "now", now);
-            },
-            ct);
-    }
+    private IQueryable<ParcelCargoRecoveryOperationSnapshot>
+        ProjectCargoRecoveryOperations(
+            IQueryable<ParcelCargoRecoveryOperation> operations)
+        => from operation in operations
+           join parcel in _db.Parcels.AsNoTracking()
+               on operation.ParcelId equals parcel.Id
+           select new ParcelCargoRecoveryOperationSnapshot(
+               operation.Id,
+               parcel.Id,
+               parcel.ParcelCode,
+               operation.OperatorId,
+               parcel.SenderUserId,
+               operation.OperationType,
+               operation.Status,
+               operation.SourceTripId,
+               operation.TargetTripId,
+               operation.TargetState,
+               operation.ActorUserId,
+               operation.Reason,
+               operation.RefundAmountVnd,
+               operation.RefundDueVnd,
+               operation.SourceStatus,
+               operation.IsStatusOverride,
+               operation.ClaimedAt,
+               operation.CompletedAt,
+               operation.FailureCode,
+               parcel.ActualWeightKg ?? parcel.EstimatedWeightKg,
+               parcel.ActualVolumeM3 ?? parcel.EstimatedVolumeM3,
+               parcel.Status,
+               parcel.TripId,
+               parcel.ReturnedAt);
 
-    public async Task<IReadOnlyList<ParcelEventSnapshot>> TryCancelPendingByTripIdAsync(
-        Guid tripId, DateTimeOffset now, CancellationToken ct)
-    {
-        return await ExecuteBulkReturningAsync(
-            """
-            UPDATE vietride_parcel.parcels
-            SET status = CAST(@target_status AS vietride_parcel.parcel_status),
-                cancellation_reason = @reason,
-                updated_at = @now
-            WHERE trip_id = @trip_id
-              AND status = CAST(@source_status AS vietride_parcel.parcel_status)
-            RETURNING id, parcel_code, operator_id, trip_id, status::text, deposit_amount, additional_amount, sender_user_id, recipient_user_id;
-            """,
-            command =>
-            {
-                AddParameter(command, "target_status", ParcelStatus.CANCELLED.ToString());
-                AddParameter(command, "source_status", ParcelStatus.PENDING.ToString());
-                AddParameter(command, "trip_id", tripId);
-                AddParameter(command, "reason", "TRIP_CANCELLED");
-                AddParameter(command, "now", now);
-            },
-            ct);
-    }
-
-    public async Task<IReadOnlyList<TripCancellationParcelImpact>> GetTripCancellationImpactAsync(
+    public async Task<IReadOnlyList<TripCancellationParcelCandidate>> GetTripCancellationCandidatesAsync(
         Guid tripId,
         Guid operatorId,
         CancellationToken ct)
         => await _db.Parcels
             .AsNoTracking()
             .Where(parcel => parcel.TripId == tripId && parcel.OperatorId == operatorId)
-            .Where(parcel => parcel.Status == ParcelStatus.PENDING_OPERATOR_REVIEW
-                || parcel.Status == ParcelStatus.PENDING_PAYMENT
-                || parcel.Status == ParcelStatus.PENDING
-                || parcel.Status == ParcelStatus.LOADED
-                || parcel.Status == ParcelStatus.IN_TRANSIT)
             .OrderBy(parcel => parcel.Id)
-            .Select(parcel => new TripCancellationParcelImpact(
+            .Select(parcel => new TripCancellationParcelCandidate(
                 parcel.Id,
-                parcel.Status.ToString(),
-                parcel.Status == ParcelStatus.PENDING
-                    ? parcel.DepositAmount.Amount + parcel.AdditionalAmount.Amount
-                    : 0))
+                parcel.ParcelCode,
+                parcel.OperatorId,
+                parcel.TripId,
+                parcel.Status,
+                parcel.DepositPaidVnd.Amount,
+                parcel.BalancePaidVnd.Amount,
+                parcel.RefundedAmountVnd.Amount,
+                parcel.SenderUserId,
+                parcel.EstimatedWeightKg,
+                parcel.EstimatedVolumeM3,
+                parcel.ActualWeightKg,
+                parcel.ActualVolumeM3))
             .ToListAsync(ct);
+
+    public async Task<bool> TryApplyTripCancellationAsync(
+        Guid parcelId,
+        Guid operatorId,
+        ParcelStatus expectedStatus,
+        ParcelStatus targetStatus,
+        long refundDueVnd,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        var query = _db.Parcels.Where(parcel => parcel.Id == parcelId
+            && parcel.OperatorId == operatorId
+            && parcel.Status == expectedStatus);
+
+        int affected;
+        if (targetStatus == ParcelStatus.CANCELLED)
+        {
+            affected = await query.ExecuteUpdateAsync(setters => setters
+                .SetProperty(parcel => parcel.Status, ParcelStatus.CANCELLED)
+                .SetProperty(parcel => parcel.CancellationReason, "TRIP_CANCELLED")
+                .SetProperty(parcel => parcel.RefundDueVnd, Money.FromRaw(refundDueVnd))
+                .SetProperty(parcel => parcel.UpdatedAt, now), ct);
+        }
+        else if (targetStatus == ParcelStatus.PENDING_OPERATOR_ACTION)
+        {
+            affected = await query.ExecuteUpdateAsync(setters => setters
+                .SetProperty(parcel => parcel.Status, ParcelStatus.PENDING_OPERATOR_ACTION)
+                .SetProperty(parcel => parcel.PendingActionReason, "TRIP_CANCELLED")
+                .SetProperty(parcel => parcel.UpdatedAt, now), ct);
+        }
+        else
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(targetStatus),
+                targetStatus,
+                "Trip cancellation supports only CANCELLED or PENDING_OPERATOR_ACTION.");
+        }
+
+        return affected == 1;
+    }
 
     public async Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkRequestTransferByTripIdAsync(
         Guid oldTripId,
         Guid newTripId,
+        Guid operatorId,
         DateTimeOffset now,
         CancellationToken ct)
     {
@@ -1245,8 +1668,14 @@ internal sealed class ParcelRepository : IParcelRepository
             SET status = CAST(@target_status AS vietride_parcel.parcel_status),
                 transfer_target_trip_id = @new_trip_id,
                 transfer_requested_at = @now,
+                transfer_confirmed_at = NULL,
+                transfer_confirmed_by_user_id = NULL,
+                transfer_confirmation_claim_id = NULL,
+                transfer_confirmation_claimed_at = NULL,
+                transfer_confirmation_claimed_by_user_id = NULL,
                 updated_at = @now
             WHERE trip_id = @old_trip_id
+                  AND operator_id = @operator_id
                   AND status IN (
                       CAST(@loaded_status AS vietride_parcel.parcel_status),
                       CAST(@in_transit_status AS vietride_parcel.parcel_status))
@@ -1259,6 +1688,7 @@ internal sealed class ParcelRepository : IParcelRepository
                 AddParameter(command, "in_transit_status", ParcelStatus.IN_TRANSIT.ToString());
                 AddParameter(command, "old_trip_id", oldTripId);
                 AddParameter(command, "new_trip_id", newTripId);
+                AddParameter(command, "operator_id", operatorId);
                 AddParameter(command, "now", now);
             },
             ct);
@@ -1305,12 +1735,29 @@ internal sealed class ParcelRepository : IParcelRepository
         Guid operatorId,
         ParcelStatus targetStatus,
         string reason,
+        long refundDueVnd,
         DateTimeOffset now,
         CancellationToken ct)
     {
-        var sourceStatuses = targetStatus == ParcelStatus.REJECTED
-            ? new[] { ParcelStatus.PENDING_PAYMENT, ParcelStatus.PENDING_OPERATOR_REVIEW }
-            : new[] { ParcelStatus.PENDING, ParcelStatus.PENDING_ADDITIONAL_PAYMENT };
+        if (targetStatus != ParcelStatus.CANCELLED)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(targetStatus),
+                targetStatus,
+                "Manual cancellation always targets CANCELLED.");
+        }
+
+        ParcelStatus[] sourceStatuses =
+        [
+            ParcelStatus.PENDING_OPERATOR_REVIEW,
+            ParcelStatus.PENDING_PAYMENT,
+            ParcelStatus.PENDING,
+            ParcelStatus.PENDING_ADDITIONAL_PAYMENT,
+            ParcelStatus.RESERVED,
+            ParcelStatus.CHECKED_IN,
+            ParcelStatus.PENDING_FINAL_PAYMENT,
+            ParcelStatus.READY_TO_LOAD,
+        ];
 
         var affected = await _db.Parcels
             .Where(p => p.Id == parcelId
@@ -1319,8 +1766,7 @@ internal sealed class ParcelRepository : IParcelRepository
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(p => p.Status, targetStatus)
                 .SetProperty(p => p.CancellationReason, reason)
-                .SetProperty(p => p.RejectionReason, targetStatus == ParcelStatus.REJECTED ? reason : (string?)null)
-                .SetProperty(p => p.RejectedAt, targetStatus == ParcelStatus.REJECTED ? now : (DateTimeOffset?)null)
+                .SetProperty(p => p.RefundDueVnd, Money.FromRaw(refundDueVnd))
                 .SetProperty(p => p.UpdatedAt, now), ct);
 
         return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
@@ -1424,18 +1870,16 @@ internal sealed class ParcelRepository : IParcelRepository
 
     // ---- Phase 7: Delivery Token ----
 
-    public async Task<ParcelEntity?> FindByDeliveryTokenAsync(Guid token, CancellationToken ct)
-        => await _db.Parcels.FirstOrDefaultAsync(p => p.DeliveryToken == token, ct);
-
     public async Task<ParcelPaymentTransitionSnapshot?> TryConfirmDeliveryAsync(
-        Guid parcelId, Guid token, string ip, DateTimeOffset now, CancellationToken ct)
+        Guid parcelId, Guid deliveryTokenId, string ip, DateTimeOffset now, CancellationToken ct)
     {
         var affected = await _db.Parcels
             .Where(p => p.Id == parcelId
-                && p.DeliveryToken == token
-                && p.DeliveryTokenRevokedAt == null
-                && p.DeliveryTokenExpiresAt != null
-                && p.DeliveryTokenExpiresAt > now
+                && _db.ParcelDeliveryTokens.Any(token =>
+                    token.Id == deliveryTokenId
+                    && token.ParcelId == p.Id
+                    && token.RevokedAt == null
+                    && token.ExpiresAt > now)
                 && p.Status == ParcelStatus.DELIVERED_PENDING_CONFIRM)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(p => p.Status, ParcelStatus.DELIVERY_CONFIRMED)
@@ -1446,14 +1890,15 @@ internal sealed class ParcelRepository : IParcelRepository
     }
 
     public async Task<ParcelPaymentTransitionSnapshot?> TryRejectDeliveryAsync(
-        Guid parcelId, Guid token, string reason, DateTimeOffset now, CancellationToken ct)
+        Guid parcelId, Guid deliveryTokenId, string reason, DateTimeOffset now, CancellationToken ct)
     {
         var affected = await _db.Parcels
             .Where(p => p.Id == parcelId
-                && p.DeliveryToken == token
-                && p.DeliveryTokenRevokedAt == null
-                && p.DeliveryTokenExpiresAt != null
-                && p.DeliveryTokenExpiresAt > now
+                && _db.ParcelDeliveryTokens.Any(token =>
+                    token.Id == deliveryTokenId
+                    && token.ParcelId == p.Id
+                    && token.RevokedAt == null
+                    && token.ExpiresAt > now)
                 && p.Status == ParcelStatus.DELIVERED_PENDING_CONFIRM)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(p => p.Status, ParcelStatus.DELIVERY_REJECTED)
@@ -1464,14 +1909,15 @@ internal sealed class ParcelRepository : IParcelRepository
     }
 
     public async Task<ParcelPaymentTransitionSnapshot?> TryUndoRejectDeliveryAsync(
-        Guid parcelId, Guid token, DateTimeOffset now, CancellationToken ct)
+        Guid parcelId, Guid deliveryTokenId, DateTimeOffset now, CancellationToken ct)
     {
         var affected = await _db.Parcels
             .Where(p => p.Id == parcelId
-                && p.DeliveryToken == token
-                && p.DeliveryTokenRevokedAt == null
-                && p.DeliveryTokenExpiresAt != null
-                && p.DeliveryTokenExpiresAt > now
+                && _db.ParcelDeliveryTokens.Any(token =>
+                    token.Id == deliveryTokenId
+                    && token.ParcelId == p.Id
+                    && token.RevokedAt == null
+                    && token.ExpiresAt > now)
                 && p.Status == ParcelStatus.DELIVERY_REJECTED
                 && p.RejectedAt != null
                 && p.RejectedAt.Value.AddMinutes(15) > now)
@@ -1481,6 +1927,45 @@ internal sealed class ParcelRepository : IParcelRepository
                 .SetProperty(p => p.RejectionReason, (string?)null)
                 .SetProperty(p => p.UpdatedAt, now), ct);
         return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
+    }
+
+    public async Task<ParcelPaymentTransitionSnapshot?> TryPrepareDeliveryResendAsync(
+        Guid parcelId,
+        ParcelStatus expectedStatus,
+        Guid expectedActiveTokenId,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        var query = _db.Parcels
+            .Where(parcel =>
+                parcel.Id == parcelId
+                && parcel.Status == expectedStatus
+                && _db.ParcelDeliveryTokens.Any(token =>
+                    token.Id == expectedActiveTokenId
+                    && token.ParcelId == parcel.Id
+                    && token.RevokedAt == null));
+
+        if (expectedStatus == ParcelStatus.DELIVERY_REJECTED)
+        {
+            query = query.Where(parcel =>
+                parcel.RejectedAt != null
+                && parcel.RejectedAt.Value.AddMinutes(15) > now);
+        }
+        else if (expectedStatus != ParcelStatus.DELIVERED_PENDING_CONFIRM)
+        {
+            return null;
+        }
+
+        var affected = await query.ExecuteUpdateAsync(setters => setters
+            .SetProperty(parcel => parcel.Status, ParcelStatus.DELIVERED_PENDING_CONFIRM)
+            .SetProperty(parcel => parcel.RejectedAt, (DateTimeOffset?)null)
+            .SetProperty(parcel => parcel.RejectionReason, (string?)null)
+            .SetProperty(parcel => parcel.LastReminderAt, (DateTimeOffset?)null)
+            .SetProperty(parcel => parcel.UpdatedAt, now), ct);
+
+        return affected > 0
+            ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(parcel => parcel.Id == parcelId, ct))
+            : null;
     }
 
     public async Task<ParcelPaymentTransitionSnapshot?> TryManualConfirmDeliveryAsync(
@@ -1498,6 +1983,21 @@ internal sealed class ParcelRepository : IParcelRepository
                 .SetProperty(p => p.UpdatedAt, now), ct);
         return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
     }
+
+    public Task<ParcelManualConfirmationSnapshot?> GetManualConfirmationSnapshotAsync(
+        Guid parcelId,
+        CancellationToken ct)
+        => _db.Parcels
+            .AsNoTracking()
+            .Where(parcel => parcel.Id == parcelId)
+            .Select(parcel => new ParcelManualConfirmationSnapshot(
+                parcel.Id,
+                parcel.Status,
+                parcel.ConfirmedAt,
+                parcel.ConfirmedByUserId,
+                parcel.ConfirmNote))
+            .SingleOrDefaultAsync(ct);
+
     private static ParcelPaymentTransitionSnapshot BuildSnapshot(ParcelEntity p)
         => new(
             p.Id, p.ParcelCode, p.Status, p.DepositAmount.Amount, p.AdditionalAmount.Amount,
@@ -1532,9 +2032,7 @@ internal sealed class ParcelRepository : IParcelRepository
                 reader.FieldCount > 5 ? reader.GetInt64(5) : 0,
                 reader.FieldCount > 6 ? reader.GetInt64(6) : 0,
                 reader.FieldCount > 7 ? reader.GetGuid(7) : Guid.Empty,
-                reader.FieldCount > 8 && !reader.IsDBNull(8) ? reader.GetGuid(8) : null,
-                reader.FieldCount > 9 && !reader.IsDBNull(9) ? reader.GetGuid(9) : null,
-                reader.FieldCount > 10 && !reader.IsDBNull(10) ? reader.GetFieldValue<DateTimeOffset>(10) : null));
+                reader.FieldCount > 8 && !reader.IsDBNull(8) ? reader.GetGuid(8) : null));
         }
 
         return snapshots;

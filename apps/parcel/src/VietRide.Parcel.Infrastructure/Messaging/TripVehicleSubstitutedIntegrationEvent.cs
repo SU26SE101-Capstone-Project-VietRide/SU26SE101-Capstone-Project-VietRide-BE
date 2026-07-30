@@ -3,16 +3,46 @@ using VietRide.Shared.Messaging.Abstractions;
 
 namespace VietRide.Parcel.Infrastructure.Messaging;
 
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record TripVehicleSubstitutedIntegrationEvent : IIntegrationEvent
 {
-    public const string EventType = "trip.vehicle_substituted";
+    public const string EventType = "trip.trip.vehicle_substituted";
 
-    public Guid OldTripId { get; init; }
-    public Guid NewTripId { get; init; }
-    public Guid OperatorId { get; init; }
-    public string? Reason { get; init; }
+    [JsonRequired]
     public Guid EventId { get; init; }
+    [JsonRequired]
     public DateTime OccurredAt { get; init; }
+    [JsonRequired]
+    public Guid SubstitutionId { get; init; }
+    [JsonRequired]
+    public DateTimeOffset DisruptedAt { get; init; }
+    [JsonRequired]
+    public Guid OperatorId { get; init; }
+    [JsonRequired]
+    public Guid OldTripId { get; init; }
+    [JsonRequired]
+    public string OldTripStatus { get; init; } = string.Empty;
+    [JsonRequired]
+    public Guid OldVehicleId { get; init; }
+    [JsonRequired]
+    public Guid NewTripId { get; init; }
+    [JsonRequired]
+    public string NewTripStatus { get; init; } = string.Empty;
+    [JsonRequired]
+    public Guid NewVehicleId { get; init; }
+    [JsonRequired]
+    public string NewVehiclePlateNumber { get; init; } = string.Empty;
+    [JsonRequired]
+    public DateTimeOffset NewTripDepartureDateTime { get; init; }
+    [JsonRequired]
+    public Guid ActorUserId { get; init; }
+    [JsonRequired]
+    public string Reason { get; init; } = string.Empty;
+    [JsonRequired]
+    public bool NotifyPassengers { get; init; }
+    [JsonRequired]
+    public IReadOnlyList<TripVehicleSubstitutionMapping> Mappings { get; init; }
+        = Array.Empty<TripVehicleSubstitutionMapping>();
 
     [JsonIgnore]
     string IIntegrationEvent.EventType => EventType;

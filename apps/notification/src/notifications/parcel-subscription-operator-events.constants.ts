@@ -1,15 +1,23 @@
 import {
   BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY,
+  PARCEL_DELIVERED_PENDING_CONFIRM_ROUTING_KEY,
+  PARCEL_DELIVERY_CONFIRMATION_REALERTED_ROUTING_KEY,
   PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY,
+  PARCEL_PENDING_OPERATOR_ACTION_REALERTED_ROUTING_KEY,
   PARCEL_REVIEW_APPROVED_ROUTING_KEY,
   PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY,
+  TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY,
 } from '@vietride/contracts';
 
 export {
   BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY,
+  PARCEL_DELIVERED_PENDING_CONFIRM_ROUTING_KEY,
+  PARCEL_DELIVERY_CONFIRMATION_REALERTED_ROUTING_KEY,
   PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY,
+  PARCEL_PENDING_OPERATOR_ACTION_REALERTED_ROUTING_KEY,
   PARCEL_REVIEW_APPROVED_ROUTING_KEY,
   PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY,
+  TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY,
 };
 
 export const OPERATOR_RECIPIENT_PROVIDER = Symbol('OPERATOR_RECIPIENT_PROVIDER');
@@ -20,8 +28,6 @@ export const BOOKING_VOUCHER_CONSENT_REJECTED_ROUTING_KEY = 'booking.voucher.con
 export const PARCEL_CREATED_ROUTING_KEY = 'parcel.parcel.created';
 export const PARCEL_LOADED_ROUTING_KEY = 'parcel.parcel.loaded';
 export const PARCEL_UNLOADED_ROUTING_KEY = 'parcel.parcel.unloaded';
-export const PARCEL_DELIVERED_PENDING_CONFIRM_ROUTING_KEY =
-  'parcel.parcel.delivered_pending_confirm';
 export const PARCEL_DELIVERY_CONFIRMED_ROUTING_KEY = 'parcel.parcel.delivery_confirmed';
 export const PARCEL_DELIVERY_REJECTED_ROUTING_KEY = 'parcel.parcel.delivery_rejected';
 export const PARCEL_CANCELLED_ROUTING_KEY = 'parcel.parcel.cancelled';
@@ -35,7 +41,6 @@ export const PARCEL_TRANSFER_ESCALATED_ROUTING_KEY = 'parcel.parcel.transfer_esc
 export const PARCEL_RETURN_INITIATED_ROUTING_KEY = 'parcel.parcel.return_initiated';
 export const PARCEL_PENDING_OPERATOR_ACTION_ROUTING_KEY = 'parcel.parcel.pending_operator_action';
 export const TRIP_STOP_ARRIVED_ROUTING_KEY = 'trip.stop.arrived';
-export const TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY = 'trip.vehicle_substituted';
 
 export const SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY = 'subscription.limit.trip_skipped';
 export const SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY = 'identity.subscription.trial_expiring';
@@ -69,6 +74,10 @@ export const PARCEL_SUBSCRIPTION_OPERATOR_QUEUE_BINDINGS = [
   {
     queue: 'notification:parcel-delivered-pending-confirm',
     routingKey: PARCEL_DELIVERED_PENDING_CONFIRM_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:parcel-delivery-confirmation-realerted',
+    routingKey: PARCEL_DELIVERY_CONFIRMATION_REALERTED_ROUTING_KEY,
   },
   {
     queue: 'notification:parcel-delivery-confirmed',
@@ -117,6 +126,10 @@ export const PARCEL_SUBSCRIPTION_OPERATOR_QUEUE_BINDINGS = [
   {
     queue: 'notification:parcel-pending-operator-action',
     routingKey: PARCEL_PENDING_OPERATOR_ACTION_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:parcel-pending-operator-action-realerted',
+    routingKey: PARCEL_PENDING_OPERATOR_ACTION_REALERTED_ROUTING_KEY,
   },
   { queue: 'notification:trip-stop-arrived', routingKey: TRIP_STOP_ARRIVED_ROUTING_KEY },
   {

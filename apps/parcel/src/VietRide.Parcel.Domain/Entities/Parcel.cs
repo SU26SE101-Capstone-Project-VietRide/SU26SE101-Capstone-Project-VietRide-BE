@@ -92,10 +92,6 @@ public sealed class Parcel : BaseEntity<Guid>
     public DateTimeOffset? ReviewedAt { get; private set; }
     public Guid? ReviewedByUserId { get; private set; }
 
-    public Guid? DeliveryToken { get; private set; }
-    public DateTimeOffset? DeliveryTokenExpiresAt { get; private set; }
-    public DateTimeOffset? DeliveryTokenRevokedAt { get; private set; }
-
     public DateTimeOffset? LoadedAt { get; private set; }
     public Guid? LoadedByUserId { get; private set; }
     public DateTimeOffset? UnloadedAt { get; private set; }
@@ -111,6 +107,9 @@ public sealed class Parcel : BaseEntity<Guid>
     public DateTimeOffset? TransferRequestedAt { get; private set; }
     public DateTimeOffset? TransferConfirmedAt { get; private set; }
     public Guid? TransferConfirmedByUserId { get; private set; }
+    public Guid? TransferConfirmationClaimId { get; private set; }
+    public DateTimeOffset? TransferConfirmationClaimedAt { get; private set; }
+    public Guid? TransferConfirmationClaimedByUserId { get; private set; }
 
     public string? ReturnReason { get; private set; }
     public DateTimeOffset? ReturnedAt { get; private set; }

@@ -1,11 +1,9 @@
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
-using VietRide.Parcel.Application.Abstractions.ServiceClients;
-using VietRide.Parcel.Application.Exceptions;
-using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
-using VietRide.Shared.Application.Outbox;
+using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Parcel.Application.Features.Parcels.OperationalRecovery;
 
@@ -13,140 +11,144 @@ public sealed class ReturnParcelCommandHandler
     : IRequestHandler<ReturnParcelCommand, OperationalParcelResponse>
 {
     private readonly IParcelRepository _parcelRepository;
-    private readonly IIdentityServiceClient _identityClient;
-    private readonly ITripServiceClient _tripClient;
-    private readonly IIntegrationEventOutbox _outbox;
-    private readonly IParcelStatsRepository _statsRepository;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly IMediator _mediator;
+    private readonly IClock _clock;
 
     public ReturnParcelCommandHandler(
         IParcelRepository parcelRepository,
-        IIdentityServiceClient identityClient,
-        ITripServiceClient tripClient,
-        IIntegrationEventOutbox outbox,
-        IParcelStatsRepository statsRepository)
+        IUnitOfWork unitOfWork,
+        IMediator mediator,
+        IClock clock)
     {
         _parcelRepository = parcelRepository;
-        _identityClient = identityClient;
-        _tripClient = tripClient;
-        _outbox = outbox;
-        _statsRepository = statsRepository;
+        _unitOfWork = unitOfWork;
+        _mediator = mediator;
+        _clock = clock;
     }
 
     public async Task<OperationalParcelResponse> Handle(
         ReturnParcelCommand command,
         CancellationToken cancellationToken)
     {
-        var parcel = await _parcelRepository.GetByIdAsync(command.ParcelId, cancellationToken);
+        var parcel = await _parcelRepository.GetByIdAsync(
+            command.ParcelId,
+            cancellationToken);
         if (parcel is null)
-            throw new CodedNotFoundException("PARCEL_NOT_FOUND", $"Parcel '{command.ParcelId}' not found.");
+        {
+            throw new CodedNotFoundException(
+                "PARCEL_NOT_FOUND",
+                $"Parcel '{command.ParcelId}' not found.");
+        }
 
         if (parcel.OperatorId != command.OperatorId)
-            throw new ForbiddenException("FORBIDDEN", "Parcel does not belong to this operator.");
-
-        if (parcel.Status is not (ParcelStatus.PENDING_OPERATOR_ACTION or ParcelStatus.TRANSFER_ESCALATED))
-            throw new CodedConflictException("INVALID_TRANSITION", $"Parcel status '{parcel.Status}' cannot be returned.");
-
-        if (string.IsNullOrWhiteSpace(command.Reason))
-            throw new CodedValidationException("VALIDATION_ERROR", "Return reason is required.");
-
-        var fromStatus = parcel.Status;
-        var now = DateTimeOffset.UtcNow;
-        var snapshot = await _parcelRepository.TryReturnAsync(
-            command.ParcelId,
-            command.OperatorId,
-            command.ReturnedByUserId,
-            command.Reason.Trim(),
-            now,
-            cancellationToken);
-
-        if (snapshot is null)
-            throw new CodedConflictException("RACE_LOST", "Parcel status changed concurrently; cannot return.");
-
-        await EnsureCargoSuccessAsync(
-            await _tripClient.ReleaseCargoAsync(
-                snapshot.TripId,
-                snapshot.ParcelId,
-                parcel.ActualWeightKg ?? parcel.EstimatedWeightKg,
-                parcel.ActualVolumeM3 ?? parcel.EstimatedVolumeM3,
-                command.IdempotencyKey ?? snapshot.ParcelId,
-                cancellationToken));
-
-        var refundAmount = await ParcelRefundAmountCalculator.CalculateRefundAsync(
-            _identityClient,
-            snapshot.OperatorId,
-            snapshot.DepositAmount + snapshot.AdditionalAmount,
-            cancellationToken);
-
-        await ParcelOutboxEvents.EnqueueAsync(
-            _outbox,
-            ParcelOutboxEvents.Returned,
-            new
-            {
-                parcelId = snapshot.ParcelId,
-                parcelCode = snapshot.ParcelCode,
-                operatorId = snapshot.OperatorId,
-                userId = snapshot.SenderUserId,
-                tripId = snapshot.TripId,
-                refundAmount,
-            },
-            cancellationToken);
-        await ParcelOutboxEvents.EnqueueRefundAsync(
-            _outbox,
-            snapshot.ParcelId,
-            snapshot.SenderUserId,
-            refundAmount,
-            cancellationToken);
-
-        if (command.IsStatusOverride)
         {
-            await ParcelOutboxEvents.EnqueueAsync(
-                _outbox,
-                ParcelOutboxEvents.StatusOverridden,
-                new
-                {
-                    parcelId = snapshot.ParcelId,
-                    operatorId = snapshot.OperatorId,
-                    actorUserId = command.ReturnedByUserId,
-                    fromStatus = fromStatus.ToString(),
-                    toStatus = snapshot.Status.ToString(),
-                    reason = command.Reason.Trim(),
-                    timestamp = now,
-                },
+            throw new ForbiddenException(
+                "FORBIDDEN",
+                "Parcel does not belong to this operator.");
+        }
+
+        if (parcel.Status is not (
+            ParcelStatus.PENDING_OPERATOR_ACTION
+            or ParcelStatus.TRANSFER_ESCALATED))
+        {
+            throw new CodedConflictException(
+                "INVALID_STATUS",
+                $"Parcel status '{parcel.Status}' cannot be returned.");
+        }
+
+        var reason = command.Reason?.Trim();
+        if (string.IsNullOrEmpty(reason) || reason.Length > 500)
+        {
+            throw new CodedValidationException(
+                "VALIDATION_ERROR",
+                "Return reason must contain between 1 and 500 characters.");
+        }
+
+        var active = await _parcelRepository.GetActiveCargoRecoveryOperationAsync(
+            parcel.Id,
+            cancellationToken);
+        if (active is not null)
+        {
+            EnsureMatchingReturn(active, parcel.TripId);
+            return await _mediator.Send(
+                new ResumeCargoRecoveryOperationCommand(active.Id),
                 cancellationToken);
         }
 
-        await _statsRepository.UpsertIncrementAsync(
-            snapshot.OperatorId,
-            DateOnly.FromDateTime(now.UtcDateTime),
-            0, 0, 0, 0, 1, 0, refundAmount,
+        var operation = await ClaimReturnAsync(
+            command,
+            parcel.TripId,
+            reason,
             cancellationToken);
-
-        return new OperationalParcelResponse(
-            snapshot.ParcelId,
-            snapshot.ParcelCode,
-            snapshot.Status.ToString(),
-            TripId: snapshot.TripId,
-            ReturnReason: command.Reason.Trim(),
-            ReturnedAt: now);
+        return await _mediator.Send(
+            new ResumeCargoRecoveryOperationCommand(operation.Id),
+            cancellationToken);
     }
 
-    private static Task EnsureCargoSuccessAsync(TripCargoOutcome outcome)
+    private async Task<ParcelCargoRecoveryOperationSnapshot> ClaimReturnAsync(
+        ReturnParcelCommand command,
+        Guid sourceTripId,
+        string reason,
+        CancellationToken cancellationToken)
     {
-        if (outcome is null)
-            return Task.CompletedTask;
-
-        return outcome.Kind switch
+        ParcelCargoRecoveryOperationSnapshot? claimed;
+        await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
         {
-            TripCargoOutcomeKind.Success => Task.CompletedTask,
-            TripCargoOutcomeKind.TripNotFound => throw new ParcelDependencyUnavailableException(
-                "TRIP_NOT_FOUND",
-                outcome.ErrorMessage ?? "Trip was not found."),
-            TripCargoOutcomeKind.CapacityExceeded => throw new ParcelDependencyUnavailableException(
-                "TRIP_CARGO_CAPACITY_EXCEEDED",
-                outcome.ErrorMessage ?? "Trip cargo capacity would be exceeded."),
-            _ => throw new ParcelDependencyUnavailableException(
-                "TRIP_SERVICE_UNAVAILABLE",
-                outcome.ErrorMessage ?? "Trip service unavailable."),
-        };
+            claimed = await _parcelRepository.TryClaimCargoRecoveryReturnAsync(
+                command.IdempotencyKey,
+                command.ParcelId,
+                command.OperatorId,
+                command.ReturnedByUserId,
+                reason,
+                command.IsStatusOverride,
+                _clock.UtcNow,
+                cancellationToken);
+            if (claimed is null)
+            {
+                await _unitOfWork.RollbackAsync(cancellationToken);
+            }
+            else
+            {
+                await _unitOfWork.CommitAsync(cancellationToken);
+            }
+        }
+        catch
+        {
+            await _unitOfWork.RollbackAsync(cancellationToken);
+            throw;
+        }
+
+        if (claimed is not null)
+        {
+            return claimed;
+        }
+
+        var concurrent = await _parcelRepository.GetActiveCargoRecoveryOperationAsync(
+            command.ParcelId,
+            cancellationToken);
+        if (concurrent is not null)
+        {
+            EnsureMatchingReturn(concurrent, sourceTripId);
+            return concurrent;
+        }
+
+        throw new CodedConflictException(
+            "TRIP_CARGO_TRANSFER_CONFLICT",
+            "Parcel return lost a concurrent state change.");
+    }
+
+    private static void EnsureMatchingReturn(
+        ParcelCargoRecoveryOperationSnapshot operation,
+        Guid sourceTripId)
+    {
+        if (operation.OperationType != ParcelCargoRecoveryOperationType.RETURN
+            || operation.SourceTripId != sourceTripId)
+        {
+            throw new CodedConflictException(
+                "PARCEL_CARGO_RECOVERY_IN_PROGRESS",
+                "Parcel already has a different cargo recovery operation in progress.");
+        }
     }
 }

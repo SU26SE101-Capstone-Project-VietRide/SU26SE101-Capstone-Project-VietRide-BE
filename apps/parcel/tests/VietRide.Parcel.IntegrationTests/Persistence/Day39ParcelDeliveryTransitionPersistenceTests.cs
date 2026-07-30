@@ -2,6 +2,8 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Features.Parcels;
+using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Parcel.Infrastructure;
 using VietRide.Shared.Kernel.Abstractions;
@@ -56,9 +58,10 @@ public sealed class Day39ParcelDeliveryTransitionPersistenceTests
                 persisted.Status.Should().Be(ParcelStatus.UNLOADED);
                 persisted.UnloadedAt.Should().BeOneOf(unloadTimes);
                 persisted.DeliveredPendingConfirmAt.Should().BeNull();
-                persisted.DeliveryToken.Should().BeNull();
-                persisted.DeliveryTokenExpiresAt.Should().BeNull();
-                persisted.DeliveryTokenRevokedAt.Should().BeNull();
+                (await readContext.ParcelDeliveryTokens
+                    .AnyAsync(token => token.ParcelId == unloadParcel.Id))
+                    .Should()
+                    .BeFalse();
             }
 
             await using (var replayContext = CreateDbContext(dataSource))
@@ -73,11 +76,9 @@ public sealed class Day39ParcelDeliveryTransitionPersistenceTests
             var deliveryAttempts = new[]
             {
                 new DeliveryAttempt(
-                    Guid.NewGuid(),
                     new DateTimeOffset(2026, 7, 15, 9, 0, 0, TimeSpan.Zero),
                     new[] { "https://storage.googleapis.com/test/delivery-1.webp" }),
                 new DeliveryAttempt(
-                    Guid.NewGuid(),
                     new DateTimeOffset(2026, 7, 15, 9, 0, 1, TimeSpan.Zero),
                     new[] { "https://storage.googleapis.com/test/delivery-2.webp" }),
             };
@@ -85,35 +86,43 @@ public sealed class Day39ParcelDeliveryTransitionPersistenceTests
                 dataSource,
                 (repository, index) => repository.TryMarkDeliveredPendingConfirmAsync(
                     deliverParcel.Id,
-                    deliveryAttempts[index].Token,
-                    deliveryAttempts[index].DeliveredAt.AddHours(48),
                     deliveryAttempts[index].PhotoUrls,
                     deliveryAttempts[index].DeliveredAt,
                     CancellationToken.None));
 
             deliveryResults.Count(result => result is not null).Should().Be(1);
 
-            Guid persistedToken;
+            var rawToken = Guid.NewGuid();
+            Guid persistedTokenId;
             await using (var readContext = CreateDbContext(dataSource))
             {
                 var persisted = await readContext.Parcels
                     .AsNoTracking()
                     .SingleAsync(parcel => parcel.Id == deliverParcel.Id);
-                var winningAttempt = deliveryAttempts.Single(attempt => attempt.Token == persisted.DeliveryToken);
+                var winningAttempt = deliveryAttempts.Single(
+                    attempt => attempt.DeliveredAt == persisted.DeliveredPendingConfirmAt);
 
                 persisted.Status.Should().Be(ParcelStatus.DELIVERED_PENDING_CONFIRM);
                 persisted.DeliveredPendingConfirmAt.Should().Be(winningAttempt.DeliveredAt);
-                persisted.DeliveryTokenExpiresAt.Should().Be(winningAttempt.DeliveredAt.AddHours(48));
-                persisted.DeliveryTokenRevokedAt.Should().BeNull();
                 persisted.DeliveryPhotoUrls.Should().Equal(winningAttempt.PhotoUrls);
-                persistedToken = persisted.DeliveryToken!.Value;
+
+                var deliveryToken = ParcelDeliveryToken.Issue(
+                    deliverParcel.Id,
+                    DeliveryTokenHasher.Hash(rawToken),
+                    winningAttempt.DeliveredAt.AddHours(48),
+                    Guid.NewGuid(),
+                    ParcelDeliveryTokenIssueReason.INITIAL_DELIVERY,
+                    winningAttempt.DeliveredAt);
+                readContext.ParcelDeliveryTokens.Add(deliveryToken);
+                await readContext.SaveChangesAsync();
+                persistedTokenId = deliveryToken.Id;
             }
 
             await using (var confirmationContext = CreateDbContext(dataSource))
             {
                 var confirmation = await CreateRepository(confirmationContext).TryConfirmDeliveryAsync(
                     deliverParcel.Id,
-                    persistedToken,
+                    persistedTokenId,
                     "127.0.0.1",
                     new DateTimeOffset(2026, 7, 15, 9, 30, 0, TimeSpan.Zero),
                     CancellationToken.None);
@@ -244,7 +253,6 @@ public sealed class Day39ParcelDeliveryTransitionPersistenceTests
     }
 
     private sealed record DeliveryAttempt(
-        Guid Token,
         DateTimeOffset DeliveredAt,
         IReadOnlyCollection<string> PhotoUrls);
 }

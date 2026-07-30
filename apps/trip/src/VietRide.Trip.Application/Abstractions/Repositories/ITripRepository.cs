@@ -111,4 +111,14 @@ public interface ITripRepository : IRepository<Domain.Entities.Trip, Guid>
         DateTimeOffset now,
         CancellationToken cancellationToken)
         => throw new NotSupportedException("Cargo counters are not supported by this repository implementation.");
+
+    Task<TripCargoTransferRepositoryResult> TransferCargoAsync(
+        Guid sourceTripId,
+        Guid parcelId,
+        Guid targetTripId,
+        string targetState,
+        bool allowCapacityOverflow,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("Atomic cargo transfer is not supported by this repository implementation.");
 }

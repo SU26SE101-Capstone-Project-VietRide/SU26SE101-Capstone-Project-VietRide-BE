@@ -7,88 +7,126 @@ using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Parcel.Application.Features.Parcels.OperationalRecovery;
 
 public sealed class ConfirmTransferCommandHandler
     : IRequestHandler<ConfirmTransferCommand, OperationalParcelResponse>
 {
+    private static readonly TimeSpan ConfirmationWindow = TimeSpan.FromMinutes(30);
+
     private readonly IParcelRepository _parcelRepository;
     private readonly ITripServiceClient _tripClient;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IClock _clock;
 
     public ConfirmTransferCommandHandler(
         IParcelRepository parcelRepository,
         ITripServiceClient tripClient,
         IIntegrationEventOutbox outbox,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IClock clock)
     {
         _parcelRepository = parcelRepository;
         _tripClient = tripClient;
         _outbox = outbox;
         _unitOfWork = unitOfWork;
+        _clock = clock;
     }
 
     public async Task<OperationalParcelResponse> Handle(
         ConfirmTransferCommand command,
         CancellationToken cancellationToken)
     {
-        var parcel = await _parcelRepository.GetByIdAsync(command.ParcelId, cancellationToken);
-        if (parcel is null)
-            throw new CodedNotFoundException("PARCEL_NOT_FOUND", $"Parcel '{command.ParcelId}' not found.");
+        var snapshot = await GetRequiredSnapshotAsync(command.ParcelId, cancellationToken);
+        ValidateRequest(snapshot, command);
+        await AuthorizeCrewAsync(snapshot, command, cancellationToken);
 
-        if (parcel.Status != ParcelStatus.PENDING_TRANSFER_CONFIRM)
-            throw new CodedConflictException("INVALID_TRANSITION", $"Parcel status '{parcel.Status}' cannot confirm transfer.");
-
-        if (parcel.TransferTargetTripId != command.TargetTripId)
-            throw new CodedConflictException("INVALID_TRANSFER_TARGET", "Transfer target trip does not match the pending transfer.");
-
-        if (parcel.ParcelCode != command.ParcelCode)
-            throw new CodedNotFoundException("PARCEL_NOT_FOUND", $"Parcel '{command.ParcelId}' not found.");
-
-        var targetTrip = await _tripClient.GetTripParcelSnapshotAsync(command.TargetTripId, cancellationToken);
-        switch (targetTrip.Kind)
+        if (IsCompletedReplay(snapshot, command.IdempotencyKey))
         {
-            case TripSnapshotOutcomeKind.TripNotFound:
-                throw new CodedNotFoundException("TRIP_NOT_FOUND", $"Trip '{command.TargetTripId}' not found.");
-            case TripSnapshotOutcomeKind.TransportError:
-                throw new ParcelDependencyUnavailableException("TRIP_SERVICE_UNAVAILABLE", targetTrip.ErrorMessage ?? "Trip service unavailable.");
+            return ToResponse(snapshot);
         }
 
-        if (targetTrip.Snapshot!.OperatorId != parcel.OperatorId)
-            throw new ForbiddenException("FORBIDDEN", "Target trip does not belong to this parcel operator.");
+        var claimed = await AcquireClaimAsync(snapshot, command, cancellationToken);
+        var claimId = claimed.ClaimId!.Value;
+        var targetTripId = claimed.TargetTripId!.Value;
+        var confirmedByUserId = claimed.ClaimedByUserId!.Value;
 
-        var now = DateTimeOffset.UtcNow;
-        ParcelPaymentTransitionSnapshot snapshot;
+        var transfer = await _tripClient.TransferCargoAsync(
+            claimed.SourceTripId,
+            claimed.ParcelId,
+            targetTripId,
+            "LOADED",
+            allowCapacityOverflow: true,
+            claimId,
+            cancellationToken);
+
+        return transfer.Kind switch
+        {
+            TripCargoTransferOutcomeKind.Success => ToResponse(
+                await CompleteAsync(
+                    claimed,
+                    targetTripId,
+                    claimId,
+                    confirmedByUserId,
+                    cancellationToken)),
+            TripCargoTransferOutcomeKind.TripNotFound
+                or TripCargoTransferOutcomeKind.ParcelCargoNotFound
+                or TripCargoTransferOutcomeKind.Conflict
+                or TripCargoTransferOutcomeKind.CapacityExceeded
+                => await ClearClaimAndThrowAsync(
+                    claimed.ParcelId,
+                    claimId,
+                    transfer,
+                    cancellationToken),
+            _ => throw new ParcelDependencyUnavailableException(
+                "TRIP_SERVICE_UNAVAILABLE",
+                transfer.ErrorMessage ?? "Trip cargo transfer outcome is unknown."),
+        };
+    }
+
+    private async Task<ParcelTransferConfirmationSnapshot> AcquireClaimAsync(
+        ParcelTransferConfirmationSnapshot initial,
+        ConfirmTransferCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (initial.ClaimId is not null)
+        {
+            EnsurePersistedClaimIsComplete(initial);
+            return initial;
+        }
+
+        var now = _clock.UtcNow;
+        if (HasReachedDeadline(initial, now))
+        {
+            throw DeadlinePassed();
+        }
+
+        ParcelTransferConfirmationSnapshot? claimed;
         await _unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {
-            snapshot = await _parcelRepository.TryConfirmTransferAsync(
-                command.ParcelId,
-                command.TargetTripId,
-                command.ParcelCode,
+            claimed = await _parcelRepository.TryClaimTransferConfirmationAsync(
+                initial.ParcelId,
+                initial.ParcelCode,
+                initial.SourceTripId,
+                initial.TargetTripId!.Value,
+                command.IdempotencyKey,
                 command.ConfirmedByUserId,
                 now,
-                cancellationToken)
-                ?? throw new CodedConflictException("RACE_LOST", "Parcel status changed concurrently; cannot confirm transfer.");
-
-            await ParcelOutboxEvents.EnqueueAsync(
-                _outbox,
-                ParcelOutboxEvents.TransferConfirmed,
-                new
-                {
-                    parcelId = snapshot.ParcelId,
-                    parcelCode = snapshot.ParcelCode,
-                    operatorId = snapshot.OperatorId,
-                    userId = snapshot.SenderUserId,
-                    tripId = snapshot.TripId,
-                    confirmedByUserId = command.ConfirmedByUserId,
-                },
                 cancellationToken);
 
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-            await _unitOfWork.CommitAsync(cancellationToken);
+            if (claimed is null)
+            {
+                await _unitOfWork.RollbackAsync(cancellationToken);
+            }
+            else
+            {
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await _unitOfWork.CommitAsync(cancellationToken);
+            }
         }
         catch
         {
@@ -96,11 +134,288 @@ public sealed class ConfirmTransferCommandHandler
             throw;
         }
 
-        return new OperationalParcelResponse(
+        if (claimed is not null)
+        {
+            EnsurePersistedClaimIsComplete(claimed);
+            return claimed;
+        }
+
+        var concurrent = await GetRequiredSnapshotAsync(command.ParcelId, cancellationToken);
+        ValidateRequest(concurrent, command);
+        if (IsCompletedReplay(concurrent, command.IdempotencyKey))
+        {
+            return concurrent;
+        }
+
+        if (concurrent.SourceTripId != initial.SourceTripId
+            || concurrent.TargetTripId != initial.TargetTripId)
+        {
+            throw NotTransferable("Parcel transfer target changed concurrently.");
+        }
+
+        if (concurrent.ClaimId is not null)
+        {
+            EnsurePersistedClaimIsComplete(concurrent);
+            return concurrent;
+        }
+
+        if (HasReachedDeadline(concurrent, _clock.UtcNow))
+        {
+            throw DeadlinePassed();
+        }
+
+        throw NotTransferable("Parcel transfer confirmation lost a concurrent state change.");
+    }
+
+    private async Task<ParcelTransferConfirmationSnapshot> CompleteAsync(
+        ParcelTransferConfirmationSnapshot claimed,
+        Guid targetTripId,
+        Guid claimId,
+        Guid confirmedByUserId,
+        CancellationToken cancellationToken)
+    {
+        var now = _clock.UtcNow;
+        ParcelTransferConfirmationSnapshot? completed;
+        await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            completed = await _parcelRepository.TryCompleteTransferConfirmationAsync(
+                claimed.ParcelId,
+                claimed.SourceTripId,
+                targetTripId,
+                claimId,
+                confirmedByUserId,
+                now,
+                cancellationToken);
+
+            if (completed is null)
+            {
+                await _unitOfWork.RollbackAsync(cancellationToken);
+            }
+            else
+            {
+                var eventId = ParcelOperationId.Create(
+                    claimId,
+                    claimed.ParcelId,
+                    "TRANSFER_CONFIRMED_EVENT");
+                await ParcelOutboxEvents.EnqueueAsync(
+                    _outbox,
+                    eventId,
+                    ParcelOutboxEvents.TransferConfirmed,
+                    new
+                    {
+                        eventId,
+                        occurredAt = now,
+                        parcelId = completed.ParcelId,
+                        parcelCode = completed.ParcelCode,
+                        operatorId = completed.OperatorId,
+                        userId = completed.SenderUserId,
+                        originalTripId = claimed.SourceTripId,
+                        tripId = targetTripId,
+                        confirmedByUserId,
+                    },
+                    cancellationToken);
+
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await _unitOfWork.CommitAsync(cancellationToken);
+            }
+        }
+        catch
+        {
+            await _unitOfWork.RollbackAsync(cancellationToken);
+            throw;
+        }
+
+        if (completed is not null)
+        {
+            return completed;
+        }
+
+        var replay = await GetRequiredSnapshotAsync(claimed.ParcelId, cancellationToken);
+        if (IsCompletedReplay(replay, claimId)
+            && replay.TargetTripId == targetTripId)
+        {
+            return replay;
+        }
+
+        throw NotTransferable("Parcel transfer completion lost a concurrent state change.");
+    }
+
+    private async Task<OperationalParcelResponse> ClearClaimAndThrowAsync(
+        Guid parcelId,
+        Guid claimId,
+        TripCargoTransferOutcome outcome,
+        CancellationToken cancellationToken)
+    {
+        await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            var cleared = await _parcelRepository.TryClearTransferConfirmationClaimAsync(
+                parcelId,
+                claimId,
+                _clock.UtcNow,
+                cancellationToken);
+            if (cleared)
+            {
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await _unitOfWork.CommitAsync(cancellationToken);
+            }
+            else
+            {
+                await _unitOfWork.RollbackAsync(cancellationToken);
+            }
+        }
+        catch
+        {
+            await _unitOfWork.RollbackAsync(cancellationToken);
+            throw;
+        }
+
+        throw outcome.Kind switch
+        {
+            TripCargoTransferOutcomeKind.TripNotFound => new CodedNotFoundException(
+                "TRIP_NOT_FOUND",
+                outcome.ErrorMessage ?? "The source or target Trip was not found."),
+            TripCargoTransferOutcomeKind.ParcelCargoNotFound => new CodedNotFoundException(
+                "PARCEL_CARGO_NOT_FOUND",
+                outcome.ErrorMessage ?? "The source Trip has no active cargo ledger for this Parcel."),
+            TripCargoTransferOutcomeKind.Conflict => new CodedConflictException(
+                "TRIP_CARGO_TRANSFER_CONFLICT",
+                outcome.ErrorMessage ?? "Trip cargo transfer lost a concurrent mutation."),
+            TripCargoTransferOutcomeKind.CapacityExceeded => new CodedValidationException(
+                "TRIP_CARGO_CAPACITY_EXCEEDED",
+                outcome.ErrorMessage ?? "Target Trip cargo capacity would be exceeded."),
+            _ => throw new InvalidOperationException("Only definitive Trip outcomes may clear a transfer claim."),
+        };
+    }
+
+    private async Task AuthorizeCrewAsync(
+        ParcelTransferConfirmationSnapshot snapshot,
+        ConfirmTransferCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (!command.RequireCrewAuthorization)
+        {
+            return;
+        }
+
+        if (command.OperatorId is null
+            || snapshot.OperatorId != command.OperatorId
+            || command.Role is null)
+        {
+            throw new ForbiddenException(
+                "FORBIDDEN",
+                "Caller is not scoped to the Parcel operator.");
+        }
+
+        var authorization = await _tripClient.AuthorizeCrewForTripAsync(
+            snapshot.TargetTripId!.Value,
+            command.ConfirmedByUserId,
+            command.OperatorId.Value,
+            command.Role,
+            cancellationToken);
+
+        switch (authorization.Kind)
+        {
+            case TripCrewAuthorizationOutcomeKind.Authorized:
+                return;
+            case TripCrewAuthorizationOutcomeKind.Denied:
+            case TripCrewAuthorizationOutcomeKind.TripNotFound:
+                throw new ForbiddenException(
+                    "FORBIDDEN",
+                    "Caller is not assigned to the target Trip as Driver or Assistant.");
+            default:
+                throw new ParcelDependencyUnavailableException(
+                    "TRIP_SERVICE_UNAVAILABLE",
+                    authorization.ErrorMessage ?? "Trip crew authorization is unavailable.");
+        }
+    }
+
+    private async Task<ParcelTransferConfirmationSnapshot> GetRequiredSnapshotAsync(
+        Guid parcelId,
+        CancellationToken cancellationToken)
+        => await _parcelRepository.GetTransferConfirmationSnapshotAsync(
+            parcelId,
+            cancellationToken)
+            ?? throw new CodedNotFoundException(
+                "PARCEL_NOT_FOUND",
+                $"Parcel '{parcelId}' not found.");
+
+    private static void ValidateRequest(
+        ParcelTransferConfirmationSnapshot snapshot,
+        ConfirmTransferCommand command)
+    {
+        if (!string.Equals(snapshot.ParcelCode, command.ParcelCode, StringComparison.Ordinal)
+            || snapshot.TargetTripId is null
+            || (command.ExpectedTargetTripId is not null
+                && snapshot.TargetTripId != command.ExpectedTargetTripId))
+        {
+            throw NotTransferable("Parcel code or transfer target does not match the pending transfer.");
+        }
+
+        if (snapshot.Status == ParcelStatus.TRANSFER_ESCALATED
+            && snapshot.ClaimId is null)
+        {
+            throw DeadlinePassed();
+        }
+
+        if (snapshot.Status != ParcelStatus.PENDING_TRANSFER_CONFIRM
+            && !IsCompletedReplay(snapshot, command.IdempotencyKey))
+        {
+            throw NotTransferable(
+                $"Parcel status '{snapshot.Status}' cannot confirm transfer.");
+        }
+
+        if (snapshot.Status == ParcelStatus.PENDING_TRANSFER_CONFIRM
+            && snapshot.TransferRequestedAt is null)
+        {
+            throw NotTransferable("Parcel transfer request timestamp is missing.");
+        }
+    }
+
+    private static void EnsurePersistedClaimIsComplete(
+        ParcelTransferConfirmationSnapshot snapshot)
+    {
+        if (snapshot.ClaimId is null
+            || snapshot.ClaimedAt is null
+            || snapshot.ClaimedByUserId is null
+            || snapshot.TargetTripId is null)
+        {
+            throw NotTransferable("Parcel transfer confirmation claim is incomplete.");
+        }
+    }
+
+    private static bool HasReachedDeadline(
+        ParcelTransferConfirmationSnapshot snapshot,
+        DateTimeOffset now)
+        => snapshot.TransferRequestedAt is null
+            || now >= snapshot.TransferRequestedAt.Value.Add(ConfirmationWindow);
+
+    private static bool IsCompletedReplay(
+        ParcelTransferConfirmationSnapshot snapshot,
+        Guid claimId)
+        => snapshot.Status == ParcelStatus.LOADED
+            && snapshot.ClaimId == claimId
+            && snapshot.TargetTripId is not null
+            && snapshot.SourceTripId == snapshot.TargetTripId
+            && snapshot.TransferConfirmedAt is not null
+            && snapshot.TransferConfirmedByUserId is not null;
+
+    private static OperationalParcelResponse ToResponse(
+        ParcelTransferConfirmationSnapshot snapshot)
+        => new(
             snapshot.ParcelId,
             snapshot.ParcelCode,
             snapshot.Status.ToString(),
-            TripId: snapshot.TripId,
-            TransferConfirmedAt: now);
-    }
+            TripId: snapshot.SourceTripId,
+            TransferTargetTripId: snapshot.TargetTripId,
+            TransferConfirmedAt: snapshot.TransferConfirmedAt);
+
+    private static CodedConflictException NotTransferable(string message)
+        => new("PARCEL_NOT_TRANSFERABLE", message);
+
+    private static CodedConflictException DeadlinePassed()
+        => new(
+            "PARCEL_TRANSFER_CONFIRMATION_DEADLINE_PASSED",
+            "The 30-minute transfer confirmation deadline has passed.");
 }

@@ -9,5 +9,5 @@ public sealed record TripCancellationImpactResponse(
     Guid TripId,
     IReadOnlyList<TripCancellationImpactResponse.AffectedParcel> AffectedParcels)
 {
-    public sealed record AffectedParcel(Guid ParcelId, string Status, long RefundAmount);
+    public sealed record AffectedParcel(Guid ParcelId, string Status, long RefundAmountVnd);
 }

@@ -4,6 +4,7 @@ import { NotificationType } from '../generated/notification-prisma-client';
 import {
   BOOKING_CANCELLED_ROUTING_KEY,
   BOOKING_CONFIRMED_ROUTING_KEY,
+  BOOKING_DISRUPTED_ROUTING_KEY,
   CORE_EVENT_QUEUE_BINDINGS,
 } from './core-events.constants';
 import { CoreEventsConsumer } from './core-events.consumer';
@@ -13,6 +14,9 @@ import { NotificationsService } from './notifications.service';
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const BOOKING_ID = '22222222-2222-4222-8222-222222222222';
 const MESSAGE_ID = 'message-1';
+const EVENT_ID = '44444444-4444-4444-8444-444444444444';
+const TRIP_ID = '55555555-5555-4555-8555-555555555555';
+const OPERATOR_ID = '66666666-6666-4666-8666-666666666666';
 
 describe('CoreEventsConsumer', () => {
   let rabbitConsumer: jest.Mocked<RabbitMqConsumer>;
@@ -50,6 +54,10 @@ describe('CoreEventsConsumer', () => {
     expect(CORE_EVENT_QUEUE_BINDINGS).toContainEqual({
       queue: 'notification:booking-cancelled',
       routingKey: BOOKING_CANCELLED_ROUTING_KEY,
+    });
+    expect(CORE_EVENT_QUEUE_BINDINGS).toContainEqual({
+      queue: 'notification:booking-disrupted',
+      routingKey: BOOKING_DISRUPTED_ROUTING_KEY,
     });
     expect(CORE_EVENT_QUEUE_BINDINGS).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ routingKey: 'trip.trip.cancelled' })]),
@@ -111,6 +119,68 @@ describe('CoreEventsConsumer', () => {
     );
 
     expect(notificationsService.createNotification).not.toHaveBeenCalled();
+  });
+
+  it('deduplicates booking disruption replay by eventId across transport ids', async () => {
+    idempotency.begin.mockResolvedValueOnce('acquired').mockResolvedValueOnce('duplicate');
+    notificationsService.createNotification.mockResolvedValue({
+      id: '77777777-7777-4777-8777-777777777777',
+      userId: USER_ID,
+      type: NotificationType.BOOKING_DISRUPTED,
+      title: 'Chuyến đi bị gián đoạn',
+      body: 'Vé bị gián đoạn.',
+      data: { bookingId: BOOKING_ID },
+      readAt: null,
+      createdAt: '2026-07-30T03:00:02.000Z',
+    });
+    const payload = {
+      eventId: EVENT_ID,
+      occurredAt: '2026-07-30T03:00:01Z',
+      bookingId: BOOKING_ID,
+      bookingCode: 'VR-20260730-ABCDEFGH',
+      tripId: TRIP_ID,
+      operatorId: OPERATOR_ID,
+      userId: USER_ID,
+      traveledRatio: 0.4,
+      refundAmount: 300_000,
+      cancellationReason: 'OPERATOR_DISRUPTED_IN_PROGRESS',
+    };
+
+    await consumer.handle(
+      BOOKING_DISRUPTED_ROUTING_KEY,
+      payload,
+      createMessage('transport-message-1'),
+    );
+    await consumer.handle(
+      BOOKING_DISRUPTED_ROUTING_KEY,
+      payload,
+      createMessage('transport-message-2'),
+    );
+
+    expect(idempotency.begin).toHaveBeenNthCalledWith(
+      1,
+      BOOKING_DISRUPTED_ROUTING_KEY,
+      EVENT_ID,
+      undefined,
+    );
+    expect(idempotency.begin).toHaveBeenNthCalledWith(
+      2,
+      BOOKING_DISRUPTED_ROUTING_KEY,
+      EVENT_ID,
+      undefined,
+    );
+    expect(notificationsService.createNotification).toHaveBeenCalledTimes(1);
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.BOOKING_DISRUPTED,
+        dedupeKey: `${BOOKING_DISRUPTED_ROUTING_KEY}:${EVENT_ID}:${USER_ID}:${NotificationType.BOOKING_DISRUPTED}`,
+      }),
+    );
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      BOOKING_DISRUPTED_ROUTING_KEY,
+      EVENT_ID,
+    );
   });
 
   it('drops malformed payload without rethrowing', async () => {

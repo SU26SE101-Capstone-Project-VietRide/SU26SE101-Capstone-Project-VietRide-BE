@@ -1,5 +1,8 @@
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Exceptions;
+using VietRide.Parcel.Application.Features.Parcels.TripCancellationImpact;
 using VietRide.Shared.Application.Outbox;
 
 namespace VietRide.Parcel.Application.Features.Parcels.TripEvents;
@@ -7,15 +10,23 @@ namespace VietRide.Parcel.Application.Features.Parcels.TripEvents;
 public sealed class HandleTripDisruptedCommandHandler
     : IRequestHandler<HandleTripDisruptedCommand, int>
 {
-    private readonly IParcelRepository _parcelRepository;
-    private readonly IIntegrationEventOutbox _outbox;
+    private const string RefundReason = "TRIP_DISRUPTED_PRE_LOAD";
+
+    private readonly IParcelRepository parcelRepository;
+    private readonly ITripServiceClient tripClient;
+    private readonly IIntegrationEventOutbox outbox;
+    private readonly IParcelStatsRepository statsRepository;
 
     public HandleTripDisruptedCommandHandler(
         IParcelRepository parcelRepository,
-        IIntegrationEventOutbox outbox)
+        ITripServiceClient tripClient,
+        IIntegrationEventOutbox outbox,
+        IParcelStatsRepository statsRepository)
     {
-        _parcelRepository = parcelRepository;
-        _outbox = outbox;
+        this.parcelRepository = parcelRepository;
+        this.tripClient = tripClient;
+        this.outbox = outbox;
+        this.statsRepository = statsRepository;
     }
 
     public async Task<int> Handle(
@@ -27,60 +38,162 @@ public sealed class HandleTripDisruptedCommandHandler
             return 0;
         }
 
-        var updated = await _parcelRepository.TryBulkSetPendingOperatorActionByTripIdAsync(
+        var now = DateTimeOffset.UtcNow;
+        var candidates = await parcelRepository.GetTripCancellationCandidatesAsync(
             command.TripId,
-            DateTimeOffset.UtcNow,
+            command.OperatorId,
             cancellationToken);
+        var changed = new List<(
+            TripCancellationParcelCandidate Candidate,
+            long RefundAmountVnd,
+            ParcelTripCancellationDisposition Disposition)>();
 
-        foreach (var parcel in updated)
+        foreach (var candidate in candidates)
         {
-            var refundAmount = CalculateDisruptionRefund(
-                parcel.DepositAmount + parcel.AdditionalAmount,
-                command.TraveledRatio);
-            if (refundAmount > 0)
+            var classification = ParcelTripCancellationClassifier.Classify(candidate);
+            if (classification.Disposition == ParcelTripCancellationDisposition.None)
             {
-                await ParcelOutboxEvents.EnqueueRefundAsync(
-                    _outbox,
-                    parcel.ParcelId,
-                    parcel.SenderUserId,
-                    refundAmount,
-                    parcel.ParcelId.ToString("D"),
+                continue;
+            }
+
+            var refundDueVnd = checked(
+                candidate.RefundedAmountVnd + classification.RefundAmountVnd);
+            if (!await parcelRepository.TryApplyTripCancellationAsync(
+                    candidate.ParcelId,
+                    command.OperatorId,
+                    candidate.Status,
+                    classification.TargetStatus!.Value,
+                    refundDueVnd,
+                    now,
+                    cancellationToken))
+            {
+                continue;
+            }
+
+            if (classification.Disposition == ParcelTripCancellationDisposition.CancelAndRefund)
+            {
+                await EnsureCargoSuccessAsync(
+                    await tripClient.ReleaseCargoAsync(
+                        candidate.TripId,
+                        candidate.ParcelId,
+                        Positive(candidate.ActualWeightKg ?? candidate.EstimatedWeightKg),
+                        Positive(candidate.ActualVolumeM3 ?? candidate.EstimatedVolumeM3),
+                        ParcelOperationId.Create(
+                            command.EventId,
+                            candidate.ParcelId,
+                            "TRIP_DISRUPTED_CARGO_RELEASE"),
+                        cancellationToken));
+
+                await ParcelOutboxEvents.EnqueueTerminalAsync(
+                    outbox,
+                    ParcelOperationId.Create(
+                        command.EventId,
+                        candidate.ParcelId,
+                        "TRIP_DISRUPTED_TERMINAL"),
+                    now,
+                    ParcelOutboxEvents.Cancelled,
+                    candidate.ParcelId,
+                    candidate.ParcelCode,
+                    candidate.OperatorId,
+                    candidate.SenderUserId,
+                    candidate.TripId,
+                    classification.RefundAmountVnd,
+                    RefundReason,
+                    cancellationToken);
+
+                if (classification.RefundAmountVnd > 0)
+                {
+                    await ParcelOutboxEvents.EnqueueCanonicalRefundAsync(
+                        outbox,
+                        ParcelOperationId.Create(
+                            command.EventId,
+                            candidate.ParcelId,
+                            "TRIP_DISRUPTED_REFUND_EVENT"),
+                        now,
+                        candidate.ParcelId,
+                        candidate.SenderUserId,
+                        classification.RefundAmountVnd,
+                        RefundReason,
+                        ParcelOperationId.Create(
+                            command.EventId,
+                            candidate.ParcelId,
+                            "TRIP_DISRUPTED_REFUND"),
+                        cancellationToken);
+                }
+            }
+            else
+            {
+                var eventId = ParcelOperationId.Create(
+                    command.EventId,
+                    candidate.ParcelId,
+                    "TRIP_DISRUPTED_PENDING_OPERATOR_ACTION");
+                await ParcelOutboxEvents.EnqueueAsync(
+                    outbox,
+                    eventId,
+                    ParcelOutboxEvents.PendingOperatorAction,
+                    new
+                    {
+                        eventId,
+                        occurredAt = now,
+                        parcelId = candidate.ParcelId,
+                        parcelCode = candidate.ParcelCode,
+                        operatorId = candidate.OperatorId,
+                        userId = candidate.SenderUserId,
+                        tripId = candidate.TripId,
+                        reason = "TRIP_DISRUPTED",
+                    },
                     cancellationToken);
             }
 
-            await ParcelOutboxEvents.EnqueueAsync(
-                _outbox,
-                ParcelOutboxEvents.PendingOperatorAction,
-                new
-                {
-                    parcelId = parcel.ParcelId,
-                    parcelCode = parcel.ParcelCode,
-                    operatorId = parcel.OperatorId,
-                    userId = parcel.SenderUserId,
-                    tripId = parcel.TripId,
-                    refundAmount,
-                    traveledRatio = command.TraveledRatio,
-                },
+            changed.Add((
+                candidate,
+                classification.RefundAmountVnd,
+                classification.Disposition));
+        }
+
+        foreach (var group in changed
+            .Where(item => item.Disposition
+                == ParcelTripCancellationDisposition.CancelAndRefund)
+            .GroupBy(item => item.Candidate.OperatorId))
+        {
+            await statsRepository.UpsertIncrementAsync(
+                group.Key,
+                DateOnly.FromDateTime(now.UtcDateTime),
+                0,
+                0,
+                0,
+                group.Count(),
+                0,
+                0,
+                group.Sum(item => item.RefundAmountVnd),
                 cancellationToken);
         }
 
-        return updated.Count;
+        return changed.Count;
     }
 
-    private static long CalculateDisruptionRefund(long paidAmount, decimal traveledRatio)
+    private static decimal Positive(decimal value)
+        => value > 0 ? value : 0.0001m;
+
+    private static Task EnsureCargoSuccessAsync(TripCargoOutcome outcome)
     {
-        if (paidAmount <= 0)
+        if (outcome is null)
         {
-            return 0;
+            return Task.CompletedTask;
         }
 
-        var boundedRatio = Math.Clamp(traveledRatio, 0m, 1m);
-        var rawRefund = (long)Math.Floor(paidAmount * (1m - boundedRatio));
-        if (rawRefund <= 0)
+        return outcome.Kind switch
         {
-            return 0;
-        }
-
-        return Math.Max(1000L, rawRefund / 1000L * 1000L);
+            TripCargoOutcomeKind.Success => Task.CompletedTask,
+            TripCargoOutcomeKind.TripNotFound => throw new ParcelDependencyUnavailableException(
+                "TRIP_NOT_FOUND",
+                outcome.ErrorMessage ?? "Trip was not found."),
+            TripCargoOutcomeKind.CapacityExceeded => throw new ParcelDependencyUnavailableException(
+                "TRIP_CARGO_TRANSFER_CONFLICT",
+                outcome.ErrorMessage ?? "Trip cargo release lost a concurrent mutation."),
+            _ => throw new ParcelDependencyUnavailableException(
+                "TRIP_SERVICE_UNAVAILABLE",
+                outcome.ErrorMessage ?? "Trip service unavailable."),
+        };
     }
 }

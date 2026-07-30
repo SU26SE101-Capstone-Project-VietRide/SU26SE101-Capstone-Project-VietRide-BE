@@ -62,7 +62,13 @@
 | Parcel | `Parcel.reviewed_by_user_id` | `identity.users.id` (role=OPERATOR_*) | N:1 | implicit |
 | Parcel | `Parcel.confirmed_by_user_id` | `identity.users.id` | N:1 | implicit |
 | Parcel | `Parcel.transfer_confirmed_by_user_id` | `identity.users.id` (role=DRIVER/ASSISTANT) | N:1 | implicit |
+| Parcel | `Parcel.transfer_confirmation_claimed_by_user_id` | `identity.users.id` (role=DRIVER/ASSISTANT) | N:1 | durable claim actor; no cross-DB FK |
 | Parcel | `Parcel.returned_by_user_id` | `identity.users.id` | N:1 | implicit |
+| Parcel | `ParcelDeliveryToken.issued_by_user_id` | `identity.users.id` (nullable) | N:1 | implicit authenticated issuer; null for migration backfill; logical reference only, no DB FK |
+| Parcel | `ParcelCargoRecoveryOperation.actor_user_id` | `identity.users.id` | N:1 | durable Day-32 recovery actor; logical reference only |
+| Parcel | `ParcelCargoRecoveryOperation.operator_id` | `identity.operators.id` | N:1 | frozen tenant scope; logical reference only |
+| Parcel | `ParcelCargoRecoveryOperation.source_trip_id` | `trip.trips.id` | N:1 | frozen source cargo owner; logical reference only |
+| Parcel | `ParcelCargoRecoveryOperation.target_trip_id` | `trip.trips.id` (nullable) | N:1 | TRANSFER target; null for RETURN; logical reference only |
 | Parcel | `ParcelRouteFare.operator_id` | `identity.operators.id` | N:1 | denormalized |
 | Parcel | `ParcelStats.operator_id` | `identity.operators.id` | N:1 | counter |
 | Notification | `Notification.user_id` | `identity.users.id` | N:1 | implicit from event payload |
@@ -137,9 +143,9 @@ Event-driven cleanup khi parent entity bị soft delete / SUSPENDED:
 |---|---|---|
 | `identity.user.deleted` | Booking, Parcel, Payment, Notification, RAG | Anonymize PII (passenger_user_id, sender_user_id, etc.) — không xóa record. |
 | `identity.operator.suspended` | Trip, Booking, Parcel | Trip-Route-Vehicle: block create Trip/Route/Vehicle. Booking/Parcel: block apply voucher (consent invalid). |
-| `trip.trip.cancelled_by_operator` | Booking, Parcel | Booking → CANCELLED + refund; Parcel → CANCELLED/PENDING_OPERATOR_ACTION per status. |
+| `trip.trip.cancelled` | Booking, Parcel | Booking → CANCELLED + refund; Parcel → CANCELLED/PENDING_OPERATOR_ACTION per status. |
 | `trip.trip.disrupted` (hasSubstitution=false) | Booking, Parcel | Booking → DISRUPTED + proportional refund; Parcel → PENDING_OPERATOR_ACTION. |
-| `trip.vehicle.substituted` | Booking, Parcel | Booking → BookingTransfer per Passenger; Parcel → PENDING_TRANSFER_CONFIRM. |
+| `trip.trip.vehicle_substituted` | Booking, Parcel | Booking → BookingTransfer per Passenger; Parcel → PENDING_TRANSFER_CONFIRM. Parcel cargo moves only through Trip's atomic source-to-target internal transfer API after target-crew confirmation. |
 | `payment.payment.succeeded` (referenceType=BOOKING) | Booking, Payment (self for hold + ledger) | Booking → CONFIRMED; INSERT PlatformWalletTransaction BOOKING_PAYMENT_HOLD + OperatorLedgerEntry BOOKING_REVENUE (audit-only, no OperatorWallet update). |
 | `payment.wallet.credited` (referenceType=BOOKING_REFUND) | Booking | Booking → REFUNDED. |
 | `trip.trip.completed` / `trip.trip.disrupted` | Payment | IF SUM(operator_ledger_entries.amount for trip) > 0 → INSERT OperatorTripSettlement {status: PENDING_HOLD, eligible_at = terminal + 7 days}. Weekly settle debits PlatformWallet and credits OperatorWallet. |

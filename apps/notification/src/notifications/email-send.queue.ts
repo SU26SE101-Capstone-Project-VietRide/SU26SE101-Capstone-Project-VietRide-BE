@@ -8,8 +8,9 @@ import {
   EMAIL_SEND_JOB_NAME,
   EMAIL_SEND_QUEUE_NAME,
 } from './email-send.constants';
+import { encryptEmailSendJob } from './email-job-payload.crypto';
 import { BULLMQ_QUEUE_PREFIX } from './fcm-push.constants';
-import type { EmailSendJobData } from './email-send.types';
+import type { EmailSendJobData, EmailSendQueueData } from './email-send.types';
 
 @Injectable()
 export class EmailSendQueue implements OnModuleDestroy {
@@ -36,10 +37,10 @@ export class EmailSendQueue implements OnModuleDestroy {
     });
   }
 
-  async enqueue(data: EmailSendJobData): Promise<void> {
+  async enqueue(data: EmailSendQueueData): Promise<void> {
     const existingJob = await this.queue.getJob(data.emailDeliveryId);
     if (!existingJob) {
-      await this.add(data);
+      await this.add(encryptEmailSendJob(data, this.env.INTERNAL_JWT_SECRET));
       return;
     }
 

@@ -6,6 +6,10 @@ namespace VietRide.Parcel.Application.Features.Parcels.OperationalRecovery;
 [SkipTransaction]
 public sealed record ConfirmTransferCommand(
     Guid ParcelId,
-    Guid TargetTripId,
     string ParcelCode,
-    Guid ConfirmedByUserId) : IRequest<OperationalParcelResponse>;
+    Guid ConfirmedByUserId,
+    Guid IdempotencyKey,
+    Guid? OperatorId = null,
+    string? Role = null,
+    Guid? ExpectedTargetTripId = null,
+    bool RequireCrewAuthorization = true) : IRequest<OperationalParcelResponse>;

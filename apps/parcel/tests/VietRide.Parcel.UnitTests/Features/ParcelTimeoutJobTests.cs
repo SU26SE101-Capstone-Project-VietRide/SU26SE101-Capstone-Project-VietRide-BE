@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using MediatR;
 using Microsoft.Extensions.Logging;
@@ -235,28 +236,23 @@ public sealed class ParcelTimeoutJobTests
     }
 
     [Fact]
-    public async Task DeliveryPendingConfirmReminder_ReissuesTokenAndEmitsReminderEvent()
+    public async Task DeliveryPendingConfirmReminder_RealertsWithoutRotatingTokenOrState()
     {
         var repo = Substitute.For<IParcelRepository>();
         var clock = Substitute.For<IClock>();
         var unitOfWork = UnitOfWork();
         var outbox = Outbox();
-        var deliveryToken = Guid.NewGuid();
-        var senderUserId = Guid.NewGuid();
-        var recipientUserId = Guid.NewGuid();
-        var tokenExpiresAt = Now.AddDays(6);
+        var tokenExpiredAt = Now.AddDays(-8);
         clock.UtcNow.Returns(Now);
-        repo.TryBulkReissueDeliveryPendingConfirmRemindersAsync(
+        repo.TryBulkClaimDeliveryConfirmationRemindersAsync(
                 Now.AddDays(-7),
-                Now.AddHours(-23),
+                Now.AddDays(-7),
                 Now,
                 Arg.Any<int>(),
                 Arg.Any<CancellationToken>())
-            .Returns(new List<ParcelEventSnapshot>
+            .Returns(new List<ParcelDeliveryReminderSnapshot>
             {
-                new(ParcelId, "VRP-001", OperatorId, TripId, ParcelStatus.DELIVERED_PENDING_CONFIRM,
-                    SenderUserId: senderUserId, RecipientUserId: recipientUserId,
-                    DeliveryToken: deliveryToken, DeliveryTokenExpiresAt: tokenExpiresAt),
+                new(ParcelId, "VRP-001", OperatorId, TripId, tokenExpiredAt),
             });
 
         var handler = new SendDeliveryPendingConfirmRemindersCommandHandler(
@@ -270,13 +266,26 @@ public sealed class ParcelTimeoutJobTests
 
         result.Should().Be(1);
         await outbox.Received(1).EnqueueAsync(
-            ParcelOutboxEvents.DeliveredPendingConfirm,
-            Arg.Is<string>(payload => payload.Contains("VRP-001")
-                && payload.Contains(deliveryToken.ToString())
-                && payload.Contains(recipientUserId.ToString())
-                && !payload.Contains(senderUserId.ToString())),
+            Arg.Any<Guid>(),
+            ParcelOutboxEvents.DeliveryConfirmationRealerted,
+            Arg.Is<string>(payload => IsExpectedDeliveryReminderPayload(payload, tokenExpiredAt)),
             Arg.Any<CancellationToken>());
         await unitOfWork.Received(1).CommitAsync(Arg.Any<CancellationToken>());
+    }
+
+    private static bool IsExpectedDeliveryReminderPayload(
+        string payload,
+        DateTimeOffset tokenExpiredAt)
+    {
+        using var document = JsonDocument.Parse(payload);
+        var root = document.RootElement;
+
+        return root.GetProperty("parcelCode").GetString() == "VRP-001"
+            && root.GetProperty("parcelId").GetGuid() == ParcelId
+            && root.GetProperty("expiredAt").GetDateTimeOffset() == tokenExpiredAt
+            && !root.TryGetProperty("token", out _)
+            && !root.TryGetProperty("deliveryToken", out _)
+            && !root.TryGetProperty("email", out _);
     }
 
     [Fact]

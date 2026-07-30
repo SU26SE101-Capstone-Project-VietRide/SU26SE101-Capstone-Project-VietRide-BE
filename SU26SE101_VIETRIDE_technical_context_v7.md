@@ -1,7 +1,7 @@
 # VietRide — Technical Project Context (Agent-Ready v7)
 
 > **Capstone:** SU26SE101 — SU26
-> **Cập nhật:** 2026-07-16 (Day 40 contract freeze)
+> **Cập nhật:** 2026-07-30 (Days 31/32/35 contract reconciliation)
 >
 > ## ⚠️ Đọc trước khi dùng — Mục đích của doc này
 >
@@ -203,61 +203,38 @@ SignalR (.NET) và Socket.IO (NestJS) đều là WebSocket abstraction tốt. L�
 
 Nếu team quen .NET thì SignalR cũng khả thi về kỹ thuật. Chọn NestJS vì mobile dùng React Native và Socket.IO client library integrate mượt hơn.
 
-**Email Service abstraction — IEmailService / IEmailProvider:**
+**Email boundary — service-local client → Notification provider:**
 
-Cả 2 loại email trong hệ thống (Registration/OTP và Parcel delivery link) dùng chung abstraction `IEmailService` / `IEmailProvider`. Business logic KHÔNG phụ thuộc trực tiếp vào SendGrid SDK.
+Identity và Parcel dùng client abstraction riêng trong service của mình; không có shared method
+nhận raw Parcel token hoặc một `ParcelDeliveryEmailDto` lớn. Business code không phụ thuộc
+SendGrid SDK. Notification là service duy nhất sở hữu `IEmailProvider` và provider implementation.
 
-```
-IEmailService (canonical interface — .NET services dùng Task, TS pseudo-signature để dễ đọc):
-  sendOtp(to: string,
-    code: string,
-    purpose: "REGISTRATION" | "PASSWORD_RESET",
-    ttlMinutes: number): Promise<void>
+Parcel tạo URL runtime
+`{PUBLIC_APP_URL}/parcels/delivery/confirm?token=<url-encoded-token>` rồi gọi exact Internal-JWT
+request:
 
-  sendParcelDeliveryLink(to: string,
-    deliveryToken: string,
-    parcelInfo: ParcelDeliveryEmailDto): Promise<void>
-
-ParcelDeliveryEmailDto:
-  {
-    parcelId: string,
-    parcelCode: string,
-    senderName: string,
-    recipientName: string,
-    originStationName: string,
-    destinationStationName: string,
-    tripDepartureTime: string,      // ISO 8601 with offset
-    operatorName?: string,
-    expiresAt: string              // ISO 8601 with offset, token TTL 48h
+```json
+{
+  "notificationId": null,
+  "dedupeKey": "parcel-delivery-token:<tokenRowId>",
+  "toEmail": "<recipientEmail>",
+  "templateKey": "PARCEL_DELIVERY_LINK",
+  "templateData": {
+    "deliveryUrl": "<runtime-only URL>",
+    "parcelCode": "VR-PCL-...",
+    "expiresAt": "<ISO-8601 offset timestamp>"
   }
-
-.NET naming khi scaffold:
-  Task SendOtpAsync(string to, string code, EmailOtpPurpose purpose, int ttlMinutes, CancellationToken ct = default)
-  Task SendParcelDeliveryLinkAsync(string to, string deliveryToken, ParcelDeliveryEmailDto parcelInfo, CancellationToken ct = default)
-
-EmailOtpPurpose enum:
-  REGISTRATION | PASSWORD_RESET
-
-IEmailProvider (interface — implementation detail):
-  sendTransactionalEmail(options: EmailOptions): Promise<void>
-
-EmailOptions:
-  {
-    to: string,
-    subject: string,
-    templateKey: "AUTH_OTP" | "PARCEL_DELIVERY_LINK",
-    templateData: object,
-    priority: "HIGH" | "NORMAL",
-    idempotencyKey?: string
-  }
-
-SendGridEmailProvider implements IEmailProvider  (default provider)
-SmtpEmailProvider implements IEmailProvider      (fallback / local dev)
+}
 ```
 
-`sendParcelDeliveryLink` implementation build confirmation URL từ `deliveryToken`:
-`{PUBLIC_APP_URL}/parcels/delivery/confirm?token=<deliveryToken>`.
-Không log `deliveryToken`, không lưu QR/email HTML rendered vào DB; chỉ lưu token hash/expiry trong Parcel Service.
+HTTP `Idempotency-Key` bằng UUID-v4 `tokenRowId`. Notification trả `202 Accepted`; mọi response
+khác, timeout hoặc transport failure map `503 UPSTREAM_UNAVAILABLE`, và Parcel không commit token
+issuance/state. Raw token/URL chỉ tồn tại trong memory + outbound request, không được log, persist
+trong Parcel/Notification audit, Outbox, Redis hoặc RabbitMQ. Notification scrub sensitive
+templateData trước mọi log/audit.
+
+Notification provider vẫn hỗ trợ các template `AUTH_OTP`, `SET_INITIAL_PASSWORD` và
+`PARCEL_DELIVERY_LINK`; provider swap (SendGrid/SMTP local) không thay đổi service contracts.
 
 Phân biệt 2 loại email:
 | Loại | Template | Priority | TTL/Rate-limit | Notification type |
@@ -265,7 +242,8 @@ Phân biệt 2 loại email:
 | OTP (Registration/Reset) | Transactional | Cao | Rate-limit Redis (max 3/1h per email) | AUTH_OTP |
 | Parcel delivery link | Transactional | Trung bình | Resend cho phép (token TTL 48h) | PARCEL_DELIVERED_PENDING_CONFIRM |
 
-Identity Service dùng `IEmailService` để gửi OTP. Parcel Service dùng `IEmailService` để gửi delivery link. Cả 2 inject cùng implementation nhưng gọi method khác nhau.
+Identity Service và Parcel Service gọi Notification qua `POST /internal/v1/emails` bằng Internal
+JWT. Hai service dùng client abstraction riêng nhưng cùng Notification provider.
 
 > Lý do không depend trực tiếp vào SendGrid: dễ swap provider (SES, Mailgun) không cần sửa business code. Dễ mock trong unit test.
 
@@ -2116,59 +2094,35 @@ hiển thị warning "Hủy gấp ảnh hưởng nhiều hành khách — cân n
 Trip cancel có 2 phase: (A) update state — atomic; (B) refund từng booking — eventual qua event. Phase B có thể fail (Wallet Service down, partial refund). Vẫn phải đảm bảo eventually consistent.
 
 ```
-PHASE A — Atomic state update (DB transaction Trip Service):
+PHASE A — Trip-local atomic state update:
   1. UPDATE Trip SET status=CANCELLED, cancelledAt=now, cancelledByUserId, cancelReason
-  2. UPDATE Booking SET status=CANCELLED, refundOverride=true,
-                       cancellationReason=OPERATOR_CANCELLED_TRIP
-       WHERE tripId=:id AND status=CONFIRMED
-  3. UPDATE Parcel SET status=CANCELLED (parcel chưa LOADED)
-                    HOẶC status=PENDING_OPERATOR_ACTION (parcel đã LOADED — operator xử lý)
-       WHERE tripId=:id AND status IN (...)
-  4. INSERT OutboxEvent {
-       eventType: "trip.trip.cancelled_by_operator",
-       payload: { tripId, operatorId, affectedBookingIds: [...], affectedParcelIds: [...],
-                  refundTotal, cancelReason },
+  2. INSERT OutboxEvent {
+       eventType: "trip.trip.cancelled",
+       payload: { eventId, occurredAt, tripId, operatorId, cancelledAt, cancelReason },
        status: PENDING
      }
-  COMMIT
+  3. COMMIT Trip + Outbox cùng local transaction.
 
-PHASE B — Refund processing (Payment & Wallet Service consume event):
-  ON TripCancelledByOperator event:
-    FOR EACH bookingId in affectedBookingIds:
-      Try:
-        BEGIN TRANSACTION (Payment DB):
-          UPDATE Wallet SET balance = balance + Booking.totalAmount
-                 WHERE userId = booking.userId
-                 AND rowVersion = :expectedRowVersion  -- optimistic lock
-          INSERT WalletTransaction { type=CREDIT, referenceType=BOOKING_REFUND,
-                                     referenceId=bookingId, amount=Booking.totalAmount,
-                                     balanceBefore, balanceAfter }
-          INSERT Payment { referenceType=BOOKING, referenceId=bookingId,
-                          method=WALLET, status=REFUNDED, refundedAt=now }
-          INSERT PlatformWalletTransaction { type=DEBIT, referenceType=BOOKING_REFUND,
-                                           referenceId=bookingId, amount=Booking.totalAmount,
-                                           balanceBefore, balanceAfter }
-          UPDATE PlatformWallet SET balance = balance - Booking.totalAmount
-                 WHERE id = singleton_id
-                 AND balance >= Booking.totalAmount
-                 AND rowVersion = :expectedPlatformRowVersion
-          INSERT OperatorLedgerEntry { entryType=BOOKING_REFUND, tripId,
-                                       amount = -Booking.totalAmount,
-                                       referenceType=BOOKING, referenceId=bookingId }
-          -- KHÔNG update OperatorWallet ở đây: trip này CANCELLED nên không có
-          -- TripSettlement, wallet chưa từng credit cho chuyến này. Ledger entry là audit-only.
-          INSERT OutboxEvent { eventType: "payment.wallet.credited", ... }
-        COMMIT
-      Catch (any error — DB constraint, rowVersion mismatch, etc.):
-        → Booking refund này FAIL → ghi vào RefundFailureLog
-        → Continue với booking tiếp theo (KHÔNG abort cả batch)
+Booking và Parcel KHÔNG bị Trip Service ghi trực tiếp. Mỗi service consume
+`trip.trip.cancelled`, lock/recheck rows local và dedupe bằng EventId:
+  - Booking chuyển row eligible sang CANCELLED và publish canonical
+    `booking.booking.cancelled` per Booking với refundAmount frozen.
+  - Parcel dùng cùng classifier cho preview/execution. Pre-load → CANCELLED + release cargo +
+    publish Parcel refund request; LOADED/IN_TRANSIT → PENDING_OPERATOR_ACTION, chưa refund/release.
+
+PHASE B — Payment refund processing:
+  Payment chỉ consume canonical `booking.booking.cancelled` và Parcel refund request, không
+  consume `trip.trip.cancelled` trực tiếp. Mỗi reference được xử lý trong local Payment
+  transaction: credit PassengerWallet, debit PlatformWallet, append immutable wallet/payment/
+  operator-ledger rows và publish `payment.wallet.credited`. Một reference fail được ghi
+  RefundFailureLog và không block các reference khác.
 
 RefundFailureLog entity (Payment & Wallet Service):
   {
     id UUID,
     bookingId UUID nullable,
     parcelId UUID nullable,
-    triggerEventType string ("trip.trip.cancelled_by_operator", "booking.booking.cancelled", etc.),
+    triggerEventType string ("trip.trip.cancelled", "booking.booking.cancelled", etc.),
     failureReason text,
     retryCount int default 0,
     lastAttemptAt datetime,
@@ -2800,7 +2754,12 @@ Trip có 2 counter cargo phân biệt rõ vai trò:
 availableCargo = Vehicle.maxCargoWeightKg
                  - Trip.estimatedPassengerLuggageKg
                  - Trip.reservedParcelWeightKg
+                 - Trip.totalLoadedWeightKg
 ```
+
+Volume capacity uses the same formula with
+`maxCargoVolumeM3 - reservedParcelVolumeM3 - totalLoadedVolumeM3`; passenger luggage has no
+volume term in v1.
 
 Parcel và Trip là hai database độc lập nên không có transaction cross-service. Mỗi service phải CAS/idempotent trong database của mình; Parcel dùng stable `Idempotency-Key` cho mutation cargo và lưu trạng thái recovery khi mutation Trip thất bại.
 
@@ -2810,11 +2769,8 @@ Parcel và Trip là hai database độc lập nên không có transaction cross-
 ADD reservedParcelWeightKg/Volume theo cargo ước tính khi:
   1. Bắt đầu deposit payment → soft hold trong 15 phút.
      Payment success chuyển PENDING_PAYMENT → RESERVED nhưng không cộng lần hai.
-  2. PENDING_OPERATOR_ACTION → RESERVED với Parcel.tripId = newTripId
-     (operator transfer parcel sang trip mới sau khi trip cũ cancelled/disrupted)
-     → ADD vào newTripId
-  3. PENDING_TRANSFER_CONFIRM → LOADED trên Trip_new (Vehicle Substitution confirm)
-     → ADD vào Trip_new.reservedParcelWeightKg (cùng lúc với totalLoadedWeightKg)
+  2. Atomic cargo transfer với `targetState=RESERVED` khi
+     PENDING_OPERATOR_ACTION → RESERVED trên Trip mới.
 
 REMEASURE reservation ước tính → thực tế khi:
   - CHECKED_IN được cân lại. Task settlement sở hữu mutation này.
@@ -2827,9 +2783,8 @@ REMOVE reservation theo giá trị hiện đang giữ khi:
   3. PENDING_FINAL_PAYMENT → REJECTED (quá finalPaymentDeadline)
   4. Parcel → CANCELLED trước khi load
   4. PENDING_OPERATOR_ACTION → RETURNED (operator trả hàng tại bến)
-  5. PENDING_OPERATOR_ACTION → RESERVED (newTripId) — REMOVE từ oldTripId
-     (operator chuyển sang trip khác; ADD vào newTripId song song)
-  6. PENDING_TRANSFER_CONFIRM → LOADED trên Trip_new — REMOVE từ Trip_old
+  5. PENDING_OPERATOR_ACTION → RESERVED (newTripId) — atomic transfer REMOVE old + ADD new
+  6. PENDING_TRANSFER_CONFIRM → LOADED trên Trip_new — atomic transfer REMOVE old + ADD loaded new
   7. TRANSFER_ESCALATED → RETURNED — REMOVE từ Trip_old
   8. IN_TRANSIT → UNLOADED (parcel vật lý rời xe, capacity freed)
      (kể cả khi flow normal — về clean state, không nợ counter)
@@ -2840,17 +2795,49 @@ REMOVE reservation theo giá trị hiện đang giữ khi:
 ```
 ADD totalLoadedWeightKg/Volume theo cargo thực tế khi:
   - READY_TO_LOAD → LOADED (Assistant scan QR / explicit confirm tại bến)
-  - PENDING_TRANSFER_CONFIRM → LOADED trên Trip_new
+  - Atomic cargo transfer với `targetState=LOADED` khi assigned target crew confirm
+    PENDING_TRANSFER_CONFIRM → LOADED trên Trip mới
 
-REMOVE totalLoadedWeightKg -= parcel.estimatedWeightKg khi:
+REMOVE totalLoadedWeightKg/Volume theo đúng frozen weight/volume của authoritative
+`TripCargoParcel` ledger row (không đọc lại estimated fields mutable từ Parcel) khi:
   - LOADED/IN_TRANSIT → UNLOADED (Assistant dỡ tại bến đích hoặc Stop dropoff)
   - DELIVERY_REJECTED → RETURN_INITIATED (sau 15 phút undo window, hàng rời xe)
-  - LOADED → PENDING_OPERATOR_ACTION (Trip CANCELLED khi parcel đã trên xe — hàng vẫn ở bến, chưa rời)
-    → Note: hàng vẫn vật lý tại bến chờ operator xử lý; nhưng `totalLoadedWeightKg` của xe đã rời bến hoặc đã hủy không còn relevant.
-    Đề xuất: REMOVE khi PENDING_OPERATOR_ACTION → RETURNED (chính thức rời) hoặc PENDING_OPERATOR_ACTION → PENDING (transfer sang trip khác).
+  - PENDING_OPERATOR_ACTION/TRANSFER_ESCALATED → RETURNED (hàng chính thức rời custody)
+  - Atomic transfer sang Trip khác (REMOVE source + ADD target trong một Trip-local transaction)
 ```
 
 > **Ranh giới ownership:** Task check-in/reweigh chỉ sở hữu estimated reservation → actual reservation. Task load chỉ sở hữu actual reservation → loaded cargo. Cả hai dùng CAS ở Parcel và mutation idempotent ở Trip để retry không cộng counter hai lần.
+>
+> **Atomic transfer contract:** Parcel gọi
+> `POST /internal/v1/trips/{sourceTripId}/cargo/transfer` với exact body
+> `{parcelId,targetTripId,targetState:"RESERVED"|"LOADED",allowCapacityOverflow}` và UUID-v4
+> Idempotency-Key. Trip lock source/target theo UUID sort order, recheck một cargo ledger row của
+> Parcel, release source và reserve/load target trong cùng local transaction. `RESERVED` luôn
+> enforce capacity; `LOADED` chỉ cho overflow khi caller gửi `allowCapacityOverflow=true` cho
+> Vehicle Substitution recovery. Parcel chỉ commit state/tripId sau HTTP success.
+>
+> **Confirm/timeout race:** crew confirm phải CAS một durable
+> `transferConfirmationClaimId/ClaimedAt/ClaimedByUserId` trước external call, và chỉ được claim
+> khi `now < transferRequestedAt + 30m`. Timeout tại equality chỉ CAS row chưa có claim. Trip call
+> dùng persisted claim id làm Idempotency-Key và exact target
+> `LOADED,allowCapacityOverflow=true`. Unknown transport outcome giữ claim để retry/recovery replay
+> cùng key; stale-claim recovery hoàn tất Parcel sau khi Trip idempotently xác nhận cargo. Vì vậy
+> crash giữa hai service không để cargo ở target trong khi Parcel bị timeout-escalate.
+
+> **Day-32 operator recovery operation:** `PENDING_OPERATOR_ACTION` transfer and
+> `PENDING_OPERATOR_ACTION|TRANSFER_ESCALATED` return use a separate durable
+> `ParcelCargoRecoveryOperation`; they never reuse the Vehicle Substitution confirmation claim.
+> The operation id is the caller UUID-v4 `Idempotency-Key` and is persisted before any Trip HTTP
+> mutation. At most one `PENDING` operation exists per Parcel. It freezes
+> `{operationType,sourceTripId,targetTripId,targetState,actorUserId,reason,refundAmountVnd,
+> refundDueVnd,sourceStatus}` so a retry does not recompute money or target state.
+>
+> Trip success is followed by one Parcel-local transaction that CAS-completes the Parcel,
+> marks the operation `COMPLETED`, and writes Outbox/stat side effects. A definitive Trip
+> `404|409|422` marks the operation `FAILED` without changing Parcel or cargo. An unknown
+> transport/`503` outcome keeps the operation `PENDING`; a recurring five-minute recovery job
+> replays the exact persisted operation id and payload. This closes both crash windows and makes
+> concurrent transfer-versus-return attempts resolve to exactly one active operation.
 
 **Use cases (cách parcel được tạo):**
 
@@ -2862,7 +2849,9 @@ Hành khách tạo yêu cầu gửi hàng theo chuyến. Có **2 use case** đ�
 
 **Use case B — Gửi hàng không đi cùng (parcel-only, không có booking):**
 - Passenger App có tab riêng "Gửi hàng" → nhập origin/destination/ngày → call **`GET /parcels/available-trips`** (endpoint riêng tách khỏi `/trips/search`)
-- Endpoint trả về danh sách Trip còn cargo capacity (`Trip.maxCargoWeightKg - Trip.totalLoadedWeightKg >= estimatedWeightKg`), filter theo route + ngày
+- Endpoint trả về danh sách Trip còn cargo capacity theo full formula
+  `maxCargoWeightKg - estimatedPassengerLuggageKg - reservedParcelWeightKg - totalLoadedWeightKg >= estimatedWeightKg`,
+  filter theo route + ngày
 - Passenger chọn chuyến → nhập info hàng + người nhận → thanh toán → hệ thống flag parcel này không có Booking liên quan, người gửi mang hàng đến bến xuất phát trước giờ khởi hành
 - Không cần passenger có Booking trên chuyến đó
 
@@ -2885,7 +2874,10 @@ Flow search:
        Route.destinationStationId IN (stations của destCity)
        Trip.departureDateTime::date = :date
        Trip.status IN (SCHEDULED, BOARDING)
-       Trip.maxCargoWeightKg - Trip.totalLoadedWeightKg >= :weightKg (nếu có)
+       Trip.maxCargoWeightKg
+         - Trip.estimatedPassengerLuggageKg
+         - Trip.reservedParcelWeightKg
+         - Trip.totalLoadedWeightKg >= :weightKg (nếu có)
   5. Response: list Trip với { tripId, routeName, operatorName, departureDateTime,
        originStationName, destinationStationName, availableCargoKg, parcelFares: { SMALL, MEDIUM, LARGE } }
 
@@ -3024,9 +3016,9 @@ Cơ chế chính — Assistant thao tác trong Driver App:
   Option A (recommended): Scan QR của parcel → confirm "Đã dỡ xuống"
   Option B: Không có QR → chọn parcel từ danh sách → tap "Đã dỡ hàng" + xác nhận
 
-→ UPDATE Parcel SET status = UNLOADED, unloadedAt = now
-→ UPDATE Trip.totalLoadedWeightKg -= parcel.estimatedWeightKg     // hàng vật lý rời xe
-→ UPDATE Trip.reservedParcelWeightKg -= parcel.estimatedWeightKg  // release reserved
+→ Parcel CAS `IN_TRANSIT → UNLOADED`, rồi gọi Trip-owned idempotent cargo release bằng stable
+  UUID-v4 key. Trip lấy weight/volume frozen từ `TripCargoParcel`, không nhận hoặc trừ lại
+  estimated mutable fields từ Parcel. Một ledger row chỉ được release một lần; retry là no-op.
 
 Operator override (exception handling only):
   → Operator bấm "Override — Đánh dấu đã dỡ" trên dashboard
@@ -3038,46 +3030,62 @@ Operator override (exception handling only):
 
 **Parcel behavior khi Trip CANCELLED (SCHEDULED hoặc BOARDING):**
 
-Trigger: Parcel Service consume TripCancelledEvent { tripId }
-  (Event-driven — KHÔNG dùng Hangfire polling làm primary trigger)
+Trigger: Parcel Service consume canonical
+`trip.trip.cancelled {eventId,occurredAt,tripId,operatorId,cancelledAt,cancelReason}`.
+Preview và execution dùng chung một classifier, tenant isolation và idempotency:
 
-Parcel PENDING_PAYMENT (chưa thanh toán xong) hoặc PENDING_OPERATOR_REVIEW:
-  → status = CANCELLED
-  → cancellationReason = "Chuyến bị hủy bởi nhà xe"
-  → Không refund (chưa charge)
-  → Push notification người gửi: "Chuyến bị hủy — yêu cầu gửi hàng đã bị từ chối"
+- Trước load:
+  `PENDING_OPERATOR_REVIEW|PENDING_PAYMENT|PENDING|PENDING_ADDITIONAL_PAYMENT|RESERVED|CHECKED_IN|PENDING_FINAL_PAYMENT|READY_TO_LOAD`
+  → `CANCELLED`, release cargo ledger đang active và refund đúng số tiền thực thu còn lại
+  `max(depositPaidVnd + balancePaidVnd - refundedAmountVnd, 0)`.
+- Đã nhận hàng vật lý: `LOADED|IN_TRANSIT`
+  → `PENDING_OPERATOR_ACTION`; chưa refund và chưa release cargo vì kiện hàng vẫn nằm trên xe/bến.
+- Terminal hoặc event replay → no-op; không phát lại refund/cargo mutation.
 
-Parcel đã thanh toán, chưa LOADED (RESERVED, CHECKED_IN, PENDING_FINAL_PAYMENT hoặc READY_TO_LOAD):
-  → status = CANCELLED
-  → cancellationReason = "Chuyến bị hủy bởi nhà xe"
-  → **Release capacity: Trip.reservedParcelWeightKg -= estimatedWeightKg**
-  → Refund về Ví VietRide
-  → Publish ParcelRefundInitiated event → Payment Service xử lý refund
-  → Push notification người gửi: "Chuyến bị hủy — hoàn X VND về ví"
+Operator manual cancel (`POST /v1/operator/parcels/{parcelId}/cancel`) hỗ trợ toàn bộ trạng thái
+trước load ở trên, tenant-safe và UUID-v4 idempotent. `refundChoice=FULL|POLICY|NO` (legacy
+`*_REFUND` aliases chỉ để compatibility). Với
+`outstanding=max(depositPaidVnd + balancePaidVnd - refundedAmountVnd,0)`:
 
-Parcel LOADED (đã nhận hàng vật lý tại bến, xe chưa khởi hành):
-  → status = PENDING_OPERATOR_ACTION
-  → Alert operator + assistant: "Chuyến [X] bị hủy — còn [N] kiện hàng đã nhận cần xử lý"
-  → Operator xử lý:
-      (1) Trả hàng tại bến → bấm "Đã trả hàng":
-            status = RETURNED
-            Release reserved: Trip.reservedParcelWeightKg -= estimatedWeightKg
-            Release physical: Trip.totalLoadedWeightKg -= estimatedWeightKg (nếu trước đó LOADED)
-            Refund về Ví VietRide → Publish ParcelRefundInitiated event
-            Push notification người gửi: "Hàng đã được trả lại tại bến — hoàn X VND về ví"
-      (2) Chuyển sang chuyến khác (manual) → operator chọn chuyến thay thế:
-            Release từ OLD trip: oldTrip.reservedParcelWeightKg -= estimatedWeightKg
-            Release physical OLD trip: oldTrip.totalLoadedWeightKg -= estimatedWeightKg (nếu trước đó LOADED)
-            Add vào NEW trip: newTrip.reservedParcelWeightKg += estimatedWeightKg
-            Parcel.tripId = newTripId
-            status = RESERVED (chờ check-in/load trên chuyến mới theo recovery policy)
-            Push notification người gửi: "Hàng của bạn đã được chuyển sang chuyến [Y]"
+```
+FULL   = outstanding
+NO     = 0
+POLICY = clamp(
+           round(outstanding * (100 - noShowFeePercent) / 100,
+                 MidpointRounding.AwayFromZero),
+           0,
+           outstanding)
+```
+
+`parcelNoShowPolicy=null` dùng default `noShowFeePercent=0`. Giá trị phải hữu hạn trong `[0,100]`;
+policy JSON malformed/out-of-range là dependency/config failure `503 UPSTREAM_UNAVAILABLE`, không
+commit cargo/state/refund. Không floor tiền theo 1.000 VND. Mọi trạng thái pre-load hợp lệ chuyển
+`CANCELLED`; `REJECTED` chỉ dành cho review/timeout flow riêng, không phải manual cancellation.
+Cargo release phải thành công trước khi commit trạng thái/refund fact.
+
+Operator xử lý `PENDING_OPERATOR_ACTION`:
+
+1. Trả hàng: Trip release cargo cũ; sau khi thành công Parcel chuyển `RETURNED` và publish
+   `parcel.refund.initiated` cho đúng outstanding amount còn lại.
+2. Chuyển chuyến: Parcel gọi duy nhất
+   `POST /internal/v1/trips/{sourceTripId}/cargo/transfer` với
+   `{parcelId,targetTripId,targetState:"RESERVED",allowCapacityOverflow:false}`. Trip lock source
+   và target theo UUID tăng dần, release source + reserve target trong cùng local transaction.
+   Chỉ sau response thành công Parcel mới đổi `tripId` và
+   `PENDING_OPERATOR_ACTION → RESERVED`.
+
+Both choices first claim a `ParcelCargoRecoveryOperation` using the public UUID-v4
+`Idempotency-Key`. Return freezes the outstanding refund from the authoritative Parcel row before
+calling Trip release; transfer freezes the source/target pair before calling atomic cargo
+transfer. A second return/transfer cannot claim while another operation is `PENDING`. Unknown Trip
+outcomes are replayed after five minutes with the same operation id; no retry may mint a new Trip
+key for the active operation.
 
 Hangfire escalation job (check mỗi 15 phút):
   SELECT Parcel WHERE status = PENDING_OPERATOR_ACTION
     AND updatedAt < now - interval '2 hours'
-  → Re-alert operator (không auto-change status)
-  → Log escalation count để operator biết đã nhắc mấy lần
+  → Publish replay-safe `parcel.parcel.pending_operator_action_realerted`
+  → Re-alert operator; không auto-change status hoặc release/refund.
 
 **Parcel chưa check-in hoặc chưa thanh toán số dư đúng hạn:**
 ```
@@ -3117,12 +3125,19 @@ Sau recovery, Parcel publish `parcel.parcel.settlement_recovered` để đính c
 
 ```
 Phụ xe bấm "Đã giao hàng"
-  → Hệ thống generate deliveryToken (UUID v4, duy nhất per parcel)
-  → INSERT/UPDATE Parcel: deliveryToken, deliveryTokenExpiresAt = now + 48h
-  → Gửi email đến địa chỉ email người nhận:
+  → Nếu có recipient email, hệ thống generate fresh deliveryToken UUID v4 cho lần issuance;
+    mỗi Parcel chỉ có tối đa một token row active
+  → Chuẩn hóa UUID dạng `D` lowercase, lưu duy nhất SHA-256 hex trong
+    `parcel_delivery_tokens` với `expiresAt = now + 48h`; raw token chỉ tồn tại trong memory
+  → Parcel gọi Notification `POST /internal/v1/emails` bằng Internal JWT + UUID-v4
+    Idempotency-Key bằng token-row id để gửi email đến địa chỉ người nhận:
       Tiêu đề: "Hàng của bạn đã được giao - Xác nhận nhận hàng"
-      Nội dung: link dạng https://app.vietride.app/delivery/confirm?token=<uuid>
+      Nội dung: link dạng
+      {PUBLIC_APP_URL}/parcels/delivery/confirm?token=<url-encoded-uuid>
       Link có hiệu lực 48 giờ
+  → Chỉ commit token row + Parcel transition sau khi Notification trả `202 Accepted`
+  → Nếu không có recipient email, transition vẫn vào `DELIVERED_PENDING_CONFIRM` nhưng không tạo
+    token; operator hoặc assigned Driver/Assistant phải dùng manual-confirm có audit note
   → Người nhận mở link trên browser (không cần cài app)
   → Trang xác nhận hiển thị: tên hàng, người gửi, mô tả
   → Người nhận bấm "Xác nhận đã nhận" hoặc "Từ chối nhận"
@@ -3133,67 +3148,65 @@ Phụ xe bấm "Đã giao hàng"
 - Link hết hạn 48 giờ → phụ xe hoặc operator có thể resend email từ dashboard (tạo token mới, token cũ bị revoke)
 - Người nhận bấm nhầm "Từ chối" → trong 15 phút đầu còn có thể đổi ý (undo), sau đó cần liên hệ nhà xe
 
-**Endpoint spec — `POST /v1/parcels/delivery/confirm`:**
+**Public delivery endpoints (không JWT; UUID-v4 Idempotency-Key required):**
 
 ```
-Public endpoint — KHÔNG cần JWT (recipient có thể không có account VietRide).
-Token tự nó là proof of authority (signed UUID, lookup match Parcel.deliveryToken).
+POST /v1/parcels/delivery/confirm
+  body { token }
+  200 { parcelId, status:"DELIVERY_CONFIRMED", confirmedAt }
 
-Request body:
-  {
-    token: string (UUID v4),
-    action: "ACCEPT" | "REJECT",
-    rejectReason?: string (required khi action = REJECT, max 500 ký tự)
-  }
+POST /v1/parcels/delivery/reject
+  body { token, rejectionReason }       // trim 1..500
+  200 { parcelId, status:"DELIVERY_REJECTED", rejectedAt, canUndoUntil }
 
-Response 200 (ACCEPT success):
-  {
-    parcelId, parcelCode, status: "DELIVERY_CONFIRMED",
-    confirmedAt: ISO 8601,
-    message: "Cảm ơn bạn đã xác nhận nhận hàng."
-  }
+POST /v1/parcels/delivery/undo-reject
+  body { token }
+  200 { parcelId, status:"DELIVERED_PENDING_CONFIRM", undoneAt }
 
-Response 200 (REJECT success):
-  {
-    parcelId, parcelCode, status: "DELIVERY_REJECTED",
-    rejectedAt: ISO 8601,
-    canUndoUntil: ISO 8601 (= rejectedAt + 15 phút),
-    message: "Đã ghi nhận từ chối. Bạn có 15 phút để đổi ý — quay lại link để xác nhận lại."
-  }
+Token tự nó là proof of authority. Không có combined `action=ACCEPT|REJECT` body. Retained
+`POST /v1/assistant/parcels/{id}/confirm-delivery` và
+`POST /v1/operator/parcels/{id}/confirm-delivery` là authenticated manual-confirm aliases; chúng
+không thay thế ba public endpoint. New assigned-crew alias là
+`POST /v1/crew/parcels/{id}/manual-confirm`.
 
 Error responses:
-  400 PARCEL_DELIVERY_TOKEN_INVALID         — token không tồn tại trong DB
-  400 PARCEL_DELIVERY_TOKEN_EXPIRED         — token đã hết hạn 48h (deliveryTokenExpiresAt < now)
-  400 PARCEL_DELIVERY_TOKEN_REVOKED         — token đã bị revoke (operator resend tạo token mới)
-  400 PARCEL_NOT_PENDING_CONFIRM            — Parcel.status không phải DELIVERED_PENDING_CONFIRM
-                                              (đã CONFIRMED/REJECTED/RETURNED rồi)
-  400 VALIDATION_ERROR                      — body sai shape (thiếu rejectReason khi REJECT, etc.)
+  400 PARCEL_DELIVERY_TOKEN_INVALID
+  400 PARCEL_DELIVERY_TOKEN_EXPIRED
+  400 PARCEL_DELIVERY_TOKEN_REVOKED
+  400 PARCEL_NOT_PENDING_CONFIRM
+  422 VALIDATION_ERROR
 
 Validation steps (BE):
-  1. SELECT Parcel WHERE deliveryToken = :token
-  2. Check deliveryTokenExpiresAt > now — nếu sai return TOKEN_EXPIRED
-  3. Check deliveryTokenRevokedAt IS NULL — nếu set return TOKEN_REVOKED
-  4. Check Parcel.status = DELIVERED_PENDING_CONFIRM — nếu khác return NOT_PENDING_CONFIRM
-  5. Process action:
-     ACCEPT → UPDATE status = DELIVERY_CONFIRMED, confirmedAt = now, confirmedByIp = req.ip
-     REJECT → UPDATE status = DELIVERY_REJECTED, rejectedAt = now, rejectionReason = body.rejectReason
+  1. Parse UUID v4, normalize dạng `D` lowercase, SHA-256 UTF-8 → 64 lowercase hex
+  2. SELECT ParcelDeliveryToken WHERE tokenHash = :hash
+  3. Check expiresAt > now — nếu sai return TOKEN_EXPIRED
+  4. Check revokedAt IS NULL — nếu set return TOKEN_REVOKED
+  5. Check Parcel.status = DELIVERED_PENDING_CONFIRM — nếu khác return NOT_PENDING_CONFIRM
+  6. Process endpoint:
+     confirm → UPDATE status = DELIVERY_CONFIRMED, confirmedAt = now, confirmedByIp = req.ip
+     reject → UPDATE status = DELIVERY_REJECTED, rejectedAt = now,
+              rejectionReason = body.rejectionReason
               (Hangfire job sau 15 phút check → RETURN_INITIATED nếu không đổi ý)
-  6. Publish event ParcelDeliveryConfirmed / ParcelDeliveryRejected → Notification Service:
+     undo-reject → chỉ trong 15-minute window, restore DELIVERED_PENDING_CONFIRM
+  7. Revoke token row khi flow không còn cho phép recipient action; publish
+     ParcelDeliveryConfirmed / ParcelDeliveryRejected → Notification Service:
      ACCEPT → push sender "Hàng đã được [recipientName] nhận thành công."
      REJECT → push operator "Người nhận từ chối hàng [parcelCode]. Lý do: [reason]"
 
 Rate limit:
-  Redis key parcel:delivery_confirm:{token}, max 5 attempts / hour per token (anti-brute force).
+  Redis key parcel:delivery_confirm:{tokenHash}, max 5 attempts / hour per token hash
+  (không lưu raw token trong Redis).
   Token là UUID v4 (122 bit entropy) → guess attack không khả thi, chỉ chống automated abuse.
 
 Resend endpoint — `POST /v1/operator/parcels/{parcelId}/resend-delivery-email`:
-  Role: OPERATOR_STAFF/ADMIN của operator chuyến đó, hoặc DRIVER/ASSISTANT của trip
+  Role: OPERATOR_STAFF/ADMIN của operator chuyến đó. Assigned DRIVER/ASSISTANT dùng exact crew
+  alias `POST /v1/crew/parcels/{parcelId}/resend-delivery-email`.
   Logic:
     1. Validate Parcel.status = DELIVERED_PENDING_CONFIRM hoặc DELIVERY_REJECTED (chưa quá undo window)
-    2. UPDATE Parcel.deliveryTokenRevokedAt = now (revoke token cũ)
-    3. Generate deliveryToken mới (UUID v4), set deliveryTokenExpiresAt = now + 48h
-    4. INSERT/UPDATE Parcel với token mới, clear revokedAt
-    5. Send email link mới
+    2. DELIVERY_REJECTED còn trong undo window được restore DELIVERED_PENDING_CONFIRM
+    3. UPDATE active ParcelDeliveryToken.revokedAt = now
+    4. Generate raw UUID v4 mới; INSERT hash/expiry vào `parcel_delivery_tokens`
+    5. Gọi Notification internal email với Idempotency-Key = token-row id; chỉ commit sau `202`
     6. Audit log: {action: PARCEL_DELIVERY_RESEND, metadata: {parcelId, resentBy}}
 ```
 
@@ -3201,14 +3214,14 @@ Resend endpoint — `POST /v1/operator/parcels/{parcelId}/resend-delivery-email`
 
 ```
 Nếu recipient KHÔNG click link trong 48 giờ:
-  → Token expire (deliveryTokenExpiresAt < now)
+  → Active token row expire (`expiresAt < now`)
   → Parcel.status VẪN giữ DELIVERED_PENDING_CONFIRM (không auto-confirm)
   → KHÔNG tự động chuyển DELIVERY_CONFIRMED (tránh case recipient claim "tôi chưa xác nhận")
   → Operator nhận re-alert sau 7 ngày qua Hangfire job:
 
 Hangfire job (Parcel Service, daily at 9am):
   SELECT Parcel WHERE status = DELIVERED_PENDING_CONFIRM
-    AND deliveryTokenExpiresAt < now - interval '7 days'
+    AND active ParcelDeliveryToken.expiresAt < now - interval '7 days'
     AND lastReminderAt IS NULL OR lastReminderAt < now - interval '7 days'
   → Push operator notification + alert:
      "Parcel [parcelCode] đã giao 7 ngày trước nhưng người nhận chưa xác nhận.
@@ -3218,9 +3231,13 @@ Hangfire job (Parcel Service, daily at 9am):
 Operator action options khi receive re-alert:
   (a) Resend email — gọi POST /v1/operator/parcels/{id}/resend-delivery-email
   (b) Manual confirm — gọi POST /v1/operator/parcels/{id}/manual-confirm
-      (existing endpoint từ "recipient không có email" case, body: {confirmNote}, role: OPERATOR/DRIVER/ASSISTANT)
-  (c) Force return — gọi POST /v1/operator/parcels/{id}/return (parcel → RETURN_INITIATED, operator xử lý ngoài)
+      (body `{confirmNote}` trim 1..500; assigned DRIVER/ASSISTANT dùng
+      `/v1/crew/parcels/{id}/manual-confirm`)
 ```
+
+`DELIVERED_PENDING_CONFIRM` không phải source hợp lệ của operational `/return`; tại re-alert chỉ
+có resend hoặc manual-confirm. Luồng return Day-32 chỉ nhận
+`PENDING_OPERATOR_ACTION|TRANSFER_ESCALATED` và kết thúc ở `RETURNED`.
 
 > **Lý do không auto-confirm:** Auto-confirm sau timeout tạo legal/dispute risk — recipient có thể claim "tôi không xác nhận, hệ thống tự confirm". Pattern đúng là **không có terminal state tự động** khi user inaction — operator can thiệp thủ công và để lại audit trail.
 
@@ -3239,10 +3256,10 @@ Hangfire job (check mỗi 1 phút):
   → Publish event ParcelReturnInitiated → alert operator
 
 Nếu người nhận đổi ý trong 15 phút:
-  → Dùng lại delivery link (token vẫn valid) → bấm "Xác nhận đã nhận"
-  → Parcel: status = DELIVERY_CONFIRMED, confirmedAt = now
-  → rejectedAt giữ nguyên (audit trail), rejectionReason giữ nguyên
-  → Hangfire job thấy status đã DELIVERY_CONFIRMED → skip, không trigger RETURN_INITIATED
+  → Gọi explicit `POST /v1/parcels/delivery/undo-reject` bằng token còn hiệu lực
+  → Parcel CAS `DELIVERY_REJECTED → DELIVERED_PENDING_CONFIRM`, clear rejection metadata
+  → Sau đó người nhận mới gọi confirm bằng cùng link/token
+  → Hangfire job thấy status không còn DELIVERY_REJECTED → skip
 ```
 
 **Parcel entity — business requirements:**
@@ -3265,14 +3282,16 @@ Nếu người nhận đổi ý trong 15 phút:
   ```
   Trường hợp A — Người nhận CÓ email:
     → Sau khi UNLOADED → DELIVERED_PENDING_CONFIRM:
-        Generate deliveryToken, gửi email confirmation link (flow cũ giữ nguyên)
+        Generate raw deliveryToken trong memory, persist SHA-256 hash/expiry row và gọi
+        Notification internal email
     → Người nhận bấm link → DELIVERY_CONFIRMED hoặc DELIVERY_REJECTED
 
   Trường hợp B — Người nhận KHÔNG có email (email = null):
     → UNLOADED → DELIVERED_PENDING_CONFIRM như bình thường
     → KHÔNG gửi email (không có địa chỉ)
     → Assistant/Operator xác nhận thủ công trong Driver App / Operator Dashboard:
-        Nút "Xác nhận đã giao (thủ công)" — chỉ enable khi Parcel.recipientEmail = null
+        Nút "Xác nhận đã giao (thủ công)" — enable khi Parcel.recipientEmail = null hoặc khi
+        recipient có email nhưng token đã hết hạn/không phản hồi và crew/operator đã xác minh ngoài hệ thống
         Bắt buộc nhập lý do / ghi chú giao hàng (ví dụ "Đã giao cho người thân tại bến")
         → UPDATE Parcel SET status = DELIVERY_CONFIRMED, confirmedAt = now,
              confirmedByUserId = assistantId/operatorId, confirmNote = <text>
@@ -3288,9 +3307,22 @@ Nếu người nhận đổi ý trong 15 phút:
     recipientPhone: string NOT NULL (luôn bắt buộc — phụ xe gọi điện xác nhận)
     recipientName:  string NOT NULL
   ```
-- **Delivery confirmation:** `deliveryToken` (UUID unique, dùng verify link 48h), `deliveryTokenExpiresAt`, `deliveryTokenRevokedAt` (nullable — set khi resend, token cũ revoked).
-- **Transfer fields:** `transferTargetTripId`, `transferRequestedAt`, `transferConfirmedAt`, `transferConfirmedByUserId` nullable — dùng khi VehicleSubstitution hoặc DISRUPTED không có xe thay thế nhưng operator chuyển hàng sang trip khác. Chỉ Driver/Assistant của target trip được confirm hàng đã lên xe mới.
+- **Delivery confirmation:** `ParcelDeliveryToken` history có
+  `{id,parcelId,tokenHash,expiresAt,revokedAt,issuedByUserId,issueReason,createdAt,updatedAt}`.
+  `tokenHash` là SHA-256 hex lowercase 64 ký tự; raw UUID không nằm trên `Parcel`, Outbox hoặc
+  log. `issueReason=INITIAL_DELIVERY|RESEND|MIGRATION_BACKFILL`; unique token hash và chỉ một row
+  chưa revoke per Parcel.
+- **Transfer fields:** `transferTargetTripId`, `transferRequestedAt`, `transferConfirmedAt`,
+  `transferConfirmedByUserId`, `transferConfirmationClaimId`,
+  `transferConfirmationClaimedAt`, `transferConfirmationClaimedByUserId` nullable — dùng khi
+  VehicleSubstitution hoặc DISRUPTED không có xe thay thế nhưng operator chuyển hàng sang trip
+  khác. Chỉ Driver/Assistant của target trip được confirm; durable claim loại race với timeout và
+  là recovery identity cho atomic Trip cargo transfer.
 - **Return fields:** `returnReason`, `returnedAt`, `returnedByUserId` nullable — bắt buộc set khi status chuyển `RETURNED` từ `PENDING_OPERATOR_ACTION` hoặc `TRANSFER_ESCALATED`; ghi kèm `AuditLog` để đối soát.
+- **Cargo recovery history:** `ParcelCargoRecoveryOperation` stores a UUID-v4 operation id,
+  Parcel/operator, `TRANSFER|RETURN`, `PENDING|COMPLETED|FAILED`, source/target Trip,
+  target state, actor, reason, frozen refund facts, source status, claim/completion timestamps and
+  an optional failure code. A partial unique index permits at most one `PENDING` row per Parcel.
 - **Status lifecycle:** xem ParcelStatus enum ở section 8.
 - **Timestamps audit:** `confirmedAt`, `rejectedAt`, `rejectionReason` (optional free text), `confirmedByIp` (audit), `reviewedAt`/`reviewedByUserId`/`reviewDecision` (chỉ EXTRA_LARGE), `unloadedAt` nullable (cho cargo weight tracking — xem section 8).
 
@@ -3326,7 +3358,7 @@ Parcel có tính phí. Operator define bảng giá theo route + size category. C
 > - Giá cuối giảm: `parcel.refund.initiated` với `amount=refundDueVnd`; refund không block `READY_TO_LOAD`.
 > - Trip/system CANCELLED trước load: refund toàn bộ `depositPaidVnd + balancePaidVnd - refundedAmountVnd`.
 > - CHECK_IN_TIMEOUT/FINAL_PAYMENT_TIMEOUT: không refund cọc; ghi `forfeitedDepositVnd=depositPaidVnd`, không cộng forfeiture lần hai vào collected amount.
-> - PENDING_OPERATOR_ACTION → RETURNED (operator trả hàng tại bến): INSERT PlatformWalletTransaction DEBIT + OperatorLedgerEntry { entryType=PARCEL_REFUND, tripId, amount = -depositAmount, note="Parcel returned at terminal after trip cancel/disrupt" } atomic với Wallet credit.
+> - PENDING_OPERATOR_ACTION → RETURNED (operator trả hàng tại bến): INSERT PlatformWalletTransaction DEBIT + OperatorLedgerEntry { entryType=PARCEL_REFUND, tripId, amount = -max(depositPaidVnd + balancePaidVnd - refundedAmountVnd, 0), note="Parcel returned at terminal after trip cancel/disrupt" } atomic với Wallet credit.
 > - TRANSFER_ESCALATED → RETURNED: cùng pattern (refund 100% nếu parcel rời khỏi VietRide custody).
 > - DELIVERY_REJECTED → RETURN_INITIATED (recipient từ chối + 15p undo): refund logic phụ thuộc operator (out of scope ledger v1 — operator settle thủ công với sender; có thể adjust ledger qua System Admin endpoint nếu cần).
 > - EXTRA_LARGE → REJECTED bởi operator review: chưa charge (status từ PENDING_OPERATOR_REVIEW chưa qua PENDING_PAYMENT) → KHÔNG có ledger entry để rollback.
@@ -4064,19 +4096,35 @@ Trường hợp Trip đang IN_PROGRESS nhưng operator **không thể** điều 
 ```
 Operator bấm "Hủy chuyến không thay thế" trong dashboard (chỉ enable khi Trip.status = IN_PROGRESS)
   → UI bắt buộc nhập reason text + xác nhận 2 bước
+  → POST /v1/operator/trips/{tripId}/disrupt-no-substitution
+      Role: OPERATOR_ADMIN; UUID-v4 Idempotency-Key required
+      Body exact: { reason: string trim 1..500 }
+      SCHEDULED/BOARDING → 422 TRIP_NOT_IN_PROGRESS
+      COMPLETED/CANCELLED/DISRUPTED → 409 TRIP_ALREADY_TERMINAL
   → Trip-Route-Vehicle Service:
-      UPDATE Trip SET status = DISRUPTED, hasSubstitution = false, disruptedAt = now
-      Publish event TripDisrupted { tripId, hasSubstitution: false, reason }
+      UPDATE Trip SET status = DISRUPTED, hasSubstitution = false,
+                      disruptedAt = now, disruptionReason = reason
+      Publish exact `trip.trip.disrupted`
+        {eventId,occurredAt,tripId,operatorId,terminalAt,hasSubstitution:false,reason}
 ```
 
 **Booking refund proportional formula:**
 
 Booking Service consume `TripDisrupted { hasSubstitution: false }`:
 
+Booking MUST fetch the authoritative raw
+`GET /internal/v1/trips/{tripId}` snapshot before calculating each affected Booking. The snapshot
+supplies nullable `totalDistanceKm`, ordered stops, stop status, nullable
+`distanceFromOriginKm`, and `orderIndex`. A timeout, 5xx, malformed response, or missing Trip is a
+retryable consumer failure that proceeds through broker retry/DLQ; it MUST NOT be interpreted as
+"no stop arrived" or produce a 100% refund.
+
 **Step 1 — Tính `traveledRatio` (tỷ lệ chặng đã đi tính từ pickup point của booking đến stop xa nhất xe đã ARRIVED):**
 
 ```
-PRIMARY path (có distanceFromOriginKm trên TripStop của trip này):
+PRIMARY path chỉ khi `totalDistanceKm`, pickup distance cần dùng, và distance của reached stop xa
+nhất đều có mặt, đồng thời denominator dương. Nếu bất kỳ input cần thiết nào null/không hợp lệ,
+dùng toàn bộ FALLBACK path; không trộn distance với order:
 
   pickupDistance = distance từ origin Station đến pickup point của booking:
     - Nếu Booking.pickupStationId = Route.originStationId (terminal pickup) → pickupDistance = 0
@@ -4115,13 +4163,14 @@ FALLBACK path (TripStop.distanceFromOriginKm NULL — Operator chưa nhập):
   IF bookingTotalOrder <= 0:
     traveledRatio = 0
   ELSE:
-    traveledRatio = bookingTravelOrder / bookingTotalOrder
+    traveledRatio = clamp(bookingTravelOrder / bookingTotalOrder, 0, 1)
 ```
 
 **Step 2 — Tính `refundAmount`:**
 
 ```
-refundAmount = round(Booking.totalAmount × (1 - traveledRatio), đồng gần nhất)  -- BSOT v1.11.0: không floor 1000
+refundAmount = round(Booking.totalAmount × (1 - traveledRatio), đồng gần nhất,
+                     MidpointRounding.AwayFromZero)  -- BSOT v1.11.0: không floor 1000
               kẹp về [0, Booking.totalAmount]
 ```
 
@@ -4131,16 +4180,26 @@ refundAmount = round(Booking.totalAmount × (1 - traveledRatio), đồng gần n
 UPDATE Booking SET status = DISRUPTED,
                    cancellationReason = OPERATOR_DISRUPTED_IN_PROGRESS,
                    refundOverride = true
-Publish ChargeRefundRequested { bookingId, refundAmount, referenceType: BOOKING_REFUND }
-  → Payment & Wallet Service:
+Trong cùng Booking-local transaction, publish hai facts với hai fresh stable EventId riêng:
+  1. `booking.booking.cancelled`
+     {eventId,occurredAt,bookingId,userId,refundAmount,refundOverride:true,
+      cancellationReason:"OPERATOR_DISRUPTED_IN_PROGRESS",bookingCode,...}
+     → sole Payment refund trigger. Notification suppress generic BOOKING_CANCELLED cho reason này.
+  2. `booking.booking.disrupted`
+     {eventId,occurredAt,bookingId,bookingCode,tripId,operatorId,userId,traveledRatio,
+      refundAmount,cancellationReason:"OPERATOR_DISRUPTED_IN_PROGRESS"}
+     → Notification-only passenger fact; Payment không bind.
+Mỗi payload.eventId == Outbox row id == RabbitMQ MessageId.
+
+Payment consume `booking.booking.cancelled`:
       1. Credit Wallet user với refundAmount (atomic Wallet UPDATE + INSERT WalletTransaction)
       2. DEBIT PlatformWallet holding pool:
          INSERT PlatformWalletTransaction { type=DEBIT, referenceType=BOOKING_REFUND,
            amount=refundAmount, referenceId=bookingId,
-           note="DISRUPTED no-substitution proportional refund (traveledRatio=X)" }
+           note="DISRUPTED no-substitution proportional refund" }
       3. INSERT OperatorLedgerEntry — audit-only:
          { entryType=BOOKING_REFUND, tripId=Trip.id, amount = -refundAmount, referenceType=BOOKING,
-           referenceId=bookingId, note="DISRUPTED no-substitution proportional refund (traveledRatio=X)" }
+           referenceId=bookingId, note="DISRUPTED no-substitution proportional refund" }
          → Trip DISRUPTED là Trip terminal → đã/sẽ có `OperatorTripSettlement` được tạo
             cho trip này. Ledger refund entry này sẽ được tính vào SUM khi compute netAmount
             tại settle time (giảm số tiền operator nhận về ví). Đảm bảo settlement consistency:
@@ -4148,8 +4207,8 @@ Publish ChargeRefundRequested { bookingId, refundAmount, referenceType: BOOKING_
       4. Voucher rollback (nếu booking đã apply voucher):
          - VIETRIDE_FUNDED: INSERT ADJUSTMENT entry amount = -discountAmount (refund credit cũ)
          - OPERATOR_FUNDED: chỉ DELETE VoucherUsage (audit entry amount=0 không ảnh hưởng balance)
-  → WalletCredited event back → Booking Service set Booking.status = REFUNDED
-Notification Service push passenger với traveledRatio:
+  → `payment.wallet.credited` back → Booking Service CAS `DISRUPTED → REFUNDED`
+Notification consume duy nhất `booking.booking.disrupted` và push passenger với traveledRatio:
   "Chuyến [X] bị gián đoạn không thể tiếp tục. Hoàn [refundAmount] VND về Ví VietRide
    (đã đi được ~[traveledRatio × 100]% lộ trình của bạn)."
 ```
@@ -4206,11 +4265,14 @@ Example 3 — FALLBACK (operator chưa nhập distance), xe đi qua 2/4 stop sau
 | Trip không có stop nào (express SG→HN) | Fallback path: `totalOrder = 0 + 1 = 1`, `reachedOrder = 0` → `traveledRatio = 0` → refund 100% (xe hỏng giữa đường nhưng không có waypoint đo được tiến độ) |
 | Round-trip booking (outbound + return là 2 booking riêng) | Áp dụng formula **độc lập per Booking**. DISRUPTED ở outbound trip chỉ ảnh hưởng outbound Booking. Return Booking không ảnh hưởng (xem 6.1 round-trip rules). |
 | Passenger NO_SHOW trên trip này trước khi DISRUPTED | Booking đã chuyển NO_SHOW trước (terminal status) → KHÔNG match filter `status IN (CONFIRMED, PARTIAL_NO_SHOW)` → không refund |
-| PARTIAL_NO_SHOW booking | Vẫn áp formula với `Booking.totalAmount` đầy đủ (passenger BOARDED chiếm 1 phần, NO_SHOW chiếm phần kia — operator chấp nhận hoàn toàn bộ totalAmount × traveledRatio để đơn giản, không tính per-passenger) |
+| PARTIAL_NO_SHOW booking | Vẫn áp formula với `Booking.totalAmount` đầy đủ (passenger BOARDED chiếm 1 phần, NO_SHOW chiếm phần kia — operator chấp nhận hoàn `totalAmount × (1 - traveledRatio)` để đơn giản, không tính per-passenger) |
 
 **Parcel behavior khi DISRUPTED no-substitution:**
-- Parcel `LOADED` hoặc `IN_TRANSIT`: → `PENDING_OPERATOR_ACTION` (operator trả hàng tại bến gần nhất hoặc chuyển sang trip khác — flow đã có ở 6.6).
-- Parcel `PENDING` (chưa LOADED): → `CANCELLED`, refund 100% (chưa load lên xe).
+- Tái sử dụng nguyên vẹn Day-32 classifier:
+  - `PENDING_OPERATOR_REVIEW|PENDING_PAYMENT|PENDING|PENDING_ADDITIONAL_PAYMENT|RESERVED|CHECKED_IN|PENDING_FINAL_PAYMENT|READY_TO_LOAD`
+    → `CANCELLED`, release active cargo và refund outstanding collected amount.
+  - `LOADED|IN_TRANSIT` → `PENDING_OPERATOR_ACTION`, chưa release/refund.
+  - Terminal/replay → no-op.
 
 **Phân biệt với Vehicle Substitution:**
 | | Vehicle Substitution | No-substitution Disrupted |
@@ -4220,7 +4282,7 @@ Example 3 — FALLBACK (operator chưa nhập distance), xe đi qua 2/4 stop sau
 | BookingTransfer records | có | không |
 | Booking outcome | Chuyển sang Trip_new, giữ CONFIRMED | → DISRUPTED → REFUNDED proportional |
 | `cancellationReason` | (không set — booking không cancel) | `OPERATOR_DISRUPTED_IN_PROGRESS` |
-| Parcel outcome | PENDING_TRANSFER_CONFIRM lên xe mới | PENDING_OPERATOR_ACTION (trả/chuyển) |
+| Parcel outcome | `LOADED|IN_TRANSIT → PENDING_TRANSFER_CONFIRM` lên xe mới | Dùng Day-32 classifier: pre-load `→ CANCELLED`; `LOADED|IN_TRANSIT → PENDING_OPERATOR_ACTION`; terminal/replay no-op |
 
 > **Lưu ý field cần thêm:** `Trip.disruptedAt datetime nullable` (set khi DISRUPTED, dùng cho reporting/audit), `Trip.disruptionReason text nullable` (operator nhập khi trigger).
 
@@ -4559,7 +4621,9 @@ BookingStatus:     PENDING_PAYMENT → CONFIRMED → COMPLETED
                                   ↘ EXPIRED   (VNPay timeout 15 phút — không refund)
                    CONFIRMED → CANCELLED → REFUNDED  (hủy chủ động + tiền về ví)
                    CONFIRMED → NO_SHOW               (tất cả passenger no-show, không hoàn tiền)
-                   CONFIRMED → PARTIAL_NO_SHOW → COMPLETED  (một phần passenger no-show, không hoàn, Trip COMPLETED → chuyển COMPLETED)
+                   CONFIRMED → PARTIAL_NO_SHOW → COMPLETED  (Trip hoàn thành bình thường)
+                                             ↘ DISRUPTED → REFUNDED
+                                               (Trip DISRUPTED no-substitution; proportional refund trên full Booking.totalAmount)
                    CONFIRMED → CANCELLED              (operator hủy chuyến TRƯỚC IN_PROGRESS → sau đó REFUNDED khi wallet credited)
                    CONFIRMED → DISRUPTED → REFUNDED   (Trip bị DISRUPTED IN_PROGRESS không có vehicle substitution
                                                         → auto-refund proportional → REFUNDED khi wallet credited.
@@ -4616,6 +4680,8 @@ PaymentStatus:
 ParcelStatus:
                    PENDING_OPERATOR_REVIEW    → PENDING_PAYMENT | REJECTED | CANCELLED
                    PENDING_PAYMENT            → RESERVED | EXPIRED | CANCELLED
+                   PENDING (legacy)            → CANCELLED | PENDING_OPERATOR_ACTION
+                   PENDING_ADDITIONAL_PAYMENT (legacy) → CANCELLED | PENDING_OPERATOR_ACTION | REJECTED
                    RESERVED                   → CHECKED_IN | REJECTED | CANCELLED | PENDING_OPERATOR_ACTION
                    CHECKED_IN                 → PENDING_FINAL_PAYMENT | READY_TO_LOAD | PENDING_OPERATOR_ACTION
                    PENDING_FINAL_PAYMENT      → READY_TO_LOAD | REJECTED | CANCELLED
@@ -4745,7 +4811,7 @@ Role:              PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_AD
 |---|---|
 | Booking | Seat release khi VNPay timeout · schedule-change auto-accept · PENDING_SEAT_ASSIGNMENT escalation (interval 15 phút) |
 | Trip-Route-Vehicle | Auto-BOARDING 30 phút trước departure · COMPLETED fallback +30 phút sau ETA · Generate Trip từ DriverSchedule (CN 23:00) |
-| Parcel | Undo-reject 15 phút · cancel EXTRA_LARGE review timeout 24h · reject/forfeit RESERVED quá `latestCheckInAt` · reject/forfeit PENDING_FINAL_PAYMENT quá `finalPaymentDeadline` (interval 5 phút) · PENDING_TRANSFER_CONFIRM escalation 30 phút · PENDING_OPERATOR_ACTION re-alert 2h |
+| Parcel | Undo-reject 15 phút · cancel EXTRA_LARGE review timeout 24h · reject/forfeit RESERVED quá `latestCheckInAt` · reject/forfeit PENDING_FINAL_PAYMENT quá `finalPaymentDeadline` (interval 5 phút) · PENDING_TRANSFER_CONFIRM escalation 30 phút · stale Day-32 cargo-recovery operation replay 5 phút · PENDING_OPERATOR_ACTION re-alert 2h |
 | Payment | PENDING_REDIRECT expired 15 phút · TopUpRequest expired 15 phút · **Trip settlement eligibility flag (daily 02:00)** — set `OperatorTripSettlement.status=ELIGIBLE` khi `eligibleAt <= now` · **Trip settlement weekly auto-settle (Monday 09:00 weekly)** — debit PlatformWallet + credit OperatorWallet cho mọi settlement ELIGIBLE · Subscription trial expire check (daily 00:30) · Trial expiring T-3 days warn (daily 09:00) · Subscription upgrade attempt hết hạn sau 15 phút và reconciliation chạy mỗi phút · Subscription paid invoice generation post-payment-success (event-driven, không phải scheduled — nhưng retry via Hangfire nếu PDF gen fail) |
 | Identity | OTP expired cleanup (optional) · FCM token stale cleanup (weekly) |
 

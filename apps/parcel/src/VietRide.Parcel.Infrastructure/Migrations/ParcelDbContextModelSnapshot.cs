@@ -213,18 +213,6 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasColumnType("jsonb")
                         .HasColumnName("delivery_photo_urls");
 
-                    b.Property<Guid?>("DeliveryToken")
-                        .HasColumnType("uuid")
-                        .HasColumnName("delivery_token");
-
-                    b.Property<DateTimeOffset?>("DeliveryTokenExpiresAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("delivery_token_expires_at");
-
-                    b.Property<DateTimeOffset?>("DeliveryTokenRevokedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("delivery_token_revoked_at");
-
                     b.Property<long>("DepositAmount")
                         .HasColumnType("bigint")
                         .HasColumnName("deposit_amount");
@@ -521,6 +509,18 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasColumnName("total_price_vnd")
                         .HasDefaultValueSql("0");
 
+                    b.Property<Guid?>("TransferConfirmationClaimId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("transfer_confirmation_claim_id");
+
+                    b.Property<DateTimeOffset?>("TransferConfirmationClaimedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("transfer_confirmation_claimed_at");
+
+                    b.Property<Guid?>("TransferConfirmationClaimedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("transfer_confirmation_claimed_by_user_id");
+
                     b.Property<DateTimeOffset?>("TransferConfirmedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("transfer_confirmed_at");
@@ -579,11 +579,6 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasDatabaseName("idx_parcels_confirmed_by_user_id")
                         .HasFilter("confirmed_by_user_id IS NOT NULL");
 
-                    b.HasIndex("DeliveryToken")
-                        .IsUnique()
-                        .HasDatabaseName("uq_parcels_delivery_token")
-                        .HasFilter("delivery_token IS NOT NULL");
-
                     b.HasIndex("DepositPaymentId")
                         .HasDatabaseName("idx_parcels_deposit_payment_id")
                         .HasFilter("deposit_payment_id IS NOT NULL");
@@ -611,6 +606,10 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                     b.HasIndex("ReviewedByUserId")
                         .HasDatabaseName("idx_parcels_reviewed_by_user_id")
                         .HasFilter("reviewed_by_user_id IS NOT NULL");
+
+                    b.HasIndex("TransferConfirmationClaimedAt")
+                        .HasDatabaseName("idx_parcels_transfer_confirmation_claimed_at")
+                        .HasFilter("status = 'PENDING_TRANSFER_CONFIRM' AND transfer_confirmation_claim_id IS NOT NULL");
 
                     b.HasIndex("TransferConfirmedByUserId")
                         .HasDatabaseName("idx_parcels_transfer_confirmed_by_user_id")
@@ -668,6 +667,201 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                             t.HasCheckConstraint("chk_parcels_volume_positive", "estimated_volume_m3 > 0");
 
                             t.HasCheckConstraint("chk_parcels_weight_positive", "estimated_weight_kg > 0");
+                        });
+                });
+
+            modelBuilder.Entity("VietRide.Parcel.Domain.Entities.ParcelCargoRecoveryOperation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("actor_user_id");
+
+                    b.Property<DateTimeOffset>("ClaimedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("claimed_at");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("FailureCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("failure_code");
+
+                    b.Property<bool>("IsStatusOverride")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_status_override");
+
+                    b.Property<string>("OperationType")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("operation_type");
+
+                    b.Property<Guid>("OperatorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("operator_id");
+
+                    b.Property<Guid>("ParcelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("parcel_id");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reason");
+
+                    b.Property<long>("RefundAmountVnd")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L)
+                        .HasColumnName("refund_amount_vnd");
+
+                    b.Property<long>("RefundDueVnd")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L)
+                        .HasColumnName("refund_due_vnd");
+
+                    b.Property<string>("SourceStatus")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("source_status");
+
+                    b.Property<Guid>("SourceTripId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("source_trip_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<string>("TargetState")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("target_state");
+
+                    b.Property<Guid?>("TargetTripId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("target_trip_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("Id")
+                        .HasName("pk_parcel_cargo_recovery_operations");
+
+                    b.HasIndex("ParcelId")
+                        .IsUnique()
+                        .HasDatabaseName("uq_parcel_cargo_recovery_operations_active_parcel")
+                        .HasFilter("status = 'PENDING'");
+
+                    b.HasIndex("ClaimedAt", "Id")
+                        .HasDatabaseName("idx_parcel_cargo_recovery_operations_stale")
+                        .HasFilter("status = 'PENDING'");
+
+                    b.ToTable("parcel_cargo_recovery_operations", "vietride_parcel", t =>
+                        {
+                            t.HasCheckConstraint("chk_parcel_cargo_recovery_amounts", "refund_amount_vnd >= 0 AND refund_due_vnd >= 0");
+
+                            t.HasCheckConstraint("chk_parcel_cargo_recovery_completion", "(status = 'PENDING' AND completed_at IS NULL AND failure_code IS NULL)\r\nOR (status = 'COMPLETED' AND completed_at IS NOT NULL AND failure_code IS NULL)\r\nOR (status = 'FAILED' AND completed_at IS NOT NULL AND failure_code IS NOT NULL)");
+
+                            t.HasCheckConstraint("chk_parcel_cargo_recovery_operation_type", "operation_type IN ('TRANSFER', 'RETURN')");
+
+                            t.HasCheckConstraint("chk_parcel_cargo_recovery_status", "status IN ('PENDING', 'COMPLETED', 'FAILED')");
+
+                            t.HasCheckConstraint("chk_parcel_cargo_recovery_target", "(operation_type = 'TRANSFER' AND target_trip_id IS NOT NULL AND target_state = 'RESERVED')\r\nOR (operation_type = 'RETURN' AND target_trip_id IS NULL AND target_state IS NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("VietRide.Parcel.Domain.Entities.ParcelDeliveryToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("IssueReason")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("issue_reason");
+
+                    b.Property<Guid?>("IssuedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("issued_by_user_id");
+
+                    b.Property<Guid>("ParcelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("parcel_id");
+
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("revoked_at");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("char(64)")
+                        .HasColumnName("token_hash")
+                        .IsFixedLength();
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("Id")
+                        .HasName("pk_parcel_delivery_tokens");
+
+                    b.HasIndex("ExpiresAt")
+                        .HasDatabaseName("idx_parcel_delivery_tokens_expires_at_active")
+                        .HasFilter("revoked_at IS NULL");
+
+                    b.HasIndex("ParcelId")
+                        .IsUnique()
+                        .HasDatabaseName("uq_parcel_delivery_tokens_active_parcel")
+                        .HasFilter("revoked_at IS NULL");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique()
+                        .HasDatabaseName("uq_parcel_delivery_tokens_token_hash");
+
+                    b.ToTable("parcel_delivery_tokens", "vietride_parcel", t =>
+                        {
+                            t.HasCheckConstraint("chk_parcel_delivery_tokens_issue_reason", "issue_reason IN ('INITIAL_DELIVERY', 'RESEND', 'MIGRATION_BACKFILL')");
                         });
                 });
 
@@ -1031,6 +1225,26 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasFilter("status IN ('PENDING'::vietride_parcel.outbox_event_status, 'PUBLISHING'::vietride_parcel.outbox_event_status, 'FAILED'::vietride_parcel.outbox_event_status)");
 
                     b.ToTable("outbox_events", "vietride_parcel");
+                });
+
+            modelBuilder.Entity("VietRide.Parcel.Domain.Entities.ParcelCargoRecoveryOperation", b =>
+                {
+                    b.HasOne("VietRide.Parcel.Domain.Entities.Parcel", null)
+                        .WithMany()
+                        .HasForeignKey("ParcelId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_parcel_cargo_recovery_operations_parcels_parcel_id");
+                });
+
+            modelBuilder.Entity("VietRide.Parcel.Domain.Entities.ParcelDeliveryToken", b =>
+                {
+                    b.HasOne("VietRide.Parcel.Domain.Entities.Parcel", null)
+                        .WithMany()
+                        .HasForeignKey("ParcelId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_parcel_delivery_tokens_parcels_parcel_id");
                 });
 #pragma warning restore 612, 618
         }

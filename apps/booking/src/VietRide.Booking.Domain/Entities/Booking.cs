@@ -322,12 +322,32 @@ public sealed class Booking : BaseEntity<Guid>
     }
 
     /// <summary>
-    /// Marks a cancelled booking as REFUNDED after wallet credit succeeds.
-    /// Only valid from CANCELLED state.
+    /// Marks an active in-progress booking as disrupted when its Trip cannot be substituted.
+    /// </summary>
+    public void Disrupt(DateTimeOffset disruptedAt)
+    {
+        if (Status is not BookingStatus.CONFIRMED and not BookingStatus.PARTIAL_NO_SHOW)
+            throw new InvalidOperationException($"Cannot disrupt booking in status {Status}.");
+
+        Status = BookingStatus.DISRUPTED;
+        CancellationReason = BookingCancellationReason.OPERATOR_DISRUPTED_IN_PROGRESS;
+        CancelledAt = disruptedAt;
+        RefundOverride = true;
+        _shuttleIntent?.Cancel(disruptedAt);
+
+        foreach (var ticket in _tickets.Where(ticket =>
+            ticket.Status is TicketStatus.PENDING_PAYMENT or TicketStatus.ISSUED))
+        {
+            ticket.Cancel(disruptedAt);
+        }
+    }
+
+    /// <summary>
+    /// Marks a cancelled or disrupted booking as REFUNDED after wallet credit succeeds.
     /// </summary>
     public void MarkRefunded(DateTimeOffset refundedAt)
     {
-        if (Status != BookingStatus.CANCELLED)
+        if (Status is not BookingStatus.CANCELLED and not BookingStatus.DISRUPTED)
             throw new InvalidOperationException($"Cannot refund booking in status {Status}.");
 
         Status = BookingStatus.REFUNDED;

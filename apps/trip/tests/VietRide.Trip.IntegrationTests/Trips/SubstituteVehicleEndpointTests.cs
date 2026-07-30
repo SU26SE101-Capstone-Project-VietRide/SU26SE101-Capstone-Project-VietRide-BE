@@ -225,6 +225,25 @@ public sealed class SubstituteVehicleEndpointTests
     }
 
     [Fact]
+    public async Task DisruptNoSubstitution_UnknownField_IsRejectedBeforeDispatch()
+    {
+        await using var harness = await SubstitutionHarness.CreateAsync();
+        var unchanged = await harness.CaptureSnapshotAsync();
+
+        using var response = await harness.SendDisruptRawAsync(
+            """
+            {
+              "reason": "Road closure",
+              "traveledRatio": 0.5
+            }
+            """);
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        await AssertErrorAsync(response, "VALIDATION_ERROR");
+        await harness.AssertUnchangedAsync(unchanged);
+    }
+
+    [Fact]
     public async Task RejectsRecoveryEqualToOrBeforeLockedDisruptedAtWithExactFieldErrorAndNoWrites()
     {
         await using var harness = await SubstitutionHarness.CreateAsync();
@@ -444,6 +463,22 @@ public sealed class SubstituteVehicleEndpointTests
             request.Headers.TryAddWithoutValidation(
                 "Idempotency-Key",
                 idempotencyKey ?? Guid.NewGuid().ToString("D"));
+            request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+            return client.SendAsync(request);
+        }
+
+        public Task<HttpResponseMessage> SendDisruptRawAsync(string body)
+        {
+            var client = factory.CreateClient();
+            var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"/v1/operator/trips/{OldTripId:D}/disrupt-no-substitution");
+            request.Headers.TryAddWithoutValidation(
+                "X-Internal-Auth",
+                $"Bearer {CreateInternalJwt(OperatorId, ActorId)}");
+            request.Headers.TryAddWithoutValidation(
+                "Idempotency-Key",
+                Guid.NewGuid().ToString("D"));
             request.Content = new StringContent(body, Encoding.UTF8, "application/json");
             return client.SendAsync(request);
         }

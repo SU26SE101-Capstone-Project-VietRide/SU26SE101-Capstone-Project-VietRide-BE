@@ -100,7 +100,8 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
             trip.DriverUserId,
             trip.AssistantUserId,
             trip.DestinationArrivedAt,
-            trip.ActualDepartureTime);
+            trip.ActualDepartureTime,
+            route.TotalDistanceKm.HasValue ? (double)route.TotalDistanceKm.Value : null);
 
         return dto;
     }

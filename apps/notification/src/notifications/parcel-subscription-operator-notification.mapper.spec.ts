@@ -6,6 +6,8 @@ import {
   BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY,
   BOOKING_VOUCHER_CONSENT_REJECTED_ROUTING_KEY,
   INVOICE_ISSUED_ROUTING_KEY,
+  PARCEL_DELIVERED_PENDING_CONFIRM_ROUTING_KEY,
+  PARCEL_DELIVERY_CONFIRMATION_REALERTED_ROUTING_KEY,
   PARCEL_LOADED_ROUTING_KEY,
   PARCEL_UNLOADED_ROUTING_KEY,
   PARCEL_AUTO_REJECTED_ROUTING_KEY,
@@ -14,6 +16,7 @@ import {
   PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY,
   PARCEL_REVIEW_APPROVED_ROUTING_KEY,
   PARCEL_REVIEW_REQUESTED_ROUTING_KEY,
+  PARCEL_PENDING_OPERATOR_ACTION_REALERTED_ROUTING_KEY,
   PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY,
   PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY,
   PAYOUT_FAILED_ROUTING_KEY,
@@ -23,6 +26,7 @@ import {
   SUBSCRIPTION_EXPIRED_ROUTING_KEY,
   SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY,
   TRIP_SETTLEMENT_COMPLETED_ROUTING_KEY,
+  TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY,
 } from './parcel-subscription-operator-events.constants';
 import { mapParcelSubscriptionOperatorEventToNotifications } from './parcel-subscription-operator-notification.mapper';
 import type { ParcelRecipientSnapshot } from './parcel-recipient.provider';
@@ -84,6 +88,118 @@ describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
     expect(loaded).toHaveLength(2);
     expect(unloaded[0]?.type).toBe(NotificationType.PARCEL_IN_TRANSIT);
     expect(rejected[0]?.type).toBe(NotificationType.PARCEL_REJECTED);
+  });
+
+  it('maps canonical delivered-pending-confirm only to explicit recipient accounts', async () => {
+    await expect(
+      mapParcelSubscriptionOperatorEventToNotifications(
+        PARCEL_DELIVERED_PENDING_CONFIRM_ROUTING_KEY,
+        {
+          eventId: '88888888-8888-4888-8888-888888888888',
+          occurredAt: '2026-07-30T03:00:00Z',
+          parcelId: PARCEL_ID,
+          parcelCode: 'VR-PCL-20260730-ABCDEFGH',
+          operatorId: OPERATOR_ID,
+          tripId: TRIP_ID,
+          userId: USER_ID,
+          recipientUserIds: [USER_ID, SECOND_USER_ID],
+          expiresAt: '2026-08-01T03:00:00Z',
+        },
+        resolveNoOperatorRecipients,
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.PARCEL_DELIVERED_PENDING_CONFIRM,
+      }),
+      expect.objectContaining({
+        userId: SECOND_USER_ID,
+        type: NotificationType.PARCEL_DELIVERED_PENDING_CONFIRM,
+      }),
+    ]);
+  });
+
+  it.each(['deliveryToken', 'deliveryUrl'])(
+    'rejects forbidden delivered-pending-confirm field %s before mapping',
+    async (field) => {
+      await expect(
+        mapParcelSubscriptionOperatorEventToNotifications(
+          PARCEL_DELIVERED_PENDING_CONFIRM_ROUTING_KEY,
+          {
+            eventId: '88888888-8888-4888-8888-888888888888',
+            occurredAt: '2026-07-30T03:00:00Z',
+            parcelId: PARCEL_ID,
+            parcelCode: 'VR-PCL-20260730-ABCDEFGH',
+            operatorId: OPERATOR_ID,
+            tripId: TRIP_ID,
+            userId: USER_ID,
+            [field]: 'forbidden-secret',
+          },
+          resolveNoOperatorRecipients,
+        ),
+      ).rejects.toThrow(ZodError);
+    },
+  );
+
+  it('maps delivery-confirmation re-alerts to operator admins with an existing type', async () => {
+    const resolveOperatorRecipients = jest.fn(async () => [SECOND_USER_ID]);
+
+    const notifications = await mapParcelSubscriptionOperatorEventToNotifications(
+      PARCEL_DELIVERY_CONFIRMATION_REALERTED_ROUTING_KEY,
+      {
+        eventId: '88888888-8888-4888-8888-888888888888',
+        occurredAt: '2026-07-30T03:00:00Z',
+        parcelId: PARCEL_ID,
+        parcelCode: 'VR-PCL-20260730-ABCDEFGH',
+        operatorId: OPERATOR_ID,
+        tripId: TRIP_ID,
+        expiredAt: '2026-07-23T03:00:00Z',
+      },
+      resolveOperatorRecipients,
+    );
+
+    expect(resolveOperatorRecipients).toHaveBeenCalledWith(OPERATOR_ID);
+    expect(notifications).toEqual([
+      expect.objectContaining({
+        userId: SECOND_USER_ID,
+        type: NotificationType.PARCEL_DELIVERED_PENDING_CONFIRM,
+        data: expect.objectContaining({
+          parcelId: PARCEL_ID,
+          expiredAt: '2026-07-23T03:00:00Z',
+        }),
+      }),
+    ]);
+  });
+
+  it('maps pending-operator-action re-alerts to admins instead of the sender userId', async () => {
+    const resolveOperatorRecipients = jest.fn(async () => [SECOND_USER_ID]);
+
+    const notifications = await mapParcelSubscriptionOperatorEventToNotifications(
+      PARCEL_PENDING_OPERATOR_ACTION_REALERTED_ROUTING_KEY,
+      {
+        eventId: '88888888-8888-4888-8888-888888888888',
+        occurredAt: '2026-07-30T03:00:00Z',
+        parcelId: PARCEL_ID,
+        parcelCode: 'VR-PCL-20260730-ABCDEFGH',
+        operatorId: OPERATOR_ID,
+        userId: USER_ID,
+        tripId: TRIP_ID,
+      },
+      resolveOperatorRecipients,
+    );
+
+    expect(resolveOperatorRecipients).toHaveBeenCalledWith(OPERATOR_ID);
+    expect(notifications).toEqual([
+      expect.objectContaining({
+        userId: SECOND_USER_ID,
+        type: NotificationType.PARCEL_IN_TRANSIT,
+      }),
+    ]);
+    expect(notifications[0]?.data).not.toHaveProperty('userId');
+  });
+
+  it('uses the canonical vehicle-substitution routing key', () => {
+    expect(TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY).toBe('trip.trip.vehicle_substituted');
   });
 
   it.each([

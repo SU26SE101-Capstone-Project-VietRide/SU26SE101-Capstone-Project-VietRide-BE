@@ -140,10 +140,6 @@ CREATE TABLE parcels (
     review_decision parcel_review_decision NULL,
     reviewed_at TIMESTAMPTZ NULL,
     reviewed_by_user_id UUID NULL,    -- logical FK
-    -- delivery confirmation token (email link)
-    delivery_token UUID NULL,
-    delivery_token_expires_at TIMESTAMPTZ NULL,
-    delivery_token_revoked_at TIMESTAMPTZ NULL,
     -- lifecycle timestamps
     loaded_at TIMESTAMPTZ NULL,
     loaded_by_user_id UUID NULL,
@@ -160,6 +156,9 @@ CREATE TABLE parcels (
     transfer_requested_at TIMESTAMPTZ NULL,
     transfer_confirmed_at TIMESTAMPTZ NULL,
     transfer_confirmed_by_user_id UUID NULL,
+    transfer_confirmation_claim_id UUID NULL,
+    transfer_confirmation_claimed_at TIMESTAMPTZ NULL,
+    transfer_confirmation_claimed_by_user_id UUID NULL,
     -- return fields
     return_reason TEXT NULL,
     returned_at TIMESTAMPTZ NULL,
@@ -189,8 +188,6 @@ CREATE TABLE parcels (
 );
 
 CREATE UNIQUE INDEX uq_parcels_parcel_code ON parcels (parcel_code);
-CREATE UNIQUE INDEX uq_parcels_delivery_token ON parcels (delivery_token)
-    WHERE delivery_token IS NOT NULL;
 CREATE INDEX idx_parcels_voucher_usage_id ON parcels (voucher_usage_id)
     WHERE voucher_usage_id IS NOT NULL;
 CREATE INDEX idx_parcels_sender_user_id_created_at
@@ -219,9 +216,88 @@ CREATE INDEX idx_parcels_deposit_payment_id
     ON parcels (deposit_payment_id) WHERE deposit_payment_id IS NOT NULL;
 CREATE INDEX idx_parcels_balance_payment_id
     ON parcels (balance_payment_id) WHERE balance_payment_id IS NOT NULL;
+
+-- -----------------------------------------------------------------------------
+-- parcel_delivery_tokens (hashed delivery-link history)
+-- -----------------------------------------------------------------------------
+CREATE TABLE parcel_delivery_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    parcel_id UUID NOT NULL REFERENCES parcels(id) ON DELETE CASCADE,
+    token_hash CHAR(64) NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ NULL,
+    issued_by_user_id UUID NULL,    -- logical FK identity.users
+    issue_reason VARCHAR(32) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_parcel_delivery_tokens_issue_reason
+        CHECK (issue_reason IN ('INITIAL_DELIVERY', 'RESEND', 'MIGRATION_BACKFILL'))
+);
+
+CREATE UNIQUE INDEX uq_parcel_delivery_tokens_token_hash
+    ON parcel_delivery_tokens (token_hash);
+CREATE UNIQUE INDEX uq_parcel_delivery_tokens_active_parcel
+    ON parcel_delivery_tokens (parcel_id)
+    WHERE revoked_at IS NULL;
+CREATE INDEX idx_parcel_delivery_tokens_expires_at_active
+    ON parcel_delivery_tokens (expires_at)
+    WHERE revoked_at IS NULL;
+
+-- -----------------------------------------------------------------------------
+-- parcel_cargo_recovery_operations (Day-32 cross-service recovery claims)
+-- -----------------------------------------------------------------------------
+CREATE TABLE parcel_cargo_recovery_operations (
+    id UUID PRIMARY KEY,
+    parcel_id UUID NOT NULL REFERENCES parcels(id) ON DELETE CASCADE,
+    operator_id UUID NOT NULL,             -- logical FK identity.operators
+    operation_type VARCHAR(16) NOT NULL,
+    status VARCHAR(16) NOT NULL,
+    source_trip_id UUID NOT NULL,          -- logical FK trip.trips
+    target_trip_id UUID NULL,              -- logical FK trip.trips; TRANSFER only
+    target_state VARCHAR(16) NULL,          -- RESERVED for Day-32 TRANSFER
+    actor_user_id UUID NOT NULL,            -- logical FK identity.users
+    reason VARCHAR(500) NOT NULL,
+    refund_amount_vnd BIGINT NOT NULL DEFAULT 0,
+    refund_due_vnd BIGINT NOT NULL DEFAULT 0,
+    source_status VARCHAR(40) NOT NULL,
+    is_status_override BOOLEAN NOT NULL DEFAULT FALSE,
+    claimed_at TIMESTAMPTZ NOT NULL,
+    completed_at TIMESTAMPTZ NULL,
+    failure_code VARCHAR(64) NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_parcel_cargo_recovery_operation_type
+        CHECK (operation_type IN ('TRANSFER', 'RETURN')),
+    CONSTRAINT chk_parcel_cargo_recovery_status
+        CHECK (status IN ('PENDING', 'COMPLETED', 'FAILED')),
+    CONSTRAINT chk_parcel_cargo_recovery_target
+        CHECK (
+            (operation_type = 'TRANSFER' AND target_trip_id IS NOT NULL AND target_state = 'RESERVED')
+            OR (operation_type = 'RETURN' AND target_trip_id IS NULL AND target_state IS NULL)
+        ),
+    CONSTRAINT chk_parcel_cargo_recovery_amounts
+        CHECK (refund_amount_vnd >= 0 AND refund_due_vnd >= 0),
+    CONSTRAINT chk_parcel_cargo_recovery_completion
+        CHECK (
+            (status = 'PENDING' AND completed_at IS NULL AND failure_code IS NULL)
+            OR (status = 'COMPLETED' AND completed_at IS NOT NULL AND failure_code IS NULL)
+            OR (status = 'FAILED' AND completed_at IS NOT NULL AND failure_code IS NOT NULL)
+        )
+);
+
+CREATE UNIQUE INDEX uq_parcel_cargo_recovery_operations_active_parcel
+    ON parcel_cargo_recovery_operations (parcel_id)
+    WHERE status = 'PENDING';
+CREATE INDEX idx_parcel_cargo_recovery_operations_stale
+    ON parcel_cargo_recovery_operations (claimed_at, id)
+    WHERE status = 'PENDING';
 CREATE INDEX idx_parcels_transfer_target_trip_id
     ON parcels (transfer_target_trip_id)
     WHERE transfer_target_trip_id IS NOT NULL;
+CREATE INDEX idx_parcels_transfer_confirmation_claimed_at
+    ON parcels (transfer_confirmation_claimed_at)
+    WHERE status = 'PENDING_TRANSFER_CONFIRM'
+      AND transfer_confirmation_claim_id IS NOT NULL;
 -- Additional payment & audit FK indexes (rare-query lookups for support/audit).
 CREATE INDEX idx_parcels_additional_payment_id
     ON parcels (additional_payment_id) WHERE additional_payment_id IS NOT NULL;
@@ -335,8 +411,8 @@ COMMENT ON COLUMN parcels.sender_user_id IS
     'REQUIRED — no walk-in parcel. Sender must have VietRide account.';
 COMMENT ON COLUMN parcels.dropoff_stop_id IS
     'NULL = deliver at destination station terminal. NOT NULL = along-route Stop with allowDropoff=true.';
-COMMENT ON COLUMN parcels.delivery_token IS
-    'UUID v4 for email link; revoked on resend.';
+COMMENT ON COLUMN parcel_delivery_tokens.token_hash IS
+    'SHA-256 lowercase hex of normalized UUID-v4 token; raw token is never persisted.';
 
 -- -----------------------------------------------------------------------------
 -- parcel_route_fares (operator config per route per size)
@@ -484,7 +560,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trg_parcels_updated_at BEFORE UPDATE ON parcels
-    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+CREATE TRIGGER trg_parcel_delivery_tokens_updated_at BEFORE UPDATE ON parcel_delivery_tokens
+FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 CREATE TRIGGER trg_parcel_route_fares_updated_at BEFORE UPDATE ON parcel_route_fares
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 CREATE TRIGGER trg_parcel_stats_updated_at BEFORE UPDATE ON parcel_stats

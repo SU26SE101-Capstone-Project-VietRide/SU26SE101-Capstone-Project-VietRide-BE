@@ -1,6 +1,7 @@
 export * from './events/identity-events';
 export * from './events/booking-created.event';
 export * from './events/booking-cancelled.event';
+export * from './events/booking-disrupted.event';
 export * from './events/trip-completed.event';
 export * from './events/payment-succeeded.event';
 export * from './events/trip-vehicle-swapped.event';
@@ -22,6 +23,7 @@ export * from './events/trip-stop-departed-with-pending.event';
 export * from './events/day24-stop-no-show-events';
 export * from './events/trip-cargo-threshold-crossed.event';
 export * from './events/parcel-sprint4-events';
+export * from './events/parcel-delivery-events';
 export * from './events/subscription-payment-succeeded.event';
 export * from './events/invoice-issued.event';
 export * from './events/trip-settlement-completed.event';

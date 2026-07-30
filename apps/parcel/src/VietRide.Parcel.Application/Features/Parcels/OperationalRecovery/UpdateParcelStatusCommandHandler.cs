@@ -26,14 +26,19 @@ public sealed class UpdateParcelStatusCommandHandler
                 "The status override endpoint only supports target status RETURNED.");
         }
 
+        var idempotencyKey = command.IdempotencyKey
+            ?? throw new CodedValidationException(
+                "VALIDATION_ERROR",
+                "Idempotency-Key is required.");
+
         return await _mediator.Send(
             new ReturnParcelCommand(
                 command.ParcelId,
                 command.OperatorId,
                 command.UserId,
                 command.Reason!,
-                IsStatusOverride: true,
-                command.IdempotencyKey),
+                idempotencyKey,
+                IsStatusOverride: true),
             cancellationToken);
     }
 }

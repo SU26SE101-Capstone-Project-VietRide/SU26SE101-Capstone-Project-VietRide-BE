@@ -8,4 +8,6 @@ public sealed record OperationalParcelResponse(
     Guid? TransferTargetTripId = null,
     DateTimeOffset? TransferConfirmedAt = null,
     string? ReturnReason = null,
-    DateTimeOffset? ReturnedAt = null);
+    DateTimeOffset? ReturnedAt = null,
+    string? RefundChoice = null,
+    long? RefundAmount = null);

@@ -276,8 +276,6 @@ public sealed class Day39UnloadDeliverTests
         repository.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
         repository.TryMarkDeliveredPendingConfirmAsync(
                 ParcelId,
-                Arg.Any<Guid>(),
-                Arg.Any<DateTimeOffset>(),
                 Arg.Is<IReadOnlyCollection<string>?>(urls =>
                     urls != null && urls.SequenceEqual(new[] { DeliveryPhotoUrl })),
                 Arg.Any<DateTimeOffset>(),
@@ -286,7 +284,9 @@ public sealed class Day39UnloadDeliverTests
 
         var handler = new DeliverParcelCommandHandler(
             repository,
+            Substitute.For<IParcelDeliveryTokenRepository>(),
             tripClient,
+            Substitute.For<IParcelDeliveryEmailClient>(),
             outbox,
             unitOfWork);
 
@@ -303,6 +303,7 @@ public sealed class Day39UnloadDeliverTests
             DateTimeOffset.UtcNow,
             TimeSpan.FromSeconds(5));
         await outbox.Received(1).EnqueueAsync(
+            Arg.Any<Guid>(),
             ParcelOutboxEvents.DeliveredPendingConfirm,
             Arg.Is<string>(payload => HasCanonicalDeliveryPayload(payload)),
             Arg.Any<CancellationToken>());
@@ -325,7 +326,9 @@ public sealed class Day39UnloadDeliverTests
         repository.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
         var handler = new DeliverParcelCommandHandler(
             repository,
+            Substitute.For<IParcelDeliveryTokenRepository>(),
             AuthorizedTripClient(),
+            Substitute.For<IParcelDeliveryEmailClient>(),
             Substitute.For<IIntegrationEventOutbox>(),
             Substitute.For<IUnitOfWork>());
 
@@ -337,8 +340,6 @@ public sealed class Day39UnloadDeliverTests
         exception.ErrorCode.Should().Be("INVALID_STATUS");
         await repository.DidNotReceive().TryMarkDeliveredPendingConfirmAsync(
             Arg.Any<Guid>(),
-            Arg.Any<Guid>(),
-            Arg.Any<DateTimeOffset>(),
             Arg.Any<IReadOnlyCollection<string>?>(),
             Arg.Any<DateTimeOffset>(),
             Arg.Any<CancellationToken>());
@@ -353,8 +354,6 @@ public sealed class Day39UnloadDeliverTests
         repository.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
         repository.TryMarkDeliveredPendingConfirmAsync(
                 ParcelId,
-                Arg.Any<Guid>(),
-                Arg.Any<DateTimeOffset>(),
                 Arg.Any<IReadOnlyCollection<string>?>(),
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<CancellationToken>())
@@ -362,7 +361,9 @@ public sealed class Day39UnloadDeliverTests
 
         var handler = new DeliverParcelCommandHandler(
             repository,
+            Substitute.For<IParcelDeliveryTokenRepository>(),
             AuthorizedTripClient(),
+            Substitute.For<IParcelDeliveryEmailClient>(),
             outbox,
             Substitute.For<IUnitOfWork>());
 
@@ -373,6 +374,7 @@ public sealed class Day39UnloadDeliverTests
         var exception = (await action.Should().ThrowAsync<CodedConflictException>()).Which;
         exception.ErrorCode.Should().Be("INVALID_STATUS");
         await outbox.DidNotReceive().EnqueueAsync(
+            Arg.Any<Guid>(),
             Arg.Any<string>(),
             Arg.Any<string>(),
             Arg.Any<CancellationToken>());
@@ -395,12 +397,16 @@ public sealed class Day39UnloadDeliverTests
         using var document = JsonDocument.Parse(payloadJson);
         var payload = document.RootElement;
         return payload.GetProperty("parcelId").GetGuid() == ParcelId
+            && payload.GetProperty("eventId").GetGuid() != Guid.Empty
+            && payload.GetProperty("occurredAt").GetDateTimeOffset() <= DateTimeOffset.UtcNow
             && payload.GetProperty("parcelCode").GetString() == "VRP-001"
             && payload.GetProperty("operatorId").GetGuid() == OperatorId
             && payload.GetProperty("tripId").GetGuid() == TripId
             && payload.GetProperty("userId").GetGuid() == RecipientUserId
-            && payload.GetProperty("deliveryToken").GetGuid() != Guid.Empty
-            && payload.GetProperty("expiresAt").GetDateTimeOffset() > DateTimeOffset.UtcNow;
+            && payload.GetProperty("recipientUserIds")[0].GetGuid() == RecipientUserId
+            && payload.GetProperty("expiresAt").GetDateTimeOffset() > DateTimeOffset.UtcNow
+            && !payload.TryGetProperty("deliveryToken", out _)
+            && !payload.TryGetProperty("recipientEmail", out _);
     }
 
     private static bool HasUnloadedPayload(string payloadJson)

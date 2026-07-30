@@ -7,6 +7,7 @@ import {
   EmailTemplateKey,
   type EmailDelivery,
 } from '../generated/notification-prisma-client';
+import { encryptEmailSendJob } from './email-job-payload.crypto';
 import type { EmailProvider, EmailSendJobData } from './email-send.types';
 import { EmailSendWorker } from './email-send.worker';
 import { EmailTemplateRenderer } from './email-template.renderer';
@@ -62,7 +63,7 @@ describe('EmailSendWorker pipeline (e2e)', () => {
 function createJob(): Job<EmailSendJobData> {
   return {
     attemptsMade: 0,
-    data: {
+    data: encryptEmailSendJob({
       emailDeliveryId: EMAIL_DELIVERY_ID,
       toEmail: RECIPIENT_EMAIL,
       templateKey: EmailTemplateKey.INVOICE_NOTICE,
@@ -71,7 +72,7 @@ function createJob(): Job<EmailSendJobData> {
         amountVnd: 500000,
         invoiceUrl: 'https://app.vietride.local/invoices/token-redacted-in-db',
       },
-    },
+    }, createEnv().INTERNAL_JWT_SECRET),
   } as unknown as Job<EmailSendJobData>;
 }
 
@@ -86,7 +87,7 @@ function createEmailDelivery(): EmailDelivery {
     sanitizedData: {
       invoiceNumber: 'VR-INV-202606-000001',
       amountVnd: 500000,
-      invoiceUrl: 'http...[REDACTED]...n-db',
+      invoiceUrl: '[REDACTED]',
     },
     status: EmailDeliveryStatus.PENDING,
     retryCount: 0,

@@ -345,19 +345,6 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
             .HasColumnType("uuid")
             .IsRequired(false);
 
-        builder.Property(x => x.DeliveryToken)
-            .HasColumnName("delivery_token")
-            .HasColumnType("uuid")
-            .IsRequired(false);
-
-        builder.Property(x => x.DeliveryTokenExpiresAt)
-            .HasColumnName("delivery_token_expires_at")
-            .IsRequired(false);
-
-        builder.Property(x => x.DeliveryTokenRevokedAt)
-            .HasColumnName("delivery_token_revoked_at")
-            .IsRequired(false);
-
         builder.Property(x => x.LoadedAt).HasColumnName("loaded_at").IsRequired(false);
         builder.Property(x => x.LoadedByUserId).HasColumnName("loaded_by_user_id").HasColumnType("uuid").IsRequired(false);
         builder.Property(x => x.UnloadedAt).HasColumnName("unloaded_at").IsRequired(false);
@@ -378,6 +365,17 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
         builder.Property(x => x.TransferConfirmedAt).HasColumnName("transfer_confirmed_at").IsRequired(false);
         builder.Property(x => x.TransferConfirmedByUserId)
             .HasColumnName("transfer_confirmed_by_user_id")
+            .HasColumnType("uuid")
+            .IsRequired(false);
+        builder.Property(x => x.TransferConfirmationClaimId)
+            .HasColumnName("transfer_confirmation_claim_id")
+            .HasColumnType("uuid")
+            .IsRequired(false);
+        builder.Property(x => x.TransferConfirmationClaimedAt)
+            .HasColumnName("transfer_confirmation_claimed_at")
+            .IsRequired(false);
+        builder.Property(x => x.TransferConfirmationClaimedByUserId)
+            .HasColumnName("transfer_confirmation_claimed_by_user_id")
             .HasColumnType("uuid")
             .IsRequired(false);
 
@@ -403,11 +401,6 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
 
         builder.HasIndex(x => x.ParcelCode)
             .HasDatabaseName("uq_parcels_parcel_code")
-            .IsUnique();
-
-        builder.HasIndex(x => x.DeliveryToken)
-            .HasDatabaseName("uq_parcels_delivery_token")
-            .HasFilter("delivery_token IS NOT NULL")
             .IsUnique();
 
         builder.HasIndex(x => new { x.SenderUserId, x.CreatedAt })
@@ -452,6 +445,11 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
         builder.HasIndex(x => x.TransferTargetTripId)
             .HasDatabaseName("idx_parcels_transfer_target_trip_id")
             .HasFilter("transfer_target_trip_id IS NOT NULL");
+
+        builder.HasIndex(x => x.TransferConfirmationClaimedAt)
+            .HasDatabaseName("idx_parcels_transfer_confirmation_claimed_at")
+            .HasFilter(
+                "status = 'PENDING_TRANSFER_CONFIRM' AND transfer_confirmation_claim_id IS NOT NULL");
 
         builder.HasIndex(x => x.AdditionalPaymentId)
             .HasDatabaseName("idx_parcels_additional_payment_id")

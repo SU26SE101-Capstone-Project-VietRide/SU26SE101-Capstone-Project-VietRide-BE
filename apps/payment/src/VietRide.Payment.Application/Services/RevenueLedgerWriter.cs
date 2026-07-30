@@ -109,26 +109,15 @@ public sealed class RevenueLedgerWriter : IRevenueLedgerWriter
                 sourceEventId),
             cancellationToken);
 
-        var paidAmount = checked(
-            allocation.GrossAmount
-            - allocation.VoucherVietRideFundedAmount
-            - allocation.VoucherOperatorFundedAmount);
-        var voucherReversal = paidAmount <= 0
-            ? 0
-            : Math.Min(
-                allocation.VoucherVietRideFundedAmount,
-                (long)Math.Floor(
-                    (decimal)allocation.VoucherVietRideFundedAmount
-                    * Math.Min(refundAmount, paidAmount)
-                    / paidAmount));
-        if (voucherReversal > 0)
+        if (allocation.ReferenceType == "BOOKING"
+            && allocation.VoucherVietRideFundedAmount > 0)
         {
             await _ledger.AddAsync(
                 OperatorLedgerEntry.Create(
                     allocation.OperatorId,
                     allocation.TripId,
                     OperatorLedgerEntryType.ADJUSTMENT,
-                    -voucherReversal,
+                    -allocation.VoucherVietRideFundedAmount,
                     referenceType,
                     allocation.ReferenceId,
                     sourceEventId,
