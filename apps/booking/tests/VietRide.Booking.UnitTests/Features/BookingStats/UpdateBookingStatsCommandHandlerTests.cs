@@ -67,6 +67,26 @@ public sealed class UpdateBookingStatsCommandHandlerTests
     }
 
     [Fact]
+    public async Task BookingStatsMonth_ConfirmedAtUtcMonthBoundary_StoresIctDate()
+    {
+        var confirmedAt = DateTimeOffset.Parse("2026-01-31T18:00:00Z");
+        var booking = CreateBooking();
+        booking.Confirm(confirmedAt);
+        _bookings.Save(booking);
+        var handler = BuildHandler();
+
+        await handler.Handle(
+            new UpdateBookingStatsCommand(
+                "booking.booking.confirmed",
+                booking.Id,
+                BookingStatsTransition.Confirmed,
+                Amount: 200_000),
+            CancellationToken.None);
+
+        _stats.Single().StatDate.Should().Be(new DateOnly(2026, 2, 1));
+    }
+
+    [Fact]
     public async Task Cancelled_IncrementsOnlyCancelledCounter()
     {
         var booking = CreateBooking();
@@ -299,6 +319,7 @@ public sealed class UpdateBookingStatsCommandHandlerTests
             Guid operatorId,
             DateOnly? from,
             DateOnly? to,
+            string groupBy,
             CancellationToken ct = default)
             => throw new NotSupportedException();
 

@@ -9,6 +9,8 @@ namespace VietRide.Booking.Application.Features.BookingStats.UpdateBookingStats;
 public sealed class UpdateBookingStatsCommandHandler
     : IRequestHandler<UpdateBookingStatsCommand, bool>
 {
+    private static readonly TimeSpan IctOffset = TimeSpan.FromHours(7);
+
     private readonly IBookingRepository _bookings;
     private readonly IBookingStatsRepository _stats;
     private readonly IOperatorServiceClient _operatorClient;
@@ -97,7 +99,7 @@ public sealed class UpdateBookingStatsCommandHandler
             _ => null,
         };
 
-        return DateOnly.FromDateTime((timestamp ?? DateTimeOffset.UtcNow).UtcDateTime);
+        return DateOnly.FromDateTime((timestamp ?? DateTimeOffset.UtcNow).ToOffset(IctOffset).DateTime);
     }
 
     private static void ApplyTransition(
