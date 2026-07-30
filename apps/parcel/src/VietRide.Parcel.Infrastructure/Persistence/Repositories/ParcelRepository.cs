@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Features.Internal.Reports.PlatformParcels;
 using VietRide.Parcel.Application.Features.Parcels.DisplaySnapshots;
+using VietRide.Parcel.Application.Features.Parcels.OperatorDetail;
 using VietRide.Parcel.Application.Features.Parcels.Reports;
 using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
@@ -1535,6 +1536,23 @@ internal sealed class ParcelRepository : IParcelRepository
 
         return PagedResult<ParcelEntity>.Create(items, page, pageSize, total);
     }
+
+    public async Task<OperatorParcelDetailData?> GetOperatorDetailAsync(
+        Guid parcelId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => await _db.Parcels
+            .AsNoTracking()
+            .Where(parcel => parcel.Id == parcelId && parcel.OperatorId == operatorId)
+            .Select(parcel => new OperatorParcelDetailData(
+                parcel,
+                _db.ParcelStatusHistories
+                    .AsNoTracking()
+                    .Where(history => history.ParcelId == parcel.Id)
+                    .OrderBy(history => history.OccurredAt)
+                    .ThenBy(history => history.Id)
+                    .ToList()))
+            .SingleOrDefaultAsync(ct);
 
     // ---- Phase 7: Delivery Token ----
 

@@ -1,6 +1,6 @@
 namespace VietRide.Parcel.Application.Features.Parcels.OperatorList;
 
-public sealed record OperatorParcelListItemResponse(
+public record OperatorParcelListItemResponse(
     Guid ParcelId,
     string ParcelCode,
     string Status,

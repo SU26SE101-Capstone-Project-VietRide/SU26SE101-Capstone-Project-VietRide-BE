@@ -90,7 +90,7 @@ public sealed class GetOperatorParcelsQueryHandler
             page.TotalItems);
     }
 
-    private static OperatorParcelListItemResponse Map(
+    internal static OperatorParcelListItemResponse Map(
         ParcelEntity parcel,
         TripSummarySnapshot? tripSummary,
         IdentityUserSummary? sender)

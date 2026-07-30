@@ -8,6 +8,7 @@ using VietRide.Parcel.Application.Features.Parcels.ManualCancel;
 using VietRide.Parcel.Application.Features.Parcels.ManualConfirmDelivery;
 using VietRide.Parcel.Application.Features.Parcels.OperationalRecovery;
 using VietRide.Parcel.Application.Features.Parcels.OperatorActions;
+using VietRide.Parcel.Application.Features.Parcels.OperatorDetail;
 using VietRide.Parcel.Application.Features.Parcels.OperatorList;
 using VietRide.Parcel.Application.Features.Parcels.Reports;
 using VietRide.Parcel.Application.Features.Parcels.Review;
@@ -50,6 +51,23 @@ public sealed class OperatorParcelsController : ControllerBase
                 pendingActionType,
                 page,
                 pageSize),
+            cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpGet("{parcelId:guid}")]
+    [ProducesResponseType(typeof(ApiResponse<OperatorParcelDetailResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<OperatorParcelDetailResponse>> GetParcelDetailAsync(
+        Guid parcelId,
+        CancellationToken cancellationToken = default)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        var result = await _mediator.Send(
+            new GetOperatorParcelDetailQuery(parcelId, operatorId),
             cancellationToken);
         return Ok(result);
     }

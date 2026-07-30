@@ -107,6 +107,10 @@ public sealed class ParcelEndpointTests : IClassFixture<VietRideWebApplicationFa
         var operatorParcels = await anonymous.GetAsync("/v1/operator/parcels");
         operatorParcels.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
 
+        var operatorParcelDetail = await anonymous.GetAsync(
+            "/v1/operator/parcels/11111111-1111-1111-1111-111111111111");
+        operatorParcelDetail.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
         var detail = await anonymous.GetAsync("/v1/parcels/11111111-1111-1111-1111-111111111111");
         detail.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
 
@@ -146,6 +150,10 @@ public sealed class ParcelEndpointTests : IClassFixture<VietRideWebApplicationFa
 
         var parcelList = await passenger.GetAsync("/v1/operator/parcels");
         await AssertForbiddenEnvelope(parcelList);
+
+        var parcelDetail = await passenger.GetAsync(
+            "/v1/operator/parcels/11111111-1111-1111-1111-111111111111");
+        await AssertForbiddenEnvelope(parcelDetail);
 
         using var patchContent = new StringContent("{}", Encoding.UTF8, "application/json");
         var fareUpdate = await passenger.PatchAsync("/v1/operator/parcel-route-fares/11111111-1111-1111-1111-111111111111/MEDIUM", patchContent);
@@ -197,6 +205,10 @@ public sealed class ParcelEndpointTests : IClassFixture<VietRideWebApplicationFa
         var response = await op.GetAsync("/v1/operator/parcels?page=1&pageSize=20");
 
         await AssertForbiddenEnvelope(response);
+
+        var detail = await op.GetAsync(
+            "/v1/operator/parcels/11111111-1111-1111-1111-111111111111");
+        await AssertForbiddenEnvelope(detail);
     }
 
     [Fact]
