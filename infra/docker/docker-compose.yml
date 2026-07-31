@@ -391,6 +391,13 @@ services:
       # main.ts crashes in production NODE_ENV when CORS origin is '*' (default).
       # Restrict it so the Socket.IO CORS adapter boots; override via .env for real FE origin.
       TRACKING_CORS_ORIGIN: ${TRACKING_CORS_ORIGIN:-http://localhost:3000}
+      GOOGLE_ROUTES_ENABLED: ${GOOGLE_ROUTES_ENABLED:-false}
+      GOOGLE_ROUTES_API_KEY: ${GOOGLE_ROUTES_API_KEY:-}
+      GOOGLE_ROUTES_BASE_URL: ${GOOGLE_ROUTES_BASE_URL:-https://routes.googleapis.com}
+      TRACKING_GOOGLE_ROUTES_TIMEOUT_MS: ${TRACKING_GOOGLE_ROUTES_TIMEOUT_MS:-1500}
+      TRACKING_ETA_MIN_INTERVAL_SECONDS: ${TRACKING_ETA_MIN_INTERVAL_SECONDS:-60}
+      TRACKING_ETA_CACHE_TTL_SECONDS: ${TRACKING_ETA_CACHE_TTL_SECONDS:-60}
+      TRACKING_ETA_FAILURE_COOLDOWN_SECONDS: ${TRACKING_ETA_FAILURE_COOLDOWN_SECONDS:-300}
     depends_on:
       postgres:
         condition: service_healthy

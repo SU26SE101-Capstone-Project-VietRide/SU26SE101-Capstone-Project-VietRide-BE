@@ -10,6 +10,7 @@ import { MvpTrackingAuthorizationAdapter } from '../authorization/tracking-autho
 import type { Env } from '../config/env.schema';
 import { EtaService, type EtaUpdateEvent } from '../eta/eta.service';
 import { OffRouteService } from '../off-route/off-route.service';
+import { ROUTE_GEOMETRY_PROVIDER } from '../off-route/off-route.constants';
 import { ShuttleService } from '../shuttle/shuttle.service';
 import { TripDelayService, type TripDelayEtaUpdate } from '../trip-delay/trip-delay.service';
 import { LocationGateway } from './location.gateway';
@@ -17,7 +18,7 @@ import {
   TRACKING_SOCKET_PATH,
   trackingGpsIdempotencyKey,
 } from './location.constants';
-import { LocationService } from './location.service';
+import { LocationService, type GpsUpdateEvent } from './location.service';
 
 const TEST_TRIP_ID = '11111111-1111-4111-8111-111111111111';
 const TEST_USER_ID = '22222222-2222-4222-8222-222222222222';
@@ -54,6 +55,7 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
   let tripDelayHandleEtaUpdate: jest.MockedFunction<
     (event: EtaUpdateEvent) => Promise<TripDelayEtaUpdate>
   >;
+  let routePeek: jest.Mock;
 
   beforeAll(async () => {
     const generated = await generateKeyPair('RS256');
@@ -77,6 +79,7 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       ...event,
       delayed: false,
     }));
+    routePeek = jest.fn(() => null);
     const redisService = {
       getClient: jest.fn(() => ({
         eval: redisEval,
@@ -102,6 +105,13 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
         {
           provide: RedisService,
           useValue: redisService,
+        },
+        {
+          provide: ROUTE_GEOMETRY_PROVIDER,
+          useValue: {
+            peekCachedRouteGeometry: routePeek,
+            getRouteGeometry: async () => null,
+          },
         },
         {
           provide: EtaService,
@@ -148,6 +158,8 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       ...event,
       delayed: false,
     }));
+    routePeek.mockReset();
+    routePeek.mockReturnValue(null);
   });
 
   afterAll(async () => {
@@ -213,6 +225,7 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       'tracking:active_trips',
       expect.stringMatching(/^[a-f0-9]{64}$/),
       expect.any(String),
+      expect.any(String),
       '86400',
       '300',
       TEST_TRIP_ID,
@@ -249,6 +262,33 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     await detectionStarted;
     releaseDetection();
     await waitForCondition(() => etaHandleGpsUpdate.mock.calls.length > 0);
+    socket.disconnect();
+  });
+
+  it('broadcasts published coordinates while off-route receives raw coordinates', async () => {
+    routePeek.mockReturnValue({
+      tripId: TEST_TRIP_ID,
+      points: [
+        { latitude: 10.7, longitude: 106.66 },
+        { latitude: 10.9, longitude: 106.66 },
+      ],
+    });
+    const token = await signIdentityToken('DRIVER', TEST_OPERATOR_ID);
+    const socket = await connectSocket(token);
+    await emitWithAck<JoinTripTrackingAck>(socket, 'joinTripTracking', { tripId: TEST_TRIP_ID });
+    const publishedPromise = waitForEvent<GpsUpdateEvent>(socket, 'gps:update');
+
+    const ack = await emitWithAck<GpsUpdateAck>(socket, 'gps:update', createGpsPayload());
+    const published = await publishedPromise;
+    await waitForCondition(() => offRouteHandleGpsUpdate.mock.calls.length === 1);
+    await waitForCondition(() => etaHandleGpsUpdate.mock.calls.length === 1);
+
+    expect(ack).toEqual({ success: true });
+    expect(published.longitude).toBeCloseTo(106.66, 6);
+    const rawDetection = offRouteHandleGpsUpdate.mock.calls[0]?.[0] as GpsUpdateEvent;
+    const publishedDetection = etaHandleGpsUpdate.mock.calls[0]?.[0] as GpsUpdateEvent;
+    expect(rawDetection.longitude).toBe(106.660172);
+    expect(publishedDetection.longitude).toBeCloseTo(106.66, 6);
     socket.disconnect();
   });
 
@@ -498,6 +538,13 @@ function createTestEnv(publicKeyPem: string): Env {
     TRACKING_DATA_PROVIDER_TIMEOUT_MS: 2_000,
     TRACKING_ROUTE_STOPS_CACHE_TTL_SECONDS: 300,
     TRACKING_ROUTE_GEOMETRY_CACHE_TTL_SECONDS: 600,
+    GOOGLE_ROUTES_ENABLED: false,
+    GOOGLE_ROUTES_API_KEY: '',
+    GOOGLE_ROUTES_BASE_URL: 'https://routes.googleapis.com',
+    TRACKING_GOOGLE_ROUTES_TIMEOUT_MS: 1_500,
+    TRACKING_ETA_MIN_INTERVAL_SECONDS: 60,
+    TRACKING_ETA_CACHE_TTL_SECONDS: 60,
+    TRACKING_ETA_FAILURE_COOLDOWN_SECONDS: 300,
   };
 }
 

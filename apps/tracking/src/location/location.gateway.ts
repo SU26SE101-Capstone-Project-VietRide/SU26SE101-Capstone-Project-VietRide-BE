@@ -216,7 +216,7 @@ export class LocationGateway implements OnGatewayInit {
     const event = result.event;
 
     this.server.to(trackingTripRoom(parsed.data.tripId)).emit('gps:update', event);
-    void this.runDetection(event).catch((error) => {
+    void this.runDetection(event, result.rawEvent).catch((error) => {
       this.logger.error(
         `Tracking detection chain failed for trip ${event.tripId}: ${(error as Error).message}`,
       );
@@ -225,8 +225,8 @@ export class LocationGateway implements OnGatewayInit {
     return { success: true };
   }
 
-  private async runDetection(event: GpsUpdateEvent): Promise<void> {
-    await this.offRouteService.handleGpsUpdate(event);
+  private async runDetection(event: GpsUpdateEvent, rawEvent: GpsUpdateEvent): Promise<void> {
+    await this.offRouteService.handleGpsUpdate(rawEvent);
     const etaUpdate = await this.etaService.handleGpsUpdate(event);
     if (etaUpdate) {
       const tripDelayEtaUpdate = await this.tripDelayService.handleEtaUpdate(etaUpdate);

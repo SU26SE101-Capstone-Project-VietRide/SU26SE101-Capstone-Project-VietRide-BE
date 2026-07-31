@@ -30,6 +30,13 @@ export const envSchema = baseEnvSchema.merge(
     TRACKING_DATA_PROVIDER_TIMEOUT_MS: z.coerce.number().int().positive().default(2_000),
     TRACKING_ROUTE_STOPS_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(300),
     TRACKING_ROUTE_GEOMETRY_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(600),
+    GOOGLE_ROUTES_ENABLED: booleanEnvSchema.default(false),
+    GOOGLE_ROUTES_API_KEY: z.string().trim().default(''),
+    GOOGLE_ROUTES_BASE_URL: z.string().url().default('https://routes.googleapis.com'),
+    TRACKING_GOOGLE_ROUTES_TIMEOUT_MS: z.coerce.number().int().positive().default(1_500),
+    TRACKING_ETA_MIN_INTERVAL_SECONDS: z.coerce.number().int().min(60).default(60),
+    TRACKING_ETA_CACHE_TTL_SECONDS: z.coerce.number().int().min(60).default(60),
+    TRACKING_ETA_FAILURE_COOLDOWN_SECONDS: z.coerce.number().int().min(300).default(300),
     TRACKING_GPS_FLUSH_ENABLED: booleanEnvSchema.default(false),
     TRACKING_GPS_FLUSH_INTERVAL_MS: z.coerce.number().int().positive().default(300_000),
     TRACKING_TRIP_DELAY_ENABLED: booleanEnvSchema.default(false),
@@ -85,10 +92,14 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
   process.env.REDIS_URL = raw.REDIS_URL ?? `redis://${redisHost}:${redisPort}`;
   if (rabbitMqUrl) process.env.RABBITMQ_URL = rabbitMqUrl;
 
-  return envSchema.parse({
+  const parsed = envSchema.parse({
     ...normalizedRaw,
     DATABASE_URL: databaseUrl,
     REDIS_URL: raw.REDIS_URL ?? `redis://${redisHost}:${redisPort}`,
     RABBITMQ_URL: rabbitMqUrl,
   });
+  if (parsed.GOOGLE_ROUTES_ENABLED && parsed.GOOGLE_ROUTES_API_KEY.length === 0) {
+    throw new Error('GOOGLE_ROUTES_API_KEY is required when GOOGLE_ROUTES_ENABLED=true');
+  }
+  return parsed;
 }

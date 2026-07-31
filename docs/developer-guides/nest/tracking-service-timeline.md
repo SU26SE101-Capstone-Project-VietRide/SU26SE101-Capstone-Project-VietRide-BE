@@ -388,20 +388,30 @@ npx nx run tracking:build
 ## Phase 10 — Hardening Và Final Acceptance
 
 **Thời lượng:** 1 ngày
-**Mục tiêu:** Full tracking service ổn định, production-ready, test coverage đủ.
+**Mục tiêu:** Ổn định đường GPS realtime và hoàn tất chấp nhận production cho route snap, ETA,
+Redis state và Google Routes mà không thay đổi payload Socket/REST công khai.
 
 ### Scope
 
-- Cleanup app skeleton:
-  - bỏ hoặc giữ `/api` hello endpoint tùy convention, nhưng không ảnh hưởng tracking.
+- GPS raw/published: project GPS lên route geometry đã cache trong ngưỡng cố định 50 m.
+  Latest/Socket/REST dùng điểm published; buffer Redis, `GpsTrail`, fingerprint idempotency và
+  off-route luôn dùng điểm raw. Cache miss chỉ phát raw, gọi warm Trip geometry bất đồng bộ và
+  dedupe request đang bay; không chờ Trip HTTP trên live GPS path.
+- ETA: dùng một `RouteGeometryProvider` cho snap, off-route và Local ETA. Local ETA chiếu vehicle
+  và stop lên polyline, tính khoảng cách tích lũy, giữ sequence/progress không lùi; không dùng
+  Haversine làm ETA chính. Google Routes là primary khi `GOOGLE_ROUTES_ENABLED=true`, Local là
+  fallback; lỗi Google liên tiếp ba lần mở cooldown 300 giây.
+- Redis ETA: cache `tracking:eta:{tripId}:{stopId}` 60 giây, state 24 giờ, lock từng trip/stop,
+  khoảng cách di chuyển 500 m hoặc ETA dưới 15 phút, và tối thiểu 60 giây giữa hai lần gọi provider.
+- Cấu hình: `GOOGLE_ROUTES_API_KEY` bắt buộc khi bật flag; E2E mặc định dùng fake Google HTTP server.
+  Real Google E2E chỉ chạy khi `RUN_REAL_GOOGLE_E2E=true`.
 - Thêm health/ready rõ hơn:
   - `/health` liveness.
   - `/ready` check Redis/RabbitMQ/Prisma nếu cần.
 - Review env:
   - `JWT_PUBLIC_KEY_URL`.
   - `USER_JWT_PUBLIC_KEY` chỉ cho local/test RSA public key override.
-  - Redis TTL constants.
-  - batch intervals.
+  - Redis TTL constants và batch intervals.
   - không có mock-auth production flag.
 - Security review:
   - không log token/request body nhạy cảm.
@@ -413,6 +423,8 @@ npx nx run tracking:build
   npx nx run tracking:test
   npx nx run tracking:test:e2e
   npx nx run tracking:build
+  node scripts/test-tracking-phase10.js
+  git diff --check
   npm run lint:ts
   npm run test:ts
   npm run build:ts

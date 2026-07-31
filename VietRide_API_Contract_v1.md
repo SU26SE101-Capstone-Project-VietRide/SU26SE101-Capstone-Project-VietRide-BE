@@ -4082,6 +4082,22 @@ Server broadcasts to room `trip:{tripId}`:
 - `eta:update`
 - `trip:statusChanged`
 
+Tracking Phase 10 invariants (the public payload above is unchanged):
+
+- GPS is projected onto cached Trip route geometry only when the nearest segment is at most 50 m
+  from the raw coordinate. Published coordinates are used by `tracking:latest:{tripId}`, REST and
+  Socket.IO. Raw coordinates are used by `tracking:gps_buffer:{tripId}`, `GpsTrail`, idempotency
+  fingerprints and off-route detection.
+- A geometry cache miss emits raw GPS immediately and warms Trip geometry asynchronously with
+  in-flight request deduplication; the live GPS acknowledgement never waits for Trip HTTP.
+- ETA uses cumulative route distance and monotonic stop sequence/progress guards. Google Routes is
+  primary only when `GOOGLE_ROUTES_ENABLED=true`; Local Route ETA is the fallback. Provider calls
+  are throttled to 60 seconds, require more than 500 m movement or an ETA under 15 minutes, and
+  use a per-trip-stop Redis lock, a 60-second ETA cache and a three-failure/300-second cooldown.
+- Default E2E uses a fake Google Routes HTTP server. Real Google E2E is opt-in with
+  `RUN_REAL_GOOGLE_E2E=true`; no `etaSource`, snap metadata or traffic metadata is added to the
+  public response shape.
+
 ## RAG AI Service
 
 ### GET `/v1/rag/documents`
