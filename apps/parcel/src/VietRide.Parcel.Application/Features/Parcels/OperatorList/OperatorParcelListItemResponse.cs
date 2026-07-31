@@ -1,6 +1,6 @@
 namespace VietRide.Parcel.Application.Features.Parcels.OperatorList;
 
-public sealed record OperatorParcelListItemResponse(
+public record OperatorParcelListItemResponse(
     Guid ParcelId,
     string ParcelCode,
     string Status,
@@ -24,4 +24,19 @@ public sealed record OperatorParcelListItemResponse(
     string? PendingActionType,
     string? PendingActionReason,
     string? PhotoUrl,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    OperatorParcelTripResponse Trip,
+    OperatorParcelRouteResponse? Route,
+    OperatorParcelUserResponse Sender,
+    OperatorParcelUserResponse Recipient,
+    string SizeCategory,
+    string? Description,
+    decimal EstimatedWeightKg,
+    decimal? ActualWeightKg,
+    decimal EstimatedVolumeM3,
+    decimal? ActualVolumeM3,
+    long EstimatedTotalPriceVnd,
+    long FinalTotalPriceVnd,
+    long DiscountAmountVnd,
+    long RefundedAmountVnd,
+    DateTimeOffset UpdatedAt);

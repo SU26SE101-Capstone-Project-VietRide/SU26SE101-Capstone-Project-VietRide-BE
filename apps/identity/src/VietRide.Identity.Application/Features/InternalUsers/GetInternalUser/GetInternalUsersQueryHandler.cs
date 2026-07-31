@@ -1,29 +1,38 @@
 using MediatR;
 using VietRide.Identity.Application.Abstractions.Repositories;
+using VietRide.Identity.Domain.Entities;
 
 namespace VietRide.Identity.Application.Features.InternalUsers.GetInternalUser;
 
 public sealed class GetInternalUsersQueryHandler(IUserRepository userRepository)
     : IRequestHandler<GetInternalUsersQuery, IReadOnlyList<GetInternalUserResponseDto>>
 {
-    public Task<IReadOnlyList<GetInternalUserResponseDto>> Handle(
+    public async Task<IReadOnlyList<GetInternalUserResponseDto>> Handle(
         GetInternalUsersQuery request,
         CancellationToken cancellationToken)
     {
-        var users = userRepository.QueryNoTracking()
-            .Where(user => request.UserIds.Contains(user.Id))
-            .ToList()
-            .Select(user => new GetInternalUserResponseDto(
-                user.Id,
-                user.DisplayName,
-                user.AvatarUrl,
-                user.Role.ToString(),
-                user.OperatorId,
-                user.Status.ToString(),
-                user.Phone?.Value,
-                user.Email))
-            .ToList();
+        var users = await userRepository.ListByIdsIncludingDeletedAsync(
+            request.UserIds,
+            cancellationToken);
+        var byId = users.ToDictionary(user => user.Id);
+        return request.UserIds
+            .Where(byId.ContainsKey)
+            .Select(userId => Map(byId[userId]))
+            .ToArray();
+    }
 
-        return Task.FromResult<IReadOnlyList<GetInternalUserResponseDto>>(users);
+    private static GetInternalUserResponseDto Map(User user)
+    {
+        var deleted = user.DeletedAt.HasValue;
+        return new GetInternalUserResponseDto(
+            user.Id,
+            deleted ? "Người dùng đã xóa" : user.DisplayName,
+            deleted ? null : user.AvatarUrl,
+            user.Role.ToString(),
+            user.OperatorId,
+            user.Status.ToString(),
+            deleted ? null : user.Phone?.Value,
+            deleted ? null : user.Email,
+            deleted);
     }
 }

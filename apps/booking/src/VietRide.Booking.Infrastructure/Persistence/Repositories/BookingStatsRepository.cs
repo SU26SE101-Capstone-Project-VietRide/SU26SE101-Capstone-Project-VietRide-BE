@@ -117,8 +117,31 @@ DO UPDATE SET
         Guid operatorId,
         DateOnly? from,
         DateOnly? to,
+        string groupBy,
         CancellationToken ct = default)
     {
+        if (string.Equals(groupBy, "month", StringComparison.OrdinalIgnoreCase))
+        {
+            var monthRows = await _db.Database.SqlQuery<OperatorBookingStatsSqlRow>($@"
+SELECT
+    operator_id AS ""OperatorId"",
+    date_trunc('month', stat_date::timestamp)::date AS ""Date"",
+    COALESCE(SUM(total_bookings), 0)::integer AS ""TotalBookings"",
+    COALESCE(SUM(total_revenue), 0)::bigint AS ""TotalRevenue"",
+    COALESCE(SUM(total_cancelled), 0)::integer AS ""TotalCancellations"",
+    COALESCE(SUM(total_no_show), 0)::integer AS ""TotalNoShows"",
+    COALESCE(SUM(total_completed), 0)::integer AS ""TotalCompleted""
+FROM vietride_booking.booking_stats
+WHERE operator_id = {operatorId}
+  AND stat_date >= {from}::date
+  AND stat_date <= {to}::date
+GROUP BY operator_id, date_trunc('month', stat_date::timestamp)::date
+ORDER BY date_trunc('month', stat_date::timestamp)::date")
+                .ToListAsync(ct);
+
+            return monthRows.Select(ToOperatorReadModel).ToList();
+        }
+
         var rows = await _db.Database.SqlQuery<OperatorBookingStatsSqlRow>($@"
 SELECT
     operator_id AS ""OperatorId"",
@@ -136,15 +159,7 @@ GROUP BY operator_id, stat_date
 ORDER BY stat_date")
             .ToListAsync(ct);
 
-        return rows.Select(row => new OperatorBookingStatsReadModel(
-                row.OperatorId,
-                row.Date,
-                row.TotalBookings,
-                row.TotalRevenue,
-                row.TotalCancellations,
-                row.TotalNoShows,
-                row.TotalCompleted))
-            .ToList();
+        return rows.Select(ToOperatorReadModel).ToList();
     }
 
     public async Task<IReadOnlyList<AdminBookingStatsAggregateReadModel>> GetAdminAggregateStatsAsync(
@@ -153,6 +168,28 @@ ORDER BY stat_date")
         string groupBy,
         CancellationToken ct = default)
     {
+        if (string.Equals(groupBy, "month", StringComparison.OrdinalIgnoreCase))
+        {
+            var monthRows = await _db.Database.SqlQuery<AdminBookingStatsAggregateSqlRow>($@"
+SELECT
+    NULL::uuid AS ""OperatorId"",
+    NULL::text AS ""OperatorName"",
+    date_trunc('month', stat_date::timestamp)::date AS ""Date"",
+    COALESCE(SUM(total_bookings), 0)::integer AS ""TotalBookings"",
+    COALESCE(SUM(total_revenue), 0)::bigint AS ""TotalRevenue"",
+    COALESCE(SUM(total_cancelled), 0)::integer AS ""TotalCancellations"",
+    COALESCE(SUM(total_no_show), 0)::integer AS ""TotalNoShows"",
+    COALESCE(SUM(total_completed), 0)::integer AS ""TotalCompleted""
+FROM vietride_booking.booking_stats
+WHERE stat_date >= {from}::date
+  AND stat_date <= {to}::date
+GROUP BY date_trunc('month', stat_date::timestamp)::date
+ORDER BY date_trunc('month', stat_date::timestamp)::date")
+                .ToListAsync(ct);
+
+            return monthRows.Select(ToAdminReadModel).ToList();
+        }
+
         if (string.Equals(groupBy, "date", StringComparison.OrdinalIgnoreCase))
         {
             var rows = await _db.Database.SqlQuery<AdminBookingStatsAggregateSqlRow>($@"
@@ -237,6 +274,16 @@ ORDER BY COALESCE(names.operator_name, '')")
             row.TotalNoShows,
             row.TotalCompleted);
 
+    private static OperatorBookingStatsReadModel ToOperatorReadModel(OperatorBookingStatsSqlRow row)
+        => new(
+            row.OperatorId,
+            row.Date,
+            row.TotalBookings,
+            row.TotalRevenue,
+            row.TotalCancellations,
+            row.TotalNoShows,
+            row.TotalCompleted);
+
     private sealed class OperatorBookingStatsSqlRow
     {
         public Guid OperatorId { get; set; }
@@ -250,8 +297,8 @@ ORDER BY COALESCE(names.operator_name, '')")
 
     private sealed class AdminBookingStatsAggregateSqlRow
     {
-        public Guid OperatorId { get; set; }
-        public string OperatorName { get; set; } = string.Empty;
+        public Guid? OperatorId { get; set; }
+        public string? OperatorName { get; set; }
         public DateOnly? Date { get; set; }
         public int TotalBookings { get; set; }
         public long TotalRevenue { get; set; }

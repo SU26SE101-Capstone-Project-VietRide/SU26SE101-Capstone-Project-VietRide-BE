@@ -7,4 +7,5 @@ public sealed record OperatorBookingDetailDto(
     int SeatCount, long BaseFare, long DiscountAmount, long TotalAmount,
     Guid? PickupStationId, Guid? PickupStopId, Guid? DropoffStationId, Guid? DropoffStopId,
     Guid? BookingGroupId, string? TripDirection, string? CancellationReason, DateTimeOffset CreatedAt,
-    IReadOnlyList<OperatorBookingSeatDto> Seats, IReadOnlyList<OperatorBookingStatusTimelineDto> StatusTimeline);
+    IReadOnlyList<OperatorBookingSeatDto> Seats, IReadOnlyList<OperatorBookingStatusTimelineDto> StatusTimeline,
+    OperatorBookingBuyerDto? Buyer = null);

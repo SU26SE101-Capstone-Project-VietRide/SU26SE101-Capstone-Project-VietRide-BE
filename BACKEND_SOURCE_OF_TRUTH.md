@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.47.0
+> **Phiên bản:** 1.48.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-07-30
+> **Cập nhật lần cuối:** 2026-07-31
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1314,7 +1314,14 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | 31 | `POST /v1/driver/trips/{tripId}/stops/{stopId}/depart` | Trip |
 | 32 | `POST /v1/operator/trips/{tripId}/substitute-vehicle` | Trip |
 | 33 | `POST /v1/bookings/trips/{newTripId}/transfers/passengers/{passengerId}/confirm` | Booking |
-| 34 | `POST /v1/operator/trips/{tripId}/disrupt-no-substitution` | Trip |
+| 34 | `POST /v1/admin/policies` | RAG |
+| 35 | `PATCH /v1/admin/policies/{policyId}` | RAG |
+| 36 | `DELETE /v1/admin/policies/{policyId}` | RAG |
+| 37 | `POST /v1/operator/policies` | RAG |
+| 38 | `PATCH /v1/operator/policies/{policyId}` | RAG |
+| 39 | `DELETE /v1/operator/policies/{policyId}` | RAG |
+| 40 | `PUT /v1/operator/parcel-route-fares/{routeId}/batch` | Parcel |
+| 41 | `POST /v1/operator/trips/{tripId}/disrupt-no-substitution` | Trip |
 
 Day-24 mutations use the same v2 fingerprint/replay contract: UUID-v4 key, actor/method/path/
 canonical-query/raw-body fingerprint, byte-identical replay before current-state lookup, and
@@ -1570,7 +1577,7 @@ updates the column.
 | | `PARCEL_NOT_TRANSFERABLE` | 409 | Status sai khi confirm transfer |
 | | `PARCEL_CARGO_RECOVERY_IN_PROGRESS` | 409 | Parcel already has a durable `TRANSFER|RETURN` cargo-recovery operation pending |
 | | `PARCEL_ADDITIONAL_PAYMENT_REQUIRED` | 402 | Cân lại > ước lượng |
-| | `PARCEL_REVIEW_TIMEOUT` | 409 | EXTRA_LARGE auto-reject 24h |
+| | `PARCEL_REVIEW_TIMEOUT` | 409 | Timeout review 24h cho record legacy `PENDING_OPERATOR_REVIEW` |
 | **Stop / Route** | `STOP_NOT_FOUND` | 404 | Day-7 Trip Stop handlers use coded 404 path; cross-tenant DELETE is masked here |
 | | `STOP_REPLACEMENT_INVALID` | 422 | Replacement Stop missing, inactive, cross-operator, or self-reference |
 | | `STOP_REPLACEMENT_CYCLE` | 422 | Replacement chain would create a cycle |
@@ -1615,6 +1622,8 @@ updates the column.
 | | `TRACKING_TRIP_NOT_ACTIVE` | 409 | Trip chưa IN_PROGRESS |
 | **RAG** | `RAG_DOCUMENT_NOT_APPROVED` | 403 | Status ≠ APPROVED |
 | | `RAG_ACCESS_DENIED_FOR_ROLE` | 403 | accessLevel không match role |
+| | `POLICY_NOT_FOUND` | 404 | Generic RAG Policy is missing, soft-deleted, or outside the caller tenant |
+| | `POLICY_VERSION_CONFLICT` | 409 | PATCH version does not match the current Policy version |
 | **Validation** | `VALIDATION_ERROR` | 422 | Field-level — kèm `errors` array |
 | | `IDEMPOTENCY_KEY_REQUIRED` | 422 | Mutation contract requires the header explicitly; middleware pass-through is not acceptance |
 | | `IDEMPOTENCY_KEY_MISMATCH` | 422 | Same key, different request fingerprint (actor/method/path/query/raw body) |
@@ -1627,7 +1636,7 @@ updates the column.
 | | `RATE_LIMIT_EXCEEDED` | 429 | Per-user/per-resource Day-38 invoice download limit |
 | | `REPORT_VALUE_OVERFLOW` | 500 | Report source/orchestrator gặp count hoặc BIGINT/NUMERIC aggregate ngoài phạm vi Int64; không wrap, saturate hoặc trả partial |
 | | `REPORT_RANGE_INVALID` | 422 | Operator report range không phải ngày ICT hợp lệ, đảo chiều hoặc vượt 92 ngày inclusive |
-| | `UPSTREAM_UNAVAILABLE` | 502 or 503 by boundary | `502` only for Gateway/proxy and legacy pass-through endpoints; `503` for an in-service fail-closed orchestration explicitly documented by its endpoint (Parcel email issuance and platform report sources). An endpoint MUST list the applicable status and never choose dynamically for the same failure class. |
+| | `UPSTREAM_UNAVAILABLE` | 502 or 503 by boundary | `502` only for Gateway/proxy and legacy pass-through endpoints; `503` for an in-service fail-closed orchestration explicitly documented by its endpoint, including Parcel email issuance, Platform Report sources, Admin Dashboard and Revenue facades. An endpoint MUST list the applicable status and never choose dynamically for the same failure class. |
 | | `INTERNAL_ERROR` | 500 | Unhandled exception (Sentry capture) |
 
 **Day-23 exact resolver mapping — POST
@@ -1988,6 +1997,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | Method + Path | Caller | Mục đích |
 |---|---|---|
 | `GET /internal/v1/users/{userId}` | All services | Internal-JWT-only raw user lookup `{ id, displayName, avatarUrl, role, operatorId, status, phone }` for HTTP validate logical FK. Errors use ADR 0004 envelope. Trip DriverSchedule create/activation validates role/operator; Shuttle dispatch còn yêu cầu driver active có display name/phone và snapshot hai field này vào assignment event. |
+| `GET /internal/v1/users?ids=<uuid>&ids=<uuid>` | Booking, Trip, Parcel, RAG | Read-only 1..100 user batch; raw additive display/contact/status DTO, including a redacted representation for requested soft-deleted IDs |
 | `GET /internal/v1/users/by-phone?phone={normalizedE164}` | Booking | Internal-JWT-only exact non-deleted-user phone lookup for the operator booking-monitor filter. Caller URI-escapes a prevalidated canonical E.164 value; raw success is exactly `{ userId }`, no PII. No match is ADR 0004 `404 RESOURCE_NOT_FOUND`. Booking maps only that exact response to an empty result; all other failures map to `502 UPSTREAM_UNAVAILABLE`. |
 | `GET /internal/v1/users/by-email?email=` | Parcel | Lookup recipient user khi tạo parcel |
 | `GET /internal/v1/users/{userId}/device-tokens` | Notification | Lấy FCM tokens active để push |
@@ -1996,7 +2006,8 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | `POST /internal/v1/operators/{operatorId}/usage/increment` | Trip, Booking, Parcel | Body `{resource, delta}` where resource is `VEHICLES|DRIVERS|ASSISTANTS|OPERATOR_USERS|ROUTES|TRIPS_THIS_MONTH`; atomically increment usage counter without concurrent overshoot |
 | `POST /internal/v1/operators/{operatorId}/quota-allocations` | Trip | Claim durable idempotent quota allocation by `{ resource, resourceId, periodKey? }`; no distributed transaction |
 | `POST /internal/v1/operators/{operatorId}/quota-allocations/{allocationId}/release` | Trip | Idempotently release an allocation after local persistence fails or its resource is soft-deleted |
-| `POST /internal/v1/operators/summaries/batch` | Payment | Read-only batch lookup `{ operatorIds }`, tối đa 500 distinct non-empty UUID; raw response gồm cả operator soft-deleted, sort ID tăng dần; empty input trả empty list; không yêu cầu Idempotency-Key |
+| `POST /internal/v1/operators/summaries/batch` | Booking, Payment | Read-only batch lookup `{ operatorIds }`, tối đa 500 distinct non-empty UUID; raw additive `{ operatorId, operatorName, logoUrl, contactPhone }`, gồm cả operator soft-deleted, sort ID tăng dần; empty input trả empty list; không yêu cầu Idempotency-Key |
+| `GET /internal/v1/admin/dashboard/identity-metrics?from=&to=` | Booking | Raw latest-login count for the ICT range plus current user-role counts, approved/active operator IDs and operator-status distribution; no historical status inference |
 | `POST /internal/v1/payments/subscription` | Identity | Create/replay a VNPay subscription payment from a server-side upgrade snapshot |
 | `POST /internal/v1/payments/{paymentId}/expire-subscription` | Identity | Idempotently expire a pending subscription payment during the Identity-owned auto-revert job |
 
@@ -2004,7 +2015,10 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 
 | Method + Path | Caller | Mục đích |
 |---|---|---|
-| `GET /internal/v1/trips/{tripId}?pricingAt=` | Booking, Parcel, Tracking, Payment | Raw Trip snapshot; includes nullable `actualDepartureTime`, nullable route `totalDistanceKm`, and stops with `status`, nullable `actualArrivalTime`, nullable `distanceFromOriginKm`, and `orderIndex`. Valid Internal JWT only (`401 AUTH_TOKEN_INVALID`), no tenant authorization. Optional ISO-offset `pricingAt` resolves Booking fare as `MANUAL_OVERRIDE` → active half-open `RouteStopFareTemplate` → `Trip.baseFare`; omitted preserves persisted legacy snapshot semantics. |
+| `GET /internal/v1/trips/{tripId}?pricingAt=` | Booking, Parcel, Tracking, Payment | Raw Trip snapshot; includes nullable `actualDepartureTime`, nullable route `totalDistanceKm`, and stops with `status`, nullable `actualArrivalTime`, nullable `distanceFromOriginKm`, and `orderIndex`. Valid Internal JWT only (`401 AUTH_TOKEN_INVALID`), no tenant authorization. Optional ISO-offset `pricingAt` resolves Booking fare as `MANUAL_OVERRIDE` → active half-open `RouteStopFareTemplate` → `Trip.baseFare`; omitted preserves persisted legacy snapshot semantics. No event/projection is added. |
+| `POST /internal/v1/trips/summaries/batch` | Parcel | Read-only `{ tripIds }`, 1..100 distinct UUIDs; one Trip query returns route/station/vehicle/crew/timing summaries; missing IDs are omitted |
+| `POST /internal/v1/operators/vehicle-counts/batch` | Payment | Read-only `{ operatorIds }`, 1..100 distinct UUIDs; raw current vehicle counts by operator |
+| `GET /internal/v1/operators/{operatorId}/route-performance?month=YYYY-MM` | Payment | Raw ICT-month trip/completed-trip aggregates grouped by route for the explicit operator tenant |
 | `POST /internal/v1/trips/{tripId}/lock-seats` | Booking | Lock seats trong checkout (TTL 10 phút Redis) |
 | `POST /internal/v1/trips/round-trip/lock-seats` | Booking | Lock outbound + return seats atomically in one Trip-owned Redis Lua script; if either leg fails, no seat is held |
 | `POST /internal/v1/trips/{tripId}/release-seats` | Booking | Release seat khi payment fail/timeout |
@@ -2159,8 +2173,8 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `parcel.parcel.delivery_rejected` | Parcel | Notification | `{ parcelId, reason }` |
 | `parcel.parcel.cancelled` · `parcel.parcel.rejected` · `parcel.parcel.returned` | Parcel | Notification | Canonical Day-32 terminal notification fact `{eventId,occurredAt,parcelId,parcelCode,operatorId,userId,tripId,refundAmount,reason}`. Trip cargo is mutated synchronously through its idempotent internal API; Payment MUST NOT bind these canonical facts. Exact legacy payloads without canonical identity remain accepted for one release only and normalize to the same deterministic Parcel reference identity described below. |
 | `parcel.parcel.auto_rejected` | Parcel | Notification, Trip (counter), Payment (refund) | Legacy exact `{ eventId, occurredAt, parcelId, parcelCode, operatorId, userId, tripId, refundAmount }` remains accepted for late-load/additional-payment producers. Settlement v2 exact variant adds `reason: CHECK_IN_TIMEOUT\|FINAL_PAYMENT_TIMEOUT` and `forfeitedDepositVnd`; `userId` is always the persisted sender and `eventId == OutboxEvent.id == RabbitMQ MessageId` |
-| `parcel.parcel.review_requested` | Parcel (EXTRA_LARGE) | Notification (operator) | `{ parcelId, operatorId }` |
-| `parcel.parcel.review_approved` | Parcel (EXTRA_LARGE) | Notification (sender) | Exact `{ eventId, occurredAt, parcelId, parcelCode, operatorId, userId, depositRequiredVnd }`; enqueue trong cùng transaction chuyển sang `PENDING_PAYMENT` |
+| `parcel.parcel.review_requested` | Parcel legacy | Notification (operator) | `{ parcelId, operatorId }`; không phát cho Parcel mới, kể cả `EXTRA_LARGE` |
+| `parcel.parcel.review_approved` | Parcel legacy | Notification (sender) | Exact `{ eventId, occurredAt, parcelId, parcelCode, operatorId, userId, depositRequiredVnd }`; enqueue trong cùng transaction chuyển record legacy sang `PENDING_PAYMENT` |
 | `parcel.parcel.final_payment_requested` | Parcel | Notification (sender) | Exact `{ eventId, occurredAt, parcelId, parcelCode, operatorId, userId, tripId, balanceRequiredVnd, balancePaidVnd, finalPaymentDeadline }`; enqueue trong cùng transaction cân lại chuyển sang `PENDING_FINAL_PAYMENT` |
 | `parcel.parcel.settlement_recovered` | Parcel | Notification (sender) | Exact `{ eventId, occurredAt, parcelId, parcelCode, userId, tripId, recoveredStatus: READY_TO_LOAD\|CANCELLED, refundAmountVnd }`; corrective fact khi callback có `paidAt` đúng hạn thắng timeout đã phát trước đó |
 | `parcel.parcel.transfer_initiated` | Parcel | Notification | `{ parcelId, originalTripId, newTripId }` |
@@ -2422,7 +2436,7 @@ UTC boundary bắt buộc, `from < to`, tối đa 366 ngày, interval `[from,to)
 
 Earned live vẫn là metric anchor; không dùng payment-ledger time, non-terminal row hoặc Stats/cache
 chưa reconciliation làm nguồn trả kết quả. Source PostgreSQL đọc
-`SUM(BIGINT)` dưới dạng NUMERIC rồi checked-convert từng group và total về Int64. Payment checked
+`SUM(BIGINT)` dưới dạng NUMERIC rồi checked-convert từng group và total về Int64. Booking checked
 mọi count/revenue/totals, union operator IDs, lookup Identity theo chunk 500, giữ missing operator
 với tên null, sort net revenue giảm dần rồi operator ID. Totals phải bằng sum `byOperator`;
 `parcelRevenueVnd`/`netRevenueVnd` có thể âm và không clamp.
@@ -2463,6 +2477,48 @@ Identity owns the `SYSTEM_ADMIN` read-only aggregate facade `GET /v1/admin/outbo
 opaque composite cursor and reports unavailable source services without inventing totals. No
 replay or purge is implemented in v1. Every Hangfire-owning service exposes the internal JWT-only
 `GET /internal/jobs/status`; lag is `max(0, nowUtc - nextRunUtc)` or null when no next run exists.
+
+#### UI gap contract freeze (2026-07-29)
+
+This freeze is additive and supersedes the UI-gap backlog wherever that backlog conflicts with
+the current service ownership or schema. It does not authorize frontend work, Admin Station work,
+new dependencies, cross-database foreign keys, or enrichment of the existing public
+`GET /v1/admin/operators` response.
+
+- Booking owns Admin Dashboard and BookingStats. Payment owns Admin/Operator Revenue Analytics.
+  The Booking Dashboard facade combines Booking-local aggregates with Identity internal metrics;
+  it does not depend on the Platform Report facade.
+- RAG owns generic `Policy` and immutable `PolicyAuditLog` Prisma aggregates. They are distinct
+  from `KnowledgeDocument` and from Identity's operator cancellation/luggage/no-show JSON.
+- Trip exposes a tenant-scoped `GET /v1/operator/trips` selector for `OPERATOR_ADMIN`. Search is
+  limited to normalized vehicle plate and route name. No `tripCode`, `routeCode`, schema migration
+  or search index is authorized unless a later measured query plan establishes a separate task.
+- Parcel fare batch preserves the physical `(route_id, size_category)` key and atomically mutates
+  that current row after checking the route belongs to the JWT operator; it does not introduce
+  fare history. Existing single-size endpoints remain compatible.
+- Cross-service display snapshots are nullable schema additions. EF/Prisma migrations never call
+  another service. Historical fill is an idempotent application backfill with bounded batch calls,
+  and reads retain a bounded internal-API fallback until fill completes.
+- `parcel_status_history` is immutable and trigger-backed so EF bulk updates and raw SQL cannot
+  bypass it. The trigger fires only when `OLD.status IS DISTINCT FROM NEW.status`; legacy rows get
+  one `MIGRATION_BASELINE` record, never fabricated transitions.
+- Dashboard `activeUsers` means the account's current latest `last_login_at` falls in the requested
+  period; it is not a full login-history metric. `activeOperators` means currently
+  `APPROVED + is_active` and having at least one BookingStats booking in the period.
+- Operator ticket revenue is signed Booking ledger revenue/refund plus VietRide-funded voucher
+  credit whose reference is `BOOKING`; Parcel revenue uses the equivalent `PARCEL` entries.
+  The exact negative `ADJUSTMENT` whose reference is `BOOKING|PARCEL` and note is
+  `reverse-vietride-funded-voucher` is included in its matching category. Operator-funded voucher
+  audit entries and adjustments whose reference is `MANUAL` are excluded. Consequently
+  `totalRevenueVnd = ticketRevenueVnd + parcelRevenueVnd`.
+- Admin analytics deliberately defines `platformRevenueVnd` as completed subscription payments,
+  `paidToOperatorsVnd` as settled payouts, and `grossRevenueVnd` as their sum. These names do not
+  represent ticket/parcel gross sales.
+- For comparisons, previous zero with current positive is `UP`; both zero is `FLAT`; in both cases
+  `changePercent` is `0`. All date/month buckets use `Asia/Ho_Chi_Minh` unless an existing endpoint
+  explicitly requires UTC boundaries.
+- All UI-gap public mutations require `Idempotency-Key`; all public responses use ADR 0004. Internal APIs
+  require Internal JWT, return raw DTOs on success, and are never exposed through Gateway.
 
 ---
 
@@ -2630,7 +2686,7 @@ Trip, and cancellation/refund uses persisted `totalAmount`.
 ### 8.3 ParcelStatus
 
 ```
-PENDING_OPERATOR_REVIEW (EXTRA_LARGE only) ──→ PENDING_PAYMENT | REJECTED | CANCELLED(review timeout)
+PENDING_OPERATOR_REVIEW (legacy only) ──→ PENDING_PAYMENT | REJECTED | CANCELLED(review timeout)
 PENDING_PAYMENT ──→ RESERVED | EXPIRED | CANCELLED
 PENDING (legacy paid compatibility) ──→ CANCELLED | PENDING_OPERATOR_ACTION
 PENDING_ADDITIONAL_PAYMENT (legacy compatibility) ──→ CANCELLED | PENDING_OPERATOR_ACTION | REJECTED
@@ -2650,7 +2706,7 @@ PENDING_OPERATOR_ACTION ──→ pendingActionResumeStatus | RETURNED
 
 **Terminal:** `DELIVERY_CONFIRMED`, `RETURN_INITIATED`, `CANCELLED`, `EXPIRED`, `REJECTED`, `RETURNED`.
 
-**Settlement v2 invariants:** pricing uses exact decimal chargeable weight and rounds fractional VND to the nearest đồng with `MidpointRounding.AwayFromZero`; it never ceilings kg or floors money to 1,000 VND. Voucher discount is clamped independently against estimated/final gross. Deposit is 20% of estimated total. Only `READY_TO_LOAD` can load. A Payment success is judged by authoritative `paidAt`, not webhook delivery time. If final-payment timeout wins before an on-time callback, the callback cancels forfeiture and restores `READY_TO_LOAD` when the trip can still serve; otherwise the Parcel becomes `CANCELLED` and all collected money is refunded.
+**Settlement v2 invariants:** pricing uses exact decimal chargeable weight and rounds fractional VND to the nearest đồng with `MidpointRounding.AwayFromZero`; it never ceilings kg or floors money to 1,000 VND. Voucher discount is clamped independently against estimated/final gross. Deposit is 20% of estimated total. Every derived size, including `EXTRA_LARGE`, requires a configured fare and starts at `PENDING_PAYMENT`; capacity is enforced at deposit hold and reweigh. `PENDING_OPERATOR_REVIEW` is legacy-only. Only `READY_TO_LOAD` can load. A Payment success is judged by authoritative `paidAt`, not webhook delivery time. If final-payment timeout wins before an on-time callback, the callback cancels forfeiture and restores `READY_TO_LOAD` when the trip can still serve; otherwise the Parcel becomes `CANCELLED` and all collected money is refunded.
 
 **Canonical two-step delivery (Day 39):**
 
@@ -3182,7 +3238,7 @@ permitted.
 | Job | Type | Trigger | Notes |
 |---|---|---|---|
 | `UndoRejectWindowJob` | Scheduled (per Parcel) | DELIVERY_REJECTED + 15 phút | DELIVERY_REJECTED → RETURN_INITIATED |
-| `AutoRejectExtraLargeJob` | Scheduled (per Parcel) | PENDING_OPERATOR_REVIEW + 24h | `CANCELLED`, reason `OPERATOR_REVIEW_TIMEOUT`; chưa có tiền để refund |
+| `AutoRejectExtraLargeJob` | Scheduled (legacy records) | PENDING_OPERATOR_REVIEW + 24h | `CANCELLED`, reason `OPERATOR_REVIEW_TIMEOUT`; không áp dụng cho Parcel mới |
 | `ParcelSettlementTimeoutJob` | Recurring | Every 5 phút | Xử lý cả `RESERVED → REJECTED` khi quá `latestCheckInAt` và `PENDING_FINAL_PAYMENT → REJECTED` khi `finalPaymentDeadline <= now`; forfeiture toàn bộ cọc + release cargo; callback on-time đến sau phải recovery theo invariant §8.3 |
 | `PendingTransferConfirmEscalationJob` | Scheduled (per Parcel) | `now >= transferRequestedAt + 30 minutes` | CAS `PENDING_TRANSFER_CONFIRM -> TRANSFER_ESCALATED` only when `transfer_confirmation_claim_id IS NULL`. Crew claim is allowed only strictly before deadline. |
 | `PendingTransferClaimRecoveryJob` | Recurring every 5 minutes | `PENDING_TRANSFER_CONFIRM`, non-null claim, `transfer_confirmation_claimed_at <= now - 5 minutes` | Replay Trip cargo transfer with the persisted claim id and persisted target; never mint a new key and never escalate a claimed row. A successful replay CAS-completes Parcel, a domain 4xx clears the claim for operator correction, and unknown/503 retains it for the next scan. |
@@ -3638,6 +3694,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.48.0** | 2026-07-31 | Codex | **MINOR** — Freeze the backend UI-gap ownership, compatibility, projection/backfill, Policy audit, Parcel history, Dashboard and Revenue semantics; remove stale Admin Operator, Trip code/index and fare-history scope; correct Platform Report ownership to Booking. |
 | **1.47.0** | 2026-07-30 | BE lead (Vũ) | **MINOR** — Closes the Day-32 Parcel recovery crash/race gate with a dedicated persistent `TRANSFER|RETURN` cargo-recovery operation, one active claim per Parcel, frozen refund/target facts, stable Trip idempotency identity, five-minute stale replay, and atomic Parcel-local finalization of state, operation, Outbox and stats. |
 | **1.46.0** | 2026-07-30 | BE lead (Vũ) | **MINOR** — Completes the implementation gate for Days 31/32/35/37/42: public Parcel delivery routing and hash-only rate limiting; encrypted Notification queue payloads; durable vehicle-transfer claim schema/recovery; exact outstanding Parcel refund identity; fail-closed per-Booking disruption snapshots; the approved `DISRUPT_ON_TRIP_DISRUPTED` timeline writer with null event actor; general-versus-Shuttle subscription guards; and exact 29/92-day report acceptance. Corrects legacy cargo formulas, status compatibility, schema/ERD inventory, error contexts, and Notification configuration ownership. |
 | **1.45.0** | 2026-07-30 | BE lead (Vũ) | **MINOR** — Reconciles Days 31/32/35 contracts: Parcel delivery confirmation stores only SHA-256 token history and sends sensitive links directly through Notification internal email; Trip cancellation and disruption use canonical routing keys plus service-local refund/cargo recovery; Trip owns an atomic source-to-target cargo-transfer API; no-substitution refunds are computed per Booking with nearest-VND `AwayFromZero`; and Parcel vehicle-substitution transfer uses crew confirmation with a replay-safe 30-minute CAS escalation. |

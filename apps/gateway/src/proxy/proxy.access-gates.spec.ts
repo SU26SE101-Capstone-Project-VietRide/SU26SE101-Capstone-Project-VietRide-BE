@@ -40,9 +40,7 @@ const createProxyMiddlewareMock = jest.mocked(createProxyMiddleware);
 const isFocusedDay23ResolveRun = process.argv.some((argument) =>
   argument.includes('Day 23 resolve schedule action'),
 );
-const describeExistingAccessGates = isFocusedDay23ResolveRun
-  ? (): void => undefined
-  : describe;
+const describeExistingAccessGates = isFocusedDay23ResolveRun ? (): void => undefined : describe;
 
 type TestResponse = Response & { statusCodeValue?: number; jsonBody?: unknown };
 
@@ -131,11 +129,7 @@ it('Day 23 resolve schedule action: existing booking prefix and PASSENGER gate',
   expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
     expect.objectContaining({ target: env.BOOKING_BASE_URL }),
   );
-  expect(passengerProxy).toHaveBeenCalledWith(
-    passengerRequest,
-    passengerResponse,
-    passengerNext,
-  );
+  expect(passengerProxy).toHaveBeenCalledWith(passengerRequest, passengerResponse, passengerNext);
 
   createProxyMiddlewareMock.mockClear();
   const operatorAuthorization = await makeAuthorizationHeader({
@@ -228,8 +222,7 @@ describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', 
   });
 
   it('enforces OPERATOR_ADMIN auth and preserves Idempotency-Key for substitute-vehicle', async () => {
-    const path =
-      '/v1/operator/trips/11111111-1111-4111-8111-111111111111/substitute-vehicle';
+    const path = '/v1/operator/trips/11111111-1111-4111-8111-111111111111/substitute-vehicle';
     const idempotencyKey = '33333333-3333-4333-8333-333333333333';
     const upstreamHandler = arrangeProxyPass();
     const signer = {
@@ -826,60 +819,41 @@ describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', 
 
   it.each([
     ['GET', '/v1/admin/users?page=1&pageSize=20', env.IDENTITY_BASE_URL],
-    [
-      'POST',
-      '/v1/admin/users/11111111-1111-1111-1111-111111111111/lock',
-      env.IDENTITY_BASE_URL,
-    ],
-    [
-      'POST',
-      '/v1/admin/users/11111111-1111-1111-1111-111111111111/unlock',
-      env.IDENTITY_BASE_URL,
-    ],
+    ['POST', '/v1/admin/users/11111111-1111-1111-1111-111111111111/lock', env.IDENTITY_BASE_URL],
+    ['POST', '/v1/admin/users/11111111-1111-1111-1111-111111111111/unlock', env.IDENTITY_BASE_URL],
     ['GET', '/v1/admin/activity-logs?page=1&pageSize=20', env.IDENTITY_BASE_URL],
-    [
-      'PATCH',
-      '/v1/admin/stations/11111111-1111-1111-1111-111111111111',
-      env.TRIP_BASE_URL,
-    ],
-    [
-      'POST',
-      '/v1/admin/stations/11111111-1111-1111-1111-111111111111/merge',
-      env.TRIP_BASE_URL,
-    ],
+    ['PATCH', '/v1/admin/stations/11111111-1111-1111-1111-111111111111', env.TRIP_BASE_URL],
+    ['POST', '/v1/admin/stations/11111111-1111-1111-1111-111111111111/merge', env.TRIP_BASE_URL],
     [
       'GET',
       '/v1/admin/reports/platform?from=2026-07-01T00%3A00%3A00Z&to=2026-08-01T00%3A00%3A00Z',
       env.BOOKING_BASE_URL,
     ],
-  ] as const)(
-    'routes Day 40 SYSTEM_ADMIN %s %s to its owner',
-    async (method, path, target) => {
-      const upstreamHandler = arrangeProxyPass();
-      const signer = {
-        sign: jest.fn().mockResolvedValue('internal-token'),
-      } as unknown as InternalJwtSigner;
-      const handler = createProxyHandler(env, signer);
-      const authorization = await makeAuthorizationHeader({
-        sub: 'admin-1',
-        role: 'SYSTEM_ADMIN',
-      });
-      const req = makeRequest(
-        path,
-        { authorization, 'x-request-id': 'req-day40-admin-route' },
-        method,
-      );
-      const res = makeResponse();
-      const next = jest.fn() as NextFunction;
+  ] as const)('routes Day 40 SYSTEM_ADMIN %s %s to its owner', async (method, path, target) => {
+    const upstreamHandler = arrangeProxyPass();
+    const signer = {
+      sign: jest.fn().mockResolvedValue('internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({
+      sub: 'admin-1',
+      role: 'SYSTEM_ADMIN',
+    });
+    const req = makeRequest(
+      path,
+      { authorization, 'x-request-id': 'req-day40-admin-route' },
+      method,
+    );
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
 
-      await handler(req, res, next);
+    await handler(req, res, next);
 
-      expect(createProxyMiddlewareMock).toHaveBeenCalledWith(expect.objectContaining({ target }));
-      expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
-      expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
-      expect(res.status).not.toHaveBeenCalled();
-    },
-  );
+    expect(createProxyMiddlewareMock).toHaveBeenCalledWith(expect.objectContaining({ target }));
+    expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
+    expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+    expect(res.status).not.toHaveBeenCalled();
+  });
 
   it.each(['PASSENGER', 'OPERATOR_ADMIN', 'OPERATOR_STAFF', 'DRIVER', 'ASSISTANT'])(
     'denies Day 40 platform report to %s',
@@ -1056,7 +1030,11 @@ describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', 
     const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
     const handler = createProxyHandler(env, signer);
     const authorization = await makeAuthorizationHeader({ sub: 'passenger-1', role: 'PASSENGER' });
-    const req = makeRequest(path, { authorization, 'x-request-id': 'req-bookings-passenger' }, 'GET');
+    const req = makeRequest(
+      path,
+      { authorization, 'x-request-id': 'req-bookings-passenger' },
+      'GET',
+    );
     const res = makeResponse();
     const next = jest.fn() as NextFunction;
 
@@ -1587,7 +1565,8 @@ describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', 
   });
 
   it('routes the trip parcel list to Parcel for Assistant and rejects Driver', async () => {
-    const path = '/v1/assistant/trips/11111111-1111-4111-8111-111111111111/parcels?page=1&pageSize=20';
+    const path =
+      '/v1/assistant/trips/11111111-1111-4111-8111-111111111111/parcels?page=1&pageSize=20';
     const upstreamHandler = arrangeProxyPass();
     const signer = {
       sign: jest.fn().mockResolvedValue('internal-token'),
@@ -1636,5 +1615,178 @@ describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', 
       error: { code: 'FORBIDDEN' },
     });
     expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+  });
+
+  it('gates the admin Policy proxy and preserves the exact mutation request', async () => {
+    const path = '/v1/admin/policies/11111111-1111-4111-8111-111111111111?include=content';
+    const idempotencyKey = '22222222-2222-4222-8222-222222222222';
+    const upstreamHandler = arrangeProxyPass();
+    const signer = {
+      sign: jest.fn().mockResolvedValue('gateway-internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({
+      sub: 'system-admin-1',
+      role: 'SYSTEM_ADMIN',
+    });
+    const req = makeRequest(
+      path,
+      {
+        authorization,
+        'idempotency-key': idempotencyKey,
+        'x-internal-auth': 'Bearer forged-client-token',
+        'x-request-id': 'req-admin-policy',
+      },
+      'PATCH',
+    );
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(signer.sign).toHaveBeenCalledWith({
+      sub: 'system-admin-1',
+      reqId: 'req-admin-policy',
+      role: 'SYSTEM_ADMIN',
+    });
+    expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+      expect.objectContaining({ target: env.RAG_BASE_URL }),
+    );
+    expect(req.headers.authorization).toBeUndefined();
+    expect(req.headers['idempotency-key']).toBe(idempotencyKey);
+    expect(req.headers['x-internal-auth']).toBe('Bearer gateway-internal-token');
+    expect(req.url).toBe(path);
+    expect(req.originalUrl).toBe(path);
+    expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+    expect(res.status).not.toHaveBeenCalled();
+
+    createProxyMiddlewareMock.mockClear();
+    const operatorAuthorization = await makeAuthorizationHeader({
+      sub: 'operator-admin-1',
+      role: 'OPERATOR_ADMIN',
+      operatorId: 'operator-1',
+    });
+    const forbiddenReq = makeRequest(
+      path,
+      { authorization: operatorAuthorization, 'x-request-id': 'req-admin-policy-forbidden' },
+      'GET',
+    );
+    const forbiddenRes = makeResponse();
+
+    await handler(forbiddenReq, forbiddenRes, jest.fn() as NextFunction);
+
+    expect(forbiddenRes.status).toHaveBeenCalledWith(403);
+    expect(forbiddenRes.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 403,
+      error: { code: 'FORBIDDEN' },
+    });
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+
+    const anonymousReq = makeRequest(path, { 'x-request-id': 'req-admin-policy-anonymous' }, 'GET');
+    const anonymousRes = makeResponse();
+
+    await handler(anonymousReq, anonymousRes, jest.fn() as NextFunction);
+
+    expect(anonymousRes.status).toHaveBeenCalledWith(401);
+    expect(anonymousRes.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 401,
+      error: { code: 'AUTH_TOKEN_INVALID' },
+    });
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+  });
+
+  it('gates operator Policy mutations and carries the JWT tenant to RAG', async () => {
+    const upstreamHandler = arrangeProxyPass();
+    const signer = {
+      sign: jest.fn().mockResolvedValue('gateway-internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const authorization = await makeAuthorizationHeader({
+      sub: 'operator-admin-1',
+      role: 'OPERATOR_ADMIN',
+      operatorId: 'operator-1',
+    });
+    const mutationCases = [
+      ['POST', '/v1/operator/policies?source=manager'],
+      ['PATCH', '/v1/operator/policies/33333333-3333-4333-8333-333333333333?source=manager'],
+      ['DELETE', '/v1/operator/policies/44444444-4444-4444-8444-444444444444?source=manager'],
+    ] as const;
+
+    for (const [index, [method, path]] of mutationCases.entries()) {
+      const idempotencyKey = `55555555-5555-4555-8555-55555555555${index}`;
+      const req = makeRequest(
+        path,
+        {
+          authorization,
+          'idempotency-key': idempotencyKey,
+          'x-internal-auth': 'Bearer forged-client-token',
+          'x-request-id': `req-operator-policy-${index}`,
+        },
+        method,
+      );
+      const res = makeResponse();
+      const next = jest.fn() as NextFunction;
+
+      await handler(req, res, next);
+
+      expect(signer.sign).toHaveBeenNthCalledWith(index + 1, {
+        sub: 'operator-admin-1',
+        reqId: `req-operator-policy-${index}`,
+        role: 'OPERATOR_ADMIN',
+        operatorId: 'operator-1',
+      });
+      expect(req.headers.authorization).toBeUndefined();
+      expect(req.headers['idempotency-key']).toBe(idempotencyKey);
+      expect(req.headers['x-internal-auth']).toBe('Bearer gateway-internal-token');
+      expect(req.url).toBe(path);
+      expect(req.originalUrl).toBe(path);
+      expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+      expect(res.status).not.toHaveBeenCalled();
+    }
+
+    expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+      expect.objectContaining({ target: env.RAG_BASE_URL }),
+    );
+
+    for (const [role, requestId] of [
+      ['SYSTEM_ADMIN', 'req-operator-policy-system-admin'],
+      ['OPERATOR_STAFF', 'req-operator-policy-staff'],
+    ] as const) {
+      const forbiddenAuthorization = await makeAuthorizationHeader({
+        sub: `${role.toLowerCase()}-1`,
+        role,
+        operatorId: 'operator-1',
+      });
+      const forbiddenReq = makeRequest('/v1/operator/policies', {
+        authorization: forbiddenAuthorization,
+        'x-request-id': requestId,
+      });
+      const forbiddenRes = makeResponse();
+
+      await handler(forbiddenReq, forbiddenRes, jest.fn() as NextFunction);
+
+      expect(forbiddenRes.status).toHaveBeenCalledWith(403);
+      expect(forbiddenRes.jsonBody).toMatchObject({
+        success: false,
+        statusCode: 403,
+        error: { code: 'FORBIDDEN' },
+      });
+    }
+
+    const anonymousReq = makeRequest('/v1/operator/policies', {
+      'x-request-id': 'req-operator-policy-anonymous',
+    });
+    const anonymousRes = makeResponse();
+
+    await handler(anonymousReq, anonymousRes, jest.fn() as NextFunction);
+
+    expect(anonymousRes.status).toHaveBeenCalledWith(401);
+    expect(anonymousRes.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 401,
+      error: { code: 'AUTH_TOKEN_INVALID' },
+    });
   });
 });

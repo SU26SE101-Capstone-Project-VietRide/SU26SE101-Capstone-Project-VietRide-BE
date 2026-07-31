@@ -51,6 +51,7 @@ public sealed class CreateBookingCommandHandler
     private readonly IVoucherService _voucherService;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IBookingStationCanonicalizer _stationCanonicalizer;
+    private readonly IIdentityUserServiceClient _identityUsers;
     private readonly IClock _clock;
     private readonly ILogger<CreateBookingCommandHandler> _logger;
 
@@ -64,7 +65,8 @@ public sealed class CreateBookingCommandHandler
         IClock clock,
         ILogger<CreateBookingCommandHandler> logger,
         IBookingStatusHistoryRepository statusHistory,
-        IBookingStationCanonicalizer stationCanonicalizer)
+        IBookingStationCanonicalizer stationCanonicalizer,
+        IIdentityUserServiceClient identityUsers)
     {
         _bookings = bookings;
         _statusHistory = statusHistory;
@@ -76,6 +78,7 @@ public sealed class CreateBookingCommandHandler
         _clock = clock;
         _logger = logger;
         _stationCanonicalizer = stationCanonicalizer;
+        _identityUsers = identityUsers;
     }
 
     public async Task<CreateBookingResult> Handle(
@@ -129,6 +132,9 @@ public sealed class CreateBookingCommandHandler
 
         ValidateStopSelections(trip, request.PickupStopId, request.DropoffStopId);
         ValidateShuttleRequest(request, trip, now);
+        var buyerProfile = await GetRequiredBuyerProfileAsync(
+            request.PassengerUserId,
+            cancellationToken);
 
         // -----------------------------------------------------------------------
         // 3. Lock seats (all-or-nothing)
@@ -229,7 +235,11 @@ public sealed class CreateBookingCommandHandler
                 tripSnapshotDeparture: trip.DepartureDateTime,
                 tripSnapshotRouteName: null,
                 seatLockToken: seatLockToken,
-                tripCurrentDeparture: trip.DepartureDateTime);
+                tripCurrentDeparture: trip.DepartureDateTime,
+                buyerDisplayName: buyerProfile.DisplayName,
+                buyerPhone: buyerProfile.Phone,
+                buyerEmail: buyerProfile.Email,
+                buyerAvatarUrl: buyerProfile.AvatarUrl);
 
             // Add passenger rows (operational-only — no PII stored)
             var ticketAllocations = BuildTicketAllocations(request.Seats, perSeatFare, discountAmount, now);
@@ -583,6 +593,17 @@ public sealed class CreateBookingCommandHandler
                 "SHUTTLE_REQUEST_CUTOFF_PASSED",
                 "The shuttle request cutoff has passed.");
         }
+    }
+
+    private async Task<BookingBuyerSnapshotProfile> GetRequiredBuyerProfileAsync(
+        Guid buyerUserId,
+        CancellationToken cancellationToken)
+    {
+        var profiles = await _identityUsers.GetUsersAsync([buyerUserId], cancellationToken);
+        return profiles.TryGetValue(buyerUserId, out var profile)
+            ? profile
+            : throw new BookingUpstreamUnavailableException(
+                "Identity did not return the authenticated Booking buyer.");
     }
 
     private static IReadOnlyList<CreateBookingTicketResult> ToTicketResults(BookingEntity booking)

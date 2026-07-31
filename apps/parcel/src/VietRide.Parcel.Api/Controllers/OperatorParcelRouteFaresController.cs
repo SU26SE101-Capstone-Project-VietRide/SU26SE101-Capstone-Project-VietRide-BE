@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Parcel.Api.Controllers.Requests;
 using VietRide.Parcel.Api.Filters;
+using VietRide.Parcel.Application.Features.ParcelRouteFares.Batch;
 using VietRide.Parcel.Application.Features.ParcelRouteFares.Create;
 using VietRide.Parcel.Application.Features.ParcelRouteFares.List;
 using VietRide.Parcel.Application.Features.ParcelRouteFares.Update;
@@ -94,6 +95,37 @@ public sealed class OperatorParcelRouteFaresController : ControllerBase
             request.PriceVnd,
             request.EffectiveFrom,
             request.EffectiveUntil), cancellationToken);
+
+        return Ok(result);
+    }
+
+    [HttpPut("{routeId:guid}/batch")]
+    [Authorize(Roles = AdminRole)]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<BatchParcelRouteFareResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<BatchParcelRouteFareResponse>> BatchAsync(
+        Guid routeId,
+        [FromBody] BatchParcelRouteFareRequest request,
+        CancellationToken cancellationToken)
+    {
+        var operatorId = GetRequiredOperatorId();
+        var items = request.Items?.Select(item => new BatchParcelRouteFareItem(
+                item?.SizeCategory,
+                item?.PriceVnd ?? 0))
+            .ToArray() ?? [];
+
+        var result = await _mediator.Send(new BatchParcelRouteFareCommand(
+            operatorId,
+            routeId,
+            request.EffectiveFrom,
+            request.EffectiveUntil,
+            items), cancellationToken);
 
         return Ok(result);
     }

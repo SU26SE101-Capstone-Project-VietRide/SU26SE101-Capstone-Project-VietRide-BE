@@ -83,6 +83,36 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
             .HasColumnType("uuid")
             .IsRequired();
 
+        builder.Property(x => x.TripSnapshotRouteId)
+            .HasColumnName("trip_snapshot_route_id")
+            .HasColumnType("uuid")
+            .IsRequired(false);
+
+        builder.Property(x => x.TripSnapshotRouteName)
+            .HasColumnName("trip_snapshot_route_name")
+            .HasMaxLength(255)
+            .IsRequired(false);
+
+        builder.Property(x => x.TripSnapshotOriginStationName)
+            .HasColumnName("trip_snapshot_origin_station_name")
+            .HasMaxLength(255)
+            .IsRequired(false);
+
+        builder.Property(x => x.TripSnapshotDestinationStationName)
+            .HasColumnName("trip_snapshot_destination_station_name")
+            .HasMaxLength(255)
+            .IsRequired(false);
+
+        builder.Property(x => x.TripSnapshotVehicleId)
+            .HasColumnName("trip_snapshot_vehicle_id")
+            .HasColumnType("uuid")
+            .IsRequired(false);
+
+        builder.Property(x => x.TripSnapshotVehicleLicensePlate)
+            .HasColumnName("trip_snapshot_vehicle_license_plate")
+            .HasMaxLength(20)
+            .IsRequired(false);
+
         builder.Property(x => x.DropoffStopId)
             .HasColumnName("dropoff_stop_id")
             .HasColumnType("uuid")
@@ -417,6 +447,16 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
 
         builder.HasIndex(x => new { x.OperatorId, x.Status })
             .HasDatabaseName("idx_parcels_operator_id_status");
+
+        builder.HasIndex(x => new { x.CreatedAt, x.Id })
+            .HasDatabaseName("idx_parcels_trip_snapshot_backfill")
+            .HasFilter(
+                "trip_snapshot_route_id IS NULL OR "
+                + "trip_snapshot_route_name IS NULL OR "
+                + "trip_snapshot_origin_station_name IS NULL OR "
+                + "trip_snapshot_destination_station_name IS NULL OR "
+                + "trip_snapshot_vehicle_id IS NULL OR "
+                + "trip_snapshot_vehicle_license_plate IS NULL");
 
         builder.HasIndex(x => new { x.Status, x.UpdatedAt })
             .HasDatabaseName("idx_parcels_status_updated_at")

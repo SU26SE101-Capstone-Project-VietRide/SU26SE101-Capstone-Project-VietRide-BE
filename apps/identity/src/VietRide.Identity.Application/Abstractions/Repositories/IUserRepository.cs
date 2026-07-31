@@ -57,4 +57,9 @@ public interface IUserRepository : IRepository<User, Guid>
         Guid operatorId,
         CancellationToken ct = default)
         => ListOperatorAdminIdsAsync(operatorId, ct);
+
+    Task<IReadOnlyList<User>> ListByIdsIncludingDeletedAsync(
+        IReadOnlyCollection<Guid> userIds,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Internal user batch lookup is not implemented by this repository.");
 }

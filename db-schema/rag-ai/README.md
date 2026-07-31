@@ -23,6 +23,8 @@ NestJS service xử lý knowledge base ingestion và LLM streaming RAG. Ingest p
 | `RagMessage` | 1 turn USER/ASSISTANT. | `citedChunkIds`, `tokensUsed` |
 | `MessageFeedback` | Feedback cho ASSISTANT message. | `rating`, `chunkIds`, `queryRewritten`, `responseLength` |
 | `OutboxEvent` | Outbox để trigger ingest/publish event. | `eventType`, `payload`, `status`, `retryCount` |
+| `Policy` | Chính sách generic cho platform hoặc một operator tenant. | `operatorId`, `policyType`, `category`, `version`, `active`, `deletedAt` |
+| `PolicyAuditLog` | Nhật ký bất biến cho mọi mutation Policy. | `action`, `before`, `after`, `actor`, `occurredAt` |
 
 ## Data Taxonomy
 
@@ -45,6 +47,8 @@ Rule retrieval production:
 - `KnowledgeDocument.access_level + category` có CHECK constraint để tránh nhầm CSKH hành khách với policy nhà xe.
 - `KnowledgeDocument.operator_id` bắt buộc NULL với `PUBLIC`, tránh leak tài liệu passenger theo tenant sai.
 - Cross-service references như `uploaded_by_user_id`, `approved_by_user_id`, `user_id`, `operator_id` là logical FK, không tạo FK cross-DB.
+- `Policy.operator_id` là logical tenant key: `NULL` cho platform và UUID cho operator; không tạo FK sang Identity.
+- `PolicyAuditLog` được ghi cùng transaction với Policy và trigger DB chặn UPDATE/DELETE để giữ audit bất biến.
 - `RagMessage.cited_chunk_ids` dùng `UUID[]` để audit citation đơn giản, không enforce FK.
 - `MessageFeedback.rating` chỉ nhận `-1` hoặc `1`.
 

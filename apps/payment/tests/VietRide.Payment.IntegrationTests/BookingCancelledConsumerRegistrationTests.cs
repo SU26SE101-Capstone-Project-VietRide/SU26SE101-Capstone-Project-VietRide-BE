@@ -4,6 +4,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using NSubstitute;
+using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Infrastructure.DependencyInjection;
 using VietRide.Payment.Infrastructure.Messaging;
 using VietRide.Shared.Messaging.Abstractions;
@@ -39,6 +41,34 @@ public sealed class BookingCancelledConsumerRegistrationTests
         handler.Should().BeOfType<BookingCancelledIntegrationEventHandler>();
         options.Value.Value.QueueName.Should().Be("payment.booking-refund");
         options.Value.Value.BindingKeys.Should().ContainSingle().Which.Should().Be(BookingCancelledIntegrationEvent.EventType);
+        hasHostedService.Should().BeTrue();
+    }
+
+    [Fact]
+    public void AddInfrastructure_WhenConsumersAreEnabled_RegistersIdentityUserDeletedConsumer()
+    {
+        var services = new ServiceCollection();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:Default"] = "Host=localhost;Port=5432;Database=test;Username=postgres;Password=postgres",
+            })
+            .Build();
+        services.AddLogging();
+        services.AddSingleton<ISender, NoOpSender>();
+        services.AddInfrastructure(configuration, registerConsumers: true);
+        services.AddSingleton(Substitute.For<IFinancialActorPrivacyStore>());
+
+        var hasHostedService = services.Any(descriptor =>
+            descriptor.ServiceType == typeof(IHostedService)
+            && descriptor.ImplementationType == typeof(RabbitMqConsumerBackgroundService<IdentityUserDeletedIntegrationEvent>));
+        using var provider = services.BuildServiceProvider();
+        var handler = provider.GetRequiredService<IIntegrationEventHandler<IdentityUserDeletedIntegrationEvent>>();
+        var options = provider.GetRequiredService<IOptions<RabbitMqConsumerOptions<IdentityUserDeletedIntegrationEvent>>>();
+
+        handler.Should().BeOfType<IdentityUserDeletedIntegrationEventHandler>();
+        options.Value.Value.QueueName.Should().Be("payment.identity-user-deleted");
+        options.Value.Value.BindingKeys.Should().ContainSingle().Which.Should().Be(IdentityUserDeletedIntegrationEvent.EventType);
         hasHostedService.Should().BeTrue();
     }
 

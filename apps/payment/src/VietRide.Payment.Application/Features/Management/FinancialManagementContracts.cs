@@ -53,7 +53,34 @@ public sealed record AdminSettlementDto(
     DateTimeOffset CreatedAt,
     int FailureCount,
     string? ActiveFailureCode,
-    string? Severity);
+    string? Severity,
+    FinancialOperatorDto? Operator,
+    FinancialActorDto? SettledBy);
+
+public sealed record FinancialOperatorDto(
+    Guid OperatorId,
+    string Name,
+    string? LogoUrl,
+    string? ContactPhone);
+
+public sealed record FinancialActorDto(
+    Guid UserId,
+    string DisplayName,
+    string Email,
+    string Role);
+
+public sealed record PlatformWalletTransactionDto(
+    Guid TransactionId,
+    string Type,
+    long Amount,
+    long BalanceBefore,
+    long BalanceAfter,
+    string ReferenceType,
+    Guid? ReferenceId,
+    string? Note,
+    DateTimeOffset CreatedAt,
+    string ActorType,
+    FinancialActorDto? Actor);
 
 public sealed record LedgerEntryDto(
     Guid LedgerEntryId,
@@ -128,7 +155,7 @@ public interface IFinancialManagementService
     Task<InvoiceDetailDto> GetInvoiceAsync(Guid operatorId, Guid invoiceId, CancellationToken cancellationToken);
     Task<PagedResult<AdminSettlementDto>> ListAdminSettlementsAsync(PageOptions options, Guid? operatorId, string? status, Guid? tripId, bool stuckOnly, string? severity, CancellationToken cancellationToken);
     Task<PlatformWalletDto> GetPlatformWalletAsync(CancellationToken cancellationToken);
-    Task<PagedResult<WalletTransactionDto>> ListPlatformTransactionsAsync(PageOptions options, string? type, string? referenceType, CancellationToken cancellationToken);
+    Task<PagedResult<PlatformWalletTransactionDto>> ListPlatformTransactionsAsync(PageOptions options, string? type, string? referenceType, CancellationToken cancellationToken);
     Task<AdjustmentResult> AdjustPlatformWalletAsync(AdjustmentRequest request, Guid actorUserId, CancellationToken cancellationToken);
     Task<AdjustmentResult> AdjustOperatorWalletAsync(Guid operatorId, AdjustmentRequest request, Guid actorUserId, CancellationToken cancellationToken);
     Task<ManualSettlementResult> SettleAsync(Guid settlementId, Guid actorUserId, CancellationToken cancellationToken);
@@ -142,7 +169,7 @@ public sealed record ListOperatorInvoicesQuery(Guid OperatorId, PageOptions Opti
 public sealed record GetOperatorInvoiceQuery(Guid OperatorId, Guid InvoiceId) : IRequest<InvoiceDetailDto>;
 public sealed record ListAdminSettlementsQuery(PageOptions Options, Guid? OperatorId, string? Status, Guid? TripId, bool StuckOnly, string? Severity) : IRequest<PagedResult<AdminSettlementDto>>;
 public sealed record GetPlatformWalletQuery : IRequest<PlatformWalletDto>;
-public sealed record ListPlatformTransactionsQuery(PageOptions Options, string? Type, string? ReferenceType) : IRequest<PagedResult<WalletTransactionDto>>;
+public sealed record ListPlatformTransactionsQuery(PageOptions Options, string? Type, string? ReferenceType) : IRequest<PagedResult<PlatformWalletTransactionDto>>;
 [SkipTransaction]
 public sealed record AdjustPlatformWalletCommand(AdjustmentRequest Request, Guid ActorUserId) : IRequest<AdjustmentResult>;
 
@@ -161,7 +188,7 @@ public sealed class FinancialManagementHandlers :
     IRequestHandler<GetOperatorInvoiceQuery, InvoiceDetailDto>,
     IRequestHandler<ListAdminSettlementsQuery, PagedResult<AdminSettlementDto>>,
     IRequestHandler<GetPlatformWalletQuery, PlatformWalletDto>,
-    IRequestHandler<ListPlatformTransactionsQuery, PagedResult<WalletTransactionDto>>,
+    IRequestHandler<ListPlatformTransactionsQuery, PagedResult<PlatformWalletTransactionDto>>,
     IRequestHandler<AdjustPlatformWalletCommand, AdjustmentResult>,
     IRequestHandler<AdjustOperatorWalletCommand, AdjustmentResult>,
     IRequestHandler<SettleTripManuallyCommand, ManualSettlementResult>
@@ -178,7 +205,7 @@ public sealed class FinancialManagementHandlers :
     public Task<InvoiceDetailDto> Handle(GetOperatorInvoiceQuery request, CancellationToken ct) => _service.GetInvoiceAsync(request.OperatorId, request.InvoiceId, ct);
     public Task<PagedResult<AdminSettlementDto>> Handle(ListAdminSettlementsQuery request, CancellationToken ct) => _service.ListAdminSettlementsAsync(request.Options, request.OperatorId, request.Status, request.TripId, request.StuckOnly, request.Severity, ct);
     public Task<PlatformWalletDto> Handle(GetPlatformWalletQuery request, CancellationToken ct) => _service.GetPlatformWalletAsync(ct);
-    public Task<PagedResult<WalletTransactionDto>> Handle(ListPlatformTransactionsQuery request, CancellationToken ct) => _service.ListPlatformTransactionsAsync(request.Options, request.Type, request.ReferenceType, ct);
+    public Task<PagedResult<PlatformWalletTransactionDto>> Handle(ListPlatformTransactionsQuery request, CancellationToken ct) => _service.ListPlatformTransactionsAsync(request.Options, request.Type, request.ReferenceType, ct);
     public Task<AdjustmentResult> Handle(AdjustPlatformWalletCommand request, CancellationToken ct) => _service.AdjustPlatformWalletAsync(request.Request, request.ActorUserId, ct);
     public Task<AdjustmentResult> Handle(AdjustOperatorWalletCommand request, CancellationToken ct) => _service.AdjustOperatorWalletAsync(request.OperatorId, request.Request, request.ActorUserId, ct);
     public Task<ManualSettlementResult> Handle(SettleTripManuallyCommand request, CancellationToken ct) => _service.SettleAsync(request.SettlementId, request.ActorUserId, ct);

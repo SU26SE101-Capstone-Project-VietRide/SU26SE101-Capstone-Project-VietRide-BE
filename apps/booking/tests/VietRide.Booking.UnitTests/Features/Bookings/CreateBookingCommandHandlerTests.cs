@@ -62,11 +62,13 @@ public class CreateBookingCommandHandlerTests
     private readonly IVoucherService _voucherService = Substitute.For<IVoucherService>();
     private readonly IIntegrationEventOutbox _outbox = Substitute.For<IIntegrationEventOutbox>();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly IIdentityUserServiceClient _identityUsers = CreateIdentityClient();
 
     private CreateBookingCommandHandler BuildSut(IBookingStationCanonicalizer? stationCanonicalizer = null) => new(
         _bookings, _tripClient, _paymentClient, _bookingService, _voucherService, _outbox, _clock,
         NullLogger<CreateBookingCommandHandler>.Instance, _statusHistory,
-        stationCanonicalizer ?? PassthroughBookingStationCanonicalizer.Instance);
+        stationCanonicalizer ?? PassthroughBookingStationCanonicalizer.Instance,
+        _identityUsers);
 
     private static CreateBookingCommand BuildCommand(
         int seatCount = 1,
@@ -127,7 +129,12 @@ public class CreateBookingCommandHandlerTests
                 Arg.Is<BookingEntity>(booking => booking.SeatLockToken == SeatLockToken
                     && booking.TripSnapshotDeparture == ValidTrip.DepartureDateTime
                     && booking.TripCurrentDeparture == ValidTrip.DepartureDateTime
-                    && booking.PickupStationId == canonicalStationId),
+                    && booking.PickupStationId == canonicalStationId
+                    && booking.PassengerUserId == PassengerUserId
+                    && booking.BuyerDisplayName == "Booking Buyer"
+                    && booking.BuyerPhone == "0900000000"
+                    && booking.BuyerEmail == "buyer@example.test"
+                    && booking.BuyerAvatarUrl == null),
                 Arg.Any<CancellationToken>());
         canonicalizer.LockRequests.Should().ContainSingle()
             .Which.Should().Contain(StationId);
@@ -292,6 +299,7 @@ public class CreateBookingCommandHandlerTests
             .ReturnsForAnyArgs(new ChargeOutcome.Success(new ChargeResult(PaymentId, "SUCCEEDED", null)));
 
         var voucherService = Substitute.For<IVoucherService>();
+        var identityUsers = CreateIdentityClient();
 
         var handler = new CreateBookingCommandHandler(
             bookings,
@@ -303,7 +311,8 @@ public class CreateBookingCommandHandlerTests
             clock,
             NullLogger<CreateBookingCommandHandler>.Instance,
             Substitute.For<IBookingStatusHistoryRepository>(),
-            PassthroughBookingStationCanonicalizer.Instance);
+            PassthroughBookingStationCanonicalizer.Instance,
+            identityUsers);
         var command = BuildCommand(seatCount: 1, paymentMethod: "WALLET");
 
         // Act: two passenger attempts race for the same trip/seat.
@@ -323,6 +332,26 @@ public class CreateBookingCommandHandlerTests
                 Arg.Is("booking.booking.confirmed"),
                 Arg.Any<string>(),
                 Arg.Any<CancellationToken>());
+    }
+
+    private static IIdentityUserServiceClient CreateIdentityClient()
+    {
+        var client = Substitute.For<IIdentityUserServiceClient>();
+        client.GetUsersAsync(Arg.Any<IReadOnlyCollection<Guid>>(), Arg.Any<CancellationToken>())
+            .Returns(callInfo =>
+            {
+                var userIds = callInfo.Arg<IReadOnlyCollection<Guid>>();
+                return userIds.ToDictionary(
+                    userId => userId,
+                    userId => new BookingBuyerSnapshotProfile(
+                        userId,
+                        "Booking Buyer",
+                        "0900000000",
+                        "buyer@example.test",
+                        null,
+                        false));
+            });
+        return client;
     }
 
     [Fact]

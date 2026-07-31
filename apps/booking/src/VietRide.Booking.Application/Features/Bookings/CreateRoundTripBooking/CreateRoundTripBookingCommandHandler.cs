@@ -49,6 +49,7 @@ public sealed class CreateRoundTripBookingCommandHandler
     private readonly IVoucherRepository _voucherRepository;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IBookingStationCanonicalizer _stationCanonicalizer;
+    private readonly IIdentityUserServiceClient _identityUsers;
     private readonly IClock _clock;
     private readonly ILogger<CreateRoundTripBookingCommandHandler> _logger;
 
@@ -63,7 +64,8 @@ public sealed class CreateRoundTripBookingCommandHandler
         IClock clock,
         ILogger<CreateRoundTripBookingCommandHandler> logger,
         IBookingStatusHistoryRepository statusHistory,
-        IBookingStationCanonicalizer stationCanonicalizer)
+        IBookingStationCanonicalizer stationCanonicalizer,
+        IIdentityUserServiceClient identityUsers)
     {
         _bookings = bookings;
         _statusHistory = statusHistory;
@@ -76,6 +78,7 @@ public sealed class CreateRoundTripBookingCommandHandler
         _clock = clock;
         _logger = logger;
         _stationCanonicalizer = stationCanonicalizer;
+        _identityUsers = identityUsers;
     }
 
     public async Task<CreateRoundTripBookingResult> Handle(
@@ -133,6 +136,10 @@ public sealed class CreateRoundTripBookingCommandHandler
                 "BOOKING_ROUND_TRIP_INVALID",
                 "Return trip departure must be after outbound trip arrival.");
         }
+
+        var buyerProfile = await GetRequiredBuyerProfileAsync(
+            request.PassengerUserId,
+            cancellationToken);
 
         var outboundSeatNumbers = request.Outbound.Seats.Select(s => s.SeatNumber.Trim()).ToList();
         var returnSeatNumbers = request.Return.Seats.Select(s => s.SeatNumber.Trim()).ToList();
@@ -302,6 +309,7 @@ public sealed class CreateRoundTripBookingCommandHandler
         {
             outboundBooking = CreatePendingBooking(
                 request.PassengerUserId,
+                buyerProfile,
                 request.Outbound,
                 outboundTrip,
                 outboundBaseFare,
@@ -315,6 +323,7 @@ public sealed class CreateRoundTripBookingCommandHandler
 
             returnBooking = CreatePendingBooking(
                 request.PassengerUserId,
+                buyerProfile,
                 request.Return,
                 returnTrip,
                 returnBaseFare,
@@ -550,6 +559,7 @@ public sealed class CreateRoundTripBookingCommandHandler
 
     private BookingEntity CreatePendingBooking(
         Guid passengerUserId,
+        BookingBuyerSnapshotProfile buyerProfile,
         CreateRoundTripBookingCommand.RoundTripBookingLegCommand leg,
         TripSnapshot trip,
         Money baseFare,
@@ -580,7 +590,11 @@ public sealed class CreateRoundTripBookingCommandHandler
             bookingGroupId: bookingGroupId,
             tripDirection: tripDirection,
             seatLockToken: seatLockToken,
-            tripCurrentDeparture: trip.DepartureDateTime);
+            tripCurrentDeparture: trip.DepartureDateTime,
+            buyerDisplayName: buyerProfile.DisplayName,
+            buyerPhone: buyerProfile.Phone,
+            buyerEmail: buyerProfile.Email,
+            buyerAvatarUrl: buyerProfile.AvatarUrl);
 
         var ticketAllocations = BuildTicketAllocations(leg.Seats, perSeatFare, discountAmount, now);
         foreach (var allocation in ticketAllocations)
@@ -602,6 +616,17 @@ public sealed class CreateRoundTripBookingCommandHandler
         }
 
         return booking;
+    }
+
+    private async Task<BookingBuyerSnapshotProfile> GetRequiredBuyerProfileAsync(
+        Guid buyerUserId,
+        CancellationToken cancellationToken)
+    {
+        var profiles = await _identityUsers.GetUsersAsync([buyerUserId], cancellationToken);
+        return profiles.TryGetValue(buyerUserId, out var profile)
+            ? profile
+            : throw new BookingUpstreamUnavailableException(
+                "Identity did not return the authenticated Booking buyer.");
     }
 
     private async Task<PaymentChargeInfo> ChargeAsync(

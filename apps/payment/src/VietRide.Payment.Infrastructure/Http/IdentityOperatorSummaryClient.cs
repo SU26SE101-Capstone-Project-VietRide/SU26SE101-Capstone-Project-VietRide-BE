@@ -54,14 +54,32 @@ internal sealed class IdentityOperatorSummaryClient : IIdentityOperatorSummaryCl
                 || !item.TryGetProperty("operatorName", out var nameProperty)
                 || nameProperty.ValueKind != JsonValueKind.String
                 || string.IsNullOrWhiteSpace(nameProperty.GetString())
+                || !TryOptionalString(item, "logoUrl", out var logoUrl)
                 || !seen.Add(operatorId))
             {
                 throw new UpstreamUnavailableException();
             }
 
-            result.Add(new OperatorSummaryItem(operatorId, nameProperty.GetString()!));
+            result.Add(new OperatorSummaryItem(operatorId, nameProperty.GetString()!, logoUrl));
         }
 
         return result;
+    }
+
+    private static bool TryOptionalString(JsonElement item, string propertyName, out string? value)
+    {
+        value = null;
+        if (!item.TryGetProperty(propertyName, out var property) || property.ValueKind == JsonValueKind.Null)
+        {
+            return true;
+        }
+
+        if (property.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        value = property.GetString();
+        return true;
     }
 }

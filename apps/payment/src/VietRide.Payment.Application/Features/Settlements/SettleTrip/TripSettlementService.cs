@@ -4,6 +4,7 @@ using VietRide.Payment.Application.Events;
 using VietRide.Payment.Application.Exceptions;
 using VietRide.Payment.Domain.Entities;
 using VietRide.Payment.Domain.Enums;
+using VietRide.Payment.Domain.ValueObjects;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
@@ -29,6 +30,7 @@ public sealed class TripSettlementService
     private readonly IOperatorWalletTransactionRepository _operatorTransactions;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IFinancialActorPrivacyStore _actorPrivacy;
     private readonly IClock _clock;
 
     public TripSettlementService(
@@ -39,6 +41,7 @@ public sealed class TripSettlementService
         IOperatorWalletTransactionRepository operatorTransactions,
         IIntegrationEventOutbox outbox,
         IUnitOfWork unitOfWork,
+        IFinancialActorPrivacyStore actorPrivacy,
         IClock clock)
     {
         _settlements = settlements;
@@ -48,13 +51,14 @@ public sealed class TripSettlementService
         _operatorTransactions = operatorTransactions;
         _outbox = outbox;
         _unitOfWork = unitOfWork;
+        _actorPrivacy = actorPrivacy;
         _clock = clock;
     }
 
     public async Task<TripSettlementResult?> SettleAsync(
         Guid settlementId,
         OperatorTripSettlementMethod method,
-        Guid? settledByUserId,
+        FinancialActorSnapshot? settledBy,
         bool conflictWhenAlreadyTerminal,
         CancellationToken cancellationToken)
     {
@@ -62,6 +66,12 @@ public sealed class TripSettlementService
         await _unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {
+            if (settledBy is not null
+                && await _actorPrivacy.IsDeletedWithLockAsync(settledBy.UserId, cancellationToken))
+            {
+                throw new UnauthorizedAccessException("Financial actor account is deleted.");
+            }
+
             var settlement = await _settlements.GetForUpdateAsync(settlementId, cancellationToken)
                 ?? throw new CodedNotFoundException("TRIP_SETTLEMENT_NOT_FOUND", "Settlement was not found.");
             if (settlement.Status is OperatorTripSettlementStatus.SETTLED or OperatorTripSettlementStatus.CANCELLED)
@@ -86,6 +96,8 @@ public sealed class TripSettlementService
             settlement.RefreshEligibility(netAmount, now);
             if (settlement.Status == OperatorTripSettlementStatus.CANCELLED)
             {
+                if (settledBy is not null)
+                    settlement.SetSettledBySnapshot(settledBy);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
                 await _unitOfWork.CommitAsync(cancellationToken);
                 transactionCompleted = true;
@@ -97,12 +109,14 @@ public sealed class TripSettlementService
 
             try
             {
-                await _platformWallets.DebitAsync(
+                var platformTransaction = await _platformWallets.DebitAsync(
                     Money.FromRaw(netAmount),
                     PlatformWalletTransactionRef.TRIP_SETTLEMENT,
                     settlement.Id,
                     "Operator trip settlement",
                     cancellationToken);
+                if (settledBy is not null)
+                    platformTransaction.AssignUserActor(settledBy);
             }
             catch (InvalidOperationException exception)
             {
@@ -134,7 +148,7 @@ public sealed class TripSettlementService
                 settlement.Id,
                 "Trip settlement");
             await _operatorTransactions.AddAsync(operatorTransaction, cancellationToken);
-            settlement.MarkSettled(netAmount, method, now, settledByUserId, operatorTransaction.Id);
+            settlement.MarkSettled(netAmount, method, now, settledBy, operatorTransaction.Id);
 
             var evt = new TripSettlementCompletedIntegrationEvent(
                 settlement.Id,

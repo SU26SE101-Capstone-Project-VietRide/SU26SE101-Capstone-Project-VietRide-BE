@@ -61,6 +61,34 @@ public sealed class ReviewParcelTests
     }
 
     [Fact]
+    public async Task ReviewParcel_ApproveWithInvalidLegacyPrice_ReturnsFareNotConfigured()
+    {
+        var parcel = ParcelEntity.CreatePendingOperatorReview(
+            "VRP-INVALID", SenderUserId, Guid.NewGuid(), "Recipient",
+            PhoneNumber.Normalize("+84912345678"), "r@example.com",
+            OperatorId, TripId, Guid.NewGuid(), null, "Item", "",
+            ParcelSizeCategory.EXTRA_LARGE, 10m,
+            ParcelDeliveryMethod.TERMINAL_PICKUP, Money.Zero);
+        var repo = Substitute.For<IParcelRepository>();
+        repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
+        var uow = UnitOfWork();
+        var handler = new ReviewParcelCommandHandler(repo, uow, Outbox(), Stats());
+
+        var act = () => handler.Handle(new ReviewParcelCommand(
+            ParcelId, OperatorId, OperatorId, "APPROVED", null), default);
+
+        await act.Should().ThrowAsync<CodedValidationException>()
+            .Where(exception => exception.ErrorCode == "FARE_NOT_CONFIGURED");
+        await repo.DidNotReceive().TryApproveReviewAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<Guid>(),
+            Arg.Any<Money>(),
+            Arg.Any<DateTimeOffset>(),
+            Arg.Any<CancellationToken>());
+        await uow.DidNotReceive().BeginTransactionAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task ReviewParcel_Reject_Success()
     {
         var parcel = CreatePendingReviewParcel();

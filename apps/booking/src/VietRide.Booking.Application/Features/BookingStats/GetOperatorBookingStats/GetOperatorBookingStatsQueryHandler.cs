@@ -1,5 +1,6 @@
 using MediatR;
 using VietRide.Booking.Application.Abstractions.Repositories;
+using VietRide.Booking.Application.Features.BookingStats;
 using VietRide.Shared.Application.Exceptions;
 
 namespace VietRide.Booking.Application.Features.BookingStats.GetOperatorBookingStats;
@@ -7,7 +8,12 @@ namespace VietRide.Booking.Application.Features.BookingStats.GetOperatorBookingS
 public sealed class GetOperatorBookingStatsQueryHandler
     : IRequestHandler<GetOperatorBookingStatsQuery, GetOperatorBookingStatsResult>
 {
-    private const string DateGroup = "date";
+    private static readonly HashSet<string> SupportedGroups = new(StringComparer.OrdinalIgnoreCase)
+    {
+        BookingStatsQueryRules.DateGroup,
+        BookingStatsQueryRules.MonthGroup,
+    };
+
     private readonly IBookingStatsRepository _stats;
 
     public GetOperatorBookingStatsQueryHandler(IBookingStatsRepository stats)
@@ -19,30 +25,75 @@ public sealed class GetOperatorBookingStatsQueryHandler
         GetOperatorBookingStatsQuery request,
         CancellationToken cancellationToken)
     {
-        if (!string.Equals(request.GroupBy, DateGroup, StringComparison.OrdinalIgnoreCase))
+        if (!SupportedGroups.Contains(request.GroupBy))
         {
             throw new CodedValidationException(
                 "VALIDATION_ERROR",
-                "Operator booking stats only supports groupBy=date.",
-                [new ValidationError("groupBy", "Only 'date' is supported.")]);
+                "Operator booking stats supports groupBy=date or groupBy=month.",
+                [new ValidationError("groupBy", "Only 'date' or 'month' is supported.")]);
         }
+
+        var groupBy = request.GroupBy.ToLowerInvariant();
+        var isMonth = groupBy == BookingStatsQueryRules.MonthGroup;
+        BookingStatsQueryRules.ValidateRange(request.From, request.To, requireCompleteRange: isMonth);
 
         var rows = await _stats.GetOperatorStatsAsync(
             request.OperatorId,
             request.From,
             request.To,
+            groupBy,
             cancellationToken);
 
+        var items = isMonth
+            ? BuildMonthlyItems(request, rows)
+            : rows.Select(MapItem).ToList();
+
         return new GetOperatorBookingStatsResult(
-            rows.Select(row => new GetOperatorBookingStatsItemResult(
-                    row.OperatorId,
-                    row.Date,
-                    row.TotalBookings,
-                    row.TotalRevenue,
-                    row.TotalCancellations,
-                    row.TotalNoShows,
-                    TotalPartialNoShows: 0,
-                    row.TotalCompleted))
-                .ToList());
+            items,
+            items.Sum(item => item.TotalBookings),
+            items.Sum(item => item.TotalRevenue));
     }
+
+    private static IReadOnlyList<GetOperatorBookingStatsItemResult> BuildMonthlyItems(
+        GetOperatorBookingStatsQuery request,
+        IReadOnlyList<OperatorBookingStatsReadModel> rows)
+    {
+        var byMonth = rows
+            .GroupBy(row => new DateOnly(row.Date.Year, row.Date.Month, 1))
+            .ToDictionary(
+                group => group.Key,
+                group => new GetOperatorBookingStatsItemResult(
+                    OperatorId: null,
+                    group.Key,
+                    group.Sum(row => row.TotalBookings),
+                    group.Sum(row => row.TotalRevenue),
+                    group.Sum(row => row.TotalCancellations),
+                    TotalNoShows: null,
+                    TotalPartialNoShows: null,
+                    group.Sum(row => row.TotalCompleted)));
+
+        return BookingStatsQueryRules
+            .EnumerateMonthStarts(request.From!.Value, request.To!.Value)
+            .Select(month => byMonth.GetValueOrDefault(month) ?? new GetOperatorBookingStatsItemResult(
+                OperatorId: null,
+                month,
+                TotalBookings: 0,
+                TotalRevenue: 0,
+                TotalCancellations: 0,
+                TotalNoShows: null,
+                TotalPartialNoShows: null,
+                TotalCompleted: 0))
+            .ToList();
+    }
+
+    private static GetOperatorBookingStatsItemResult MapItem(OperatorBookingStatsReadModel row)
+        => new(
+            row.OperatorId,
+            row.Date,
+            row.TotalBookings,
+            row.TotalRevenue,
+            row.TotalCancellations,
+            row.TotalNoShows,
+            TotalPartialNoShows: 0,
+            row.TotalCompleted);
 }

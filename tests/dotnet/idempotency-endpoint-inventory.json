@@ -189,7 +189,7 @@
       "stack": "dotnet",
       "servicePrefix": "trip",
       "requireAllMutations": true,
-      "expectedMutationCount": 50,
+      "expectedMutationCount": 51,
       "endpoints": [
         {
           "method": "POST",
@@ -265,6 +265,12 @@
           "method": "POST",
           "path": "/v1/driver/trips/{tripId:guid}/destination/arrive",
           "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/trips/summaries/batch",
+          "policy": "exempt",
+          "reason": "Trip summary batching is a read-only query exposed as POST for bounded request payloads."
         },
         {
           "method": "POST",
@@ -667,7 +673,7 @@
       "stack": "dotnet",
       "servicePrefix": "parcel",
       "requireAllMutations": true,
-      "expectedMutationCount": 21,
+      "expectedMutationCount": 22,
       "endpoints": [
         {
           "method": "POST",
@@ -712,6 +718,11 @@
         {
           "method": "PATCH",
           "path": "/v1/operator/parcel-route-fares/{routeId:guid}/{sizeCategory}",
+          "policy": "required"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/operator/parcel-route-fares/{routeId:guid}/batch",
           "policy": "required"
         },
         {

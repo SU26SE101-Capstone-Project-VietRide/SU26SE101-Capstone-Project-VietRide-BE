@@ -18,6 +18,50 @@ public class IdentityServiceClientInternalClientTests
     private FakeMessageHandler _handler = null!;
 
     [Fact]
+    public async Task GetUsersAsync_DeduplicatesIdsAndDeserializesRedactedBatch()
+    {
+        var body = JsonSerializer.Serialize(new[]
+        {
+            new
+            {
+                id = UserId,
+                displayName = "Người dùng đã xóa",
+                phone = (string?)null,
+                email = (string?)null,
+                avatarUrl = (string?)null,
+                role = "PASSENGER",
+                operatorId = (Guid?)null,
+                status = "DELETED",
+                deleted = true,
+            },
+        }, JsonOptions);
+        var client = BuildClient(HttpStatusCode.OK, body);
+
+        var outcome = await client.GetUsersAsync([UserId, UserId]);
+
+        outcome.Kind.Should().Be(IdentityUserBatchOutcomeKind.Success);
+        var user = outcome.Users.Should().ContainSingle().Which;
+        user.Id.Should().Be(UserId);
+        user.Deleted.Should().BeTrue();
+        user.DisplayName.Should().Be("Người dùng đã xóa");
+        _handler.LastRequest!.Method.Should().Be(HttpMethod.Get);
+        _handler.LastRequest.RequestUri!.AbsolutePath.Should().Be("/internal/v1/users");
+        _handler.LastRequest.RequestUri.Query.Should().Be($"?ids={UserId:D}");
+    }
+
+    [Fact]
+    public async Task GetUsersAsync_MapsMalformedOrNonSuccessResponseToTransportFailure()
+    {
+        var malformed = BuildClient(HttpStatusCode.OK, "[{\"id\":\"not-a-uuid\"}]");
+        var malformedOutcome = await malformed.GetUsersAsync([UserId]);
+        malformedOutcome.Kind.Should().Be(IdentityUserBatchOutcomeKind.TransportError);
+
+        var unavailable = BuildClient(HttpStatusCode.ServiceUnavailable, "{}");
+        var unavailableOutcome = await unavailable.GetUsersAsync([UserId]);
+        unavailableOutcome.Kind.Should().Be(IdentityUserBatchOutcomeKind.TransportError);
+    }
+
+    [Fact]
     public async Task GetUserInfoAsync_Sends_Request_To_Correct_Path()
     {
         var body = JsonSerializer.Serialize(new

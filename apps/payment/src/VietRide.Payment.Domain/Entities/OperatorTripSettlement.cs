@@ -1,4 +1,5 @@
 using VietRide.Payment.Domain.Enums;
+using VietRide.Payment.Domain.ValueObjects;
 using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Payment.Domain.Entities;
@@ -16,6 +17,14 @@ public sealed class OperatorTripSettlement : BaseEntity<Guid>
     public OperatorTripSettlementMethod? SettlementMethod { get; private set; }
     public DateTimeOffset? SettledAt { get; private set; }
     public Guid? SettledByUserId { get; private set; }
+    public bool OperatorSnapshotResolved { get; private set; }
+    public string? OperatorName { get; private set; }
+    public string? OperatorLogoUrl { get; private set; }
+    public string? OperatorContactPhone { get; private set; }
+    public bool SettledBySnapshotResolved { get; private set; }
+    public string? SettledByDisplayName { get; private set; }
+    public string? SettledByEmail { get; private set; }
+    public string? SettledByRole { get; private set; }
     public Guid? WalletTransactionId { get; private set; }
     public int SettlementFailureCount { get; private set; }
     public DateTimeOffset? LastSettlementFailureAt { get; private set; }
@@ -52,6 +61,7 @@ public sealed class OperatorTripSettlement : BaseEntity<Guid>
             Status = OperatorTripSettlementStatus.CANCELLED;
             SettlementMethod = OperatorTripSettlementMethod.AUTO_WEEKLY;
             SettledAt = now;
+            SettledBySnapshotResolved = true;
             ActiveFailureCode = null;
             return;
         }
@@ -78,7 +88,7 @@ public sealed class OperatorTripSettlement : BaseEntity<Guid>
         long netAmount,
         OperatorTripSettlementMethod method,
         DateTimeOffset settledAt,
-        Guid? settledByUserId,
+        FinancialActorSnapshot? settledBy,
         Guid walletTransactionId)
     {
         if (Status != OperatorTripSettlementStatus.ELIGIBLE)
@@ -90,12 +100,60 @@ public sealed class OperatorTripSettlement : BaseEntity<Guid>
         Status = OperatorTripSettlementStatus.SETTLED;
         SettlementMethod = method;
         SettledAt = settledAt;
-        SettledByUserId = settledByUserId;
+        SettledBySnapshotResolved = true;
+        if (settledBy is not null)
+        {
+            SettledByUserId = settledBy.UserId;
+            SettledByDisplayName = settledBy.DisplayName;
+            SettledByEmail = settledBy.Email;
+            SettledByRole = settledBy.Role;
+        }
         WalletTransactionId = walletTransactionId;
         if (ActiveFailureCode is not null)
         {
             ActiveFailureCode = null;
             FailureResolvedAt = settledAt;
         }
+    }
+
+    public void SetOperatorSnapshot(FinancialOperatorSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        if (snapshot.OperatorId != OperatorId)
+            throw new ArgumentException("Operator snapshot does not belong to this settlement.", nameof(snapshot));
+
+        OperatorName = snapshot.Name;
+        OperatorLogoUrl = snapshot.LogoUrl;
+        OperatorContactPhone = snapshot.ContactPhone;
+        OperatorSnapshotResolved = true;
+    }
+
+    public void MarkOperatorSnapshotUnavailable()
+    {
+        OperatorName = null;
+        OperatorLogoUrl = null;
+        OperatorContactPhone = null;
+        OperatorSnapshotResolved = true;
+    }
+
+    public void SetSettledBySnapshot(FinancialActorSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        if (SettledByUserId.HasValue && SettledByUserId != snapshot.UserId)
+            throw new ArgumentException("Actor snapshot does not belong to this settlement.", nameof(snapshot));
+
+        SettledByUserId = snapshot.UserId;
+        SettledByDisplayName = snapshot.DisplayName;
+        SettledByEmail = snapshot.Email;
+        SettledByRole = snapshot.Role;
+        SettledBySnapshotResolved = true;
+    }
+
+    public void MarkSettledBySnapshotUnavailable()
+    {
+        SettledByDisplayName = null;
+        SettledByEmail = null;
+        SettledByRole = null;
+        SettledBySnapshotResolved = true;
     }
 }

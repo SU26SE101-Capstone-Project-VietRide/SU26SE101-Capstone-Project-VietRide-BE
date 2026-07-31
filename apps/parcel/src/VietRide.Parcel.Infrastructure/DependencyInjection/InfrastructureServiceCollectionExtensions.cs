@@ -56,6 +56,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<PendingCargoRecoveryOperationJob>();
         services.AddScoped<ParcelDeliveryPendingConfirmReminderJob>();
         services.AddScoped<PlatformParcelStatsBackfillJob>();
+        services.AddScoped<ParcelTripDisplaySnapshotBackfillJob>();
 
         return services;
     }
@@ -84,6 +85,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddTransient<CorrelationIdDelegatingHandler>();
 
         services.AddScoped<IParcelRepository, ParcelRepository>();
+        services.AddScoped<IOperatorParcelStatsRepository, OperatorParcelStatsRepository>();
         services.AddScoped<IParcelDeliveryTokenRepository, ParcelDeliveryTokenRepository>();
         services.AddScoped<SentParcelHistoryReader>();
         services.AddScoped<IParcelRouteFareRepository, ParcelRouteFareRepository>();

@@ -8,6 +8,7 @@ import {
 } from '@vietride/nest-common';
 import { NestRedisModule, RedisService } from '@vietride/nest-redis';
 import { SignJWT } from 'jose';
+import { createHash } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { CHAT_COMPLETION_PROVIDER, EMBEDDING_PROVIDER, STORAGE_PROVIDER } from '../app/tokens';
 import { InternalJwtAuthGuard } from '../auth/internal-jwt-auth.guard';
@@ -31,6 +32,8 @@ const PASSENGER_USER_ID = '22222222-2222-4222-8222-222222222222';
 const UPLOAD_OPERATION_ID = '33333333-3333-4333-8333-333333333333';
 const CRASH_UPLOAD_OPERATION_ID = '44444444-4444-4444-8444-444444444444';
 const CHAT_OPERATION_ID = '55555555-5555-4555-8555-555555555555';
+const LEGACY_PG_OPERATION_ID = '66666666-6666-4666-8666-666666666666';
+const LEGACY_REDIS_OPERATION_ID = '77777777-7777-4777-8777-777777777777';
 const EMBEDDING_DIMENSIONS = 2_048;
 
 describeReal('RAG idempotency with real PostgreSQL and Redis (system e2e)', () => {
@@ -84,6 +87,19 @@ describeReal('RAG idempotency with real PostgreSQL and Redis (system e2e)', () =
     ingestRepository = app.get(IngestRepository);
 
     await redis.getClient().flushdb();
+    await prisma.idempotencyOperation.deleteMany({
+      where: {
+        operationId: {
+          in: [
+            UPLOAD_OPERATION_ID,
+            CRASH_UPLOAD_OPERATION_ID,
+            CHAT_OPERATION_ID,
+            LEGACY_PG_OPERATION_ID,
+            LEGACY_REDIS_OPERATION_ID,
+          ],
+        },
+      },
+    });
   }, 60_000);
 
   afterAll(async () => {
@@ -118,9 +134,9 @@ describeReal('RAG idempotency with real PostgreSQL and Redis (system e2e)', () =
     uploadedDocumentId = readDataId(original.json);
     expect(readDataId(replay.json)).toBe(uploadedDocumentId);
     expect(storage.uploadCalls).toBe(1);
-    expect(await prisma.knowledgeDocument.count()).toBe(1);
-    expect(await prisma.outboxEvent.count()).toBe(1);
-    expect(await prisma.idempotencyOperation.count()).toBe(1);
+    expect(await prisma.knowledgeDocument.count({ where: { id: uploadedDocumentId } })).toBe(1);
+    expect(await countOutboxEventsForDocument(prisma, uploadedDocumentId)).toBe(1);
+    expect(await redis.get(idempotencyResponseKey(UPLOAD_OPERATION_ID))).not.toBeNull();
   });
 
   it('rejects a non-v4 key before running the upload', async () => {
@@ -134,7 +150,46 @@ describeReal('RAG idempotency with real PostgreSQL and Redis (system e2e)', () =
 
     expect(result.response.status).toBe(422);
     expect(storage.uploadCalls).toBe(1);
-    expect(await prisma.knowledgeDocument.count()).toBe(1);
+    expect(await prisma.knowledgeDocument.count({ where: { id: uploadedDocumentId } })).toBe(1);
+  });
+
+  it('fails closed across rollout for both pre-v2 PostgreSQL and Redis keys', async () => {
+    const uploadCallsBefore = storage.uploadCalls;
+    await prisma.idempotencyOperation.create({
+      data: {
+        operationId: LEGACY_PG_OPERATION_ID,
+        userId: ADMIN_USER_ID,
+        method: 'POST',
+        path: '/v1/rag/documents',
+        fingerprint: 'A'.repeat(64),
+        ownerToken: '88888888-8888-4888-8888-888888888888',
+        status: 'COMPLETED',
+        expiresAt: new Date(Date.now() + 60_000),
+      },
+    });
+    await redis
+      .getClient()
+      .set(`rag:idem:${LEGACY_REDIS_OPERATION_ID}`, 'legacy-body-hash', 'EX', 86_400);
+    const token = await signInternalJwt(ADMIN_USER_ID, 'SYSTEM_ADMIN');
+
+    const postgresLegacy = await uploadDocument(
+      baseUrl,
+      token,
+      LEGACY_PG_OPERATION_ID,
+      Buffer.from('legacy postgres retry', 'utf8'),
+    );
+    const redisLegacy = await uploadDocument(
+      baseUrl,
+      token,
+      LEGACY_REDIS_OPERATION_ID,
+      Buffer.from('legacy redis retry', 'utf8'),
+    );
+
+    expect(postgresLegacy.response.status).toBe(422);
+    expect(readErrorCode(postgresLegacy.json)).toBe('IDEMPOTENCY_KEY_MISMATCH');
+    expect(redisLegacy.response.status).toBe(422);
+    expect(readErrorCode(redisLegacy.json)).toBe('IDEMPOTENCY_KEY_MISMATCH');
+    expect(storage.uploadCalls).toBe(uploadCallsBefore);
   });
 
   it('ingests once and a durable retry does not create duplicate chunks or outbox events', async () => {
@@ -155,7 +210,7 @@ describeReal('RAG idempotency with real PostgreSQL and Redis (system e2e)', () =
     expect(await prisma.knowledgeChunk.count({ where: { documentId: uploadedDocumentId } })).toBe(
       firstChunks.length,
     );
-    expect(await prisma.outboxEvent.count()).toBe(1);
+    expect(await countOutboxEventsForDocument(prisma, uploadedDocumentId)).toBe(1);
   });
 
   it('recovers a crash after the ingest DB commit but before the Redis marker and outbox publish', async () => {
@@ -207,6 +262,12 @@ describeReal('RAG idempotency with real PostgreSQL and Redis (system e2e)', () =
   });
 
   it('finishes an aborted SSE operation and reconnects by replaying it without duplicate chat side effects', async () => {
+    const conversationsBefore = await prisma.ragConversation.count({
+      where: { userId: PASSENGER_USER_ID },
+    });
+    const messagesBefore = await prisma.ragMessage.count({
+      where: { conversation: { userId: PASSENGER_USER_ID } },
+    });
     const token = await signInternalJwt(PASSENGER_USER_ID, 'PASSENGER');
     const payload = JSON.stringify({ message: 'Toi can huong dan dat ve' });
     const controller = new AbortController();
@@ -228,10 +289,7 @@ describeReal('RAG idempotency with real PostgreSQL and Redis (system e2e)', () =
     controller.abort();
 
     await waitFor(async () => {
-      const operation = await prisma.idempotencyOperation.findUnique({
-        where: { operationId: CHAT_OPERATION_ID },
-      });
-      return operation?.status === 'COMPLETED';
+      return (await redis.get(idempotencyResponseKey(CHAT_OPERATION_ID))) !== null;
     });
 
     const replay = await fetch(`${baseUrl}/v1/rag/chat`, {
@@ -247,8 +305,14 @@ describeReal('RAG idempotency with real PostgreSQL and Redis (system e2e)', () =
     expect(replay.status).toBe(200);
     expect(replayBody).toContain('event: done');
     expect(chat.streamCalls).toBe(1);
-    expect(await prisma.ragConversation.count({ where: { userId: PASSENGER_USER_ID } })).toBe(1);
-    expect(await prisma.ragMessage.count()).toBe(2);
+    expect(await prisma.ragConversation.count({ where: { userId: PASSENGER_USER_ID } })).toBe(
+      conversationsBefore + 1,
+    );
+    expect(
+      await prisma.ragMessage.count({
+        where: { conversation: { userId: PASSENGER_USER_ID } },
+      }),
+    ).toBe(messagesBefore + 2);
 
     const mismatch = await fetch(`${baseUrl}/v1/rag/chat`, {
       method: 'POST',
@@ -377,8 +441,25 @@ async function findOutboxEvent(prisma: RagPrismaService, documentId: string) {
   return event;
 }
 
+async function countOutboxEventsForDocument(
+  prisma: RagPrismaService,
+  documentId: string,
+): Promise<number> {
+  return (await prisma.outboxEvent.findMany()).filter(
+    (item) => readPayloadDocumentId(item.payload) === documentId,
+  ).length;
+}
+
 function readPayloadDocumentId(payload: unknown): string | undefined {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return undefined;
   const value = (payload as { documentId?: unknown }).documentId;
   return typeof value === 'string' ? value : undefined;
+}
+
+function idempotencyResponseKey(operationId: string): string {
+  const hash = createHash('sha256')
+    .update(operationId.toLowerCase(), 'utf8')
+    .digest('hex')
+    .toUpperCase();
+  return `rag:idem:v2:response:${hash}`;
 }

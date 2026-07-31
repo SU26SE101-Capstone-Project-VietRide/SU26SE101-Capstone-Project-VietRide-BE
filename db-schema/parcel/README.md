@@ -13,9 +13,10 @@ Quản lý **parcel lifecycle full**: tạo request, deposit + re-weigh + additi
 
 | Entity | Purpose | Key business fields |
 |---|---|---|
-| `Parcel` | Hàng ký gửi (40+ field). | `parcelCode` UNIQUE, `senderUserId` NOT NULL, `recipientUserId` nullable, `dropoffStopId` nullable, `sizeCategory` enum, deposit/additional pricing, transfer/return/review fields, full status machine |
+| `Parcel` | Hàng ký gửi (40+ field). | `parcelCode` UNIQUE, `senderUserId` NOT NULL, `recipientUserId` nullable, `dropoffStopId` nullable, `sizeCategory` enum, deposit/additional pricing, delivery-confirmation, transfer/return/review fields, full status machine |
 | `ParcelDeliveryToken` | Lịch sử token xác nhận giao hàng chỉ lưu hash. | `tokenHash` UNIQUE, tối đa một token chưa revoke mỗi Parcel, expiry/revocation/issuer/reason |
 | `ParcelCargoRecoveryOperation` | Durable Day-32 transfer/return orchestration history. | Stable UUID-v4 Trip key, frozen source/target/refund facts, `PENDING|COMPLETED|FAILED`, one pending operation per Parcel |
+| `ParcelStatusHistory` | Dòng thời gian trạng thái bất biến do trigger sở hữu. | `status`, `occurredAt`, `actorType`, `actorId`, `source`, `reason` |
 | `ParcelRouteFare` | Operator config giá per route per size. | composite PK `(routeId, sizeCategory)`, future-dated effective window |
 | `ParcelStats` | Counter table per operator per day. | UNIQUE `(operatorId, statDate)` |
 | `PlatformParcelStats` | Projection Day 42 theo từng Parcel `DELIVERY_CONFIRMED`. | `parcelId`, `operatorId`, `confirmedAt`, signed `parcelRevenueVnd` |
@@ -36,7 +37,9 @@ Quản lý **parcel lifecycle full**: tạo request, deposit + re-weigh + additi
 - **`parcels.sender_user_id NOT NULL`** — spec yêu cầu sender phải có account (no walk-in).
 - **`parcels.recipient_email` nullable** — hỗ trợ hybrid delivery confirmation (email link nếu có email; manual confirm bởi staff nếu không).
 - **`parcels.dropoff_stop_id` nullable** — null = terminal, not null = along-route Stop (validate `allowDropoff=true` app-layer).
+- **Sáu `trip_snapshot_*` nullable** — lưu cố định route, tên bến và xe tại lúc tạo Parcel để UI hiển thị ổn định khi dữ liệu Trip/Route/Vehicle về sau đổi hoặc bị soft-delete. Migration không gọi Trip; job `parcel.trip-display-snapshot-backfill` xử lý tối đa 100 Parcel mỗi lần bằng một batch API, ghi nguyên tuple với CAS và không bịa dữ liệu khi Trip thiếu.
 - **`parcels.status` enum** với 22 value, gồm cả compatibility states `PENDING` và `PENDING_ADDITIONAL_PAYMENT`. Mọi transition validate ở handler.
+- **`parcel_status_history` bất biến và do trigger ghi** — mọi câu `UPDATE` đổi `parcels.status`, kể cả EF bulk update và raw SQL, tạo đúng một dòng. Migration chỉ ghi một `MIGRATION_BASELINE` theo trạng thái hiện tại của Parcel cũ tại thời điểm migration; không dựng lại transition lịch sử. Parcel mới không có dòng lúc `INSERT`, chỉ có history từ transition thật đầu tiên. `actor_type` là `USER`/`RECIPIENT` khi có bằng chứng persisted, `UNKNOWN` khi không thể suy ra chính xác; `SYSTEM` chỉ dùng cho baseline.
 - **`parcels` 1 mega-table thay vì split** — query "parcel detail page" lấy 1 row đủ; tránh N+1.
 - **2 CHECK constraints** cho weight: `estimated_weight_kg > 0` (bắt buộc), `actual_weight_kg > 0 OR NULL`.
 - **`parcels` indexes nặng vào status + updated_at partial** — Hangfire scan các state cần processing (PENDING_*, DELIVERED_PENDING_CONFIRM, TRANSFER_*, DELIVERY_REJECTED) hiệu quả qua composite index.
@@ -66,6 +69,9 @@ Quản lý **parcel lifecycle full**: tạo request, deposit + re-weigh + additi
 | `idx_parcels_recipient_user_id_created_at` | `(recipient_user_id, created_at DESC)` partial | B-tree | "My received parcels" |
 | `idx_parcels_trip_id_status` | `(trip_id, status)` | B-tree | Trip detail page (parcels of trip) |
 | `idx_parcels_operator_id_status` | `(operator_id, status)` | B-tree | Operator dashboard list |
+| `idx_parcel_status_history_parcel_occurred_id` | `(parcel_id, occurred_at, id)` | B-tree | Đọc timeline theo thứ tự xác định |
+| `uq_parcel_status_history_migration_baseline` | `parcel_id` partial khi `source = 'MIGRATION_BASELINE'` | unique | Tối đa một baseline cho mỗi Parcel |
+| `idx_parcels_trip_snapshot_backfill` | `(created_at, id)` partial khi bất kỳ snapshot còn null | B-tree | Bounded application backfill không full scan |
 | `idx_parcels_status_updated_at` | `(status, updated_at)` partial | B-tree | Hangfire scan all transient states |
 | `idx_parcels_additional_payment_deadline` | `additional_payment_deadline` partial | B-tree | 5m timeout job |
 | `idx_parcels_transfer_target_trip_id` | partial | B-tree | "Parcels awaiting confirm on this trip" |
@@ -93,6 +99,7 @@ Quản lý **parcel lifecycle full**: tạo request, deposit + re-weigh + additi
 - **Tool:** EF Core Migrations.
 - **Bootstrap order:** Sau Identity, Trip-Route-Vehicle, Payment & Wallet (logical FK targets).
 - **Status enum migration:** Add new value via `ALTER TYPE parcel_status ADD VALUE 'X'` (PG ≥ 9.1 supports inline).
+- **Status history rollout:** Migration khóa `parcels` bằng `SHARE ROW EXCLUSIVE` trong transaction, seed đúng một baseline cho từng Parcel hiện hữu, sau đó bật trigger transition trước khi nhả khóa để không có khoảng trống mất lịch sử. Trigger riêng chặn `UPDATE`/`DELETE` history; `Down()` gỡ trigger/function trước khi gỡ bảng.
 
 ## Open Questions
 

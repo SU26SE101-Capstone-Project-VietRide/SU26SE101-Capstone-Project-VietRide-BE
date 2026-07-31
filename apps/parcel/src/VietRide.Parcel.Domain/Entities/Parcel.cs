@@ -17,6 +17,12 @@ public sealed class Parcel : BaseEntity<Guid>
 
     public Guid OperatorId { get; private set; }
     public Guid TripId { get; private set; }
+    public Guid? TripSnapshotRouteId { get; private set; }
+    public string? TripSnapshotRouteName { get; private set; }
+    public string? TripSnapshotOriginStationName { get; private set; }
+    public string? TripSnapshotDestinationStationName { get; private set; }
+    public Guid? TripSnapshotVehicleId { get; private set; }
+    public string? TripSnapshotVehicleLicensePlate { get; private set; }
     public Guid? DropoffStopId { get; private set; }
     public Guid? BookingId { get; private set; }
 
@@ -120,6 +126,37 @@ public sealed class Parcel : BaseEntity<Guid>
     public void AssignAdditionalPaymentId(Guid paymentId)
     {
         AdditionalPaymentId = paymentId;
+    }
+
+    public void CaptureTripDisplaySnapshot(
+        Guid routeId,
+        string routeName,
+        string originStationName,
+        string destinationStationName,
+        Guid vehicleId,
+        string vehicleLicensePlate)
+    {
+        if (TripSnapshotRouteId.HasValue
+            || TripSnapshotRouteName is not null
+            || TripSnapshotOriginStationName is not null
+            || TripSnapshotDestinationStationName is not null
+            || TripSnapshotVehicleId.HasValue
+            || TripSnapshotVehicleLicensePlate is not null)
+        {
+            throw new InvalidOperationException("Trip display snapshot has already been captured.");
+        }
+
+        if (routeId == Guid.Empty)
+            throw new ArgumentException("Route id is required.", nameof(routeId));
+        if (vehicleId == Guid.Empty)
+            throw new ArgumentException("Vehicle id is required.", nameof(vehicleId));
+
+        TripSnapshotRouteId = routeId;
+        TripSnapshotRouteName = NormalizeRequired(routeName, nameof(routeName));
+        TripSnapshotOriginStationName = NormalizeRequired(originStationName, nameof(originStationName));
+        TripSnapshotDestinationStationName = NormalizeRequired(destinationStationName, nameof(destinationStationName));
+        TripSnapshotVehicleId = vehicleId;
+        TripSnapshotVehicleLicensePlate = NormalizeRequired(vehicleLicensePlate, nameof(vehicleLicensePlate));
     }
 
     public static Parcel CreatePendingPayment(
@@ -254,7 +291,7 @@ public sealed class Parcel : BaseEntity<Guid>
             DimWeightFactor = 6000m,
             SettlementPolicyVersion = 1,
             Status = ParcelStatus.PENDING_PAYMENT,
-            ReviewDecision = ParcelReviewDecision.PENDING,
+            ReviewDecision = null,
         };
     }
 
@@ -443,4 +480,12 @@ public sealed class Parcel : BaseEntity<Guid>
 
     private static string? NormalizeOptional(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string NormalizeRequired(string value, string parameterName)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new ArgumentException("Value is required.", parameterName);
+
+        return value.Trim();
+    }
 }

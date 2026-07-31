@@ -266,4 +266,81 @@ describe('createProxyHandler auth enforcement', () => {
 
     expect(proxyReq.destroy).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['/v1/admin/dashboard/summary', 'OPERATOR_ADMIN'],
+    ['/v1/operator/parcel-stats', 'OPERATOR_STAFF'],
+    ['/v1/admin/revenue/analytics', 'OPERATOR_ADMIN'],
+    ['/v1/operator/revenue/analytics', 'OPERATOR_STAFF'],
+    ['/v1/operator/trips', 'OPERATOR_STAFF'],
+    [
+      '/v1/operator/parcel-route-fares/11111111-1111-4111-8111-111111111111/batch',
+      'OPERATOR_STAFF',
+    ],
+  ])('rejects UI-gap route %s for role %s at Gateway', async (path, role) => {
+    const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const req = makeRequest(path, { 'x-request-id': 'req-ui23-forbidden' }, 'GET');
+    (req as RequestWithUser).user = {
+      sub: 'ui23-user-id',
+      role,
+      operatorId: '11111111-1111-4111-8111-111111111111',
+    };
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 403,
+      error: { code: 'FORBIDDEN' },
+      meta: { traceId: 'req-ui23-forbidden' },
+    });
+    expect(signer.sign).not.toHaveBeenCalled();
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('proxies every UI-gap public facade for its exact allowed role', async () => {
+    const upstreamHandler = jest.fn();
+    createProxyMiddlewareMock.mockReturnValue(
+      upstreamHandler as unknown as ReturnType<typeof createProxyMiddleware>,
+    );
+    const signer = {
+      sign: jest.fn().mockResolvedValue('internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const cases = [
+      ['GET', '/v1/admin/dashboard/summary', 'SYSTEM_ADMIN'],
+      ['GET', '/v1/operator/parcel-stats', 'OPERATOR_ADMIN'],
+      ['GET', '/v1/admin/revenue/analytics', 'SYSTEM_ADMIN'],
+      ['GET', '/v1/operator/revenue/analytics', 'OPERATOR_ADMIN'],
+      ['GET', '/v1/operator/trips', 'OPERATOR_ADMIN'],
+      [
+        'PUT',
+        '/v1/operator/parcel-route-fares/11111111-1111-4111-8111-111111111111/batch',
+        'OPERATOR_ADMIN',
+      ],
+    ] as const;
+
+    for (const [method, path, role] of cases) {
+      const req = makeRequest(path, { 'x-request-id': `req-${role}-${method}` }, method);
+      (req as RequestWithUser).user = {
+        sub: 'ui23-user-id',
+        role,
+        operatorId: '11111111-1111-4111-8111-111111111111',
+      };
+      const res = makeResponse();
+      const next = jest.fn() as NextFunction;
+
+      await handler(req, res, next);
+
+      expect(res.status).not.toHaveBeenCalled();
+      expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
+      expect(req.url).toBe(path);
+      expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+    }
+  });
 });

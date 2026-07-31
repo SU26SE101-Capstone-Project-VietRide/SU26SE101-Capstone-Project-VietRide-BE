@@ -1074,8 +1074,18 @@ soft-deleted operators are included. Response items are sorted by ID ascending.
 Response `200` (raw internal success payload):
 
 ```json
-[{ "operatorId": "uuid", "operatorName": "Nha xe A" }]
+[
+  {
+    "operatorId": "uuid",
+    "operatorName": "Nha xe A",
+    "logoUrl": "https://example.test/logo.jpg",
+    "contactPhone": "0900000000"
+  }
+]
 ```
+
+`logoUrl` and `contactPhone` are nullable additive fields; `operatorName` is preserved for existing
+Booking/Payment clients.
 
 ## Booking Service
 
@@ -2739,7 +2749,7 @@ Parcel cargo policy:
   calculation rounds to the nearest đồng with `MidpointRounding.AwayFromZero`.
 - `dimWeightKg = lengthCm × widthCm × heightCm / 6000` and `chargeableWeightKg = max(weightKg, dimWeightKg)`.
 - `grossPriceVnd = max(minimumPriceVnd, round(chargeableWeightKg × pricePerKgVnd))`; rounding is to the nearest đồng with `MidpointRounding.AwayFromZero`. There is no kg ceiling and no 1,000-VND floor.
-- Size is derived from chargeable weight: `SMALL <= 5`, `MEDIUM <= 15`, `LARGE <= 30`, `EXTRA_LARGE > 30` kg. Client size fields are compatibility hints only.
+- Size is derived from chargeable weight: `SMALL <= 5`, `MEDIUM <= 15`, `LARGE <= 30`, `EXTRA_LARGE > 30` kg. Client size fields are compatibility hints only. All sizes require a configured route fare and new Parcels start at `PENDING_PAYMENT`; `EXTRA_LARGE` does not require operator pre-review.
 - `estimatedTotalPriceVnd = estimatedGrossPriceVnd - min(discountAmountVnd, estimatedGrossPriceVnd)`; final total uses the same clamp against final gross.
 - Settlement v2 deposit is 20% of estimated total. Only `READY_TO_LOAD` may transition to `LOADED`.
 - `PENDING_OPERATOR_ACTION` is disambiguated by `pendingActionType`; `pendingActionResumeStatus` records the settlement state to resume after recovery.
@@ -2847,7 +2857,7 @@ Response `201`:
 }
 ```
 
-The server derives `estimatedSizeCategory`; old clients may still send `sizeCategory`, but it does not override calculated size or price. `EXTRA_LARGE` is returned as `PENDING_OPERATOR_REVIEW`; all other sizes return `PENDING_PAYMENT`. Create does not reserve cargo or create a payment.
+The server derives `estimatedSizeCategory`; old clients may still send `sizeCategory`, but it does not override calculated size or price. Every size, including `EXTRA_LARGE`, returns `PENDING_PAYMENT`. A fare for the derived route/size is required; otherwise the server returns `422 FARE_NOT_CONFIGURED` without writes. Create does not reserve cargo or create a payment. Capacity is enforced when the deposit soft hold starts and again when the Assistant records actual measurements.
 
 ### POST `/v1/parcels/{parcelId}/deposit-payment`
 
@@ -3563,7 +3573,7 @@ Response `200` uses the ADR 0004 paged envelope. Items are ordered by `createdAt
       {
         "parcelId": "uuid",
         "parcelCode": "VR-PCL-20260727-ABC123",
-        "status": "PENDING_OPERATOR_REVIEW",
+        "status": "PENDING_PAYMENT",
         "tripId": "uuid",
         "senderUserId": "uuid",
         "recipientName": "Nguyen Van A",
@@ -3601,13 +3611,13 @@ Response `200` uses the ADR 0004 paged envelope. Items are ordered by `createdAt
 Errors: `403 FORBIDDEN` when `operatorId` scope is missing; `422 VALIDATION_ERROR` for invalid
 filters or pagination.
 
-### PATCH `/v1/operator/parcels/{parcelId}/review`
+### PATCH `/v1/operator/parcels/{parcelId}/review` (legacy compatibility)
 
-Auth: `OPERATOR_ADMIN|OPERATOR_STAFF` for the Parcel operator. Idempotency: required. Valid only from `PENDING_OPERATOR_REVIEW`.
+Auth: `OPERATOR_ADMIN|OPERATOR_STAFF` for the Parcel operator. Idempotency: required. Valid only for legacy records still in `PENDING_OPERATOR_REVIEW`; new Parcels never enter this state.
 
 Request: `{ "decision": "APPROVE|REJECT", "reason": "optional for approve, required for reject" }`. Price, deposit and payment method are not accepted from Operator input.
 
-`APPROVE` moves to `PENDING_PAYMENT`; the Passenger then calls deposit-payment. `REJECT` moves to `REJECTED`. An unresolved review after 24 hours moves to `CANCELLED` with reason `OPERATOR_REVIEW_TIMEOUT`; no payment or refund exists in either reject/timeout branch.
+`APPROVE` moves a legacy record with a valid fare snapshot to `PENDING_PAYMENT`; a missing or invalid snapshot returns `422 FARE_NOT_CONFIGURED`. The Passenger then calls deposit-payment. `REJECT` moves to `REJECTED`. An unresolved legacy review after 24 hours moves to `CANCELLED` with reason `OPERATOR_REVIEW_TIMEOUT`; no payment or refund exists in either reject/timeout branch.
 
 ### POST `/v1/operator/parcels/{parcelId}/request-transfer`
 
@@ -7528,3 +7538,299 @@ Each Hangfire-owning .NET service exposes a service-local, non-Gateway route
 `max(0, nowUtc - nextRunUtc)` for overdue jobs and `null` when there is no next run or the job is
 disabled. The endpoint is read-only and does not alter schedules, readiness or Hangfire dashboard
 exposure.
+
+## Backend UI gaps — canonical contract addendum (2026-07-29)
+
+This addendum supersedes the external UI-gap backlog and older endpoint notes where they conflict.
+All public successes remain wrapped in ADR 0004; snippets below show only `data`. All mutations
+require `Idempotency-Key`. Internal successes are raw DTOs and require Internal JWT.
+
+### Scope exclusions and compatibility
+
+- `GET /v1/admin/operators` is unchanged; no `BE-ADM-02` projection is added.
+- Admin Station endpoints and frontend changes are outside this scope.
+- `POST /v1/operator/trips/{tripId}/substitute-vehicle` and all existing single-size Parcel fare
+  endpoints are unchanged.
+- No `tripCode`, `routeCode`, Trip schema/index or fare-history version is introduced.
+- Additive objects do not remove, rename or retype existing response fields.
+
+### GET `/v1/operator/trips`
+
+Auth: `OPERATOR_ADMIN` only. The operator is read from the JWT; `operatorId` is not accepted.
+
+Query: `search?`, `status?`, `from?`, `to?`, `page=1`, `pageSize=20` (1..100),
+`sortBy=departureAt`, `sortDir=asc|desc`. `from`/`to` are ICT dates and `from <= to`.
+`search` matches route name case-insensitively and vehicle plate after removing separators.
+The date range is inclusive and is converted to UTC `[from@00:00 ICT, to+1day@00:00 ICT)`.
+
+Each paged item is:
+
+```json
+{
+  "tripId": "uuid",
+  "status": "IN_PROGRESS",
+  "route": {
+    "routeId": "uuid",
+    "name": "HCM - Đà Lạt",
+    "originName": "Hồ Chí Minh",
+    "destinationName": "Đà Lạt"
+  },
+  "vehicle": {
+    "vehicleId": "uuid",
+    "licensePlate": "51B-12345",
+    "status": "MAINTENANCE"
+  },
+  "driver": { "userId": "uuid", "displayName": "Nguyễn Văn A", "phone": "0900000000" },
+  "assistant": null,
+  "departureAt": "2026-07-29T08:00:00+07:00",
+  "arrivalEstimate": "2026-07-29T15:00:00+07:00",
+  "canSubstituteVehicle": true
+}
+```
+
+`canSubstituteVehicle` uses the existing substitution domain precondition. Cross-tenant trips are
+not returned. `OPERATOR_STAFF` receives `403 FORBIDDEN`.
+
+### Booking buyer projection
+
+`GET /v1/operator/bookings` and `GET /v1/operator/bookings/{id}` add the same nullable `buyer`
+object without changing passenger filters or fields:
+
+```json
+{
+  "buyer": {
+    "userId": "uuid",
+    "displayName": "Nguyễn Văn A",
+    "phone": "0900000000",
+    "email": "a@example.com",
+    "avatarUrl": "https://example.test/avatar.jpg"
+  }
+}
+```
+
+`buyer` is the account that created/paid for the Booking, never the first passenger. New Bookings
+persist this snapshot. Nullable legacy rows are filled by an idempotent application backfill and
+may use one bounded Identity batch read while incomplete; migrations never call Identity. A
+soft-deleted buyer is always redacted to `displayName = "Người dùng đã xóa"` with phone, email and
+avatar null. This paragraph supersedes the older no-PII-snapshot note for these buyer fields only.
+
+### Financial management projection
+
+Existing `GET /v1/admin/trip-settlements` items add nullable `operator` and `settledBy` objects.
+Existing `GET /v1/admin/platform-wallet/transactions` items add `actorType` (`USER|SYSTEM`) and a
+nullable `actor` object `{ userId, displayName, email, role }`. Future authenticated manual writes
+persist actor snapshots atomically. Historical actors that cannot be proven remain null; automated
+events/jobs use `actorType=SYSTEM`. No wallet balance or settlement-state behavior changes.
+`operator` is `{ operatorId, name, logoUrl, contactPhone }`; `settledBy` uses the exact actor shape
+`{ userId, displayName, email, role }`.
+
+### Generic Policy — RAG owner
+
+Routes:
+
+| Route | Role | Tenant |
+|---|---|---|
+| `GET/POST /v1/admin/policies` | `SYSTEM_ADMIN` | platform (`operatorId=null`) |
+| `GET/PATCH/DELETE /v1/admin/policies/{policyId}` | `SYSTEM_ADMIN` | platform |
+| `GET/POST /v1/operator/policies` | `OPERATOR_ADMIN` | caller operator |
+| `GET/PATCH/DELETE /v1/operator/policies/{policyId}` | `OPERATOR_ADMIN` | caller operator |
+
+List query supports `policyType=FOR_OPERATOR|FOR_USER`, `category`, `active`, `search`, standard
+pagination, `sortBy=updatedAt|createdAt|title|version` and `sortDir=asc|desc`.
+
+Create body and response use the following canonical field names:
+
+```json
+{
+  "id": "uuid",
+  "operatorId": null,
+  "title": "Chính sách hoàn vé",
+  "description": "Quy định hoàn vé áp dụng toàn hệ thống",
+  "content": "Nội dung Markdown hoặc plain text",
+  "policyType": "FOR_OPERATOR",
+  "category": "REFUND",
+  "version": 1,
+  "active": true,
+  "createdBy": {
+    "userId": "uuid",
+    "displayName": "System Admin",
+    "email": "admin@vietride.vn"
+  },
+  "createdAt": "2026-07-29T10:00:00Z",
+  "updatedAt": "2026-07-29T10:00:00Z"
+}
+```
+
+Create accepts all fields above except server-managed `id`, `operatorId`, `version`, actor and
+timestamps. `title`, `description`, `content` and `category` are required after trim. Create starts
+at version 1; title/description/content/category changes increment once; activation-only changes do
+not. Changing `policyType` is a content edit and increments the version. PATCH body is
+`{ version, title?, description?, content?, policyType?, category?, active? }`,
+requires at least one changed field and accepts no actor/operator/timestamp field. Delete is
+soft-delete and distinct from inactive. PATCH requires the current `version`;
+mismatch is `409 POLICY_VERSION_CONFLICT`; missing, deleted or cross-tenant resources use
+`404 POLICY_NOT_FOUND`. RAG writes the Policy and immutable `PolicyAuditLog` in one Prisma
+transaction. These resources are unrelated to RAG `KnowledgeDocument` and Identity operator
+cancellation/luggage/no-show JSON.
+
+Each audit row is `{ id, policyId, action, before, after, actor, occurredAt }`, where `action` is
+`CREATE|UPDATE|ACTIVATE|DEACTIVATE|DELETE`, `before/after` are nullable canonical Policy snapshots,
+and `actor` is `{ userId, displayName, email, role }`. Actor ID/role come from the verified JWT and
+display fields from Identity; no actor field is accepted from the request. A PATCH containing any
+content field records one `UPDATE` even when it also toggles `active`; only an active-only PATCH
+records `ACTIVATE` or `DEACTIVATE`. Identity actor lookup failure aborts the transaction and returns
+`503 UPSTREAM_UNAVAILABLE` without a Policy or audit row.
+
+### PUT `/v1/operator/parcel-route-fares/{routeId}/batch`
+
+Auth: `OPERATOR_ADMIN`; route ownership comes from JWT tenant. Body:
+
+```json
+{
+  "effectiveFrom": "2026-08-01T00:00:00+07:00",
+  "effectiveUntil": null,
+  "items": [
+    { "sizeCategory": "SMALL", "priceVnd": 50000 },
+    { "sizeCategory": "MEDIUM", "priceVnd": 80000 },
+    { "sizeCategory": "LARGE", "priceVnd": 120000 }
+  ]
+}
+```
+
+`items` has 1..4 unique current enum values; `priceVnd` is a positive whole VND amount;
+`effectiveUntil`, when present, is after `effectiveFrom`. One transaction upserts the current row
+identified by the existing physical key `(routeId, sizeCategory)` after verifying that route owner
+equals the JWT operator. Any invalid item rolls back the whole batch. Response returns `routeId`
+and all requested items with persisted effective values and `created`. No schema migration or fare
+history is part of this endpoint.
+
+### Operator Parcel projections
+
+`GET /v1/operator/parcels` additively returns nested `trip`, `route`, `sender` and `recipient`, plus
+current size/weight/volume, price/refund and timestamps. It retains existing flat fields for one
+compatibility release and does not require `tripCode`. At most one Parcel page query, one Trip batch
+and one Identity batch are permitted.
+
+`GET /v1/operator/parcels/{parcelId}` is new and returns that projection plus base/deposit/
+additional/discount/refund/forfeiture amounts, voucher, deadlines/pending action, load/unload/
+delivery timestamps, dimensions and ordered status history. Both routes are tenant-isolated. Route,
+station and vehicle display values use stable nullable Parcel snapshots with bounded Trip fallback
+until application backfill completes.
+
+Status history items are `{ status, occurredAt, actorType, actorId, source, reason }`. Existing
+Parcels have a single `MIGRATION_BASELINE` item; unavailable historical transitions are not
+fabricated.
+
+### Dashboard aggregates
+
+Existing BookingStats routes add `groupBy=month` while retaining existing group values. Month/day
+buckets use `Asia/Ho_Chi_Minh`, zero-fill missing buckets and reconcile item totals with summary.
+Their `from/to` parameters are inclusive ICT dates and use the UTC half-open conversion described
+for Operator Trip search; the maximum requested range is 366 inclusive days.
+
+`GET /v1/operator/parcel-stats?from=&to=&groupBy=status|route&limit=` is `OPERATOR_ADMIN`-only,
+tenant-scoped and uses stable route snapshots so inactive routes retain historical names.
+Its `from/to` range uses the same inclusive ICT rule.
+
+BookingStats month items remain `{ date, totalBookings, totalRevenue, totalCancellations }`; the
+operator variant also retains `totalCompleted`. `date` is the first ICT date of the month. Parcel
+status items are `{ key, count }` where `key` is a current ParcelStatus; route items are
+`{ routeId, routeName, parcelCount }`. Both Parcel shapes return `totalParcels`.
+
+`GET /v1/admin/dashboard/summary?from=&to=` is a Booking-owned `SYSTEM_ADMIN` facade. It combines
+BookingStats with Identity internal metrics and does not call Platform Report. `activeUsers` means
+the account is currently non-deleted/unlocked and its latest `lastLoginAt` is in the period.
+`activeOperators` is the intersection of operators currently non-deleted,
+`APPROVED + isActive` and operators with at least one BookingStats booking in the period. The
+previous period is the immediately preceding equal-length ICT range. `userDistribution` counts
+current non-deleted users by role (locked users remain in this distribution), while
+`operatorStatusDistribution` counts current non-deleted operators by registration status.
+The range is 1..366 inclusive ICT days; missing, reversed or oversized ranges return
+`422 VALIDATION_ERROR`.
+Identity timeout, 5xx or malformed metrics fail the whole Dashboard with
+`503 UPSTREAM_UNAVAILABLE`; no partial summary/distribution is returned.
+
+The response data shape is:
+
+```json
+{
+  "period": { "from": "2026-01-01", "to": "2026-12-31", "timezone": "Asia/Ho_Chi_Minh" },
+  "totalRevenue": { "currentValue": 0, "previousValue": 0, "changePercent": 0, "trend": "FLAT" },
+  "activeOperators": { "currentValue": 0, "previousValue": 0, "changePercent": 0, "trend": "FLAT" },
+  "activeUsers": { "currentValue": 0, "previousValue": 0, "changePercent": 0, "trend": "FLAT" },
+  "bookings": { "currentValue": 0, "previousValue": 0, "changePercent": 0, "trend": "FLAT" },
+  "userDistribution": [{ "role": "PASSENGER", "count": 0 }],
+  "operatorStatusDistribution": [{ "status": "APPROVED", "count": 0, "percent": 0 }]
+}
+```
+
+### Revenue analytics — Payment owner
+
+`GET /v1/admin/revenue/analytics?from=&to=&groupBy=month&top=5` is `SYSTEM_ADMIN`-only; `top` is
+clamped 1..20. The range is 1..366 inclusive ICT days and `groupBy` is exactly `month`.
+`platformRevenueVnd` is completed subscription payments,
+`paidToOperatorsVnd` is settled payouts, and `grossRevenueVnd` is their sum. Monthly buckets are
+zero-filled and reconcile with summary. Top operators are batch-enriched with Identity display
+data and Trip vehicle counts.
+
+Subscription rows require `Payment.status=SUCCEEDED` and are bucketed by `succeededAt`. Payout rows
+require settlement `status=SETTLED` and are bucketed by `settledAt`; top operators rank by these
+same settled payouts in the requested period.
+
+Admin response data contains `period`, `summary.grossRevenueVnd`,
+`summary.platformRevenueVnd`, `summary.paidToOperatorsVnd` (each comparison object), `monthly`
+items `{ month, grossRevenueVnd, paidToOperatorsVnd, platformRevenueVnd }`, and `topOperators`
+items `{ rank, operatorId, operatorName, logoUrl, revenueVnd, vehicleCount }`.
+
+`GET /v1/operator/revenue/analytics?month=YYYY-MM` is `OPERATOR_ADMIN`-only and gets the tenant from
+JWT. It returns current/previous summary, exactly 12 zero-filled months ending at the selected
+month, and route performance. Ticket revenue is signed `BOOKING_REVENUE/BOOKING_REFUND` plus
+VietRide-funded voucher credit whose reference is `BOOKING`; Parcel uses the equivalent `PARCEL`
+entries. The exact negative voucher reversal entry `entryType=ADJUSTMENT`,
+`referenceType=BOOKING|PARCEL`, `note=reverse-vietride-funded-voucher` is included in its matching
+category. `VOUCHER_OPERATOR_FUNDED_AUDIT` and every adjustment with `referenceType=MANUAL` are
+excluded, so `totalRevenueVnd = ticketRevenueVnd + parcelRevenueVnd`. Ledger entries are bucketed by
+`createdAt`. Route booking/parcel counts use distinct ledger references grouped by `tripId`; Trip
+supplies route/trip completion metadata. The comparison previous period is the immediately prior
+ICT calendar month. `averageRevenuePerTripVnd = totalRevenueVnd / tripCount`, rounded to the nearest
+đồng away from zero; tripCount zero returns 0. `completionRatePercent = completedTripCount /
+tripCount * 100`; tripCount zero returns 0.
+
+Operator response data contains `period`, comparison objects for `totalRevenueVnd`,
+`ticketRevenueVnd`, `parcelRevenueVnd`, `averageRevenuePerTripVnd`, exactly 12 `monthly` items
+`{ month, revenueVnd, ticketRevenueVnd, parcelRevenueVnd, tripCount }`, and `routePerformance`
+items `{ routeId, routeName, originName, destinationName, tripCount, completedTripCount,
+bookingCount, parcelCount, revenueVnd, completionRatePercent }`.
+
+For every comparison metric, previous zero and current positive means `trend=UP`; both zero means
+`trend=FLAT`; `changePercent=0` in both zero-denominator cases. Required upstream failure or
+malformed data fails the whole facade with `503 UPSTREAM_UNAVAILABLE`; no partial analytics are
+returned.
+
+### Internal UI-gap projections
+
+All routes below are Internal-JWT-only, return raw success DTOs and are never registered in
+Gateway:
+
+| Route | Owner | Request/response rule |
+|---|---|---|
+| `GET /internal/v1/users?ids=<uuid>&ids=<uuid>` | Identity | Existing 1..100 batch adds phone/email/avatar/status and includes soft-deleted IDs as redacted users |
+| `POST /internal/v1/operators/summaries/batch` | Identity | Existing read-only batch adds logo/contact phone; response remains deterministic by operator ID |
+| `GET /internal/v1/admin/dashboard/identity-metrics?from=&to=` | Identity | Raw `{ activeUserCount, approvedActiveOperatorIds, userRoleCounts, operatorStatusCounts }`; ICT range and current-state semantics described above |
+| `POST /internal/v1/trips/summaries/batch` | Trip | Body `{ tripIds }`, 1..100 distinct IDs; raw trip/route/station/vehicle/crew/timing summaries, missing IDs omitted |
+| `POST /internal/v1/operators/vehicle-counts/batch` | Trip | Body `{ operatorIds }`, 1..100 distinct IDs; raw `{ operatorId, vehicleCount }[]` |
+| `GET /internal/v1/operators/{operatorId}/route-performance?month=YYYY-MM` | Trip | Raw ICT-month `{ routeId, routeName, originName, destinationName, tripCount, completedTripCount }[]` |
+
+User batch items are `{ id, displayName, phone, email, avatarUrl, role, operatorId, status,
+deleted }`; deleted rows keep only `id`, `role`, `operatorId`, `status`, `deleted=true` and the
+redacted display name. Operator batch items preserve the existing field name and are
+`{ operatorId, operatorName, logoUrl, contactPhone }`.
+
+Trip summary items are `{ tripId, status, departureAt, arrivalEstimate, route { routeId, name,
+originName, destinationName }, vehicle { vehicleId, licensePlate, status }, driverUserId,
+assistantUserId }`. Identity metric maps are arrays of `{ role, count }` and `{ status, count }`;
+approved operator IDs are distinct and sorted. Vehicle-count and route-performance responses are
+the exact array item shapes in the table and are sorted by ID/route name for deterministic callers.
+
+Internal 4xx is never retried. Timeout, transport, 5xx or malformed payload maps at the public
+facade to its documented `UPSTREAM_UNAVAILABLE` response. Caller cancellation propagates unchanged.

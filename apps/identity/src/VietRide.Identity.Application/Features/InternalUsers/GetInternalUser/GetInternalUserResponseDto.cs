@@ -8,4 +8,5 @@ public sealed record GetInternalUserResponseDto(
     Guid? OperatorId,
     string Status,
     string? Phone = null,
-    string? Email = null);
+    string? Email = null,
+    bool Deleted = false);

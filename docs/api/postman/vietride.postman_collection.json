@@ -9652,6 +9652,275 @@
           }
         }
       ]
+    },
+    {
+      "name": "UI Gaps - Gateway Real Stack",
+      "description": "Ma trận UI-25 chỉ gọi public API qua Gateway bằng JWT do Identity login thật cấp. ID, token và Idempotency-Key đều do runner inject vào environment tạm rồi xóa trong finally.",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const expectedStatus = {",
+              "  '01. Admin platform report': 200, '02. Operator trip selector': 200,",
+              "  '03. Operator booking list buyer': 200, '04. Operator booking detail buyer': 200,",
+              "  '05. Admin trip settlement projection': 200, '06. Platform wallet actor projection': 200,",
+              "  '07. Operator booking stats month': 200, '08. Admin booking stats month': 200,",
+              "  '09. Create admin Policy': 201, '10. Replay admin Policy create': 201,",
+              "  '11. List admin Policies': 200, '12. Get admin Policy': 200,",
+              "  '13. Update admin Policy': 200, '14. Delete admin Policy': 200,",
+              "  '15. Create operator Policy': 201, '16. List operator Policies': 200,",
+              "  '17. Get operator Policy': 200, '18. Update operator Policy': 200,",
+              "  '19. Delete operator Policy': 200, '20. Parcel fare batch': 200,",
+              "  '21. Replay Parcel fare batch': 200, '22. Operator Parcel list': 200,",
+              "  '23. Operator Parcel detail': 200, '24. Parcel stats by status': 200,",
+              "  '25. Parcel stats by route': 200, '26. Admin dashboard summary': 200,",
+              "  '27. Admin revenue analytics': 200, '28. Operator revenue analytics': 200,",
+              "  '29. Dashboard missing auth': 401, '30. Admin revenue wrong role': 403,",
+              "  '31. Operator Trip exact route rejects staff': 403, '32. Fare batch rejects staff': 403,",
+              "  '33. Operator Trip invalid range': 422, '34. Operator revenue invalid month': 422,",
+              "  '35. Admin Policy validation': 422, '36. Admin Policy rejects operator': 403,",
+              "  '37. Operator Policy rejects system admin': 403, '38. Booking Swagger anonymous': 200,",
+              "  '39. Parcel Swagger anonymous': 200, '40. Payment Swagger anonymous': 200,",
+              "  '41. Internal source is not exposed': 404",
+              "};",
+              "const name = pm.info.requestName;",
+              "pm.test(`${name} returns the contract status`, () => pm.response.to.have.status(expectedStatus[name]));",
+              "const contentType = pm.response.headers.get('Content-Type') || '';",
+              "const body = contentType.includes('json') ? pm.response.json() : null;",
+              "if (expectedStatus[name] >= 400 && body) pm.test(`${name} returns an error response`, () => pm.expect(body.success).to.equal(false));",
+              "if ([200, 201].includes(expectedStatus[name]) && body && !name.includes('Swagger')) pm.test(`${name} keeps ADR 0004`, () => { pm.expect(body.success).to.equal(true); pm.expect(body.statusCode).to.equal(expectedStatus[name]); });",
+              "const findItem = (items, key, value) => (items || []).find((item) => item && item[key] === value);",
+              "switch (name) {",
+              "  case '01. Admin platform report': pm.test('Platform report reconciles the fixture operator', () => { const item = findItem(body.data.byOperator, 'operatorId', pm.environment.get('operatorId')); pm.expect(item.operatorName).to.equal('UI-25 Real Stack Operator'); pm.expect(item.completedBookingCount).to.equal(1); pm.expect(item.completedTripCount).to.equal(1); pm.expect(item.deliveredParcelCount).to.equal(1); pm.expect(item.bookingRevenueVnd).to.equal(100000); pm.expect(item.parcelRevenueVnd).to.equal(60000); pm.expect(item.netRevenueVnd).to.equal(160000); }); break;",
+              "  case '02. Operator trip selector': pm.test('Trip selector returns the tenant fixture', () => { const item = findItem(body.data.items, 'tripId', pm.environment.get('ui25TripId')); pm.expect(item).to.be.an('object'); pm.expect(item.route.routeId).to.equal(pm.environment.get('ui25RouteId')); pm.expect(item.vehicle.licensePlate).to.equal('51B-25025'); }); break;",
+              "  case '03. Operator booking list buyer': pm.test('Booking list returns buyer snapshot', () => { const item = findItem(body.data.items, 'id', pm.environment.get('ui25BookingId')); pm.expect(item.buyer.displayName).to.equal('UI-25 Buyer'); pm.expect(item.buyer.email).to.match(/ui25-system-/); }); break;",
+              "  case '04. Operator booking detail buyer': pm.test('Booking detail keeps the same buyer shape', () => { pm.expect(body.data.id).to.equal(pm.environment.get('ui25BookingId')); pm.expect(body.data.buyer.displayName).to.equal('UI-25 Buyer'); }); break;",
+              "  case '05. Admin trip settlement projection': pm.test('Settlement has stable operator and actor snapshots', () => { const item = findItem(body.data.items, 'operatorId', pm.environment.get('operatorId')); pm.expect(item.operator).to.be.an('object'); pm.expect(item.settledBy.role).to.equal('SYSTEM_ADMIN'); }); break;",
+              "  case '06. Platform wallet actor projection': pm.test('Wallet transaction exposes USER actor', () => { const item = (body.data.items || []).find((row) => row.note === 'UI-25 projection'); pm.expect(item.actorType).to.equal('USER'); pm.expect(item.actor.role).to.equal('SYSTEM_ADMIN'); }); break;",
+              "  case '07. Operator booking stats month': pm.test('Operator booking month contains the exact fixture', () => { const item = findItem(body.data.items, 'date', `${pm.environment.get('ui25Month')}-01`); pm.expect(item.totalBookings).to.equal(1); pm.expect(item.totalRevenue).to.equal(100000); pm.expect(item.totalCompleted).to.equal(1); }); break;",
+              "  case '08. Admin booking stats month': pm.test('Admin booking month includes the fixture contribution', () => { const item = findItem(body.data.items, 'date', `${pm.environment.get('ui25Month')}-01`); pm.expect(item.totalBookings).to.be.at.least(1); pm.expect(item.totalRevenue).to.be.at.least(100000); }); break;",
+              "  case '09. Create admin Policy': pm.environment.set('ui25AdminPolicyId', body.data.id); pm.environment.set('ui25AdminPolicyVersion', body.data.version); pm.test('Admin Policy starts at version 1', () => { pm.expect(body.data.operatorId).to.equal(null); pm.expect(body.data.version).to.equal(1); }); break;",
+              "  case '10. Replay admin Policy create': pm.test('Admin Policy replay returns the original resource', () => pm.expect(body.data.id).to.equal(pm.environment.get('ui25AdminPolicyId'))); break;",
+              "  case '11. List admin Policies': pm.test('Admin Policy list contains the fixture', () => pm.expect(findItem(body.data.items, 'id', pm.environment.get('ui25AdminPolicyId'))).to.be.an('object')); break;",
+              "  case '12. Get admin Policy': pm.test('Admin Policy detail is tenant-correct', () => pm.expect(body.data.operatorId).to.equal(null)); break;",
+              "  case '13. Update admin Policy': pm.environment.set('ui25AdminPolicyVersion', body.data.version); pm.test('Admin Policy content update increments once', () => pm.expect(body.data.version).to.equal(2)); break;",
+              "  case '15. Create operator Policy': pm.environment.set('ui25OperatorPolicyId', body.data.id); pm.environment.set('ui25OperatorPolicyVersion', body.data.version); pm.test('Operator Policy uses JWT tenant', () => { pm.expect(body.data.operatorId).to.equal(pm.environment.get('operatorId')); pm.expect(body.data.version).to.equal(1); }); break;",
+              "  case '16. List operator Policies': pm.test('Operator Policy list contains only the tenant fixture', () => { const item = findItem(body.data.items, 'id', pm.environment.get('ui25OperatorPolicyId')); pm.expect(item.operatorId).to.equal(pm.environment.get('operatorId')); }); break;",
+              "  case '17. Get operator Policy': pm.test('Operator Policy detail keeps JWT tenant', () => pm.expect(body.data.operatorId).to.equal(pm.environment.get('operatorId'))); break;",
+              "  case '18. Update operator Policy': pm.environment.set('ui25OperatorPolicyVersion', body.data.version); pm.test('Operator Policy content update increments once', () => pm.expect(body.data.version).to.equal(2)); break;",
+              "  case '20. Parcel fare batch': pm.test('Fare batch persists all three sizes', () => { pm.expect(body.data.routeId).to.equal(pm.environment.get('ui25RouteId')); pm.expect(body.data.items).to.have.length(3); }); break;",
+              "  case '21. Replay Parcel fare batch': pm.test('Fare replay keeps the same three rows', () => pm.expect(body.data.items).to.have.length(3)); break;",
+              "  case '22. Operator Parcel list': pm.test('Parcel list returns nested stable projections', () => { const item = findItem(body.data.items, 'parcelId', pm.environment.get('ui25ParcelId')); pm.expect(item.trip.tripId).to.equal(pm.environment.get('ui25TripId')); pm.expect(item.route.routeId).to.equal(pm.environment.get('ui25RouteId')); pm.expect(item.sender.displayName).to.equal('UI-25 Operator Admin'); pm.expect(item.recipient.displayName).to.equal('UI-25 Recipient'); }); break;",
+              "  case '23. Operator Parcel detail': pm.test('Parcel detail includes settlement and ordered history', () => { pm.expect(body.data.parcelId).to.equal(pm.environment.get('ui25ParcelId')); pm.expect(body.data.finalTotalPriceVnd).to.equal(60000); pm.expect(body.data.statusHistory.length).to.be.at.least(1); }); break;",
+              "  case '24. Parcel stats by status': pm.test('Parcel status aggregate reconciles', () => pm.expect(body.data.totalParcels).to.be.at.least(1)); break;",
+              "  case '25. Parcel stats by route': pm.test('Parcel route aggregate uses snapshot', () => { const item = findItem(body.data.items, 'routeId', pm.environment.get('ui25RouteId')); pm.expect(item.routeName).to.equal('UI-25 HCM - Đà Lạt'); }); break;",
+              "  case '26. Admin dashboard summary': pm.test('Dashboard exposes all reconciled KPI groups', () => { pm.expect(body.data.bookings.currentValue).to.be.at.least(1); pm.expect(body.data.userDistribution).to.be.an('array'); pm.expect(body.data.operatorStatusDistribution).to.be.an('array'); }); break;",
+              "  case '27. Admin revenue analytics': pm.test('Admin revenue includes seeded platform and payout values', () => { const s = body.data.summary; const month = findItem(body.data.monthly, 'month', pm.environment.get('ui25Month')); const top = findItem(body.data.topOperators, 'operatorId', pm.environment.get('operatorId')); pm.expect(s.grossRevenueVnd.currentValue).to.equal(s.platformRevenueVnd.currentValue + s.paidToOperatorsVnd.currentValue); pm.expect(month.platformRevenueVnd).to.be.at.least(300000); pm.expect(month.paidToOperatorsVnd).to.be.at.least(160000); pm.expect(month.grossRevenueVnd).to.equal(month.platformRevenueVnd + month.paidToOperatorsVnd); pm.expect(top.operatorName).to.equal('UI-25 Real Stack Operator'); pm.expect(top.revenueVnd).to.equal(160000); pm.expect(top.vehicleCount).to.equal(1); }); break;",
+              "  case '28. Operator revenue analytics': pm.test('Operator revenue is exact for the tenant fixture', () => { const s = body.data.summary; const month = findItem(body.data.monthly, 'month', pm.environment.get('ui25Month')); const route = findItem(body.data.routePerformance, 'routeId', pm.environment.get('ui25RouteId')); pm.expect(body.data.monthly).to.have.length(12); pm.expect(s.totalRevenueVnd.currentValue).to.equal(160000); pm.expect(s.ticketRevenueVnd.currentValue).to.equal(100000); pm.expect(s.parcelRevenueVnd.currentValue).to.equal(60000); pm.expect(month.revenueVnd).to.equal(160000); pm.expect(month.ticketRevenueVnd).to.equal(100000); pm.expect(month.parcelRevenueVnd).to.equal(60000); pm.expect(route.bookingCount).to.equal(1); pm.expect(route.parcelCount).to.equal(1); pm.expect(route.revenueVnd).to.equal(160000); }); break;",
+              "  case '38. Booking Swagger anonymous': case '39. Parcel Swagger anonymous': case '40. Payment Swagger anonymous': pm.test('Swagger is OpenAPI JSON', () => pm.expect(body.openapi).to.match(/^3\\./)); break;",
+              "}"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "01 - Public projections",
+          "item": [
+            {
+              "name": "01. Admin platform report",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/admin/reports/platform?from={{ui25ReportFromUtc}}&to={{ui25ReportToUtc}}" }
+            },
+            {
+              "name": "02. Operator trip selector",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/trips?from={{ui25FromDate}}&to={{ui25ToDate}}&page=1&pageSize=100" }
+            },
+            {
+              "name": "03. Operator booking list buyer",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/bookings?page=1&pageSize=100" }
+            },
+            {
+              "name": "04. Operator booking detail buyer",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/bookings/{{ui25BookingId}}" }
+            },
+            {
+              "name": "05. Admin trip settlement projection",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/admin/trip-settlements?page=1&pageSize=100" }
+            },
+            {
+              "name": "06. Platform wallet actor projection",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/admin/platform-wallet/transactions?page=1&pageSize=100" }
+            },
+            {
+              "name": "07. Operator booking stats month",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/booking-stats?from={{ui25FromDate}}&to={{ui25ToDate}}&groupBy=month" }
+            },
+            {
+              "name": "08. Admin booking stats month",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/admin/booking-stats/aggregate?from={{ui25FromDate}}&to={{ui25ToDate}}&groupBy=month" }
+            }
+          ]
+        },
+        {
+          "name": "02 - Admin Policy CRUD",
+          "item": [
+            {
+              "name": "09. Create admin Policy",
+              "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{ui25AdminPolicyCreateKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"title\": \"UI25-{{ui25RunId}}-ADMIN\",\n  \"description\": \"Kiểm thử E2E qua Gateway\",\n  \"content\": \"Nội dung UI-25\",\n  \"policyType\": \"FOR_OPERATOR\",\n  \"category\": \"UI25\",\n  \"active\": true\n}" }, "url": "{{baseUrl}}/v1/admin/policies" }
+            },
+            {
+              "name": "10. Replay admin Policy create",
+              "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{ui25AdminPolicyCreateKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"title\": \"UI25-{{ui25RunId}}-ADMIN\",\n  \"description\": \"Kiểm thử E2E qua Gateway\",\n  \"content\": \"Nội dung UI-25\",\n  \"policyType\": \"FOR_OPERATOR\",\n  \"category\": \"UI25\",\n  \"active\": true\n}" }, "url": "{{baseUrl}}/v1/admin/policies" }
+            },
+            {
+              "name": "11. List admin Policies",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/admin/policies?search=UI25-{{ui25RunId}}-ADMIN&page=1&pageSize=20" }
+            },
+            {
+              "name": "12. Get admin Policy",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/admin/policies/{{ui25AdminPolicyId}}" }
+            },
+            {
+              "name": "13. Update admin Policy",
+              "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{ui25AdminPolicyUpdateKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"version\": {{ui25AdminPolicyVersion}},\n  \"content\": \"Nội dung UI-25 đã cập nhật\"\n}" }, "url": "{{baseUrl}}/v1/admin/policies/{{ui25AdminPolicyId}}" }
+            },
+            {
+              "name": "14. Delete admin Policy",
+              "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }, { "key": "Idempotency-Key", "value": "{{ui25AdminPolicyDeleteKey}}" }], "url": "{{baseUrl}}/v1/admin/policies/{{ui25AdminPolicyId}}" }
+            }
+          ]
+        },
+        {
+          "name": "03 - Operator Policy CRUD",
+          "item": [
+            {
+              "name": "15. Create operator Policy",
+              "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{ui25OperatorPolicyCreateKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"title\": \"UI25-{{ui25RunId}}-OPERATOR\",\n  \"description\": \"Kiểm thử tenant qua Gateway\",\n  \"content\": \"Nội dung nhà xe UI-25\",\n  \"policyType\": \"FOR_USER\",\n  \"category\": \"UI25_OPERATOR\",\n  \"active\": true\n}" }, "url": "{{baseUrl}}/v1/operator/policies" }
+            },
+            {
+              "name": "16. List operator Policies",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/policies?search=UI25-{{ui25RunId}}-OPERATOR&page=1&pageSize=20" }
+            },
+            {
+              "name": "17. Get operator Policy",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/policies/{{ui25OperatorPolicyId}}" }
+            },
+            {
+              "name": "18. Update operator Policy",
+              "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{ui25OperatorPolicyUpdateKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"version\": {{ui25OperatorPolicyVersion}},\n  \"category\": \"UI25_OPERATOR_UPDATED\"\n}" }, "url": "{{baseUrl}}/v1/operator/policies/{{ui25OperatorPolicyId}}" }
+            },
+            {
+              "name": "19. Delete operator Policy",
+              "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }, { "key": "Idempotency-Key", "value": "{{ui25OperatorPolicyDeleteKey}}" }], "url": "{{baseUrl}}/v1/operator/policies/{{ui25OperatorPolicyId}}" }
+            }
+          ]
+        },
+        {
+          "name": "04 - Parcel operator",
+          "item": [
+            {
+              "name": "20. Parcel fare batch",
+              "request": { "method": "PUT", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{ui25FareBatchKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"effectiveFrom\": \"{{ui25EffectiveFrom}}\",\n  \"effectiveUntil\": null,\n  \"items\": [\n    { \"sizeCategory\": \"SMALL\", \"priceVnd\": 50000 },\n    { \"sizeCategory\": \"MEDIUM\", \"priceVnd\": 80000 },\n    { \"sizeCategory\": \"LARGE\", \"priceVnd\": 120000 }\n  ]\n}" }, "url": "{{baseUrl}}/v1/operator/parcel-route-fares/{{ui25RouteId}}/batch" }
+            },
+            {
+              "name": "21. Replay Parcel fare batch",
+              "request": { "method": "PUT", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{ui25FareBatchKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"effectiveFrom\": \"{{ui25EffectiveFrom}}\",\n  \"effectiveUntil\": null,\n  \"items\": [\n    { \"sizeCategory\": \"SMALL\", \"priceVnd\": 50000 },\n    { \"sizeCategory\": \"MEDIUM\", \"priceVnd\": 80000 },\n    { \"sizeCategory\": \"LARGE\", \"priceVnd\": 120000 }\n  ]\n}" }, "url": "{{baseUrl}}/v1/operator/parcel-route-fares/{{ui25RouteId}}/batch" }
+            },
+            {
+              "name": "22. Operator Parcel list",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/parcels?page=1&pageSize=100" }
+            },
+            {
+              "name": "23. Operator Parcel detail",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/parcels/{{ui25ParcelId}}" }
+            },
+            {
+              "name": "24. Parcel stats by status",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/parcel-stats?from={{ui25FromDate}}&to={{ui25ToDate}}&groupBy=status" }
+            },
+            {
+              "name": "25. Parcel stats by route",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/parcel-stats?from={{ui25FromDate}}&to={{ui25ToDate}}&groupBy=route&limit=10" }
+            }
+          ]
+        },
+        {
+          "name": "05 - Dashboard and analytics",
+          "item": [
+            {
+              "name": "26. Admin dashboard summary",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/admin/dashboard/summary?from={{ui25FromDate}}&to={{ui25ToDate}}" }
+            },
+            {
+              "name": "27. Admin revenue analytics",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/admin/revenue/analytics?from={{ui25FromDate}}&to={{ui25ToDate}}&groupBy=month&top=20" }
+            },
+            {
+              "name": "28. Operator revenue analytics",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/revenue/analytics?month={{ui25Month}}" }
+            }
+          ]
+        },
+        {
+          "name": "06 - Gateway access Swagger and validation",
+          "item": [
+            {
+              "name": "29. Dashboard missing auth",
+              "request": { "method": "GET", "url": "{{baseUrl}}/v1/admin/dashboard/summary?from={{ui25FromDate}}&to={{ui25ToDate}}" }
+            },
+            {
+              "name": "30. Admin revenue wrong role",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/admin/revenue/analytics?from={{ui25FromDate}}&to={{ui25ToDate}}&groupBy=month" }
+            },
+            {
+              "name": "31. Operator Trip exact route rejects staff",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/trips?page=1&pageSize=20" }
+            },
+            {
+              "name": "32. Fare batch rejects staff",
+              "request": { "method": "PUT", "header": [{ "key": "Authorization", "value": "Bearer {{operatorUserAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{ui25FareWrongRoleKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"effectiveFrom\": \"{{ui25EffectiveFrom}}\",\n  \"effectiveUntil\": null,\n  \"items\": [{ \"sizeCategory\": \"SMALL\", \"priceVnd\": 50000 }]\n}" }, "url": "{{baseUrl}}/v1/operator/parcel-route-fares/{{ui25RouteId}}/batch" }
+            },
+            {
+              "name": "33. Operator Trip invalid range",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/trips?from=2026-08-02&to=2026-08-01" }
+            },
+            {
+              "name": "34. Operator revenue invalid month",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/revenue/analytics?month=2026-13" }
+            },
+            {
+              "name": "35. Admin Policy validation",
+              "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{ui25PolicyValidationKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"title\": \"   \",\n  \"description\": \"invalid\",\n  \"content\": \"invalid\",\n  \"policyType\": \"FOR_USER\",\n  \"category\": \"UI25\",\n  \"active\": true\n}" }, "url": "{{baseUrl}}/v1/admin/policies" }
+            },
+            {
+              "name": "36. Admin Policy rejects operator",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/admin/policies?page=1&pageSize=20" }
+            },
+            {
+              "name": "37. Operator Policy rejects system admin",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }], "url": "{{baseUrl}}/v1/operator/policies?page=1&pageSize=20" }
+            },
+            {
+              "name": "38. Booking Swagger anonymous",
+              "request": { "method": "GET", "url": "{{baseUrl}}/api-specs/booking" }
+            },
+            {
+              "name": "39. Parcel Swagger anonymous",
+              "request": { "method": "GET", "url": "{{baseUrl}}/api-specs/parcel" }
+            },
+            {
+              "name": "40. Payment Swagger anonymous",
+              "request": { "method": "GET", "url": "{{baseUrl}}/api-specs/payment" }
+            },
+            {
+              "name": "41. Internal source is not exposed",
+              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }], "url": "{{baseUrl}}/internal/v1/reports/platform/bookings?from={{ui25ReportFromUtc}}&to={{ui25ReportToUtc}}" }
+            }
+          ]
+        }
+      ]
     }
   ]
 }

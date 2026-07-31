@@ -397,6 +397,7 @@ public class CreateRoundTripBookingIntegrationTests
 
         public ITripServiceClient TripClient { get; } = Substitute.For<ITripServiceClient>();
         public IPaymentServiceClient PaymentClient { get; } = Substitute.For<IPaymentServiceClient>();
+        public IIdentityUserServiceClient IdentityUsers { get; } = Substitute.For<IIdentityUserServiceClient>();
         public IBookingRepository BookingRepository { get; } = Substitute.For<IBookingRepository>();
         public IVoucherService VoucherService { get; } = Substitute.For<IVoucherService>();
         public IVoucherRepository VoucherRepository { get; } = Substitute.For<IVoucherRepository>();
@@ -451,6 +452,11 @@ public class CreateRoundTripBookingIntegrationTests
             {
                 services.AddSingleton(TripClient);
                 services.AddSingleton(PaymentClient);
+                IdentityUsers.GetUsersAsync(
+                        Arg.Any<IReadOnlyCollection<Guid>>(),
+                        Arg.Any<CancellationToken>())
+                    .Returns(call => BuyerProfiles(call.Arg<IReadOnlyCollection<Guid>>()));
+                services.AddSingleton(IdentityUsers);
                 services.AddSingleton<IBookingStationCanonicalizer>(
                     PassthroughBookingStationCanonicalizer.Instance);
                 services.AddSingleton(VoucherService);
@@ -474,6 +480,18 @@ public class CreateRoundTripBookingIntegrationTests
                 services.AddSingleton<IConnectionMultiplexer>(InMemoryIdempotencyRedis.Create());
             });
         }
+
+        private static IReadOnlyDictionary<Guid, BookingBuyerSnapshotProfile> BuyerProfiles(
+            IReadOnlyCollection<Guid> userIds)
+            => userIds.ToDictionary(
+                userId => userId,
+                userId => new BookingBuyerSnapshotProfile(
+                    userId,
+                    "Integration Test Buyer",
+                    "0900000000",
+                    "buyer@example.test",
+                    null,
+                    Deleted: false));
 
         public HttpClient CreateAuthenticatedClient(Guid userId, string role = "PASSENGER")
         {

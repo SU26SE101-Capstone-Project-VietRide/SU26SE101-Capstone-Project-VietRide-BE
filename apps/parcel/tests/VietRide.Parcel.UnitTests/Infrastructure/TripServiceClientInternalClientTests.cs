@@ -19,6 +19,148 @@ public class TripServiceClientInternalClientTests
     private FakeMessageHandler _handler = null!;
 
     [Fact]
+    public async Task GetTripSummariesAsync_PostsDistinctIdsAndDeserializesRawArray()
+    {
+        var routeId = Guid.NewGuid();
+        var vehicleId = Guid.NewGuid();
+        var departure = DateTimeOffset.UtcNow.AddHours(1);
+        var arrival = departure.AddHours(8);
+        var body = JsonSerializer.Serialize(new[]
+        {
+            new
+            {
+                tripId = TripId,
+                status = "SCHEDULED",
+                departureAt = departure,
+                arrivalEstimate = arrival,
+                route = new
+                {
+                    routeId,
+                    name = "HCM - Da Lat",
+                    originName = "Mien Dong",
+                    destinationName = "Da Lat",
+                },
+                vehicle = new
+                {
+                    vehicleId,
+                    licensePlate = "51B-12345",
+                    status = "ACTIVE",
+                },
+                driverUserId = Guid.NewGuid(),
+                assistantUserId = (Guid?)null,
+            },
+        }, JsonOptions);
+        var client = BuildClient(HttpStatusCode.OK, body);
+
+        var outcome = await client.GetTripSummariesAsync([TripId, TripId]);
+
+        outcome.Kind.Should().Be(TripSummaryBatchOutcomeKind.Success);
+        var summary = outcome.Summaries.Should().ContainSingle().Which;
+        summary.Route.Should().Be(new TripRouteSummarySnapshot(
+            routeId,
+            "HCM - Da Lat",
+            "Mien Dong",
+            "Da Lat"));
+        summary.Vehicle.Should().Be(new TripVehicleSummarySnapshot(
+            vehicleId,
+            "51B-12345",
+            "ACTIVE"));
+        _handler.LastRequest.Should().NotBeNull();
+        _handler.LastRequest!.Method.Should().Be(HttpMethod.Post);
+        _handler.LastRequest.RequestUri!.AbsolutePath.Should().Be("/internal/v1/trips/summaries/batch");
+        var requestBody = await _handler.LastRequest.Content!.ReadAsStringAsync();
+        using var json = JsonDocument.Parse(requestBody);
+        json.RootElement.GetProperty("tripIds").GetArrayLength().Should().Be(1);
+        json.RootElement.GetProperty("tripIds")[0].GetGuid().Should().Be(TripId);
+    }
+
+    [Fact]
+    public async Task GetTripSummariesAsync_MapsNonSuccessToTransportFailure()
+    {
+        var client = BuildClient(HttpStatusCode.ServiceUnavailable, "{}");
+
+        var outcome = await client.GetTripSummariesAsync([TripId]);
+
+        outcome.Kind.Should().Be(TripSummaryBatchOutcomeKind.TransportError);
+        outcome.Summaries.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetTripSummariesAsync_RejectsDuplicateResponseItemsAsTransportFailure()
+    {
+        var summary = new
+        {
+            tripId = TripId,
+            status = "SCHEDULED",
+            departureAt = DateTimeOffset.UtcNow,
+            arrivalEstimate = DateTimeOffset.UtcNow.AddHours(1),
+            route = new
+            {
+                routeId = Guid.NewGuid(),
+                name = "Route",
+                originName = "Origin",
+                destinationName = "Destination",
+            },
+            vehicle = new
+            {
+                vehicleId = Guid.NewGuid(),
+                licensePlate = "51B-12345",
+                status = "ACTIVE",
+            },
+        };
+        var client = BuildClient(HttpStatusCode.OK, JsonSerializer.Serialize(new[] { summary, summary }, JsonOptions));
+
+        var outcome = await client.GetTripSummariesAsync([TripId]);
+
+        outcome.Kind.Should().Be(TripSummaryBatchOutcomeKind.TransportError);
+        outcome.Summaries.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetTripSummariesAsync_RejectsEmptyTripIdBeforeHttp()
+    {
+        var client = BuildClient(HttpStatusCode.OK, "[]");
+
+        var action = () => client.GetTripSummariesAsync([Guid.Empty]);
+
+        await action.Should().ThrowAsync<ArgumentException>();
+        _handler.LastRequest.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetTripSummariesAsync_RejectsMissingCurrentTripFields()
+    {
+        var body = JsonSerializer.Serialize(new[]
+        {
+            new
+            {
+                tripId = TripId,
+                status = "",
+                departureAt = default(DateTimeOffset),
+                arrivalEstimate = default(DateTimeOffset),
+                route = new
+                {
+                    routeId = Guid.NewGuid(),
+                    name = "Route",
+                    originName = "Origin",
+                    destinationName = "Destination",
+                },
+                vehicle = new
+                {
+                    vehicleId = Guid.NewGuid(),
+                    licensePlate = "51B-12345",
+                    status = "",
+                },
+            },
+        }, JsonOptions);
+        var client = BuildClient(HttpStatusCode.OK, body);
+
+        var outcome = await client.GetTripSummariesAsync([TripId]);
+
+        outcome.Kind.Should().Be(TripSummaryBatchOutcomeKind.TransportError);
+    }
+
+    [Fact]
     public async Task GetTripParcelSnapshotAsync_Sends_Request_To_Correct_Path()
     {
         var snapshotJson = JsonSerializer.Serialize(new

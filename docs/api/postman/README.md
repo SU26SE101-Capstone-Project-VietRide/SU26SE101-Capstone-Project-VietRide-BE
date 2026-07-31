@@ -315,6 +315,32 @@ Booking Outbox propagation, full Booking + Parcel Wallet refunds, frozen route-c
 metadata, and one-event idempotency. Its `finally` path removes its exact DB and Redis fixtures and
 restores the platform Wallet baseline. Tokens are never printed or committed.
 
+## UI-25 — UI gaps qua Gateway và Postman
+
+Folder tích lũy `UI Gaps - Gateway Real Stack` bao phủ các public facade/projection được bổ sung
+trong UI-01–UI-23: Platform Report, Trip selector, Booking buyer, financial snapshots, Policy CRUD,
+Parcel fare/list/detail/stats, Dashboard và Revenue analytics. Folder cũng kiểm tra thiếu auth, sai
+role, validation, idempotency replay, Swagger anonymous và việc Gateway không expose internal API.
+
+Runner mặc định sử dụng stack thật. Nó đăng ký ba user fixture, gán role/tenant trong DB test, rồi
+đăng nhập thật qua Identity để lấy JWT; không tự ký token và không bật auth override. Mọi request
+Postman chỉ dùng `{{baseUrl}}` của Gateway. Policy được tạo/sửa/xóa qua API; các prerequisite còn
+lại được seed bằng UUID riêng. Runner kiểm tra persistence rồi cleanup DB/Redis trong `finally`, kể
+cả khi Newman lỗi. Token, mật khẩu, ID và Idempotency-Key chỉ tồn tại trong environment tạm dưới
+`TestResults/` và file tạm luôn bị xóa.
+
+Trước khi chạy, rebuild/start `identity`, `trip`, `booking`, `payment`, `parcel`, `rag` và `gateway`
+bằng root `.env`. Không chạy toàn bộ collection tích lũy vì các folder cũ cần harness riêng.
+
+```powershell
+node scripts/run-ui-gaps-gateway-e2e.mjs --static-only
+npm run postman:ui-gaps:local
+```
+
+`--static-only` chỉ kiểm tra JSON, route matrix, Gateway-only boundary, mutation idempotency header
+và placeholder không chứa secret. Lần chạy live chỉ PASS khi 41 request, toàn bộ assertion,
+persistence check và cleanup residue đều xanh.
+
 ## Notes
 
 - Requests hit the **Gateway** (`:3000`) using the real resource-prefixed routes

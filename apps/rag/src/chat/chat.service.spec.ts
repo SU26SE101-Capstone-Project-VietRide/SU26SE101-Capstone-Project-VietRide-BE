@@ -162,7 +162,10 @@ describe('ChatService', () => {
       refusalMessage: 'Tôi chỉ hỗ trợ VietRide.',
     });
 
-    const prepared = await service.prepareChat({ message: 'Viết thơ về biển' }, { sub: USER_ID, role: 'PASSENGER' });
+    const prepared = await service.prepareChat(
+      { message: 'Viết thơ về biển' },
+      { sub: USER_ID, role: 'PASSENGER' },
+    );
     const events = [];
     for await (const event of service.streamPrepared(prepared)) {
       events.push(event);
@@ -197,8 +200,12 @@ describe('ChatService', () => {
       makeEnv({ QUERY_REWRITE_ENABLED: true }),
       runtimeConfig,
     );
-    repository.findRecentMessages.mockResolvedValue([makeMessage('ASSISTANT', 'Hoàn tiền mất 3 ngày.')]);
-    queryRewriteService.rewriteIfNeeded.mockResolvedValue('Thời gian hoàn tiền VietRide là bao lâu?');
+    repository.findRecentMessages.mockResolvedValue([
+      makeMessage('ASSISTANT', 'Hoàn tiền mất 3 ngày.'),
+    ]);
+    queryRewriteService.rewriteIfNeeded.mockResolvedValue(
+      'Thời gian hoàn tiền VietRide là bao lâu?',
+    );
 
     await service.prepareChat({ message: 'Vậy mất bao lâu?' }, { sub: USER_ID, role: 'PASSENGER' });
 
@@ -262,7 +269,11 @@ describe('ChatService', () => {
         limit: 10,
       }),
     );
-    expect(rerankService.rerank).toHaveBeenCalledWith('Tôi cần hỗ trợ', [makeChunk()], runtimeConfigSnapshot);
+    expect(rerankService.rerank).toHaveBeenCalledWith(
+      'Tôi cần hỗ trợ',
+      [makeChunk()],
+      runtimeConfigSnapshot,
+    );
   });
 
   it('checks rate limit before retrieval', async () => {
@@ -307,7 +318,10 @@ describe('ChatService', () => {
 
   it('rejects operator-scoped roles without operatorId', async () => {
     await expect(
-      service.prepareChat({ message: 'Quy trình vận hành' }, { sub: USER_ID, role: 'OPERATOR_ADMIN' }),
+      service.prepareChat(
+        { message: 'Quy trình vận hành' },
+        { sub: USER_ID, role: 'OPERATOR_ADMIN' },
+      ),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
@@ -357,10 +371,7 @@ describe('ChatService', () => {
   });
 
   it('passes callerRole for audience filtering in search', async () => {
-    await service.prepareChat(
-      { message: 'Test audience' },
-      { sub: USER_ID, role: 'PASSENGER' },
-    );
+    await service.prepareChat({ message: 'Test audience' }, { sub: USER_ID, role: 'PASSENGER' });
 
     expect(repository.searchChunks).toHaveBeenCalledWith(
       expect.objectContaining({ callerRole: 'PASSENGER' }),
@@ -378,11 +389,9 @@ describe('ChatService', () => {
       events.push(event);
     }
 
-    expect(repository.createAssistantMessage).toHaveBeenCalledWith(
-      CONVERSATION_ID,
-      'Xin chào',
-      [CHUNK_ID],
-    );
+    expect(repository.createAssistantMessage).toHaveBeenCalledWith(CONVERSATION_ID, 'Xin chào', [
+      CHUNK_ID,
+    ]);
     expect(events).toContainEqual(
       expect.objectContaining({
         event: 'done',
@@ -419,11 +428,9 @@ describe('ChatService', () => {
     }
 
     expect(prepared.chunks.map((chunk) => chunk.id)).toEqual([CHUNK_ID]);
-    expect(repository.createAssistantMessage).toHaveBeenCalledWith(
-      CONVERSATION_ID,
-      'Xin chào',
-      [CHUNK_ID],
-    );
+    expect(repository.createAssistantMessage).toHaveBeenCalledWith(CONVERSATION_ID, 'Xin chào', [
+      CHUNK_ID,
+    ]);
   });
 
   it('emits an SSE error event when provider stream fails', async () => {
@@ -452,6 +459,7 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     NODE_ENV: 'test',
     PORT: 3003,
     GATEWAY_URL: 'http://gateway:3000',
+    IDENTITY_INTERNAL_BASE_URL: 'http://identity:5001',
     DATABASE_URL: 'postgresql://user:pass@localhost:5432/vietride_rag',
     REDIS_URL: 'redis://localhost:6379',
     REDIS_HOST: 'localhost',
@@ -494,7 +502,9 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
 
 function makeRuntimeConfigSnapshot(): RuntimeConfigSnapshot {
   return new RuntimeConfigSnapshot(
-    new Map(RAG_RUNTIME_CONFIG_DEFINITIONS.map((definition) => [definition.key, definition.defaultValue])),
+    new Map(
+      RAG_RUNTIME_CONFIG_DEFINITIONS.map((definition) => [definition.key, definition.defaultValue]),
+    ),
   );
 }
 

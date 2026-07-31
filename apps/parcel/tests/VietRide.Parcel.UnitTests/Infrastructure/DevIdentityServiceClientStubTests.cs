@@ -35,4 +35,18 @@ public class DevIdentityServiceClientStubTests
         result.OperatorInfo!.Id.Should().Be(operatorId);
         result.OperatorInfo.Name.Should().Be("Dev Operator");
     }
+
+    [Fact]
+    public async Task GetUsersAsync_ReturnsOneSummaryPerDistinctUser()
+    {
+        var userId = Guid.NewGuid();
+
+        var result = await _sut.GetUsersAsync([userId, userId]);
+
+        result.Kind.Should().Be(IdentityUserBatchOutcomeKind.Success);
+        var user = result.Users.Should().ContainSingle().Which;
+        user.Id.Should().Be(userId);
+        user.DisplayName.Should().Be("Dev Passenger");
+        user.Phone.Should().NotBeNullOrWhiteSpace();
+    }
 }
