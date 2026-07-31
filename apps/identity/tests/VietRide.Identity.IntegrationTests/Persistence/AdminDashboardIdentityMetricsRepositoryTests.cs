@@ -144,6 +144,7 @@ public sealed class AdminDashboardIdentityMetricsRepositoryTests
         DbCommandInterceptor? interceptor = null)
     {
         var builder = new DbContextOptionsBuilder<IdentityDbContext>()
+            .ConfigureWarnings(warnings => warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning))
             .UseNpgsql(dataSource, npgsql =>
                 npgsql.MigrationsHistoryTable("__ef_migrations_history", IdentityDbContext.SchemaName));
         if (interceptor is not null)
