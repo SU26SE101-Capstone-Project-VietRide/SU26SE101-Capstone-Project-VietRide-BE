@@ -125,7 +125,7 @@ public sealed class CreateOperatorCommandHandler : IRequestHandler<CreateOperato
         var setInitialPasswordUrl = _initialPasswordTokens.BuildSetInitialPasswordUrl(code, adminUser.Role);
         await _emailService.SendAccountCreatedLinkAsync(
             adminUser.Email,
-            new AccountCreatedEmailDto(adminUser.Id, adminUser.DisplayName, setInitialPasswordUrl, tokenExpiresAt),
+            new AccountCreatedEmailDto(token.Id, adminUser.Id, adminUser.DisplayName, setInitialPasswordUrl, tokenExpiresAt),
             cancellationToken);
 
         var metadata = JsonSerializer.Serialize(new

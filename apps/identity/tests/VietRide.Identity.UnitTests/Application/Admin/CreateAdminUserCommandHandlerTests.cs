@@ -66,7 +66,9 @@ public sealed class CreateAdminUserCommandHandlerTests
         capturedToken.Code.Should().Be("initial-token");
         capturedToken.ExpiresAt.Should().Be(Now.AddHours(48));
         capturedEmailInfo.Should().NotBeNull();
-        capturedEmailInfo!.UserId.Should().Be(capturedUser.Id);
+        capturedEmailInfo!.OperationId.Should().Be(capturedToken.Id);
+        capturedEmailInfo.OperationId.ToString("D")[14].Should().Be('4');
+        capturedEmailInfo.UserId.Should().Be(capturedUser.Id);
         capturedEmailInfo.DisplayName.Should().Be("Admin User");
         capturedEmailInfo.SetInitialPasswordUrl.Should().EndWith("initial-token");
         capturedEmailInfo.ExpiresAt.Should().Be(Now.AddHours(48));
