@@ -51,6 +51,30 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
     }
 
     [Fact]
+    public async Task Handle_WhenLegacyDueAtIsNull_PublishesCreatedAtPlusFifteenMinutes()
+    {
+        var userId = Guid.NewGuid();
+        var bookingId = Guid.NewGuid();
+        var payment = CreatePendingPayment(userId, bookingId, "legacy-due-at", 250_000);
+        payment.DueAt.Should().BeNull();
+        var outbox = new FakeIntegrationEventOutbox();
+        var handler = CreateHandler(
+            new FakeVnPayClient(isSignatureValid: true),
+            new FakePaymentRepository(payment),
+            new FakePlatformWalletRepository(Money.FromRaw(1_000_000)),
+            outbox);
+
+        await handler.Handle(
+            CreateCommand("legacy-due-at", "00", "25000000"),
+            CancellationToken.None);
+
+        using var payload = JsonDocument.Parse(
+            outbox.Events.Single(evt => evt.EventType == "payment.payment.succeeded").Payload);
+        payload.RootElement.GetProperty("dueAt").GetDateTimeOffset()
+            .Should().Be(payment.CreatedAt.AddMinutes(15));
+    }
+
+    [Fact]
     public async Task Handle_WhenSameIpnReplays_DoesNotDoubleCreditOrEnqueue()
     {
         var userId = Guid.NewGuid();

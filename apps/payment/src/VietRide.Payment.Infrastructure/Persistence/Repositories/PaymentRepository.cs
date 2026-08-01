@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Domain.Entities;
@@ -60,6 +61,19 @@ internal sealed class PaymentRepository : IPaymentRepository
             .OrderByDescending(payment => payment.CreatedAt)
             .ThenByDescending(payment => payment.Id)
             .FirstOrDefaultAsync(cancellationToken);
+
+    public async Task<PaymentEntity?> FindSucceededByReferenceAsync(
+        PaymentReferenceType referenceType,
+        Guid referenceId,
+        CancellationToken cancellationToken)
+        => await _db.Payments
+            .Where(payment => payment.ReferenceType == referenceType
+                && payment.ReferenceId == referenceId
+                && payment.Status == PaymentStatus.SUCCEEDED)
+            .OrderBy(payment => payment.CreatedAt)
+            .ThenBy(payment => payment.Id)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
 
     public async Task<IReadOnlyList<PaymentEntity>> ListLatestSubscriptionPaymentsAsync(
         IReadOnlyCollection<Guid> upgradeAttemptIds,
@@ -150,6 +164,131 @@ internal sealed class PaymentRepository : IPaymentRepository
             .ConfigureAwait(false);
 
         return affected > 0;
+    }
+
+    public async Task<PaymentEntity?> FindSucceededBookingPaymentByAllocationAsync(
+        Guid bookingId,
+        CancellationToken cancellationToken)
+        => (await ListSucceededBookingFundingPaymentsByAllocationAsync(
+            bookingId,
+            cancellationToken).ConfigureAwait(false)).FirstOrDefault();
+
+    public async Task<IReadOnlyList<PaymentEntity>> ListSucceededBookingFundingPaymentsByAllocationAsync(
+        Guid bookingId,
+        CancellationToken cancellationToken)
+    {
+        var containment = JsonSerializer.Serialize(
+            new
+            {
+                allocations = new[]
+                {
+                    new
+                    {
+                        referenceType = "BOOKING",
+                        referenceId = bookingId,
+                    },
+                },
+            },
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        return await _db.Payments
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_payment.payments
+                WHERE status IN (
+                          'SUCCEEDED'::vietride_payment.payment_status,
+                          'REFUNDED'::vietride_payment.payment_status
+                      )
+                  AND method IN (
+                          'WALLET'::vietride_payment.payment_method,
+                          'VNPAY'::vietride_payment.payment_method
+                      )
+                  AND succeeded_at IS NOT NULL
+                  AND context @> CAST({containment} AS jsonb)
+                  AND (
+                      (
+                          reference_type = 'BOOKING'::vietride_payment.payment_reference_type
+                          AND reference_id = {bookingId}
+                      )
+                      OR (
+                          reference_type = 'BOOKING_GROUP'::vietride_payment.payment_reference_type
+                      )
+                  )
+                ORDER BY succeeded_at, created_at, id
+                LIMIT 2
+                """)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<PaymentEntity>> ListBookingPaymentAttemptsByAllocationAsync(
+        Guid bookingId,
+        CancellationToken cancellationToken)
+    {
+        var containment = JsonSerializer.Serialize(
+            new
+            {
+                allocations = new[]
+                {
+                    new
+                    {
+                        referenceType = "BOOKING",
+                        referenceId = bookingId,
+                    },
+                },
+            },
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        return await _db.Payments
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_payment.payments
+                WHERE method IN (
+                          'WALLET'::vietride_payment.payment_method,
+                          'VNPAY'::vietride_payment.payment_method
+                      )
+                  AND context @> CAST({containment} AS jsonb)
+                  AND (
+                      (
+                          reference_type = 'BOOKING'::vietride_payment.payment_reference_type
+                          AND reference_id = {bookingId}
+                      )
+                      OR reference_type = 'BOOKING_GROUP'::vietride_payment.payment_reference_type
+                  )
+                ORDER BY created_at, id
+                """)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<bool> TryMarkRefundedByIdAsync(
+        Guid paymentId,
+        DateTimeOffset refundedAt,
+        CancellationToken cancellationToken)
+    {
+        var affected = await _db.Payments
+            .Where(payment => payment.Id == paymentId && payment.Status == PaymentStatus.SUCCEEDED)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(payment => payment.Status, PaymentStatus.REFUNDED)
+                    .SetProperty(payment => payment.RefundedAt, refundedAt),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return affected == 1;
+    }
+
+    public async Task AcquireRefundReconciliationLockAsync(
+        Guid paymentId,
+        CancellationToken cancellationToken)
+    {
+        var lockKey = $"payment-refund-reconciliation:{paymentId:N}";
+        await _db.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock(hashtext({lockKey})::bigint)",
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectDueAsync(

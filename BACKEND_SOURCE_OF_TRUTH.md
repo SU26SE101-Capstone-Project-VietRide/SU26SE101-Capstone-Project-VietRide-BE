@@ -1,6 +1,6 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.48.0
+> **Phiên bản:** 1.49.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
 > **Cập nhật lần cuối:** 2026-07-31
 > **Capstone:** SU26SE101 — SU26
@@ -2143,7 +2143,7 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `payment.payment.refunded` | Payment | Booking, Parcel | `{ eventId, occurredAt, paymentId, referenceType, referenceId, amount, context }` |
 | `payment.payment.failed` | Payment | Booking, Parcel | `{ paymentId, referenceType, referenceId, reason }` |
 | `payment.payment.expired` | Payment | Booking, Parcel | `{ paymentId, referenceType, referenceId }` |
-| `payment.wallet.credited` | Payment | Booking (mark REFUNDED), Parcel (mark REFUNDED), Notification | `{ userId, amount, referenceType, referenceId }` |
+| `payment.wallet.credited` | Payment | Payment (self-consume to mark the funding Payment REFUNDED), Booking (mark REFUNDED), Parcel (mark REFUNDED), Notification | `{ eventId, occurredAt, userId, amount, referenceType, referenceId, paymentId? }`; `paymentId` is optional for wire compatibility. The current `BOOKING_REFUND` producer populates it for both generic and exact refunds after resolving the correlated funding Payment; it is omitted only for legacy payloads and non-Booking refunds. |
 | `payment.wallet.debited` | Payment | Notification | `{ eventId, occurredAt, userId, walletTransactionId?, amount, balanceAfter?, referenceType, referenceId }`; one fact per committed wallet ledger item |
 | `payment.subscription.payment_succeeded` | Payment | Identity, Payment Invoice pipeline | `{ eventId, occurredAt, paymentId, upgradeAttemptId, operatorId, operatorSubscriptionId, planId, amount, method, planName, billingPeriod, periodFrom, periodTo, succeededAt, buyerSnapshot }`; WALLET and VNPay use one schema |
 | `payment.subscription.payment_failed` | Payment | Identity | `{ eventId, occurredAt, paymentId, upgradeAttemptId, operatorId, operatorSubscriptionId, responseCode }`; đóng session, attempt còn retry được trước dueAt |
@@ -2185,6 +2185,12 @@ it acknowledges only after persisting one unresolved `RefundFailureLog` with `re
 recurring `RefundFailureRetryJob` then owns at most five attempts at the §10.1 ten-minute cadence.
 An exhausted row remains unresolved for Admin handling. Refund failure never rolls back the
 already-committed Trip or Booking cancellation.
+
+An exact `booking.payment_refund.requested` failure is persisted with
+`referenceType=BOOKING_REFUND_PAYMENT` and `referenceId=paymentId`; unlike generic refund rows,
+its authoritative `amount` may be zero when the captured allocation is fully voucher-funded.
+Retry reconstructs the same exact-payment command so the required VietRide-funded voucher
+ledger reversal is not lost.
 
 **Day-22 ownership:** For Day-22 vehicle swap, schedule change, and schedule-day-removal
 cancellation only, Trip emits domain facts while Booking owns passenger-impact state and passenger-
@@ -3269,6 +3275,7 @@ permitted.
 | Hangfire retry | Default Hangfire policy + custom `AutomaticRetry(Attempts = 5)` cho job critical |
 | BullMQ retry | `{ attempts: 5, backoff: { type: 'exponential', delay: 5000 } }` |
 | RabbitMQ consumer | Manual ack; nack → DLQ `vietride.events.dlq` sau N retries; alert Sentry |
+| Shared.Messaging transient consumer retry | Retry is opt-in only when a handler throws `TransientIntegrationEventException`. Publish to the queue-specific durable retry topology with per-message TTL, increment the application-owned `vietride-retry-count` header, and route to the terminal DLQ after the configured retry count is exhausted. Retry publishing uses `mandatory=true` plus publisher confirms; an unroutable or unconfirmed retry is not ACKed as successful. |
 | Outbox publisher | `retry_count` field; sau 10 lần FAILED → leave + Sentry alert (không drop) |
 
 ---
@@ -3673,6 +3680,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.49.0** | 2026-07-31 | BE lead (Vũ) | **MINOR** — Ratifies exact Booking refund correlation and zero-net group reconciliation: `payment.wallet.credited.paymentId?` is Booking-refund-only and backward-compatible, captured-payment retry rows use `BOOKING_REFUND_PAYMENT` with `referenceId=paymentId` and may carry amount zero, and Shared.Messaging transient retries are explicit, durable, TTL/header bounded, mandatory, and publisher-confirmed. No physical schema migration or index. |
 | **1.48.0** | 2026-07-31 | BE lead (Vũ) | **MINOR** — Reopens Day 36/43 and ratifies the payment/history/auth repair contract: Booking VNPay deadlines follow Trip seat-lock expiry, legacy null `DueAt` falls back to 15 minutes, late capture never resurrects an expired Booking and uses idempotent allocation refund, `booking.payment_refund.requested` and `PAYMENT_DEADLINE_PASSED` are registered, internal latest-attempt redirect lookup is strict/no-store, Booking and Passenger history gain fail-open `paymentRedirectUrl`, and Google login returns stored avatar without provider overwrite. No schema migration or index. |
 | **1.47.0** | 2026-07-30 | BE lead (Vũ) | **MINOR** — Closes the Day-32 Parcel recovery crash/race gate with a dedicated persistent `TRANSFER|RETURN` cargo-recovery operation, one active claim per Parcel, frozen refund/target facts, stable Trip idempotency identity, five-minute stale replay, and atomic Parcel-local finalization of state, operation, Outbox and stats. |
 | **1.46.0** | 2026-07-30 | BE lead (Vũ) | **MINOR** — Completes the implementation gate for Days 31/32/35/37/42: public Parcel delivery routing and hash-only rate limiting; encrypted Notification queue payloads; durable vehicle-transfer claim schema/recovery; exact outstanding Parcel refund identity; fail-closed per-Booking disruption snapshots; the approved `DISRUPT_ON_TRIP_DISRUPTED` timeline writer with null event actor; general-versus-Shuttle subscription guards; and exact 29/92-day report acceptance. Corrects legacy cargo formulas, status compatibility, schema/ERD inventory, error contexts, and Notification configuration ownership. |

@@ -286,6 +286,138 @@ public class TripServiceClientTests
         result.Should().BeFalse();
     }
 
+    [Theory]
+    [InlineData("BOOKING_SEAT_UNAVAILABLE", true)]
+    [InlineData("IDEMPOTENCY_REQUEST_PENDING", false)]
+    [InlineData("BOOKING_TRIP_NOT_BOOKABLE", false)]
+    public async Task ConfirmBookedSeatsAsync_Classifies_409_By_Adr0004_Error_Code(
+        string errorCode,
+        bool isDefinitive)
+    {
+        ITripServiceClient client = BuildClient(
+            HttpStatusCode.Conflict,
+            ErrorBody(errorCode, "Trip confirmation conflict."));
+
+        var result = await client.ConfirmBookedSeatsAsync(
+            TripId,
+            LockToken,
+            BookingId,
+            [new PassengerSeatAssignment(PassengerId, "A01")]);
+
+        if (isDefinitive)
+        {
+            result.Should().BeOfType<SeatConfirmationOutcome.DefinitiveSeatUnavailable>();
+        }
+        else
+        {
+            result.Should().BeOfType<SeatConfirmationOutcome.TransientFailure>();
+        }
+    }
+
+    [Theory]
+    [InlineData("BOOKING_SEAT_UNAVAILABLE", true)]
+    [InlineData("IDEMPOTENCY_REQUEST_PENDING", false)]
+    [InlineData("BOOKING_TRIP_NOT_BOOKABLE", false)]
+    public async Task ConfirmBookedRoundTripSeatsAsync_Classifies_409_By_Adr0004_Error_Code(
+        string errorCode,
+        bool isDefinitive)
+    {
+        ITripServiceClient client = BuildClient(
+            HttpStatusCode.Conflict,
+            ErrorBody(errorCode, "Trip round-trip confirmation conflict."));
+        var outbound = new RoundTripBookSeatsLeg(
+            TripId,
+            LockToken,
+            BookingId,
+            [new PassengerSeatAssignment(PassengerId, "A01")]);
+        var @return = new RoundTripBookSeatsLeg(
+            Guid.Parse("88888888-8888-8888-8888-888888888888"),
+            Guid.Parse("99999999-9999-9999-9999-999999999999"),
+            Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            [new PassengerSeatAssignment(PassengerId, "B01")]);
+
+        var result = await client.ConfirmBookedRoundTripSeatsAsync(
+            outbound,
+            @return,
+            operationId: Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"));
+
+        if (isDefinitive)
+        {
+            result.Should().BeOfType<SeatConfirmationOutcome.DefinitiveSeatUnavailable>();
+        }
+        else
+        {
+            result.Should().BeOfType<SeatConfirmationOutcome.TransientFailure>();
+        }
+    }
+
+    [Theory]
+    [InlineData("TRIP_NOT_FOUND", false, true)]
+    [InlineData("UNKNOWN_TRIP_ERROR", false, false)]
+    [InlineData("", true, false)]
+    public async Task ConfirmBookedSeatsAsync_Classifies_404_By_Adr0004_Error_Code(
+        string errorCode,
+        bool malformed,
+        bool isDefinitive)
+    {
+        ITripServiceClient client = BuildClient(
+            HttpStatusCode.NotFound,
+            malformed ? "not-json" : ErrorBody(errorCode, "Trip confirmation failure.", 404));
+
+        var result = await client.ConfirmBookedSeatsAsync(
+            TripId,
+            LockToken,
+            BookingId,
+            [new PassengerSeatAssignment(PassengerId, "A01")]);
+
+        if (isDefinitive)
+        {
+            result.Should().BeOfType<SeatConfirmationOutcome.DefinitiveSeatUnavailable>();
+        }
+        else
+        {
+            result.Should().BeOfType<SeatConfirmationOutcome.TransientFailure>();
+        }
+    }
+
+    [Theory]
+    [InlineData("TRIP_NOT_FOUND", false, true)]
+    [InlineData("UNKNOWN_TRIP_ERROR", false, false)]
+    [InlineData("", true, false)]
+    public async Task ConfirmBookedRoundTripSeatsAsync_Classifies_404_By_Adr0004_Error_Code(
+        string errorCode,
+        bool malformed,
+        bool isDefinitive)
+    {
+        ITripServiceClient client = BuildClient(
+            HttpStatusCode.NotFound,
+            malformed ? "not-json" : ErrorBody(errorCode, "Trip round-trip confirmation failure.", 404));
+        var outbound = new RoundTripBookSeatsLeg(
+            TripId,
+            LockToken,
+            BookingId,
+            [new PassengerSeatAssignment(PassengerId, "A01")]);
+        var @return = new RoundTripBookSeatsLeg(
+            Guid.Parse("88888888-8888-8888-8888-888888888888"),
+            Guid.Parse("99999999-9999-9999-9999-999999999999"),
+            Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            [new PassengerSeatAssignment(PassengerId, "B01")]);
+
+        var result = await client.ConfirmBookedRoundTripSeatsAsync(
+            outbound,
+            @return,
+            operationId: Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"));
+
+        if (isDefinitive)
+        {
+            result.Should().BeOfType<SeatConfirmationOutcome.DefinitiveSeatUnavailable>();
+        }
+        else
+        {
+            result.Should().BeOfType<SeatConfirmationOutcome.TransientFailure>();
+        }
+    }
+
     // -----------------------------------------------------------------------
     // ReleaseSeatsAsync — idempotent, does not throw on 404 / 409
     // -----------------------------------------------------------------------
@@ -381,11 +513,11 @@ public class TripServiceClientTests
         assistantUserId = AssistantUserId,
     }, JsonOptions);
 
-    private static string ErrorBody(string code, string message) =>
+    private static string ErrorBody(string code, string message, int statusCode = 409) =>
         JsonSerializer.Serialize(new
         {
             success = false,
-            statusCode = 409,
+            statusCode,
             error = new { code, message },
         }, JsonOptions);
 

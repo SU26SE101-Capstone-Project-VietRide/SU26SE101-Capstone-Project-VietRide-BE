@@ -15,6 +15,38 @@ namespace VietRide.Payment.UnitTests.Features.Internal.Wallets.RefundToWallet;
 public sealed class RefundToWalletCommandHandlerTests
 {
     [Fact]
+    public void Validator_AllowsOnlyExactCapturedBookingZeroRefunds()
+    {
+        var validator = new RefundToWalletCommandValidator();
+        var userId = Guid.NewGuid();
+        var bookingId = Guid.NewGuid();
+
+        validator.Validate(new RefundToWalletCommand(
+                userId,
+                0,
+                "BOOKING_REFUND",
+                bookingId,
+                "exact-zero",
+                Guid.NewGuid()))
+            .IsValid.Should().BeTrue();
+        validator.Validate(new RefundToWalletCommand(
+                userId,
+                0,
+                "BOOKING_REFUND",
+                bookingId,
+                "generic-zero"))
+            .IsValid.Should().BeFalse();
+        validator.Validate(new RefundToWalletCommand(
+                userId,
+                -1,
+                "BOOKING_REFUND",
+                bookingId,
+                "negative",
+                Guid.NewGuid()))
+            .IsValid.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Handle_WhenRefundIsValid_DebitsPlatformCreditsWalletAndEnqueuesWalletCredited()
     {
         var userId = Guid.NewGuid();
@@ -46,6 +78,7 @@ public sealed class RefundToWalletCommandHandlerTests
         payload.RootElement.GetProperty("amount").GetInt64().Should().Be(175_000);
         payload.RootElement.GetProperty("referenceType").GetString().Should().Be("BOOKING_REFUND");
         payload.RootElement.GetProperty("referenceId").GetGuid().Should().Be(bookingId);
+        payload.RootElement.GetProperty("paymentId").GetGuid().Should().NotBe(Guid.Empty);
     }
 
     [Fact]
@@ -77,6 +110,7 @@ public sealed class RefundToWalletCommandHandlerTests
         using var payload = JsonDocument.Parse(outbox.Events.Single().PayloadJson);
         payload.RootElement.GetProperty("referenceType").GetString().Should().Be("PARCEL_REFUND");
         payload.RootElement.GetProperty("referenceId").GetGuid().Should().Be(parcelId);
+        payload.RootElement.TryGetProperty("paymentId", out _).Should().BeFalse();
     }
 
     [Fact]
@@ -169,6 +203,37 @@ public sealed class RefundToWalletCommandHandlerTests
     }
 
     [Fact]
+    public async Task Handle_WhenGenericBookingRefundIsPartial_ReplayDoesNotTopUpOrEmitSideEffects()
+    {
+        var userId = Guid.NewGuid();
+        var bookingId = Guid.NewGuid();
+        var wallets = new FakeWalletRepository(userId, Money.FromRaw(1_000_000));
+        await wallets.CreditBookingRefundAsync(
+            userId,
+            Money.FromRaw(87_500),
+            bookingId,
+            CancellationToken.None);
+        var platformWallets = new FakePlatformWalletRepository(Money.FromRaw(500_000));
+        var outbox = new FakeIntegrationEventOutbox();
+        var handler = CreateHandler(
+            wallets,
+            platformWallets,
+            outbox,
+            bookingId,
+            PaymentReferenceType.BOOKING);
+
+        var result = await handler.Handle(
+            CreateCommand(userId, bookingId),
+            CancellationToken.None);
+
+        result.WalletTransactionId.Should().Be(wallets.Transactions.Single().Id);
+        wallets.Transactions.Should().ContainSingle()
+            .Which.Amount.Amount.Should().Be(87_500);
+        platformWallets.Transactions.Should().BeEmpty();
+        outbox.Events.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Handle_WhenPlatformWalletWouldUnderflow_ThrowsRegisteredErrorWithoutWalletCreditOrOutbox()
     {
         var userId = Guid.NewGuid();
@@ -197,7 +262,7 @@ public sealed class RefundToWalletCommandHandlerTests
         => new(userId, 175_000, referenceType, bookingId, idempotencyKey);
 
     private static RefundToWalletCommandHandler CreateHandler(
-        IWalletRepository wallets,
+        FakeWalletRepository wallets,
         IPlatformWalletRepository platformWallets,
         IIntegrationEventOutbox outbox,
         Guid referenceId,
@@ -206,7 +271,7 @@ public sealed class RefundToWalletCommandHandlerTests
             wallets,
             platformWallets,
             outbox,
-            new FakePaymentRepository(referenceId, referenceType),
+            new FakePaymentRepository(referenceId, referenceType, userId: wallets.UserId),
             new NoOpRevenueLedgerWriter());
 
     private sealed class FakeWalletRepository : IWalletRepository
@@ -221,6 +286,7 @@ public sealed class RefundToWalletCommandHandlerTests
         }
 
         public Money Balance { get; private set; }
+        public Guid UserId => _userId;
         public IReadOnlyList<WalletTransaction> Transactions => _transactions;
         public List<(WalletTransactionRef ReferenceType, Guid ReferenceId)> AcquiredReferenceLocks { get; } = [];
 
@@ -272,12 +338,43 @@ public sealed class RefundToWalletCommandHandlerTests
                     && transaction.ReferenceId == referenceId)
                 .Sum(transaction => transaction.Amount.Amount));
 
+        public Task<IReadOnlyList<WalletTransaction>> ListRefundTransactionsByReferenceAsync(
+            WalletTransactionRef referenceType,
+            Guid referenceId,
+            CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<WalletTransaction>>(
+                _transactions
+                    .Where(transaction => transaction.ReferenceType == referenceType
+                        && transaction.ReferenceId == referenceId)
+                    .ToArray());
+
         public Task<WalletTransaction> CreditBookingRefundAsync(
             Guid userId,
             Money amount,
             Guid bookingId,
             CancellationToken cancellationToken)
             => CreditRefundAsync(userId, amount, WalletTransactionRef.BOOKING_REFUND, bookingId, cancellationToken);
+
+        public Task<WalletTransaction> CreditBookingRefundAsync(
+            Guid userId,
+            Money amount,
+            Guid bookingId,
+            Guid transactionId,
+            CancellationToken cancellationToken)
+        {
+            userId.Should().Be(_userId);
+            var before = Balance;
+            Balance += amount;
+            var transaction = WalletTransaction.CreateBookingRefundCredit(
+                transactionId,
+                userId,
+                bookingId,
+                amount,
+                before,
+                Balance);
+            _transactions.Add(transaction);
+            return Task.FromResult(transaction);
+        }
 
         public Task<WalletTransaction> CreditRefundAsync(
             Guid userId,
@@ -383,14 +480,22 @@ public sealed class RefundToWalletCommandHandlerTests
         public FakePaymentRepository(
             Guid referenceId,
             PaymentReferenceType referenceType,
-            long? parcelAdditionalAmount = null)
+            long? parcelAdditionalAmount = null,
+            Guid? userId = null)
         {
             var primaryAmount = 175_000 - (parcelAdditionalAmount ?? 0);
             var operatorId = Guid.NewGuid();
             var tripId = Guid.NewGuid();
+            var paymentUserId = userId ?? Guid.NewGuid();
             var payments = new List<VietRide.Payment.Domain.Entities.Payment>
             {
-                CreatePayment(referenceId, referenceType, primaryAmount, operatorId, tripId),
+                CreatePayment(
+                    referenceId,
+                    referenceType,
+                    primaryAmount,
+                    paymentUserId,
+                    operatorId,
+                    tripId),
             };
             if (parcelAdditionalAmount.HasValue)
             {
@@ -398,6 +503,7 @@ public sealed class RefundToWalletCommandHandlerTests
                     referenceId,
                     PaymentReferenceType.PARCEL_ADDITIONAL,
                     parcelAdditionalAmount.Value,
+                    paymentUserId,
                     operatorId,
                     tripId));
             }
@@ -409,13 +515,14 @@ public sealed class RefundToWalletCommandHandlerTests
             Guid referenceId,
             PaymentReferenceType referenceType,
             long amount,
+            Guid userId,
             Guid operatorId,
             Guid tripId)
         {
             var payment = VietRide.Payment.Domain.Entities.Payment.CreateSucceededWalletCharge(
                 referenceType,
                 referenceId,
-                Guid.NewGuid(),
+                userId,
                 Money.FromRaw(amount),
                 DateTimeOffset.UtcNow.AddDays(-1));
             payment.AttachContext(PaymentContextCodec.ValidateAndSerialize(
@@ -443,6 +550,20 @@ public sealed class RefundToWalletCommandHandlerTests
             => Task.FromResult<VietRide.Payment.Domain.Entities.Payment?>(
                 _payments.SingleOrDefault(payment =>
                     payment.ReferenceType == referenceType && payment.ReferenceId == referenceId));
+
+        public Task<VietRide.Payment.Domain.Entities.Payment?> FindSucceededBookingPaymentByAllocationAsync(
+            Guid bookingId,
+            CancellationToken cancellationToken)
+            => Task.FromResult<VietRide.Payment.Domain.Entities.Payment?>(
+                _payments.SingleOrDefault(payment =>
+                    payment.ReferenceType == PaymentReferenceType.BOOKING
+                    && payment.ReferenceId == bookingId));
+
+        public Task<IReadOnlyList<VietRide.Payment.Domain.Entities.Payment>> ListBookingPaymentAttemptsByAllocationAsync(
+            Guid bookingId,
+            CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<VietRide.Payment.Domain.Entities.Payment>>(
+                _payments.Where(payment => payment.ReferenceId == bookingId).ToArray());
 
         public IQueryable<VietRide.Payment.Domain.Entities.Payment> Query()
             => _payments.AsQueryable();

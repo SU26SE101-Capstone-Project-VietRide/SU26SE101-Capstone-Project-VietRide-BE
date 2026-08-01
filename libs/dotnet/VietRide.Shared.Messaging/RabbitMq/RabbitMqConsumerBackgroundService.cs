@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,8 +20,9 @@ namespace VietRide.Shared.Messaging.RabbitMq;
 /// <remarks>
 /// Delivery is at-least-once: the broker can re-deliver a message after process
 /// failure before acknowledgement, so registered handlers MUST be idempotent.
-/// Handler exceptions reject the message with <c>BasicNack(requeue: false)</c>
-/// to avoid infinite requeue loops and allow broker dead-letter handling.
+/// An explicitly configured <see cref="TransientIntegrationEventException"/> is copied to a
+/// durable TTL retry queue and acknowledged only after publisher confirmation. Exhausted
+/// transient failures and all other exceptions reject without requeue for terminal DLQ handling.
 /// </remarks>
 public sealed class RabbitMqConsumerBackgroundService<TEvent> : BackgroundService
     where TEvent : IIntegrationEvent
@@ -28,6 +30,8 @@ public sealed class RabbitMqConsumerBackgroundService<TEvent> : BackgroundServic
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private const int ConnectRetryDelaySeconds = 5;
+    private const string RetryCountHeader = "vietride-retry-count";
+    private static readonly TimeSpan RetryPublishConfirmTimeout = TimeSpan.FromSeconds(5);
 
     private readonly IRabbitMqConnectionFactory _connections;
     private readonly RabbitMqOptions _rabbitMqOptions;
@@ -127,6 +131,7 @@ public sealed class RabbitMqConsumerBackgroundService<TEvent> : BackgroundServic
         };
 
         DeclareSourceQueueWithDeadLetterArguments(queueArguments);
+        DeclareTransientRetryTopology();
 
         foreach (var bindingKey in _consumerOptions.BindingKeys)
         {
@@ -203,6 +208,41 @@ public sealed class RabbitMqConsumerBackgroundService<TEvent> : BackgroundServic
             arguments: queueArguments);
     }
 
+    private void DeclareTransientRetryTopology()
+    {
+        if (_consumerOptions.TransientRetryCount == 0)
+        {
+            return;
+        }
+
+        var channel = _channel!;
+        channel.ExchangeDeclare(
+            exchange: RetryExchangeName,
+            type: ExchangeType.Direct,
+            durable: true,
+            autoDelete: false);
+
+        var retryQueueArguments = new Dictionary<string, object>
+        {
+            ["x-dead-letter-exchange"] = _rabbitMqOptions.ExchangeName,
+            ["x-dead-letter-routing-key"] = RetryReturnRoutingKey,
+        };
+        channel.QueueDeclare(
+            queue: RetryQueueName,
+            durable: true,
+            exclusive: false,
+            autoDelete: false,
+            arguments: retryQueueArguments);
+        channel.QueueBind(
+            queue: RetryQueueName,
+            exchange: RetryExchangeName,
+            routingKey: RetryPublishRoutingKey);
+        channel.QueueBind(
+            queue: _consumerOptions.QueueName,
+            exchange: _rabbitMqOptions.ExchangeName,
+            routingKey: RetryReturnRoutingKey);
+    }
+
     private static bool IsPreconditionFailed(OperationInterruptedException ex)
         => ex.ShutdownReason?.ReplyCode == 406;
 
@@ -212,6 +252,8 @@ public sealed class RabbitMqConsumerBackgroundService<TEvent> : BackgroundServic
     /// </summary>
     public async Task ProcessDeliveryAsync(IModel channel, BasicDeliverEventArgs args, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         try
         {
             var integrationEvent = JsonSerializer.Deserialize<TEvent>(args.Body.Span, JsonOptions)
@@ -246,6 +288,11 @@ public sealed class RabbitMqConsumerBackgroundService<TEvent> : BackgroundServic
                 args.DeliveryTag,
                 inboxResult);
         }
+        catch (TransientIntegrationEventException ex)
+            when (_consumerOptions.TransientRetryCount > 0)
+        {
+            HandleTransientFailure(channel, args, ex, cancellationToken);
+        }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             channel.BasicNack(args.DeliveryTag, multiple: false, requeue: false);
@@ -257,6 +304,160 @@ public sealed class RabbitMqConsumerBackgroundService<TEvent> : BackgroundServic
                 args.DeliveryTag);
         }
     }
+
+    private void HandleTransientFailure(
+        IModel channel,
+        BasicDeliverEventArgs args,
+        TransientIntegrationEventException exception,
+        CancellationToken cancellationToken)
+    {
+        var retryCount = GetTransientRetryCount(args.BasicProperties);
+        if (retryCount >= _consumerOptions.TransientRetryCount)
+        {
+            channel.BasicNack(args.DeliveryTag, multiple: false, requeue: false);
+            _logger.LogWarning(
+                exception,
+                "RabbitMQ transient delivery exhausted {RetryCount} delayed retries and was dead-lettered: queue={Queue} routingKey={RoutingKey} tag={DeliveryTag}.",
+                retryCount,
+                _consumerOptions.QueueName,
+                args.RoutingKey,
+                args.DeliveryTag);
+            return;
+        }
+
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var retryPublisherChannel = _connections.GetOrCreate().CreateModel();
+            var retryProperties = CloneForPersistentRetry(
+                retryPublisherChannel,
+                args.BasicProperties,
+                retryCount + 1,
+                _consumerOptions.TransientRetryDelay);
+            var retryWasReturned = 0;
+            EventHandler<BasicReturnEventArgs> returnedHandler = (_, returned) =>
+            {
+                if (string.Equals(
+                    returned.BasicProperties.MessageId,
+                    retryProperties.MessageId,
+                    StringComparison.Ordinal))
+                {
+                    Interlocked.Exchange(ref retryWasReturned, 1);
+                }
+            };
+
+            retryPublisherChannel.BasicReturn += returnedHandler;
+            try
+            {
+                retryPublisherChannel.ConfirmSelect();
+                retryPublisherChannel.BasicPublish(
+                    exchange: RetryExchangeName,
+                    routingKey: RetryPublishRoutingKey,
+                    mandatory: true,
+                    basicProperties: retryProperties,
+                    body: args.Body);
+                retryPublisherChannel.WaitForConfirmsOrDie(RetryPublishConfirmTimeout);
+                if (Volatile.Read(ref retryWasReturned) != 0)
+                {
+                    throw new InvalidOperationException(
+                        $"RabbitMQ returned delayed-retry message {retryProperties.MessageId} as unroutable.");
+                }
+
+                channel.BasicAck(args.DeliveryTag, multiple: false);
+                _logger.LogWarning(
+                    exception,
+                    "RabbitMQ transient delivery scheduled for delayed retry {NextRetry}/{MaxRetries}: queue={Queue} routingKey={RoutingKey} tag={DeliveryTag} delay={RetryDelay}.",
+                    retryCount + 1,
+                    _consumerOptions.TransientRetryCount,
+                    _consumerOptions.QueueName,
+                    args.RoutingKey,
+                    args.DeliveryTag,
+                    _consumerOptions.TransientRetryDelay);
+            }
+            finally
+            {
+                retryPublisherChannel.BasicReturn -= returnedHandler;
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception publishException)
+        {
+            channel.BasicNack(args.DeliveryTag, multiple: false, requeue: true);
+            _logger.LogError(
+                publishException,
+                "RabbitMQ delayed-retry publish was not safely routed and confirmed; original delivery was requeued: queue={Queue} routingKey={RoutingKey} tag={DeliveryTag}.",
+                _consumerOptions.QueueName,
+                args.RoutingKey,
+                args.DeliveryTag);
+        }
+    }
+
+    private long GetTransientRetryCount(IBasicProperties basicProperties)
+    {
+        if (basicProperties.Headers is null
+            || !basicProperties.Headers.TryGetValue(RetryCountHeader, out var rawRetryCount))
+        {
+            return 0;
+        }
+
+        var retryCount = rawRetryCount switch
+        {
+            int value when value >= 0 => value,
+            long value when value >= 0 => value,
+            _ => -1,
+        };
+        if (retryCount >= 0)
+        {
+            return retryCount;
+        }
+
+        _logger.LogWarning(
+            "RabbitMQ retry-count header was malformed for queue {Queue}; exhausting the delivery to prevent an unbounded retry loop.",
+            _consumerOptions.QueueName);
+        return long.MaxValue;
+    }
+
+    private static IBasicProperties CloneForPersistentRetry(
+        IModel channel,
+        IBasicProperties source,
+        long nextRetryCount,
+        TimeSpan retryDelay)
+    {
+        var clone = channel.CreateBasicProperties();
+        clone.AppId = source.AppId;
+        clone.ClusterId = source.ClusterId;
+        clone.ContentEncoding = source.ContentEncoding;
+        clone.ContentType = source.ContentType;
+        clone.CorrelationId = source.CorrelationId;
+        clone.DeliveryMode = 2;
+        clone.Expiration = ((long)Math.Ceiling(retryDelay.TotalMilliseconds))
+            .ToString(CultureInfo.InvariantCulture);
+        clone.Headers = source.Headers?
+            .Where(header => !IsBrokerDeathHeader(header.Key))
+            .ToDictionary(header => header.Key, header => header.Value)
+            ?? new Dictionary<string, object>();
+        clone.Headers[RetryCountHeader] = nextRetryCount;
+        clone.MessageId = source.MessageId;
+        clone.Priority = source.Priority;
+        clone.ReplyTo = source.ReplyTo;
+        clone.Timestamp = source.Timestamp;
+        clone.Type = source.Type;
+        clone.UserId = source.UserId;
+        return clone;
+    }
+
+    private static bool IsBrokerDeathHeader(string headerName)
+        => string.Equals(headerName, "x-death", StringComparison.OrdinalIgnoreCase)
+            || headerName.StartsWith("x-first-death-", StringComparison.OrdinalIgnoreCase)
+            || headerName.StartsWith("x-last-death-", StringComparison.OrdinalIgnoreCase);
+
+    private string RetryExchangeName => $"{_consumerOptions.QueueName}.retry.dlx";
+    private string RetryQueueName => $"{_consumerOptions.QueueName}.retry";
+    private string RetryPublishRoutingKey => $"{_consumerOptions.QueueName}.retry";
+    private string RetryReturnRoutingKey => $"__retry__.{_consumerOptions.QueueName}";
 
     private static Guid ResolvePayloadEventId(
         ReadOnlyMemory<byte> payload,

@@ -6,4 +6,7 @@ public sealed record ConfirmBookingOnPaymentCommand(
     Guid PaymentId,
     string ReferenceType,
     Guid ReferenceId,
-    long Amount) : IRequest<bool>;
+    long Amount,
+    string Method = "WALLET",
+    DateTimeOffset? PaidAt = null,
+    DateTimeOffset? DueAt = null) : IRequest<bool>;

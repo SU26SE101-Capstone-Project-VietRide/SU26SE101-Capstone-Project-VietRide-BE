@@ -497,9 +497,9 @@ CREATE TABLE refund_failure_logs (
     trigger_event_type VARCHAR(100) NOT NULL,
     failure_reason TEXT NOT NULL,
     user_id UUID NULL,                -- logical FK; retry payload
-    amount BIGINT NULL,               -- retry payload, VND
-    reference_type VARCHAR(50) NULL,  -- retry payload: BOOKING_REFUND / PARCEL_REFUND
-    reference_id UUID NULL,           -- retry payload bookingId / parcelId
+    amount BIGINT NULL,               -- retry payload, VND; zero only for BOOKING_REFUND_PAYMENT
+    reference_type VARCHAR(50) NULL,  -- BOOKING_REFUND / PARCEL_REFUND / BOOKING_REFUND_PAYMENT
+    reference_id UUID NULL,           -- bookingId / parcelId; paymentId for BOOKING_REFUND_PAYMENT
     retry_count INT NOT NULL DEFAULT 0,
     last_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     resolved_at TIMESTAMPTZ NULL,

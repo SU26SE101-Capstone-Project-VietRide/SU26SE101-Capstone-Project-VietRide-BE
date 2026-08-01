@@ -170,6 +170,8 @@ public static class InfrastructureServiceCollectionExtensions
             {
                 options.QueueName = "booking.payment-succeeded";
                 options.BindingKeys = [PaymentSucceededIntegrationEvent.EventType];
+                options.TransientRetryCount = 5;
+                options.TransientRetryDelay = TimeSpan.FromSeconds(10);
             });
             services.AddVietRideEventConsumer<StopDisabledIntegrationEvent, StopDisabledIntegrationEventHandler>(options =>
             {

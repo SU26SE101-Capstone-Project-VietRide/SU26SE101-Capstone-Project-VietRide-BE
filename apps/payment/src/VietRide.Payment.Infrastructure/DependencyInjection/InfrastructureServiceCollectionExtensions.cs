@@ -165,6 +165,12 @@ public static class InfrastructureServiceCollectionExtensions
                 options.BindingKeys = [BookingCancelledIntegrationEvent.EventType];
             });
 
+            services.AddVietRideEventConsumer<BookingPaymentRefundRequestedIntegrationEvent, BookingPaymentRefundRequestedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "payment.booking-payment-refund-requested";
+                options.BindingKeys = [BookingPaymentRefundRequestedIntegrationEvent.EventType];
+            });
+
             services.AddVietRideEventConsumer<WalletCreditedConsumerEvent, MarkPaymentRefundedCommandHandler>(options =>
             {
                 options.QueueName = "payment.payment-refunded";

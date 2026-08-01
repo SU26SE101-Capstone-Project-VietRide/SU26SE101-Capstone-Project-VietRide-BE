@@ -109,6 +109,20 @@ internal sealed class BookingRepository : IBookingRepository
             $"SELECT pg_advisory_xact_lock(hashtextextended({sourceEventId.ToString("N")}, 0))",
             ct);
 
+    public async Task AcquirePaymentTransitionLocksAsync(
+        IReadOnlyCollection<Guid> bookingIds,
+        CancellationToken ct = default)
+    {
+        foreach (var bookingId in bookingIds.Distinct().Order())
+        {
+            var lockKey = $"booking-payment-transition:{bookingId:N}";
+            await _db.Database.ExecuteSqlInterpolatedAsync(
+                    $"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))",
+                    ct)
+                .ConfigureAwait(false);
+        }
+    }
+
     public async Task<IReadOnlyList<BookingEntity>> GetScheduleChangeBookingsForUpdateAsync(
         Guid tripId,
         Guid operatorId,
@@ -892,6 +906,50 @@ internal sealed class BookingRepository : IBookingRepository
         }
 
         return updated == 1;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> TryConfirmPendingPaymentGroupAsync(
+        IReadOnlyCollection<Guid> bookingIds,
+        DateTimeOffset confirmedAt,
+        CancellationToken ct = default)
+    {
+        var ids = bookingIds.Distinct().Order().ToArray();
+        if (ids.Length == 0)
+        {
+            return false;
+        }
+
+        var pendingStatus = BookingStatus.PENDING_PAYMENT.ToString();
+        var confirmedStatus = BookingStatus.CONFIRMED.ToString();
+        var updated = await _db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE vietride_booking.bookings
+            SET status = CAST({confirmedStatus} AS public.booking_status),
+                confirmed_at = {confirmedAt},
+                updated_at = {confirmedAt}
+            WHERE id = ANY ({ids})
+              AND status = CAST({pendingStatus} AS public.booking_status)
+              AND (
+                  SELECT COUNT(*)
+                  FROM vietride_booking.bookings candidate
+                  WHERE candidate.id = ANY ({ids})
+                    AND candidate.status = CAST({pendingStatus} AS public.booking_status)
+              ) = {ids.Length}
+            """, ct).ConfigureAwait(false);
+        if (updated != ids.Length)
+        {
+            return false;
+        }
+
+        await _db.Tickets
+            .Where(ticket => ids.Contains(ticket.BookingId)
+                && ticket.Status == TicketStatus.PENDING_PAYMENT)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(ticket => ticket.Status, TicketStatus.ISSUED)
+                .SetProperty(ticket => ticket.IssuedAt, confirmedAt)
+                .SetProperty(ticket => ticket.UpdatedAt, confirmedAt), ct)
+            .ConfigureAwait(false);
+        return true;
     }
 
     /// <inheritdoc/>

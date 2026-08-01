@@ -130,4 +130,25 @@ public sealed class WalletTransaction : BaseEntity<Guid>
             amount,
             balanceBefore,
             balanceAfter);
+
+    public static WalletTransaction CreateBookingRefundCredit(
+        Guid transactionId,
+        Guid userId,
+        Guid bookingId,
+        Money amount,
+        Money balanceBefore,
+        Money balanceAfter)
+    {
+        if (transactionId == Guid.Empty)
+            throw new ArgumentException("Transaction id is required.", nameof(transactionId));
+
+        var transaction = CreateBookingRefundCredit(
+            userId,
+            bookingId,
+            amount,
+            balanceBefore,
+            balanceAfter);
+        transaction.Id = transactionId;
+        return transaction;
+    }
 }

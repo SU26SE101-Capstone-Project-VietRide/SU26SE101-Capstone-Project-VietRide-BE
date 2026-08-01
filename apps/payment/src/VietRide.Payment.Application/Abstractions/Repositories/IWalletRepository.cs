@@ -56,11 +56,29 @@ public interface IWalletRepository : IRepository<Wallet, Guid>
         CancellationToken cancellationToken)
         => throw new NotSupportedException("This wallet repository does not support wallet transaction reference lookups.");
 
+    Task<WalletTransaction?> FindTransactionByIdAsync(
+        Guid transactionId,
+        CancellationToken cancellationToken)
+        => Task.FromResult<WalletTransaction?>(null);
+
     Task<long> GetTotalRefundedByReferenceAsync(
         WalletTransactionRef referenceType,
         Guid referenceId,
         CancellationToken cancellationToken)
         => Task.FromResult(0L);
+
+    Task<long> GetTotalRefundedByReferenceAndUserAsync(
+        WalletTransactionRef referenceType,
+        Guid referenceId,
+        Guid userId,
+        CancellationToken cancellationToken)
+        => GetTotalRefundedByReferenceAsync(referenceType, referenceId, cancellationToken);
+
+    Task<IReadOnlyList<WalletTransaction>> ListRefundTransactionsByReferenceAsync(
+        WalletTransactionRef referenceType,
+        Guid referenceId,
+        CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyList<WalletTransaction>>([]);
 
     Task<WalletTransaction> CreditRefundAsync(
         Guid userId,
@@ -76,4 +94,12 @@ public interface IWalletRepository : IRepository<Wallet, Guid>
         Guid bookingId,
         CancellationToken cancellationToken)
         => CreditRefundAsync(userId, amount, WalletTransactionRef.BOOKING_REFUND, bookingId, cancellationToken);
+
+    Task<WalletTransaction> CreditBookingRefundAsync(
+        Guid userId,
+        Money amount,
+        Guid bookingId,
+        Guid transactionId,
+        CancellationToken cancellationToken)
+        => CreditBookingRefundAsync(userId, amount, bookingId, cancellationToken);
 }

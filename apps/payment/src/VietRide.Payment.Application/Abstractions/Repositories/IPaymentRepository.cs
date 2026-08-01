@@ -21,6 +21,12 @@ public interface IPaymentRepository : IRepository<PaymentEntity, Guid>
         CancellationToken cancellationToken)
         => FindByReferenceAsync(referenceType, referenceId, cancellationToken);
 
+    Task<PaymentEntity?> FindSucceededByReferenceAsync(
+        PaymentReferenceType referenceType,
+        Guid referenceId,
+        CancellationToken cancellationToken)
+        => FindByReferenceAsync(referenceType, referenceId, cancellationToken);
+
     Task<IReadOnlyList<PaymentEntity>> ListLatestSubscriptionPaymentsAsync(
         IReadOnlyCollection<Guid> upgradeAttemptIds,
         CancellationToken cancellationToken)
@@ -69,4 +75,35 @@ public interface IPaymentRepository : IRepository<PaymentEntity, Guid>
         Guid referenceId,
         DateTimeOffset refundedAt,
         CancellationToken cancellationToken);
+
+    Task<PaymentEntity?> FindSucceededBookingPaymentByAllocationAsync(
+        Guid bookingId,
+        CancellationToken cancellationToken)
+        => Task.FromResult<PaymentEntity?>(null);
+
+    async Task<IReadOnlyList<PaymentEntity>> ListSucceededBookingFundingPaymentsByAllocationAsync(
+        Guid bookingId,
+        CancellationToken cancellationToken)
+    {
+        var payment = await FindSucceededBookingPaymentByAllocationAsync(
+            bookingId,
+            cancellationToken).ConfigureAwait(false);
+        return payment is null ? [] : [payment];
+    }
+
+    Task<IReadOnlyList<PaymentEntity>> ListBookingPaymentAttemptsByAllocationAsync(
+        Guid bookingId,
+        CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyList<PaymentEntity>>([]);
+
+    Task<bool> TryMarkRefundedByIdAsync(
+        Guid paymentId,
+        DateTimeOffset refundedAt,
+        CancellationToken cancellationToken)
+        => Task.FromResult(false);
+
+    Task AcquireRefundReconciliationLockAsync(
+        Guid paymentId,
+        CancellationToken cancellationToken)
+        => Task.CompletedTask;
 }

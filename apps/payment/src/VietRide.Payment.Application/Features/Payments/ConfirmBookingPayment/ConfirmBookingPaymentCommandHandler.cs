@@ -164,8 +164,15 @@ public sealed class ConfirmBookingPaymentCommandHandler
             }
             else
             {
-                await EnqueuePaymentSucceededAsync(payment, cancellationToken).ConfigureAwait(false);
-                await EnqueueLateParcelRefundIfNeededAsync(payment, cancellationToken).ConfigureAwait(false);
+                var effectiveDueAt = payment.DueAt ?? payment.CreatedAt.AddMinutes(15);
+                await EnqueuePaymentSucceededAsync(
+                    payment,
+                    effectiveDueAt,
+                    cancellationToken).ConfigureAwait(false);
+                await EnqueueLateParcelRefundIfNeededAsync(
+                    payment,
+                    effectiveDueAt,
+                    cancellationToken).ConfigureAwait(false);
             }
 
             _logger.LogInformation(
@@ -216,6 +223,7 @@ public sealed class ConfirmBookingPaymentCommandHandler
 
     private async Task EnqueuePaymentSucceededAsync(
         VietRide.Payment.Domain.Entities.Payment payment,
+        DateTimeOffset effectiveDueAt,
         CancellationToken cancellationToken)
     {
         var context = PaymentContextCodec.DeserializeTrusted(payment.Context);
@@ -227,7 +235,7 @@ public sealed class ConfirmBookingPaymentCommandHandler
             payment.Method,
             context,
             payment.SucceededAt!.Value,
-            payment.DueAt);
+            effectiveDueAt);
         await _revenueLedger.RecordPaymentSucceededAsync(
             evt.EventId,
             context,
@@ -252,12 +260,12 @@ public sealed class ConfirmBookingPaymentCommandHandler
 
     private async Task EnqueueLateParcelRefundIfNeededAsync(
         VietRide.Payment.Domain.Entities.Payment payment,
+        DateTimeOffset effectiveDueAt,
         CancellationToken cancellationToken)
     {
         if (payment.ReferenceType is not (PaymentReferenceType.PARCEL or PaymentReferenceType.PARCEL_ADDITIONAL)
-            || !payment.DueAt.HasValue
             || !payment.SucceededAt.HasValue
-            || payment.SucceededAt.Value < payment.DueAt.Value
+            || payment.SucceededAt.Value < effectiveDueAt
             || !payment.UserId.HasValue)
         {
             return;

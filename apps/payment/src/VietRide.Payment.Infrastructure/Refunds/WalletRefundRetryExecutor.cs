@@ -64,12 +64,31 @@ internal sealed class WalletRefundRetryExecutor : IRefundRetryExecutor
             return false;
         }
 
-        command = new RefundToWalletCommand(
-            failure.UserId.Value,
-            failure.Amount.Value,
-            failure.ReferenceType,
-            failure.ReferenceId.Value,
-            $"refund-retry-{failure.Id:N}");
+        if (failure.ReferenceType == "BOOKING_REFUND_PAYMENT")
+        {
+            if (!failure.BookingId.HasValue)
+            {
+                invalidReason = "Captured-payment refund failure log is missing its Booking allocation.";
+                return false;
+            }
+
+            command = new RefundToWalletCommand(
+                failure.UserId.Value,
+                failure.Amount.Value,
+                "BOOKING_REFUND",
+                failure.BookingId.Value,
+                $"refund-retry-{failure.Id:N}",
+                failure.ReferenceId.Value);
+        }
+        else
+        {
+            command = new RefundToWalletCommand(
+                failure.UserId.Value,
+                failure.Amount.Value,
+                failure.ReferenceType,
+                failure.ReferenceId.Value,
+                $"refund-retry-{failure.Id:N}");
+        }
         invalidReason = string.Empty;
         return true;
     }

@@ -171,6 +171,11 @@ Trước đây flow check `OperatorBalance >= refundTotal` + `OPERATOR_INSUFFICI
 | `uq_outbox_dlq_event_id` | `event_id` | unique | One terminal row per event |
 | `idx_outbox_dlq_terminal_event_id` | `(terminal_at, event_id)` | B-tree | Composite cursor review theo contract |
 
+`refund_failure_logs.reference_type=BOOKING_REFUND_PAYMENT` phân biệt retry exact captured-payment:
+`reference_id` là `payment_id` (không phải `booking_id`) và `amount=0` hợp lệ cho allocation
+fully voucher-funded. Các discriminator generic `BOOKING_REFUND` / `PARCEL_REFUND` vẫn yêu cầu
+amount dương. Đây là contract logic trên schema hiện có, không thêm migration/index.
+
 ## Cross-service References (Logical FK)
 
 | Column | References | Enforcement |
