@@ -33,6 +33,11 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
         CancellationToken ct = default)
         => throw new NotSupportedException("Passenger booking history is not implemented by this repository.");
 
+    Task<IReadOnlyDictionary<Guid, long>> GetBookingGroupNetTotalsAsync(
+        IReadOnlyCollection<Guid> bookingGroupIds,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Booking group net-total lookup is not implemented by this repository.");
+
     Task<IReadOnlyList<PlatformBookingReportItem>> GetPlatformBookingMetricsAsync(
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc,

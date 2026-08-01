@@ -257,6 +257,7 @@ public static class InfrastructureServiceCollectionExtensions
         if (UsePaymentDevStub(configuration))
         {
             services.AddScoped<IPaymentServiceClient, DevPaymentServiceClient>();
+            services.AddScoped<IPaymentRedirectLookupClient, DevPaymentRedirectLookupClient>();
         }
         else
         {
@@ -274,6 +275,19 @@ public static class InfrastructureServiceCollectionExtensions
                 .AddHttpMessageHandler<InternalJwtDelegatingHandler>()
                 .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
                 .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
+
+            services
+                .AddHttpClient<IPaymentRedirectLookupClient, PaymentRedirectLookupClient>(client =>
+                {
+                    var baseUrl = ResolvePaymentBaseUrl(configuration);
+                    client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
+                    client.Timeout = TimeSpan.FromSeconds(5);
+                    client.DefaultRequestHeaders.Accept.Clear();
+                    client.DefaultRequestHeaders.Accept.Add(
+                        new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+                })
+                .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
+                .AddHttpMessageHandler<InternalJwtDelegatingHandler>();
         }
 
         return services;

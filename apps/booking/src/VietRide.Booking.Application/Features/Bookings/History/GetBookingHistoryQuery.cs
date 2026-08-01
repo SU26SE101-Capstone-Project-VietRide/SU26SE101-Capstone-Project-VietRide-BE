@@ -1,4 +1,4 @@
-using MediatR;
+using VietRide.Shared.Application.Cqrs;
 using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Booking.Application.Features.Bookings.History;
@@ -9,4 +9,4 @@ public sealed record GetBookingHistoryQuery(
     string? From,
     string? To,
     int Page,
-    int PageSize) : IRequest<PagedResult<BookingHistoryItemDto>>;
+    int PageSize) : IQuery<PagedResult<BookingHistoryItemDto>>;

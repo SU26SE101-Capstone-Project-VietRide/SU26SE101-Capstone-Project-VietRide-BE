@@ -100,6 +100,30 @@ internal sealed class BookingRepository : IBookingRepository
         return PagedResult<BookingEntity>.Create(items, page, pageSize, totalItems);
     }
 
+    public async Task<IReadOnlyDictionary<Guid, long>> GetBookingGroupNetTotalsAsync(
+        IReadOnlyCollection<Guid> bookingGroupIds,
+        CancellationToken ct = default)
+    {
+        if (bookingGroupIds.Count == 0)
+            return new Dictionary<Guid, long>();
+
+        var distinctGroupIds = bookingGroupIds.Distinct().ToArray();
+        var rows = await _db.Bookings
+            .AsNoTracking()
+            .Where(booking => booking.BookingGroupId.HasValue
+                && distinctGroupIds.Contains(booking.BookingGroupId.Value))
+            .Select(booking => new
+            {
+                BookingGroupId = booking.BookingGroupId!.Value,
+                TotalAmount = booking.TotalAmount.Amount,
+            })
+            .ToListAsync(ct);
+
+        return rows
+            .GroupBy(row => row.BookingGroupId)
+            .ToDictionary(group => group.Key, group => group.Sum(row => row.TotalAmount));
+    }
+
     // -----------------------------------------------------------------------
     // IBookingRepository — aggregate-specific queries
     // -----------------------------------------------------------------------

@@ -77,6 +77,125 @@ public sealed class PaymentServiceClientTests
             .Which.Message.Should().Be("Payment dueAt must be in the future.");
     }
 
+    [Fact]
+    public async Task RedirectLookupAsync_WhenSuccessful_UsesDedicatedRawInternalEndpoint()
+    {
+        var handler = new FakeMessageHandler(
+            HttpStatusCode.OK,
+            $$"""
+            [
+              {
+                "paymentId": "{{PaymentId}}",
+                "referenceType": "BOOKING",
+                "referenceId": "{{ReferenceId}}",
+                "amount": 350000,
+                "dueAt": "2026-08-01T10:05:00Z",
+                "paymentRedirectUrl": "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?token=signed"
+              }
+            ]
+            """);
+        var client = BuildRedirectLookupClient(handler);
+
+        var result = await client.LookupAsync(
+            UserId,
+            [new PaymentRedirectLookupReference("BOOKING", ReferenceId)]);
+
+        result.Should().ContainSingle().Which.Should().BeEquivalentTo(new PaymentRedirectLookupItem(
+            PaymentId,
+            "BOOKING",
+            ReferenceId,
+            350_000,
+            new DateTimeOffset(2026, 8, 1, 10, 5, 0, TimeSpan.Zero),
+            "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?token=signed"));
+        handler.CallCount.Should().Be(1);
+        handler.LastRequestUri.Should().Be("http://payment-service/internal/v1/payments/redirect-sessions/lookup");
+        handler.LastIdempotencyKey.Should().BeNull();
+        using var body = JsonDocument.Parse(handler.LastBody!);
+        body.RootElement.GetProperty("userId").GetGuid().Should().Be(UserId);
+        body.RootElement.GetProperty("references").GetArrayLength().Should().Be(1);
+    }
+
+    [Fact]
+    public async Task RedirectLookupAsync_WhenNonSuccess_FailsOpenWithoutReadingBody()
+    {
+        var handler = new FakeMessageHandler(HttpStatusCode.ServiceUnavailable, "signed-secret-response");
+        var client = BuildRedirectLookupClient(handler);
+
+        var result = await client.LookupAsync(
+            UserId,
+            [new PaymentRedirectLookupReference("BOOKING", ReferenceId)]);
+
+        result.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("not-json")]
+    [InlineData("[{\"paymentId\":null}]")]
+    [InlineData("[{\"paymentId\":\"11111111-1111-4111-8111-111111111111\",\"referenceType\":\"BOOKING\",\"referenceId\":\"22222222-2222-4222-8222-222222222222\",\"amount\":350000,\"dueAt\":\"2026-08-01T10:05:00Z\",\"paymentRedirectUrl\":\"not-a-url\"}]")]
+    public async Task RedirectLookupAsync_WhenPayloadMalformed_FailsOpen(string responseBody)
+    {
+        var handler = new FakeMessageHandler(HttpStatusCode.OK, responseBody);
+        var client = BuildRedirectLookupClient(handler);
+
+        var result = await client.LookupAsync(
+            UserId,
+            [new PaymentRedirectLookupReference("BOOKING", ReferenceId)]);
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RedirectLookupAsync_WhenTransportFails_FailsOpen()
+    {
+        var client = BuildRedirectLookupClient(new ThrowingMessageHandler(new HttpRequestException("offline")));
+
+        var result = await client.LookupAsync(
+            UserId,
+            [new PaymentRedirectLookupReference("BOOKING", ReferenceId)]);
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RedirectLookupAsync_WhenRequestTimesOut_FailsOpen()
+    {
+        var client = BuildRedirectLookupClient(new ThrowingMessageHandler(new TaskCanceledException("timeout")));
+
+        var result = await client.LookupAsync(
+            UserId,
+            [new PaymentRedirectLookupReference("BOOKING", ReferenceId)]);
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RedirectLookupAsync_WhenCallerCancels_PropagatesCancellation()
+    {
+        using var source = new CancellationTokenSource();
+        source.Cancel();
+        var client = BuildRedirectLookupClient(
+            new ThrowingMessageHandler(new OperationCanceledException(source.Token)));
+
+        var action = () => client.LookupAsync(
+            UserId,
+            [new PaymentRedirectLookupReference("BOOKING", ReferenceId)],
+            source.Token);
+
+        await action.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task RedirectLookupAsync_WhenReferencesEmpty_DoesNotCallPayment()
+    {
+        var handler = new FakeMessageHandler(HttpStatusCode.OK, "[]");
+        var client = BuildRedirectLookupClient(handler);
+
+        var result = await client.LookupAsync(UserId, []);
+
+        result.Should().BeEmpty();
+        handler.CallCount.Should().Be(0);
+    }
+
     private static PaymentServiceClient BuildClient(FakeMessageHandler handler)
     {
         var httpClient = new HttpClient(handler)
@@ -89,16 +208,34 @@ public sealed class PaymentServiceClientTests
             NullLogger<PaymentServiceClient>.Instance);
     }
 
+    private static PaymentRedirectLookupClient BuildRedirectLookupClient(HttpMessageHandler handler)
+    {
+        var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://payment-service"),
+        };
+
+        return new PaymentRedirectLookupClient(httpClient);
+    }
+
     private sealed class FakeMessageHandler(
         HttpStatusCode statusCode,
         string responseBody) : HttpMessageHandler
     {
         public string? LastBody { get; private set; }
+        public int CallCount { get; private set; }
+        public string? LastRequestUri { get; private set; }
+        public string? LastIdempotencyKey { get; private set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
+            CallCount++;
+            LastRequestUri = request.RequestUri?.AbsoluteUri;
+            LastIdempotencyKey = request.Headers.TryGetValues("Idempotency-Key", out var values)
+                ? values.Single()
+                : null;
             LastBody = request.Content is null
                 ? null
                 : await request.Content.ReadAsStringAsync(cancellationToken);
@@ -108,5 +245,13 @@ public sealed class PaymentServiceClientTests
                 Content = new StringContent(responseBody, Encoding.UTF8, "application/json"),
             };
         }
+    }
+
+    private sealed class ThrowingMessageHandler(Exception exception) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+            => Task.FromException<HttpResponseMessage>(exception);
     }
 }
