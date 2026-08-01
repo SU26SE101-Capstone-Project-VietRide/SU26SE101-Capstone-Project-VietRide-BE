@@ -199,6 +199,39 @@ the new internal Payment redirect lookup, Booking refund consumer, and two read-
 clients exist. The final gate reruns the inventory verifier, Day 43 reliability E2E, impacted
 regression, and writes a fresh `docs/handoff/day-43-checklist.md`.
 
+### Final inventory freeze — 2026-08-01
+
+The reopened audit freezes the exact mutation surface after the later endpoint merges and the
+Payment redirect-history work:
+
+| Service | Total | Required | Exempt |
+| --- | ---: | ---: | ---: |
+| Identity | 35 | 30 | 5 |
+| Trip | 54 | 53 | 1 |
+| Booking | 27 | 26 | 1 |
+| Payment | 15 | 11 | 4 |
+| Parcel | 30 | 29 | 1 |
+| Notification | 3 | 3 | 0 |
+| RAG | 7 | 6 | 1 |
+| **Total** | **171** | **158** | **13** |
+
+The cross-system inventory now distinguishes source-level registration sites from registrations
+created by mapped binding arrays:
+
+- 43 .NET `IIntegrationEventHandler<T>` registrations.
+- 14 Notification `.subscribe(...)` source callsites, expanding to 73 runtime RabbitMQ binding
+  registrations (five callsites map binding collections; nine are direct registrations).
+- 24 .NET outbound POST/PUT/PATCH/DELETE-style HTTP callsites. Nineteen target idempotency-required
+  mutations and five are exact read-only exemptions in five files: Payment's and Booking's Identity
+  operator-summary clients, the Booking and Parcel Payment redirect lookup clients, and Parcel's
+  Booking voucher validation callsite.
+
+The provisional repair-plan baseline of 22 outbound callsites and four exemption files omitted two
+older `PostAsJsonAsync` callsites. Exhaustive discovery classifies Parcel voucher validation as the
+fifth read-only exemption and verifies Identity transactional email as a required mutation. The
+inventory uses callsite tokens rather than whole-file exemptions so the mixed Parcel
+`BookingServiceClient` cannot exempt its voucher-usage mutations accidentally.
+
 ## Open questions đã đóng
 
 Các Q1–Q4 cũ bên dưới được giữ làm lịch sử của bản draft; quyết định ở mục trên là SOT hiện hành và không còn là blocker.

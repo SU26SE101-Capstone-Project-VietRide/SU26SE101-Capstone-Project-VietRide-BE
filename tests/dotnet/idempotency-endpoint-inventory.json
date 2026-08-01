@@ -6,7 +6,7 @@
       "stack": "dotnet",
       "servicePrefix": "identity",
       "requireAllMutations": true,
-      "expectedMutationCount": 34,
+      "expectedMutationCount": 35,
       "endpoints": [
         {
           "method": "POST",
@@ -182,6 +182,11 @@
           "method": "POST",
           "path": "/v1/users/me/complete-profile",
           "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/users/me/avatar",
+          "policy": "required"
         }
       ]
     },
@@ -189,7 +194,7 @@
       "stack": "dotnet",
       "servicePrefix": "trip",
       "requireAllMutations": true,
-      "expectedMutationCount": 50,
+      "expectedMutationCount": 54,
       "endpoints": [
         {
           "method": "POST",
@@ -304,6 +309,11 @@
         {
           "method": "POST",
           "path": "/internal/v1/trips/{tripId:guid}/cargo/release",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/trips/{sourceTripId:guid}/cargo/transfer",
           "policy": "required"
         },
         {
@@ -423,6 +433,22 @@
         },
         {
           "method": "POST",
+          "path": "/v1/operator/trips/{tripId:guid}/cancel/preview",
+          "policy": "exempt",
+          "reason": "This POST is a read-only cancellation impact preview."
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/trips/{tripId:guid}/cancel",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/trips/{tripId:guid}/change-route",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
           "path": "/v1/operator/trips/{tripId:guid}/substitute-vehicle",
           "policy": "required"
         },
@@ -447,7 +473,7 @@
       "stack": "dotnet",
       "servicePrefix": "booking",
       "requireAllMutations": true,
-      "expectedMutationCount": 26,
+      "expectedMutationCount": 27,
       "endpoints": [
         {
           "method": "POST",
@@ -492,6 +518,11 @@
         {
           "method": "POST",
           "path": "/v1/bookings/trips/{tripId:guid}/boarding/qr-scan",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/bookings/trips/{newTripId}/transfers/passengers/{passengerId}/confirm",
           "policy": "required"
         },
         {
@@ -586,7 +617,7 @@
       "stack": "dotnet",
       "servicePrefix": "payment",
       "requireAllMutations": true,
-      "expectedMutationCount": 14,
+      "expectedMutationCount": 15,
       "endpoints": [
         {
           "method": "POST",
@@ -622,6 +653,12 @@
           "method": "POST",
           "path": "/internal/v1/payments/charge",
           "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/payments/redirect-sessions/lookup",
+          "policy": "exempt",
+          "reason": "Read-only internal lookup; repeated requests do not mutate state."
         },
         {
           "method": "POST",
@@ -667,8 +704,19 @@
       "stack": "dotnet",
       "servicePrefix": "parcel",
       "requireAllMutations": true,
-      "expectedMutationCount": 21,
+      "expectedMutationCount": 30,
       "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/assistant/trips/{tripId:guid}/parcels/qr-scan",
+          "policy": "exempt",
+          "reason": "QR scan resolves a parcel code without mutating state."
+        },
+        {
+          "method": "POST",
+          "path": "/v1/assistant/parcels/{parcelId:guid}/check-in",
+          "policy": "required"
+        },
         {
           "method": "POST",
           "path": "/v1/assistant/parcels/{parcelId:guid}/load",
@@ -702,6 +750,21 @@
         {
           "method": "POST",
           "path": "/internal/v1/parcels/{parcelId:guid}/confirm-transfer",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/crew/parcels/{parcelId:guid}/confirm-transfer",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/crew/parcels/{parcelId:guid}/manual-confirm",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/crew/parcels/{parcelId:guid}/resend-delivery-email",
           "policy": "required"
         },
         {
@@ -750,6 +813,16 @@
           "policy": "required"
         },
         {
+          "method": "POST",
+          "path": "/v1/operator/parcels/{parcelId:guid}/manual-confirm",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/parcels/{parcelId:guid}/resend-delivery-email",
+          "policy": "required"
+        },
+        {
           "method": "PATCH",
           "path": "/v1/operator/parcels/{parcelId:guid}/status",
           "policy": "required"
@@ -772,6 +845,16 @@
         {
           "method": "POST",
           "path": "/v1/parcels",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/parcels/{parcelId:guid}/deposit-payment",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/parcels/{parcelId:guid}/final-payment",
           "policy": "required"
         }
       ]
@@ -861,12 +944,68 @@
     }
   ],
   "coverage": {
-    "dotnetRabbitMqRegistrations": 37,
-    "notificationRabbitMqSubscriptions": 12,
-    "dotnetOutboundHttpMutations": 18,
+    "dotnetRabbitMqRegistrations": 43,
+    "notificationRabbitMqSubscriptionCallsites": 14,
+    "notificationRabbitMqRuntimeBindings": 73,
+    "notificationRabbitMqBindingCollections": [
+      {
+        "file": "apps/notification/src/notifications/booking-trip-change-events.consumer.ts",
+        "consumerFile": "apps/notification/src/notifications/booking-trip-change-events.consumer.ts",
+        "name": "BOOKING_TRIP_CHANGE_QUEUE_BINDINGS"
+      },
+      {
+        "file": "apps/notification/src/notifications/core-events.constants.ts",
+        "consumerFile": "apps/notification/src/notifications/core-events.consumer.ts",
+        "name": "CORE_EVENT_QUEUE_BINDINGS"
+      },
+      {
+        "file": "apps/notification/src/notifications/parcel-subscription-operator-events.constants.ts",
+        "consumerFile": "apps/notification/src/notifications/parcel-subscription-operator-events.consumer.ts",
+        "name": "PARCEL_SUBSCRIPTION_OPERATOR_QUEUE_BINDINGS"
+      },
+      {
+        "file": "apps/notification/src/notifications/shuttle-events.consumer.ts",
+        "consumerFile": "apps/notification/src/notifications/shuttle-events.consumer.ts",
+        "name": "bindings"
+      },
+      {
+        "file": "apps/notification/src/notifications/trip-tracking-alert-events.constants.ts",
+        "consumerFile": "apps/notification/src/notifications/trip-tracking-alert-events.consumer.ts",
+        "name": "TRIP_TRACKING_ALERT_QUEUE_BINDINGS"
+      }
+    ],
+    "dotnetOutboundHttpCallsites": 24,
     "dotnetOutboundHttpExemptions": [
-      "apps/payment/src/VietRide.Payment.Infrastructure/Http/IdentityOperatorSummaryClient.cs",
-      "apps/booking/src/VietRide.Booking.Infrastructure/Http/IdentityPlatformReportClient.cs"
+      {
+        "file": "apps/payment/src/VietRide.Payment.Infrastructure/Http/IdentityOperatorSummaryClient.cs",
+        "method": "POST",
+        "match": "internal/v1/operators/summaries/batch",
+        "reason": "Read-only bounded operator-summary lookup."
+      },
+      {
+        "file": "apps/booking/src/VietRide.Booking.Infrastructure/Http/IdentityPlatformReportClient.cs",
+        "method": "POST",
+        "match": "internal/v1/operators/summaries/batch",
+        "reason": "Read-only bounded operator-summary lookup."
+      },
+      {
+        "file": "apps/booking/src/VietRide.Booking.Infrastructure/Http/PaymentRedirectLookupClient.cs",
+        "method": "POST",
+        "match": "/internal/v1/payments/redirect-sessions/lookup",
+        "reason": "Read-only redirect-session lookup; the target endpoint is explicitly exempt."
+      },
+      {
+        "file": "apps/parcel/src/VietRide.Parcel.Infrastructure/Http/BookingServiceClient.cs",
+        "method": "POST",
+        "match": "/internal/v1/vouchers/validate",
+        "reason": "Read-only voucher validation; the target endpoint is explicitly exempt."
+      },
+      {
+        "file": "apps/parcel/src/VietRide.Parcel.Infrastructure/Http/PaymentRedirectLookupClient.cs",
+        "method": "POST",
+        "match": "/internal/v1/payments/redirect-sessions/lookup",
+        "reason": "Read-only redirect-session lookup; the target endpoint is explicitly exempt."
+      }
     ],
     "gatewayRouteTable": "apps/gateway/src/config/routes.ts"
   }

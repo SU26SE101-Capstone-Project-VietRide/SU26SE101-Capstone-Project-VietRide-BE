@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   combineDotNetRoute,
+  countNotificationBindingCollection,
+  outboundCallsiteHasIdempotencyKey,
   scanControllerSource,
+  scanDotNetOutboundHttpSource,
   scanNestControllerSource,
 } from './verify-idempotency-inventory.mjs';
 
@@ -121,4 +124,82 @@ test('pending-action endpoint is discovered exactly once across legacy and activ
 
   assert.equal(pendingActionMutations.length, 1);
   assert.equal(pendingActionMutations[0].actionName, 'Resolve');
+});
+
+test('outbound HTTP discovery includes explicit methods and JSON convenience methods', () => {
+  const callsites = scanDotNetOutboundHttpSource(`
+    using var first = new HttpRequestMessage(HttpMethod.Post, "/internal/v1/mutate");
+    using var second = await client.PostAsJsonAsync("/internal/v1/read", body);
+    using var third = await client.PutAsync("/internal/v1/replace", body);
+    using var ignored = await client.GetAsync("/internal/v1/query");
+  `);
+
+  assert.deepEqual(
+    callsites.map(({ method, style }) => ({ method, style })),
+    [
+      { method: 'POST', style: 'http-method' },
+      { method: 'POST', style: 'json-extension' },
+      { method: 'PUT', style: 'http-extension' },
+    ],
+  );
+});
+
+test('outbound idempotency validation is scoped to the enclosing client method', () => {
+  const source = `
+    public async Task SendCoveredAsync(Guid idempotencyKey)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/internal/v1/covered");
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey.ToString("D"));
+        await client.SendAsync(request);
+    }
+
+    public async Task SendMissingAsync(Guid idempotencyKey)
+    {
+        await client.PostAsync("/internal/v1/missing", content);
+    }
+  `;
+  const callsites = scanDotNetOutboundHttpSource(source);
+
+  assert.deepEqual(
+    callsites.map((callsite) => outboundCallsiteHasIdempotencyKey(source, callsite)),
+    [true, false],
+  );
+});
+
+test('outbound idempotency validation follows a header-owning request helper argument', () => {
+  const source = `
+    public async Task SendDerivedAsync(Guid operationId)
+    {
+        using var request = BuildRequest(
+            HttpMethod.Post,
+            "/internal/v1/derived",
+            operationId.ToString("D"));
+        await client.SendAsync(request);
+    }
+
+    private static HttpRequestMessage BuildRequest(
+        HttpMethod method,
+        string path,
+        string idempotencyKey)
+    {
+        var request = new HttpRequestMessage(method, path);
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey);
+        return request;
+    }
+  `;
+  const [callsite] = scanDotNetOutboundHttpSource(source);
+
+  assert.equal(outboundCallsiteHasIdempotencyKey(source, callsite), true);
+});
+
+test('Notification binding collection counts mapped runtime registrations', () => {
+  const source = `
+    export const BINDINGS = [
+      { queue: 'notification:first', routingKey: 'first.created' },
+      { queue: 'notification:second', routingKey: 'second.created' },
+    ] as const;
+  `;
+
+  assert.equal(countNotificationBindingCollection(source, 'BINDINGS'), 2);
+  assert.equal(countNotificationBindingCollection(source, 'MISSING'), null);
 });

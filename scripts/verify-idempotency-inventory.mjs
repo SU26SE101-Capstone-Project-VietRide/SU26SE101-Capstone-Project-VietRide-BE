@@ -466,6 +466,149 @@ function listFiles(directory, predicate) {
   });
 }
 
+export function scanDotNetOutboundHttpSource(source) {
+  const callsites = [];
+  const patterns = [
+    { pattern: /HttpMethod\.(Post|Put|Patch|Delete)\b/g, style: 'http-method' },
+    {
+      pattern: /\.(Post|Put|Patch|Delete)AsJsonAsync\s*\(/g,
+      style: 'json-extension',
+    },
+    {
+      pattern: /\.(Post|Put|Patch|Delete)Async\s*\(/g,
+      style: 'http-extension',
+    },
+  ];
+
+  for (const { pattern, style } of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      callsites.push({
+        method: match[1].toUpperCase(),
+        style,
+        index: match.index,
+      });
+    }
+  }
+
+  return callsites.sort((left, right) => left.index - right.index);
+}
+
+function getCSharpMethodSections(source) {
+  const methodDeclaration =
+    /^[ \t]*(?:public|private|protected|internal)\s+(?:(?:static|async|virtual|override|sealed)\s+)*[^;{}=]*?\([^;{}]*?\)\s*(?:\{|=>)/gm;
+  const declarations = [...source.matchAll(methodDeclaration)];
+  return declarations.map((declaration, index) => {
+    const start = declaration.index;
+    const end = declarations[index + 1]?.index ?? source.length;
+    return {
+      start,
+      end,
+      declaration: declaration[0],
+      source: source.slice(start, end),
+    };
+  });
+}
+
+function splitCSharpArguments(source, openParenthesisIndex) {
+  const argumentsList = [];
+  let current = '';
+  let parenthesisDepth = 1;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+  let quote = null;
+  let escaped = false;
+
+  for (let index = openParenthesisIndex + 1; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote) {
+      current += character;
+      if (escaped) escaped = false;
+      else if (character === '\\') escaped = true;
+      else if (character === quote) quote = null;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      current += character;
+      continue;
+    }
+    if (character === '(') parenthesisDepth += 1;
+    else if (character === ')') {
+      parenthesisDepth -= 1;
+      if (parenthesisDepth === 0) {
+        argumentsList.push(current.trim());
+        return argumentsList;
+      }
+    } else if (character === '[') bracketDepth += 1;
+    else if (character === ']') bracketDepth -= 1;
+    else if (character === '{') braceDepth += 1;
+    else if (character === '}') braceDepth -= 1;
+    else if (
+      character === ',' &&
+      parenthesisDepth === 1 &&
+      bracketDepth === 0 &&
+      braceDepth === 0
+    ) {
+      argumentsList.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += character;
+  }
+
+  return null;
+}
+
+function getEnclosingCSharpMethod(source, index) {
+  const sections = getCSharpMethodSections(source);
+  return sections.findLast((section) => section.start <= index && index < section.end) ?? null;
+}
+
+export function getEnclosingCSharpMethodSource(source, index) {
+  return getEnclosingCSharpMethod(source, index)?.source ?? null;
+}
+
+export function outboundCallsiteHasIdempotencyKey(source, callsite) {
+  const enclosingMethod = getEnclosingCSharpMethod(source, callsite.index);
+  if (!enclosingMethod) return false;
+  if (enclosingMethod.source.includes('Idempotency-Key')) return true;
+
+  const prefix = source.slice(enclosingMethod.start, callsite.index);
+  const helperCall = /([A-Za-z_]\w*)\s*\(\s*$/.exec(prefix);
+  if (!helperCall) return false;
+
+  const helperName = helperCall[1];
+  const escapedHelperName = helperName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const helperNamePattern = new RegExp(`\\b${escapedHelperName}(?:<[^>]+>)?\\s*\\(`);
+  const helperMethod = getCSharpMethodSections(source).find(
+    (section) =>
+      helperNamePattern.test(section.declaration) && section.source.includes('Idempotency-Key'),
+  );
+  if (!helperMethod) return false;
+
+  const signatureOpenParenthesis = helperMethod.declaration.indexOf('(');
+  const helperParameters = splitCSharpArguments(helperMethod.declaration, signatureOpenParenthesis);
+  const idempotencyParameterIndex = helperParameters?.findIndex((parameter) =>
+    /\bidempotencyKey\b/i.test(parameter),
+  );
+  if (idempotencyParameterIndex === undefined || idempotencyParameterIndex < 0) return false;
+
+  const invocationOpenParenthesis =
+    enclosingMethod.start + helperCall.index + helperCall[0].lastIndexOf('(');
+  const invocationArguments = splitCSharpArguments(source, invocationOpenParenthesis);
+  return Boolean(invocationArguments?.[idempotencyParameterIndex]?.trim());
+}
+
+export function countNotificationBindingCollection(source, collectionName) {
+  const escapedName = collectionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const declaration = new RegExp(
+    `(?:export\\s+)?const\\s+${escapedName}\\s*=\\s*\\[([\\s\\S]*?)\\]\\s+as\\s+const\\s*;`,
+  ).exec(source);
+
+  if (!declaration) return null;
+  return [...declaration[1].matchAll(/\bqueue\s*:/g)].length;
+}
+
 export function scanNestControllerSource(
   source,
   serviceName,
@@ -645,41 +788,105 @@ function validateCrossSystemCoverage(coverage) {
     const source = fs.readFileSync(file, 'utf8');
     return total + [...source.matchAll(/\.subscribe\s*\(/g)].length;
   }, 0);
-  if (subscriptionCount !== coverage.notificationRabbitMqSubscriptions) {
+  if (subscriptionCount !== coverage.notificationRabbitMqSubscriptionCallsites) {
     fail(
-      `Notification RabbitMQ inventory drift: expected ${coverage.notificationRabbitMqSubscriptions}, found ${subscriptionCount}`,
+      `Notification RabbitMQ subscription-callsite drift: expected ${coverage.notificationRabbitMqSubscriptionCallsites}, found ${subscriptionCount}`,
     );
   }
 
-  const outboundPattern = /HttpMethod\.(Post|Put|Patch|Delete)\b/g;
+  const bindingCollections = coverage.notificationRabbitMqBindingCollections ?? [];
+  let mappedBindingCount = 0;
+  const bindingCollectionKeys = new Set();
+  for (const collection of bindingCollections) {
+    const key = `${collection.file}:${collection.name}`;
+    if (bindingCollectionKeys.has(key)) {
+      fail(`duplicate Notification RabbitMQ binding collection: ${key}`);
+      continue;
+    }
+    bindingCollectionKeys.add(key);
+
+    const bindingFile = path.join(root, collection.file ?? '');
+    const consumerFile = path.join(root, collection.consumerFile ?? '');
+    if (!fs.existsSync(bindingFile) || !fs.existsSync(consumerFile)) {
+      fail(`Notification RabbitMQ binding collection files not found: ${key}`);
+      continue;
+    }
+
+    const bindingSource = fs.readFileSync(bindingFile, 'utf8');
+    const consumerSource = fs.readFileSync(consumerFile, 'utf8');
+    const count = countNotificationBindingCollection(bindingSource, collection.name);
+    if (count === null) {
+      fail(`${collection.file}: Notification binding collection ${collection.name} not found`);
+      continue;
+    }
+    if (!consumerSource.includes(`${collection.name}.map`)) {
+      fail(`${collection.consumerFile}: ${collection.name} is not mapped into subscriptions`);
+      continue;
+    }
+    mappedBindingCount += count;
+  }
+
+  const runtimeBindingCount = subscriptionCount - bindingCollections.length + mappedBindingCount;
+  if (runtimeBindingCount !== coverage.notificationRabbitMqRuntimeBindings) {
+    fail(
+      `Notification RabbitMQ runtime-binding drift: expected ${coverage.notificationRabbitMqRuntimeBindings}, found ${runtimeBindingCount}`,
+    );
+  }
+
+  const exemptions = coverage.dotnetOutboundHttpExemptions ?? [];
+  const exemptionKeys = new Set();
+  for (const exemption of exemptions) {
+    const key = `${exemption.file}|${exemption.method}|${exemption.match}`;
+    if (exemptionKeys.has(key)) fail(`duplicate outbound HTTP exemption: ${key}`);
+    exemptionKeys.add(key);
+    if (!exemption.file || !exemption.method || !exemption.match || !exemption.reason?.trim()) {
+      fail(`outbound HTTP exemption must define file, method, match and reason: ${key}`);
+    }
+  }
+
   const outboundCallsites = [];
   for (const file of dotnetSourceFiles) {
     const source = fs.readFileSync(file, 'utf8');
-    for (const match of source.matchAll(outboundPattern)) {
-      outboundCallsites.push({ file, source, method: match[1] });
+    for (const callsite of scanDotNetOutboundHttpSource(source)) {
+      outboundCallsites.push({ file, source, ...callsite });
     }
   }
-  if (outboundCallsites.length !== coverage.dotnetOutboundHttpMutations) {
+  if (outboundCallsites.length !== coverage.dotnetOutboundHttpCallsites) {
     fail(
-      `.NET outbound HTTP mutation inventory drift: expected ${coverage.dotnetOutboundHttpMutations}, found ${outboundCallsites.length}`,
+      `.NET outbound HTTP callsite drift: expected ${coverage.dotnetOutboundHttpCallsites}, found ${outboundCallsites.length}`,
     );
   }
 
-  const exemptions = new Set(coverage.dotnetOutboundHttpExemptions ?? []);
+  const matchedExemptions = new Set();
   for (const callsite of outboundCallsites) {
     const relativeFile = path.relative(root, callsite.file).replace(/\\/g, '/');
-    if (exemptions.has(relativeFile)) continue;
-    if (!callsite.source.includes('Idempotency-Key')) {
+    const context = callsite.source.slice(
+      Math.max(0, callsite.index - 150),
+      Math.min(callsite.source.length, callsite.index + 600),
+    );
+    const matchingExemptions = exemptions.filter(
+      (exemption) =>
+        exemption.file === relativeFile &&
+        exemption.method === callsite.method &&
+        context.includes(exemption.match),
+    );
+    if (matchingExemptions.length > 1) {
+      fail(`${relativeFile}: outbound ${callsite.method} matches multiple exemptions`);
+      continue;
+    }
+    if (matchingExemptions.length === 1) {
+      matchedExemptions.add(matchingExemptions[0]);
+      continue;
+    }
+    if (!outboundCallsiteHasIdempotencyKey(callsite.source, callsite)) {
       fail(`${relativeFile}: outbound ${callsite.method} does not forward Idempotency-Key`);
     }
   }
   for (const exemption of exemptions) {
-    if (
-      !outboundCallsites.some(
-        (callsite) => path.relative(root, callsite.file).replace(/\\/g, '/') === exemption,
-      )
-    ) {
-      fail(`outbound HTTP exemption no longer exists: ${exemption}`);
+    if (!matchedExemptions.has(exemption)) {
+      fail(
+        `outbound HTTP exemption no longer exists: ${exemption.file} ${exemption.method} ${exemption.match}`,
+      );
     }
   }
 
@@ -766,7 +973,15 @@ function main() {
           : `${name}=${result.controllers} controllers/${result.mutations} mutations/${result.exemptions} exemptions`,
       )
       .join(', ');
-    console.log(`idempotency inventory PASS (${details})`);
+    const coverage = inventory.coverage;
+    const crossSystem = [
+      `${coverage.dotnetRabbitMqRegistrations} .NET handlers`,
+      `${coverage.notificationRabbitMqSubscriptionCallsites} Notification subscribe callsites`,
+      `${coverage.notificationRabbitMqRuntimeBindings} Notification runtime bindings`,
+      `${coverage.dotnetOutboundHttpCallsites} outbound HTTP callsites`,
+      `${coverage.dotnetOutboundHttpExemptions.length} outbound exemptions`,
+    ].join('/');
+    console.log(`idempotency inventory PASS (${details}; ${crossSystem})`);
   }
 }
 

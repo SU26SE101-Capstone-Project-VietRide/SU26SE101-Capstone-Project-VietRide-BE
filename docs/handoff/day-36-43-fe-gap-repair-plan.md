@@ -483,9 +483,11 @@ dotnet format apps/parcel/VietRide.Parcel.sln --verify-no-changes --include apps
 | RAG | 7 | 6 | 1 |
 | Total | 171 | 158 | 13 |
 
-Cross-system baselines: 43 .NET RabbitMQ handlers, 14 Notification subscriptions,
-22 outbound mutation-style HTTP callsites, and four outbound exemption files including the
-two dedicated read-only lookup helpers.
+Cross-system baselines: 43 .NET RabbitMQ handlers; 14 Notification `.subscribe(...)` source
+callsites expanding to 73 runtime RabbitMQ bindings; and 24 outbound POST/PUT/PATCH/DELETE-style
+HTTP callsites with five exact read-only exemption callsites/files, including the two dedicated
+Payment redirect lookup helpers. The corrected 24/5 baseline includes two older
+`PostAsJsonAsync` callsites omitted by the provisional count.
 
 **Verification**
 
