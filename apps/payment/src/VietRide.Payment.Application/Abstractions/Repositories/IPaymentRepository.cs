@@ -47,6 +47,18 @@ public interface IPaymentRepository : IRepository<PaymentEntity, Guid>
         Guid referenceId,
         CancellationToken cancellationToken);
 
+    Task<PaymentEntity?> FindVnPayPaymentByTxnRefAsync(
+        string vnPayTxnRef,
+        CancellationToken cancellationToken)
+        => Task.FromResult(QueryNoTracking().FirstOrDefault(payment =>
+            payment.VnPayTxnRef == vnPayTxnRef
+            && payment.Method == PaymentMethod.VNPAY));
+
+    Task<PaymentEntity?> LockAndReloadAsync(
+        Guid paymentId,
+        CancellationToken cancellationToken)
+        => GetByIdAsync(paymentId, cancellationToken);
+
     Task<WalletTransaction> DebitWalletBookingPaymentAsync(
         Guid userId,
         Guid bookingId,

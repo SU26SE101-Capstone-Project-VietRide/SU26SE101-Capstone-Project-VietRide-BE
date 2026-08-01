@@ -54,6 +54,7 @@ public sealed class ConfirmBookingPaymentIpnIntegrationTests
             ["vnp_ResponseCode"] = "00",
             ["vnp_Amount"] = "25000000",
             ["vnp_TransactionStatus"] = "00",
+            ["vnp_PayDate"] = "20260731100000",
             ["vnp_SecureHash"] = "valid",
         });
 

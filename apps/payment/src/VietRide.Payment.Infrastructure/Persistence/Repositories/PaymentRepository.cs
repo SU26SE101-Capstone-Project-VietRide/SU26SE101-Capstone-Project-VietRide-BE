@@ -101,6 +101,38 @@ internal sealed class PaymentRepository : IPaymentRepository
             .ConfigureAwait(false);
     }
 
+    public async Task<PaymentEntity?> FindVnPayPaymentByTxnRefAsync(
+        string vnPayTxnRef,
+        CancellationToken cancellationToken)
+        => await _db.Payments
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                payment => payment.VnPayTxnRef == vnPayTxnRef
+                    && payment.Method == PaymentMethod.VNPAY,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+    public async Task<PaymentEntity?> LockAndReloadAsync(
+        Guid paymentId,
+        CancellationToken cancellationToken)
+    {
+        var trackedPayment = _db.Payments.Local.FirstOrDefault(payment => payment.Id == paymentId);
+        if (trackedPayment is not null)
+        {
+            _db.Entry(trackedPayment).State = EntityState.Detached;
+        }
+
+        return await _db.Payments
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_payment.payments
+                WHERE id = {paymentId}
+                FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     public async Task<WalletTransaction> DebitWalletBookingPaymentAsync(
         Guid userId,
         Guid bookingId,
