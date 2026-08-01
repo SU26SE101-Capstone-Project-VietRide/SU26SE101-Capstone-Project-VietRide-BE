@@ -8,11 +8,23 @@ import { SECONDS_PER_MINUTE } from './eta.constants';
 
 const GOOGLE_DURATION_PATTERN = /^(\d+(?:\.\d+)?)s$/;
 
+export interface RouteCoordinate {
+  latitude: number;
+  longitude: number;
+}
+
 @Injectable()
 export class GoogleRoutesEtaProvider implements EtaProvider {
   constructor(@Inject(ENV_TOKEN) private readonly env: Env) {}
 
   async calculate(gps: GpsUpdateEvent, stop: TripStopSnapshot): Promise<EtaProviderResult | null> {
+    return this.calculateCoordinates(gps, stop);
+  }
+
+  async calculateCoordinates(
+    origin: RouteCoordinate,
+    destination: RouteCoordinate,
+  ): Promise<EtaProviderResult | null> {
     const baseUrl = this.env.GOOGLE_ROUTES_BASE_URL ?? 'https://routes.googleapis.com';
     const apiKey = this.env.GOOGLE_ROUTES_API_KEY ?? '';
     const controller = new AbortController();
@@ -26,8 +38,12 @@ export class GoogleRoutesEtaProvider implements EtaProvider {
           'X-Goog-FieldMask': 'routes.duration,routes.distanceMeters',
         },
         body: JSON.stringify({
-          origin: { location: { latLng: { latitude: gps.latitude, longitude: gps.longitude } } },
-          destination: { location: { latLng: { latitude: stop.latitude, longitude: stop.longitude } } },
+          origin: { location: { latLng: { latitude: origin.latitude, longitude: origin.longitude } } },
+          destination: {
+            location: {
+              latLng: { latitude: destination.latitude, longitude: destination.longitude },
+            },
+          },
           travelMode: 'DRIVE',
           routingPreference: 'TRAFFIC_AWARE',
           computeAlternativeRoutes: false,

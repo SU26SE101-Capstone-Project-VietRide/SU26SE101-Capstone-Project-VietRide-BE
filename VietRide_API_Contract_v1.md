@@ -4098,6 +4098,67 @@ Tracking Phase 10 invariants (the public payload above is unchanged):
   `RUN_REAL_GOOGLE_E2E=true`; no `etaSource`, snap metadata or traffic metadata is added to the
   public response shape.
 
+### Shuttle tracking
+
+Client joins the authorized Shuttle room:
+
+```ts
+socket.emit("joinShuttleTracking", { shuttleTripId }, ack)
+```
+
+Success ack preserves the existing common join shape; `tripId` contains the ShuttleTrip ID:
+
+```json
+{
+  "success": true,
+  "tripId": "uuid",
+  "room": "shuttle:uuid",
+  "scope": "PASSENGER|DRIVER|OPERATOR"
+}
+```
+
+Only the assigned Shuttle driver may emit `shuttle:gps:update`:
+
+```json
+{
+  "shuttleTripId": "uuid",
+  "latitude": 10.762622,
+  "longitude": 106.660172,
+  "speedKmh": 30,
+  "heading": 90,
+  "recordedAt": "2026-08-01T01:00:00.000Z"
+}
+```
+
+The server broadcasts the unchanged GPS payload as `shuttle:gps:update`, then may asynchronously
+broadcast `shuttle:eta:update`:
+
+```json
+{
+  "shuttleTripId": "uuid",
+  "nextPickupOrder": 1,
+  "etaMinutes": 17,
+  "estimatedArrivalTime": "2026-08-01T01:17:00.000Z",
+  "distanceMeters": 5909,
+  "updatedAt": "2026-08-01T01:00:01.000Z"
+}
+```
+
+REST fallback endpoints are:
+
+- `GET /v1/tracking/shuttle-trips/{shuttleTripId}/latest`
+- `GET /v1/tracking/shuttle-trips/{shuttleTripId}/eta`
+
+Shuttle ETA follows `pickupOrder`, skips cancelled groups and uses the Station stop as the final
+destination. Google Routes is primary when `GOOGLE_ROUTES_ENABLED=true`; direct-distance/speed ETA
+is the local fallback because Shuttle has no fixed route geometry. Provider calls use a minimum
+60-second interval, the existing 500 m movement or ETA-under-15-minute conditions, a per-Shuttle
+pickup Redis lock, a 60-second cache and a three-failure/300-second Google cooldown. GPS persistence,
+broadcast and acknowledgement never wait for Google HTTP. Shuttle state remains under
+`tracking:shuttle:*` and does not enter main Trip `GpsTrail`, active-trip, off-route or delay chains.
+No `etaSource` or provider metadata is added to the public payload. Default E2E uses a fake Google
+server; real Google is opt-in with `RUN_REAL_GOOGLE_E2E=true`.
+
 ## RAG AI Service
 
 ### GET `/v1/rag/documents`

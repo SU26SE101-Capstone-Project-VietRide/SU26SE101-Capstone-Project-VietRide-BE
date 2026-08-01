@@ -19,6 +19,7 @@ import { TripDelayService } from '../trip-delay/trip-delay.service';
 import { shuttleRoom } from '../shuttle/shuttle.constants';
 import { JoinShuttleTrackingSchema, ShuttleGpsUpdateSchema } from '../shuttle/shuttle.dto';
 import { ShuttleService } from '../shuttle/shuttle.service';
+import { ShuttleEtaService } from '../shuttle/shuttle-eta.service';
 import { TRACKING_SOCKET_PATH, trackingTripRoom } from './location.constants';
 import { JoinTripTrackingSchema } from './dto/join-trip-tracking.dto';
 import { UpdateLocationSchema } from './dto/update-location.dto';
@@ -64,6 +65,7 @@ export class LocationGateway implements OnGatewayInit {
     private readonly offRouteService: OffRouteService,
     private readonly tripDelayService: TripDelayService,
     private readonly shuttleService: ShuttleService,
+    private readonly shuttleEtaService: ShuttleEtaService,
   ) {}
 
   afterInit(server: Server): void {
@@ -121,11 +123,20 @@ export class LocationGateway implements OnGatewayInit {
       const context = await this.shuttleService.getContext(user, parsed.data.shuttleTripId);
       if (!context.allowed || context.scope !== 'DRIVER')
         return { success: false, error: 'ACCESS_DENIED' };
-      const result = await this.shuttleService.recordLocation(parsed.data, context);
+      const result = await this.shuttleService.recordLocation(parsed.data);
       if (result.duplicate) return { success: true };
       const room = shuttleRoom(parsed.data.shuttleTripId);
       this.server.to(room).emit('shuttle:gps:update', result.gps);
-      if (result.eta) this.server.to(room).emit('shuttle:eta:update', result.eta);
+      void this.shuttleEtaService
+        .handleGpsUpdate(parsed.data, context)
+        .then((eta) => {
+          if (eta) this.server.to(room).emit('shuttle:eta:update', eta);
+        })
+        .catch((error) => {
+          this.logger.error(
+            `Shuttle ETA chain failed for ${parsed.data.shuttleTripId}: ${(error as Error).message}`,
+          );
+        });
       return { success: true };
     } catch (error) {
       if ((error as Error).message === 'GPS_OPERATION_PAYLOAD_MISMATCH') {

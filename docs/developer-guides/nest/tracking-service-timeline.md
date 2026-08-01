@@ -38,6 +38,7 @@ Mỗi phase phải test được bằng e2e/unit theo hướng production. Nếu
 - [x] Phase 8 — Outbox Publisher
 - [x] Phase 9 — Trip/Booking/Parcel Authorization Providers
 - [x] Phase 10 — Hardening Và Final Acceptance
+- [x] Phase 11 — Shuttle GPS Và Google Routes ETA
 
 ---
 
@@ -446,8 +447,15 @@ Redis state và Google Routes mà không thay đổi payload Socket/REST công k
 - Passenger có manifest `PENDING`, driver được assign hoặc operator cùng tenant mới được truy cập.
 - Lấy manifest/stops qua internal Trip API; không broadcast PII của Booking khác.
 - ETA đi theo `pickup_order`, bỏ nhóm đã hủy và dùng origin Station làm điểm cuối.
-- Recalculate sau 500 m hoặc khi ETA dưới 15 phút; dùng Haversine và GPS speed hiện có.
-- Redis riêng: `tracking:shuttle:latest:{id}` TTL 300 giây, `tracking:shuttle:gps_buffer:{id}` tối đa 1000/TTL 24 giờ, `tracking:shuttle:eta:{id}:{order}` TTL 60 giây và `tracking:shuttle:eta_state:{id}`.
+- Google Routes dùng `DRIVE` và `TRAFFIC_AWARE` làm provider chính khi `GOOGLE_ROUTES_ENABLED=true`;
+  Haversine và tốc độ GPS là fallback cục bộ vì Shuttle không có route geometry cố định.
+- Recalculate sau tối thiểu 60 giây khi di chuyển trên 500 m, ETA dưới 15 phút hoặc chuyển sang
+  `pickup_order` mới. Ba lỗi Google liên tiếp mở cooldown 300 giây.
+- Redis riêng: `tracking:shuttle:latest:{id}` TTL 300 giây, `tracking:shuttle:gps_buffer:{id}` tối đa
+  1000/TTL 24 giờ, `tracking:shuttle:eta:{id}:{order}` TTL 60 giây,
+  `tracking:shuttle:eta_state:{id}` và lock `tracking:shuttle:eta_lock:{id}:{order}`.
+- GPS được ghi, broadcast và ack trước; Google HTTP chạy bất đồng bộ và chỉ phát
+  `shuttle:eta:update` khi hoàn tất. Public Socket/REST payload không thêm `etaSource`.
 - Shuttle không được ghi `tracking:active_trips`, main `GpsTrail`, hoặc kích hoạt off-route/delay chain của main Trip.
 - Bổ sung REST latest/ETA fallback và test authorization, TTL, cancellation, tenant isolation.
 
@@ -458,7 +466,11 @@ npx nx run tracking:lint
 npx nx run tracking:test
 npx nx run tracking:test:e2e
 npx nx run tracking:build
+node scripts/test-tracking-phase11-shuttle-google.js
+git diff --check
 ```
+
+Real Google E2E chỉ chạy khi `RUN_REAL_GOOGLE_E2E=true`; E2E mặc định dùng fake Google HTTP server.
 
 ## Public Interfaces / Events Cần Hoàn Thành
 

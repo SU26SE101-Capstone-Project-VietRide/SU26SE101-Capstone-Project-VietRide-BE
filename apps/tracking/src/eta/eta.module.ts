@@ -12,10 +12,11 @@ import { LocalRouteEtaProvider } from './local-route-eta.provider';
   providers: [
     EtaService,
     TrackingInternalJwtSigner,
+    GoogleRoutesEtaProvider,
     { provide: TRIP_DATA_PROVIDER, useClass: HttpTripDataProvider },
-    { provide: GOOGLE_ETA_PROVIDER, useClass: GoogleRoutesEtaProvider },
+    { provide: GOOGLE_ETA_PROVIDER, useExisting: GoogleRoutesEtaProvider },
     { provide: LOCAL_ETA_PROVIDER, useClass: LocalRouteEtaProvider },
   ],
-  exports: [EtaService, TRIP_DATA_PROVIDER],
+  exports: [EtaService, TRIP_DATA_PROVIDER, GoogleRoutesEtaProvider],
 })
 export class EtaModule {}

@@ -10,6 +10,7 @@ import { TripDelayModule } from '../trip-delay/trip-delay.module';
 import { LocationGateway } from './location.gateway';
 import { LocationService } from './location.service';
 import { ShuttleService } from '../shuttle/shuttle.service';
+import { ShuttleEtaService } from '../shuttle/shuttle-eta.service';
 import { ShuttleTrackingController } from '../shuttle/shuttle-tracking.controller';
 import { ShuttleTrackingAuthGuard } from '../shuttle/shuttle-tracking-auth.guard';
 
@@ -22,6 +23,7 @@ import { ShuttleTrackingAuthGuard } from '../shuttle/shuttle-tracking-auth.guard
     { provide: TRACKING_JWT_VERIFIER, useClass: JoseUserJwtVerifier },
     { provide: TRACKING_AUTHORIZATION_ADAPTER, useClass: HttpTrackingAuthorizationAdapter },
     ShuttleService,
+    ShuttleEtaService,
     ShuttleTrackingAuthGuard,
   ],
   controllers: [ShuttleTrackingController],
