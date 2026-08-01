@@ -8,6 +8,11 @@ namespace VietRide.Payment.Application.Abstractions.Repositories;
 
 public interface IPaymentRepository : IRepository<PaymentEntity, Guid>
 {
+    Task<IReadOnlyList<RedirectSessionLookupCandidate>> ListLatestRedirectSessionCandidatesAsync(
+        IReadOnlyCollection<PaymentReference> references,
+        CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyList<RedirectSessionLookupCandidate>>([]);
+
     Task<PaymentEntity?> FindByIdempotencyKeyAsync(string idempotencyKey, CancellationToken cancellationToken);
 
     Task<PaymentEntity?> FindByReferenceAsync(

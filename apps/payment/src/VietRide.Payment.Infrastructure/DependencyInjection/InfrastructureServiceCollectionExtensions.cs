@@ -144,6 +144,7 @@ public static class InfrastructureServiceCollectionExtensions
                 "VNPay TMN code and hash secret are required in production.")
             .ValidateOnStart();
         services.AddScoped<IVnPayClient, VnPayClient>();
+        services.AddSingleton<IVnPayRedirectUrlValidator, VnPayRedirectUrlValidator>();
         services.Configure<InvoicePdfOptions>(configuration.GetSection(InvoicePdfOptions.SectionName));
         services.Configure<InvoiceStorageOptions>(configuration.GetSection(InvoiceStorageOptions.SectionName));
         services.Configure<OperatorWebOptions>(configuration.GetSection(OperatorWebOptions.SectionName));

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using System.Linq.Expressions;
 using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Domain.Entities;
 using VietRide.Payment.Domain.Enums;
@@ -38,6 +39,54 @@ internal sealed class PaymentRepository : IPaymentRepository
 
     public IQueryable<PaymentEntity> QueryNoTracking()
         => _db.Payments.AsNoTracking();
+
+    public async Task<IReadOnlyList<RedirectSessionLookupCandidate>> ListLatestRedirectSessionCandidatesAsync(
+        IReadOnlyCollection<PaymentReference> references,
+        CancellationToken cancellationToken)
+    {
+        if (references.Count == 0)
+            return [];
+
+        var payment = Expression.Parameter(typeof(PaymentEntity), "payment");
+        Expression? requestedReference = null;
+        foreach (var reference in references)
+        {
+            var matchesReference = Expression.AndAlso(
+                Expression.Equal(
+                    Expression.Property(payment, nameof(PaymentEntity.ReferenceType)),
+                    Expression.Constant(reference.ReferenceType)),
+                Expression.Equal(
+                    Expression.Property(payment, nameof(PaymentEntity.ReferenceId)),
+                    Expression.Constant(reference.ReferenceId)));
+            requestedReference = requestedReference is null
+                ? matchesReference
+                : Expression.OrElse(requestedReference, matchesReference);
+        }
+
+        var predicate = Expression.Lambda<Func<PaymentEntity, bool>>(requestedReference!, payment);
+        return await _db.Payments
+            .AsNoTracking()
+            .Where(predicate)
+            .GroupBy(candidate => new { candidate.ReferenceType, candidate.ReferenceId })
+            .Select(group => group
+                .OrderByDescending(candidate => candidate.CreatedAt)
+                .ThenByDescending(candidate => candidate.Id)
+                .Select(candidate => new RedirectSessionLookupCandidate(
+                    candidate.Id,
+                    candidate.ReferenceType,
+                    candidate.ReferenceId,
+                    candidate.UserId,
+                    candidate.Amount.Amount,
+                    candidate.Method,
+                    candidate.Status,
+                    candidate.DueAt,
+                    candidate.PaymentRedirectUrl,
+                    candidate.Context,
+                    candidate.ContextReconciliationRequired))
+                .First())
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
 
     public async Task<PaymentEntity?> FindByIdempotencyKeyAsync(string idempotencyKey, CancellationToken cancellationToken)
         => await _db.Payments.FirstOrDefaultAsync(
