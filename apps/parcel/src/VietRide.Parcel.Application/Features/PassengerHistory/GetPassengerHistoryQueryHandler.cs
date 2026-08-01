@@ -2,6 +2,8 @@ using MediatR;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Exceptions;
 using VietRide.Parcel.Application.Features.History;
+using VietRide.Parcel.Domain.Enums;
+using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Parcel.Application.Features.PassengerHistory;
@@ -11,13 +13,19 @@ public sealed class GetPassengerHistoryQueryHandler
 {
     private readonly IBookingServiceClient _bookings;
     private readonly SentParcelHistoryReader _parcels;
+    private readonly IPaymentRedirectLookupClient _paymentRedirectLookup;
+    private readonly IClock _clock;
 
     public GetPassengerHistoryQueryHandler(
         IBookingServiceClient bookings,
-        SentParcelHistoryReader parcels)
+        SentParcelHistoryReader parcels,
+        IPaymentRedirectLookupClient paymentRedirectLookup,
+        IClock clock)
     {
         _bookings = bookings;
         _parcels = parcels;
+        _paymentRedirectLookup = paymentRedirectLookup;
+        _clock = clock;
     }
 
     public async Task<PagedResult<PassengerHistoryItemDto>> Handle(
@@ -27,7 +35,7 @@ public sealed class GetPassengerHistoryQueryHandler
         if (request.Type.Equals("TICKET", StringComparison.OrdinalIgnoreCase))
             return await GetTicketHistoryAsync(request, cancellationToken);
 
-        var parcelPage = await _parcels.ReadAsync(
+        var parcelPage = await _parcels.ReadForPassengerHistoryAsync(
             request.UserId,
             request.Status,
             request.From,
@@ -35,25 +43,30 @@ public sealed class GetPassengerHistoryQueryHandler
             request.Page,
             request.PageSize,
             cancellationToken);
+        var paymentRedirectUrls = await GetParcelPaymentRedirectUrlsAsync(
+            request.UserId,
+            parcelPage.Items,
+            cancellationToken);
         var parcelItems = parcelPage.Items.Select(parcel => new PassengerHistoryItemDto(
             "PARCEL",
-            parcel.ParcelId,
-            parcel.ParcelCode,
-            parcel.TripId,
-            parcel.Status,
-            parcel.CreatedAt,
-            parcel.TotalAmount,
-            parcel.OriginName,
-            parcel.DestinationName,
-            parcel.DepartureDateTime,
-            parcel.EstimatedArrivalTime,
+            parcel.History.ParcelId,
+            parcel.History.ParcelCode,
+            parcel.History.TripId,
+            parcel.History.Status,
+            parcel.History.CreatedAt,
+            parcel.History.TotalAmount,
+            parcel.History.OriginName,
+            parcel.History.DestinationName,
+            parcel.History.DepartureDateTime,
+            parcel.History.EstimatedArrivalTime,
             null,
             new ParcelHistoryDetailsDto(
-                parcel.BookingId,
-                parcel.RecipientName,
-                parcel.SizeCategory,
-                parcel.PhotoUrl,
-                parcel.DeliveryMethod)))
+                parcel.History.BookingId,
+                parcel.History.RecipientName,
+                parcel.History.SizeCategory,
+                parcel.History.PhotoUrl,
+                parcel.History.DeliveryMethod),
+            paymentRedirectUrls.GetValueOrDefault(parcel.History.ParcelId)))
             .ToList();
 
         return PagedResult<PassengerHistoryItemDto>.Create(
@@ -103,7 +116,8 @@ public sealed class GetPassengerHistoryQueryHandler
                     ticket.SeatNumber,
                     ticket.Status,
                     ticket.PaidAmount)).ToList()),
-            null))
+            null,
+            booking.PaymentRedirectUrl))
             .ToList();
 
         return PagedResult<PassengerHistoryItemDto>.Create(
@@ -112,4 +126,104 @@ public sealed class GetPassengerHistoryQueryHandler
             outcome.Page.PageSize,
             outcome.Page.TotalItems);
     }
+
+    private async Task<IReadOnlyDictionary<Guid, string>> GetParcelPaymentRedirectUrlsAsync(
+        Guid userId,
+        IReadOnlyCollection<PassengerParcelHistoryProjection> parcels,
+        CancellationToken cancellationToken)
+    {
+        var now = _clock.UtcNow;
+        var candidates = parcels
+            .Select(parcel => CreateRedirectCandidate(parcel, now))
+            .Where(candidate => candidate is not null)
+            .Select(candidate => candidate!)
+            .GroupBy(candidate => (candidate.ReferenceType, candidate.ReferenceId))
+            .ToDictionary(group => group.Key, group => group.First());
+        if (candidates.Count == 0)
+            return new Dictionary<Guid, string>();
+
+        IReadOnlyList<PaymentRedirectLookupItem> lookupItems;
+        try
+        {
+            lookupItems = await _paymentRedirectLookup.LookupAsync(
+                userId,
+                candidates.Keys
+                    .Select(reference => new PaymentRedirectLookupReference(
+                        reference.ReferenceType,
+                        reference.ReferenceId))
+                    .ToArray(),
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return new Dictionary<Guid, string>();
+        }
+
+        return lookupItems
+            .GroupBy(item => (item.ReferenceType, item.ReferenceId))
+            .Where(group => group.Count() == 1)
+            .Select(group => group.Single())
+            .Where(item => candidates.TryGetValue(
+                    (item.ReferenceType, item.ReferenceId),
+                    out var candidate)
+                && item.PaymentId == candidate.PaymentId
+                && item.Amount == candidate.Amount
+                && item.DueAt > now
+                && item.DueAt <= candidate.Deadline
+                && !string.IsNullOrWhiteSpace(item.PaymentRedirectUrl))
+            .ToDictionary(
+                item => candidates[(item.ReferenceType, item.ReferenceId)].ParcelId,
+                item => item.PaymentRedirectUrl);
+    }
+
+    private static RedirectCandidate? CreateRedirectCandidate(
+        PassengerParcelHistoryProjection parcel,
+        DateTimeOffset now)
+    {
+        if (parcel.Status == ParcelStatus.PENDING_PAYMENT
+            && parcel.DepositPaymentId.HasValue
+            && parcel.DepositPaymentId.Value != Guid.Empty
+            && parcel.DepositRemainingAmount > 0
+            && parcel.LatestCheckInAt.HasValue
+            && parcel.LatestCheckInAt.Value > now)
+        {
+            return new RedirectCandidate(
+                parcel.History.ParcelId,
+                parcel.DepositPaymentId.Value,
+                "PARCEL",
+                parcel.History.ParcelId,
+                parcel.DepositRemainingAmount,
+                parcel.LatestCheckInAt.Value);
+        }
+
+        if (parcel.Status == ParcelStatus.PENDING_FINAL_PAYMENT
+            && parcel.BalancePaymentId.HasValue
+            && parcel.BalancePaymentId.Value != Guid.Empty
+            && parcel.BalanceRemainingAmount > 0
+            && parcel.FinalPaymentDeadline.HasValue
+            && parcel.FinalPaymentDeadline.Value > now)
+        {
+            return new RedirectCandidate(
+                parcel.History.ParcelId,
+                parcel.BalancePaymentId.Value,
+                "PARCEL_ADDITIONAL",
+                parcel.History.ParcelId,
+                parcel.BalanceRemainingAmount,
+                parcel.FinalPaymentDeadline.Value);
+        }
+
+        return null;
+    }
+
+    private sealed record RedirectCandidate(
+        Guid ParcelId,
+        Guid PaymentId,
+        string ReferenceType,
+        Guid ReferenceId,
+        long Amount,
+        DateTimeOffset Deadline);
 }

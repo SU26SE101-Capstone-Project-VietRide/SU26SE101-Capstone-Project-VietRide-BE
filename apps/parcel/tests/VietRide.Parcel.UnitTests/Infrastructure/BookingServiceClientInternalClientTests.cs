@@ -88,11 +88,30 @@ public class BookingServiceClientInternalClientTests
             statusCode = 200,
             data = new
             {
-                items = Array.Empty<object>(),
+                items = new[]
+                {
+                    new
+                    {
+                        bookingId = BookingId,
+                        bookingCode = "VR-20260801-ABCDEFGH",
+                        tripId = Guid.NewGuid(),
+                        status = "PENDING_PAYMENT",
+                        createdAt = DateTimeOffset.UtcNow,
+                        totalAmount = 350_000L,
+                        originName = "Origin",
+                        destinationName = "Destination",
+                        departureDateTime = DateTimeOffset.UtcNow.AddDays(1),
+                        bookingGroupId = (Guid?)null,
+                        tripDirection = (string?)null,
+                        routeName = "Route",
+                        tickets = Array.Empty<object>(),
+                        paymentRedirectUrl = "https://sandbox.vnpayment.vn/ticket",
+                    },
+                },
                 page = 2,
                 pageSize = 10,
-                totalItems = 0,
-                totalPages = 0,
+                totalItems = 1,
+                totalPages = 1,
                 hasNextPage = false,
                 hasPreviousPage = true,
             },
@@ -109,6 +128,8 @@ public class BookingServiceClientInternalClientTests
 
         result.IsSuccess.Should().BeTrue();
         result.Page!.Page.Should().Be(2);
+        result.Page.Items.Should().ContainSingle().Which.PaymentRedirectUrl.Should()
+            .Be("https://sandbox.vnpayment.vn/ticket");
         _handler.LastRequest!.RequestUri!.AbsolutePath.Should().Be("/internal/v1/bookings/history");
         _handler.LastRequest.RequestUri.Query.Should().Contain($"userId={userId:D}");
         _handler.LastRequest.RequestUri.Query.Should().Contain("status=CONFIRMED");

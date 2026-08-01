@@ -134,7 +134,7 @@ The property is always serialized. Lookup failure or ineligibility yields `null`
 | R6 | Completed | APPROVE | 2026-08-01 | Payment unit 17/17; PostgreSQL race/IPN 5/5; Parcel 19/19; repository interface expansion only |
 | R7 | Completed | APPROVE | 2026-08-01 | Payment lookup unit 20/20; endpoint/repository PostgreSQL 3/3; one reader command, latest-first tie-break verified |
 | R8 | Completed | APPROVE | 2026-08-01 | Booking History lookup/enrichment; focused tests 23/23; format, CRLF, and diff-check clean |
-| R9 | Pending | Pending | - | Passenger History enrichment |
+| R9 | Completed | APPROVE | 2026-08-01 | Passenger History ticket/parcel enrichment; focused tests 30/30; format, CRLF, and diff-check clean |
 | R10 | Pending | Pending | - | Final inventory and audits |
 
 ## R0 - Freeze source-of-truth and configuration
