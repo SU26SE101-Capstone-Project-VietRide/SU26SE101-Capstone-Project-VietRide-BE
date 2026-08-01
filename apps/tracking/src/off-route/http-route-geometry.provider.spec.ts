@@ -18,10 +18,13 @@ describe('HttpRouteGeometryProvider', () => {
         ok: true,
         json: async () => ({
           success: true,
+          statusCode: 200,
           data: {
             tripId: TRIP_ID,
             points: [{ latitude: 10, longitude: 106 }, { latitude: 10.1, longitude: 106 }],
+            alertRecipientUserIds: null,
           },
+          meta: { traceId: 'trip-e2e', timestamp: '2026-08-01T00:00:00.000Z' },
         }),
       } as Response);
     })) as typeof fetch;

@@ -37,7 +37,7 @@ Mỗi phase phải test được bằng e2e/unit theo hướng production. Nếu
 - [x] Phase 7 — Trip Delayed Detection
 - [x] Phase 8 — Outbox Publisher
 - [x] Phase 9 — Trip/Booking/Parcel Authorization Providers
-- [ ] Phase 10 — Hardening Và Final Acceptance
+- [x] Phase 10 — Hardening Và Final Acceptance
 
 ---
 
@@ -405,6 +405,10 @@ Redis state và Google Routes mà không thay đổi payload Socket/REST công k
   khoảng cách di chuyển 500 m hoặc ETA dưới 15 phút, và tối thiểu 60 giây giữa hai lần gọi provider.
 - Cấu hình: `GOOGLE_ROUTES_API_KEY` bắt buộc khi bật flag; E2E mặc định dùng fake Google HTTP server.
   Real Google E2E chỉ chạy khi `RUN_REAL_GOOGLE_E2E=true`.
+- Tương thích Trip: chấp nhận và chuẩn hóa `null` cho `alertRecipientUserIds`, `estimatedArrivalTime`
+  và các field tùy chọn liên quan; unit test phải dùng JSON envelope thực tế của Trip.
+- Swagger trên production: chỉ đăng ký `/docs` và `/docs-json` khi `TRACKING_SWAGGER_ENABLED=true`.
+  Kiểm thử smoke trên hệ thống thật bằng token thật vẫn là gate vận hành bắt buộc sau deploy.
 - Thêm health/ready rõ hơn:
   - `/health` liveness.
   - `/ready` check Redis/RabbitMQ/Prisma nếu cần.

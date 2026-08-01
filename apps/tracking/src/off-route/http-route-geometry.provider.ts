@@ -17,7 +17,7 @@ const RouteGeometryPointSchema = z.object({
 const RouteGeometryDataSchema = z.object({
   tripId: z.string(),
   points: z.array(RouteGeometryPointSchema),
-  alertRecipientUserIds: z.array(z.string()).optional(),
+  alertRecipientUserIds: z.array(z.string()).nullish(),
 });
 
 const ApiResponseEnvelopeSchema = z.object({

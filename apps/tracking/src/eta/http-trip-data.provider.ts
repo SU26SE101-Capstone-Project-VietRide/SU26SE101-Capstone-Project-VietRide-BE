@@ -14,9 +14,9 @@ const RouteStopSchema = z.object({
   latitude: z.number(),
   longitude: z.number(),
   sequence: z.number().int().min(0),
-  status: z.string().optional(),
-  alertRecipientUserIds: z.array(z.string()).optional(),
-  estimatedArrivalTime: z.string().optional(),
+  status: z.string().nullish(),
+  alertRecipientUserIds: z.array(z.string()).nullish(),
+  estimatedArrivalTime: z.string().nullish(),
 });
 
 const RouteStopsDataSchema = z.object({
@@ -86,9 +86,9 @@ export class HttpTripDataProvider implements TripDataProvider {
         latitude: stop.latitude,
         longitude: stop.longitude,
         sequence: stop.sequence,
-        ...(stop.status !== undefined ? { status: stop.status } : {}),
+        ...(stop.status != null ? { status: stop.status } : {}),
         ...(stop.alertRecipientUserIds?.length ? { alertRecipientUserIds: stop.alertRecipientUserIds } : {}),
-        ...(stop.estimatedArrivalTime !== undefined ? { estimatedArrivalTime: stop.estimatedArrivalTime } : {}),
+        ...(stop.estimatedArrivalTime != null ? { estimatedArrivalTime: stop.estimatedArrivalTime } : {}),
       }));
 
       this.cache.set(tripId, {
