@@ -272,12 +272,12 @@ public static class InfrastructureServiceCollectionExtensions
             services,
             configuration["Identity:BaseUrl"]
                 ?? configuration["IDENTITY_SERVICE_BASE_URL"]
-                ?? "http://identity:8080");
+                ?? "http://identity:5001");
         RegisterPlatformReportClient<IIdentityFinancialProjectionClient, IdentityFinancialProjectionClient>(
             services,
             configuration["Identity:BaseUrl"]
                 ?? configuration["IDENTITY_SERVICE_BASE_URL"]
-                ?? "http://identity:8080");
+                ?? "http://identity:5001");
 
         return services;
     }

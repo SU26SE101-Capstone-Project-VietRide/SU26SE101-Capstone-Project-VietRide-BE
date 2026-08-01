@@ -1638,17 +1638,19 @@ internal sealed class ParcelRepository : IParcelRepository
             DateTimeOffset claimedAtCutoff,
             int maxBatch,
             CancellationToken ct)
-        => await ProjectCargoRecoveryOperations(
-                _db.ParcelCargoRecoveryOperations
-                    .AsNoTracking()
-                    .Where(operation =>
-                        operation.Status
-                            == ParcelCargoRecoveryOperationStatus.PENDING
-                        && operation.ClaimedAt <= claimedAtCutoff))
+    {
+        var operations = _db.ParcelCargoRecoveryOperations
+            .AsNoTracking()
+            .Where(operation =>
+                operation.Status == ParcelCargoRecoveryOperationStatus.PENDING
+                && operation.ClaimedAt <= claimedAtCutoff)
             .OrderBy(operation => operation.ClaimedAt)
             .ThenBy(operation => operation.Id)
-            .Take(maxBatch)
+            .Take(maxBatch);
+
+        return await ProjectCargoRecoveryOperations(operations)
             .ToListAsync(ct);
+    }
 
     public async Task<ParcelPaymentTransitionSnapshot?> TryReturnAsync(
         Guid parcelId,

@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql;
 using Npgsql.NameTranslation;
+using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Inbox;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
@@ -362,6 +363,85 @@ public sealed class ShuttlePersistenceIntegrationTests
         finally
         {
             await setup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
+    public async Task PickupProgression_AssignedDriverMarksWholeOrderAndTrackingContextAdvances()
+    {
+        var databaseName = $"vietride_trip_shuttle_pickup_{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        now = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerMillisecond));
+        var clock = new FrozenClock(now);
+        await using var db = CreateDbContext(databaseName, clock);
+
+        try
+        {
+            await db.Database.MigrateAsync();
+            var seed = await SeedBaseAsync(db, now.AddHours(4));
+            var bookingId = Guid.NewGuid();
+            var passengerId = Guid.NewGuid();
+            for (var index = 0; index < 2; index++)
+            {
+                db.ShuttlePassengers.Add(ShuttlePassenger.Request(
+                    seed.MainTripId,
+                    bookingId,
+                    Guid.NewGuid(),
+                    passengerId,
+                    "12 Nguyen Hue, District 1",
+                    10.7731m,
+                    106.7032m));
+            }
+
+            await db.SaveChangesAsync();
+            var service = CreateDispatchService(db, clock, seed.OperatorId);
+            var created = await service.CreateAsync(new CreateShuttleTripInput(
+                seed.OperatorId,
+                seed.MainTripId,
+                seed.ShuttleDriverId,
+                seed.ShuttleVehicleId,
+                now.AddHours(1),
+                now.AddHours(2),
+                [bookingId],
+                null), CancellationToken.None);
+
+            var wrongDriver = async () => await service.MarkPickupAsync(
+                created.ShuttleTripId,
+                1,
+                Guid.NewGuid(),
+                CancellationToken.None);
+            await wrongDriver.Should().ThrowAsync<ForbiddenException>();
+
+            var first = await service.MarkPickupAsync(
+                created.ShuttleTripId,
+                1,
+                seed.ShuttleDriverId,
+                CancellationToken.None);
+            var replay = await service.MarkPickupAsync(
+                created.ShuttleTripId,
+                1,
+                seed.ShuttleDriverId,
+                CancellationToken.None);
+            var context = await service.GetTrackingContextAsync(
+                created.ShuttleTripId,
+                seed.ShuttleDriverId,
+                "DRIVER",
+                null,
+                CancellationToken.None);
+
+            first.PickedUpPassengerCount.Should().Be(2);
+            replay.PickedUpPassengerCount.Should().Be(0);
+            context.Stops.Should().ContainSingle(stop =>
+                stop.PickupOrder == 1 && stop.Status == ShuttlePassenger.PickedUpStatus);
+            var persisted = await db.ShuttlePassengers.AsNoTracking()
+                .Where(x => x.ShuttleTripId == created.ShuttleTripId)
+                .ToArrayAsync();
+            persisted.Should().OnlyContain(x =>
+                x.Status == ShuttlePassenger.PickedUpStatus && x.PickedUpAt == now);
+        }
+        finally
+        {
+            await db.Database.EnsureDeletedAsync();
         }
     }
 

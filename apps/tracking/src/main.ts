@@ -2,9 +2,9 @@ import './bootstrap-env';
 
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app/app.module';
 import { CorsIoAdapter } from './app/cors-io.adapter';
+import { setupTrackingSwagger } from './app/tracking-swagger';
 import { loadEnv } from './config/env.schema';
 
 async function bootstrap(): Promise<void> {
@@ -18,13 +18,7 @@ async function bootstrap(): Promise<void> {
   app.enableShutdownHooks();
   app.useWebSocketAdapter(new CorsIoAdapter(app, env.TRACKING_CORS_ORIGIN));
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('VietRide Tracking API')
-    .setVersion('v1')
-    .addBearerAuth()
-    .build();
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('docs', app, document);
+  setupTrackingSwagger(app, env.TRACKING_SWAGGER_ENABLED);
 
   const port = env.PORT;
   await app.listen(env.PORT, '0.0.0.0');

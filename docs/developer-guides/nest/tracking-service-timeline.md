@@ -37,7 +37,8 @@ Mỗi phase phải test được bằng e2e/unit theo hướng production. Nếu
 - [x] Phase 7 — Trip Delayed Detection
 - [x] Phase 8 — Outbox Publisher
 - [x] Phase 9 — Trip/Booking/Parcel Authorization Providers
-- [ ] Phase 10 — Hardening Và Final Acceptance
+- [x] Phase 10 — Hardening Và Final Acceptance
+- [x] Phase 11 — Shuttle GPS Và Google Routes ETA
 
 ---
 
@@ -388,20 +389,34 @@ npx nx run tracking:build
 ## Phase 10 — Hardening Và Final Acceptance
 
 **Thời lượng:** 1 ngày
-**Mục tiêu:** Full tracking service ổn định, production-ready, test coverage đủ.
+**Mục tiêu:** Ổn định đường GPS realtime và hoàn tất chấp nhận production cho route snap, ETA,
+Redis state và Google Routes mà không thay đổi payload Socket/REST công khai.
 
 ### Scope
 
-- Cleanup app skeleton:
-  - bỏ hoặc giữ `/api` hello endpoint tùy convention, nhưng không ảnh hưởng tracking.
+- GPS raw/published: project GPS lên route geometry đã cache trong ngưỡng cố định 50 m.
+  Latest/Socket/REST dùng điểm published; buffer Redis, `GpsTrail`, fingerprint idempotency và
+  off-route luôn dùng điểm raw. Cache miss chỉ phát raw, gọi warm Trip geometry bất đồng bộ và
+  dedupe request đang bay; không chờ Trip HTTP trên live GPS path.
+- ETA: dùng một `RouteGeometryProvider` cho snap, off-route và Local ETA. Local ETA chiếu vehicle
+  và stop lên polyline, tính khoảng cách tích lũy, giữ sequence/progress không lùi; không dùng
+  Haversine làm ETA chính. Google Routes là primary khi `GOOGLE_ROUTES_ENABLED=true`, Local là
+  fallback; lỗi Google liên tiếp ba lần mở cooldown 300 giây.
+- Redis ETA: cache `tracking:eta:{tripId}:{stopId}` 60 giây, state 24 giờ, lock từng trip/stop,
+  khoảng cách di chuyển 500 m hoặc ETA dưới 15 phút, và tối thiểu 60 giây giữa hai lần gọi provider.
+- Cấu hình: `GOOGLE_ROUTES_API_KEY` bắt buộc khi bật flag; E2E mặc định dùng fake Google HTTP server.
+  Real Google E2E chỉ chạy khi `RUN_REAL_GOOGLE_E2E=true`.
+- Tương thích Trip: chấp nhận và chuẩn hóa `null` cho `alertRecipientUserIds`, `estimatedArrivalTime`
+  và các field tùy chọn liên quan; unit test phải dùng JSON envelope thực tế của Trip.
+- Swagger trên production: chỉ đăng ký `/docs` và `/docs-json` khi `TRACKING_SWAGGER_ENABLED=true`.
+  Kiểm thử smoke trên hệ thống thật bằng token thật vẫn là gate vận hành bắt buộc sau deploy.
 - Thêm health/ready rõ hơn:
   - `/health` liveness.
   - `/ready` check Redis/RabbitMQ/Prisma nếu cần.
 - Review env:
   - `JWT_PUBLIC_KEY_URL`.
   - `USER_JWT_PUBLIC_KEY` chỉ cho local/test RSA public key override.
-  - Redis TTL constants.
-  - batch intervals.
+  - Redis TTL constants và batch intervals.
   - không có mock-auth production flag.
 - Security review:
   - không log token/request body nhạy cảm.
@@ -413,6 +428,8 @@ npx nx run tracking:build
   npx nx run tracking:test
   npx nx run tracking:test:e2e
   npx nx run tracking:build
+  node scripts/test-tracking-phase10.js
+  git diff --check
   npm run lint:ts
   npm run test:ts
   npm run build:ts
@@ -429,9 +446,19 @@ npx nx run tracking:build
 - Socket.IO: `joinShuttleTracking`, `shuttle:gps:update`, `shuttle:eta:update`.
 - Passenger có manifest `PENDING`, driver được assign hoặc operator cùng tenant mới được truy cập.
 - Lấy manifest/stops qua internal Trip API; không broadcast PII của Booking khác.
-- ETA đi theo `pickup_order`, bỏ nhóm đã hủy và dùng origin Station làm điểm cuối.
-- Recalculate sau 500 m hoặc khi ETA dưới 15 phút; dùng Haversine và GPS speed hiện có.
-- Redis riêng: `tracking:shuttle:latest:{id}` TTL 300 giây, `tracking:shuttle:gps_buffer:{id}` tối đa 1000/TTL 24 giờ, `tracking:shuttle:eta:{id}:{order}` TTL 60 giây và `tracking:shuttle:eta_state:{id}`.
+- Tài xế được gán gọi `POST /v1/driver/shuttle-trips/{shuttleTripId}/stops/{pickupOrder}/pickup`
+  với `Idempotency-Key` để Trip chuyển nguyên tử cả nhóm `PENDING` sang `PICKED_UP`.
+- ETA đi theo `pickup_order`, bỏ nhóm terminal (`PICKED_UP`, `DELIVERED`, `NO_SHOW`, `CANCELLED`),
+  không lùi xuống dưới thứ tự ETA đã ghi và dùng origin Station làm điểm cuối.
+- Google Routes dùng `DRIVE` và `TRAFFIC_AWARE` làm provider chính khi `GOOGLE_ROUTES_ENABLED=true`;
+  Haversine và tốc độ GPS là fallback cục bộ vì Shuttle không có route geometry cố định.
+- Recalculate sau tối thiểu 60 giây khi di chuyển trên 500 m, ETA dưới 15 phút hoặc chuyển sang
+  `pickup_order` mới. Ba lỗi Google liên tiếp mở cooldown 300 giây.
+- Redis riêng: `tracking:shuttle:latest:{id}` TTL 300 giây, `tracking:shuttle:gps_buffer:{id}` tối đa
+  1000/TTL 24 giờ, `tracking:shuttle:eta:{id}:{order}` TTL 60 giây,
+  `tracking:shuttle:eta_state:{id}` và lock `tracking:shuttle:eta_lock:{id}:{order}`.
+- GPS được ghi, broadcast và ack trước; Google HTTP chạy bất đồng bộ và chỉ phát
+  `shuttle:eta:update` khi hoàn tất. Public Socket/REST payload không thêm `etaSource`.
 - Shuttle không được ghi `tracking:active_trips`, main `GpsTrail`, hoặc kích hoạt off-route/delay chain của main Trip.
 - Bổ sung REST latest/ETA fallback và test authorization, TTL, cancellation, tenant isolation.
 
@@ -442,7 +469,11 @@ npx nx run tracking:lint
 npx nx run tracking:test
 npx nx run tracking:test:e2e
 npx nx run tracking:build
+node scripts/test-tracking-phase11-shuttle-google.js
+git diff --check
 ```
+
+Real Google E2E chỉ chạy khi `RUN_REAL_GOOGLE_E2E=true`; E2E mặc định dùng fake Google HTTP server.
 
 ## Public Interfaces / Events Cần Hoàn Thành
 

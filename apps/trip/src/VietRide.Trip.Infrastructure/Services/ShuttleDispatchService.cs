@@ -300,6 +300,83 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
             stops);
     }
 
+    public async Task<ShuttlePickupResult> MarkPickupAsync(
+        Guid shuttleTripId,
+        int pickupOrder,
+        Guid driverUserId,
+        CancellationToken cancellationToken)
+    {
+        if (pickupOrder <= 0)
+        {
+            throw new CodedValidationException(
+                "VALIDATION_ERROR",
+                "Pickup order must be a positive integer.");
+        }
+
+        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+        await AcquireLockAsync("shuttle-pickup", shuttleTripId, cancellationToken);
+
+        var shuttleTrip = await _db.ShuttleTrips
+            .SingleOrDefaultAsync(x => x.Id == shuttleTripId, cancellationToken)
+            ?? throw new CodedNotFoundException(
+                "SHUTTLE_TRIP_NOT_FOUND",
+                "Shuttle trip was not found.");
+        if (shuttleTrip.DriverUserId != driverUserId)
+        {
+            throw new ForbiddenException(
+                "FORBIDDEN",
+                "Shuttle trip is not assigned to this driver.");
+        }
+
+        if (shuttleTrip.Status is "COMPLETED" or "CANCELLED")
+        {
+            throw new CodedConflictException(
+                "SHUTTLE_TRIP_TERMINAL",
+                "A terminal Shuttle trip cannot accept pickup updates.");
+        }
+
+        var manifests = await _db.ShuttlePassengers
+            .Where(x => x.ShuttleTripId == shuttleTripId && x.PickupOrder == pickupOrder)
+            .ToArrayAsync(cancellationToken);
+        if (manifests.Length == 0)
+        {
+            throw new CodedNotFoundException(
+                "SHUTTLE_PICKUP_NOT_FOUND",
+                "Shuttle pickup order was not found.");
+        }
+
+        var pickedUpAt = manifests
+            .Where(x => x.PickedUpAt.HasValue)
+            .Select(x => x.PickedUpAt!.Value)
+            .DefaultIfEmpty(_clock.UtcNow)
+            .Min();
+        var changed = 0;
+        foreach (var manifest in manifests.Where(x => x.Status == ShuttlePassenger.PendingStatus))
+        {
+            if (manifest.MarkPickedUp(pickedUpAt))
+            {
+                changed++;
+            }
+        }
+
+        var activeCount = manifests.Count(x =>
+            x.Status is ShuttlePassenger.PickedUpStatus or ShuttlePassenger.DeliveredStatus);
+        if (activeCount == 0)
+        {
+            throw new CodedConflictException(
+                "SHUTTLE_PICKUP_NOT_PENDING",
+                "Shuttle pickup has no pending passengers.");
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return new ShuttlePickupResult(
+            shuttleTripId,
+            pickupOrder,
+            changed,
+            pickedUpAt);
+    }
+
     private Task AcquireLockAsync(string resource, Guid id, CancellationToken cancellationToken)
         => _db.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT pg_advisory_xact_lock(hashtextextended({resource + ':' + id.ToString("N")}, 0))",

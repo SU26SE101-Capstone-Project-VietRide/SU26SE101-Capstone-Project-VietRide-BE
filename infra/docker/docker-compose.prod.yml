@@ -343,6 +343,9 @@ services:
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-vietride.events}
       # CORS — restrict to FE domain in production. Default '*' allows all origins.
       TRACKING_CORS_ORIGIN: ${TRACKING_CORS_ORIGIN:?TRACKING_CORS_ORIGIN is required in production}
+      GOOGLE_ROUTES_ENABLED: ${GOOGLE_ROUTES_ENABLED:?GOOGLE_ROUTES_ENABLED is required in production}
+      GOOGLE_ROUTES_API_KEY: ${GOOGLE_ROUTES_API_KEY:?GOOGLE_ROUTES_API_KEY is required in production}
+      GOOGLE_ROUTES_BASE_URL: ${GOOGLE_ROUTES_BASE_URL:-https://routes.googleapis.com}
       TRACKING_SWAGGER_ENABLED: 'false'
       # Worker flags — default false in code, must be true in production
       TRACKING_GPS_FLUSH_ENABLED: 'true'

@@ -4168,6 +4168,84 @@ Server broadcasts to room `trip:{tripId}`:
 - `eta:update`
 - `trip:statusChanged`
 
+Tracking Phase 10 invariants (the public payload above is unchanged):
+
+- GPS is projected onto cached Trip route geometry only when the nearest segment is at most 50 m
+  from the raw coordinate. Published coordinates are used by `tracking:latest:{tripId}`, REST and
+  Socket.IO. Raw coordinates are used by `tracking:gps_buffer:{tripId}`, `GpsTrail`, idempotency
+  fingerprints and off-route detection.
+- A geometry cache miss emits raw GPS immediately and warms Trip geometry asynchronously with
+  in-flight request deduplication; the live GPS acknowledgement never waits for Trip HTTP.
+- ETA uses cumulative route distance and monotonic stop sequence/progress guards. Google Routes is
+  primary only when `GOOGLE_ROUTES_ENABLED=true`; Local Route ETA is the fallback. Provider calls
+  are throttled to 60 seconds, require more than 500 m movement or an ETA under 15 minutes, and
+  use a per-trip-stop Redis lock, a 60-second ETA cache and a three-failure/300-second cooldown.
+- Default E2E uses a fake Google Routes HTTP server. Real Google E2E is opt-in with
+  `RUN_REAL_GOOGLE_E2E=true`; no `etaSource`, snap metadata or traffic metadata is added to the
+  public response shape.
+
+### Shuttle tracking
+
+Client joins the authorized Shuttle room:
+
+```ts
+socket.emit("joinShuttleTracking", { shuttleTripId }, ack)
+```
+
+Success ack preserves the existing common join shape; `tripId` contains the ShuttleTrip ID:
+
+```json
+{
+  "success": true,
+  "tripId": "uuid",
+  "room": "shuttle:uuid",
+  "scope": "PASSENGER|DRIVER|OPERATOR"
+}
+```
+
+Only the assigned Shuttle driver may emit `shuttle:gps:update`:
+
+```json
+{
+  "shuttleTripId": "uuid",
+  "latitude": 10.762622,
+  "longitude": 106.660172,
+  "speedKmh": 30,
+  "heading": 90,
+  "recordedAt": "2026-08-01T01:00:00.000Z"
+}
+```
+
+The server broadcasts the unchanged GPS payload as `shuttle:gps:update`, then may asynchronously
+broadcast `shuttle:eta:update`:
+
+```json
+{
+  "shuttleTripId": "uuid",
+  "nextPickupOrder": 1,
+  "etaMinutes": 17,
+  "estimatedArrivalTime": "2026-08-01T01:17:00.000Z",
+  "distanceMeters": 5909,
+  "updatedAt": "2026-08-01T01:00:01.000Z"
+}
+```
+
+REST fallback endpoints are:
+
+- `GET /v1/tracking/shuttle-trips/{shuttleTripId}/latest`
+- `GET /v1/tracking/shuttle-trips/{shuttleTripId}/eta`
+
+Shuttle ETA follows `pickupOrder`, skips terminal groups (`PICKED_UP`, `DELIVERED`, `NO_SHOW`,
+`CANCELLED`), never regresses below the last published pickup order and uses the Station stop as the
+final destination. Google Routes is primary when `GOOGLE_ROUTES_ENABLED=true`; direct-distance/speed ETA
+is the local fallback because Shuttle has no fixed route geometry. Provider calls use a minimum
+60-second interval, the existing 500 m movement or ETA-under-15-minute conditions, a per-Shuttle
+pickup Redis lock, a 60-second cache and a three-failure/300-second Google cooldown. GPS persistence,
+broadcast and acknowledgement never wait for Google HTTP. Shuttle state remains under
+`tracking:shuttle:*` and does not enter main Trip `GpsTrail`, active-trip, off-route or delay chains.
+No `etaSource` or provider metadata is added to the public payload. Default E2E uses a fake Google
+server; real Google is opt-in with `RUN_REAL_GOOGLE_E2E=true`.
+
 ## RAG AI Service
 
 ### GET `/v1/rag/documents`
@@ -5228,6 +5306,29 @@ Errors: `402 SUBSCRIPTION_EXPIRED`; `403 FORBIDDEN`; `403 SUBSCRIPTION_MODULE_DI
 SHUTTLE_REQUEST_SET_CHANGED`; `409 SHUTTLE_CAPACITY_EXCEEDED`; `409
 SHUTTLE_DRIVER_CONFLICT`; `409 SHUTTLE_VEHICLE_CONFLICT`; `409
 SHUTTLE_REQUEST_CUTOFF_PASSED`; `422 VALIDATION_ERROR`; `503 UPSTREAM_UNAVAILABLE`.
+
+### POST `/v1/driver/shuttle-trips/{shuttleTripId}/stops/{pickupOrder}/pickup`
+
+Auth: assigned `DRIVER` only. `Idempotency-Key` is required. The request has no body.
+
+Atomically changes every `PENDING` passenger manifest at the requested `pickupOrder` to `PICKED_UP`
+and records the same pickup timestamp for the whole group. Replaying the operation is a successful
+no-op with `pickedUpPassengerCount: 0` when the group is already picked up.
+
+Response `200`:
+
+```json
+{
+  "shuttleTripId": "uuid",
+  "pickupOrder": 1,
+  "pickedUpPassengerCount": 2,
+  "pickedUpAt": "2026-08-02T01:00:00Z"
+}
+```
+
+Errors: `401 UNAUTHORIZED`; `403 FORBIDDEN`; `404 SHUTTLE_TRIP_NOT_FOUND`; `404
+SHUTTLE_PICKUP_NOT_FOUND`; `409 SHUTTLE_TRIP_TERMINAL`; `409 SHUTTLE_PICKUP_NOT_PENDING`; `422
+VALIDATION_ERROR`; `422 IDEMPOTENCY_KEY_MISMATCH`.
 
 ### Shuttle fields trong Booking
 

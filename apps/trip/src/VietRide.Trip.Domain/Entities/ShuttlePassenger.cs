@@ -7,6 +7,7 @@ public sealed class ShuttlePassenger : BaseEntity<Guid>
     public const string InboundDirection = "INBOUND_TO_STATION";
     public const string PendingAssignmentStatus = "PENDING_ASSIGNMENT";
     public const string PendingStatus = "PENDING";
+    public const string PickedUpStatus = "PICKED_UP";
     public const string DeliveredStatus = "DELIVERED";
     public const string CancelledStatus = "CANCELLED";
     public Guid? ShuttleTripId { get; private set; }
@@ -92,6 +93,23 @@ public sealed class ShuttlePassenger : BaseEntity<Guid>
 
         Status = CancelledStatus;
         CancelReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
+    }
+
+    public bool MarkPickedUp(DateTimeOffset pickedUpAt)
+    {
+        if (Status is PickedUpStatus or DeliveredStatus)
+        {
+            return false;
+        }
+
+        if (Status != PendingStatus)
+        {
+            throw new InvalidOperationException("Only pending Shuttle passengers can be picked up.");
+        }
+
+        Status = PickedUpStatus;
+        PickedUpAt = pickedUpAt;
+        return true;
     }
 
     private static void ValidateId(Guid value, string parameterName)

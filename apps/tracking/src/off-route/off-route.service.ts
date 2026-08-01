@@ -1,7 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { RedisService } from '@vietride/nest-redis';
 import pino from 'pino';
-import { calculateDistanceMeters } from '../eta/eta.service';
 import type { GpsUpdateEvent } from '../location/location.service';
 import { TrackingPrismaService } from '../prisma/tracking-prisma.service';
 import {
@@ -10,10 +9,9 @@ import {
   OFF_ROUTE_EVENT_TYPE,
   OFF_ROUTE_STATE_TTL_SECONDS,
   ROUTE_GEOMETRY_PROVIDER,
-  APPROXIMATE_METERS_PER_DEGREE_LATITUDE,
   trackingOffRouteSinceKey,
 } from './off-route.constants';
-import type { RouteGeometryPoint, RouteGeometryProvider } from './route-geometry.provider';
+import { projectPointToRoute, type RouteGeometryPoint, type RouteGeometryProvider } from './route-geometry.provider';
 
 interface OffRouteState {
   firstDetectedAt: string;
@@ -52,8 +50,12 @@ export class OffRouteService {
   }
 
   private async evaluateGpsUpdate(gps: GpsUpdateEvent): Promise<OffRouteAlertPayload | null> {
-    const route = await this.routeGeometryProvider.getRouteGeometry(gps.tripId);
-    if (!route || route.points.length < 2) return null;
+    const route = this.routeGeometryProvider.peekCachedRouteGeometry(gps.tripId);
+    if (!route) {
+      void this.routeGeometryProvider.getRouteGeometry(gps.tripId).catch(() => null);
+      return null;
+    }
+    if (route.points.length < 2) return null;
 
     const distanceMeters = Math.round(calculateNearestRouteDistanceMeters(gps, route.points));
     const stateKey = trackingOffRouteSinceKey(gps.tripId);
@@ -132,68 +134,5 @@ export function calculateNearestRouteDistanceMeters(
   point: RouteGeometryPoint,
   routePoints: RouteGeometryPoint[],
 ): number {
-  let nearestDistanceMeters = Number.POSITIVE_INFINITY;
-
-  for (let index = 0; index < routePoints.length - 1; index += 1) {
-    const segmentStart = routePoints[index];
-    const segmentEnd = routePoints[index + 1];
-    if (!segmentStart || !segmentEnd) continue;
-
-    const distanceMeters = calculatePointToSegmentDistanceMeters(point, segmentStart, segmentEnd);
-    nearestDistanceMeters = Math.min(nearestDistanceMeters, distanceMeters);
-  }
-
-  return nearestDistanceMeters;
-}
-
-function calculatePointToSegmentDistanceMeters(
-  point: RouteGeometryPoint,
-  segmentStart: RouteGeometryPoint,
-  segmentEnd: RouteGeometryPoint,
-): number {
-  const segmentDistanceMeters = calculateDistanceMeters(
-    segmentStart.latitude,
-    segmentStart.longitude,
-    segmentEnd.latitude,
-    segmentEnd.longitude,
-  );
-  if (segmentDistanceMeters === 0) {
-    return calculateDistanceMeters(point.latitude, point.longitude, segmentStart.latitude, segmentStart.longitude);
-  }
-
-  const projection = projectToLocalMeters(point, segmentStart, segmentEnd);
-  const segmentLengthSquared = projection.segmentX * projection.segmentX + projection.segmentY * projection.segmentY;
-  const rawPosition =
-    (projection.pointX * projection.segmentX + projection.pointY * projection.segmentY) / segmentLengthSquared;
-  const position = Math.max(0, Math.min(1, rawPosition));
-  const nearestX = projection.segmentX * position;
-  const nearestY = projection.segmentY * position;
-  const deltaX = projection.pointX - nearestX;
-  const deltaY = projection.pointY - nearestY;
-  return Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-}
-
-function projectToLocalMeters(
-  point: RouteGeometryPoint,
-  segmentStart: RouteGeometryPoint,
-  segmentEnd: RouteGeometryPoint,
-): {
-  pointX: number;
-  pointY: number;
-  segmentX: number;
-  segmentY: number;
-} {
-  const referenceLatitudeRadians = degreesToRadians(segmentStart.latitude);
-  const metersPerDegreeLatitude = APPROXIMATE_METERS_PER_DEGREE_LATITUDE;
-  const metersPerDegreeLongitude = metersPerDegreeLatitude * Math.cos(referenceLatitudeRadians);
-  return {
-    pointX: (point.longitude - segmentStart.longitude) * metersPerDegreeLongitude,
-    pointY: (point.latitude - segmentStart.latitude) * metersPerDegreeLatitude,
-    segmentX: (segmentEnd.longitude - segmentStart.longitude) * metersPerDegreeLongitude,
-    segmentY: (segmentEnd.latitude - segmentStart.latitude) * metersPerDegreeLatitude,
-  };
-}
-
-function degreesToRadians(value: number): number {
-  return (value * Math.PI) / 180;
+  return projectPointToRoute(point, routePoints)?.distanceMeters ?? Number.POSITIVE_INFINITY;
 }

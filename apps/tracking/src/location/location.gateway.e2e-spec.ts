@@ -10,18 +10,22 @@ import { MvpTrackingAuthorizationAdapter } from '../authorization/tracking-autho
 import type { Env } from '../config/env.schema';
 import { EtaService, type EtaUpdateEvent } from '../eta/eta.service';
 import { OffRouteService } from '../off-route/off-route.service';
+import { ROUTE_GEOMETRY_PROVIDER } from '../off-route/off-route.constants';
 import { ShuttleService } from '../shuttle/shuttle.service';
+import { ShuttleEtaService } from '../shuttle/shuttle-eta.service';
+import type { ShuttleEtaEvent } from '../shuttle/shuttle-eta.service';
 import { TripDelayService, type TripDelayEtaUpdate } from '../trip-delay/trip-delay.service';
 import { LocationGateway } from './location.gateway';
 import {
   TRACKING_SOCKET_PATH,
   trackingGpsIdempotencyKey,
 } from './location.constants';
-import { LocationService } from './location.service';
+import { LocationService, type GpsUpdateEvent } from './location.service';
 
 const TEST_TRIP_ID = '11111111-1111-4111-8111-111111111111';
 const TEST_USER_ID = '22222222-2222-4222-8222-222222222222';
 const TEST_OPERATOR_ID = '33333333-3333-4333-8333-333333333333';
+const TEST_SHUTTLE_ID = '55555555-5555-4555-8555-555555555555';
 const CONNECT_TIMEOUT_MS = 2_000;
 const ACK_TIMEOUT_MS = 2_000;
 const IDENTITY_ISSUER = 'vietride-identity';
@@ -54,6 +58,10 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
   let tripDelayHandleEtaUpdate: jest.MockedFunction<
     (event: EtaUpdateEvent) => Promise<TripDelayEtaUpdate>
   >;
+  let routePeek: jest.Mock;
+  let shuttleGetContext: jest.Mock;
+  let shuttleRecordLocation: jest.Mock;
+  let shuttleEtaHandleGpsUpdate: jest.Mock;
 
   beforeAll(async () => {
     const generated = await generateKeyPair('RS256');
@@ -77,6 +85,10 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       ...event,
       delayed: false,
     }));
+    routePeek = jest.fn(() => null);
+    shuttleGetContext = jest.fn();
+    shuttleRecordLocation = jest.fn();
+    shuttleEtaHandleGpsUpdate = jest.fn(async () => undefined);
     const redisService = {
       getClient: jest.fn(() => ({
         eval: redisEval,
@@ -104,6 +116,13 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
           useValue: redisService,
         },
         {
+          provide: ROUTE_GEOMETRY_PROVIDER,
+          useValue: {
+            peekCachedRouteGeometry: routePeek,
+            getRouteGeometry: async () => null,
+          },
+        },
+        {
           provide: EtaService,
           useValue: { handleGpsUpdate: etaHandleGpsUpdate },
         },
@@ -122,9 +141,13 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
         {
           provide: ShuttleService,
           useValue: {
-            getContext: jest.fn(),
-            recordLocation: jest.fn(),
+            getContext: shuttleGetContext,
+            recordLocation: shuttleRecordLocation,
           },
+        },
+        {
+          provide: ShuttleEtaService,
+          useValue: { handleGpsUpdate: shuttleEtaHandleGpsUpdate },
         },
       ],
     }).compile();
@@ -148,6 +171,12 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       ...event,
       delayed: false,
     }));
+    routePeek.mockReset();
+    routePeek.mockReturnValue(null);
+    shuttleGetContext.mockReset();
+    shuttleRecordLocation.mockReset();
+    shuttleEtaHandleGpsUpdate.mockReset();
+    shuttleEtaHandleGpsUpdate.mockResolvedValue(undefined);
   });
 
   afterAll(async () => {
@@ -213,6 +242,7 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       'tracking:active_trips',
       expect.stringMatching(/^[a-f0-9]{64}$/),
       expect.any(String),
+      expect.any(String),
       '86400',
       '300',
       TEST_TRIP_ID,
@@ -249,6 +279,93 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     await detectionStarted;
     releaseDetection();
     await waitForCondition(() => etaHandleGpsUpdate.mock.calls.length > 0);
+    socket.disconnect();
+  });
+
+  it('broadcasts Shuttle GPS and returns ack before Google ETA completes', async () => {
+    const token = await signIdentityToken('DRIVER', TEST_OPERATOR_ID);
+    const socket = await connectSocket(token);
+    const context = {
+      shuttleTripId: TEST_SHUTTLE_ID,
+      mainTripId: TEST_TRIP_ID,
+      operatorId: TEST_OPERATOR_ID,
+      driverUserId: TEST_USER_ID,
+      allowed: true,
+      scope: 'DRIVER',
+      stops: [{
+        pickupOrder: 1,
+        bookingId: null,
+        latitude: 10.8,
+        longitude: 106.7,
+        status: 'PENDING',
+        isStation: true,
+      }],
+    };
+    const payload = {
+      shuttleTripId: TEST_SHUTTLE_ID,
+      latitude: 10.7,
+      longitude: 106.65,
+      speedKmh: 30,
+      recordedAt: '2026-08-01T01:00:00.000Z',
+    };
+    const eta: ShuttleEtaEvent = {
+      shuttleTripId: TEST_SHUTTLE_ID,
+      nextPickupOrder: 1,
+      etaMinutes: 10,
+      estimatedArrivalTime: '2026-08-01T01:10:00.000Z',
+      distanceMeters: 6_200,
+      updatedAt: '2026-08-01T01:00:01.000Z',
+    };
+    let releaseEta: () => void = () => undefined;
+    shuttleGetContext.mockResolvedValue(context);
+    shuttleRecordLocation.mockResolvedValue({ gps: payload, duplicate: false });
+    shuttleEtaHandleGpsUpdate.mockImplementationOnce(
+      () => new Promise<ShuttleEtaEvent>((resolve) => {
+        releaseEta = () => resolve(eta);
+      }),
+    );
+
+    await emitWithAck<JoinTripTrackingAck>(socket, 'joinShuttleTracking', {
+      shuttleTripId: TEST_SHUTTLE_ID,
+    });
+    const gpsPromise = waitForEvent<typeof payload>(socket, 'shuttle:gps:update');
+    const etaPromise = waitForEvent<ShuttleEtaEvent>(socket, 'shuttle:eta:update');
+    const ack = await emitWithAck<GpsUpdateAck>(socket, 'shuttle:gps:update', payload);
+    const receivedGps = await gpsPromise;
+
+    expect(ack).toEqual({ success: true });
+    expect(receivedGps).toEqual(payload);
+    expect(shuttleEtaHandleGpsUpdate).toHaveBeenCalledWith(payload, context);
+
+    releaseEta();
+    await expect(etaPromise).resolves.toEqual(eta);
+    socket.disconnect();
+  });
+
+  it('broadcasts published coordinates while off-route receives raw coordinates', async () => {
+    routePeek.mockReturnValue({
+      tripId: TEST_TRIP_ID,
+      points: [
+        { latitude: 10.7, longitude: 106.66 },
+        { latitude: 10.9, longitude: 106.66 },
+      ],
+    });
+    const token = await signIdentityToken('DRIVER', TEST_OPERATOR_ID);
+    const socket = await connectSocket(token);
+    await emitWithAck<JoinTripTrackingAck>(socket, 'joinTripTracking', { tripId: TEST_TRIP_ID });
+    const publishedPromise = waitForEvent<GpsUpdateEvent>(socket, 'gps:update');
+
+    const ack = await emitWithAck<GpsUpdateAck>(socket, 'gps:update', createGpsPayload());
+    const published = await publishedPromise;
+    await waitForCondition(() => offRouteHandleGpsUpdate.mock.calls.length === 1);
+    await waitForCondition(() => etaHandleGpsUpdate.mock.calls.length === 1);
+
+    expect(ack).toEqual({ success: true });
+    expect(published.longitude).toBeCloseTo(106.66, 6);
+    const rawDetection = offRouteHandleGpsUpdate.mock.calls[0]?.[0] as GpsUpdateEvent;
+    const publishedDetection = etaHandleGpsUpdate.mock.calls[0]?.[0] as GpsUpdateEvent;
+    expect(rawDetection.longitude).toBe(106.660172);
+    expect(publishedDetection.longitude).toBeCloseTo(106.66, 6);
     socket.disconnect();
   });
 
@@ -498,6 +615,13 @@ function createTestEnv(publicKeyPem: string): Env {
     TRACKING_DATA_PROVIDER_TIMEOUT_MS: 2_000,
     TRACKING_ROUTE_STOPS_CACHE_TTL_SECONDS: 300,
     TRACKING_ROUTE_GEOMETRY_CACHE_TTL_SECONDS: 600,
+    GOOGLE_ROUTES_ENABLED: false,
+    GOOGLE_ROUTES_API_KEY: '',
+    GOOGLE_ROUTES_BASE_URL: 'https://routes.googleapis.com',
+    TRACKING_GOOGLE_ROUTES_TIMEOUT_MS: 1_500,
+    TRACKING_ETA_MIN_INTERVAL_SECONDS: 60,
+    TRACKING_ETA_CACHE_TTL_SECONDS: 60,
+    TRACKING_ETA_FAILURE_COOLDOWN_SECONDS: 300,
   };
 }
 

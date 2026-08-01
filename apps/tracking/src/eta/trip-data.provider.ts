@@ -3,6 +3,7 @@ export interface TripStopSnapshot {
   latitude: number;
   longitude: number;
   sequence: number;
+  status?: string;
   alertRecipientUserIds?: string[];
   estimatedArrivalTime?: string;
 }

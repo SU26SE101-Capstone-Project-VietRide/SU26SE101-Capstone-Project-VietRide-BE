@@ -190,6 +190,44 @@ public sealed class Day32CargoRecoveryOperationPersistenceTests
     }
 
     [Fact]
+    public async Task StaleRecoveryScan_OrdersAndCapsBeforeProjection()
+    {
+        var databaseName = $"vietride_parcel_day32_operation_stale_scan_{Guid.NewGuid():N}";
+        var connectionString = CreateConnectionString(databaseName);
+        await CreateDatabaseAsync(connectionString, databaseName);
+
+        try
+        {
+            await using var dataSource = CreateDataSource(connectionString);
+            var oldest = CreateParcel("VRP-D32-STALE-OLDEST");
+            var middle = CreateParcel("VRP-D32-STALE-MIDDLE");
+            var newest = CreateParcel("VRP-D32-STALE-NEWEST");
+            await SeedPendingOperatorActionAsync(dataSource, oldest, 0, 0, 0);
+            await SeedPendingOperatorActionAsync(dataSource, middle, 0, 0, 0);
+            await SeedPendingOperatorActionAsync(dataSource, newest, 0, 0, 0);
+            await SeedPendingCargoRecoveryOperationAsync(dataSource, oldest, Now.AddMinutes(-30));
+            await SeedPendingCargoRecoveryOperationAsync(dataSource, middle, Now.AddMinutes(-20));
+            await SeedPendingCargoRecoveryOperationAsync(dataSource, newest, Now.AddMinutes(-10));
+
+            await using var dbContext = CreateDbContext(dataSource);
+            var result = await CreateRepository(dbContext)
+                .GetStaleCargoRecoveryOperationsAsync(
+                    Now.AddMinutes(-5),
+                    maxBatch: 2,
+                    CancellationToken.None);
+
+            result.Select(item => item.ParcelId)
+                .Should()
+                .Equal(oldest.Id, middle.Id);
+            result.Should().HaveCount(2);
+        }
+        finally
+        {
+            await DropDatabaseAsync(connectionString, databaseName);
+        }
+    }
+
+    [Fact]
     public async Task ReturnClaim_FreezesOutstandingRefundFromAuthoritativeRow()
     {
         var databaseName = $"vietride_parcel_day32_operation_refund_{Guid.NewGuid():N}";
@@ -250,6 +288,26 @@ public sealed class Day32CargoRecoveryOperationPersistenceTests
                 refund_due_vnd = {refundedAmountVnd}
             WHERE id = {parcel.Id};
             """);
+    }
+
+    private static async Task SeedPendingCargoRecoveryOperationAsync(
+        NpgsqlDataSource dataSource,
+        ParcelEntity parcel,
+        DateTimeOffset claimedAt)
+    {
+        await using var dbContext = CreateDbContext(dataSource);
+        await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO vietride_parcel.parcel_cargo_recovery_operations
+                (id, parcel_id, operator_id, operation_type, status, source_trip_id,
+                 target_trip_id, target_state, actor_user_id, reason, refund_amount_vnd,
+                 refund_due_vnd, source_status, is_status_override, claimed_at,
+                 completed_at, failure_code, created_at, updated_at)
+            VALUES
+                ({Guid.NewGuid()}, {parcel.Id}, {parcel.OperatorId}, 'RETURN', 'PENDING',
+                 {parcel.TripId}, NULL, NULL, {Guid.NewGuid()}, 'stale recovery test', 0,
+                 0, 'PENDING_OPERATOR_ACTION', FALSE, {claimedAt}, NULL, NULL,
+                 {claimedAt}, {claimedAt});
+            """, CancellationToken.None);
     }
 
     private static ParcelEntity CreateParcel(string parcelCode)

@@ -42,6 +42,14 @@ describe('OffRouteService', () => {
     });
     outboxCreate = jest.fn(async (args: unknown) => args);
     routeGeometryProvider = {
+      peekCachedRouteGeometry: jest.fn((tripId: string) => ({
+        tripId,
+        alertRecipientUserIds: [ALERT_RECIPIENT_USER_ID],
+        points: [
+          { latitude: 10.7, longitude: 106.6 },
+          { latitude: 10.8, longitude: 106.6 },
+        ],
+      })),
       getRouteGeometry: jest.fn(async (tripId: string) => ({
         tripId,
         alertRecipientUserIds: [ALERT_RECIPIENT_USER_ID],

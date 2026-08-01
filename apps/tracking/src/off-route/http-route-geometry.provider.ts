@@ -17,7 +17,7 @@ const RouteGeometryPointSchema = z.object({
 const RouteGeometryDataSchema = z.object({
   tripId: z.string(),
   points: z.array(RouteGeometryPointSchema),
-  alertRecipientUserIds: z.array(z.string()).optional(),
+  alertRecipientUserIds: z.array(z.string()).nullish(),
 });
 
 const ApiResponseEnvelopeSchema = z.object({
@@ -36,6 +36,7 @@ interface CacheEntry {
 @Injectable()
 export class HttpRouteGeometryProvider implements RouteGeometryProvider {
   private readonly cache = new Map<string, CacheEntry>();
+  private readonly inFlight = new Map<string, Promise<RouteGeometrySnapshot | null>>();
 
   constructor(
     @Inject(ENV_TOKEN) private readonly env: Env,
@@ -48,6 +49,25 @@ export class HttpRouteGeometryProvider implements RouteGeometryProvider {
       return cached.data;
     }
 
+    const existing = this.inFlight.get(tripId);
+    if (existing) return existing;
+
+    const request = this.fetchRouteGeometry(tripId);
+    this.inFlight.set(tripId, request);
+    try {
+      return await request;
+    } finally {
+      this.inFlight.delete(tripId);
+    }
+  }
+
+  peekCachedRouteGeometry(tripId: string): RouteGeometrySnapshot | null {
+    const cached = this.cache.get(tripId);
+    if (!cached || Date.now() >= cached.expiresAt) return null;
+    return cached.data;
+  }
+
+  private async fetchRouteGeometry(tripId: string): Promise<RouteGeometrySnapshot | null> {
     const url = this.buildUrl(tripId);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.env.TRACKING_DATA_PROVIDER_TIMEOUT_MS);
