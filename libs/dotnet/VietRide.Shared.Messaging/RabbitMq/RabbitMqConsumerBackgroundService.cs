@@ -30,6 +30,7 @@ public sealed class RabbitMqConsumerBackgroundService<TEvent> : BackgroundServic
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private const int ConnectRetryDelaySeconds = 5;
+    private static readonly TimeSpan ChannelHealthPollInterval = TimeSpan.FromSeconds(1);
     private const string RetryCountHeader = "vietride-retry-count";
     private static readonly TimeSpan RetryPublishConfirmTimeout = TimeSpan.FromSeconds(5);
 
@@ -66,9 +67,15 @@ public sealed class RabbitMqConsumerBackgroundService<TEvent> : BackgroundServic
         {
             try
             {
-                StartConsuming(stoppingToken);
-                await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken).ConfigureAwait(false);
-                return;
+                var activeChannel = StartConsuming(stoppingToken);
+                await WaitForChannelClosureAsync(activeChannel, stoppingToken).ConfigureAwait(false);
+                if (stoppingToken.IsCancellationRequested)
+                    return;
+
+                _logger.LogWarning(
+                    "RabbitMQ consumer channel closed for queue {Queue}; recreating consumer topology.",
+                    _consumerOptions.QueueName);
+                DisposeChannel();
             }
             catch (OperationCanceledException)
             {
@@ -82,9 +89,7 @@ public sealed class RabbitMqConsumerBackgroundService<TEvent> : BackgroundServic
                     _consumerOptions.QueueName,
                     ConnectRetryDelaySeconds);
 
-                try { _channel?.Dispose(); }
-                catch { /* best-effort cleanup before retry */ }
-                _channel = null;
+                DisposeChannel();
 
                 try
                 {
@@ -98,7 +103,24 @@ public sealed class RabbitMqConsumerBackgroundService<TEvent> : BackgroundServic
         }
     }
 
-    private void StartConsuming(CancellationToken stoppingToken)
+    private async Task WaitForChannelClosureAsync(
+        IModel activeChannel,
+        CancellationToken stoppingToken)
+    {
+        while (activeChannel.IsOpen)
+        {
+            await Task.Delay(ChannelHealthPollInterval, stoppingToken).ConfigureAwait(false);
+        }
+    }
+
+    private void DisposeChannel()
+    {
+        try { _channel?.Dispose(); }
+        catch { /* best-effort cleanup before reconnect */ }
+        _channel = null;
+    }
+
+    private IModel StartConsuming(CancellationToken stoppingToken)
     {
         _channel = _connections.GetOrCreate().CreateModel();
         _channel.ExchangeDeclare(
@@ -143,10 +165,12 @@ public sealed class RabbitMqConsumerBackgroundService<TEvent> : BackgroundServic
 
         _channel.BasicQos(prefetchSize: 0, prefetchCount: _consumerOptions.PrefetchCount, global: false);
 
-        var consumer = new AsyncEventingBasicConsumer(_channel);
-        consumer.Received += (_, args) => ProcessDeliveryAsync(_channel, args, stoppingToken);
+        var consumerChannel = _channel
+            ?? throw new InvalidOperationException("RabbitMQ consumer channel was not created.");
+        var consumer = new AsyncEventingBasicConsumer(consumerChannel);
+        consumer.Received += (_, args) => ProcessDeliveryAsync(consumerChannel, args, stoppingToken);
 
-        _channel.BasicConsume(
+        consumerChannel.BasicConsume(
             queue: _consumerOptions.QueueName,
             autoAck: false,
             consumer: consumer);
@@ -155,6 +179,8 @@ public sealed class RabbitMqConsumerBackgroundService<TEvent> : BackgroundServic
             "RabbitMQ consumer started: queue={Queue} bindings={Bindings}.",
             _consumerOptions.QueueName,
             string.Join(",", _consumerOptions.BindingKeys));
+
+        return consumerChannel;
     }
 
     private void DeclareSourceQueueWithDeadLetterArguments(IDictionary<string, object> queueArguments)

@@ -473,6 +473,112 @@ public sealed class RabbitMqConsumerBackgroundServiceTests
     }
 
     [Fact]
+    public async Task StartAsync_RecreatesConsumer_WhenActiveChannelCloses()
+    {
+        var handler = Substitute.For<IIntegrationEventHandler<TestIntegrationEvent>>();
+        var firstConnection = Substitute.For<IConnection>();
+        var secondConnection = Substitute.For<IConnection>();
+        var firstChannel = Substitute.For<IModel>();
+        var secondChannel = Substitute.For<IModel>();
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstIsOpen = 1;
+        firstChannel.IsOpen.Returns(_ => Volatile.Read(ref firstIsOpen) == 1);
+        secondChannel.IsOpen.Returns(true);
+        firstChannel
+            .BasicConsume("payment.wallet-bootstrap", false, Arg.Any<IBasicConsumer>())
+            .Returns(_ =>
+            {
+                firstStarted.TrySetResult();
+                return "first-consumer";
+            });
+        secondChannel
+            .BasicConsume("payment.wallet-bootstrap", false, Arg.Any<IBasicConsumer>())
+            .Returns(_ =>
+            {
+                secondStarted.TrySetResult();
+                return "second-consumer";
+            });
+        firstConnection.CreateModel().Returns(firstChannel);
+        secondConnection.CreateModel().Returns(secondChannel);
+        var connections = Substitute.For<IRabbitMqConnectionFactory>();
+        connections.GetOrCreate().Returns(firstConnection, secondConnection);
+        var service = CreateService(handler, connections, CreateInbox());
+
+        await service.StartAsync(CancellationToken.None);
+        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Volatile.Write(ref firstIsOpen, 0);
+
+        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        connections.Received(2).GetOrCreate();
+        firstChannel.Received(1).Dispose();
+
+        await service.StopAsync(CancellationToken.None);
+        service.Dispose();
+    }
+
+    [Fact]
+    public async Task StartAsync_OldConsumerCallback_AcknowledgesOnlyOriginalChannel_AfterReconnect()
+    {
+        var handler = Substitute.For<IIntegrationEventHandler<TestIntegrationEvent>>();
+        var firstConnection = Substitute.For<IConnection>();
+        var secondConnection = Substitute.For<IConnection>();
+        var firstChannel = Substitute.For<IModel>();
+        var secondChannel = Substitute.For<IModel>();
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        AsyncEventingBasicConsumer? firstConsumer = null;
+        var firstIsOpen = 1;
+        firstChannel.IsOpen.Returns(_ => Volatile.Read(ref firstIsOpen) == 1);
+        secondChannel.IsOpen.Returns(true);
+        firstChannel
+            .BasicConsume("payment.wallet-bootstrap", false, Arg.Any<IBasicConsumer>())
+            .Returns(call =>
+            {
+                firstConsumer = call.Arg<IBasicConsumer>() as AsyncEventingBasicConsumer;
+                firstStarted.TrySetResult();
+                return "first-consumer";
+            });
+        secondChannel
+            .BasicConsume("payment.wallet-bootstrap", false, Arg.Any<IBasicConsumer>())
+            .Returns(_ =>
+            {
+                secondStarted.TrySetResult();
+                return "second-consumer";
+            });
+        firstConnection.CreateModel().Returns(firstChannel);
+        secondConnection.CreateModel().Returns(secondChannel);
+        var connections = Substitute.For<IRabbitMqConnectionFactory>();
+        connections.GetOrCreate().Returns(firstConnection, secondConnection);
+        var service = CreateService(handler, connections, CreateInbox());
+
+        await service.StartAsync(CancellationToken.None);
+        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Volatile.Write(ref firstIsOpen, 0);
+        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+        firstConsumer.Should().NotBeNull();
+        var delivery = CreateDelivery(73, new TestIntegrationEvent { Name = "old-channel-delivery" });
+        await firstConsumer!.HandleBasicDeliver(
+            "first-consumer",
+            delivery.DeliveryTag,
+            delivery.Redelivered,
+            delivery.Exchange,
+            delivery.RoutingKey,
+            delivery.BasicProperties,
+            delivery.Body);
+
+        firstChannel.Received(1).BasicAck(73, multiple: false);
+        secondChannel.DidNotReceive().BasicAck(Arg.Any<ulong>(), Arg.Any<bool>());
+        secondChannel.DidNotReceive().BasicNack(Arg.Any<ulong>(), Arg.Any<bool>(), Arg.Any<bool>());
+
+        await service.StopAsync(CancellationToken.None);
+        service.Dispose();
+    }
+
+    [Fact]
     public async Task StartAsync_RedeclaresSameRetryTopology_WhenDelayChanges()
     {
         var handler = Substitute.For<IIntegrationEventHandler<TestIntegrationEvent>>();
