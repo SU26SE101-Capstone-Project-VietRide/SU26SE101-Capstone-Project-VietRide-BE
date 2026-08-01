@@ -59,8 +59,45 @@ public sealed class ListOperatorBookingsQueryHandler
             request.SortBy ?? "createdAt",
             request.SortDir.Equals("desc", StringComparison.OrdinalIgnoreCase));
         var result = await _bookings.ListOperatorBookingsAsync(criteria, cancellationToken);
+        var items = result.Items;
+        var missingBuyerIds = items
+            .Where(item => item.Buyer is null && item.BuyerUserId != Guid.Empty)
+            .Select(item => item.BuyerUserId)
+            .Distinct()
+            .ToArray();
+        if (missingBuyerIds.Length > 0)
+        {
+            var profiles = await _identityUsers.GetUsersAsync(missingBuyerIds, cancellationToken);
+            items = items
+                .Select(item => item.Buyer is not null
+                    ? item
+                    : item with { Buyer = ToBuyer(item.BuyerUserId, profiles) })
+                .ToArray();
+        }
+
         return PagedResult<OperatorBookingListItem>.Create(
-            result.Items, request.Page, effectivePageSize, result.TotalItems);
+            items, request.Page, effectivePageSize, result.TotalItems);
+    }
+
+    private static OperatorBookingBuyerDto? ToBuyer(
+        Guid buyerUserId,
+        IReadOnlyDictionary<Guid, BookingBuyerSnapshotProfile> profiles)
+    {
+        var profile = profiles.TryGetValue(buyerUserId, out var resolved)
+            ? resolved
+            : new BookingBuyerSnapshotProfile(
+                buyerUserId,
+                BookingBuyerSnapshotProfile.DeletedDisplayName,
+                null,
+                null,
+                null,
+                true);
+        return new OperatorBookingBuyerDto(
+            profile.UserId,
+            profile.DisplayName,
+            profile.Phone,
+            profile.Email,
+            profile.AvatarUrl);
     }
 
     private static (DateTimeOffset? From, DateTimeOffset? To) ToUtcInterval(DateOnly? date)

@@ -10,7 +10,7 @@ namespace VietRide.Booking.IntegrationTests;
 public sealed class BookingStatsRepositoryIntegrationTests
     : IClassFixture<VoucherPersistenceIntegrationTests.DbBackedVoucherFactory>
 {
-    private static readonly Guid OperatorId = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    private static readonly Guid OperatorId = Guid.NewGuid();
     private readonly VoucherPersistenceIntegrationTests.DbBackedVoucherFactory _factory;
 
     public BookingStatsRepositoryIntegrationTests(
@@ -60,7 +60,7 @@ VALUES
         await using var readScope = _factory.Services.CreateAsyncScope();
         var repository = readScope.ServiceProvider.GetRequiredService<IBookingStatsRepository>();
 
-        var operatorStats = await repository.GetOperatorStatsAsync(OperatorId, null, null);
+        var operatorStats = await repository.GetOperatorStatsAsync(OperatorId, null, null, "date");
         var byOperator = await repository.GetAdminAggregateStatsAsync(null, null, "operator");
         var byDate = await repository.GetAdminAggregateStatsAsync(null, null, "date");
 
@@ -86,5 +86,54 @@ VALUES
         dateRow.OperatorName.Should().Be("New Name");
         dateRow.TotalBookings.Should().Be(10);
         dateRow.TotalRevenue.Should().Be(1_000_000);
+    }
+
+    [Fact]
+    public async Task BookingStatsMonth_Repository_GroupsByFirstIctCalendarDateWithoutSplittingOperators()
+    {
+        await _factory.InitializeAsync();
+
+        var operatorId = Guid.NewGuid();
+        var otherOperatorId = Guid.NewGuid();
+        var operatorName = "Operator A";
+        var otherOperatorName = "Operator B";
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<BookingDbContext>();
+            await db.Database.ExecuteSqlInterpolatedAsync($@"
+INSERT INTO vietride_booking.booking_stats (
+    id, operator_id, operator_name, stat_date, trip_id,
+    total_bookings, total_confirmed, total_cancelled, total_no_show,
+    total_completed, total_revenue, total_refunded, total_seats_booked, updated_at
+)
+VALUES
+    ({Guid.NewGuid()}, {operatorId}, {operatorName}, {new DateOnly(2026, 1, 31)}, {Guid.NewGuid()}, 2, 2, 1, 0, 1, 200000, 0, 2, now()),
+    ({Guid.NewGuid()}, {operatorId}, {operatorName}, {new DateOnly(2026, 2, 1)}, {Guid.NewGuid()}, 3, 3, 0, 1, 2, 300000, 0, 3, now()),
+    ({Guid.NewGuid()}, {otherOperatorId}, {otherOperatorName}, {new DateOnly(2026, 2, 28)}, {Guid.NewGuid()}, 5, 5, 2, 0, 4, 500000, 0, 5, now());");
+        }
+
+        await using var readScope = _factory.Services.CreateAsyncScope();
+        var repository = readScope.ServiceProvider.GetRequiredService<IBookingStatsRepository>();
+
+        var operatorMonths = await repository.GetOperatorStatsAsync(
+            operatorId,
+            new DateOnly(2026, 1, 15),
+            new DateOnly(2026, 2, 28),
+            "month");
+        var adminMonths = await repository.GetAdminAggregateStatsAsync(
+            new DateOnly(2026, 1, 15),
+            new DateOnly(2026, 2, 28),
+            "month");
+
+        operatorMonths.Should().HaveCount(2);
+        operatorMonths.Select(row => row.Date).Should().Equal(
+            new DateOnly(2026, 1, 1),
+            new DateOnly(2026, 2, 1));
+        operatorMonths.Sum(row => row.TotalBookings).Should().Be(5);
+
+        adminMonths.Should().HaveCount(2);
+        adminMonths.Should().OnlyContain(row => row.OperatorId == null && row.OperatorName == null);
+        adminMonths.Single(row => row.Date == new DateOnly(2026, 2, 1)).TotalBookings.Should().Be(8);
+        adminMonths.Sum(row => row.TotalRevenue).Should().Be(1_000_000);
     }
 }

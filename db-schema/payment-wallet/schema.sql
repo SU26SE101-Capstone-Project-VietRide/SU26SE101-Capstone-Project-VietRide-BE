@@ -306,10 +306,18 @@ CREATE TABLE platform_wallet_transactions (
     reference_type platform_wallet_transaction_ref NOT NULL,
     reference_id UUID NULL,    -- bookingId / parcelId / settlementId / paymentId / adjustmentId
     note TEXT NULL,
+    actor_type VARCHAR(16) NOT NULL DEFAULT 'SYSTEM',
+    actor_user_id UUID NULL,    -- logical FK identity.users; no cross-database FK
+    actor_display_name VARCHAR(200) NULL,
+    actor_email VARCHAR(320) NULL,
+    actor_role VARCHAR(50) NULL,
+    actor_snapshot_resolved BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_platform_wallet_transactions_amount_positive CHECK (amount > 0),
     CONSTRAINT chk_platform_wallet_transactions_balance_non_negative
-        CHECK (balance_before >= 0 AND balance_after >= 0)
+        CHECK (balance_before >= 0 AND balance_after >= 0),
+    CONSTRAINT chk_platform_wallet_transactions_actor_type
+        CHECK (actor_type IN ('USER', 'SYSTEM'))
 );
 
 CREATE INDEX idx_platform_wallet_transactions_created_at
@@ -320,9 +328,23 @@ CREATE INDEX idx_platform_wallet_transactions_reference
 CREATE UNIQUE INDEX uq_platform_wallet_transactions_subscription
     ON platform_wallet_transactions (type, reference_type, reference_id)
     WHERE reference_type = 'SUBSCRIPTION_PAYMENT';
+CREATE INDEX idx_platform_wallet_transactions_actor_user_id
+    ON platform_wallet_transactions (actor_user_id)
+    WHERE actor_user_id IS NOT NULL;
 
 COMMENT ON TABLE platform_wallet_transactions IS
     'Immutable ledger for PlatformWallet. INSERT atomic with UPDATE platform_wallets via optimistic lock.';
+
+-- -----------------------------------------------------------------------------
+-- deleted_financial_actor_markers (durable privacy fence for manual actors)
+-- -----------------------------------------------------------------------------
+CREATE TABLE deleted_financial_actor_markers (
+    user_id UUID PRIMARY KEY,    -- logical FK identity.users; no cross-database FK
+    deleted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE deleted_financial_actor_markers IS
+    'Durable tombstones serialized by advisory lock with manual financial writes; prevents deleted-user PII from being restored by a racing write/backfill.';
 
 -- -----------------------------------------------------------------------------
 -- operator_wallets (OPERATOR internal wallet — 1-1 with Operator)
@@ -437,6 +459,14 @@ CREATE TABLE operator_trip_settlements (
     settlement_method operator_trip_settlement_method NULL,    -- set when settled
     settled_at TIMESTAMPTZ NULL,
     settled_by_user_id UUID NULL,                  -- SYSTEM_ADMIN if ADMIN_MANUAL; NULL if AUTO_WEEKLY
+    operator_snapshot_resolved BOOLEAN NOT NULL DEFAULT FALSE,
+    operator_name VARCHAR(200) NULL,
+    operator_logo_url VARCHAR(2048) NULL,
+    operator_contact_phone VARCHAR(32) NULL,
+    settled_by_snapshot_resolved BOOLEAN NOT NULL DEFAULT FALSE,
+    settled_by_display_name VARCHAR(200) NULL,
+    settled_by_email VARCHAR(320) NULL,
+    settled_by_role VARCHAR(50) NULL,
     wallet_transaction_id UUID NULL REFERENCES operator_wallet_transactions (id) ON DELETE SET NULL,
     settlement_failure_count INT NOT NULL DEFAULT 0,
     last_settlement_failure_at TIMESTAMPTZ NULL,

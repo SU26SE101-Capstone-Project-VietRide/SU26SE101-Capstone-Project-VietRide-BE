@@ -14,7 +14,7 @@
   final chaos run observed one terminal row with source `retry_count=6`.
 - [x] `GET /v1/admin/outbox/dlq` remains available through the Identity facade with cursor and
   degraded-source behavior covered by the Day 43 E2E.
-- [x] The exhaustive mutation inventory is green: 171 endpoints, 158 requiring idempotency and 13
+- [x] The exhaustive mutation inventory is green: 180 endpoints, 165 requiring idempotency and 15
   explicit exemptions.
 - [x] All five Hangfire-owning services expose Internal-JWT job status with the approved lag
   semantics; the reliability E2E passed the job-health assertions.
@@ -37,7 +37,7 @@
 
 - `scripts/verify-idempotency-inventory.mjs` and tests — exhaustive endpoint, handler,
   Notification binding and outbound HTTP discovery.
-- `tests/dotnet/idempotency-endpoint-inventory.json` — final 171/158/13 inventory.
+- `tests/dotnet/idempotency-endpoint-inventory.json` — final post-main-merge 180/165/15 inventory.
 - `apps/identity/src/.../NotificationEmailClient.cs` and focused tests — required UUID-v4
   idempotency for transactional email.
 - `libs/dotnet/VietRide.Shared.Messaging/RabbitMq/RabbitMqConsumerBackgroundService.cs` and tests —
@@ -58,13 +58,13 @@
 | Parcel build / format / tests | PASS | 0 warnings/errors; unit 368/368; integration 58/58 |
 | Shared libraries final build / format / tests | PASS | 0 warnings/errors; Messaging 43/43, Web 99/99, Reporting 11/11, Persistence 37/37 |
 | Full TS lint/test/build matrix | PASS | All 10 TS projects and dependencies completed; existing build warnings were non-fatal |
-| `npm run verify:idempotency-inventory` | PASS | 171 total / 158 required / 13 exempt; 43 .NET handlers; 14 source subscribe callsites → 73 runtime bindings; 24 outbound mutation-style HTTP callsites / 5 exact exemptions |
+| `npm run verify:idempotency-inventory` | PASS | Post-main-merge: 180 total / 165 required / 15 exempt; 45 .NET handlers; 14 source subscribe callsites → 73 runtime bindings; 28 outbound mutation-style HTTP callsites / 9 exact exemptions |
 | `node --test scripts/verify-idempotency-inventory.test.mjs` | PASS | 9/9 |
 | `npm run e2e:day43` | PASS | Final post-fix run exit 0 in 479s: inventory, seed, DLQ, idempotency, job health, migration up/down/reapply, acceptance and cleanup |
 | `npm run e2e:parcel-settlement -- --reuse-images` | PASS | Post-factory regression 643 assertions in 359s; broker recovery and callback reconciliation passed |
 | Production-like `docker compose ... --profile app up -d --build` | PASS | Build/up exit 0 |
 | Production-like `/health` matrix | PASS | Gateway plus Identity, Trip, Booking, Payment, Parcel, Tracking, Notification and RAG all HTTP 200; infra healthy |
-| Hard invariants | PASS | CPM, banned deps, no co-author trailer, diff-check and EOL across 153 changed files |
+| Hard invariants | PASS | CPM, banned deps, no co-author trailer, diff-check and changed-file EOL |
 | Day 43 Review bullet | PASS | Broker killed; Outbox retained/failed; broker restarted; row drained as `PUBLISHED retry_count=1`; terminal event produced exactly one DLQ row at retry 6 |
 
 ## Final inventory
@@ -72,13 +72,13 @@
 | Service | Total | Required | Exempt |
 | --- | ---: | ---: | ---: |
 | Identity | 35 | 30 | 5 |
-| Trip | 54 | 53 | 1 |
+| Trip | 56 | 53 | 3 |
 | Booking | 27 | 26 | 1 |
 | Payment | 15 | 11 | 4 |
-| Parcel | 30 | 29 | 1 |
+| Parcel | 31 | 30 | 1 |
 | Notification | 3 | 3 | 0 |
-| RAG | 7 | 6 | 1 |
-| **Total** | **171** | **158** | **13** |
+| RAG | 13 | 12 | 1 |
+| **Total** | **180** | **165** | **15** |
 
 ## Contract / event / schema changes shipped
 
@@ -86,7 +86,8 @@ The reopened inventory includes the internal Payment redirect lookup and Booking
 added by the repair plan. Their contract/event registry entries and BSOT changelog were updated in
 R0/R5/R7. The Day 43 audit repairs add no endpoint, migration or schema object. RabbitMQ connection
 attempt timeout is backward-compatible with existing configuration through a default of five
-seconds.
+seconds. The merge from `origin/main` adds UI-gap Policy, analytics and projection endpoints; their
+required mutations and read-only POST exemptions are included in the 180/165/15 inventory above.
 
 ## Known gaps & carry-over for Day 44
 

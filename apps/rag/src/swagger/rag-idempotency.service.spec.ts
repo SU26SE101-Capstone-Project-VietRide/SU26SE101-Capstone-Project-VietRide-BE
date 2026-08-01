@@ -1,122 +1,225 @@
-import { ConflictException, UnprocessableEntityException } from '@nestjs/common';
-import { RagPrismaService } from '../prisma/rag-prisma.service';
+import type { RedisService } from '@vietride/nest-redis';
+import type { RagPrismaService } from '../prisma/rag-prisma.service';
 import { RagIdempotencyService } from './rag-idempotency.service';
 
-const OPERATION_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-const USER_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const OPERATION_ID = '11111111-1111-4111-8111-111111111111';
+const FINGERPRINT = 'A'.repeat(64);
 
-describe('RagIdempotencyService', () => {
+describe('RagIdempotencyService v2', () => {
+  let client: {
+    get: jest.Mock;
+    set: jest.Mock;
+    eval: jest.Mock;
+  };
   let service: RagIdempotencyService;
-  let prisma: {
-    idempotencyOperation: {
-      create: jest.Mock;
-      findUnique: jest.Mock;
-      update: jest.Mock;
-      updateMany: jest.Mock;
-      deleteMany: jest.Mock;
-    };
+  let legacyOperations: {
+    create: jest.Mock;
+    findUnique: jest.Mock;
+    deleteMany: jest.Mock;
+    updateMany: jest.Mock;
   };
 
   beforeEach(() => {
-    prisma = {
-      idempotencyOperation: {
-        create: jest.fn(),
-        findUnique: jest.fn(),
-        update: jest.fn(),
-        updateMany: jest.fn(),
-        deleteMany: jest.fn(),
-      },
+    client = {
+      get: jest.fn().mockResolvedValue(null),
+      set: jest.fn().mockResolvedValue('OK'),
+      eval: jest.fn().mockResolvedValue(1),
     };
-    service = new RagIdempotencyService(prisma as unknown as RagPrismaService);
+    legacyOperations = {
+      create: jest.fn().mockResolvedValue({}),
+      findUnique: jest.fn().mockResolvedValue(null),
+      deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    };
+    service = new RagIdempotencyService(
+      { getClient: () => client } as unknown as RedisService,
+      { idempotencyOperation: legacyOperations } as unknown as RagPrismaService,
+    );
   });
 
-  it('acquires a new UUID operation with an owner token', async () => {
-    const result = await service.begin(makeInput());
+  it('writes the old-node PostgreSQL barrier before taking the SHA-keyed Redis lock', async () => {
+    const result = await service.begin({
+      operationId: OPERATION_ID,
+      userId: OPERATION_ID,
+      method: 'POST',
+      path: '/v1/admin/policies',
+      fingerprint: FINGERPRINT,
+    });
 
     expect(result.state).toBe('acquired');
-    if (result.state === 'acquired') {
-      expect(result.operationId).toBe(OPERATION_ID);
-      expect(result.ownerToken).toMatch(/^[0-9a-f-]{36}$/i);
-    }
+    expect(client.set).toHaveBeenCalledWith(
+      expect.stringMatching(/^rag:idem:v2:processing:[A-F0-9]{64}$/),
+      expect.stringMatching(new RegExp(`^${FINGERPRINT}:[0-9a-f-]{36}$`, 'i')),
+      'EX',
+      120,
+      'NX',
+    );
+    expect(client.set.mock.calls[0]?.[0]).not.toContain(OPERATION_ID);
+    expect(legacyOperations.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        operationId: OPERATION_ID,
+        fingerprint: FINGERPRINT,
+        status: 'V2_BARRIER',
+        expiresAt: expect.any(Date),
+      }),
+    });
+    expect(legacyOperations.create.mock.invocationCallOrder[0]).toBeLessThan(
+      client.set.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+    );
   });
 
-  it('replays a completed response for the same fingerprint', async () => {
-    prisma.idempotencyOperation.create.mockRejectedValueOnce(new Error('unique'));
-    prisma.idempotencyOperation.findUnique.mockResolvedValueOnce(
-      existingOperation({
-        status: 'COMPLETED',
-        responseStatus: 200,
-        responseHeaders: { 'content-type': 'text/event-stream' },
-        responseBody: 'event: done\n\n',
+  it('replays a completed response without acquiring another lock', async () => {
+    client.get.mockResolvedValueOnce(
+      JSON.stringify({
+        fingerprint: FINGERPRINT,
+        statusCode: 201,
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+        body: '{"success":true,"statusCode":201}',
       }),
     );
 
-    await expect(service.begin(makeInput())).resolves.toEqual({
-      state: 'replay',
-      response: {
-        statusCode: 200,
-        headers: { 'content-type': 'text/event-stream' },
-        body: 'event: done\n\n',
+    const result = await service.begin({
+      operationId: OPERATION_ID,
+      userId: OPERATION_ID,
+      method: 'POST',
+      path: '/v1/admin/policies',
+      fingerprint: FINGERPRINT,
+    });
+
+    expect(result).toMatchObject({ state: 'replay', response: { statusCode: 201 } });
+    expect(client.set).not.toHaveBeenCalled();
+  });
+
+  it('fails closed while a frozen legacy Redis idempotency key still exists', async () => {
+    client.get.mockImplementation(async (key: string) =>
+      key === `rag:idem:${OPERATION_ID}` ? 'legacy-body-hash' : null,
+    );
+
+    await expect(
+      service.begin({
+        operationId: OPERATION_ID,
+        userId: OPERATION_ID,
+        method: 'POST',
+        path: '/v1/admin/policies',
+        fingerprint: FINGERPRINT,
+      }),
+    ).rejects.toMatchObject({
+      response: { errorCode: 'IDEMPOTENCY_KEY_MISMATCH' },
+    });
+    expect(client.set).not.toHaveBeenCalled();
+  });
+
+  it('fails closed while an unexpired pre-v2 PostgreSQL operation still exists', async () => {
+    legacyOperations.create.mockRejectedValueOnce(new Error('duplicate operation id'));
+    legacyOperations.findUnique.mockResolvedValueOnce({
+      operationId: OPERATION_ID,
+      userId: OPERATION_ID,
+      method: 'POST',
+      path: '/v1/admin/policies',
+      fingerprint: FINGERPRINT,
+      ownerToken: '22222222-2222-4222-8222-222222222222',
+      status: 'COMPLETED',
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+
+    await expect(
+      service.begin({
+        operationId: OPERATION_ID,
+        userId: OPERATION_ID,
+        method: 'POST',
+        path: '/v1/admin/policies',
+        fingerprint: FINGERPRINT,
+      }),
+    ).rejects.toMatchObject({
+      response: { errorCode: 'IDEMPOTENCY_KEY_MISMATCH' },
+    });
+    expect(client.set).not.toHaveBeenCalled();
+  });
+
+  it('uses one owner-safe Lua operation to store a 24-hour response and release the lock', async () => {
+    const begin = await service.begin({
+      operationId: OPERATION_ID,
+      userId: OPERATION_ID,
+      method: 'POST',
+      path: '/v1/admin/policies',
+      fingerprint: FINGERPRINT,
+    });
+    if (begin.state !== 'acquired') throw new Error('Expected acquired state');
+
+    await service.complete(begin.operationId, begin.ownerToken, {
+      statusCode: 201,
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+      body: '{"success":true}',
+    });
+
+    expect(client.eval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('SET'"),
+      2,
+      expect.stringMatching(/^rag:idem:v2:processing:/),
+      expect.stringMatching(/^rag:idem:v2:response:/),
+      `${FINGERPRINT}:${begin.ownerToken}`,
+      expect.stringContaining('"fingerprint"'),
+      86_400,
+    );
+    expect(legacyOperations.updateMany).toHaveBeenCalledWith({
+      where: {
+        operationId: OPERATION_ID,
+        ownerToken: begin.ownerToken,
+        status: 'V2_BARRIER',
+      },
+      data: { expiresAt: expect.any(Date) },
+    });
+  });
+
+  it('releases a failed owner only when its token still owns the processing lock', async () => {
+    const begin = await service.begin({
+      operationId: OPERATION_ID,
+      userId: OPERATION_ID,
+      method: 'POST',
+      path: '/v1/admin/policies',
+      fingerprint: FINGERPRINT,
+    });
+    if (begin.state !== 'acquired') throw new Error('Expected acquired state');
+
+    await service.abandon(begin.operationId, begin.ownerToken);
+
+    expect(client.eval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('DEL'"),
+      1,
+      expect.stringMatching(/^rag:idem:v2:processing:/),
+      `${FINGERPRINT}:${begin.ownerToken}`,
+    );
+    expect(legacyOperations.deleteMany).toHaveBeenCalledWith({
+      where: {
+        operationId: OPERATION_ID,
+        ownerToken: begin.ownerToken,
+        status: 'V2_BARRIER',
       },
     });
   });
 
-  it('rejects the same operation UUID with a different fingerprint', async () => {
-    prisma.idempotencyOperation.create.mockRejectedValueOnce(new Error('unique'));
-    prisma.idempotencyOperation.findUnique.mockResolvedValueOnce(
-      existingOperation({ fingerprint: 'different' }),
-    );
-
-    await expect(service.begin(makeInput())).rejects.toBeInstanceOf(
-      UnprocessableEntityException,
-    );
-  });
-
-  it('returns pending while a live owner is processing', async () => {
-    prisma.idempotencyOperation.create.mockRejectedValueOnce(new Error('unique'));
-    prisma.idempotencyOperation.findUnique.mockResolvedValueOnce(existingOperation());
-
-    await expect(service.begin(makeInput())).rejects.toBeInstanceOf(ConflictException);
-  });
-
-  it('only completes an operation owned by the caller', async () => {
-    prisma.idempotencyOperation.updateMany.mockResolvedValueOnce({ count: 0 });
+  it('retains the old-node barrier when response persistence starts but Redis completion fails', async () => {
+    const begin = await service.begin({
+      operationId: OPERATION_ID,
+      userId: OPERATION_ID,
+      method: 'POST',
+      path: '/v1/admin/policies',
+      fingerprint: FINGERPRINT,
+    });
+    if (begin.state !== 'acquired') throw new Error('Expected acquired state');
+    client.eval.mockResolvedValueOnce(0);
 
     await expect(
-      service.complete(OPERATION_ID, 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', {
-        statusCode: 200,
-        headers: {},
-        body: '{}',
+      service.complete(begin.operationId, begin.ownerToken, {
+        statusCode: 201,
+        headers: { 'content-type': 'application/json' },
+        body: '{"success":true}',
       }),
     ).rejects.toThrow('RAG_IDEMPOTENCY_LOCK_NOT_OWNED');
+    legacyOperations.deleteMany.mockClear();
+
+    await service.abandon(begin.operationId, begin.ownerToken);
+
+    expect(legacyOperations.deleteMany).not.toHaveBeenCalled();
   });
 });
-
-function makeInput() {
-  return {
-    operationId: OPERATION_ID,
-    userId: USER_ID,
-    method: 'POST',
-    path: '/v1/rag/chat',
-    fingerprint: 'A'.repeat(64),
-  };
-}
-
-function existingOperation(overrides: Record<string, unknown> = {}) {
-  return {
-    operationId: OPERATION_ID,
-    userId: USER_ID,
-    method: 'POST',
-    path: '/v1/rag/chat',
-    fingerprint: 'A'.repeat(64),
-    ownerToken: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
-    status: 'PROCESSING',
-    responseStatus: null,
-    responseHeaders: null,
-    responseBody: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    expiresAt: new Date(Date.now() + 60_000),
-    ...overrides,
-  };
-}

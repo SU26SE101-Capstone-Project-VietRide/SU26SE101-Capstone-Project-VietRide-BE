@@ -1117,13 +1117,13 @@ Nếu `netAmount <= 0` tại settle time (vd toàn bộ refund): SET settlement 
        entryType = VOUCHER_VIETRIDE_FUNDED_CREDIT,
        tripId = Trip.id,
        amount = +discountAmount,
-       referenceType = VOUCHER_USAGE, referenceId = voucherUsageId
+       referenceType = BOOKING / PARCEL, referenceId = bookingId / parcelId
      }
      → Operator sẽ nhận đủ giá gốc khi settle (Booking.totalAmount + VietRide-funded credit = gross).
    - OPERATOR_FUNDED: INSERT OperatorLedgerEntry {
        entryType = VOUCHER_OPERATOR_FUNDED_AUDIT,
        tripId = Trip.id, amount = 0,
-       referenceType = VOUCHER_USAGE, referenceId = voucherUsageId,
+       referenceType = BOOKING / PARCEL, referenceId = bookingId / parcelId,
        note = "Voucher [code] applied — discount [X] VND borne by operator"
      }
 
@@ -4602,7 +4602,7 @@ IP/user-agent ở cột audit; missing actor retry/DLQ, không tạo fake User.
 
 #### Platform earned report
 
-`GET /v1/admin/reports/platform` do Payment orchestration, `SYSTEM_ADMIN` only, bắt buộc RFC3339 UTC
+`GET /v1/admin/reports/platform` do Booking orchestration, `SYSTEM_ADMIN` only, bắt buộc RFC3339 UTC
 `from/to`, half-open `[from,to)`, tối đa 366 ngày. Payment không đọc foreign DB:
 
 - Booking source: `COMPLETED`, anchor `completedAt`, count + `SUM(totalAmount)`.
@@ -4610,12 +4610,14 @@ IP/user-agent ở cột audit; missing actor retry/DLQ, không tạo fake User.
 - Parcel source: `DELIVERY_CONFIRMED`, anchor `confirmedAt`, count + signed
   `SUM(depositPaidVnd + balancePaidVnd - refundedAmountVnd)`; forfeited deposit được báo cáo riêng và không cộng hai lần.
 
-Ba source HTTP call chạy song song, timeout 5 giây. `SUM(BIGINT)` PostgreSQL là NUMERIC và phải
-checked-convert group/total về Int64; Payment checked mọi phép cộng. Overflow trả
-`REPORT_VALUE_OVERFLOW`, không wrap/saturate/partial. Missing operator summary giữ tên null.
-`byOperator` là union IDs, sort net revenue giảm dần rồi ID; totals bằng sum breakdown; Parcel/net
-revenue có thể âm. Timeout/upstream 5xx khác/payload invalid trả `UPSTREAM_UNAVAILABLE`, không cache
-hoặc Payment write.
+Booking local cùng ba HTTP source Trip, Parcel và Payment ledger chạy song song, timeout 5 giây;
+Identity lookup chỉ chạy sau khi Booking có union operator IDs. `SUM(BIGINT)` PostgreSQL là NUMERIC
+và phải checked-convert group/total về Int64; Booking kiểm tra mọi phép cộng và reconciliation.
+Overflow trả `REPORT_VALUE_OVERFLOW`, không wrap/saturate/partial. Missing operator summary giữ tên
+null. `byOperator` sort net revenue giảm dần rồi ID; totals bằng sum breakdown; Parcel/net revenue có
+thể âm. Timeout, upstream 5xx, payload invalid hoặc ledger mismatch trả
+`503 UPSTREAM_UNAVAILABLE`. Chỉ Booking ghi cache composite sau reconciliation; Payment không ghi DB
+hoặc cache composite report.
 
 Day 40 dùng live query với partial indexes trên terminal timestamp + operator. Stats materialization,
 Redis cache, Excel export và occupancy/cancellation/no-show analytics defer Day 42. Auto-merge bằng
@@ -4843,7 +4845,7 @@ Role:              PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_AD
 | **TripStop** | `{tripId, stopId, orderIndex, estimatedArrivalTime (static planned baseline), actualArrivalTime nullable, actualDepartureTime nullable, status PENDING\|ARRIVED\|SKIPPED, distanceFromOriginKm nullable}`. `actualDepartureTime` is the durable Day-24 stop-departure anchor; arrival/status remain authoritative for no-show. Approved pre-departure Route edit hoặc DriverSchedule `ALL_PENDING` cascade có thể recompute baseline; GPS/Tracking dynamic ETA không bao giờ update field này. Copy `distanceFromOriginKm` từ RouteStop khi generate — dùng cho DISRUPTED refund mà không cần join ngược. |
 | **Trip.source** | `MANUAL \| AUTO_FROM_SCHEDULE \| VEHICLE_SUBSTITUTION`. Manual create: Operator nhập form → hệ thống generate TripSeat + TripStop; Day 22 không copy fare-template thành TripStopFare mới. Initial status: SCHEDULED nếu departure > 30 phút; BOARDING ngay nếu ≤ 30 phút (publish TripBoardingStarted ngay, không đợi Hangfire). Reject nếu departure trong quá khứ. **VEHICLE_SUBSTITUTION**: Trip_new tạo từ 6.12 Vehicle Substitution flow — Trip Service set source = VEHICLE_SUBSTITUTION explicitly khi INSERT; counter check `maxTripsPerMonth` skip + `currentTripsThisMonth` không increment (xem 4.5 c.0). |
 | **RouteStopFareTemplate** | `{routeId, stopId, fareFromThisStop BIGINT, effectiveFrom datetime, effectiveUntil datetime nullable}` — **Exception override** cho stop có giá khác `Route.baseFare`. Operator chỉ tạo entry cho stop muốn config giá riêng — stop không có entry dùng baseFare. Day 22 không tạo `TEMPLATE_SNAPSHOT` khi Hangfire/manual generate Trip; legacy snapshot chỉ còn readable ở request không có `pricingAt`. Chỉ explicit operator per-Trip fare override tạo `MANUAL_OVERRIDE`. Với một handler-start `pricingAt`, precedence là `MANUAL_OVERRIDE` → active template half-open window → `Trip.baseFare`. Trip DB dùng `btree_gist` exclusion guard để không có overlapping window cùng `(routeId,stopId)`. |
-| **Pricing config — future-dated + manual override** | Mọi entity pricing (`Route.baseFare`, `RouteStopFareTemplate`, `ParcelRouteFare`) hỗ trợ **effectiveFrom** và **effectiveUntil** datetime. Operator có thể config giá trước nhiều tháng (vd set giá Tết từ tháng 10). Đến thời điểm hiệu lực, hệ thống tự dùng giá mới. Operator có thể **manual override** giá per trip tại thời điểm tạo/sửa trip (không bị khóa bởi schedule). KHÔNG hardcode pricing trong code. |
+| **Pricing config — future-dated + manual override** | `Route.baseFare` và `RouteStopFareTemplate` hỗ trợ nhiều effective window/future version. Ngoại lệ UI-gap: `ParcelRouteFare` chỉ giữ một current row theo physical key `(routeId,sizeCategory)`; batch sửa `effectiveFrom/effectiveUntil` trên chính row đó, không tạo parallel future version/history. Operator có thể **manual override** giá per trip tại thời điểm tạo/sửa trip (không bị khóa bởi schedule). KHÔNG hardcode pricing trong code. |
 | **Voucher** | Platform-wide. Fields: code, type, value, minOrderAmount, maxDiscountAmount, totalUsageLimit, perUserLimit, validFrom, validUntil, applicableOperatorIds, applicableRouteIds, isActive, **`fundingType` enum `VIETRIDE_FUNDED \| OPERATOR_FUNDED`**. `VoucherUsage` track per (voucherId, userId, bookingId, bookingGroupId, **`fundedBy` snapshot enum** = voucher.fundingType tại thời điểm apply — dùng cho settlement reconcile). DELETE khi CANCELLED/REFUNDED. Round-trip: 2 VoucherUsage records, limit check bằng `COUNT(DISTINCT bookingGroupId)`. **`OperatorVoucherConsent` entity**: track operator opt-in cho voucher OPERATOR_FUNDED — schema chi tiết ở Booking Service entity list (cùng service với Voucher để strict FK). Validation khi apply voucher: nếu `fundingType=OPERATOR_FUNDED` → check `OperatorVoucherConsent.status=ACCEPTED` cho `Trip.operatorId`; sai → error `VOUCHER_NOT_APPLICABLE`. |
 | **BookingPendingAction** | `{id, bookingId FK, reason (ROUTE_CHANGE\|SEAT_DOWNGRADE\|SCHEDULE_CHANGE\|PENDING_SEAT_ASSIGNMENT\|STOP_DISABLED), severity (nullable, dùng cho SCHEDULE_CHANGE: MEDIUM\|MAJOR — KHÔNG include MINOR vì MINOR không persist record), deadline, resolvedAt nullable, resolvedAction nullable, metadata JSONB, createdAt}`. Partial unique: `UNIQUE(bookingId) WHERE resolvedAt IS NULL` — chỉ 1 active per booking. Action mới phát sinh: close action cũ với `SUPERSEDED` trước khi INSERT mới. Schedule metadata freeze exact `sourceEventId`, `oldDeparture`, `newDeparture`, `severity`, `initialDeadline`, nullable `terminalDeadline`, `refundBasisAmount`, `refundPercent`, `refundAmount`; refund basis là immutable `Booking.totalAmount`, money BIGINT và phép chia làm tròn `MidpointRounding.AwayFromZero`. Xem flow theo từng reason tại section 6.4 (ROUTE_CHANGE), 6.4.1 (STOP_DISABLED), 6.12 (PENDING_SEAT_ASSIGNMENT), 6.13 (SCHEDULE_CHANGE). |
 | **Voucher code generation** | Code unique indexed. Admin tạo voucher có 2 cách: (a) nhập code thủ công (vd "TET2026"), (b) bấm "Auto generate" → BE gen 8 ký tự uppercase base32 unique (vd "VC7K2X9P"). UI radio chọn mode. BE validate uniqueness ở cả 2 case. |

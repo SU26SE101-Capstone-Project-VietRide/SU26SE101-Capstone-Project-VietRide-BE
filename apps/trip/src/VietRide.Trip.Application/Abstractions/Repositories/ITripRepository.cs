@@ -1,13 +1,34 @@
 using VietRide.Shared.Application.Repositories;
+using VietRide.Shared.Kernel.Primitives;
 using VietRide.Trip.Application.Features.DriverTrips.GetAssignedTripRoute;
 using VietRide.Trip.Application.Features.Internal.Reports.PlatformTrips;
+using VietRide.Trip.Application.Features.Internal.Trips.BatchTripSummaries;
 using VietRide.Trip.Application.Features.OperatorReports;
+using VietRide.Trip.Application.Features.Trips.ListOperatorTrips;
 using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Application.Abstractions.Repositories;
 
 public interface ITripRepository : IRepository<Domain.Entities.Trip, Guid>
 {
+    Task<IReadOnlyList<InternalTripSummaryDto>> ListSummariesByIdsAsync(
+        IReadOnlyCollection<Guid> tripIds,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("Internal Trip summary batching is not implemented by this repository.");
+
+    Task<PagedResult<OperatorTripListRow>> ListOperatorTripsAsync(
+        Guid operatorId,
+        int page,
+        int pageSize,
+        string? routeSearch,
+        string? normalizedPlateSearch,
+        TripStatus? status,
+        DateTimeOffset? fromUtc,
+        DateTimeOffset? toUtc,
+        bool sortDescending,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Operator Trip list is not implemented by this repository.");
+
     IAsyncEnumerable<TripOperatorOccupancyRow> StreamOperatorOccupancyRowsAsync(
         Guid operatorId,
         DateTimeOffset fromUtc,

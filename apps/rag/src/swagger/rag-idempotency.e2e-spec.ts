@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { SignJWT } from 'jose';
+import { RedisService } from '@vietride/nest-redis';
 import type { AddressInfo } from 'node:net';
 import { ENV_TOKEN } from '../app/tokens';
 import { InternalJwtAuthGuard } from '../auth/internal-jwt-auth.guard';
@@ -18,29 +19,29 @@ const OPERATION_ID = '22222222-2222-4222-8222-222222222222';
 describe('RAG chat idempotency replay (e2e)', () => {
   let app: INestApplication;
   let baseUrl: string;
-  let stored: Record<string, unknown> | undefined;
+  const values = new Map<string, string>();
   const chatService = {
     prepareChat: jest.fn(async () => ({ conversationId: 'conversation' })),
     streamPrepared: jest.fn(() => streamEvents()),
   };
 
   beforeAll(async () => {
-    const prisma = {
-      idempotencyOperation: {
-        create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
-          if (stored) throw new Error('unique');
-          stored = { ...data, responseStatus: null, responseHeaders: null, responseBody: null };
-          return stored;
-        }),
-        findUnique: jest.fn(async () => stored ?? null),
-        update: jest.fn(),
-        updateMany: jest.fn(async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
-          if (!stored || stored.ownerToken !== where.ownerToken) return { count: 0 };
-          stored = { ...stored, ...data };
-          return { count: 1 };
-        }),
-        deleteMany: jest.fn(async () => ({ count: 1 })),
-      },
+    const client = {
+      get: jest.fn(async (key: string) => values.get(key) ?? null),
+      set: jest.fn(async (key: string, value: string, ...args: string[]) => {
+        if (args.includes('NX') && values.has(key)) return null;
+        values.set(key, value);
+        return 'OK';
+      }),
+      eval: jest.fn(async (_script: string, keyCount: number, ...args: Array<string | number>) => {
+        const keys = args.slice(0, keyCount).map(String);
+        const scriptArgs = args.slice(keyCount).map(String);
+        const processingKey = keys[0];
+        if (!processingKey || values.get(processingKey) !== scriptArgs[0]) return 0;
+        if (keyCount === 2 && keys[1]) values.set(keys[1], scriptArgs[1] ?? '');
+        values.delete(processingKey);
+        return 1;
+      }),
     };
     const moduleRef = await Test.createTestingModule({
       controllers: [ChatController],
@@ -48,7 +49,18 @@ describe('RAG chat idempotency replay (e2e)', () => {
         InternalJwtAuthGuard,
         RagIdempotencyService,
         { provide: ChatService, useValue: chatService },
-        { provide: RagPrismaService, useValue: prisma },
+        { provide: RedisService, useValue: { getClient: () => client } },
+        {
+          provide: RagPrismaService,
+          useValue: {
+            idempotencyOperation: {
+              create: jest.fn().mockResolvedValue({}),
+              findUnique: jest.fn().mockResolvedValue(null),
+              deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+              updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+            },
+          },
+        },
         { provide: ENV_TOKEN, useValue: { INTERNAL_JWT_SECRET: SECRET } },
         { provide: APP_INTERCEPTOR, useClass: RagIdempotencyInterceptor },
       ],

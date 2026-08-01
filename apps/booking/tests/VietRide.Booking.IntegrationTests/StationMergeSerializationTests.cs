@@ -382,6 +382,17 @@ public sealed class StationMergeSerializationTests
         var voucherService = Substitute.For<IVoucherService>();
         var voucherRepository = Substitute.For<IVoucherRepository>();
         var outbox = Substitute.For<IIntegrationEventOutbox>();
+        var identityUsers = Substitute.For<IIdentityUserServiceClient>();
+        identityUsers.GetUsersAsync(Arg.Any<IReadOnlyCollection<Guid>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<IReadOnlyCollection<Guid>>().ToDictionary(
+                id => id,
+                id => new BookingBuyerSnapshotProfile(
+                    id,
+                    "Booking Buyer",
+                    "0900000000",
+                    "buyer@example.test",
+                    null,
+                    false)));
         var operatorId = Guid.NewGuid();
         var destinationStationId = Guid.NewGuid();
         var trip = CreateTripSnapshot(
@@ -420,7 +431,8 @@ public sealed class StationMergeSerializationTests
                         clock,
                         NullLogger<CreateBookingCommandHandler>.Instance,
                         statusHistory,
-                        canonicalizer);
+                        canonicalizer,
+                        identityUsers);
                     var command = new CreateBookingCommand(
                         passengerUserId,
                         tripId,
@@ -487,7 +499,8 @@ public sealed class StationMergeSerializationTests
                         clock,
                         NullLogger<CreateRoundTripBookingCommandHandler>.Instance,
                         statusHistory,
-                        canonicalizer);
+                        canonicalizer,
+                        identityUsers);
                     var command = new CreateRoundTripBookingCommand(
                         passengerUserId,
                         $"race-{iteration}-{Guid.NewGuid():N}",

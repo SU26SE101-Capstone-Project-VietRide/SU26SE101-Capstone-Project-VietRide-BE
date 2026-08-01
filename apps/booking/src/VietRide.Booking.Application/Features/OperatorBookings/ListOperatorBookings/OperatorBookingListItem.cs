@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace VietRide.Booking.Application.Features.OperatorBookings.ListOperatorBookings;
 
 public sealed record OperatorBookingListItem(
@@ -8,4 +10,6 @@ public sealed record OperatorBookingListItem(
     OperatorBookingTripDto Trip,
     int SeatCount,
     long TotalAmount,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    OperatorBookingBuyerDto? Buyer = null,
+    [property: JsonIgnore] Guid BuyerUserId = default);

@@ -25,7 +25,11 @@ public sealed class GetOperatorSummariesQueryHandler
             cancellationToken);
         return operators
             .OrderBy(operatorTenant => operatorTenant.Id)
-            .Select(operatorTenant => new InternalOperatorSummaryDto(operatorTenant.Id, operatorTenant.Name))
+            .Select(operatorTenant => new InternalOperatorSummaryDto(
+                operatorTenant.Id,
+                operatorTenant.Name,
+                operatorTenant.LogoUrl,
+                operatorTenant.ContactPhone))
             .ToArray();
     }
 }

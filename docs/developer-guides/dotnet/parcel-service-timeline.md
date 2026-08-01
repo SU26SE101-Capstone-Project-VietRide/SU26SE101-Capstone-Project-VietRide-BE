@@ -168,6 +168,7 @@ dotnet test apps/parcel/VietRide.Parcel.sln -c Release --filter "InternalClient|
 - `POST /v1/operator/parcel-route-fares`.
 - `GET /v1/operator/parcel-route-fares`.
 - `PATCH /v1/operator/parcel-route-fares/{routeId}/{sizeCategory}`.
+- `PUT /v1/operator/parcel-route-fares/{routeId}/batch`.
 - `GET /v1/parcels/available-trips`.
 - `POST /v1/parcels`.
 - `bookingId` optional.
@@ -507,6 +508,7 @@ dotnet test apps/parcel/VietRide.Parcel.sln -c Release
 - `POST /v1/operator/parcel-route-fares`
 - `GET /v1/operator/parcel-route-fares`
 - `PATCH /v1/operator/parcel-route-fares/{routeId}/{sizeCategory}`
+- `PUT /v1/operator/parcel-route-fares/{routeId}/batch`
 - `GET /v1/parcels/available-trips`
 - `POST /v1/parcels`
 - `GET /v1/parcels/received`

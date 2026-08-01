@@ -59,6 +59,16 @@ public sealed class ReviewParcelCommandHandler
                     "ALREADY_REVIEWED",
                     $"Parcel has already been reviewed with decision '{parcel.ReviewDecision}'.");
 
+            var hasValidPrice = parcel.SettlementPolicyVersion >= 2
+                ? parcel.EstimatedGrossPriceVnd.Amount > 0
+                    && parcel.PricePerKgVnd.Amount > 0
+                : parcel.EstimatedTotalPriceVnd.Amount > 0
+                    && parcel.DepositRequiredVnd.Amount > 0;
+            if (!hasValidPrice)
+                throw new CodedValidationException(
+                    "FARE_NOT_CONFIGURED",
+                    "Parcel cannot be approved because its fare snapshot is missing or invalid.");
+
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
             ParcelPaymentTransitionSnapshot snapshot;
             try

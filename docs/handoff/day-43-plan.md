@@ -207,30 +207,30 @@ Payment redirect-history work:
 | Service | Total | Required | Exempt |
 | --- | ---: | ---: | ---: |
 | Identity | 35 | 30 | 5 |
-| Trip | 54 | 53 | 1 |
+| Trip | 56 | 53 | 3 |
 | Booking | 27 | 26 | 1 |
 | Payment | 15 | 11 | 4 |
-| Parcel | 30 | 29 | 1 |
+| Parcel | 31 | 30 | 1 |
 | Notification | 3 | 3 | 0 |
-| RAG | 7 | 6 | 1 |
-| **Total** | **171** | **158** | **13** |
+| RAG | 13 | 12 | 1 |
+| **Total** | **180** | **165** | **15** |
 
 The cross-system inventory now distinguishes source-level registration sites from registrations
 created by mapped binding arrays:
 
-- 43 .NET `IIntegrationEventHandler<T>` registrations.
+- 45 .NET `IIntegrationEventHandler<T>` registrations.
 - 14 Notification `.subscribe(...)` source callsites, expanding to 73 runtime RabbitMQ binding
   registrations (five callsites map binding collections; nine are direct registrations).
-- 24 .NET outbound POST/PUT/PATCH/DELETE-style HTTP callsites. Nineteen target idempotency-required
-  mutations and five are exact read-only exemptions in five files: Payment's and Booking's Identity
-  operator-summary clients, the Booking and Parcel Payment redirect lookup clients, and Parcel's
-  Booking voucher validation callsite.
+- 28 .NET outbound POST/PUT/PATCH/DELETE-style HTTP callsites. Nineteen target
+  idempotency-required mutations and nine are exact read-only exemptions across eight files. The
+  post-merge additions are Payment's Identity financial projection lookup, two Trip revenue
+  analytics batch lookups, and Parcel's Trip summary batch lookup.
 
 The provisional repair-plan baseline of 22 outbound callsites and four exemption files omitted two
-older `PostAsJsonAsync` callsites. Exhaustive discovery classifies Parcel voucher validation as the
-fifth read-only exemption and verifies Identity transactional email as a required mutation. The
-inventory uses callsite tokens rather than whole-file exemptions so the mixed Parcel
-`BookingServiceClient` cannot exempt its voucher-usage mutations accidentally.
+older `PostAsJsonAsync` callsites. Merging `origin/main` at `5b00b313` then added the UI-gap policy,
+analytics and projection surfaces, raising the executable baseline to 180/165/15, 45 handlers and
+28/9 outbound callsites/exemptions. The inventory uses callsite tokens rather than whole-file
+exemptions so mixed clients cannot exempt mutation callsites accidentally.
 
 ## Open questions đã đóng
 

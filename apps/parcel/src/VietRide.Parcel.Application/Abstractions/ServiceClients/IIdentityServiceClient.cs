@@ -6,6 +6,11 @@ public interface IIdentityServiceClient
         Guid userId,
         CancellationToken cancellationToken = default);
 
+    Task<IdentityUserBatchOutcome> GetUsersAsync(
+        IReadOnlyCollection<Guid> userIds,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Identity user batch lookup is not implemented by this client.");
+
     Task<OperatorLookupOutcome> GetOperatorInfoAsync(
         Guid operatorId,
         CancellationToken cancellationToken = default);

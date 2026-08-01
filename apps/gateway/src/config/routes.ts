@@ -156,6 +156,12 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['SYSTEM_ADMIN'],
     },
     {
+      prefix: '/v1/admin/dashboard/summary',
+      target: env.BOOKING_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
       prefix: '/v1/admin/trip-settlements',
       target: env.PAYMENT_BASE_URL,
       authRequired: 'user',
@@ -266,6 +272,13 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       prefix: '/v1/operator/trips/{tripId}/substitute-vehicle',
       pathPattern:
         /^\/v1\/operator\/trips\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/substitute-vehicle$/,
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    },
+    {
+      prefix: '/v1/operator/trips/{list}',
+      pathPattern: /^\/v1\/operator\/trips$/,
       target: env.TRIP_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['OPERATOR_ADMIN'],
@@ -439,6 +452,18 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
 
     // Payment
     {
+      prefix: '/v1/admin/revenue/analytics',
+      target: env.PAYMENT_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
+      prefix: '/v1/operator/revenue/analytics',
+      target: env.PAYMENT_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    },
+    {
       prefix: '/v1/payments',
       target: env.PAYMENT_BASE_URL,
       authRequired: 'mixed',
@@ -461,12 +486,26 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
 
     // Parcel
     {
+      prefix: '/v1/operator/parcel-stats',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    },
+    {
       prefix: '/v1/crew/parcels',
       target: env.PARCEL_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['DRIVER', 'ASSISTANT'],
     },
     { prefix: '/v1/operator/parcels', target: env.PARCEL_BASE_URL, authRequired: 'user' },
+    {
+      prefix: '/v1/operator/parcel-route-fares/{routeId}/batch',
+      pathPattern:
+        /^\/v1\/operator\/parcel-route-fares\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/batch$/,
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    },
     {
       prefix: '/v1/operator/parcel-route-fares',
       target: env.PARCEL_BASE_URL,
@@ -521,6 +560,18 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       authRequired: 'user',
       requiredRoles: ['SYSTEM_ADMIN'],
       forwardUserAuthorization: true,
+    },
+    {
+      prefix: '/v1/admin/policies',
+      target: env.RAG_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    },
+    {
+      prefix: '/v1/operator/policies',
+      target: env.RAG_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
     },
     {
       prefix: '/v1/tracking',

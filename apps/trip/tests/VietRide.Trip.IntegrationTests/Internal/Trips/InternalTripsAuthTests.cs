@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -23,6 +24,7 @@ public sealed class InternalTripsAuthTests : IClassFixture<InternalTripsWebAppli
     {
         var tripId = Guid.NewGuid();
         yield return [HttpMethod.Get, $"/internal/v1/trips/{tripId}", null!];
+        yield return [HttpMethod.Post, "/internal/v1/trips/summaries/batch", JsonContent.Create(new { tripIds = new[] { tripId } })];
         yield return [HttpMethod.Post, $"/internal/v1/trips/{tripId}/lock-seats", JsonContent.Create(new { seatNumbers = new[] { "A01" }, holdOwnerId = Guid.NewGuid(), ttlSeconds = 60 })];
         yield return [HttpMethod.Post, $"/internal/v1/trips/{tripId}/release-seats", JsonContent.Create(new { seatLockToken = Guid.NewGuid(), seatNumbers = new[] { "A01" } })];
         yield return [HttpMethod.Post, $"/internal/v1/trips/{tripId}/book-seats", JsonContent.Create(new { seatLockToken = Guid.NewGuid(), bookingId = Guid.NewGuid(), passengerSeatAssignments = new[] { new { passengerId = Guid.NewGuid(), seatNumber = "A01" } } })];
@@ -66,6 +68,54 @@ public sealed class InternalTripsAuthTests : IClassFixture<InternalTripsWebAppli
         var response = await client.SendAsync(request);
 
         response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+    }
+
+    [Fact]
+    public async Task BatchTripSummaries_MissingInternalJwt_Returns401AuthTokenInvalid()
+    {
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync(
+            "/internal/v1/trips/summaries/batch",
+            new { tripIds = new[] { Guid.NewGuid() } });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        payload.GetProperty("error").GetProperty("code").GetString().Should().Be("AUTH_TOKEN_INVALID");
+    }
+
+    [Fact]
+    public async Task BatchTripSummaries_TamperedInternalJwt_Returns401AuthTokenInvalid()
+    {
+        using var client = factory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/internal/v1/trips/summaries/batch")
+        {
+            Content = JsonContent.Create(new { tripIds = new[] { Guid.NewGuid() } }),
+        };
+        request.Headers.TryAddWithoutValidation("X-Internal-Auth", "Bearer not-a-valid-jwt");
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        payload.GetProperty("error").GetProperty("code").GetString().Should().Be("AUTH_TOKEN_INVALID");
+    }
+
+    [Fact]
+    public async Task BatchTripSummaries_InvalidBatchReturns422WithoutIdempotencyKey()
+    {
+        using var client = factory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/internal/v1/trips/summaries/batch")
+        {
+            Content = JsonContent.Create(new { tripIds = Array.Empty<Guid>() }),
+        };
+        request.Headers.TryAddWithoutValidation("X-Internal-Auth", CreateInternalJwt());
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        payload.GetProperty("error").GetProperty("code").GetString().Should().Be("VALIDATION_ERROR");
     }
 
     private static string CreateInternalJwt()

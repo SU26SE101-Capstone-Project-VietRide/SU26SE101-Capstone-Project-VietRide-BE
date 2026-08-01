@@ -489,6 +489,12 @@ HTTP callsites with five exact read-only exemption callsites/files, including th
 Payment redirect lookup helpers. The corrected 24/5 baseline includes two older
 `PostAsJsonAsync` callsites omitted by the provisional count.
 
+Post-plan merge reconciliation: merging `origin/main` at `5b00b313` adds UI-gap Policy, analytics
+and projection surfaces. The executable inventory after that merge is 180 total / 165 required /
+15 exempt, with 45 .NET handlers and 28 outbound HTTP callsites / 9 exact read-only exemptions.
+This does not change the R0–R10 acceptance decisions; it keeps the final verifier aligned with the
+merged runtime surface.
+
 **Verification**
 
 ```powershell

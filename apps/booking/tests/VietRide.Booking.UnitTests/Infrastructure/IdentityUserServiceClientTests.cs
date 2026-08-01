@@ -209,6 +209,67 @@ public sealed class IdentityUserServiceClientTests
         Assert.Equal(cts.Token, exception.CancellationToken);
     }
 
+    [Fact]
+    public async Task GetUsers_ProjectsCompleteBuyerSnapshot()
+    {
+        var userId = Guid.NewGuid();
+        var handler = new StubHandler(_ => Json(HttpStatusCode.OK, $$"""
+            [{"id":"{{userId:D}}","displayName":" Buyer Name ","phone":" 0900000000 ","email":" buyer@example.test ","avatarUrl":" https://example.test/avatar.jpg ","deleted":false}]
+            """));
+
+        var result = await CreateClient(handler).GetUsersAsync([userId]);
+
+        var buyer = Assert.Single(result).Value;
+        Assert.Equal(userId, buyer.UserId);
+        Assert.Equal("Buyer Name", buyer.DisplayName);
+        Assert.Equal("0900000000", buyer.Phone);
+        Assert.Equal("buyer@example.test", buyer.Email);
+        Assert.Equal("https://example.test/avatar.jpg", buyer.AvatarUrl);
+        Assert.False(buyer.Deleted);
+    }
+
+    [Fact]
+    public async Task GetUsers_DeletedBuyerIsRedactedEvenWhenIdentityReturnsPii()
+    {
+        var userId = Guid.NewGuid();
+        var handler = new StubHandler(_ => Json(HttpStatusCode.OK, $$"""
+            [{"id":"{{userId:D}}","displayName":"Leaked Name","phone":"0900000000","email":"leaked@example.test","avatarUrl":"https://example.test/leaked.jpg","deleted":true}]
+            """));
+
+        var buyer = (await CreateClient(handler).GetUsersAsync([userId]))[userId];
+
+        Assert.Equal("Người dùng đã xóa", buyer.DisplayName);
+        Assert.Null(buyer.Phone);
+        Assert.Null(buyer.Email);
+        Assert.Null(buyer.AvatarUrl);
+        Assert.True(buyer.Deleted);
+    }
+
+    [Fact]
+    public async Task GetUsers_ChunksOneHundredAndOneDistinctIdsIntoOneHundredAndOne()
+    {
+        var userIds = Enumerable.Range(0, 101).Select(_ => Guid.NewGuid()).ToArray();
+        var handler = new StubHandler(request =>
+        {
+            var ids = request.RequestUri!.Query
+                .TrimStart('?')
+                .Split('&', StringSplitOptions.RemoveEmptyEntries)
+                .Select(part => Guid.Parse(part["ids=".Length..]));
+            var body = "[" + string.Join(",", ids.Select(id =>
+                $$"""{"id":"{{id:D}}","displayName":"Buyer","deleted":false}""")) + "]";
+            return Json(HttpStatusCode.OK, body);
+        });
+
+        var result = await CreateClient(handler).GetUsersAsync(userIds);
+
+        Assert.Equal(101, result.Count);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal(
+            new[] { 100, 1 },
+            handler.Requests.Select(request => request.RequestUri!.Query
+                .Split("ids=", StringSplitOptions.None).Length - 1));
+    }
+
     private static IdentityUserServiceClient CreateClient(HttpMessageHandler handler)
         => new(new HttpClient(handler) { BaseAddress = new Uri("http://identity") });
 
@@ -227,10 +288,12 @@ public sealed class IdentityUserServiceClientTests
     private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> response) : HttpMessageHandler
     {
         public HttpRequestMessage? LastRequest { get; private set; }
+        public List<HttpRequestMessage> Requests { get; } = [];
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             LastRequest = request;
+            Requests.Add(request);
             return Task.FromResult(response(request));
         }
     }

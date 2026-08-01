@@ -23,4 +23,18 @@ public class DevTripServiceClientStubTests
         result.Snapshot.OriginStation.Name.Should().Be("Dev Origin");
         result.Snapshot.DestinationArrivedAt.Should().NotBeNull();
     }
+
+    [Fact]
+    public async Task GetTripSummariesAsync_ReturnsOneCompleteSummaryPerDistinctTrip()
+    {
+        var tripId = Guid.NewGuid();
+
+        var result = await _sut.GetTripSummariesAsync([tripId, tripId]);
+
+        result.Kind.Should().Be(TripSummaryBatchOutcomeKind.Success);
+        var summary = result.Summaries.Should().ContainSingle().Which;
+        summary.TripId.Should().Be(tripId);
+        summary.Route.Name.Should().Be("Dev Route");
+        summary.Vehicle.LicensePlate.Should().Be("DEV-0001");
+    }
 }

@@ -41,6 +41,24 @@ namespace VietRide.Payment.Infrastructure.Migrations
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_payment", "wallet_transaction_type", new[] { "CREDIT", "DEBIT" });
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("VietRide.Payment.Domain.Entities.DeletedFinancialActorMarker", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<DateTimeOffset>("DeletedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()")
+                        .HasColumnName("deleted_at");
+
+                    b.HasKey("UserId")
+                        .HasName("pk_deleted_financial_actor_markers");
+
+                    b.ToTable("deleted_financial_actor_markers", "vietride_payment");
+                });
+
             modelBuilder.Entity("VietRide.Payment.Domain.Entities.Invoice", b =>
                 {
                     b.Property<Guid>("Id")
@@ -302,9 +320,30 @@ namespace VietRide.Payment.Infrastructure.Migrations
                         .HasDefaultValue(0L)
                         .HasColumnName("net_amount");
 
+                    b.Property<string>("OperatorContactPhone")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("operator_contact_phone");
+
                     b.Property<Guid>("OperatorId")
                         .HasColumnType("uuid")
                         .HasColumnName("operator_id");
+
+                    b.Property<string>("OperatorLogoUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)")
+                        .HasColumnName("operator_logo_url");
+
+                    b.Property<string>("OperatorName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("operator_name");
+
+                    b.Property<bool>("OperatorSnapshotResolved")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("operator_snapshot_resolved");
 
                     b.Property<int>("RowVersion")
                         .IsConcurrencyToken()
@@ -316,6 +355,27 @@ namespace VietRide.Payment.Infrastructure.Migrations
                     b.Property<DateTimeOffset?>("SettledAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("settled_at");
+
+                    b.Property<string>("SettledByDisplayName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("settled_by_display_name");
+
+                    b.Property<string>("SettledByEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)")
+                        .HasColumnName("settled_by_email");
+
+                    b.Property<string>("SettledByRole")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("settled_by_role");
+
+                    b.Property<bool>("SettledBySnapshotResolved")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("settled_by_snapshot_resolved");
 
                     b.Property<Guid?>("SettledByUserId")
                         .HasColumnType("uuid")
@@ -711,6 +771,39 @@ namespace VietRide.Payment.Infrastructure.Migrations
                         .HasColumnName("id")
                         .HasDefaultValueSql("gen_random_uuid()");
 
+                    b.Property<string>("ActorDisplayName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("actor_display_name");
+
+                    b.Property<string>("ActorEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)")
+                        .HasColumnName("actor_email");
+
+                    b.Property<string>("ActorRole")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("actor_role");
+
+                    b.Property<bool>("ActorSnapshotResolved")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("actor_snapshot_resolved");
+
+                    b.Property<string>("ActorType")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("actor_type")
+                        .HasDefaultValueSql("'SYSTEM'");
+
+                    b.Property<Guid?>("ActorUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("actor_user_id");
+
                     b.Property<long>("Amount")
                         .HasColumnType("bigint")
                         .HasColumnName("amount");
@@ -748,6 +841,10 @@ namespace VietRide.Payment.Infrastructure.Migrations
                     b.HasKey("Id")
                         .HasName("pk_platform_wallet_transactions");
 
+                    b.HasIndex("ActorUserId")
+                        .HasDatabaseName("idx_platform_wallet_transactions_actor_user_id")
+                        .HasFilter("actor_user_id IS NOT NULL");
+
                     b.HasIndex("CreatedAt")
                         .IsDescending()
                         .HasDatabaseName("idx_platform_wallet_transactions_created_at");
@@ -763,6 +860,8 @@ namespace VietRide.Payment.Infrastructure.Migrations
 
                     b.ToTable("platform_wallet_transactions", "vietride_payment", t =>
                         {
+                            t.HasCheckConstraint("chk_platform_wallet_transactions_actor_type", "actor_type IN ('USER','SYSTEM')");
+
                             t.HasCheckConstraint("chk_platform_wallet_transactions_amount_positive", "amount > 0");
 
                             t.HasCheckConstraint("chk_platform_wallet_transactions_balance_non_negative", "balance_before >= 0 AND balance_after >= 0");

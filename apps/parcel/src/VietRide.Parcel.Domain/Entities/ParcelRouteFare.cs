@@ -45,6 +45,11 @@ public sealed class ParcelRouteFare : BaseEntity<Guid>
         PricePerChargeableKgVnd = newPrice;
     }
 
+    public void AssignOperator(Guid operatorId)
+    {
+        OperatorId = operatorId;
+    }
+
     public void UpdateWeightPricing(Money pricePerChargeableKg, Money minimumPrice)
     {
         PricePerChargeableKgVnd = pricePerChargeableKg;

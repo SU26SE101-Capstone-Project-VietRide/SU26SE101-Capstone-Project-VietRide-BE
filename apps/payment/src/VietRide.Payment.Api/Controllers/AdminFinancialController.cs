@@ -43,8 +43,8 @@ public sealed class AdminFinancialController : ControllerBase
         => Ok(await _sender.Send(new GetPlatformWalletQuery(), ct));
 
     [HttpGet("platform-wallet/transactions")]
-    [ProducesResponseType(typeof(ApiResponse<PagedResult<WalletTransactionDto>>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<PagedResult<WalletTransactionDto>>> PlatformTransactions(
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<PlatformWalletTransactionDto>>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<PagedResult<PlatformWalletTransactionDto>>> PlatformTransactions(
         [FromQuery] int page = 1, [FromQuery] int pageSize = 20,
         [FromQuery] string? type = null, [FromQuery] string? referenceType = null,
         [FromQuery] DateTimeOffset? from = null, [FromQuery] DateTimeOffset? to = null,

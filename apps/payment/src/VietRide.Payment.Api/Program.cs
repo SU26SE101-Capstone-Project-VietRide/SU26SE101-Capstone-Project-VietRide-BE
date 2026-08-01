@@ -121,6 +121,10 @@ if (registerMessaging)
         TripSettlementStuckAlertJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
         Cron.Hourly());
+    recurringJobs.AddOrUpdate<FinancialProjectionBackfillJob>(
+        FinancialProjectionBackfillJob.RecurringJobId,
+        job => job.RunAsync(CancellationToken.None),
+        "*/5 * * * *");
 }
 
 app.Run();

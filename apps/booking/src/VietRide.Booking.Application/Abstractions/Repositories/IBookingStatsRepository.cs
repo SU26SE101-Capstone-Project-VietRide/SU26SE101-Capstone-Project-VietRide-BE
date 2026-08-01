@@ -30,6 +30,7 @@ public interface IBookingStatsRepository : IRepository<BookingStats, Guid>
         Guid operatorId,
         DateOnly? from,
         DateOnly? to,
+        string groupBy,
         CancellationToken ct = default);
 
     Task<IReadOnlyList<AdminBookingStatsAggregateReadModel>> GetAdminAggregateStatsAsync(

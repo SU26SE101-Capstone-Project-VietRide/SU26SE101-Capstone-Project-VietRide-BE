@@ -9,6 +9,7 @@ using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Application.Features.Internal.Trips.Cargo;
 using VietRide.Trip.Application.Features.Trips.EditTrip;
 using VietRide.Trip.Application.Features.Trips.GetTripDetail;
+using VietRide.Trip.Application.Features.Trips.ListOperatorTrips;
 using VietRide.Trip.Application.Features.Trips.Operations;
 
 namespace VietRide.Trip.Api.Controllers;
@@ -25,6 +26,36 @@ public sealed class OperatorTripsController : ControllerBase
     public OperatorTripsController(IMediator mediator)
     {
         this.mediator = mediator;
+    }
+
+    [HttpGet]
+    [Authorize(Roles = OperatorWriteRoles)]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<OperatorTripListItemDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<PagedResult<OperatorTripListItemDto>>> ListAsync(
+        [FromQuery] string? search,
+        [FromQuery] OperatorTripStatusFilter? status,
+        [FromQuery] DateOnly? from,
+        [FromQuery] DateOnly? to,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize,
+        [FromQuery] string? sortBy,
+        [FromQuery] string? sortDir,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await mediator.Send(
+            new ListOperatorTripsQuery(
+                GetRequiredOperatorId(),
+                search,
+                status,
+                from,
+                to,
+                page,
+                pageSize,
+                sortBy,
+                sortDir),
+            cancellationToken));
     }
 
     [HttpPatch("{tripId:guid}")]

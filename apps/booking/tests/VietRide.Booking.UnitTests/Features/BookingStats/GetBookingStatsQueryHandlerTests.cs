@@ -39,6 +39,46 @@ public sealed class GetBookingStatsQueryHandlerTests
         item.TotalNoShows.Should().Be(2);
         item.TotalPartialNoShows.Should().Be(0);
         stats.LastOperatorId.Should().Be(OperatorId);
+        stats.LastOperatorGroupBy.Should().Be("date");
+    }
+
+    [Fact]
+    public async Task BookingStatsMonth_Operator_ZeroFillsMissingMonthsAndReconcilesSummary()
+    {
+        var stats = new FakeBookingStatsRepository
+        {
+            OperatorRows =
+            [
+                new OperatorBookingStatsReadModel(
+                    OperatorId,
+                    new DateOnly(2026, 2, 1),
+                    TotalBookings: 3,
+                    TotalRevenue: 450_000,
+                    TotalCancellations: 1,
+                    TotalNoShows: 2,
+                    TotalCompleted: 4),
+            ],
+        };
+        var handler = new GetOperatorBookingStatsQueryHandler(stats);
+
+        var result = await handler.Handle(
+            new GetOperatorBookingStatsQuery(
+                OperatorId,
+                new DateOnly(2026, 1, 15),
+                new DateOnly(2026, 3, 10),
+                "month"),
+            CancellationToken.None);
+
+        result.Items.Select(item => item.Date).Should().Equal(
+            new DateOnly(2026, 1, 1),
+            new DateOnly(2026, 2, 1),
+            new DateOnly(2026, 3, 1));
+        result.Items[0].TotalBookings.Should().Be(0);
+        result.Items[1].TotalRevenue.Should().Be(450_000);
+        result.Items[2].TotalCompleted.Should().Be(0);
+        result.TotalBookings.Should().Be(result.Items.Sum(item => item.TotalBookings));
+        result.TotalRevenue.Should().Be(result.Items.Sum(item => item.TotalRevenue));
+        stats.LastOperatorGroupBy.Should().Be("month");
     }
 
     [Fact]
@@ -72,6 +112,43 @@ public sealed class GetBookingStatsQueryHandlerTests
     }
 
     [Fact]
+    public async Task BookingStatsMonth_Admin_ZeroFillsMissingMonthsAndReconcilesSummary()
+    {
+        var stats = new FakeBookingStatsRepository
+        {
+            AdminRows =
+            [
+                new AdminBookingStatsAggregateReadModel(
+                    OperatorId: null,
+                    OperatorName: null,
+                    Date: new DateOnly(2026, 2, 1),
+                    TotalBookings: 7,
+                    TotalRevenue: 1_250_000,
+                    TotalCancellations: 1,
+                    TotalNoShows: 2,
+                    TotalCompleted: 4),
+            ],
+        };
+        var handler = new GetAdminBookingStatsAggregateQueryHandler(stats);
+
+        var result = await handler.Handle(
+            new GetAdminBookingStatsAggregateQuery(
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 3, 31),
+                "month"),
+            CancellationToken.None);
+
+        result.Items.Select(item => item.Date).Should().Equal(
+            new DateOnly(2026, 1, 1),
+            new DateOnly(2026, 2, 1),
+            new DateOnly(2026, 3, 1));
+        result.Items.Should().OnlyContain(item => item.OperatorId == null && item.OperatorName == null);
+        result.TotalBookings.Should().Be(7);
+        result.TotalRevenue.Should().Be(1_250_000);
+        stats.LastAdminGroupBy.Should().Be("month");
+    }
+
+    [Fact]
     public async Task OperatorStats_WhenGroupByIsNotDate_ThrowsCodedValidationException()
     {
         var handler = new GetOperatorBookingStatsQueryHandler(new FakeBookingStatsRepository());
@@ -99,11 +176,51 @@ public sealed class GetBookingStatsQueryHandlerTests
         ex.Which.Errors.Should().ContainSingle(error => error.Field == "groupBy");
     }
 
+    [Theory]
+    [InlineData("2026-01-01", null)]
+    [InlineData(null, "2026-01-31")]
+    [InlineData("2026-02-01", "2026-01-31")]
+    [InlineData("2025-01-01", "2026-01-02")]
+    public async Task BookingStatsMonth_WhenRangeIsMissingReversedOrOver366Days_ThrowsValidation(
+        string? fromValue,
+        string? toValue)
+    {
+        var handler = new GetOperatorBookingStatsQueryHandler(new FakeBookingStatsRepository());
+        DateOnly? from = fromValue is null ? null : DateOnly.Parse(fromValue);
+        DateOnly? to = toValue is null ? null : DateOnly.Parse(toValue);
+
+        var act = () => handler.Handle(
+            new GetOperatorBookingStatsQuery(OperatorId, from, to, "month"),
+            CancellationToken.None);
+
+        var ex = await act.Should().ThrowAsync<CodedValidationException>();
+        ex.Which.ErrorCode.Should().Be("VALIDATION_ERROR");
+        ex.Which.Errors.Should().Contain(error => error.Field == "from" || error.Field == "to");
+    }
+
+    [Fact]
+    public async Task BookingStatsMonth_WhenRangeEndsAtMaximumDate_ZeroFillsWithoutOverflow()
+    {
+        var handler = new GetOperatorBookingStatsQueryHandler(new FakeBookingStatsRepository());
+
+        var result = await handler.Handle(
+            new GetOperatorBookingStatsQuery(
+                OperatorId,
+                new DateOnly(9999, 12, 1),
+                new DateOnly(9999, 12, 31),
+                "month"),
+            CancellationToken.None);
+
+        result.Items.Should().ContainSingle();
+        result.Items.Single().Date.Should().Be(new DateOnly(9999, 12, 1));
+    }
+
     private sealed class FakeBookingStatsRepository : IBookingStatsRepository
     {
         public IReadOnlyList<OperatorBookingStatsReadModel> OperatorRows { get; set; } = [];
         public IReadOnlyList<AdminBookingStatsAggregateReadModel> AdminRows { get; set; } = [];
         public Guid LastOperatorId { get; private set; }
+        public string? LastOperatorGroupBy { get; private set; }
         public string? LastAdminGroupBy { get; private set; }
 
         public Task<BookingStatsEntity?> GetByIdAsync(Guid id, CancellationToken ct)
@@ -138,9 +255,11 @@ public sealed class GetBookingStatsQueryHandlerTests
             Guid operatorId,
             DateOnly? from,
             DateOnly? to,
+            string groupBy,
             CancellationToken ct = default)
         {
             LastOperatorId = operatorId;
+            LastOperatorGroupBy = groupBy;
             return Task.FromResult(OperatorRows);
         }
 

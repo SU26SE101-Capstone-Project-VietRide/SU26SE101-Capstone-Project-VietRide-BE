@@ -1,4 +1,6 @@
 using VietRide.Parcel.Application.Features.Internal.Reports.PlatformParcels;
+using VietRide.Parcel.Application.Features.Parcels.DisplaySnapshots;
+using VietRide.Parcel.Application.Features.Parcels.OperatorDetail;
 using VietRide.Parcel.Application.Features.Parcels.Reports;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Repositories;
@@ -10,6 +12,22 @@ namespace VietRide.Parcel.Application.Abstractions.Repositories;
 
 public interface IParcelRepository : IRepository<ParcelEntity, Guid>
 {
+    Task<OperatorParcelDetailData?> GetOperatorDetailAsync(
+        Guid parcelId,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Operator Parcel detail is not implemented by this repository.");
+
+    Task<IReadOnlyList<ParcelTripDisplaySnapshotCandidate>> ListTripDisplaySnapshotBackfillCandidatesAsync(
+        int batchSize,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Parcel trip display snapshot backfill is not implemented by this repository.");
+
+    Task<int> ApplyTripDisplaySnapshotBackfillAsync(
+        IReadOnlyCollection<ParcelTripDisplaySnapshotUpdate> updates,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Parcel trip display snapshot backfill is not implemented by this repository.");
+
     IAsyncEnumerable<ParcelOperatorReportRow> StreamOperatorReportRowsAsync(
         Guid operatorId,
         DateTimeOffset fromUtc,

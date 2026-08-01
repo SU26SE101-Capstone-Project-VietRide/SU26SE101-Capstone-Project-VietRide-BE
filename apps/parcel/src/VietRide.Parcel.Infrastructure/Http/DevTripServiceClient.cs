@@ -82,6 +82,37 @@ public sealed class DevTripServiceClient : ITripServiceClient
         return Task.FromResult(new TripSnapshotOutcome(TripSnapshotOutcomeKind.Success, snapshot, null));
     }
 
+    public Task<TripSummaryBatchOutcome> GetTripSummariesAsync(
+        IReadOnlyCollection<Guid> tripIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (tripIds.Any(tripId => tripId == Guid.Empty))
+            throw new ArgumentException("Trip ids cannot contain an empty UUID.", nameof(tripIds));
+
+        var distinctTripIds = tripIds.Distinct().ToArray();
+        if (distinctTripIds.Length > 100)
+            throw new ArgumentOutOfRangeException(nameof(tripIds), "At most 100 distinct trip ids are allowed.");
+
+        var now = DateTimeOffset.UtcNow;
+        var summaries = distinctTripIds
+            .Select(tripId => new TripSummarySnapshot(
+                tripId,
+                "SCHEDULED",
+                now.AddHours(4),
+                now.AddHours(8),
+                new TripRouteSummarySnapshot(
+                    Guid.Parse("22222222-2222-4222-8222-222222222222"),
+                    "Dev Route",
+                    "Dev Origin",
+                    "Dev Destination"),
+                new TripVehicleSummarySnapshot(
+                    Guid.Parse("33333333-3333-4333-8333-333333333333"),
+                    "DEV-0001",
+                    "ACTIVE")))
+            .ToArray();
+        return Task.FromResult(TripSummaryBatchOutcome.Success(summaries));
+    }
+
     public Task<RouteOwnershipOutcome> ValidateRouteOwnershipAsync(
         Guid routeId,
         Guid operatorId,

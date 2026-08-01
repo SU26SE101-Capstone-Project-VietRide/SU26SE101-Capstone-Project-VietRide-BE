@@ -1,5 +1,6 @@
 using VietRide.Booking.Application.Features.Internal.Bookings;
 using VietRide.Booking.Application.Features.Internal.Reports.PlatformBookings;
+using VietRide.Booking.Application.Features.OperatorBookings.BuyerSnapshots;
 using VietRide.Booking.Application.Features.OperatorBookings.GetOperatorBookingDetail;
 using VietRide.Booking.Application.Features.OperatorBookings.ListOperatorBookings;
 using VietRide.Booking.Application.Features.OperatorReports;
@@ -16,6 +17,21 @@ namespace VietRide.Booking.Application.Abstractions.Repositories;
 /// </summary>
 public interface IBookingRepository : IRepository<BookingEntity, Guid>
 {
+    Task<IReadOnlyList<BookingBuyerSnapshotCandidate>> ListBuyerSnapshotBackfillCandidatesAsync(
+        int batchSize,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Booking buyer snapshot backfill is not implemented by this repository.");
+
+    Task<int> ApplyBuyerSnapshotBackfillAsync(
+        IReadOnlyCollection<BookingBuyerSnapshotUpdate> updates,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Booking buyer snapshot backfill is not implemented by this repository.");
+
+    Task<int> RedactBuyerSnapshotsAsync(
+        Guid buyerUserId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Booking buyer snapshot redaction is not implemented by this repository.");
+
     IAsyncEnumerable<BookingOperatorReportRow> StreamOperatorReportRowsAsync(
         Guid operatorId,
         DateTimeOffset fromUtc,

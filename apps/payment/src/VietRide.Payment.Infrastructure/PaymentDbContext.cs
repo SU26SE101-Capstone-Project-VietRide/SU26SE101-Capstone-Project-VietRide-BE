@@ -34,6 +34,7 @@ public sealed class PaymentDbContext : VietRideDbContextBase, IBatchChargePaymen
     public DbSet<OperatorLedgerEntry> OperatorLedgerEntries => Set<OperatorLedgerEntry>();
     public DbSet<OperatorTripSettlement> OperatorTripSettlements => Set<OperatorTripSettlement>();
     public DbSet<ProcessedIntegrationEvent> ProcessedIntegrationEvents => Set<ProcessedIntegrationEvent>();
+    public DbSet<DeletedFinancialActorMarker> DeletedFinancialActorMarkers => Set<DeletedFinancialActorMarker>();
 
     public static void ConfigurePostgresTypes(NpgsqlDataSourceBuilder dataSourceBuilder)
     {

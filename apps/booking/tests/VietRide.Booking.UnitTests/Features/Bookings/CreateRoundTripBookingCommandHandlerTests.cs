@@ -83,11 +83,33 @@ public class CreateRoundTripBookingCommandHandlerTests
     private readonly IVoucherRepository _voucherRepository = Substitute.For<IVoucherRepository>();
     private readonly IIntegrationEventOutbox _outbox = Substitute.For<IIntegrationEventOutbox>();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly IIdentityUserServiceClient _identityUsers = CreateIdentityClient();
 
     private CreateRoundTripBookingCommandHandler BuildSut(IBookingStationCanonicalizer? stationCanonicalizer = null) => new(
         _bookings, _tripClient, _paymentClient, _bookingService, _voucherService, _voucherRepository, _outbox, _clock,
         NullLogger<CreateRoundTripBookingCommandHandler>.Instance, _statusHistory,
-        stationCanonicalizer ?? PassthroughBookingStationCanonicalizer.Instance);
+        stationCanonicalizer ?? PassthroughBookingStationCanonicalizer.Instance,
+        _identityUsers);
+
+    private static IIdentityUserServiceClient CreateIdentityClient()
+    {
+        var client = Substitute.For<IIdentityUserServiceClient>();
+        client.GetUsersAsync(Arg.Any<IReadOnlyCollection<Guid>>(), Arg.Any<CancellationToken>())
+            .Returns(callInfo =>
+            {
+                var userIds = callInfo.Arg<IReadOnlyCollection<Guid>>();
+                return userIds.ToDictionary(
+                    userId => userId,
+                    userId => new BookingBuyerSnapshotProfile(
+                        userId,
+                        "Booking Buyer",
+                        "0900000000",
+                        "buyer@example.test",
+                        null,
+                        false));
+            });
+        return client;
+    }
 
     private static CreateRoundTripBookingCommand BuildCommand(
         string paymentMethod = "WALLET",
@@ -149,7 +171,11 @@ public class CreateRoundTripBookingCommandHandlerTests
                 && b.TotalAmount.Amount == 200_000
                 && b.DiscountAmount.Amount == 0
                 && b.TripSnapshotDeparture == OutboundTrip.DepartureDateTime
-                && b.TripCurrentDeparture == OutboundTrip.DepartureDateTime),
+                && b.TripCurrentDeparture == OutboundTrip.DepartureDateTime
+                && b.PassengerUserId == PassengerUserId
+                && b.BuyerDisplayName == "Booking Buyer"
+                && b.BuyerPhone == "0900000000"
+                && b.BuyerEmail == "buyer@example.test"),
             Arg.Any<CancellationToken>());
         await _bookings.Received(1).AddAsync(
             Arg.Is<BookingEntity>(b =>
@@ -159,7 +185,11 @@ public class CreateRoundTripBookingCommandHandlerTests
                 && b.TotalAmount.Amount == 180_000
                 && b.DiscountAmount.Amount == 0
                 && b.TripSnapshotDeparture == ReturnTrip.DepartureDateTime
-                && b.TripCurrentDeparture == ReturnTrip.DepartureDateTime),
+                && b.TripCurrentDeparture == ReturnTrip.DepartureDateTime
+                && b.PassengerUserId == PassengerUserId
+                && b.BuyerDisplayName == "Booking Buyer"
+                && b.BuyerPhone == "0900000000"
+                && b.BuyerEmail == "buyer@example.test"),
             Arg.Any<CancellationToken>());
 
         await _paymentClient.Received(1).BatchChargeAsync(

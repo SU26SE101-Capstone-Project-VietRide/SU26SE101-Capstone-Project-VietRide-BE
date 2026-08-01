@@ -21,6 +21,21 @@ public sealed class BookingHangfireRegistrationTests(
     : IClassFixture<VoucherPersistenceIntegrationTests.DbBackedVoucherFactory>
 {
     [Fact]
+    public void QueueName_UsesConfiguredWorkerQueueForRecurringJobs()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Hangfire:QueueName"] = " booking-ui-gap ",
+            })
+            .Build();
+
+        VietRide.Booking.Infrastructure.Jobs.HangfireServiceCollectionExtensions
+            .GetQueueName(configuration)
+            .Should().Be("booking-ui-gap");
+    }
+
+    [Fact]
     public void RegistrationUsesApprovedHangfireServicesAndBookingScheduler()
     {
         var configuration = new ConfigurationBuilder()

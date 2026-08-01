@@ -58,6 +58,68 @@ public sealed class IdentityUserServiceClient : IIdentityUserServiceClient
         }
     }
 
+    public async Task<IReadOnlyDictionary<Guid, BookingBuyerSnapshotProfile>> GetUsersAsync(
+        IReadOnlyCollection<Guid> userIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (userIds.Count == 0)
+        {
+            return new Dictionary<Guid, BookingBuyerSnapshotProfile>();
+        }
+
+        try
+        {
+            var profiles = new Dictionary<Guid, BookingBuyerSnapshotProfile>();
+            foreach (var chunk in userIds.Distinct().Chunk(100))
+            {
+                var query = string.Join("&", chunk.Select(id => $"ids={id:D}"));
+                using var response = await _httpClient.GetAsync(
+                    $"/internal/v1/users?{query}",
+                    cancellationToken).ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw new BookingUpstreamUnavailableException("Identity user batch lookup failed.");
+                }
+
+                var payload = await response.Content.ReadFromJsonAsync<List<IdentityUserProjection>>(
+                    cancellationToken: cancellationToken).ConfigureAwait(false)
+                    ?? throw new JsonException("Identity user batch lookup returned an invalid payload.");
+                foreach (var user in payload)
+                {
+                    if (user.Id == Guid.Empty || string.IsNullOrWhiteSpace(user.DisplayName))
+                    {
+                        throw new JsonException("Identity user batch lookup returned an invalid user.");
+                    }
+
+                    var deleted = user.Deleted;
+                    profiles[user.Id] = new BookingBuyerSnapshotProfile(
+                        user.Id,
+                        deleted ? BookingBuyerSnapshotProfile.DeletedDisplayName : user.DisplayName.Trim(),
+                        deleted ? null : NormalizeOptional(user.Phone),
+                        deleted ? null : NormalizeOptional(user.Email),
+                        deleted ? null : NormalizeOptional(user.AvatarUrl),
+                        deleted);
+                }
+            }
+
+            return profiles;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (BookingUpstreamUnavailableException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            throw new BookingUpstreamUnavailableException(
+                "Identity user batch lookup is unavailable.",
+                exception);
+        }
+    }
+
     private static async Task<bool> IsResourceNotFoundAsync(
         HttpResponseMessage response,
         CancellationToken cancellationToken)
@@ -85,4 +147,15 @@ public sealed class IdentityUserServiceClient : IIdentityUserServiceClient
     }
 
     private sealed record UserLookupResponse(Guid UserId);
+
+    private sealed record IdentityUserProjection(
+        Guid Id,
+        string? DisplayName,
+        string? Phone,
+        string? Email,
+        string? AvatarUrl,
+        bool Deleted);
+
+    private static string? NormalizeOptional(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

@@ -115,6 +115,7 @@ public static class InfrastructureServiceCollectionExtensions
         // ------------------------------------------------------------------
         // Repositories
         // ------------------------------------------------------------------
+        services.AddScoped<IAdminDashboardIdentityMetricsRepository, AdminDashboardIdentityMetricsRepository>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IEmailVerificationTokenRepository, EmailVerificationTokenRepository>();

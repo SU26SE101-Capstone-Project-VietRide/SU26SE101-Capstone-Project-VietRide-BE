@@ -27,6 +27,32 @@ public sealed class DevIdentityServiceClient : IIdentityServiceClient
         return Task.FromResult(new UserLookupOutcome(UserLookupOutcomeKind.Success, userInfo, null));
     }
 
+    public Task<IdentityUserBatchOutcome> GetUsersAsync(
+        IReadOnlyCollection<Guid> userIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (userIds.Any(userId => userId == Guid.Empty))
+            throw new ArgumentException("User ids cannot contain an empty UUID.", nameof(userIds));
+
+        var distinctUserIds = userIds.Distinct().ToArray();
+        if (distinctUserIds.Length > 100)
+            throw new ArgumentOutOfRangeException(nameof(userIds), "At most 100 distinct user ids are allowed.");
+
+        var users = distinctUserIds
+            .Select(userId => new IdentityUserSummary(
+                userId,
+                "Dev Passenger",
+                "+84901234567",
+                "passenger@example.test",
+                null,
+                "PASSENGER",
+                null,
+                "ACTIVE",
+                false))
+            .ToArray();
+        return Task.FromResult(IdentityUserBatchOutcome.Success(users));
+    }
+
     public Task<OperatorLookupOutcome> GetOperatorInfoAsync(
         Guid operatorId,
         CancellationToken cancellationToken = default)

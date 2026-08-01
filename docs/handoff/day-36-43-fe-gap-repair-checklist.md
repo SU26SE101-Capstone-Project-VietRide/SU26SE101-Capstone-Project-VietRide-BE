@@ -49,6 +49,7 @@
 | Shared libraries build/format/tests | PASS — Messaging 43, Web 99, Reporting 11, Persistence 37 |
 | TS lint/test/build matrix | PASS |
 | Idempotency verifier and parser tests | PASS — inventory plus 9/9 tests |
+| Post-main-merge inventory reconciliation | PASS — 180 total / 165 required / 15 exempt; 45 handlers; 28 outbound callsites / 9 exemptions |
 | Day 36 real-app E2E | PASS — 10/10 checkpoints, 204.4s |
 | Day 43 real-app reliability E2E | PASS — all checkpoints, 479s |
 | Parcel settlement real-app E2E | PASS — 631 clean-build assertions; post-factory regression 643 assertions |

@@ -70,6 +70,8 @@ describe('buildRouteTable', () => {
       ['/v1/admin/platform-wallet', env.PAYMENT_BASE_URL],
       ['/v1/admin/invoices', env.PAYMENT_BASE_URL],
       ['/v1/admin/reports/platform', env.BOOKING_BASE_URL],
+      ['/v1/admin/dashboard/summary', env.BOOKING_BASE_URL],
+      ['/v1/admin/revenue/analytics', env.PAYMENT_BASE_URL],
     ] as const;
 
     expect(routes.find((r) => r.prefix === '/v1/admin')).toBeUndefined();
@@ -126,6 +128,34 @@ describe('buildRouteTable', () => {
       expect(route?.authRequired).toBe('user');
       expect(route?.requiredRoles).toEqual(['PASSENGER']);
     });
+  });
+
+  it('routes generic Policy APIs to RAG with exact admin roles', () => {
+    const adminRoute = matchRoute(
+      routes,
+      '/v1/admin/policies/11111111-1111-4111-8111-111111111111',
+    );
+    const operatorRoute = matchRoute(
+      routes,
+      '/v1/operator/policies/22222222-2222-4222-8222-222222222222',
+    );
+
+    expect(adminRoute).toMatchObject({
+      prefix: '/v1/admin/policies',
+      target: env.RAG_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['SYSTEM_ADMIN'],
+    });
+    expect(matchRoute(routes, '/v1/admin/policies')).toBe(adminRoute);
+    expect(adminRoute?.forwardUserAuthorization).not.toBe(true);
+    expect(operatorRoute).toMatchObject({
+      prefix: '/v1/operator/policies',
+      target: env.RAG_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    });
+    expect(matchRoute(routes, '/v1/operator/policies')).toBe(operatorRoute);
+    expect(operatorRoute?.forwardUserAuthorization).not.toBe(true);
   });
 
   it('routes all six operator XLSX reports to their owning services with operator roles', () => {
@@ -279,7 +309,7 @@ describe('buildRouteTable', () => {
   it('keeps operator booking routes distinct from neighboring Trip and Booking prefixes', () => {
     const cases = [
       ['/v1/operator/bookings', '/v1/operator/bookings', env.BOOKING_BASE_URL],
-      ['/v1/operator/trips', '/v1/operator/trips', env.TRIP_BASE_URL],
+      ['/v1/operator/trips', '/v1/operator/trips/{list}', env.TRIP_BASE_URL],
       ['/v1/operator/booking-stats', '/v1/operator/booking-stats', env.BOOKING_BASE_URL],
       ['/v1/bookings', '/v1/bookings', env.BOOKING_BASE_URL],
       [
@@ -465,6 +495,14 @@ describe('buildRouteTable', () => {
     expect(matchRoute(routes, '/internal/v1/reports/platform/trips')).toBeUndefined();
     expect(matchRoute(routes, '/internal/v1/reports/platform/parcels')).toBeUndefined();
     expect(matchRoute(routes, '/internal/v1/operators/summaries/batch')).toBeUndefined();
+    expect(matchRoute(routes, '/internal/v1/admin/dashboard/identity-metrics')).toBeUndefined();
+    expect(matchRoute(routes, '/internal/v1/operators/vehicle-counts/batch')).toBeUndefined();
+    expect(
+      matchRoute(
+        routes,
+        '/internal/v1/operators/11111111-1111-4111-8111-111111111111/route-performance',
+      ),
+    ).toBeUndefined();
     expect(routes.some((r) => r.prefix.startsWith('/internal'))).toBe(false);
   });
 
@@ -768,6 +806,65 @@ describe('buildRouteTable', () => {
     expect(operatorRoute?.target).toBe(env.TRIP_BASE_URL);
     expect(parcelFareRoute?.prefix).not.toBe(operatorRoute?.prefix);
     expect(routes.find((r) => r.prefix === '/v1/operator')).toBeUndefined();
+  });
+
+  it('routes all UI-gap public facades to their owners with exact access gates', () => {
+    const expected = [
+      ['/v1/admin/dashboard/summary', env.BOOKING_BASE_URL, ['SYSTEM_ADMIN']],
+      ['/v1/operator/parcel-stats', env.PARCEL_BASE_URL, ['OPERATOR_ADMIN']],
+      ['/v1/admin/revenue/analytics', env.PAYMENT_BASE_URL, ['SYSTEM_ADMIN']],
+      ['/v1/operator/revenue/analytics', env.PAYMENT_BASE_URL, ['OPERATOR_ADMIN']],
+      ['/v1/operator/trips', env.TRIP_BASE_URL, ['OPERATOR_ADMIN']],
+      [
+        '/v1/operator/parcel-route-fares/11111111-1111-4111-8111-111111111111/batch',
+        env.PARCEL_BASE_URL,
+        ['OPERATOR_ADMIN'],
+      ],
+    ] as const;
+
+    expected.forEach(([path, target, roles]) => {
+      const route = matchRoute(routes, path);
+
+      expect(route?.target).toBe(target);
+      expect(route?.authRequired).toBe('user');
+      expect(route?.requiredRoles).toEqual(roles);
+      expect(route?.forwardUserAuthorization).not.toBe(true);
+    });
+  });
+
+  it('preserves legacy staff reads outside the two new admin-only exact routes', () => {
+    expect(
+      matchRoute(
+        routes,
+        '/v1/operator/trips/11111111-1111-4111-8111-111111111111/cargo-capacity',
+      )?.requiredRoles,
+    ).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
+    expect(matchRoute(routes, '/v1/operator/parcel-route-fares')?.requiredRoles).toEqual([
+      'OPERATOR_ADMIN',
+      'OPERATOR_STAFF',
+    ]);
+    expect(
+      matchRoute(
+        routes,
+        '/v1/operator/parcel-route-fares/11111111-1111-4111-8111-111111111111/SMALL',
+      )?.requiredRoles,
+    ).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
+  });
+
+  it('keeps Swagger specs public and mapped to every UI-gap facade owner', () => {
+    const expected = [
+      ['/api-specs/booking', env.BOOKING_BASE_URL],
+      ['/api-specs/parcel', env.PARCEL_BASE_URL],
+      ['/api-specs/payment', env.PAYMENT_BASE_URL],
+    ] as const;
+
+    expected.forEach(([path, target]) => {
+      expect(matchRoute(routes, path)).toMatchObject({
+        target,
+        authRequired: 'none',
+        rewriteTo: '/swagger/v1/swagger.json',
+      });
+    });
   });
 
   it('prefixes are unique', () => {

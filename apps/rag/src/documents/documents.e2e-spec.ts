@@ -8,6 +8,7 @@ import { RAG_RUNTIME_CONFIG_DEFINITIONS } from '../config/runtime-config.registr
 import { RuntimeConfigService, RuntimeConfigSnapshot } from '../config/runtime-config.service';
 import type { KnowledgeDocument } from '../generated/rag-prisma-client';
 import type { StorageProvider } from '../providers/storage.provider';
+import { RagIdempotencyService } from '../swagger/rag-idempotency.service';
 import { DocumentsController } from './documents.controller';
 import { DocumentsRepository } from './documents.repository';
 import { DocumentsService } from './documents.service';
@@ -52,11 +53,23 @@ describe('DocumentsController (e2e)', () => {
         { provide: STORAGE_PROVIDER, useValue: storageProvider },
         { provide: ENV_TOKEN, useValue: { INTERNAL_JWT_SECRET } },
         { provide: RuntimeConfigService, useValue: runtimeConfig },
+        {
+          provide: RagIdempotencyService,
+          useValue: {
+            begin: jest.fn(async ({ operationId }: { operationId: string }) => ({
+              state: 'acquired',
+              operationId,
+              ownerToken: 'documents-e2e-owner',
+            })),
+            complete: jest.fn().mockResolvedValue(undefined),
+            abandon: jest.fn().mockResolvedValue(undefined),
+          },
+        },
       ],
     }).compile();
 
     app = moduleFixture.createNestApplication();
-        await app.listen(0);
+    await app.listen(0);
     const address = app.getHttpServer().address() as AddressInfo;
     baseUrl = `http://127.0.0.1:${address.port}`;
   });
@@ -102,7 +115,10 @@ describe('DocumentsController (e2e)', () => {
         'Idempotency-Key': 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       },
     });
-    const body = (await response.json()) as { items?: Array<{ id: string; status: string }>; totalItems?: number };
+    const body = (await response.json()) as {
+      items?: Array<{ id: string; status: string }>;
+      totalItems?: number;
+    };
 
     expect(response.status).toBe(200);
     expect(body.items).toHaveLength(1);
@@ -131,12 +147,18 @@ describe('DocumentsController (e2e)', () => {
       },
       body: makeValidForm(),
     });
-    const body = (await response.json()) as { id?: string; previewUrl?: string; status?: string };
+    const body = (await response.json()) as {
+      success?: boolean;
+      statusCode?: number;
+      data?: { id?: string; previewUrl?: string; status?: string };
+    };
 
     expect(response.status).toBe(201);
-    expect(body.id).toBe(DOCUMENT_ID);
-    expect(body.status).toBe('APPROVED');
-    expect(body.previewUrl).toBe('https://preview.example/faq.txt');
+    expect(body.success).toBe(true);
+    expect(body.statusCode).toBe(201);
+    expect(body.data?.id).toBe(DOCUMENT_ID);
+    expect(body.data?.status).toBe('APPROVED');
+    expect(body.data?.previewUrl).toBe('https://preview.example/faq.txt');
   });
 
   it('POST /v1/rag/documents returns 401 without internal JWT', async () => {
@@ -151,7 +173,10 @@ describe('DocumentsController (e2e)', () => {
   it('POST /v1/rag/documents returns 403 for non-admin caller', async () => {
     const response = await fetch(`${baseUrl}/v1/rag/documents`, {
       method: 'POST',
-      headers: { 'X-Internal-Auth': await signInternalJwt(PASSENGER_USER_ID, 'PASSENGER') },
+      headers: {
+        'X-Internal-Auth': await signInternalJwt(PASSENGER_USER_ID, 'PASSENGER'),
+        'Idempotency-Key': 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      },
       body: makeValidForm(),
     });
 
@@ -164,7 +189,10 @@ describe('DocumentsController (e2e)', () => {
 
     const response = await fetch(`${baseUrl}/v1/rag/documents`, {
       method: 'POST',
-      headers: { 'X-Internal-Auth': await signInternalJwt(ADMIN_USER_ID, 'SYSTEM_ADMIN') },
+      headers: {
+        'X-Internal-Auth': await signInternalJwt(ADMIN_USER_ID, 'SYSTEM_ADMIN'),
+        'Idempotency-Key': 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      },
       body: form,
     });
 
@@ -213,7 +241,9 @@ function makeValidForm(): FormData {
 
 function makeRuntimeConfigSnapshot(): RuntimeConfigSnapshot {
   return new RuntimeConfigSnapshot(
-    new Map(RAG_RUNTIME_CONFIG_DEFINITIONS.map((definition) => [definition.key, definition.defaultValue])),
+    new Map(
+      RAG_RUNTIME_CONFIG_DEFINITIONS.map((definition) => [definition.key, definition.defaultValue]),
+    ),
   );
 }
 

@@ -104,7 +104,14 @@ public sealed record IdentityUserLookupResult(
         null);
 }
 
-public sealed record IdentityUserProfile(Guid Id, string DisplayName, string? AvatarUrl, string Role, Guid? OperatorId, string Status);
+public sealed record IdentityUserProfile(
+    Guid Id,
+    string DisplayName,
+    string? AvatarUrl,
+    string Role,
+    Guid? OperatorId,
+    string Status,
+    string? Phone = null);
 
 public sealed record IdentityOperatorLookupResult(
     bool Found,

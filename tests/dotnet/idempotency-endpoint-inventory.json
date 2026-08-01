@@ -194,7 +194,7 @@
       "stack": "dotnet",
       "servicePrefix": "trip",
       "requireAllMutations": true,
-      "expectedMutationCount": 54,
+      "expectedMutationCount": 56,
       "endpoints": [
         {
           "method": "POST",
@@ -270,6 +270,18 @@
           "method": "POST",
           "path": "/v1/driver/trips/{tripId:guid}/destination/arrive",
           "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/trips/summaries/batch",
+          "policy": "exempt",
+          "reason": "Trip summary batching is a read-only query exposed as POST for bounded request payloads."
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/operators/vehicle-counts/batch",
+          "policy": "exempt",
+          "reason": "Operator vehicle counting is a read-only query exposed as POST for a bounded request payload."
         },
         {
           "method": "POST",
@@ -704,7 +716,7 @@
       "stack": "dotnet",
       "servicePrefix": "parcel",
       "requireAllMutations": true,
-      "expectedMutationCount": 30,
+      "expectedMutationCount": 31,
       "endpoints": [
         {
           "method": "POST",
@@ -775,6 +787,11 @@
         {
           "method": "PATCH",
           "path": "/v1/operator/parcel-route-fares/{routeId:guid}/{sizeCategory}",
+          "policy": "required"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/operator/parcel-route-fares/{routeId:guid}/batch",
           "policy": "required"
         },
         {
@@ -889,9 +906,39 @@
       "sourceDirectory": "apps/rag/src",
       "requiredDecorator": "ApiIdempotencyRequired",
       "decoratorFile": "apps/rag/src/swagger/idempotency.swagger.ts",
-      "expectedMutationCount": 7,
-      "expectedRequiredCount": 6,
+      "expectedMutationCount": 13,
+      "expectedRequiredCount": 12,
       "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/admin/policies",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/admin/policies/:policyId",
+          "policy": "required"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/admin/policies/:policyId",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/policies",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/operator/policies/:policyId",
+          "policy": "required"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/operator/policies/:policyId",
+          "policy": "required"
+        },
         {
           "method": "POST",
           "path": "/v1/rag/chat",
@@ -944,7 +991,7 @@
     }
   ],
   "coverage": {
-    "dotnetRabbitMqRegistrations": 43,
+    "dotnetRabbitMqRegistrations": 45,
     "notificationRabbitMqSubscriptionCallsites": 14,
     "notificationRabbitMqRuntimeBindings": 73,
     "notificationRabbitMqBindingCollections": [
@@ -974,8 +1021,32 @@
         "name": "TRIP_TRACKING_ALERT_QUEUE_BINDINGS"
       }
     ],
-    "dotnetOutboundHttpCallsites": 24,
+    "dotnetOutboundHttpCallsites": 28,
     "dotnetOutboundHttpExemptions": [
+      {
+        "file": "apps/payment/src/VietRide.Payment.Infrastructure/Http/IdentityFinancialProjectionClient.cs",
+        "method": "POST",
+        "match": "internal/v1/operators/summaries/batch",
+        "reason": "Read-only bounded operator-summary lookup."
+      },
+      {
+        "file": "apps/payment/src/VietRide.Payment.Infrastructure/Http/TripRevenueAnalyticsClient.cs",
+        "method": "POST",
+        "match": "internal/v1/operators/vehicle-counts/batch",
+        "reason": "Read-only bounded operator vehicle-count lookup."
+      },
+      {
+        "file": "apps/payment/src/VietRide.Payment.Infrastructure/Http/TripRevenueAnalyticsClient.cs",
+        "method": "POST",
+        "match": "internal/v1/trips/summaries/batch",
+        "reason": "Read-only bounded Trip summary lookup."
+      },
+      {
+        "file": "apps/parcel/src/VietRide.Parcel.Infrastructure/Http/TripServiceClient.cs",
+        "method": "POST",
+        "match": "/internal/v1/trips/summaries/batch",
+        "reason": "Read-only bounded Trip summary lookup."
+      },
       {
         "file": "apps/payment/src/VietRide.Payment.Infrastructure/Http/IdentityOperatorSummaryClient.cs",
         "method": "POST",

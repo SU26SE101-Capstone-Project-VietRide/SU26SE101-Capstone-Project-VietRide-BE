@@ -34,6 +34,7 @@ public sealed class ParcelRouteFareTests
         var repo = Substitute.For<IParcelRouteFareRepository>();
         var tripClient = Substitute.For<ITripServiceClient>();
         var uow = Substitute.For<IUnitOfWork>();
+        ConfigureTransactions(uow);
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
 
@@ -51,8 +52,6 @@ public sealed class ParcelRouteFareTests
                 return Task.FromResult(captured);
             });
 
-        uow.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(1);
-
         var handler = new CreateParcelRouteFareCommandHandler(repo, tripClient, uow, clock);
         var command = new CreateParcelRouteFareCommand(OperatorId, RouteId, "MEDIUM", 100_000, Now, null);
 
@@ -67,6 +66,7 @@ public sealed class ParcelRouteFareTests
 
         captured.Should().NotBeNull();
         captured!.PriceVnd.Amount.Should().Be(100_000);
+        await repo.Received(1).AcquireRouteBatchLockAsync(RouteId, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -75,6 +75,7 @@ public sealed class ParcelRouteFareTests
         var repo = Substitute.For<IParcelRouteFareRepository>();
         var tripClient = Substitute.For<ITripServiceClient>();
         var uow = Substitute.For<IUnitOfWork>();
+        ConfigureTransactions(uow);
         var clock = Substitute.For<IClock>();
 
         tripClient.ValidateRouteOwnershipAsync(RouteId, OperatorId, Arg.Any<CancellationToken>())
@@ -94,6 +95,7 @@ public sealed class ParcelRouteFareTests
         var repo = Substitute.For<IParcelRouteFareRepository>();
         var tripClient = Substitute.For<ITripServiceClient>();
         var uow = Substitute.For<IUnitOfWork>();
+        ConfigureTransactions(uow);
         var clock = Substitute.For<IClock>();
 
         tripClient.ValidateRouteOwnershipAsync(RouteId, OperatorId, Arg.Any<CancellationToken>())
@@ -113,6 +115,7 @@ public sealed class ParcelRouteFareTests
         var repo = Substitute.For<IParcelRouteFareRepository>();
         var tripClient = Substitute.For<ITripServiceClient>();
         var uow = Substitute.For<IUnitOfWork>();
+        ConfigureTransactions(uow);
         var clock = Substitute.For<IClock>();
 
         tripClient.ValidateRouteOwnershipAsync(RouteId, OperatorId, Arg.Any<CancellationToken>())
@@ -137,6 +140,7 @@ public sealed class ParcelRouteFareTests
         var repo = Substitute.For<IParcelRouteFareRepository>();
         var tripClient = Substitute.For<ITripServiceClient>();
         var uow = Substitute.For<IUnitOfWork>();
+        ConfigureTransactions(uow);
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
 
@@ -153,8 +157,6 @@ public sealed class ParcelRouteFareTests
                 captured = callInfo.ArgAt<ParcelRouteFare>(0);
                 return Task.FromResult(captured);
             });
-
-        uow.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(1);
 
         var handler = new CreateParcelRouteFareCommandHandler(repo, tripClient, uow, clock);
         var command = new CreateParcelRouteFareCommand(OperatorId, RouteId, "LARGE", 123_500, Now, null);
@@ -188,6 +190,12 @@ public sealed class ParcelRouteFareTests
     }
 
     #endregion
+
+    private static void ConfigureTransactions(IUnitOfWork unitOfWork)
+        => unitOfWork.ExecuteInTransactionAsync(
+                Arg.Any<Func<Task<ParcelRouteFareResponse>>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<Task<ParcelRouteFareResponse>>>()());
 
     #region List
 

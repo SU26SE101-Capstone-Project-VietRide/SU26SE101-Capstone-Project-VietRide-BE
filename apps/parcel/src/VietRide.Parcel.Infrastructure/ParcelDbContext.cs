@@ -20,6 +20,7 @@ public sealed class ParcelDbContext : VietRideDbContextBase
     }
 
     public DbSet<ParcelEntity> Parcels => Set<ParcelEntity>();
+    public DbSet<ParcelStatusHistory> ParcelStatusHistories => Set<ParcelStatusHistory>();
     public DbSet<ParcelDeliveryToken> ParcelDeliveryTokens => Set<ParcelDeliveryToken>();
     public DbSet<ParcelCargoRecoveryOperation> ParcelCargoRecoveryOperations
         => Set<ParcelCargoRecoveryOperation>();

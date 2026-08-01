@@ -23,7 +23,7 @@ public static class HangfireServiceCollectionExtensions
         }
 
         var schemaName = configuration["Hangfire:SchemaName"] ?? DefaultSchemaName;
-        var queueName = configuration["Hangfire:QueueName"] ?? DefaultQueueName;
+        var queueName = GetQueueName(configuration);
         var workerCount = configuration.GetValue<int?>("Hangfire:WorkerCount") ?? 2;
 
         services.AddHangfire(globalConfiguration => globalConfiguration
@@ -46,12 +46,22 @@ public static class HangfireServiceCollectionExtensions
         });
         services.AddScoped<IPendingActionRealertScheduler, HangfirePendingActionRealertScheduler>();
         services.AddScoped<PlatformBookingStatsBackfillJob>();
+        services.AddScoped<BuyerSnapshotBackfillJob>();
         services.AddScoped<IScheduleChangeAutoAcceptScheduler, HangfireScheduleChangeAutoAcceptScheduler>();
         services.AddScoped<IRouteChangeExpiryScheduler, HangfireRouteChangeExpiryScheduler>();
         services.AddSingleton<IStopDisabledAutoFallbackScheduler, HangfireStopDisabledAutoFallbackScheduler>();
         services.AddSingleton<INoShowDetectionScheduler, HangfireNoShowDetectionScheduler>();
 
         return services;
+    }
+
+    public static string GetQueueName(IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        var configured = configuration["Hangfire:QueueName"];
+        return string.IsNullOrWhiteSpace(configured)
+            ? DefaultQueueName
+            : configured.Trim();
     }
 
     private sealed class HangfireStopDisabledAutoFallbackScheduler(IRecurringJobManager jobs)
