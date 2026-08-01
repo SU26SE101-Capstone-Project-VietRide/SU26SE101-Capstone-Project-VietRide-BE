@@ -6,7 +6,7 @@ services:
   postgres:
     container_name: day37-e2e-postgres
     ports:
-      - '55437:5432'
+      - '${POSTGRES_PORT:-34000}:5432'
     healthcheck: &fast-healthcheck
       interval: 2s
       timeout: 5s
@@ -15,45 +15,45 @@ services:
   redis:
     container_name: day37-e2e-redis
     ports:
-      - '56379:6379'
+      - '${REDIS_PORT:-34001}:6379'
     healthcheck: *fast-healthcheck
   rabbitmq:
     container_name: day37-e2e-rabbitmq
     ports:
-      - '55672:5672'
-      - '55673:15672'
+      - '${RABBITMQ_PORT:-34002}:5672'
+      - '${RABBITMQ_MGMT_PORT:-34003}:15672'
   identity:
     container_name: day37-e2e-identity
     ports:
-      - '55001:5001'
+      - '${IDENTITY_PORT:-34004}:5001'
     healthcheck: *fast-healthcheck
   trip:
     container_name: day37-e2e-trip
     ports:
-      - '55002:5002'
+      - '${TRIP_PORT:-34005}:5002'
     healthcheck: *fast-healthcheck
   booking:
     container_name: day37-e2e-booking
     ports:
-      - '55003:5003'
+      - '${BOOKING_PORT:-34006}:5003'
     healthcheck: *fast-healthcheck
   payment:
     container_name: day37-e2e-payment
     ports:
-      - '55004:5004'
+      - '${PAYMENT_PORT:-34007}:5004'
     healthcheck: *fast-healthcheck
   parcel:
     container_name: day37-e2e-parcel
     ports:
-      - '55005:5005'
+      - '${PARCEL_PORT:-34008}:5005'
   notification:
     container_name: day37-e2e-notification
     ports:
-      - '55012:3002'
+      - '${NOTIFICATION_PORT:-34009}:3002'
   gateway:
     container_name: day37-e2e-gateway
     ports:
-      - '55300:3000'
+      - '${GATEWAY_PORT:-34010}:3000'
     healthcheck: *fast-healthcheck
 
 networks:
