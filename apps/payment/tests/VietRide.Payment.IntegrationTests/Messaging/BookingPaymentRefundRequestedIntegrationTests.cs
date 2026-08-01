@@ -1379,7 +1379,7 @@ public sealed class BookingPaymentRefundRequestedIntegrationTests
     {
         const string fallback =
             "Host=localhost;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
-        var configured = Environment.GetEnvironmentVariable("PAYMENT_PERSISTENCE_TEST_CONNECTION");
+        var configured = Environment.GetEnvironmentVariable("VIETRIDE_PAYMENT_TEST_CONNECTION_STRING");
         var template = string.IsNullOrWhiteSpace(configured) ? fallback : configured;
         return new NpgsqlConnectionStringBuilder(
             template.Replace("{databaseName}", databaseName, StringComparison.OrdinalIgnoreCase))
