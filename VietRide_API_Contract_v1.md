@@ -4149,8 +4149,9 @@ REST fallback endpoints are:
 - `GET /v1/tracking/shuttle-trips/{shuttleTripId}/latest`
 - `GET /v1/tracking/shuttle-trips/{shuttleTripId}/eta`
 
-Shuttle ETA follows `pickupOrder`, skips cancelled groups and uses the Station stop as the final
-destination. Google Routes is primary when `GOOGLE_ROUTES_ENABLED=true`; direct-distance/speed ETA
+Shuttle ETA follows `pickupOrder`, skips terminal groups (`PICKED_UP`, `DELIVERED`, `NO_SHOW`,
+`CANCELLED`), never regresses below the last published pickup order and uses the Station stop as the
+final destination. Google Routes is primary when `GOOGLE_ROUTES_ENABLED=true`; direct-distance/speed ETA
 is the local fallback because Shuttle has no fixed route geometry. Provider calls use a minimum
 60-second interval, the existing 500 m movement or ETA-under-15-minute conditions, a per-Shuttle
 pickup Redis lock, a 60-second cache and a three-failure/300-second Google cooldown. GPS persistence,
@@ -5219,6 +5220,29 @@ Errors: `402 SUBSCRIPTION_EXPIRED`; `403 FORBIDDEN`; `403 SUBSCRIPTION_MODULE_DI
 SHUTTLE_REQUEST_SET_CHANGED`; `409 SHUTTLE_CAPACITY_EXCEEDED`; `409
 SHUTTLE_DRIVER_CONFLICT`; `409 SHUTTLE_VEHICLE_CONFLICT`; `409
 SHUTTLE_REQUEST_CUTOFF_PASSED`; `422 VALIDATION_ERROR`; `503 UPSTREAM_UNAVAILABLE`.
+
+### POST `/v1/driver/shuttle-trips/{shuttleTripId}/stops/{pickupOrder}/pickup`
+
+Auth: assigned `DRIVER` only. `Idempotency-Key` is required. The request has no body.
+
+Atomically changes every `PENDING` passenger manifest at the requested `pickupOrder` to `PICKED_UP`
+and records the same pickup timestamp for the whole group. Replaying the operation is a successful
+no-op with `pickedUpPassengerCount: 0` when the group is already picked up.
+
+Response `200`:
+
+```json
+{
+  "shuttleTripId": "uuid",
+  "pickupOrder": 1,
+  "pickedUpPassengerCount": 2,
+  "pickedUpAt": "2026-08-02T01:00:00Z"
+}
+```
+
+Errors: `401 UNAUTHORIZED`; `403 FORBIDDEN`; `404 SHUTTLE_TRIP_NOT_FOUND`; `404
+SHUTTLE_PICKUP_NOT_FOUND`; `409 SHUTTLE_TRIP_TERMINAL`; `409 SHUTTLE_PICKUP_NOT_PENDING`; `422
+VALIDATION_ERROR`; `422 IDEMPOTENCY_KEY_MISMATCH`.
 
 ### Shuttle fields trong Booking
 

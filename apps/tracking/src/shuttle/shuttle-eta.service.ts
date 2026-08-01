@@ -51,6 +51,13 @@ interface ProviderCalculation {
   cooldownUntil?: string;
 }
 
+const TERMINAL_PICKUP_STATUSES = new Set([
+  'PICKED_UP',
+  'DELIVERED',
+  'NO_SHOW',
+  'CANCELLED',
+]);
+
 const SHUTTLE_DEFAULT_SPEED_KMH = 30;
 const SHUTTLE_MIN_REPORTED_SPEED_KMH = 3;
 const RELEASE_LOCK_SCRIPT =
@@ -85,10 +92,9 @@ export class ShuttleEtaService {
     gps: ShuttleGpsUpdateDto,
     context: ShuttleTrackingContext,
   ): Promise<ShuttleEtaEvent | undefined> {
-    const nextStop = this.findNextStop(context.stops);
-    if (!nextStop) return undefined;
-
     const state = await this.readState(gps.shuttleTripId);
+    const nextStop = this.findNextStop(context.stops, state?.order);
+    if (!nextStop) return undefined;
     const cached = await this.readCachedEta(gps.shuttleTripId, nextStop.pickupOrder);
     if (!this.shouldRecalculate(gps, nextStop, state, cached)) return undefined;
 
@@ -210,10 +216,17 @@ export class ShuttleEtaService {
     };
   }
 
-  private findNextStop(stops: ShuttleTrackingStop[]): ShuttleTrackingStop | undefined {
+  private findNextStop(
+    stops: ShuttleTrackingStop[],
+    minimumOrder?: number,
+  ): ShuttleTrackingStop | undefined {
     return [...stops]
       .sort((left, right) => left.pickupOrder - right.pickupOrder)
-      .find((stop) => stop.status !== 'CANCELLED');
+      .find(
+        (stop) =>
+          !TERMINAL_PICKUP_STATUSES.has(stop.status) &&
+          (minimumOrder === undefined || stop.pickupOrder >= minimumOrder),
+      );
   }
 
   private async readState(shuttleTripId: string): Promise<ShuttleEtaState | null> {

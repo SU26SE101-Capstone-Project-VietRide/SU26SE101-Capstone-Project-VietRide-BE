@@ -4,11 +4,13 @@ using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Idempotency;
 using VietRide.Trip.Api.Controllers.Requests;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.DriverSchedules.GetMyDriverSchedule;
 using VietRide.Trip.Application.Features.DriverTrips.CompleteTrip;
 using VietRide.Trip.Application.Features.DriverTrips.GetAssignedTripRoute;
 using VietRide.Trip.Application.Features.DriverTrips.StartTrip;
 using VietRide.Trip.Application.Features.Incidents.ReportIncident;
+using VietRide.Trip.Application.Features.Shuttle;
 using ArriveTripDestinationCommand = VietRide.Trip.Application.Features.Trips.Operations.ArriveTripDestinationCommand;
 using ArriveTripDestinationResponse = VietRide.Trip.Application.Features.Trips.Operations.ArriveTripDestinationResponse;
 using ArriveTripStopCommand = VietRide.Trip.Application.Features.Trips.Operations.ArriveTripStopCommand;
@@ -192,6 +194,26 @@ public sealed class DriverController : ControllerBase
         var actorUserId = CurrentUserClaims.GetUserId(User);
         return Ok(await mediator.Send(
             new ArriveTripDestinationCommand(tripId, actorUserId),
+            cancellationToken));
+    }
+
+    [HttpPost("shuttle-trips/{shuttleTripId:guid}/stops/{pickupOrder:int}/pickup")]
+    [Authorize(Roles = "DRIVER")]
+    [RequireIdempotency(AllowRequestBody = false)]
+    [ProducesResponseType(typeof(ApiResponse<ShuttlePickupResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ShuttlePickupResult>> MarkShuttlePickupAsync(
+        Guid shuttleTripId,
+        int pickupOrder,
+        CancellationToken cancellationToken)
+    {
+        var driverUserId = CurrentUserClaims.GetUserId(User);
+        return Ok(await mediator.Send(
+            new MarkShuttlePickupCommand(shuttleTripId, pickupOrder, driverUserId),
             cancellationToken));
     }
 }

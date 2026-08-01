@@ -2,6 +2,7 @@ import { RedisService } from '@vietride/nest-redis';
 import type { Env } from '../config/env.schema';
 import { GoogleRoutesEtaProvider } from '../eta/google-routes-eta.provider';
 import { ShuttleEtaService } from './shuttle-eta.service';
+import type { ShuttleTrackingContext } from './shuttle.service';
 import {
   shuttleEtaKey,
   shuttleEtaLockKey,
@@ -152,6 +153,55 @@ describe('ShuttleEtaService', () => {
     expect(google.calculateCoordinates).not.toHaveBeenCalled();
   });
 
+  it('skips terminal pickup groups and targets the final Station', async () => {
+    const context = createContext();
+    const [firstStop, secondStop] = context.stops;
+    if (!firstStop || !secondStop) throw new Error('Expected pickup and Station fixtures');
+    context.stops = [
+      { ...firstStop, pickupOrder: 1, status: 'PICKED_UP' },
+      { ...secondStop, pickupOrder: 2, status: 'DELIVERED' },
+      { ...secondStop, pickupOrder: 3, status: 'NO_SHOW' },
+      { ...secondStop, pickupOrder: 4, status: 'CANCELLED' },
+      {
+        pickupOrder: 5,
+        bookingId: null,
+        latitude: 10.7769,
+        longitude: 106.7009,
+        status: 'PENDING',
+        isStation: true,
+      },
+    ];
+
+    const event = await service.handleGpsUpdate(createGps(), context);
+
+    expect(event?.nextPickupOrder).toBe(5);
+    expect(google.calculateCoordinates).toHaveBeenCalledWith(
+      { latitude: 10.7, longitude: 106.65 },
+      { latitude: 10.7769, longitude: 106.7009 },
+    );
+  });
+
+  it('does not regress to a lower pickup order from stale context', async () => {
+    const context = createContext();
+    context.stops = context.stops.map((stop, index) => ({
+      ...stop,
+      pickupOrder: index + 2,
+      status: 'PENDING',
+    }));
+    store.set(shuttleEtaStateKey(SHUTTLE_ID), JSON.stringify({
+      order: 3,
+      latitude: 10.6,
+      longitude: 106.5,
+      etaMinutes: 30,
+      lastProviderCallAt: new Date(Date.now() - 61_000).toISOString(),
+      googleFailureCount: 0,
+    }));
+
+    const event = await service.handleGpsUpdate(createGps(), context);
+
+    expect(event?.nextPickupOrder).toBe(3);
+  });
+
   function ageState(): void {
     const key = shuttleEtaStateKey(SHUTTLE_ID);
     const state = JSON.parse(store.get(key) ?? '{}');
@@ -170,7 +220,7 @@ function createGps() {
   };
 }
 
-function createContext() {
+function createContext(): ShuttleTrackingContext {
   return {
     shuttleTripId: SHUTTLE_ID,
     mainTripId: '36000000-0000-4000-8000-000000000002',

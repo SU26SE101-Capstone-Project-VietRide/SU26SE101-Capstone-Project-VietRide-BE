@@ -446,7 +446,10 @@ Redis state và Google Routes mà không thay đổi payload Socket/REST công k
 - Socket.IO: `joinShuttleTracking`, `shuttle:gps:update`, `shuttle:eta:update`.
 - Passenger có manifest `PENDING`, driver được assign hoặc operator cùng tenant mới được truy cập.
 - Lấy manifest/stops qua internal Trip API; không broadcast PII của Booking khác.
-- ETA đi theo `pickup_order`, bỏ nhóm đã hủy và dùng origin Station làm điểm cuối.
+- Tài xế được gán gọi `POST /v1/driver/shuttle-trips/{shuttleTripId}/stops/{pickupOrder}/pickup`
+  với `Idempotency-Key` để Trip chuyển nguyên tử cả nhóm `PENDING` sang `PICKED_UP`.
+- ETA đi theo `pickup_order`, bỏ nhóm terminal (`PICKED_UP`, `DELIVERED`, `NO_SHOW`, `CANCELLED`),
+  không lùi xuống dưới thứ tự ETA đã ghi và dùng origin Station làm điểm cuối.
 - Google Routes dùng `DRIVE` và `TRAFFIC_AWARE` làm provider chính khi `GOOGLE_ROUTES_ENABLED=true`;
   Haversine và tốc độ GPS là fallback cục bộ vì Shuttle không có route geometry cố định.
 - Recalculate sau tối thiểu 60 giây khi di chuyển trên 500 m, ETA dưới 15 phút hoặc chuyển sang

@@ -47,4 +47,21 @@ public sealed class ShuttleDomainTests
         passenger.Status.Should().Be(ShuttlePassenger.CancelledStatus);
         passenger.CancelReason.Should().Be("AUTO_UNFULFILLED_CUTOFF");
     }
+
+    [Fact]
+    public void MarkPickedUp_AdvancesPendingPassengerAndIsIdempotent()
+    {
+        var passenger = ShuttlePassenger.Request(
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            "123 Nguyen Hue", 10.77m, 106.70m);
+        var shuttleTripId = Guid.NewGuid();
+        var pickedUpAt = DateTimeOffset.Parse("2026-08-02T01:00:00Z");
+        passenger.Assign(shuttleTripId, 2);
+
+        passenger.MarkPickedUp(pickedUpAt);
+        passenger.MarkPickedUp(pickedUpAt.AddMinutes(1));
+
+        passenger.Status.Should().Be(ShuttlePassenger.PickedUpStatus);
+        passenger.PickedUpAt.Should().Be(pickedUpAt);
+    }
 }

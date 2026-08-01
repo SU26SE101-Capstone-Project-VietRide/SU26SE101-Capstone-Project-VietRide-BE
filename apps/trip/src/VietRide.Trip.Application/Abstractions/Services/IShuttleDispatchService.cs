@@ -18,6 +18,12 @@ public interface IShuttleDispatchService
         string role,
         Guid? operatorId,
         CancellationToken cancellationToken);
+
+    Task<ShuttlePickupResult> MarkPickupAsync(
+        Guid shuttleTripId,
+        int pickupOrder,
+        Guid driverUserId,
+        CancellationToken cancellationToken);
 }
 
 public sealed record CreateShuttleTripInput(
